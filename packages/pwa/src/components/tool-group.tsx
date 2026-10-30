@@ -95,22 +95,6 @@ export const elapsedLabel = (since: string | undefined, now: number): string | u
   return start === null ? undefined : formatElapsedSeconds(wholeSecondsSince(start, now));
 };
 
-/** Every picture the finished calls of a run returned, in order, each named for the tool that made it. */
-const resultImagesOf = (calls: readonly ToolCall[]): readonly NamedTranscriptImage[] =>
-  calls.flatMap(call =>
-    (call.result?.images ?? []).map((marker): NamedTranscriptImage => ({ marker, alt: toolImageAlt(call.use.name) })),
-  );
-
-/**
- * The pictures a run returned, drawn UNDER the run and never folded into it: a screenshot is what the
- * tool was run to show, so collapsing "4 tools" must not hide it. At most three show at rest.
- */
-function RunImages({ calls }: { readonly calls: readonly ToolCall[] }) {
-  const images = resultImagesOf(calls);
-  if (images.length === 0) return null;
-  return <TranscriptImages className="fy-tool-images mb-1 ml-1.5 mt-0.5" images={images} initialLimit={3} />;
-}
-
 /** The reading of a bare result whose tool use never arrived. */
 const ORPHAN_RESULT: ExtractedTool = {
   verb: 'result',
@@ -213,7 +197,6 @@ const ToolRun = memo(function ToolRun({ calls, live, isLast, scheduler }: ToolGr
     return (
       <>
         <ToolLine call={first} onToggle={toggleCall} open={openCalls.has(first.key)} />
-        <RunImages calls={history} />
         {runningLine}
       </>
     );
@@ -247,7 +230,6 @@ const ToolRun = memo(function ToolRun({ calls, live, isLast, scheduler }: ToolGr
           </div>
         ) : null}
       </div>
-      <RunImages calls={history} />
       {runningLine}
     </>
   );
@@ -282,10 +264,17 @@ function ToolLine({
   const failed = call.result?.isError === true;
   const raw = call.result ? resultText(call.result) : null;
   const text = raw !== null && summary.isExec ? parseExecOutput(raw).cleanText : raw;
-  // A result that is only a picture has no text to open: the picture is drawn under the run (`RunImages`).
-  const pictureOnly = text === '' && (call.result?.images?.length ?? 0) > 0;
+  // A picture a tool returned is the ferret looking, not something shown to the owner: it stays behind
+  // the row's chevron and is only mounted — so only fetched — once the row is open.
+  const images = (call.result?.images ?? []).map(
+    (marker): NamedTranscriptImage => ({
+      marker,
+      alt: toolImageAlt(call.use.name),
+    }),
+  );
+  const pictureOnly = text === '' && images.length > 0;
   const cleaned = pictureOnly ? null : text;
-  const hasBody = summary.bodyLines.length > 0 || (call.result !== undefined && !pictureOnly);
+  const hasBody = summary.bodyLines.length > 0 || (call.result !== undefined && !pictureOnly) || images.length > 0;
 
   const bodyLang = bodyLanguage(summary);
   const resultLang = langFromPath(summary.filePath);
@@ -329,6 +318,7 @@ function ToolLine({
               <CodeBlock code={cleaned} lang={failed ? undefined : resultLang} tone={failed ? 'err' : 'default'} />
             </div>
           ) : null}
+          {images.length > 0 ? <TranscriptImages className="fy-tool-images" images={images} initialLimit={3} /> : null}
         </div>
       ) : null}
     </div>

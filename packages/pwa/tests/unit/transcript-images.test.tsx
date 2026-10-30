@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import type { TranscriptImageMarker } from '@ferretry/protocol';
 import { AttachmentGalleryProvider } from '../../src/components/attachment-gallery.tsx';
 import { type HandoffSource, HandoffSourceProvider } from '../../src/components/handoff-message.tsx';
-import { messageImageAlt, toolImageAlt, TranscriptImages } from '../../src/components/transcript-images.tsx';
+import { messageImageAlt, TranscriptImages, toolImageAlt } from '../../src/components/transcript-images.tsx';
 import { TranscriptRow } from '../../src/components/transcript-row.tsx';
 import type { AttachmentBlobUrlPort } from '../../src/lib/attachment-blob-cache.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
@@ -240,9 +240,14 @@ describe('a picture in a message', () => {
 });
 
 describe('a picture a tool returned', () => {
-  const call = (name: string, text: string, images: readonly TranscriptImageMarker[]): ToolCall => ({
-    key: `k-${name}`,
-    use: { name, input: {} },
+  const call = (
+    name: string,
+    text: string,
+    images: readonly TranscriptImageMarker[],
+    input: unknown = {},
+  ): ToolCall => ({
+    key: `k-${name}-${images.length}-${text}`,
+    use: { name, input },
     result: { text, images },
   });
   const toolRow = (...calls: ToolCall[]): TranscriptEntry => ({
@@ -251,28 +256,82 @@ describe('a picture a tool returned', () => {
     text: 'ran a tool',
     tools: calls,
   });
+  const press = async (button: Element | null | undefined, what: string): Promise<void> => {
+    const target = must(button, what) as HTMLElement;
+    await interact(() => {
+      target.click();
+    });
+  };
+  const loader = (asked: string[]) => async (_daemon: unknown, scope: { attachmentId: string }) => {
+    asked.push(scope.attachmentId);
+    return new Blob(['x'], { type: 'image/png' });
+  };
 
-  it('shows an image-only result as its picture, with no empty result body', async () => {
+  it('keeps a Read of an image to its one-line row: no picture, no fetch', async () => {
     observe(true);
+    const asked: string[] = [];
     const view = await mount(
-      inChat(
-        async () => new Blob(['x'], { type: 'image/png' }),
-        toolRow(call('mcp__playwright__browser_take_screenshot', '', [marker()])),
-      ),
+      inChat(loader(asked), toolRow(call('Read', '', [marker()], { file_path: '/tmp/image.png' }))),
     );
     try {
-      expect(view.container.querySelector('img')?.getAttribute('alt')).toBe('Screenshot from playwright');
-      expect(view.container.querySelector('.fy-tool-images')).not.toBeNull();
+      expect(view.container.textContent).toContain('image.png');
+      expect(view.container.querySelector('img')).toBeNull();
+      expect(view.container.querySelector('.fy-tool-images')).toBeNull();
+      expect(view.container.querySelector('[data-transcript-image-state]')).toBeNull();
+      expect(asked).toEqual([]);
     } finally {
       await view.unmount();
     }
   });
 
-  it('shows the images of a run of calls under the run, in order', async () => {
+  it('shows the picture only once the row is opened, and drops it again when closed', async () => {
+    observe(true);
+    const asked: string[] = [];
+    const view = await mount(
+      inChat(
+        loader(asked),
+        toolRow(call('mcp__playwright__browser_take_screenshot', '', [marker()], { filename: 'page.png' })),
+      ),
+    );
+    try {
+      const row = (): Element | null => view.container.querySelector('.kt-chrome button');
+      expect(asked).toEqual([]);
+      await press(row(), 'the tool row');
+      expect(view.container.querySelector('img')?.getAttribute('alt')).toBe('Screenshot from playwright');
+      expect(view.container.querySelector('.fy-tool-images')).not.toBeNull();
+      expect(view.container.textContent).not.toContain('result ·');
+      expect(asked).toEqual(['transcript-image:4096.2048.0']);
+      await press(row(), 'the tool row');
+      expect(view.container.querySelector('img')).toBeNull();
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('shows the words of the result and its picture together once opened', async () => {
     observe(true);
     const view = await mount(
       inChat(
         async () => new Blob(['x'], { type: 'image/png' }),
+        toolRow(call('mcp__figma__get_image', 'frame 12', [marker()])),
+      ),
+    );
+    try {
+      expect(view.container.querySelector('img')).toBeNull();
+      await press(view.container.querySelector('.kt-chrome button'), 'the tool row');
+      expect(view.container.textContent).toContain('result · 1 lines');
+      expect(view.container.querySelector('img')?.getAttribute('alt')).toBe('Image from figma');
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('fetches only the pictures of the calls the reader opened, in a collapsed run', async () => {
+    observe(true);
+    const asked: string[] = [];
+    const view = await mount(
+      inChat(
+        loader(asked),
         toolRow(
           call('mcp__playwright__browser_take_screenshot', 'saved', [marker(0)]),
           call('mcp__figma__get_image', '', [marker(1)]),
@@ -281,10 +340,22 @@ describe('a picture a tool returned', () => {
       ),
     );
     try {
+      expect(view.container.querySelector('img')).toBeNull();
+      expect(asked).toEqual([]);
+      await press(view.container.querySelector('.kt-chrome button'), 'the run line');
+      expect(view.container.querySelector('img')).toBeNull();
+      expect(asked).toEqual([]);
+      const lines = [...view.container.querySelectorAll('.kt-chrome .kt-chrome button')];
+      await press(lines[1], 'the figma line');
+      expect([...view.container.querySelectorAll('img')].map(image => image.getAttribute('alt'))).toEqual([
+        'Image from figma',
+      ]);
+      await press(lines[0], 'the screenshot line');
       expect([...view.container.querySelectorAll('img')].map(image => image.getAttribute('alt'))).toEqual([
         'Screenshot from playwright',
         'Image from figma',
       ]);
+      expect(asked.sort()).toEqual(['transcript-image:4096.2048.0', 'transcript-image:4096.2048.1']);
     } finally {
       await view.unmount();
     }
