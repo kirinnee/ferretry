@@ -17,7 +17,7 @@ import type { PrObservation } from '../board/index.ts';
 export const MAX_PRS_PER_QUERY = 50;
 export const MAX_BRANCHES_PER_QUERY = 20;
 /** How many PRs one branch may name (newest first): a branch reused for a second PR finds both. */
-export const PRS_PER_BRANCH = 5;
+const PRS_PER_BRANCH = 5;
 /** How many of a repository's newest releases are read to find the one a merge first shipped in. */
 export const RELEASES_PER_QUERY = 50;
 
@@ -74,7 +74,7 @@ export const pollArguments = (poll: RepositoryPoll): readonly string[] | null =>
 // ---------------------------------------------------------------------------------------------------
 
 /** A PR as one poll saw it: the observation, keyed by its number, and the branch it was opened from. */
-export interface PolledPr {
+interface PolledPr {
   readonly number: number;
   readonly headRefName: string;
   readonly observation: PrObservation;

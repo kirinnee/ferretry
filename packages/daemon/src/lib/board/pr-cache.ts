@@ -59,7 +59,7 @@ export interface PrUpdate {
 }
 
 /** A message the watcher queues to one of the card's ferrets. */
-export interface PrNudge {
+interface PrNudge {
   readonly reason: 'closed-unmerged' | 'ci-failing';
   readonly sessionId: string;
   readonly message: string;

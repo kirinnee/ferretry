@@ -30,7 +30,7 @@ export const WATCH_TICK_MS = 30_000;
 /** The first look after the daemon starts: after the boot has settled, not during it. */
 export const WATCH_FIRST_TICK_MS = 20_000;
 /** Each delay is moved by up to this fraction either way. */
-export const WATCH_JITTER = 0.1;
+const WATCH_JITTER = 0.1;
 /** How many repositories one tick polls; the rest are due at the next. */
 export const MAX_REPOSITORIES_PER_TICK = 8;
 /** How many release compares one tick may run, across every card. */

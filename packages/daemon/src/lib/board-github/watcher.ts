@@ -307,17 +307,16 @@ export class GitHubWatcher {
   ): Promise<{ answers: Map<string, RepositoryAnswer>; reachable: boolean; polled: string[] }> {
     const answers = new Map<string, RepositoryAnswer>();
     const polled: string[] = [];
+    // A repository name that is not `owner/name` cannot be asked about at all, so it takes no slot.
     const due = [...polls]
-      .filter(([key]) => (this.due.get(key) ?? 0) <= nowMs)
-      .toSorted(([left], [right]) => (this.due.get(left) ?? 0) - (this.due.get(right) ?? 0))
+      .flatMap(([key, poll]) => {
+        const args = pollArguments(poll);
+        return args === null || (this.due.get(key) ?? 0) > nowMs ? [] : [{ key, poll, args }];
+      })
+      .toSorted((left, right) => (this.due.get(left.key) ?? 0) - (this.due.get(right.key) ?? 0))
       .slice(0, MAX_REPOSITORIES_PER_TICK);
-    for (const [key, poll] of due) {
+    for (const { key, poll, args } of due) {
       if (this.stopped) break;
-      const args = pollArguments(poll);
-      if (args === null) {
-        this.due.set(key, nowMs + pollDelay(false, this.ports.clock.random()));
-        continue;
-      }
       const outcome = await this.ports.gh.run(args);
       if (this.unreachable(outcome)) {
         for (const pending of polls.keys()) this.due.set(pending, nowMs + pollDelay(false, this.ports.clock.random()));
