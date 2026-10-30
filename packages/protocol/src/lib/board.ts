@@ -20,8 +20,22 @@
 import { z } from 'zod';
 import { AgendaIdSchema } from './agenda.ts';
 import {
+  DependencyUntilSchema,
+  isBackwardMove,
+  type LaneCategory,
+  LaneIdSchema,
+  LaneLayoutSchema,
+  type LaneLookupError,
+  LaneRenamesSchema,
+  type LaneSet,
+  LaneSetSchema,
+  LaneTemplateNameSchema,
+  LaneTriggerSchema,
+} from './board-lanes.ts';
+import {
   BoardProjectIdSchema,
   type BoardResult,
+  BoardSkipSchema,
   BoardTaskIdSchema,
   boardErr,
   boardOk,
@@ -29,19 +43,6 @@ import {
   type TaskRef,
   TaskRefSchema,
 } from './board-refs.ts';
-import {
-  DependencyUntilSchema,
-  isBackwardMove,
-  type LaneCategory,
-  LaneIdSchema,
-  type LaneLookupError,
-  LaneLayoutSchema,
-  LaneRenamesSchema,
-  type LaneSet,
-  LaneSetSchema,
-  LaneTemplateNameSchema,
-  LaneTriggerSchema,
-} from './board-lanes.ts';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 import { type TaskKind, TaskKindSchema, TaskMessageSchema, TaskTitleSchema, TaskWorkflowSchema } from './tasks.ts';
 
@@ -715,6 +716,14 @@ export const BoardTaskActionRequestSchema = z.discriminatedUnion('action', [
   }),
 ]);
 export type BoardTaskActionRequest = z.infer<typeof BoardTaskActionRequestSchema>;
+
+/** `fy task skip "<why>"`: the calling ferret records that its work needs no card (§3.4). */
+export const BoardSkipRequestSchema = z.strictObject({ reason: BoardSkipSchema.shape.reason });
+export type BoardSkipRequest = z.infer<typeof BoardSkipRequestSchema>;
+
+/** The decision as recorded on the session. */
+export const BoardSkipResponseSchema = z.object({ sessionId: SessionIdSchema, skip: BoardSkipSchema });
+export type BoardSkipResponse = z.infer<typeof BoardSkipResponseSchema>;
 export type BoardTaskActionRequestInput = z.input<typeof BoardTaskActionRequestSchema>;
 
 /**

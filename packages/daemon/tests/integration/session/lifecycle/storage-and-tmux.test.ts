@@ -1631,6 +1631,7 @@ describe('TmuxSessionLifecycleLauncher launch instructions', () => {
       'tools',
       'settings',
       'notify',
+      'board',
       'hypermedia',
       'pack',
     ]);
@@ -1649,7 +1650,13 @@ describe('TmuxSessionLifecycleLauncher launch instructions', () => {
     const launched = await subject.launch(record('worker-session'));
 
     // Assert
-    should(launched?.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'notify', 'hypermedia']);
+    should(launched?.sections.map(section => section.id)).deepEqual([
+      'tools',
+      'settings',
+      'notify',
+      'board',
+      'hypermedia',
+    ]);
     should(launched?.questions).be.false();
   });
 

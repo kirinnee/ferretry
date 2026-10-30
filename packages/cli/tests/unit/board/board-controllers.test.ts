@@ -3,6 +3,8 @@ import type {
   BoardProjectsResponse,
   BoardQueryInput,
   BoardResponse,
+  BoardSkipRequest,
+  BoardSkipResponse,
   BoardTaskActionRequestInput,
   BoardTaskCreateRequestInput,
   BoardTaskResponse,
@@ -45,6 +47,7 @@ class FakeGateway implements IBoardGateway {
   readonly projectCalls: (string | undefined)[] = [];
   readonly createCalls: { as: string | undefined; request: BoardTaskCreateRequestInput }[] = [];
   readonly actCalls: { as: string | undefined; id: string; request: BoardTaskActionRequestInput }[] = [];
+  readonly skipCalls: { as: string | undefined; request: BoardSkipRequest }[] = [];
 
   boardResponse: BoardResponse = response();
   listingResponse: BoardProjectsResponse = listing({
@@ -97,6 +100,12 @@ class FakeGateway implements IBoardGateway {
         laneSet(),
       ),
     );
+  }
+
+  skip(as: string | undefined, request: BoardSkipRequest): Promise<BoardSkipResponse> {
+    this.skipCalls.push({ as, request });
+    if (this.actError !== undefined) return Promise.reject(this.actError);
+    return Promise.resolve({ sessionId: as ?? '', skip: { reason: request.reason, at: '2026-10-30T10:00:00.000Z' } });
   }
 
   projects(as: string | undefined) {
@@ -707,6 +716,42 @@ describe('the action verbs', () => {
       'ok: &F1 dropped',
       'ok: &F1 noted',
     ]);
+  });
+
+  it('should record a skip on the calling session, with the words as one reason', async () => {
+    // Arrange
+    const { controller, gateway, log } = harness(new FakeGateway(), DENISHA);
+
+    // Act
+    await controller.skip(['the', 'owner', 'said', 'not', 'to', 'track', 'this'], {});
+    await controller.skip(['chit-chat'], { session: 'other-session', json: true });
+
+    // Assert
+    should(gateway.skipCalls).eql([
+      { as: DENISHA, request: { reason: 'the owner said not to track this' } },
+      { as: 'other-session', request: { reason: 'chit-chat' } },
+    ]);
+    should(log[0]).equal(
+      'ok: no card for this work — the owner said not to track this. The board check stays quiet until you take a card.',
+    );
+    should(JSON.parse((log[1] as string).slice('ok: '.length))).match({
+      sessionId: 'other-session',
+      skip: { reason: 'chit-chat' },
+    });
+  });
+
+  it('should refuse a skip with no reason, or with no session to record it on', async () => {
+    // Arrange
+    const { controller, gateway } = harness();
+    const ferret = harness(new FakeGateway(), DENISHA);
+
+    // Act + Assert
+    should(await refusal(() => controller.skip(['chat'], {}))).match(/run it from a ferret's pane, or pass --session/u);
+    should(await refusal(() => ferret.controller.skip(['  '], {}))).match(
+      /say why this work needs no card: fy task skip/u,
+    );
+    should(gateway.skipCalls).eql([]);
+    should(ferret.gateway.skipCalls).eql([]);
   });
 
   it('should send a depend and an undepend', async () => {

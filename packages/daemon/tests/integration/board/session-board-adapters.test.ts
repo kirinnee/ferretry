@@ -5,7 +5,9 @@ import { join } from 'node:path';
 import { BOARD_EVENT_TYPES, TaskRefSchema } from '@ferretry/protocol';
 import should from 'should';
 import {
+  BOARD_CHECKED_EVENT,
   JournalBoardChanges,
+  JournalBoardChecks,
   StorageSessionFocus,
   StorageSessionParents,
 } from '../../../src/adapters/board/session-board-adapters.ts';
@@ -19,8 +21,8 @@ import {
   StateHomeLayout,
   SystemClock,
 } from '../../../src/adapters/index.ts';
-import { jsonObject } from '../../../src/lib/json.ts';
 import { parseSessionId } from '../../../src/lib/index.ts';
+import { jsonObject } from '../../../src/lib/json.ts';
 
 /**
  * The board's session-side adapters over a real state home: lineage from `config.parent`, the focus
@@ -75,6 +77,43 @@ afterEach(async () => {
 });
 
 describe('the board session adapters', () => {
+  it('should keep a skip in config.boardSkip beside every other field, and drop it when the session takes a card', async () => {
+    // Arrange
+    const storage = await openStorage();
+    const id = await session(storage, 'lead');
+    const focus = new StorageSessionFocus(storage);
+    const skip = { reason: 'the owner said not to track this', at: NOW };
+
+    // Act
+    const recorded = await focus.skip('lead', skip);
+    const standing = await focus.skipOf('lead');
+    const kept = jsonObject(await storage.readConfig(id));
+    await focus.setFocus('lead', { id: 'F3' });
+    const after = await focus.skipOf('lead');
+    const config = jsonObject(await storage.readConfig(id));
+
+    // Assert
+    should(recorded).be.true();
+    should(standing).eql(skip);
+    should(kept).match({ name: 'lead', boardSkip: skip });
+    should(after).be.null();
+    should(config).match({ name: 'lead', focusTask: { id: 'F3' } });
+    should(config).not.have.property('boardSkip');
+  });
+
+  it('should record no skip for an unknown session, and read none from an unusable one', async () => {
+    // Arrange
+    const storage = await openStorage();
+    const id = await session(storage, 'lead');
+    await storage.updateConfig(id, current => ({ ...(jsonObject(current) ?? {}), boardSkip: { reason: '' } }));
+    const focus = new StorageSessionFocus(storage);
+
+    // Act + Assert
+    should(await focus.skip('ghost', { reason: 'x', at: NOW })).be.false();
+    should(await focus.skipOf('ghost')).be.null();
+    should(await focus.skipOf('lead')).be.null();
+  });
+
   it('should read a session parent, and nothing for a root, an unknown or an unusable session', async () => {
     // Arrange
     const storage = await openStorage();
@@ -137,5 +176,20 @@ describe('the board session adapters', () => {
 
     // Assert
     should(journal.map(entry => entry.data)).eql([event]);
+  });
+
+  it('should journal each turn-end nudge with the work it saw, and drop it for a session it does not hold', async () => {
+    // Arrange
+    const storage = await openStorage();
+    const id = await session(storage, 'lead');
+    const checks = new JournalBoardChecks(storage);
+
+    // Act
+    await checks.record('lead', ['Edit', 'git push']);
+    await checks.record('ghost', ['Edit']);
+    const journal = (await storage.replay(id)).events.filter(entry => entry.type === BOARD_CHECKED_EVENT);
+
+    // Assert
+    should(journal.map(entry => entry.data)).eql([{ seen: ['Edit', 'git push'] }]);
   });
 });

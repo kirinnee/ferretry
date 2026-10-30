@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { SessionAgendaSummarySchema } from './agenda.ts';
-import { BoardProjectIdSchema, TaskRefSchema } from './board-refs.ts';
+import { BoardProjectIdSchema, BoardSkipSchema, TaskRefSchema } from './board-refs.ts';
 import {
   ApiErrorResponseSchema,
   InstantSchema,
@@ -490,6 +490,11 @@ export const SessionConfigSchema = z.object({
    */
   focusTask: TaskRefSchema.optional(),
   /**
+   * Why this session's work has no card (`fy task skip`): the turn-end check stays quiet while it stands. Cleared
+   * when the session takes a card, so it covers the work it was recorded for and no later ask.
+   */
+  boardSkip: BoardSkipSchema.optional(),
+  /**
    * The spawn-side warden stamp: who caused this session to exist, and whether it descends from a
    * warden.
    *
@@ -658,7 +663,7 @@ const DeclaredWaitSchema = z.object({
 
 /**
  * The named sections of the system prompt Ferretry appends to an agent, in the order a wrapper
- * composes them (`@ferretry/fleet` `launchInstructions`): the tools, the settings rules and the notify rule every agent
+ * composes them (`@ferretry/fleet` `launchInstructions`): the tools, the settings rules, the notify rule and the board rules every agent
  * gets, then each per-ferret section its launch switched on. `attention` is the notify rule's old name, kept so a
  * launch record made before the rename still parses.
  */
@@ -667,6 +672,7 @@ export const LaunchInstructionSectionIdSchema = z.enum([
   'settings',
   'attention',
   'notify',
+  'board',
   'hypermedia',
   'pack',
   'agenda',

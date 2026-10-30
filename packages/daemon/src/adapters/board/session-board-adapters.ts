@@ -1,4 +1,11 @@
-import { BOARD_EVENT_TYPES, type BoardChangedEvent, type TaskRef, TaskRefSchema } from '@ferretry/protocol';
+import {
+  BOARD_EVENT_TYPES,
+  type BoardChangedEvent,
+  type BoardSkip,
+  BoardSkipSchema,
+  type TaskRef,
+  TaskRefSchema,
+} from '@ferretry/protocol';
 import type { BoardChangeSink, SessionFocus, SessionParents } from '../../lib/board/index.ts';
 import { jsonObject } from '../../lib/json.ts';
 import { tryParseSessionId } from '../../lib/session-id.ts';
@@ -26,7 +33,8 @@ export class StorageSessionParents implements SessionParents {
 
 /**
  * The card a session works on, as `config.focusTask` in its own configuration document — the session
- * owns the fact (`board-design.md` §2.1). Written by spreading the document, so every other field stays.
+ * owns the fact (`board-design.md` §2.1) — and why it has none, as `config.boardSkip`. Written by spreading
+ * the document, so every other field stays; taking a card drops the skip, which was about the work before it.
  */
 export class StorageSessionFocus implements SessionFocus {
   constructor(private readonly storage: SessionDocuments) {}
@@ -35,7 +43,10 @@ export class StorageSessionFocus implements SessionFocus {
     const id = known(this.storage, sessionId);
     if (id === undefined) return false;
     const focusTask = TaskRefSchema.parse(task);
-    await this.storage.updateConfig(id, current => ({ ...(jsonObject(current) ?? {}), focusTask }));
+    await this.storage.updateConfig(id, current => {
+      const { boardSkip: _cleared, ...rest } = jsonObject(current) ?? {};
+      return { ...rest, focusTask };
+    });
     return true;
   }
 
@@ -43,6 +54,21 @@ export class StorageSessionFocus implements SessionFocus {
     const id = known(this.storage, sessionId);
     if (id === undefined) return null;
     const parsed = TaskRefSchema.safeParse(jsonObject(await this.storage.readConfig(id))?.focusTask);
+    return parsed.success ? parsed.data : null;
+  }
+
+  async skip(sessionId: string, skip: BoardSkip): Promise<boolean> {
+    const id = known(this.storage, sessionId);
+    if (id === undefined) return false;
+    const boardSkip = BoardSkipSchema.parse(skip);
+    await this.storage.updateConfig(id, current => ({ ...(jsonObject(current) ?? {}), boardSkip }));
+    return true;
+  }
+
+  async skipOf(sessionId: string): Promise<BoardSkip | null> {
+    const id = known(this.storage, sessionId);
+    if (id === undefined) return null;
+    const parsed = BoardSkipSchema.safeParse(jsonObject(await this.storage.readConfig(id))?.boardSkip);
     return parsed.success ? parsed.data : null;
   }
 }
@@ -60,5 +86,18 @@ export class JournalBoardChanges implements BoardChangeSink {
     const id = known(this.storage, sessionId);
     if (id === undefined) return;
     await this.storage.append(id, BOARD_EVENT_TYPES.changed, event);
+  }
+}
+
+/** The journal entry the turn-end check leaves, with the mutating work it saw: the audit of each nudge. */
+export const BOARD_CHECKED_EVENT = 'board.unfiled-work';
+
+/** Journals a turn-end nudge on the nudged session (`board-design.md` §3.4). */
+export class JournalBoardChecks {
+  constructor(private readonly storage: SessionDocuments) {}
+
+  async record(sessionId: string, seen: readonly string[]): Promise<void> {
+    const id = known(this.storage, sessionId);
+    if (id !== undefined) await this.storage.append(id, BOARD_CHECKED_EVENT, { seen: [...seen] });
   }
 }

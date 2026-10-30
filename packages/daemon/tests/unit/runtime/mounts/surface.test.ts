@@ -19,15 +19,15 @@ import { SecuritySettingsService } from '../../../../src/lib/security/index.ts';
 import { SessionFilesystem } from '../../../../src/lib/session/filesystem/index.ts';
 import { OperatorReadService } from '../../../../src/lib/session/reads/index.ts';
 import { ChallengeLedger, StepUpRegistry, StepUpService } from '../../../../src/lib/step-up/index.ts';
-import { agentToolWorld } from '../../agent-tools/support.ts';
 import { MemoryTranscript } from '../../../support/transcript-images.ts';
+import { agentToolWorld } from '../../agent-tools/support.ts';
 import { fixedClock, request } from '../../api/support.ts';
 import { NOT_AUDITED, NOT_AUDITED_SOCKETS } from '../../audit/not-audited.ts';
 import { FakeRootPinner, FakeSessionGit } from '../../session/filesystem/support.ts';
 import {
+  agendaService,
   analyticsSubsystem,
   attachSubsystem,
-  agendaService,
   boardSubsystem,
   CREDENTIALS,
   configChangeSubsystem,
@@ -779,7 +779,7 @@ describe('the mounted daemon surface', () => {
     // green. Two additions here both have to rewrite the line that carries the terminating `;`.
     const operatorRoutes =
       108 + // the session table and everything that is not the account model (three of them the agenda spellings of the agenda routes, kept beside them for the legacy window; six of them the send ledger: its read, one send, a retry under the same id, a cancel, an Enter for one typed and not sent, and the hand-off document behind a pointer; one the Enter or erase for a person's own draft in the composer) (three socket-ticket counters gone: a device opens streams inside its session; the operator password's set and unlock routes gone: the passkey step-up replaced them)
-      4 + // the project boards: the board query, one card, a new card, and an action on a card (board-design.md §2)
+      5 + // the project boards: the board query, one card, a new card, an action on a card (board-design.md §2), and a ferret's skip (§3.4)
       4 + // the credential sign-in family: start, then read, answer or cancel one flow
       5 + // the MCP sign-in family: its status read, start, finish, cancel and sign out (docs/mcp-oauth.md)
       3 + // every MCP server a ferret sees, for the machine and for one ferret, and checking one (docs/mcp-scopes.md)
@@ -1064,6 +1064,7 @@ describe('the mounted daemon surface', () => {
       'POST /v1/sessions/:sessionId/tasks/:taskId',
       'GET /v1/board',
       'POST /v1/board/tasks',
+      'POST /v1/board/skip',
       'GET /v1/board/tasks',
       'POST /v1/board/import',
       'GET /v1/board/tasks/:taskId',

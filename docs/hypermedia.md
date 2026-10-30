@@ -62,23 +62,25 @@ next restart. A ferret should check before telling the owner a section is missin
 
 ## The injected instruction
 
-Exactly this, from `HYPERMEDIA_INSTRUCTION` in `packages/fleet/src/lib/account/fixed-layer.ts`. It is
-in every turn's context, so it is kept short; change it there and here together.
+Exactly this, from `HYPERMEDIA_INSTRUCTION` in `packages/fleet/src/lib/account/fixed-layer.ts` (with the binary's
+name for `fy`). It is in every turn's context, so it is kept short: mermaid, svg and html are taught whole, chart keeps
+one line, and every type's full spec is one `fy render guide <type>` away, printed from
+[fy-render.md](fy-render.md). Change it there and here together.
 
-````textHypermedia: when you teach, explain, compare or walk through anything not straightforward — a flow, architecture, state machine, layout or change over time — show it in your reply as well as saying it. Do not overdo it: a simple answer stays plain text; one picture beats several.
+````text
+Hypermedia: when you teach, explain, compare or walk through anything not straightforward — a flow, architecture, state machine, layout or change over time — show it in your reply as well as saying it. Do not overdo it: a simple answer stays plain text; one picture beats several.
 Always inline: never publish an artifact, page, gist or link to explain something unless the owner asks for one.
 Tell it as a short story the reader can drive: step-through Next buttons, sliders, toggles, tap to reveal, animated diagrams. One idea per step, short labels, gentle motion that honours prefers-reduced-motion.
 Write a fenced block whose info string is exactly fy-render: line 1 `type: <type>`, line 2 `alt: <one-line description>`, then a line `---`, then the payload.
 - mermaid: Mermaid source (flowchart TB, sequenceDiagram, …): top-down, short labels; auto-themed, so no %%{init}%% or colours.
 - svg: one self-contained <svg>…</svg> (CSS animation welcome); no script, foreignObject or external links.
 - html: a fragment with inline CSS and <script> for interaction (runs isolated); load nothing from the network.
-- map: JSON/YAML {center: [lat, lng], zoom, markers: [{at, label, popup}], lines: [{points}], polygons, geojson}; real places.
-- chart: JSON/YAML {kind: bar, x: [Mon, Tue], y: {format: money}, series: [{name: Cost, data: [2, 3]}]}; kind line|bar|area|pie|doughnut|scatter|radar; format number|percent|money|duration|bytes; stacked; frames: [{label, series}] steps. No colours: tone accent|good|warn|bad|muted|1-8.
-- image, video, audio, pdf: save files you make into $FY_MEDIA_DIR and put `src: media:<file name>` before `---`, with no payload; `src: @workspace/path` and `src: https://…` also work.
+- chart: JSON/YAML {kind: bar|line|area|pie|…, x: […], series: [{name, data}]}; full spec: `fy render guide chart`.
+- map, image, video, audio, pdf: `fy render guide <type>`.
 Example:
 ```fy-render
 type: mermaid
-alt: How a request reaches the daemon
+alt: How a request flows
 ---
 flowchart TB
   Phone --> Relay --> Daemon

@@ -15,6 +15,8 @@ import {
   type BoardProjectId,
   type BoardQuery,
   type BoardResponse,
+  type BoardSkipRequest,
+  type BoardSkipResponse,
   type BoardTask,
   type BoardTaskActionRequest,
   type BoardTaskCreateRequest,
@@ -308,6 +310,22 @@ export class BoardService {
       await this.deliverReopen(caller, outcome, outcome.task);
     }
     return await this.view(await this.ports.store.read(), id);
+  }
+
+  /**
+   * `fy task skip "<why>"` (§3.4): the calling ferret records why its work needs no card — chit-chat, or the
+   * owner said not to track it — so the turn-end check stays quiet until it takes one. It is a decision about
+   * the ferret's own session, so only a ferret makes it, and only for itself.
+   */
+  async skip(request: BoardSkipRequest, caller: BoardCaller): Promise<BoardSkipResponse> {
+    if (caller.kind !== 'ferret') {
+      throw new BoardError('invalid', 'skip is for a ferret: it records why its own session has no card');
+    }
+    const skip = { reason: request.reason, at: this.ports.clock.now() };
+    if (!(await this.ports.focus.skip(caller.sessionId, skip))) {
+      throw new BoardError('not-found', 'there is no session to record the skip on');
+    }
+    return { sessionId: caller.sessionId, skip };
   }
 
   /**

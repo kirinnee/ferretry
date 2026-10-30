@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { BoardQuery, BoardTaskActionRequest, BoardTaskCreateRequest } from '@ferretry/protocol';
+import type { BoardQuery, BoardSkipRequest, BoardTaskActionRequest, BoardTaskCreateRequest } from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher, ApiError, ApiRouter } from '../../../../src/lib/api/index.ts';
 import { type BoardCaller, BoardError, BoardService, BoardUnavailableError } from '../../../../src/lib/board/index.ts';
@@ -55,11 +55,63 @@ const recording = () => {
       calls.push({ route: 'act', value: { id, ...value }, caller });
       return await service.act(id, value, caller);
     },
+    skip: async (value: BoardSkipRequest, caller) => {
+      calls.push({ route: 'skip', value, caller });
+      return await service.skip(value, caller);
+    },
   };
   return { calls, board };
 };
 
 describe('the board mount', () => {
+  it('should record a skip for the ferret in the pane that asked, never one named in the body', async () => {
+    // Arrange
+    const { calls, board } = recording();
+
+    // Act
+    const response = await (
+      await dispatcher(board)
+    ).dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/board/skip',
+        headers: agentIn('lead'),
+        body: JSON.stringify({ reason: 'the owner said not to track this' }),
+      }),
+    );
+    const named = await (
+      await dispatcher(board)
+    ).dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/board/skip',
+        headers: agentIn('lead'),
+        body: JSON.stringify({ reason: 'x', sessionId: 'child' }),
+      }),
+    );
+
+    // Assert
+    should(response.status).equal(200);
+    should(response.headers.get('cache-control')).equal('no-store');
+    should(calls[0]).match({ route: 'skip', value: { reason: 'the owner said not to track this' } });
+    should(calls[0]?.caller).eql({ kind: 'ferret', sessionId: 'lead' });
+    should(jsonBody(response)).match({ sessionId: 'lead', skip: { reason: 'the owner said not to track this' } });
+    should(named.status).equal(400);
+  });
+
+  it('should refuse a skip from the owner, which has no session of its own to record it on', async () => {
+    // Act
+    const response = await (
+      await dispatcher(recording().board)
+    ).dispatch(
+      request({ method: 'POST', path: '/v1/board/skip', headers: human, body: JSON.stringify({ reason: 'chat' }) }),
+    );
+
+    // Assert
+    should(response.status).equal(400);
+    should(jsonBody(response).code).equal('invalid');
+  });
+
   it('should read the board query from the query string, defaulting to open cards', async () => {
     // Arrange
     const { calls, board } = recording();

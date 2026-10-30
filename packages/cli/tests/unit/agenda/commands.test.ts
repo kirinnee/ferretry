@@ -716,7 +716,7 @@ describe('agenda card flags', () => {
     const { parsed, gateway } = run(['agenda', 'add', 'Ok?', '-t', 'Ok', '-k', 'yesno', '--up', 'Maybe']);
 
     // Assert
-    await should(parsed).be.rejectedWith(/--up only fits --kind task/u);
+    await should(parsed).be.rejectedWith(/--up only fits --kind todo/u);
     should(gateway.applied).be.empty();
   });
 

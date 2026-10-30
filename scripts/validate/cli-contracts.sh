@@ -25,6 +25,7 @@ cli_contracts=(
   installer-checksum
   installer-timeouts
   installation-parity
+  render-guide-doc
   release-daemon
   released-version
   nix-packages
@@ -368,6 +369,45 @@ installation-parity)
       exit 1
     }
   done
+  ;;
+render-guide-doc)
+  # `fy render guide` prints the `## Guide for agents` section of docs/fy-render.md, which OWNS the
+  # text; the binary ships a copy (RENDER_GUIDE_SECTION in the CLI's guide-text.ts) because a
+  # release has no repository beside it. Two texts claiming to be the guide would split silently —
+  # an agent reading the doc and an agent running the command told different shapes, and neither
+  # side would ever know — so this gate holds the copy to the doc byte for byte, reading the copy
+  # through the SAME module the command prints from rather than a second extraction of its own.
+  guide_doc="docs/fy-render.md"
+  guide_module="${cli_pkg}/src/lib/render/guide-text.ts"
+  test -f "${guide_doc}" || {
+    echo "❌ ${guide_doc} is missing" >&2
+    exit 1
+  }
+  test -f "${guide_module}" || {
+    echo "❌ ${guide_module} is missing: fy render guide has nothing to print" >&2
+    exit 1
+  }
+
+  headings="$(grep -c '^## Guide for agents$' "${guide_doc}" || true)"
+  [ "${headings}" = "1" ] || {
+    echo "❌ ${guide_doc} carries ${headings} '## Guide for agents' headings; the guide needs exactly one owner" >&2
+    exit 1
+  }
+
+  # The section runs from its heading to the next `## ` heading. Blank lines around the section are
+  # trimmed on both sides before the comparison (the shipped literal opens on its own line); the
+  # closing `---` separator is part of the slice, exactly as the command's extractor bounds it
+  # (packages/cli/src/lib/render/guide.ts).
+  trim_edges() { sed -e '/./,$!d' -e :a -e '/^[[:space:]]*$/{$d;N;ba' -e '}'; }
+  doc_slice="$(awk '/^## Guide for agents$/ { on = 1 } on && /^## / && !/^## Guide for agents$/ { exit } on { print }' "${guide_doc}" | trim_edges)"
+  shipped="$(bun -e 'const { RENDER_GUIDE_SECTION } = await import("./packages/cli/src/lib/render/guide-text.ts"); console.log(RENDER_GUIDE_SECTION);' | trim_edges)"
+
+  if [ "${doc_slice}" != "${shipped}" ]; then
+    echo "❌ the guide fy render guide prints has drifted from ${guide_doc} § Guide for agents:" >&2
+    diff <(printf '%s\n' "${doc_slice}") <(printf '%s\n' "${shipped}") >&2 || true
+    echo "   edit the doc, then copy the section whole into RENDER_GUIDE_SECTION (${guide_module})" >&2
+    exit 1
+  fi
   ;;
 release-daemon)
   # A release archive, package, and cask must carry EVERY independently declared executable: the CLI,

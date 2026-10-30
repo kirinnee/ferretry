@@ -320,6 +320,7 @@ describe('launchInstructionFacts', () => {
       'settings',
       'attention',
       'notify',
+      'board',
       'hypermedia',
       'pack',
       'agenda',

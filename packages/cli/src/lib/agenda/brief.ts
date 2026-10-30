@@ -297,7 +297,7 @@ function upFrom(kind: CardAsk['kind'], flags: BriefFlags, file: BriefFile): UpAn
     return undefined;
   }
   if (kind !== 'task' && kind !== 'permission') {
-    throw new Error(`--up only fits --kind task (e.g. "Skip") or --kind permission (e.g. "Always allow"), not ${kind}`);
+    throw new Error(`--up only fits --kind todo (e.g. "Skip") or --kind permission (e.g. "Always allow"), not ${kind}`);
   }
   return { label, ...(description === undefined ? {} : { description }) };
 }
@@ -342,7 +342,7 @@ function askFor(
   const lone = questions?.length === 1 ? questions[0] : undefined;
   const named = parseKind(kind);
   if (named === 'task' && questions !== undefined) {
-    throw new Error('a task asks nothing to answer: drop --question, or drop --task');
+    throw new Error('a todo asks nothing to answer: drop --question, or drop --todo (or --kind todo)');
   }
   if (named === 'info' && questions !== undefined) {
     throw new Error('an info card asks nothing to answer: drop --question, or use --kind reply');

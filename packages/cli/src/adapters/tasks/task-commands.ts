@@ -1,5 +1,4 @@
-import { TaskKindSchema, TaskWorkflowSchema } from '@ferretry/protocol';
-import { DependencyUntilSchema } from '@ferretry/protocol';
+import { DependencyUntilSchema, TaskKindSchema, TaskWorkflowSchema } from '@ferretry/protocol';
 import type { Command } from 'commander';
 import type {
   BoardController,
@@ -118,6 +117,13 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
     .argument('<id>', ID_HELP)
     .action(async (id: string, options: SessionOptions) => {
       await board.focus(id, options);
+    });
+
+  acting(group.command('skip'))
+    .description('record why this work needs no card, so the turn-end board check stays quiet')
+    .argument('<why...>', 'why: chit-chat, or the owner said not to track it')
+    .action(async (why: string[], options: SessionOptions) => {
+      await board.skip(why, options);
     });
 
   acting(group.command('block'))

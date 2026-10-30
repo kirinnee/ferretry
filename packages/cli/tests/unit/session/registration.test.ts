@@ -19,6 +19,7 @@ import {
   capturedPresenter,
   FakeFiles,
   RecordingApi,
+  RecordingBoard,
   WAIT_CLOCK,
 } from './controller-doubles.ts';
 import { sessionView } from './session-fixtures.ts';
@@ -62,7 +63,7 @@ function harness(
   registerSessionCommands(program, {
     presenter,
     start: new StartSessionController(api, files, presenter, environment, 'fy'),
-    list: new ListSessionsController(api, presenter),
+    list: new ListSessionsController(api, presenter, new RecordingBoard(), { amber: cell => cell }),
     status: new SessionStatusController(api, presenter),
     send: new SendMessageController(api, files, presenter, environment, WAIT_CLOCK),
     answer: new AnswerQuestionController(api, presenter),

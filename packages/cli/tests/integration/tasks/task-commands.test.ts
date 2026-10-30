@@ -3,6 +3,8 @@ import type {
   BoardProjectsResponse,
   BoardQueryInput,
   BoardResponse,
+  BoardSkipRequest,
+  BoardSkipResponse,
   BoardTaskActionRequestInput,
   BoardTaskCreateRequestInput,
   BoardTaskResponse,
@@ -50,6 +52,13 @@ class FakeBoardGateway implements IBoardGateway {
   act(as: string | undefined, id: string, request: BoardTaskActionRequestInput): Promise<BoardTaskResponse> {
     this.acted = { as, id, request };
     return Promise.resolve(taskResponse({ laneId: 'implement' }));
+  }
+
+  skipped: { as: string | undefined; request: BoardSkipRequest } | undefined;
+
+  skip(as: string | undefined, request: BoardSkipRequest): Promise<BoardSkipResponse> {
+    this.skipped = { as, request };
+    return Promise.resolve({ sessionId: as ?? '', skip: { reason: request.reason, at: '2026-10-30T10:00:00.000Z' } });
   }
 
   projects(as: string | undefined): Promise<BoardProjectsResponse> {
@@ -223,6 +232,19 @@ describe('fy task lifecycle verbs', () => {
 
     // Assert
     should(gateway.acted?.request).containEql({ action: 'assign', assignee: 'session-8' });
+  });
+});
+
+describe('fy task skip', () => {
+  it('should record the words as the reason, on the acting session', async () => {
+    // Arrange
+    const { run, gateway } = harness();
+
+    // Act
+    await run('task', 'skip', 'owner', 'said', 'not', 'to', 'track', '--session', 'session-8');
+
+    // Assert
+    should(gateway.skipped).eql({ as: 'session-8', request: { reason: 'owner said not to track' } });
   });
 });
 
