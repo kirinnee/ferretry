@@ -165,6 +165,7 @@ import { AgendaWireProbes } from './lib/agenda-wire-react.tsx';
 import { agendaTargetFromSearch } from './lib/agenda-inbox.ts';
 import { inboxSourceFromSearch } from './lib/agenda-inbox-list.ts';
 import { transcriptIsCurrent } from './lib/background-fresh.ts';
+import { boardPorts } from './lib/board-ports.ts';
 import { DEFAULT_CARRIER_PREFERENCE } from './lib/carrier-preference.ts';
 import type { DaemonConnectionRecord } from './lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonCarriers } from './lib/daemon-connection.ts';
@@ -2017,16 +2018,7 @@ function BoardRoute({ connection, taskId }: BoardPageProps) {
     (search: string) => navigate(`${window.location.pathname}${search === '' ? '' : `?${search}`}`, { replace: true }),
     [navigate],
   );
-  const ports = useMemo(
-    () => ({
-      sendMessage: async (daemon: DaemonConnection, sessionId: string, message: string) => {
-        await (await store.clients.client(daemon)).send(sessionId, { message });
-      },
-      startFerret: async (daemon: DaemonConnection, prompt: string) =>
-        (await (await store.clients.client(daemon)).start({ mode: 'auto', prompt })).config.id,
-    }),
-    [store.clients],
-  );
+  const ports = useMemo(() => boardPorts(daemon => store.clients.client(daemon)), [store.clients]);
   return (
     <BoardPage
       agenda={store.attention}
