@@ -130,13 +130,35 @@ describe('an orphaned card', () => {
     should(journalTypes(subject)).containEql('fleet.warden_board_blind');
   });
 
-  it('should try again next sweep when the message could not be queued or the notice was refused', async () => {
+  it('should put a message it could not type on the owner ferret’s board instead, and not type it again', async () => {
+    // Arrange — the message was refused by a composer the reader could not place. Not remembered, it was
+    // typed again every sweep: nine notices every two minutes, crowding out the owner's own message.
+    const subject = harness({
+      config: enabled(),
+      fleet: [worker, lead],
+      board: boardPort(boardOf(orphanView())),
+      remedyFails: 'nudge',
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.notices).have.length(1);
+    should(subject.notices[0]).containDeep({ sessionId: 'lead', notice: { task: { id: 'F1' } } });
+    should(subject.state().orphans?.F1).containEql({ via: 'notice', to: 'lead' });
+    should(journalTypes(subject)).not.containEql('fleet.warden_orphan_failed');
+  });
+
+  it('should try again next sweep when neither the message nor the notice landed', async () => {
     // Arrange
     const message = harness({
       config: enabled(),
       fleet: [worker, lead],
       board: boardPort(boardOf(orphanView())),
       remedyFails: 'nudge',
+      noticeWrite: 'rejected',
     });
     const notice = harness({
       config: enabled(),
@@ -154,6 +176,21 @@ describe('an orphaned card', () => {
       should(subject.state()).not.have.property('orphans');
       should(journalTypes(subject)).containEql('fleet.warden_orphan_failed');
     }
+  });
+
+  it('should never type into an interactive owner’s chat: the notice goes on its board', async () => {
+    // Arrange
+    const chat = session({ id: 'lead', status: 'running', mode: 'interactive' });
+    const subject = harness({ config: enabled(), fleet: [worker, chat], board: boardPort(boardOf(orphanView())) });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.remedies).be.empty();
+    should(subject.notices).have.length(1);
+    should(subject.notices[0]).containDeep({ sessionId: 'lead', notice: { task: { id: 'F1' } } });
+    should(subject.state().orphans?.F1).containEql({ via: 'notice', to: 'lead' });
   });
 
   it('should say so when nobody on this machine can be told', async () => {
