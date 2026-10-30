@@ -283,7 +283,7 @@ export const DaemonConfigDocumentSchema = z
     transcriptReconcileSeconds: z.number().int().positive().default(2),
     /**
      * THE SESSION-WORKER POOL (docs/performance.md › "Session workers", docs/design/session-workers.md):
-     * every running session is observed off the main thread, through its own read-only attached tmux
+     * every running session is observed off the main thread, through its own attached observe-only tmux
      * client, and written by this daemon's main thread as before. `max` threads (default 2), each running
      * session on its own thread until there are `max`, then shared by the least-loaded one — set `max` at or
      * above the running count for one thread per agent. `fastExit` settles a pane its worker saw die at once

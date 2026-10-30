@@ -1,11 +1,12 @@
 /**
- * A SESSION WORKER'S OWN tmux CLIENT, over a real tmux: attached to its one session, read-only, and
- * refusing to run anything but a read.
+ * A SESSION WORKER'S OWN tmux CLIENT, over a real tmux: attached to its one session and refusing to run
+ * anything but a read.
  *
- * tmux's `read-only` flag guards keyboard input, NOT control commands — an in-band `send-keys` from a
- * read-only client still types into the pane (measured on 3.6a). A worker watches an agent and must
- * never type into it, so its client refuses every command that is not an allowlisted read itself, and
- * never hands one to a spawned tmux either. This holds it to that, command by command.
+ * tmux's `read-only` flag is no guard for this: on 3.6a an in-band `send-keys` from a read-only client
+ * still typed into the pane, and from 3.7 a read-only client makes tmux refuse the daemon's OWN
+ * `send-keys` whenever it is picked as their target client. A worker watches an agent and must never type
+ * into it, so its client refuses every command that is not an allowlisted read itself, and never hands one
+ * to a spawned tmux either — while staying a client tmux lets the daemon type past. This holds it to both.
  */
 import { afterEach, describe, it } from 'bun:test';
 import { existsSync } from 'node:fs';
@@ -15,7 +16,11 @@ import { join } from 'node:path';
 import should from 'should';
 import { BunTmuxProcess, ControlModeTmuxProcess } from '../../../src/adapters/index.ts';
 import type { TmuxCommandPort, TmuxCommandResult } from '../../../src/lib/tmux/contracts.ts';
-import { PANE_WATCH_FORMAT, parsePaneWatch } from '../../../src/lib/tmux/control-protocol.ts';
+import {
+  PANE_WATCH_FORMAT,
+  parsePaneWatch,
+  SESSION_WORKER_ATTACH_FLAGS,
+} from '../../../src/lib/tmux/control-protocol.ts';
 import { isTmuxServerAbsent } from '../../../src/lib/tmux/server-absent.ts';
 
 const TMUX = Bun.which('tmux');
@@ -44,7 +49,7 @@ async function attached(target = 'agent') {
   await direct.execute(['new-session', '-d', '-s', 'neighbour', '-x', '80', '-y', '8', 'cat']);
   const spawned = new CountingSpawn(direct);
   const subject = new ControlModeTmuxProcess(TMUX, socket, spawned, {
-    attach: { target, flags: 'ignore-size,read-only,no-output' },
+    attach: { target, flags: SESSION_WORKER_ATTACH_FLAGS },
     mutations: 'refuse',
   });
   cleanups.push(async () => {
@@ -108,6 +113,28 @@ describe('a session worker’s attached control client', () => {
     should(spawned.commands.length).equal(before);
     should((await direct.execute(['list-sessions', '-F', '#{session_name}'])).stdout).equal('agent\nneighbour\n');
     should((await direct.execute(['capture-pane', '-p', '-t', 'agent'])).stdout.trim()).equal('');
+  });
+
+  it('should let the daemon’s own send-keys type into every pane while it is attached', async () => {
+    // Arrange — the worker's client attached and connected; tmux takes the most recently active attached
+    // client as the target client of a send-keys that names none, so it is this one.
+    const { direct, subject } = await attached();
+    await subject.execute(['has-session', '-t', 'agent']);
+    should(subject.connected).be.true();
+
+    // Act — the daemon's keystrokes, from a spawned tmux, into the watched pane and into another session's.
+    const own = await direct.execute(['send-keys', '-t', 'agent', '-l', 'typed past the worker']);
+    const other = await direct.execute(['send-keys', '-t', 'neighbour', '-l', 'typed next door']);
+    for (let wait = 0; wait < 40; wait += 1) {
+      const shown = await direct.execute(['capture-pane', '-p', '-t', 'agent']);
+      if (shown.stdout.includes('typed past the worker')) break;
+      await Bun.sleep(50);
+    }
+
+    // Assert — on tmux 3.7+ a read-only client here fails both with "client is read-only".
+    should(own).deepEqual({ code: 0, stdout: '', stderr: '' });
+    should(other).deepEqual({ code: 0, stdout: '', stderr: '' });
+    should((await direct.execute(['capture-pane', '-p', '-t', 'agent'])).stdout).match(/typed past the worker/u);
   });
 
   it('should refuse a stdin payload too, and never accept a session it could not address', async () => {
@@ -176,7 +203,7 @@ describe('a session worker’s pane subscription', () => {
     const socket = join(root, 's');
     const direct = new BunTmuxProcess(TMUX, socket);
     const subject = new ControlModeTmuxProcess(TMUX, socket, direct, {
-      attach: { target: 'agent', flags: 'ignore-size,read-only,no-output' },
+      attach: { target: 'agent', flags: SESSION_WORKER_ATTACH_FLAGS },
       mutations: 'refuse',
     });
     cleanups.push(async () => {

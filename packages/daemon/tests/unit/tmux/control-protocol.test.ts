@@ -7,10 +7,12 @@ import {
   controlSubscriptionLine,
   decodeControlOutput,
   isControlAttachable,
+  isReadOnlyAttach,
   PANE_WATCH_FORMAT,
   parseControlGuard,
   parseControlNotification,
   parsePaneWatch,
+  SESSION_WORKER_ATTACH_FLAGS,
 } from '../../../src/lib/index.ts';
 
 const NONCE = '0123456789abcdef0123456789abcdef';
@@ -213,6 +215,26 @@ describe('isControlAttachable', () => {
   ])('should say whether %p can be attached to (%p)', (input, expected) => {
     // Act + Assert
     should(isControlAttachable(input)).equal(expected);
+  });
+});
+
+describe('isReadOnlyAttach', () => {
+  it.each([
+    ['ignore-size,read-only,no-output', true],
+    ['read-only', true],
+    ['ignore-size,no-output', false],
+    ['!read-only', false],
+    ['read-only-ish', false],
+    ['', false],
+  ])('should say whether %p attaches read-only (%p)', (input, expected) => {
+    // Act + Assert
+    should(isReadOnlyAttach(input)).equal(expected);
+  });
+
+  it('should keep a session worker’s client writable to tmux, so no send-keys can take it as a read-only target', () => {
+    // Act + Assert
+    should(isReadOnlyAttach(SESSION_WORKER_ATTACH_FLAGS)).be.false();
+    should(SESSION_WORKER_ATTACH_FLAGS.split(',')).containDeep(['ignore-size', 'no-output']);
   });
 });
 

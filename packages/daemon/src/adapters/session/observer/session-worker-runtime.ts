@@ -64,7 +64,7 @@ export const DEFAULT_SESSION_WORKER_PACING: SessionWorkerPacing = {
 /** What a session worker reads through. Nothing here can write: no storage, no file write, no `send-keys`. */
 export interface SessionWorkerDeps {
   readonly post: (message: FromSessionWorker) => void;
-  /** The session's own read-only attached control client (`bin/session.worker.ts` builds it). */
+  /** The session's own attached observe-only control client (`bin/session.worker.ts` builds it). */
   readonly tmux: (binding: SessionBinding['tmux']) => WorkerTmuxClient;
   readonly transcripts: Readonly<Record<'claude' | 'codex', TranscriptSource>>;
   readonly stat: (file: string) => Promise<{ readonly size: number; readonly mtimeMs: number } | undefined>;
@@ -136,7 +136,7 @@ const LIVENESS_EVENTS = 20;
  * A SESSION WORKER'S PROGRAM: the session observer, for the sessions this thread hosts, looking only when
  * something happened (stage 3c of `docs/design/session-workers.md`).
  *
- * WHEN IT LOOKS. The session's own read-only attached tmux client is subscribed to its panes'
+ * WHEN IT LOOKS. The session's own attached observe-only tmux client is subscribed to its panes'
  * `#{pane_dead} #{window_activity}` — tmux reports a change at most once a second and streams no pane bytes
  * at all — and the main thread forwards the file-event hub's notice when the transcript changes. Either
  * arms a look after a short settle, never sooner than the throttle after the last one, so a pane drawing
