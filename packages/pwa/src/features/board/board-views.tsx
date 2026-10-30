@@ -17,9 +17,8 @@ import {
   type BoardGroupOf,
   buildTree,
   flattenTree,
-  laneOfCategory,
 } from '../../lib/board-view.ts';
-import type { BoardAnswerState, BoardDone } from '../../lib/board-done.ts';
+import { type BoardAnswerState, type BoardDone, doneLaneOf } from '../../lib/board-done.ts';
 import { BoardCard, type BoardCardMoves } from './board-card.tsx';
 import { BoardIcon } from './board-icons.tsx';
 import { BoardLane } from './board-lane.tsx';
@@ -116,7 +115,7 @@ function KanbanBoard({
   readonly onDropCard: (groupKey: string, laneId: string) => void;
 }) {
   const inAir = env.dragging !== null && env.dragging.groupKey === group.key;
-  const closeLane = laneOfCategory(group, 'closed');
+  const closeLane = doneLaneOf(group.laneSet);
   const dragged = inAir ? env.dragging?.cardKey : undefined;
   const lanes = hideClosed ? group.lanes.filter(lane => lane.category !== 'closed') : group.lanes;
   return (

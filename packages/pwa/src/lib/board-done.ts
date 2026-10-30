@@ -17,8 +17,8 @@ type DoneLanes = Pick<LaneSet, 'lanes'>;
  * last active lane. Read structurally, so the same code reads both.
  */
 export type DeclaredLanes = DoneLanes & {
-  readonly doneLane?: string | null | undefined;
-  readonly notGoodLane?: string | null | undefined;
+  readonly doneLane?: LaneSet['doneLane'] | null | undefined;
+  readonly notGoodLane?: LaneSet['notGoodLane'] | null | undefined;
 };
 
 const declared = (laneSet: DeclaredLanes, laneId: string | null | undefined, category: LaneCategory) =>

@@ -208,13 +208,3 @@ export const cardPlaces = (model: BoardModel): ReadonlyMap<string, BoardCardPlac
   }
   return places;
 };
-
-/** The first (`closed`) or last (`active`) lane of a category on a board, or `null`: where "Done" and "Not good" go. */
-export const laneOfCategory = (
-  group: BoardGroupOf,
-  category: LaneCategory,
-  which: 'first' | 'last' = 'first',
-): string | null => {
-  const matching = group.laneSet?.lanes.filter(lane => lane.category === category) ?? [];
-  return (which === 'first' ? matching[0] : matching[matching.length - 1])?.id ?? null;
-};
