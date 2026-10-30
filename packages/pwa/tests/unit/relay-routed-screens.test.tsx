@@ -3,14 +3,13 @@ import type { ReactNode } from 'react';
 import { FileInstanceSurface } from '../../src/components/file-instance-surface.tsx';
 import { fsApi, resetFsProbes } from '../../src/components/files-api.ts';
 import { sessionReferenceSurface } from '../../src/components/reference-surface.tsx';
-import { SessionSearchProvider, SessionTasksSearchSurface } from '../../src/features/session-search/session-search.tsx';
+import { SessionSearchControl, SessionSearchProvider } from '../../src/features/session-search/session-search.tsx';
 import { SessionSkillsSurface } from '../../src/features/skills/session-skills-surface.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import type { DaemonFetch } from '../../src/lib/runtime-models.ts';
 import { type AppStore, StoreProvider } from '../../src/lib/store.tsx';
 import { interact, mount, must } from '../support/dom.ts';
-import { taskSummary } from '../support/tasks.ts';
 
 /**
  * Every screen here used to reach its daemon over the daemon's own address, past the carrier router.
@@ -68,30 +67,17 @@ const settle = async (): Promise<void> => {
 };
 
 describe('screens read a relay-only daemon through the carrier', () => {
-  it('Tasks search reads the board, and Mark done is sent, through the carrier', async () => {
+  it('the chat search reads its file index through the carrier and dials nothing directly', async () => {
     // Arrange
-    const live = {
-      ...taskSummary({ id: 'F6', title: 'Needle task', phase: 'live', status: 'live' }),
-      sessionId: 'session-a',
-    };
     const relay = carrier(row => {
-      if (row.method === 'POST') return new Response('{"error":"refused for the test"}', { status: 403 });
       if (row.pathname.endsWith('/fs/index'))
         return Response.json({
           v: 1,
           sessionId: 'session-a',
           root: '/work',
-          files: [],
+          files: [{ name: 'needle.ts', path: 'src/needle.ts' }],
           coverage: 'complete',
           skipped: [],
-        });
-      if (row.pathname.endsWith('/tasks'))
-        return Response.json({
-          v: 1,
-          sessionId: 'session-a',
-          tasks: [live],
-          parseErrors: 0,
-          updatedAt: '2026-10-09T00:00:00.000Z',
         });
       return new Response('not found', { status: 404 });
     });
@@ -99,21 +85,25 @@ describe('screens read a relay-only daemon through the carrier', () => {
       routed(
         relay.fetch,
         <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
-          <SessionTasksSearchSurface />
+          <SessionSearchControl />
         </SessionSearchProvider>,
       ),
     );
     await settle();
 
     // Act
-    const done = must(view.container.querySelector<HTMLButtonElement>('[aria-label="Mark &F6 done"]'), 'Mark done');
-    await interact(() => done.click());
+    const input = must(view.container.querySelector<HTMLInputElement>('input'), 'search input');
+    await interact(() => {
+      input.focus();
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, 'needle');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
     await settle();
 
     // Assert
-    expect(relay.seen.some(row => row.method === 'GET' && row.pathname.endsWith('/tasks'))).toBe(true);
-    expect(relay.seen.some(row => row.pathname.endsWith('/fs/index'))).toBe(true);
-    expect(relay.seen.some(row => row.method === 'POST' && row.pathname.endsWith('/tasks/F6'))).toBe(true);
+    expect(relay.seen.filter(row => row.pathname.endsWith('/fs/index'))).toHaveLength(1);
+    expect(relay.seen.some(row => /\/tasks(\/|$)/u.test(row.pathname))).toBe(false);
+    expect(view.container.textContent).toContain('src/needle.ts');
     expect(direct).toEqual([]);
     await view.unmount();
   });

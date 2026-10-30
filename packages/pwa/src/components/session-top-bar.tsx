@@ -1,27 +1,22 @@
 /**
- * THE SESSION'S ONE BAR — the agent's name, where it lives, how it is doing, and what you can do to it.
+ * THE SESSION'S ONE BAR — the agent's name, how it is doing, and what you can do to it. Nothing else.
  *
- * The approved session-view redesign: the page used to spend two rows of chrome before the
- * conversation started — a header with a task title, a runtime eyebrow and a session id, then a second
- * toolbar of lifecycle buttons, pane openers, an Attention button and a live-feed chip. ONE bar now
- * carries:
+ * The owner (2026-10-30): "top bar is too crowded". The bar had grown to the name, an unread badge, a
+ * refresh mark, four capability icons, a sub-ferrets pill, a task chip, an Agenda toggle, Interrupt, Stop,
+ * Info, Actions and a theme switch. It now carries only:
  *
- *   - the ferret's name (the callsign) and the project it is working in — nothing else identifies it;
+ *   - the ferret's task title (and its callsign when that differs) — what it is;
  *   - its status as a dot and a word, which is also where "needs you" and a dead live feed show up;
- *   - Interrupt and Stop/Start, beside the name rather than in a row below it;
- *   - ⓘ Info, which is for LOOKING: a resizable right panel on a desktop, a bottom sheet on a phone;
- *   - Actions ▾, which is for DOING: one grouped dropdown on every width.
+ *   - Interrupt and Stop/Start, beside the name;
+ *   - ⓘ, an icon with no word, which opens Info (a right panel on a desktop, a bottom sheet on a phone);
+ *   - Actions ▾, the ONE overflow: Theme and every action sit in it.
  *
- * That is the header's one rule, LOOK vs DO. The old ⋯ menu and the panel-toggle icon are gone: what
- * they held is now either a fact in Info or an action in Actions.
+ * Everything that left is in Info › Overview, in its "About this ferret" block: its sub-ferrets, its card,
+ * its capabilities (the switch marks), Restart and its agenda. Nothing was removed, only moved.
  *
- * ON A PHONE THE BAR IS ☰ (the sessions drawer), the name, the card's reference, ONE status dot and ▾ —
- * and nothing else. The owner's phone (2026-10-30) drew eleven things in one 390px row: the card chip ran
- * under Interrupt and the menu, and its "active" sat under the pause glyph. So on a phone the page puts
- * Interrupt, ⓘ Info, the theme switch and the outdated note in Actions ▾, and this bar draws none of
- * `actions`, `onToggleInfo`, `trailing`, the agenda count (the agenda line above the composer says it) or
- * the outdated mark. The switch marks (Learning, Hypermedia, Pack) live in Info, and a dropped live feed is
- * one small icon, not a word and a link.
+ * ON A PHONE THE BAR IS ONE COMPACT ROW: ☰ (the sessions drawer), the title (cut with an ellipsis; the whole
+ * title is Info › Overview's Task row), ONE status dot, ⓘ and ▾ — and nothing else: the page puts Interrupt
+ * in ▾, and this bar draws none of `actions`.
  *
  * PRESENTATIONAL ONLY. The page owns every action and every piece of state; this file draws what it is
  * handed, so a test can mount it with plain values and the page cannot end up with two owners of the
@@ -31,9 +26,6 @@
 import { displaySystemCallsign, type SessionView } from '@ferretry/protocol';
 import { Info, Menu } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { OutdatedMark } from '../features/restart-outdated/outdated-mark.tsx';
-import { agendaOn, hypermediaOn, packOn } from '../features/session-info/info-model.ts';
-import { SwitchMarks, type SwitchMarksProps } from '../features/session-info/switch-marks.tsx';
 import { displayCallsign } from '../lib/callsign.ts';
 import { harnessWord } from '../lib/harness-dialogs.ts';
 import { permissionPhrase } from '../lib/permission-requests.ts';
@@ -41,7 +33,6 @@ import type { SessionTurn } from '../lib/session-activity.ts';
 import { sessionStatusLabel } from '../lib/session-screens.ts';
 import { sessionTask } from '../shell/session-title.ts';
 import { StatusMark } from '../shell/status-mark.tsx';
-import { UnreadBadge } from '../shell/unread-badge.tsx';
 
 /**
  * WHO is working on this session: its callsign, else the name it was given, else its id. This is the
@@ -70,19 +61,10 @@ const TURN_WORD: Readonly<Record<SessionTurn, string>> = {
 
 export interface SessionTopBarProps {
   readonly session: SessionView;
-  /** The project this session's folder belongs to, or null when it cannot be named. */
-  readonly project: string | null;
-  /** Phone layout: the project and the status word give their room to the name. */
+  /** Phone layout: the callsign and the status word give their room to the name. */
   readonly compact: boolean;
   /** The primary lifecycle actions, rendered by the page that owns them. Not drawn on a phone: they are in ▾. */
   readonly actions: ReactNode;
-  /**
-   * How many Agenda items are open on this ferret. A small accent count beside the name when there are
-   * any, nothing when there are none — the pinned block above the composer is the item itself.
-   */
-  readonly agendaOpen?: number;
-  /** The ferret's card chip (`ChatCardChip`), drawn beside the name at every width. Absent: this host has no board. */
-  readonly cardChip?: ReactNode;
   /** Status additions after the status word: "needs you", a dead live feed. */
   readonly status?: ReactNode;
   /**
@@ -93,42 +75,24 @@ export interface SessionTopBarProps {
   readonly turn?: SessionTurn | null;
   /** Whether Info is open. */
   readonly infoOpen?: boolean;
-  /** The ⓘ that opens or closes Info. Absent: this host shows no Info, and draws no ⓘ. Not drawn on a phone. */
+  /** The ⓘ that opens or closes Info. Absent: this host shows no Info, and draws no ⓘ. */
   readonly onToggleInfo?: () => void;
-  /** Actions ▾, rendered by the page that owns every action. */
+  /** Actions ▾, the one overflow, rendered by the page that owns every action. */
   readonly menu?: ReactNode;
-  /** The far-right control after Actions ▾: the theme quick switch. Not drawn on a phone: it is in ▾. */
-  readonly trailing?: ReactNode;
   /** Phone only: opens the sessions drawer. */
   readonly onOpenSessions?: () => void;
-  /** The ferret that started this one, as a link to it. Absent for a ferret a person started. */
-  readonly startedBy?: { readonly name: string; readonly onOpen: () => void };
-  /** The ACTIVE sub-ferrets this ferret started, as the indicator that lists them (`sub-ferrets.tsx`). Never drawn on a phone. */
-  readonly subFerrets?: ReactNode;
-  /**
-   * The ferret's switch marks beside its name, with the switches' latest answers and, for a reader who may
-   * control it, the tap that switches one. Absent: read from the session's own record, marks only.
-   */
-  readonly switches?: SwitchMarksProps;
 }
 
 export function SessionTopBar({
   session,
-  project,
   compact,
   actions,
-  agendaOpen = 0,
-  cardChip,
   status,
   turn = null,
   infoOpen = false,
   onToggleInfo,
   menu,
-  trailing,
   onOpenSessions,
-  startedBy,
-  subFerrets,
-  switches,
 }: SessionTopBarProps) {
   const name = sessionDisplayName(session);
   const title = sessionTitle(session);
@@ -164,30 +128,6 @@ export function SessionTopBar({
             {name}
           </span>
         )}
-        {agendaOpen > 0 && !compact ? <UnreadBadge className="fy-session-bar__agenda" count={agendaOpen} /> : null}
-        {compact ? null : <OutdatedMark view={session} />}
-        {compact ? null : (
-          <SwitchMarks
-            {...{
-              agenda: agendaOn(session),
-              ...(switches ?? { learning: false, hypermedia: hypermediaOn(session), pack: packOn(session) }),
-            }}
-          />
-        )}
-        {project === null || compact ? null : <span className="fy-session-bar__project">{project}</span>}
-        {startedBy === undefined || compact ? null : (
-          <button
-            className="fy-session-bar__started-by"
-            data-session-started-by=""
-            onClick={startedBy.onOpen}
-            title={`Started by ${startedBy.name}`}
-            type="button"
-          >
-            Started by {startedBy.name}
-          </button>
-        )}
-        {compact ? null : subFerrets}
-        {cardChip}
         <span
           className="fy-session-bar__status"
           data-session-activity={turn ?? undefined}
@@ -212,20 +152,20 @@ export function SessionTopBar({
           {actions}
         </div>
       )}
-      {onToggleInfo === undefined || compact ? null : (
+      {onToggleInfo === undefined ? null : (
         <button
+          aria-label="Info"
           aria-pressed={infoOpen}
-          className="fy-session-bar__info kt-btn kt-btn--sm"
+          className="fy-session-bar__info fy-session-bar__icon"
           data-session-info-toggle=""
           onClick={onToggleInfo}
+          title="Info"
           type="button"
         >
-          <Info aria-hidden="true" size={14} />
-          <span>Info</span>
+          <Info aria-hidden="true" size={18} />
         </button>
       )}
       {menu}
-      {compact ? null : trailing}
     </header>
   );
 }

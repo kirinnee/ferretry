@@ -1,29 +1,20 @@
 /**
  * Current-session file and task search (handover #6).
  *
- * kteam has no matching surface to port: its FilesTab has no name/path search
- * and SessionTasks has no task-prose search.  This module therefore keeps one
- * explicitly daemon-scoped search model and exposes the same visible control
- * to the app bar, Tasks, and Files. The daemon owns task-prose membership and
- * returns bounded summaries; the browser filters only the typed file index.
+ * One explicitly daemon-scoped search model, exposed as the same visible control to the app bar and
+ * Files. The tasks it searches are THIS FERRET'S CARDS on the board (one `/v1/board` read through the
+ * store, `useFerretCards`): the browser matches them against the typed query, like the file index.
  */
 
 import {
-  FY_REQUEST_ID_HEADER,
   MAX_SESSION_SEARCH_QUERY_LENGTH,
   matchesSessionSearchQuery,
-  normalizeSessionSearchQuery,
-  type ScopedTaskSummary,
-  type ScopedTaskView,
-  ScopedTaskViewSchema,
   type SessionFileIndexCoverage,
   type SessionFileIndexEntry,
   SessionFileIndexResponseSchema,
   type SessionFileIndexSkip,
   SessionSearchQuerySchema,
-  SessionTaskListResponseSchema,
   sessionSearchFileHaystack,
-  type TaskSummary,
 } from '@ferretry/protocol';
 import { LoaderCircle, Search, TriangleAlert } from 'lucide-react';
 import {
@@ -39,22 +30,17 @@ import {
   useState,
 } from 'react';
 import { fsApi } from '../../components/files-api.ts';
-import { SessionTaskKanban, SessionTaskList } from '../../components/session-tasks.tsx';
-import { taskReference } from '../../features/tasks/task-board-model.ts';
-import { TaskQuickSummary } from '../../features/tasks/task-row.tsx';
-import { useDebouncedEffect } from '../../hooks/use-debounce.ts';
-import { useLayoutMode } from '../../hooks/use-layout-mode.ts';
-import { addReferenceMessage, addReferenceToComposer } from '../../lib/composer-references.ts';
+import { useFerretCards } from '../../hooks/use-ferret-cards.ts';
+import type { DaemonBoardStore } from '../../lib/board-store.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../../lib/daemon-scope.ts';
-import { daemonRequest } from '../../lib/daemon-transport.ts';
 import type { DaemonFetch } from '../../lib/runtime-models.ts';
+import type { SessionCard } from '../../lib/session-cards.ts';
 import { useDaemonFetch } from '../../lib/store.tsx';
 import { nextActiveIndex, paletteCountLabel } from '../../shell/palette-model.ts';
 import { type FuzzyField, SUBSTRING_SCORE, scoreFields, WORD_START_SCORE } from '../../shell/palette-ranking.ts';
 
 export type SessionSearchResourceState = 'loading' | 'ready' | 'unavailable';
-export type SessionSearchMatchState = 'idle' | 'searching' | 'ready' | 'unavailable';
 
 interface SessionSearchFile {
   readonly kind: 'file';
@@ -64,7 +50,7 @@ interface SessionSearchFile {
 
 interface SessionSearchTask {
   readonly kind: 'task';
-  readonly task: ScopedTaskSummary;
+  readonly task: SessionCard;
 }
 
 export type SessionSearchResult = SessionSearchFile | SessionSearchTask;
@@ -79,15 +65,11 @@ interface SearchSnapshot {
   readonly fileState: SessionSearchResourceState;
   readonly taskError: string | null;
   readonly fileError: string | null;
-  readonly tasks: readonly ScopedTaskSummary[];
+  /** This ferret's cards, whatever their lane; empty until the board is read. */
+  readonly tasks: readonly SessionCard[];
   readonly files: readonly SessionFileIndexEntry[];
   readonly coverage: SessionFileIndexCoverage;
   readonly skipped: readonly SessionFileIndexSkip[];
-  readonly parseErrors: number;
-  readonly matchState: SessionSearchMatchState;
-  readonly matches: readonly ScopedTaskSummary[];
-  readonly matchQuery: string;
-  readonly matchError: string | null;
 }
 
 const INITIAL: SearchSnapshot = {
@@ -99,34 +81,24 @@ const INITIAL: SearchSnapshot = {
   files: [],
   coverage: 'complete',
   skipped: [],
-  parseErrors: 0,
-  matchState: 'idle',
-  matches: [],
-  matchQuery: '',
-  matchError: null,
 };
 
 /**
  * A snapshot CARRIES the session it describes.
  *
- * The snapshot used to be a bare piece of state cleared by the load effect. That
- * made the scope prop and the evidence two facts with two update schedules: a
- * render published the new scope immediately while the effect that clears the
- * old evidence is passive, so one committed render paired daemon beta's scope
- * with daemon alpha's ready task list. Everything downstream then read that pair
- * as the truth — the reference surface proved `&F6` against a session that has
- * no F6, and an Add to chat or Mark Done fired in that window addressed beta
- * with a task it took from alpha.
+ * The file index is a bare piece of state cleared by the load effect. That would make the scope prop and
+ * the evidence two facts with two update schedules: a render would publish the new scope immediately while
+ * the effect that clears the old evidence is passive, so one committed render could pair daemon beta's
+ * scope with daemon alpha's files.
  *
- * Keying it makes the mismatch unrepresentable rather than merely brief: the
- * render derives INITIAL whenever the stored key is not the key being rendered,
- * so "we have not read THIS session yet" is a synchronous consequence of the
- * scope rather than the outcome of an effect that has not run.
+ * Keying it makes the mismatch unrepresentable rather than merely brief: the render derives INITIAL
+ * whenever the stored key is not the key being rendered, so "we have not read THIS session yet" is a
+ * synchronous consequence of the scope rather than the outcome of an effect that has not run.
  */
 interface KeyedSnapshot {
   /** `daemonSessionKey(scope)`, or `''` for no scope — never a real key. */
   readonly key: string;
-  readonly snapshot: SearchSnapshot;
+  readonly snapshot: Pick<SearchSnapshot, 'fileState' | 'fileError' | 'files' | 'coverage' | 'skipped'>;
 }
 
 /** The key a scope's evidence is filed under. `null` gets one no scope can equal. */
@@ -143,9 +115,6 @@ const snapshotKey = (scope: DaemonSessionScope | null): string => (scope === nul
  */
 export const MAX_SESSION_SEARCH_RESULTS = 12;
 
-/** Matches the established side-pane search settling interval. */
-export const SESSION_SEARCH_QUERY_DEBOUNCE_MS = 160;
-
 /**
  * What each field is worth when ordering matches.
  *
@@ -156,9 +125,8 @@ export const SESSION_SEARCH_QUERY_DEBOUNCE_MS = 160;
  * is the "two legitimate input domains need two named things" split rather than
  * a second copy of one decision.
  *
- * A name outranks a path. A daemon-confirmed task whose matching prose is not
- * carried by its summary sits between those two; see
- * {@link CONFIRMED_TASK_MATCH_SCORE}.
+ * A name outranks a path. A card that matches only in its summary or lane sits between those two; see
+ * {@link PROSE_TASK_MATCH_SCORE}.
  */
 const SESSION_SEARCH_WEIGHTS = {
   fileName: 3,
@@ -169,20 +137,22 @@ const SESSION_SEARCH_WEIGHTS = {
 } as const;
 
 /**
- * What a daemon-confirmed task match is worth when its summary has no matching field.
+ * What a card that matched on its summary or lane is worth when its title and id do not match.
  *
- * The browser cannot score the description, ask, or clarifications that made
- * the daemon include the row. This midpoint outranks the best path-only word
- * start while staying below the weakest filename substring, preserving the
- * intended name → confirmed prose → path order on the ranker's real scale.
+ * This midpoint outranks the best path-only word start while staying below the weakest filename
+ * substring, preserving the intended name → card prose → path order on the ranker's real scale.
  */
-const CONFIRMED_TASK_MATCH_SCORE =
+const PROSE_TASK_MATCH_SCORE =
   (SESSION_SEARCH_WEIGHTS.filePath * WORD_START_SCORE + SESSION_SEARCH_WEIGHTS.fileName * SUBSTRING_SCORE) / 2;
 
-const taskFields = (task: ScopedTaskSummary): readonly FuzzyField[] => [
+const taskFields = (task: SessionCard): readonly FuzzyField[] => [
   { value: task.title, weight: SESSION_SEARCH_WEIGHTS.taskTitle },
   { value: task.id, weight: SESSION_SEARCH_WEIGHTS.taskId, anchored: true },
+  ...(task.legacyId === null ? [] : [{ value: task.legacyId, weight: SESSION_SEARCH_WEIGHTS.taskId, anchored: true }]),
 ];
+
+const taskHaystack = (task: SessionCard): string =>
+  [task.id, task.legacyId ?? '', task.title, task.summary, task.lane].join(' ');
 
 const fileFields = (file: SessionSearchFile): readonly FuzzyField[] => [
   { value: file.name, weight: SESSION_SEARCH_WEIGHTS.fileName },
@@ -192,27 +162,27 @@ const fileFields = (file: SessionSearchFile): readonly FuzzyField[] => [
 const resultScore = (result: SessionSearchResult, query: string): number =>
   result.kind === 'file'
     ? scoreFields(fileFields(result), query)
-    : Math.max(scoreFields(taskFields(result.task), query), CONFIRMED_TASK_MATCH_SCORE);
+    : Math.max(scoreFields(taskFields(result.task), query), PROSE_TASK_MATCH_SCORE);
 
 /** Stable within one result set, and distinct across two mounts of one control. */
 export const sessionSearchResultKey = (result: SessionSearchResult): string =>
   result.kind === 'file' ? `file:${result.path}` : `task:${result.task.id}`;
 
 /**
- * Ranked, with deliberately asymmetric membership.
- *
- * Tasks are already confirmed matches from the daemon, which owns the full
- * prose. Files are filtered locally with the protocol-owned file haystack and
- * matcher. Ranking changes only order: it never rejects a confirmed task.
+ * Ranked, with one membership rule for both kinds: the protocol-owned matcher over a haystack (a file's
+ * name and path; a card's id, old id, title, summary and lane). Ranking changes only order: it never
+ * rejects a member.
  */
 export const filterSessionSearchResults = (
-  tasks: readonly ScopedTaskSummary[],
+  tasks: readonly SessionCard[],
   files: readonly SessionFileIndexEntry[],
   query: string,
 ): readonly SessionSearchResult[] => {
   if (!SessionSearchQuerySchema.safeParse(query).success) return [];
   const members: readonly SessionSearchResult[] = [
-    ...tasks.map(task => ({ kind: 'task' as const, task })),
+    ...tasks
+      .filter(task => matchesSessionSearchQuery(taskHaystack(task), query))
+      .map(task => ({ kind: 'task' as const, task })),
     ...files
       .filter(file => matchesSessionSearchQuery(sessionSearchFileHaystack(file), query))
       .map(file => ({ kind: 'file' as const, name: file.name, path: file.path })),
@@ -224,54 +194,6 @@ export const filterSessionSearchResults = (
 };
 
 const failureMessage = (reason: unknown): string => (reason instanceof Error ? reason.message : String(reason));
-
-const taskPath = (scope: DaemonSessionScope): string => `/v1/sessions/${encodeURIComponent(scope.sessionId)}/tasks`;
-
-const taskQueryPath = (scope: DaemonSessionScope, query: string): string => {
-  const params = new URLSearchParams();
-  params.set('q', query);
-  return `${taskPath(scope)}?${params.toString()}`;
-};
-
-/** Optimistic state has the same daemon/session identity as the task it shadows. */
-const taskOverlayKey = (scope: DaemonSessionScope, taskId: string): string =>
-  JSON.stringify([scope.daemonId, scope.sessionId, taskId]);
-
-const readJson = async <Value,>(
-  daemon: DaemonConnection,
-  path: string,
-  signal: AbortSignal,
-  fetcher: DaemonFetch,
-): Promise<Value> => {
-  const target = daemonRequest(daemon, path, { signal });
-  const response = await fetcher(target.url, target.init);
-  if (!response.ok) throw new Error(`The daemon could not read current-session search data (HTTP ${response.status}).`);
-  return (await response.json()) as Value;
-};
-
-interface TaskListRead {
-  readonly tasks: readonly ScopedTaskSummary[];
-  readonly parseErrors: number;
-}
-
-const readTasks = async (
-  daemon: DaemonConnection,
-  scope: DaemonSessionScope,
-  signal: AbortSignal,
-  fetcher: DaemonFetch,
-  query?: string,
-): Promise<TaskListRead> => {
-  const path = query === undefined ? taskPath(scope) : taskQueryPath(scope, query);
-  const parsed = SessionTaskListResponseSchema.safeParse(await readJson(daemon, path, signal, fetcher));
-  if (!parsed.success) {
-    throw new Error('The daemon returned an unreadable task list.');
-  }
-  if (parsed.data.sessionId !== scope.sessionId)
-    throw new Error('The daemon returned task search data from another session.');
-  if (parsed.data.tasks.some(task => task.sessionId !== scope.sessionId))
-    throw new Error('The daemon returned a task from another session.');
-  return { tasks: parsed.data.tasks, parseErrors: parsed.data.parseErrors };
-};
 
 interface FileIndexRead {
   readonly files: readonly SessionFileIndexEntry[];
@@ -309,15 +231,13 @@ interface SessionSearchContextValue extends SearchSnapshot {
   /**
    * Which mount currently PRESENTS the popup, or `null` for none.
    *
-   * The query is shared by every mount, and it also drives the Tasks list's own
-   * filter. Two mounts rendering a popup from one query is what the app bar and
-   * the open Files pane did; dismissal therefore has to release PRESENTATION
-   * rather than clear the query, or dismissing the app bar's popup would
-   * silently unfilter the Tasks list nobody touched.
+   * The query is shared by every mount. Two mounts rendering a popup from one query is what the app bar
+   * and the open Files pane did; dismissal therefore has to release PRESENTATION rather than clear the
+   * query, or dismissing the app bar's popup would silently clear the Files pane's box.
    */
   readonly presenting: string | null;
   readonly activeIndex: number;
-  /** The task read already in flight for `scope`, or nothing once it settled. */
+  /** The board read already in flight for `scope`, or nothing once it settled. */
   readonly waitForTasks: () => Promise<void> | undefined;
   readonly setQuery: (query: string) => void;
   readonly setActiveIndex: (index: number) => void;
@@ -338,11 +258,14 @@ export function useSessionSearch(): SessionSearchContextValue {
 export function SessionSearchProvider({
   connection,
   scope,
+  board,
   focusSignal = 0,
   children,
 }: {
   readonly connection: DaemonConnection;
   readonly scope: DaemonSessionScope | null;
+  /** The board store the cards are read through; absent, the host has no board and no cards. */
+  readonly board?: DaemonBoardStore;
   readonly focusSignal?: number;
   readonly children: ReactNode;
 }) {
@@ -350,7 +273,7 @@ export function SessionSearchProvider({
   const [stored, setStored] = useState<KeyedSnapshot>({ key: '', snapshot: INITIAL });
   const [query, setQueryState] = useState('');
   const [presenting, setPresenting] = useState<string | null>(null);
-  // Identity, not position: task and file reads settle independently and a
+  // Identity, not position: file and card reads settle independently and a
   // newly ranked row may be inserted before the reader's active result. An
   // index would then make Enter open a different result than the one still
   // highlighted a moment earlier.
@@ -358,75 +281,73 @@ export function SessionSearchProvider({
   const openers = useRef<SessionSearchOpeners | null>(null);
   const key = snapshotKey(scope);
   const currentKey = useRef(key);
-  const taskPending = useRef<{ readonly key: string; readonly promise: Promise<void> } | null>(null);
-  const queryGeneration = useRef(0);
-  const queryController = useRef<AbortController | null>(null);
   currentKey.current = key;
+  const ferret = useFerretCards(board, connection, scope?.sessionId ?? null);
+  // The board read in flight for THIS session. Menus await it rather than offer an invented empty list.
+  const taskPending = useRef<{
+    readonly key: string;
+    readonly promise: Promise<void>;
+    readonly settle: () => void;
+  } | null>(null);
+  useEffect(() => {
+    const held = taskPending.current;
+    if (ferret.state !== 'loading') {
+      if (held?.key === key) held.settle();
+      if (held?.key === key) taskPending.current = null;
+      return;
+    }
+    if (held?.key === key || scope === null) return;
+    held?.settle();
+    let settle: () => void = () => undefined;
+    const promise = new Promise<void>(resolve => {
+      settle = resolve;
+    });
+    taskPending.current = { key, promise, settle };
+    return () => {
+      if (taskPending.current?.key === key) {
+        taskPending.current.settle();
+        taskPending.current = null;
+      }
+    };
+  }, [ferret.state, key, scope]);
   const waitForTasks = useCallback((): Promise<void> | undefined => {
     const held = taskPending.current;
     return held?.key === currentKey.current ? held.promise : undefined;
   }, []);
-  // DERIVED, not cleared. Evidence filed under another session is not this
-  // session's evidence, and this is the line that says so during the very render
-  // that publishes the new scope.
-  const snapshot = stored.key === key ? stored.snapshot : INITIAL;
+  // DERIVED, not cleared. Evidence filed under another session is not this session's evidence, and this is
+  // the line that says so during the very render that publishes the new scope.
+  const files = stored.key === key ? stored.snapshot : INITIAL;
+  const snapshot = useMemo<SearchSnapshot>(
+    () => ({
+      ...files,
+      taskState: scope === null ? 'loading' : ferret.state,
+      taskError: ferret.error,
+      tasks: scope === null ? [] : ferret.cards,
+    }),
+    [files, scope, ferret],
+  );
 
-  // Every async completion publishes to the key that STARTED it, and builds on
-  // that key's own snapshot — never on whatever happens to be stored. A read
-  // that finishes after the reader moved on can therefore only ever write under
-  // the session it asked about.
-  const publish = useCallback((forKey: string, update: (current: SearchSnapshot) => SearchSnapshot): void => {
-    setStored(current => ({
-      key: forKey,
-      snapshot: update(current.key === forKey ? current.snapshot : INITIAL),
-    }));
-  }, []);
+  // Every async completion publishes to the key that STARTED it. A read that finishes after the reader
+  // moved on can therefore only ever write under the session it asked about.
+  const publish = useCallback(
+    (forKey: string, update: (current: KeyedSnapshot['snapshot']) => KeyedSnapshot['snapshot']): void => {
+      setStored(current => ({
+        key: forKey,
+        snapshot: update(current.key === forKey ? current.snapshot : INITIAL),
+      }));
+    },
+    [],
+  );
 
   // A new query is a new list; start at the top of it. Owned here rather than in
   // the control, because every mount reads one query and they must agree on
   // which row is active.
-  const parsedQuery = SessionSearchQuerySchema.safeParse(query);
-  const normalizedQuery = parsedQuery.success ? normalizeSessionSearchQuery(parsedQuery.data) : null;
-  const setQuery = useCallback(
-    (next: string) => {
-      const parsedNext = SessionSearchQuerySchema.safeParse(next);
-      const normalizedNext = parsedNext.success ? normalizeSessionSearchQuery(parsedNext.data) : null;
-      if (normalizedNext !== normalizedQuery) {
-        queryGeneration.current += 1;
-        queryController.current?.abort();
-        queryController.current = null;
-      }
-      setQueryState(next);
-      setActiveKey(null);
-      // Raw spelling belongs to the input; the normalized value is the query
-      // snapshot's identity. A case/whitespace-only edit must not replace an
-      // unavailable answer with `searching`, because the debounced reader will
-      // not re-arm for an identity it has already asked.
-      if (normalizedNext === normalizedQuery) return;
-      if (scope === null) return;
-      if (normalizedNext === null) {
-        publish(key, current => ({
-          ...current,
-          matchState: 'idle',
-          matches: [],
-          matchQuery: '',
-          matchError: null,
-        }));
-        return;
-      }
-      publish(key, current =>
-        current.matchState === 'ready' && current.matchQuery === normalizedNext
-          ? current
-          : { ...current, matchState: 'searching', matchError: null },
-      );
-    },
-    [key, normalizedQuery, publish, scope],
-  );
+  const setQuery = useCallback((next: string) => {
+    setQueryState(next);
+    setActiveKey(null);
+  }, []);
 
   useEffect(() => {
-    queryGeneration.current += 1;
-    queryController.current?.abort();
-    queryController.current = null;
     setQueryState('');
     // The popup and its active row belong to the query that opened them, so a
     // session change closes both rather than pointing a live selection at
@@ -435,37 +356,7 @@ export function SessionSearchProvider({
     setActiveKey(null);
     if (scope === null) return;
     const controller = new AbortController();
-    // No `setStored(INITIAL)` here: the loading state for a session this
-    // provider has not read yet is already what `snapshot` derives above, and
-    // writing it would be a second, later answer to the same question.
     const forKey = daemonSessionKey(scope);
-    const taskRead = readTasks(connection, scope, controller.signal, fetcher).then(
-      read => {
-        if (!controller.signal.aborted)
-          publish(forKey, current => ({
-            ...current,
-            taskState: 'ready',
-            taskError: null,
-            tasks: read.tasks,
-            parseErrors: read.parseErrors,
-          }));
-      },
-      reason => {
-        if (!controller.signal.aborted)
-          publish(forKey, current => ({
-            ...current,
-            taskState: 'unavailable',
-            taskError: failureMessage(reason),
-            tasks: [],
-            parseErrors: 0,
-          }));
-      },
-    );
-    const pending = { key: forKey, promise: taskRead };
-    taskPending.current = pending;
-    void taskRead.finally(() => {
-      if (taskPending.current === pending) taskPending.current = null;
-    });
     void readFiles(connection, scope, controller.signal, fetcher).then(
       read => {
         if (!controller.signal.aborted)
@@ -490,53 +381,8 @@ export function SessionSearchProvider({
           }));
       },
     );
-    return () => {
-      controller.abort();
-      if (taskPending.current === pending) taskPending.current = null;
-      queryGeneration.current += 1;
-      queryController.current?.abort();
-      queryController.current = null;
-    };
+    return () => controller.abort();
   }, [connection, fetcher, publish, scope]);
-
-  useDebouncedEffect(
-    () => {
-      if (scope === null || normalizedQuery === null) return;
-      const forKey = daemonSessionKey(scope);
-      const generation = queryGeneration.current;
-      const controller = new AbortController();
-      queryController.current?.abort();
-      queryController.current = controller;
-      publish(forKey, current => ({ ...current, matchState: 'searching', matchError: null }));
-      void readTasks(connection, scope, controller.signal, fetcher, normalizedQuery).then(
-        read => {
-          if (controller.signal.aborted || queryGeneration.current !== generation || currentKey.current !== forKey)
-            return;
-          publish(forKey, current => ({
-            ...current,
-            matchState: 'ready',
-            matches: read.tasks,
-            matchQuery: normalizedQuery,
-            matchError: null,
-            parseErrors: Math.max(current.parseErrors, read.parseErrors),
-          }));
-        },
-        reason => {
-          if (controller.signal.aborted || queryGeneration.current !== generation || currentKey.current !== forKey)
-            return;
-          publish(forKey, current => ({
-            ...current,
-            matchState: 'unavailable',
-            matches: [],
-            matchQuery: normalizedQuery,
-            matchError: failureMessage(reason),
-          }));
-        },
-      );
-    },
-    [connection, fetcher, key, normalizedQuery],
-    SESSION_SEARCH_QUERY_DEBOUNCE_MS,
-  );
 
   const setOpeners = useCallback((next: SessionSearchOpeners | null) => {
     openers.current = next;
@@ -552,10 +398,9 @@ export function SessionSearchProvider({
     (instanceId: string) => setPresenting(current => (current === instanceId ? null : current)),
     [],
   );
-  const currentMatches = normalizedQuery !== null && snapshot.matchQuery === normalizedQuery ? snapshot.matches : [];
   const ranked = useMemo(
-    () => filterSessionSearchResults(currentMatches, snapshot.files, query),
-    [currentMatches, query, snapshot.files],
+    () => filterSessionSearchResults(snapshot.tasks, snapshot.files, query),
+    [snapshot.tasks, snapshot.files, query],
   );
   const results = useMemo(() => ranked.slice(0, MAX_SESSION_SEARCH_RESULTS), [ranked]);
   const activeIndex = useMemo(() => {
@@ -614,7 +459,7 @@ export function SessionSearchProvider({
  *
  * "Indexing" rather than "searching": before a query is typed this control is
  * loading the board and the daemon-built index. A settled query has its own
- * searching state below. An unavailable half is never folded into empty.
+ * An unavailable half is never folded into empty.
  */
 const indexingCopy = (taskState: SessionSearchResourceState, fileState: SessionSearchResourceState): string =>
   taskState === 'loading'
@@ -633,15 +478,12 @@ const indexingCopy = (taskState: SessionSearchResourceState, fileState: SessionS
 const unavailableCopy = (
   taskState: SessionSearchResourceState,
   fileState: SessionSearchResourceState,
-  matchState: SessionSearchMatchState,
   taskError: string | null,
   fileError: string | null,
-  matchError: string | null,
 ): string =>
   [
     [taskState === 'unavailable' ? 'Tasks unavailable.' : '', taskError],
     [fileState === 'unavailable' ? 'Files unavailable.' : '', fileError],
-    [matchState === 'unavailable' ? 'Task search unavailable.' : '', matchError],
   ]
     .map(([copy, reason]) =>
       copy ? (reason ? `${copy.slice(0, -1)}: ${reason.trim().replace(/[.!?]*$/u, '.')}` : copy) : '',
@@ -653,9 +495,6 @@ const SEARCH_QUERY_INVALID_COPY = `Search text must be between 1 and ${MAX_SESSI
 
 const skippedCopy = (skipped: readonly SessionFileIndexSkip[]): string =>
   `Not indexed: ${skipped.map(entry => `${entry.count} ${entry.reason}`).join(', ')}.`;
-
-const parseErrorsCopy = (parseErrors: number): string =>
-  `${parseErrors} task${parseErrors === 1 ? '' : 's'} could not be read.`;
 
 /**
  * How long a settled result count waits before it is announced.
@@ -791,7 +630,6 @@ export function SessionSearchControl({
       !queryValid ||
       search.taskState !== 'ready' ||
       search.fileState !== 'ready' ||
-      search.matchState !== 'ready' ||
       search.coverage !== 'complete'
     ) {
       setAnnouncement('');
@@ -802,7 +640,7 @@ export function SessionSearchControl({
       SESSION_SEARCH_ANNOUNCE_DEBOUNCE_MS,
     );
     return () => clearTimeout(timer);
-  }, [presenting, queryValid, resultCount, search.coverage, search.fileState, search.matchState, search.taskState]);
+  }, [presenting, queryValid, resultCount, search.coverage, search.fileState, search.taskState]);
 
   // A pointer landing anywhere outside this control dismisses it, exactly like
   // clicking off any other transient surface. Captured at the document so a
@@ -849,11 +687,7 @@ export function SessionSearchControl({
 
   if (!search.active) return null;
   const loading = search.taskState === 'loading' || search.fileState === 'loading';
-  const searching = queryValid && search.matchState === 'searching';
-  const unavailable =
-    search.taskState === 'unavailable' ||
-    search.fileState === 'unavailable' ||
-    (queryValid && search.matchState === 'unavailable');
+  const unavailable = search.taskState === 'unavailable' || search.fileState === 'unavailable';
   const partial = search.fileState === 'ready' && search.coverage === 'partial';
   const hidden = search.resultTotal - results.length;
   return (
@@ -929,27 +763,10 @@ export function SessionSearchControl({
               {indexingCopy(search.taskState, search.fileState)}
             </p>
           )}
-          {!loading && searching && (
-            <p
-              className="m-0 flex items-center gap-2 px-3 py-2 text-ui text-muted"
-              data-search-searching=""
-              role="status"
-            >
-              <LoaderCircle className="animate-spin" size={14} />
-              Searching this session's tasks…
-            </p>
-          )}
           {unavailable && (
             <p className="m-0 flex items-start gap-2 px-3 py-2 text-ui text-warn" role="alert">
               <TriangleAlert className="mt-0.5 shrink-0" size={14} />
-              {unavailableCopy(
-                search.taskState,
-                search.fileState,
-                search.matchState,
-                search.taskError,
-                search.fileError,
-                search.matchError,
-              )}
+              {unavailableCopy(search.taskState, search.fileState, search.taskError, search.fileError)}
             </p>
           )}
           {queryPresent && !queryValid && (
@@ -962,7 +779,7 @@ export function SessionSearchControl({
           )}
           {queryValid &&
             !loading &&
-            search.matchState === 'ready' &&
+            search.taskState === 'ready' &&
             results.length === 0 &&
             !unavailable &&
             !partial && (
@@ -972,7 +789,7 @@ export function SessionSearchControl({
             )}
           {queryValid &&
             !loading &&
-            search.matchState === 'ready' &&
+            search.taskState === 'ready' &&
             results.length === 0 &&
             !unavailable &&
             partial && (
@@ -986,11 +803,6 @@ export function SessionSearchControl({
           {search.fileState === 'ready' && search.skipped.length > 0 && (
             <p className="m-0 px-3 py-2 text-ui text-muted" data-search-skips="">
               {skippedCopy(search.skipped)}
-            </p>
-          )}
-          {search.taskState === 'ready' && search.parseErrors > 0 && (
-            <p className="m-0 px-3 py-2 text-ui text-muted" data-search-parse-errors="">
-              {parseErrorsCopy(search.parseErrors)}
             </p>
           )}
           <div aria-label="Current-session results" id={listboxId} role="listbox">
@@ -1021,7 +833,7 @@ export function SessionSearchControl({
                   {result.kind === 'file' ? result.name : result.task.title}
                 </span>
                 <span className="mono text-2xs text-muted">
-                  {result.kind === 'file' ? result.path : `#${result.task.id}`}
+                  {result.kind === 'file' ? result.path : `&${result.task.id} · ${result.task.lane}`}
                 </span>
               </button>
             ))}
@@ -1035,233 +847,5 @@ export function SessionSearchControl({
         </div>
       )}
     </div>
-  );
-}
-
-const asSummary = (task: ScopedTaskView): ScopedTaskSummary => {
-  const { ask, clarifications, description, ...summary } = task;
-  return {
-    ...summary,
-    descriptionChars: description.length,
-    askChars: ask.text.length,
-    askSource: ask.source,
-    clarificationCount: clarifications.length,
-  };
-};
-
-/** The real Tasks singleton: List and Kanban both consume the shared search control and model. */
-export function SessionTasksSearchSurface() {
-  const search = useSessionSearch();
-  const fetcher = useDaemonFetch();
-  const compact = useLayoutMode() === 'drawer';
-  const [view, setView] = useState<'list' | 'kanban'>('list');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [optimistic, setOptimistic] = useState<ReadonlyMap<string, ScopedTaskSummary>>(new Map());
-  const [markingDoneKey, setMarkingDoneKey] = useState<string | null>(null);
-  const [markDoneError, setMarkDoneError] = useState<string | null>(null);
-  const [referenceMessage, setReferenceMessage] = useState('');
-  const parsedQuery = SessionSearchQuerySchema.safeParse(search.query);
-  const normalizedQuery = parsedQuery.success ? normalizeSessionSearchQuery(parsedQuery.data) : null;
-  const taskFilterUnavailable = normalizedQuery !== null && search.matchState === 'unavailable';
-  const tasks = useMemo(() => {
-    const matchedIds =
-      normalizedQuery !== null && search.matchState === 'ready' && normalizedQuery === search.matchQuery
-        ? new Set(search.matches.map(task => task.id))
-        : null;
-    // The query response decides membership only. The mount board remains the
-    // source of every row and action, so a query cannot replace reference/action
-    // evidence with a newer or differently projected summary. If narrowing
-    // fails, keep that proved board visible and name the failed filter below;
-    // an empty pane would falsely claim that the query matched zero tasks.
-    const source =
-      normalizedQuery === null || taskFilterUnavailable
-        ? search.tasks
-        : matchedIds === null
-          ? []
-          : search.tasks.filter(task => matchedIds.has(task.id));
-    return source.map(task =>
-      search.scope === null ? task : (optimistic.get(taskOverlayKey(search.scope, task.id)) ?? task),
-    );
-  }, [
-    normalizedQuery,
-    optimistic,
-    search.matchQuery,
-    search.matches,
-    search.matchState,
-    search.scope,
-    search.tasks,
-    taskFilterUnavailable,
-  ]);
-  const selected = tasks.find(task => task.id === selectedId) ?? null;
-  const markingDoneId =
-    search.scope === null || markingDoneKey === null
-      ? null
-      : (tasks.find(task => taskOverlayKey(search.scope as DaemonSessionScope, task.id) === markingDoneKey)?.id ??
-        null);
-
-  const markDone = useCallback(
-    async (task: TaskSummary): Promise<void> => {
-      const scope = search.scope;
-      if (scope === null || task.phase !== 'live' || markingDoneKey !== null) return;
-      const original = search.tasks.find(candidate => candidate.id === task.id);
-      if (original === undefined) return;
-      const overlayKey = taskOverlayKey(scope, task.id);
-      const optimisticTask: ScopedTaskSummary = {
-        ...original,
-        phase: 'done',
-        status: 'done',
-        statusReason: 'Marked done from Tasks.',
-        updatedAt: new Date().toISOString(),
-      };
-      setMarkDoneError(null);
-      setMarkingDoneKey(overlayKey);
-      setOptimistic(current => new Map(current).set(overlayKey, optimisticTask));
-      // ONE id per logical Mark Done, minted here rather than per transport
-      // attempt: a retry of the same click is the SAME operation, and the daemon
-      // deduplicates on this header. Minting it deeper down would give a
-      // re-sent request a fresh identity and complete the task twice.
-      const requestId = crypto.randomUUID();
-      try {
-        const target = daemonRequest(search.connection, `${taskPath(scope)}/${encodeURIComponent(task.id)}`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', [FY_REQUEST_ID_HEADER]: requestId },
-          body: JSON.stringify({ action: 'phase', phase: 'done', reason: 'Marked done from Tasks.' }),
-        });
-        const response = await fetcher(target.url, target.init);
-        if (!response.ok) throw new Error(`The daemon refused to mark this task done (HTTP ${response.status}).`);
-        const parsed = ScopedTaskViewSchema.safeParse(await response.json());
-        if (!parsed.success || parsed.data.sessionId !== scope.sessionId)
-          throw new Error('The daemon returned an unreadable completion result.');
-        setOptimistic(current => new Map(current).set(overlayKey, asSummary(parsed.data)));
-      } catch (reason) {
-        // Revert and name the refusal. A silent rollback is a lie, while
-        // leaving an unconfirmed task done is worse.
-        setOptimistic(current => new Map(current).set(overlayKey, original));
-        setMarkDoneError(failureMessage(reason));
-      } finally {
-        setMarkingDoneKey(null);
-      }
-    },
-    [fetcher, markingDoneKey, search.connection, search.scope, search.tasks],
-  );
-
-  // Add to chat — put THIS task's reference into THIS session's draft.
-  //
-  // The scope carried here is the one the rows were read under, so the token
-  // lands in the composer of the daemon and session that actually owns the
-  // task. That is not a nicety: a task id is session-local, so `&F12` delivered
-  // into another session's draft names a different piece of work, and the agent
-  // reading it would have no way to know.
-  //
-  // What LANDS in the draft is formatted by the one canonical renderer inside
-  // `addReferenceToComposer`, never assembled here, so an id the grammar cannot
-  // write down is refused rather than pasted in as prose that never resolves.
-  // There is deliberately no second refusal branch on this side: `TaskIdSchema`
-  // already parsed every id on this surface, so a local guard would be a claim
-  // about a danger the boundary has eliminated. The SPOKEN token comes from
-  // `taskReference`, which is also what labels the button, so the sentence and
-  // the control it answers can never name the task differently.
-  const addToChat = useCallback(
-    (task: TaskSummary): void => {
-      const scope = search.scope;
-      if (scope === null) return;
-      const outcome = addReferenceToComposer({ kind: 'task', id: task.id }, scope);
-      setReferenceMessage(addReferenceMessage(outcome, taskReference(task.id)));
-    },
-    [search.scope],
-  );
-
-  if (search.scope === null) return null;
-
-  if (search.taskState === 'loading')
-    return (
-      <div className="flex min-h-0 flex-1 flex-col gap-2 p-2">
-        <SessionSearchControl />
-        <p className="m-0 flex items-center gap-2 p-2 text-ui text-muted" role="status">
-          <LoaderCircle className="animate-spin" size={14} /> Loading task search evidence…
-        </p>
-      </div>
-    );
-  if (search.taskState === 'unavailable')
-    return (
-      <div className="flex min-h-0 flex-1 flex-col gap-2 p-2">
-        <SessionSearchControl />
-        <p className="m-0 flex items-start gap-2 p-2 text-ui text-warn" role="alert">
-          <TriangleAlert className="mt-0.5 shrink-0" size={14} /> Tasks are unavailable: {search.taskError}
-        </p>
-      </div>
-    );
-  return (
-    <section aria-label="Session tasks" className="flex min-h-0 flex-1 flex-col gap-2 p-2">
-      <SessionSearchControl />
-      <div className="flex shrink-0 items-center justify-between gap-2">
-        <div role="tablist" aria-label="Task views" className="flex gap-1">
-          {(['list', 'kanban'] as const).map(candidate => (
-            <button
-              aria-selected={view === candidate}
-              className="kt-btn kt-btn--sm"
-              key={candidate}
-              onClick={() => setView(candidate)}
-              role="tab"
-              type="button"
-            >
-              {candidate === 'list' ? 'List' : 'Kanban'}
-            </button>
-          ))}
-        </div>
-        <span className="mono text-2xs text-muted">
-          {tasks.length} task{tasks.length === 1 ? '' : 's'}
-        </span>
-      </div>
-      {taskFilterUnavailable ? (
-        <p
-          className="m-0 flex items-start gap-2 rounded-control border border-warn-border bg-warn-bg px-2 py-1.5 text-ui text-warn"
-          data-task-filter-unavailable=""
-          role="alert"
-        >
-          <TriangleAlert aria-hidden="true" className="mt-0.5 shrink-0" size={14} />
-          <span>
-            Task filtering failed; showing all mounted tasks. {search.matchError ?? 'The daemon returned no reason.'}
-          </span>
-        </p>
-      ) : null}
-      {selected && <TaskQuickSummary task={selected} />}
-      {markDoneError !== null ? (
-        <p className="m-0 rounded-control border border-err-border bg-err-bg px-2 py-1.5 text-ui text-err" role="alert">
-          {markDoneError}
-        </p>
-      ) : null}
-      <p
-        className={
-          referenceMessage === '' ? 'sr-only' : 'm-0 rounded-control bg-surface-2 px-2 py-1.5 text-ui text-muted'
-        }
-        data-task-add-status=""
-        role="status"
-      >
-        {referenceMessage}
-      </p>
-      <div className="min-h-0 overflow-auto">
-        {view === 'list' ? (
-          <SessionTaskList
-            daemonId={search.scope.daemonId}
-            markingDoneId={markingDoneId}
-            onAddToChat={addToChat}
-            onMarkDone={markDone}
-            onOpen={setSelectedId}
-            tasks={tasks}
-          />
-        ) : (
-          <SessionTaskKanban
-            compact={compact}
-            daemonId={search.scope.daemonId}
-            markingDoneId={markingDoneId}
-            onAddToChat={addToChat}
-            onMarkDone={markDone}
-            onOpen={setSelectedId}
-            tasks={tasks}
-          />
-        )}
-      </div>
-    </section>
   );
 }

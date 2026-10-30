@@ -1,9 +1,8 @@
 import { describe, it } from 'bun:test';
-import { parseFerretryNotice } from '@ferretry/protocol';
 import should from 'should';
 import {
-  assembleInflightReport,
   type AssembleInflightReportInput,
+  assembleInflightReport,
   type OpenToolInfo,
   type ProcessInfo,
 } from '../../../src/lib/migrate/inflight-report.ts';
@@ -59,14 +58,15 @@ describe('restartNotice', () => {
     const idle = report({ status: 'waiting' });
 
     // Act
-    const notice = parseFerretryNotice(restartNotice(idle, REPORT, 'auto') ?? '');
+    const notice = restartNotice(idle, REPORT, 'auto') ?? '';
 
     // Assert
-    should(notice).startWith('Restarted — nothing was interrupted.\n\n');
-    should(notice).containEql('not from the owner');
-    should(
-      parseFerretryNotice(restartNotice(report({ openTools: [tool('unknown')] }), REPORT, 'auto') ?? ''),
-    ).startWith('Restarted mid-turn');
+    should(notice).startWith('Ferretry restarted you, and nothing was interrupted.');
+    should(notice).not.startWith('[');
+    should(notice).not.containEql('not from the owner');
+    should(restartNotice(report({ openTools: [tool('unknown')] }), REPORT, 'auto') ?? '').startWith(
+      'Ferretry restarted you mid-turn',
+    );
   });
 
   it('should send a Ferretry notice naming the one interrupted command', () => {
@@ -77,11 +77,11 @@ describe('restartNotice', () => {
     });
 
     // Act
-    const notice = parseFerretryNotice(restartNotice(busy, REPORT, 'interactive') ?? '');
+    const notice = restartNotice(busy, REPORT, 'interactive') ?? '';
 
     // Assert
-    should(notice).startWith('Restarted mid-turn — 1 command was interrupted.\n\n');
-    should(notice).containEql('not from the owner');
+    should(notice).startWith('Ferretry restarted you mid-turn, and 1 command was interrupted.');
+    should(notice).not.containEql('not from the owner');
     should(notice).containEql(`read ${REPORT}`);
   });
 
@@ -95,8 +95,8 @@ describe('restartNotice', () => {
 
     // Act + Assert
     should(interruptedCount(busy)).equal(3);
-    should(parseFerretryNotice(restartNotice(busy, REPORT, 'interactive') ?? '')).startWith(
-      'Restarted mid-turn — 3 commands were interrupted.',
+    should(restartNotice(busy, REPORT, 'interactive') ?? '').startWith(
+      'Ferretry restarted you mid-turn, and 3 commands were interrupted.',
     );
   });
 
@@ -108,8 +108,8 @@ describe('restartNotice', () => {
 
     // Act + Assert
     should(interruptedCount(blind)).equal(0);
-    should(parseFerretryNotice(restartNotice(blind, REPORT, 'interactive') ?? '')).startWith(
-      'Restarted mid-turn — what was running could not be checked.',
+    should(restartNotice(blind, REPORT, 'interactive') ?? '').startWith(
+      'Ferretry restarted you mid-turn, and what was running could not be checked.',
     );
   });
 });

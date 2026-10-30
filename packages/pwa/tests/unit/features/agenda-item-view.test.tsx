@@ -105,6 +105,32 @@ describe('the item view', () => {
     expect(top.querySelector('[data-agenda-body]')).toBeNull();
   });
 
+  test("gives a phone the ask as the body's first paragraph; ⓘ pins it in the head, remembered on this device", async () => {
+    globalThis.localStorage?.removeItem('fy-agenda-ask-pinned-v1');
+    await draw(richItem);
+    const first = one('.fy-item-view__column').firstElementChild as HTMLElement;
+    expect(first.hasAttribute('data-agenda-body-ask')).toBe(true);
+    expect(first.textContent).toContain('Which database');
+    expect(one('[data-agenda-view]').hasAttribute('data-ask-pinned')).toBe(false);
+    const info = one<HTMLButtonElement>('[data-agenda-info]');
+    expect(info.getAttribute('aria-pressed')).toBe('false');
+    await interact(() => info.click());
+    expect(one('[data-agenda-view]').hasAttribute('data-ask-pinned')).toBe(true);
+    expect(info.getAttribute('aria-pressed')).toBe('true');
+    await view?.unmount();
+    await draw(richItem);
+    expect(one('[data-agenda-view]').hasAttribute('data-ask-pinned')).toBe(true);
+    await interact(() => one<HTMLButtonElement>('[data-agenda-info]').click());
+    expect(globalThis.localStorage?.getItem('fy-agenda-ask-pinned-v1')).toBe('0');
+  });
+
+  test('has no ⓘ and no body ask for an item with no ask of its own', async () => {
+    await draw(agendaItem('A9', { title: '', subject: 'Look at this' } as Partial<AgendaItem>));
+    expect(root().querySelector('[data-agenda-ask]')).toBeNull();
+    expect(root().querySelector('[data-agenda-info]')).toBeNull();
+    expect(root().querySelector('[data-agenda-body-ask]')).toBeNull();
+  });
+
   test('keeps the head to ONE row: the title beside the status dot, n of N, ‹ › and ✕', async () => {
     await draw(richItem);
     const row = one('[data-agenda-top] .fy-item-view__nav');
@@ -433,14 +459,16 @@ describe('several questions, drawn once each', () => {
 });
 
 describe('the ask', () => {
-  test('a long ask is said once, whole, in the top — never again in the body', async () => {
+  test("a long ask is said whole in the top, and in the body only as the phone's first paragraph", async () => {
     const long = 'Which database should keep every one of the board’s finished items for the next two years?';
     await draw(
       agendaItem('A10', { title: 'Database', subject: long, ask: { kind: 'permission' } } as Partial<AgendaItem>),
     );
     const top = one('[data-agenda-top]');
     expect(top.querySelector('[data-agenda-ask]')?.textContent).toContain(long);
-    expect(one('.fy-item-view__body').textContent).not.toContain(long);
+    // The body holds it once, as the paragraph a phone reads (a desktop hides it): nothing else repeats it.
+    expect(one('[data-agenda-body-ask]').textContent).toBe(long);
+    expect((one('.fy-item-view__body').textContent ?? '').split(long).length - 1).toBe(1);
   });
 
   test('a short ask is said once, in the top', async () => {

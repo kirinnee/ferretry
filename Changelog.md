@@ -1,3 +1,39 @@
+## [4.135.0](https://github.com/kirinnee/ferretry/compare/v4.134.1...v4.135.0) (2026-10-30)
+
+### Features
+
+* **pwa:** queue ticks, wait reasons, edit and cancel on chat bubbles (S5) ([#1016](https://github.com/kirinnee/ferretry/issues/1016)) ([81b3b33](https://github.com/kirinnee/ferretry/commit/81b3b332100836fb9aa42928c5beaeb69d07c824))
+
+### Fixes
+
+* **daemon:** a long transcript is still being read, not unreadable — no false 'unconfirmed', no resend notice ([#1033](https://github.com/kirinnee/ferretry/issues/1033)) ([4925ce1](https://github.com/kirinnee/ferretry/commit/4925ce1b6bae70589bc3a237221ec36e0d96b09a))
+* **daemon:** Ferretry's own notices are plain sentences; who a turn is from is metadata (B66) ([#1028](https://github.com/kirinnee/ferretry/issues/1028)) ([c165225](https://github.com/kirinnee/ferretry/commit/c165225a86ca4bc5d8c301416b80ba06244beb1a))
+* **pwa:** one compact row of agenda actions, a one-line phone head and composer ([#1023](https://github.com/kirinnee/ferretry/issues/1023)) ([6b337fe](https://github.com/kirinnee/ferretry/commit/6b337feecf9e24e9e71ecddf4c7b286496188d19))
+* **pwa:** wrap board card titles to two lines and keep meta items whole ([#1017](https://github.com/kirinnee/ferretry/issues/1017)) ([efcf07d](https://github.com/kirinnee/ferretry/commit/efcf07dc396824278f3637bad239949fc6284be7))
+
+## [4.134.1](https://github.com/kirinnee/ferretry/compare/v4.134.0...v4.134.1) (2026-10-30)
+
+### Fixes
+
+* **pwa:** call the agenda client on itself when a card opens ([#1029](https://github.com/kirinnee/ferretry/issues/1029)) ([268b27a](https://github.com/kirinnee/ferretry/commit/268b27a3b9564339a5b482755a3768ffcba6e773))
+
+## [4.134.0](https://github.com/kirinnee/ferretry/compare/v4.133.0...v4.134.0) (2026-10-30)
+
+### Features
+
+* **daemon:** who a queued message is from is metadata, never text (QueuedMessage.by) ([#1025](https://github.com/kirinnee/ferretry/issues/1025)) ([4980a8e](https://github.com/kirinnee/ferretry/commit/4980a8ec8034839f285a322de9853c652ebaf30d))
+
+## [4.133.0](https://github.com/kirinnee/ferretry/compare/v4.132.0...v4.133.0) (2026-10-30)
+
+### Features
+
+* **pwa:** ClickUp-dense Board cards on a phone ([#1012](https://github.com/kirinnee/ferretry/issues/1012)) ([6714f5f](https://github.com/kirinnee/ferretry/commit/6714f5f968afa2b7e043e01b7943d31cc8704855))
+
+### Fixes
+
+* **daemon:** read a multi-paragraph Codex draft down to the cursor; a may-have-landed message is unconfirmed, not failed ([#1024](https://github.com/kirinnee/ferretry/issues/1024)) ([78be655](https://github.com/kirinnee/ferretry/commit/78be6553bd9138ebc2d35a561ac09fd95efab9f7))
+* **pwa:** withdraw the recovery chip once a page renders again ([#1027](https://github.com/kirinnee/ferretry/issues/1027)) ([9512b42](https://github.com/kirinnee/ferretry/commit/9512b42baab9d421508413fdf50889ccac7f29bb))
+
 ## [4.132.0](https://github.com/kirinnee/ferretry/compare/v4.131.0...v4.132.0) (2026-10-30)
 
 ### Features

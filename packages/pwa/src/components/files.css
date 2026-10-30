@@ -216,7 +216,6 @@
 }
 
 .kt-fs-stale[data-tone='err'] {
-  border-inline-start: var(--stroke-heavy) solid var(--err);
   background: var(--err-bg);
   color: var(--err);
 }
@@ -507,7 +506,6 @@
 }
 
 .kt-fs-tree-note[data-tone='err'] {
-  border-inline-start: var(--stroke-heavy) solid var(--err);
   background: var(--err-bg);
   color: var(--err);
 }
@@ -659,13 +657,11 @@ button.kt-fs-row:active {
 }
 
 .kt-fs-note[data-tone='err'] {
-  border-inline-start: var(--stroke-heavy) solid var(--err);
   background: var(--err-bg);
   color: var(--err);
 }
 
 .kt-fs-note[data-tone='warn'] {
-  border-inline-start: var(--stroke-heavy) solid var(--warn);
   background: var(--warn-bg);
   color: var(--warn);
 }
@@ -700,7 +696,6 @@ button.kt-fs-row:active {
   flex: 0 0 auto;
   padding: var(--gap-xs) var(--pad-cell-x);
   border-block-end: var(--stroke) solid var(--accent-border);
-  border-inline-start: var(--stroke-heavy) solid var(--accent);
   background: var(--accent-soft);
   color: var(--accent);
   font-family: var(--font-mono);
@@ -710,7 +705,6 @@ button.kt-fs-row:active {
 
 .kt-fs-location[data-tone='warn'] {
   border-block-end-color: var(--warn-border);
-  border-inline-start-color: var(--warn);
   background: var(--warn-bg);
   color: var(--warn);
 }
@@ -723,13 +717,11 @@ button.kt-fs-row:active {
   display: flex;
   min-width: 100%;
   align-items: baseline;
-  border-inline-start: var(--stroke-heavy) solid transparent;
   background: var(--code-bg);
   color: var(--code-fg);
 }
 
 .kt-fs-source-line[data-highlighted='true'] {
-  border-inline-start-color: var(--accent);
   background: var(--accent-soft);
   color: var(--fg);
   box-shadow: inset 0 0 0 var(--stroke) var(--accent-border);
@@ -776,7 +768,6 @@ button.kt-fs-row:active {
   display: flex;
   min-width: 100%;
   align-items: baseline;
-  border-inline-start: var(--stroke-heavy) solid transparent;
   background: var(--code-bg);
   color: var(--code-fg);
   white-space: pre;
@@ -811,7 +802,6 @@ button.kt-fs-row:active {
 }
 
 .kt-fs-diff-line[data-kind='add'] {
-  border-inline-start-color: var(--ok);
   background: var(--ok-bg);
   color: var(--fg);
 }
@@ -822,7 +812,6 @@ button.kt-fs-row:active {
 }
 
 .kt-fs-diff-line[data-kind='del'] {
-  border-inline-start-color: var(--err);
   background: var(--err-bg);
   color: var(--fg);
 }

@@ -1,7 +1,8 @@
 import { type HandoffPointer, parseFerretryNotice, parsePeerEnvelope } from '@ferretry/protocol';
 import { type ReactNode, useState } from 'react';
-import { handedOverDraft, isOwnSend, ledgerPlacementCopy } from '../lib/ledger-placement.ts';
+import { handedOverDraft, isFerretryNoticeSend, isOwnSend, ledgerPlacementCopy } from '../lib/ledger-placement.ts';
 import { clockOfInstant } from '../lib/message-clock.ts';
+import { stripFraming } from '../lib/message-framing.ts';
 import type { LedgerSendRecord } from '../lib/send-ledger.ts';
 import type { AgentRunMark, TranscriptEntry } from '../lib/session-screens.ts';
 import { AgendaMessageOr, useAgendaChatReply } from './agenda-message.tsx';
@@ -106,6 +107,7 @@ export function TranscriptRow({
   if (entry.kind === 'ledger' && entry.ledger !== undefined) {
     return (
       <div className="fy-message fy-message-ledger" data-transcript-kind="ledger" {...rhythm}>
+        {isFerretryNoticeSend(entry.ledger) ? <span className="fy-system-label">Ferretry</span> : null}
         <LedgerMessage
           onCancel={onCancel}
           onCollapse={entry.settled === 'expanded' ? onExpand : undefined}
@@ -139,6 +141,10 @@ export function TranscriptRow({
   if (entry.kind === 'system' && entry.event !== undefined)
     return <HarnessEventRow event={entry.event} rhythm={rhythm} />;
   if (entry.kind === 'system') return <SystemNoticeRow entry={entry} rhythm={rhythm} />;
+  if (entry.kind === 'user' && entry.send !== undefined && isFerretryNoticeSend(entry.send))
+    return (
+      <SystemNoticeRow entry={{ ...entry, text: parseFerretryNotice(entry.text) ?? entry.text }} rhythm={rhythm} />
+    );
   if (entry.kind === 'user') return <OwnMessageRow answered={answered} entry={entry} rhythm={rhythm} />;
   return <TranscriptTextRow entry={entry} rhythm={rhythm} run={run} />;
 }
@@ -350,7 +356,7 @@ function OwnWords({ text, onItsWay = false }: { readonly text: string; readonly 
   // Still on its way: worded as the ferret will receive it, so a reply about an open item (`!A5 …`) shows as its
   // agenda card at once. One component either way, so the bubble stays ONE element from sent to answered.
   const worded = useAgendaChatReply(text);
-  return <AgendaMessageOr fallback={<p>{text}</p>} text={onItsWay ? worded : text} />;
+  return <AgendaMessageOr fallback={<p>{stripFraming(text).body}</p>} text={onItsWay ? worded : text} />;
 }
 
 function TranscriptTextRow({
@@ -380,7 +386,9 @@ function TranscriptTextRow({
       </header>
       <EntryBody
         entry={entry}
-        prose={entry.kind === 'assistant' ? <AssistantProse text={entry.text} /> : <p>{entry.text}</p>}
+        prose={
+          entry.kind === 'assistant' ? <AssistantProse text={entry.text} /> : <p>{stripFraming(entry.text).body}</p>
+        }
         speaker={entry.kind === 'assistant' ? 'assistant' : undefined}
       />
       {run === undefined || run.end ? footer : <div className="fy-run-time">{footer}</div>}

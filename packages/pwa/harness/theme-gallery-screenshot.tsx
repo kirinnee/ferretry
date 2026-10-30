@@ -20,8 +20,7 @@
  *   * harness-events, transcript-unbound, handoff, approval-card, restart-refusal, fast-switch.
  *
  * Skipped (too entangled to render without a daemon store): `runtime-buttons` (needs the account-picker
- * store), `composer-fast` (needs the runtime catalog source) and the SubFerretIndicator popover (fixed to
- * the viewport).
+ * store) and `composer-fast` (needs the runtime catalog source).
  *
  *   bun harness/theme-gallery-screenshot.tsx [--theme <id>] [--viewport <phone|desktop>]
  *   # writes harness/out/theme-gallery-<theme>-<phone|desktop>.png for neo-light, neo-dark, studio-light,

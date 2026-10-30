@@ -17,7 +17,7 @@ import {
   type TaskRef,
 } from '@ferretry/protocol';
 import { ArrowLeft, Check, ChevronDown, MessageSquare, X } from 'lucide-react';
-import { type FormEvent, useId, useMemo, useState } from 'react';
+import { Component, type ErrorInfo, type FormEvent, type ReactNode, useId, useMemo, useState } from 'react';
 import { type BoardMachine, useBoardTask } from '../../../hooks/use-board.ts';
 import { useBoardAsks } from '../../../hooks/use-board-asks.ts';
 import type { DaemonAgendaClient } from '../../../lib/agenda-client.ts';
@@ -95,6 +95,44 @@ type Dialog =
   | { readonly kind: 'drop' }
   | { readonly kind: 'undepend'; readonly ref: TaskRef };
 
+/**
+ * ONE CARD THAT CANNOT BE DRAWN STAYS IN ITS DRAWER. Without this, a throw anywhere in a card reached the
+ * pane's boundary and replaced the whole Board with "reload to recover" — which a reload could not fix, since
+ * the same card throws again — and the error itself was only in a console a phone does not show
+ * (2026-10-30). Here the drawer keeps its bar (Close still works), the Board stays usable behind it, and the
+ * error's own message is on screen, so the reader can say what failed. A different card starts clean.
+ */
+class CardErrorBoundary extends Component<
+  {
+    readonly label: string;
+    readonly onReport?: (message: string, error: unknown, componentStack: string | null | undefined) => void;
+    readonly children: ReactNode;
+  },
+  { readonly error: string | null }
+> {
+  override state: { readonly error: string | null } = { error: null };
+
+  static getDerivedStateFromError(error: unknown): { readonly error: string } {
+    const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    return { error: message.trim() === '' ? 'Unknown error' : message };
+  }
+
+  override componentDidCatch(error: unknown, info: ErrorInfo): void {
+    const report = this.props.onReport ?? ((message, caught, stack) => console.warn(message, caught, stack));
+    report(`ferretry: card ${this.props.label} failed to render`, error, info?.componentStack);
+  }
+
+  override render(): ReactNode {
+    if (this.state.error === null) return this.props.children;
+    return (
+      <div className="fy-board-detail__empty" role="alert">
+        <p className="m-0">{this.props.label} could not be drawn.</p>
+        <p className="fy-board-detail__error m-0">{this.state.error}</p>
+      </div>
+    );
+  }
+}
+
 export function BoardDetail(props: BoardDetailProps) {
   const { phone, onClose, taskId, machine } = props;
   const ref = parseTaskRef(taskId);
@@ -118,7 +156,9 @@ export function BoardDetail(props: BoardDetailProps) {
           <span className="fy-board-detail__ref">{label}</span>
         </div>
         {ref.ok ? (
-          <LoadedCard {...props} id={ref.value.id} />
+          <CardErrorBoundary key={`${String(machine.connection.daemonId)}/${label}`} label={label}>
+            <LoadedCard {...props} id={ref.value.id} />
+          </CardErrorBoundary>
         ) : (
           <p className="fy-board-detail__empty" role="status">
             {machine.name} has no card {label}.

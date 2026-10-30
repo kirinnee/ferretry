@@ -67,8 +67,7 @@
   font-size: var(--text-sm);
 }
 .fy-attn-card[data-pinned] {
-  border-color: var(--border);
-  border-left-color: var(--accent);
+  border-color: var(--accent);
   box-shadow: none;
   outline: none;
 }
@@ -108,13 +107,10 @@
   outline-offset: 2px;
 }
 .fy-attn-panel__record {
-  border-left: var(--stroke-heavy) solid var(--border-soft);
-  padding-left: var(--gap-sm);
   font-size: var(--text-sm);
   line-height: var(--leading-base);
 }
 .fy-attn-panel__record[data-highlighted] {
-  border-left-color: var(--accent);
   border-radius: var(--radius-control);
   outline: var(--stroke-heavy) solid var(--accent);
   outline-offset: 2px;
@@ -182,7 +178,7 @@
   text-decoration: underline;
 }
 
-/* THE FOLD (agenda-collapse.ts): a ⌄ at the end of the pinned card's header, and — folded — one slim
+/* THE FOLD: a ⌄ at the end of the pinned card's header, and — folded — one slim
    line above the composer. The line is a real button, so Enter and Space unfold it. */
 .fy-attn-collapse {
   display: inline-flex;

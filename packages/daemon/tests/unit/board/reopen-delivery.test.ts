@@ -47,7 +47,7 @@ const notice = (overrides: Partial<ReopenNotice['task']> = {}): ReopenNotice => 
   by: { kind: 'owner' },
 });
 
-const LINE = '[reopened &F412 by owner: not good]';
+const LINE = '&F412 was reopened by the owner: not good';
 
 const ladder = (answers: Readonly<Record<string, ReopenDelivery>>, warnings: string[] = []) => {
   const messenger = new FakeMessenger(answers);

@@ -598,7 +598,9 @@ describe('a message carried by a revive — a finished sub-ferret sent a peer me
     should(relaunching.fate).equal('accepted');
     should(settled).match({ fate: 'unaccounted', unaccountedReason: 'revive_unconfirmed', retryable: false });
     should(subject.harness.typed).have.length(1);
-    should(notice).match(/was handed to session-1 as the first turn of its relaunch/u);
+    should(notice).match(
+      /handed your message to session-1 \(send send-1\) to session-1 as the first turn of its relaunch/u,
+    );
     should(notice).match(/do not send it again/u);
     should(notice).not.match(/did not reach it/u);
   });
@@ -658,7 +660,7 @@ describe('an agent-to-agent send', () => {
     should(final).match({ fate: 'timed_out', attempt: 4, senderKind: 'agent', from: SENDER });
     should(subject.harness.typed).have.length(4);
     should(notice).match({ senderKind: 'daemon', fate: 'delivered' });
-    should(subject.sender.typed[0]).match(/Your message to session-1 \(send send-1\) did not reach it/);
+    should(subject.sender.typed[0]).match(/^Ferretry could not deliver your message to session-1 \(send send-1\)/);
   });
 });
 

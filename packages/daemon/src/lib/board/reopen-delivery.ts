@@ -1,5 +1,5 @@
 /**
- * DELIVERING A REOPEN (`board-design.md` §2.9): the card's ferret is told `[reopened &F412 by owner: …]`
+ * DELIVERING A REOPEN (`board-design.md` §2.9): the card's ferret is told `&F412 was reopened by the owner: …`
  * without anyone telling it separately. The ladder, first rung that takes it:
  *
  * 1. the card's assignee, if it is alive — the line is queued like any owner message;

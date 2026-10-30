@@ -895,18 +895,21 @@ describe('composer task family', () => {
   const task = (id: string, patch: Partial<ComposerReferenceTask> = {}): ComposerReferenceTask => ({
     id,
     title: `Title of ${id}`,
-    status: 'todo',
-    phase: 'todo',
+    summary: '',
+    lane: 'To do',
+    closed: false,
+    active: false,
     assignee: 'zelda',
-    updatedAt: '2026-10-01T00:00:00.000Z',
+    touchedAt: '2026-10-01T00:00:00.000Z',
+    legacyId: null,
     ...patch,
   });
   const tasks: readonly ComposerReferenceTask[] = [
-    task('F1', { updatedAt: '2026-10-02T00:00:00.000Z' }),
-    task('F2', { status: 'in_progress', phase: 'build', updatedAt: '2026-09-01T00:00:00.000Z' }),
-    task('F3', { status: 'done', phase: 'done' }),
-    task('F4', { status: 'dropped', phase: 'dropped' }),
-    task('F5', { updatedAt: '2026-10-03T00:00:00.000Z', assignee: null }),
+    task('F1', { touchedAt: '2026-10-02T00:00:00.000Z' }),
+    task('F2', { lane: 'In progress', active: true, touchedAt: '2026-09-01T00:00:00.000Z' }),
+    task('F3', { lane: 'Shipped', closed: true }),
+    task('F4', { lane: 'Dropped', closed: true }),
+    task('F5', { touchedAt: '2026-10-03T00:00:00.000Z', assignee: null }),
   ];
   const ladder = () => createReferencesProvider({ daemon: daemonA, scope: scopeA, getTasks: () => tasks });
   const [, , direct] = createDirectReferenceProviders({ daemon: daemonA, scope: scopeA, getTasks: () => tasks });
@@ -946,20 +949,18 @@ describe('composer task family', () => {
     expect(rows?.every(row => decodeURIComponent(row.id).includes('same/session'))).toBe(true);
   });
 
-  it('names a blocked task as blocked, and falls back to the status when no phase is known', () => {
+  it('orders equals by recency then id, and finds a card by the id it had before the import', () => {
     const rows = createDirectReferenceProviders({
       daemon: daemonA,
       scope: scopeA,
       getTasks: () => [
-        task('F6', { blocked: true }),
-        { id: 'F7', title: 'Bare', status: 'researched' },
-        { id: 'F8', title: 'Undated', status: 'todo' },
-        { id: 'F9', title: 'Created only', status: 'todo', createdAt: '2026-10-09T00:00:00.000Z' },
+        task('F6', { touchedAt: '2026-10-09T00:00:00.000Z' }),
+        task('F7', { touchedAt: 'not a date', legacyId: 'C3' }),
+        task('F8', { touchedAt: 'not a date' }),
       ],
     })[2]?.initialCandidates?.(context('&', 'F'))?.candidates;
-    expect(rows?.find(row => row.label === '&F6')?.badge).toBe('Blocked');
-    expect(rows?.find(row => row.label === '&F7')).toMatchObject({ badge: 'Researched', detail: 'Bare · unassigned' });
-    expect(rows?.map(row => row.label)).toEqual(['&F9', '&F6', '&F7', '&F8']);
+    expect(rows?.map(row => row.label)).toEqual(['&F6', '&F7', '&F8']);
+    expect(rows?.find(row => row.label === '&F7')?.keywords).toContain('C3');
   });
 
   it('offers nothing, rather than inventing rows, when the host wires no tasks', () => {

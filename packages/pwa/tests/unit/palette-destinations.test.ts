@@ -5,6 +5,8 @@ import { daemonSettingsPath } from '../../src/lib/pages/routes.ts';
 import { APP_BAR_DESTINATIONS } from '../../src/shell/app-bar.tsx';
 import {
   type AppBarDestinationLike,
+  BOARD_FOR_FERRET_SEARCH_TERMS,
+  boardForFerretPaletteCommand,
   destinationExists,
   destinationPaletteEntries,
   PAIR_PHONE_SEARCH_TERMS,
@@ -178,6 +180,22 @@ describe('pairPhonePaletteCommand', () => {
     });
     for (const word of ['pair', 'phone', 'qr', 'scan', 'device'])
       expect(matchesPaletteCommand(command, word)).toBe(true);
+    command.run();
+    expect(ran).toBe(1);
+  });
+});
+
+describe('boardForFerretPaletteCommand', () => {
+  it('names the ferret, is found by "board", and runs what the host gave it', () => {
+    let ran = 0;
+    const command = boardForFerretPaletteCommand('Ferretry lead', QrCode, () => (ran += 1));
+    expect(command).toMatchObject({
+      id: 'board-for-ferret',
+      label: 'Board for Ferretry lead',
+      searchTerms: BOARD_FOR_FERRET_SEARCH_TERMS,
+      Icon: QrCode,
+    });
+    for (const word of ['board', 'cards', 'kanban']) expect(matchesPaletteCommand(command, word)).toBe(true);
     command.run();
     expect(ran).toBe(1);
   });

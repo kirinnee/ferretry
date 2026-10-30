@@ -248,8 +248,8 @@
      "Sent to", a sub-ferret start, a question, a harness dialog, compaction, the dictation review —
      wears the SAME stroke and shadow as the human bubble, so a Neo transcript is inked and offset
      throughout and a Studio one stays hairlined and soft. The radius is the panel's, with a smaller
-     `--card-tail-radius` on the corner nearest the speaker; `--card-edge` is the accent rail some
-     cards carry on their leading side. Families restate the bubble/radius/stroke ramp these read
+     `--card-tail-radius` on the corner nearest the speaker. Cards carry no accent rail on their
+     leading side. Families restate the bubble/radius/stroke ramp these read
      from, never these names, so a new family inherits cards that already match it.
      Declared on :root/[data-swatch] alongside the values they read, so each resolves per theme. */
   --card-bg: var(--surface);
@@ -258,7 +258,6 @@
   --card-radius: var(--radius-panel);
   --card-tail-radius: var(--radius-xs);
   --card-shadow: var(--bubble-shadow);
-  --card-edge: var(--stroke-heavy);
 
   /* ---- icon-only ghost controls (the composer's attach and mic) ----
      Quiet by default: no fill, no edge, no shadow. A family whose every control is an inked block

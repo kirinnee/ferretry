@@ -1,5 +1,7 @@
 import type { SendCancelEffect, SendUnaccountedReason } from '@ferretry/protocol';
 import type { LedgerSendRecord } from './send-ledger.ts';
+import { isSessionEndedTimeout } from './send-ledger.ts';
+import { WAIT_REASON_COPY } from './send-queue.ts';
 
 export interface SendBadge {
   readonly label: string;
@@ -51,6 +53,47 @@ const attempts = (record: LedgerSendRecord): string => {
 };
 
 /**
+ * A message the durable queue holds says where it is in the queue's own words, and a plain reason when it
+ * waits. Rows the queue never saw, and rows the agent has (delivered) or a person took back from the
+ * ledger, keep the ledger's words.
+ */
+const queueBadge = (record: LedgerSendRecord): SendBadge | undefined => {
+  const queue = record.queue;
+  if (queue?.state === 'read' && record.fate === 'delivered')
+    return {
+      label: 'read',
+      tone: 'border-ok-border bg-ok-bg text-ok',
+      detail: 'the agent has read it — its transcript shows it as a message from you',
+    };
+  if (queue === undefined || record.fate === 'delivered' || record.fate === 'cancelled') return undefined;
+  switch (queue.state) {
+    case 'queued':
+      return {
+        label: 'queued',
+        tone: WAITING_TONE,
+        detail:
+          queue.waitReason === undefined ? 'waiting for its turn' : `waiting: ${WAIT_REASON_COPY[queue.waitReason]}`,
+      };
+    case 'typing':
+      return { label: 'sending', tone: QUIET_TONE, detail: 'sending — it is being typed into the agent now' };
+    case 'failed':
+      if (record.fate === 'unaccounted')
+        return {
+          label: 'unconfirmed',
+          tone: QUIET_TONE,
+          detail: queue.failure ?? 'nothing proves it reached the agent, though it may have',
+        };
+      return {
+        label: 'failed',
+        tone: 'border-err-border bg-err-bg text-err',
+        detail: queue.failure ?? 'it could not be delivered',
+      };
+    default:
+      return undefined;
+  }
+};
+
+/**
  * The chip for a send. Every word is a claim the daemon has PROVEN:
  *
  *   * `sending` — the daemon has it and is checking where it went. Nothing more is known yet.
@@ -62,6 +105,8 @@ const attempts = (record: LedgerSendRecord): string => {
  *     landed, and red invites a resend that would make the agent read it twice.
  */
 export const sendBadge = (record: LedgerSendRecord): SendBadge => {
+  const queued = queueBadge(record);
+  if (queued !== undefined) return queued;
   if (record.fate === 'delivered')
     return {
       label: 'delivered',
@@ -76,17 +121,19 @@ export const sendBadge = (record: LedgerSendRecord): SendBadge => {
       label: 'cancelled',
       tone: QUIET_TONE,
       detail:
-        record.cancelEffect === undefined
-          ? 'taken back; what that did on the agent’s screen is not known'
-          : CANCEL_EFFECTS[record.cancelEffect],
+        record.cancelEffect !== undefined
+          ? CANCEL_EFFECTS[record.cancelEffect]
+          : record.queue?.state === 'cancelled'
+            ? 'taken back before it was typed; the agent never saw it'
+            : 'taken back; what that did on the agent’s screen is not known',
     };
-  if (record.fate === 'timed_out')
+  if (record.fate === 'timed_out' && !isSessionEndedTimeout(record))
     return {
       label: 'not delivered',
       tone: 'border-err-border bg-err-bg text-err',
       detail: `timed out — ${reasonOf(record)} (${attempts(record)})`,
     };
-  if (record.fate === 'unaccounted')
+  if (record.fate === 'unaccounted' || record.fate === 'timed_out')
     return {
       label: 'unconfirmed',
       tone: QUIET_TONE,

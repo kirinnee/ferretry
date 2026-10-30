@@ -1,4 +1,4 @@
-import type { QueuedMessage, SendSenderKind } from '@ferretry/protocol';
+import type { QueueAuthor, QueuedMessage, SendSenderKind } from '@ferretry/protocol';
 import type { ClockPort, SerialExecutor } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
 import { foldQueue } from './model.ts';
@@ -11,11 +11,11 @@ export interface QueueRequest {
   readonly sender: SendSenderKind;
   readonly from?: string | undefined;
   readonly fromName?: string | undefined;
+  /** Who it is from, as data for the app's sender chip — never as text in the body. */
+  readonly by?: QueueAuthor | undefined;
   readonly text: string;
   readonly attachmentIds?: readonly string[] | undefined;
   readonly replyExpected?: boolean | undefined;
-  /** A daemon notice that may be typed into the owner's own chat, as a message of its own. */
-  readonly chat?: boolean | undefined;
 }
 
 /** What an enqueue did: made the message, or found the one a first request already made. */
@@ -74,10 +74,10 @@ export class SessionQueueService {
         sender: request.sender,
         ...(request.from === undefined ? {} : { from: request.from }),
         ...(request.fromName === undefined ? {} : { fromName: request.fromName }),
+        ...(request.by === undefined ? {} : { by: request.by }),
         text: request.text,
         attachmentIds: [...(request.attachmentIds ?? [])],
         ...(request.replyExpected === true ? { replyExpected: true } : {}),
-        ...(request.chat === true ? { chat: true } : {}),
         enqueuedAt: at,
         state: 'queued',
         stateAt: at,

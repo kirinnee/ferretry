@@ -1,3 +1,37 @@
+## [4.134.1](https://github.com/kirinnee/ferretry/compare/v4.134.0...v4.134.1) (2026-10-30)
+
+### Fixes
+
+* **pwa:** call the agenda client on itself when a card opens ([#1029](https://github.com/kirinnee/ferretry/issues/1029)) ([268b27a](https://github.com/kirinnee/ferretry/commit/268b27a3b9564339a5b482755a3768ffcba6e773))
+
+## [4.134.0](https://github.com/kirinnee/ferretry/compare/v4.133.0...v4.134.0) (2026-10-30)
+
+### Features
+
+* **daemon:** who a queued message is from is metadata, never text (QueuedMessage.by) ([#1025](https://github.com/kirinnee/ferretry/issues/1025)) ([4980a8e](https://github.com/kirinnee/ferretry/commit/4980a8ec8034839f285a322de9853c652ebaf30d))
+
+## [4.133.0](https://github.com/kirinnee/ferretry/compare/v4.132.0...v4.133.0) (2026-10-30)
+
+### Features
+
+* **pwa:** ClickUp-dense Board cards on a phone ([#1012](https://github.com/kirinnee/ferretry/issues/1012)) ([6714f5f](https://github.com/kirinnee/ferretry/commit/6714f5f968afa2b7e043e01b7943d31cc8704855))
+
+### Fixes
+
+* **daemon:** read a multi-paragraph Codex draft down to the cursor; a may-have-landed message is unconfirmed, not failed ([#1024](https://github.com/kirinnee/ferretry/issues/1024)) ([78be655](https://github.com/kirinnee/ferretry/commit/78be6553bd9138ebc2d35a561ac09fd95efab9f7))
+* **pwa:** withdraw the recovery chip once a page renders again ([#1027](https://github.com/kirinnee/ferretry/issues/1027)) ([9512b42](https://github.com/kirinnee/ferretry/commit/9512b42baab9d421508413fdf50889ccac7f29bb))
+
+## [4.132.0](https://github.com/kirinnee/ferretry/compare/v4.131.0...v4.132.0) (2026-10-30)
+
+### Features
+
+* **board:** parent fy new cards from intent; add fy task reparent ([#1021](https://github.com/kirinnee/ferretry/issues/1021)) ([0cae998](https://github.com/kirinnee/ferretry/commit/0cae998af659a21f3a4056f88db31a6a4c5d8670))
+* Inbox v2 — full item view with composer, swipe deck, who+what, mandatory premise/context ([#1002](https://github.com/kirinnee/ferretry/issues/1002)) ([ccee241](https://github.com/kirinnee/ferretry/commit/ccee241e0aadf87ef27be0356a4ad52c4bc9a0f8)), closes [#1001](https://github.com/kirinnee/ferretry/issues/1001)
+
+### Performance
+
+* **pwa:** load each session-layout scenario once and flip the theme family in place ([#1019](https://github.com/kirinnee/ferretry/issues/1019)) ([2eba12c](https://github.com/kirinnee/ferretry/commit/2eba12cf4e3e6098ecb173fc52521cba64cc36f8))
+
 ## [4.131.0](https://github.com/kirinnee/ferretry/compare/v4.130.0...v4.131.0) (2026-10-30)
 
 ### Features

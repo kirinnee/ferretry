@@ -237,6 +237,13 @@ export const daemonBoardPath = (id: DaemonId): string => `${daemonSessionsPath(i
 export const daemonBoardCardPath = (id: DaemonId, taskId: string): string =>
   `${daemonBoardPath(id)}/${encodeURIComponent(taskId)}`;
 
+/** The Board narrowed to one ferret's cards, with `highlight` (a task id) marked: `/d/<id>/board?ferret=<session>&highlight=<task>`. */
+export const daemonBoardForFerretPath = (id: DaemonId, sessionId: string, highlight?: string): string => {
+  const query = new URLSearchParams({ ferret: sessionId });
+  if (highlight !== undefined) query.set('highlight', highlight);
+  return `${daemonBoardPath(id)}?${query.toString()}`;
+};
+
 /** Builds the canonical settings pathname for one daemon. */
 export const daemonSettingsPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/settings`;
 

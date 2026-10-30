@@ -159,7 +159,7 @@ export interface SegmentContext {
   readonly machine: string | null;
 }
 
-/** The meta line of a card, left to right. */
+/** The meta line of a card, in priority order: when the row is too narrow the card drops whole items from the right. */
 export const cardSegments = (task: BoardTaskView, context: SegmentContext): readonly BoardSegment[] => {
   const segments: BoardSegment[] = [
     {
@@ -169,16 +169,6 @@ export const cardSegments = (task: BoardTaskView, context: SegmentContext): read
       tone: 'quiet',
       title: `${task.kind} ${formatTaskRef({ id: task.id })}`,
       optional: false,
-    },
-    {
-      key: 'people',
-      text: peopleLabel(task, context.names),
-      icon: null,
-      tone: 'quiet',
-      title: `Owned by ${context.names(task.owner)}${
-        task.assignee === null || task.assignee === task.owner ? '' : `, assigned to ${context.names(task.assignee)}`
-      }`,
-      optional: true,
     },
     activitySegment(task, context.category, context.now),
   ];
@@ -204,6 +194,16 @@ export const cardSegments = (task: BoardTaskView, context: SegmentContext): read
       optional: false,
     });
   }
+  segments.push({
+    key: 'people',
+    text: peopleLabel(task, context.names),
+    icon: null,
+    tone: 'quiet',
+    title: `Owned by ${context.names(task.owner)}${
+      task.assignee === null || task.assignee === task.owner ? '' : `, assigned to ${context.names(task.assignee)}`
+    }`,
+    optional: true,
+  });
   if (task.shippedIn !== null) {
     segments.push({
       key: 'shipped',

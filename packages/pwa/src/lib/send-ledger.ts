@@ -30,6 +30,7 @@ import type {
   SendUnaccountedReason,
 } from '@ferretry/protocol';
 import { z } from 'zod';
+import type { QueueView } from './send-queue.ts';
 
 /**
  * Slack when joining a durable row to the optimistic row that caused it. The
@@ -100,6 +101,8 @@ export interface LedgerSendRecord {
    * daemon's current word. Never on the wire: {@link markLedgerUnread} sets it on open rows only.
    */
   readonly unread?: LedgerUnread;
+  /** Where the durable queue has this message (`send-queue.ts`); absent for a message the queue never held. */
+  readonly queue?: QueueView;
 }
 
 /** Since when the ledger could not be read, and why, in the failure's own words. */
@@ -134,6 +137,13 @@ export const markLedgerUnread = (
     record.fate === 'accepted' || record.fate === 'queued' ? { ...record, unread } : record,
   );
 };
+
+/**
+ * A send the ledger gave up on only because its session ended. The ledger could not know whether the agent
+ * had it first, so this is NOT "not delivered": it reads as unconfirmed and offers no one-tap retry.
+ */
+export const isSessionEndedTimeout = (record: LedgerSendRecord): boolean =>
+  record.fate === 'timed_out' && record.unaccountedReason === 'session_ended';
 
 /** How a page holds its rows: a value, or an update of the rows it already has (React's `setState`). */
 export type LedgerRowsSetter = (

@@ -90,54 +90,61 @@ send stays an ordinary tool call. The parsing lives in `packages/pwa/src/lib/pee
 
 ## Notices from Ferretry itself
 
-A message Ferretry types into a session on its own account opens with `[ferretry] ` (written and parsed
-in `packages/protocol/src/lib/agent-messages.ts`). Both Chats draw it as a compact **system row**, never
-as the owner's bubble. Its first paragraph is the headline; anything after the first blank line is
-addressed to the agent and sits behind a **details** control.
+**No tag and no footer, on anything** (the owner, 2026-10-30: "there should not be any append or prepend on
+any feature"). A message Ferretry types into a session on its own account is plain sentences with Ferretry
+— or its Warden — as their subject ("Ferretry restarted you mid-turn…", "Ferretry's Warden resumed you…",
+"Ferretry could not confirm your message to…"), so the agent reads whose it is from the words themselves.
+Who it is from is METADATA the app reads, never text: a queued message's `by` (`QueuedMessage.by`), and a
+relaunch turn's author kept beside its document (`turns/turn-NNN.by.json`, `SessionHandoff.by`, from
+`resumeTurnAuthor`: the Warden, a restart, the owner or a ferret). Both Chats draw it as Ferretry's, never as
+the owner's bubble. Older history that still opens with `[ferretry] ` (`agent-messages.ts`) is stripped for
+display. A contract test (`tests/unit/no-prepend-notices.test.ts`) holds every notice to this.
 
 A **restart or same-harness migrate** resumes the same conversation, so it sends a notice only when the
 session was mid-turn AND the in-flight inventory held something not classified safe (re-armable,
-destructive or unknown, or a blind spot). Otherwise it sends nothing. An auto session is the exception: its resume would otherwise type the default "continue the assigned task" prompt, so it is told `Restarted — nothing was interrupted.` instead. When sent it reads
+destructive or unknown, or a blind spot). Otherwise it sends nothing. An auto session is the exception: its resume would otherwise type the default "continue the assigned task" prompt, so it is told `Ferretry restarted you, and nothing was interrupted.` instead. When sent it reads
 `Restarted mid-turn — 1 command was interrupted · details`, and the agent is told it came from Ferretry,
 not the owner, and where `migration-inflight.md` is (`packages/daemon/src/lib/migrate/restart-notice.ts`).
 A notice that travelled as a turn file is recognised by the document it holds, so it is a system row once
 that file has been read.
 
-## Board events that ride the next message
+## What the board types into a chat
 
-A lead hears about its sub-ferrets' cards without being woken for it (`board-design.md` §2.8). When a
-child card moves, blocks, unblocks, is dropped or starts waiting on the owner, and when a card's last
-blocker ships, the board sweep (`packages/daemon/src/lib/board/sweep.ts`, once a minute) queues one
-item in that ferret's **pending context** (`<state>/board/pending/<session>.json`). Nothing is typed.
-The items go out on top of the next message the ferret receives through the send route — its owner's
-or a teammate's — as one line, then a blank line, then the message unchanged:
+No board news reaches a chat (the owner, 2026-10-30: "there should not be any append or prepend on any
+feature"). A card's move, block, unblock, drop, reopen or done is never typed into the lead's chat, alone
+or as a batched digest: the ferret that finished tells its lead in its own words (`fy signal done` reaches
+it through `fy wait`), the board shows the state, and the card's history keeps every event.
 
-```text
-[board] &F413 → Implement · &F414 waiting on owner (!A9)
+The board types only what a ferret has to **act on**, each as a plain sentence with no tag in front and no
+footer behind. Who sent it is the queue item's metadata, `by: {kind: 'ferretry', feature: 'Board'}`, which
+the app shows as a "Ferretry · Board" sender chip — never as text in the message:
 
-The owner's words, as typed.
-```
+| Producer                                     | To                                                                | Message                                                                                                            |
+| -------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Stale nudge (`lib/board/sweep.ts`)           | the card's assignee, alive and idle; else the card's owner ferret | `&F412 has had no activity for 3h in Implement. Move it, note why, block it, or drop it.`                          |
+| Go-ahead (`lib/board/sweep.ts`)              | the dependent card's assignee, once its last blocker ships        | `&F20 can go ahead: &F18 merged.`                                                                                  |
+| PR closed unmerged (`lib/board/pr-cache.ts`) | the card's owner ferret                                           | `&F412 PR #930 was closed without merging. Reopen it, link its replacement, or drop the card.`                     |
+| CI red (`lib/board/pr-cache.ts`)             | the card's assignee                                               | `&F412 PR #930 CI is red. Fix it, or note on the card why it can stay red.`                                        |
+| Turn-end check (`lib/board/turn-check.ts`)   | the ferret that changed code with no card                         | `You changed code this turn without a card. Create one (fy task create …) or record why not: fy task skip "<why>"` |
+| Reopen (`lib/board/reopen-delivery.ts`)      | the card's assignee, else its owner ferret                        | `&F412 was reopened by the owner: <reason>`                                                                        |
 
-A move the daemon made from a PR fact (opened, ready, merged, released, running here) is never a line: history records it and the board shows it, but nobody is told a card moved because GitHub said so. A teammate's banner still comes first, above the line. Items are coalesced per card and kind (a card
-that moved twice says only where it is now), at most 32 are held, and a send that fails puts them back.
-The dependent card's assignee gets the unblock line the same way: `[board] &F20 unblocked: &F18 merged`.
+The stale nudge goes at most once per card per its lane's stale threshold, and never to a ferret that
+declared `fy signal waiting`. A go-ahead that could not be sent is said again on the next sweep. The
+contract is tested in `packages/daemon/tests/unit/board/no-prepend.test.ts`.
 
-The sweep's own **nudge** is the one board message that does start a turn, because a stale card is the
-ferret's to act on: `[board] &F412 untouched 3h in Implement — move it, note why, block it, or drop it`.
-It goes to the card's assignee when it is alive and idle, else to the card's owner ferret; at most once
-per card per its lane's stale threshold; never to a ferret that declared `fy signal waiting`. It carries
-the recipient's pending context on top too.
+**The agent's side.** The agent reads the sentence as it is: there is no agent-facing framing on these,
+because each names its card and says what to do, so nothing needs a "not from the owner" line.
 
 Declared gaps:
 
-- **Below the send route nothing carries it.** The agenda's batched answers and the Warden's nudges are
-  sent beneath it, so the lead hears the line with the message after those.
-- **The owner's Chat shows the line** above their own words, because it is part of the message the
-  ferret was given.
+- **An interactive session's daemon messages skip the queue.** The queue never types a daemon message into
+  the owner's own chat, so a board message to an interactive ferret still takes the direct send path,
+  which has no `by`; the app has no queue item to read the chip from.
 
 ## The Warden and the board
 
-The Warden reads the board (`board-design.md` §3.4). Both of its board messages are `[ferretry] ` notices.
+The Warden reads the board (`board-design.md` §3.4). Its orphaned-card message is a plain sentence, from
+"Ferretry · Warden" as the queue item's `by`; the resume turns below are still `[ferretry] ` notices (a GAP).
 
 - **An orphaned card.** A card in an active or review lane whose ferret is finished, with nothing alive
   under it, is the Warden anomaly `orphaned_card` (`packages/daemon/src/lib/warden/orphans.ts`). The

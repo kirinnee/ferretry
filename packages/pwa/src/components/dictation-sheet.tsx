@@ -372,10 +372,10 @@ export function DictationSheet({
         else onDismiss();
       }}
       className={cn(
-        'absolute inset-x-0 bottom-[calc(100%+0.5rem)] z-50 overflow-hidden rounded-panel border border-l-heavy border-border bg-surface font-ui shadow-panel',
-        stage === 'recording' && 'border-l-err',
-        (stage === 'starting' || stage === 'transcribing' || stage === 'review') && 'border-l-accent',
-        (stage === 'empty' || stage === 'error') && 'border-l-warn',
+        'absolute inset-x-0 bottom-[calc(100%+0.5rem)] z-50 overflow-hidden rounded-panel border bg-surface font-ui shadow-panel',
+        stage === 'recording' && 'border-err',
+        (stage === 'starting' || stage === 'transcribing' || stage === 'review') && 'border-accent',
+        (stage === 'empty' || stage === 'error') && 'border-warn',
       )}
     >
       {stage === 'review' && review !== null ? (

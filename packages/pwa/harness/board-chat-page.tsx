@@ -1,5 +1,5 @@
 /**
- * One ferret's chat header and Info side pane, drawn by the real `SessionTopBar`, `ChatCardChip`, `InfoPanel`
+ * One ferret's chat header and Info side pane, drawn by the real `SessionTopBar`, `InfoPanel`
  * and `BoardSideTab` over a fake daemon (`board-chat-screenshot.ts` bundles this).
  *
  * `?state=card|none` picks a session with or without a focus card, and `?lanes=closed` collapses the lanes.
@@ -8,13 +8,11 @@
 import type { SessionView } from '@ferretry/protocol';
 import { createRoot } from 'react-dom/client';
 import { SessionTopBar } from '../src/components/session-top-bar.tsx';
-import { ChatCardChip } from '../src/features/board/chat-card-chip.tsx';
 import { BoardSideTab } from '../src/features/board/board-side-tab.tsx';
 import { InfoPanel } from '../src/features/session-info/info-panel.tsx';
 import { INFO_TABS } from '../src/features/session-info/info-model.ts';
 import { useChatCard } from '../src/hooks/use-chat-card.ts';
 import { DaemonBoardStore } from '../src/lib/board-store.ts';
-import { daemonBoardCardPath } from '../src/lib/pages/routes.ts';
 import {
   boardAnswer,
   card,
@@ -157,19 +155,9 @@ function Harness() {
             Interrupt
           </button>
         }
-        cardChip={
-          chat === null ? null : (
-            <ChatCardChip
-              chip={chat.chip}
-              href={chat.chip.kind === 'card' ? daemonBoardCardPath(laptop.daemonId, chat.chip.id) : ''}
-              onNavigate={() => undefined}
-            />
-          )
-        }
         compact={compact}
         infoOpen
         onToggleInfo={() => undefined}
-        project="ferretry"
         session={lead}
         turn="working"
       />

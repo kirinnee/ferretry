@@ -42,6 +42,8 @@ interface Harness {
   /** The ferret each board read asked the daemon for (the daemon does the filtering). */
   readonly asked: (string | null)[];
   readonly root: HTMLElement;
+  /** Draws the same page again with another URL search. */
+  readonly setSearch: (search: string) => Promise<void>;
 }
 
 const open = async (
@@ -90,7 +92,12 @@ const open = async (
   };
   view = await mount(<BoardPage {...props} />);
   await interact(() => flush());
-  return { acts, navigated, searches, reads, asked, root: view.container };
+  const mounted = view;
+  const setSearch = async (search: string): Promise<void> => {
+    await mounted.render(<BoardPage {...props} search={search} />);
+    await interact(() => flush());
+  };
+  return { acts, navigated, searches, reads, asked, root: view.container, setSearch };
 };
 
 const click = (root: HTMLElement, selector: string) =>
@@ -274,6 +281,31 @@ describe('BoardPage — views', () => {
     const droppedOnly = await open({ props: { search: 'view=archive&state=dropped' } });
     expect(titles(droppedOnly.root)).toEqual(['Dropped idea']);
     expect(droppedOnly.reads.some(read => read.endsWith(':closed'))).toBe(false);
+  });
+});
+
+describe('BoardPage — highlight', () => {
+  const marked = (root: HTMLElement) =>
+    [...root.querySelectorAll('[data-highlighted]')].map(node => node.getAttribute('data-task'));
+
+  it('marks the card the URL names and no other', async () => {
+    const { root } = await open({ props: { search: 'highlight=F2' } });
+    expect(marked(root)).toEqual(['F2']);
+  });
+
+  it('marks nothing without the parameter, or for a card that is not on the board', async () => {
+    expect(marked((await open()).root)).toEqual([]);
+    await view?.unmount();
+    expect(marked((await open({ props: { search: 'highlight=F99' } })).root)).toEqual([]);
+  });
+
+  it('marks every view of the card, and lets go when the parameter goes', async () => {
+    const { root, setSearch } = await open({ props: { search: 'view=list&highlight=F1' } });
+    expect(marked(root)).toEqual(['F1']);
+    await setSearch('view=list');
+    expect(marked(root)).toEqual([]);
+    await setSearch('view=list&highlight=F3');
+    expect(marked(root)).toEqual(['F3']);
   });
 });
 

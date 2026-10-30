@@ -3,11 +3,12 @@ import should from 'should';
 import { daemonId } from '../../../src/lib/daemon-connection.ts';
 import {
   connectionPickerPath,
-  daemonAnalyticsPath,
-  daemonBoardCardPath,
-  daemonBoardPath,
-  daemonAnalyticsQueryPath,
   daemonAgendaPath,
+  daemonAnalyticsPath,
+  daemonAnalyticsQueryPath,
+  daemonBoardCardPath,
+  daemonBoardForFerretPath,
+  daemonBoardPath,
   daemonImportedHistoryPath,
   daemonLearningPath,
   daemonMachineSetupPath,
@@ -231,6 +232,14 @@ describe('route parsing', () => {
     ]);
     should(routePath(routes[0] as Route)).equal('/d/daemon-b/board');
     should(routePageKey(routes[1] as Route)).equal(routePageKey(routes[0] as Route));
+  });
+
+  it('narrows the board to one ferret, and marks one card when asked', () => {
+    should(daemonBoardForFerretPath(daemonB, 'mvgt2oz9-04e28935')).equal('/d/daemon-b/board?ferret=mvgt2oz9-04e28935');
+    should(daemonBoardForFerretPath(daemonB, 'mvgt2oz9-04e28935', 'F11')).equal(
+      '/d/daemon-b/board?ferret=mvgt2oz9-04e28935&highlight=F11',
+    );
+    should(daemonBoardForFerretPath(daemonB, 'a b&c', 'F 1')).equal('/d/daemon-b/board?ferret=a+b%26c&highlight=F+1');
   });
 
   it('should send unscoped and invalid daemon paths to the connection picker', () => {

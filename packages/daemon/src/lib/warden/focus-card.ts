@@ -9,14 +9,7 @@
  *
  * Pure: the card arrives already read (`WardenBoardPort.focusCard`).
  */
-import {
-  type BoardTaskView,
-  describeBoardEvent,
-  ferretryNotice,
-  formatTaskRef,
-  type LaneSet,
-  type PrLink,
-} from '@ferretry/protocol';
+import { type BoardTaskView, describeBoardEvent, formatTaskRef, type LaneSet, type PrLink } from '@ferretry/protocol';
 
 /** A ferret's focus card, with the lanes of its board so the lane reads by name. */
 export interface WardenFocusCard {
@@ -80,10 +73,8 @@ export type WardenResumeAct = 'resume' | 'restart';
 export function wardenResumeMessage(act: WardenResumeAct, reason: string, card: WardenFocusCard): string {
   const did = act === 'restart' ? 'restarted you with your conversation intact' : 'resumed you';
   const why = reason.trim().replace(/\.$/u, '');
-  return ferretryNotice(
-    `The Warden ${did}: ${why}.\n\n` +
-      'This notice is from Ferretry, not from the owner. Re-read your last turn and continue from where you ' +
-      'stopped, on the card below.\n\n' +
-      focusCardBrief(card),
+  return (
+    `Ferretry's Warden ${did}: ${why}. Re-read your last turn and continue from where you stopped, on the card below.\n\n` +
+    focusCardBrief(card)
   );
 }

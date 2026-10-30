@@ -18,7 +18,8 @@
  */
 
 import { sendBadge } from './send-badge.ts';
-import type { LedgerSendRecord } from './send-ledger.ts';
+import { effectiveQueueState } from './send-queue.ts';
+import { isSessionEndedTimeout, type LedgerSendRecord } from './send-ledger.ts';
 
 export type SendReceiptKind =
   | 'sending'
@@ -27,6 +28,7 @@ export type SendReceiptKind =
   | 'typed'
   | 'delivered'
   | 'answered'
+  | 'read'
   | 'unconfirmed'
   | 'failed'
   | 'cancelled';
@@ -44,6 +46,41 @@ export interface SendReceipt {
 const ANSWERED_DETAIL = 'the agent has replied since this message arrived';
 
 /**
+ * A message the durable queue holds draws the queue's tick: ✓ queued (with the plain reason it waits), ✓ while
+ * it is being typed, ✓✓ delivered, ✓✓✓ read. A delivered ledger fate outranks a queue that has not caught up.
+ * Failed and cancelled keep their own marks. `undefined` leaves a row to the ledger mapping below.
+ */
+const queueReceipt = (record: LedgerSendRecord, detail: string): SendReceipt | undefined => {
+  const state = effectiveQueueState(record);
+  switch (state) {
+    case 'read':
+      return { kind: 'read', name: 'Read', detail };
+    case 'queued':
+      return record.fate === 'cancelled'
+        ? undefined
+        : {
+            kind: 'queued',
+            name: 'Queued',
+            detail,
+            ...(record.queue?.waitReason === undefined ? {} : { chip: detail }),
+          };
+    case 'typing':
+      return record.fate === 'cancelled' ? undefined : { kind: 'queued', name: 'Sending', detail };
+    case 'unconfirmed':
+      return record.fate === 'cancelled' || record.fate === 'delivered'
+        ? undefined
+        : { kind: 'unconfirmed', name: 'Unconfirmed', detail, chip: 'unconfirmed' };
+    case 'failed':
+      if (record.fate === 'cancelled' || record.fate === 'delivered') return undefined;
+      return record.fate === 'unaccounted'
+        ? { kind: 'unconfirmed', name: 'Unconfirmed', detail, chip: 'unconfirmed' }
+        : { kind: 'failed', name: 'Failed', detail, chip: 'failed' };
+    default:
+      return undefined;
+  }
+};
+
+/**
  * Every fate the daemon can report, mapped once. The order is `sendBadge`'s: a settled fate outranks
  * `held`, and `held` outranks a plain queue, so a revived session's held send never reads as queued.
  *
@@ -58,10 +95,16 @@ const ANSWERED_DETAIL = 'the agent has replied since this message arrived';
  * | `timed_out`                         | `failed`      | small red !     | "not delivered" |
  * | `accepted`/`queued` + typed     | `typed`       | pencil          | "typed, not sent" |
  * | `cancelled`                       | `cancelled`   | struck circle   | "cancelled"     |
+ * | queue `queued` / `typing`            | `queued`      | one grey tick   | —               |
+ * | queue `read`                        | `read`        | three accent ticks | —            |
+ * | queue `failed`                      | `failed`      | small red !     | "failed"        |
+ * | queue `unconfirmed`                 | `unconfirmed` | faint question  | "unconfirmed"   |
  * | open, ledger unread (`unread`)     | `unconfirmed` | faint question  | "status unknown" |
  */
 export const sendReceipt = (record: LedgerSendRecord, answered = false): SendReceipt => {
   const { detail } = sendBadge(record);
+  const queue = queueReceipt(record, detail);
+  if (queue !== undefined) return queue;
   switch (record.fate) {
     case 'delivered':
       return answered
@@ -70,6 +113,8 @@ export const sendReceipt = (record: LedgerSendRecord, answered = false): SendRec
     case 'cancelled':
       return { kind: 'cancelled', name: 'Cancelled', detail, chip: 'cancelled' };
     case 'timed_out':
+      if (isSessionEndedTimeout(record))
+        return { kind: 'unconfirmed', name: 'Unconfirmed', detail, chip: 'unconfirmed' };
       return { kind: 'failed', name: 'Not delivered', detail, chip: 'not delivered' };
     case 'unaccounted':
       return { kind: 'unconfirmed', name: 'Unconfirmed', detail, chip: 'unconfirmed' };
@@ -97,14 +142,20 @@ export interface ReceiptLegendRow {
 
 export const RECEIPT_LEGEND: readonly ReceiptLegendRow[] = [
   { kind: 'sending', name: 'Sending', meaning: 'On its way, or kept until the session is revived.' },
-  { kind: 'queued', name: 'Queued', meaning: 'Waiting in the agent’s queue in Claude or Codex.' },
+  {
+    kind: 'queued',
+    name: 'Queued',
+    meaning:
+      'Saved and waiting to be typed in. The message says why when it has to wait: the ferret is busy, its box holds a draft, a question or dialog is open.',
+  },
   {
     kind: 'typed',
     name: 'Typed, not sent',
     meaning: 'It is sitting in the agent’s composer. Press Enter on the message to send it, or cancel it.',
   },
-  { kind: 'delivered', name: 'Delivered', meaning: 'It is in the transcript.' },
+  { kind: 'delivered', name: 'Delivered', meaning: 'It was typed into the agent and submitted.' },
   { kind: 'answered', name: 'Answered', meaning: 'The agent replied after it.' },
+  { kind: 'read', name: 'Read', meaning: 'The agent’s transcript shows it as a message from you.' },
   { kind: 'unconfirmed', name: 'Unconfirmed', meaning: 'It could not be proven either way.' },
   { kind: 'failed', name: 'Not delivered', meaning: 'It never arrived. Retry is offered on the message.' },
   {

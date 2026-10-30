@@ -147,8 +147,9 @@ describe('the plain words for a death', () => {
     const message = reviveMessage({ kind: 'signal', signal: 9 }, '2026-10-30T11:59:00.000Z', 'auto');
 
     // Assert
-    should(message).startWith('[ferretry] Your terminal ended because it was killed by a signal (SIGKILL) at ');
-    should(message).containEql('2026-10-30 11:59 UTC; it was started again.');
+    should(message).startWith(
+      'Ferretry started your terminal again: it ended because it was killed by a signal (SIGKILL) at 2026-10-30 11:59 UTC.',
+    );
     should(message).containEql('Re-read your last turn file and continue');
   });
 
@@ -172,7 +173,7 @@ describe('the plain words for a death', () => {
 
     // Assert
     should(message).equal(
-      '[ferretry] Your terminal ended because the tmux server crashed at 2026-10-30 11:59 UTC; it was started again.',
+      'Ferretry started your terminal again: it ended because the tmux server crashed at 2026-10-30 11:59 UTC.',
     );
   });
 });
