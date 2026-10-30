@@ -170,6 +170,36 @@ function headerAbove(lines: readonly string[], from: number, top: number): strin
   return header;
 }
 
+/** Claude's "You've hit your org's monthly spend limit" notice, which sits above the dialog's rule. */
+const LIMIT_NOTICE = /^you['’]ve hit your\b.*\blimit\b/iu;
+
+/** How far above the rows the notice may sit. */
+const NOTICE_REACH_LINES = 14;
+
+/**
+ * Claude's `/rate-limit-options` dialog is recognised by its ROWS: its title ("What do you want to do?")
+ * is generic, but no other dialog offers to wait for a limit to reset or to ask an admin for more usage.
+ */
+function isUsageLimitDialog(rows: readonly DialogRow[]): boolean {
+  return (
+    rows.some(row => /\bwait for (?:the )?limit to reset\b/iu.test(row.label)) &&
+    rows.some(row => /\bask your admin\b|\bwait here, then continue\b/iu.test(row.label))
+  );
+}
+
+/** The "You've hit your … limit" notice above the dialog, wrapped lines joined, or `undefined`. */
+function limitNotice(lines: readonly string[], top: number): string | undefined {
+  for (let index = top - 1; index >= Math.max(0, top - NOTICE_REACH_LINES); index -= 1) {
+    const text = (lines[index] as string).replace(/^\s*⎿\s*/u, '').trim();
+    if (!LIMIT_NOTICE.test(text)) continue;
+    const parts = [text];
+    for (let next = index + 1; next < top && !blank(lines[next]) && !RULE.test(lines[next] as string); next += 1)
+      parts.push((lines[next] as string).trim());
+    return parts.join(' ');
+  }
+  return undefined;
+}
+
 /** Which dialog a header shows, and the line that is its title. */
 const KINDS: readonly { readonly kind: HarnessDialogKind; readonly marker: RegExp }[] = [
   { kind: 'hooks-review', marker: /^hooks need review$/iu },
@@ -240,12 +270,11 @@ export function parseHarnessDialog(pane: string): HarnessDialog | undefined {
   const known = KINDS.map(({ kind, marker }) => ({ kind, at: header.findIndex(line => marker.test(line)) })).find(
     ({ at }) => at >= 0,
   );
-  const kind = known?.kind ?? 'other';
+  const usageLimit = known === undefined && isUsageLimitDialog(found.rows);
+  const kind = usageLimit ? 'usage-limit' : (known?.kind ?? 'other');
   const titleAt = known?.at ?? 0;
-  const body = header
-    .slice(titleAt + 1)
-    .join('\n')
-    .trim();
+  const notice = usageLimit ? limitNotice(lines, found.top) : undefined;
+  const body = [...(notice === undefined ? [] : [notice]), ...header.slice(titleAt + 1)].join('\n').trim();
   const escapeWord = ESCAPE_WORD.exec(footer)?.[1]?.toLowerCase();
   const options: HarnessDialogOption[] = found.rows.map((row, index) => {
     const label = clip(row.label, LIMITS.label);

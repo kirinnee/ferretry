@@ -309,3 +309,9 @@ describe('a harness dialog read as data', () => {
     should(settleHarnessDialog(DIALOG, undefined, undefined)).be.undefined();
   });
 });
+
+describe('a rate-limited session', () => {
+  it('should stay a status whose turn is watched, so the release of its limit is seen', () => {
+    should(isTurnStatus('rate_limited')).be.true();
+  });
+});

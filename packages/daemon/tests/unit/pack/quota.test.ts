@@ -151,3 +151,33 @@ describe('shortInstant', () => {
     should(shortInstant('soon', NOW)).equal('soon');
   });
 });
+
+describe('quotaOf with a limit a pane proved', () => {
+  it('should call the login exhausted until the reset, and say why', () => {
+    // Act
+    const quota = quotaOf(credential('a'), NOW, {
+      notice: 'n',
+      spend: true,
+      retryAt: Date.parse('2026-11-01T00:00:00.000Z'),
+    });
+
+    // Assert
+    should(quota.state).equal('exhausted');
+    should(quota.summary).startWith('hit its spend limit until');
+  });
+
+  it('should call a limit with no time exhausted, and ignore one that has already reset', () => {
+    // Act
+    const open = quotaOf(credential('a'), NOW, { notice: 'n', spend: false });
+    const over = quotaOf(credential('a'), NOW, {
+      notice: 'n',
+      spend: true,
+      retryAt: Date.parse('2026-10-22T11:00:00.000Z'),
+    });
+
+    // Assert
+    should(open.state).equal('exhausted');
+    should(open.summary).equal('hit its usage limit');
+    should(over.state).equal('unknown');
+  });
+});

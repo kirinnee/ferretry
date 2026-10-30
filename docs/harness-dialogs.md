@@ -52,6 +52,7 @@ homes with no network. The captures are the fixtures in `packages/daemon/tests/f
 | Codex   | Welcome to Codex (sign-in)           | `sign-in`         | —                                                                                |
 | Claude  | New MCP server found in this project | `mcp-servers`     | Use this MCP server, Use this and all …                                          |
 | Claude  | Settings Error                       | `settings-error`  | —                                                                                |
+| Claude  | What do you want to do? (limit hit)  | `usage-limit`     | — (the session is recorded `rate_limited`; no row is ever picked for you)        |
 | Either  | Do you trust this folder?            | `directory-trust` | the "Yes" rows                                                                   |
 | Codex   | Folder access: Trust this folder?    | `directory-trust` | Trust and continue                                                               |
 | Codex   | Folder access: Open restricted       | `directory-trust` | — (opening changes no saved trust)                                               |

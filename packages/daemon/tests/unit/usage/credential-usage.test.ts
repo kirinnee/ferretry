@@ -267,3 +267,42 @@ describe('credentialUsageRows — environment logins (docs/provider-quotas.md)',
     should(rows[1]).not.have.property('balance');
   });
 });
+
+describe('credentialUsageRows with a limit proven by a pane', () => {
+  const limits = new Map([
+    ['claude-writer', { notice: "You've hit your org's monthly spend limit", spend: true, retryAt: 5_000 }],
+  ]);
+
+  it('should read a spend-limited login as at its limit, unavailable for spend_limit, until the reset', () => {
+    // Act
+    const rows = credentialUsageRows(
+      manifest(runtime(WRITER_ID, 'claude-writer', 'work'), runtime(REVIEWER_ID, 'claude-reviewer', 'other')),
+      [credential(), credential({ id: 'other' })],
+      limits,
+    );
+
+    // Assert
+    should(rows[0]).containEql({
+      agent: 'claude-writer',
+      atLimit: true,
+      unavailable: true,
+      unavailableReason: 'spend_limit',
+      availability: 'unavailable',
+      retryAt: 5_000,
+    });
+    should(rows[1]?.atLimit).be.false();
+    should(rows[1]?.unavailableReason).be.undefined();
+  });
+
+  it('should leave a login that needs signing in an auth problem', () => {
+    // Act
+    const [row] = credentialUsageRows(
+      manifest(runtime(WRITER_ID, 'claude-writer', 'work')),
+      [credential({ status: status('needs_sign_in') })],
+      limits,
+    );
+
+    // Assert
+    should(row?.unavailableReason).equal('auth');
+  });
+});

@@ -69,6 +69,8 @@ const TURN_STATUSES: ReadonlySet<SessionStatus> = new Set<SessionStatus>([
   'awaiting_user',
   'awaiting_question',
   'interrupted',
+  // A session parked on a usage-limit dialog (see ./usage-limit.ts) stays watched, so its release is seen.
+  'rate_limited',
 ]);
 
 /** Statuses that are, by their own account, waiting for the person. */

@@ -5,3 +5,4 @@ export * from './credential-usage.ts';
 export * from './quota.ts';
 export * from './types.ts';
 export * from './provider-quota/index.ts';
+export * from './pane-limit.ts';

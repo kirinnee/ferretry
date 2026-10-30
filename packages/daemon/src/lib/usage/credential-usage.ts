@@ -5,6 +5,7 @@ import type {
   FleetCredentialUsageWindow,
   FleetCredentialView,
 } from '@ferretry/protocol';
+import { limitedCredentials, type PaneLimit } from './pane-limit.ts';
 import { providerAccountFields } from './provider-quota/account.ts';
 import type { UsageSourcePort } from './types.ts';
 
@@ -29,6 +30,11 @@ export interface CredentialUsageSourceDeps {
   credentials(): Promise<FleetCredentialList>;
   /** The published manifest, or `undefined` when no apply has published one yet. */
   manifest(): Promise<FleetManifest | undefined>;
+  /**
+   * The limits live sessions' panes prove, by agent (executable name). Absent: none are read. A failure
+   * is no limits, not a failed feed: the pane evidence only ever adds a limit the provider did not say.
+   */
+  limits?(): Promise<ReadonlyMap<string, PaneLimit>>;
 }
 
 /**
@@ -47,7 +53,8 @@ export class CredentialUsageSource implements UsageSourcePort {
       const manifest = await this.deps.manifest();
       if (manifest === undefined) return undefined;
       const list = await this.deps.credentials();
-      return credentialUsageRows(manifest, list.credentials);
+      const limits = await this.deps.limits?.().catch(() => undefined);
+      return credentialUsageRows(manifest, list.credentials, limits);
     } catch {
       return undefined;
     }
@@ -58,11 +65,17 @@ export class CredentialUsageSource implements UsageSourcePort {
 export function credentialUsageRows(
   manifest: FleetManifest,
   credentials: readonly FleetCredentialView[],
+  paneLimits: ReadonlyMap<string, PaneLimit> = new Map(),
 ): readonly AccountUsage[] {
   const byId = new Map(credentials.map(credential => [credential.id, credential] as const));
-  return manifestRuntimes(manifest).flatMap(runtime => {
+  const runtimes = manifestRuntimes(manifest).map(runtime => ({
+    agent: wrapperNameOf(runtime.wrapper),
+    credential: runtime.credential,
+  }));
+  const limited = limitedCredentials(paneLimits, runtimes);
+  return runtimes.flatMap(runtime => {
     const credential = byId.get(runtime.credential);
-    return credential === undefined ? [] : [usageRow(wrapperNameOf(runtime.wrapper), credential)];
+    return credential === undefined ? [] : [usageRow(runtime.agent, credential, limited.get(runtime.credential))];
   });
 }
 
@@ -86,7 +99,7 @@ const resetAt = (window: FleetCredentialUsageWindow): number | undefined =>
  * An environment login's provider quota (`usage.provider`) adds what only it can say — money left,
  * this month's transcript cost, and an at-limit the provider itself reported.
  */
-function usageRow(agent: string, credential: FleetCredentialView): AccountUsage {
+function usageRow(agent: string, credential: FleetCredentialView, limit?: PaneLimit): AccountUsage {
   const word = credential.status.word;
   const known = word !== 'checking';
   const signedIn = word === 'ready' || word === 'refresh_due';
@@ -106,9 +119,16 @@ function usageRow(agent: string, credential: FleetCredentialView): AccountUsage 
           atLimit:
             fiveHour === 100 ||
             weekly === 100 ||
-            (credential.usage.provider?.via === 'endpoint' && credential.usage.provider.exhausted),
+            (credential.usage.provider?.via === 'endpoint' && credential.usage.provider.exhausted) ||
+            limit !== undefined,
         }
       : {}),
+    // A pane that says the login is spent outranks a feed that has not noticed. Only a signed-in login
+    // is relabelled: a rejected credential stays an `auth` problem for a person to fix.
+    ...(known && signedIn && limit?.spend === true
+      ? { availability: 'unavailable' as const, unavailable: true, unavailableReason: 'spend_limit' as const }
+      : {}),
+    ...(known && signedIn && limit?.retryAt !== undefined ? { retryAt: limit.retryAt } : {}),
     ...(fiveHour === undefined ? {} : { fiveHourPercent: fiveHour }),
     ...(weekly === undefined ? {} : { weeklyPercent: weekly }),
     ...(fiveHourReset === undefined ? {} : { fiveHourResetAt: fiveHourReset }),

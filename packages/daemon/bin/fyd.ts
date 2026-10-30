@@ -468,7 +468,7 @@ import {
   storedSessionStart,
   storedTranscriptProvenance,
 } from '../src/adapters/session/transcript/index.ts';
-import { StorageTurnPorts } from '../src/adapters/session/turn/index.ts';
+import { StorageTurnPorts, storagePaneLimits } from '../src/adapters/session/turn/index.ts';
 import { FileMcpProjectFiles } from '../src/adapters/session-mcp/project-files.ts';
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import { BunDetachedLauncher } from '../src/adapters/system/detached-launcher.ts';
@@ -692,6 +692,8 @@ import {
   type ConversionSummary as ConvertedConversationSummary,
   CredentialAgentIdentities,
   CredentialUsageSource,
+  limitedCredentials,
+  type PaneLimit,
   canServeModel,
   chooseRelayCarrierSources,
   choosesPortAtBind,
@@ -7226,6 +7228,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    */
   let credentialList: (() => Promise<FleetCredentialList>) | undefined;
   /**
+   * The limits live sessions' panes prove ("You've hit your org's monthly spend limit"), once storage is
+   * open. The usage feed lays them over its rows; until then it has none.
+   */
+  let paneLimits: (() => Promise<ReadonlyMap<string, PaneLimit>>) | undefined;
+  /**
    * Environment logins' provider quotas (docs/provider-quotas.md), once the subsystems are mounted. The
    * usage feed is built before them and lays these readings over its rows; until then it has none.
    */
@@ -8265,6 +8272,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
                 if (credentialList === undefined) throw new Error('the credentials surface is not mounted yet');
                 return await credentialList();
               },
+              limits: async () => (paneLimits === undefined ? new Map() : await paneLimits()),
             }),
             ...(config.usage.url === undefined ? [] : [new HttpUsageSource(config.usage.url)]),
           ],
@@ -10081,6 +10089,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // SETTLED: the feed caches this list for an interval, so a login being read right now is listed
       // with its last known word rather than a "Checking" that would outlive the read.
       credentialList = async () => await fleetCredentials.list({ settled: true });
+      paneLimits = async () => await storagePaneLimits(storage, Date.now());
       const terminalSubsystem = createTerminalSubsystem(storage, terminals, { now: () => Date.now() });
       // A session browser nobody watches or drives stops after this long, so a forgotten one does not
       // hold the one shared profile away from every other session.
@@ -10311,6 +10320,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             credentials: credentials.credentials,
             tools: machine.tools,
             unlaunchable,
+            paneLimits: limitedCredentials(
+              await storagePaneLimits(storage, Date.now()),
+              runtimes.runtimes.map(runtime => ({ agent: runtime.wrapper, credential: runtime.credential.id })),
+            ),
             now: clock.now(),
           };
         },

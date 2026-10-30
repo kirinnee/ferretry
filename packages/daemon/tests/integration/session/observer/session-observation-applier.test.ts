@@ -21,6 +21,7 @@ import {
   RuntimeEnvironment,
   SessionObservationApplier,
   SqliteHomeLockFactory,
+  storagePaneLimits,
   StateFileSystemFactory,
   StateHomeLayout,
   SystemClock,
@@ -273,5 +274,82 @@ describe('SessionObservationApplier', () => {
       status: 'awaiting_user',
       needsHumanKind: 'structured-answer-released-unconfirmed',
     });
+  });
+});
+
+describe('a session parked on the usage-limit dialog, over real storage', () => {
+  const dialog = {
+    id: '0123456789abcdef',
+    harness: 'claude',
+    kind: 'usage-limit',
+    title: 'What do you want to do?',
+    body: "You've hit your org's monthly spend limit",
+    options: [
+      { number: 1, label: 'Stop and wait for limit to reset', grantsTrust: false },
+      { number: 2, label: 'Wait here, then continue automatically at Nov 1, 12am', grantsTrust: false },
+    ],
+    selected: 1,
+  } as const;
+  const config = {
+    id: ID,
+    incarnation: 'i1',
+    runtimeGeneration: 1,
+    name: 'limited',
+    agent: 'claude-liftoff',
+    harness: 'claude',
+    modelHint: 'opus',
+    mode: 'auto',
+    remoteControl: false,
+    harnessFlags: [],
+    cwd: '/work',
+    createdAt: NOW,
+    updatedAt: NOW,
+    turn: 1,
+    intervalSeconds: 30,
+    timeoutSeconds: 600,
+    nudgeAfterSeconds: 120,
+    killAfterSeconds: 900,
+    directSendMaxChars: 4000,
+    resumeMenuChoice: 'full',
+    maxSnapshots: 5,
+    retry: { transientAttempts: 2, stalledAttempts: 1, waitForQuotaReset: true, allowAccountFailover: false },
+  };
+
+  it('should record rate_limited, prove the login spent, then release it when the dialog closes', async () => {
+    // Arrange
+    const storage = await openStorage();
+    await storage.writeConfig(ID, config);
+    await storage.writeState(ID, { id: ID, status: 'running', turn: 1, turnState: 'working' });
+    const subject = new SessionObservationApplier(
+      storage,
+      { all: noReceipts, append: async () => {} },
+      new KeyedSerialExecutor(),
+    );
+    const nowMs = Date.parse(NOW);
+
+    // Act
+    await subject.apply(ID, { kind: 'turn', change: { from: 'working', to: 'needs-input', dialog } as never }, NOW);
+    const limits = await storagePaneLimits(storage, nowMs);
+    await subject.apply(ID, { kind: 'turn', change: { from: 'needs-input', to: undefined } }, NOW);
+    const after = await storagePaneLimits(storage, nowMs);
+
+    // Assert
+    should([...limits.keys()]).deepEqual(['claude-liftoff']);
+    should(limits.get('claude-liftoff')?.spend).be.true();
+    should(after.size).equal(0);
+    should(((await storage.readState(ID)) as { status: string }).status).equal('running');
+  });
+
+  it('should skip a limited session whose documents cannot be read', async () => {
+    // Arrange
+    const storage = await openStorage();
+    await storage.writeConfig(ID, { id: ID });
+    await storage.writeState(ID, { id: ID, status: 'rate_limited', turn: 1 });
+
+    // Act
+    const limits = await storagePaneLimits(storage, Date.parse(NOW));
+
+    // Assert
+    should(limits.size).equal(0);
   });
 });
