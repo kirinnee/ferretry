@@ -597,7 +597,9 @@ reviewer checks.
 - **A control client can mutate the pane.** Because the client is not `read-only` (§3.2), a bug in
   the worker could type into an agent. The allowlist is the guard; a unit test feeds every non-read command to
   the worker's control adapter and requires a refusal.
-- **Shutdown order**: workers drain (≤ 1 s) and terminate before storage closes; cleanups are registered after the
+- **Shutdown order**: each started worker is told `stop`, ends every tmux client it started and answers `stopped` once
+  their processes have exited (≤ 5 s, then it is terminated anyway) — a client left to notice the daemon's exit can
+  wedge with its server on a `kill-server` — and workers terminate before storage closes; cleanups are registered after the
   storage open, so they run first. A patch arriving after storage closed is dropped and logged, never written.
 - **Transcript resolution stays on main** (Codex rollout discovery reads every session's claims). It runs only until
   a session's transcript is bound, then never again for that session; it moves to the housekeeping worker in stage 4.

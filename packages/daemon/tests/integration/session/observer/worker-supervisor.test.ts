@@ -475,6 +475,48 @@ describe('WorkerSupervisor', () => {
     should(workers.length).equal(1);
   });
 
+  it('should have every started thread end its tmux clients, and end the threads only once each said stopped', async () => {
+    // Arrange — two started threads, and a third still loading that was handed a session.
+    const { subject, workers } = rig(8, { startConcurrency: 3 });
+    subject.reconcile([wanted(A), wanted(B), wanted(C)]);
+    workers[0]?.ready();
+    workers[1]?.ready();
+
+    // Act — one answers at once; the other only later.
+    const stopping = subject.stop();
+    workers[0]?.answer({ kind: 'stopped' });
+    await Promise.resolve();
+    const beforeSecond = workers.map(worker => worker.terminated);
+    workers[1]?.answer({ kind: 'stopped' });
+    await stopping;
+
+    // Assert — stop went to the started threads; the loading one learned nothing; all ended after the answers.
+    should(workers[0]?.kinds()).deepEqual(['probe', 'attach', 'stop']);
+    should(workers[1]?.kinds()).deepEqual(['probe', 'attach', 'stop']);
+    should(workers[2]?.kinds()).deepEqual(['probe']);
+    should(beforeSecond).deepEqual([false, false, false]);
+    should(workers.map(worker => worker.terminated)).deepEqual([true, true, true]);
+    should(subject.reconcile([wanted(A)])).deepEqual([]);
+  });
+
+  it('should end a thread that never says stopped once the wait is over', async () => {
+    // Arrange
+    const { subject, workers, advance } = rig();
+    subject.reconcile([wanted(A)]);
+    workers[0]?.ready();
+
+    // Act
+    const stopping = subject.stop(5_000);
+    await Promise.resolve();
+    const beforeDeadline = workers[0]?.terminated;
+    advance(5_000);
+    await stopping;
+
+    // Assert
+    should(beforeDeadline).be.false();
+    should(workers[0]?.terminated).be.true();
+  });
+
   it('should still end a thread whose termination throws because it is already gone', async () => {
     // Arrange — a thread that crashes and then cannot be terminated, as one that has already exited.
     const { subject, workers, advance } = rig();

@@ -99,6 +99,8 @@ interface Thread {
   ready: boolean;
   ended: boolean;
   drain: (() => void) | undefined;
+  /** Called when the thread answers `stopped`, while {@link WorkerSupervisor.stop} waits for it. */
+  stopped: (() => void) | undefined;
 }
 
 interface Placement {
@@ -289,10 +291,45 @@ export class WorkerSupervisor {
     for (const thread of [...this.threads.values()]) this.end(thread, new Error('the session workers were closed'));
   }
 
+  /**
+   * {@link close}, but first has every thread that has started end its tmux clients and answer once they
+   * have EXITED — waiting at most `withinMs` for each. WHAT A STOPPING DAEMON CALLS: a terminated
+   * thread's clients would be left to notice the daemon's exit, and a `kill-server` while one is still
+   * detaching keeps the server and the client running for good. A thread still loading was told nothing
+   * but the probe, so it started no client and is simply ended.
+   */
+  async stop(withinMs = 5_000): Promise<void> {
+    this.closed = true;
+    const started = [...this.threads.values()].filter(thread => thread.ready && !thread.ended);
+    await Promise.all(
+      started.map(
+        async thread =>
+          await new Promise<void>(resolve => {
+            const cancel = this.ports.schedule(withinMs, resolve);
+            thread.stopped = () => {
+              cancel();
+              resolve();
+            };
+            this.post(thread.id, { kind: 'stop' });
+          }),
+      ),
+    );
+    this.close();
+  }
+
   private start(): Thread {
     const id = this.nextThread++;
     const worker = this.ports.spawn();
-    const thread: Thread = { id, worker, sessions: new Set(), held: [], ready: false, ended: false, drain: undefined };
+    const thread: Thread = {
+      id,
+      worker,
+      sessions: new Set(),
+      held: [],
+      ready: false,
+      ended: false,
+      drain: undefined,
+      stopped: undefined,
+    };
     this.threads.set(id, thread);
     worker.unref?.();
     worker.onmessage = event => this.receive(thread, event.data);
@@ -369,6 +406,9 @@ export class WorkerSupervisor {
         return;
       case 'fault':
         if (message.fatal) this.crash(thread.id, message.message);
+        return;
+      case 'stopped':
+        thread.stopped?.();
         return;
     }
   }

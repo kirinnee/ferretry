@@ -291,14 +291,14 @@ export class WorkerObserverHost implements SessionObserverHost {
     return await this.ports.inline.sendEvidence(id, since);
   }
 
-  close(): void {
+  async close(): Promise<void> {
     this.armed = false;
     this.next?.cancel();
     this.next = undefined;
     this.unsubscribe();
     for (const watch of this.watches.values()) watch.close();
     this.watches.clear();
-    this.ports.supervisor.close();
+    await this.ports.supervisor.stop();
   }
 
   /** Every hosted session's transcript, watched; a session no worker hosts any more, no longer. */

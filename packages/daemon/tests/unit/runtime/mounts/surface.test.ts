@@ -522,7 +522,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     midTurn: async () => 0,
     pane: async () => undefined,
     sendEvidence: async () => ({ readable: false, inputs: [] }),
-    close: () => undefined,
+    close: async () => undefined,
   },
   sessionMigrate: new FakeSessionMigrate(),
   // The quota-failover loop serves no route either, and for the same reason the declared-wait loop

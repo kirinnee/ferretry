@@ -11431,9 +11431,11 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // changes, and this thread reconciles which session has a worker when something changes — observing on a
   // 2 s cadence only a session no worker has. Spends no tokens.
   subsystems.observer.arm();
-  cleanups.push(() => {
-    // The session workers, and the tmux clients they hold, end with the observer.
-    subsystems.observer.close();
+  cleanups.push(async () => {
+    // The session workers, and the tmux clients they hold, end with the observer — the clients WAITED
+    // OUT, as the shared one is: a client left to notice this process's exit is still on its server
+    // after the process has gone.
+    await subsystems.observer.close();
   });
   cleanups.push(async () => {
     clearInterval(waitTicks);
