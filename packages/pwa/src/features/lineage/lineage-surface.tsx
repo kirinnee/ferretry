@@ -138,9 +138,9 @@ function SessionLineageLink({
       data-lineage-tree-depth={displayDepth}
       title={[label.full, mark.label, contextNote].filter(Boolean).join('\n')}
       className={cn(
-        'group relative flex min-h-[44px] w-full min-w-0 items-center gap-xs border-l-heavy px-2 py-1 text-left',
+        'group relative flex min-h-[44px] w-full min-w-0 items-center gap-xs px-2 py-1 text-left',
         'hover:bg-surface-2 focus-visible:bg-surface-2',
-        current ? 'border-l-accent bg-accent-soft' : 'border-l-transparent',
+        current && 'bg-accent-soft',
         !matchesFilter && 'bg-surface-2',
       )}
     >
@@ -283,8 +283,8 @@ function ParentIssue({
           : 'The configured parent session no longer resolves'
       }
       className={cn(
-        'relative flex min-h-[44px] min-w-0 items-center gap-xs border-l-heavy px-2 py-1',
-        invalid ? 'border-l-warn' : 'border-l-err',
+        'relative flex min-h-[44px] min-w-0 items-center gap-xs px-2 py-1',
+        invalid ? 'bg-warn-bg' : 'bg-err-bg',
       )}
     >
       {hasChildren && (

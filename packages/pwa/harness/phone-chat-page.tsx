@@ -17,6 +17,7 @@ import { createRoot } from 'react-dom/client';
 import { SessionSearchProvider } from '../src/features/session-search/session-search.tsx';
 import { useAppViewport } from '../src/hooks/use-app-viewport.ts';
 import { useLayoutMode } from '../src/hooks/use-layout-mode.ts';
+import { DaemonAgendaClient } from '../src/lib/agenda-client.ts';
 import { agendaTargetFromSearch } from '../src/lib/agenda-inbox.ts';
 import { DaemonBoardStore } from '../src/lib/board-store.ts';
 import { daemonSessionScope } from '../src/lib/daemon-scope.ts';
@@ -40,6 +41,8 @@ const ago = (minutes: number): string => new Date(NOW - minutes * 60_000).toISOS
 const ID = 'mvgt2oz9-04e28935';
 const params = new URLSearchParams(window.location.search);
 const idle = params.get('turn') === 'idle';
+const withInfo = params.get('info');
+const alone = params.has('alone');
 
 const A55 = {
   id: 'A55',
@@ -100,6 +103,44 @@ const SESSION = {
   directory: '/home/kirin/Workspace/personal/ferretry',
   outdated: { sections: ['pack'] },
 } as unknown as SessionView;
+
+const CHILD_STATES = [
+  'working',
+  'working',
+  'working',
+  'working',
+  'working',
+  'working',
+  'done',
+  'done',
+  'done',
+] as const;
+/** Nine sub-ferrets the lead started (six at work, three done): the owner's "9 sub-ferrets" header. */
+const CHILDREN: readonly SessionView[] = alone
+  ? []
+  : CHILD_STATES.map((state, index) => {
+      const base = SESSION as unknown as { config: object; state: object };
+      return {
+        ...base,
+        config: {
+          ...base.config,
+          id: `child-${index}`,
+          name: `Unit ${index + 1}`,
+          teammate: `sub${index + 1}`,
+          parent: ID,
+          focusTask: undefined,
+          createdAt: ago(300 - index),
+        },
+        state: {
+          ...base.state,
+          id: `child-${index}`,
+          status: state === 'done' ? 'stopped' : 'running',
+          turnState: state === 'done' ? 'your-turn' : 'working',
+          promptReady: state === 'done',
+          agenda: undefined,
+        },
+      } as unknown as SessionView;
+    });
 
 const LINES = [
   'Picked up the daemon problems from this morning and split them across the pack.',
@@ -181,9 +222,17 @@ function Harness() {
           chatWidth="readable"
           client={CLIENT}
           connection={laptop}
-          daemonSessions={[session]}
+          context={{
+            attention: new DaemonAgendaClient(undefined, async () => Response.json({}, { status: 503 })),
+            createFleetClient: async () => {
+              throw new Error('the harness has no fleet');
+            },
+            machineName: 'laptop',
+          }}
+          daemonSessions={[session, ...CHILDREN]}
           dictationSettings={DEFAULT_STT_SETTINGS}
           entries={ENTRIES}
+          {...(withInfo === null ? {} : { initialInfo: 'overview' as const })}
           onNavigate={to => window.history.pushState(null, '', `#nav=${to}`)}
           onOpenSessions={() => undefined}
           onSessionChange={setSession}

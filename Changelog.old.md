@@ -1,3 +1,26 @@
+## [4.134.1](https://github.com/kirinnee/ferretry/compare/v4.134.0...v4.134.1) (2026-10-30)
+
+### Fixes
+
+* **pwa:** call the agenda client on itself when a card opens ([#1029](https://github.com/kirinnee/ferretry/issues/1029)) ([268b27a](https://github.com/kirinnee/ferretry/commit/268b27a3b9564339a5b482755a3768ffcba6e773))
+
+## [4.134.0](https://github.com/kirinnee/ferretry/compare/v4.133.0...v4.134.0) (2026-10-30)
+
+### Features
+
+* **daemon:** who a queued message is from is metadata, never text (QueuedMessage.by) ([#1025](https://github.com/kirinnee/ferretry/issues/1025)) ([4980a8e](https://github.com/kirinnee/ferretry/commit/4980a8ec8034839f285a322de9853c652ebaf30d))
+
+## [4.133.0](https://github.com/kirinnee/ferretry/compare/v4.132.0...v4.133.0) (2026-10-30)
+
+### Features
+
+* **pwa:** ClickUp-dense Board cards on a phone ([#1012](https://github.com/kirinnee/ferretry/issues/1012)) ([6714f5f](https://github.com/kirinnee/ferretry/commit/6714f5f968afa2b7e043e01b7943d31cc8704855))
+
+### Fixes
+
+* **daemon:** read a multi-paragraph Codex draft down to the cursor; a may-have-landed message is unconfirmed, not failed ([#1024](https://github.com/kirinnee/ferretry/issues/1024)) ([78be655](https://github.com/kirinnee/ferretry/commit/78be6553bd9138ebc2d35a561ac09fd95efab9f7))
+* **pwa:** withdraw the recovery chip once a page renders again ([#1027](https://github.com/kirinnee/ferretry/issues/1027)) ([9512b42](https://github.com/kirinnee/ferretry/commit/9512b42baab9d421508413fdf50889ccac7f29bb))
+
 ## [4.132.0](https://github.com/kirinnee/ferretry/compare/v4.131.0...v4.132.0) (2026-10-30)
 
 ### Features

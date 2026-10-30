@@ -36,19 +36,10 @@ import {
 } from '@ferretry/protocol';
 import { effectiveAssignee } from './authority.ts';
 import { cardCategory } from './graph.ts';
-import type { PendingContext } from './pending-context.ts';
-import type {
-  BoardClock,
-  BoardDiagnostics,
-  LaneProposer,
-  LaneSetSource,
-  ProjectAdopter,
-  SessionFocus,
-  SessionParents,
-} from './ports.ts';
+import type { BoardDiagnostics, LaneProposer, LaneSetSource, ProjectAdopter, SessionFocus } from './ports.ts';
 import type { BoardService, SignalDoneOutcome } from './service.ts';
 import { BoardError } from './errors.ts';
-import { clip, doneQuietText } from './signal-done.ts';
+import { clip } from './signal-done.ts';
 
 /** The longest ask a card keeps; a longer brief is cut, and the brief field says so. */
 const MAX_ASK_LENGTH = MAX_BOARD_BRIEF_LENGTH;
@@ -72,9 +63,6 @@ export interface SessionCardsPorts {
   readonly adoption?: ProjectAdopter;
   readonly projects: BoardProjectNames;
   readonly focus: Pick<SessionFocus, 'anchorOf'>;
-  readonly parents: SessionParents;
-  readonly pending: PendingContext;
-  readonly clock: BoardClock;
   readonly diagnostics: BoardDiagnostics;
   /** The shipped command name, so every command a note prints exists after a rename. */
   readonly bin: string;
@@ -342,9 +330,9 @@ export class SessionCards {
   }
 
   /**
-   * `fy signal done` on the board: the note and the move ({@link BoardService.signalDone}), then a quiet
-   * line to the lead — the card's owner when it is someone else, else the session's own parent. Never
-   * rejects: the signal is already recorded.
+   * `fy signal done` on the board: the note and the move ({@link BoardService.signalDone}). Nothing is
+   * typed into the lead's chat: the done message reaches it through `fy wait`, in the ferret's own words,
+   * and the board shows the move. Never rejects: the signal is already recorded.
    */
   async signalled(sessionId: string, message: string | undefined): Promise<SignalDoneOutcome | null> {
     let outcome: SignalDoneOutcome | null;
@@ -353,23 +341,6 @@ export class SessionCards {
     } catch (error) {
       this.ports.diagnostics.warn(`could not record ${sessionId}'s done on its card: ${said(error)}`);
       return null;
-    }
-    if (outcome === null) return null;
-    const lead = outcome.task.owner === sessionId ? await this.ports.parents.parentOf(sessionId) : outcome.task.owner;
-    if (lead !== undefined && lead !== sessionId) {
-      await this.ports.pending
-        .append(lead, [
-          {
-            key: `${outcome.task.id}:done`,
-            text: doneQuietText(outcome.task, outcome.moved, message),
-            at: this.ports.clock.now(),
-          },
-        ])
-        .catch((error: unknown) =>
-          this.ports.diagnostics.warn(
-            `could not tell ${lead} that ${formatTaskRef(outcome.task)} is done: ${said(error)}`,
-          ),
-        );
     }
     return outcome;
   }

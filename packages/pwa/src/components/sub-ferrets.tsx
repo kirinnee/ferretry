@@ -1,27 +1,24 @@
 /**
  * A PARENT'S VIEW OF ITS PACK — the sub-ferrets a ferret started, seen from the parent (docs/pack-mode.md).
  *
- * The child already says "Started by <parent>". This is the other direction, in two places that read the
- * same rows: the desktop session bar's indicator ("3 sub-ferrets · 1 running", which opens the list) and
- * Info's lineage list. Both are about the ACTIVE pack: a finished, stopped or failed sub-ferret is not
- * counted in the bar and sits behind "Show finished (n)" in Info, so a long-running parent's history
- * cannot flood either. A phone's bar draws no indicator at all — Info › Sub-ferrets is its way in. Each row is the sub-ferret's name as a link, how it is doing now — with the reason
- * when it failed, stopped or wants you — and the model it runs on (`lib/sub-ferret-state.ts`).
+ * The child already says "Started by <parent>". This is the other direction: Info's "About this ferret"
+ * block lists the ACTIVE pack, and a finished, stopped or failed sub-ferret sits behind "Show finished (n)"
+ * so a long-running parent's history cannot flood it. The session bar draws no indicator at all. Each row
+ * is the sub-ferret's name as a link, how it is doing now — with the reason when it failed, stopped or
+ * wants you — and the model it runs on (`lib/sub-ferret-state.ts`).
  *
  * The rows are live because the session list they come from is: the page re-reads it, and nothing here
  * keeps a copy.
  */
 
 import type { SessionView } from '@ferretry/protocol';
-import { Network } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import {
   type SubFerretReading,
   subFerretLive,
   subFerretModel,
   subFerretName,
   subFerretState,
-  subFerretSummary,
 } from '../lib/sub-ferret-state.ts';
 
 /** One sub-ferret as a row shows it. */
@@ -130,68 +127,5 @@ export function SubFerretsPack({
         </>
       )}
     </div>
-  );
-}
-
-/**
- * The desktop session bar's indicator: the summary of the ACTIVE sub-ferrets as a button that opens the
- * list beneath it. Nothing active, nothing drawn. (The bar itself leaves it out on a phone.)
- */
-export function SubFerretIndicator({
-  sessions,
-  onOpenSession,
-}: {
-  /** The sub-ferrets, as `subFerretsOf` lists them; only the active ones are shown and counted. */
-  readonly sessions: readonly SessionView[];
-  readonly onOpenSession?: (sessionId: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const root = useRef<HTMLSpanElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: Event): void => {
-      if (event instanceof KeyboardEvent && event.key !== 'Escape') return;
-      if (event.type === 'pointerdown' && root.current?.contains(event.target as Node) === true) return;
-      setOpen(false);
-    };
-    document.addEventListener('keydown', close);
-    document.addEventListener('pointerdown', close);
-    return () => {
-      document.removeEventListener('keydown', close);
-      document.removeEventListener('pointerdown', close);
-    };
-  }, [open]);
-  const active = activeSubFerrets(sessions);
-  if (active.length === 0) return null;
-  const summary = subFerretSummary(active);
-  const items = subFerretItems(
-    active,
-    onOpenSession === undefined
-      ? undefined
-      : (id: string) => {
-          setOpen(false);
-          onOpenSession(id);
-        },
-  );
-  return (
-    <span className="fy-sub-ferret-indicator" data-sub-ferrets="" ref={root}>
-      <button
-        aria-expanded={open}
-        className="fy-sub-ferret-toggle"
-        data-sub-ferret-toggle=""
-        onClick={() => setOpen(current => !current)}
-        title={summary}
-        type="button"
-      >
-        <Network aria-hidden="true" size={13} />
-        <span>{summary}</span>
-      </button>
-      {open ? (
-        <div className="fy-sub-ferret-popover" data-sub-ferret-popover="">
-          <p className="fy-sub-ferret-popover-title">{summary}</p>
-          <SubFerretList items={items} />
-        </div>
-      ) : null}
-    </span>
   );
 }

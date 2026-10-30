@@ -8,7 +8,7 @@
  */
 
 import type { BoardActivityFilter, BoardProjectId } from '@ferretry/protocol';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Spinner } from '../../components/spinner.tsx';
 import {
   useBoard,
@@ -382,10 +382,20 @@ export function BoardPage({
     [model.cards, places, openCard],
   );
   const composeMachine = detailMachine ?? machines[0];
-  const detailAgenda =
-    agenda.hydrate !== undefined && agenda.store !== undefined
-      ? { hydrate: agenda.hydrate, respond: agenda.respond, store: agenda.store }
-      : null;
+  // CALLED ON `agenda`, NEVER COPIED OFF IT. The app passes the agenda client itself, a class whose methods
+  // read its own private fields; `{ hydrate: agenda.hydrate }` detached them from it, so the drawer's first
+  // hydrate threw "Receiver must be an instance of class" during render and every card — opened from the
+  // Board or a chat's `&task` — fell to "reload to recover" (2026-10-30). Memoised as well: a new object each
+  // render re-ran the drawer's hydrate effect on every render.
+  const detailAgenda = useMemo((): BoardAgenda | null => {
+    const { hydrate, store: agendaStore } = agenda;
+    if (hydrate === undefined || agendaStore === undefined) return null;
+    return {
+      hydrate: (daemon, scope) => hydrate.call(agenda, daemon, scope),
+      respond: (...args) => agenda.respond(...args),
+      store: agendaStore,
+    };
+  }, [agenda]);
   const closeDetail = useCallback(() => {
     if (openCard !== null) onNavigate(daemonBoardPath(openCard.daemonId));
   }, [openCard, onNavigate]);
@@ -431,12 +441,29 @@ export function BoardPage({
       </button>
     );
 
+  // `?highlight=F11` (Info's "Open board"): the card is marked and scrolled to, and the mark follows it through refreshes.
+  const highlight = params.get('highlight');
+  const pageRef = useRef<HTMLElement | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `model` is the trigger — a refresh redraws the cards, so the mark is laid again
+  useEffect(() => {
+    const page = pageRef.current;
+    if (page === null || highlight === null || highlight === '') return;
+    const cards = [...page.querySelectorAll<HTMLElement>('[data-task]')].filter(
+      card => card.dataset['task'] === highlight,
+    );
+    for (const card of cards) card.setAttribute('data-highlighted', '');
+    cards[0]?.scrollIntoView?.({ block: 'center', inline: 'nearest' });
+    return () => {
+      for (const card of cards) card.removeAttribute('data-highlighted');
+    };
+  }, [highlight, model]);
+
   const hideClosed = filters.state === 'open';
   const reading = board.status === 'loading' || board.status === 'idle';
   const failed = board.status === 'error';
 
   return (
-    <section aria-label="Board" className="fy-board" data-phone={phone ? '' : undefined} data-view={view}>
+    <section aria-label="Board" className="fy-board" data-phone={phone ? '' : undefined} data-view={view} ref={pageRef}>
       <header className="fy-board__head">
         {phone ? null : <h1 className="fy-board__title">Board</h1>}
         <nav aria-label="Board views" className="fy-board__views">

@@ -198,14 +198,14 @@ export const applyPrUpdate = (card: BoardTask, update: PrUpdate, context: CardCo
       nudges.push({
         reason: 'closed-unmerged',
         sessionId: card.owner,
-        message: `[board] ${ref} ${name} was closed without merging — reopen it, link its replacement, or drop the card`,
+        message: `${ref} ${name} was closed without merging. Reopen it, link its replacement, or drop the card.`,
       });
     }
     if (change.turnedRed) {
       nudges.push({
         reason: 'ci-failing',
         sessionId: effectiveAssignee(card),
-        message: `[board] ${ref} ${name} CI is red — fix it, or note on the card why it can stay red`,
+        message: `${ref} ${name} CI is red. Fix it, or note on the card why it can stay red.`,
       });
     }
   }

@@ -554,7 +554,8 @@
 }
 .fy-session-bar[data-compact] {
   gap: var(--gap-xs);
-  padding: 6px 8px;
+  min-height: 48px;
+  padding: 2px 6px;
 }
 .fy-session-bar__who {
   display: flex;
@@ -580,15 +581,6 @@
   flex-shrink: 0;
   color: var(--muted);
   font-size: var(--text-sm);
-  white-space: nowrap;
-}
-.fy-session-bar__project {
-  flex-shrink: 1;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--muted);
-  font-size: var(--text-sm);
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .fy-session-bar__status {
@@ -1003,26 +995,6 @@
 }
 .fy-sbar--drawer .fy-sbar__fold {
   min-height: 44px;
-}
-
-/* The header's "Started by <parent>": quiet text that is a link. */
-.fy-session-bar__started-by {
-  flex-shrink: 1;
-  min-width: 0;
-  overflow: hidden;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  font-size: var(--text-sm);
-  text-decoration: underline;
-  text-decoration-color: var(--border-strong, var(--border));
-  text-overflow: ellipsis;
-  text-underline-offset: 2px;
-  white-space: nowrap;
-}
-.fy-session-bar__started-by:hover {
-  color: var(--fg);
 }
 
 /* ── REORDERING MACHINES ─────────────────────────────────────────────────────────────────────────

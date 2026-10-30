@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type BoardTaskEvent, parseFerretryNotice, type PrLink } from '@ferretry/protocol';
+import type { BoardTaskEvent, PrLink } from '@ferretry/protocol';
 import should from 'should';
 import {
   FOCUS_HISTORY_LINES,
@@ -152,21 +152,19 @@ describe('focusCardBrief', () => {
 describe('wardenResumeMessage', () => {
   it('should say the Warden resumed the ferret, why, and hand it the card', () => {
     // Act
-    const text = parseFerretryNotice(
-      wardenResumeMessage('resume', 'its turn died but the work should continue.', focus()),
-    );
+    const text = wardenResumeMessage('resume', 'its turn died but the work should continue.', focus());
 
     // Assert
-    should(text).startWith('The Warden resumed you: its turn died but the work should continue.\n\n');
-    should(text).containEql('This notice is from Ferretry, not from the owner.');
+    should(text).startWith("Ferretry's Warden resumed you: its turn died but the work should continue.");
+    should(text).not.containEql('not from the owner');
     should(text).containEql('continue from where you stopped, on the card below.\n\nYour card: &F1 — Ship the thing');
   });
 
   it('should say a restart kept the conversation', () => {
     // Act
-    const text = parseFerretryNotice(wardenResumeMessage('restart', 'its process is frozen', focus()));
+    const text = wardenResumeMessage('restart', 'its process is frozen', focus());
 
     // Assert
-    should(text).startWith('The Warden restarted you with your conversation intact: its process is frozen.');
+    should(text).startWith("Ferretry's Warden restarted you with your conversation intact: its process is frozen.");
   });
 });

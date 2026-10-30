@@ -39,7 +39,7 @@ export function ImportedHistoryPage({ connection, readHistory, readConversation 
         <p className="fy-eyebrow [overflow-wrap:anywhere]">Archive · {connection.daemonId}</p>
         <PageThemeSwitch />
       </div>
-      <div className="mt-2 border-l-heavy border-accent pl-5">
+      <div className="mt-2">
         <h1 id="imported-history-heading" className="font-display text-3xl font-bold tracking-display">
           Imported history
         </h1>

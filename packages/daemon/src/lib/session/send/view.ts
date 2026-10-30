@@ -103,11 +103,16 @@ export class TranscriptSendEvidence implements SendEvidenceSource {
       return { readable: false, inputs: [] };
     }
     let watch: SendEvidenceWatch = { inputs: held.inputs, blind: held.partial, partial: held.partial };
-    const finished = await drainTranscriptWindow(held.window, batch => {
+    const drained = await drainTranscriptWindow(held.window, batch => {
       watch = foldSendEvidenceBatch(watch, batch);
-    }).catch(() => false);
+    }).then(
+      finished => (finished ? ('finished' as const) : ('reading' as const)),
+      () => 'failed' as const,
+    );
     this.hold(id, { ...held, inputs: watch.inputs.slice(-HELD_INPUTS), partial: watch.partial });
-    return { readable: finished && !watch.blind, inputs: watch.inputs };
+    // A look that stopped at its step budget kept its place and has more to read: catching up, not blind.
+    if (drained === 'reading' && !watch.blind) return { readable: false, catchingUp: true, inputs: watch.inputs };
+    return { readable: drained === 'finished' && !watch.blind, inputs: watch.inputs };
   }
 
   private async open(target: TranscriptTarget, from: number): Promise<HeldWindow | undefined> {

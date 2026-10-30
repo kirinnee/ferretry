@@ -124,6 +124,22 @@ export const whatsNewPaletteCommand = (Icon: LucideIcon, run: () => void): Palet
   Icon,
 });
 
+export const BOARD_FOR_FERRET_SEARCH_TERMS = 'board for this ferret cards tasks kanban project mine';
+
+/** "Board for <ferret>": the project Board narrowed to the ferret the reader is chatting with. */
+export const boardForFerretPaletteCommand = (
+  ferretName: string,
+  Icon: LucideIcon,
+  run: () => void,
+): PaletteCommand => ({
+  id: 'board-for-ferret',
+  label: `Board for ${ferretName}`,
+  description: "Open the board filtered to this ferret's cards.",
+  searchTerms: BOARD_FOR_FERRET_SEARCH_TERMS,
+  run,
+  Icon,
+});
+
 export const pairPhonePaletteCommand = (
   label: string,
   description: string,

@@ -17,7 +17,6 @@ import type {
   WardenVerdict,
 } from '@ferretry/protocol';
 import type { ReactNode } from 'react';
-import type { ChatChip } from '../../lib/board-chat.ts';
 import type { ResolvedQuota } from '../../lib/usage.ts';
 import { ContextRailBody, type ContextRailBodyProps } from '../context-rail/context-rail-body.tsx';
 import { FOLDER_TABS, loadedSkillCount } from '../context-rail/context-rail-model.ts';
@@ -26,6 +25,7 @@ import type { ContextLoader } from '../context-rail/context-rail-ports.ts';
 import { useContextSignals } from '../context-rail/context-rail-signals.tsx';
 import type { ClipboardWriter } from '../onboarding/copy-button.tsx';
 import type { SurfaceDriving } from '../workspace/use-surface-driving.ts';
+import type { InfoAboutProps } from './info-about.tsx';
 import { InfoOverview } from './info-overview.tsx';
 import { INFO_TABS } from './info-model.ts';
 import { InfoPanel } from './info-panel.tsx';
@@ -68,7 +68,9 @@ export interface SessionInfoProps {
   readonly onRename?: () => void;
   readonly onOpenSession?: (sessionId: string) => void;
   /** This ferret's card, when the host has a board: the Overview's Card row and the Tasks tab. */
-  readonly card?: { readonly chip: ChatChip; readonly onOpen: () => void; readonly tasks: ReactNode };
+  readonly card?: NonNullable<InfoAboutProps['card']> & { readonly tasks: ReactNode };
+  /** The capability switches, Restart and agenda rows of Overview's "About this ferret" block. */
+  readonly about?: Pick<InfoAboutProps, 'switches' | 'onRestart' | 'agenda'>;
   readonly onOpenAnalytics?: () => void;
   /** The model and effort pickers, when the host has them (another surface owns them). */
   readonly runtimeControls?: ReactNode;
@@ -122,6 +124,7 @@ export function SessionInfo({
   onRename,
   onOpenSession,
   card,
+  about,
   onOpenAnalytics,
   runtimeControls,
   learning,
@@ -175,7 +178,16 @@ export function SessionInfo({
             {...(sessions === undefined ? {} : { sessions })}
             {...(onRename === undefined ? {} : { onRename })}
             {...(onOpenSession === undefined ? {} : { onOpenSession })}
-            {...(card === undefined ? {} : { card: { chip: card.chip, onOpen: card.onOpen } })}
+            {...(card === undefined
+              ? {}
+              : {
+                  card: {
+                    chip: card.chip,
+                    onOpen: card.onOpen,
+                    ...(card.onOpenBoard === undefined ? {} : { onOpenBoard: card.onOpenBoard }),
+                  },
+                })}
+            {...(about === undefined ? {} : { about })}
           />
         ),
         tasks: () => card?.tasks ?? null,

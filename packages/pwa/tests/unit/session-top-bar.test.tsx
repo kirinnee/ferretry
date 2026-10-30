@@ -29,9 +29,7 @@ describe('what titles a chat', () => {
 
   test('the callsign is a secondary line on a desktop, absent on a phone and when it would repeat the title', async () => {
     const draw = async (compact: boolean, config: object) => {
-      view = await mount(
-        <SessionTopBar actions={null} compact={compact} project={null} session={sessionView('s1', { config })} />,
-      );
+      view = await mount(<SessionTopBar actions={null} compact={compact} session={sessionView('s1', { config })} />);
       const bar = must(view.container.querySelector('[data-session-bar]'), 'the session bar');
       const out = [bar.querySelector('h1')?.textContent, bar.querySelector('[data-session-callsign]')?.textContent];
       await view.unmount();
@@ -45,7 +43,7 @@ describe('what titles a chat', () => {
 });
 
 describe('SessionTopBar', () => {
-  test('draws the name, project and status in one row, with the actions, ⓘ Info and the Actions menu', async () => {
+  test('draws the name, status, actions, ⓘ Info and the menu in one row, and nothing else', async () => {
     let toggled = 0;
     view = await mount(
       <SessionTopBar
@@ -58,7 +56,6 @@ describe('SessionTopBar', () => {
           </button>
         }
         onToggleInfo={() => (toggled += 1)}
-        project="ferretry"
         session={sessionView('s1', { config: { teammate: 'hadi', name: 'Fix the sign-in', label: 'diene-cyan' } })}
         status={<span data-extra="">needs you</span>}
       />,
@@ -67,57 +64,58 @@ describe('SessionTopBar', () => {
     expect(bar.querySelector('h1')?.textContent).toBe('Fix the sign-in');
     expect(bar.querySelector('[data-session-callsign]')?.textContent).toBe('Hadi');
     expect(bar.querySelector('.fy-session-bar__who')?.getAttribute('title')).toBe('Fix the sign-in — Hadi');
-    expect(bar.querySelector('.fy-session-bar__project')?.textContent).toBe('ferretry');
     expect(bar.querySelector('.fy-session-bar__word')?.textContent).toBe('running');
     expect(bar.querySelector('[data-extra]')).not.toBeNull();
     expect(bar.querySelector('[data-session-bar-sessions]')).toBeNull();
     expect(bar.querySelector('[data-menu-slot]')).not.toBeNull();
-    // The old ⋯ menu is gone: LOOK is Info, DO is Actions.
+    expect(bar.querySelector('[data-session-actions] button')?.textContent).toBe('Interrupt');
     expect(bar.querySelector('[data-session-more]')).toBeNull();
 
     const info = must(bar.querySelector<HTMLButtonElement>('[data-session-info-toggle]'), 'the ⓘ toggle');
     expect(info.getAttribute('aria-pressed')).toBe('true');
-    // On a desktop the word is the label; no aria-label repeats it.
-    expect(info.textContent).toBe('Info');
-    expect(info.hasAttribute('aria-label')).toBe(false);
+    expect(info.getAttribute('aria-label')).toBe('Info');
+    expect(info.textContent).toBe('');
     await interact(() => info.click());
     expect(toggled).toBe(1);
   });
 
-  test('says who started the ferret as a link, and drops it on a phone', async () => {
-    let opened = 0;
-    const props = {
-      actions: null,
-      project: 'ferretry',
-      session: sessionView('s1'),
-      startedBy: { name: 'Hadi', onOpen: () => (opened += 1) },
-    };
-    view = await mount(<SessionTopBar {...props} compact={false} />);
-    const link = must(view.container.querySelector<HTMLButtonElement>('[data-session-started-by]'), 'the link');
-    expect(link.textContent).toBe('Started by Hadi');
-    await interact(() => link.click());
-    expect(opened).toBe(1);
-    await view.render(<SessionTopBar {...props} compact />);
-    expect(view.container.querySelector('[data-session-started-by]')).toBeNull();
-  });
-
-  test('carries the sub-ferret indicator beside the name on a desktop and draws none on a phone', async () => {
-    const props = { actions: null, project: null, session: sessionView('s1'), subFerrets: <span data-pack-slot="" /> };
-    view = await mount(<SessionTopBar {...props} compact={false} />);
-    expect(view.container.querySelector('.fy-session-bar__who [data-pack-slot]')).not.toBeNull();
-    await view.render(<SessionTopBar {...props} compact />);
-    expect(view.container.querySelector('[data-pack-slot]')).toBeNull();
-  });
-
-  test('on a phone it keeps the name and the dot, drops the project, and opens the sessions drawer', async () => {
-    let opened = 0;
+  test('carries none of what moved into Info: project, started-by, sub-ferrets, card, marks, agenda, restart', async () => {
     view = await mount(
       <SessionTopBar
         actions={null}
+        compact={false}
+        onToggleInfo={() => undefined}
+        session={
+          {
+            ...sessionView('s1', { config: { teammate: 'hadi', mode: 'interactive' } }),
+            outdated: { sections: ['pack'] },
+          } as SessionView
+        }
+      />,
+    );
+    for (const gone of [
+      '.fy-session-bar__project',
+      '[data-session-started-by]',
+      '[data-sub-ferrets]',
+      '[data-card-chip]',
+      '[data-switch-marks]',
+      '[data-switch-mark]',
+      '.fy-session-bar__agenda',
+      '[data-outdated-mark]',
+      '[data-session-unread]',
+    ])
+      expect(view.container.querySelector(gone)).toBeNull();
+  });
+
+  test('on a phone it is the title, status, ⓘ and the menu — and nothing else', async () => {
+    let opened = 0;
+    view = await mount(
+      <SessionTopBar
+        actions={<button data-lifecycle="" type="button" />}
         compact
+        menu={<button data-menu="" type="button" />}
         onOpenSessions={() => (opened += 1)}
         onToggleInfo={() => undefined}
-        project="ferretry"
         session={sessionView('s1', {
           config: { teammate: 'hadi', label: undefined as never, name: undefined as never },
         })}
@@ -125,107 +123,36 @@ describe('SessionTopBar', () => {
     );
     const bar = must(view.container.querySelector('[data-session-bar]'), 'the session bar');
     expect(bar.hasAttribute('data-compact')).toBe(true);
-    expect(bar.querySelector('.fy-session-bar__project')).toBeNull();
     expect(bar.querySelector('.fy-session-bar__who')?.getAttribute('title')).toBe('Hadi');
     expect(bar.querySelector('.fy-session-bar__status .sr-only')?.textContent).toBe('running');
-    // ⓘ is in Actions ▾ on a phone (the page adds it there), never in the bar.
-    expect(bar.querySelector('[data-session-info-toggle]')).toBeNull();
+    expect(bar.querySelectorAll('.fy-session-bar__status')).toHaveLength(1);
+    expect(bar.querySelector('[data-session-callsign]')).toBeNull();
+    expect(bar.querySelector('[data-lifecycle]')).toBeNull();
+    expect(bar.querySelector('[data-session-actions]')).toBeNull();
+    // ☰ (the sessions drawer) is the phone's own way back, then the row: title+status, ⓘ, menu.
+    const row = [...bar.children].map(child =>
+      child.matches('[data-session-bar-sessions]')
+        ? 'sessions'
+        : child.matches('.fy-session-bar__who')
+          ? 'who'
+          : child.matches('[data-session-info-toggle]')
+            ? 'info'
+            : child.matches('[data-menu]')
+              ? 'menu'
+              : 'other',
+    );
+    expect(row).toEqual(['sessions', 'who', 'info', 'menu']);
     await interact(() => must(bar.querySelector<HTMLButtonElement>('[data-session-bar-sessions]'), '☰').click());
     expect(opened).toBe(1);
   });
 
-  test('shows an accent count while items are open, and nothing at all when clear', async () => {
-    const props = { actions: null, compact: false, project: null, session: sessionView('s1') };
-    view = await mount(<SessionTopBar {...props} agendaOpen={3} />);
-    const badge = must(view.container.querySelector('.fy-session-bar__agenda'), 'the count badge');
-    expect(badge.textContent).toContain('3');
-    await view.render(<SessionTopBar {...props} agendaOpen={0} />);
-    expect(view.container.querySelector('.fy-session-bar__agenda')).toBeNull();
-    await view.render(<SessionTopBar {...props} />);
-    expect(view.container.querySelector('.fy-session-bar__agenda')).toBeNull();
-  });
-
-  test('on a phone it draws no switch marks — they live in Info — and on a desktop it still does', async () => {
-    const props = {
-      actions: null,
-      project: null,
-      session: sessionView('s1', { config: { teammate: 'hadi', mode: 'interactive' } }),
-      switches: { learning: true, hypermedia: true, pack: true },
-    };
-    view = await mount(<SessionTopBar {...props} compact={false} />);
-    expect(view.container.querySelector('[data-switch-marks]')).not.toBeNull();
-    await view.render(<SessionTopBar {...props} compact />);
-    expect(view.container.querySelector('[data-switch-marks]')).toBeNull();
-    expect(view.container.querySelector('[data-switch-mark]')).toBeNull();
-  });
-
-  test('omits the project when the folder cannot be named, and ⓘ when the host has no Info', async () => {
-    view = await mount(<SessionTopBar actions={null} compact={false} project={null} session={sessionView('s1')} />);
-    expect(view.container.querySelector('.fy-session-bar__project')).toBeNull();
+  test('draws ⓘ on a phone too, and omits it when the host has no Info', async () => {
+    view = await mount(<SessionTopBar actions={null} compact session={sessionView('s1')} />);
     expect(view.container.querySelector('[data-session-info-toggle]')).toBeNull();
-  });
-});
-
-describe('SessionTopBar on a phone', () => {
-  // The owner's phone (2026-10-30) drew eleven things in one 390px row, and the card chip ran under Interrupt and ▾.
-  test('draws ☰, the name, the card, ONE status dot and ▾ — and none of what a wider bar adds', async () => {
-    const props = {
-      actions: <button data-lifecycle="" type="button" />,
-      agendaOpen: 2,
-      cardChip: (
-        <a data-card-chip="card" href="#card">
-          &amp;F11
-        </a>
-      ),
-      menu: <button data-menu="" type="button" />,
-      onOpenSessions: () => undefined,
-      onToggleInfo: () => undefined,
-      project: 'ferretry',
-      session: { ...sessionView('s1'), outdated: { sections: ['pack'] } } as SessionView,
-      trailing: <button data-trailing-slot="" type="button" />,
-    };
-    view = await mount(<SessionTopBar {...props} compact />);
-    const bar = must(view.container.querySelector('[data-session-bar]'), 'the session bar');
-    for (const absent of [
-      '[data-lifecycle]',
-      '[data-session-actions]',
-      '[data-session-info-toggle]',
-      '[data-trailing-slot]',
-      '.fy-session-bar__agenda',
-      '[data-outdated-mark]',
-    ])
-      expect(bar.querySelector(absent)).toBeNull();
-    for (const present of ['[data-session-bar-sessions]', '.fy-session-bar__name', '[data-card-chip]', '[data-menu]'])
-      expect(bar.querySelector(present)).not.toBeNull();
-    expect(bar.querySelectorAll('.fy-session-bar__status')).toHaveLength(1);
-
-    // A desktop keeps every one of them.
-    await view.render(<SessionTopBar {...props} compact={false} />);
-    for (const present of [
-      '[data-lifecycle]',
-      '[data-session-info-toggle]',
-      '[data-trailing-slot]',
-      '.fy-session-bar__agenda',
-      '[data-outdated-mark]',
-    ])
-      expect(view.container.querySelector(present)).not.toBeNull();
-  });
-});
-
-describe('SessionTopBar trailing slot', () => {
-  test('draws the trailing control last, after the Actions menu', async () => {
-    view = await mount(
-      <SessionTopBar
-        actions={null}
-        compact={false}
-        menu={<button type="button">Actions</button>}
-        project={null}
-        session={sessionView('s1')}
-        trailing={<span data-trailing-slot="" />}
-      />,
+    await view.render(
+      <SessionTopBar actions={null} compact onToggleInfo={() => undefined} session={sessionView('s1')} />,
     );
-    const bar = must(view.container.querySelector('[data-session-bar]'), 'the session bar');
-    expect(bar.lastElementChild?.matches('[data-trailing-slot]')).toBe(true);
+    expect(view.container.querySelector('[data-session-info-toggle]')).not.toBeNull();
   });
 });
 
@@ -241,7 +168,6 @@ describe('SessionTopBar turn word', () => {
         <SessionTopBar
           actions={null}
           compact={compact}
-          project={null}
           session={sessionView('s1', { state: { status: 'running', turnState: turn, turnPrompt: prompt } })}
           turn={turn}
         />,
@@ -281,7 +207,6 @@ describe('SessionTopBar turn word', () => {
         <SessionTopBar
           actions={null}
           compact={false}
-          project={null}
           session={sessionView('s1', {
             state: { status: 'running', turnState: turn, turnPrompt: 'Do you want to proceed?', permissionRequest },
           })}
@@ -316,7 +241,6 @@ describe('SessionTopBar turn word', () => {
         <SessionTopBar
           actions={null}
           compact={false}
-          project={null}
           session={sessionView('s1', {
             state: { status: 'running', turnState: turn, turnPrompt: 'Hooks need review', harnessDialog },
           })}
@@ -347,7 +271,6 @@ describe('SessionTopBar turn word', () => {
         <SessionTopBar
           actions={null}
           compact={false}
-          project={null}
           session={sessionView('s1', { state: { status: 'running', turnState: turn } })}
           turn={turn}
         />,
@@ -358,27 +281,5 @@ describe('SessionTopBar turn word', () => {
       await view.unmount();
       view = null;
     }
-  });
-});
-
-describe('the hypermedia mark', () => {
-  test('sits beside the name while the ferret may use hypermedia, and is gone once it is off', async () => {
-    const bar = (hypermedia: boolean | undefined) => (
-      <SessionTopBar
-        actions={null}
-        compact={false}
-        project={null}
-        session={sessionView('s1', {
-          config: { teammate: 'hadi', mode: 'interactive', ...(hypermedia === undefined ? {} : { hypermedia }) },
-        })}
-      />
-    );
-    view = await mount(bar(undefined));
-    expect(
-      view.container.querySelector('.fy-session-bar__who [data-switch-mark="hypermedia"]')?.getAttribute('aria-label'),
-    ).toContain('Hypermedia on');
-    await view.unmount();
-    view = await mount(bar(false));
-    expect(view.container.querySelector('[data-switch-mark="hypermedia"]')).toBeNull();
   });
 });

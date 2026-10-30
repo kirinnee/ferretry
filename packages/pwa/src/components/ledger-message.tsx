@@ -32,16 +32,20 @@
  * the agent is holding it) and a generic "failed" would hide it.
  */
 
-import { Ban, ChevronUp, Copy, CornerDownLeft, Ellipsis, RotateCw, X } from 'lucide-react';
+import { Ban, ChevronUp, Copy, CornerDownLeft, Ellipsis, Pencil, RotateCw, X } from 'lucide-react';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { browserClipboardWriter, type ClipboardWriter } from '../features/onboarding/copy-button.tsx';
 import { useInputModality } from '../hooks/use-input-modality.ts';
 import { displayCallsign } from '../lib/callsign.ts';
 import { type LedgerBlockPlacement, ledgerPlacementCopy } from '../lib/ledger-placement.ts';
 import { clockOfInstant } from '../lib/message-clock.ts';
+import { chipFromSender, ferretryChip, stripFraming } from '../lib/message-framing.ts';
 import { peerFrom } from '../lib/peer-message.ts';
 import type { LedgerSendRecord } from '../lib/send-ledger.ts';
+import { effectiveQueueState } from '../lib/send-queue.ts';
 import { ContextMenu, type ContextMenuItem, type MenuAnchor } from '../shell/context-menu.tsx';
+import { Textarea } from '../shell/primitives.tsx';
+import { useQueueActions } from './queue-actions-context.tsx';
 import { MessageFooter } from './send-receipt.tsx';
 import type { SendDismiss, SendExpand } from './settled-send-note.tsx';
 
@@ -93,11 +97,11 @@ export interface LedgerMessageProps {
   readonly write?: ClipboardWriter;
 }
 
-type ActionKind = 'retry' | 'cancel' | 'enter';
+type ActionKind = 'retry' | 'cancel' | 'enter' | 'edit';
 
 /** What an action settled to. `message` is the daemon's own refusal sentence, when it gave one. */
 interface Note {
-  readonly kind: 'cancel' | 'enter';
+  readonly kind: 'cancel' | 'enter' | 'edit';
   readonly result: 'done' | 'error';
   readonly message?: string | undefined;
 }
@@ -115,7 +119,16 @@ export function LedgerMessage({
   onCollapse,
   write = browserClipboardWriter(),
 }: LedgerMessageProps) {
-  const { from, body } = peerFrom(record.message);
+  const { from, body: peerBody } = peerFrom(record.message);
+  const framed = stripFraming(peerBody);
+  const body = framed.body;
+  const chip =
+    chipFromSender(record.queue?.by, displayCallsign) ??
+    (from
+      ? displayCallsign(from.name)
+      : framed.ferretry || framed.feature !== undefined
+        ? ferretryChip(framed)
+        : undefined);
   const boundary = ledgerPlacementCopy(placement);
   return (
     <div className="kt-bubble-row" data-ledger-placement={placement}>
@@ -123,9 +136,11 @@ export function LedgerMessage({
       <div className="kt-bubble">
         {/* No "You" header: the bubble's alignment already says who sent it. A teammate's message
             keeps its sender's name, because alignment cannot. */}
-        {from ? (
-          <div className="px-panel pt-1 text-[10.5px] font-medium text-muted">{displayCallsign(from.name)}</div>
-        ) : null}
+        {chip === undefined ? null : (
+          <div className="px-panel pt-1 text-[10.5px] font-medium text-muted" data-sender-chip>
+            {chip}
+          </div>
+        )}
         {boundary === undefined ? null : (
           <span className="sr-only" data-ledger-boundary>
             {boundary}
@@ -208,6 +223,7 @@ const BUSY_COPY: Readonly<Record<ActionKind, string>> = {
   retry: 'Retrying…',
   cancel: 'Cancelling…',
   enter: 'Pressing Enter…',
+  edit: 'Saving…',
 };
 
 /**
@@ -281,7 +297,10 @@ function useLedgerActions({
   write = browserClipboardWriter(),
   enabled = true,
 }: LedgerActionsProps): LedgerActions {
-  const { body } = peerFrom(record.message);
+  const body = stripFraming(peerFrom(record.message).body).body;
+  const queueApi = useQueueActions();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
   const actionHeld = useRef(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const keepRef = useRef<HTMLButtonElement | null>(null);
@@ -305,16 +324,22 @@ function useLedgerActions({
   const unconfirmed = record.fate === 'unaccounted' && !unbound;
   const delivered = record.fate === 'delivered';
   const open = (record.fate === 'accepted' || record.fate === 'queued') && record.held !== true;
+  // A message the durable queue holds is already safe on the daemon: its tick says where it is and why it waits,
+  // so it never offers a resend. Until it is typed it can be edited or cancelled in the queue itself.
+  const queueState = effectiveQueueState(record);
+  const queueBacked = queueState === 'queued' || queueState === 'typing' || queueState === 'failed';
+  const queueEditable = queueState === 'queued' && record.fate === 'accepted' && queueApi !== null;
   const typed = record.typedNotSent === true && open;
   const settling = useStillSettling(Date.parse(record.acceptedAt), OPEN_SEND_SETTLE_MS, enabled && open && !typed);
   // Held for a revive is kept deliberately; delivered and cancelled are done. Everything else can be taken back.
-  const actionable = open || ((record.fate === 'timed_out' || record.fate === 'unaccounted') && record.held !== true);
+  const actionable =
+    !queueBacked && (open || ((record.fate === 'timed_out' || record.fate === 'unaccounted') && record.held !== true));
   const showCopy = !delivered && body.length > 0;
-  const openRetry = open && !typed && onRetry !== undefined && result !== 'accepted';
+  const openRetry = open && !typed && !queueBacked && onRetry !== undefined && result !== 'accepted';
   const unconfirmedRetry = unconfirmed && onRetry !== undefined && result !== 'accepted';
   const resendable = openRetry || unconfirmedRetry;
-  const retryOnce = retryable && onRetry !== undefined && result !== 'accepted';
-  const queuedCancel = record.fate === 'queued' && !typed;
+  const retryOnce = retryable && !queueBacked && onRetry !== undefined && result !== 'accepted';
+  const queuedCancel = record.fate === 'queued' && !typed && !queueBacked;
 
   // The warning is gone, so focus goes back to the button that opened the menu rather than to the page.
   const closeConfirm = (): void => {
@@ -348,6 +373,24 @@ function useLedgerActions({
       if (done !== undefined) setNote({ kind, result: done ? 'done' : 'error' });
     } catch (error) {
       setNote({ kind, result: 'error', message: refusal(error) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const saveEdit = async (): Promise<void> => {
+    const text = draft.trim();
+    if (queueApi === null || text.length === 0 || actionHeld.current) return;
+    setBusy('edit');
+    setNote(null);
+    try {
+      const done = await runResendOnce(actionHeld, () => queueApi.edit(record, text));
+      if (done !== undefined) setNote({ kind: 'edit', result: done ? 'done' : 'error' });
+      if (done === true) setEditing(false);
+    } catch (error) {
+      // A refusal (typed in the meantime, or gone) means this row is stale: the refresh it triggered fixes it.
+      setEditing(false);
+      setNote({ kind: 'edit', result: 'error', message: refusal(error) });
     } finally {
       setBusy(null);
     }
@@ -404,6 +447,26 @@ function useLedgerActions({
         icon: <RotateCw aria-hidden="true" size={16} />,
         onSelect: () => setConfirming(true),
       });
+    if (queueEditable)
+      items.push(
+        {
+          key: 'edit',
+          label: 'Edit',
+          hint: 'Change the words before they are typed in',
+          icon: <Pencil aria-hidden="true" size={16} />,
+          onSelect: () => {
+            setDraft(record.message);
+            setEditing(true);
+          },
+        },
+        {
+          key: 'cancel',
+          label: 'Cancel',
+          hint: 'Take it back before it is typed in',
+          icon: <Ban aria-hidden="true" size={16} />,
+          onSelect: stay(() => void act('cancel', () => queueApi.cancel(record))),
+        },
+      );
     if (actionable && onCancel !== undefined)
       items.push({
         key: 'cancel',
@@ -474,6 +537,31 @@ function useLedgerActions({
           {UNBOUND_SEND_COPY}
         </p>
       ) : null}
+      {editing && queueEditable ? (
+        <div className="mx-panel mb-2" data-ledger-edit="">
+          <Textarea
+            aria-label="Edit message"
+            className="w-full"
+            onChange={event => setDraft(event.target.value)}
+            rows={3}
+            value={draft}
+          />
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            <button
+              className="kt-btn kt-btn--sm shrink-0"
+              data-ledger-edit-save=""
+              disabled={busy !== null || draft.trim().length === 0}
+              onClick={() => void saveEdit()}
+              type="button"
+            >
+              Save
+            </button>
+            <button className="kt-btn kt-btn--sm shrink-0" onClick={() => setEditing(false)} type="button">
+              Keep as it was
+            </button>
+          </div>
+        </div>
+      ) : null}
       {busy !== null ? (
         <div className="mx-panel mb-2 text-[11px] text-muted" data-ledger-busy="" role="status">
           {BUSY_COPY[busy]}
@@ -503,13 +591,19 @@ function useLedgerActions({
         <div className="mx-panel mb-2 text-[11px] text-muted" role="status">
           {note.kind === 'cancel'
             ? 'Cancel sent — this row updates once the agent’s screen has been checked.'
-            : 'Enter pressed — this row updates when the agent has it.'}
+            : note.kind === 'edit'
+              ? 'Saved — it waits with its new words.'
+              : 'Enter pressed — this row updates when the agent has it.'}
         </div>
       ) : null}
       {note?.result === 'error' ? (
         <div className="mx-panel mb-2 text-[11px] text-err" role="alert">
-          {note.kind === 'cancel' ? 'Cancel did not go through' : 'Enter was not pressed'} —{' '}
-          {note.message ?? 'check this row before trying again.'}
+          {note.kind === 'cancel'
+            ? 'Cancel did not go through'
+            : note.kind === 'edit'
+              ? 'The edit was not saved'
+              : 'Enter was not pressed'}{' '}
+          — {note.message ?? 'check this row before trying again.'}
         </div>
       ) : null}
     </>
