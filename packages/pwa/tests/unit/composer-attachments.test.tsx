@@ -357,8 +357,11 @@ describe('composer uploads over a connection that drops', () => {
       },
       async milliseconds => {
         waits.push(milliseconds);
-        // Read once React has rendered what the hook set just before it waited.
-        for (let turn = 0; turn < 5; turn += 1) await new Promise(resolve => setTimeout(resolve, 0));
+        // Read once React has rendered what the hook set just before it waited — waited for, not a fixed
+        // number of turns: how many React takes is its business, and a count that held on one runner did not.
+        const attempt = `(${waits.length + 1} of`;
+        for (let turn = 0; turn < 1_500 && !state().entries[0]?.note?.includes(attempt); turn += 1)
+          await new Promise(resolve => setTimeout(resolve, 0));
         notes.push(state().entries[0]?.note);
       },
     );

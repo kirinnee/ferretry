@@ -29,6 +29,7 @@ import type { FyEvent, FyEventStreamIdle, SessionView } from '@ferretry/protocol
 import type { FyApiClient } from '@ferretry/protocol/client';
 import { act } from 'react';
 import should from 'should';
+import { unitClock } from '../../../daemon/tests/support/unit-clock.ts';
 import { AppShell } from '../../src/App.tsx';
 import { CARRIER_PREFERENCE_KEY, CarrierPreferenceStore } from '../../src/lib/carrier-preference.ts';
 import type { DaemonConnectionRepository } from '../../src/lib/connections.ts';
@@ -45,8 +46,14 @@ import { sessionView } from '../support/sessions.ts';
 
 /** Requests a minute an idle fleet page may send: 3.1 measured with the fleet feed (5.3 without it). */
 const FLEET_PAGE_BUDGET = 4;
-/** Requests a minute an idle session page may send: 5.8 measured (6.3 to 7.6 before the opening proof). */
-const SESSION_PAGE_BUDGET = 8;
+/**
+ * Requests a minute an idle session page may send: 8.5 measured, the same on every run. The 5.8 this
+ * used to quote (5.5 to 6.6 run to run on 2026-10-30) undercounted: a poll schedules its next one only
+ * once its request has answered, and the clock used to jump while a sealed session's WebCrypto was still
+ * in flight, so polls were lost to how fast the machine was. `unitClock.quiet()` now lets every request
+ * land first; the processes poll alone is 3.2 of the 8.5.
+ */
+const SESSION_PAGE_BUDGET = 9;
 
 const WARM_UP_MS = 30_000;
 const IDLE_MS = 10 * 60_000;
@@ -319,8 +326,8 @@ const turns = async (count: number): Promise<void> => {
 };
 
 /**
- * Lets the app's work land before the fake clock moves again: rounds of event-loop turns with a
- * millisecond of real time between them, for the WebCrypto a sealed session settles on, until the
+ * Lets the app's work land before the fake clock moves again: rounds of event-loop turns, each
+ * waiting until the WebCrypto a sealed session settles on is no longer in flight, until the
  * network has been quiet for {@link QUIET_ROUNDS} rounds. A fixed number of turns was not enough on a
  * busy machine: a session still opening when the clock jumped past its deadline was redialled, and the
  * recovery reads were counted against the app.
@@ -330,7 +337,7 @@ const settle = async (): Promise<void> => {
   for (let round = 0; round < MAX_SETTLE_ROUNDS && quiet < QUIET_ROUNDS; round += 1) {
     const before = traffic;
     await turns(10);
-    Bun.sleepSync(1);
+    await unitClock.quiet();
     await turns(10);
     quiet = traffic === before ? quiet + 1 : 0;
   }

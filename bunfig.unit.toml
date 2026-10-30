@@ -1,6 +1,6 @@
 [test]
 # Every tier runs offline: no booted daemon follows the published model catalog or the hosted relay.
-preload = ["./packages/daemon/tests/support/offline-environment.ts"]
+preload = ["./packages/daemon/tests/support/offline-environment.ts", "./packages/daemon/tests/support/unit-determinism.ts"]
 root = "packages"
 pathIgnorePatterns = ["**/tests/integration/**", "**/tests/sit/**", "**/tests/realworld/**"]
 # Bun 1.3.13 truncates LCOV at 640 KiB when the text reporter is also active.

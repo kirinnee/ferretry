@@ -7,6 +7,7 @@ import {
   type PackCleanUpRequest,
   type PackRoutingAcceptRequest,
 } from '@ferretry/protocol';
+import { unitClock } from '../../../../../daemon/tests/support/unit-clock.ts';
 import { RoutingPromptCard, type RoutingPromptCardProps } from '../../../../src/features/pack/routing-prompt-card.tsx';
 import { ideaLimitFor } from '../../../../src/lib/pack/routing-prompt.ts';
 import { interact, type Mounted, mount, must, pressKey } from '../../../support/dom.ts';
@@ -235,6 +236,8 @@ describe('the routing prompt card', () => {
   });
 
   it('says a read of the run failed, keeps polling, and clears the message once a read succeeds', async () => {
+    // Held: the message lives only until the next poll, and on an idle clock that poll is immediate.
+    unitClock.hold();
     let reads = 0;
     const root = await card(
       { ...OWNER_VIEW, cleanUp: { ...OWNER_VIEW.cleanUp, job: RUNNING_JOB } },
@@ -247,7 +250,14 @@ describe('the routing prompt card', () => {
         },
       },
     );
+    const poll = async () => {
+      await interact(() => {
+        unitClock.advance(3_000);
+      });
+    };
+    await poll();
     await waitForText(root, 'Could not read the clean-up just now (offline) — trying again.');
+    await poll();
     await waitFor(() => root.querySelector('[data-clean-up-review]') !== null, 'the review');
     expect(reads).toBe(2);
     expect(textOf(root)).not.toContain('trying again');

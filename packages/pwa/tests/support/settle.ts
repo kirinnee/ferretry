@@ -1,3 +1,5 @@
+import { unitClock } from '../../../daemon/tests/support/unit-clock.ts';
+
 /**
  * ONE BOUNDED WAIT FOR THE WHOLE PACKAGE, AND IT FAILS OUT LOUD.
  *
@@ -16,31 +18,27 @@
  * repository. Making it speak was what separated them. So running out of budget THROWS, and says what
  * never became true.
  *
- * The budget is WALL CLOCK rather than a turn count, because a turn is not a unit of time: an
- * `act()` flush on a loaded CI runner costs many times what it costs on an idle laptop, so one turn
- * count is a different budget on every machine — which is exactly how a ceiling meant to be
- * "a second" turned out to be 300ms of sleeping.
- *
- * Turns YIELD rather than sleep for as long as yielding is enough — a bare task boundary lets the
- * awaited chain advance as fast as it can, and the common case needs no turn at all — then settle
- * into a small poll, so a slow runner is waited for rather than spun on while it is already short of
- * the CPU the awaited work needs.
+ * The budget used to be WALL CLOCK, and that was the flake: on a loaded runner the awaited work and
+ * the budget raced. The unit tier now has no wall clock at all (`unit-determinism.ts`): what the
+ * awaited code schedules on a timer happens in virtual time, in order, whatever the machine's speed,
+ * so the only thing left to bound is how many real turns the wait spins — see {@link SETTLE_TURNS}.
  */
 
 /**
- * The wall-clock ceiling on one wait.
+ * The ceiling on one wait, in TURNS of the event loop — not milliseconds.
  *
- * Measured against the runner's own limit rather than chosen for feel: the unit tier keeps Bun's
- * DEFAULT 5-second per-test timeout (`scripts/ci/test.sh` raises it for the int and sit tiers only),
- * so a wait has to give up well inside that or Bun's own timeout wins the race and takes the
- * diagnostic with it. Two seconds leaves the rest of a test — the mount, the interaction, the
- * assertions — its own room inside the same 5 seconds: the whole test measured ~1s on the runners
- * where this failed, of which the old wait was ~300ms.
+ * The unit tier has no wall clock: `packages/daemon/tests/support/unit-determinism.ts` freezes time, so
+ * a budget read off `Date.now()` would never run out, and a sleep of even 1 ms would wait on a clock
+ * nothing moves. A turn is a real zero-delay task boundary, which still lets work the test does not
+ * schedule — WebCrypto, a dynamic `import()`, a file read — finish off the JavaScript thread. Each turn is
+ * `unitClock.turn()`, which the virtual clock does not count as work in hand, so a timer the awaited
+ * code set (a poll, a debounce) still fires on idle, in order, while this waits.
+ *
+ * Only IDLE turns count — a turn taken while WebCrypto or a file read is still in flight is the
+ * machine's speed, not the wait's — so the ceiling is the same on every machine: 1,500 turns in which
+ * nothing was left to happen means nothing is going to.
  */
-const SETTLE_BUDGET_MS = 2_000;
-
-/** Longest one turn sleeps, once yielding alone has stopped being enough. */
-const MAX_TURN_DELAY_MS = 5;
+const SETTLE_TURNS = 1_500;
 
 /**
  * Waits for `ready`, inside the caller's own `act` wrapper, and fails naming `what` if it never
@@ -61,20 +59,17 @@ export const settleUntil = async (
   ready: () => boolean,
   what: string | (() => string),
   flush: (callback: () => Promise<void>) => Promise<void>,
-  budgetMs: number = SETTLE_BUDGET_MS,
+  maxTurns: number = SETTLE_TURNS,
 ): Promise<void> => {
-  const started = Date.now();
   let turns = 0;
   while (!ready()) {
-    const elapsed = Date.now() - started;
-    if (elapsed >= budgetMs)
+    if (turns >= maxTurns)
       throw new Error(
-        `waited ${elapsed}ms over ${turns} turns for ${typeof what === 'string' ? what : what()}, which never became true`,
+        `waited ${turns} turns for ${typeof what === 'string' ? what : what()}, which never became true — a wait on a timer needs unitClock.advance(ms)`,
       );
-    const delay = Math.min(turns, MAX_TURN_DELAY_MS);
-    await flush(async () => {
-      await new Promise(resolve => setTimeout(resolve, delay));
-    });
-    turns += 1;
+    await flush(() => unitClock.turn());
+    // A turn spent while tracked off-thread work is still in flight is the machine's speed, not the
+    // wait's: only idle turns count toward the ceiling.
+    if (!unitClock.busy) turns += 1;
   }
 };
