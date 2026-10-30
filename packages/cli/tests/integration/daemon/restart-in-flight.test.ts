@@ -1,4 +1,4 @@
-import { afterEach, describe, it } from 'bun:test';
+import { afterAll, afterEach, beforeAll, describe, it } from 'bun:test';
 import { chmod, mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -52,9 +52,12 @@ const daemons = new Set<number>();
 const sockets = new Set<string>();
 const children = new Set<Bun.Subprocess>();
 
-afterEach(async () => {
+afterEach(() => {
   for (const child of children) child.kill();
   children.clear();
+});
+
+afterAll(async () => {
   await tearDownSupervisedDaemons({ daemons, sockets, roots }, { tmux: TMUX });
 }, TEARDOWN_TIMEOUT_MS);
 
@@ -341,9 +344,39 @@ const saidItIsWaiting = (child: Bun.Subprocess<'pipe', 'pipe', 'pipe'>, who: str
   );
 
 describe('a daemon restart under a ferret that is mid-turn', () => {
+  // One daemon for the three journeys: each one stops it and brings it back, and each starts the ferret it needs
+  // itself, so booting a fresh daemon per journey would only pay the same start three times.
+  let shared: BootedDaemon;
+  beforeAll(async () => {
+    shared = await boot();
+  }, 120_000);
+
+  it('makes a person’s fy call wait only while a restart is vouched for', async () => {
+    // Arrange
+    const daemon = shared;
+    const marker = new FileDaemonRestartMarker(restartMarkerPath(daemon.stateHome));
+    await daemon.stop();
+
+    // Act — no marker: a stopped daemon fails at once. A marker: the call waits for the new daemon.
+    const refused = await finished(fy(daemon, ['ps', '--json'], {}));
+    await marker.mark(Date.now() + 120_000);
+    const waiting = fy(daemon, ['ps', '--json'], {});
+    await saidItIsWaiting(waiting, 'the fy call');
+    await daemon.start();
+    await marker.clear();
+    const listed = await finished(waiting);
+
+    // Assert
+    should(refused.code).not.equal(0);
+    should(refused.stderr).not.match(NOTE);
+    should(listed.code).equal(0, listed.stderr);
+    should(JSON.parse(listed.stdout)).be.an.Array();
+    should(listed.stderr.match(NOTE)).have.length(1);
+  }, 120_000);
+
   it('lands the ferret’s fy call, its MCP tool call and a message in flight once the new daemon serves', async () => {
     // Arrange — a ferret at its prompt, and the identity its own `fy` would carry.
-    const daemon = await boot();
+    const daemon = shared;
     const session = await startIdle(daemon);
     const ferret = await ferretEnvironment(daemon);
     should(ferret.FY_SESSION_ID).equal(session.config.id);
@@ -436,7 +469,7 @@ describe('a daemon restart under a ferret that is mid-turn', () => {
         return read.record.fate === 'delivered';
       },
       'the new daemon to confirm the message in flight from the transcript',
-      { pollMs: 250, evidence: async () => `${JSON.stringify(read.record)}\n${await logOf(daemon.logFile)}` },
+      { pollMs: 25, evidence: async () => `${JSON.stringify(read.record)}\n${await logOf(daemon.logFile)}` },
     );
     should(read.record?.fate).equal('delivered');
     should(read.record?.attempt ?? 1).equal(1);
@@ -444,7 +477,7 @@ describe('a daemon restart under a ferret that is mid-turn', () => {
 
   it('keeps a ferret mid-turn mid-turn: the new daemon adopts its pane with its turn state as it was', async () => {
     // Arrange — the ferret is working, and the daemon has seen it working.
-    const daemon = await boot();
+    const daemon = shared;
     const session = await startIdle(daemon);
     await writeFile(join(daemon.root, 'claude-working'), '');
     const state = async () => {
@@ -454,7 +487,7 @@ describe('a daemon restart under a ferret that is mid-turn', () => {
       return SessionViewSchema.parse(await read.json()).state;
     };
     await waitFor(async () => (await state()).turnState === 'working', 'the daemon to see the ferret working', {
-      pollMs: 150,
+      pollMs: 20,
       evidence: () => logOf(daemon.logFile),
     });
 
@@ -466,28 +499,5 @@ describe('a daemon restart under a ferret that is mid-turn', () => {
     // Assert — the same live session, still mid-turn, from its first answer.
     should(after.status).not.equal('stopped');
     should(after.turnState).equal('working', JSON.stringify(after));
-  }, 120_000);
-
-  it('makes a person’s fy call wait only while a restart is vouched for', async () => {
-    // Arrange
-    const daemon = await boot();
-    const marker = new FileDaemonRestartMarker(restartMarkerPath(daemon.stateHome));
-    await daemon.stop();
-
-    // Act — no marker: a stopped daemon fails at once. A marker: the call waits for the new daemon.
-    const refused = await finished(fy(daemon, ['ps', '--json'], {}));
-    await marker.mark(Date.now() + 120_000);
-    const waiting = fy(daemon, ['ps', '--json'], {});
-    await saidItIsWaiting(waiting, 'the fy call');
-    await daemon.start();
-    await marker.clear();
-    const listed = await finished(waiting);
-
-    // Assert
-    should(refused.code).not.equal(0);
-    should(refused.stderr).not.match(NOTE);
-    should(listed.code).equal(0, listed.stderr);
-    should(JSON.parse(listed.stdout)).be.an.Array();
-    should(listed.stderr.match(NOTE)).have.length(1);
   }, 120_000);
 });

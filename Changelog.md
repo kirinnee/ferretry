@@ -1,3 +1,10 @@
+## [4.143.0](https://github.com/kirinnee/ferretry/compare/v4.142.0...v4.143.0) (2026-10-30)
+
+### Features
+
+* **board:** action-first lanes, declared Done/Not good lanes, human vs agent cards ([#1064](https://github.com/kirinnee/ferretry/issues/1064)) ([13bc0f7](https://github.com/kirinnee/ferretry/commit/13bc0f70039705a0ba2ad1eed9c5df5e630ee21a))
+* **pwa:** Board table as the current summary, agent tasks hidden by default ([#1060](https://github.com/kirinnee/ferretry/issues/1060)) ([6e4fbff](https://github.com/kirinnee/ferretry/commit/6e4fbffa26d38895182e47f6403ad1e036bd78fe))
+
 ## [4.142.0](https://github.com/kirinnee/ferretry/compare/v4.141.5...v4.142.0) (2026-10-30)
 
 ### Features

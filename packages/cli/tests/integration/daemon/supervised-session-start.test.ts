@@ -1,4 +1,4 @@
-import { afterEach, describe, it } from 'bun:test';
+import { afterAll, beforeAll, describe, it } from 'bun:test';
 import { chmod, mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -52,7 +52,7 @@ const roots = new Set<string>();
 const daemons = new Set<number>();
 const sockets = new Set<string>();
 
-afterEach(async () => {
+afterAll(async () => {
   await tearDownSupervisedDaemons({ daemons, sockets, roots }, { tmux: TMUX });
 }, TEARDOWN_TIMEOUT_MS);
 
@@ -67,7 +67,7 @@ interface Journey {
   readonly healthIntervalSeconds?: number;
 }
 
-/** A harness that sits at its prompt for the whole test, as the original journey needs. */
+/** A harness that sits at its prompt for the whole test: no scripted exit, and the default health interval. */
 const STAYS_AT_PROMPT: Journey = { afterPrompt: [] };
 
 /** The daemon's whole world: a private bin directory, a launcher for `fyd`, and a fake account. */
@@ -219,10 +219,10 @@ function headers(daemon: BootedDaemon, requestId: string): Record<string, string
   };
 }
 
-async function startSession(daemon: BootedDaemon): Promise<Response> {
+async function startSession(daemon: BootedDaemon, requestId: string): Promise<Response> {
   return await fetch(`http://127.0.0.1:${daemon.port}/v1/sessions`, {
     method: 'POST',
-    headers: headers(daemon, 'req-supervised-1'),
+    headers: headers(daemon, requestId),
     body: JSON.stringify({ agent: WRAPPER, mode: 'interactive', name: 'Probe', cwd: daemon.root }),
   });
 }
@@ -234,24 +234,18 @@ async function logOf(daemon: BootedDaemon): Promise<string> {
 }
 
 describe('a session on a daemon `fy daemon start` launched', () => {
-  it('should reach running, although the supervisor hands the daemon almost no environment', async () => {
-    // Arrange
-    const daemon = await boot();
-
-    // Act
-    const response = await startSession(daemon);
-    const body = await response.text();
-
-    // Assert
-    should(response.status).equal(201, `${body}\n${await logOf(daemon)}`);
-    should(JSON.parse(body)).match({ state: { status: 'running' } });
-  }, 60_000);
+  // One daemon for both journeys, booted the way `fy daemon start` boots it. The one-second health interval and
+  // the scripted exit after `go` change nothing for the session that is never told `go`. The journey that
+  // finds its session by listing the tmux server's one session runs first, before another exists.
+  let daemon: BootedDaemon;
+  beforeAll(async () => {
+    daemon = await boot({ afterPrompt: [{ type: 'exit', code: 3 }], healthIntervalSeconds: 1 });
+  }, 120_000);
 
   it('should stop reading running within one health interval once its harness exits', async () => {
-    // Arrange — a one-second interval stands in for the thirty-second default; the rule under test
+    // Arrange — the daemon's one-second health interval stands in for the thirty-second default; the rule under test
     // is "within one interval", and the daemon reads the operator's number rather than a constant.
-    const daemon = await boot({ afterPrompt: [{ type: 'exit', code: 3 }], healthIntervalSeconds: 1 });
-    const response = await startSession(daemon);
+    const response = await startSession(daemon, 'req-supervised-exits');
     const body = await response.text();
     should(response.status).equal(201, `${body}\n${await logOf(daemon)}`);
     const started = JSON.parse(body) as { config: { id: string } };
@@ -294,5 +288,15 @@ describe('a session on a daemon `fy daemon start` launched', () => {
       },
       `${JSON.stringify(actual.state)}\n${await logOf(daemon)}`,
     );
+  }, 60_000);
+
+  it('should reach running, although the supervisor hands the daemon almost no environment', async () => {
+    // Act
+    const response = await startSession(daemon, 'req-supervised-running');
+    const body = await response.text();
+
+    // Assert
+    should(response.status).equal(201, `${body}\n${await logOf(daemon)}`);
+    should(JSON.parse(body)).match({ state: { status: 'running' } });
   }, 60_000);
 });

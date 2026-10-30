@@ -34,11 +34,7 @@
  * below `sm`. A picker that only matched at one width would be a failed port.
  */
 
-import { afterAll, beforeAll, describe, it } from 'bun:test';
-import { spawnSync } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { beforeAll, describe, it } from 'bun:test';
 import { Check, Monitor, Moon, Sun } from 'lucide-react';
 import type { Browser } from 'playwright-core';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -52,8 +48,7 @@ import {
 } from '../../../src/lib/theme-preferences.ts';
 import { THEME_FAMILY_CARD_CLASS, ThemeSettings } from '../../../src/shell/theme-toggle.tsx';
 import { sharedChromium } from '../support/chromium.ts';
-
-const packageDir = resolve(import.meta.dir, '../../..');
+import { shellCss } from '../support/shell-css.ts';
 
 /** The state a reader on Ember, pinned to dark, with default type would have. */
 const FAMILY: ThemeFamilyId = 'phosphor';
@@ -247,40 +242,14 @@ const VIEWPORTS = [
   { name: 'desktop', width: 1_440, height: 900 },
 ] as const;
 
-let workspace = '';
 let browser: Browser;
 let css = '';
-
-const buildCss = (outFile: string): void => {
-  const result = spawnSync(
-    './node_modules/.bin/tailwindcss',
-    [
-      '--config',
-      'tailwind.config.ts',
-      '--input',
-      'src/styles/index.css',
-      '--output',
-      outFile,
-      '--content',
-      './src/**/*.{ts,tsx},./tests/integration/shell/*.tsx',
-    ],
-    { cwd: packageDir, stdio: 'pipe' },
-  );
-  if (result.status !== 0) throw new Error(`tailwind build failed: ${result.stderr?.toString() ?? ''}`);
-};
 
 describe('ported theme picker visual contract', () => {
   beforeAll(async () => {
     browser = await sharedChromium();
-    workspace = await mkdtemp(join(tmpdir(), 'fy-visual-theme-'));
-    const outFile = join(workspace, 'app.css');
-    buildCss(outFile);
-    css = await readFile(outFile, 'utf8');
+    css = await shellCss();
   }, 120_000);
-
-  afterAll(async () => {
-    if (workspace !== '') await rm(workspace, { recursive: true, force: true });
-  });
 
   it('should render pixel-identically to the original kteam markup at both viewports', async () => {
     const page = documentFor(css, renderToStaticMarkup(<Port />), renderToStaticMarkup(<Reference />));

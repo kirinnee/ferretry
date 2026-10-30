@@ -355,6 +355,8 @@ const agendaCases: SchemaCase[] = [
     value: { sessionId: 'session-1', delivered: 1 },
   },
   { name: 'attention error', schema: agenda.AgendaErrorCodeSchema, value: 'invalid' },
+  { name: 'clear-agents request', schema: agenda.AgendaClearAgentsRequestSchema, value: { dryRun: true } },
+  { name: 'clear-agents result', schema: agenda.AgendaClearAgentsResultSchema, value: { cleared: 4, sessions: 2 } },
 ];
 
 const messagePin = {

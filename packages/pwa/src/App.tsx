@@ -130,6 +130,7 @@ import { useAppViewport } from './hooks/use-app-viewport.ts';
 import { type BoardMachine, useBoard } from './hooks/use-board.ts';
 import { useChatTasksUrl } from './hooks/use-chat-tasks-url.ts';
 import { useAgendaSession, useAgendaSnapshot } from './hooks/use-agenda.ts';
+import { agendaClearPort } from './lib/agenda-clear-agents.ts';
 import { AgendaInboxContext, useAgendaInbox, useAgendaInboxModel, useInboxMachines } from './hooks/use-agenda-inbox.ts';
 import { useAgendaReplies } from './hooks/use-agenda-replies.ts';
 import { useCarrierPreferences, useTunnelService, useTunnelSwitches } from './hooks/use-carrier-preferences.ts';
@@ -2006,8 +2007,10 @@ function AgendaRoute({ connection }: DaemonPageProps) {
   const machineNotifications = usePairedMachineNotifications();
   const daemonFetch = useDaemonFetch();
   const clientFor = useCallback((target: DaemonConnection) => store.clients.client(target), [store.clients]);
+  const clearPort = useMemo(() => agendaClearPort(store.clients, daemonFetch), [store, daemonFetch]);
   return inbox === null ? null : (
     <AgendaInboxPage
+      clearPort={clearPort}
       banner={
         <NotificationsOffBanner
           rows={machineNotifications.rows}

@@ -899,3 +899,31 @@ describe('agenda card flags', () => {
     for (const flag of ['--title', '--ask', '--up', '--up-why']) should(help).containEql(flag);
   });
 });
+
+describe('agenda clear', () => {
+  it('should hand --agents and --yes to the controller, which refuses inside a ferret', async () => {
+    // Arrange + Act
+    const inside = run(['agenda', 'clear', '--agents', '--yes'], board, ['agenda.clear-agents.1']);
+
+    // Assert
+    await should(inside.parsed).be.rejectedWith(/only the owner/u);
+    should(inside.gateway.clears).be.empty();
+  });
+
+  it('should clear at the owner’s own shell', async () => {
+    // Arrange
+    const gateway = new RecordingAgendaGateway(board);
+    gateway.offered = ['agenda.clear-agents.1'];
+    gateway.clearing = { cleared: 2, sessions: 1 };
+    const out = new CapturingOutput();
+    const program = new Command().name('fy').exitOverride();
+    registerAgendaCommands(program, new AgendaController(gateway, out, undefined));
+
+    // Act
+    await program.parseAsync(['node', 'fy', 'agenda', 'clear', '--agents', '--yes']);
+
+    // Assert
+    should(gateway.clears).deepEqual([true, false]);
+    should(out.messages).deepEqual(['cleared 2 open agenda items on 1 agent ferret']);
+  });
+});

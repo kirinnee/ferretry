@@ -852,6 +852,63 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
     check((await dragging()) === 0, 'inbox phone: the card did not spring back');
   }
   await card.close();
+
+  // CLEAR ALL FROM AGENT FERRETS: only under the Agents filter; a confirm with the count and the machine that
+  // needs an update; then the result.
+  const clear = await open(browserContext, theme, 'entry=inbox&view=sections');
+  check((await clear.locator('[data-agenda-clear-agents-button]').count()) === 0, 'clear: the button is on All');
+  await clear.locator('[data-agenda-kind-option="interactive"]').click();
+  check(
+    (await clear.locator('[data-agenda-clear-agents-button]').count()) === 0,
+    'clear: the button is on Interactive',
+  );
+  const ownersOnly = await clear.locator('[data-agenda-row]').count();
+  await clear.locator('[data-agenda-kind-option="auto"]').click();
+  await clear.waitForTimeout(200);
+  check(
+    (await clear.locator('[data-agenda-row]').count()) !== ownersOnly,
+    'clear: Agents and Interactive list the same rows',
+  );
+  const clearButton = clear.locator('[data-agenda-clear-agents-button]');
+  check((await clearButton.count()) === 1, 'clear: no button under Agents');
+  check(
+    ((await clearButton.textContent()) ?? '').trim() === 'Clear all from agent ferrets',
+    'clear: the button words are wrong',
+  );
+  if (phone) check(((await clearButton.boundingBox())?.height ?? 0) >= 35.5, 'clear: the button is under 36px');
+  check(
+    (await clear.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0,
+    'clear: the Agents view scrolls sideways',
+  );
+  await shot(clear, 'button', form, theme, 'clear');
+  await clearButton.click();
+  await clear.locator('[data-clear-confirm]').waitFor({ state: 'visible' });
+  await clear.waitForTimeout(150);
+  const confirmText = (await clear.locator('[data-clear-dialog]').textContent()) ?? '';
+  check(confirmText.includes('Dismiss 5 agenda items from agent ferrets?'), `clear: the confirm says "${confirmText}"`);
+  check(
+    confirmText.includes('needs an update to clear'),
+    'clear: the older machine is not listed as needing an update',
+  );
+  const confirmBox = await boxOf(clear.locator('[data-clear-dialog]'), 'clear dialog');
+  check(
+    confirmBox.x >= 0 && confirmBox.x + confirmBox.width <= (phone ? 390 : 1_440),
+    'clear: the dialog leaves the screen',
+  );
+  const confirmButton = clear.locator('[data-clear-confirm-button]');
+  if (phone) check(((await confirmButton.boundingBox())?.height ?? 0) >= 43.5, 'clear: the Clear button is under 44px');
+  await shot(clear, 'confirm', form, theme, 'clear');
+  await confirmButton.click();
+  await clear.locator('[data-clear-result]').waitFor({ state: 'visible' });
+  await clear.waitForTimeout(150);
+  check(
+    ((await clear.locator('[data-clear-result]').textContent()) ?? '').includes(
+      'Dismissed 5 agenda items from 3 ferrets.',
+    ),
+    'clear: the result does not say what was dismissed',
+  );
+  await shot(clear, 'result', form, theme, 'clear');
+  await clear.close();
   await browserContext.close();
 };
 

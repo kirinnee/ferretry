@@ -1107,6 +1107,20 @@ export const DirectNotificationRequestSchema = z.strictObject({
 });
 export type DirectNotificationRequest = z.infer<typeof DirectNotificationRequestSchema>;
 
+/** The resolution note every item the owner's "clear all from agent ferrets" dismisses carries. */
+export const AGENDA_CLEAR_AGENTS_NOTE = 'cleared: agent-ferret backlog';
+
+/** `POST /v1/agenda/clear-agents` (`agenda.clear-agents.1`): `dryRun` counts what would go and changes nothing. */
+export const AgendaClearAgentsRequestSchema = z.strictObject({ dryRun: z.boolean().optional() });
+export type AgendaClearAgentsRequest = z.infer<typeof AgendaClearAgentsRequestSchema>;
+
+/** How many open items the call dismissed (or, on a dry run, would), on how many agent ferrets' boards. */
+export const AgendaClearAgentsResultSchema = z.strictObject({
+  cleared: z.number().int().nonnegative(),
+  sessions: z.number().int().nonnegative(),
+});
+export type AgendaClearAgentsResult = z.infer<typeof AgendaClearAgentsResultSchema>;
+
 export const AgendaCountResponseSchema = z.object({
   sessionId: z.string().min(1),
   count: NonNegativeIntegerSchema,

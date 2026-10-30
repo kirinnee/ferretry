@@ -2,6 +2,7 @@ import type {
   AgendaActionRequest,
   AgendaAsk,
   AgendaBrief,
+  AgendaClearAgentsResult,
   AgendaId,
   AgendaItem,
   AgendaResponse,
@@ -138,6 +139,15 @@ export class RecordingAgendaGateway implements IAgendaGateway {
   sendReplies(sessionId: string): Promise<AgendaSnapshot> {
     this.flushed.push(sessionId);
     return Promise.resolve(this.result);
+  }
+
+  /** Each `clearAgents` call's dry-run flag, and what the daemon says it found or cleared. */
+  readonly clears: boolean[] = [];
+  clearing: AgendaClearAgentsResult = { cleared: 0, sessions: 0 };
+
+  clearAgents(dryRun: boolean): Promise<AgendaClearAgentsResult> {
+    this.clears.push(dryRun);
+    return Promise.resolve(this.clearing);
   }
 
   /** What the daemon reports it offers; a test sets it to say the daemon is new enough. */

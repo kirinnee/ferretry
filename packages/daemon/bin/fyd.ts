@@ -119,6 +119,7 @@ import {
 import { SessionConfigAgendaModes } from '../src/adapters/agenda/session-agenda-modes.ts';
 import { armSessionTurnChanges, StorageSessionStops } from '../src/adapters/agenda/session-turn-stops.ts';
 import { armAgendaNudge, StorageAgendaNudgeSessions } from '../src/adapters/agenda/storage-agenda-nudge.ts';
+import { StorageAgentSessions } from '../src/adapters/agenda/storage-agent-sessions.ts';
 import {
   StorageHarnessPromptJournal,
   StorageHarnessPromptStates,
@@ -616,6 +617,7 @@ import {
   AccountModelConversationListPolicy,
   ActivityLedger,
   type AgendaActor,
+  AgendaAgentClearer,
   AgendaBoardUndelivered,
   AgendaBuzz,
   AgendaChangeFanout,
@@ -10770,6 +10772,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         notifications,
         attention: agenda,
         agendaReplies,
+        agendaClearer: new AgendaAgentClearer(new StorageAgentSessions(storage), agendaBoards, agenda),
         pins: new PinService(
           new FilePinSessionDirectory(paths, stateFiles),
           // Its own queue: a pin mutation must not serialize behind storage-wide or session work.

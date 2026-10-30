@@ -54,8 +54,8 @@ fields. **A chat reply is not a turn at all: it parks the item** (see "Parked it
 
 ## Handing it back
 
-On the ferret's turn there are three ways out. The same two verbs also bring back an item the owner's
-reply parked (see "Parked items"). **None of the first two pings the owner.**
+On the ferret's turn there are three ways out. Only `edit` — with the whole card refreshed — brings back an item the owner's
+reply parked (see "Parked items"); a bare `surface` is refused there. **None of the first two pings the owner.**
 
 - `fy agenda edit <id> …` — change the card (settled answers, what is still open, new options). Any edit by
   the raising agent on its own turn hands the item back to the owner, even one that changes nothing.
@@ -98,9 +98,14 @@ would lose it when the ferret still needs something.
 - **The words are kept.** The reply text is a `replied` entry in the item's history, cut at the detail limit. A
   reply with no words (a bare chip) records the entry without a note. Any wait (more information, a discussion)
   ends: the reply answered it.
-- **The ferret decides what happens next.** `fy agenda surface <id> [--why "…"]` or its own
-  `fy agenda edit <id> …` brings it back on the owner's turn — **fresh**: `waitingSince` is now, so it reads as
-  new and unread. `fy agenda done <id>` closes it when the reply settled it.
+- **The ferret decides what happens next.** It brings the item back with `fy agenda edit <id> --summary "…"
+--premise "…" --context "…"`, on the owner's turn — **fresh**: `waitingSince` is now, so it reads as new and
+  unread. **The whole card is refreshed on every reply**: the owner's words changed what is going on, so the
+  ask, the premise and the context are all written again (restating one unchanged is fine) and the card stays an
+  isolated, self-contained statement of the situation. An `edit` that leaves one out is refused (`invalid`,
+  naming the missing flags), and so is a bare `fy agenda surface <id>` of a replied item. The owner, the
+  daemon's timer and a snoozed or never-replied item are unaffected. `fy agenda done <id>` closes it when the
+  reply settled it.
 - The app lists it under **Replied (n)**; the owner can bring it back themselves ("Back to my list").
 - Buttons, options and `[answer to !A…]` are unchanged: they still resolve with a response, as `done`.
 - **Warden items follow the same rule.** A daemon-raised item the owner replied to parks like any other; it is
@@ -277,6 +282,23 @@ why it matters now — so every NEW item a ferret raises must carry both:
   `--context`: its premise is the held change, in the daemon's words.
 - **Only new items.** It is checked when an item is raised, never when one is read or edited: an item already
   on a board keeps working without them, and `agenda edit` may still reword either.
+
+## Clearing the agent ferrets' backlog
+
+Agent ferrets (sessions with `mode: auto`, the same fact as the Inbox's **Agents** filter) can leave a long backlog
+the owner never meant to read. One owner action dismisses every open item on their boards.
+
+- **Route:** `POST /v1/agenda/clear-agents` → `{ cleared, sessions }`. `{ "dryRun": true }` returns the same counts
+  and dismisses nothing; the app and the CLI use it for the confirm. Offered as `agenda.clear-agents.1`.
+- **Owner only.** An agent credential is refused with 403. Each item is dismissed through `AgendaService` as the
+  human, with the note `cleared: agent-ferret backlog`. Only the open items of agent sessions are touched;
+  interactive sessions' items, and items already resolved, are left alone.
+- **CLI:** `fy agenda clear --agents [--yes]` shows the count and asks to confirm unless `--yes`. It is refused
+  when `FY_SESSION_ID` is set — a ferret never clears for the owner.
+- **App:** in the Inbox, choose **Agents** in the kind filter (All / Interactive / Agents) and press **Clear all
+  from agent ferrets**. The confirm counts each machine with a dry run, then clears on every machine that offers
+  the feature; a machine without it is listed as "needs an update", and one that did not answer as "could not be
+  reached". The machines are those the Inbox shows rows from.
 
 ## In the Inbox
 

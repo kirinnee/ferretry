@@ -357,18 +357,18 @@ const tap = async (profile: Profile, scope: string, script: string): Promise<() 
 };
 
 /** Opens the app at `path` in a window of its own, the way the reader left it. */
-const appAt = async (profile: Profile, path: string, options: { boot?: number; wired?: boolean } = {}) => {
+const appAt = async (profile: Profile, path: string, options: { held?: boolean; wired?: boolean } = {}) => {
   const page = await profile.context.newPage();
   await page.goto(`${origin()}/`);
   await page.evaluate(
-    ({ boot, wired }) => {
-      localStorage.setItem('scene-boot-ms', String(boot));
+    ({ held, wired }) => {
+      localStorage.setItem('scene-hold', held ? '1' : '0');
       localStorage.setItem('scene-app', wired ? 'app' : 'none');
     },
-    { boot: options.boot ?? 0, wired: options.wired ?? true },
+    { held: options.held ?? false, wired: options.wired ?? true },
   );
   await page.goto(`${origin()}${path}`);
-  if (options.boot === undefined && options.wired !== false) await settledOn(page, path);
+  if (options.held !== true && options.wired !== false) await settledOn(page, path);
   return page;
 };
 
@@ -548,16 +548,19 @@ describe('a notification tap opens its conversation on the machine that sent it'
 
   test('a window still starting when the tap lands is routed once the app is up, without a second window', async () => {
     const browserProfile = await profile();
-    // The store takes longer to load than the worker waits for a reply.
-    const app = await appAt(browserProfile, '/d/alpha/session/mva1-aaaa0001', { boot: 2_500 });
+    // The store is still loading — the router is not mounted — for as long as the test holds it.
+    const app = await appAt(browserProfile, '/d/alpha/session/mva1-aaaa0001', { held: true });
     await retire(browserProfile);
     await push(browserProfile, 'beta', ASK);
 
     const tapped = await tap(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);
+    // The worker is done — the entry point's inbox answered it, no second window — with nothing mounted yet.
+    expect((await tapped()).opened).toEqual([]);
+    expect((await shown(app)).route).toBeNull();
+    await app.evaluate(() => (globalThis as unknown as { __mountScene: () => void }).__mountScene());
     const landed = await settledOn(app, BETA_ASK);
 
     expect(landed.route).toMatchObject({ kind: 'session', daemonId: 'beta', attention: 'A3' });
-    expect((await tapped()).opened).toEqual([]);
     await browserProfile.context.close();
   }, 120_000);
 
