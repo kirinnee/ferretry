@@ -28,7 +28,8 @@
     "packages/pwa": {
       "entry": ["src/main.tsx", "src/lib/index.ts"],
       "project": ["src/**/*.{ts,tsx}"],
-      "ignoreDependencies": ["sherpa-glue", "sherpa-runtime-wasm"]
+      "ignoreDependencies": ["sherpa-glue", "sherpa-runtime-wasm"],
+      "ignore": ["src/features/attention/attention-config-change.tsx"]
     }
   },
   "bun": false,

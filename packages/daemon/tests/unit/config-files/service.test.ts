@@ -54,6 +54,11 @@ class FakeDirectory implements ConfigDirectoryPort {
     this.files.set(path, text);
   }
 
+  async remove(path: string): Promise<void> {
+    this.writes += 1;
+    this.files.delete(path);
+  }
+
   async writeSchemas(schemas: ReadonlyMap<string, string>): Promise<void> {
     this.schemaWrites.push(schemas);
   }
@@ -707,6 +712,52 @@ describe('ConfigFilesService.confirm', () => {
     should(confirmed).be.true();
     should(store.value).eql({});
     should(service.current().evaluation.effective.learning.enabled).be.true();
+  });
+});
+
+describe('ConfigFilesService.discard', () => {
+  it('should put the version in effect back over the held edit, only for the reviewed etag', async () => {
+    // Arrange
+    const { service, directory } = setup({ 'warden.yaml': WARDEN_ON }, acceptedAs('warden.yaml', WARDEN_OFF));
+
+    // Act
+    const stale = await service.discard('warden.yaml', digest(WARDEN_OFF));
+    const discarded = await service.discard('warden.yaml', digest(WARDEN_ON));
+    const again = await service.discard('warden.yaml', digest(WARDEN_ON));
+
+    // Assert
+    should(stale).be.false();
+    should(discarded).be.true();
+    should(again).be.false();
+    should(directory.files.get('warden.yaml')).equal(WARDEN_OFF);
+    should((await service.load()).evaluation.pending).be.empty();
+    should(service.current().evaluation.effective.warden.layers.llm).be.false();
+  });
+
+  it('should remove a new file that loosened and was never in effect', async () => {
+    // Arrange
+    const { service, directory } = setup({ 'machine.yaml': MACHINE_SKIP });
+
+    // Act
+    const discarded = await service.discard('machine.yaml', digest(MACHINE_SKIP));
+
+    // Assert
+    should(discarded).be.true();
+    should(directory.files.has('machine.yaml')).be.false();
+    should((await service.load()).evaluation.pending).be.empty();
+  });
+
+  it('should write back a file whose deletion was held', async () => {
+    // Arrange
+    const { service, directory } = setup({}, acceptedAs('learning.yaml', LEARNING_OFF));
+
+    // Act
+    const discarded = await service.discard('learning.yaml', ABSENT_CONFIG_ETAG);
+
+    // Assert
+    should(discarded).be.true();
+    should(directory.files.get('learning.yaml')).equal(LEARNING_OFF);
+    should((await service.load()).evaluation.pending).be.empty();
   });
 });
 

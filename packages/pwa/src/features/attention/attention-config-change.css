@@ -1,0 +1,54 @@
+/* The held configuration change an agenda card confirms (attention-config-change.tsx). Role tokens only, so
+   every theme draws it in its own light and dark. The values moving are set apart by weight and an arrow,
+   never by colour alone; the "edited after it was raised" line says so in words beside its icon. */
+.fy-attn-change {
+  box-sizing: border-box;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding: var(--gap-sm) var(--gap-md);
+  flex-direction: column;
+  gap: var(--gap-xs);
+  border: var(--stroke) solid var(--warn-border);
+  border-radius: var(--radius-control);
+  background: var(--warn-bg);
+  color: var(--fg);
+}
+.fy-attn-change__head,
+.fy-attn-change__restated {
+  display: flex;
+  margin: 0;
+  align-items: center;
+  gap: var(--gap-xs);
+  font-size: var(--text-sm);
+}
+.fy-attn-change__head {
+  color: var(--muted);
+}
+.fy-attn-change__head code {
+  overflow-wrap: anywhere;
+}
+.fy-attn-change__restated {
+  color: var(--warn);
+  font-weight: 600;
+}
+.fy-attn-change__list {
+  display: flex;
+  margin: 0;
+  padding-left: 1.25em;
+  flex-direction: column;
+  gap: 2px;
+}
+.fy-attn-change__item {
+  overflow-wrap: anywhere;
+}
+.fy-attn-change__values {
+  white-space: nowrap;
+}
+.fy-attn-change__from {
+  color: var(--muted);
+}
+.fy-attn-change__allow {
+  margin: 0;
+}

@@ -62,6 +62,8 @@ export interface BriefFlags extends AskFlags {
   readonly step?: readonly string[];
   /** The text of `--body-file`: one Markdown document. */
   readonly body?: string;
+  /** A configuration file whose held change the owner's Allow puts into effect (`--confirms`). */
+  readonly confirms?: string;
 }
 
 const OptionInput = z.union([z.string(), z.object({ label: z.string(), description: z.string().optional() })]);
@@ -109,6 +111,7 @@ const BriefFileSchema = z.strictObject({
   blocking: z.boolean().optional(),
   willBlock: z.string().optional(),
   neededBy: z.string().optional(),
+  confirms: z.string().optional(),
 });
 export type BriefFile = z.infer<typeof BriefFileSchema>;
 
@@ -148,7 +151,13 @@ export function composeAddRequest(
   const questions = questionsFrom(flags, file, options);
   const steps = stepsFrom(flags.step) ?? stepsFrom(file.steps);
   const named = flags.kind ?? (flags.task === true ? 'task' : file.kind);
-  const card = askFor(named, options ?? fileOptions?.map(each => each.label), questions, steps !== undefined);
+  const confirms = confirmsFrom(flags, file, named, options ?? fileOptions, questions);
+  const card = askFor(
+    named,
+    options ?? fileOptions?.map(each => each.label),
+    questions,
+    steps !== undefined && confirms === undefined,
+  );
   const ask = withOptionDetail(card.ask, fileOptions);
   // A recommendation that is the lone question's own pick is said once, on the question.
   const recommendation = onQuestion(questions, flags) ? undefined : recommendationFrom(flags, file);
@@ -202,10 +211,48 @@ export function composeAddRequest(
     ...(willBlock === undefined ? {} : { willBlock }),
     ...(neededBy === undefined ? {} : { neededBy }),
   };
-  const parsed = AttentionActionRequestSchema.safeParse(request);
+  const parsed = AttentionActionRequestSchema.safeParse(
+    confirms === undefined ? request : confirmationRequest(request, confirms),
+  );
   if (!parsed.success) throw new Error(describeIssues(parsed.error));
   if (parsed.data.action !== 'add') throw new Error('not an add request');
   return parsed.data;
+}
+
+/**
+ * The file `--confirms` names, when it names one. The daemon writes a confirmation's card itself — Allow,
+ * Deny and Discard change — so the flags that choose a card's kind or answers are refused beside it.
+ */
+function confirmsFrom(
+  flags: BriefFlags,
+  file: BriefFile,
+  kind: string | undefined,
+  options: readonly unknown[] | undefined,
+  questions: readonly AttentionQuestion[] | undefined,
+): string | undefined {
+  const path = text(flags.confirms) ?? text(file.confirms);
+  if (path === undefined) return undefined;
+  const clashing = [
+    ...(kind === undefined ? [] : ['--kind']),
+    ...(options === undefined ? [] : ['--option']),
+    ...(questions === undefined ? [] : ['--question']),
+    ...(text(flags.up) === undefined && file.up === undefined ? [] : ['--up']),
+  ];
+  if (clashing.length > 0) {
+    throw new Error(
+      `--confirms writes the card's answers itself (Allow, Deny, Discard change): drop ${clashing.join(', ')}`,
+    );
+  }
+  return path;
+}
+
+/** The add request for a confirmation: the card's own kind, ask and answers left to the daemon. */
+function confirmationRequest<T extends { readonly kind?: unknown; readonly ask?: unknown; readonly answers?: unknown }>(
+  request: T,
+  confirms: string,
+): Omit<T, 'kind' | 'ask' | 'answers'> & { readonly confirms: string } {
+  const { kind: _kind, ask: _ask, answers: _answers, ...rest } = request;
+  return { ...rest, confirms };
 }
 
 function askLineFrom(summary: string | undefined): string {
