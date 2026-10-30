@@ -1,3 +1,15 @@
+## [4.116.0](https://github.com/kirinnee/ferretry/compare/v4.115.0...v4.116.0) (2026-10-30)
+
+### Features
+
+* **board:** starts make cards, signal done moves them, agenda items tie to cards (U7) ([#946](https://github.com/kirinnee/ferretry/issues/946)) ([713b120](https://github.com/kirinnee/ferretry/commit/713b12075f5ee0466d9f525b0bec3144ee941971))
+* **pwa:** board data layer with live updates, filters and write verbs (U10) ([#948](https://github.com/kirinnee/ferretry/issues/948)) ([44b8848](https://github.com/kirinnee/ferretry/commit/44b884898daea2800ede165cc358bd7e9d648e5a)), closes [#932](https://github.com/kirinnee/ferretry/issues/932)
+
+### Fixes
+
+* **daemon:** close the tunnel listener before stopping cloudflared ([#951](https://github.com/kirinnee/ferretry/issues/951)) ([f837a1d](https://github.com/kirinnee/ferretry/commit/f837a1d07088b10bcc4565cf1aebdde7085b7bd8))
+* **fleet:** compare directory devices when judging a shared-history rename ([#947](https://github.com/kirinnee/ferretry/issues/947)) ([6c9c42c](https://github.com/kirinnee/ferretry/commit/6c9c42c4f1f3ddd7ccb0db4445f321a613ad123b))
+
 ## [4.115.0](https://github.com/kirinnee/ferretry/compare/v4.114.0...v4.115.0) (2026-10-30)
 
 ### Features
