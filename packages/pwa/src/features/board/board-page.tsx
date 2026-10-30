@@ -8,7 +8,6 @@
  */
 
 import type { BoardActivityFilter, BoardProjectId } from '@ferretry/protocol';
-import { X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Spinner } from '../../components/spinner.tsx';
 import {
@@ -44,6 +43,7 @@ import { PageThemeSwitch } from '../../shell/theme-toggle.tsx';
 import type { BoardCardMoves } from './board-card.tsx';
 import { BoardCountsBar } from './board-counts.tsx';
 import { BoardFilterBar, BoardFilterSheet } from './board-filters.tsx';
+import { BoardNotice } from './board-notice.tsx';
 import { PhoneKanban } from './board-phone.tsx';
 import { BoardReasonBox } from './board-reason-box.tsx';
 import { type BoardAgenda, BoardDetail, type BoardDetailPorts } from './detail/board-detail.tsx';
@@ -246,6 +246,8 @@ export function BoardPage({
   const [problem, setProblem] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [composing, setComposing] = useState(false);
+  // A phone can dismiss a machine's error; it comes back if the machine says something else.
+  const [dismissedErrors, setDismissedErrors] = useState<ReadonlySet<string>>(() => new Set());
 
   const send = useCallback(
     async (card: BoardCardOf, group: BoardGroupOf, to: string, reason?: string): Promise<boolean> => {
@@ -408,6 +410,27 @@ export function BoardPage({
     writeParams(next);
   };
 
+  const cardButton =
+    ports === undefined || machines.length === 0 ? null : (
+      <button className="kt-btn" data-variant="primary" onClick={() => setComposing(true)} type="button">
+        + Card
+      </button>
+    );
+  const scopeToggle =
+    scopeFerret === null ? null : (
+      <ScopeToggle
+        ferret={names(scopeFerret)}
+        onChange={all => setFilters({ ...filters, ferret: all ? null : scopeFerret })}
+        scoped={scoped}
+      />
+    );
+  const lanesLink =
+    onlyGroup === undefined ? null : (
+      <button className="fy-board__lanes" data-board-lanes="header" onClick={() => editLanes(onlyGroup)} type="button">
+        Lanes ✎
+      </button>
+    );
+
   const hideClosed = filters.state === 'open';
   const reading = board.status === 'loading' || board.status === 'idle';
   const failed = board.status === 'error';
@@ -415,7 +438,7 @@ export function BoardPage({
   return (
     <section aria-label="Board" className="fy-board" data-phone={phone ? '' : undefined} data-view={view}>
       <header className="fy-board__head">
-        <h1 className="fy-board__title">Board</h1>
+        {phone ? null : <h1 className="fy-board__title">Board</h1>}
         <nav aria-label="Board views" className="fy-board__views">
           {BOARD_VIEWS.map(option => (
             <button
@@ -430,31 +453,14 @@ export function BoardPage({
             </button>
           ))}
         </nav>
-        <div className="fy-board__tools">
-          {ports === undefined || machines.length === 0 ? null : (
-            <button className="kt-btn" data-variant="primary" onClick={() => setComposing(true)} type="button">
-              + Card
-            </button>
-          )}
-          {scopeFerret === null ? null : (
-            <ScopeToggle
-              ferret={names(scopeFerret)}
-              onChange={all => setFilters({ ...filters, ferret: all ? null : scopeFerret })}
-              scoped={scoped}
-            />
-          )}
-          {onlyGroup === undefined ? null : (
-            <button
-              className="fy-board__lanes"
-              data-board-lanes="header"
-              onClick={() => editLanes(onlyGroup)}
-              type="button"
-            >
-              Lanes ✎
-            </button>
-          )}
-          <PageThemeSwitch />
-        </div>
+        {phone ? null : (
+          <div className="fy-board__tools">
+            {cardButton}
+            {scopeToggle}
+            {lanesLink}
+            <PageThemeSwitch />
+          </div>
+        )}
       </header>
       {phone ? (
         <div className="fy-board__phone-bar">
@@ -465,12 +471,15 @@ export function BoardPage({
             onChange={next => setFilters(next)}
             quietFerret={scopeFerret}
           />
+          {cardButton}
+          {scopeToggle}
           <BoardCountsBar
             activity={filters.activity}
             counts={model.counts}
             onActivity={pressCount}
             onOpenArchive={() => setView('archive')}
           />
+          {lanesLink}
         </div>
       ) : (
         <>
@@ -491,20 +500,27 @@ export function BoardPage({
         </>
       )}
       {notice === null ? null : (
-        <p className="fy-board__notice" role="status">
-          <span>{notice}</span>
-          <button aria-label="Dismiss" className="fy-board__notice-x" onClick={() => setNotice(null)} type="button">
-            <X aria-hidden="true" size={12} />
-          </button>
-        </p>
+        <BoardNotice compact={phone} onDismiss={() => setNotice(null)}>
+          {notice}
+        </BoardNotice>
       )}
       {board.machines
         .filter(machine => machine.status === 'error')
-        .map(machine => (
-          <p className="fy-board__notice" data-machine={machine.daemonId} key={machine.daemonId} role="status">
-            {machine.machine} did not answer: {machine.error ?? 'unreachable'}
-          </p>
-        ))}
+        .map(machine => {
+          const said = `${machine.machine} did not answer: ${machine.error ?? 'unreachable'}`;
+          const key = `${machine.daemonId}:${said}`;
+          if (dismissedErrors.has(key)) return null;
+          return (
+            <BoardNotice
+              compact={phone}
+              key={machine.daemonId}
+              machine={machine.daemonId}
+              onDismiss={phone ? () => setDismissedErrors(current => new Set(current).add(key)) : undefined}
+            >
+              {said}
+            </BoardNotice>
+          );
+        })}
       {reading && model.cards.length === 0 ? (
         <p className="fy-board__reading" role="status">
           <Spinner size={14} />
