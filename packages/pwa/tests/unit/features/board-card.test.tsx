@@ -150,7 +150,7 @@ describe('BoardCard', () => {
       'Implement',
       'Merged',
       'Released',
-      'Manually tested',
+      'To test',
       'Closed',
     ]);
     expect(items.map(item => item.hasAttribute('data-backward'))).toEqual([

@@ -77,6 +77,8 @@ export interface BoardServiceDependencies {
   readonly diagnostics: BoardDiagnostics;
   /** This daemon's id, once its identity is open; a write before then is refused as unavailable. */
   readonly machineId: () => string | undefined;
+  /** The release this daemon runs when it reads as one; a card whose PR shipped in it is running here. */
+  readonly runningVersion?: () => string | null;
   /** The board-wide section dependency writes share. */
   readonly serial: Pick<SerialExecutor, 'run'>;
   /** Moves a ferret on the Unfiled board onto the board of the repository it stands in, at its first card. */
@@ -465,6 +467,7 @@ export class BoardService {
     );
     return {
       now: this.ports.clock.now(),
+      runningVersion: this.ports.runningVersion?.() ?? null,
       actor: actorOf(caller),
       standing: await this.standing(caller, card),
       laneSet,

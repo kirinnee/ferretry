@@ -63,7 +63,7 @@ describe('KanbanView', () => {
       'Review/CI',
       'Merged',
       'Released',
-      'Manually tested',
+      'To test',
       'Closed',
       'Unplaced',
     ]);

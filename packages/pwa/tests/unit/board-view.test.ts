@@ -181,7 +181,7 @@ describe('filters', () => {
       'Review/CI',
       'Merged',
       'Released',
-      'Manually tested',
+      'To test',
       'Closed',
     ]);
     expect(

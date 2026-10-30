@@ -103,7 +103,7 @@ describe('applyPrUpdate', () => {
 
   it('should change nothing when the poll learned nothing', () => {
     should(apply(withPr({}), {})).deepEqual({ task: null, nudges: [] });
-    const fresh = withPr({ state: 'open', checks: 'pending', polledAt: NOW });
+    const fresh = withPr({ state: 'open', checks: 'pending', polledAt: NOW }, { laneId: 'review' });
     should(apply(fresh, { observed: [observed()] }).task).be.null();
   });
 
@@ -196,11 +196,11 @@ describe('applyPrUpdate', () => {
 
   it('should not cache a release for a PR that is not merged', () => {
     should(apply(withPr({}), { releases: [{ url: URL, releasedIn: RELEASE }] }).task).be.null();
-    const open = withPr({ state: 'open', checks: 'pending', polledAt: NOW });
+    const open = withPr({ state: 'open', checks: 'pending', polledAt: NOW }, { laneId: 'review' });
     should(apply(open, { observed: [observed()], releases: [{ url: URL, releasedIn: RELEASE }] }).task).be.null();
   });
 
-  it('should move a released card to Manually tested once this machine runs that release, and not before', () => {
+  it('should move a released card to To test once this machine runs that release, and not before', () => {
     const released = withPr(
       { state: 'merged', mergedAt: MERGED_AT, mergeSha: SHA, releasedIn: RELEASE, polledAt: NOW },
       { laneId: 'released' },
@@ -226,9 +226,67 @@ describe('applyPrUpdate', () => {
   it('should never move a card the owner sent back, though its PR merged long ago', () => {
     const sentBack = withPr(
       { state: 'merged', checks: 'passing', mergedAt: MERGED_AT, mergeSha: SHA, releasedIn: RELEASE, polledAt: NOW },
-      { laneId: 'implement' },
+      {
+        laneId: 'implement',
+        history: [
+          { seq: 1, at: MERGED_AT, actor: { kind: 'daemon' }, type: 'created', laneId: 'implement' },
+          {
+            seq: 2,
+            at: '2026-10-30T09:45:00Z',
+            actor: { kind: 'owner' },
+            type: 'moved',
+            from: 'tested',
+            to: 'implement',
+            backward: true,
+            reason: 'not good',
+          },
+        ],
+      },
     );
     should(apply(sentBack, { observed: [merged()], runningVersion: '4.114.0' }).task).be.null();
+  });
+
+  it('should catch a stale card up to its facts on any poll, with no event to fire', () => {
+    const merged940 = {
+      state: 'merged',
+      checks: 'passing',
+      mergedAt: MERGED_AT,
+      mergeSha: SHA,
+      polledAt: NOW,
+    } as const;
+    const stale = withPr(merged940, { laneId: 'implement' });
+    const caught = apply(stale, { observed: [merged()] }).task;
+    should(moves(caught)).deepEqual([['merged', 'pr.merged', 'PR #940 merged']]);
+    const released = withPr({ ...merged940, releasedIn: RELEASE }, { laneId: 'review' });
+    should(moves(apply(released, {}).task)).deepEqual([
+      ['released', 'release.published', 'PR #940 released in 4.110.0'],
+    ]);
+    should(moves(apply(released, { runningVersion: '4.110.0' }).task)).deepEqual([
+      ['tested', 'release.running', 'this machine runs 4.110.0, which includes 4.110.0'],
+    ]);
+    const open = withPr({ state: 'open', checks: 'pending', polledAt: NOW }, { laneId: 'implement' });
+    should(moves(apply(open, {}).task)).deepEqual([['review', 'pr.ready', 'PR #940 ready for review']]);
+  });
+
+  it('should pass a Plan or Design gate on a fact, which no ferret could', () => {
+    const planning = withPr({ state: 'merged', mergedAt: MERGED_AT, mergeSha: SHA, polledAt: NOW }, { laneId: 'plan' });
+    should(apply(planning, {}).task?.laneId).equal('merged');
+  });
+
+  it('should enter a closing lane on a fact only in a lane set with no To test lane', () => {
+    const shipped = {
+      state: 'merged',
+      mergedAt: MERGED_AT,
+      mergeSha: SHA,
+      releasedIn: RELEASE,
+      polledAt: NOW,
+    } as const;
+    const noVerify = lanes(PROJECT, 'pr-release');
+    const closes = withPr(shipped, { laneId: 'review' });
+    should(applyPrUpdate(closes, update(), context(closes, {}, noVerify)).task?.laneId).equal('released');
+    const verify = withPr(shipped, { laneId: 'review' });
+    should(apply(verify, { runningVersion: '4.110.0' }).task?.laneId).equal('tested');
+    should(apply(withPr(shipped, { laneId: 'tested' }), { runningVersion: '4.110.0' }).task).be.null();
   });
 
   it('should never move backwards, but still record what GitHub said', () => {

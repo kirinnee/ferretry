@@ -3,7 +3,7 @@
  *
  * The drawer draws; this file decides. The lane stepper (where the card is, among its project's lanes),
  * the history rows (what happened, in words, with the boring runs folded), the PR and release lines, the
- * two answers a card in 🧪 Manually tested waits for, and the two messages the owner sends a ferret from
+ * two answers a card in 🧪 To test waits for, and the two messages the owner sends a ferret from
  * the detail. Nothing here reads the clock or the network, so every state is a value-to-value test.
  */
 

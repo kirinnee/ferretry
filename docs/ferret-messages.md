@@ -113,12 +113,12 @@ The items go out on top of the next message the ferret receives through the send
 or a teammate's — as one line, then a blank line, then the message unchanged:
 
 ```text
-[board] &F413 → Review/CI (PR #930) · &F414 waiting on owner (!A9)
+[board] &F413 → Implement · &F414 waiting on owner (!A9)
 
 The owner's words, as typed.
 ```
 
-A teammate's banner still comes first, above the line. Items are coalesced per card and kind (a card
+A move the daemon made from a PR fact (opened, ready, merged, released, running here) is never a line: history records it and the board shows it, but nobody is told a card moved because GitHub said so. A teammate's banner still comes first, above the line. Items are coalesced per card and kind (a card
 that moved twice says only where it is now), at most 32 are held, and a send that fails puts them back.
 The dependent card's assignee gets the unblock line the same way: `[board] &F20 unblocked: &F18 merged`.
 

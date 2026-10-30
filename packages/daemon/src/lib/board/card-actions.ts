@@ -43,6 +43,7 @@ import {
 import { type BoardOperation, type BoardStanding, mayDo, OPERATION_STANDINGS, refusalMessage } from './authority.ts';
 import { BoardError } from './errors.ts';
 import { type BoardIndex, blockedBy, dependencyCycle, type LaneSets } from './graph.ts';
+import { laneFromFacts } from './lane-facts.ts';
 
 /** The facts every rule may consult, gathered by the service before it calls one. */
 export interface CardContext {
@@ -53,6 +54,8 @@ export interface CardContext {
   readonly laneSet: LaneSet;
   readonly index: BoardIndex;
   readonly laneSets: LaneSets;
+  /** The version this daemon runs, for `release.running`; absent or `null` when it is not known. */
+  readonly runningVersion?: string | null;
 }
 
 /** What a rule decided. `task: null` changes nothing on the card. */
@@ -229,6 +232,7 @@ export const triggerMove = (
   if (card.dropped !== null) return null;
   const lane = laneForTrigger(context.laneSet, card.workflow, trigger);
   if (!lane.ok || lane.value === null || lane.value.id === card.laneId) return null;
+  if (lane.value.category === 'closed' && lane.value.ownerGate === true) return null;
   const backward = isBackwardMove(context.laneSet, card.laneId, lane.value.id);
   if (!backward.ok || backward.value) return null;
   const blockers = blockedBy(card, context.index, context.laneSets);
@@ -250,6 +254,21 @@ export const triggerMove = (
     ),
     laneId: lane.value.id,
   };
+};
+
+/**
+ * Catches a card up to its own PR facts ({@link laneFromFacts}): the daemon's automatic move, forward
+ * through any owner gate, recorded with the trigger and the fact that moved it. `null` when the facts
+ * put the card where it already is, or have no opinion. Whoever asked for the write, the move is the
+ * daemon's: a card the facts moved was moved by no one.
+ */
+export const reconcileFacts = (card: BoardTask, context: CardContext): BoardTask | null => {
+  const move = laneFromFacts(card, context.laneSet, card.workflow, {
+    prs: card.links.prs,
+    runningVersion: context.runningVersion ?? null,
+  });
+  if (move === null) return null;
+  return triggerMove(card, move.trigger, move.reason, { ...context, actor: { kind: 'daemon' }, standing: 'daemon' });
 };
 
 // ---------------------------------------------------------------------------------------------------
@@ -333,10 +352,27 @@ const undepend = (
 // Links
 // ---------------------------------------------------------------------------------------------------
 
-/** A newly linked PR: the URL, and nothing GitHub has said yet (the watcher fills the rest). */
-const unpolledPr = (url: string): PrLink => {
+/** What another card already caches of the same PR (the freshest look), under this link's own spelling. */
+const cachedElsewhere = (url: string, index: BoardIndex): PrLink | null => {
+  const parts = prUrlParts(url);
+  if (parts === null) return null;
+  let freshest: PrLink | null = null;
+  for (const other of index.cards) {
+    for (const pr of other.links.prs) {
+      if (pr.state === 'unknown' || pr.polledAt === null) continue;
+      if (pr.number !== parts.number || pr.repo.toLowerCase() !== parts.repo.toLowerCase()) continue;
+      if (freshest === null || (freshest.polledAt ?? '') < pr.polledAt) freshest = pr;
+    }
+  }
+  return freshest === null ? null : { ...freshest, url, repo: parts.repo };
+};
+
+/** A newly linked PR: what another card already caches of it, else the URL and nothing GitHub has said yet. */
+const unpolledPr = (url: string, index: BoardIndex): PrLink => {
   const parts = prUrlParts(url);
   if (parts === null) throw new BoardError('invalid', `${url} is not a GitHub pull request URL`);
+  const cached = cachedElsewhere(url, index);
+  if (cached !== null) return cached;
   return {
     url,
     number: parts.number,
@@ -364,12 +400,11 @@ const link = (
   const { links } = card;
   if (action.pr !== undefined) {
     if (links.prs.some(pr => pr.url === action.pr)) already(action.pr);
-    return {
-      task: {
-        ...withEvent(card, { type: 'linked', field: 'pr', value: action.pr }, context),
-        links: { ...links, prs: [...links.prs, unpolledPr(action.pr)] },
-      },
+    const linked: BoardTask = {
+      ...withEvent(card, { type: 'linked', field: 'pr', value: action.pr }, context),
+      links: { ...links, prs: [...links.prs, unpolledPr(action.pr, context.index)] },
     };
+    return { task: reconcileFacts(linked, context) ?? linked };
   }
   if (action.branch !== undefined) {
     if (links.branch === action.branch) already(action.branch);
@@ -493,17 +528,16 @@ const refile = (
   const alreadyClosed = source.ok && source.value === 'closed';
   if (!(alreadyClosed && isClosedLane(lane))) requireOwnerForClosed(lane, context.standing, card);
   const fromProject: BoardProjectId = card.projectId;
-  return {
-    task: {
-      ...withEvent(
-        card,
-        { type: 'refiled', fromProject, toProject: action.projectId, toLane: lane.id, reason: action.reason ?? null },
-        context,
-      ),
-      projectId: action.projectId,
-      laneId: lane.id,
-    },
+  const refiled: BoardTask = {
+    ...withEvent(
+      card,
+      { type: 'refiled', fromProject, toProject: action.projectId, toLane: lane.id, reason: action.reason ?? null },
+      context,
+    ),
+    projectId: action.projectId,
+    laneId: lane.id,
   };
+  return { task: reconcileFacts(refiled, { ...context, laneSet: target }) ?? refiled };
 };
 
 /**

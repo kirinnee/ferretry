@@ -7,6 +7,7 @@ import {
   type BoardTaskCreateRequestInput,
   BoardTaskCreateRequestSchema,
   UNFILED_PROJECT_ID,
+  type PrLink,
 } from '@ferretry/protocol';
 import should from 'should';
 import {
@@ -1395,5 +1396,141 @@ describe("relocating a removed lane's cards", () => {
 
     // Assert
     should(moved).eql([]);
+  });
+});
+
+describe('lanes follow PR facts at the write', () => {
+  const URL = 'https://github.com/kirinnee/ferretry/pull/930';
+  const RELEASE = { version: '4.110.0', tag: 'v4.110.0', at: '2026-10-30T09:30:00Z' };
+  const known = (fields: Partial<PrLink> = {}): PrLink => ({
+    url: URL,
+    number: 930,
+    repo: 'kirinnee/ferretry',
+    state: 'merged',
+    draft: false,
+    checks: 'passing',
+    mergedAt: '2026-10-30T09:00:00Z',
+    mergeSha: 'a'.repeat(40),
+    releasedIn: null,
+    polledAt: NOW,
+    ...fields,
+  });
+  const holding = (pr: PrLink, overrides: Partial<BoardTask> = {}): BoardTask =>
+    card({ id: 'F2', laneId: 'implement', links: { prs: [pr], branch: null, commits: [], docs: [] }, ...overrides });
+  const moves = (task: BoardTask) =>
+    task.history.flatMap(event =>
+      event.type === 'moved' ? [[event.to, event.trigger, event.reason, event.actor.kind, event.auto]] : [],
+    );
+
+  it('should use what another card already caches of a PR the moment it is linked', async () => {
+    // Arrange
+    const { ports, service } = serviceWith([card({ laneId: 'implement' }), holding(known())]);
+
+    // Act
+    await service.act('F1', action({ action: 'link', pr: URL.replace('kirinnee', 'KirinNee') }), lead);
+
+    // Assert
+    should(stored(ports).links.prs[0]).match({
+      state: 'merged',
+      number: 930,
+      url: URL.replace('kirinnee', 'KirinNee'),
+    });
+    should(moves(stored(ports))).eql([['merged', 'pr.merged', 'PR #930 merged', 'daemon', true]]);
+    should(stored(ports).history.map(event => event.type)).eql(['created', 'linked', 'moved']);
+  });
+
+  it.each([
+    { name: 'open', pr: known({ state: 'open', mergedAt: null, mergeSha: null }), lane: 'review', trigger: 'pr.ready' },
+    {
+      name: 'released and running here',
+      pr: known({ releasedIn: RELEASE }),
+      lane: 'tested',
+      trigger: 'release.running',
+    },
+  ])('should move a card at once on a linked PR that is $name', async ({ pr, lane, trigger }) => {
+    // Arrange
+    const { ports, service } = serviceWith([card({ laneId: 'plan' }), holding(pr)], {
+      runningVersion: () => '4.114.0',
+    });
+
+    // Act
+    await service.act('F1', action({ action: 'link', pr: URL }), lead);
+
+    // Assert
+    should(stored(ports).laneId).equal(lane);
+    should(lastEvent(ports)).match({ type: 'moved', trigger, auto: true, actor: { kind: 'daemon' } });
+  });
+
+  it('should leave a card where it is when the PR linked is one nobody has polled', async () => {
+    // Arrange
+    const { ports, service } = serviceWith([card({ laneId: 'implement' })]);
+
+    // Act
+    await service.act('F1', action({ action: 'link', pr: URL }), lead);
+
+    // Assert
+    should(stored(ports)).match({ laneId: 'implement' });
+    should(stored(ports).links.prs[0]?.state).equal('unknown');
+    should(lastEvent(ports)).match({ type: 'linked' });
+  });
+
+  it('should not seed a link from a card that holds a stale unknown state, or a different PR', async () => {
+    // Arrange
+    const other = known({ url: 'https://github.com/kirinnee/ferretry/pull/931', number: 931 });
+    const unknown = known({ state: 'unknown', checks: 'none', mergedAt: null, mergeSha: null, polledAt: null });
+    const { ports, service } = serviceWith([card(), holding(other), holding(unknown, { id: 'F3' })]);
+
+    // Act
+    await service.act('F1', action({ action: 'link', pr: URL }), lead);
+
+    // Assert
+    should(stored(ports).links.prs[0]?.state).equal('unknown');
+  });
+
+  it('should take the freshest look when several cards cache the same PR', async () => {
+    // Arrange
+    const stale = known({ state: 'open', mergedAt: null, mergeSha: null, polledAt: '2026-10-30T08:00:00.000Z' });
+    const { ports, service } = serviceWith([card(), holding(known()), holding(stale, { id: 'F3' })]);
+
+    // Act
+    await service.act('F1', action({ action: 'link', pr: URL }), lead);
+
+    // Assert
+    should(stored(ports).links.prs[0]?.state).equal('merged');
+  });
+
+  it('should re-evaluate a card refiled to another board against that board lanes', async () => {
+    // Arrange
+    const { ports, service } = serviceWith([holding(known(), { id: 'F1' })]);
+
+    // Act
+    await service.act('F1', action({ action: 'refile', projectId: OTHER_PROJECT }), lead);
+
+    // Assert: the `pr` template closes on merge, and a fact may enter a lane the owner does not gate.
+    should(stored(ports)).match({ projectId: OTHER_PROJECT, laneId: 'merged' });
+    should(moves(stored(ports))).eql([['merged', 'pr.merged', 'PR #930 merged', 'daemon', true]]);
+  });
+
+  it('should refile as before when the card has no PR facts', async () => {
+    // Arrange
+    const { ports, service } = serviceWith([card({ laneId: 'implement' })]);
+
+    // Act
+    await service.act('F1', action({ action: 'refile', projectId: OTHER_PROJECT }), lead);
+
+    // Assert
+    should(stored(ports)).match({ projectId: OTHER_PROJECT, laneId: 'plan' });
+  });
+
+  it('should record a PR update with the version this daemon runs', async () => {
+    // Arrange
+    const shipped = holding(known({ releasedIn: RELEASE }), { id: 'F1', laneId: 'released' });
+    const { ports, service } = serviceWith([shipped], { runningVersion: () => '4.110.0' });
+
+    // Act
+    await service.recordPullRequests('F1', { link: [], observed: [], releases: [], runningVersion: null });
+
+    // Assert
+    should(stored(ports).laneId).equal('tested');
   });
 });

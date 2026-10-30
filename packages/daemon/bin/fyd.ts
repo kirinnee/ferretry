@@ -73,6 +73,7 @@ import {
   PACK_CLEAN_UP_LABEL,
   type PackConfig,
   type PackRefusal,
+  ProtocolVersionSchema,
   type RegisterProjectRequest,
   type RuntimeControlRequest,
   type RuntimeModelChoice,
@@ -1971,6 +1972,7 @@ function createBoardWorld(
     clock,
     diagnostics: boardDiagnostics,
     machineId,
+    runningVersion: () => (ProtocolVersionSchema.safeParse(daemonVersion).success ? daemonVersion : null),
     serial: new KeyedSerialExecutor(),
     adoption,
   });

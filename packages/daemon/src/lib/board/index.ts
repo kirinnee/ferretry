@@ -5,6 +5,7 @@ export * from './card-actions.ts';
 export * from './derive.ts';
 export * from './errors.ts';
 export * from './graph.ts';
+export * from './lane-facts.ts';
 export * from './lineage.ts';
 export * from './pending-context.ts';
 export * from './ports.ts';

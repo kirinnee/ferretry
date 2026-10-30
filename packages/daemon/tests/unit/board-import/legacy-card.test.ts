@@ -1,5 +1,7 @@
 import { describe, it } from 'bun:test';
+import { BoardTaskSchema } from '@ferretry/protocol';
 import should from 'should';
+import { laneFromFacts } from '../../../src/lib/board/index.ts';
 import {
   buildCard,
   type CardInput,
@@ -9,7 +11,6 @@ import {
   UNTRIAGED_TITLE,
   untriagedCard,
 } from '../../../src/lib/board-import/index.ts';
-import { BoardTaskSchema } from '@ferretry/protocol';
 import { card, lanes, MACHINE, NOW } from '../board/support.ts';
 import { actorOf, daemonActor, entryOf, oldTask, statusAct, taskAt } from './support.ts';
 
@@ -349,6 +350,19 @@ describe('buildCard', () => {
     should(result.links.prs[0]).match({ url, number: 7, repo: 'a/b', state: 'unknown' });
     should(result.links).match({ branch: 'feat/x', commits: ['c1'], docs: ['d.md', 'not a pull request'] });
     should(result.files).eql(['a.ts']);
+  });
+
+  it('should leave an imported PR for the watcher: nothing is known about it, so the facts have no opinion yet', () => {
+    // Arrange
+    const task = oldTask({ links: { prs: ['https://github.com/a/b/pull/7'], branch: null, commits: [], docs: [] } });
+
+    // Act
+    const result = built({ entry: entryOf(task) });
+
+    // Assert
+    should(
+      laneFromFacts(result, lanes(), result.workflow, { prs: result.links.prs, runningVersion: '9.0.0' }),
+    ).be.null();
   });
 
   it('should refuse a task that will not parse as a card, naming the field', () => {

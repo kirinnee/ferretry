@@ -190,7 +190,7 @@ const merged: Lane = { id: 'merged', name: 'Merged', category: 'shipped', enterO
 const released: Lane = { id: 'released', name: 'Released', category: 'shipped', enterOn: ['release.published'] };
 const tested: Lane = {
   id: 'tested',
-  name: 'Manually tested',
+  name: 'To test',
   category: 'verify',
   enterOn: ['release.running'],
   ownerGate: true,
@@ -244,8 +244,8 @@ const quickLanes: Lane[] = [
  * The templates, as data (`board-design.md` §2.3):
  *
  * - `pr-release-verify` — Ferretry's own: Todo → Plan/Design → Implement → Review/CI → Merged → Released →
- *   Manually tested → Closed. The card reaches Manually tested once the release runs on this machine.
- * - `pr-release` — no Manually tested; Released closes.
+ *   To test → Closed. The card reaches To test once the release runs on this machine.
+ * - `pr-release` — no To test; Released closes.
  * - `pr` — Merged closes.
  * - `ops` — Investigate → Fix → Verify → Closed.
  * - `writing` — Research → Draft → Review → Published → Closed.

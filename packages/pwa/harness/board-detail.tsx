@@ -4,7 +4,7 @@
  * on a phone.
  *
  * `?view=card|tested|ask` picks the card: a card in review with children, dependencies, links and history; a
- * 🧪 Manually tested card with the two verdict buttons; a card stopped by a blocking ask with answer buttons.
+ * 🧪 To test card with the two verdict buttons; a card stopped by a blocking ask with answer buttons.
  * Nothing leaves the page.
  */
 

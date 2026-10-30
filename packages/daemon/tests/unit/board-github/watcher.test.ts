@@ -5,9 +5,9 @@ import { BoardService } from '../../../src/lib/board/index.ts';
 import {
   GH_MISSING_WARNING,
   type GhOutcome,
-  ghSignedOutWarning,
   GitHubWatcher,
   type GitHubWatcherPorts,
+  ghSignedOutWarning,
   MAX_COMPARES_PER_TICK,
   POLL_IDLE_MS,
   POLL_OPEN_MS,
@@ -494,7 +494,97 @@ describe('GitHubWatcher: releases', () => {
     should(gh.compares()).have.length(MAX_COMPARES_PER_TICK);
   });
 
-  it('should move a released card to Manually tested without asking GitHub anything', async () => {
+  it('should catch a stale card up on the next poll, with no event for it to wait on', async () => {
+    const settled = link(940, { state: 'merged', mergedAt: '2026-10-30T09:00:00Z', mergeSha: SHA, polledAt: NOW });
+    const subject = rig({
+      cards: [withLinks([settled], { laneId: 'implement' })],
+      gh: new FakeGh(repoAnswer({ prs: { 940: prNode(940, { state: 'MERGED' }) }, releases: [] })),
+    });
+    should((await subject.watcher.tick()).written).deepEqual(['F1']);
+    should(subject.stored().laneId).equal('merged');
+    const [event] = subject.stored().history.filter(entry => entry.type === 'moved');
+    should(event).match({ auto: true, trigger: 'pr.merged', reason: 'PR #940 merged', actor: { kind: 'daemon' } });
+  });
+
+  it('should reconcile a card whose PRs need no polling at all, on every tick', async () => {
+    const shipped = link(940, {
+      state: 'merged',
+      mergedAt: '2026-10-30T09:00:00Z',
+      mergeSha: SHA,
+      releasedIn: RELEASE,
+      polledAt: NOW,
+    });
+    const subject = rig({
+      cards: [
+        withLinks([shipped], { laneId: 'implement' }),
+        withLinks([{ ...shipped, url: prUrl(941), number: 941 }], { id: 'F2', laneId: 'plan' }),
+      ],
+      version: '4.109.0',
+    });
+    await subject.watcher.tick();
+    should(subject.stored().laneId).equal('released');
+    should(subject.stored('F2').laneId).equal('released');
+    should(subject.gh.calls).be.empty();
+    // The release reaches this machine: the next tick finds it, with nothing new from GitHub.
+    const running = rig({ cards: [subject.stored(), subject.stored('F2')], version: '4.110.0' });
+    await running.watcher.tick();
+    should(running.stored().laneId).equal('tested');
+    should(running.stored('F2').laneId).equal('tested');
+  });
+
+  it('should leave a card the owner sent back after its PR merged where it was sent', async () => {
+    const settled = link(940, { state: 'merged', mergedAt: '2026-10-30T09:00:00Z', mergeSha: SHA, polledAt: NOW });
+    const base = withLinks([settled], { laneId: 'implement' });
+    const sentBack = {
+      ...base,
+      history: [
+        ...base.history,
+        {
+          seq: 2,
+          at: '2026-10-30T09:30:00Z',
+          actor: { kind: 'owner' as const },
+          type: 'moved' as const,
+          from: 'tested',
+          to: 'implement',
+          backward: true,
+          reason: 'not good',
+        },
+      ],
+    };
+    const subject = rig({
+      cards: [sentBack],
+      gh: new FakeGh(repoAnswer({ prs: { 940: prNode(940, { state: 'MERGED' }) }, releases: [] })),
+    });
+    await subject.watcher.tick();
+    should(subject.stored().laneId).equal('implement');
+  });
+
+  it('should look at a PR it has never asked about at once, not when its repository is next due', async () => {
+    const subject = rig({
+      cards: [
+        withLinks([link(940, { state: 'merged', mergedAt: '2026-10-30T09:00:00Z', mergeSha: SHA, polledAt: NOW })]),
+      ],
+      gh: new FakeGh(
+        repoAnswer({
+          prs: { 940: prNode(940, { state: 'MERGED' }), 941: prNode(941, { state: 'MERGED' }) },
+          releases: [],
+        }),
+      ),
+    });
+    await subject.watcher.tick();
+    should(subject.gh.polls()).equal(1);
+    // The repository is now idle for ten minutes. A card imported or linked with an unknown PR is looked at anyway.
+    subject.store.cards.set('F2', withLinks([link(941)], { id: 'F2' }));
+    should((await subject.watcher.tick()).polled).deepEqual([REPO]);
+    should(subject.stored('F2').laneId).equal('merged');
+    // And only once: a PR GitHub left unknown waits for the cadence like any other.
+    subject.store.cards.set('F3', withLinks([link(942)], { id: 'F3' }));
+    await subject.watcher.tick();
+    should(subject.gh.polls()).equal(3);
+    should((await subject.watcher.tick()).polled).be.empty();
+  });
+
+  it('should move a released card to To test without asking GitHub anything', async () => {
     const subject = rig({ cards: [withLinks([merged({ releasedIn: RELEASE })], { laneId: 'released' })] });
     should((await subject.watcher.tick()).written).deepEqual(['F1']);
     should(subject.stored().laneId).equal('tested');

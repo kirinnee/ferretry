@@ -87,7 +87,7 @@ describe('LaneStepper', () => {
       'Review/CI:current',
       'Merged:next',
       'Released:next',
-      'Manually tested:next',
+      'To test:next',
       'Closed:next',
     ]);
     expect(root.querySelector('[aria-current="step"]')?.textContent).toBe('Review/CI');
