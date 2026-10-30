@@ -653,6 +653,7 @@ describe('investigationRows', () => {
       title: 'Jev sent it for a closer look · claude-default · sonnet',
       reportPath: 'r/done.md',
       verdict: 'killed',
+      jev: 'Jev: no record — from before Jev’s results were kept',
     });
   });
 });

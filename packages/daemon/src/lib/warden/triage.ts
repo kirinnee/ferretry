@@ -50,6 +50,7 @@
 
 import type {
   WardenCaps,
+  WardenJevBefore,
   WardenGuardFailureCode,
   WardenInvestigationOrigin,
   WardenSavings,
@@ -122,6 +123,8 @@ export interface WardenInvestigationRecord {
   readonly model?: string;
   /** The investigator's own name, `warden-00002a` (stored lowercase). */
   readonly wardenName?: string;
+  /** What Jev did about the flag first (`jev-checks.ts` {@link jevBeforeInvestigation}). Session investigations only. */
+  readonly jev?: WardenJevBefore;
 }
 
 /** Every priced investigation ever, as a running total, so the savings line can say what one costs. */

@@ -271,6 +271,21 @@ checks (_6 checks: 1 healthy · 0 acted · 5 handed on_) and says **Jev paused: 
 the chart draws Jev's bar as its checks, and Recent actions lists every check that settled nothing as a
 _Handed on_ or _Skipped_ row of Jev's. A day from before this has no `jev` and reads as it did.
 
+**Beside every LLM result, what Jev did first.** Jev being on does not mean Jev ran: its cap may be spent,
+the flag may be one it never judges, the run may be forced. So the Warden keeps Jev's last word on each
+standing flag it did not settle (`jevBefore` in its state) and an investigation records it when it starts, as
+`jev` on the investigation and on every act its verdict leads to: **handed on** (with why, the act Jev
+chose if any, how sure it was, what the call cost and the check's time — which, with the ferret and the flag,
+names its line in the check record), **skipped** (the cap), **not asked** (the owner asked for it, a forced
+run, a kind Jev never judges, a back-off, a snapshot that could not be masked, Jev's own earlier act on the
+same trouble) or **off**. An investigation queued before this was kept says **no record**; a fleet triage
+carries one answer only when Jev said the same about every flag it covers. Still no text. The Warden page
+puts it as one line under every LLM row in Recent actions, every investigation and the report —
+_Jev: not sure (21%) · $0.0041 → investigated_, _Jev: skipped — daily cap spent → investigated_, _Jev: off_ —
+and says today's spend at a glance (_Today: Jev $0.0055 · LLM $1.20 · together $1.21_; an amount under a
+cent is shown to four places, never rounded to $0.00), what one Jev check costs, and each day's Jev and LLM
+spend in the chart.
+
 **Investigators are named `warden-000001` … `warden-FFFFFF`**, from a counter in `warden/state.json`
 (`investigatorSequence`) that wraps to 1 and skips a name a live session still holds — never from the first-name
 pool, which is for real ferrets. The name is stored lowercase and shown with its digits uppercase

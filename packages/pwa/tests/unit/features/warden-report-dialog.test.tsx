@@ -54,3 +54,21 @@ describe('WardenReportDialog', () => {
     await unreadable.unmount();
   });
 });
+
+describe('WardenReportDialog and Jev', () => {
+  it('says what Jev did before the investigation when the opener knows it, and nothing otherwise', () => {
+    const withJev = renderToStaticMarkup(
+      <WardenReportDialog
+        request={{ ...request, jev: 'Jev: not sure (21%) · $0.0041 → investigated' }}
+        read={async () => '# Evidence'}
+        onClose={() => {}}
+      />,
+    );
+    const without = renderToStaticMarkup(
+      <WardenReportDialog request={request} read={async () => '# Evidence'} onClose={() => {}} />,
+    );
+
+    expect(withJev).toContain('Jev: not sure (21%) · $0.0041 → investigated');
+    expect(without).not.toContain('data-warden-jev');
+  });
+});

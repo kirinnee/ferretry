@@ -10,6 +10,8 @@ import type { WardenVerdictView } from './warden-verdicts.tsx';
 export interface WardenReportDialogRequest {
   readonly connection: DaemonConnection;
   readonly verdict: WardenVerdictView;
+  /** What Jev did before this investigation, as its line, when the opener knows it. */
+  readonly jev?: string;
 }
 
 export type WardenReportReader = (connection: DaemonConnection, reportPath: string) => Promise<string>;
@@ -78,6 +80,14 @@ export function WardenReportDialog({
             <X size={16} aria-hidden="true" />
           </button>
         </header>
+        {request.jev !== undefined && (
+          <p
+            className="m-0 border-b border-border-soft px-cell-x py-xs text-meta leading-base text-muted"
+            data-warden-jev
+          >
+            {request.jev}
+          </p>
+        )}
         <div className="min-h-0 overflow-auto px-cell-x py-3 text-ui leading-base">
           {body === null && !unavailable && <p className="m-0 text-muted">Loading report evidence…</p>}
           {unavailable && (
