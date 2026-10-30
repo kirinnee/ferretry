@@ -100,6 +100,7 @@ import { sessionReadRoutes } from './session-reads.ts';
 import { type SessionRenameSubsystem, sessionRenameRoutes } from './session-rename.ts';
 import { type SessionResumeSubsystem, sessionResumeRoutes } from './session-resume.ts';
 import { sessionRuntimeRoutes } from './session-runtime.ts';
+import type { QueueDeliverer } from '../../session/queue/deliverer.ts';
 import { type SessionSendSubsystem, sessionSendRoutes } from './session-send.ts';
 import { type SessionSignalSubsystem, sessionSignalRoutes } from './session-signal.ts';
 import { type SessionDirectorySubsystem, sessionRoutes } from './sessions.ts';
@@ -263,6 +264,11 @@ export interface MountedSubsystems {
    *  proven absent, and settles the rest honestly. It is armed at boot because a restart owes every
    *  in-flight send a re-derivation from the transcript — never a re-typing. */
   readonly sendTracking: SendTrackingLoop;
+  /**
+   * The durable queue's deliverer: armed after the bind like every loop that can type into a pane, and
+   * stopped FIRST on the way down, so a hand-over in flight is finished rather than cut in half.
+   */
+  readonly queueDelivery: Pick<QueueDeliverer, 'arm' | 'stop'>;
   /** Answering a live structured form, after a pane-bound confirmation. */
   readonly sessionAnswer: SessionAnswerSubsystem;
   /** Durable encrypted attachment originals plus process-local unlock state. */

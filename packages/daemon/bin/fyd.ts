@@ -8984,9 +8984,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         view: async id => await deliveryView.view(id),
         transport: new SendPathQueueTransport(sends, sendLedger),
         sessions: () => storage.listSessions().map(session => session.id),
+        sleep: async milliseconds => await Bun.sleep(milliseconds),
       });
       storage.subscribeStates(id => void queueDeliverer.changed(id).catch(() => undefined));
-      void queueDeliverer.arm().catch(() => undefined);
       /**
        * What every producer inside this daemon sends through: with the queue on, its message is enqueued and
        * the deliverer types it — the Warden, the board, the declared-wait watcher as the daemon's, the owner's
@@ -10859,6 +10859,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sessionControl,
         sessionResume: sessionResumeSubsystem,
         sendTracking: sendTracker,
+        queueDelivery: queueDeliverer,
         sessionSend: createSessionSendSubsystem(
           storage,
           sessions,
@@ -12403,6 +12404,11 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * re-types nothing it cannot prove absent — and the disarm cancels the one pending look per session.
    */
   cleanups.push(subsystems.sendTracking.arm());
+  // The queue's deliverer looks once at every session for what a restart left open. Its stop is the FIRST
+  // thing a shutdown does: a send answers once its message is on disk, so one sent just before a stop is
+  // being typed while the daemon goes down, and the tmux client it types through is released below.
+  void subsystems.queueDelivery.arm().catch(() => undefined);
+  cleanups.unshift(async () => await subsystems.queueDelivery.stop());
   // The line an operator greps for. Everything above it is a step that can stall; a log that reaches
   // here and stops is a daemon that is serving, which is a completely different report from one that
   // stops at "state home opened" — and before any of this existed the two were the same empty file.

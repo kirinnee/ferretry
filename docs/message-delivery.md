@@ -34,7 +34,9 @@ this page, which is still how a message reaches the pane.
   (`movesFrom`): `queued` there is ✓✓, `delivered` there is ✓✓✓. A `typing` message the ledger never saw
   had no key typed and waits again; nothing is ever typed twice on a guess. It looks at a session when a
   message is enqueued, when its state document changes, at boot, and every `lookMs` (5 s) while something
-  in it is still waiting or unproven. Both harnesses follow one rule: Claude Code's own queue shows a
+  in it is still waiting or unproven. It is armed after the bind, like the send tracker, and stopped FIRST
+  on the way down: a send answers once its message is on disk, so one sent just before a stop is still
+  being typed, and the stop waits (up to `drainMs`, 15 s) for that hand-over rather than cutting it in half. Both harnesses follow one rule: Claude Code's own queue shows a
   message typed mid-turn, so its hand-over is proven at once; Codex steers it into the running turn and
   shows nothing, so it stays `typing` — holding the next message — until Codex's transcript proves it.
 - **Switch** — `"delivery": { "queue": false }` in `config/daemon.json` turns it off (on by default; read at
