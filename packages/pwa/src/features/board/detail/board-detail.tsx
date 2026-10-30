@@ -4,12 +4,13 @@
  * One flowing page, in the manner of a task page: a header (id, title, a lane dropdown, who and where), plain
  * headed sections, a timeline, and a comment box pinned at the bottom. A side drawer on a wide screen and a
  * full-screen page on a phone; either way the address names the card, so Back leaves it and a link opens it. The card is read through the board store (one source of truth with
- * the Board behind it), every write goes through `BoardActions`, and an answer to a waiting ask goes through
- * the agenda client every other answer uses. This file composes; the facts are `board-detail.ts` and the
+ * the Board behind it), every write goes through `BoardActions`, and an ask opens in its ferret's chat as
+ * the same item view every `!A5` opens — it is answered there, never here. This file composes; the facts are `board-detail.ts` and the
  * sections draw them.
  */
 
 import {
+  type AgendaId,
   type BoardTaskId,
   type BoardTaskView,
   formatTaskRef,
@@ -22,6 +23,7 @@ import { Component, type ErrorInfo, type FormEvent, type ReactNode, useId, useMe
 import { type BoardMachine, useBoardTask } from '../../../hooks/use-board.ts';
 import { useBoardAsks } from '../../../hooks/use-board-asks.ts';
 import type { DaemonAgendaClient } from '../../../lib/agenda-client.ts';
+import { agendaConversationPath } from '../../../lib/agenda-inbox.ts';
 import type { BoardActions } from '../../../lib/board-actions.ts';
 import {
   activityText,
@@ -36,15 +38,15 @@ import {
   verdictLanes,
   written,
 } from '../../../lib/board-detail.ts';
-import type { RunningOnMachine } from '../../../lib/board-model.ts';
 import { boardDone } from '../../../lib/board-done.ts';
+import type { RunningOnMachine } from '../../../lib/board-model.ts';
 import { moveChoices, planMove } from '../../../lib/board-move.ts';
 import type { FerretNames } from '../../../lib/board-present.ts';
 import type { DaemonBoardStore } from '../../../lib/board-store.ts';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { daemonBoardPath, daemonSessionPath } from '../../../lib/pages/routes.ts';
-import { BoardIcon } from '../board-icons.tsx';
 import { BoardDoneAction } from '../board-done-action.tsx';
+import { BoardIcon } from '../board-icons.tsx';
 import { BoardReasonBox } from '../board-reason-box.tsx';
 import {
   AskSection,
@@ -60,7 +62,6 @@ import {
   prIconName,
   TermsTable,
 } from './board-detail-sections.tsx';
-import { WaitingOnYou } from './board-detail-waiting.tsx';
 
 export type BoardAgenda = Pick<DaemonAgendaClient, 'hydrate' | 'respond' | 'store'>;
 
@@ -607,17 +608,13 @@ function DetailBody({
 
         {task.waitingOnOwner.length + asks.open.length + asks.resolved.length === 0 ? null : (
           <DetailSection count={asks.open.length + asks.resolved.length} id="asks" title="Agenda asks">
-            {task.waitingOnOwner.length === 0 ? null : (
-              <WaitingOnYou
-                asks={asks}
-                names={names}
-                onAnswer={async (ref, response, note) => {
-                  const result = await actions.answer(machine.connection.daemonId, ref, response, note);
-                  return result.ok ? null : result.error.message;
-                }}
-              />
-            )}
-            {asks.open.length + asks.resolved.length === 0 ? null : <AsksList asks={asks} names={names} />}
+            <AsksList
+              asks={asks}
+              names={names}
+              onOpen={(sessionId, id) =>
+                onNavigate(agendaConversationPath(machine.connection.daemonId, sessionId, id as AgendaId))
+              }
+            />
           </DetailSection>
         )}
 

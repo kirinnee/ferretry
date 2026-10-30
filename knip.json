@@ -57,6 +57,8 @@
         "harness/phone-chat-page.tsx",
         "harness/board-chat-page.tsx",
         "harness/agenda-v4-screenshot.ts",
+        "harness/agenda-settled-screenshot.ts",
+        "harness/agenda-settled-page.tsx",
         "harness/inbox-v2-screenshot.ts",
         "harness/allow-confirm-screenshot.tsx",
         "harness/agenda-page.tsx",

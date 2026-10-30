@@ -169,25 +169,22 @@ export function ContextNote({ children }: { readonly children: string }) {
 
 /**
  * A read that failed. Given the machine and what was being read, it says it in plain words — "Liftoff MBP
- * isn't reachable right now" — and keeps the transport's own text behind Details; given a title, it says
- * that and the reason as they are.
+ * isn't reachable right now" — and keeps the transport's own text behind Details.
  */
-export type ContextFailureProps =
-  | { readonly title: string; readonly reason: string; readonly onRetry: () => void }
-  | {
-      readonly machineName: string;
-      /** What was being done, after "Couldn't": "read this ferret's skills". */
-      readonly what: string;
-      readonly reason: string;
-      /** Set when the machine's daemon predates the route: said as an update to make, not as a failure. */
-      readonly outdated?: OutdatedMachine;
-      /** What the update would let the app show, after "to show": "MCP". Used only with `outdated`. */
-      readonly showing?: string;
-      readonly onRetry: () => void;
-    };
+interface ContextFailureProps {
+  readonly machineName: string;
+  /** What was being done, after "Couldn't": "read this ferret's skills". */
+  readonly what: string;
+  readonly reason: string;
+  /** Set when the machine's daemon predates the route: said as an update to make, not as a failure. */
+  readonly outdated?: OutdatedMachine;
+  /** What the update would let the app show, after "to show": "MCP". Used only with `outdated`. */
+  readonly showing?: string;
+  readonly onRetry: () => void;
+}
 
 export function ContextFailure(props: ContextFailureProps) {
-  if ('outdated' in props && props.outdated !== undefined)
+  if (props.outdated !== undefined)
     return (
       <ContextOutdated
         machineName={props.machineName}
@@ -196,21 +193,15 @@ export function ContextFailure(props: ContextFailureProps) {
         onRetry={props.onRetry}
       />
     );
-  const failure: PlainFailure =
-    'title' in props
-      ? { headline: props.title, details: props.reason }
-      : plainFailure(props.reason, props.machineName, props.what);
-  const plain = !('title' in props);
+  const failure: PlainFailure = plainFailure(props.reason, props.machineName, props.what);
   return (
     <div className="flex min-w-0 flex-col gap-xs py-sm" role="alert" data-context-failed="">
       <p className="m-0 break-words text-cell font-semibold text-fg">{failure.headline}</p>
-      {failure.details === undefined ? null : plain ? (
+      {failure.details === undefined ? null : (
         <details className="min-w-0 text-meta text-muted" data-context-failed-details="">
           <summary className="cursor-pointer select-none">Details</summary>
           <span className="block break-words font-mono text-2xs">{failure.details}</span>
         </details>
-      ) : (
-        <p className="m-0 break-words text-meta text-muted">{failure.details}</p>
       )}
       <div>
         <Button type="button" size="sm" onClick={props.onRetry} data-context-retry="">

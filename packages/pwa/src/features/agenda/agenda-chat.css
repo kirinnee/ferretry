@@ -336,3 +336,41 @@ button.fy-agenda-line__main:focus-visible {
   color: var(--muted);
   font-size: var(--text-sm);
 }
+
+/* An item that cannot be answered here (agenda-settled.tsx): where it stands, in the quick replies' place. */
+.fy-settled {
+  padding-block: var(--gap-sm);
+}
+.fy-settled__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-sm);
+  width: 100%;
+  max-width: var(--chat-column, 720px);
+  margin-inline: auto;
+}
+.fy-settled__line {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  min-width: 0;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.fy-settled > .fy-settled__line,
+.fy-settled__detail {
+  width: 100%;
+  max-width: var(--chat-column, 720px);
+  margin: 0 auto;
+}
+.fy-settled__detail {
+  color: var(--fg);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+.fy-settled__back {
+  flex-shrink: 0;
+}

@@ -30,13 +30,13 @@ describe('useInfoPlacement', () => {
     let placement: ReturnType<typeof useInfoPlacement> | undefined;
     let renderer: ReactTestRenderer | undefined;
     const Probe = () => {
-      placement = useInfoPlacement('signals');
+      placement = useInfoPlacement('surfaces');
       return null;
     };
     act(() => {
       renderer = create(createElement(Probe));
     });
-    expect(placement).toMatchObject({ open: true, tab: 'signals' });
+    expect(placement).toMatchObject({ open: true, tab: 'surfaces' });
     act(() => renderer?.unmount());
   });
 

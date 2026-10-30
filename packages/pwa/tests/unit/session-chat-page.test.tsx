@@ -33,7 +33,6 @@ import type { SessionActionContribution } from '../../src/features/session-actio
 import { RenameForm } from '../../src/features/session-actions/rename-form.tsx';
 import { SessionInfo } from '../../src/features/session-info/session-info.tsx';
 import { SessionSearchProvider } from '../../src/features/session-search/session-search.tsx';
-import { ThemeToggle } from '../../src/shell/theme-toggle.tsx';
 import { SessionWorkspace } from '../../src/features/workspace/session-workspace.tsx';
 import { WorkspaceView } from '../../src/features/workspace/workspace-view.tsx';
 import { TOUCH_SELECTION_RELEASE_SETTLE_MS } from '../../src/hooks/use-live-clock.ts';
@@ -57,6 +56,7 @@ import { WorkspaceLayoutStore } from '../../src/lib/workspace-layout-store.ts';
 import { WorkspaceRailPreferenceStore } from '../../src/lib/workspace-rail-preferences.ts';
 import { BottomSheet } from '../../src/shell/bottom-sheet.tsx';
 import { resetSidePaneTabsStates } from '../../src/shell/side-pane-tab-model.ts';
+import { ThemeToggle } from '../../src/shell/theme-toggle.tsx';
 import { fakeDeck, terminalListing, terminalView } from '../support/terminal-deck.ts';
 import { boardAnswer, card as boardCard, fakeEnvironment, fakePort, laneSetFor, PROJECT } from './board-support.ts';
 import { factoryFor } from './features/fleet/mcp-sign-in-support.ts';
@@ -1713,7 +1713,7 @@ describe('SessionChatPage', () => {
       expect(page.root.findByType(SessionInfo).props.placement.tab).toBe('folder');
       const rail = () => page.root.findByType(ContextRailBody);
       expect(rail().props.tab).toBe('skills');
-      expect(rail().props.agentName).toBe(sessionDisplayName(sessionView('shared')));
+      expect(rail().props.sessionId).toBe('shared');
       expect(JSON.stringify(page.toJSON())).toContain('floop');
       expect(scope.sessionId).toBe('shared');
       // Insert puts the invocation into this agent's composer draft; a Docs row opens a Files tab.
@@ -2517,20 +2517,14 @@ describe('SessionChatPage', () => {
       }
     });
 
-    test('keeps the resolved history in the header menu as "N resolved", and shows no row when there is none', () => {
+    test('keeps resolved history out of the chat and the header menu: Info’s agenda list holds it (#B76)', () => {
       const withHistory = renderSessionChatPage(agendaPage({ attention: agendaModel([], [resolvedItem]) }));
       try {
-        expect(actionLabels(withHistory.root)).toContain('1 resolved');
+        expect(actionLabels(withHistory.root).some(label => label.endsWith('resolved'))).toBe(false);
         expect(lines(withHistory.root)).toHaveLength(0);
         expect(withHistory.root.findAll(node => node.props?.['data-agenda-record'] !== undefined)).toHaveLength(0);
       } finally {
         run(() => withHistory.unmount());
-      }
-      const without = renderSessionChatPage(agendaPage({ attention: agendaModel([], []) }));
-      try {
-        expect(actionLabels(without.root).some(label => label.endsWith('resolved'))).toBe(false);
-      } finally {
-        run(() => without.unmount());
       }
     });
 
@@ -2550,8 +2544,11 @@ describe('SessionChatPage', () => {
       }
     });
 
-    test('proves every id on this session’s ledger and opens an open one as its card, a resolved one in the list', () => {
-      const page = renderSessionChatPage(agendaPage({ attention: agendaModel([agendaItem], [resolvedItem]) }));
+    test('proves every id on this session’s ledger and every one opens the same card: open, parked, resolved (#B76)', () => {
+      const parked = { ...agendaItem, id: 'A89', parked: { reason: 'replied', at: '2026-07-31T11:50:00.000Z' } };
+      const page = renderSessionChatPage(
+        agendaPage({ attention: agendaModel([agendaItem, parked as typeof agendaItem], [resolvedItem]) }),
+      );
       try {
         const surface = page.root.findByType(ReferenceSurfaceProvider).props.surface;
         expect(surface.agendaReferenceResolver('A3')).toBe(true);
@@ -2567,9 +2564,17 @@ describe('SessionChatPage', () => {
         run(() => page.root.findByType(AgendaItemView).props.onClose());
         expect(cards(page.root)).toHaveLength(0);
 
+        // !A89: replied to, so parked — the link the owner clicked in lizzette's chat. It opens, with the way back.
+        expect(surface.agendaReferenceResolver('A89')).toBe(true);
+        run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onAgendaOpen('A89', null));
+        expect(page.root.findByType(AgendaItemView).props.item.id).toBe('A89');
+        expect(page.root.findAll(node => node.props?.['data-agenda-settled'] === 'replied')).not.toHaveLength(0);
+        run(() => page.root.findByType(AgendaItemView).props.onClose());
+
         run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onAgendaOpen('A2', null));
-        expect(actionLabels(page.root)).toContain('1 resolved');
-        expect(cards(page.root)).toHaveLength(0);
+        expect(page.root.findByType(AgendaItemView).props.item.id).toBe('A2');
+        expect(page.root.findAll(node => node.props?.['data-agenda-settled'] === 'resolved')).not.toHaveLength(0);
+        expect(actionLabels(page.root).some(label => label.endsWith('resolved'))).toBe(false);
       } finally {
         run(() => page.unmount());
       }
@@ -2585,6 +2590,25 @@ describe('SessionChatPage', () => {
         expect(lines(page.root)).toHaveLength(0);
       } finally {
         run(() => page.unmount());
+      }
+    });
+
+    test('a notification deep link (?agenda=) to a parked or resolved item opens its card, never nothing (#B76)', () => {
+      const parked = { ...agendaItem, id: 'A89', parked: { reason: 'replied', at: '2026-07-31T11:50:00.000Z' } };
+      const board = agendaModel([agendaItem, parked as typeof agendaItem], [resolvedItem]);
+      const toParked = renderSessionChatPage(agendaPage({ attention: board, agendaTarget: 'A89' }));
+      try {
+        expect(toParked.root.findByType(AgendaItemView).props.item.id).toBe('A89');
+        expect(toParked.root.findAll(node => node.props?.['data-agenda-missing'] !== undefined)).toHaveLength(0);
+      } finally {
+        run(() => toParked.unmount());
+      }
+      const toResolved = renderSessionChatPage(agendaPage({ attention: board, agendaTarget: 'A2' }));
+      try {
+        expect(toResolved.root.findByType(AgendaItemView).props.item.id).toBe('A2');
+        expect(toResolved.root.findAll(node => node.props?.['data-agenda-settled'] === 'resolved')).not.toHaveLength(0);
+      } finally {
+        run(() => toResolved.unmount());
       }
     });
 
@@ -3781,7 +3805,6 @@ describe('SessionChatPage Info and Actions', () => {
       ).toEqual(['ferretry:ferretry']);
       expect(ports.folder.sessionId).toBe('shared');
       expect(ports.folder.machineName).toBe('alpha box');
-      expect(ports.folder.agentName).toBe(sessionDisplayName(current));
       expect(ports.folder.mcpSignIn.machineName).toBe('alpha box');
       run(() => ports.folder.onInsertSkill('/floop'));
 

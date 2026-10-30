@@ -15,11 +15,13 @@ import {
 } from '../../../src/features/board/detail/board-detail-sections.tsx';
 import { laneNameOf } from '../../../src/lib/board-detail.ts';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
+
 const text = (root: Element, selector: string): string | undefined =>
   root.querySelector(selector)?.textContent ?? undefined;
+
 import { agendaItem } from '../../support/agenda-inbox.tsx';
 import { card, laneSetFor, laptop, workstation } from '../board-support.ts';
-import { HELPER, LEAD, names, NOW } from './board-detail-support.tsx';
+import { HELPER, LEAD, NOW, names } from './board-detail-support.tsx';
 
 let view: Mounted | null = null;
 afterEach(async () => {
@@ -385,9 +387,13 @@ describe('AsksList', () => {
     }) as unknown as ResolvedAgendaItem;
 
   it('says it is reading while the agendas load, and that there are none after', async () => {
-    const root = await show(<AsksList asks={{ open: [], resolved: [], reading: true }} names={names} />);
+    const root = await show(
+      <AsksList asks={{ open: [], resolved: [], reading: true }} names={names} onOpen={() => undefined} />,
+    );
     expect(root.textContent).toBe('Reading the asks…');
-    await view?.render(<AsksList asks={{ open: [], resolved: [], reading: false }} names={names} />);
+    await view?.render(
+      <AsksList asks={{ open: [], resolved: [], reading: false }} names={names} onOpen={() => undefined} />,
+    );
     expect(root.textContent).toBe('No asks have been raised.');
   });
 
@@ -398,15 +404,21 @@ describe('AsksList', () => {
         { ref: { sessionId: HELPER, id: 'A2' }, item: null, blocking: false },
       ],
       resolved: [
-        resolved('A3', { title: 'Which colour?', disposition: 'answered', resolutionNote: 'blue it is' }),
-        resolved('A4', { title: 'Old thing', disposition: 'dismissed', resolutionNote: null }),
+        {
+          sessionId: LEAD,
+          item: resolved('A3', { title: 'Which colour?', disposition: 'answered', resolutionNote: 'blue it is' }),
+        },
+        {
+          sessionId: LEAD,
+          item: resolved('A4', { title: 'Old thing', disposition: 'dismissed', resolutionNote: null }),
+        },
       ],
       reading: false,
     };
-    const root = await show(<AsksList asks={asks} names={names} />);
+    const root = await show(<AsksList asks={asks} names={names} onOpen={() => undefined} />);
     const rows = [...root.querySelectorAll('li')].map(item => `${item.getAttribute('data-state')}|${item.textContent}`);
     expect(rows).toEqual([
-      'open|Blocking · Approve it?',
+      'blocking|Blocking · Approve it?',
       'open|Open · A2 from mvudnu',
       'resolved|Answered · Which colour? · blue it is',
       'resolved|Dismissed · Old thing',

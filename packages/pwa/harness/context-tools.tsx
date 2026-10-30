@@ -11,7 +11,6 @@ import { FyHttpError } from '@ferretry/protocol/client';
 import { useState } from 'react';
 import { ContextRailBody } from '../src/features/context-rail/context-rail-body.tsx';
 import {
-  type ContextSignalsPort,
   sessionMcpLoader,
   sessionSkillsInventoryLoader,
   skillFileLoader,
@@ -236,15 +235,6 @@ const clientFor =
     }) as Awaited<ReturnType<FleetClientFactory>>['request'],
   });
 
-const NO_SIGNALS: ContextSignalsPort = {
-  subscribe: () => () => undefined,
-  status: () => 'ready',
-  snapshot: () => undefined,
-  load: async () => undefined,
-  respond: async () => undefined,
-  resolve: async () => undefined,
-};
-
 export function ContextToolsHarness({ frame }: { readonly frame: ContextToolsFrame }) {
   useAppViewport();
   const [createClient] = useState(() => clientFor(frame));
@@ -275,10 +265,8 @@ export function ContextToolsHarness({ frame }: { readonly frame: ContextToolsFra
       {/* Info's right panel on a desktop; the whole width on a phone. */}
       <aside className="flex min-h-dvh w-full flex-col border-l border-border-soft bg-surface md:w-[400px]">
         <ContextRailBody
-          agentName="Hadi"
           sessionId="harness-session"
           machineName={MACHINE}
-          signals={NO_SIGNALS}
           loadMcp={sessionMcpLoader(CONNECTION, createClient, 'harness-session')}
           loadSkills={sessionSkillsInventoryLoader(CONNECTION, createClient, 'harness-session')}
           loadSkillFile={skillFileLoader(CONNECTION, createClient, 'harness-session')}

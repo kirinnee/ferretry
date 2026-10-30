@@ -39,18 +39,7 @@ import {
   fakeChannels,
   mcpFlow,
 } from '../fleet/mcp-sign-in-support.ts';
-import {
-  answeredItem,
-  DOCS,
-  type FakeSignals,
-  fakeSignals,
-  MCP,
-  NOW,
-  openItem,
-  SKILLS,
-  skill,
-  snapshot,
-} from './context-rail-fixtures.ts';
+import { DOCS, MCP, NOW, SKILLS, skill } from './context-rail-fixtures.ts';
 
 const STUDIO = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceId: 't' });
 
@@ -73,7 +62,6 @@ const never =
 
 interface Harness {
   readonly root: HTMLElement;
-  readonly signals: FakeSignals;
   readonly inserted: string[];
   readonly opened: string[];
   readonly tabs: string[];
@@ -85,19 +73,14 @@ afterEach(async () => {
   mounted = undefined;
 });
 
-const body = async (
-  overrides: Partial<ContextRailBodyProps> = {},
-  signals = fakeSignals(snapshot()),
-): Promise<Harness> => {
+const body = async (overrides: Partial<ContextRailBodyProps> = {}): Promise<Harness> => {
   const inserted: string[] = [];
   const opened: string[] = [];
   const tabs: string[] = [];
   mounted = await mountSettled(
     <ContextRailBody
-      agentName="Hadi"
       sessionId="session-a"
       machineName="studio-mac"
-      signals={signals}
       loadMcp={async () => MCP}
       loadSkills={async () => SKILLS}
       loadDocs={async () => DOCS}
@@ -109,7 +92,7 @@ const body = async (
       {...overrides}
     />,
   );
-  return { root: mounted.container, signals, inserted, opened, tabs };
+  return { root: mounted.container, inserted, opened, tabs };
 };
 
 const tab = async (root: HTMLElement, label: string): Promise<void> => {
@@ -124,84 +107,6 @@ const rows = (root: HTMLElement, attribute: string): string[] =>
   [...root.querySelectorAll(`[${attribute}]`)].map(row => row.getAttribute(attribute) ?? '');
 
 const search = (root: HTMLElement, value: string) => type(root, '[data-side-pane-search] input', value);
-
-describe('ContextRailBody — Signals', () => {
-  it('opens on Signals with a count badge and lists what is waiting', async () => {
-    const { root } = await body();
-    expect(root.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('Signals1');
-    expect(text(root, '[data-context-signals-count]')).toBe('1');
-    expect(rows(root, 'data-context-signal')).toEqual(['A1']);
-    expect(root.textContent).toContain('Use the seeded test account?');
-    expect(root.textContent).toContain('Hadi · 2m ago · pick one');
-    expect(text(root, '[data-context-chip="open"]')).toBe('Open1');
-    expect(text(root, '[data-context-chip="answered"]')).toBe('Answered1');
-  });
-
-  it('answers through the agenda answer controls and shows a refusal on the item', async () => {
-    const { root, signals } = await body();
-    const yes = must(
-      [...root.querySelectorAll<HTMLButtonElement>('[data-context-signal="A1"] button')].find(button =>
-        button.textContent?.includes('Yes'),
-      ),
-      'the Yes answer',
-    );
-    signals.failNext = new Error('the daemon refused it');
-    await interact(() => yes.click());
-    await settle();
-    expect(text(root, '[data-context-signal-refusal]')).toBe('Couldn’t send that: the daemon refused it');
-
-    await interact(() => yes.click());
-    await settle();
-    expect(signals.responses).toEqual([{ id: 'A1', response: { kind: 'multiple-choice', choice: 'Yes' } }]);
-    expect(root.querySelector('[data-context-signal-refusal]')).toBeNull();
-  });
-
-  it('marks an item with no answer shape done', async () => {
-    const signals = fakeSignals(snapshot([openItem({ ask: undefined })], []));
-    const { root } = await body({}, signals);
-    await click(root, '[data-context-signal-done]');
-    expect(signals.resolved).toEqual(['A1']);
-  });
-
-  it('shows the answered items with how they ended, filtered by the search', async () => {
-    const signals = fakeSignals(
-      snapshot([openItem()], [answeredItem(), answeredItem({ id: 'A5', subject: 'Deploy now?', response: undefined })]),
-    );
-    const { root } = await body({}, signals);
-    await click(root, '[data-context-chip="answered"]');
-    expect(rows(root, 'data-context-signal')).toEqual(['A2', 'A5']);
-    expect(text(root, '[data-context-signal="A2"] [data-context-signal-outcome]')).toBe('Chose “Start over”');
-
-    await search(root, 'deploy');
-    expect(rows(root, 'data-context-signal')).toEqual(['A5']);
-    expect(text(root, '[data-context-chip="open"]')).toBe('Open0');
-
-    await search(root, 'nothing like it');
-    expect(text(root, '[data-context-note]')).toBe('Nothing under Answered matches “nothing like it”.');
-  });
-
-  it('stays live: an answer given elsewhere updates the list and the badge', async () => {
-    const { root, signals } = await body();
-    await interact(() => signals.set('ready', snapshot([], [answeredItem()])));
-    expect(root.querySelector('[data-context-signals-count]')).toBeNull();
-    expect(text(root, '[data-context-note]')).toBe('Nothing is waiting on you here.');
-  });
-
-  it('says it is reading, and offers a retry when the board failed', async () => {
-    const signals = fakeSignals(undefined);
-    const { root } = await body({}, signals);
-    expect(text(root, '[data-context-note]')).toBe('Reading signals…');
-    expect(signals.loads).toBe(1);
-
-    signals.failLoad = true;
-    await interact(() => signals.set('error'));
-    expect(root.querySelector('[data-context-failed]')?.textContent).toContain(
-      'Couldn’t read what this agent is waiting on',
-    );
-    await click(root, '[data-context-retry]');
-    expect(signals.loads).toBe(2);
-  });
-});
 
 describe('ContextRailBody — MCP', () => {
   const NOTION_SUBJECT = 'notion..a1b2c3d4e5f6';
@@ -226,7 +131,7 @@ describe('ContextRailBody — MCP', () => {
 
   it('reads only once the tab is shown, then lists every server by scope with where it stands', async () => {
     const loadMcp = counted(async () => MCP);
-    const { root, tabs } = await body({ loadMcp });
+    const { root, tabs } = await body({ loadMcp, tabs: ['skills', 'mcp'] });
     expect(loadMcp.calls).toBe(0);
 
     await tab(root, 'MCP');
@@ -254,7 +159,7 @@ describe('ContextRailBody — MCP', () => {
     expect(rows(root, 'data-context-mcp')).toEqual(['lint']);
 
     // Moving away and back keeps the answer and the chosen chip, and does not read again.
-    await tab(root, 'Signals');
+    await tab(root, 'Skills');
     await tab(root, 'MCP');
     expect(loadMcp.calls).toBe(1);
     expect(rows(root, 'data-context-mcp')).toEqual(['lint']);
