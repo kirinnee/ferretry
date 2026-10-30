@@ -779,7 +779,7 @@ describe('composer reference families', () => {
       candidates: [{ replacement: ':ottis' }],
     });
     expect(attentionProvider?.initialCandidates?.(context('!', 'A3'))).toMatchObject({
-      contextLabel: '! unresolved agenda items',
+      contextLabel: '! open agenda items',
       candidates: [{ replacement: '!A3' }],
     });
     // The same rows the ladder offers, from the same read — one fact, two doors.

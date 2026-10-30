@@ -944,11 +944,11 @@ export function createDirectReferenceProviders({
       },
       initialCandidates: ({ query, signal }) =>
         initialUnlessWarming(waitForAttentionItems, signal, () =>
-          attentionResult(scope, getAttentionItems(scope), query, '! unresolved agenda items'),
+          attentionResult(scope, getAttentionItems(scope), query, '! open agenda items'),
         ),
       candidates: ({ query, signal }) =>
         warmed(waitForAttentionItems, signal, () =>
-          attentionResult(scope, getAttentionItems(scope), query, '! unresolved agenda items'),
+          attentionResult(scope, getAttentionItems(scope), query, '! open agenda items'),
         ),
     },
   ];

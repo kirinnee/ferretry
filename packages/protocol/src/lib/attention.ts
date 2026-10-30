@@ -894,7 +894,13 @@ export const SessionAttentionSummarySchema = z.object({
 });
 export type SessionAttentionSummary = z.infer<typeof SessionAttentionSummarySchema>;
 
-/** The query parameter a conversation link names an Attention item by. */
+/** The query parameter a conversation link names an agenda item by: `?agenda=A3`. */
+export const AGENDA_LINK_PARAMETER = 'agenda';
+
+/**
+ * The older spelling, `?attention=A3`. Delivered pushes and bookmarks carry it for good, so a client keeps
+ * reading it; the daemon still WRITES it into pushes until older apps (which read only this one) are gone.
+ */
 export const ATTENTION_LINK_PARAMETER = 'attention';
 
 /**
