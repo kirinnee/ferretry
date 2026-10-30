@@ -109,7 +109,9 @@ export function PendingAttachmentStrip({
                   <span aria-hidden="true" className="shrink-0 text-faint">
                     ·
                   </span>
-                  {entry.status === 'uploading' ? (
+                  {entry.status === 'deferred' ? (
+                    <span className="truncate text-muted">{entry.note}</span>
+                  ) : entry.status === 'uploading' ? (
                     <span className="inline-flex min-w-0 items-center gap-1 text-muted">
                       <Loader2
                         aria-hidden="true"
@@ -190,7 +192,7 @@ export function PendingAttachmentStrip({
                 <LockKeyholeOpen aria-hidden="true" size={15} />
               </button>
             ) : null}
-            {entry.status === 'failed' ? (
+            {entry.status === 'failed' || entry.status === 'deferred' ? (
               <button
                 aria-label={`Retry ${entry.file.name}`}
                 className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-control text-muted hover:bg-surface hover:text-fg"

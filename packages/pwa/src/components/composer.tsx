@@ -398,7 +398,9 @@ export function Composer({
       uploadAttachment ?? (file => uploadSessionAttachment(daemon, scope, file, autocompleteFetcher ?? browserFetch)),
     [autocompleteFetcher, daemon, scope, uploadAttachment],
   );
-  const attachments = useComposerAttachments(uploader, daemonSessionKey(scope));
+  const outbox = useSendOutbox();
+  // Beside a device outbox a file can wait for the connection: it goes up with the message, later.
+  const attachments = useComposerAttachments(uploader, daemonSessionKey(scope), undefined, outbox !== null);
   const fileInput = useRef<HTMLInputElement | null>(null);
   const photoInput = useRef<HTMLInputElement | null>(null);
   const [dropping, setDropping] = useState(false);
@@ -719,7 +721,9 @@ export function Composer({
     !attachments.uploading &&
     attachments.failed.length === 0 &&
     (canSubmitComposer(draft, disabled, sending) ||
-      ((attachmentIds.length > 0 || location?.kind === 'ready') && !disabled && !sending));
+      ((attachmentIds.length > 0 || attachments.deferred.length > 0 || location?.kind === 'ready') &&
+        !disabled &&
+        !sending));
   /**
    * `interrupt` is the ONLY way a send asks the daemon for `now`, and only the explicit ⌘/Ctrl+⇧+↵
    * reaches it. `now` makes the daemon press Escape on the agent's pane, which stops a turn — so it
@@ -741,7 +745,6 @@ export function Composer({
     onSent?.();
   };
 
-  const outbox = useSendOutbox();
   const submit = async (interrupt = false) => {
     if (!canSubmit || submitLock.current) return;
     submitLock.current = true;
@@ -773,6 +776,12 @@ export function Composer({
             sessionId,
             message,
             attachmentIds: input.attachmentIds ?? [],
+            // Files that waited for the connection: the outbox uploads them before it sends.
+            files: attachments.deferred.map(entry => ({
+              name: entry.file.name,
+              type: entry.file.type,
+              blob: entry.file,
+            })),
             now: interrupt,
             // The "re" chips, kept with the message so a later attempt is still about the same item.
             references: referencesOf(api),

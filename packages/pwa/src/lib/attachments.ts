@@ -318,6 +318,9 @@ export const UPLOAD_CONNECTION_DROPPED_COPY = 'The connection to this machine dr
 /** Said while an upload waits for one of the few that go at once to finish. */
 export const UPLOAD_QUEUED_COPY = 'waiting';
 
+/** Said on a file that waits for the connection: the message can still be sent, and the file goes with it. */
+export const UPLOAD_DEFERRED_COPY = 'uploads when the connection is back';
+
 /** Said between automatic attempts, so a dropped connection reads as one being handled. */
 export const uploadRetryingCopy = (attempt: number, attempts: number): string =>
   `connection dropped — retrying (${attempt} of ${attempts})`;

@@ -89,7 +89,11 @@ export interface PendingSend {
   readonly localAttachmentIds: readonly string[];
 }
 
-export type PendingAttachmentStatus = 'uploading' | 'ready' | 'failed';
+/**
+ * `deferred`: the connection is gone, so the file is not uploaded now — it goes to this device's outbox with the
+ * message and is uploaded there, before the send, once the machine answers again.
+ */
+export type PendingAttachmentStatus = 'uploading' | 'ready' | 'failed' | 'deferred';
 
 export interface PendingAttachment {
   readonly localId: string;
