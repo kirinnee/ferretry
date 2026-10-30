@@ -94,7 +94,10 @@ mkdir -p "${coverage_dir}"
 set +e
 # `swept.sh` gives each run its own TMPDIR and FERRETRY_TEST=1, and fails it if a tmux server outlives
 # it — see the script. The quarantine rerun below is a second run, so it is swept on its own.
-./scripts/test/swept.sh bun test --config="${config}" "${timeout_flag[@]}" --coverage --reporter=junit --reporter-outfile="${coverage_dir}/junit.xml" "${files[@]}" 2>&1 | tee "${coverage_dir}/console.log"
+# `stall-watch.ts` kills a run that has printed nothing for FY_TEST_STALL_SECONDS — over twice the
+# per-test budget, so only a wedged test or a run that will not exit — and says which threads and
+# processes it held; a test whose main thread is stuck cannot fire its own timeout. See the script.
+./scripts/test/swept.sh bun scripts/test/stall-watch.ts "${FY_TEST_STALL_SECONDS:-300}" -- bun test --config="${config}" "${timeout_flag[@]}" --coverage --reporter=junit --reporter-outfile="${coverage_dir}/junit.xml" "${files[@]}" 2>&1 | tee "${coverage_dir}/console.log"
 # A red run whose every failure is a quarantined flake reruns those files once, and its exit is the
 # run's from here on: 0 when green or rescued, the original status otherwise — see the script.
 ./scripts/test/swept.sh bun scripts/ci/quarantine.ts "${mode}" "${PIPESTATUS[0]}" "${config}" "${coverage_dir}" "${coverage_dir}/console.log" "${timeout_flag[@]}"

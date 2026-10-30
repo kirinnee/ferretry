@@ -543,6 +543,20 @@ by name against the host `PATH`. Three rules now hold, and each has a mechanism 
   `kill-server`: tmux 3.6a, told to exit in the same instant a daemon's control client loses its
   daemon, keeps both the server and the client running for good
   (`packages/cli/tests/integration/support/supervised-daemon-teardown.ts` owns that order).
+- **A silent run is killed and described.** `scripts/ci/test.sh` runs the unit and integration
+  `bun test` under `scripts/test/stall-watch.ts`. If the run prints nothing for
+  `FY_TEST_STALL_SECONDS` (default 300), a test is wedged or the finished run is not exiting. A test
+  whose main thread is stuck in a synchronous call cannot fire its own timeout, because the timer runs
+  on that thread. The watchdog prints the last line, the live processes and each thread with what it
+  waits in (a `Worker` is a thread), then kills the tree and exits 124.
+- **No `Bun.gc(true)` in the test process, and no measured threads either.** `Bun.gc(true)` is
+  synchronous. On 2026-10-29 it wedged the daemon integration group twice, in two different files.
+  Each time it ran just after earlier files had terminated real `Worker`s, and `terminate()` returns
+  before the thread has gone. So a test that forces a collection, or starts real `Worker`s to measure
+  them, does it in a child process with a kill deadline: `tests/integration/support/worker-rss.ts`,
+  `session-worker-rss.ts` and `parse-window-finalization.ts`. The runner process is shared by every
+  file in the run. Wedged there, it takes the whole group down and no timeout can end it; in a child,
+  the test kills it and fails with the reason.
 
 ### No test runs inside the agent session that started it
 

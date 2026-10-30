@@ -331,6 +331,24 @@ into **`E2E Slow Journeys`**.
   13–25 minutes, with 12–24 of them spent in the journeys. Each shard has `timeout-minutes: 20`
   (`E2E Slow`: 25), so a wedged browser cannot hold a runner for six hours.
 
+## Job ceilings
+
+Every CI job carries `timeout-minutes`, sized at about two to three times its normal duration. It is a
+**ceiling, not a retry**: a job that reaches it is red, and the log says it was cancelled. Without one,
+a wedged job holds its runner for GitHub's six-hour default. On 2026-10-29 the daemon integration group
+hung inside a test and held its runner for two hours, three runs in a row, before anyone cancelled it.
+
+- The integration matrix (`int`) has `timeout-minutes: 20`; its slowest group takes about eight
+  minutes.
+- The e2e shards have `timeout-minutes: 20` (`E2E Slow`: 25); see [E2E tier](#e2e-tier).
+- A new job states its ceiling when it is added, sized from its first green runs.
+
+The ceiling is the last net. The unit and integration tiers stop sooner on their own:
+`scripts/test/stall-watch.ts` kills a `bun test` run that has printed nothing for
+`FY_TEST_STALL_SECONDS` (default 300, over twice the per-test budget), and first prints the last line,
+the live processes and every thread, with stacks when `gdb` is on the PATH. See
+[Testing](../testing/index.md).
+
 ## One run per commit
 
 `CI` runs once for each commit under test: a pull request through its `pull_request` run, `main`

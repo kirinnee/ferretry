@@ -309,6 +309,10 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-latest
+    # A CEILING, NOT A RETRY: the slowest group takes ~8 min, so 20 is a wedged run. On 2026-10-29 the
+    # daemon group hung in a test and held its runner for two hours; without this it holds one for six.
+    # `scripts/test/stall-watch.ts` ends a silent run sooner and says why; this catches everything else.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
