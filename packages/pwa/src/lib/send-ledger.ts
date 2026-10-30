@@ -30,7 +30,7 @@ import type {
   SendUnaccountedReason,
 } from '@ferretry/protocol';
 import { z } from 'zod';
-import type { QueueView } from './send-queue.ts';
+import type { OutboxView, QueueView } from './send-queue.ts';
 
 /**
  * Slack when joining a durable row to the optimistic row that caused it. The
@@ -101,6 +101,8 @@ export interface LedgerSendRecord {
    * daemon's current word. Never on the wire: {@link markLedgerUnread} sets it on open rows only.
    */
   readonly unread?: LedgerUnread;
+  /** Where this device's outbox has this message, while it has not reached the machine's queue (`send-queue.ts`). */
+  readonly outbox?: OutboxView;
   /** Where the durable queue has this message (`send-queue.ts`); absent for a message the queue never held. */
   readonly queue?: QueueView;
 }

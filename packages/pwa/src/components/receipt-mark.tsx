@@ -5,8 +5,9 @@
  * instead of borrowed from an icon set whose double tick is two slanted strokes crossing each other:
  *
  *   * ONE CHECK is a single clean tick, 10 units wide.
- *   * TWO CHECKS are that same tick twice, the second 35% of its width to the right, so the second
- *     sits partly over the first and both stay legible. THREE CHECKS (read) add a third at the same step.
+ *   * TWO, THREE AND FOUR CHECKS are that same tick repeated, each 35% of its width to the right of the one before,
+ *     so each sits partly over the last and all stay legible: one saved on this device, two on the machine's queue,
+ *     three typed into the ferret, four read.
  *   * Every stroke is 1.75 CSS px with round caps and joins, at a height of 14px.
  *
  * The stroke is `non-scaling`, so it is 1.75px at any size and any device pixel ratio instead of a
@@ -33,10 +34,11 @@ interface Drawing {
 const DRAWINGS: Readonly<Record<SendReceiptKind, Drawing>> = {
   sending: { width: 16, paths: ['M8 4.6V8l2.3 1.5', 'M8 2a6 6 0 1 0 0 12A6 6 0 0 0 8 2Z'] },
   held: { width: 16, paths: ['M8 4.6V8l2.3 1.5', 'M8 2a6 6 0 1 0 0 12A6 6 0 0 0 8 2Z'] },
-  queued: { width: 14, paths: [CHECK] },
-  delivered: { width: 17.5, paths: [CHECK, checkAt(SECOND_OFFSET)] },
-  answered: { width: 17.5, paths: [CHECK, checkAt(SECOND_OFFSET)] },
-  read: { width: 21, paths: [CHECK, checkAt(SECOND_OFFSET), checkAt(2 * SECOND_OFFSET)] },
+  saved: { width: 14, paths: [CHECK] },
+  queued: { width: 17.5, paths: [CHECK, checkAt(SECOND_OFFSET)] },
+  delivered: { width: 21, paths: [CHECK, checkAt(SECOND_OFFSET), checkAt(2 * SECOND_OFFSET)] },
+  answered: { width: 21, paths: [CHECK, checkAt(SECOND_OFFSET), checkAt(2 * SECOND_OFFSET)] },
+  read: { width: 24.5, paths: [CHECK, checkAt(SECOND_OFFSET), checkAt(2 * SECOND_OFFSET), checkAt(3 * SECOND_OFFSET)] },
   typed: { width: 16, paths: ['M10.6 3.4 12.6 5.4 6 12l-2.8.8L4 10Z', 'M9.2 4.8l2 2'] },
   unconfirmed: { width: 16, paths: ['M5.6 5.6a2.6 2.6 0 1 1 3.8 2.3c-.9.5-1.4 1-1.4 2', 'M8 13h.01'] },
   failed: { width: 16, paths: ['M8 2.5v7.5', 'M8 13h.01'] },

@@ -2460,6 +2460,7 @@ describe('AppShell', () => {
       [`/d/${ALPHA}/learning`, 'Sessions, Learning'],
       [`/d/${ALPHA}/inbox`, 'Sessions, Inbox'],
       [`/d/${ALPHA}/board`, 'Sessions, Board'],
+      [`/d/${ALPHA}/queue`, 'Sessions, Queue'],
       [`/d/${ALPHA}/history`, 'Sessions, Imported history'],
       [`/d/${ALPHA}/session/one`, 'Sessions, one'],
     ] as const) {

@@ -97,6 +97,7 @@
         "harness/fast-mode-screenshot.tsx",
         "harness/remote-control-screenshot.tsx",
         "harness/receipts-screenshot.tsx",
+        "harness/outbox-screenshot.tsx",
         "harness/harness-events-screenshot.tsx",
         "harness/transcript-unbound-screenshot.tsx",
         "harness/stuck-messages-screenshot.tsx",

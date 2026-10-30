@@ -17,6 +17,11 @@ export interface BoardPageProps extends DaemonPageProps {
   readonly taskId: string | undefined;
 }
 
+export interface QueuePageProps extends DaemonPageProps {
+  /** The ferret the address names (`/queue/<sessionId>`); `undefined` on All queues. */
+  readonly sessionId: string | undefined;
+}
+
 export interface ProjectDetailPageProps extends DaemonPageProps {
   /** The protocol UUID of the registered project, taken from the route. */
   readonly projectId: string;
@@ -40,6 +45,8 @@ export interface PageHostSlots {
   readonly Attention?: ComponentType<DaemonPageProps>;
   /** The Board: every card across every paired machine, as lanes. */
   readonly Board?: ComponentType<BoardPageProps>;
+  /** The message queue: what waits, per ferret or across all of them. */
+  readonly Queue?: ComponentType<QueuePageProps>;
   readonly ImportedHistory?: ComponentType<DaemonPageProps>;
   /** One machine's full-screen first run. */
   readonly MachineSetup?: ComponentType<DaemonPageProps>;
@@ -105,6 +112,9 @@ export function PageHost({ route, connection, slots }: PageHostProps) {
     case 'board':
       if (slots.Board === undefined) throw new Error('the board route is not mounted');
       return <slots.Board connection={matchedConnection} taskId={route.taskId} />;
+    case 'queue':
+      if (slots.Queue === undefined) throw new Error('the queue route is not mounted');
+      return <slots.Queue connection={matchedConnection} sessionId={route.sessionId} />;
     case 'imported-history':
       if (slots.ImportedHistory === undefined) throw new Error('the imported-history route is not mounted');
       return <slots.ImportedHistory connection={matchedConnection} />;
