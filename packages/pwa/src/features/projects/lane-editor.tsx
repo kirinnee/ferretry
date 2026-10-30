@@ -164,7 +164,7 @@ function LaneRow({
         <input
           className={`${fieldClass} w-20`}
           aria-label={`Stale after for ${lane.name}`}
-          placeholder="stale after"
+          placeholder="never"
           aria-invalid={problems.some(message => message.includes('duration'))}
           value={lane.staleAfter ?? ''}
           disabled={busy}
