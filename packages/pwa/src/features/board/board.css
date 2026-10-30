@@ -951,12 +951,30 @@ a.fy-card-chip:hover {
 .fy-card-chip__activity[data-tone='err'] {
   color: var(--err);
 }
+/* ON A PHONE THE CHIP IS ITS REFERENCE ALONE, and it gives way before anything else in the bar does. Its title, lane
+   and activity left it no room: an unshrinkable "&F11 · ● active" ran under Interrupt and ▾, and the bar's one status
+   dot already says how the ferret is doing. "No card" is a nudge for a wide screen, not worth a phone's row. */
 .fy-session-bar[data-compact] .fy-card-chip__title,
-.fy-session-bar[data-compact] .fy-card-chip__lane {
+.fy-session-bar[data-compact] .fy-card-chip__lane,
+.fy-session-bar[data-compact] .fy-card-chip__activity,
+.fy-session-bar[data-compact] .fy-card-chip[data-card-chip='none'] {
   display: none;
 }
+/* A link's 44px touch floor made the pill a fat circle round four characters: on a phone the reference is drawn as
+   the link it is, with no outline, and keeps the whole floor as its target. */
 .fy-session-bar[data-compact] .fy-card-chip {
-  flex: none;
+  flex: 0 1 auto;
+  align-self: center;
+  justify-content: center;
+  padding: 0 2px;
+  border-color: transparent;
+  background: transparent;
+}
+.fy-session-bar[data-compact] .fy-card-chip__ref {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .fy-board-side {
   display: flex;

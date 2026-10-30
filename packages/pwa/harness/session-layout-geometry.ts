@@ -19,7 +19,7 @@
  *      each side); its row is kteam's — attach and mic in a left column, Interrupt & send over Send in a
  *      right one — and the field between them is the SAME box with the agent idle and working, because a
  *      box that resized under the thumb when Interrupt appeared was the owner's complaint. The status line
- *      under it stays one line, the bar's Interrupt is an icon no wider than ⓘ, and the Chat / Console
+ *      under it stays one line, the bar draws no Interrupt and no ⓘ (both are in ▾), and the Chat / Console
  *      tabs start on the conversation's own text edge in a strip no taller than the old 33px one.
  *   4. A PHONE WITH WIDE CONTENT. At 390px, with a code block, a table, a long URL and a tool result in the
  *      transcript, the chat column, the composer and every one of its buttons (Send among them) sit inside
@@ -366,8 +366,11 @@ export async function runSessionLayoutGeometry(run: SessionLayoutRun): Promise<n
         );
       if (status !== null && status.height > 46)
         fail(`${where}: the composer's status line is ${status.height}px — it wrapped onto a second row`);
-      if (barAction === null || info === null || barAction.width > info.width + EPSILON)
-        fail(`${where}: the bar's Interrupt is not an icon the size of ⓘ (${barAction?.width}px vs ${info?.width}px)`);
+      // The owner's phone (2026-10-30): the bar is ☰ · name · card · one dot · ▾. Interrupt and ⓘ live in ▾ there.
+      if (barAction !== null || info !== null)
+        fail(
+          `${where}: the phone bar still draws ${barAction === null ? '' : 'Interrupt '}${info === null ? '' : 'ⓘ'}— they belong in ▾`,
+        );
       if (
         tabs === null ||
         firstTab === null ||

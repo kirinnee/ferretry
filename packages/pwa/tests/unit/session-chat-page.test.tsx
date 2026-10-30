@@ -30,10 +30,11 @@ import { AddMcpForm } from '../../src/features/session-actions/add-mcp-form.tsx'
 import { ConvertSheet } from '../../src/features/session-actions/convert-sheet.tsx';
 import type { CoreActionContext } from '../../src/features/session-actions/core-actions.ts';
 import { ForkForm } from '../../src/features/session-actions/fork-form.tsx';
-import type { SessionActionContribution } from '../../src/features/session-actions/registry.ts';
+import type { SessionActionContribution, SessionActionSection } from '../../src/features/session-actions/registry.ts';
 import { RenameForm } from '../../src/features/session-actions/rename-form.tsx';
 import { SessionInfo } from '../../src/features/session-info/session-info.tsx';
 import { SessionSearchProvider } from '../../src/features/session-search/session-search.tsx';
+import { ThemeSettingsPanel } from '../../src/shell/theme-toggle.tsx';
 import { SessionWorkspace } from '../../src/features/workspace/session-workspace.tsx';
 import { WorkspaceView } from '../../src/features/workspace/workspace-view.tsx';
 import { TOUCH_SELECTION_RELEASE_SETTLE_MS } from '../../src/hooks/use-live-clock.ts';
@@ -953,7 +954,7 @@ describe('SessionChatPage', () => {
     }
   });
 
-  test('keeps Interrupt on a phone bar and moves Stop into Actions, behind an inline confirmation', async () => {
+  test('on a phone puts Interrupt, Theme and Stop in Actions — Stop behind an inline confirmation', async () => {
     const calls: string[] = [];
     let opened = 0;
     const page = renderSessionChatPage(
@@ -970,8 +971,14 @@ describe('SessionChatPage', () => {
       />,
     );
     try {
-      expect(hasBarAction(page.root, 'Interrupt turn')).toBe(true);
+      // The owner's phone (2026-10-30): the bar is ☰ · name · card · dot · ▾, and nothing else — so the bar's
+      // Interrupt, ⓘ and theme switch are the top of ▾ (this host has no Info, so no Info row).
+      expect(hasBarAction(page.root, 'Interrupt turn')).toBe(false);
       expect(hasBarAction(page.root, 'Stop session')).toBe(false);
+      expect(page.root.findAllByProps({ 'data-session-info-toggle': '' })).toHaveLength(0);
+      expect(page.root.findAllByProps({ 'data-theme-trigger': '' })).toHaveLength(0);
+      expect(actionLabels(page.root).slice(0, 2)).toEqual(['Interrupt turn', 'Theme…']);
+      expect(actionLabels(page.root)).not.toContain('Info');
       expect(actionLabels(page.root).at(-1)).toBe('Stop ferret…');
       // On a phone the trigger is an icon, named for a screen reader.
       expect(actionsTrigger(page.root).props['aria-label']).toBe('Actions');
@@ -994,7 +1001,63 @@ describe('SessionChatPage', () => {
       });
       await flush();
       expect(calls).toEqual(['stop:shared:stopped from the PWA session workspace']);
-      expect(hasBarAction(page.root, 'Interrupt turn')).toBe(true);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('on a phone ▾ interrupts, opens Info and opens the theme controls — what the bar no longer draws', async () => {
+    const calls: string[] = [];
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={client(calls, sessionView('shared'))}
+        connection={alpha}
+        context={contextDependencies()}
+        entries={[]}
+        onSessionChange={() => undefined}
+        presentation="sheet"
+        session={sessionView('shared')}
+      />,
+    );
+    try {
+      expect(actionLabels(page.root).slice(0, 3)).toEqual(['Interrupt turn', 'Info', 'Theme…']);
+      chooseAction(page.root, 'interrupt');
+      await flush();
+      expect(calls).toEqual(['interrupt:shared']);
+
+      // The form's sheet is portalled on a phone (the real controls are proved in harness/phone-chat-screenshot.ts).
+      chooseAction(page.root, 'theme');
+      const menu = page.root.findByType(ActionsMenu);
+      expect(menu.props.form).toBe('theme');
+      const theme = (menu.props.sections as readonly SessionActionSection[])
+        .flatMap(section => section.entries)
+        .find(entry => entry.id === 'theme');
+      if (theme?.kind !== 'form') throw new Error('Theme… is not a form in Actions');
+      expect((theme.render({} as never) as ReactElement).type).toBe(ThemeSettingsPanel);
+
+      chooseAction(page.root, 'info');
+      expect(page.root.findByType(SessionInfo).props.placement.open).toBe(true);
+      expect(actionLabels(page.root)).toContain('Close Info');
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('on a phone offers no Interrupt in ▾ for a ferret that is not running', () => {
+    const stopped = sessionView('shared', { state: { status: 'stopped' } });
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={client([], stopped)}
+        connection={alpha}
+        entries={[]}
+        onSessionChange={() => undefined}
+        presentation="sheet"
+        session={stopped}
+      />,
+    );
+    try {
+      expect(actionLabels(page.root)).not.toContain('Interrupt turn');
+      expect(actionLabels(page.root)[0]).toBe('Theme…');
     } finally {
       run(() => page.unmount());
     }

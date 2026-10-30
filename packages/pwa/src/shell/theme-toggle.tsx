@@ -334,6 +334,14 @@ export interface ThemeToggleProps {
   readonly iconOnly?: boolean;
 }
 
+/**
+ * The same controls as the popover, for a host that already gives them a sheet of their own: a phone's chat
+ * header has no room for the switch, so its Actions ▾ opens these under a "Theme" heading.
+ */
+export function ThemeSettingsPanel() {
+  return <ThemeSettings theme={useTheme()} />;
+}
+
 export function ThemeToggle({ store, touch = false, iconOnly = false }: ThemeToggleProps = {}) {
   const theme = useTheme(store);
   const { family, mode, resolved, families } = theme;
