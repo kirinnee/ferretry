@@ -1882,11 +1882,6 @@ button.fy-receipt {
     max-height: min(calc(6 * 44px + 8px), max(96px, calc(var(--app-h, 100dvh) * 0.3)));
   }
 }
-.fy-composer-context {
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 12px;
-  white-space: nowrap;
-}
 .fy-composer-chip {
   background: transparent;
   border: var(--stroke, 1px) solid var(--fy-border);
@@ -2392,7 +2387,7 @@ html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-compos
   min-width: 0;
 }
 .fy-composer[data-composer-layout='phone'] .fy-composer__runtime-row > .fy-composer__runtime:not(:first-child),
-.fy-composer[data-composer-layout='phone'] .fy-composer-context,
+.fy-composer[data-composer-layout='phone'] .fy-context-ring,
 .fy-composer[data-composer-layout='phone'] .fy-composer-quota {
   flex: 0 0 auto;
 }
@@ -2958,6 +2953,57 @@ html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-compos
 }
 @media (prefers-reduced-motion: reduce) {
   .fy-add-menu-sheet {
+    animation: none;
+  }
+}
+
+/* The context ring (components/context-ring.tsx): 14px to the eye, the floor to the finger. */
+.fy-context-ring {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--fy-muted);
+  display: inline-flex;
+  flex: 0 0 auto;
+  justify-content: center;
+  padding: 0;
+  position: relative;
+}
+button.fy-context-ring {
+  cursor: pointer;
+}
+button.fy-context-ring::after {
+  content: '';
+  height: var(--target-floor, 44px);
+  left: 50%;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: var(--target-floor, 44px);
+}
+.fy-context-ring__track {
+  stroke: var(--fy-border);
+}
+.fy-context-ring__fill {
+  stroke: var(--accent);
+  stroke-linecap: butt;
+}
+.fy-context-ring[data-tone='warn'] .fy-context-ring__fill {
+  stroke: var(--warn);
+}
+.fy-context-ring[data-tone='err'] .fy-context-ring__fill {
+  stroke: var(--err);
+}
+.fy-context-ring[data-compacting] svg {
+  animation: fy-context-ring-spin 1.1s linear infinite;
+}
+@keyframes fy-context-ring-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fy-context-ring[data-compacting] svg {
     animation: none;
   }
 }

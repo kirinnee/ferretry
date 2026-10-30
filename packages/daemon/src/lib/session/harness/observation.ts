@@ -33,6 +33,16 @@ export interface ObservedRuntime {
   readonly fast?: boolean;
   /** The timestamp of the newest record that carried any of these. */
   readonly at?: string;
+  /** How large the conversation last was, as the harness's own newest usage record stated it. */
+  readonly context?: ObservedContext;
+}
+
+/** The context size the transcript last stated: a token count, when it was written, and a window if the harness named one. */
+export interface ObservedContext {
+  readonly tokens: number;
+  readonly at: string;
+  /** The window the harness itself reported (Codex does); never derived here. */
+  readonly window?: number;
 }
 
 /** A non-blank string, trimmed; blank is no evidence at all. */
@@ -135,6 +145,36 @@ function eventEvidence(
 }
 
 /**
+ * HOW LARGE THE CONVERSATION LAST WAS: the newest usage record that states a context size, or the size a
+ * compaction boundary says it left behind when that is newer — a usage record from before a compaction
+ * would otherwise keep the ring red for a session that just emptied itself.
+ *
+ * A record with no usable timestamp is no evidence: an older record's count is not this one's, and the
+ * stored field is typed as an instant. The window is carried separately because only some harnesses
+ * state one, and a later record that omits it does not retract it.
+ */
+export function projectObservedContext(events: readonly TranscriptEvent[]): ObservedContext | undefined {
+  let tokens: number | undefined;
+  let at: string | undefined;
+  let window: number | undefined;
+  for (const event of events) {
+    const stamp = instant(event.timestamp);
+    if (stamp === undefined) continue;
+    if (event.kind === 'usage' && event.usage.contextTokens !== undefined) {
+      tokens = event.usage.contextTokens;
+      at = stamp;
+      window = event.usage.contextWindow ?? window;
+    } else if (event.kind === 'compaction' && event.tokensAfter !== undefined) {
+      tokens = event.tokensAfter;
+      at = stamp;
+    }
+  }
+  return tokens === undefined || at === undefined
+    ? undefined
+    : { tokens, at, ...(window === undefined ? {} : { window }) };
+}
+
+/**
  * Fold a transcript tail into the runtime it last showed.
  *
  * LAST EVIDENCE WINS, per field. A Codex settings record may state a level without restating the
@@ -184,18 +224,33 @@ export function projectObservedRuntime(events: readonly TranscriptEvent[]): Obse
  * back to `model unavailable` on a session that is running perfectly well.
  */
 export function observedRuntimeStatePatch(
-  current: Pick<SessionState, 'observedModel' | 'observedModelAt' | 'observedReasoningEffort' | 'observedFast'>,
+  current: Pick<
+    SessionState,
+    | 'observedModel'
+    | 'observedModelAt'
+    | 'observedReasoningEffort'
+    | 'observedFast'
+    | 'contextTokens'
+    | 'contextAt'
+    | 'contextWindow'
+  >,
   observed: ObservedRuntime,
 ): Partial<SessionState> {
   const model = observed.model ?? current.observedModel;
   const reasoningEffort = observed.reasoningEffort ?? current.observedReasoningEffort;
   const fast = observed.fast ?? current.observedFast;
   const at = observed.at ?? current.observedModelAt;
+  const contextTokens = observed.context?.tokens ?? current.contextTokens;
+  const contextAt = observed.context?.at ?? current.contextAt;
+  const contextWindow = observed.context?.window ?? current.contextWindow;
   if (
     model === current.observedModel &&
     reasoningEffort === current.observedReasoningEffort &&
     fast === current.observedFast &&
-    at === current.observedModelAt
+    at === current.observedModelAt &&
+    contextTokens === current.contextTokens &&
+    contextAt === current.contextAt &&
+    contextWindow === current.contextWindow
   )
     return {};
   return {
@@ -203,5 +258,8 @@ export function observedRuntimeStatePatch(
     ...(reasoningEffort === undefined ? {} : { observedReasoningEffort: reasoningEffort }),
     ...(fast === undefined ? {} : { observedFast: fast }),
     ...(at === undefined ? {} : { observedModelAt: at }),
+    ...(contextTokens === undefined ? {} : { contextTokens }),
+    ...(contextAt === undefined ? {} : { contextAt }),
+    ...(contextWindow === undefined ? {} : { contextWindow }),
   };
 }

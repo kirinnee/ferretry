@@ -96,6 +96,26 @@ describe('SidebarRow', () => {
     await screen.unmount();
   });
 
+  test('draws a context ring only from 90% full', async () => {
+    const withContext = (id: string, percent: number): SessionView => ({
+      ...sessionView(id),
+      context: { usedTokens: percent * 10_000, windowTokens: 1_000_000, percent, at: '2026-10-30T08:00:00.000Z' },
+    });
+    const roomy = await render([withContext('s-1', 89.4)]);
+    expect(roomy.container.querySelector('[data-context-ring]')).toBeNull();
+    await roomy.unmount();
+
+    const full = await render([withContext('s-2', 95)]);
+    const ring = must(full.container.querySelector('[data-context-ring]'), 'the ring');
+    expect(ring.getAttribute('data-tone')).toBe('err');
+    expect(ring.getAttribute('title')).toContain('(95%)');
+    await full.unmount();
+
+    const unknown = await render([sessionView('s-3')]);
+    expect(unknown.container.querySelector('[data-context-ring]')).toBeNull();
+    await unknown.unmount();
+  });
+
   test('marks the row a reader is on with aria-current, not with colour alone', async () => {
     const sessions = [sessionView('s-1')];
     const screen = await render(sessions, { active: true });

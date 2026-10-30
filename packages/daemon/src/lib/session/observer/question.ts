@@ -1,6 +1,11 @@
 import type { SessionState } from '@ferretry/protocol';
 import type { TranscriptEvent } from '../../transcript/types.ts';
-import { type ObservedRuntime, observedRuntimeStatePatch, projectObservedRuntime } from '../harness/observation.ts';
+import {
+  type ObservedRuntime,
+  observedRuntimeStatePatch,
+  projectObservedContext,
+  projectObservedRuntime,
+} from '../harness/observation.ts';
 import {
   type AnswerOperationRecord,
   type QuestionDocument,
@@ -21,7 +26,16 @@ export interface QuestionLook {
   /** The document's question and observed-runtime fields — the whole document on the main thread, the
    *  pushed facts on a session worker. */
   readonly state: QuestionDocument &
-    Pick<SessionState, 'observedModel' | 'observedModelAt' | 'observedReasoningEffort' | 'observedFast'>;
+    Pick<
+      SessionState,
+      | 'observedModel'
+      | 'observedModelAt'
+      | 'observedReasoningEffort'
+      | 'observedFast'
+      | 'contextTokens'
+      | 'contextAt'
+      | 'contextWindow'
+    >;
   readonly events: readonly TranscriptEvent[];
   /** The answer ledger, by request id. */
   readonly answers: ReadonlyMap<string, AnswerOperationRecord>;
@@ -64,7 +78,11 @@ export function stepQuestion(look: QuestionLook): QuestionPatch | undefined {
     ...(projection.kind === 'resolved' ? { resolvedToolUseId: projection.toolUseId } : {}),
   });
   const records = [...answerEvidence.records.values()];
-  const runtime = projectObservedRuntime(look.events);
+  const context = projectObservedContext(look.events);
+  const runtime: ObservedRuntime = {
+    ...projectObservedRuntime(look.events),
+    ...(context === undefined ? {} : { context }),
+  };
   // The model the harness SAID it was using, never the one the session was launched with. Nothing else
   // in the daemon writes these fields, so every surface that shows a running model is reading this.
   const writes =

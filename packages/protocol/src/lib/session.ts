@@ -745,6 +745,8 @@ export const SessionStateSchema = z.object({
   agenda: SessionAttentionSummarySchema.optional(),
   contextPercent: z.number().finite().min(0).max(100).optional(),
   contextTokens: NonNegativeIntegerSchema.optional(),
+  /** When the transcript record `contextTokens` was read from was written. */
+  contextAt: InstantSchema.optional(),
   contextWindow: PositiveIntegerSchema.optional(),
   usage5hPercent: z.number().finite().min(0).max(100).optional(),
   usageWeeklyPercent: z.number().finite().min(0).max(100).optional(),
@@ -801,11 +803,33 @@ export const SessionOutdatedSchema = z.strictObject({
 });
 export type SessionOutdated = z.infer<typeof SessionOutdatedSchema>;
 
+/**
+ * How full a session's context window is, from the newest usage the harness recorded.
+ *
+ * Derived when the view is read, never stored: the stored facts are the harness's own token count
+ * (`contextTokens`, `contextAt`) and the daemon resolves the window from the model evidence it holds. It
+ * is ABSENT whenever either half is unknown — no usage record yet, or a model whose window nothing states —
+ * because a ring filled from a guessed window is a lie about a measurement.
+ */
+export const SessionContextSchema = z.strictObject({
+  /** Tokens the newest model call carried: input plus cache reads and writes. */
+  usedTokens: NonNegativeIntegerSchema,
+  /** The model's context window in tokens. */
+  windowTokens: PositiveIntegerSchema,
+  /** `usedTokens` over `windowTokens`, one decimal, never above 100. */
+  percent: z.number().finite().min(0).max(100),
+  /** When the usage record was written. */
+  at: InstantSchema,
+});
+export type SessionContext = z.infer<typeof SessionContextSchema>;
+
 export const SessionViewSchema = z.object({
   config: SessionConfigSchema,
   state: SessionStateSchema,
   /** Present only while the running ferret carries out-of-date instructions (`fy restart --outdated`). */
   outdated: SessionOutdatedSchema.optional(),
+  /** How full the context window is; absent while unknown (see {@link SessionContextSchema}). */
+  context: SessionContextSchema.optional(),
   directory: z.string().min(1),
   /**
    * The highest event sequence this session's journal held when the view was read: where a reader

@@ -15,6 +15,9 @@ export type QuestionFacts = Pick<
   | 'observedModelAt'
   | 'observedReasoningEffort'
   | 'observedFast'
+  | 'contextTokens'
+  | 'contextAt'
+  | 'contextWindow'
 >;
 
 /** Everything the main thread tells an observer about a session: what each of its parts decides from. */
@@ -33,5 +36,8 @@ export function observerFactsOf(state: SessionState): ObserverFacts {
     ...(state.observedModelAt === undefined ? {} : { observedModelAt: state.observedModelAt }),
     ...(state.observedReasoningEffort === undefined ? {} : { observedReasoningEffort: state.observedReasoningEffort }),
     ...(state.observedFast === undefined ? {} : { observedFast: state.observedFast }),
+    ...(state.contextTokens === undefined ? {} : { contextTokens: state.contextTokens }),
+    ...(state.contextAt === undefined ? {} : { contextAt: state.contextAt }),
+    ...(state.contextWindow === undefined ? {} : { contextWindow: state.contextWindow }),
   };
 }

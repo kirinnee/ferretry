@@ -10,6 +10,7 @@
 
 import type { AnalyticsAggregateResult, AnalyticsResponse, SessionView } from '@ferretry/protocol';
 import { BarChart3 } from 'lucide-react';
+import { contextReadout } from '../../lib/context-ring.ts';
 import type { ResolvedQuota } from '../../lib/usage.ts';
 import { quotaMoneyText, quotaResetsIn } from '../../shell/quota-readout.tsx';
 import { formatTokens, formatUsd } from '../analytics/analytics-overview.ts';
@@ -86,7 +87,12 @@ export function InfoUsage({ view, analytics, quota, now, onOpenAnalytics }: Info
     <>
       <InfoSection>
         <InfoRow hint={INFO_HINT.context} label="Context">
-          {view.state.contextPercent === undefined ? (
+          {view.context !== undefined ? (
+            <>
+              <InfoMeter label="Context used" percent={view.context.percent} />
+              <span className="fy-info-muted">{contextReadout(view.context).text}</span>
+            </>
+          ) : view.state.contextPercent === undefined ? (
             <span className="fy-info-muted">Not reported yet</span>
           ) : (
             <InfoMeter label="Context used" percent={view.state.contextPercent} />

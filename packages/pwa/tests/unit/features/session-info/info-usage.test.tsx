@@ -80,6 +80,16 @@ describe('InfoUsage — context and turns', () => {
     );
     expect(mounted.container.querySelector('[role="meter"]')).not.toBeNull();
   });
+
+  it('says how many tokens of the window the daemon measured', async () => {
+    const view = {
+      ...sessionView('session-a'),
+      context: { usedTokens: 118_000, windowTokens: 1_000_000, percent: 11.8, at: '2026-10-30T08:00:00.000Z' },
+    };
+    mounted = await mount(<InfoUsage analytics={{ kind: 'loading' }} now={NOW} quota={null} view={view} />);
+    expect(mounted.container.textContent).toContain('118k of 1M tokens (12%)');
+    expect(mounted.container.querySelector('[role="meter"]')).not.toBeNull();
+  });
 });
 
 describe('InfoUsage — Tokens', () => {

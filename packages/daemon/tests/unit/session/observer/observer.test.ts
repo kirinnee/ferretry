@@ -200,6 +200,27 @@ describe('stepQuestion', () => {
     should(actual?.runtime).deepEqual({ model: 'claude-opus-5-5', at: NOW });
     should(actual?.writes).be.true();
   });
+
+  it('should carry the context size the transcript last stated beside the model', () => {
+    // Arrange
+    const sized = {
+      kind: 'usage',
+      harness: 'claude',
+      role: 'assistant',
+      timestamp: NOW,
+      usage: { model: 'claude-opus-5-5', contextTokens: 118_000 },
+    } as TranscriptEvent;
+
+    // Act
+    const actual = stepQuestion({ state: state(), events: [sized], answers: new Map() });
+
+    // Assert
+    should(actual?.runtime).deepEqual({
+      model: 'claude-opus-5-5',
+      at: NOW,
+      context: { tokens: 118_000, at: NOW },
+    });
+  });
 });
 
 describe('questionReceipts', () => {

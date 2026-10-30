@@ -1491,7 +1491,9 @@ export function SessionChatPage({
               connectionLive={connectionState?.kind === 'connected'}
               quota={quota}
               sessionId={session.config.id}
-              {...(session.state.contextPercent === undefined ? {} : { contextPercent: session.state.contextPercent })}
+              {...(session.context === undefined ? {} : { context: session.context })}
+              compacting={liveSample?.compaction?.phase === 'running'}
+              {...(infoSlot === undefined ? {} : { onOpenContext: () => info.show('usage') })}
               // The model and effort chips ride the composer's own status line, so the
               // runtime costs no row of its own above the message box.
               statusSlot={runtimePickers(false)}
