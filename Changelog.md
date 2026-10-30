@@ -1,3 +1,9 @@
+## [4.108.1](https://github.com/kirinnee/ferretry/compare/v4.108.0...v4.108.1) (2026-10-30)
+
+### Fixes
+
+* **test:** measure session workers outside the shared test process, and end a wedged run ([#903](https://github.com/kirinnee/ferretry/issues/903)) ([da4ad4f](https://github.com/kirinnee/ferretry/commit/da4ad4f2e26c48000aca42bb21c0ef96468d1e5d)), closes [#897](https://github.com/kirinnee/ferretry/issues/897) [#897](https://github.com/kirinnee/ferretry/issues/897)
+
 ## [4.108.0](https://github.com/kirinnee/ferretry/compare/v4.107.0...v4.108.0) (2026-10-29)
 
 ### Features
