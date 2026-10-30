@@ -826,12 +826,29 @@ describe('AgentToolService — refs, points and what a page shows', () => {
     const stale = await refusal(world.service.call(agent, { tool: 'browser.click', name: 'app', ref: 'e4' }));
     world.browser.failure = new BrowserTransportError('profile_busy', 'the agent profile is in use', 409);
     const busy = await refusal(world.service.call(agent, { tool: 'browser.click', name: 'app', ref: 'e4' }));
+    world.browser.failure = new BrowserTransportError('launch_failed', 'browser worker did not become ready', 503);
+    const unstarted = await refusal(world.service.call(agent, { tool: 'browser.click', name: 'app', ref: 'e4' }));
+    world.browser.failure = new BrowserTransportError('not_running', 'the browser worker is closed', 409);
+    const gone = await refusal(world.service.call(agent, { tool: 'browser.click', name: 'app', ref: 'e4' }));
 
     // Assert
     should(stale.code).equal('upstream_failed');
     should(stale.message).startWith("e4 is not on the page's latest snapshot");
     should(busy).match({ code: 'conflict', message: 'the agent profile is in use' });
-    should(world.audit.entries.slice(-2).map(entry => entry.outcome)).deepEqual(['failed', 'refused']);
+    should(unstarted).match({
+      code: 'unavailable',
+      message: browserUnavailable('browser worker did not become ready'),
+    });
+    should(gone).match({
+      code: 'not_found',
+      message: 'The browser is not running in this session. Open a page with browser.open.',
+    });
+    should(world.audit.entries.slice(-4).map(entry => entry.outcome)).deepEqual([
+      'failed',
+      'refused',
+      'refused',
+      'refused',
+    ]);
   });
 
   it('should withhold what a page shows, rather than serve it unmasked, when the vault cannot be opened', async () => {
