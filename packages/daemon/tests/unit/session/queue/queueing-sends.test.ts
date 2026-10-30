@@ -76,7 +76,9 @@ describe('a producer sending through the queue', () => {
 
     const outcome = await sends.send({ id: ID, sendId: 's-1', message: 'your card is stale', attachmentIds: ['a'] });
 
-    should(enqueued).deepEqual([{ id: 's-1', sender: 'daemon', text: 'your card is stale', attachmentIds: ['a'] }]);
+    should(enqueued).deepEqual([
+      { id: 's-1', sender: 'daemon', by: { kind: 'ferretry' }, text: 'your card is stale', attachmentIds: ['a'] },
+    ]);
     should(woken).eql([ID]);
     should(direct).be.empty();
     should(outcome.disposition).equal('queued');
@@ -183,5 +185,55 @@ describe('a producer sending through the queue', () => {
 
     should(outcome.disposition).equal('delivered');
     should(outcome.record).equal(handed);
+  });
+
+  it('should say who each message is from as data, with the producer’s feature, never as text', async () => {
+    // The owner: "there should not be any append or prepend on any feature".
+    const requests: QueueRequest[] = [];
+    const sends = (kind: 'human' | 'daemon', feature?: string) =>
+      new QueueingSends(
+        {
+          queue: {
+            enqueue: async (_id, request) => {
+              requests.push(request);
+              return {
+                message: {
+                  v: 1,
+                  id: request.id,
+                  sender: request.sender,
+                  text: request.text,
+                  attachmentIds: [],
+                  enqueuedAt: AT,
+                  state: 'queued',
+                  stateAt: AT,
+                  revision: 1,
+                },
+                created: true,
+              };
+            },
+          },
+          deliverer: { enqueued: async () => undefined },
+          direct: { send: async () => ({ disposition: 'delivered' }) as SendOutcome, authorize: async () => undefined },
+          target: async () => auto,
+          ledger: { list: async () => [] },
+          clock: { now: () => AT },
+          sleep: async () => undefined,
+        },
+        kind,
+        feature,
+      );
+
+    await sends('daemon', 'Board').send({ id: ID, sendId: 'b', message: 'your card is stale' });
+    await sends('human', 'Agenda').send({ id: ID, sendId: 'a', message: 'yes' });
+    await sends('daemon').send({ id: ID, sendId: 'p', message: 'hi', senderReference: 'session-2' });
+    await sends('daemon').send({ id: ID, sendId: 'd', message: 'note' });
+
+    should(requests.map(request => request.by)).eql([
+      { kind: 'ferretry', feature: 'Board' },
+      { kind: 'owner', feature: 'Agenda' },
+      { kind: 'ferret' },
+      { kind: 'ferretry' },
+    ]);
+    should(requests.map(request => request.text)).eql(['your card is stale', 'yes', 'hi', 'note']);
   });
 });
