@@ -23,7 +23,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { sharedChromium } from '../support/chromium.ts';
-import { pullDown, readBoardScroll, scrollBoardTo } from '../support/board-scroll.ts';
+import { pullDown, readBoardDensity, readBoardScroll, scrollBoardTo } from '../support/board-scroll.ts';
 
 const packageRoot = resolve(import.meta.dir, '../../..');
 const shotsDir = process.env.FY_BOARD_SCROLL_SHOTS_DIR ?? '';
@@ -175,6 +175,33 @@ describe('the Board scrolls in one place on a phone', () => {
       expect(await pullDown(tab, 400, 160)).toBe(0);
     } finally {
       await context.close();
+    }
+  }, 60_000);
+
+  it('fits ten or more whole cards under the sticky strip, with a menu a finger can still hit', async () => {
+    for (const mode of ['light', 'dark'] as const) {
+      const { context, tab } = await open('phone', mode);
+      try {
+        await scrollBoardTo(tab, 1_100);
+        const dense = await readBoardDensity(tab);
+        expect(dense.wholeCardsUnderStrip).toBeGreaterThanOrEqual(10);
+        expect(dense.cardHeight).toBeLessThanOrEqual(64);
+        expect(dense.cardStep - dense.cardHeight).toBeLessThanOrEqual(5);
+        expect(dense.moreButton.height).toBeLessThan(40);
+        expect(dense.moreHit.width).toBeGreaterThanOrEqual(40);
+        expect(dense.moreHit.height).toBeGreaterThanOrEqual(40);
+        // A finger 18px off the small button's centre, still inside the 44px overlay, lands on the button.
+        const reaches = await tab.evaluate(() => {
+          const more = document.querySelector('.fy-board-card__more')?.getBoundingClientRect();
+          if (more === undefined) return false;
+          const hit = document.elementFromPoint(more.left + more.width / 2, more.top + more.height / 2 + 18);
+          return hit !== null && hit.closest('.fy-board-card__more') !== null;
+        });
+        expect(reaches).toBe(true);
+        await shoot(tab, `board-b62-${mode}-phone-dense.png`);
+      } finally {
+        await context.close();
+      }
     }
   }, 60_000);
 

@@ -13,7 +13,12 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { type BrowserContext, chromium, type Page } from 'playwright-core';
-import { pullDown, readBoardScroll, scrollBoardTo } from '../tests/integration/support/board-scroll.ts';
+import {
+  pullDown,
+  readBoardDensity,
+  readBoardScroll,
+  scrollBoardTo,
+} from '../tests/integration/support/board-scroll.ts';
 
 const harnessDir = import.meta.dir;
 const packageDir = resolve(harnessDir, '..');
@@ -141,6 +146,8 @@ const scrollShots = async (): Promise<void> => {
       process.stdout.write(`pull from mid-list opened the finder ${await pullDown(page, 400, 160)}x\n`);
       await scrollBoardTo(page, 1_100);
       await shot(page, `${scheme}-phone-scrolled`, 'board-b62');
+      await shot(page, `${scheme}-phone-dense`, 'board-b62');
+      process.stdout.write(`density: ${JSON.stringify(await readBoardDensity(page))}\n`);
       process.stdout.write(`scrolled: ${JSON.stringify(await readBoardScroll(page))}\n`);
       await page.close();
     } finally {
