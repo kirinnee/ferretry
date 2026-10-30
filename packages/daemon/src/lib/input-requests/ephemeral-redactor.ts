@@ -1,3 +1,4 @@
+import { mergeRanges } from '../secrets/policy.ts';
 import type { Scrub, TextRedactor } from '../secrets/redaction.ts';
 import type { EphemeralValues } from './ephemeral-values.ts';
 
@@ -28,6 +29,7 @@ export class EphemeralAwareRedactor implements TextRedactor {
       work({
         text: text => scrub.text(this.values.scrubAll(text)),
         data: value => scrub.data(this.maskStrings(value)),
+        cover: text => mergeRanges([...scrub.cover(text), ...this.values.coverAll(text)]),
       }),
     );
   }

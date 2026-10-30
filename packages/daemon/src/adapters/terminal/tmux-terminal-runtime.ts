@@ -237,6 +237,9 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
   }
 
   /**
+   * The rows keep their trailing spaces (`-N`): tmux trims them otherwise, and a value typed with a trailing
+   * space must still be found, and covered, cell for cell, before the screen is masked.
+   *
    * The pane and its geometry in ONE tmux invocation: `capture-pane` then `display-message`, joined by
    * tmux's own `;`, so the rows and the cursor are read in the same server turn and cost one process
    * rather than two. A capture is taken after every keystroke and on every poll, so the spawn it saves
@@ -248,6 +251,7 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
       'capture-pane',
       '-p',
       '-e',
+      '-N',
       '-S',
       `-${String(Math.max(0, Math.trunc(historyLines)))}`,
       '-t',

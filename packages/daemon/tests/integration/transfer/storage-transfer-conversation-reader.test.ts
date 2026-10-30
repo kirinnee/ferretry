@@ -241,6 +241,7 @@ describe('StorageTransferConversationReader', () => {
           work({
             text: text => text.replace('the message the fork is cut at', '[redacted:cut]'),
             data: value => value,
+            cover: () => [],
           }),
       },
     );

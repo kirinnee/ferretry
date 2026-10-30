@@ -6045,7 +6045,7 @@ function createInputRequestService(input: {
     clock,
     ids: { requestId: () => crypto.randomUUID().replaceAll('-', '') },
     timers: { after: async milliseconds => await Bun.sleep(milliseconds) },
-    trusted: { isTrusted: comm => trusted.has(comm), trust: comm => void trusted.add(comm) },
+    trusted: { isTrusted: digest => trusted.has(digest), trust: digest => void trusted.add(digest) },
     sessions: {
       ended: async sessionId => {
         const id = tryParseSessionId(sessionId);

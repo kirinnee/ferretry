@@ -78,9 +78,13 @@ export function parseForeground(output: string): InputForeground | undefined {
  * `if-shell -F` whose condition tmux evaluates in its own server, in the same command that runs the
  * `send-keys -H`: the pane's shell pid, the foreground program's name tmux reports, the cursor row and
  * "not dead" must still be what the final look saw, or tmux types nothing. What tmux cannot compare is the
- * foreground process GROUP and the ECHO flag (it has no format for either): those are read as the last
- * observations before the write, so a same-named replacement of the foreground program, or a program that
- * turns echo on, in that window is not caught. docs/input-requests.md names this residual risk.
+ * foreground process GROUP and the ECHO flag (it has no format for either).
+ *
+ * THIS IS COMPARE-AND-ENQUEUE. tmux evaluates the condition in its command queue, but `send-keys` only
+ * enqueues the bytes into the pane's pty buffer; it does not wait for a program to read them. After the
+ * predicate the foreground can become ANY command (not only a same-named one), echo can flip and the
+ * prompt can change, and the bytes go to whatever reads the pty next. docs/input-requests.md names this
+ * residual risk, and the owner's warning card and the trusted-program gate are the remaining defence.
  * Enter is a trailing carriage return in the same command: there is no second command to fail between the
  * value and Enter, so a write that did not complete cleanly is `uncertain` (the value may be sitting in a
  * hidden buffer) and is never retried.
@@ -134,6 +138,7 @@ export class TmuxInputTarget implements InputTargetPort {
     const captured = await this.tmux.execute([
       'capture-pane',
       '-p',
+      '-N',
       '-S',
       String(cursorRow),
       '-E',
@@ -142,7 +147,7 @@ export class TmuxInputTarget implements InputTargetPort {
       pane,
     ]);
     if (captured.code !== 0) return { ok: false, reason: 'target_gone' };
-    const promptLine = plain((captured.stdout.split('\n')[0] ?? '').trimEnd());
+    const promptLine = plain(captured.stdout.split('\n')[0] ?? '');
     const echo = await this.modes.echo(first.tty);
     const last = await this.describe(pane);
     if (

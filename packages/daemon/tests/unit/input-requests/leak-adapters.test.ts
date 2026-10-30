@@ -13,7 +13,9 @@ import { EphemeralAwareRedactor } from '../../../src/lib/input-requests/ephemera
 import { EphemeralValues } from '../../../src/lib/input-requests/ephemeral-values.ts';
 import type { InputAuditEntry, InputCaller } from '../../../src/lib/input-requests/ports.ts';
 import { InputRequestService } from '../../../src/lib/input-requests/service.ts';
+import { digestLine } from '../../../src/lib/input-requests/digest.ts';
 import { TmuxInputTarget } from '../../../src/lib/input-requests/terminal-target.ts';
+import { OperatorReadService } from '../../../src/lib/session/reads/service.ts';
 import { NO_REDACTION, type TextRedactor } from '../../../src/lib/secrets/redaction.ts';
 import type { TerminalRecord } from '../../../src/lib/terminal/contracts.ts';
 import type { TmuxCommandPort, TmuxCommandResult } from '../../../src/lib/tmux/contracts.ts';
@@ -45,29 +47,57 @@ const RECORD: TerminalRecord = {
 interface Scenario {
   readonly name: string;
   readonly value: string;
+  readonly cols: number;
+  /** The rows tmux holds, each cut at the pane width as a terminal wraps them. */
   readonly physical: (value: string) => readonly string[];
   readonly joined: (value: string) => readonly string[];
 }
 
+const wrap = (text: string, cols: number): string[] =>
+  text.length <= cols ? [text] : [text.slice(0, cols), ...wrap(text.slice(cols), cols)];
+
 const SCENARIOS: readonly Scenario[] = [
-  { name: 'plain', value: 'Tr0ub4dor&3-LEAKPROBE', physical: v => [`Password: ${v}`], joined: v => [`Password: ${v}`] },
+  {
+    name: 'plain',
+    value: 'Tr0ub4dor&3-LEAKPROBE',
+    cols: 40,
+    physical: v => [`Password: ${v}`],
+    joined: v => [`Password: ${v}`],
+  },
   {
     name: 'trailing spaces',
     value: 'sp ace-LEAKPROBE  ',
+    cols: 40,
     physical: v => [`pw: ${v}`],
+    joined: v => [`pw: ${v}`],
+  },
+  {
+    name: 'trailing spaces that wrap onto a row of their own',
+    value: 'sp ace-LEAKPROBE  ',
+    cols: 20,
+    physical: v => wrap(`pw: ${v}`, 20),
     joined: v => [`pw: ${v}`],
   },
   {
     name: 'wrapped over two rows',
     value: 'Tr0ub4dor&3-LEAKPROBE',
-    physical: v => [`Password: ${v.slice(0, 7)}`, v.slice(7)],
+    cols: 20,
+    physical: v => wrap(`Password: ${v}`, 20),
     joined: v => [`Password: ${v}`],
   },
   {
     name: 'in colour',
     value: 'Tr0ub4dor&3-LEAKPROBE',
+    cols: 40,
     physical: v => [`${ESC}[31mPassword: ${v}${ESC}[0m`],
     joined: v => [`Password: ${v}`],
+  },
+  {
+    name: 'a short value ending in a space',
+    value: 'qz ',
+    cols: 40,
+    physical: v => [`pw: ${v}`],
+    joined: v => [`pw: ${v}`],
   },
 ];
 
@@ -77,21 +107,32 @@ interface Pane {
   argv: string;
   failWrite: boolean;
   typed: string[];
+  cols: number;
+  comm: string;
 }
 
 const ok = (stdout: string): TmuxCommandResult => ({ code: 0, stdout, stderr: '' });
 const unhex = (tokens: readonly string[]): string =>
   new TextDecoder().decode(Uint8Array.from(tokens.map(token => Number.parseInt(token, 16))));
 
+const SGR = new RegExp(`${ESC}\\[[0-9;]*m`, 'gu');
+const visibleWidth = (row: string): number => row.replaceAll(SGR, '').length;
+/** What tmux does to a row unless asked not to (-N): the spaces ending it go, even before a trailing colour reset. */
+const trimmed = (row: string): string => row.replace(new RegExp(` +((?:${ESC}\\[[0-9;]*m)*)$`, 'u'), '$1');
+/** And what it does with -N: the row is the full width of the pane. */
+const padded = (row: string, cols: number): string => row + ' '.repeat(Math.max(0, cols - visibleWidth(row)));
+
 function fakeTmux(pane: Pane): TmuxCommandPort {
+  const rows = (args: readonly string[]): string[] =>
+    pane.physical.map(row => (args.includes('-N') ? padded(row, pane.cols) : trimmed(row)));
   return {
     execute: async args => {
-      if (args[0] === 'display-message') return ok(`%3|4242|0|1700000000\t/dev/pts/9\t0\tsudo\n`);
+      if (args[0] === 'display-message' && !args.includes('-p')) return { code: 1, stdout: '', stderr: 'bad' };
+      if (args[0] === 'display-message') return ok(`%3|4242|0|1700000000\t/dev/pts/9\t0\t${pane.comm}\n`);
       if (args[0] === 'capture-pane' && args.includes(';'))
-        return ok(`${pane.physical.join('\n')}\n0|0|20|${pane.physical.length}|0\n`);
+        return ok(`${rows(args).join('\n')}\n0|0|${pane.cols}|${pane.physical.length}|0\n`);
       if (args[0] === 'capture-pane' && args.includes('-J')) return ok(`${pane.joined.join('\n')}\n\n\n`);
-      if (args[0] === 'capture-pane')
-        return ok(`${(pane.physical[0] ?? '').replaceAll(new RegExp(`${ESC}\\[[0-9;]*m`, 'gu'), '')}\n`);
+      if (args[0] === 'capture-pane') return ok(`${rows(args)[0]?.replaceAll(SGR, '') ?? ''}\n`);
       if (args[0] === 'if-shell') {
         if (pane.failWrite) return { code: 1, stdout: '', stderr: 'no server' };
         pane.typed.push(unhex(String(args[5]).split(' ').slice(4)));
@@ -103,16 +144,23 @@ function fakeTmux(pane: Pane): TmuxCommandPort {
 }
 
 function composed(scenario: Scenario, options: { history?: readonly InputEvent[]; failWrite?: boolean } = {}) {
+  const trusted = new Set<string>();
   const pane: Pane = {
     physical: ['[sudo] password for kirin:'],
     joined: ['[sudo] password for kirin:'],
     argv: 'sudo -v',
     failWrite: options.failWrite ?? false,
     typed: [],
+    cols: scenario.cols,
+    comm: 'sudo',
   };
   const tmux = fakeTmux(pane);
   const runtime = new TmuxTerminalRuntime(tmux, () => 1, { shell: async () => '/bin/sh' } as never);
-  const clock = { now: () => Date.parse('2026-10-30T12:00:00.000Z') };
+  let nowMs = Date.parse('2026-10-30T12:00:00.000Z');
+  const clock = { now: () => nowMs };
+  const advance = (ms: number): void => {
+    nowMs += ms;
+  };
   const values = new EphemeralValues(clock);
   const redactor = new EphemeralAwareRedactor(NO_REDACTION, values);
   const emitted: string[] = [];
@@ -124,7 +172,7 @@ function composed(scenario: Scenario, options: { history?: readonly InputEvent[]
       tmux,
       { locate: async () => ({ tmuxSession: TMUX }) },
       { echo: async () => 'off' },
-      async () => PS.replace('sudo -v', pane.argv),
+      async () => PS.replace('sudo sudo -v', `${pane.comm} ${pane.argv}`),
     ),
     agenda: {
       raise: async (_session, cardBody) => {
@@ -146,7 +194,7 @@ function composed(scenario: Scenario, options: { history?: readonly InputEvent[]
     clock,
     ids: { requestId: () => (id++).toString(16).padStart(32, '0') },
     timers: { after: async () => await new Promise<void>(() => undefined) },
-    trusted: { isTrusted: () => false, trust: () => undefined },
+    trusted: { isTrusted: digest => trusted.has(digest), trust: digest => void trusted.add(digest) },
     sessions: { ended: async () => false, all: async () => [SESSION] },
     values,
     redact: async text => await redactor.redact(text),
@@ -156,7 +204,16 @@ function composed(scenario: Scenario, options: { history?: readonly InputEvent[]
     resize: async () => undefined,
     capture: async (_session, _terminal, history) => await runtime.capture(RECORD, history),
   };
-  return { pane, runtime, service, values, redactor, emitted, events, underlying, scenario };
+  const reader = new OperatorReadService(
+    {} as never,
+    { capture: async () => ({ alive: true, dead: false, text: await runtime.text(RECORD, 50) }) },
+    {} as never,
+    {} as never,
+    {} as never,
+    undefined,
+    redactor,
+  );
+  return { pane, runtime, service, values, redactor, emitted, events, underlying, scenario, trusted, reader, advance };
 }
 
 const RAISE = {
@@ -166,17 +223,22 @@ const RAISE = {
   submit: 'owner-default',
 } as const;
 
-const bodyFor = (digest: string, value: string): InputDeliverBody => ({
+const bodyFor = (digest: string, value: string, trustProgram = false): InputDeliverBody => ({
   deliveryId: crypto.randomUUID(),
   observedDigest: digest,
   padded: padInputValue(value),
   submit: true,
+  ...(trustProgram ? { trustProgram: true } : {}),
 });
 
 /** The pieces of a value an eye or a grep could match: whole, its first six characters and its last nine. */
 const piecesOf = (value: string): string[] => [value.trim(), value.slice(0, 6), value.trim().slice(-9)];
 
-async function streamed(service: TerminalStreamService): Promise<{ frames: string; closed: number }> {
+/** Opens a viewer, then lets `polls` more captures happen, `between` each one: the open frame, then deltas. */
+async function streamed(
+  service: TerminalStreamService,
+  options: { polls?: number; between?: () => void } = {},
+): Promise<{ frames: string; closed: number }> {
   const frames: string[] = [];
   let closed = 0;
   const downstream: TerminalStreamDownstream = {
@@ -188,9 +250,20 @@ async function streamed(service: TerminalStreamService): Promise<{ frames: strin
       closed += 1;
     },
   };
-  const scheduler: TerminalStreamScheduler = { schedule: () => ({ cancel: () => undefined }) };
+  let pending: (() => void) | undefined;
+  const scheduler: TerminalStreamScheduler = {
+    schedule: callback => {
+      pending = callback;
+      return { cancel: () => undefined };
+    },
+  };
   const bridge = new TerminalStreamBridge(service, SESSION, RECORD.id, downstream, scheduler);
   await bridge.open();
+  for (let poll = 0; poll < (options.polls ?? 0); poll += 1) {
+    options.between?.();
+    pending?.();
+    await new Promise<void>(resolve => setTimeout(resolve, 5));
+  }
   bridge.close();
   return { frames: frames.join('\n'), closed };
 }
@@ -228,9 +301,50 @@ describe('the value is unfindable outside the program it was typed into, over th
         const masked = await streamed(new RedactingTerminalStreamService(world.underlying, world.redactor));
         const raw = await streamed(world.underlying);
 
-        should(masked.frames).containEql('[redacted:input');
+        should(masked.frames).containEql('*');
         for (const piece of piecesOf(scenario.value)) should(masked.frames).not.containEql(piece);
         should(raw.frames).containEql(scenario.value.trim().slice(-9));
+      });
+
+      it('should keep the value out of every delta frame when the echo arrives after the viewer opened', async () => {
+        const world = composed(scenario);
+        await typedInto(world);
+        const echoed = world.pane.physical;
+        world.pane.physical = ['[sudo] password for kirin:'];
+        const masked = await streamed(new RedactingTerminalStreamService(world.underlying, world.redactor), {
+          polls: 3,
+          between: () => {
+            world.pane.physical = echoed;
+          },
+        });
+
+        should(masked.frames).containEql('*');
+        for (const piece of piecesOf(scenario.value)) should(masked.frames).not.containEql(piece);
+      });
+
+      it('should keep the masked screen the shape of the real one: the same rows, within the same columns', async () => {
+        const world = composed(scenario);
+        await typedInto(world);
+        const real = await world.underlying.capture(SESSION, RECORD.id, 50);
+        const masked = await new RedactingTerminalStreamService(world.underlying, world.redactor).capture(
+          SESSION,
+          RECORD.id,
+          50,
+        );
+
+        should(masked.lines.length).equal(real.lines.length);
+        should(masked.cols).equal(real.cols);
+        should(masked.cursorX).equal(real.cursorX);
+        for (const row of masked.lines) should(row.replaceAll(SGR, '').length).be.belowOrEqual(real.cols);
+      });
+
+      it('should mask the value from the operator’s screen read', async () => {
+        const world = composed(scenario);
+        await typedInto(world);
+        const screen = await world.reader.snapshot(SESSION);
+
+        should(screen).containEql('[redacted:input');
+        for (const piece of piecesOf(scenario.value)) should(screen).not.containEql(piece);
       });
 
       it('should show a later request, its card, journal, audit and agent notes nothing of the echoed value', async () => {
@@ -254,6 +368,43 @@ describe('the value is unfindable outside the program it was typed into, over th
     const everything = [JSON.stringify(await world.service.list(HOST)), ...world.emitted].join('\n');
 
     should(everything).containEql('sudo --password=[redacted:input');
+    for (const piece of piecesOf(scenario.value)) should(everything).not.containEql(piece);
+  });
+
+  it('should mask held values that interact, and a held value beside a vault secret, from the stream', async () => {
+    const scenario = SCENARIOS[0] as Scenario;
+    const world = composed(scenario);
+    await typedInto(world);
+    world.values.hold(SESSION, ':', 'A2');
+    world.values.hold(SESSION, 'LEAKPROBE', 'A3');
+    const masked = await streamed(new RedactingTerminalStreamService(world.underlying, world.redactor), { polls: 1 });
+
+    should(masked.frames).not.containEql('LEAKPROBE');
+    should(masked.frames).not.containEql('Tr0ub4dor');
+    should(masked.frames).not.containEql(':');
+  });
+
+  it('should keep a program name the owner typed earlier out of every view, record and the trusted-program memory', async () => {
+    const scenario: Scenario = { ...(SCENARIOS[0] as Scenario), value: 'Tr0ub4dor3-LEAKPROBE' };
+    const world = composed(scenario);
+    await typedInto(world);
+    world.pane.comm = scenario.value;
+    world.pane.argv = scenario.value;
+    await world.service.raise(SESSION, RAISE);
+    const [request] = await world.service.list(HOST);
+    await world.service.deliver(
+      SESSION,
+      request?.id ?? '',
+      bodyFor(request?.observedDigest ?? '', 'other', true),
+      HOST,
+    );
+    world.advance(2 * 60 * 60 * 1000);
+    await world.service.sessionEnded(SESSION);
+    const everything = [JSON.stringify(await world.service.list(HOST)), ...world.emitted, ...world.trusted].join('\n');
+
+    should(world.trusted.size).equal(1);
+    should(world.trusted.has(digestLine(scenario.value))).be.true();
+    should(world.values.heldCount()).equal(0);
     for (const piece of piecesOf(scenario.value)) should(everything).not.containEql(piece);
   });
 

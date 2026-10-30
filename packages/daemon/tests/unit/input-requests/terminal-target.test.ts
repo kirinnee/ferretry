@@ -35,6 +35,13 @@ interface World {
   /** What tmux actually typed: the keys of a send-keys its own condition let through. */
   typed: (readonly string[])[];
   ran: (readonly string[])[];
+  /**
+   * The pane's pty buffer: what send-keys ENQUEUED. A program reads it later, so who it reaches is whoever
+   * is in the foreground (and whatever echo is) when the read happens, not when the predicate was evaluated.
+   */
+  queued: (readonly string[])[];
+  /** Runs after tmux's condition held and the bytes were enqueued, before any program reads them. */
+  afterEnqueue: ((w: World) => void) | undefined;
 }
 
 const world = (): World => ({
@@ -52,6 +59,8 @@ const world = (): World => ({
   calls: [],
   typed: [],
   ran: [],
+  queued: [],
+  afterEnqueue: undefined,
 });
 
 const GUARD = /#\{==:#\{(\w+)\},([^}]*)\}/gu;
@@ -79,7 +88,10 @@ function target(w: World): TmuxInputTarget {
         if (w.throwOnSend) throw new Error('socket closed');
         if (w.write.code !== 0) return w.write;
         if (!holds(args[4] ?? '', w)) return ok(`${args[6]?.split(' ').at(-1)}\n`);
-        w.typed.push((args[5] ?? '').split(' '));
+        const keys = (args[5] ?? '').split(' ');
+        w.typed.push(keys);
+        w.queued.push(keys);
+        w.afterEnqueue?.(w);
         return w.write;
       }
       return failed;
@@ -115,12 +127,12 @@ describe('observing a terminal an input request aims at', () => {
       foreground: { pid: 4300, pgid: 4300, comm: 'sudo', argv: 'sudo -v' },
       echo: 'off',
       cursorRow: 7,
-      promptLine: '[sudo] password for kirin:',
-      promptLineDigest: digestLine('[sudo] password for kirin:'),
+      promptLine: '[sudo] password for kirin:                       ',
+      promptLineDigest: digestLine('[sudo] password for kirin:                       '),
       recognisedConsumer: true,
     });
     should(w.ran).deepEqual([['ps', '-t', 'pts/9', '-o', 'pid=,pgid=,tpgid=,comm=,args=']]);
-    should(w.calls[1]).deepEqual(['capture-pane', '-p', '-S', '7', '-E', '7', '-t', PANE]);
+    should(w.calls[1]).deepEqual(['capture-pane', '-p', '-N', '-S', '7', '-E', '7', '-t', PANE]);
   });
 
   it('should report a pane with no session creation second and a shell that is not a consumer', async () => {
@@ -431,6 +443,47 @@ describe('the write is bound at the injection boundary (a change DURING the fina
 
     should(await target(w).type('s1', dev, SECRET, true, expected)).equal('target_changed');
     should(w.typed).deepEqual([]);
+  });
+
+  it('DECLARED LIMIT: the guard is compare-and-ENQUEUE, so a foreground that becomes ANY command after the predicate still gets the bytes', async () => {
+    const w = world();
+    const expected = await observed(w);
+    let readerOfThePty = '';
+    w.afterEnqueue = live => {
+      live.command = 'ssh';
+      readerOfThePty = live.command;
+    };
+
+    const outcome = await target(w).type('s1', dev, SECRET, true, expected);
+
+    should(outcome).equal('typed');
+    should(w.queued).have.length(1);
+    should(readerOfThePty).equal('ssh');
+    // The predicate named sudo; the program that reads the buffered bytes is not sudo.
+    should(w.command).not.equal(expected.foreground.comm);
+  });
+
+  it('DECLARED LIMIT: echo turning on after the predicate is not caught either', async () => {
+    const w = world();
+    const expected = await observed(w);
+    w.afterEnqueue = live => {
+      live.echo = 'on';
+    };
+
+    should(await target(w).type('s1', dev, SECRET, true, expected)).equal('typed');
+    should(w.echo).equal('on');
+    should(w.queued).have.length(1);
+  });
+
+  it('should separate the predicate from the delivery: a world that already changed is refused, never queued', async () => {
+    const w = world();
+    const expected = await observed(w);
+    w.before = finalWrite(live => {
+      live.command = 'ssh';
+    });
+
+    should(await target(w).type('s1', dev, SECRET, true, expected)).equal('target_changed');
+    should(w.queued).deepEqual([]);
   });
 
   it('DECLARED LIMIT: a same-named program that replaces the foreground after ps is not caught', async () => {

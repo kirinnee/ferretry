@@ -22,7 +22,7 @@ import {
   inputValueProblem,
   unpadInputValue,
 } from '@ferretry/protocol';
-import { digestFacts } from './digest.ts';
+import { digestFacts, digestLine } from './digest.ts';
 import type { EphemeralValues } from './ephemeral-values.ts';
 import { InputRequestError } from './errors.ts';
 import type {
@@ -230,7 +230,8 @@ export class InputRequestService {
    */
   private async project(sessionId: string, facts: InputTargetFacts): Promise<InputTargetFacts> {
     if (facts.kind !== 'terminal') return facts;
-    const clip = async (text: string, limit: number): Promise<string> => (await this.deps.redact(text)).slice(0, limit);
+    const clip = async (text: string, limit: number): Promise<string> =>
+      (await this.deps.redact(text)).slice(0, limit).trimEnd();
     return {
       ...facts,
       promptLine: this.deps.values.fragments(sessionId, facts.promptLine)
@@ -526,7 +527,7 @@ export class InputRequestService {
     if (
       request.sensitivity !== 'plain' &&
       !facts.recognisedConsumer &&
-      !this.deps.trusted.isTrusted(facts.foreground.comm)
+      !this.deps.trusted.isTrusted(digestLine(facts.foreground.comm))
     ) {
       if (body.trustProgram !== true)
         return {
@@ -537,7 +538,7 @@ export class InputRequestService {
             'trust_required',
           ),
         };
-      this.deps.trusted.trust(facts.foreground.comm);
+      this.deps.trusted.trust(digestLine(facts.foreground.comm));
     }
     return undefined;
   }

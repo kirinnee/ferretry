@@ -99,10 +99,13 @@ press keys"). `plain` allows Tab. `inputValueProblem` is that rule.
   terminal secret, off for a browser). If that command fails or throws, the outcome is _uncertain_: the
   value may or may not have been typed. That is a terminal `interrupted` outcome. It is never
   retried, whatever `deliveryId` the next Send carries.
-- **Serialised per session.** Raising a request, an agent's own `terminal.send`/`close`, a delivery
-  and a card closing take one lock per session, so an agent send cannot complete after a request is
-  raised on its pane, and two raises on one target cannot both be admitted. Admission reserves the
-  surface and the pending-request capacity under that lock.
+- **Serialised per session.** Raising a request, an agent's own `terminal.send`/`close` and a delivery
+  take one lock per session, so an agent send cannot complete after a request is raised on its pane,
+  and two raises on one target cannot both be admitted. Admission reserves the surface and the
+  pending-request capacity under that lock. An **owner cancel and a card being dismissed do not take
+  that lock**: they check the request's state and make their final-state change synchronously, so a
+  delivery already past its last look finishes as delivered and one that has not started finds the
+  request closed. A close the daemon itself caused is ignored by the card-closed observer.
 - **Limits**: 3 pending requests and 20 raises an hour per session; 30 remote deliveries an hour per
   daemon.
 
@@ -139,10 +142,19 @@ and the agent's `terminal.read` and `terminal.wait`. Redaction fails closed.
   the write, then dropped: a request that ends keeps no observed facts and no digest.
 - **The viewer's stream is scrubbed too.** The live terminal the app draws goes through
   `RedactingTerminalStreamService`: each capture is masked before the stream diffs it, so a delta, a
-  full redraw and a re-attach all carry the masked screen. A value that wrapped over rows is masked in
-  the rows it sat in, and only those rows lose their colours. A redactor that fails closes the stream.
-- **The text an agent reads keeps its trailing spaces.** tmux pads a line with spaces; only blank
-  _rows_ at the bottom are trimmed, so a value typed with trailing spaces still matches when it is masked.
+  full redraw and a re-attach all carry the masked screen. The mask is **structural**: each row is split
+  into terminal cells, the redactor says WHERE a known value sits (positions, never the value), and
+  exactly those cells are overwritten in place with `*` of the same width (two for a wide character, none
+  for a combining mark). Nothing is rewritten, so rows, columns and the cursor keep their shape, colours
+  survive, and no marker exists that another value could collide with. A value that wrapped over rows is
+  masked in each row it sat in. A redactor that fails closes the stream.
+- **Captures keep their trailing spaces until masked.** The viewer capture and the prompt-line read use
+  `capture-pane -N`, so tmux does not trim a value typed with trailing spaces before it is matched;
+  the trailing spaces are dropped only after masking. Values of one or two characters count half of
+  themselves as a piece, so `ab ` cut at the edge of a row is still found.
+- **The trust set never holds a program name.** The trusted-program set is keyed by the keyed digest of
+  the name, so a foreground program whose name is itself a typed value is not kept after the window or
+  the session ends.
 - **Digests are keyed.** `observedDigest` and the prompt-line digest are HMACs under a per-process key,
   so a leaked digest cannot be used to test guesses against a low-entropy prompt line.
 - **Values are really dropped.** Each purge replaces the stored array with only the unexpired entries.
@@ -165,14 +177,23 @@ and the agent's `terminal.read` and `terminal.wait`. Redaction fails closed.
 - **A browser `private` code can appear in an after-screenshot** (a later phase).
 - **Not zeroed, not locked.** Strings are immutable in the runtime. "Dropped" means unreachable. Swap
   and core dumps are out of scope.
-- **The guard is tmux's, and tmux does not know everything.** The pane, its shell pid, the foreground
-  _command name_, the cursor row and liveness are compared atomically with the write. The terminal's
-  **echo flag** and the foreground **process group** are not formats tmux can compare: they are read
-  just before the command, so a program that replaces another of the **same name** in the foreground, or
-  echo turning on, in the instant between that last read and the write is not caught. A unit test pins
-  this as a declared limit. The remaining defences are the owner's warning card, the trusted-program
-  gate and the masking above. The `if-shell` syntax itself is exercised against real tmux only in CI;
-  if a tmux build rejects it the write fails closed as _uncertain_, never as a silent type.
+- **The guard is compare-and-ENQUEUE, not compare-and-deliver.** `if-shell -F` evaluates its condition
+  inside the tmux server's command queue, and the branch's `send-keys -H` then only **enqueues** the
+  bytes into the pane's pty buffer. tmux does not wait for the program to read them. So what is proven is:
+  at the instant of the queue, the pane (by id), its shell pid, the foreground _command name_, the cursor
+  row and liveness were what the owner was shown. What is NOT proven, and cannot be with tmux's formats:
+  the foreground **process group** and the terminal's **echo flag** (tmux has no format for either), and
+  anything that changes between the queue and the program reading the bytes. In that gap the foreground
+  can become **any** command (a different name as well as a same-named replacement), echo can flip, and
+  the prompt can change; the bytes then go to whatever reads the pty next. Unit tests pin each of these as
+  a declared limit. The remaining defences are the owner's warning card, the trusted-program gate, the
+  short window and the masking above. The `if-shell` syntax itself is exercised against a real tmux
+  in CI (`tmux-input-guard.test.ts`); if a tmux build rejects it the write fails closed as _uncertain_,
+  never as a silent type.
+- **A value cut by the capture window is not matched.** The viewer masks what one capture holds. A value
+  that wrapped so that only its tail is left in the first captured row (its head scrolled out of the
+  capture) is not found as a whole. The prompt-line projection catches pieces at the edge of its own line,
+  the viewer does not.
 - **An uncertain write is not a retry.** If the single write fails or throws the owner is told the
   value may have been typed, and must raise a new request. Typing it again could put the password in
   the wrong place twice.

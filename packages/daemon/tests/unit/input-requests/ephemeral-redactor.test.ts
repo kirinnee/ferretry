@@ -10,7 +10,8 @@ values.hold('s1', 'JUST-TYPED', 'A1');
 const vault: TextRedactor = {
   redact: async text => text.replaceAll('VAULT', '[vault]'),
   redactData: async value => JSON.parse(JSON.stringify(value).replaceAll('VAULT', '[vault]')) as unknown,
-  batch: async work => work({ text: text => text.replaceAll('VAULT', '[vault]'), data: value => value }),
+  batch: async work =>
+    work({ text: text => text.replaceAll('VAULT', '[vault]'), data: value => value, cover: () => [] }),
 };
 
 describe('EphemeralAwareRedactor', () => {

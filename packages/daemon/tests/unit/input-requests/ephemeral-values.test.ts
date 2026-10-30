@@ -90,13 +90,14 @@ describe('EphemeralValues.fragments', () => {
     should(values.fragments('s2', 'Password: hunter2-UN')).be.false();
   });
 
-  it('should compare a value shorter than three characters whole, and forget an expired value', () => {
+  it('should count half of a value shorter than six characters as a piece of it, and forget an expired value', () => {
     const values = build();
     values.hold('s1', 'ab', 'A1');
     values.hold('s1', 'gone-value', 'A2', 1);
     clock.ms += 5_000;
 
-    should(values.fragments('s1', 'xa')).be.false();
-    should(values.fragments('s1', 'gone-va')).be.false();
+    should(values.fragments('s1', 'xa')).be.true();
+    should(values.fragments('s1', 'xb')).be.false();
+    should(values.fragments('s1', 'gone-val')).be.false();
   });
 });

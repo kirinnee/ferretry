@@ -446,7 +446,7 @@ async function journey(label: string, options: JourneyOptions = {}): Promise<Jou
     new StorageTransferConversationReader(
       [new NodeTranscriptSource(new ClaudeTranscriptParser()), new NodeTranscriptSource(new CodexTranscriptParser())],
       new StorageTranscriptDigestJournal(storage),
-      { batch: async work => work({ text: options.redact ?? (text => text), data: value => value }) },
+      { batch: async work => work({ text: options.redact ?? (text => text), data: value => value, cover: () => [] }) },
     );
 
   /** The composition root's own start-account resolution, over the two published accounts. */
@@ -526,7 +526,7 @@ async function journey(label: string, options: JourneyOptions = {}): Promise<Jou
       },
       contributors: {
         conversation: new ConversationFacetContributor(conversation, {
-          batch: async work => work({ text: options.redact ?? (text => text), data: value => value }),
+          batch: async work => work({ text: options.redact ?? (text => text), data: value => value, cover: () => [] }),
         }),
         attachments: new AttachmentFacetContributor(new SessionAttachmentTransferReader(attachments())),
         references: new ReferenceFacetContributor(),

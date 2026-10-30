@@ -1,4 +1,5 @@
 import { INPUT_DEFAULT_REDACTION_SECONDS, INPUT_MAX_REDACTION_SECONDS } from '@ferretry/protocol';
+import { coverageOf, type TextRange } from '../secrets/policy.ts';
 import type { InputClock } from './ports.ts';
 
 /**
@@ -13,7 +14,10 @@ import type { InputClock } from './ports.ts';
  */
 
 const MIN_MASKED_LENGTH = 1;
-const MIN_FRAGMENT = 3;
+const MAX_FRAGMENT_FLOOR = 3;
+
+/** The shortest piece of a value that counts as the value: three characters, fewer for a value too short to have three. */
+const fragmentFloor = (length: number): number => Math.min(MAX_FRAGMENT_FLOOR, Math.ceil(length / 2));
 
 interface Held {
   readonly value: string;
@@ -49,6 +53,15 @@ export class EphemeralValues {
     return mask([...this.held.values()].flat(), text);
   }
 
+  /** WHERE `text` holds a value of ANY session: positions only, for masking a screen by cell. */
+  coverAll(text: string): readonly TextRange[] {
+    this.purge();
+    return coverageOf(
+      text,
+      [...this.held.values()].flat().map(entry => entry.value),
+    );
+  }
+
   /** Lets go of every value whose window has ended, in every session. */
   purge(): void {
     const now = this.clock.now();
@@ -73,13 +86,13 @@ export class EphemeralValues {
 
   /**
    * Whether `text` ends with the START of a value this session holds, or starts with the END of one (three
-   * characters or more): the piece of a value that wrapped over a row boundary, which no whole-value match can
+   * characters or more, or half of a shorter value): the piece of a value that wrapped over a row boundary, which no whole-value match can
    * find. A yes/no for the daemon's own projection, never a position or a character: nothing returns a value.
    */
   fragments(sessionId: string, text: string): boolean {
     this.purge();
     return (this.held.get(sessionId) ?? []).some(({ value }) => {
-      for (let size = Math.min(MIN_FRAGMENT, value.length); size < value.length; size += 1) {
+      for (let size = fragmentFloor(value.length); size < value.length; size += 1) {
         if (text.endsWith(value.slice(0, size)) || text.startsWith(value.slice(value.length - size))) return true;
       }
       return false;

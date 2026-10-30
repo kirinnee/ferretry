@@ -99,10 +99,14 @@ export interface InputIds {
   requestId(): string;
 }
 
-/** Whether the owner already trusts a program that is not a recognised consumer (D3). */
+/**
+ * Whether the owner already trusts a program that is not a recognised consumer (D3). A program is named by the
+ * KEYED digest of its name, never the name: a program name can be anything a terminal reports, including a
+ * value the owner typed, and what this remembers for the life of the daemon must not be readable.
+ */
 export interface InputTrustedPrograms {
-  isTrusted(comm: string): boolean;
-  trust(comm: string): void;
+  isTrusted(programDigest: string): boolean;
+  trust(programDigest: string): void;
 }
 
 /** Sessions that exist now. */

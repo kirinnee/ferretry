@@ -8,7 +8,7 @@ import {
   padInputValue,
 } from '@ferretry/protocol';
 import should from 'should';
-import { digestFacts } from '../../../src/lib/input-requests/digest.ts';
+import { digestFacts, digestLine } from '../../../src/lib/input-requests/digest.ts';
 import { EphemeralValues } from '../../../src/lib/input-requests/ephemeral-values.ts';
 import { InputRequestError } from '../../../src/lib/input-requests/errors.ts';
 import type {
@@ -70,6 +70,8 @@ interface World {
   typeThrows: boolean;
   order: string[];
   closeThrows: boolean;
+  /** Holds the audit record of a refusal: the failed attempt's side effect, suspended. */
+  refusalAuditGate: Promise<void> | undefined;
 }
 
 function build(overrides: Partial<World> = {}) {
@@ -99,6 +101,7 @@ function build(overrides: Partial<World> = {}) {
     typeThrows: false,
     order: [],
     closeThrows: false,
+    refusalAuditGate: undefined,
     ...overrides,
   };
   const clock = { now: () => w.now };
@@ -136,7 +139,12 @@ function build(overrides: Partial<World> = {}) {
       },
       history: async () => w.history,
     },
-    audit: { record: async entry => void w.audits.push(entry) },
+    audit: {
+      record: async entry => {
+        if (entry.event === 'input.refused') await w.refusalAuditGate;
+        w.audits.push(entry);
+      },
+    },
     clock,
     ids: { requestId: () => (w.nextId++).toString(16).padStart(32, '0') },
     timers: { after: async () => await new Promise<void>(resolve => w.sleeps.push(resolve)) },
@@ -370,6 +378,37 @@ describe('InputRequestService.deliver', () => {
     }
   });
 
+  it('should type once when a FAILED attempt is still recording its refusal while two later Sends race', async () => {
+    // Arrange — the first attempt is refused (a digest the card did not show) and its audit is suspended. If
+    // the lock covered only the write, the two correct Sends behind it would both pass their guards and type.
+    const { w, service, id, digest } = await raised();
+    let record: () => void = () => undefined;
+    w.refusalAuditGate = new Promise<void>(resolve => {
+      record = resolve;
+    });
+
+    // Act
+    const failing = service.deliver(SESSION, id, bodyFor('c'.repeat(64)), HOST);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const results = Promise.allSettled([
+      service.deliver(SESSION, id, bodyFor(digest), HOST),
+      service.deliver(SESSION, id, bodyFor(digest), DEVICE),
+    ]);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    should(w.writes.length).equal(0);
+    record();
+    const settled = await results;
+    const refusal = await refused(failing);
+
+    // Assert
+    should(refusal.reason).equal('target_changed');
+    should(w.writes.length).equal(1);
+    should(settled.filter(r => r.status === 'fulfilled').length).equal(1);
+    for (const r of settled) {
+      if (r.status === 'rejected') should((r.reason as InputRequestError).reason).equal('already_delivered');
+    }
+  });
+
   it('should refuse a digest the card did not show: target_changed, zero writes', async () => {
     const { w, service, id } = await raised();
     const error = await refused(service.deliver(SESSION, id, bodyFor('c'.repeat(64)), HOST));
@@ -469,7 +508,8 @@ describe('InputRequestService.deliver', () => {
 
     should(blocked.reason).equal('trust_required');
     should(ok.state).equal('delivered');
-    should(w.trusted.has('myapp')).be.true();
+    should(w.trusted.has(digestLine('myapp'))).be.true();
+    should(w.trusted.has('myapp')).be.false();
     should(w.writes.length).equal(1);
   });
 
@@ -479,7 +519,7 @@ describe('InputRequestService.deliver', () => {
       recognisedConsumer: false,
       foreground: { ...FACTS.foreground, comm: 'myapp' },
     } as InputTargetFacts;
-    const trusted = await raised({ facts: odd, trusted: new Set(['myapp']) });
+    const trusted = await raised({ facts: odd, trusted: new Set([digestLine('myapp')]) });
     const plain = await raised({ facts: odd }, { ...RAISE, sensitivity: 'plain' });
 
     await trusted.service.deliver(SESSION, trusted.id, bodyFor(trusted.digest), HOST);

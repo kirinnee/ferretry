@@ -233,6 +233,7 @@ describe('TmuxTerminalRuntime', () => {
       'capture-pane',
       '-p',
       '-e',
+      '-N',
       '-S',
       '-2000',
       '-t',
