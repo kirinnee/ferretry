@@ -36,10 +36,6 @@ const STATUS = {
   },
 } as const;
 
-/** Five days out, at the start of a UTC day, as the daemon publishes a calendar-date `until`. */
-const DISABLED_UNTIL = `${new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10)}T00:00:00.000Z`;
-const LOGIN_OFF_REASON = 'Org monthly spend limit reached';
-
 const login = (fields: Record<string, unknown> & { readonly id: string; readonly word: keyof typeof STATUS }) => {
   const { word, id, ...rest } = fields;
   return {
@@ -88,8 +84,6 @@ const CREDENTIALS = {
       id: 'claude-work',
       word: 'refresh_due',
       label: 'work',
-      // Switched off by hand (docs/disabling.md): shows the reason, the end, and that nothing was stopped.
-      disabled: { reason: LOGIN_OFF_REASON, until: DISABLED_UNTIL, source: 'login' },
       usage: usage(71, 83),
       usedBy: ['claude-review', 'claude-work'],
       signOut: {
@@ -599,26 +593,15 @@ const RUNTIMES = {
         ],
       },
     }),
-    // Switched off on its own block: its switch turns it back on.
-    runtime({
-      name: 'claude-default',
-      sameAs: [],
-      disabled: { reason: 'Keeping the personal quota for Friday', until: DISABLED_UNTIL, source: 'runtime' },
-      launch: { available: false, reason: 'claude-default is disabled (Keeping the personal quota for Friday).' },
-    }),
-    // Off because its LOGIN is off: the switch is locked and points at the login.
+    runtime({ name: 'claude-default', sameAs: [] }),
     runtime({
       name: 'claude-review',
       profile: 'Review',
       credential: { id: 'claude-work', store: 'ferretry', label: 'work', status: 'refresh_due' },
-      disabled: { reason: LOGIN_OFF_REASON, until: DISABLED_UNTIL, source: 'login' },
-      launch: { available: false, reason: `login claude-work is disabled (${LOGIN_OFF_REASON}).` },
     }),
     runtime({
       name: 'claude-work',
       credential: { id: 'claude-work', store: 'ferretry', label: 'work', status: 'refresh_due' },
-      disabled: { reason: LOGIN_OFF_REASON, until: DISABLED_UNTIL, source: 'login' },
-      launch: { available: false, reason: `login claude-work is disabled (${LOGIN_OFF_REASON}).` },
     }),
     runtime({ name: 'claude-team', credential: TEAM, launch: { available: false, reason: 'Sign in to launch' } }),
     runtime({

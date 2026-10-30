@@ -36,6 +36,7 @@ import { CredentialsTab } from '../../src/features/fleet/credentials/credentials
 import { RuntimesTab } from '../../src/features/fleet/runtimes/runtimes-tab.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { harnessCatalogAnswer } from '../account-model-catalog.ts';
+import { overlay } from '../disable-switch-overlay.ts';
 
 const params = new URLSearchParams(location.search);
 const tab = params.get('tab') ?? 'credentials';
@@ -47,7 +48,7 @@ const client = {
   request: async (path, schema, init) => {
     const answer = harnessCatalogAnswer(path, init);
     if (answer === undefined) throw new Error('no route ' + path);
-    return schema.parse(answer);
+    return schema.parse(overlay(path, answer));
   },
 };
 const Tab = tab === 'runtimes' ? RuntimesTab : CredentialsTab;
