@@ -45,6 +45,7 @@
 
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync } from 'node:fs';
+import { availableParallelism } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Locator, Page } from 'playwright-core';
@@ -52,10 +53,12 @@ import { type Browser, chromium, webkit } from 'playwright-core';
 import { THEME_FAMILIES } from '../src/lib/theme-preferences.ts';
 import { captureElement } from './gallery-capture.ts';
 import { assertFixedElementsClear } from './landing-geometry.ts';
+import { type PoolTask, runOrderedPool } from './ordered-pool.ts';
 import { runSafeAreaGeometry, SAFE_AREA_GEOMETRY_CHECKS } from './safe-area-geometry.ts';
-import { runSessionLayoutGeometry, SESSION_LAYOUT_GEOMETRY_CHECKS } from './session-layout-geometry.ts';
+import { planSessionLayoutGeometry, SESSION_LAYOUT_GEOMETRY_CHECKS } from './session-layout-geometry.ts';
 import { runSessionsPageGeometry, SESSIONS_PAGE_GEOMETRY_CHECKS } from './sessions-page-geometry.ts';
 import { runViewportMatrix } from './viewport-matrix.ts';
+import { reportWalkTiming, timePage } from './walk-timing.ts';
 
 const harnessDir = dirname(fileURLToPath(import.meta.url));
 const packageDir = resolve(harnessDir, '..');
@@ -94,6 +97,11 @@ const SELECTED_VIEWPORTS: readonly (typeof VIEWPORTS)[number][] = (() => {
 })();
 
 /** Whether this run walks `name`'s viewport. */
+type WalkPart = 'gallery' | 'settings' | 'sessions' | 'overlays';
+
+/** How many independent walks share one Chrome. A 2-CPU runner gets two, anything bigger three; the cap is a decision, not a guess at load. */
+const WALK_CONCURRENCY = availableParallelism() <= 2 ? 2 : 3;
+
 const walks = (name: ViewportName): boolean => SELECTED_VIEWPORTS.some(viewport => viewport.name === name);
 
 /** What a per-viewport tally owes over the viewports this run walks: both shares unsplit, one share split. */
@@ -544,23 +552,20 @@ let sidewaysChecks = 0;
  * margins first. Their codes are the harness's fixed fake one, never a real code.
  */
 const capturePairingFailures = async (page: Page, viewportName: string): Promise<void> => {
-  for (const [label, slug] of [
+  // One theme flip each way for the whole set rather than a flip per card: a flip restyles the entire
+  // gallery document, which is the expensive part. Every card is pressed and fit-checked in dark (the
+  // theme the page is in on entry), shot in dark, then the same states are shot in light.
+  const failures = [
     ['Pairing failed — machine is older', 'pairing-failed-older-machine'],
     ['Pairing failed — app is older', 'pairing-failed-older-app'],
     ['Pairing failed — browser cannot make the key', 'pairing-failed-no-device-key'],
-  ] as const) {
+  ] as const;
+  for (const [label] of failures) {
     const card = page.getByLabel(label, { exact: true });
     await card.scrollIntoViewIfNeeded();
     await card.getByRole('button', { name: 'Pair this device' }).click();
     await card.locator('[data-pairing-failure="stated"]').waitFor();
     await assertCardFitsWithMargins(card, `${label} at ${viewportName}`);
-    for (const theme of ['studio-dark', 'studio-light'] as const) {
-      await applyTheme(page, theme);
-      const target = join(outDir, `${slug}${theme === 'studio-light' ? '-light' : ''}-${viewportName}.png`);
-      await captureElement(page, card, target);
-      process.stdout.write(`📸 ${label} ${theme} ${viewportName} -> ${target}\n`);
-    }
-    await applyTheme(page, 'studio-dark');
   }
   // The notice a refused device sees in place of the page: no button to press, the same fit rule.
   const refused = page.getByLabel('Machine no longer accepts this browser', { exact: true });
@@ -571,6 +576,11 @@ const capturePairingFailures = async (page: Page, viewportName: string): Promise
   if (sideways) throw new Error(`the refused-device notice scrolls sideways at ${viewportName}`);
   for (const theme of ['studio-dark', 'studio-light'] as const) {
     await applyTheme(page, theme);
+    for (const [label, slug] of failures) {
+      const target = join(outDir, `${slug}${theme === 'studio-light' ? '-light' : ''}-${viewportName}.png`);
+      await captureElement(page, page.getByLabel(label, { exact: true }), target);
+      process.stdout.write(`📸 ${label} ${theme} ${viewportName} -> ${target}\n`);
+    }
     const target = join(outDir, `device-refused${theme === 'studio-light' ? '-light' : ''}-${viewportName}.png`);
     await captureElement(page, refused, target);
     process.stdout.write(`📸 device refused ${theme} ${viewportName} -> ${target}\n`);
@@ -2197,8 +2207,18 @@ if (process.argv.includes('--landing-only')) {
   process.exit(0);
 }
 
+// Whitespace and syntax only: names stay, so a failure still reads. Every cold page load parses this bundle.
 process.stdout.write('📦 bundling the harness page…\n');
-run('bun', ['build', 'harness/main.tsx', '--outdir', 'harness/out', '--target', 'browser']);
+run('bun', [
+  'build',
+  'harness/main.tsx',
+  '--outdir',
+  'harness/out',
+  '--target',
+  'browser',
+  '--minify-whitespace',
+  '--minify-syntax',
+]);
 
 process.stdout.write('🎨 compiling the design system…\n');
 run('./node_modules/.bin/tailwindcss', [
@@ -2293,9 +2313,7 @@ try {
 
   const browser = await chromium.launch({ executablePath: chrome, headless: true });
   try {
-    for (const viewport of SESSION_LAYOUT_ONLY || SAFE_AREA_ONLY || SESSIONS_PAGE_ONLY || VIEWPORT_MATRIX_ONLY
-      ? []
-      : SELECTED_VIEWPORTS) {
+    const walkViewport = async (viewport: (typeof VIEWPORTS)[number], parts: ReadonlySet<WalkPart>): Promise<void> => {
       const context = await browser.newContext({
         ...(viewport.name === 'mobile'
           ? PHONE_CONTEXT
@@ -2317,11 +2335,12 @@ try {
         });
         const page = await context.newPage();
         watchTrustedTypes(page);
+        timePage(page);
         try {
-          await page.goto(server.url.toString());
+          if (!WALKS_SETTINGS || parts.has('gallery') || parts.has('overlays')) await page.goto(server.url.toString());
           if (SEARCH_ONLY) {
             await captureSessionSearchEvidence(page, viewport, server.url.toString());
-            continue;
+            return;
           }
           if (AGENDA_ONLY) {
             // Pressing the real line is the point — this proves the journey (the line → the open drawer),
@@ -2334,7 +2353,7 @@ try {
             const target = join(outDir, `agenda-${viewport.name}.png`);
             await captureElement(page, harness, target);
             process.stdout.write(`📸 agenda ${viewport.name} ${viewport.width}x${viewport.height} -> ${target}\n`);
-            continue;
+            return;
           }
           if (WARDEN_ONLY) {
             // The settings card that carries Jev's per-act bars, then the page whose Recent actions show Jev's own.
@@ -2351,43 +2370,43 @@ try {
             process.stdout.write(`📸 Warden page ${viewport.name} -> ${pageTarget}\n`);
             const overflow = await overview.evaluate(el => el.scrollWidth - el.clientWidth);
             if (overflow > 0) throw new Error(`Warden page scrolls sideways by ${overflow}px on ${viewport.name}`);
-            continue;
+            return;
           }
           if (FILES_ONLY) {
             await captureFiles(page, viewport.name);
-            continue;
+            return;
           }
           if (PAIRING_FAILURES_ONLY) {
             await capturePairingFailures(page, viewport.name);
-            continue;
+            return;
           }
           if (MCP_SIGN_IN_ONLY) {
             await captureMcpSignIn(page, viewport.name);
-            continue;
+            return;
           }
           if (CONTEXT_TOOLS_ONLY) {
             await captureContextTools(page, viewport.name);
-            continue;
+            return;
           }
           if (PAIR_FROM_MENU_ONLY) {
             await capturePairFromMenu(page, viewport.name);
-            continue;
+            return;
           }
           if (WHATS_NEW_ONLY) {
             await captureWhatsNew(page, viewport.name);
-            continue;
+            return;
           }
           if (SESSION_CONTEXT_MENU_ONLY) {
             await captureSessionContextMenu(page, viewport.name);
-            continue;
+            return;
           }
           if (ABOUT_ONLY) {
             await captureAbout(page, viewport.name);
-            continue;
+            return;
           }
           if (AGENT_CLIS_ONLY) {
             await captureAgentClis(page, viewport.name);
-            continue;
+            return;
           }
           if (TASK_BOARD_ONLY) {
             const target = join(outDir, `task-board-${viewport.name}.png`);
@@ -2395,7 +2414,7 @@ try {
             await taskBoard.scrollIntoViewIfNeeded();
             await captureElement(page, taskBoard, target);
             process.stdout.write(`📸 task board ${viewport.name} ${viewport.width}x${viewport.height} -> ${target}\n`);
-            continue;
+            return;
           }
           if (PROJECTS_ONLY) {
             for (const frame of PROJECTS_FRAMES) {
@@ -2524,9 +2543,9 @@ try {
                 `   projects form ${mode} @ ${viewport.name}: page scroll x=false focus=${geometry.focused ?? '(none)'}\n`,
               );
             }
-            continue;
+            return;
           }
-          if (!SETTINGS_ONLY) {
+          if (!SETTINGS_ONLY && parts.has('gallery')) {
             const target = join(outDir, `${viewport.name}.png`);
             await page.screenshot({ path: target });
             process.stdout.write(`📸 ${viewport.name} ${viewport.width}x${viewport.height} -> ${target}\n`);
@@ -2691,1589 +2710,1606 @@ try {
           // above uses the same SettingsPageHarness component, but the standalone
           // query removes the gallery gutters so these are true 390×844 and
           // 1440×900 responsive captures rather than close approximations.
-          const settingsUrl = new URL(server.url);
-          settingsUrl.searchParams.set('settings-harness', '1');
-          await page.goto(settingsUrl.toString());
-          let settingsPage = page.getByLabel('Settings page preview', { exact: true });
-          const phone = viewport.name === 'mobile';
+          if (parts.has('settings')) {
+            const settingsUrl = new URL(server.url);
+            settingsUrl.searchParams.set('settings-harness', '1');
+            await page.goto(settingsUrl.toString());
+            let settingsPage = page.getByLabel('Settings page preview', { exact: true });
+            const phone = viewport.name === 'mobile';
 
-          // ONE LEVEL PER SCREEN ON A PHONE: Settings opens on its grouped cards, and each card opens a
-          // screen of its own with "‹ Settings" back. A desktop opens on Appearance beside the sidebar.
-          const settingsHome = settingsPage.locator('[data-settings-home]');
-          const settingsSidebar = settingsPage.locator('[data-settings-sidebar]');
-          if (phone) {
-            await settingsHome.waitFor({ state: 'visible' });
-            // The first screen is a layout of its own — two groups of inset cards on a recessed ground,
-            // with machine names as long as a reader cares to type.
-            await assertNoSidewaysScroll(page, `the Settings home at ${viewport.name}`);
-            const homeTarget = join(outDir, 'settings-home-mobile.png');
-            await page.screenshot({ path: homeTarget, animations: 'disabled' });
-            process.stdout.write(`📸 Settings home -> ${homeTarget}\n`);
-          }
-          /** On a phone, back to the grouped cards from whatever screen is open. */
-          const settingsBack = async (): Promise<void> => {
-            if (!phone || (await settingsHome.isVisible())) return;
-            await settingsPage.locator('[data-settings-back]').click();
-            await settingsHome.waitFor({ state: 'visible' });
-          };
-          const settingsNavigation = (): Locator => (phone ? settingsHome : settingsSidebar);
-          const selectSettingsSection = async (id: 'appearance' | 'behaviour') => {
-            const label = { appearance: 'Appearance', behaviour: 'Behaviour' }[id];
-            await settingsBack();
-            await settingsNavigation().locator(`[data-settings-section-choice="${id}"]`).click();
-            await settingsPage.locator(`[data-settings-section="${id}"]`).waitFor({ state: 'visible' });
-            // Rows fade their colours; capture the settled state so the row just left cannot read as selected.
-            await settleTransitions(page);
-            await assertNoSidewaysScroll(page, `the ${label} section at ${viewport.name}`);
-          };
-          /** Open one paired machine from the sidebar or the Machines card: the only machine picker now. */
-          const openMachine = async (daemonId: string): Promise<Locator> => {
-            await settingsBack();
-            await settingsNavigation().locator(`[data-settings-machine="${daemonId}"]`).click();
-            const surface = settingsPage.locator(`[data-machines-surface="${daemonId}"]`);
-            await surface.waitFor({ state: 'visible' });
-            await settleTransitions(page);
-            return surface;
-          };
-
-          if (phone) await selectSettingsSection('appearance');
-          else await settingsPage.locator('[data-settings-section="appearance"]').waitFor({ state: 'visible' });
-
-          // Appearance is the section Settings OPENS ON at a desktop, which is the one reason it once went
-          // unchecked. It is also the section carrying the theme-family cards, so it has more ways to widen
-          // a phone than any other.
-          await assertNoSidewaysScroll(page, `the Appearance section at ${viewport.name}`);
-
-          const appearanceTarget = join(outDir, `settings-appearance-${viewport.name}.png`);
-          await page.screenshot({ path: appearanceTarget });
-          process.stdout.write(`📸 Settings Appearance ${viewport.name} -> ${appearanceTarget}\n`);
-
-          for (const family of ['phosphor', 'blueprint', 'broadsheet', 'wayfinding', 'ledger', 'ma']) {
-            const card = settingsPage.locator(`[data-family-card="${family}"]`);
-            const target = join(outDir, `theme-${family}-${viewport.name}.png`);
-            await captureElement(page, card, target);
-            process.stdout.write(`📸 Theme ${family} ${viewport.name} -> ${target}\n`);
-          }
-
-          await selectSettingsSection('behaviour');
-          const behaviourTarget = join(outDir, `settings-behaviour-${viewport.name}.png`);
-          await page.screenshot({ path: behaviourTarget });
-          process.stdout.write(`📸 Settings Behaviour ${viewport.name} -> ${behaviourTarget}\n`);
-
-          const composerEnterTarget = join(outDir, `settings-composer-enter-key-${viewport.name}.png`);
-          await captureElement(page, settingsPage.locator('#settings-composer-enter-key'), composerEnterTarget);
-          process.stdout.write(`📸 Settings composer Enter key ${viewport.name} -> ${composerEnterTarget}\n`);
-
-          // EVERY PAIRED MACHINE IS LISTED BY NAME with its status line, in the sidebar or on the Machines
-          // card — Daemons is no longer a section of its own, so this list is where a machine is chosen.
-          await settingsBack();
-          const listedMachines = await settingsNavigation().locator('[data-settings-machine]').count();
-          if (listedMachines !== 4) fail(`settings many-daemon fixture listed ${listedMachines} machines instead of 4`);
-
-          /**
-           * One of the machine's connection and security panels — what the Daemons section used to hold —
-           * opened from its Machine tab. The list is one card of rows; a row opens its panel as a page of
-           * its own with "‹ Machine" back.
-           */
-          const openDaemonPanel = async (frame: Locator, slug: string): Promise<void> => {
-            await frame.locator(`[data-daemon-panel="${slug}"]`).click();
-            await frame.locator(`[data-daemon-panel-open="${slug}"]`).waitFor({ state: 'visible' });
-          };
-          const closeDaemonPanel = async (frame: Locator): Promise<void> => {
-            await frame.locator('[data-daemon-panel-back]').click();
-            await frame.locator('[data-daemon-panel]').first().waitFor({ state: 'visible' });
-          };
-          const openMachineTab = async (surface: Locator): Promise<void> => {
-            await surface.locator('[data-machine-tab="machine"]').click();
-            await surface.locator('[data-machine-tab-panel="machine"]').waitFor({ state: 'visible' });
-          };
-
-          const studioMachine = await openMachine('harness-daemon');
-          await openMachineTab(studioMachine);
-          const wardenFrame = settingsPage.locator('[data-daemon-settings-frame="harness-daemon"]');
-          await wardenFrame.locator('[data-daemon-panel]').first().waitFor({ state: 'visible' });
-          // The fixture is only evidence about the real frame if it carries the panels the composition
-          // root supplies: every app panel but Model pricing, Speed-ups and Learning, which it has never mounted.
-          const daemonPanels = await wardenFrame.locator('[data-daemon-panel]').count();
-          if (daemonPanels !== 14)
-            fail(`settings fixture listed ${daemonPanels} connection and security panels instead of the 14 it mounts`);
-          await wardenFrame.scrollIntoViewIfNeeded();
-          // Ten rows with a sentence each is the longest list in Settings; if one row widens a phone, it is here.
-          await assertNoSidewaysScroll(page, `the connection and security list at ${viewport.name}`);
-          const panelListTarget = join(outDir, `settings-machine-panels-${viewport.name}.png`);
-          await page.screenshot({ path: panelListTarget, animations: 'disabled' });
-          process.stdout.write(`📸 Settings connection and security ${viewport.name} -> ${panelListTarget}\n`);
-
-          // Every panel the daemon owns, in the order the list shows them.
-          for (const [label, slug, ready] of [
-            // Each waits for SETTLED content, not for a spinner or a refusal:
-            // the harness daemon answers `/v1/secrets` in the page, so a capture
-            // that still showed "Reading…" or "Failed to fetch" would be a
-            // regression to review, not a state to accept.
-            // Warden first: it is the first panel the list offers, and its widest content (supervision status,
-            // account failover and policy) is exactly what could widen a phone.
-            ['Warden', 'warden', '[data-daemon-panel-open="warden"] > *'],
-            ['Secrets', 'secrets', '[data-testid="secrets-card"]'],
-            // The live panel, inside the frame, because that is where a reader meets it. The gallery
-            // cards prove the individual states; this proves it is reachable and fits both widths.
-            ['What devices may do', 'grants', '[data-grant-surface="harness-daemon"]'],
-            // Adding a device, in the frame, where a reader meets it. The gallery cards below prove the
-            // individual states; this proves it is reachable, daemon-scoped and fits both widths.
-            ['Add a device', 'devices', '[data-add-device-surface="harness-daemon"]'],
-            // Passkeys, daemon-scoped like the panels around it. The fixture answers GET /v1/passkeys with two
-            // frozen entries, so the capture shows a real list and the Add control, never a prompt.
-            ['Security', 'security', '[data-security-card]'],
-            ['Resource limits', 'resource-limits', '[data-testid="cgroup-config-card"]'],
-            ['Doctor', 'doctor', '[data-doctor-daemon="harness-daemon"]'],
-            // The performance report, recorded: the broken budget first, then both reports as text.
-            ['Performance', 'performance', '[data-performance]'],
-            // The security log, with a gap warning, both badges and "Show older" on it: its widest rows.
-            ['Security log', 'security-log', '[data-security-log-panel]'],
-            // The configuration files: an invalid file, a held loosening and a login naming its key by reference.
-            ['Files', 'files', '[data-config-files-panel]'],
-            // About & updates: the version pair, the install method, the Update button and its changelog.
-            ['About & updates', 'about', '#about-machine-heading'],
-            // Agent CLIs: each harness's path, install method, verification badge and Update buttons.
-            ['Agent CLIs', 'agent-clis', '#agent-clis-heading'],
-            ['Carrier', 'carrier', '[data-active-carrier]'],
-            ['Host checks', 'host-checks', '[data-daemon-host-checks="harness-daemon"]'],
-          ] as const) {
-            await openDaemonPanel(wardenFrame, slug);
-            const readySurface = wardenFrame.locator(ready).first();
-            await readySurface.waitFor({ state: 'visible' });
-            // Every panel, at both widths, with its real values on it — this is the one check that
-            // catches the widest value in a panel widening the whole page instead of scrolling itself.
-            await assertNoSidewaysScroll(page, `the ${label} panel at ${viewport.name}`);
-            if (slug === 'security') {
-              // THE SETTINGS BLOCK'S TWO SENTENCES, DRIVEN: a loosening a remote phone may not make, and a number
-              // past its bounds. Each is the longest unbroken text the block can show, so each is measured.
-              const block = wardenFrame.locator('[data-security-settings]');
-              await block.scrollIntoViewIfNeeded();
-              for (const [field, value, sentence, slugPart] of [
-                ['idleExpiryDays', '60', 'Loosening this can only be done at the machine', 'loosen'],
-                ['idleExpiryDays', '999', 'Enter a whole number from 1 to 90.', 'bounds'],
-              ] as const) {
-                await block.locator(`[data-security-input="${field}"]`).fill(value);
-                await block.getByText(sentence, { exact: false }).first().waitFor({ state: 'visible' });
-                await assertNoSidewaysScroll(page, `the Security settings (${slugPart}) at ${viewport.name}`);
-                const settingsTarget = join(outDir, `settings-daemon-security-${slugPart}-${viewport.name}.png`);
-                await page.screenshot({ path: settingsTarget });
-                process.stdout.write(
-                  `📸 Settings daemon Security settings ${slugPart} ${viewport.name} -> ${settingsTarget}\n`,
-                );
-              }
-              await block.locator('[data-security-input="idleExpiryDays"]').fill('30');
+            // ONE LEVEL PER SCREEN ON A PHONE: Settings opens on its grouped cards, and each card opens a
+            // screen of its own with "‹ Settings" back. A desktop opens on Appearance beside the sidebar.
+            const settingsHome = settingsPage.locator('[data-settings-home]');
+            const settingsSidebar = settingsPage.locator('[data-settings-sidebar]');
+            if (phone) {
+              await settingsHome.waitFor({ state: 'visible' });
+              // The first screen is a layout of its own — two groups of inset cards on a recessed ground,
+              // with machine names as long as a reader cares to type.
+              await assertNoSidewaysScroll(page, `the Settings home at ${viewport.name}`);
+              const homeTarget = join(outDir, 'settings-home-mobile.png');
+              await page.screenshot({ path: homeTarget, animations: 'disabled' });
+              process.stdout.write(`📸 Settings home -> ${homeTarget}\n`);
             }
-            if (slug === 'resource-limits') {
-              // Keep a top frame as navigation context, then compose the acceptance frame at the
-              // native viewport. The compact two-column mobile editors leave enough room between
-              // the enforcement toggle and final warning for BOTH endpoints (and every control
-              // between them) to remain in one honest 390x844 screenshot.
-              const toggle = readySurface.getByRole('checkbox');
-              await toggle.scrollIntoViewIfNeeded();
-              const toggleTarget = join(outDir, `settings-daemon-resource-limits-toggle-${viewport.name}.png`);
-              await page.screenshot({ path: toggleTarget });
-              process.stdout.write(`📸 Settings daemon Resource limits toggle ${viewport.name} -> ${toggleTarget}\n`);
-
-              // Bring the final warning into view, then minimally restore the toggle. If the two
-              // endpoints do not fit together, fail instead of silently emitting incomplete proof.
-              const warning = readySurface.getByRole('alert').last();
-              await warning.waitFor({ state: 'visible' });
-              await warning.scrollIntoViewIfNeeded();
-              await toggle.scrollIntoViewIfNeeded();
-              const [toggleBox, warningBox] = await Promise.all([toggle.boundingBox(), warning.boundingBox()]);
-              const frameHeight = page.viewportSize()?.height;
-              if (
-                toggleBox === null ||
-                warningBox === null ||
-                frameHeight === undefined ||
-                toggleBox.y < 0 ||
-                warningBox.y + warningBox.height > frameHeight
-              )
-                throw new Error(`resource-limit evidence does not fit in the ${viewport.name} viewport`);
-            }
-            if (slug === 'performance') {
-              // Idle first (the one button), then a recording run to its report: the report text is the widest
-              // thing the panel shows, and it must scroll inside its box rather than widen a phone.
-              const idleTarget = join(outDir, `settings-daemon-performance-idle-${viewport.name}.png`);
-              await page.screenshot({ path: idleTarget });
-              process.stdout.write(`📸 Settings daemon Performance idle ${viewport.name} -> ${idleTarget}\n`);
-              await readySurface.locator('[data-performance-record]').click();
-              const report = readySurface.locator('[data-performance-report]');
-              await report.waitFor({ state: 'visible' });
-              await assertNoSidewaysScroll(page, `the Performance report at ${viewport.name}`);
-              await readySurface.evaluate(element => element.scrollIntoView({ block: 'start' }));
-            }
-            // The Files panel's evidence is its head — where the files are, what waits and what is wrong — so
-            // its frame starts there rather than wherever the previous panel left the page scrolled.
-            if (slug === 'files') await readySurface.evaluate(element => element.scrollIntoView({ block: 'start' }));
-            const target = join(outDir, `settings-daemon-${slug}-${viewport.name}.png`);
-            await page.screenshot({ path: target });
-            process.stdout.write(`📸 Settings daemon ${label} ${viewport.name} -> ${target}\n`);
-            if (slug === 'files') {
-              // EDIT AS YAML, SAVED AND REFUSED: the invalid file's located issues inline under the editor,
-              // reached by pressing Save, because the issue rows are the widest thing the sheet can show.
-              await readySurface.locator('[data-config-edit="warden.yaml"]').click();
-              const editor = page.locator('[data-bottom-sheet="config-file-editor"]');
-              await editor.locator('[data-config-editor-text]').waitFor({ state: 'visible' });
-              await editor.locator('[data-config-submit]').click();
-              const refused = editor.locator('[data-config-save="invalid"]');
-              await refused.waitFor({ state: 'visible' });
-              await refused.scrollIntoViewIfNeeded();
-              await assertNoSidewaysScroll(page, `the Edit as YAML sheet at ${viewport.name}`);
-              const editTarget = join(outDir, `settings-daemon-files-edit-${viewport.name}.png`);
-              await page.screenshot({ path: editTarget, animations: 'disabled' });
-              process.stdout.write(`📸 Settings daemon Files edit ${viewport.name} -> ${editTarget}\n`);
-              await editor.locator('[data-config-cancel]').click();
-              await editor.waitFor({ state: 'detached' });
-            }
-            if (slug === 'devices') {
-              // The per-device capability switches: seven rows by two axes, the longest block this panel
-              // can grow, with a blocked widen's reason and host command beside its switch. Opened on the
-              // first device (the browser doing the looking, holding fleet.use alone), because a closed
-              // disclosure hides exactly the content that could widen a phone.
-              const disclosure = readySurface.locator('[data-device-capabilities]').first();
-              await disclosure.locator('summary').click();
-              await disclosure.locator('[data-device-capability="secrets"]').waitFor({ state: 'visible' });
-              await disclosure.locator('[data-device-grant-reason]').first().waitFor({ state: 'visible' });
-              await assertNoSidewaysScroll(page, `the open device capabilities at ${viewport.name}`);
-              const capabilitiesTarget = join(outDir, `settings-daemon-devices-capabilities-${viewport.name}.png`);
-              await disclosure.scrollIntoViewIfNeeded();
-              await page.screenshot({ path: capabilitiesTarget });
-              process.stdout.write(
-                `📸 Settings daemon device capabilities ${viewport.name} -> ${capabilitiesTarget}\n`,
-              );
-            }
-            await closeDaemonPanel(wardenFrame);
-          }
-
-          const unreachableMachine = await openMachine('unreachable-daemon');
-          await openMachineTab(unreachableMachine);
-          const unavailableWardenFrame = settingsPage.locator('[data-daemon-settings-frame="unreachable-daemon"]');
-          await openDaemonPanel(unavailableWardenFrame, 'warden');
-          await unavailableWardenFrame.getByLabel('Warden settings unavailable').waitFor({ state: 'visible' });
-          // A FAILURE STATE IS A LAYOUT, not an absence of one. These two frames explain why a panel
-          // could not be read, and the sentences that do the explaining are the longest unbroken text
-          // in Settings — an unwrapped URL or daemon id in one of them widens the page exactly as a
-          // healthy panel's widest value would, and it does it on the screen a reader is already
-          // having a bad time on.
-          await assertNoSidewaysScroll(page, `the unavailable daemon's Warden panel at ${viewport.name}`);
-          const unavailableWardenTarget = join(outDir, `settings-daemon-warden-unavailable-${viewport.name}.png`);
-          await page.screenshot({ path: unavailableWardenTarget });
-          process.stdout.write(
-            `📸 Settings unavailable daemon Warden ${viewport.name} -> ${unavailableWardenTarget}\n`,
-          );
-          await closeDaemonPanel(unavailableWardenFrame);
-
-          // The unavailable pairing must not borrow the healthy daemon's
-          // measured relay. Capture its own failed direct + relay evidence so
-          // that daemon scoping is reviewable in pixels, not only in fixture code.
-          await openDaemonPanel(unavailableWardenFrame, 'carrier');
-          await unavailableWardenFrame.locator('[data-active-carrier]').waitFor({ state: 'visible' });
-          await assertNoSidewaysScroll(page, `the unavailable daemon's Carrier panel at ${viewport.name}`);
-          const unavailableCarrierTarget = join(outDir, `settings-daemon-carrier-unavailable-${viewport.name}.png`);
-          await page.screenshot({ path: unavailableCarrierTarget });
-          process.stdout.write(
-            `📸 Settings unavailable daemon Carrier ${viewport.name} -> ${unavailableCarrierTarget}\n`,
-          );
-
-          const currentMachine = await openMachine('harness-daemon');
-          await openMachineTab(currentMachine);
-          const currentFrame = settingsPage.locator('[data-daemon-settings-frame="harness-daemon"]');
-          await openDaemonPanel(currentFrame, 'host-checks');
-          const currentDaemon = currentFrame.locator('[data-daemon-host-checks="harness-daemon"]');
-          await currentDaemon.locator('[data-daemon-reachability="reachable"]').waitFor({ state: 'visible' });
-          await currentDaemon.getByText('Manage daemon', { exact: true }).click();
-          await currentDaemon.getByText('Removing this pairing only forgets it in this browser.').waitFor({
-            state: 'visible',
-          });
-          const removalTarget = join(outDir, `settings-removal-disclosure-${viewport.name}.png`);
-          await page.screenshot({ path: removalTarget });
-          process.stdout.write(`📸 Settings removal disclosure ${viewport.name} -> ${removalTarget}\n`);
-
-          // MACHINES (account model, O1): the section, each of its five tabs, and the Machines list the
-          // switcher opens. The tab row is five equal columns, which is the
-          // shape most likely to widen a 390px phone once a label is longer than its cell. A tab is waited
-          // for by its PANEL, so a tab that a unit has filled is walked exactly like an empty frame.
-          //
-          // EVERY MACHINES FRAME IS ALSO A GEOMETRY CHECK (`assertMachinesGeometry`), and every capture here
-          // is taken with transitions finished. The tabs fade their colours, and a capture taken the instant
-          // a tab is clicked shows the one just left still selected: measured, 12 of 12 such captures carried
-          // the old tab's accent label, and 0 of 12 with `animations: 'disabled'`.
-          const settledShot = (target: string) => page.screenshot({ path: target, animations: 'disabled' });
-          const machinesSurface = await openMachine('harness-daemon');
-          await machinesSurface.locator('[data-machine-tab-panel="runtimes"]').waitFor({ state: 'visible' });
-          await assertMachinesGeometry(page, `the Machines runtimes tab at ${viewport.name}`);
-          for (const tab of ['credentials', 'profiles', 'components', 'machine'] as const) {
-            await machinesSurface.locator(`[data-machine-tab="${tab}"]`).click();
-            await machinesSurface.locator(`[data-machine-tab-panel="${tab}"]`).waitFor({ state: 'visible' });
-            await assertNoSidewaysScroll(page, `the Machines ${tab} tab at ${viewport.name}`);
-            await assertMachinesGeometry(page, `the Machines ${tab} tab at ${viewport.name}`);
-          }
-          await machinesSurface.locator('[data-machine-settings]').waitFor({ state: 'visible' });
-          const machinesTarget = join(outDir, `settings-machines-${viewport.name}.png`);
-          await settledShot(machinesTarget);
-          process.stdout.write(`📸 Settings Machines ${viewport.name} -> ${machinesTarget}\n`);
-
-          // THE SETTINGS TAB'S FLOWS (U19): five more checks per viewport, one per layout that differs —
-          // Import again's "Found on" list with its long values, its Name step with a duplicate card, the
-          // Clone source list with both disabled reasons (E27), the Clone preview's "Runs on" review, and
-          // Install with its exact command.
-          const machineFrame = async (what: string, file: string): Promise<void> => {
-            await assertMachinesGeometry(page, `the Machines ${what} at ${viewport.name}`);
-            const target = join(outDir, `settings-machines-${file}-${viewport.name}.png`);
-            await settledShot(target);
-            process.stdout.write(`📸 Settings Machines ${what} ${viewport.name} -> ${target}\n`);
-            await assertNoSidewaysScroll(page, `the Machines ${what} at ${viewport.name}`);
-          };
-          const backToSettingsTab = async (): Promise<void> => {
-            await machinesSurface.locator('[data-machine-tab="machine"]').click();
-            await machinesSurface.locator('[data-machine-settings]').waitFor({ state: 'visible' });
-          };
-          // Import again is New machine setup's Claude Code step, full screen: it is walked with the setup below.
-          await machinesSurface.locator('[data-settings-action="clone"]').click();
-          await machinesSurface.locator('[data-clone-source-reason]').nth(1).waitFor({ state: 'visible' });
-          await machineFrame('Clone source', 'clone-source');
-          {
-            const target = join(outDir, `settings-machines-clone-source-step-${SCHEME}-${viewport.name}.png`);
-            await captureElement(page, machinesSurface.locator('[data-clone-step="source"]'), target);
-            process.stdout.write(`📸 Settings Machines clone source step ${viewport.name} -> ${target}\n`);
-          }
-          // The Preview from a machine that can be copied: every command the copy would run here, in words,
-          // each with its box (docs/cross-daemon.md §3a). Its long command lines are the 390px risk.
-          await machinesSurface.locator('[data-setup-choice="clone-source-daemon"]').click();
-          await machinesSurface.locator('[data-clone-step="source"] [data-step-next]').click();
-          await machinesSurface.locator('[data-setup-section="runs"]').waitFor({ state: 'visible' });
-          await machineFrame('Clone preview', 'clone-preview');
-          // The "Runs on" review and the source step's sentence, as elements: both run below the fold.
-          // One panel at a time: the whole review is taller than a phone screen.
-          for (const [selector, file] of [
-            ['[data-setup-note="runs-warning"]', 'clone-runs-warning'],
-            ['[data-clone-runnable="mcp/notes"]', 'clone-runs-mcp'],
-            ['[data-clone-runnable="hooks/guard"]', 'clone-runs-hook'],
-            ['[data-clone-runnable="settings/claude"]', 'clone-runs-settings'],
-          ] as const) {
-            const element = machinesSurface.locator(selector);
-            if (selector.includes('hooks/guard')) await element.locator('summary').click();
-            const target = join(outDir, `settings-machines-${file}-${SCHEME}-${viewport.name}.png`);
-            await captureElement(page, element, target);
-            process.stdout.write(`📸 Settings Machines ${file} ${viewport.name} -> ${target}\n`);
-          }
-          await backToSettingsTab();
-          // By its address: the shared machine data lists only Claude Code, and the flow is linkable anyway.
-          await page.evaluate(() => {
-            window.location.hash = `#machines/${encodeURIComponent('Studio workstation')}/machine/install-codex`;
-          });
-          await machinesSurface.locator('[data-install-flow="codex"]').waitFor({ state: 'visible' });
-          await machineFrame('Install Codex', 'install');
-          await backToSettingsTab();
-          // THE MACHINES LIST is the sidebar on a desktop and the Machines card on a phone — one picker, with
-          // every machine's name and status line on it.
-          await settingsBack();
-          await assertNoSidewaysScroll(page, `the Machines list at ${viewport.name}`);
-          // On a phone the list is its own screen, outside any machine, so there is no machine layout to measure.
-          if (!phone) await assertMachinesGeometry(page, `the Machines list at ${viewport.name}`);
-          const machinesListTarget = join(outDir, `settings-machines-list-${viewport.name}.png`);
-          await settledShot(machinesListTarget);
-          process.stdout.write(`📸 Settings Machines list ${viewport.name} -> ${machinesListTarget}\n`);
-
-          // RUNTIMES AND CREDENTIALS (account model U17): ten pages per viewport — the two lists, a runtime
-          // with its fixed layer, one whose model set has models this login cannot use, the three Add a
-          // runtime decisions, a login that needs sign-in, its sign-in link, and a sign-out confirmation.
-          // (The captures share the helper below.)
-          // PROFILES AND COMPONENTS (account model U18): twelve pages per viewport, each one a different
-          // layout — a layer stack, a conflict sentence with a dotted key, a delete card, a stepper with a
-          // reorder list, a component's badges and a path long enough to wrap. Every one has to fit 390px.
-          // `framed` runs after the checks and before the capture: the geometry check hovers a tab, which
-          // scrolls the page back to it, so a frame that needs a lower part of the page in view says so here.
-          /** One full-screen setup frame: it fits, its stepper and its pinned footer are where they belong. */
-          const setupShot = async (name: string, label: string): Promise<void> => {
-            await assertNoSidewaysScroll(page, `the setup ${label} at ${viewport.name}`);
-            await assertSetupGeometry(page, `the setup ${label} at ${viewport.name}`);
-            const target = join(outDir, `setup-${name}-${viewport.name}.png`);
-            await settledShot(target);
-            process.stdout.write(`📸 Setup ${label} ${viewport.name} -> ${target}\n`);
-          };
-          const accountShot = async (name: string, label: string, framed?: () => Promise<void>): Promise<void> => {
-            await assertNoSidewaysScroll(page, `the Machines ${label} at ${viewport.name}`);
-            await assertMachinesGeometry(page, `the Machines ${label} at ${viewport.name}`);
-            await framed?.();
-            const target = join(outDir, `settings-machines-${name}-${viewport.name}.png`);
-            await settledShot(target);
-            process.stdout.write(`📸 Settings Machines ${label} ${viewport.name} -> ${target}\n`);
-          };
-          // PROFILE SCOPE (P7) IN OTHER THEME FAMILIES: the list's scope badges and the Add runtime picker
-          // below are the frames a new badge tone could make illegible, so they are also captured in two
-          // more families. Evidence only: the geometry gate above already measured this layout.
-          const themedShot = async (name: string): Promise<void> => {
-            const initial = await page.evaluate(() => document.documentElement.dataset.theme ?? '');
-            for (const theme of PROFILE_SCOPE_THEMES) {
-              await applyTheme(page, theme);
-              const target = join(outDir, `settings-machines-${name}-${theme}-${viewport.name}.png`);
-              await settledShot(target);
-              process.stdout.write(`📸 Settings Machines ${name} ${theme} ${viewport.name} -> ${target}\n`);
-            }
-            // Settled, not just set: the step after this one clicks, and on the old layout it can miss.
-            await applyTheme(page, initial);
-          };
-          await openMachine('harness-daemon');
-          await machinesSurface.locator('[data-machine-tab="runtimes"]').click();
-          const runtimesPanel = machinesSurface.locator('[data-machine-tab-panel="runtimes"]');
-          await runtimesPanel.locator('[data-runtime-row="claude-agent"]').waitFor({ state: 'visible' });
-          await accountShot('runtimes', 'Runtimes list');
-          await runtimesPanel.locator('[data-runtime-row="claude-agent"]').click();
-          await runtimesPanel.locator('[data-runtime-fixed-layer]').waitFor({ state: 'visible' });
-          await accountShot('runtime-agent', 'agent runtime page');
-          await runtimesPanel.locator('[data-page-back]').click();
-          await runtimesPanel.locator('[data-runtime-row="codex-default"]').click();
-          await runtimesPanel.locator('[data-runtime-models]').waitFor({ state: 'visible' });
-          await accountShot('runtime-models', 'runtime page with unavailable models');
-          await runtimesPanel.locator('[data-page-back]').click();
-          // RENAME AND REMOVE (docs/account-model.md "Renaming and removing a runtime"): each row's buttons open a
-          // dialog — a bottom sheet on a phone, centred on a desktop — that must fit with its confirm button in
-          // view: Rename with a new name typed, Remove listing the ferrets on it with a move picked, and the
-          // machine's default runtime, which asks for another default first.
-          const dialogShot = async (name: string, label: string): Promise<void> => {
-            await page.locator('[data-runtime-dialog]').waitFor({ state: 'visible' });
-            await assertNoSidewaysScroll(page, `the ${label} dialog at ${viewport.name}`);
-            await assertRuntimeDialogGeometry(page, `the ${label} dialog at ${viewport.name}`);
-            const target = join(outDir, `settings-machines-${name}-${viewport.name}.png`);
-            await settledShot(target);
-            process.stdout.write(`📸 Settings Machines ${label} ${viewport.name} -> ${target}\n`);
-            await page.locator('[data-runtime-dialog-cancel]').click();
-            await page.locator('[data-runtime-dialog]').waitFor({ state: 'detached' });
-          };
-          await runtimesPanel.locator('[data-runtime-rename="claude-work"]').click();
-          await page.locator('[data-runtime-rename-input]').fill('claude-office');
-          await dialogShot('runtime-rename', 'Rename runtime');
-          await runtimesPanel.locator('[data-runtime-remove="codex-default"]').click();
-          await page.locator('[data-runtime-running]').waitFor({ state: 'visible' });
-          await page.locator('[data-runtime-move-target]').selectOption('claude-agent');
-          await dialogShot('runtime-remove', 'Remove runtime');
-          await runtimesPanel.locator('[data-runtime-remove="claude-default"]').click();
-          await page.locator('[data-runtime-default-picker]').waitFor({ state: 'visible' });
-          await dialogShot('runtime-remove-default', 'Remove the default runtime');
-          // ADD A RUNTIME IS ONE FORM: login, profile and name on one page, each frame scrolled to its part.
-          const toPart = (part: string) => async (): Promise<void> => {
-            await runtimesPanel
-              .locator(`[data-add-runtime-part="${part}"]`)
-              .evaluate(element => element.scrollIntoView({ block: 'start', behavior: 'instant' }));
-          };
-          await runtimesPanel.locator('[data-add-runtime]').click();
-          await runtimesPanel.locator('[data-add-runtime-credential="claude-personal"]').click();
-          await accountShot('add-runtime-credential', 'Add a runtime, login picked');
-          await runtimesPanel.locator('[data-add-runtime-profile="Default"]').click();
-          await runtimesPanel.locator('[data-add-runtime-duplicate]').waitFor({ state: 'visible' });
-          await accountShot('add-runtime-profile', 'Add a runtime, profile with a duplicate', toPart('profile'));
-          await themedShot('add-runtime-profile');
-          await runtimesPanel.locator('[data-duplicate-ok]').check();
-          await runtimesPanel.locator('#add-runtime-name').fill('claude-default');
-          await runtimesPanel.locator('[data-runtime-name-problem]').waitFor({ state: 'visible' });
-          await accountShot('add-runtime-name', 'Add a runtime, a name that clashes', toPart('name'));
-          // "+ Add a new login" opens IN PLACE under the list: no stepper of its own.
-          await runtimesPanel.locator('[data-add-row="login"]').click();
-          await runtimesPanel.locator('[data-add-runtime-new-login]').waitFor({ state: 'visible' });
-          await accountShot('add-runtime-new-login', 'Add a runtime, a new login in place', async () => {
-            await runtimesPanel
-              .locator('[data-add-runtime-new-login]')
-              .evaluate(element => element.scrollIntoView({ block: 'start', behavior: 'instant' }));
-          });
-          await runtimesPanel.locator('[data-add-runtime-new-login-close]').click();
-          await runtimesPanel.locator('[data-page-back]').click();
-
-          await machinesSurface.locator('[data-machine-tab="credentials"]').click();
-          const credentialsPanel = machinesSurface.locator('[data-machine-tab-panel="credentials"]');
-          await credentialsPanel.locator('[data-credential-row="claude-team"]').waitFor({ state: 'visible' });
-          await accountShot('credentials', 'Credentials list');
-          // An environment login's own page, with the quota its provider reported (docs/provider-quotas.md).
-          await credentialsPanel.locator('[data-credential-row="glm-env"]').click();
-          await credentialsPanel.locator('[data-provider-quota="endpoint"]').waitFor({ state: 'visible' });
-          await accountShot('credential-provider-quota', 'environment login quota');
-          await credentialsPanel.locator('[data-page-back]').click();
-          await credentialsPanel.locator('[data-credential-row="claude-team"]').waitFor({ state: 'visible' });
-          await credentialsPanel.locator('[data-credential-row="claude-team"]').click();
-          await credentialsPanel.locator('[data-credential-sign-in="start"]').waitFor({ state: 'visible' });
-          await accountShot('credential-slot', 'empty login page');
-          await credentialsPanel.locator('[data-credential-sign-in="start"] [data-change-submit]').click();
-          await credentialsPanel.locator('[data-credential-sign-in="awaiting-code"]').waitFor({ state: 'visible' });
-          await accountShot('credential-sign-in', 'login sign-in link');
-          await credentialsPanel.locator('[data-page-back]').click();
-          // A SIGN-IN ALREADY RUNNING is picked up, never an error naming a flow: the second start lands
-          // on the same link, says so, and offers Start over.
-          await credentialsPanel.locator('[data-credential-row="claude-team"]').click();
-          await credentialsPanel.locator('[data-credential-sign-in="start"] [data-change-submit]').click();
-          await credentialsPanel.locator('[data-sign-in-resumed]').waitFor({ state: 'visible' });
-          const resumedText = await credentialsPanel.locator('[data-credential-sign-in]').innerText();
-          if (/flow|fy_daemon_/u.test(resumedText)) fail('the picked-up sign-in shows an internal id');
-          await accountShot('credential-sign-in-resumed', 'login sign-in picked up');
-          await credentialsPanel.locator('[data-sign-in-start-over]').click();
-          await credentialsPanel.locator('[data-sign-in-resumed]').waitFor({ state: 'detached' });
-          await credentialsPanel.locator('[data-page-back]').click();
-          // CODEX'S TWO SIGN-INS (S2): the device code with its "didn't work?" way out, the link sign-in
-          // that asks for the address a phone's browser could not load, and the wait after it is pasted.
-          // Each frame starts at the Codex panel, because on a phone its steps sit below the fold.
-          const codexPanelToTop = async (): Promise<void> => {
-            await credentialsPanel
-              .locator('[data-codex-login]')
-              .evaluate(panel => panel.scrollIntoView({ block: 'start', behavior: 'instant' }));
-          };
-          await credentialsPanel.locator('[data-credential-row="codex-team"]').click();
-          await credentialsPanel.locator('[data-credential-sign-in="start"] [data-change-submit]').click();
-          await credentialsPanel.locator('[data-credential-sign-in="awaiting-approval"]').waitFor({ state: 'visible' });
-          await accountShot('codex-device-code', 'Codex device code', codexPanelToTop);
-          await credentialsPanel.locator('[data-codex-login-use-link] button').click();
-          await credentialsPanel.locator('[data-credential-sign-in="awaiting-callback"]').waitFor({ state: 'visible' });
-          await accountShot('codex-link', 'Codex link sign-in', codexPanelToTop);
-          // START OVER with the callback port held by somebody else's program: named, and left alone.
-          await credentialsPanel.locator('[data-sign-in-start-over]').click();
-          await credentialsPanel.locator('[data-credential-sign-in="failed"]').waitFor({ state: 'visible' });
-          await accountShot('codex-port-held', 'Codex callback port held', codexPanelToTop);
-          await credentialsPanel
-            .locator('[data-credential-sign-in="failed"] button:has-text("Start a new sign-in")')
-            .click();
-          await credentialsPanel.locator('[data-credential-sign-in="start"] [data-change-submit]').click();
-          await credentialsPanel.locator('[data-credential-sign-in="awaiting-callback"]').waitFor({ state: 'visible' });
-          await credentialsPanel
-            .locator('textarea[name="codex-login-address"]')
-            .fill('http://localhost:1455/auth/callback?code=harness-preview&state=harness-preview');
-          await credentialsPanel.locator('[data-credential-sign-in="awaiting-callback"] button[type="submit"]').click();
-          await credentialsPanel.locator('[data-credential-sign-in="finishing"]').waitFor({ state: 'visible' });
-          await accountShot('codex-finishing', 'Codex finishing', codexPanelToTop);
-          await credentialsPanel.locator('[data-credential-sign-in="finishing"] button:has-text("Cancel")').click();
-          await credentialsPanel.locator('[data-page-back]').click();
-          await credentialsPanel.locator('[data-credential-row="claude-personal"]').click();
-          await credentialsPanel.locator('[data-credential-sign-out-ask]').click();
-          await credentialsPanel.locator('[data-credential-sign-out]').scrollIntoViewIfNeeded();
-          await accountShot('credential-sign-out', 'sign-out confirmation');
-          await credentialsPanel.locator('[data-sign-out-keep]').click();
-          await credentialsPanel.locator('[data-page-back]').click();
-          // REMOVE A LOGIN: the Remove button on a row opens a dialog that shows its impact first — a login nobody
-          // uses; one used by two runtimes with "switch to" chosen (the default); and the same with the
-          // runtime removed too, which lists the ferrets on it with a move picker. Each must fit with its confirm
-          // button whole and in view. The login's own page carries the same button beside the sign-out difference.
-          const loginDialogShot = async (name: string, label: string): Promise<void> => {
-            await page
-              .locator('[data-runtime-dialog="remove-login"] [data-login-remove-impact]')
-              .waitFor({ state: 'visible' });
-            await assertNoSidewaysScroll(page, `the ${label} dialog at ${viewport.name}`);
-            await assertRuntimeDialogGeometry(page, `the ${label} dialog at ${viewport.name}`);
-            const target = join(outDir, `settings-machines-${name}-${viewport.name}.png`);
-            await settledShot(target);
-            process.stdout.write(`📸 Settings Machines ${label} ${viewport.name} -> ${target}\n`);
-          };
-          const closeLoginDialog = async (): Promise<void> => {
-            await page.locator('[data-runtime-dialog-cancel]').click();
-            await page.locator('[data-runtime-dialog]').waitFor({ state: 'detached' });
-          };
-          await credentialsPanel.locator('[data-credential-remove="codex-team"]').click();
-          await loginDialogShot('login-remove-unused', 'Remove a login nobody uses');
-          await closeLoginDialog();
-          await credentialsPanel.locator('[data-credential-remove="claude-work"]').click();
-          await loginDialogShot('login-remove-switch', 'Remove a login used by two runtimes, switching them');
-          await page.locator('[data-login-remove-runtime-too="claude-review"]').click();
-          await page.locator('[data-login-remove-ferrets]').waitFor({ state: 'visible' });
-          await page.locator('[data-runtime-move-target]').selectOption('claude-default');
-          await loginDialogShot('login-remove-runtime', 'Remove a login, removing a runtime too');
-          await closeLoginDialog();
-          await credentialsPanel.locator('[data-credential-row="claude-work"]').click();
-          await credentialsPanel.locator('[data-credential-remove-zone]').waitFor({ state: 'visible' });
-          await accountShot('credential-remove-zone', 'login page Remove', async () => {
-            await credentialsPanel
-              .locator('[data-credential-remove-zone]')
-              .evaluate(element => element.scrollIntoView({ block: 'center', behavior: 'instant' }));
-          });
-          await credentialsPanel.locator('[data-page-back]').click();
-          // ADD A LOGIN (U21): ONE screen — every provider as tiles (the two sign-ins, then the API-key
-          // providers under their headings, two to a row on a phone, with the search box thirteen providers
-          // earn), then only what the one tapped needs: a provider's key, or a sign-in and its one button.
-          await credentialsPanel.locator('[data-add-login]').first().click();
-          await credentialsPanel.locator('[data-add-login-choices]').waitFor({ state: 'visible' });
-          await credentialsPanel.locator('[data-provider-search]').waitFor({ state: 'visible' });
-          await accountShot('add-login-tool', 'Add a login provider choice');
-          // Each frame starts where the new part does, because on a phone the sign-in tiles fill the top.
-          const toTop = (selector: string) => async (): Promise<void> => {
-            await credentialsPanel
-              .locator(selector)
-              .evaluate(element => element.scrollIntoView({ block: 'start', behavior: 'instant' }));
-          };
-          await accountShot('add-login-providers', 'Add a login provider tiles', toTop('[data-provider-grid]'));
-          await themedShot('add-login-providers');
-          await credentialsPanel.locator('[data-provider-tile="deepseek"]').click();
-          await credentialsPanel.locator('[data-one-click="deepseek"]').waitFor({ state: 'visible' });
-          await accountShot('add-login-provider-key', 'Add a login provider key', toTop('[data-add-login-chosen]'));
-          await credentialsPanel.locator('[data-add-login-change]').click();
-          await credentialsPanel.locator('[data-add-login-choice]:not([aria-disabled])').first().click();
-          await credentialsPanel.locator('[data-add-login-fields]').waitFor({ state: 'visible' });
-          await accountShot('add-login-start', 'Add a login sign-in');
-          await credentialsPanel.locator('[data-add-login-back]').click();
-          const stopAddLogin = credentialsPanel.locator('[data-add-login-stop]');
-          if ((await stopAddLogin.count()) > 0) await stopAddLogin.click();
-          await credentialsPanel.locator('[data-credential-row="claude-team"]').waitFor({ state: 'visible' });
-
-          // THE PAIRING A RESET LEFT BEHIND: same name, same address. It is called the old pairing and
-          // offers Remove; the live one keeps its plain name. No fingerprint is shown on either.
-          const oldPairing = await openMachine('harness-daemon-before-reset');
-          await oldPairing.locator('[data-machine-replaced]').waitFor({ state: 'visible' });
-          const oldHeading = await oldPairing.locator('#settings-machine-heading').innerText();
-          if (oldHeading !== 'Studio workstation (old pairing)') fail(`the old pairing reads "${oldHeading}"`);
-          await accountShot('old-pairing', 'old pairing');
-          await openMachine('harness-daemon');
-          const liveHeading = await machinesSurface.locator('#settings-machine-heading').innerText();
-          if (liveHeading !== 'Studio workstation') fail(`the live pairing reads "${liveHeading}"`);
-
-          await machinesSurface.locator('[data-machine-tab="profiles"]').click();
-          const profilesPanel = machinesSurface.locator('[data-machine-tab-panel="profiles"]');
-          await profilesPanel.locator('[data-profile-row="Default"]').waitFor({ state: 'visible' });
-          await accountShot('profiles', 'Profiles list');
-          await themedShot('profiles');
-          await profilesPanel.locator('[data-profile-row="Default"]').click();
-          await profilesPanel
-            .locator('[data-profile-editor="Default"] [data-profile-item]')
-            .first()
-            .waitFor({ state: 'visible' });
-          await accountShot('profile', 'profile page');
-          await themedShot('profile');
-          await profilesPanel.locator('[data-profile-delete]').click();
-          await profilesPanel.locator('[data-catalog-note="delete"]').scrollIntoViewIfNeeded();
-          await accountShot('profile-delete', 'profile delete card');
-          await profilesPanel.locator('[data-profile-keep]').click();
-          // Mixing tools is refused on drop (or on Add), naming the items to blame (R5).
-          if (viewport.name === 'mobile') {
-            await profilesPanel.locator('[data-profile-pick]').click();
-            const picker = page.locator('[data-profile-picker]');
-            await picker.locator('[data-library-add="profile/Codex"]').click();
-            await picker.locator('[data-catalog-note="picker-refused"]').waitFor({ state: 'visible' });
-            await accountShot('profile-refused', 'profile refusing a mix in the picker');
-            await picker.locator('[data-picker-done]').click();
-            await picker.waitFor({ state: 'detached' });
-          } else {
-            await profilesPanel.locator('[data-library-add="profile/Codex"]').click();
-            await profilesPanel.locator('[data-catalog-note="refused"]').waitFor({ state: 'visible' });
-            await accountShot('profile-refused', 'profile refusing a mix');
-            await profilesPanel.locator('[data-refusal-dismiss]').click();
-          }
-          await profilesPanel.locator('[data-catalog-back]').click();
-          // Agent work: Agent comes later than Default, so it overrides one key — the chip and Resolved.
-          await profilesPanel.locator('[data-profile-row="Agent work"]').click();
-          await profilesPanel.locator('[data-override-chip]').first().waitFor({ state: 'visible' });
-          await accountShot('profile-overrides', 'profile contents with an override chip');
-          await themedShot('profile-overrides');
-          await profilesPanel.locator('[data-profile-view="resolved"]').click();
-          await profilesPanel.locator('[data-resolved-overridden]').first().waitFor({ state: 'visible' });
-          await accountShot('profile-resolved', 'profile Resolved view');
-          await themedShot('profile-resolved');
-          await profilesPanel.locator('[data-profile-yaml]').click();
-          await page.locator('[data-config-editor-text]').waitFor({ state: 'visible' });
-          await accountShot('profile-yaml', 'profile Edit as YAML');
-          await page.locator('[data-config-cancel]').click();
-          await page.locator('[data-config-editor]').waitFor({ state: 'detached' });
-          await profilesPanel.locator('[data-catalog-back]').click();
-          await profilesPanel.locator('[data-profile-row="Old mix"]').click();
-          await profilesPanel.locator('[data-catalog-note="mixed"]').waitFor({ state: 'visible' });
-          await accountShot('profile-mixed', 'mixed profile page');
-          await profilesPanel.locator('[data-catalog-back]').click();
-          await profilesPanel.locator('[data-profile-new]').click();
-          await profilesPanel.locator('[data-profile-name]').fill('Docs');
-          if (viewport.name === 'mobile') {
-            await profilesPanel.locator('[data-profile-pick]').click();
-            const picker = page.locator('[data-profile-picker]');
-            await picker.locator('[data-library-add="profile/Shared"]').click();
-            await picker.locator('[data-library-add="mcp/notes"]').click();
-            await accountShot('profile-picker', 'new profile Add picker');
-            await picker.locator('[data-picker-done]').click();
-            await picker.waitFor({ state: 'detached' });
-          } else {
-            await profilesPanel
-              .locator('[data-library-item="profile/Shared"]')
-              .dragTo(profilesPanel.locator('[data-profile-contents]'));
-            await profilesPanel
-              .locator('[data-library-item="mcp/notes"]')
-              .dragTo(profilesPanel.locator('[data-profile-item="profile/Shared"]'));
-            await profilesPanel.locator('[data-profile-item="mcp/notes"]').waitFor({ state: 'visible' });
-          }
-          await accountShot('profile-new', 'new profile built by drag and drop');
-          await profilesPanel.locator('[data-profile-cancel]').click();
-
-          await machinesSurface.locator('[data-machine-tab="components"]').click();
-          const componentsPanel = machinesSurface.locator('[data-machine-tab-panel="components"]');
-          await componentsPanel.locator('[data-component-kind="mcp"]').waitFor({ state: 'visible' });
-          await accountShot('components', 'Components kinds');
-          await componentsPanel.locator('[data-component-kind="mcp"]').click();
-          await componentsPanel.locator('[data-component-row="mcp/notes"]').waitFor({ state: 'visible' });
-          await accountShot('component-list', 'MCP servers list');
-          await componentsPanel.locator('[data-component-row="mcp/notes"]').click();
-          await componentsPanel.locator('[data-catalog-note="path"]').waitFor({ state: 'visible' });
-          await accountShot('component', 'component page with warnings');
-          await componentsPanel.locator('[data-catalog-back]').click();
-          await componentsPanel.locator('[data-catalog-back]').click();
-          await componentsPanel.locator('[data-component-kind="settings"]').click();
-          await componentsPanel.locator('[data-component-row="settings/Codex settings"]').waitFor({ state: 'visible' });
-          await accountShot('component-list-settings', 'Settings list with scope badges');
-          await componentsPanel.locator('[data-catalog-back]').click();
-          await componentsPanel.locator('[data-component-kind="instructions"]').click();
-          await componentsPanel.locator('[data-component-row="instructions/Main instructions"]').click();
-          await componentsPanel.locator('[data-component-rendered] h1').waitFor({ state: 'visible' });
-          await accountShot('component-markdown', 'instructions rendered as Markdown');
-          await themedShot('component-markdown');
-          await componentsPanel.locator('[data-component-view-source]').click();
-          await componentsPanel.locator('[data-component-source]').waitFor({ state: 'visible' });
-          await accountShot('component-markdown-source', 'instructions as source');
-          await componentsPanel.locator('[data-component-edit]').click();
-          await componentsPanel.locator('[data-catalog-note="used"]').waitFor({ state: 'visible' });
-          await accountShot('component-edit', 'component edit used everywhere');
-          await componentsPanel.locator('[data-catalog-back]').click();
-          await componentsPanel.locator('[data-catalog-back]').click();
-          await componentsPanel.locator('[data-catalog-back]').click();
-          await componentsPanel.locator('[data-component-kind="skills"]').click();
-          await componentsPanel.locator('[data-component-row="skills/My skills"]').click();
-          await componentsPanel.locator('[data-catalog-note="partial"]').waitFor({ state: 'visible' });
-          await accountShot('component-partial', 'component partly supported');
-          await componentsPanel.locator('[data-catalog-back]').click();
-          await componentsPanel.locator('[data-catalog-back]').click();
-          await componentsPanel.locator('[data-component-kind="settings"]').click();
-          await componentsPanel.locator('[data-component-row="settings/Claude settings"]').click();
-          await componentsPanel.locator('[data-component-edit]').click();
-          await componentsPanel.locator('[data-component-hidden]').waitFor({ state: 'visible' });
-          await accountShot('component-settings-edit', 'settings edit with a hidden value');
-
-          // THE OTHER MACHINES (U21): one asleep or offline, and one not set up with the first run it
-          // links to. These are the states a person meets on a second machine, and each is its own
-          // layout — a status card above the tab panel, a set-up card instead of a list, and a stepper.
-          const offlineSurface = await openMachine('unreachable-daemon');
-          await offlineSurface.locator('[data-machine-offline]').waitFor({ state: 'visible' });
-          await accountShot('offline', 'offline machine');
-          // A machine that is not set up SAYS SO above its tabs, with the one button that resumes it; the
-          // first run itself is a FULL SCREEN of its own, outside Settings and with no app chrome.
-          const newMachine = await openMachine('checking-daemon');
-          await newMachine.locator('[data-machine-finish-setup]').waitFor({ state: 'visible' });
-          await accountShot('not-set-up', 'machine not set up');
-          await newMachine.locator('[data-machine-finish-setup-open]').click();
-          // New machine setup: ONE rail, no stepper inside any step. The whole journey, every step a frame
-          // measured for the rail and the pinned footer: Start from, Claude Code (its runtime renamed and
-          // imported in place), Codex (imported to sign in later), Speed-ups, Voice (skipped), the Warden,
-          // Learning, Agent controls, and Done naming both runtimes and the skipped step's "Set up later".
-          const setupScreen = page.locator('#harness-machine-setup [data-machine-onboarding]');
-          const setupStep = async (step: string): Promise<void> =>
-            setupScreen.locator(`[data-onboarding-step-body="${step}"]`).waitFor({ state: 'visible' });
-          const setupNext = async (): Promise<void> => setupScreen.locator('[data-onboarding-next]').click();
-          await setupStep('start');
-          await setupShot('start', 'Start from');
-          await setupNext();
-          await setupScreen.locator('[data-harness-name="claude"]').waitFor({ state: 'visible' });
-          await setupShot('claude', 'Claude Code, its runtime named in place');
-          await setupScreen.locator('[data-harness-name="claude"]').fill('claude-main');
-          await setupScreen.locator('[data-onboarding-step-body="claude"] [data-change-submit]').click();
-          await setupScreen.locator('[data-harness-imported="claude"]').waitFor({ state: 'visible' });
-          await setupShot('claude-imported', 'Claude Code imported, claude-main made');
-          await setupNext();
-          await setupScreen.locator('[data-harness-name="codex"]').waitFor({ state: 'visible' });
-          await setupShot('codex', 'Codex, not signed in');
-          await setupScreen.locator('[data-onboarding-step-body="codex"] [data-change-submit]').click();
-          await setupScreen.locator('[data-harness-imported="codex"]').waitFor({ state: 'visible' });
-          await setupNext();
-          for (const [step, label] of [
-            ['speedups', 'Speed-ups'],
-            ['voice', 'Voice'],
-            ['warden', 'Warden'],
-            ['learning', 'Learning'],
-            ['controls', 'Agent controls'],
-          ] as const) {
-            await setupStep(step);
-            await setupShot(step, label);
-            if (step === 'voice') await setupScreen.locator('[data-onboarding-skip]').click();
-            else await setupNext();
-          }
-          await setupStep('done');
-          await setupScreen
-            .locator('[data-onboarding-summary-row="codex"]')
-            .filter({ hasText: 'codex-default' })
-            .waitFor();
-          const claudeRow = await setupScreen.locator('[data-onboarding-summary-row="claude"]').innerText();
-          if (!claudeRow.includes('claude-main')) fail(`Done does not name the runtime Claude Code made: ${claudeRow}`);
-          await setupShot('done', 'Done naming both runtimes, Voice skipped');
-          // Leaving lands back on the machine in Settings, banner and all.
-          await setupScreen.locator('[data-onboarding-restart]').click();
-          await setupScreen.locator('[data-onboarding-later-all]').click();
-          await page
-            .locator('[data-machines-surface="checking-daemon"] [data-machine-finish-setup]')
-            .waitFor({ state: 'visible' });
-          // IMPORT AGAIN is the same Claude Code step on a machine that is set up: what changed, a runtime
-          // that already uses this login and profile, and Codex to install — the widest layouts at 390px.
-          {
-            const importUrl = new URL(server.url);
-            importUrl.searchParams.set('machine-setup', 'harness-daemon');
-            importUrl.searchParams.set('setup-step', 'claude');
-            await page.goto(importUrl.toString());
-            await setupScreen.locator('[data-harness-add-another]').waitFor({ state: 'visible' });
-            await setupScreen.locator('[data-harness-add-another]').check();
-            await setupScreen.locator('[data-harness-name="claude"]').fill('claude-default');
-            await setupScreen.locator('[data-harness-name-problem="claude"]').waitFor({ state: 'visible' });
-            await setupShot('import-again-claude', 'Import again on Claude Code');
-            await setupNext();
-            await setupScreen.locator('[data-onboarding-step-body="codex"] [data-tool-install]').first().waitFor();
-            await setupShot('import-again-codex', 'Import again, Codex to install');
-          }
-          settingsPage = page.getByLabel('Settings page preview', { exact: true });
-
-          // The compact registry is a separate deterministic route rather than a
-          // DOM mutation: it remounts the reachability hooks exactly as a fresh
-          // one-daemon browser would and proves the empty space is intentional.
-          settingsUrl.searchParams.set('settings-daemons', 'one');
-          await page.goto(settingsUrl.toString());
-          settingsPage = page.getByLabel('Settings page preview', { exact: true });
-          // The single machine is still LISTED, by name with its status — one row, never a hidden list.
-          if (phone) await settingsHome.waitFor({ state: 'visible' });
-          const oneMachineRows = await settingsNavigation().locator('[data-settings-machine]').count();
-          if (oneMachineRows !== 1) fail(`settings one-daemon fixture listed ${oneMachineRows} machines instead of 1`);
-          const oneMachine = await openMachine('harness-daemon');
-          await openMachineTab(oneMachine);
-          const oneDaemonFrame = settingsPage.locator('[data-daemon-settings-frame="harness-daemon"]');
-          await openDaemonPanel(oneDaemonFrame, 'host-checks');
-          await settingsPage.locator('[data-daemon-reachability="reachable"]').waitFor({ state: 'visible' });
-          // The one-daemon route is a DIFFERENT MOUNT, not the many-daemon page with rows hidden: it
-          // remounts the frame with no daemon switcher above it, so the panel gets width the checked
-          // page never gave it. A layout that only breaks when it is given more room is not a strange
-          // failure — it is what an element sized from a container rather than the viewport does.
-          await assertNoSidewaysScroll(page, `the one-daemon Settings route at ${viewport.name}`);
-          const oneDaemonTarget = join(outDir, `settings-daemons-one-${viewport.name}.png`);
-          await page.screenshot({ path: oneDaemonTarget });
-          process.stdout.write(`📸 Settings Daemons (one) ${viewport.name} -> ${oneDaemonTarget}\n`);
-
-          // THE UNLOCK SCREEN, the first thing a locked machine shows: one sentence, one line on how long
-          // it stays, one button. It is a viewport shot because the dialog is fixed to the viewport.
-          const unlockPromptTarget = join(outDir, `unlock-prompt-${viewport.name}.png`);
-          await page.goto(`${server.url}?unlock-prompt`);
-          const unlockPrompt = page.getByRole('dialog', { name: 'Unlock' });
-          await unlockPrompt.getByText('It stays unlocked on this device for 8 hours.').waitFor({ state: 'visible' });
-          await unlockPrompt.getByRole('button', { name: 'Unlock' }).waitFor({ state: 'visible' });
-          await assertNoSidewaysScroll(page, `the unlock screen at ${viewport.name}`);
-          await page.screenshot({ path: unlockPromptTarget, animations: 'disabled' });
-          process.stdout.write(`📸 unlock screen ${viewport.name} -> ${unlockPromptTarget}\n`);
-          await page.goto(settingsUrl.toString());
-
-          // EVERY THEME FAMILY'S TERMINAL, measured: one cell per character, in a monospace face.
-          for (const family of THEME_FAMILIES)
-            await assertTerminalGeometry(page, server.url.toString(), family.id, viewport.name);
-          await page.evaluate(() => localStorage.removeItem('fy-theme-v1'));
-          await page.goto(settingsUrl.toString());
-
-          // The rest of this pass belongs to the full gallery.
-          if (SETTINGS_ONLY) continue;
-          await page.goto(server.url.toString());
-          // A four-kind ledger is taller than a phone viewport. Chrome may cull
-          // unpainted rows during an element screenshot, so temporarily borrow
-          // a tall viewport to capture the full, real phone-width board.
-          const agendaTarget = join(outDir, `attention-${viewport.name}.png`);
-          await page.setViewportSize({ width: viewport.width, height: 2_400 });
-          const agenda = page.getByLabel('Inbox ledger');
-          await agenda.locator('summary').filter({ hasText: 'Resolution audit' }).click();
-          await captureElement(page, agenda, agendaTarget);
-          await page.setViewportSize({ width: viewport.width, height: viewport.height });
-          process.stdout.write(`📸 Inbox ledger -> ${agendaTarget}\n`);
-          const pinsTriggerTarget = join(outDir, `pins-trigger-${viewport.name}.png`);
-          await captureElement(page, page.getByLabel('Pins trigger'), pinsTriggerTarget);
-          process.stdout.write(`📸 Pins trigger -> ${pinsTriggerTarget}\n`);
-          const pinsTarget = join(outDir, `pins-${viewport.name}.png`);
-          await captureElement(page, page.getByLabel('Pins ledger'), pinsTarget);
-          process.stdout.write(`📸 Pins ledger -> ${pinsTarget}\n`);
-          // Three pairing screens, because they are three different screens: the
-          // cold open a first-timer sees, the confirmation a scanned QR lands
-          // on, and what the surface becomes once a daemon is connected.
-          for (const [label, slug] of [
-            ['Daemon pairing', 'pairing'],
-            ['Pairing confirmation', 'pairing-confirm'],
-            ['Paired daemon list', 'pairing-list'],
-          ] as const) {
-            const pairingTarget = join(outDir, `${slug}-${viewport.name}.png`);
-            await captureElement(page, page.getByLabel(label, { exact: true }), pairingTarget);
-            process.stdout.write(`📸 ${label} ${viewport.name} -> ${pairingTarget}\n`);
-          }
-
-          // AND IN LIGHT. Pairing is the first screen a new reader ever sees,
-          // and half of them are not in dark mode. The rest of this harness page
-          // is captured dark only; this one surface is worth both.
-          await applyTheme(page, 'studio-light');
-          for (const [label, slug] of [
-            ['Daemon pairing', 'pairing'],
-            ['Pairing confirmation', 'pairing-confirm'],
-            ['Paired daemon list', 'pairing-list'],
-          ] as const) {
-            const lightTarget = join(outDir, `${slug}-light-${viewport.name}.png`);
-            await captureElement(page, page.getByLabel(label, { exact: true }), lightTarget);
-            process.stdout.write(`📸 ${label} light ${viewport.name} -> ${lightTarget}\n`);
-          }
-          await applyTheme(page, 'studio-dark');
-
-          await capturePairingFailures(page, viewport.name);
-          const wardenOverviewTarget = join(outDir, `warden-overview-${viewport.name}.png`);
-          await captureElement(page, page.locator('[data-harness="warden-overview"]'), wardenOverviewTarget);
-          process.stdout.write(`📸 Warden page -> ${wardenOverviewTarget}\n`);
-          const wardenStripTarget = join(outDir, `warden-strip-${viewport.name}.png`);
-          await captureElement(page, page.locator('[data-harness="warden-strip"]'), wardenStripTarget);
-          process.stdout.write(`📸 Warden strip -> ${wardenStripTarget}\n`);
-          // The secret store, in the three states a person actually meets: one that exists
-          // (masked, with a configured reference that does not resolve), a damaged store that says
-          // so rather than reporting empty, and a read this browser could not make.
-          for (const [name, selector] of [
-            [`secrets`, `[data-harness="secrets-card"]`],
-            [`secrets-damaged`, `[data-harness="secrets-damaged"]`],
-            [`secrets-unreachable`, `[data-harness="secrets-unreachable"]`],
-          ] as const) {
-            const target = join(outDir, `${name}-${viewport.name}.png`);
-            await captureElement(page, page.locator(selector), target);
-            process.stdout.write(`📸 Secrets ${name} ${viewport.name} -> ${target}\n`);
-          }
-          // The operator's limits, in the four states a paired browser actually meets. Every one of
-          // them is a frame where a control is refused, so every one has to show the reason beside it
-          // — that is the thing being reviewed, not the switches.
-          //
-          // A TALL VIEWPORT IS BORROWED, for the reason the agenda ledger borrows one: five
-          // capabilities × two axes × a reason under each is far taller than a phone, and Chrome may
-          // cull unpainted rows during an element screenshot. Captured at 390 wide and 844 high, the
-          // card came out clipped at the second row and the desktop shot stitched the NEXT card's
-          // content under this one's name — an element capture that is confidently wrong rather than
-          // obviously short, which is the worse of the two failures.
-          await page.setViewportSize({ width: viewport.width, height: 4_000 });
-          for (const [name, selector] of [
-            [`grants-step-up-needed`, `[data-harness="grants-step-up-needed"]`],
-            [`grants-step-up-held`, `[data-harness="grants-step-up-held"]`],
-            [`grants-undetermined`, `[data-harness="grants-undetermined"]`],
-            [`grants-unreachable`, `[data-harness="grants-unreachable"]`],
-            // The capability list in both postures that exist. The governed one is the frame that matters:
-            // the harness daemon's address is loopback, so a capture claiming the limits do not apply
-            // there would be the old direct-local reading, visible in a PNG.
-            [`capability-list-governed`, `[data-harness="capability-list-governed"]`],
-            [`capability-list-unknown`, `[data-harness="capability-list-unknown"]`],
-          ] as const) {
-            const frame = page.locator(selector);
-            await frame.scrollIntoViewIfNeeded();
-            // Settled content, not a spinner: every one of these frames is rendered from a fixture, so
-            // a capture still showing "Reading…" would be a regression to review rather than a state.
-            await frame
-              .locator('[data-grant-surface], [aria-label="Capability grants unavailable"], [data-capability-list]')
-              .first()
-              .waitFor({ state: 'visible' });
-            const target = join(outDir, `${name}-${viewport.name}.png`);
-            await captureElement(page, frame, target);
-            process.stdout.write(`📸 Capability limits ${name} ${viewport.name} -> ${target}\n`);
-          }
-          // AND THE PASSKEY FRAMES IN LIGHT. The warn tone of a row waiting on a confirmation is the last
-          // place to lose contrast, so it has to be legible in both themes rather than designed in dark and
-          // inverted — a hairline that vanishes on `surface-2` takes a boundary with it.
-          await applyTheme(page, 'studio-light');
-          for (const name of ['grants-step-up-needed', 'grants-step-up-held'] as const) {
-            const frame = page.locator(`[data-harness="${name}"]`);
-            await frame.scrollIntoViewIfNeeded();
-            const target = join(outDir, `${name}-light-${viewport.name}.png`);
-            await captureElement(page, frame, target);
-            process.stdout.write(`📸 Capability limits ${name} light ${viewport.name} -> ${target}\n`);
-          }
-          await applyTheme(page, 'studio-dark');
-          // Adding a device, in the states somebody actually meets. THE CODE IN THESE FRAMES IS FAKE —
-          // see `HARNESS_INVITE`. A committed PNG of a real minted code would be a live credential in
-          // the repository, and a QR is a machine-readable label rather than obfuscation.
-          //
-          // The tall viewport is still borrowed, for the reason the grant frames borrow one: a QR, a
-          // countdown, a selectable link and a device list are taller than a phone, and Chrome may cull
-          // unpainted rows during an element screenshot.
-          for (const [name, selector] of [
-            [`pair-devices`, `[data-harness="pair-devices"]`],
-            [`pair-invite`, `[data-harness="pair-invite"]`],
-            [`pair-expired`, `[data-harness="pair-expired"]`],
-            [`pair-empty`, `[data-harness="pair-empty"]`],
-            [`pair-refused`, `[data-harness="pair-refused"]`],
-          ] as const) {
-            const frame = page.locator(selector);
-            await frame.scrollIntoViewIfNeeded();
-            // Settled content, not a spinner: every frame is rendered from a fixture, so a capture still
-            // showing "Reading…" would be a regression to review rather than a state.
-            await frame
-              .locator('[data-add-device-surface], [aria-label="Adding a device unavailable"]')
-              .first()
-              .waitFor({ state: 'visible' });
-            const target = join(outDir, `${name}-${viewport.name}.png`);
-            await captureElement(page, frame, target);
-            process.stdout.write(`📸 Add a device ${name} ${viewport.name} -> ${target}\n`);
-          }
-          await page.setViewportSize({ width: viewport.width, height: viewport.height });
-          const taskDagTarget = join(outDir, `task-dag-${viewport.name}.png`);
-          await captureElement(page, page.locator('[data-task-graph]'), taskDagTarget);
-          process.stdout.write(`📸 Task dependency graph -> ${taskDagTarget}\n`);
-          const sessionTasksTarget = join(outDir, `session-tasks-${viewport.name}.png`);
-          await captureElement(page, page.getByLabel('Session task board'), sessionTasksTarget);
-          process.stdout.write(`📸 Session task board -> ${sessionTasksTarget}\n`);
-          const taskNameTarget = join(outDir, `task-name-${viewport.name}.png`);
-          await captureElement(page, page.getByLabel('Task name'), taskNameTarget);
-          process.stdout.write(`📸 Task name -> ${taskNameTarget}\n`);
-
-          const inAppTarget = join(outDir, `in-app-browser-${viewport.name}.png`);
-          await page.locator('#harness-in-app-browser').scrollIntoViewIfNeeded();
-          await captureElement(page, page.getByLabel('In-app link preview'), inAppTarget);
-          process.stdout.write(`📸 In-app link preview -> ${inAppTarget}\n`);
-
-          await captureFiles(page, viewport.name);
-
-          const attachmentsTarget = join(outDir, `attachments-${viewport.name}.png`);
-          // The thumbnail is `loading="lazy"` and the harness stacks it thousands
-          // of pixels below the fold, so Chrome has not started decoding it yet.
-          // Scroll first: capturing before it lands gives a 0x0 box and a card
-          // screenshot that is silently missing its image.
-          await page.locator('#harness-attachments').scrollIntoViewIfNeeded();
-          await page.getByAltText('Coverage by tier').waitFor({ state: 'visible' });
-          await captureElement(page, page.getByLabel('Transcript attachments'), attachmentsTarget);
-          process.stdout.write(`📸 Transcript attachments -> ${attachmentsTarget}\n`);
-          const terminalTarget = join(outDir, `terminal-snapshot-${viewport.name}.png`);
-          await captureElement(page, page.getByLabel('Terminal snapshot'), terminalTarget);
-          process.stdout.write(`📸 Terminal snapshot -> ${terminalTarget}\n`);
-
-          const sidePaneTabsTarget = join(outDir, `side-pane-tabs-${viewport.name}.png`);
-          await captureElement(page, page.locator('[data-harness="side-pane-tabs"]'), sidePaneTabsTarget);
-          process.stdout.write(`📸 Side pane tabs -> ${sidePaneTabsTarget}\n`);
-
-          for (const [label, slug] of [
-            ['Session dashboard full table', 'session-dashboard-table'],
-            ['Session dashboard full cards', 'session-dashboard-cards'],
-            ['Session dashboard compact panel', 'session-dashboard-compact'],
-            ['Session dashboard scoped', 'session-dashboard-scoped'],
-            ['Session dashboard minimal panel', 'session-dashboard-minimal'],
-            ['Session dashboard lean table', 'session-dashboard-lean-table'],
-            ['Sessions page connected', 'sessions-page-connected'],
-          ] as const) {
-            const dashboardTarget = join(outDir, `${slug}-${viewport.name}.png`);
-            await captureElement(page, page.getByLabel(label, { exact: true }), dashboardTarget);
-            process.stdout.write(`📸 ${label} -> ${dashboardTarget}\n`);
-          }
-
-          // Four stacked dashboards are taller than a phone viewport. `captureElement`
-          // grows the viewport to fit them and puts it back, so the hand-rolled
-          // borrow that used to live here — and the identical one at the dictation
-          // settings card — is gone rather than duplicated.
-          const dashboardStatesTarget = join(outDir, `session-dashboard-states-${viewport.name}.png`);
-          await captureElement(
-            page,
-            page.getByLabel('Session dashboard states', { exact: true }),
-            dashboardStatesTarget,
-          );
-          process.stdout.write(`📸 Session dashboard states -> ${dashboardStatesTarget}\n`);
-
-          const unlockTarget = join(outDir, `attachment-unlock-${viewport.name}.png`);
-          await page.goto(`${server.url}?attachment-unlock`);
-          await captureElement(page, page.getByRole('dialog', { name: 'Unlock encrypted PDF' }), unlockTarget);
-          process.stdout.write(`📸 attachment unlock -> ${unlockTarget}\n`);
-          await page.goto(server.url.toString());
-
-          // The harness stacks every ported surface down one column, so most of it
-          // is below the fold. A full-page stitch cannot prove those: the app bar
-          // is sticky, and Chrome repaints a fixed layer into every stitched tile.
-          // So each surface below the fold is captured as ITS OWN element shot,
-          // which is both immune to that and easier to compare against the
-          // original screen by screen.
-          for (const section of SECTIONS) {
-            const element = page.locator(`#${section}`);
-            await element.scrollIntoViewIfNeeded();
-            const sectionTarget = join(outDir, `${viewport.name}-${section}.png`);
-            await captureElement(page, element, sectionTarget);
-            process.stdout.write(`📸 ${viewport.name} ${section} -> ${sectionTarget}\n`);
-          }
-
-          // #43: a Skills row carries two actions, and the second one's whole
-          // point is a state the resting frame cannot show. Expand one detail
-          // and capture the section again, so a reviewer sees the disclosed
-          // content and the primary/secondary hierarchy beside it rather than
-          // two buttons and a promise.
-          const skills = page.locator('#harness-skills');
-          await skills.scrollIntoViewIfNeeded();
-          await skills
-            .getByRole('button', { name: /^View full detail for/u })
-            .first()
-            .click();
-          const skillsDetailTarget = join(outDir, `${viewport.name}-harness-skills-detail.png`);
-          await captureElement(page, skills, skillsDetailTarget);
-          process.stdout.write(`📸 ${viewport.name} skills detail -> ${skillsDetailTarget}\n`);
-
-          const ledgerTarget = join(outDir, `send-ledger-${viewport.name}.png`);
-          await captureElement(page, page.getByLabel('Send ledger rows'), ledgerTarget);
-          process.stdout.write(`📸 send ledger -> ${ledgerTarget}
-    `);
-
-          // A tool run's EXPANDED state is the other half of its design — the slim
-          // chrome line is what it looks like at rest, and the code surfaces only
-          // exist after a deliberate click — so it gets its own pass.
-          const toolGroup = page.locator('[data-transcript-kind="tool"]').first();
-          await toolGroup.scrollIntoViewIfNeeded();
-          await toolGroup.getByRole('button').first().click();
-          await toolGroup.getByRole('button').nth(1).click();
-          const toolGroupTarget = join(outDir, `tool-group-${viewport.name}.png`);
-          await captureElement(page, toolGroup, toolGroupTarget);
-          process.stdout.write(`📸 tool group -> ${toolGroupTarget}\n`);
-
-          // The context menu is anchored and `fixed`, which is exactly what a
-          // full-page stitch cannot capture — so it gets its own viewport-sized
-          // pass behind a fragment.
-          const menuTarget = join(outDir, `${viewport.name}-menu.png`);
-          await page.goto(`${server.url}#menu`);
-          await page.reload();
-          // Wait for the rows, not just for load: the menu paints hidden and is
-          // revealed by a layout effect once it has been measured and clamped.
-          await page.locator('[role="menuitem"]').last().waitFor({ state: 'visible' });
-          await page.screenshot({ path: menuTarget });
-          process.stdout.write(`📸 ${viewport.name} context menu -> ${menuTarget}\n`);
-
-          const paletteTarget = join(outDir, `${viewport.name}-palette.png`);
-          await page.goto(`${server.url}#palette`);
-          await page.reload();
-          await page.locator('[role="option"]').last().waitFor({ state: 'visible' });
-          await page.screenshot({ path: paletteTarget });
-          process.stdout.write(`📸 ${viewport.name} command palette -> ${paletteTarget}\n`);
-
-          const rowMenuTarget = join(outDir, `${viewport.name}-row-menu.png`);
-          await page.goto(`${server.url}#row-menu`);
-          await page.reload();
-          await page.locator('[role="menuitem"]').last().waitFor({ state: 'visible' });
-          await page.screenshot({ path: rowMenuTarget });
-          process.stdout.write(`📸 ${viewport.name} session row menu -> ${rowMenuTarget}\n`);
-
-          // The bulk-stop confirmation is a fixed overlay like the menu and the
-          // palette, and its two states are different screens: what will die, and
-          // what did.
-          for (const [fragment, name] of [
-            ['#stop', 'stop-confirm'],
-            ['#stop-results', 'stop-results'],
-          ] as const) {
-            const stopTarget = join(outDir, `${viewport.name}-${name}.png`);
-            await page.goto(`${server.url}${fragment}`);
-            await page.reload();
-            await page.getByRole('dialog', { name: /confirm|results/ }).waitFor({ state: 'visible' });
-            await page.screenshot({ path: stopTarget });
-            process.stdout.write(`📸 ${viewport.name} ${name} -> ${stopTarget}\n`);
-          }
-
-          // The fleet drawer only exists below the drawer breakpoint, and only while
-          // it is open, so a page-flow capture at 390px correctly shows nothing.
-          const drawerTarget = join(outDir, `${viewport.name}-fleet-drawer.png`);
-          await page.goto(`${server.url}#fleet-drawer`);
-          await page.reload();
-          const drawer = page.getByRole('dialog', { name: 'Fleet sessions' });
-          if (await drawer.isVisible().catch(() => false)) {
-            await page.screenshot({ path: drawerTarget });
-            process.stdout.write(`📸 ${viewport.name} fleet drawer -> ${drawerTarget}\n`);
-          }
-
-          const renameTarget = join(outDir, `${viewport.name}-rename.png`);
-          await page.goto(`${server.url}#rename`);
-          await page.reload();
-          await page.getByRole('dialog', { name: 'Rename session' }).waitFor({ state: 'visible' });
-          await page.screenshot({ path: renameTarget });
-          process.stdout.write(`📸 ${viewport.name} rename sheet -> ${renameTarget}\n`);
-
-          const migrateTarget = join(outDir, `${viewport.name}-migrate.png`);
-          await page.goto(`${server.url}#migrate`);
-          await page.reload();
-          await page.getByRole('dialog', { name: 'Change model or account' }).waitFor({ state: 'visible' });
-          await page.screenshot({ path: migrateTarget });
-          process.stdout.write(`📸 ${viewport.name} migrate sheet -> ${migrateTarget}\n`);
-
-          // THE ASSEMBLED SESSION WORKSPACE, on a page of its own.
-          //
-          // It is `h-full` with a single scroller of its own, so an element shot
-          // inside the stacked gallery would be clipped by the gallery's
-          // scroller and would prove nothing about where the composer sits. The
-          // alternate root mounts the production shell and the production
-          // viewport producer, and derives pane-vs-sheet from the layout regime
-          // exactly as `src/App.tsx` does — so this loop's two viewports are the
-          // two presentations, with nothing to switch by hand.
-          //
-          // Captured at rest FIRST: the pane starts closed in production, so the
-          // full-width chat column is the state a reader actually opens on, and
-          // it is the only frame that shows the transcript and the composer with
-          // nothing over them.
-          const workspaceTarget = join(outDir, `${viewport.name}-session-workspace.png`);
-          await page.goto(`${server.url}#session-workspace`);
-          await page.reload();
-          await page.locator('#harness-session-workspace-page').waitFor({ state: 'visible' });
-          // The transcript follows its tail on mount; wait for the LAST row
-          // rather than for load, or the shot catches a scroller mid-pin.
-          await page.locator('[data-transcript-kind]').last().waitFor({ state: 'visible' });
-          await page.screenshot({ path: workspaceTarget });
-          process.stdout.write(`📸 ${viewport.name} session workspace -> ${workspaceTarget}\n`);
-
-          // THE SESSION BAR AS ITS OWN REVIEW SURFACE. The workspace capture proves the bar's share of
-          // the viewport; this tighter image makes its spacing legible. It is ONE row now — the agent's
-          // name, project and status, the lifecycle buttons, ⓘ Info and Actions ▾ — and the height is printed so a
-          // regression back to two rows of chrome is a number, not an impression.
-          const sessionBar = page.locator('[data-session-bar]');
-          const sessionBarTarget = join(outDir, `session-bar-${viewport.name}.png`);
-          await captureElement(page, sessionBar, sessionBarTarget);
-          process.stdout.write(`📸 session bar ${viewport.name} -> ${sessionBarTarget}\n`);
-          const sessionBarHeight = await sessionBar.evaluate(bar => Math.round(bar.getBoundingClientRect().height));
-          process.stdout.write(`   session bar height=${sessionBarHeight}px\n`);
-          if (sessionBarHeight > 64)
-            fail(`the session bar is ${sessionBarHeight}px tall at ${viewport.name}: one row, please`);
-
-          // Geometry, printed rather than eyeballed. A screenshot cannot tell a
-          // pinned tail apart from a transcript that happens to be short, and it
-          // cannot show that the page itself never scrolls — which is the one
-          // invariant the whole shell exists to hold (`html, body { overflow:
-          // hidden }` plus one scroller per page).
-          const workspaceGeometry = await page.evaluate(() => {
-            const root = document.documentElement;
-            const scrollers = [...document.querySelectorAll<HTMLElement>('*')].filter(element => {
-              const style = getComputedStyle(element);
-              const scrolls = /auto|scroll/u.test(`${style.overflowY}${style.overflowX}`);
-              return scrolls && element.scrollHeight - element.clientHeight > 1;
-            });
-            const composer = document.querySelector<HTMLElement>('[data-session-input] form');
-            const transcript = document.querySelector<HTMLElement>('.fy-transcript');
-            const box = composer?.getBoundingClientRect();
-            return {
-              appHeight: root.style.getPropertyValue('--app-h'),
-              pageScrollsX: root.scrollWidth > root.clientWidth,
-              pageScrollsY: root.scrollHeight > root.clientHeight,
-              scrollers: scrollers.map(element => element.className.split(/\s+/u)[0] || element.tagName),
-              transcriptPinned:
-                transcript === null
-                  ? null
-                  : transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop <= 2,
-              composerBottom: box === undefined ? null : Math.round(box.bottom),
-              composerVisible: box === undefined ? null : Math.round(box.bottom) <= window.innerHeight,
-              pane: document.querySelector('aside') !== null,
+            /** On a phone, back to the grouped cards from whatever screen is open. */
+            const settingsBack = async (): Promise<void> => {
+              if (!phone || (await settingsHome.isVisible())) return;
+              await settingsPage.locator('[data-settings-back]').click();
+              await settingsHome.waitFor({ state: 'visible' });
             };
-          });
-          process.stdout.write(
-            `   workspace geometry: --app-h=${workspaceGeometry.appHeight || '(unset)'} ` +
-              `page scroll x/y=${workspaceGeometry.pageScrollsX}/${workspaceGeometry.pageScrollsY} ` +
-              `scrollers=[${workspaceGeometry.scrollers.join(', ')}] ` +
-              `transcript pinned=${String(workspaceGeometry.transcriptPinned)} ` +
-              `composer bottom=${String(workspaceGeometry.composerBottom)}px ` +
-              `visible=${String(workspaceGeometry.composerVisible)} pane mounted=${workspaceGeometry.pane}\n`,
-          );
-          if (workspaceGeometry.pageScrollsX) {
-            fail('the session workspace made the page scroll horizontally');
-          }
-          if (workspaceGeometry.composerVisible === false) {
-            fail(`the composer sits below the viewport at ${viewport.name}`);
-          }
+            const settingsNavigation = (): Locator => (phone ? settingsHome : settingsSidebar);
+            const selectSettingsSection = async (id: 'appearance' | 'behaviour') => {
+              const label = { appearance: 'Appearance', behaviour: 'Behaviour' }[id];
+              await settingsBack();
+              await settingsNavigation().locator(`[data-settings-section-choice="${id}"]`).click();
+              await settingsPage.locator(`[data-settings-section="${id}"]`).waitFor({ state: 'visible' });
+              // Rows fade their colours; capture the settled state so the row just left cannot read as selected.
+              await settleTransitions(page);
+              await assertNoSidewaysScroll(page, `the ${label} section at ${viewport.name}`);
+            };
+            /** Open one paired machine from the sidebar or the Machines card: the only machine picker now. */
+            const openMachine = async (daemonId: string): Promise<Locator> => {
+              await settingsBack();
+              await settingsNavigation().locator(`[data-settings-machine="${daemonId}"]`).click();
+              const surface = settingsPage.locator(`[data-machines-surface="${daemonId}"]`);
+              await surface.waitFor({ state: 'visible' });
+              await settleTransitions(page);
+              return surface;
+            };
 
-          // THEN the Console — the agent's own pane — shown through the agent pane's own Console tab, the
-          // control a reader clicks. It resolves entirely from the harness snapshot reader, so the
-          // capture is the agent pane's second tab rather than a network error.
-          const workspacePaneTarget = join(outDir, `${viewport.name}-session-workspace-pane.png`);
-          await page.getByRole('tab', { name: 'Console' }).first().click();
-          await page.locator('[data-workspace-console]').waitFor({ state: 'visible' });
-          await page.screenshot({ path: workspacePaneTarget });
-          process.stdout.write(`📸 ${viewport.name} session workspace, Console shown -> ${workspacePaneTarget}\n`);
+            if (phone) await selectSettingsSection('appearance');
+            else await settingsPage.locator('[data-settings-section="appearance"]').waitFor({ state: 'visible' });
 
-          // The real remote browser gets this route of its own so this is the
-          // production side-pane layout taking the whole screen, not a gallery
-          // card sized to look like one. The visible Exit control is the phone
-          // escape hatch; Escape then proves the keyboard route returns to the
-          // exact pane/sheet it started from.
-          const fullBrowserTarget = join(outDir, `${viewport.name}-browser-full-viewport.png`);
-          await page.goto(`${server.url}#browser-full-viewport`);
-          await page.reload();
-          await page.locator('#harness-browser-full-viewport-page').waitFor({ state: 'visible' });
-          await page.getByLabel('Expand browser to fill the viewport').click();
-          const exitBrowser = page.getByLabel('Exit full-screen browser');
-          await exitBrowser.waitFor({ state: 'visible' });
-          const fullBrowserGeometry = await measureFullBrowserFrame(exitBrowser);
-          if (
-            !fullBrowserGeometry.fixed ||
-            fullBrowserGeometry.width !== fullBrowserGeometry.viewportWidth ||
-            fullBrowserGeometry.height !== fullBrowserGeometry.viewportHeight
-          ) {
-            fail(
-              `the full browser does not occupy the ${viewport.name} viewport: ${JSON.stringify(fullBrowserGeometry)}`,
-            );
-          }
-          await page.screenshot({ path: fullBrowserTarget });
-          process.stdout.write(`📸 ${viewport.name} browser full viewport -> ${fullBrowserTarget}\n`);
-          await page.keyboard.press('Escape');
-          await page.getByLabel('Expand browser to fill the viewport').waitFor({ state: 'visible' });
+            // Appearance is the section Settings OPENS ON at a desktop, which is the one reason it once went
+            // unchecked. It is also the section carrying the theme-family cards, so it has more ways to widen
+            // a phone than any other.
+            await assertNoSidewaysScroll(page, `the Appearance section at ${viewport.name}`);
 
-          /**
-           * THE PICKERS, EACH ON ITS OWN PAGE, WITH THE LIST ACTUALLY OPEN.
-           *
-           * Every state here is reached by driving the real control — click the field, type into it,
-           * arrow through it — because the list only exists while the field has focus and a posed
-           * popover would prove nothing about the component that has to produce one.
-           *
-           * The three assertions below are the point of the pass, and they are assertions rather
-           * than pictures because a screenshot cannot tell a list that fits from one that is being
-           * clipped by an ancestor: both look like a list.
-           */
-          for (const frame of PICKER_FRAMES) {
-            await page.goto(`${server.url}#picker-${frame}`);
-            await page.reload();
-            const pickerPage = page.locator(`#harness-picker-${frame}-page`);
-            await pickerPage.waitFor({ state: 'visible' });
+            const appearanceTarget = join(outDir, `settings-appearance-${viewport.name}.png`);
+            await page.screenshot({ path: appearanceTarget });
+            process.stdout.write(`📸 Settings Appearance ${viewport.name} -> ${appearanceTarget}\n`);
 
-            const field = page.locator('input[role="combobox"]');
-            await field.click();
-            const expectsList = frame !== 'account-failed';
-            if (expectsList) {
-              await page.locator('[role="listbox"]').waitFor({ state: 'visible' });
-              // Move the cursor with the keyboard, so the capture carries a real active row and
-              // `aria-activedescendant` is pointing at something.
-              await page.keyboard.press('ArrowDown');
-              await page.keyboard.press('ArrowDown');
-            } else {
-              // The whole claim of this frame: the roster failed and the field still works.
-              await page.locator('[data-picker-state="failed"]').waitFor({ state: 'visible' });
-              await field.type('claude-auto-typed-by-hand');
-              const typed = await field.inputValue();
-              if (typed !== 'claude-auto-typed-by-hand') {
-                fail(`the failed-roster field did not accept a typed value (got ${JSON.stringify(typed)})`);
-              }
+            for (const family of ['phosphor', 'blueprint', 'broadsheet', 'wayfinding', 'ledger', 'ma']) {
+              const card = settingsPage.locator(`[data-family-card="${family}"]`);
+              const target = join(outDir, `theme-${family}-${viewport.name}.png`);
+              await captureElement(page, card, target);
+              process.stdout.write(`📸 Theme ${family} ${viewport.name} -> ${target}\n`);
             }
 
-            const geometry = await page.evaluate(
-              ([wantsList, minimum]) => {
-                const root = document.documentElement;
-                const listbox = document.querySelector<HTMLElement>('[role="listbox"]');
-                const box = (element: Element) => {
-                  const rect = element.getBoundingClientRect();
-                  return {
-                    top: Math.round(rect.top),
-                    left: Math.round(rect.left),
-                    right: Math.round(rect.right),
-                    bottom: Math.round(rect.bottom),
-                    height: Math.round(rect.height),
-                  };
-                };
-                // Every ancestor that can scroll, and therefore can clip. A popover that leaves one
-                // of these rectangles is painted where nobody can see it.
-                const clippers: Array<{ readonly at: string; readonly box: ReturnType<typeof box> }> = [];
-                if (listbox !== null) {
-                  for (let node = listbox.parentElement; node !== null; node = node.parentElement) {
-                    const style = getComputedStyle(node);
-                    if (/auto|scroll|hidden|clip/u.test(`${style.overflowY}${style.overflowX}`)) {
-                      clippers.push({
-                        at: node.tagName.toLowerCase() + (node.id ? `#${node.id}` : ''),
-                        box: box(node),
-                      });
-                    }
-                  }
-                }
-                const controls = [...document.querySelectorAll<HTMLElement>('input[role="combobox"], button')];
-                const options = [...document.querySelectorAll<HTMLElement>('[role="option"]')];
-                const measured = [...controls, ...options]
-                  .filter(element => element.getBoundingClientRect().height > 0)
-                  .map(element => ({
-                    what: element.getAttribute('role') ?? element.tagName.toLowerCase(),
-                    height: Math.round(element.getBoundingClientRect().height),
-                  }));
-                return {
-                  viewport: { width: window.innerWidth, height: window.innerHeight },
-                  pageScrollsX: root.scrollWidth > root.clientWidth,
-                  scrollWidth: root.scrollWidth,
-                  listbox: listbox === null ? null : box(listbox),
-                  optionCount: options.length,
-                  activeDescendant:
-                    document.querySelector('input[role="combobox"]')?.getAttribute('aria-activedescendant') ?? null,
-                  // What is actually on the glass at the list's own centre. A rectangle in the right
-                  // place that something else paints over is still an invisible list.
-                  centreOwnedByList:
-                    listbox === null
-                      ? null
-                      : (() => {
-                          const rect = listbox.getBoundingClientRect();
-                          const hit = document.elementFromPoint(
-                            Math.round(rect.left + rect.width / 2),
-                            Math.round(rect.top + Math.min(rect.height / 2, 20)),
-                          );
-                          return hit !== null && listbox.contains(hit);
-                        })(),
-                  clippers,
-                  wantsList,
-                  undersized: measured.filter(entry => entry.height < minimum),
-                  smallest: measured.reduce((low, entry) => Math.min(low, entry.height), Number.POSITIVE_INFINITY),
-                };
-              },
-              [expectsList, TOUCH_TARGET_MINIMUM] as const,
-            );
+            await selectSettingsSection('behaviour');
+            const behaviourTarget = join(outDir, `settings-behaviour-${viewport.name}.png`);
+            await page.screenshot({ path: behaviourTarget });
+            process.stdout.write(`📸 Settings Behaviour ${viewport.name} -> ${behaviourTarget}\n`);
 
-            process.stdout.write(
-              `   picker ${frame} @ ${viewport.name}: page scroll x=${geometry.pageScrollsX} ` +
-                `(scrollWidth=${geometry.scrollWidth} vs ${geometry.viewport.width}) ` +
-                `options=${geometry.optionCount} active=${geometry.activeDescendant ?? '(none)'} ` +
-                `list=${geometry.listbox === null ? '(none)' : `${geometry.listbox.top}-${geometry.listbox.bottom}px`} ` +
-                `centre owned by list=${String(geometry.centreOwnedByList)} ` +
-                `smallest control=${geometry.smallest}px clippers=${geometry.clippers.length}\n`,
-            );
+            const composerEnterTarget = join(outDir, `settings-composer-enter-key-${viewport.name}.png`);
+            await captureElement(page, settingsPage.locator('#settings-composer-enter-key'), composerEnterTarget);
+            process.stdout.write(`📸 Settings composer Enter key ${viewport.name} -> ${composerEnterTarget}\n`);
 
-            // 1. No horizontal overflow. Asserted at BOTH widths but it is 390px that has ever
-            //    failed it, and a picker whose list forces a sideways scroll is unusable on a phone.
-            if (geometry.pageScrollsX) {
+            // EVERY PAIRED MACHINE IS LISTED BY NAME with its status line, in the sidebar or on the Machines
+            // card — Daemons is no longer a section of its own, so this list is where a machine is chosen.
+            await settingsBack();
+            const listedMachines = await settingsNavigation().locator('[data-settings-machine]').count();
+            if (listedMachines !== 4)
+              fail(`settings many-daemon fixture listed ${listedMachines} machines instead of 4`);
+
+            /**
+             * One of the machine's connection and security panels — what the Daemons section used to hold —
+             * opened from its Machine tab. The list is one card of rows; a row opens its panel as a page of
+             * its own with "‹ Machine" back.
+             */
+            const openDaemonPanel = async (frame: Locator, slug: string): Promise<void> => {
+              await frame.locator(`[data-daemon-panel="${slug}"]`).click();
+              await frame.locator(`[data-daemon-panel-open="${slug}"]`).waitFor({ state: 'visible' });
+            };
+            const closeDaemonPanel = async (frame: Locator): Promise<void> => {
+              await frame.locator('[data-daemon-panel-back]').click();
+              await frame.locator('[data-daemon-panel]').first().waitFor({ state: 'visible' });
+            };
+            const openMachineTab = async (surface: Locator): Promise<void> => {
+              await surface.locator('[data-machine-tab="machine"]').click();
+              await surface.locator('[data-machine-tab-panel="machine"]').waitFor({ state: 'visible' });
+            };
+
+            const studioMachine = await openMachine('harness-daemon');
+            await openMachineTab(studioMachine);
+            const wardenFrame = settingsPage.locator('[data-daemon-settings-frame="harness-daemon"]');
+            await wardenFrame.locator('[data-daemon-panel]').first().waitFor({ state: 'visible' });
+            // The fixture is only evidence about the real frame if it carries the panels the composition
+            // root supplies: every app panel but Model pricing, Speed-ups and Learning, which it has never mounted.
+            const daemonPanels = await wardenFrame.locator('[data-daemon-panel]').count();
+            if (daemonPanels !== 14)
               fail(
-                `the ${frame} picker made the page scroll horizontally at ${viewport.name} ` +
-                  `(${geometry.scrollWidth}px in a ${geometry.viewport.width}px viewport)`,
+                `settings fixture listed ${daemonPanels} connection and security panels instead of the 14 it mounts`,
               );
-            }
+            await wardenFrame.scrollIntoViewIfNeeded();
+            // Ten rows with a sentence each is the longest list in Settings; if one row widens a phone, it is here.
+            await assertNoSidewaysScroll(page, `the connection and security list at ${viewport.name}`);
+            const panelListTarget = join(outDir, `settings-machine-panels-${viewport.name}.png`);
+            await page.screenshot({ path: panelListTarget, animations: 'disabled' });
+            process.stdout.write(`📸 Settings connection and security ${viewport.name} -> ${panelListTarget}\n`);
 
-            // 2. Every visible control and every offered row is at least a thumb tall.
-            if (geometry.undersized.length > 0) {
-              fail(
-                `the ${frame} picker has controls below ${TOUCH_TARGET_MINIMUM}px at ${viewport.name}: ` +
-                  geometry.undersized.map(entry => `${entry.what} ${entry.height}px`).join(', '),
-              );
-            }
-
-            // 3. The open list is inside the viewport, on the glass, and inside every ancestor that
-            //    could clip it. This is the one a picture cannot make for us.
-            if (geometry.wantsList) {
-              const list = geometry.listbox;
-              if (list === null) fail(`the ${frame} picker rendered no listbox to measure at ${viewport.name}`);
-              if (geometry.optionCount === 0) fail(`the ${frame} picker opened an empty list at ${viewport.name}`);
-              if (geometry.activeDescendant === null) {
-                fail(`the ${frame} picker points aria-activedescendant at nothing after two ArrowDowns`);
-              }
-              if (
-                list.top < 0 ||
-                list.bottom > geometry.viewport.height ||
-                list.left < 0 ||
-                list.right > geometry.viewport.width
-              ) {
-                fail(
-                  `the ${frame} picker's list leaves the ${viewport.name} viewport: ` +
-                    `${list.left},${list.top} → ${list.right},${list.bottom} in ` +
-                    `${geometry.viewport.width}x${geometry.viewport.height}`,
-                );
-              }
-              for (const clipper of geometry.clippers) {
-                if (
-                  list.top < clipper.box.top ||
-                  list.bottom > clipper.box.bottom ||
-                  list.left < clipper.box.left ||
-                  list.right > clipper.box.right
-                ) {
-                  fail(
-                    `the ${frame} picker's list is clipped by ${clipper.at} at ${viewport.name}: ` +
-                      `list ${list.top}-${list.bottom}px vs clipper ${clipper.box.top}-${clipper.box.bottom}px`,
+            // Every panel the daemon owns, in the order the list shows them.
+            for (const [label, slug, ready] of [
+              // Each waits for SETTLED content, not for a spinner or a refusal:
+              // the harness daemon answers `/v1/secrets` in the page, so a capture
+              // that still showed "Reading…" or "Failed to fetch" would be a
+              // regression to review, not a state to accept.
+              // Warden first: it is the first panel the list offers, and its widest content (supervision status,
+              // account failover and policy) is exactly what could widen a phone.
+              ['Warden', 'warden', '[data-daemon-panel-open="warden"] > *'],
+              ['Secrets', 'secrets', '[data-testid="secrets-card"]'],
+              // The live panel, inside the frame, because that is where a reader meets it. The gallery
+              // cards prove the individual states; this proves it is reachable and fits both widths.
+              ['What devices may do', 'grants', '[data-grant-surface="harness-daemon"]'],
+              // Adding a device, in the frame, where a reader meets it. The gallery cards below prove the
+              // individual states; this proves it is reachable, daemon-scoped and fits both widths.
+              ['Add a device', 'devices', '[data-add-device-surface="harness-daemon"]'],
+              // Passkeys, daemon-scoped like the panels around it. The fixture answers GET /v1/passkeys with two
+              // frozen entries, so the capture shows a real list and the Add control, never a prompt.
+              ['Security', 'security', '[data-security-card]'],
+              ['Resource limits', 'resource-limits', '[data-testid="cgroup-config-card"]'],
+              ['Doctor', 'doctor', '[data-doctor-daemon="harness-daemon"]'],
+              // The performance report, recorded: the broken budget first, then both reports as text.
+              ['Performance', 'performance', '[data-performance]'],
+              // The security log, with a gap warning, both badges and "Show older" on it: its widest rows.
+              ['Security log', 'security-log', '[data-security-log-panel]'],
+              // The configuration files: an invalid file, a held loosening and a login naming its key by reference.
+              ['Files', 'files', '[data-config-files-panel]'],
+              // About & updates: the version pair, the install method, the Update button and its changelog.
+              ['About & updates', 'about', '#about-machine-heading'],
+              // Agent CLIs: each harness's path, install method, verification badge and Update buttons.
+              ['Agent CLIs', 'agent-clis', '#agent-clis-heading'],
+              ['Carrier', 'carrier', '[data-active-carrier]'],
+              ['Host checks', 'host-checks', '[data-daemon-host-checks="harness-daemon"]'],
+            ] as const) {
+              await openDaemonPanel(wardenFrame, slug);
+              const readySurface = wardenFrame.locator(ready).first();
+              await readySurface.waitFor({ state: 'visible' });
+              // Every panel, at both widths, with its real values on it — this is the one check that
+              // catches the widest value in a panel widening the whole page instead of scrolling itself.
+              await assertNoSidewaysScroll(page, `the ${label} panel at ${viewport.name}`);
+              if (slug === 'security') {
+                // THE SETTINGS BLOCK'S TWO SENTENCES, DRIVEN: a loosening a remote phone may not make, and a number
+                // past its bounds. Each is the longest unbroken text the block can show, so each is measured.
+                const block = wardenFrame.locator('[data-security-settings]');
+                await block.scrollIntoViewIfNeeded();
+                for (const [field, value, sentence, slugPart] of [
+                  ['idleExpiryDays', '60', 'Loosening this can only be done at the machine', 'loosen'],
+                  ['idleExpiryDays', '999', 'Enter a whole number from 1 to 90.', 'bounds'],
+                ] as const) {
+                  await block.locator(`[data-security-input="${field}"]`).fill(value);
+                  await block.getByText(sentence, { exact: false }).first().waitFor({ state: 'visible' });
+                  await assertNoSidewaysScroll(page, `the Security settings (${slugPart}) at ${viewport.name}`);
+                  const settingsTarget = join(outDir, `settings-daemon-security-${slugPart}-${viewport.name}.png`);
+                  await page.screenshot({ path: settingsTarget });
+                  process.stdout.write(
+                    `📸 Settings daemon Security settings ${slugPart} ${viewport.name} -> ${settingsTarget}\n`,
                   );
                 }
+                await block.locator('[data-security-input="idleExpiryDays"]').fill('30');
               }
-              if (geometry.centreOwnedByList !== true) {
-                fail(`something is painted over the ${frame} picker's list at ${viewport.name}`);
+              if (slug === 'resource-limits') {
+                // Keep a top frame as navigation context, then compose the acceptance frame at the
+                // native viewport. The compact two-column mobile editors leave enough room between
+                // the enforcement toggle and final warning for BOTH endpoints (and every control
+                // between them) to remain in one honest 390x844 screenshot.
+                const toggle = readySurface.getByRole('checkbox');
+                await toggle.scrollIntoViewIfNeeded();
+                const toggleTarget = join(outDir, `settings-daemon-resource-limits-toggle-${viewport.name}.png`);
+                await page.screenshot({ path: toggleTarget });
+                process.stdout.write(`📸 Settings daemon Resource limits toggle ${viewport.name} -> ${toggleTarget}\n`);
+
+                // Bring the final warning into view, then minimally restore the toggle. If the two
+                // endpoints do not fit together, fail instead of silently emitting incomplete proof.
+                const warning = readySurface.getByRole('alert').last();
+                await warning.waitFor({ state: 'visible' });
+                await warning.scrollIntoViewIfNeeded();
+                await toggle.scrollIntoViewIfNeeded();
+                const [toggleBox, warningBox] = await Promise.all([toggle.boundingBox(), warning.boundingBox()]);
+                const frameHeight = page.viewportSize()?.height;
+                if (
+                  toggleBox === null ||
+                  warningBox === null ||
+                  frameHeight === undefined ||
+                  toggleBox.y < 0 ||
+                  warningBox.y + warningBox.height > frameHeight
+                )
+                  throw new Error(`resource-limit evidence does not fit in the ${viewport.name} viewport`);
               }
+              if (slug === 'performance') {
+                // Idle first (the one button), then a recording run to its report: the report text is the widest
+                // thing the panel shows, and it must scroll inside its box rather than widen a phone.
+                const idleTarget = join(outDir, `settings-daemon-performance-idle-${viewport.name}.png`);
+                await page.screenshot({ path: idleTarget });
+                process.stdout.write(`📸 Settings daemon Performance idle ${viewport.name} -> ${idleTarget}\n`);
+                await readySurface.locator('[data-performance-record]').click();
+                const report = readySurface.locator('[data-performance-report]');
+                await report.waitFor({ state: 'visible' });
+                await assertNoSidewaysScroll(page, `the Performance report at ${viewport.name}`);
+                await readySurface.evaluate(element => element.scrollIntoView({ block: 'start' }));
+              }
+              // The Files panel's evidence is its head — where the files are, what waits and what is wrong — so
+              // its frame starts there rather than wherever the previous panel left the page scrolled.
+              if (slug === 'files') await readySurface.evaluate(element => element.scrollIntoView({ block: 'start' }));
+              const target = join(outDir, `settings-daemon-${slug}-${viewport.name}.png`);
+              await page.screenshot({ path: target });
+              process.stdout.write(`📸 Settings daemon ${label} ${viewport.name} -> ${target}\n`);
+              if (slug === 'files') {
+                // EDIT AS YAML, SAVED AND REFUSED: the invalid file's located issues inline under the editor,
+                // reached by pressing Save, because the issue rows are the widest thing the sheet can show.
+                await readySurface.locator('[data-config-edit="warden.yaml"]').click();
+                const editor = page.locator('[data-bottom-sheet="config-file-editor"]');
+                await editor.locator('[data-config-editor-text]').waitFor({ state: 'visible' });
+                await editor.locator('[data-config-submit]').click();
+                const refused = editor.locator('[data-config-save="invalid"]');
+                await refused.waitFor({ state: 'visible' });
+                await refused.scrollIntoViewIfNeeded();
+                await assertNoSidewaysScroll(page, `the Edit as YAML sheet at ${viewport.name}`);
+                const editTarget = join(outDir, `settings-daemon-files-edit-${viewport.name}.png`);
+                await page.screenshot({ path: editTarget, animations: 'disabled' });
+                process.stdout.write(`📸 Settings daemon Files edit ${viewport.name} -> ${editTarget}\n`);
+                await editor.locator('[data-config-cancel]').click();
+                await editor.waitFor({ state: 'detached' });
+              }
+              if (slug === 'devices') {
+                // The per-device capability switches: seven rows by two axes, the longest block this panel
+                // can grow, with a blocked widen's reason and host command beside its switch. Opened on the
+                // first device (the browser doing the looking, holding fleet.use alone), because a closed
+                // disclosure hides exactly the content that could widen a phone.
+                const disclosure = readySurface.locator('[data-device-capabilities]').first();
+                await disclosure.locator('summary').click();
+                await disclosure.locator('[data-device-capability="secrets"]').waitFor({ state: 'visible' });
+                await disclosure.locator('[data-device-grant-reason]').first().waitFor({ state: 'visible' });
+                await assertNoSidewaysScroll(page, `the open device capabilities at ${viewport.name}`);
+                const capabilitiesTarget = join(outDir, `settings-daemon-devices-capabilities-${viewport.name}.png`);
+                await disclosure.scrollIntoViewIfNeeded();
+                await page.screenshot({ path: capabilitiesTarget });
+                process.stdout.write(
+                  `📸 Settings daemon device capabilities ${viewport.name} -> ${capabilitiesTarget}\n`,
+                );
+              }
+              await closeDaemonPanel(wardenFrame);
             }
 
-            const pickerTarget = join(outDir, `${viewport.name}-picker-${frame}.png`);
-            await page.screenshot({ path: pickerTarget });
-            process.stdout.write(`📸 ${viewport.name} picker ${frame} -> ${pickerTarget}\n`);
-          }
+            const unreachableMachine = await openMachine('unreachable-daemon');
+            await openMachineTab(unreachableMachine);
+            const unavailableWardenFrame = settingsPage.locator('[data-daemon-settings-frame="unreachable-daemon"]');
+            await openDaemonPanel(unavailableWardenFrame, 'warden');
+            await unavailableWardenFrame.getByLabel('Warden settings unavailable').waitFor({ state: 'visible' });
+            // A FAILURE STATE IS A LAYOUT, not an absence of one. These two frames explain why a panel
+            // could not be read, and the sentences that do the explaining are the longest unbroken text
+            // in Settings — an unwrapped URL or daemon id in one of them widens the page exactly as a
+            // healthy panel's widest value would, and it does it on the screen a reader is already
+            // having a bad time on.
+            await assertNoSidewaysScroll(page, `the unavailable daemon's Warden panel at ${viewport.name}`);
+            const unavailableWardenTarget = join(outDir, `settings-daemon-warden-unavailable-${viewport.name}.png`);
+            await page.screenshot({ path: unavailableWardenTarget });
+            process.stdout.write(
+              `📸 Settings unavailable daemon Warden ${viewport.name} -> ${unavailableWardenTarget}\n`,
+            );
+            await closeDaemonPanel(unavailableWardenFrame);
 
-          await captureSessionSearchEvidence(page, viewport, server.url.toString());
+            // The unavailable pairing must not borrow the healthy daemon's
+            // measured relay. Capture its own failed direct + relay evidence so
+            // that daemon scoping is reviewable in pixels, not only in fixture code.
+            await openDaemonPanel(unavailableWardenFrame, 'carrier');
+            await unavailableWardenFrame.locator('[data-active-carrier]').waitFor({ state: 'visible' });
+            await assertNoSidewaysScroll(page, `the unavailable daemon's Carrier panel at ${viewport.name}`);
+            const unavailableCarrierTarget = join(outDir, `settings-daemon-carrier-unavailable-${viewport.name}.png`);
+            await page.screenshot({ path: unavailableCarrierTarget });
+            process.stdout.write(
+              `📸 Settings unavailable daemon Carrier ${viewport.name} -> ${unavailableCarrierTarget}\n`,
+            );
 
-          // Back to the gallery: every capture after this one expects the shell, and a page left on a
-          // fleet fragment made the next locator wait for an app bar that is not on it.
-          await page.goto(server.url.toString());
-          await page.reload();
-          await page.locator('[data-density-region="app-bar"]').first().waitFor({ state: 'visible' });
-
-          // The install stage on a page of its own, so the capture starts at
-          // the real top of the screen rather than wherever the gallery's
-          // scroller happened to clip it.
-          const installTarget = join(outDir, `${viewport.name}-onboarding-install-page.png`);
-          await page.goto(`${server.url}#onboarding-install`);
-          await page.reload();
-          await page.locator('#harness-onboarding-install-page').waitFor({ state: 'visible' });
-          await page.screenshot({ path: installTarget, fullPage: true });
-          process.stdout.write(`📸 ${viewport.name} setup install page -> ${installTarget}\n`);
-
-          // The pairing stage with the keyboard up: the state the reader
-          // reported as broken. Phone only — a desktop has no software keyboard
-          // to model, and pretending otherwise would be a made-up screenshot.
-          //
-          // Supplementary, not authoritative: this gallery context is 390px wide
-          // but not touch-emulated, so it proves the layout and the focus, not
-          // the coarse-pointer branches. The real-app driver owns that.
-          if (viewport.name === 'mobile') {
-            await page.addInitScript(VISUAL_VIEWPORT_SHIM);
-            // A real document navigation, not a fragment jump: the alternate
-            // root only mounts on load, and an init script only runs on one.
-            await page.goto(`${server.url}#onboarding-keyboard`);
-            await page.reload();
-            await page.locator('#harness-onboarding-scan-page').waitFor({ state: 'visible' });
-
-            // The keyboard is only up because a FIELD has focus, so the shot has
-            // to start there — an unfocused capture would look identical and
-            // prove nothing about the state that was reported broken.
-            await page.getByRole('button', { name: 'Paste a link instead' }).click();
-            const field = page.locator('#pairing-link');
-            await field.waitFor({ state: 'visible' });
-            await field.focus();
-
-            const before = await page.evaluate(() => ({
-              innerHeight: window.innerHeight,
-              screenHeight: window.screen.height,
-              visual: window.visualViewport?.height ?? null,
-              focused: document.activeElement?.id ?? null,
-            }));
-            if (before.focused !== 'pairing-link') fail(`the pairing field never took focus (got ${before.focused})`);
-
-            await page.evaluate(() => {
-              (window as unknown as { __harnessKeyboard: (height: number) => void }).__harnessKeyboard(430);
+            const currentMachine = await openMachine('harness-daemon');
+            await openMachineTab(currentMachine);
+            const currentFrame = settingsPage.locator('[data-daemon-settings-frame="harness-daemon"]');
+            await openDaemonPanel(currentFrame, 'host-checks');
+            const currentDaemon = currentFrame.locator('[data-daemon-host-checks="harness-daemon"]');
+            await currentDaemon.locator('[data-daemon-reachability="reachable"]').waitFor({ state: 'visible' });
+            await currentDaemon.getByText('Manage daemon', { exact: true }).click();
+            await currentDaemon.getByText('Removing this pairing only forgets it in this browser.').waitFor({
+              state: 'visible',
             });
-            // The producer schedules through requestAnimationFrame, so the
-            // attribute lands a frame after the resize, not with it.
-            await page
-              .waitForFunction(() => document.documentElement.getAttribute('data-keyboard') === 'open')
-              .catch(() => fail('the production viewport producer never reported an open keyboard'));
+            const removalTarget = join(outDir, `settings-removal-disclosure-${viewport.name}.png`);
+            await page.screenshot({ path: removalTarget });
+            process.stdout.write(`📸 Settings removal disclosure ${viewport.name} -> ${removalTarget}\n`);
 
-            // The keyboard is only handled if the field it belongs to is still
-            // on screen. A shot of the stage with the input somewhere below the
-            // fold is a picture of the bug, not of the fix.
+            // MACHINES (account model, O1): the section, each of its five tabs, and the Machines list the
+            // switcher opens. The tab row is five equal columns, which is the
+            // shape most likely to widen a 390px phone once a label is longer than its cell. A tab is waited
+            // for by its PANEL, so a tab that a unit has filled is walked exactly like an empty frame.
+            //
+            // EVERY MACHINES FRAME IS ALSO A GEOMETRY CHECK (`assertMachinesGeometry`), and every capture here
+            // is taken with transitions finished. The tabs fade their colours, and a capture taken the instant
+            // a tab is clicked shows the one just left still selected: measured, 12 of 12 such captures carried
+            // the old tab's accent label, and 0 of 12 with `animations: 'disabled'`.
+            const settledShot = (target: string) => page.screenshot({ path: target, animations: 'disabled' });
+            const machinesSurface = await openMachine('harness-daemon');
+            await machinesSurface.locator('[data-machine-tab-panel="runtimes"]').waitFor({ state: 'visible' });
+            await assertMachinesGeometry(page, `the Machines runtimes tab at ${viewport.name}`);
+            for (const tab of ['credentials', 'profiles', 'components', 'machine'] as const) {
+              await machinesSurface.locator(`[data-machine-tab="${tab}"]`).click();
+              await machinesSurface.locator(`[data-machine-tab-panel="${tab}"]`).waitFor({ state: 'visible' });
+              await assertNoSidewaysScroll(page, `the Machines ${tab} tab at ${viewport.name}`);
+              await assertMachinesGeometry(page, `the Machines ${tab} tab at ${viewport.name}`);
+            }
+            await machinesSurface.locator('[data-machine-settings]').waitFor({ state: 'visible' });
+            const machinesTarget = join(outDir, `settings-machines-${viewport.name}.png`);
+            await settledShot(machinesTarget);
+            process.stdout.write(`📸 Settings Machines ${viewport.name} -> ${machinesTarget}\n`);
+
+            // THE SETTINGS TAB'S FLOWS (U19): five more checks per viewport, one per layout that differs —
+            // Import again's "Found on" list with its long values, its Name step with a duplicate card, the
+            // Clone source list with both disabled reasons (E27), the Clone preview's "Runs on" review, and
+            // Install with its exact command.
+            const machineFrame = async (what: string, file: string): Promise<void> => {
+              await assertMachinesGeometry(page, `the Machines ${what} at ${viewport.name}`);
+              const target = join(outDir, `settings-machines-${file}-${viewport.name}.png`);
+              await settledShot(target);
+              process.stdout.write(`📸 Settings Machines ${what} ${viewport.name} -> ${target}\n`);
+              await assertNoSidewaysScroll(page, `the Machines ${what} at ${viewport.name}`);
+            };
+            const backToSettingsTab = async (): Promise<void> => {
+              await machinesSurface.locator('[data-machine-tab="machine"]').click();
+              await machinesSurface.locator('[data-machine-settings]').waitFor({ state: 'visible' });
+            };
+            // Import again is New machine setup's Claude Code step, full screen: it is walked with the setup below.
+            await machinesSurface.locator('[data-settings-action="clone"]').click();
+            await machinesSurface.locator('[data-clone-source-reason]').nth(1).waitFor({ state: 'visible' });
+            await machineFrame('Clone source', 'clone-source');
+            {
+              const target = join(outDir, `settings-machines-clone-source-step-${SCHEME}-${viewport.name}.png`);
+              await captureElement(page, machinesSurface.locator('[data-clone-step="source"]'), target);
+              process.stdout.write(`📸 Settings Machines clone source step ${viewport.name} -> ${target}\n`);
+            }
+            // The Preview from a machine that can be copied: every command the copy would run here, in words,
+            // each with its box (docs/cross-daemon.md §3a). Its long command lines are the 390px risk.
+            await machinesSurface.locator('[data-setup-choice="clone-source-daemon"]').click();
+            await machinesSurface.locator('[data-clone-step="source"] [data-step-next]').click();
+            await machinesSurface.locator('[data-setup-section="runs"]').waitFor({ state: 'visible' });
+            await machineFrame('Clone preview', 'clone-preview');
+            // The "Runs on" review and the source step's sentence, as elements: both run below the fold.
+            // One panel at a time: the whole review is taller than a phone screen.
+            for (const [selector, file] of [
+              ['[data-setup-note="runs-warning"]', 'clone-runs-warning'],
+              ['[data-clone-runnable="mcp/notes"]', 'clone-runs-mcp'],
+              ['[data-clone-runnable="hooks/guard"]', 'clone-runs-hook'],
+              ['[data-clone-runnable="settings/claude"]', 'clone-runs-settings'],
+            ] as const) {
+              const element = machinesSurface.locator(selector);
+              if (selector.includes('hooks/guard')) await element.locator('summary').click();
+              const target = join(outDir, `settings-machines-${file}-${SCHEME}-${viewport.name}.png`);
+              await captureElement(page, element, target);
+              process.stdout.write(`📸 Settings Machines ${file} ${viewport.name} -> ${target}\n`);
+            }
+            await backToSettingsTab();
+            // By its address: the shared machine data lists only Claude Code, and the flow is linkable anyway.
+            await page.evaluate(() => {
+              window.location.hash = `#machines/${encodeURIComponent('Studio workstation')}/machine/install-codex`;
+            });
+            await machinesSurface.locator('[data-install-flow="codex"]').waitFor({ state: 'visible' });
+            await machineFrame('Install Codex', 'install');
+            await backToSettingsTab();
+            // THE MACHINES LIST is the sidebar on a desktop and the Machines card on a phone — one picker, with
+            // every machine's name and status line on it.
+            await settingsBack();
+            await assertNoSidewaysScroll(page, `the Machines list at ${viewport.name}`);
+            // On a phone the list is its own screen, outside any machine, so there is no machine layout to measure.
+            if (!phone) await assertMachinesGeometry(page, `the Machines list at ${viewport.name}`);
+            const machinesListTarget = join(outDir, `settings-machines-list-${viewport.name}.png`);
+            await settledShot(machinesListTarget);
+            process.stdout.write(`📸 Settings Machines list ${viewport.name} -> ${machinesListTarget}\n`);
+
+            // RUNTIMES AND CREDENTIALS (account model U17): ten pages per viewport — the two lists, a runtime
+            // with its fixed layer, one whose model set has models this login cannot use, the three Add a
+            // runtime decisions, a login that needs sign-in, its sign-in link, and a sign-out confirmation.
+            // (The captures share the helper below.)
+            // PROFILES AND COMPONENTS (account model U18): twelve pages per viewport, each one a different
+            // layout — a layer stack, a conflict sentence with a dotted key, a delete card, a stepper with a
+            // reorder list, a component's badges and a path long enough to wrap. Every one has to fit 390px.
+            // `framed` runs after the checks and before the capture: the geometry check hovers a tab, which
+            // scrolls the page back to it, so a frame that needs a lower part of the page in view says so here.
+            /** One full-screen setup frame: it fits, its stepper and its pinned footer are where they belong. */
+            const setupShot = async (name: string, label: string): Promise<void> => {
+              await assertNoSidewaysScroll(page, `the setup ${label} at ${viewport.name}`);
+              await assertSetupGeometry(page, `the setup ${label} at ${viewport.name}`);
+              const target = join(outDir, `setup-${name}-${viewport.name}.png`);
+              await settledShot(target);
+              process.stdout.write(`📸 Setup ${label} ${viewport.name} -> ${target}\n`);
+            };
+            const accountShot = async (name: string, label: string, framed?: () => Promise<void>): Promise<void> => {
+              await assertNoSidewaysScroll(page, `the Machines ${label} at ${viewport.name}`);
+              await assertMachinesGeometry(page, `the Machines ${label} at ${viewport.name}`);
+              await framed?.();
+              const target = join(outDir, `settings-machines-${name}-${viewport.name}.png`);
+              await settledShot(target);
+              process.stdout.write(`📸 Settings Machines ${label} ${viewport.name} -> ${target}\n`);
+            };
+            // PROFILE SCOPE (P7) IN OTHER THEME FAMILIES: the list's scope badges and the Add runtime picker
+            // below are the frames a new badge tone could make illegible, so they are also captured in two
+            // more families. Evidence only: the geometry gate above already measured this layout.
+            const themedShot = async (name: string): Promise<void> => {
+              const initial = await page.evaluate(() => document.documentElement.dataset.theme ?? '');
+              for (const theme of PROFILE_SCOPE_THEMES) {
+                await applyTheme(page, theme);
+                const target = join(outDir, `settings-machines-${name}-${theme}-${viewport.name}.png`);
+                await settledShot(target);
+                process.stdout.write(`📸 Settings Machines ${name} ${theme} ${viewport.name} -> ${target}\n`);
+              }
+              // Settled, not just set: the step after this one clicks, and on the old layout it can miss.
+              await applyTheme(page, initial);
+            };
+            await openMachine('harness-daemon');
+            await machinesSurface.locator('[data-machine-tab="runtimes"]').click();
+            const runtimesPanel = machinesSurface.locator('[data-machine-tab-panel="runtimes"]');
+            await runtimesPanel.locator('[data-runtime-row="claude-agent"]').waitFor({ state: 'visible' });
+            await accountShot('runtimes', 'Runtimes list');
+            await runtimesPanel.locator('[data-runtime-row="claude-agent"]').click();
+            await runtimesPanel.locator('[data-runtime-fixed-layer]').waitFor({ state: 'visible' });
+            await accountShot('runtime-agent', 'agent runtime page');
+            await runtimesPanel.locator('[data-page-back]').click();
+            await runtimesPanel.locator('[data-runtime-row="codex-default"]').click();
+            await runtimesPanel.locator('[data-runtime-models]').waitFor({ state: 'visible' });
+            await accountShot('runtime-models', 'runtime page with unavailable models');
+            await runtimesPanel.locator('[data-page-back]').click();
+            // RENAME AND REMOVE (docs/account-model.md "Renaming and removing a runtime"): each row's buttons open a
+            // dialog — a bottom sheet on a phone, centred on a desktop — that must fit with its confirm button in
+            // view: Rename with a new name typed, Remove listing the ferrets on it with a move picked, and the
+            // machine's default runtime, which asks for another default first.
+            const dialogShot = async (name: string, label: string): Promise<void> => {
+              await page.locator('[data-runtime-dialog]').waitFor({ state: 'visible' });
+              await assertNoSidewaysScroll(page, `the ${label} dialog at ${viewport.name}`);
+              await assertRuntimeDialogGeometry(page, `the ${label} dialog at ${viewport.name}`);
+              const target = join(outDir, `settings-machines-${name}-${viewport.name}.png`);
+              await settledShot(target);
+              process.stdout.write(`📸 Settings Machines ${label} ${viewport.name} -> ${target}\n`);
+              await page.locator('[data-runtime-dialog-cancel]').click();
+              await page.locator('[data-runtime-dialog]').waitFor({ state: 'detached' });
+            };
+            await runtimesPanel.locator('[data-runtime-rename="claude-work"]').click();
+            await page.locator('[data-runtime-rename-input]').fill('claude-office');
+            await dialogShot('runtime-rename', 'Rename runtime');
+            await runtimesPanel.locator('[data-runtime-remove="codex-default"]').click();
+            await page.locator('[data-runtime-running]').waitFor({ state: 'visible' });
+            await page.locator('[data-runtime-move-target]').selectOption('claude-agent');
+            await dialogShot('runtime-remove', 'Remove runtime');
+            await runtimesPanel.locator('[data-runtime-remove="claude-default"]').click();
+            await page.locator('[data-runtime-default-picker]').waitFor({ state: 'visible' });
+            await dialogShot('runtime-remove-default', 'Remove the default runtime');
+            // ADD A RUNTIME IS ONE FORM: login, profile and name on one page, each frame scrolled to its part.
+            const toPart = (part: string) => async (): Promise<void> => {
+              await runtimesPanel
+                .locator(`[data-add-runtime-part="${part}"]`)
+                .evaluate(element => element.scrollIntoView({ block: 'start', behavior: 'instant' }));
+            };
+            await runtimesPanel.locator('[data-add-runtime]').click();
+            await runtimesPanel.locator('[data-add-runtime-credential="claude-personal"]').click();
+            await accountShot('add-runtime-credential', 'Add a runtime, login picked');
+            await runtimesPanel.locator('[data-add-runtime-profile="Default"]').click();
+            await runtimesPanel.locator('[data-add-runtime-duplicate]').waitFor({ state: 'visible' });
+            await accountShot('add-runtime-profile', 'Add a runtime, profile with a duplicate', toPart('profile'));
+            await themedShot('add-runtime-profile');
+            await runtimesPanel.locator('[data-duplicate-ok]').check();
+            await runtimesPanel.locator('#add-runtime-name').fill('claude-default');
+            await runtimesPanel.locator('[data-runtime-name-problem]').waitFor({ state: 'visible' });
+            await accountShot('add-runtime-name', 'Add a runtime, a name that clashes', toPart('name'));
+            // "+ Add a new login" opens IN PLACE under the list: no stepper of its own.
+            await runtimesPanel.locator('[data-add-row="login"]').click();
+            await runtimesPanel.locator('[data-add-runtime-new-login]').waitFor({ state: 'visible' });
+            await accountShot('add-runtime-new-login', 'Add a runtime, a new login in place', async () => {
+              await runtimesPanel
+                .locator('[data-add-runtime-new-login]')
+                .evaluate(element => element.scrollIntoView({ block: 'start', behavior: 'instant' }));
+            });
+            await runtimesPanel.locator('[data-add-runtime-new-login-close]').click();
+            await runtimesPanel.locator('[data-page-back]').click();
+
+            await machinesSurface.locator('[data-machine-tab="credentials"]').click();
+            const credentialsPanel = machinesSurface.locator('[data-machine-tab-panel="credentials"]');
+            await credentialsPanel.locator('[data-credential-row="claude-team"]').waitFor({ state: 'visible' });
+            await accountShot('credentials', 'Credentials list');
+            // An environment login's own page, with the quota its provider reported (docs/provider-quotas.md).
+            await credentialsPanel.locator('[data-credential-row="glm-env"]').click();
+            await credentialsPanel.locator('[data-provider-quota="endpoint"]').waitFor({ state: 'visible' });
+            await accountShot('credential-provider-quota', 'environment login quota');
+            await credentialsPanel.locator('[data-page-back]').click();
+            await credentialsPanel.locator('[data-credential-row="claude-team"]').waitFor({ state: 'visible' });
+            await credentialsPanel.locator('[data-credential-row="claude-team"]').click();
+            await credentialsPanel.locator('[data-credential-sign-in="start"]').waitFor({ state: 'visible' });
+            await accountShot('credential-slot', 'empty login page');
+            await credentialsPanel.locator('[data-credential-sign-in="start"] [data-change-submit]').click();
+            await credentialsPanel.locator('[data-credential-sign-in="awaiting-code"]').waitFor({ state: 'visible' });
+            await accountShot('credential-sign-in', 'login sign-in link');
+            await credentialsPanel.locator('[data-page-back]').click();
+            // A SIGN-IN ALREADY RUNNING is picked up, never an error naming a flow: the second start lands
+            // on the same link, says so, and offers Start over.
+            await credentialsPanel.locator('[data-credential-row="claude-team"]').click();
+            await credentialsPanel.locator('[data-credential-sign-in="start"] [data-change-submit]').click();
+            await credentialsPanel.locator('[data-sign-in-resumed]').waitFor({ state: 'visible' });
+            const resumedText = await credentialsPanel.locator('[data-credential-sign-in]').innerText();
+            if (/flow|fy_daemon_/u.test(resumedText)) fail('the picked-up sign-in shows an internal id');
+            await accountShot('credential-sign-in-resumed', 'login sign-in picked up');
+            await credentialsPanel.locator('[data-sign-in-start-over]').click();
+            await credentialsPanel.locator('[data-sign-in-resumed]').waitFor({ state: 'detached' });
+            await credentialsPanel.locator('[data-page-back]').click();
+            // CODEX'S TWO SIGN-INS (S2): the device code with its "didn't work?" way out, the link sign-in
+            // that asks for the address a phone's browser could not load, and the wait after it is pasted.
+            // Each frame starts at the Codex panel, because on a phone its steps sit below the fold.
+            const codexPanelToTop = async (): Promise<void> => {
+              await credentialsPanel
+                .locator('[data-codex-login]')
+                .evaluate(panel => panel.scrollIntoView({ block: 'start', behavior: 'instant' }));
+            };
+            await credentialsPanel.locator('[data-credential-row="codex-team"]').click();
+            await credentialsPanel.locator('[data-credential-sign-in="start"] [data-change-submit]').click();
+            await credentialsPanel
+              .locator('[data-credential-sign-in="awaiting-approval"]')
+              .waitFor({ state: 'visible' });
+            await accountShot('codex-device-code', 'Codex device code', codexPanelToTop);
+            await credentialsPanel.locator('[data-codex-login-use-link] button').click();
+            await credentialsPanel
+              .locator('[data-credential-sign-in="awaiting-callback"]')
+              .waitFor({ state: 'visible' });
+            await accountShot('codex-link', 'Codex link sign-in', codexPanelToTop);
+            // START OVER with the callback port held by somebody else's program: named, and left alone.
+            await credentialsPanel.locator('[data-sign-in-start-over]').click();
+            await credentialsPanel.locator('[data-credential-sign-in="failed"]').waitFor({ state: 'visible' });
+            await accountShot('codex-port-held', 'Codex callback port held', codexPanelToTop);
+            await credentialsPanel
+              .locator('[data-credential-sign-in="failed"] button:has-text("Start a new sign-in")')
+              .click();
+            await credentialsPanel.locator('[data-credential-sign-in="start"] [data-change-submit]').click();
+            await credentialsPanel
+              .locator('[data-credential-sign-in="awaiting-callback"]')
+              .waitFor({ state: 'visible' });
+            await credentialsPanel
+              .locator('textarea[name="codex-login-address"]')
+              .fill('http://localhost:1455/auth/callback?code=harness-preview&state=harness-preview');
+            await credentialsPanel
+              .locator('[data-credential-sign-in="awaiting-callback"] button[type="submit"]')
+              .click();
+            await credentialsPanel.locator('[data-credential-sign-in="finishing"]').waitFor({ state: 'visible' });
+            await accountShot('codex-finishing', 'Codex finishing', codexPanelToTop);
+            await credentialsPanel.locator('[data-credential-sign-in="finishing"] button:has-text("Cancel")').click();
+            await credentialsPanel.locator('[data-page-back]').click();
+            await credentialsPanel.locator('[data-credential-row="claude-personal"]').click();
+            await credentialsPanel.locator('[data-credential-sign-out-ask]').click();
+            await credentialsPanel.locator('[data-credential-sign-out]').scrollIntoViewIfNeeded();
+            await accountShot('credential-sign-out', 'sign-out confirmation');
+            await credentialsPanel.locator('[data-sign-out-keep]').click();
+            await credentialsPanel.locator('[data-page-back]').click();
+            // REMOVE A LOGIN: the Remove button on a row opens a dialog that shows its impact first — a login nobody
+            // uses; one used by two runtimes with "switch to" chosen (the default); and the same with the
+            // runtime removed too, which lists the ferrets on it with a move picker. Each must fit with its confirm
+            // button whole and in view. The login's own page carries the same button beside the sign-out difference.
+            const loginDialogShot = async (name: string, label: string): Promise<void> => {
+              await page
+                .locator('[data-runtime-dialog="remove-login"] [data-login-remove-impact]')
+                .waitFor({ state: 'visible' });
+              await assertNoSidewaysScroll(page, `the ${label} dialog at ${viewport.name}`);
+              await assertRuntimeDialogGeometry(page, `the ${label} dialog at ${viewport.name}`);
+              const target = join(outDir, `settings-machines-${name}-${viewport.name}.png`);
+              await settledShot(target);
+              process.stdout.write(`📸 Settings Machines ${label} ${viewport.name} -> ${target}\n`);
+            };
+            const closeLoginDialog = async (): Promise<void> => {
+              await page.locator('[data-runtime-dialog-cancel]').click();
+              await page.locator('[data-runtime-dialog]').waitFor({ state: 'detached' });
+            };
+            await credentialsPanel.locator('[data-credential-remove="codex-team"]').click();
+            await loginDialogShot('login-remove-unused', 'Remove a login nobody uses');
+            await closeLoginDialog();
+            await credentialsPanel.locator('[data-credential-remove="claude-work"]').click();
+            await loginDialogShot('login-remove-switch', 'Remove a login used by two runtimes, switching them');
+            await page.locator('[data-login-remove-runtime-too="claude-review"]').click();
+            await page.locator('[data-login-remove-ferrets]').waitFor({ state: 'visible' });
+            await page.locator('[data-runtime-move-target]').selectOption('claude-default');
+            await loginDialogShot('login-remove-runtime', 'Remove a login, removing a runtime too');
+            await closeLoginDialog();
+            await credentialsPanel.locator('[data-credential-row="claude-work"]').click();
+            await credentialsPanel.locator('[data-credential-remove-zone]').waitFor({ state: 'visible' });
+            await accountShot('credential-remove-zone', 'login page Remove', async () => {
+              await credentialsPanel
+                .locator('[data-credential-remove-zone]')
+                .evaluate(element => element.scrollIntoView({ block: 'center', behavior: 'instant' }));
+            });
+            await credentialsPanel.locator('[data-page-back]').click();
+            // ADD A LOGIN (U21): ONE screen — every provider as tiles (the two sign-ins, then the API-key
+            // providers under their headings, two to a row on a phone, with the search box thirteen providers
+            // earn), then only what the one tapped needs: a provider's key, or a sign-in and its one button.
+            await credentialsPanel.locator('[data-add-login]').first().click();
+            await credentialsPanel.locator('[data-add-login-choices]').waitFor({ state: 'visible' });
+            await credentialsPanel.locator('[data-provider-search]').waitFor({ state: 'visible' });
+            await accountShot('add-login-tool', 'Add a login provider choice');
+            // Each frame starts where the new part does, because on a phone the sign-in tiles fill the top.
+            const toTop = (selector: string) => async (): Promise<void> => {
+              await credentialsPanel
+                .locator(selector)
+                .evaluate(element => element.scrollIntoView({ block: 'start', behavior: 'instant' }));
+            };
+            await accountShot('add-login-providers', 'Add a login provider tiles', toTop('[data-provider-grid]'));
+            await themedShot('add-login-providers');
+            await credentialsPanel.locator('[data-provider-tile="deepseek"]').click();
+            await credentialsPanel.locator('[data-one-click="deepseek"]').waitFor({ state: 'visible' });
+            await accountShot('add-login-provider-key', 'Add a login provider key', toTop('[data-add-login-chosen]'));
+            await credentialsPanel.locator('[data-add-login-change]').click();
+            await credentialsPanel.locator('[data-add-login-choice]:not([aria-disabled])').first().click();
+            await credentialsPanel.locator('[data-add-login-fields]').waitFor({ state: 'visible' });
+            await accountShot('add-login-start', 'Add a login sign-in');
+            await credentialsPanel.locator('[data-add-login-back]').click();
+            const stopAddLogin = credentialsPanel.locator('[data-add-login-stop]');
+            if ((await stopAddLogin.count()) > 0) await stopAddLogin.click();
+            await credentialsPanel.locator('[data-credential-row="claude-team"]').waitFor({ state: 'visible' });
+
+            // THE PAIRING A RESET LEFT BEHIND: same name, same address. It is called the old pairing and
+            // offers Remove; the live one keeps its plain name. No fingerprint is shown on either.
+            const oldPairing = await openMachine('harness-daemon-before-reset');
+            await oldPairing.locator('[data-machine-replaced]').waitFor({ state: 'visible' });
+            const oldHeading = await oldPairing.locator('#settings-machine-heading').innerText();
+            if (oldHeading !== 'Studio workstation (old pairing)') fail(`the old pairing reads "${oldHeading}"`);
+            await accountShot('old-pairing', 'old pairing');
+            await openMachine('harness-daemon');
+            const liveHeading = await machinesSurface.locator('#settings-machine-heading').innerText();
+            if (liveHeading !== 'Studio workstation') fail(`the live pairing reads "${liveHeading}"`);
+
+            await machinesSurface.locator('[data-machine-tab="profiles"]').click();
+            const profilesPanel = machinesSurface.locator('[data-machine-tab-panel="profiles"]');
+            await profilesPanel.locator('[data-profile-row="Default"]').waitFor({ state: 'visible' });
+            await accountShot('profiles', 'Profiles list');
+            await themedShot('profiles');
+            await profilesPanel.locator('[data-profile-row="Default"]').click();
+            await profilesPanel
+              .locator('[data-profile-editor="Default"] [data-profile-item]')
+              .first()
+              .waitFor({ state: 'visible' });
+            await accountShot('profile', 'profile page');
+            await themedShot('profile');
+            await profilesPanel.locator('[data-profile-delete]').click();
+            await profilesPanel.locator('[data-catalog-note="delete"]').scrollIntoViewIfNeeded();
+            await accountShot('profile-delete', 'profile delete card');
+            await profilesPanel.locator('[data-profile-keep]').click();
+            // Mixing tools is refused on drop (or on Add), naming the items to blame (R5).
+            if (viewport.name === 'mobile') {
+              await profilesPanel.locator('[data-profile-pick]').click();
+              const picker = page.locator('[data-profile-picker]');
+              await picker.locator('[data-library-add="profile/Codex"]').click();
+              await picker.locator('[data-catalog-note="picker-refused"]').waitFor({ state: 'visible' });
+              await accountShot('profile-refused', 'profile refusing a mix in the picker');
+              await picker.locator('[data-picker-done]').click();
+              await picker.waitFor({ state: 'detached' });
+            } else {
+              await profilesPanel.locator('[data-library-add="profile/Codex"]').click();
+              await profilesPanel.locator('[data-catalog-note="refused"]').waitFor({ state: 'visible' });
+              await accountShot('profile-refused', 'profile refusing a mix');
+              await profilesPanel.locator('[data-refusal-dismiss]').click();
+            }
+            await profilesPanel.locator('[data-catalog-back]').click();
+            // Agent work: Agent comes later than Default, so it overrides one key — the chip and Resolved.
+            await profilesPanel.locator('[data-profile-row="Agent work"]').click();
+            await profilesPanel.locator('[data-override-chip]').first().waitFor({ state: 'visible' });
+            await accountShot('profile-overrides', 'profile contents with an override chip');
+            await themedShot('profile-overrides');
+            await profilesPanel.locator('[data-profile-view="resolved"]').click();
+            await profilesPanel.locator('[data-resolved-overridden]').first().waitFor({ state: 'visible' });
+            await accountShot('profile-resolved', 'profile Resolved view');
+            await themedShot('profile-resolved');
+            await profilesPanel.locator('[data-profile-yaml]').click();
+            await page.locator('[data-config-editor-text]').waitFor({ state: 'visible' });
+            await accountShot('profile-yaml', 'profile Edit as YAML');
+            await page.locator('[data-config-cancel]').click();
+            await page.locator('[data-config-editor]').waitFor({ state: 'detached' });
+            await profilesPanel.locator('[data-catalog-back]').click();
+            await profilesPanel.locator('[data-profile-row="Old mix"]').click();
+            await profilesPanel.locator('[data-catalog-note="mixed"]').waitFor({ state: 'visible' });
+            await accountShot('profile-mixed', 'mixed profile page');
+            await profilesPanel.locator('[data-catalog-back]').click();
+            await profilesPanel.locator('[data-profile-new]').click();
+            await profilesPanel.locator('[data-profile-name]').fill('Docs');
+            if (viewport.name === 'mobile') {
+              await profilesPanel.locator('[data-profile-pick]').click();
+              const picker = page.locator('[data-profile-picker]');
+              await picker.locator('[data-library-add="profile/Shared"]').click();
+              await picker.locator('[data-library-add="mcp/notes"]').click();
+              await accountShot('profile-picker', 'new profile Add picker');
+              await picker.locator('[data-picker-done]').click();
+              await picker.waitFor({ state: 'detached' });
+            } else {
+              await profilesPanel
+                .locator('[data-library-item="profile/Shared"]')
+                .dragTo(profilesPanel.locator('[data-profile-contents]'));
+              await profilesPanel
+                .locator('[data-library-item="mcp/notes"]')
+                .dragTo(profilesPanel.locator('[data-profile-item="profile/Shared"]'));
+              await profilesPanel.locator('[data-profile-item="mcp/notes"]').waitFor({ state: 'visible' });
+            }
+            await accountShot('profile-new', 'new profile built by drag and drop');
+            await profilesPanel.locator('[data-profile-cancel]').click();
+
+            await machinesSurface.locator('[data-machine-tab="components"]').click();
+            const componentsPanel = machinesSurface.locator('[data-machine-tab-panel="components"]');
+            await componentsPanel.locator('[data-component-kind="mcp"]').waitFor({ state: 'visible' });
+            await accountShot('components', 'Components kinds');
+            await componentsPanel.locator('[data-component-kind="mcp"]').click();
+            await componentsPanel.locator('[data-component-row="mcp/notes"]').waitFor({ state: 'visible' });
+            await accountShot('component-list', 'MCP servers list');
+            await componentsPanel.locator('[data-component-row="mcp/notes"]').click();
+            await componentsPanel.locator('[data-catalog-note="path"]').waitFor({ state: 'visible' });
+            await accountShot('component', 'component page with warnings');
+            await componentsPanel.locator('[data-catalog-back]').click();
+            await componentsPanel.locator('[data-catalog-back]').click();
+            await componentsPanel.locator('[data-component-kind="settings"]').click();
+            await componentsPanel
+              .locator('[data-component-row="settings/Codex settings"]')
+              .waitFor({ state: 'visible' });
+            await accountShot('component-list-settings', 'Settings list with scope badges');
+            await componentsPanel.locator('[data-catalog-back]').click();
+            await componentsPanel.locator('[data-component-kind="instructions"]').click();
+            await componentsPanel.locator('[data-component-row="instructions/Main instructions"]').click();
+            await componentsPanel.locator('[data-component-rendered] h1').waitFor({ state: 'visible' });
+            await accountShot('component-markdown', 'instructions rendered as Markdown');
+            await themedShot('component-markdown');
+            await componentsPanel.locator('[data-component-view-source]').click();
+            await componentsPanel.locator('[data-component-source]').waitFor({ state: 'visible' });
+            await accountShot('component-markdown-source', 'instructions as source');
+            await componentsPanel.locator('[data-component-edit]').click();
+            await componentsPanel.locator('[data-catalog-note="used"]').waitFor({ state: 'visible' });
+            await accountShot('component-edit', 'component edit used everywhere');
+            await componentsPanel.locator('[data-catalog-back]').click();
+            await componentsPanel.locator('[data-catalog-back]').click();
+            await componentsPanel.locator('[data-catalog-back]').click();
+            await componentsPanel.locator('[data-component-kind="skills"]').click();
+            await componentsPanel.locator('[data-component-row="skills/My skills"]').click();
+            await componentsPanel.locator('[data-catalog-note="partial"]').waitFor({ state: 'visible' });
+            await accountShot('component-partial', 'component partly supported');
+            await componentsPanel.locator('[data-catalog-back]').click();
+            await componentsPanel.locator('[data-catalog-back]').click();
+            await componentsPanel.locator('[data-component-kind="settings"]').click();
+            await componentsPanel.locator('[data-component-row="settings/Claude settings"]').click();
+            await componentsPanel.locator('[data-component-edit]').click();
+            await componentsPanel.locator('[data-component-hidden]').waitFor({ state: 'visible' });
+            await accountShot('component-settings-edit', 'settings edit with a hidden value');
+
+            // THE OTHER MACHINES (U21): one asleep or offline, and one not set up with the first run it
+            // links to. These are the states a person meets on a second machine, and each is its own
+            // layout — a status card above the tab panel, a set-up card instead of a list, and a stepper.
+            const offlineSurface = await openMachine('unreachable-daemon');
+            await offlineSurface.locator('[data-machine-offline]').waitFor({ state: 'visible' });
+            await accountShot('offline', 'offline machine');
+            // A machine that is not set up SAYS SO above its tabs, with the one button that resumes it; the
+            // first run itself is a FULL SCREEN of its own, outside Settings and with no app chrome.
+            const newMachine = await openMachine('checking-daemon');
+            await newMachine.locator('[data-machine-finish-setup]').waitFor({ state: 'visible' });
+            await accountShot('not-set-up', 'machine not set up');
+            await newMachine.locator('[data-machine-finish-setup-open]').click();
+            // New machine setup: ONE rail, no stepper inside any step. The whole journey, every step a frame
+            // measured for the rail and the pinned footer: Start from, Claude Code (its runtime renamed and
+            // imported in place), Codex (imported to sign in later), Speed-ups, Voice (skipped), the Warden,
+            // Learning, Agent controls, and Done naming both runtimes and the skipped step's "Set up later".
+            const setupScreen = page.locator('#harness-machine-setup [data-machine-onboarding]');
+            const setupStep = async (step: string): Promise<void> =>
+              setupScreen.locator(`[data-onboarding-step-body="${step}"]`).waitFor({ state: 'visible' });
+            const setupNext = async (): Promise<void> => setupScreen.locator('[data-onboarding-next]').click();
+            await setupStep('start');
+            await setupShot('start', 'Start from');
+            await setupNext();
+            await setupScreen.locator('[data-harness-name="claude"]').waitFor({ state: 'visible' });
+            await setupShot('claude', 'Claude Code, its runtime named in place');
+            await setupScreen.locator('[data-harness-name="claude"]').fill('claude-main');
+            await setupScreen.locator('[data-onboarding-step-body="claude"] [data-change-submit]').click();
+            await setupScreen.locator('[data-harness-imported="claude"]').waitFor({ state: 'visible' });
+            await setupShot('claude-imported', 'Claude Code imported, claude-main made');
+            await setupNext();
+            await setupScreen.locator('[data-harness-name="codex"]').waitFor({ state: 'visible' });
+            await setupShot('codex', 'Codex, not signed in');
+            await setupScreen.locator('[data-onboarding-step-body="codex"] [data-change-submit]').click();
+            await setupScreen.locator('[data-harness-imported="codex"]').waitFor({ state: 'visible' });
+            await setupNext();
+            for (const [step, label] of [
+              ['speedups', 'Speed-ups'],
+              ['voice', 'Voice'],
+              ['warden', 'Warden'],
+              ['learning', 'Learning'],
+              ['controls', 'Agent controls'],
+            ] as const) {
+              await setupStep(step);
+              await setupShot(step, label);
+              if (step === 'voice') await setupScreen.locator('[data-onboarding-skip]').click();
+              else await setupNext();
+            }
+            await setupStep('done');
+            await setupScreen
+              .locator('[data-onboarding-summary-row="codex"]')
+              .filter({ hasText: 'codex-default' })
+              .waitFor();
+            const claudeRow = await setupScreen.locator('[data-onboarding-summary-row="claude"]').innerText();
+            if (!claudeRow.includes('claude-main'))
+              fail(`Done does not name the runtime Claude Code made: ${claudeRow}`);
+            await setupShot('done', 'Done naming both runtimes, Voice skipped');
+            // Leaving lands back on the machine in Settings, banner and all.
+            await setupScreen.locator('[data-onboarding-restart]').click();
+            await setupScreen.locator('[data-onboarding-later-all]').click();
             await page
-              .waitForFunction(() => {
-                const input = document.getElementById('pairing-link');
-                const limit = window.visualViewport?.height ?? window.innerHeight;
-                if (input === null) return false;
-                const rect = input.getBoundingClientRect();
-                return rect.top >= 0 && rect.bottom <= limit;
-              })
-              .catch(async () => {
-                const state = await page.evaluate(() => {
-                  const input = document.getElementById('pairing-link');
-                  const rect = input?.getBoundingClientRect();
-                  return {
-                    keyboard: document.documentElement.getAttribute('data-keyboard'),
-                    appHeight: getComputedStyle(document.documentElement).getPropertyValue('--app-h'),
-                    visual: window.visualViewport?.height ?? null,
-                    focused: document.activeElement?.id ?? null,
-                    top: Math.round(rect?.top ?? -1),
-                    bottom: Math.round(rect?.bottom ?? -1),
-                  };
-                });
-                fail(`the focused pairing field never came back into view: ${JSON.stringify(state)}`);
+              .locator('[data-machines-surface="checking-daemon"] [data-machine-finish-setup]')
+              .waitFor({ state: 'visible' });
+            // IMPORT AGAIN is the same Claude Code step on a machine that is set up: what changed, a runtime
+            // that already uses this login and profile, and Codex to install — the widest layouts at 390px.
+            {
+              const importUrl = new URL(server.url);
+              importUrl.searchParams.set('machine-setup', 'harness-daemon');
+              importUrl.searchParams.set('setup-step', 'claude');
+              await page.goto(importUrl.toString());
+              await setupScreen.locator('[data-harness-add-another]').waitFor({ state: 'visible' });
+              await setupScreen.locator('[data-harness-add-another]').check();
+              await setupScreen.locator('[data-harness-name="claude"]').fill('claude-default');
+              await setupScreen.locator('[data-harness-name-problem="claude"]').waitFor({ state: 'visible' });
+              await setupShot('import-again-claude', 'Import again on Claude Code');
+              await setupNext();
+              await setupScreen.locator('[data-onboarding-step-body="codex"] [data-tool-install]').first().waitFor();
+              await setupShot('import-again-codex', 'Import again, Codex to install');
+            }
+            settingsPage = page.getByLabel('Settings page preview', { exact: true });
+
+            // The compact registry is a separate deterministic route rather than a
+            // DOM mutation: it remounts the reachability hooks exactly as a fresh
+            // one-daemon browser would and proves the empty space is intentional.
+            settingsUrl.searchParams.set('settings-daemons', 'one');
+            await page.goto(settingsUrl.toString());
+            settingsPage = page.getByLabel('Settings page preview', { exact: true });
+            // The single machine is still LISTED, by name with its status — one row, never a hidden list.
+            if (phone) await settingsHome.waitFor({ state: 'visible' });
+            const oneMachineRows = await settingsNavigation().locator('[data-settings-machine]').count();
+            if (oneMachineRows !== 1)
+              fail(`settings one-daemon fixture listed ${oneMachineRows} machines instead of 1`);
+            const oneMachine = await openMachine('harness-daemon');
+            await openMachineTab(oneMachine);
+            const oneDaemonFrame = settingsPage.locator('[data-daemon-settings-frame="harness-daemon"]');
+            await openDaemonPanel(oneDaemonFrame, 'host-checks');
+            await settingsPage.locator('[data-daemon-reachability="reachable"]').waitFor({ state: 'visible' });
+            // The one-daemon route is a DIFFERENT MOUNT, not the many-daemon page with rows hidden: it
+            // remounts the frame with no daemon switcher above it, so the panel gets width the checked
+            // page never gave it. A layout that only breaks when it is given more room is not a strange
+            // failure — it is what an element sized from a container rather than the viewport does.
+            await assertNoSidewaysScroll(page, `the one-daemon Settings route at ${viewport.name}`);
+            const oneDaemonTarget = join(outDir, `settings-daemons-one-${viewport.name}.png`);
+            await page.screenshot({ path: oneDaemonTarget });
+            process.stdout.write(`📸 Settings Daemons (one) ${viewport.name} -> ${oneDaemonTarget}\n`);
+
+            // THE UNLOCK SCREEN, the first thing a locked machine shows: one sentence, one line on how long
+            // it stays, one button. It is a viewport shot because the dialog is fixed to the viewport.
+            const unlockPromptTarget = join(outDir, `unlock-prompt-${viewport.name}.png`);
+            await page.goto(`${server.url}?unlock-prompt`);
+            const unlockPrompt = page.getByRole('dialog', { name: 'Unlock' });
+            await unlockPrompt.getByText('It stays unlocked on this device for 8 hours.').waitFor({ state: 'visible' });
+            await unlockPrompt.getByRole('button', { name: 'Unlock' }).waitFor({ state: 'visible' });
+            await assertNoSidewaysScroll(page, `the unlock screen at ${viewport.name}`);
+            await page.screenshot({ path: unlockPromptTarget, animations: 'disabled' });
+            process.stdout.write(`📸 unlock screen ${viewport.name} -> ${unlockPromptTarget}\n`);
+            await page.goto(settingsUrl.toString());
+
+            // EVERY THEME FAMILY'S TERMINAL, measured: one cell per character, in a monospace face.
+            for (const family of THEME_FAMILIES)
+              await assertTerminalGeometry(page, server.url.toString(), family.id, viewport.name);
+            await page.evaluate(() => localStorage.removeItem('fy-theme-v1'));
+            await page.goto(settingsUrl.toString());
+          }
+          if (parts.has('sessions')) {
+            await page.goto(server.url.toString());
+            // A four-kind ledger is taller than a phone viewport. Chrome may cull
+            // unpainted rows during an element screenshot, so temporarily borrow
+            // a tall viewport to capture the full, real phone-width board.
+            const agendaTarget = join(outDir, `attention-${viewport.name}.png`);
+            await page.setViewportSize({ width: viewport.width, height: 2_400 });
+            const agenda = page.getByLabel('Inbox ledger');
+            await agenda.locator('summary').filter({ hasText: 'Resolution audit' }).click();
+            await captureElement(page, agenda, agendaTarget);
+            await page.setViewportSize({ width: viewport.width, height: viewport.height });
+            process.stdout.write(`📸 Inbox ledger -> ${agendaTarget}\n`);
+            const pinsTriggerTarget = join(outDir, `pins-trigger-${viewport.name}.png`);
+            await captureElement(page, page.getByLabel('Pins trigger'), pinsTriggerTarget);
+            process.stdout.write(`📸 Pins trigger -> ${pinsTriggerTarget}\n`);
+            const pinsTarget = join(outDir, `pins-${viewport.name}.png`);
+            await captureElement(page, page.getByLabel('Pins ledger'), pinsTarget);
+            process.stdout.write(`📸 Pins ledger -> ${pinsTarget}\n`);
+            // Three pairing screens, because they are three different screens: the
+            // cold open a first-timer sees, the confirmation a scanned QR lands
+            // on, and what the surface becomes once a daemon is connected.
+            for (const [label, slug] of [
+              ['Daemon pairing', 'pairing'],
+              ['Pairing confirmation', 'pairing-confirm'],
+              ['Paired daemon list', 'pairing-list'],
+            ] as const) {
+              const pairingTarget = join(outDir, `${slug}-${viewport.name}.png`);
+              await captureElement(page, page.getByLabel(label, { exact: true }), pairingTarget);
+              process.stdout.write(`📸 ${label} ${viewport.name} -> ${pairingTarget}\n`);
+            }
+
+            // AND IN LIGHT. Pairing is the first screen a new reader ever sees,
+            // and half of them are not in dark mode. The rest of this harness page
+            // is captured dark only; this one surface is worth both.
+            await applyTheme(page, 'studio-light');
+            for (const [label, slug] of [
+              ['Daemon pairing', 'pairing'],
+              ['Pairing confirmation', 'pairing-confirm'],
+              ['Paired daemon list', 'pairing-list'],
+            ] as const) {
+              const lightTarget = join(outDir, `${slug}-light-${viewport.name}.png`);
+              await captureElement(page, page.getByLabel(label, { exact: true }), lightTarget);
+              process.stdout.write(`📸 ${label} light ${viewport.name} -> ${lightTarget}\n`);
+            }
+            await applyTheme(page, 'studio-dark');
+
+            await capturePairingFailures(page, viewport.name);
+            const wardenOverviewTarget = join(outDir, `warden-overview-${viewport.name}.png`);
+            await captureElement(page, page.locator('[data-harness="warden-overview"]'), wardenOverviewTarget);
+            process.stdout.write(`📸 Warden page -> ${wardenOverviewTarget}\n`);
+            const wardenStripTarget = join(outDir, `warden-strip-${viewport.name}.png`);
+            await captureElement(page, page.locator('[data-harness="warden-strip"]'), wardenStripTarget);
+            process.stdout.write(`📸 Warden strip -> ${wardenStripTarget}\n`);
+            // The secret store, in the three states a person actually meets: one that exists
+            // (masked, with a configured reference that does not resolve), a damaged store that says
+            // so rather than reporting empty, and a read this browser could not make.
+            for (const [name, selector] of [
+              [`secrets`, `[data-harness="secrets-card"]`],
+              [`secrets-damaged`, `[data-harness="secrets-damaged"]`],
+              [`secrets-unreachable`, `[data-harness="secrets-unreachable"]`],
+            ] as const) {
+              const target = join(outDir, `${name}-${viewport.name}.png`);
+              await captureElement(page, page.locator(selector), target);
+              process.stdout.write(`📸 Secrets ${name} ${viewport.name} -> ${target}\n`);
+            }
+            // The operator's limits, in the four states a paired browser actually meets. Every one of
+            // them is a frame where a control is refused, so every one has to show the reason beside it
+            // — that is the thing being reviewed, not the switches.
+            //
+            // A TALL VIEWPORT IS BORROWED, for the reason the agenda ledger borrows one: five
+            // capabilities × two axes × a reason under each is far taller than a phone, and Chrome may
+            // cull unpainted rows during an element screenshot. Captured at 390 wide and 844 high, the
+            // card came out clipped at the second row and the desktop shot stitched the NEXT card's
+            // content under this one's name — an element capture that is confidently wrong rather than
+            // obviously short, which is the worse of the two failures.
+            await page.setViewportSize({ width: viewport.width, height: 4_000 });
+            for (const [name, selector] of [
+              [`grants-step-up-needed`, `[data-harness="grants-step-up-needed"]`],
+              [`grants-step-up-held`, `[data-harness="grants-step-up-held"]`],
+              [`grants-undetermined`, `[data-harness="grants-undetermined"]`],
+              [`grants-unreachable`, `[data-harness="grants-unreachable"]`],
+              // The capability list in both postures that exist. The governed one is the frame that matters:
+              // the harness daemon's address is loopback, so a capture claiming the limits do not apply
+              // there would be the old direct-local reading, visible in a PNG.
+              [`capability-list-governed`, `[data-harness="capability-list-governed"]`],
+              [`capability-list-unknown`, `[data-harness="capability-list-unknown"]`],
+            ] as const) {
+              const frame = page.locator(selector);
+              await frame.scrollIntoViewIfNeeded();
+              // Settled content, not a spinner: every one of these frames is rendered from a fixture, so
+              // a capture still showing "Reading…" would be a regression to review rather than a state.
+              await frame
+                .locator('[data-grant-surface], [aria-label="Capability grants unavailable"], [data-capability-list]')
+                .first()
+                .waitFor({ state: 'visible' });
+              const target = join(outDir, `${name}-${viewport.name}.png`);
+              await captureElement(page, frame, target);
+              process.stdout.write(`📸 Capability limits ${name} ${viewport.name} -> ${target}\n`);
+            }
+            // AND THE PASSKEY FRAMES IN LIGHT. The warn tone of a row waiting on a confirmation is the last
+            // place to lose contrast, so it has to be legible in both themes rather than designed in dark and
+            // inverted — a hairline that vanishes on `surface-2` takes a boundary with it.
+            await applyTheme(page, 'studio-light');
+            for (const name of ['grants-step-up-needed', 'grants-step-up-held'] as const) {
+              const frame = page.locator(`[data-harness="${name}"]`);
+              await frame.scrollIntoViewIfNeeded();
+              const target = join(outDir, `${name}-light-${viewport.name}.png`);
+              await captureElement(page, frame, target);
+              process.stdout.write(`📸 Capability limits ${name} light ${viewport.name} -> ${target}\n`);
+            }
+            await applyTheme(page, 'studio-dark');
+            // Adding a device, in the states somebody actually meets. THE CODE IN THESE FRAMES IS FAKE —
+            // see `HARNESS_INVITE`. A committed PNG of a real minted code would be a live credential in
+            // the repository, and a QR is a machine-readable label rather than obfuscation.
+            //
+            // The tall viewport is still borrowed, for the reason the grant frames borrow one: a QR, a
+            // countdown, a selectable link and a device list are taller than a phone, and Chrome may cull
+            // unpainted rows during an element screenshot.
+            for (const [name, selector] of [
+              [`pair-devices`, `[data-harness="pair-devices"]`],
+              [`pair-invite`, `[data-harness="pair-invite"]`],
+              [`pair-expired`, `[data-harness="pair-expired"]`],
+              [`pair-empty`, `[data-harness="pair-empty"]`],
+              [`pair-refused`, `[data-harness="pair-refused"]`],
+            ] as const) {
+              const frame = page.locator(selector);
+              await frame.scrollIntoViewIfNeeded();
+              // Settled content, not a spinner: every frame is rendered from a fixture, so a capture still
+              // showing "Reading…" would be a regression to review rather than a state.
+              await frame
+                .locator('[data-add-device-surface], [aria-label="Adding a device unavailable"]')
+                .first()
+                .waitFor({ state: 'visible' });
+              const target = join(outDir, `${name}-${viewport.name}.png`);
+              await captureElement(page, frame, target);
+              process.stdout.write(`📸 Add a device ${name} ${viewport.name} -> ${target}\n`);
+            }
+            await page.setViewportSize({ width: viewport.width, height: viewport.height });
+            const taskDagTarget = join(outDir, `task-dag-${viewport.name}.png`);
+            await captureElement(page, page.locator('[data-task-graph]'), taskDagTarget);
+            process.stdout.write(`📸 Task dependency graph -> ${taskDagTarget}\n`);
+            const sessionTasksTarget = join(outDir, `session-tasks-${viewport.name}.png`);
+            await captureElement(page, page.getByLabel('Session task board'), sessionTasksTarget);
+            process.stdout.write(`📸 Session task board -> ${sessionTasksTarget}\n`);
+            const taskNameTarget = join(outDir, `task-name-${viewport.name}.png`);
+            await captureElement(page, page.getByLabel('Task name'), taskNameTarget);
+            process.stdout.write(`📸 Task name -> ${taskNameTarget}\n`);
+
+            const inAppTarget = join(outDir, `in-app-browser-${viewport.name}.png`);
+            await page.locator('#harness-in-app-browser').scrollIntoViewIfNeeded();
+            await captureElement(page, page.getByLabel('In-app link preview'), inAppTarget);
+            process.stdout.write(`📸 In-app link preview -> ${inAppTarget}\n`);
+
+            await captureFiles(page, viewport.name);
+
+            const attachmentsTarget = join(outDir, `attachments-${viewport.name}.png`);
+            // The thumbnail is `loading="lazy"` and the harness stacks it thousands
+            // of pixels below the fold, so Chrome has not started decoding it yet.
+            // Scroll first: capturing before it lands gives a 0x0 box and a card
+            // screenshot that is silently missing its image.
+            await page.locator('#harness-attachments').scrollIntoViewIfNeeded();
+            await page.getByAltText('Coverage by tier').waitFor({ state: 'visible' });
+            await captureElement(page, page.getByLabel('Transcript attachments'), attachmentsTarget);
+            process.stdout.write(`📸 Transcript attachments -> ${attachmentsTarget}\n`);
+            const terminalTarget = join(outDir, `terminal-snapshot-${viewport.name}.png`);
+            await captureElement(page, page.getByLabel('Terminal snapshot'), terminalTarget);
+            process.stdout.write(`📸 Terminal snapshot -> ${terminalTarget}\n`);
+
+            const sidePaneTabsTarget = join(outDir, `side-pane-tabs-${viewport.name}.png`);
+            await captureElement(page, page.locator('[data-harness="side-pane-tabs"]'), sidePaneTabsTarget);
+            process.stdout.write(`📸 Side pane tabs -> ${sidePaneTabsTarget}\n`);
+
+            for (const [label, slug] of [
+              ['Session dashboard full table', 'session-dashboard-table'],
+              ['Session dashboard full cards', 'session-dashboard-cards'],
+              ['Session dashboard compact panel', 'session-dashboard-compact'],
+              ['Session dashboard scoped', 'session-dashboard-scoped'],
+              ['Session dashboard minimal panel', 'session-dashboard-minimal'],
+              ['Session dashboard lean table', 'session-dashboard-lean-table'],
+              ['Sessions page connected', 'sessions-page-connected'],
+            ] as const) {
+              const dashboardTarget = join(outDir, `${slug}-${viewport.name}.png`);
+              await captureElement(page, page.getByLabel(label, { exact: true }), dashboardTarget);
+              process.stdout.write(`📸 ${label} -> ${dashboardTarget}\n`);
+            }
+
+            // Four stacked dashboards are taller than a phone viewport. `captureElement`
+            // grows the viewport to fit them and puts it back, so the hand-rolled
+            // borrow that used to live here — and the identical one at the dictation
+            // settings card — is gone rather than duplicated.
+            const dashboardStatesTarget = join(outDir, `session-dashboard-states-${viewport.name}.png`);
+            await captureElement(
+              page,
+              page.getByLabel('Session dashboard states', { exact: true }),
+              dashboardStatesTarget,
+            );
+            process.stdout.write(`📸 Session dashboard states -> ${dashboardStatesTarget}\n`);
+
+            const unlockTarget = join(outDir, `attachment-unlock-${viewport.name}.png`);
+            await page.goto(`${server.url}?attachment-unlock`);
+            await captureElement(page, page.getByRole('dialog', { name: 'Unlock encrypted PDF' }), unlockTarget);
+            process.stdout.write(`📸 attachment unlock -> ${unlockTarget}\n`);
+            await page.goto(server.url.toString());
+
+            // The harness stacks every ported surface down one column, so most of it
+            // is below the fold. A full-page stitch cannot prove those: the app bar
+            // is sticky, and Chrome repaints a fixed layer into every stitched tile.
+            // So each surface below the fold is captured as ITS OWN element shot,
+            // which is both immune to that and easier to compare against the
+            // original screen by screen.
+            for (const section of SECTIONS) {
+              const element = page.locator(`#${section}`);
+              await element.scrollIntoViewIfNeeded();
+              const sectionTarget = join(outDir, `${viewport.name}-${section}.png`);
+              await captureElement(page, element, sectionTarget);
+              process.stdout.write(`📸 ${viewport.name} ${section} -> ${sectionTarget}\n`);
+            }
+
+            // #43: a Skills row carries two actions, and the second one's whole
+            // point is a state the resting frame cannot show. Expand one detail
+            // and capture the section again, so a reviewer sees the disclosed
+            // content and the primary/secondary hierarchy beside it rather than
+            // two buttons and a promise.
+            const skills = page.locator('#harness-skills');
+            await skills.scrollIntoViewIfNeeded();
+            await skills
+              .getByRole('button', { name: /^View full detail for/u })
+              .first()
+              .click();
+            const skillsDetailTarget = join(outDir, `${viewport.name}-harness-skills-detail.png`);
+            await captureElement(page, skills, skillsDetailTarget);
+            process.stdout.write(`📸 ${viewport.name} skills detail -> ${skillsDetailTarget}\n`);
+
+            const ledgerTarget = join(outDir, `send-ledger-${viewport.name}.png`);
+            await captureElement(page, page.getByLabel('Send ledger rows'), ledgerTarget);
+            process.stdout.write(`📸 send ledger -> ${ledgerTarget}
+    `);
+
+            // A tool run's EXPANDED state is the other half of its design — the slim
+            // chrome line is what it looks like at rest, and the code surfaces only
+            // exist after a deliberate click — so it gets its own pass.
+            const toolGroup = page.locator('[data-transcript-kind="tool"]').first();
+            await toolGroup.scrollIntoViewIfNeeded();
+            await toolGroup.getByRole('button').first().click();
+            await toolGroup.getByRole('button').nth(1).click();
+            const toolGroupTarget = join(outDir, `tool-group-${viewport.name}.png`);
+            await captureElement(page, toolGroup, toolGroupTarget);
+            process.stdout.write(`📸 tool group -> ${toolGroupTarget}\n`);
+          }
+          if (parts.has('overlays')) {
+            // The context menu is anchored and `fixed`, which is exactly what a
+            // full-page stitch cannot capture — so it gets its own viewport-sized
+            // pass behind a fragment.
+            const menuTarget = join(outDir, `${viewport.name}-menu.png`);
+            await page.goto(`${server.url}#menu`);
+            await page.reload();
+            // Wait for the rows, not just for load: the menu paints hidden and is
+            // revealed by a layout effect once it has been measured and clamped.
+            await page.locator('[role="menuitem"]').last().waitFor({ state: 'visible' });
+            await page.screenshot({ path: menuTarget });
+            process.stdout.write(`📸 ${viewport.name} context menu -> ${menuTarget}\n`);
+
+            const paletteTarget = join(outDir, `${viewport.name}-palette.png`);
+            await page.goto(`${server.url}#palette`);
+            await page.reload();
+            await page.locator('[role="option"]').last().waitFor({ state: 'visible' });
+            await page.screenshot({ path: paletteTarget });
+            process.stdout.write(`📸 ${viewport.name} command palette -> ${paletteTarget}\n`);
+
+            const rowMenuTarget = join(outDir, `${viewport.name}-row-menu.png`);
+            await page.goto(`${server.url}#row-menu`);
+            await page.reload();
+            await page.locator('[role="menuitem"]').last().waitFor({ state: 'visible' });
+            await page.screenshot({ path: rowMenuTarget });
+            process.stdout.write(`📸 ${viewport.name} session row menu -> ${rowMenuTarget}\n`);
+
+            // The bulk-stop confirmation is a fixed overlay like the menu and the
+            // palette, and its two states are different screens: what will die, and
+            // what did.
+            for (const [fragment, name] of [
+              ['#stop', 'stop-confirm'],
+              ['#stop-results', 'stop-results'],
+            ] as const) {
+              const stopTarget = join(outDir, `${viewport.name}-${name}.png`);
+              await page.goto(`${server.url}${fragment}`);
+              await page.reload();
+              await page.getByRole('dialog', { name: /confirm|results/ }).waitFor({ state: 'visible' });
+              await page.screenshot({ path: stopTarget });
+              process.stdout.write(`📸 ${viewport.name} ${name} -> ${stopTarget}\n`);
+            }
+
+            // The fleet drawer only exists below the drawer breakpoint, and only while
+            // it is open, so a page-flow capture at 390px correctly shows nothing.
+            const drawerTarget = join(outDir, `${viewport.name}-fleet-drawer.png`);
+            await page.goto(`${server.url}#fleet-drawer`);
+            await page.reload();
+            const drawer = page.getByRole('dialog', { name: 'Fleet sessions' });
+            if (await drawer.isVisible().catch(() => false)) {
+              await page.screenshot({ path: drawerTarget });
+              process.stdout.write(`📸 ${viewport.name} fleet drawer -> ${drawerTarget}\n`);
+            }
+
+            const renameTarget = join(outDir, `${viewport.name}-rename.png`);
+            await page.goto(`${server.url}#rename`);
+            await page.reload();
+            await page.getByRole('dialog', { name: 'Rename session' }).waitFor({ state: 'visible' });
+            await page.screenshot({ path: renameTarget });
+            process.stdout.write(`📸 ${viewport.name} rename sheet -> ${renameTarget}\n`);
+
+            const migrateTarget = join(outDir, `${viewport.name}-migrate.png`);
+            await page.goto(`${server.url}#migrate`);
+            await page.reload();
+            await page.getByRole('dialog', { name: 'Change model or account' }).waitFor({ state: 'visible' });
+            await page.screenshot({ path: migrateTarget });
+            process.stdout.write(`📸 ${viewport.name} migrate sheet -> ${migrateTarget}\n`);
+
+            // THE ASSEMBLED SESSION WORKSPACE, on a page of its own.
+            //
+            // It is `h-full` with a single scroller of its own, so an element shot
+            // inside the stacked gallery would be clipped by the gallery's
+            // scroller and would prove nothing about where the composer sits. The
+            // alternate root mounts the production shell and the production
+            // viewport producer, and derives pane-vs-sheet from the layout regime
+            // exactly as `src/App.tsx` does — so this loop's two viewports are the
+            // two presentations, with nothing to switch by hand.
+            //
+            // Captured at rest FIRST: the pane starts closed in production, so the
+            // full-width chat column is the state a reader actually opens on, and
+            // it is the only frame that shows the transcript and the composer with
+            // nothing over them.
+            const workspaceTarget = join(outDir, `${viewport.name}-session-workspace.png`);
+            await page.goto(`${server.url}#session-workspace`);
+            await page.reload();
+            await page.locator('#harness-session-workspace-page').waitFor({ state: 'visible' });
+            // The transcript follows its tail on mount; wait for the LAST row
+            // rather than for load, or the shot catches a scroller mid-pin.
+            await page.locator('[data-transcript-kind]').last().waitFor({ state: 'visible' });
+            await page.screenshot({ path: workspaceTarget });
+            process.stdout.write(`📸 ${viewport.name} session workspace -> ${workspaceTarget}\n`);
+
+            // THE SESSION BAR AS ITS OWN REVIEW SURFACE. The workspace capture proves the bar's share of
+            // the viewport; this tighter image makes its spacing legible. It is ONE row now — the agent's
+            // name, project and status, the lifecycle buttons, ⓘ Info and Actions ▾ — and the height is printed so a
+            // regression back to two rows of chrome is a number, not an impression.
+            const sessionBar = page.locator('[data-session-bar]');
+            const sessionBarTarget = join(outDir, `session-bar-${viewport.name}.png`);
+            await captureElement(page, sessionBar, sessionBarTarget);
+            process.stdout.write(`📸 session bar ${viewport.name} -> ${sessionBarTarget}\n`);
+            const sessionBarHeight = await sessionBar.evaluate(bar => Math.round(bar.getBoundingClientRect().height));
+            process.stdout.write(`   session bar height=${sessionBarHeight}px\n`);
+            if (sessionBarHeight > 64)
+              fail(`the session bar is ${sessionBarHeight}px tall at ${viewport.name}: one row, please`);
+
+            // Geometry, printed rather than eyeballed. A screenshot cannot tell a
+            // pinned tail apart from a transcript that happens to be short, and it
+            // cannot show that the page itself never scrolls — which is the one
+            // invariant the whole shell exists to hold (`html, body { overflow:
+            // hidden }` plus one scroller per page).
+            const workspaceGeometry = await page.evaluate(() => {
+              const root = document.documentElement;
+              const scrollers = [...document.querySelectorAll<HTMLElement>('*')].filter(element => {
+                const style = getComputedStyle(element);
+                const scrolls = /auto|scroll/u.test(`${style.overflowY}${style.overflowX}`);
+                return scrolls && element.scrollHeight - element.clientHeight > 1;
               });
-
-            const after = await page.evaluate(() => {
-              const rect = document.getElementById('pairing-link')?.getBoundingClientRect();
+              const composer = document.querySelector<HTMLElement>('[data-session-input] form');
+              const transcript = document.querySelector<HTMLElement>('.fy-transcript');
+              const box = composer?.getBoundingClientRect();
               return {
+                appHeight: root.style.getPropertyValue('--app-h'),
+                pageScrollsX: root.scrollWidth > root.clientWidth,
+                pageScrollsY: root.scrollHeight > root.clientHeight,
+                scrollers: scrollers.map(element => element.className.split(/\s+/u)[0] || element.tagName),
+                transcriptPinned:
+                  transcript === null
+                    ? null
+                    : transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop <= 2,
+                composerBottom: box === undefined ? null : Math.round(box.bottom),
+                composerVisible: box === undefined ? null : Math.round(box.bottom) <= window.innerHeight,
+                pane: document.querySelector('aside') !== null,
+              };
+            });
+            process.stdout.write(
+              `   workspace geometry: --app-h=${workspaceGeometry.appHeight || '(unset)'} ` +
+                `page scroll x/y=${workspaceGeometry.pageScrollsX}/${workspaceGeometry.pageScrollsY} ` +
+                `scrollers=[${workspaceGeometry.scrollers.join(', ')}] ` +
+                `transcript pinned=${String(workspaceGeometry.transcriptPinned)} ` +
+                `composer bottom=${String(workspaceGeometry.composerBottom)}px ` +
+                `visible=${String(workspaceGeometry.composerVisible)} pane mounted=${workspaceGeometry.pane}\n`,
+            );
+            if (workspaceGeometry.pageScrollsX) {
+              fail('the session workspace made the page scroll horizontally');
+            }
+            if (workspaceGeometry.composerVisible === false) {
+              fail(`the composer sits below the viewport at ${viewport.name}`);
+            }
+
+            // THEN the Console — the agent's own pane — shown through the agent pane's own Console tab, the
+            // control a reader clicks. It resolves entirely from the harness snapshot reader, so the
+            // capture is the agent pane's second tab rather than a network error.
+            const workspacePaneTarget = join(outDir, `${viewport.name}-session-workspace-pane.png`);
+            await page.getByRole('tab', { name: 'Console' }).first().click();
+            await page.locator('[data-workspace-console]').waitFor({ state: 'visible' });
+            await page.screenshot({ path: workspacePaneTarget });
+            process.stdout.write(`📸 ${viewport.name} session workspace, Console shown -> ${workspacePaneTarget}\n`);
+
+            // The real remote browser gets this route of its own so this is the
+            // production side-pane layout taking the whole screen, not a gallery
+            // card sized to look like one. The visible Exit control is the phone
+            // escape hatch; Escape then proves the keyboard route returns to the
+            // exact pane/sheet it started from.
+            const fullBrowserTarget = join(outDir, `${viewport.name}-browser-full-viewport.png`);
+            await page.goto(`${server.url}#browser-full-viewport`);
+            await page.reload();
+            await page.locator('#harness-browser-full-viewport-page').waitFor({ state: 'visible' });
+            await page.getByLabel('Expand browser to fill the viewport').click();
+            const exitBrowser = page.getByLabel('Exit full-screen browser');
+            await exitBrowser.waitFor({ state: 'visible' });
+            const fullBrowserGeometry = await measureFullBrowserFrame(exitBrowser);
+            if (
+              !fullBrowserGeometry.fixed ||
+              fullBrowserGeometry.width !== fullBrowserGeometry.viewportWidth ||
+              fullBrowserGeometry.height !== fullBrowserGeometry.viewportHeight
+            ) {
+              fail(
+                `the full browser does not occupy the ${viewport.name} viewport: ${JSON.stringify(fullBrowserGeometry)}`,
+              );
+            }
+            await page.screenshot({ path: fullBrowserTarget });
+            process.stdout.write(`📸 ${viewport.name} browser full viewport -> ${fullBrowserTarget}\n`);
+            await page.keyboard.press('Escape');
+            await page.getByLabel('Expand browser to fill the viewport').waitFor({ state: 'visible' });
+
+            /**
+             * THE PICKERS, EACH ON ITS OWN PAGE, WITH THE LIST ACTUALLY OPEN.
+             *
+             * Every state here is reached by driving the real control — click the field, type into it,
+             * arrow through it — because the list only exists while the field has focus and a posed
+             * popover would prove nothing about the component that has to produce one.
+             *
+             * The three assertions below are the point of the pass, and they are assertions rather
+             * than pictures because a screenshot cannot tell a list that fits from one that is being
+             * clipped by an ancestor: both look like a list.
+             */
+            for (const frame of PICKER_FRAMES) {
+              await page.goto(`${server.url}#picker-${frame}`);
+              await page.reload();
+              const pickerPage = page.locator(`#harness-picker-${frame}-page`);
+              await pickerPage.waitFor({ state: 'visible' });
+
+              const field = page.locator('input[role="combobox"]');
+              await field.click();
+              const expectsList = frame !== 'account-failed';
+              if (expectsList) {
+                await page.locator('[role="listbox"]').waitFor({ state: 'visible' });
+                // Move the cursor with the keyboard, so the capture carries a real active row and
+                // `aria-activedescendant` is pointing at something.
+                await page.keyboard.press('ArrowDown');
+                await page.keyboard.press('ArrowDown');
+              } else {
+                // The whole claim of this frame: the roster failed and the field still works.
+                await page.locator('[data-picker-state="failed"]').waitFor({ state: 'visible' });
+                await field.type('claude-auto-typed-by-hand');
+                const typed = await field.inputValue();
+                if (typed !== 'claude-auto-typed-by-hand') {
+                  fail(`the failed-roster field did not accept a typed value (got ${JSON.stringify(typed)})`);
+                }
+              }
+
+              const geometry = await page.evaluate(
+                ([wantsList, minimum]) => {
+                  const root = document.documentElement;
+                  const listbox = document.querySelector<HTMLElement>('[role="listbox"]');
+                  const box = (element: Element) => {
+                    const rect = element.getBoundingClientRect();
+                    return {
+                      top: Math.round(rect.top),
+                      left: Math.round(rect.left),
+                      right: Math.round(rect.right),
+                      bottom: Math.round(rect.bottom),
+                      height: Math.round(rect.height),
+                    };
+                  };
+                  // Every ancestor that can scroll, and therefore can clip. A popover that leaves one
+                  // of these rectangles is painted where nobody can see it.
+                  const clippers: Array<{ readonly at: string; readonly box: ReturnType<typeof box> }> = [];
+                  if (listbox !== null) {
+                    for (let node = listbox.parentElement; node !== null; node = node.parentElement) {
+                      const style = getComputedStyle(node);
+                      if (/auto|scroll|hidden|clip/u.test(`${style.overflowY}${style.overflowX}`)) {
+                        clippers.push({
+                          at: node.tagName.toLowerCase() + (node.id ? `#${node.id}` : ''),
+                          box: box(node),
+                        });
+                      }
+                    }
+                  }
+                  const controls = [...document.querySelectorAll<HTMLElement>('input[role="combobox"], button')];
+                  const options = [...document.querySelectorAll<HTMLElement>('[role="option"]')];
+                  const measured = [...controls, ...options]
+                    .filter(element => element.getBoundingClientRect().height > 0)
+                    .map(element => ({
+                      what: element.getAttribute('role') ?? element.tagName.toLowerCase(),
+                      height: Math.round(element.getBoundingClientRect().height),
+                    }));
+                  return {
+                    viewport: { width: window.innerWidth, height: window.innerHeight },
+                    pageScrollsX: root.scrollWidth > root.clientWidth,
+                    scrollWidth: root.scrollWidth,
+                    listbox: listbox === null ? null : box(listbox),
+                    optionCount: options.length,
+                    activeDescendant:
+                      document.querySelector('input[role="combobox"]')?.getAttribute('aria-activedescendant') ?? null,
+                    // What is actually on the glass at the list's own centre. A rectangle in the right
+                    // place that something else paints over is still an invisible list.
+                    centreOwnedByList:
+                      listbox === null
+                        ? null
+                        : (() => {
+                            const rect = listbox.getBoundingClientRect();
+                            const hit = document.elementFromPoint(
+                              Math.round(rect.left + rect.width / 2),
+                              Math.round(rect.top + Math.min(rect.height / 2, 20)),
+                            );
+                            return hit !== null && listbox.contains(hit);
+                          })(),
+                    clippers,
+                    wantsList,
+                    undersized: measured.filter(entry => entry.height < minimum),
+                    smallest: measured.reduce((low, entry) => Math.min(low, entry.height), Number.POSITIVE_INFINITY),
+                  };
+                },
+                [expectsList, TOUCH_TARGET_MINIMUM] as const,
+              );
+
+              process.stdout.write(
+                `   picker ${frame} @ ${viewport.name}: page scroll x=${geometry.pageScrollsX} ` +
+                  `(scrollWidth=${geometry.scrollWidth} vs ${geometry.viewport.width}) ` +
+                  `options=${geometry.optionCount} active=${geometry.activeDescendant ?? '(none)'} ` +
+                  `list=${geometry.listbox === null ? '(none)' : `${geometry.listbox.top}-${geometry.listbox.bottom}px`} ` +
+                  `centre owned by list=${String(geometry.centreOwnedByList)} ` +
+                  `smallest control=${geometry.smallest}px clippers=${geometry.clippers.length}\n`,
+              );
+
+              // 1. No horizontal overflow. Asserted at BOTH widths but it is 390px that has ever
+              //    failed it, and a picker whose list forces a sideways scroll is unusable on a phone.
+              if (geometry.pageScrollsX) {
+                fail(
+                  `the ${frame} picker made the page scroll horizontally at ${viewport.name} ` +
+                    `(${geometry.scrollWidth}px in a ${geometry.viewport.width}px viewport)`,
+                );
+              }
+
+              // 2. Every visible control and every offered row is at least a thumb tall.
+              if (geometry.undersized.length > 0) {
+                fail(
+                  `the ${frame} picker has controls below ${TOUCH_TARGET_MINIMUM}px at ${viewport.name}: ` +
+                    geometry.undersized.map(entry => `${entry.what} ${entry.height}px`).join(', '),
+                );
+              }
+
+              // 3. The open list is inside the viewport, on the glass, and inside every ancestor that
+              //    could clip it. This is the one a picture cannot make for us.
+              if (geometry.wantsList) {
+                const list = geometry.listbox;
+                if (list === null) fail(`the ${frame} picker rendered no listbox to measure at ${viewport.name}`);
+                if (geometry.optionCount === 0) fail(`the ${frame} picker opened an empty list at ${viewport.name}`);
+                if (geometry.activeDescendant === null) {
+                  fail(`the ${frame} picker points aria-activedescendant at nothing after two ArrowDowns`);
+                }
+                if (
+                  list.top < 0 ||
+                  list.bottom > geometry.viewport.height ||
+                  list.left < 0 ||
+                  list.right > geometry.viewport.width
+                ) {
+                  fail(
+                    `the ${frame} picker's list leaves the ${viewport.name} viewport: ` +
+                      `${list.left},${list.top} → ${list.right},${list.bottom} in ` +
+                      `${geometry.viewport.width}x${geometry.viewport.height}`,
+                  );
+                }
+                for (const clipper of geometry.clippers) {
+                  if (
+                    list.top < clipper.box.top ||
+                    list.bottom > clipper.box.bottom ||
+                    list.left < clipper.box.left ||
+                    list.right > clipper.box.right
+                  ) {
+                    fail(
+                      `the ${frame} picker's list is clipped by ${clipper.at} at ${viewport.name}: ` +
+                        `list ${list.top}-${list.bottom}px vs clipper ${clipper.box.top}-${clipper.box.bottom}px`,
+                    );
+                  }
+                }
+                if (geometry.centreOwnedByList !== true) {
+                  fail(`something is painted over the ${frame} picker's list at ${viewport.name}`);
+                }
+              }
+
+              const pickerTarget = join(outDir, `${viewport.name}-picker-${frame}.png`);
+              await page.screenshot({ path: pickerTarget });
+              process.stdout.write(`📸 ${viewport.name} picker ${frame} -> ${pickerTarget}\n`);
+            }
+
+            await captureSessionSearchEvidence(page, viewport, server.url.toString());
+
+            // Back to the gallery: every capture after this one expects the shell, and a page left on a
+            // fleet fragment made the next locator wait for an app bar that is not on it.
+            await page.goto(server.url.toString());
+            await page.reload();
+            await page.locator('[data-density-region="app-bar"]').first().waitFor({ state: 'visible' });
+
+            // The install stage on a page of its own, so the capture starts at
+            // the real top of the screen rather than wherever the gallery's
+            // scroller happened to clip it.
+            const installTarget = join(outDir, `${viewport.name}-onboarding-install-page.png`);
+            await page.goto(`${server.url}#onboarding-install`);
+            await page.reload();
+            await page.locator('#harness-onboarding-install-page').waitFor({ state: 'visible' });
+            await page.screenshot({ path: installTarget, fullPage: true });
+            process.stdout.write(`📸 ${viewport.name} setup install page -> ${installTarget}\n`);
+
+            // The pairing stage with the keyboard up: the state the reader
+            // reported as broken. Phone only — a desktop has no software keyboard
+            // to model, and pretending otherwise would be a made-up screenshot.
+            //
+            // Supplementary, not authoritative: this gallery context is 390px wide
+            // but not touch-emulated, so it proves the layout and the focus, not
+            // the coarse-pointer branches. The real-app driver owns that.
+            if (viewport.name === 'mobile') {
+              await page.addInitScript(VISUAL_VIEWPORT_SHIM);
+              // A real document navigation, not a fragment jump: the alternate
+              // root only mounts on load, and an init script only runs on one.
+              await page.goto(`${server.url}#onboarding-keyboard`);
+              await page.reload();
+              await page.locator('#harness-onboarding-scan-page').waitFor({ state: 'visible' });
+
+              // The keyboard is only up because a FIELD has focus, so the shot has
+              // to start there — an unfocused capture would look identical and
+              // prove nothing about the state that was reported broken.
+              await page.getByRole('button', { name: 'Paste a link instead' }).click();
+              const field = page.locator('#pairing-link');
+              await field.waitFor({ state: 'visible' });
+              await field.focus();
+
+              const before = await page.evaluate(() => ({
                 innerHeight: window.innerHeight,
                 screenHeight: window.screen.height,
                 visual: window.visualViewport?.height ?? null,
                 focused: document.activeElement?.id ?? null,
-                keyboard: document.documentElement.getAttribute('data-keyboard'),
-                fieldTop: Math.round(rect?.top ?? -1),
-                fieldBottom: Math.round(rect?.bottom ?? -1),
-                gate: document.getElementById('fy-portrait-gate') !== null,
-              };
-            });
-            if (after.focused !== 'pairing-link') fail('the pairing field lost focus before the capture');
-            if (after.gate) fail('the portrait gate mounted over an upright phone with its keyboard open');
+              }));
+              if (before.focused !== 'pairing-link') fail(`the pairing field never took focus (got ${before.focused})`);
 
-            const keyboardTarget = join(outDir, `${viewport.name}-onboarding-keyboard.png`);
-            await page.screenshot({ path: keyboardTarget });
-            // Printed, not assumed: a shot that silently failed to open the
-            // keyboard looks exactly like one that did.
-            process.stdout.write(
-              `📸 ${viewport.name} setup pairing, keyboard open -> ${keyboardTarget}\n` +
-                `   screen ${before.screenHeight}px and layout ${before.innerHeight}px unchanged at ` +
-                `${after.screenHeight}px / ${after.innerHeight}px; visual viewport ${before.visual}px -> ` +
-                `${after.visual}px; data-keyboard=${after.keyboard}; focus=#${after.focused} visible at ` +
-                `${after.fieldTop}-${after.fieldBottom}px; portrait gate mounted=${after.gate}\n`,
-            );
+              await page.evaluate(() => {
+                (window as unknown as { __harnessKeyboard: (height: number) => void }).__harnessKeyboard(430);
+              });
+              // The producer schedules through requestAnimationFrame, so the
+              // attribute lands a frame after the resize, not with it.
+              await page
+                .waitForFunction(() => document.documentElement.getAttribute('data-keyboard') === 'open')
+                .catch(() => fail('the production viewport producer never reported an open keyboard'));
+
+              // The keyboard is only handled if the field it belongs to is still
+              // on screen. A shot of the stage with the input somewhere below the
+              // fold is a picture of the bug, not of the fix.
+              await page
+                .waitForFunction(() => {
+                  const input = document.getElementById('pairing-link');
+                  const limit = window.visualViewport?.height ?? window.innerHeight;
+                  if (input === null) return false;
+                  const rect = input.getBoundingClientRect();
+                  return rect.top >= 0 && rect.bottom <= limit;
+                })
+                .catch(async () => {
+                  const state = await page.evaluate(() => {
+                    const input = document.getElementById('pairing-link');
+                    const rect = input?.getBoundingClientRect();
+                    return {
+                      keyboard: document.documentElement.getAttribute('data-keyboard'),
+                      appHeight: getComputedStyle(document.documentElement).getPropertyValue('--app-h'),
+                      visual: window.visualViewport?.height ?? null,
+                      focused: document.activeElement?.id ?? null,
+                      top: Math.round(rect?.top ?? -1),
+                      bottom: Math.round(rect?.bottom ?? -1),
+                    };
+                  });
+                  fail(`the focused pairing field never came back into view: ${JSON.stringify(state)}`);
+                });
+
+              const after = await page.evaluate(() => {
+                const rect = document.getElementById('pairing-link')?.getBoundingClientRect();
+                return {
+                  innerHeight: window.innerHeight,
+                  screenHeight: window.screen.height,
+                  visual: window.visualViewport?.height ?? null,
+                  focused: document.activeElement?.id ?? null,
+                  keyboard: document.documentElement.getAttribute('data-keyboard'),
+                  fieldTop: Math.round(rect?.top ?? -1),
+                  fieldBottom: Math.round(rect?.bottom ?? -1),
+                  gate: document.getElementById('fy-portrait-gate') !== null,
+                };
+              });
+              if (after.focused !== 'pairing-link') fail('the pairing field lost focus before the capture');
+              if (after.gate) fail('the portrait gate mounted over an upright phone with its keyboard open');
+
+              const keyboardTarget = join(outDir, `${viewport.name}-onboarding-keyboard.png`);
+              await page.screenshot({ path: keyboardTarget });
+              // Printed, not assumed: a shot that silently failed to open the
+              // keyboard looks exactly like one that did.
+              process.stdout.write(
+                `📸 ${viewport.name} setup pairing, keyboard open -> ${keyboardTarget}\n` +
+                  `   screen ${before.screenHeight}px and layout ${before.innerHeight}px unchanged at ` +
+                  `${after.screenHeight}px / ${after.innerHeight}px; visual viewport ${before.visual}px -> ` +
+                  `${after.visual}px; data-keyboard=${after.keyboard}; focus=#${after.focused} visible at ` +
+                  `${after.fieldTop}-${after.fieldBottom}px; portrait gate mounted=${after.gate}\n`,
+              );
+            }
           }
         } catch (cause) {
           // The screen a wait gave up on, which the log alone cannot show: a timed-out wait names the
@@ -4290,13 +4326,38 @@ try {
       } finally {
         await context.close();
       }
+    };
+
+    // INDEPENDENT WALKS, run together and PRINTED in the order listed here. Each task opens its own
+    // context (own storage, viewport, theme) and shares nothing with another, so what one finishes first
+    // cannot change what another measures; the pool prints their output in list order whichever ends first.
+    const walkTasks: PoolTask[] = [];
+    const walked: readonly (typeof VIEWPORTS)[number][] =
+      SESSION_LAYOUT_ONLY || SAFE_AREA_ONLY || SESSIONS_PAGE_ONLY || VIEWPORT_MATRIX_ONLY ? [] : SELECTED_VIEWPORTS;
+    for (const viewport of walked) {
+      const segments: readonly { readonly part: WalkPart; readonly weight: number }[] = !WALKS_SETTINGS
+        ? [{ part: 'gallery', weight: 100 }]
+        : SETTINGS_ONLY
+          ? [{ part: 'settings', weight: 100 }]
+          : [
+              { part: 'gallery', weight: 20 },
+              { part: 'settings', weight: 50 },
+              { part: 'sessions', weight: 100 },
+              { part: 'overlays', weight: 60 },
+            ];
+      for (const segment of segments) {
+        const parts: ReadonlySet<WalkPart> = WALKS_SETTINGS
+          ? new Set([segment.part])
+          : new Set<WalkPart>(['gallery', 'settings', 'sessions', 'overlays']);
+        walkTasks.push({ weight: segment.weight, run: () => walkViewport(viewport, parts) });
+      }
     }
 
     // THE SESSION PAGE'S LAYOUT — conversation width, the tab strip, nothing under a split pane — in
-    // every theme family. Its own contexts and viewports, so it runs after the viewport passes.
+    // every theme family. Its own contexts and viewports.
     const owesSessionLayout = (WALKS_SETTINGS && walks(PASS_OWNER.sessionLayout)) || SESSION_LAYOUT_ONLY;
-    const sessionLayoutChecks = owesSessionLayout
-      ? await runSessionLayoutGeometry({
+    const sessionLayoutPlan = owesSessionLayout
+      ? planSessionLayoutGeometry({
           browser,
           rootUrl: server.url.toString(),
           scheme: SCHEME,
@@ -4304,7 +4365,48 @@ try {
           fail,
           ...(SESSION_LAYOUT_ONLY ? { captureDir: outDir, captureFamilies: ['studio', 'neo', 'wayfinding'] } : {}),
         })
-      : 0;
+      : undefined;
+    for (const step of sessionLayoutPlan?.steps ?? []) walkTasks.push({ weight: 1, run: step });
+
+    // THE BOTTOM SAFE-AREA INSET'S ONE OWNER, on a simulated home-indicator phone: at rest, keyboard up and
+    // down, and rotated. Its own contexts.
+    const owesSafeArea = (WALKS_SETTINGS && walks(PASS_OWNER.safeArea)) || SAFE_AREA_ONLY;
+    let safeAreaChecks = 0;
+    if (owesSafeArea)
+      walkTasks.push({
+        weight: 10,
+        run: async () => {
+          safeAreaChecks = await runSafeAreaGeometry({
+            browser,
+            rootUrl: server.url.toString(),
+            scheme: SCHEME,
+            fail,
+            keyboardShim: VISUAL_VIEWPORT_SHIM,
+            ...(SAFE_AREA_ONLY ? { captureDir: outDir } : {}),
+          });
+        },
+      });
+
+    // THE SESSIONS PAGE'S SIDEWAYS SCROLL, on a phone at four widths and every density, with the worst text.
+    const owesSessionsPage = (WALKS_SETTINGS && walks(PASS_OWNER.sessionsPage)) || SESSIONS_PAGE_ONLY;
+    let sessionsPageChecks = 0;
+    if (owesSessionsPage)
+      walkTasks.push({
+        weight: 10,
+        run: async () => {
+          sessionsPageChecks = await runSessionsPageGeometry({
+            browser,
+            rootUrl: server.url.toString(),
+            scheme: SCHEME,
+            fail,
+          });
+        },
+      });
+
+    await runOrderedPool(walkTasks, WALK_CONCURRENCY);
+    reportWalkTiming('concurrent walk');
+
+    const sessionLayoutChecks = sessionLayoutPlan?.checks() ?? 0;
     if (owesSessionLayout && sessionLayoutChecks !== SESSION_LAYOUT_GEOMETRY_CHECKS)
       fail(
         `the run made ${sessionLayoutChecks} session layout geometry checks instead of the ` +
@@ -4316,19 +4418,6 @@ try {
       );
     else if (WALKS_SETTINGS) process.stdout.write(notOwedHere('session layout geometry', PASS_OWNER.sessionLayout));
 
-    // THE BOTTOM SAFE-AREA INSET'S ONE OWNER, on a simulated home-indicator phone: at rest, keyboard up and
-    // down, and rotated. Its own contexts, so it runs after the viewport passes.
-    const owesSafeArea = (WALKS_SETTINGS && walks(PASS_OWNER.safeArea)) || SAFE_AREA_ONLY;
-    const safeAreaChecks = owesSafeArea
-      ? await runSafeAreaGeometry({
-          browser,
-          rootUrl: server.url.toString(),
-          scheme: SCHEME,
-          fail,
-          keyboardShim: VISUAL_VIEWPORT_SHIM,
-          ...(SAFE_AREA_ONLY ? { captureDir: outDir } : {}),
-        })
-      : 0;
     if (owesSafeArea && safeAreaChecks !== SAFE_AREA_GEOMETRY_CHECKS)
       fail(
         `the run made ${safeAreaChecks} safe-area geometry checks instead of the ` +
@@ -4365,11 +4454,6 @@ try {
       }
     }
 
-    // THE SESSIONS PAGE'S SIDEWAYS SCROLL, on a phone at four widths and every density, with the worst text.
-    const owesSessionsPage = (WALKS_SETTINGS && walks(PASS_OWNER.sessionsPage)) || SESSIONS_PAGE_ONLY;
-    const sessionsPageChecks = owesSessionsPage
-      ? await runSessionsPageGeometry({ browser, rootUrl: server.url.toString(), scheme: SCHEME, fail })
-      : 0;
     if (owesSessionsPage && sessionsPageChecks !== SESSIONS_PAGE_GEOMETRY_CHECKS)
       fail(
         `the run made ${sessionsPageChecks} sessions page geometry checks instead of the ` +
