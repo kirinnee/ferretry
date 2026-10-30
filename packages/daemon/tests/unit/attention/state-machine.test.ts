@@ -6,7 +6,7 @@ import type {
   AttentionItem,
   AttentionResponse,
 } from '@ferretry/protocol';
-import { MAX_ATTENTION_PER_SESSION, MAX_ATTENTION_REVISIONS } from '@ferretry/protocol';
+import { AttentionItemSchema, MAX_ATTENTION_PER_SESSION, MAX_ATTENTION_REVISIONS } from '@ferretry/protocol';
 import should from 'should';
 import {
   type AttentionActor,
@@ -2481,5 +2481,30 @@ describe('an item that confirms a held configuration change', () => {
 
     // Assert
     should(parsed?.entries[0]?.item.confirms).deepEqual(CONFIRMS);
+  });
+});
+
+describe('Attention state machine board cards', () => {
+  it('should keep the card an item was raised against, exactly as sent', () => {
+    // Arrange
+    const task = { id: 'F412' };
+    const remote = { machineId: 'mac', id: 'B7' };
+
+    // Act
+    const local = raised(AGENT, { task });
+    const elsewhere = raised(AGENT, { task: remote });
+
+    // Assert
+    should(local.item?.task).deepEqual(task);
+    should(elsewhere.item?.task).deepEqual(remote);
+    should(AttentionItemSchema.parse(local.item).task).deepEqual(task);
+  });
+
+  it('should raise an item that names no card without one', () => {
+    // Act
+    const created = raised();
+
+    // Assert
+    should(created.item?.task).be.undefined();
   });
 });

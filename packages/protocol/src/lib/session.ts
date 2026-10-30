@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { SessionAttentionSummarySchema } from './attention.ts';
+import { BoardProjectIdSchema, TaskRefSchema } from './board-refs.ts';
 import {
   ApiErrorResponseSchema,
   InstantSchema,
@@ -480,6 +481,17 @@ export const SessionConfigSchema = z.object({
   teammate: z.string().optional(),
   label: z.string().optional(),
   parent: z.string().optional(),
+  /**
+   * The board this session works on (`board-design.md` §2.2): resolved once at start — inherited from the
+   * parent, else the project its cwd is in, else `unfiled` — and kept. Absent for a session started before
+   * boards existed.
+   */
+  projectId: BoardProjectIdSchema.optional(),
+  /**
+   * The one card this session's activity is attributed to ("last touched"). Set when the session's card is
+   * created, by `fy task focus`, and by any write the session makes to a card. Absent: no card yet.
+   */
+  focusTask: TaskRefSchema.optional(),
   /**
    * The spawn-side warden stamp: who caused this session to exist, and whether it descends from a
    * warden.
