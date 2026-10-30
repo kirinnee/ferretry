@@ -41,6 +41,7 @@ class SignalTerminationGate implements TerminationGate {
     private readonly early: () => Promise<void>,
     private readonly exit: (code: number) => void,
     target: SignalTarget,
+    private readonly pending: () => boolean,
   ) {
     const { promise, resolve } = Promise.withResolvers<void>();
     this.#terminated = promise;
@@ -60,10 +61,18 @@ class SignalTerminationGate implements TerminationGate {
     }
     if (this.#stopping) return;
     this.#stopping = true;
-    void this.early().then(
-      () => this.exit(INTERRUPTED_BOOT_EXIT_CODE),
-      () => this.exit(INTERRUPTED_BOOT_EXIT_CODE),
-    );
+    void this.#releaseThenExit();
+  }
+
+  /**
+   * `early`, again for as long as anything is still `pending`, and the exit IN THE SAME STEP as the
+   * check that found nothing: no boot continuation can run between the last look and the exit, so a
+   * cleanup the still-running boot registers just as a release finishes is released rather than lost.
+   */
+  async #releaseThenExit(): Promise<void> {
+    do await this.early().catch(() => undefined);
+    while (this.pending());
+    this.exit(INTERRUPTED_BOOT_EXIT_CODE);
   }
 }
 
@@ -95,6 +104,8 @@ export function terminationGate(
   early: () => Promise<void>,
   exit: (code: number) => void,
   target: SignalTarget = process,
+  /** Whether `early` has something left to release — a cleanup registered after it last looked. */
+  pending: () => boolean = () => false,
 ): TerminationGate {
-  return new SignalTerminationGate(early, exit, target);
+  return new SignalTerminationGate(early, exit, target, pending);
 }

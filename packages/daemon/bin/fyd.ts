@@ -12766,8 +12766,8 @@ async function execute(answer: ArgumentAnswer & { readonly kind: 'boot' | 'check
   // when that failed, the only thing this daemon had ever written was nothing at all.
   const notices = bootJournal(answer.overrides.logLevel);
   // A boot listens for SIGINT/SIGTERM from its first instant: interrupted before it serves, it releases
-  // what it has acquired — including what the still-running boot acquires meanwhile — and exits; once
-  // serving, the signal ends the wait below as always.
+  // what it has acquired — including what the still-running boot registers until the very moment it
+  // exits — and exits; once serving, the signal ends the wait below as always.
   const gate =
     answer.kind === 'boot'
       ? terminationGate(
@@ -12776,6 +12776,8 @@ async function execute(answer: ArgumentAnswer & { readonly kind: 'boot' | 'check
             await releaseAcquired(cleanups);
           },
           code => process.exit(code),
+          process,
+          () => cleanups.length > 0,
         )
       : undefined;
   try {

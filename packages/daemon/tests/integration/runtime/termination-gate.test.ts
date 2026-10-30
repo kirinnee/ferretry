@@ -156,6 +156,38 @@ describe('terminationGate edges', () => {
     should(cleanups).be.empty();
   });
 
+  it('should release a cleanup the boot registers after the release emptied the list, before it exits', async () => {
+    // Arrange — the release has looked for the last time and found nothing; a boot continuation queued
+    // just behind that look (the observer armed after a later await) registers before the gate exits.
+    const target = scriptedTarget();
+    const order: string[] = [];
+    const cleanups: Array<() => void | Promise<void>> = [];
+    let registeredLate = false;
+    terminationGate(
+      async () => {
+        await releaseAcquired(cleanups);
+        if (registeredLate) return;
+        registeredLate = true;
+        queueMicrotask(() =>
+          cleanups.push(() => {
+            order.push('registered after the release');
+          }),
+        );
+      },
+      code => order.push(`exit ${String(code)}`),
+      target,
+      () => cleanups.length > 0,
+    );
+
+    // Act
+    target.fire('SIGTERM');
+    await waitFor(() => order.some(entry => entry.startsWith('exit')), 'the gate to exit');
+
+    // Assert
+    should(order).deepEqual(['registered after the release', `exit ${String(INTERRUPTED_BOOT_EXIT_CODE)}`]);
+    should(cleanups).be.empty();
+  });
+
   it('should resolve the wait on SIGINT too once serving, running no early release', async () => {
     // Arrange
     const target = scriptedTarget();
