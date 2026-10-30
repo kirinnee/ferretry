@@ -10,7 +10,7 @@ import {
 import { z } from 'zod';
 import type { SerialExecutor } from '../ports.ts';
 import type { PushDispatch } from '../push/types.ts';
-import { notificationKey } from './policy.ts';
+import { normalizedNotificationKey, notificationKey } from './policy.ts';
 
 /**
  * The ledger excludes push endpoints, key material, push enrolment ids, and device names. A paired
@@ -47,9 +47,10 @@ export const AttentionNotificationRequestedRecordSchema = z
   .strictObject({
     v: z.literal(1),
     phase: z.literal('requested'),
-    key: z.string().startsWith('attention:'),
+    /** `agenda:` from now on; a ledger written before the rename holds `attention:`, and both are read. */
+    key: z.string().regex(/^(agenda|attention):/u),
     at: InstantSchema,
-    origin: z.literal('attention'),
+    origin: z.enum(['agenda', 'attention']),
     attribution: z.string().min(1),
     sessionId: z.string().min(1),
     attentionId: AttentionIdSchema,
@@ -66,7 +67,7 @@ export const AttentionNotificationRequestedRecordSchema = z
     sent: SentNotificationSchema,
     enrolled: NonNegativeIntegerSchema,
   })
-  .refine(record => record.key === notificationKey(record), {
+  .refine(record => normalizedNotificationKey(record.key) === notificationKey(record), {
     message: 'the agenda notification key does not name its session and item',
     path: ['key'],
   });

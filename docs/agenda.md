@@ -124,12 +124,12 @@ cleared is a bug.
 ## Delivery
 
 How the owner's card actions — an answer, a done, a dismiss, a Discuss or a request for more information —
-reach the ferret (`AttentionReplyBatcher`, `packages/daemon/src/lib/attention/reply-batch.ts`; the class and
-the files below keep their old names until a later release renames them). The owner's words that drove it:
+reach the ferret (`AttentionReplyBatcher`, `packages/daemon/src/lib/attention/reply-batch.ts`; the class keeps
+its old name until a later release renames it; its files are [on disk](#on-disk) under the agenda names). The owner's words that drove it:
 "only on receipt (the harness receive the 'card reply'), then it can be considered 'DONE', else it surfaces
 back as a card again".
 
-1. **Held.** The action goes to the ferret's outbox (`attention-replies.json`, beside the agenda's own
+1. **Held.** The action goes to the ferret's outbox (`agenda-replies.json`, beside the agenda's own
    file). It is due **10 seconds after the last card action**: every further action on that ferret's cards
    restarts the countdown, and the first one never waits more than **2 minutes**. The agenda says so:
    `replies: {pending, dueAt, heldForTurn?}` on every `GET` and `POST` of the agenda route
@@ -174,7 +174,7 @@ max wait is **refused** by the config check, not clamped. All four are read at s
   `instructions~<digest>`, and belongs to no item.
 - **Durable.** A daemon restarted before a batch was accepted re-sends it under the same id; one
   restarted after looks for its proof. Answers held across a restart are delivered once it is back.
-- **A damaged outbox** is set aside as `attention-replies.json.damaged-<id>` and a fresh one starts, so it
+- **A damaged outbox** is set aside as `agenda-replies.json.damaged-<id>` and a fresh one starts, so it
   never stops later answers.
 - **Why this replaced the old outbox.** The old one recorded a batch as delivered the moment it was handed
   over, and swallowed a refusal. A ferret whose composer held text (a person mid-message, or a stranded
@@ -202,6 +202,26 @@ every combination of old and new meets.
 
 The last two rows are still sent the old way on purpose: an older app's service worker drops a push kind it does not
 know, and the handover counts are a strict object an older reader refuses an unknown key in.
+
+### On disk
+
+A ferret's session directory holds the agenda as `agenda.json` and its held answers as `agenda-replies.json`; releases
+before the rename called them `attention.json` and `attention-replies.json`. The daemon **reads the new name, else the
+old one, and always writes the new one**, so a daemon upgraded or downgraded in between never loses an item.
+
+- **Once, at start**, the daemon moves each session's old file to the new name: it writes the new file whole, reads it
+  back and requires it equal, and only then renames the old file to `*.migrated`. A crash at any step leaves a file the
+  reader still understands; the next start finishes it.
+- **Both files present** (a crash between the two steps, or a downgrade and an upgrade): the newer document stays and the
+  other becomes `*.migrated`. A ledger is newer by its `updatedAt`, then its `nextId`; an outbox has no clock, so it is
+  dated by the latest instant of any answer in it. A tie keeps the new name.
+- **A damaged old file is left exactly where it is** and the session counts as failed: the reader still reads or sets it
+  aside as before, and the next start tries again. The marker `agenda-files-migration.json` in the daemon's home is
+  written only when every session succeeded, and the migration never stops the daemon starting.
+- **`*.migrated` files are kept for one release.** The release after the one that migrated may delete them.
+- Records already in `notifications.jsonl` keep their `attention:` keys and their `attention` origin; new ones are
+  written `agenda:`, and a repeat check treats the two spellings as one key. A daemon-written send id is read the same
+  way: `attention-…` and `agenda-…` name one send.
 
 ### How each end finds out
 

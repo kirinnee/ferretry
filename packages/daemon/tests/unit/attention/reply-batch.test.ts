@@ -135,9 +135,9 @@ describe('the attention outbox', () => {
 
   it('should name every item in a batch’s send id, stamped with when it was begun', () => {
     // Act + Assert — the stamp keeps an answer given again after a failed delivery off the settled id.
-    should(attentionBatchSendId(SESSION, ['A3'])).equal('attention-session-1-A3');
-    should(attentionBatchSendId(SESSION, ['A3', 'A7'])).equal('attention-session-1-A3-A7');
-    should(attentionBatchSendId(SESSION, ['A3'], AT)).equal(`attention-session-1-A3-${Date.parse(AT).toString(36)}`);
+    should(attentionBatchSendId(SESSION, ['A3'])).equal('agenda-session-1-A3');
+    should(attentionBatchSendId(SESSION, ['A3', 'A7'])).equal('agenda-session-1-A3-A7');
+    should(attentionBatchSendId(SESSION, ['A3'], AT)).equal(`agenda-session-1-A3-${Date.parse(AT).toString(36)}`);
     should(attentionBatchSendId(SESSION, ['A3'], '2026-10-28T17:00:01.000Z')).not.equal(
       attentionBatchSendId(SESSION, ['A3'], AT),
     );
@@ -170,7 +170,7 @@ describe('the attention reply batcher', () => {
     await settled();
 
     // Assert
-    should(unstamped(sends.sent)).deepEqual([{ message: 'one', sendId: 'attention-session-1-A1' }]);
+    should(unstamped(sends.sent)).deepEqual([{ message: 'one', sendId: 'agenda-session-1-A1' }]);
   });
 
   it('should send an answer once when the owner skips the wait as the timer fires', async () => {
@@ -187,7 +187,7 @@ describe('the attention reply batcher', () => {
     await settled();
 
     // Assert
-    should(unstamped(sends.sent)).deepEqual([{ message: 'Reached you', sendId: 'attention-session-1-A6' }]);
+    should(unstamped(sends.sent)).deepEqual([{ message: 'Reached you', sendId: 'agenda-session-1-A6' }]);
   });
 
   it('should send a full outbox before it takes one more answer', async () => {
@@ -269,9 +269,9 @@ describe('the attention reply batcher and needs-info requests', () => {
     should(unstamped(sends.sent)).deepEqual([
       {
         message: '[answer to !A1] yes\n\n[needs more info !A3] one',
-        sendId: 'attention-session-1-A1-A3~1',
+        sendId: 'agenda-session-1-A1-A3~1',
       },
-      { message: '[needs more info !A3] two', sendId: 'attention-session-1-A3~2' },
+      { message: '[needs more info !A3] two', sendId: 'agenda-session-1-A3~2' },
     ]);
     should(outboxes.files.get(SESSION)?.delivered).deepEqual(['A1', 'A3~1', 'A3~2']);
   });
@@ -345,7 +345,7 @@ describe('the attention reply batcher while the ferret is mid-turn', () => {
     should(rechecked).equal(ATTENTION_REPLY_RECHECK_MS);
     should(during?.heldForTurn).be.true();
     should(sentWhileBusy).equal(0);
-    should(unstamped(sends.sent)).deepEqual([{ message: 'one\n\ntwo', sendId: 'attention-session-1-A1-A2' }]);
+    should(unstamped(sends.sent)).deepEqual([{ message: 'one\n\ntwo', sendId: 'agenda-session-1-A1-A2' }]);
   });
 
   it('should not say a batch is held for the turn before it is due, or when the ferret is idle', async () => {
@@ -413,7 +413,7 @@ describe('the attention reply batcher while the ferret is mid-turn', () => {
     await settled();
 
     // Assert
-    should(unstamped(sends.sent)).deepEqual([{ message: 'one', sendId: 'attention-session-1-A1' }]);
+    should(unstamped(sends.sent)).deepEqual([{ message: 'one', sendId: 'agenda-session-1-A1' }]);
     should(timers.tasks.has(SESSION)).be.false();
   });
 
@@ -483,7 +483,7 @@ describe('the attention reply batcher while the ferret is mid-turn', () => {
 
     // Assert
     should(unstamped(sends.sent)).deepEqual([
-      { message: 'answer\n\nnote', sendId: 'attention-session-1-A4-instructions~0123456789abcd' },
+      { message: 'answer\n\nnote', sendId: 'agenda-session-1-A4-instructions~0123456789abcd' },
     ]);
   });
 });
@@ -605,7 +605,7 @@ describe('the attention reply batcher and the ferret’s composer', () => {
     await batcher.flush(SESSION);
 
     // Assert
-    should(unstamped(sends.sent)).deepEqual([{ message: 'one\n\ntwo', sendId: 'attention-session-1-A1-A2' }]);
+    should(unstamped(sends.sent)).deepEqual([{ message: 'one\n\ntwo', sendId: 'agenda-session-1-A1-A2' }]);
     should(await batcher.delivery(SESSION)).deepEqual({ sending: ['A1', 'A2'] });
   });
 
@@ -649,10 +649,7 @@ describe('the attention reply batcher and the ferret’s composer', () => {
     should(recheck).equal(ATTENTION_REPLY_RECHECK_MS);
     should(sends.sent).have.length(2);
     should(sends.sent[0]?.sendId).not.equal(sends.sent[1]?.sendId);
-    should(unstamped(sends.sent).map(each => each.sendId)).deepEqual([
-      'attention-session-1-A1',
-      'attention-session-1-A1',
-    ]);
+    should(unstamped(sends.sent).map(each => each.sendId)).deepEqual(['agenda-session-1-A1', 'agenda-session-1-A1']);
   });
 });
 

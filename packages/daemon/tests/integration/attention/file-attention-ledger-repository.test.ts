@@ -156,7 +156,7 @@ describe('FileAttentionLedgerRepository', () => {
     );
     const directory = dirname(repository.file('session-1'));
     await mkdir(directory, { recursive: true });
-    await writeFile(join(directory, '.attention-fixed.tmp'), 'squatter');
+    await writeFile(join(directory, '.agenda-fixed.tmp'), 'squatter');
     const service = new AttentionService(
       repository,
       { now: () => '2026-07-31T10:00:00Z' },

@@ -14,6 +14,8 @@ import {
   attentionNotificationAttribution,
   attentionNotificationTitle,
   deadlineNotificationPayload,
+  legacyNotificationKey,
+  normalizedNotificationKey,
   notificationKey,
   pingNotificationPayload,
   stoppedNotificationPayload,
@@ -66,20 +68,20 @@ describe('notification keys', () => {
     ];
 
     // Assert — a stop is the ferret's, whichever of its items triggered it.
-    should(keys[0]).equal('attention:session-1:A1:ping');
-    should(keys[1]).equal('attention:session-1:A1:deadline');
-    should(keys[2]).equal(`attention:session-1:stopped:${AT}`);
+    should(keys[0]).equal('agenda:session-1:A1:ping');
+    should(keys[1]).equal('agenda:session-1:A1:deadline');
+    should(keys[2]).equal(`agenda:session-1:stopped:${AT}`);
     should(keys[3]).equal(keys[2]);
     should(new Set([keys[0], keys[1], keys[2], keys[4]]).size).equal(4);
   });
 
   it('should keep reading the keys an earlier daemon wrote', () => {
-    should(notificationKey({ sessionId: 'session-1', attentionId: 'A1' })).equal('attention:session-1:A1');
+    should(notificationKey({ sessionId: 'session-1', attentionId: 'A1' })).equal('agenda:session-1:A1');
     should(notificationKey({ sessionId: 'session-1', attentionId: 'A1', infoRequest: 2 })).equal(
-      'attention:session-1:A1:info-2',
+      'agenda:session-1:A1:info-2',
     );
     should(notificationKey({ sessionId: 'session-1', attentionId: 'A1', surfaced: true })).equal(
-      'attention:session-1:A1:surfaced',
+      'agenda:session-1:A1:surfaced',
     );
   });
 });
@@ -251,5 +253,21 @@ describe('a push an older app still reads (agenda.wire.1)', () => {
       }).success,
     ).be.true();
     should(OLD_PUSH_KINDS.safeParse('agenda').success).be.false();
+  });
+});
+
+describe('notification key spellings', () => {
+  it('should read an attention key and an agenda key as the same key', () => {
+    // Arrange / Act / Assert
+    should(normalizedNotificationKey('attention:s:A1:ping')).equal('agenda:s:A1:ping');
+    should(normalizedNotificationKey('agenda:s:A1:ping')).equal('agenda:s:A1:ping');
+    should(normalizedNotificationKey('direct:abc')).equal('direct:abc');
+  });
+
+  it('should spell an agenda key the way a daemon before the rename wrote it', () => {
+    // Arrange / Act / Assert
+    should(legacyNotificationKey('agenda:s:A1:ping')).equal('attention:s:A1:ping');
+    should(legacyNotificationKey('attention:s:A1:ping')).equal('attention:s:A1:ping');
+    should(legacyNotificationKey('direct:abc')).equal('direct:abc');
   });
 });

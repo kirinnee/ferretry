@@ -1,3 +1,4 @@
+export * from './agenda-files.ts';
 export * from './agenda-migration.ts';
 export * from './conversation.ts';
 export * from './harness-prompt.ts';

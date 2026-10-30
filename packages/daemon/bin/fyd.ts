@@ -115,6 +115,8 @@ import {
   NodeRawDeflate,
   probePdfDecryptWorker,
 } from '../src/adapters/attachments/index.ts';
+import { FileAgendaFileStore } from '../src/adapters/attention/file-agenda-file-store.ts';
+import { FileAgendaFilesMigrationMarker } from '../src/adapters/attention/file-agenda-files-migration-marker.ts';
 import { FileAgendaMigrationMarker } from '../src/adapters/attention/file-agenda-migration-marker.ts';
 import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
 import { FileAttentionOutboxRepository } from '../src/adapters/attention/file-attention-outbox-repository.ts';
@@ -785,6 +787,7 @@ import {
   mcpCheckBaseEnvironment,
   mcpInventoryFolders,
   messageWithAttachments,
+  migrateAgendaFiles,
   migrateToAgendaMode,
   modelCatalogPricingRates,
   modelCatalogsView,
@@ -8963,15 +8966,33 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // idea of what a session is waiting for.
       // The ledger repository is handed raw ids from the transport, so the id is parsed here rather than
       // asserted: an id the layout would not accept must never become a directory path.
+      // The agenda files move to their agenda names in the background, and the repositories below hold every read
+      // and write until it settles, so no write can land between the migration's read and its copy. Total: it never
+      // rejects, and a failed session keeps its old file (still read) and is tried again next start.
+      const agendaFilesMigrated = migrateAgendaFiles(
+        storage.listSessions().map(session => session.id),
+        {
+          marker: new FileAgendaFilesMigrationMarker(join(paths.home, 'agenda-files-migration.json')),
+          files: new FileAgendaFileStore(id => createSessionPaths(paths, parseSessionId(id)).directory),
+          now: () => new Date(clock.now()).toISOString(),
+          log: line => process.stderr.write(`${line}\n`),
+        },
+      );
       const attentionBoards = new FileAttentionLedgerRepository(
         id => createSessionPaths(paths, parseSessionId(id)).directory,
+        undefined,
+        agendaFilesMigrated,
       );
       // Each ferret's held answers (docs/attention.md § Delivery). The send is awaited by the batcher, outside
       // its per-session lock: it may wait for a launch or revive a stopped ferret, and the owner's next answer
       // must not wait on that. The send ledger keeps one message per batch send id, and is the one witness of
       // whether it arrived; an answer that did not is reopened on the board, built just below (read lazily).
       const attentionReplies = new AttentionReplyBatcher(
-        new FileAttentionOutboxRepository(id => createSessionPaths(paths, parseSessionId(id)).directory),
+        new FileAttentionOutboxRepository(
+          id => createSessionPaths(paths, parseSessionId(id)).directory,
+          undefined,
+          agendaFilesMigrated,
+        ),
         new SendAttentionMessenger(sends),
         new KeyedAttentionReplyTimers(),
         new KeyedSerialExecutor(),
@@ -9045,7 +9066,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         attentionBoards,
         clock,
         {
-          // A missing attention.json is an empty board only for a session the
+          // A missing agenda.json is an empty board only for a session the
           // registry can prove exists. Session document damage propagates
           // rather than being flattened into "no attention".
           has: async id => (await sessions.get(id)) !== undefined,

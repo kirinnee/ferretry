@@ -431,6 +431,43 @@ describe('send to an idle prompt', () => {
 });
 
 describe('idempotency', () => {
+  describe('a daemon-written id across the agenda rename', () => {
+    const sentBefore: SendRecord = {
+      sendId: 'attention-session-1-A1-abc',
+      acceptedAt: '2026-08-01T11:00:00.000Z',
+      acceptedTurn: 2,
+      path: 'direct',
+      message: 'the batch',
+      matchText: 'the batch',
+      turn: 3,
+      fate: 'delivered',
+      attempt: 1,
+      attemptAt: '2026-08-01T11:00:00.000Z',
+      senderKind: 'daemon',
+    };
+
+    it('recognises an attention- send as the same send as the agenda- one and types nothing again', async () => {
+      const { service, terminal, ledger, repository } = parts();
+      ledger.records.set(sentBefore.sendId, sentBefore);
+
+      const outcome = await service.send(request({ sendId: 'agenda-session-1-A1-abc', message: 'the batch' }));
+
+      should(outcome.disposition).equal('delivered');
+      should(terminal.typed).be.empty();
+      should(ledger.records.size).equal(1);
+      should(repository.transitions).be.empty();
+    });
+
+    it('starts over when the earlier send under the other spelling was withdrawn', async () => {
+      const { service, terminal, ledger } = parts();
+      ledger.records.set(sentBefore.sendId, { ...sentBefore, fate: 'withdrawn' });
+
+      await service.send(request({ sendId: 'agenda-session-1-A1-abc', message: 'the batch' }));
+
+      should(terminal.typed).eql(['the batch']);
+      should(ledger.records.size).equal(2);
+    });
+  });
   it('answers a retried request from the first send, and types nothing a second time', async () => {
     const { service, terminal, repository, ledger } = parts();
     const first = await service.send(request());

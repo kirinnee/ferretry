@@ -7,6 +7,7 @@ import {
   type AttentionReceipts,
 } from '../../lib/attention/index.ts';
 import type { SessionSendService } from '../../lib/session/send/service.ts';
+import { sameSendId } from '../../lib/session/send/index.ts';
 import {
   SendDraftRefused,
   type SendFate,
@@ -83,7 +84,7 @@ export class LedgerAttentionReceipts implements AttentionReceipts {
   async receipt(sessionId: string, sendId: string): Promise<AttentionReceipt> {
     const id = tryParseSessionId(sessionId);
     if (id === undefined) return { state: 'failed', reason: 'the ferret could not be found' };
-    const record = (await this.ledger.list(id)).find(each => each.sendId === sendId);
+    const record = (await this.ledger.list(id)).find(each => sameSendId(each.sendId, sendId));
     if (record?.fate === 'delivered') return { state: 'delivered' };
     const reason = record?.fate === undefined ? undefined : FAILED_FATES[record.fate];
     return reason === undefined ? { state: 'pending' } : { state: 'failed', reason };
