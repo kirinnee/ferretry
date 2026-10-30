@@ -26,37 +26,6 @@ import type { FerretNames } from './board-present.ts';
 
 type Lanes = Pick<LaneSet, 'lanes'>;
 
-// ---------------------------------------------------------------------------------------------------
-// The lane stepper
-// ---------------------------------------------------------------------------------------------------
-
-export interface LaneStep {
-  readonly id: string;
-  readonly name: string;
-  readonly category: LaneCategory;
-  /** `done` is behind the card, `current` is where it is, `next` is ahead. */
-  readonly state: 'done' | 'current' | 'next';
-}
-
-/**
- * The project's lanes in order with the card's place among them; the Closed lane is always last. A card in a
- * lane the set does not have (a lane edit after it moved) has no `current` step and every step reads `next`.
- */
-export const laneStepper = (laneSet: Lanes | null, laneId: string): readonly LaneStep[] => {
-  if (laneSet === null) return [];
-  const ordered = [
-    ...laneSet.lanes.filter(lane => lane.category !== 'closed'),
-    ...laneSet.lanes.filter(lane => lane.category === 'closed'),
-  ];
-  const at = ordered.findIndex(lane => lane.id === laneId);
-  return ordered.map((lane, index) => ({
-    id: lane.id,
-    name: lane.name,
-    category: lane.category,
-    state: at < 0 ? 'next' : index < at ? 'done' : index === at ? 'current' : 'next',
-  }));
-};
-
 export const laneCategoryOf = (laneSet: Lanes | null, laneId: string): LaneCategory | null =>
   laneSet?.lanes.find(lane => lane.id === laneId)?.category ?? null;
 
@@ -257,38 +226,6 @@ export const historyRows = (history: readonly BoardTaskEvent[], context: History
       ...describe(event, context),
     }));
 
-export type HistoryItem =
-  | { readonly kind: 'row'; readonly row: HistoryRow }
-  /** A run of minor events (edits, file claims, links), folded into one line until opened. */
-  | { readonly kind: 'fold'; readonly rows: readonly HistoryRow[]; readonly label: string };
-
-/** The shortest run of minor events that is folded; two stay as rows, which is shorter than the fold. */
-export const FOLD_MINIMUM = 3;
-
-/** Folds each run of at least {@link FOLD_MINIMUM} minor rows into one item. */
-export const foldHistory = (rows: readonly HistoryRow[]): readonly HistoryItem[] => {
-  const items: HistoryItem[] = [];
-  let run: HistoryRow[] = [];
-  const flush = (): void => {
-    if (run.length >= FOLD_MINIMUM) {
-      items.push({ kind: 'fold', rows: run, label: `${run.length} small changes` });
-    } else {
-      for (const row of run) items.push({ kind: 'row', row });
-    }
-    run = [];
-  };
-  for (const row of rows) {
-    if (row.minor) {
-      run.push(row);
-      continue;
-    }
-    flush();
-    items.push({ kind: 'row', row });
-  }
-  flush();
-  return items;
-};
-
 // ---------------------------------------------------------------------------------------------------
 // Asks
 // ---------------------------------------------------------------------------------------------------
@@ -424,7 +361,7 @@ export const hasLinks = (task: Pick<BoardTaskView, 'links' | 'shippedIn'>): bool
 
 /** Who said the ask and where, in the parts the section strings together. */
 export interface AskOrigin {
-  /** "The owner" or "From ottilie". */
+  /** "you", a ferret's name or "the daemon"; the section writes "from" before it. */
   readonly who: string;
   /** The session the ask was said in, to link to; `null` when the source is not a session. */
   readonly sessionId: string | null;
@@ -446,15 +383,22 @@ export const askOrigin = (
   const sessionId = source.startsWith(SESSION_SOURCE) ? source.slice(SESSION_SOURCE.length) : null;
   const author = task.createdBy;
   return {
-    who:
-      author.kind === 'owner'
-        ? 'The owner'
-        : author.kind === 'ferret'
-          ? `From ${names(author.sessionId)}`
-          : 'The daemon',
+    who: author.kind === 'owner' ? 'you' : author.kind === 'ferret' ? names(author.sessionId) : 'the daemon',
     sessionId,
     chat: sessionId === null ? null : `${names(sessionId)}'s chat`,
     via: sessionId === null && !/^owner/iu.test(source) ? source : null,
     age,
   };
+};
+
+const RAW_PREFIX = /^\s*\([^()\n]{1,60}\)\s*/u;
+
+/**
+ * The ask as the owner reads it: a ferret opening a card on someone's behalf leaves a raw note in front of the
+ * words ("(sada, found live) Fix the thing"); the byline already says who, so the note is dropped. Words that
+ * are only a parenthesis stay as they are.
+ */
+export const askWords = (text: string): string => {
+  const rest = text.replace(RAW_PREFIX, '');
+  return rest.trim() === '' ? text.trim() : rest.trim();
 };

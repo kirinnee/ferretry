@@ -40,7 +40,12 @@ const menuItem = (root: HTMLElement, name: string): HTMLButtonElement =>
     `the "${name}" menu item`,
   );
 const pickLane = async (root: HTMLElement, name: string): Promise<void> => {
-  await click(root, '[aria-haspopup="menu"]');
+  await click(root, '[data-pill="lane"]');
+  await interact(() => menuItem(root, name).click());
+};
+const MORE = 'button[aria-label="More actions"]';
+const moreItem = async (root: HTMLElement, name: string): Promise<void> => {
+  await click(root, MORE);
   await interact(() => menuItem(root, name).click());
 };
 const reasonBox = (root: HTMLElement): HTMLElement => must(root.querySelector('[role="dialog"]'), 'the reason box');
@@ -55,7 +60,12 @@ const comment = async (root: HTMLElement, name: string, words: string): Promise<
   await submit(must(root.querySelector('[data-form="comment"]'), 'the comment form'));
   await interact(() => flush());
 };
+const addDependency = async (root: HTMLElement): Promise<void> => {
+  if (root.querySelector('[aria-label="Card it waits for"]') === null)
+    await click(root, '[data-action="add-dependency"]');
+};
 const dependOn = async (root: HTMLElement, target: string): Promise<void> => {
+  await addDependency(root);
   await fillLabelled(root, 'Card it waits for', target);
   await submit(must(buttonNamed(root, 'Depend').closest('form'), 'the depend form'));
   await interact(() => flush());
@@ -68,7 +78,6 @@ describe('BoardDetail — reading', () => {
   it('says the machine has no such card for an address that is not a card id', async () => {
     const { root } = await open({ taskId: 'zzz' });
     expect(text(root, '.fy-board-detail__empty')).toBe('laptop has no card zzz.');
-    expect(text(root, '.fy-board-detail__ref')).toBe('zzz');
   });
 
   it('says the machine has no such card when it answers that it holds none', async () => {
@@ -105,7 +114,6 @@ describe('BoardDetail — reading', () => {
     expect(text(root, '[role="alert"]')).toBe(
       '&F1 could not be drawn.TypeError: Receiver must be an instance of class anonymous',
     );
-    expect(text(root, '.fy-board-detail__ref')).toBe('&F1');
     expect(reports).toEqual(['ferretry: card &F1 failed to render']);
     await click(root, '.fy-board-detail__close');
     expect(harness.closed.count).toBe(1);
@@ -116,29 +124,26 @@ describe('BoardDetail — reading', () => {
     expect(text(root, '[role="alert"]')).toBe('The card could not be read: the machine is down.');
   });
 
-  it('draws the card: title, who and where, the lane stepper and each section', async () => {
+  it('draws the card: id and title, one meta line, and each section in a flowing page', async () => {
     const { root } = await open({ task: card('F1', { ...IMPLEMENT, summary: 'It **builds**.' }) });
-    expect(text(root, '.fy-board-detail__title')).toBe('Build it');
-    expect([...root.querySelectorAll('.fy-board-detail__meta span')].map(span => span.textContent)).toEqual([
-      '&F1',
-      'Feature',
-      'ferretry',
-      expect.stringContaining('Denisha'),
-    ]);
-    expect(root.querySelector('[aria-label="Lanes"] [aria-current="step"]')?.textContent).toBe('Implement');
+    expect(text(root, '.fy-board-detail__title')).toBe('&F1 Build it');
+    expect(text(root, '[data-pill="lane"]')?.trim()).toBe('Implement');
+    expect(text(root, '[data-meta="assignee"]')).toContain('Denisha');
+    expect(text(root, '.fy-board-detail__faint')).toBe('Feature · ferretry');
+    expect(root.querySelector('[data-meta="pr"]')).toBeNull();
     expect([...root.querySelectorAll('[data-section]')].map(section => section.getAttribute('data-section'))).toEqual([
       'header',
-      'stepper',
       'summary',
       'ask',
       'depends',
       'history',
     ]);
+    expect(root.querySelector('details[data-section]')).toBeNull();
     expect(root.querySelector('[data-section="summary"] strong')?.textContent).toBe('builds');
-    expect(root.querySelector('[data-section="waiting"]')).toBeNull();
+    expect(root.querySelector('[data-section="asks"]')).toBeNull();
   });
 
-  it('draws the written sections folded, and none for what the card does not have', async () => {
+  it('draws the written sections open, and none for what the card does not have', async () => {
     const { root } = await open({
       task: card('F1', {
         ...IMPLEMENT,
@@ -152,18 +157,17 @@ describe('BoardDetail — reading', () => {
     const sections = [...root.querySelectorAll('[data-section]')].map(section => section.getAttribute('data-section'));
     expect(sections).toEqual([
       'header',
-      'stepper',
       'summary',
       'ask',
       'premise',
       'context',
       'terms',
       'brief',
-      'depends',
       'links',
+      'depends',
       'history',
     ]);
-    expect(root.querySelector('[data-section="premise"]')?.hasAttribute('open')).toBe(false);
+    expect(root.querySelector('[data-section="premise"]')?.tagName).toBe('SECTION');
     expect(root.querySelector('[data-section="children"]')).toBeNull();
     expect(root.querySelector('[data-section="asks"]')).toBeNull();
   });
@@ -187,21 +191,23 @@ describe('BoardDetail — reading', () => {
     const { root } = await open({ task: card('F1', { laneId: 'tested', title: 'Try it', dropped: DROPPED }) });
     expect(text(root, '[data-state="dropped"]')).toBe('Dropped: obsolete');
     expect(root.querySelector('[aria-label="Your verdict"]')).toBeNull();
-    expect(root.querySelector('[aria-haspopup="menu"]')).toBeNull();
-    expect(root.textContent).not.toContain('Drop​');
-    expect(
-      [...root.querySelectorAll('.fy-board-detail__actions button')].map(button => button.textContent?.trim()),
-    ).toEqual(['Open chat']);
+    expect(root.querySelector('[data-pill="lane"]')?.hasAttribute('data-static')).toBe(true);
+    await click(root, MORE);
+    expect([...root.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).toEqual([
+      'Reparent…',
+      'Copy link',
+    ]);
   });
 
   it('offers no move on a closed card or one on a project without lanes', async () => {
     const closed = await open({ task: card('F1', { laneId: 'closed' }) });
-    expect(closed.root.querySelector('[aria-haspopup="menu"]')).toBeNull();
+    expect(closed.root.querySelector('[data-pill="lane"]')?.hasAttribute('data-static')).toBe(true);
+    await click(closed.root, MORE);
+    expect(closed.root.textContent).not.toContain('Move to…');
     await view?.unmount();
     view = null;
     const bare = await open({ task: card('F1', IMPLEMENT), laneSet: null });
-    expect(bare.root.querySelector('[aria-haspopup="menu"]')).toBeNull();
-    expect(bare.root.textContent).toContain('This project has no confirmed lanes.');
+    expect(bare.root.querySelector('[data-pill="lane"]')?.hasAttribute('data-static')).toBe(true);
   });
 
   it('draws sub-cards and the machines running its release from the cards the Board has', async () => {
@@ -263,7 +269,7 @@ describe('BoardDetail — drawer, page and closing', () => {
 describe('BoardDetail — moving', () => {
   it('sends a forward move at once', async () => {
     const { root, actions } = await open({ task: card('F1', IMPLEMENT) });
-    await click(root, '[aria-haspopup="menu"]');
+    await click(root, '[data-pill="lane"]');
     expect([...root.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).toEqual([
       'Todo (needs a reason)',
       'Plan/Design (needs a reason)',
@@ -302,11 +308,11 @@ describe('BoardDetail — moving', () => {
     expect(reasonBox(root).querySelector('[aria-label="Reason"]')?.getAttribute('aria-invalid')).toBe('true');
   });
 
-  it('shows the refusal of a forward move beside the dependency form, where the owner is looking', async () => {
+  it('shows the refusal of a forward move beside the comment box, where the owner is looking', async () => {
     const actions = fakeActions({ moveTask: async () => refusal('blocked by &F2', null) });
     const { root } = await open({ task: card('F1', IMPLEMENT), actions });
     await pickLane(root, 'Review/CI');
-    expect(text(root, '[data-section="depends"] [role="alert"]')).toBe('blocked by &F2');
+    expect(text(root, '.fy-board-detail__foot [data-problem]')).toBe('blocked by &F2');
     expect(root.querySelector('[role="dialog"]')).toBeNull();
   });
 
@@ -393,7 +399,7 @@ describe('BoardDetail — the verdict', () => {
 describe('BoardDetail — dropping', () => {
   it('asks why and drops the card with the words', async () => {
     const { root, actions } = await open({ task: card('F1', IMPLEMENT) });
-    await clickNamed(root, 'Drop');
+    await moreItem(root, 'Drop');
     expect(text(reasonBox(root), '.fy-board-reason__heading')).toBe('Drop Build it');
     expect(reasonBox(root).querySelector('input')?.getAttribute('placeholder')).toBe('Why is it being dropped?');
     expect(buttonNamed(reasonBox(root), 'Drop it')).not.toBeNull();
@@ -405,7 +411,7 @@ describe('BoardDetail — dropping', () => {
   it('keeps the box with the daemon words when the drop is refused', async () => {
     const actions = fakeActions({ drop: async () => refusal('only the owner may drop', 'owner-gate') });
     const { root } = await open({ task: card('F1', IMPLEMENT), actions });
-    await clickNamed(root, 'Drop');
+    await moreItem(root, 'Drop');
     await reasonSubmit(root, 'gone');
     expect(text(reasonBox(root), '[role="alert"]')).toBe('only the owner may drop');
   });
@@ -414,6 +420,8 @@ describe('BoardDetail — dropping', () => {
 describe('BoardDetail — dependencies', () => {
   it('depends on a card until it ships, and clears the field', async () => {
     const { root, actions } = await open({ task: card('F1', IMPLEMENT) });
+    expect(root.querySelector('[aria-label="Card it waits for"]')).toBeNull();
+    expect(text(root, '[data-section="depends"]')).toContain('Nothing.');
     await dependOn(root, '&F2');
     expect(actions.calls).toEqual([`depend:${JSON.stringify([{ task: { id: 'F2' }, until: 'shipped' }])}`]);
     expect(root.querySelector<HTMLInputElement>('[aria-label="Card it waits for"]')?.value).toBe('');
@@ -421,6 +429,7 @@ describe('BoardDetail — dependencies', () => {
 
   it('can wait for a release instead', async () => {
     const { root, actions } = await open({ task: card('F1', IMPLEMENT) });
+    await addDependency(root);
     await fillLabelled(root, 'Until', 'released');
     await dependOn(root, '&F2');
     expect(actions.calls[0]).toContain('"until":"released"');
@@ -486,11 +495,27 @@ describe('BoardDetail — commenting', () => {
   it('sends the words tagged with the card to the owner when nobody is assigned, then notes it', async () => {
     const { root, actions, sent } = await open({ task: card('F1', IMPLEMENT) });
     expect(root.querySelector('[data-form="comment"] button')?.hasAttribute('disabled')).toBe(true);
+    expect(root.querySelector('[data-form="comment"] textarea')?.getAttribute('placeholder')).toBe(
+      'Comment to Denisha…',
+    );
     await comment(root, 'Denisha', '  please add tests ');
     expect(sent).toEqual([{ sessionId: LEAD, message: '[re &F1] please add tests' }]);
     expect(actions.calls).toEqual(['note:["please add tests"]']);
-    expect(text(root, '.fy-board-detail__notice')).toBe('Sent to Denisha.');
+    expect(text(root, '.fy-board-detail__foot .fy-board-detail__notice')).toBe('Sent to Denisha.');
     expect(root.querySelector<HTMLTextAreaElement>('[data-form="comment"] textarea')?.value).toBe('');
+  });
+
+  it('sends on Enter, keeps Shift+Enter for a new line, and ignores Enter on an empty box', async () => {
+    const { root, sent } = await open({ task: card('F1', IMPLEMENT) });
+    const box = must(root.querySelector<HTMLTextAreaElement>('[data-form="comment"] textarea'), 'the comment box');
+    await interact(() => pressKey(box, 'Enter'));
+    expect(sent).toEqual([]);
+    await fill(box, 'ship it');
+    await interact(() => pressKey(box, 'Enter', { shiftKey: true }));
+    expect(sent).toEqual([]);
+    await interact(() => pressKey(box, 'Enter'));
+    await interact(() => flush());
+    expect(sent).toEqual([{ sessionId: LEAD, message: '[re &F1] ship it' }]);
   });
 
   it('speaks to the assignee when there is one', async () => {
@@ -537,6 +562,120 @@ describe('BoardDetail — commenting', () => {
   });
 });
 
+describe('BoardDetail — the more-actions menu', () => {
+  it('lists Move to…, Reparent…, Drop… and Copy link, and Move to… opens the lane menu', async () => {
+    const { root } = await open({ task: card('F1', IMPLEMENT) });
+    await click(root, MORE);
+    expect([...root.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).toEqual([
+      'Move to…',
+      'Reparent…',
+      'Drop…',
+      'Copy link',
+    ]);
+    await interact(() => menuItem(root, 'Move to…').click());
+    expect(menuItem(root, 'Review/CI')).not.toBeNull();
+  });
+
+  it('closes when the button is pressed again', async () => {
+    const { root } = await open({ task: card('F1', IMPLEMENT) });
+    await click(root, MORE);
+    await click(root, MORE);
+    expect(root.querySelector('[role="menu"]')).toBeNull();
+    await click(root, '[data-pill="lane"]');
+    await click(root, '[data-pill="lane"]');
+    expect(root.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it('puts the card under another card, or at the top level', async () => {
+    const { root, actions } = await open({ task: card('F1', IMPLEMENT) });
+    await moreItem(root, 'Reparent');
+    const form = must(root.querySelector('[data-form="reparent"]'), 'the reparent form');
+    await fillLabelled(root, 'Parent card', 'banana');
+    await submit(form);
+    expect(text(form, '[role="alert"]')).toBe('banana is not a card id.');
+    await fillLabelled(root, 'Parent card', '&F9');
+    await submit(form);
+    await interact(() => flush());
+    expect(actions.calls).toEqual([`reparent:${JSON.stringify([{ id: 'F9' }])}`]);
+    expect(text(root, '.fy-board-detail__notice')).toBe('Moved under &F9.');
+    expect(root.querySelector('[data-form="reparent"]')).toBeNull();
+    await moreItem(root, 'Reparent');
+    await submit(must(root.querySelector('[data-form="reparent"]'), 'the reparent form'));
+    await interact(() => flush());
+    expect(actions.calls[1]).toBe('reparent:[null]');
+    expect(text(root, '.fy-board-detail__notice')).toBe('Now a top-level card.');
+  });
+
+  it('keeps the reparent form with the daemon words when it is refused, and cancels', async () => {
+    const actions = fakeActions({ reparent: async () => refusal('that would make a cycle') });
+    const { root } = await open({ task: card('F1', IMPLEMENT), actions });
+    await moreItem(root, 'Reparent');
+    await fillLabelled(root, 'Parent card', '&F9');
+    await submit(must(root.querySelector('[data-form="reparent"]'), 'the reparent form'));
+    await interact(() => flush());
+    expect(text(root, '[data-form="reparent"] [role="alert"]')).toBe('that would make a cycle');
+    await clickNamed(must(root.querySelector('[data-form="reparent"]'), 'the reparent form'), 'Cancel');
+    expect(root.querySelector('[data-form="reparent"]')).toBeNull();
+  });
+
+  it('copies the link, and says when it cannot', async () => {
+    const copied: string[] = [];
+    const original = Object.getOwnPropertyDescriptor(globalThis.navigator, 'clipboard');
+    const set = (value: unknown) =>
+      Object.defineProperty(globalThis.navigator, 'clipboard', { value, configurable: true });
+    try {
+      const { root } = await open({ task: card('F1', IMPLEMENT) });
+      set({ writeText: async (words: string) => void copied.push(words) });
+      await moreItem(root, 'Copy link');
+      await interact(() => flush());
+      expect(copied).toHaveLength(1);
+      expect(text(root, '.fy-board-detail__notice')).toBe('Link copied.');
+      set({ writeText: () => Promise.reject(new Error('denied')) });
+      await moreItem(root, 'Copy link');
+      await interact(() => flush());
+      expect(text(root, '.fy-board-detail__notice')).toBe('The link could not be copied.');
+      set(undefined);
+      await moreItem(root, 'Copy link');
+      expect(text(root, '.fy-board-detail__notice')).toBe('This browser cannot copy; the address bar has the link.');
+    } finally {
+      if (original === undefined) Reflect.deleteProperty(globalThis.navigator, 'clipboard');
+      else Object.defineProperty(globalThis.navigator, 'clipboard', original);
+    }
+  });
+});
+
+describe('BoardDetail — the header', () => {
+  it('shows the first PR with its state, and the activity', async () => {
+    const task = card('F1', {
+      ...IMPLEMENT,
+      links: {
+        prs: [
+          {
+            repo: 'kirinnee/ferretry',
+            number: 7,
+            url: 'https://github.com/kirinnee/ferretry/pull/7',
+            state: 'open',
+            draft: false,
+            checks: 'none',
+            mergedAt: null,
+            mergeSha: null,
+            releasedIn: null,
+            polledAt: '2026-08-01T09:30:00.000Z',
+          },
+        ],
+        branch: null,
+        commits: [],
+        docs: [],
+      },
+    });
+    const { root } = await open({ task });
+    expect(text(root, '[data-meta="pr"]')).toContain('kirinnee/ferretry#7');
+    expect(root.querySelector('[data-meta="pr"]')?.getAttribute('href')).toBe(
+      'https://github.com/kirinnee/ferretry/pull/7',
+    );
+  });
+});
+
 describe('BoardDetail — chat', () => {
   it('opens the chat of the assignee, or of the owner when nobody is assigned', async () => {
     const owner = await open({ task: card('F1', IMPLEMENT) });
@@ -573,7 +712,7 @@ describe('BoardDetail — answering', () => {
 
   it('draws a Waiting-on-you section with the ask the ferret raised, and the asks list', async () => {
     const { root } = await open({ task: blocked(), agendaItems: [item] });
-    const section = must(root.querySelector('[data-section="waiting"]'), 'the waiting section');
+    const section = must(root.querySelector('[data-section="asks"]'), 'the Agenda asks section');
     expect(section.querySelector('.fy-board-detail__count')?.textContent).toBe('1');
     expect(text(section, '.fy-board-detail__asktitle')).toBe('Approve the plan?');
     expect(text(root, '[data-kind="asks"] [data-state="open"]')).toBe('Blocking · Approve the plan?');
@@ -586,7 +725,7 @@ describe('BoardDetail — answering', () => {
     expect(actions.calls).toEqual([
       `answer:${JSON.stringify([waiting, { kind: 'multiple-choice', choice: 'Yes' }, undefined])}`,
     ]);
-    expect(root.querySelector('[data-section="waiting"] [role="alert"]')).toBeNull();
+    expect(root.querySelector('[data-section="asks"] [role="alert"]')).toBeNull();
   });
 
   it('shows the words of a refused answer in place', async () => {
@@ -594,11 +733,11 @@ describe('BoardDetail — answering', () => {
     const { root } = await open({ task: blocked(), agendaItems: [item], actions });
     await tap(buttonNamed(root, 'No'));
     await interact(() => flush());
-    expect(text(root, '[data-section="waiting"] [role="alert"]')).toBe('the ferret is gone');
+    expect(text(root, '[data-section="asks"] [role="alert"]')).toBe('the ferret is gone');
   });
 
   it('says the ask is not listed when the ferret agenda does not hold it', async () => {
     const { root } = await open({ task: blocked(), agendaItems: [] });
-    expect(text(root, '[data-section="waiting"]')).toContain('is waiting, but its ask is not listed any more.');
+    expect(text(root, '[data-section="asks"]')).toContain('is waiting, but its ask is not listed any more.');
   });
 });

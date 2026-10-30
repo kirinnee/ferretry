@@ -48,6 +48,7 @@ export const fakeActions = (
     note: verb('note'),
     link: verb('link'),
     drop: verb('drop'),
+    reparent: verb('reparent'),
     editField: verb('editField'),
     create: verb('create'),
     answer: async (...args: unknown[]) => {

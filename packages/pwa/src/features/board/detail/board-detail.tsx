@@ -1,8 +1,9 @@
 /**
  * THE CARD DETAIL (`/d/<id>/board/<taskId>`): one card in full, over the Board.
  *
- * A side drawer on a wide screen and a full-screen page on a phone; either way the address names the card,
- * so Back leaves it and a link opens it. The card is read through the board store (one source of truth with
+ * One flowing page, in the manner of a task page: a header (id, title, a lane dropdown, who and where), plain
+ * headed sections, a timeline, and a comment box pinned at the bottom. A side drawer on a wide screen and a
+ * full-screen page on a phone; either way the address names the card, so Back leaves it and a link opens it. The card is read through the board store (one source of truth with
  * the Board behind it), every write goes through `BoardActions`, and an answer to a waiting ask goes through
  * the agenda client every other answer uses. This file composes; the facts are `board-detail.ts` and the
  * sections draw them.
@@ -16,7 +17,7 @@ import {
   parseTaskRef,
   type TaskRef,
 } from '@ferretry/protocol';
-import { ArrowLeft, Check, ChevronDown, MessageSquare, X } from 'lucide-react';
+import { ArrowLeft, Check, ChevronDown, Ellipsis, MessageSquare, X } from 'lucide-react';
 import { Component, type ErrorInfo, type FormEvent, type ReactNode, useId, useMemo, useState } from 'react';
 import { type BoardMachine, useBoardTask } from '../../../hooks/use-board.ts';
 import { useBoardAsks } from '../../../hooks/use-board-asks.ts';
@@ -32,13 +33,12 @@ import {
   kindLabel,
   laneCategoryOf,
   laneNameOf,
-  laneStepper,
   verdictLanes,
   written,
 } from '../../../lib/board-detail.ts';
 import type { RunningOnMachine } from '../../../lib/board-model.ts';
 import { moveChoices, planMove } from '../../../lib/board-move.ts';
-import { peopleLabel, type FerretNames } from '../../../lib/board-present.ts';
+import type { FerretNames } from '../../../lib/board-present.ts';
 import type { DaemonBoardStore } from '../../../lib/board-store.ts';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { daemonBoardPath, daemonSessionPath } from '../../../lib/pages/routes.ts';
@@ -47,14 +47,15 @@ import { BoardReasonBox } from '../board-reason-box.tsx';
 import {
   AskSection,
   AsksList,
+  Avatar,
   type ChildLine,
   ChildrenList,
-  DependencyChips,
+  DependsLine,
   DetailSection,
   HistorySection,
-  LaneStepper,
   LinksSection,
   Prose,
+  prIconName,
   TermsTable,
 } from './board-detail-sections.tsx';
 import { WaitingOnYou } from './board-detail-waiting.tsx';
@@ -153,7 +154,6 @@ export function BoardDetail(props: BoardDetailProps) {
             {phone ? <ArrowLeft aria-hidden="true" size={14} /> : <X aria-hidden="true" size={14} />}
             {phone ? 'Board' : null}
           </button>
-          <span className="fy-board-detail__ref">{label}</span>
         </div>
         {ref.ok ? (
           <CardErrorBoundary key={`${String(machine.connection.daemonId)}/${label}`} label={label}>
@@ -195,6 +195,8 @@ function LoadedCard(props: BoardDetailProps & { readonly id: BoardTaskId }) {
   );
 }
 
+type MenuName = 'lane' | 'more';
+
 function DetailBody({
   task,
   laneSet,
@@ -212,7 +214,9 @@ function DetailBody({
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [menu, setMenu] = useState<MenuName | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [reparenting, setReparenting] = useState(false);
   const menuId = useId();
 
   const target = { daemonId: machine.connection.daemonId, id: task.id };
@@ -235,6 +239,8 @@ function DetailBody({
   );
   const open = (id: string): void =>
     onNavigate(`${daemonBoardPath(machine.connection.daemonId)}/${encodeURIComponent(id)}`);
+  const movable = laneSet !== null && category !== 'closed' && task.dropped === null;
+  const firstPr = task.links.prs[0] ?? null;
 
   const run = async (work: () => Promise<{ readonly ok: boolean; readonly error?: { readonly message: string } }>) => {
     setBusy(true);
@@ -251,7 +257,7 @@ function DetailBody({
   };
 
   const requestMove = (to: string): void => {
-    setMenuOpen(false);
+    setMenu(null);
     setNotice(null);
     const plan = planMove(laneSet, task.laneId, to);
     if (plan.kind === 'refused') setNotice(plan.message);
@@ -259,6 +265,19 @@ function DetailBody({
       setProblem(null);
       setDialog({ kind: 'move', to: plan.to, toName: laneNameOf(laneSet, plan.to) });
     } else if (plan.kind === 'send') void run(() => actions.moveTask(moveTarget, plan.to));
+  };
+
+  const copyLink = (): void => {
+    setMenu(null);
+    const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
+    if (clipboard === undefined) {
+      setNotice('This browser cannot copy; the address bar has the link.');
+      return;
+    }
+    void clipboard.writeText(window.location.href).then(
+      () => setNotice('Link copied.'),
+      () => setNotice('The link could not be copied.'),
+    );
   };
 
   const submitReason = (reason: string): void => {
@@ -294,254 +313,341 @@ function DetailBody({
               }
             : {};
 
-  return (
-    <div className="fy-board-detail__content">
-      <header className="fy-board-detail__head" data-section="header">
-        <h2 className="fy-board-detail__title">{task.title}</h2>
-        <p className="fy-board-detail__meta">
-          <span>{formatTaskRef({ id: task.id })}</span>
-          <span>{kindLabel(task.kind)}</span>
-          <span>{projectName(task.projectId)}</span>
-          <span>{peopleLabel(task, names)}</span>
-          {task.dropped === null ? null : <span data-state="dropped">Dropped: {task.dropped.reason}</span>}
-        </p>
-        <p className="fy-board-detail__activity" data-activity={task.activity}>
-          <BoardIcon
-            name={
-              category === 'verify'
-                ? 'to-test'
-                : task.waitingOnOwner.length > 0
-                  ? 'waiting-on-you'
-                  : task.activity === 'active'
-                    ? 'active'
-                    : task.activity === 'stale'
-                      ? 'stale'
-                      : task.activity === 'orphaned'
-                        ? 'orphaned'
-                        : 'waiting'
-            }
-            size={13}
-          />{' '}
-          {activityText(task, category)}
-        </p>
-      </header>
-
-      {notice === null ? null : (
-        <p className="fy-board-detail__notice" role="status">
-          {notice}
-        </p>
-      )}
-
-      {verdict === null || task.dropped !== null ? null : (
-        <fieldset aria-label="Your verdict" className="fy-board-detail__verdict">
-          {verdict.closeLaneId === null ? null : (
-            <button
-              className="fy-board-detail__big"
-              data-verdict="works"
-              disabled={busy}
-              title="Works → Close"
-              onClick={() => requestMove(verdict.closeLaneId as string)}
-              type="button"
-            >
-              <Check aria-hidden="true" size={14} />
-              Close
-            </button>
-          )}
-          {verdict.reworkLaneId === null ? null : (
-            <button
-              className="fy-board-detail__big"
-              data-verdict="not-good"
-              disabled={busy}
-              title={`Not good → back to ${laneNameOf(laneSet, verdict.reworkLaneId)}, with a reason`}
-              onClick={() => {
-                setProblem(null);
-                const to = verdict.reworkLaneId as string;
-                setDialog({ kind: 'rework', to, toName: laneNameOf(laneSet, to) });
-              }}
-              type="button"
-            >
-              <X aria-hidden="true" size={14} />
-              Not good
-            </button>
-          )}
-        </fieldset>
-      )}
-
-      <DetailSection id="stepper" title="Lane">
-        <LaneStepper steps={laneStepper(laneSet, task.laneId)} />
-      </DetailSection>
-
-      <DetailSection id="summary" title="Summary">
-        <Prose empty="No summary yet." text={task.summary} />
-      </DetailSection>
-
-      {task.waitingOnOwner.length === 0 ? null : (
-        <DetailSection
-          count={task.waitingOnOwner.length}
-          id="waiting"
-          title={
-            <span className="fy-board-detail__titled">
-              <BoardIcon name="waiting-on-you" size={12} /> Waiting on you
-            </span>
-          }
-        >
-          <WaitingOnYou
-            asks={asks}
-            names={names}
-            onAnswer={async (ref, response, note) => {
-              const result = await actions.answer(machine.connection.daemonId, ref, response, note);
-              return result.ok ? null : result.error.message;
-            }}
-          />
-        </DetailSection>
-      )}
-
-      <DetailSection id="ask" title="Ask">
-        <AskSection
-          names={names}
-          now={now}
-          onOpenSession={sessionId => onNavigate(daemonSessionPath(machine.connection.daemonId, sessionId))}
-          task={task}
-        />
-      </DetailSection>
-
-      {written(task.premise) ? (
-        <DetailSection defaultOpen={false} id="premise" title="Premise">
-          <Prose empty="" text={task.premise} />
-        </DetailSection>
-      ) : null}
-      {written(task.context) ? (
-        <DetailSection defaultOpen={false} id="context" title="Context">
-          <Prose empty="" text={task.context} />
-        </DetailSection>
-      ) : null}
-      {task.terms.length === 0 ? null : (
-        <DetailSection count={task.terms.length} defaultOpen={false} id="terms" title="Terms">
-          <TermsTable terms={task.terms} />
-        </DetailSection>
-      )}
-      {written(task.brief) ? (
-        <DetailSection defaultOpen={false} id="brief" title="Brief">
-          <Prose empty="" text={task.brief} />
-        </DetailSection>
-      ) : null}
-
-      {children.length === 0 ? null : (
-        <DetailSection count={children.length} id="children" title="Sub-cards">
-          <ChildrenList lines={children} now={now} onOpen={open} />
-        </DetailSection>
-      )}
-
-      <DetailSection id="depends" title="Depends on and blocks">
-        <DependencyChips
-          onOpen={open}
-          onUndepend={ref => {
-            setProblem(null);
-            setDialog({ kind: 'undepend', ref });
-          }}
-          task={task}
-        />
-        <DependForm
-          busy={busy}
-          onAdd={(ref, until) => run(() => actions.depend(target, { task: ref, until }))}
-          problem={dialog === null ? problem : null}
-        />
-      </DetailSection>
-
-      {hasLinks(task) ? (
-        <DetailSection id="links" title="Links">
-          <LinksSection runningOn={here?.runningOn ?? []} task={task} />
-        </DetailSection>
-      ) : null}
-
-      {asks.open.length + asks.resolved.length === 0 ? null : (
-        <DetailSection count={asks.open.length + asks.resolved.length} id="asks" title="Asks">
-          <AsksList asks={asks} names={names} />
-        </DetailSection>
-      )}
-
-      <DetailSection id="history" title="History">
-        <HistorySection context={historyContext} now={now} task={task} />
-      </DetailSection>
-
-      <fieldset aria-label="Card actions" className="fy-board-detail__actions">
-        {laneSet === null || category === 'closed' || task.dropped !== null ? null : (
-          <div className="fy-board-detail__menu">
-            <button
-              aria-controls={menuOpen ? menuId : undefined}
-              aria-expanded={menuOpen}
-              aria-haspopup="menu"
-              className="kt-btn"
-              data-variant="ghost"
-              onClick={() => setMenuOpen(value => !value)}
-              type="button"
-            >
-              Move <ChevronDown aria-hidden="true" size={12} />
-            </button>
-            {menuOpen ? (
-              <div aria-label="Move to…" className="fy-board-menu" id={menuId} role="menu">
-                {moveChoices(laneSet, task.laneId).map(choice => (
-                  <button
-                    className="fy-board-menu__item"
-                    data-backward={choice.backward ? '' : undefined}
-                    key={choice.laneId}
-                    onClick={() => requestMove(choice.laneId)}
-                    role="menuitem"
-                    type="button"
-                  >
-                    {choice.name}
-                    {choice.backward ? ' (needs a reason)' : ''}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        )}
+  const laneMenu = (
+    <div aria-label="Move to…" className="fy-board-menu fy-board-detail__lanemenu" id={menuId} role="menu">
+      {moveChoices(laneSet, task.laneId).map(choice => (
         <button
-          className="kt-btn"
-          data-variant="ghost"
-          onClick={() => onNavigate(daemonSessionPath(machine.connection.daemonId, recipient))}
+          className="fy-board-menu__item"
+          data-backward={choice.backward ? '' : undefined}
+          key={choice.laneId}
+          onClick={() => requestMove(choice.laneId)}
+          role="menuitem"
           type="button"
         >
-          <MessageSquare aria-hidden="true" size={12} /> Open chat
+          {choice.name}
+          {choice.backward ? ' (needs a reason)' : ''}
         </button>
-        {task.dropped !== null ? null : (
-          <button
-            className="kt-btn"
-            data-variant="ghost"
-            onClick={() => {
-              setProblem(null);
-              setDialog({ kind: 'drop' });
-            }}
-            type="button"
-          >
-            Drop
-          </button>
-        )}
-      </fieldset>
+      ))}
+    </div>
+  );
 
-      <CommentForm
-        busy={busy}
-        name={names(recipient)}
-        onSend={async text => {
-          setBusy(true);
-          setProblem(null);
-          try {
-            await ports.sendMessage(machine.connection, recipient, ferretComment(task, text));
-          } catch (reason) {
+  return (
+    <>
+      <div className="fy-board-detail__content">
+        <header className="fy-board-detail__head" data-section="header">
+          <div className="fy-board-detail__headline">
+            <h2 className="fy-board-detail__title">
+              <span className="fy-board-detail__id">{formatTaskRef({ id: task.id })}</span> {task.title}
+            </h2>
+            <div className="fy-board-detail__tools">
+              <button
+                className="kt-btn"
+                data-variant="ghost"
+                onClick={() => onNavigate(daemonSessionPath(machine.connection.daemonId, recipient))}
+                type="button"
+              >
+                <MessageSquare aria-hidden="true" size={12} /> Open chat
+              </button>
+              <div className="fy-board-detail__menu">
+                <button
+                  aria-controls={menu === 'more' ? menuId : undefined}
+                  aria-expanded={menu === 'more'}
+                  aria-haspopup="menu"
+                  aria-label="More actions"
+                  className="kt-btn"
+                  data-variant="ghost"
+                  onClick={() => setMenu(value => (value === 'more' ? null : 'more'))}
+                  type="button"
+                >
+                  <Ellipsis aria-hidden="true" size={14} />
+                </button>
+                {menu === 'more' ? (
+                  <div aria-label="More actions" className="fy-board-menu" id={menuId} role="menu">
+                    {movable ? (
+                      <button
+                        className="fy-board-menu__item"
+                        onClick={() => setMenu('lane')}
+                        role="menuitem"
+                        type="button"
+                      >
+                        Move to…
+                      </button>
+                    ) : null}
+                    <button
+                      className="fy-board-menu__item"
+                      onClick={() => {
+                        setMenu(null);
+                        setReparenting(true);
+                      }}
+                      role="menuitem"
+                      type="button"
+                    >
+                      Reparent…
+                    </button>
+                    {task.dropped === null ? (
+                      <button
+                        className="fy-board-menu__item"
+                        onClick={() => {
+                          setMenu(null);
+                          setProblem(null);
+                          setDialog({ kind: 'drop' });
+                        }}
+                        role="menuitem"
+                        type="button"
+                      >
+                        Drop…
+                      </button>
+                    ) : null}
+                    <button className="fy-board-menu__item" onClick={copyLink} role="menuitem" type="button">
+                      Copy link
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+          <div className="fy-board-detail__meta">
+            <span className="fy-board-detail__lane">
+              {movable ? (
+                <>
+                  <button
+                    aria-controls={menu === 'lane' ? menuId : undefined}
+                    aria-expanded={menu === 'lane'}
+                    aria-haspopup="menu"
+                    aria-label={`Lane: ${laneNameOf(laneSet, task.laneId)}. Move to…`}
+                    className="fy-board-detail__pill"
+                    data-pill="lane"
+                    onClick={() => setMenu(value => (value === 'lane' ? null : 'lane'))}
+                    type="button"
+                  >
+                    {laneNameOf(laneSet, task.laneId)} <ChevronDown aria-hidden="true" size={12} />
+                  </button>
+                  {menu === 'lane' ? laneMenu : null}
+                </>
+              ) : (
+                <span className="fy-board-detail__pill" data-pill="lane" data-static="">
+                  {laneNameOf(laneSet, task.laneId)}
+                </span>
+              )}
+            </span>
+            {firstPr === null ? null : (
+              <a
+                className="fy-board-detail__metalink"
+                data-meta="pr"
+                href={firstPr.url}
+                rel="noreferrer"
+                target="_blank"
+              >
+                <BoardIcon name={prIconName(firstPr)} size={13} /> {firstPr.repo}#{firstPr.number}
+              </a>
+            )}
+            <span className="fy-board-detail__who" data-meta="assignee">
+              <Avatar name={names(recipient)} /> {names(recipient)}
+            </span>
+            <span className="fy-board-detail__activity" data-activity={task.activity}>
+              <BoardIcon
+                name={
+                  category === 'verify'
+                    ? 'to-test'
+                    : task.waitingOnOwner.length > 0
+                      ? 'waiting-on-you'
+                      : task.activity === 'active'
+                        ? 'active'
+                        : task.activity === 'stale'
+                          ? 'stale'
+                          : task.activity === 'orphaned'
+                            ? 'orphaned'
+                            : 'waiting'
+                }
+                size={13}
+              />{' '}
+              {activityText(task, category)}
+            </span>
+            <span className="fy-board-detail__faint">
+              {kindLabel(task.kind)} · {projectName(task.projectId)}
+            </span>
+          </div>
+          {task.dropped === null ? null : (
+            <p className="fy-board-detail__quiet" data-state="dropped">
+              Dropped: {task.dropped.reason}
+            </p>
+          )}
+        </header>
+
+        {verdict === null || task.dropped !== null ? null : (
+          <fieldset aria-label="Your verdict" className="fy-board-detail__verdict">
+            {verdict.closeLaneId === null ? null : (
+              <button
+                className="kt-btn"
+                data-variant="primary"
+                data-verdict="works"
+                disabled={busy}
+                title="Works → Close"
+                onClick={() => requestMove(verdict.closeLaneId as string)}
+                type="button"
+              >
+                <Check aria-hidden="true" size={14} />
+                Close
+              </button>
+            )}
+            {verdict.reworkLaneId === null ? null : (
+              <button
+                className="kt-btn"
+                data-variant="ghost"
+                data-verdict="not-good"
+                disabled={busy}
+                title={`Not good → back to ${laneNameOf(laneSet, verdict.reworkLaneId)}, with a reason`}
+                onClick={() => {
+                  setProblem(null);
+                  const to = verdict.reworkLaneId as string;
+                  setDialog({ kind: 'rework', to, toName: laneNameOf(laneSet, to) });
+                }}
+                type="button"
+              >
+                <X aria-hidden="true" size={14} />
+                Not good
+              </button>
+            )}
+          </fieldset>
+        )}
+
+        {reparenting ? (
+          <ReparentForm
+            busy={busy}
+            onCancel={() => setReparenting(false)}
+            onSubmit={async parent => {
+              const done = await run(() => actions.reparent(target, parent));
+              if (done) {
+                setReparenting(false);
+                setNotice(parent === null ? 'Now a top-level card.' : `Moved under ${formatTaskRef(parent)}.`);
+              }
+              return done;
+            }}
+            problem={dialog === null ? problem : null}
+          />
+        ) : null}
+
+        <DetailSection id="summary" title="Summary">
+          <Prose empty="No summary yet." text={task.summary} />
+        </DetailSection>
+
+        <DetailSection id="ask" title="Ask">
+          <AskSection
+            names={names}
+            now={now}
+            onOpenSession={sessionId => onNavigate(daemonSessionPath(machine.connection.daemonId, sessionId))}
+            task={task}
+          />
+        </DetailSection>
+
+        {written(task.premise) ? (
+          <DetailSection id="premise" title="Premise">
+            <Prose empty="" text={task.premise} />
+          </DetailSection>
+        ) : null}
+        {written(task.context) ? (
+          <DetailSection id="context" title="Context">
+            <Prose empty="" text={task.context} />
+          </DetailSection>
+        ) : null}
+        {task.terms.length === 0 ? null : (
+          <DetailSection count={task.terms.length} id="terms" title="Terms">
+            <TermsTable terms={task.terms} />
+          </DetailSection>
+        )}
+        {written(task.brief) ? (
+          <DetailSection id="brief" title="Brief">
+            <Prose empty="" text={task.brief} />
+          </DetailSection>
+        ) : null}
+
+        {children.length === 0 ? null : (
+          <DetailSection count={children.length} id="children" title="Sub-cards">
+            <ChildrenList lines={children} now={now} onOpen={open} />
+          </DetailSection>
+        )}
+
+        {hasLinks(task) ? (
+          <DetailSection id="links" title="Links">
+            <LinksSection runningOn={here?.runningOn ?? []} task={task} />
+          </DetailSection>
+        ) : null}
+
+        <DetailSection id="depends" title="Depends on">
+          <DependsLine
+            adding={adding}
+            form={
+              <DependForm
+                busy={busy}
+                onAdd={(ref, until) => run(() => actions.depend(target, { task: ref, until }))}
+                problem={dialog === null ? problem : null}
+              />
+            }
+            onOpen={open}
+            onToggleAdd={() => setAdding(value => !value)}
+            onUndepend={ref => {
+              setProblem(null);
+              setDialog({ kind: 'undepend', ref });
+            }}
+            task={task}
+          />
+        </DetailSection>
+
+        {task.waitingOnOwner.length + asks.open.length + asks.resolved.length === 0 ? null : (
+          <DetailSection count={asks.open.length + asks.resolved.length} id="asks" title="Agenda asks">
+            {task.waitingOnOwner.length === 0 ? null : (
+              <WaitingOnYou
+                asks={asks}
+                names={names}
+                onAnswer={async (ref, response, note) => {
+                  const result = await actions.answer(machine.connection.daemonId, ref, response, note);
+                  return result.ok ? null : result.error.message;
+                }}
+              />
+            )}
+            {asks.open.length + asks.resolved.length === 0 ? null : <AsksList asks={asks} names={names} />}
+          </DetailSection>
+        )}
+
+        <DetailSection id="history" title="History">
+          <HistorySection context={historyContext} now={now} task={task} />
+        </DetailSection>
+      </div>
+
+      <footer className="fy-board-detail__foot">
+        {problem === null || dialog !== null || adding || reparenting ? null : (
+          <p className="fy-board-reason__error" data-problem="" role="alert">
+            {problem}
+          </p>
+        )}
+        {notice === null ? null : (
+          <p className="fy-board-detail__notice" role="status">
+            {notice}
+          </p>
+        )}
+        <CommentForm
+          busy={busy}
+          name={names(recipient)}
+          onSend={async text => {
+            setBusy(true);
+            setProblem(null);
+            try {
+              await ports.sendMessage(machine.connection, recipient, ferretComment(task, text));
+            } catch (reason) {
+              setBusy(false);
+              return reason instanceof Error ? reason.message : 'The message did not go through.';
+            }
+            const noted = await actions.note(target, commentNote(text));
             setBusy(false);
-            return reason instanceof Error ? reason.message : 'The message did not go through.';
-          }
-          const noted = await actions.note(target, commentNote(text));
-          setBusy(false);
-          setNotice(
-            noted.ok
-              ? `Sent to ${names(recipient)}.`
-              : `Sent to ${names(recipient)}, but not noted: ${noted.error.message}`,
-          );
-          return null;
-        }}
-      />
+            setNotice(
+              noted.ok
+                ? `Sent to ${names(recipient)}.`
+                : `Sent to ${names(recipient)}, but not noted: ${noted.error.message}`,
+            );
+            return null;
+          }}
+        />
+      </footer>
 
       {dialog === null ? null : (
         <div className="fy-board__scrim">
@@ -558,7 +664,7 @@ function DetailBody({
           />
         </div>
       )}
-    </div>
+    </>
   );
 }
 
@@ -620,6 +726,56 @@ function DependForm({
   );
 }
 
+/** "Reparent…": the card it goes under, or nothing to make it a top-level card. */
+function ReparentForm({
+  busy,
+  problem,
+  onSubmit,
+  onCancel,
+}: {
+  readonly busy: boolean;
+  readonly problem: string | null;
+  readonly onSubmit: (parent: TaskRef | null) => Promise<boolean>;
+  readonly onCancel: () => void;
+}) {
+  const [text, setText] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const submit = (event: FormEvent): void => {
+    event.preventDefault();
+    const ref = parseTaskRef(text);
+    if (!ref.ok && ref.error.code !== 'empty') {
+      setError(`${text.trim()} is not a card id.`);
+      return;
+    }
+    setError(null);
+    void onSubmit(ref.ok ? ref.value : null);
+  };
+  return (
+    <form className="fy-board-detail__form" data-form="reparent" onSubmit={submit}>
+      <input
+        aria-label="Parent card"
+        className="fy-board-reason__input"
+        onChange={event => setText(event.target.value)}
+        placeholder="Move under… &F412 (empty: top level)"
+        type="text"
+        value={text}
+      />
+      <button className="kt-btn" data-variant="ghost" disabled={busy} type="submit">
+        Reparent
+      </button>
+      <button className="kt-btn" data-variant="ghost" onClick={onCancel} type="button">
+        Cancel
+      </button>
+      {(error ?? problem) ? (
+        <p className="fy-board-reason__error" role="alert">
+          {error ?? problem}
+        </p>
+      ) : null}
+    </form>
+  );
+}
+
+/** The comment box, in the chat composer's shape: Enter sends, Shift+Enter is a new line. */
 function CommentForm({
   busy,
   name,
@@ -631,8 +787,7 @@ function CommentForm({
 }) {
   const [text, setText] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const submit = (event: FormEvent): void => {
-    event.preventDefault();
+  const send = (): void => {
     if (text.trim() === '') return;
     void onSend(text).then(failed => {
       setError(failed);
@@ -640,17 +795,29 @@ function CommentForm({
     });
   };
   return (
-    <form className="fy-board-detail__form" data-form="comment" onSubmit={submit}>
+    <form
+      className="fy-board-detail__composer"
+      data-form="comment"
+      onSubmit={(event: FormEvent) => {
+        event.preventDefault();
+        send();
+      }}
+    >
       <textarea
         aria-label={`Comment to ${name}`}
-        className="fy-board-reason__input"
+        className="fy-board-detail__composer-input"
         onChange={event => setText(event.target.value)}
+        onKeyDown={event => {
+          if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+          event.preventDefault();
+          send();
+        }}
         placeholder={`Comment to ${name}…`}
-        rows={2}
+        rows={1}
         value={text}
       />
       <button className="kt-btn" data-variant="primary" disabled={busy || text.trim() === ''} type="submit">
-        Send to ferret
+        Send
       </button>
       {error === null ? null : (
         <p className="fy-board-reason__error" role="alert">

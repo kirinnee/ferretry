@@ -3,8 +3,9 @@
  * (`board-detail-screenshot.ts` bundles this): a drawer beside the Board on a wide screen, a page of its own
  * on a phone.
  *
- * `?view=card|tested|ask` picks the card: a card in review with children, dependencies, links and history; a
- * 🧪 To test card with the two verdict buttons; a card stopped by a blocking ask with answer buttons.
+ * `?view=card|tested|ask|empty` picks the card: a card in review with a PR, children, dependencies, links and
+ * history; a 🧪 To test card with the two verdict buttons; a card stopped by a blocking ask with answer buttons;
+ * a brand-new card with nothing on it yet.
  * Nothing leaves the page.
  */
 
@@ -110,7 +111,10 @@ const REVIEW_CARD = card('F2', {
   owner: DENISHA,
   assignee: OTTILIE,
   summary: 'Open any card from the Board: its ask, asks waiting on you, children, links and history in one place.',
-  ask: { text: 'Open a card to see everything about it, and act on it from there.', source: `session:${DENISHA}` },
+  ask: {
+    text: '(sada, found live) Open a card to see everything about it, and act on it from there.',
+    source: 'owner (board)',
+  },
   clarifications: [
     { text: 'On a phone this is a full page, and Back must work.', source: 'owner (board)', at: ago(300), by: owner },
   ],
@@ -165,6 +169,16 @@ const REVIEW_CARD = card('F2', {
     { seq: 8, at: ago(300), actor: owner, type: 'note', text: 'Looks good so far; keep the sections compact.' },
     {
       seq: 9,
+      at: ago(120),
+      actor: ferret(OTTILIE),
+      type: 'moved',
+      from: 'implement',
+      to: 'plan',
+      backward: true,
+      reason: 'the brief changed, replanning the sections',
+    },
+    {
+      seq: 10,
       at: ago(60),
       actor: daemon,
       type: 'moved',
@@ -213,6 +227,19 @@ const TESTED_CARD = card('F10', {
   ],
 });
 
+const EMPTY_CARD = card('F11', {
+  createdAt: ago(3),
+  title: 'Try the new card page',
+  laneId: 'todo',
+  owner: DENISHA,
+  assignee: null,
+  summary: '',
+  ask: { text: 'Make a card here and see how it reads.', source: 'owner (board)' },
+  activity: 'idle',
+  lastTouchedAt: ago(3),
+  history: [{ seq: 1, at: ago(3), actor: owner, type: 'created', laneId: 'todo' }],
+});
+
 const WAITING_CARD = card('F8', {
   createdAt: ago(30),
   title: 'Choose the finished-items database',
@@ -231,6 +258,7 @@ const BOARD_CARDS = [
   REVIEW_CARD,
   TESTED_CARD,
   WAITING_CARD,
+  EMPTY_CARD,
   card('F1', { title: 'Board v2', laneId: 'implement', owner: DENISHA, rollup: rollup(4, 2), lastTouchedAt: ago(30) }),
   card('F3', {
     title: 'Detail: sections',
@@ -252,7 +280,7 @@ const BOARD_CARDS = [
 ];
 
 const view = new URLSearchParams(window.location.search).get('view') ?? 'card';
-const OPEN_ID = view === 'tested' ? 'F10' : view === 'ask' ? 'F8' : 'F2';
+const OPEN_ID = view === 'tested' ? 'F10' : view === 'ask' ? 'F8' : view === 'empty' ? 'F11' : 'F2';
 
 const store = new DaemonBoardStore(
   fakePort({

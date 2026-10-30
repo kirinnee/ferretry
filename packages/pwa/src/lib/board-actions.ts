@@ -84,6 +84,8 @@ export interface BoardActions {
   link(target: BoardCardTarget, link: BoardLinkTarget): Promise<BoardMutation>;
   drop(target: BoardCardTarget, reason: string): Promise<BoardMutation>;
   editField(target: BoardCardTarget, edit: BoardEdit): Promise<BoardMutation>;
+  /** Puts the card under another card, or at the top level with `parent: null`. */
+  reparent(target: BoardCardTarget, parent: Action<'reparent'>['parent'], reason?: string): Promise<BoardMutation>;
   /** Opens a card the owner writes, on one machine. */
   create(daemonId: DaemonId, request: BoardTaskCreateRequestInput): Promise<BoardMutation>;
   /** The owner picks a template for a project with no lanes: proposed, then confirmed in the same breath. */
@@ -192,6 +194,8 @@ export const createBoardActions = (deps: BoardActionsDeps): BoardActions => {
     link: (target, link) => send(target, { action: 'link', ...link }),
     drop: (target, reason) => send(target, { action: 'drop', reason }),
     editField: (target, edit) => send(target, { action: 'edit', ...edit }),
+    reparent: (target, parent, reason) =>
+      send(target, { action: 'reparent', parent, ...(reason === undefined ? {} : { reason }) }),
     create: async (daemonId, request) => {
       const machine = deps.connection(daemonId);
       if (machine === undefined) return boardErr(unpaired(daemonId));
