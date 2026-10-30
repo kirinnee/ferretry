@@ -8,7 +8,10 @@ import {
   emptyWardenDay,
   EMPTY_JEV_DAY,
   expiredJevCheckFiles,
+  JEV_BEFORE_LIMIT,
   JEV_CHECK_KEEP_DAYS,
+  jevBeforeInvestigation,
+  jevBeforeOf,
   jevCapSkipOf,
   jevCheckDay,
   jevCheckFileDay,
@@ -18,7 +21,9 @@ import {
   jevCheckOf,
   parseJevCheckLines,
   pruneCapSkips,
+  pruneJevBefore,
   recordWardenJevCheck,
+  rememberJevBefore,
 } from '../../../src/lib/warden/index.ts';
 
 const NOW = Date.parse('2026-10-30T12:00:00.000Z');
@@ -206,5 +211,82 @@ describe('remembering cap skips', () => {
 
     // Assert
     should(actual).deepEqual([kept]);
+  });
+});
+
+describe('what Jev did before an investigation', () => {
+  const prior = (overrides: Partial<WardenJevCheck> & { readonly verdict: 'handed_on' | 'skipped' | 'acted' }) => ({
+    ...check(overrides),
+    verdict: overrides.verdict,
+  });
+
+  it('should carry a check over without its text, and an act as why Jev was not asked again', () => {
+    // Act
+    const handed = jevBeforeOf(prior({ verdict: 'handed_on', why: 'not_sure_enough', act: 'restart', route: 'owner' }));
+    const skipped = jevBeforeOf(prior({ verdict: 'skipped', why: 'jev_paced', confidence: 0, costUsd: 0 }));
+    const acted = jevBeforeOf(prior({ verdict: 'acted', act: 'nudge' }));
+
+    // Assert
+    should(handed).deepEqual({
+      verdict: 'handed_on',
+      why: 'not_sure_enough',
+      act: 'restart',
+      at: '2026-10-30T12:00:00.000Z',
+      confidence: 0.9,
+      costUsd: 0.0004,
+    });
+    should(skipped).match({ verdict: 'skipped', why: 'jev_paced', confidence: 0, costUsd: 0 });
+    should(acted).match({ verdict: 'not_asked', why: 'already_acted', act: 'nudge' });
+    should(jevBeforeOf(prior({ verdict: 'handed_on', why: undefined }))).not.have.property('why');
+  });
+
+  it('should keep one word per flag, the newest first, and no more than the limit', () => {
+    // Arrange
+    const full = Object.fromEntries(
+      Array.from({ length: JEV_BEFORE_LIMIT }, (_, index) => [`s${index}|sus_thinking`, { verdict: 'off' as const }]),
+    );
+
+    // Act
+    const replaced = rememberJevBefore({ 'a|x': { verdict: 'off' } }, 'a|x', { verdict: 'skipped', why: 'jev_cap' });
+    const bounded = rememberJevBefore(full, 'new|sus_thinking', { verdict: 'off' });
+
+    // Assert
+    should(replaced).deepEqual({ 'a|x': { verdict: 'skipped', why: 'jev_cap' } });
+    should(Object.keys(bounded)).have.length(JEV_BEFORE_LIMIT);
+    should(Object.keys(bounded)[0]).equal('new|sus_thinking');
+    should(bounded).not.have.property(`s${JEV_BEFORE_LIMIT - 1}|sus_thinking`);
+  });
+
+  it('should forget the word on a flag that no longer stands', () => {
+    // Act
+    const actual = pruneJevBefore({ 's1|sus_thinking': { verdict: 'off' }, 's2|sus_thinking': { verdict: 'off' } }, [
+      anomaly,
+    ]);
+
+    // Assert
+    should(actual).deepEqual({ 's1|sus_thinking': { verdict: 'off' } });
+  });
+
+  it.each([
+    [
+      'the owner asked',
+      { kind: 'owner_request', jevOn: true, force: false },
+      { verdict: 'not_asked', why: 'owner_request' },
+    ],
+    [
+      'Jev said something',
+      { kind: 'sus_thinking', jevOn: false, force: true, last: { verdict: 'skipped', why: 'jev_cap' } },
+      { verdict: 'skipped', why: 'jev_cap' },
+    ],
+    ['the layer is off', { kind: 'sus_thinking', jevOn: false, force: true }, { verdict: 'off' }],
+    ['a forced run', { kind: 'sus_thinking', jevOn: true, force: true }, { verdict: 'not_asked', why: 'forced' }],
+    [
+      'nothing was kept',
+      { kind: 'sus_thinking', jevOn: true, force: false },
+      { verdict: 'not_asked', why: 'no_record' },
+    ],
+  ] as const)('should say what Jev did when %s', (_label, input, expected) => {
+    // Act / Assert
+    should(jevBeforeInvestigation(input)).deepEqual(expected);
   });
 });
