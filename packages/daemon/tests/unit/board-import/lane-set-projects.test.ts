@@ -71,39 +71,4 @@ describe('LaneSetImportProjects', () => {
       },
     ]);
   });
-
-  it('should propose the quick lanes for a project with no folder, without looking at git', async () => {
-    // Arrange
-    const fake = new FakeLanes(project(null));
-    const facts = new FakeFacts();
-
-    // Act
-    await new LaneSetImportProjects(fake, facts).propose(PROJECT, 'lead');
-
-    // Assert
-    should(facts.inspected).eql([]);
-    should(fake.applied[0]?.request).match({ template: 'quick' });
-  });
-
-  it('should answer null for a project that is not there', async () => {
-    // Act
-    const proposed = await new LaneSetImportProjects(new FakeLanes(undefined), new FakeFacts()).propose(
-      PROJECT,
-      'lead',
-    );
-
-    // Assert
-    should(proposed).be.null();
-  });
-
-  it('should answer null when the proposal is refused', async () => {
-    // Act
-    const proposed = await new LaneSetImportProjects(
-      new FakeLanes(project('/repo'), 'refused'),
-      new FakeFacts(),
-    ).propose(PROJECT, 'lead');
-
-    // Assert
-    should(proposed).be.null();
-  });
 });

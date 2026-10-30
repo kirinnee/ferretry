@@ -549,7 +549,6 @@ import {
   BoardService,
   BoardSweep,
   LivenessActivityDeriver,
-  NoLaneProposals,
   type PendingContext,
   PendingContextDelivery,
   ReopenDeliveryLadder,
@@ -820,6 +819,7 @@ import {
   jsonObject,
   KnownAndFerretFolders,
   LaneProposalAcceptance,
+  InferredLaneProposer,
   LaneSetService,
   type LearningSubsystem,
   LegacyWireUseCounter,
@@ -1894,8 +1894,8 @@ interface BoardWorld {
  * The project boards (v2): one file per card under `<state>/board`, written under ownership and lineage,
  * and the cards every start with a brief gets (`SessionCards`, board-design.md §3.1).
  *
- * Lanes and projects are U3's `LaneSetService`. Lane proposals for a project with none are still a STUB
- * (`NoLaneProposals`, until the template inference lands, so such a card is filed on Unfiled with a hint).
+ * Lanes and projects are U3's `LaneSetService`; a start in a project with no lanes is proposed the template its
+ * folder suggests (`InferredLaneProposer`).
  * Activity is derived from the session roster with the Warden's liveness ledger laid over it, and the
  * lead's quiet lines wait in its pending context for its next turn. The agenda link reads each ferret's
  * agenda through the agenda service, and a reopen is delivered through the ordinary send path. The
@@ -1908,7 +1908,7 @@ function createBoardWorld(
   clock: SystemClock,
   machineId: () => string | undefined,
   /** Which board a session works on, each board's lanes and its name (U3's `LaneSetService`). */
-  lanes: Pick<LaneSetService, 'projectOf' | 'laneSet' | 'project'>,
+  lanes: Pick<LaneSetService, 'projectOf' | 'laneSet' | 'project' | 'apply'>,
   sends: Pick<SessionSendService, 'send'>,
   /** One ferret's open agenda items; read lazily, because the agenda service is built after the board. */
   agendaItems: (sessionId: string) => Promise<readonly AgendaItem[]>,
@@ -1940,7 +1940,7 @@ function createBoardWorld(
   const cards = new SessionCards({
     board,
     lanes,
-    proposer: new NoLaneProposals(),
+    proposer: new InferredLaneProposer(lanes, new GitProjectFacts()),
     // The name the board list shows: a registered project's, `Unfiled`, or the id of one no longer listed.
     projects: { nameOf: async projectId => (await lanes.project(projectId))?.name ?? projectId },
     focus,
