@@ -190,14 +190,7 @@ describe('the Board scrolls in one place on a phone', () => {
         expect(dense.moreButton.height).toBeLessThan(40);
         expect(dense.moreHit.width).toBeGreaterThanOrEqual(40);
         expect(dense.moreHit.height).toBeGreaterThanOrEqual(40);
-        // A finger 18px off the small button's centre, still inside the 44px overlay, lands on the button.
-        const reaches = await tab.evaluate(() => {
-          const more = document.querySelector('.fy-board-card__more')?.getBoundingClientRect();
-          if (more === undefined) return false;
-          const hit = document.elementFromPoint(more.left + more.width / 2, more.top + more.height / 2 + 18);
-          return hit !== null && hit.closest('.fy-board-card__more') !== null;
-        });
-        expect(reaches).toBe(true);
+        expect(dense.moreReached).toBe(true);
         await shoot(tab, `board-b62-${mode}-phone-dense.png`);
       } finally {
         await context.close();

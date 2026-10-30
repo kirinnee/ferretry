@@ -96,6 +96,8 @@ export interface BoardDensityFacts {
   /** The ⋮ menu button's own box and the box a finger can hit (the button's, or its hit overlay's). */
   readonly moreButton: { readonly width: number; readonly height: number };
   readonly moreHit: { readonly width: number; readonly height: number };
+  /** A finger 18px off the visible button's centre, inside its hit overlay, lands on the button. */
+  readonly moreReached: boolean;
 }
 
 export const readBoardDensity = async (page: Page): Promise<BoardDensityFacts> =>
@@ -106,13 +108,22 @@ export const readBoardDensity = async (page: Page): Promise<BoardDensityFacts> =
     const strip = document.querySelector('.fy-board-phone__strip')?.getBoundingClientRect();
     const bar = document.querySelector('[data-safe-bottom]')?.getBoundingClientRect();
     const floor = bar?.top ?? window.innerHeight;
-    const more = document.querySelector<HTMLElement>('.fy-board-card__more');
+    const limit = strip?.bottom ?? 0;
+    const visible = [...document.querySelectorAll<HTMLElement>('.fy-board-card__more')].filter(
+      button => button.getBoundingClientRect().top >= limit + 20 && button.getBoundingClientRect().bottom <= floor - 20,
+    );
+    const more = visible[0] ?? document.querySelector<HTMLElement>('.fy-board-card__more');
     const button = more?.getBoundingClientRect();
     // The hit area is whatever the element's `::after` overlay reaches, read from the pseudo-element's own box.
     const after = more === null || more === undefined ? null : getComputedStyle(more, '::after');
     const reach = (value: string | undefined): number =>
       value === undefined || value === 'auto' ? 0 : Number.parseFloat(value);
+    const reached =
+      button === undefined
+        ? null
+        : document.elementFromPoint(button.left + button.width / 2, button.top + button.height / 2 + 18);
     return {
+      moreReached: reached?.closest('.fy-board-card__more') === more,
       cardHeight: boxes[0]?.height ?? 0,
       cardStep: boxes.length > 1 ? (boxes[1]?.top ?? 0) - (boxes[0]?.top ?? 0) : 0,
       wholeCardsUnderStrip: boxes.filter(box => box.top >= (strip?.bottom ?? 0) && box.bottom <= floor).length,
