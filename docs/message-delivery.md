@@ -34,7 +34,9 @@ is typed from it; the rest of this page is still how a message reaches the pane.
   (`movesFrom`): `queued` there is ✓✓, `delivered` there is ✓✓✓. A `typing` message the ledger never saw
   had no key typed and waits again; nothing is ever typed twice on a guess. It looks at a session when a
   message is enqueued, when its state document changes, at boot, and every `lookMs` (5 s) while something
-  in it is still waiting or unproven. Claude Code only for now; Codex is the next slice.
+  in it is still waiting or unproven. Both harnesses follow one rule: Claude Code's own queue shows a
+  message typed mid-turn, so its hand-over is proven at once; Codex steers it into the running turn and
+  shows nothing, so it stays `typing` — holding the next message — until Codex's transcript proves it.
 - **Read it** — `GET /v1/sessions/:sessionId/queue` (operator), `fy queue <ferret> [--json]`.
 - **Edit or cancel** — only while `queued` (`SessionQueueService.edit` / `.cancel`): once a key has gone to
   the pane, the words are the agent's.

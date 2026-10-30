@@ -257,17 +257,31 @@ describe('handing over a queue', () => {
     should(world.scheduled).have.length(1);
   });
 
-  it('should leave a Codex session and a daemon notice to the owner’s chat alone', async () => {
-    const codex = new World(message('a', 'human'));
-    codex.target = { ...codex.target, harness: 'codex' };
+  it('should deliver to a Codex session mid-turn, holding the rest until its transcript proves the first', async () => {
+    // Codex steers text typed mid-turn into the running turn and shows no queue: the pane proves nothing.
+    const world = new World(message('a', 'human'), message('b', 'agent', 1));
+    world.target = { ...world.target, harness: 'codex' };
+    world.answers.push({ kind: 'unproven' });
+
+    await world.deliverer.enqueued(ID);
+    should(world.handed).eql(['a']);
+    should(world.state('b')?.state).equal('queued');
+
+    world.fates.set('a', 'delivered');
+    await world.deliverer.changed(ID);
+
+    should(world.state('a')?.state).equal('read');
+    should(world.handed).eql(['a', 'b']);
+  });
+
+  it('should leave a daemon notice to the owner’s chat alone', async () => {
     const chat = new World(message('warden', 'daemon'));
     chat.target = { ...chat.target, mode: 'interactive' };
 
-    await codex.deliverer.enqueued(ID);
     await chat.deliverer.enqueued(ID);
 
-    should([...codex.handed, ...chat.handed]).be.empty();
-    should([...codex.scheduled, ...chat.scheduled]).be.empty();
+    should(chat.handed).be.empty();
+    should(chat.scheduled).be.empty();
   });
 
   it('should ignore a change to a session with nothing open, and pick up what a restart left', async () => {

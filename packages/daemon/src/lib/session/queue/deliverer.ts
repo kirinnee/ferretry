@@ -23,7 +23,10 @@ import type { SessionQueueStore } from './ports.ts';
  * `lookMs`, since a person clearing a draft writes nothing the daemon hears. A session with nothing open
  * is not looked at at all.
  *
- * Claude Code only for now: a Codex session's queue is left alone until its own slice.
+ * BOTH HARNESSES, ONE RULE. Claude Code holds text typed mid-turn in its own queue, which the pane shows,
+ * so the hand-over is proven at once. Codex steers it straight into the running turn and shows nothing
+ * (measured on 0.163), so the hand-over is unproven: the message stays `typing`, nothing else is typed
+ * behind it, and Codex's transcript — through the send ledger — moves it on within seconds.
  */
 
 /** The send path, as delivery uses it. */
@@ -129,7 +132,6 @@ export class QueueDeliverer {
       await this.waiting(id, messages, 'unreadable');
       return false;
     }
-    if (view.target.harness === 'codex') return false;
     const next = nextToDeliver(messages, view.target.mode);
     if (next === undefined) return false;
     const reason = waitReasonOf(view);
