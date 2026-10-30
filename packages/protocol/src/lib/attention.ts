@@ -807,8 +807,9 @@ const AddAttentionRequestSchema = z.strictObject({
    */
   confirms: singleLine(MAX_ATTENTION_CONFIRMS_PATH_LENGTH).optional(),
   /**
-   * The board card the item belongs to. A released daemon (4.110 and older) refuses an add that carries it,
-   * so a client sends it only to a daemon that reports `DAEMON_FEATURES.agendaTask`.
+   * The board card the item belongs to. A daemon released before this field (4.111 and every older one)
+   * refuses an add that carries it, so a client sends it only to a daemon that reports
+   * `DAEMON_FEATURES.agendaTask`.
    */
   task: TaskRefSchema.optional(),
   ...AttentionBriefShape,
