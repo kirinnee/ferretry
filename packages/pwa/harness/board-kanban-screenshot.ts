@@ -5,7 +5,7 @@
  *   bun harness/board-kanban-screenshot.ts [outDir]    # default /tmp/claude-1000
  *
  * It bundles `board-page.tsx`, serves it on an ephemeral loopback port, aborts anything that leaves it, and
- * fails when a page scrolls sideways or a To test / Released card has no Done.
+ * fails when a page scrolls sideways or a To test / Released card has no Done (a Merged card has none).
  */
 
 import { spawnSync } from 'node:child_process';
@@ -99,10 +99,18 @@ const shot = async (page: Page, name: string): Promise<void> => {
   process.stdout.write(`📸 ${path}\n`);
 };
 
-const mustHaveDone = async (page: Page, category: 'verify' | 'shipped'): Promise<void> => {
-  const cards = await page.locator(`.fy-board-card[data-category="${category}"]`).count();
-  const withDone = await page.locator(`.fy-board-card[data-category="${category}"] .fy-board-done`).count();
-  if (cards === 0 || withDone !== cards) fail(`${withDone} of ${cards} ${category} cards have a Done`);
+const doneCount = async (page: Page, lane: string): Promise<readonly [number, number]> => {
+  const cards = page.locator(`.fy-board-lane[aria-label^="${lane},"] .fy-board-card`);
+  return [await cards.count(), await cards.locator('.fy-board-done').count()];
+};
+
+const checkDone = async (page: Page): Promise<void> => {
+  for (const lane of ['To test', 'Released']) {
+    const [cards, withDone] = await doneCount(page, lane);
+    if (cards === 0 || withDone !== cards) fail(`${withDone} of ${cards} ${lane} cards have a Done`);
+  }
+  const [merged, mergedDone] = await doneCount(page, 'Merged');
+  if (merged === 0 || mergedDone !== 0) fail(`${mergedDone} of ${merged} Merged cards show a Done row`);
 };
 
 try {
@@ -115,8 +123,7 @@ try {
       try {
         const page = await open(context, `studio-${scheme}`);
         if (label === 'desktop') {
-          await mustHaveDone(page, 'verify');
-          await mustHaveDone(page, 'shipped');
+          await checkDone(page);
           await shot(page, `board-kanban-done-${scheme}-desktop`);
           await page.locator('.fy-board-card__more').first().click();
           await page.waitForTimeout(150);
@@ -132,7 +139,7 @@ try {
       }
     }
   }
-  process.stdout.write('✅ the Kanban captured; Done on every To test and Released card\n');
+  process.stdout.write('✅ the Kanban captured; Done on every To test and Released card, none on Merged\n');
 } finally {
   await browser.close();
   server.stop();

@@ -45,6 +45,7 @@ export interface BoardCardMoves {
 interface BoardCardDone {
   readonly done: BoardDone;
   readonly press: () => void;
+  readonly atRelease: boolean;
 }
 
 export interface BoardCardProps {
@@ -98,7 +99,7 @@ export function BoardCard({
     machine: showMachine ? card.machine : null,
   }).filter(segment => density === 'page' || !segment.optional);
   const toTest = moves !== undefined && density === 'page' && category === 'verify';
-  const released = done !== undefined && done.done.kind === 'done' && density === 'page' && category === 'shipped';
+  const released = done !== undefined && done.atRelease && done.done.kind === 'done' && density === 'page';
   return (
     <li
       className="fy-board-card"

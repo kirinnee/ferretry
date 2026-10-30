@@ -29,6 +29,8 @@ import { archiveRowsOf, TableRows } from './board-table.tsx';
 export interface BoardDoneControl {
   readonly done: BoardDone;
   readonly press: () => void;
+  /** The card sits in the release lane, where the Done row is drawn on the card itself. */
+  readonly atRelease: boolean;
 }
 
 /** What every view needs to draw and wire a card. */

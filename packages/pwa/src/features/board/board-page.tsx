@@ -20,7 +20,7 @@ import {
 import type { DaemonBoardStore } from '../../lib/board-store.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { type BoardFilters, boardFiltersToSearch } from '../../lib/board-model.ts';
-import { boardDone } from '../../lib/board-done.ts';
+import { boardDone, isReleaseLane } from '../../lib/board-done.ts';
 import { moveChoices, planMove } from '../../lib/board-move.ts';
 import { ferretNamer } from '../../lib/board-present.ts';
 import {
@@ -329,7 +329,13 @@ export function BoardPage({
         category: place.category,
         dropped: card.task.dropped !== null,
       });
-      return done === null ? undefined : { done, press: () => requestMove(card, place.group, done.laneId) };
+      return done === null
+        ? undefined
+        : {
+            done,
+            press: () => requestMove(card, place.group, done.laneId),
+            atRelease: isReleaseLane(place.group.laneSet, card.task.laneId),
+          };
     },
     [requestMove],
   );

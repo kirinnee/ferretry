@@ -184,7 +184,7 @@ describe('TableView', () => {
   const doneFor: BoardCardEnv['doneFor'] = (entry, place) =>
     place.category === 'closed'
       ? undefined
-      : { done: { kind: 'done', laneId: 'closed' }, press: () => pressed.push(entry.task.id) };
+      : { done: { kind: 'done', laneId: 'closed' }, press: () => pressed.push(entry.task.id), atRelease: false };
   const pressed: string[] = [];
   const table = (model: BoardModel, props: Partial<Parameters<typeof TableView>[0]> = {}) => (
     <TableView
