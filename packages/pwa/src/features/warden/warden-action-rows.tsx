@@ -159,12 +159,21 @@ function ActionRow({
                   sessionId: row.sessionId,
                   reportPath,
                   ...(newest === undefined ? {} : { at: newest.full }),
+                  ...(row.jev === undefined ? {} : { jev: row.jev }),
                 })
               }
             />
           )}
         </span>
       </div>
+      {row.jev !== undefined && (
+        <p
+          className="m-0 px-cell-x pb-xs pl-[calc(theme(spacing.cell-x)+2rem+theme(spacing.sm))] text-meta leading-base text-faint"
+          data-warden-jev
+        >
+          {row.jev}
+        </p>
+      )}
       {open && <Detail row={row} />}
     </li>
   );
