@@ -401,7 +401,7 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     // stays under 7.4 KB (docs/pack-mode.md records the sizes: raised from 6.7 KB for Attention's steps and
     // hypermedia's `chart`; the notify rule replaced Attention's 1 KB, Agenda mode adds its own section). The
     // Board section (640) was paid for by naming the tools by prefix, moving map, media and chart's full spec
-    // behind `fy render guide`, and compressing the lessons rule: 7,247 measured (the reply-closes-the-item wording), so keep 150 of headroom.
+    // behind `fy render guide`, and compressing the lessons rule: 7,242 measured (the reply-parks-the-item wording), so keep 150 of headroom.
     const longestRouting = 1 + 'Routing: '.length + MAX_ROUTING_PROMPT_CHARS;
     should(Object.values(sizes).reduce((sum, size) => sum + size, 0) + longestRouting).be.below(7_400 - 150);
     should(sizes.pack).be.below(1_050);

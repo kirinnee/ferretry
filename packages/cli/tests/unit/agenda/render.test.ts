@@ -494,6 +494,31 @@ describe('agenda turns', () => {
     should(asked).not.containEql('the owner wrote about this');
   });
 
+  it('should say when a snoozed item comes back, and what the ferret does with one the owner replied to', () => {
+    // Act
+    const snoozed = renderAgendaList(
+      snapshot([
+        {
+          ...agentItem('A2', 'log in', { neededBy: '2026-07-31T15:00:00.000Z' }),
+          parked: { reason: 'snoozed', at: '2026-07-31T09:00:00.000Z', until: '2026-07-31T17:00:00.000Z' },
+        },
+      ]),
+    );
+    const replied = renderAgendaList(
+      snapshot([
+        { ...agentItem('A3', 'pick a region'), parked: { reason: 'replied', at: '2026-07-31T09:10:00.000Z' } },
+      ]),
+    );
+
+    // Assert — the deadline comes first, so that is when it wakes
+    should(snoozed).containEql('snoozed by the owner until 2026-07-31T15:00:00.000Z');
+    should(snoozed).containEql('agenda surface --now');
+    should(snoozed).not.containEql("owner's turn");
+    should(replied).containEql('replied 2026-07-31T09:10:00.000Z: parked');
+    should(replied).containEql('agenda surface');
+    should(replied).containEql('agenda done');
+  });
+
   it("should say it is the owner's turn on a fresh ask, and print what the item blocks", () => {
     // Act
     const fresh = renderAgendaList(

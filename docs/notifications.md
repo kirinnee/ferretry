@@ -35,7 +35,7 @@ verbatim; `fy` is the binary name):
 
 ## When the phone buzzes
 
-Only these three. Everything else — a new item while the ferret works, an edit, a change of whose turn it
+Only these four. Everything else — a new item while the ferret works, an edit, a change of whose turn it
 is, a notice without `--ping`, the owner's own moves — moves the Inbox badge and nothing more.
 
 | #   | Moment                                                                                     | Push                                                              | How often                               |
@@ -43,6 +43,11 @@ is, a notice without `--ping`, the owner's own moves — moves the Inbox badge a
 | 1   | The ferret **stops on the owner**: it went idle with at least one item on the owner's turn | ONE grouped push: "<ferret> is stopped · N need you"              | Once per stop (however many items wait) |
 | 2   | An item's **`neededBy`** comes within `attention.deadlineWarnHours` (default 3 hours)      | The item's title; "Needed in 25 min" / "Overdue" ahead of its ask | Once per item                           |
 | 3   | A notice with **`--ping`**                                                                 | The notice's summary                                              | Once per notice                         |
+| 4   | A **snoozed** item wakes and it **blocks** the ferret or has a **`neededBy`**              | The item's title; "Back from snooze: <ask>"                       | Once per wake                           |
+
+A woken item already inside its deadline's window gets the deadline's push (row 2) instead, never both. A snoozed
+or replied item is parked ([agenda.md](agenda.md#parked-items)): it never counts toward a stop or a deadline while
+it sleeps.
 
 Each push opens the ferret's chat at the item that triggered it (`?attention=<id>`): the first blocking item
 for a stop, else the oldest.
@@ -58,7 +63,8 @@ never pushes twice — across a daemon restart too — and the next idle period 
 - A ferret that is working. Items raised mid-turn wait for the stop.
 - A ferret that was **already idle when the daemon started**. The start-up pass looks at deadlines only;
   a stop is something the daemon sees happen.
-- An item on the ferret's turn (the owner replied; the ferret has the ball).
+- An item on the ferret's turn (the owner asked for more, or to discuss it; the ferret has the ball).
+- A parked item: one the owner replied to, or snoozed and not yet woken.
 
 **Duplicate suppression is durable.** Each push is recorded in the notification ledger before it is
 sent, under a key naming its reason — `attention:<session>:stopped:<stoppedAt>`,
@@ -167,7 +173,8 @@ The section (`AGENDA_INSTRUCTION` in `@ferretry/fleet`, about 1,000 characters, 
 test) names the verbs and flags `fy agenda` takes — its one `agenda add` example carries `--premise` and
 `--context`, which every new item requires ([agenda.md](agenda.md#rules-the-writing-keeps)) — what `--blocking`,
 `--will-block` and `--by` mean, and that `"[answer to !A3 …]"` is an answer while `"[re !A3 …]"` is chat that
-closes the item (re-raise it with `fy agenda surface` only if the owner still has to decide or do something).
+parks the item as replied (bring it back with `fy agenda surface` if the owner must still act, else `done` it —
+[agenda.md](agenda.md#parked-items)).
 
 - **The switch** is the session's own recorded setting, `config.agenda` (`sessionAgendaEnabled`, absent
   means OFF), exactly like `config.hypermedia` and `config.pack`. At each launch the daemon turns it into
