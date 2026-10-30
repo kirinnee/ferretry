@@ -13,6 +13,7 @@
 // leave holds the ones behind it: the reader typed them in that order, and the ferret should read them so.
 // Sessions are independent of each other.
 
+import { withReferences } from './agenda-reply.ts';
 import { attachmentErrorMessage } from './attachments.ts';
 import { carrierDelivery } from './relay-carrier.ts';
 
@@ -29,6 +30,12 @@ export interface OutboxEntry {
   readonly daemonId: string;
   readonly sessionId: string;
   readonly message: string;
+  /**
+   * The Agenda items this message is about (the composer's "re" chips), sent as the `!A3` prefix the daemon reads.
+   * Kept apart from the words so an edit shows only what was typed, and added on EVERY attempt — a message that
+   * leaves after a reload or a reconnect is still about the item it was typed for.
+   */
+  readonly references?: readonly string[];
   /** Files already on the daemon. */
   readonly attachmentIds: readonly string[];
   /** Files still to upload; emptied (into `attachmentIds`) as each one goes up. */
@@ -103,23 +110,29 @@ const statusOf = (error: unknown): number | undefined => {
   return undefined;
 };
 
+/** What a request that never got an answer throws: the typed client's transport error, a deadline. */
+const NETWORK_ERROR_NAMES: ReadonlySet<string> = new Set(['FyTransportError', 'AbortError', 'TimeoutError']);
+
+/**
+ * A bare `fetch` that never reached the machine rejects with a `TypeError` whose words each browser picks:
+ * Chromium's "Failed to fetch", Firefox's "NetworkError when attempting to fetch resource.", WebKit's "Load
+ * failed". ONLY those count as offline: any other `TypeError` is a bug in this app, and treating it as "no
+ * connection" retried it every few seconds forever behind a calm "waiting for connection".
+ */
+const FETCH_NETWORK_FAILURE = /^(?:failed to fetch|networkerror when attempting to fetch resource\.?|load failed)$/iu;
+
 /**
  * A failure that says nothing about the message itself: no carrier, a timeout, a machine that is down or
- * busy. Everything else is an answer — the daemon read the message and said no — and waiting would not help.
+ * busy. Everything else is an answer — the daemon read the message and said no, or this app failed — and
+ * waiting would not help, so it is shown rather than retried.
  */
-/** What a request that never got an answer throws: the typed client's transport error, fetch's TypeError, a deadline. */
-const NETWORK_ERROR_NAMES: ReadonlySet<string> = new Set([
-  'FyTransportError',
-  'TypeError',
-  'AbortError',
-  'TimeoutError',
-]);
-
 const isWaitingFailure = (error: unknown): boolean => {
   if (carrierDelivery(error) !== undefined) return true;
   const status = statusOf(error);
   if (status !== undefined) return status === 408 || status === 429 || status >= 500;
-  return error instanceof Error && NETWORK_ERROR_NAMES.has(error.name);
+  if (!(error instanceof Error)) return false;
+  if (NETWORK_ERROR_NAMES.has(error.name)) return true;
+  return error.name === 'TypeError' && FETCH_NETWORK_FAILURE.test(error.message.trim());
 };
 
 const reasonOf = (error: unknown): string =>
@@ -148,6 +161,8 @@ export interface OutboxEnqueue {
   readonly attachmentIds?: readonly string[];
   readonly files?: readonly OutboxFile[];
   readonly now?: boolean;
+  /** The Agenda items it is about; see {@link OutboxEntry.references}. */
+  readonly references?: readonly string[];
 }
 
 export class SendOutbox {
@@ -220,6 +235,7 @@ export class SendOutbox {
       daemonId: input.daemonId,
       sessionId: input.sessionId,
       message: input.message,
+      ...(input.references === undefined || input.references.length === 0 ? {} : { references: [...input.references] }),
       attachmentIds: [...(input.attachmentIds ?? [])],
       files: [...(input.files ?? [])],
       now: input.now === true,
@@ -374,7 +390,7 @@ export class SendOutbox {
       const result = await (viaThis ? via : (sender as OutboxSender)).send(
         entry.sessionId,
         {
-          message: current.message,
+          message: withReferences(current.message, current.references ?? []),
           ...(current.attachmentIds.length === 0 ? {} : { attachmentIds: [...current.attachmentIds] }),
           ...(current.now ? { now: true } : {}),
         },

@@ -94,9 +94,15 @@ this page, which is still how a message reaches the pane.
   (`watchOutbox`), and again after a reload. The send is idempotent: the request id is the queue id, and the
   daemon answers a repeat from its first record, so a retry never types twice. Attachments are uploaded during
   the drain, before the send; a failed upload keeps the message in the outbox with the plain reason
-  (`attachmentErrorMessage`) and holds the ones behind it. A message the machine refuses outright is not
-  retried. **Edit** and **Cancel** act on the outbox copy locally; once the message has left they fall through
-  to the daemon queue's PATCH/DELETE. The `now` flag rides the outbox untouched.
+  (`attachmentErrorMessage`) and holds the ones behind it. Only a failure that never reached the machine counts
+  as waiting — the typed client's transport error, a deadline, a carrier with no route, a 408/429/5xx, or a bare
+  fetch's own network `TypeError` ("Failed to fetch", "NetworkError when attempting to fetch resource.", "Load
+  failed"). A message the machine refuses outright, or one that hit a bug in the app (any other error), is shown
+  as **Not sent** and not retried. **Edit** and **Cancel** act on the outbox copy locally; once the message has
+  left they fall through to the daemon queue's PATCH/DELETE. The `now` flag rides the outbox untouched, and so
+  do the Agenda items a reply is about (the composer's "re" chips, `referencesOf`): they are stored beside the
+  words and sent as the `!A3` prefix on every attempt, so a reply that leaves after a reload is still about its
+  item, while an edit shows only what was typed.
 - **Queue views** — the chat header's ⋯ menu has **Message queue** (that ferret: `/d/<id>/queue/<session>`), and
   **All queues** (`/d/<id>/queue`, also in Find / ⌘K) lists every ferret with something waiting across every
   paired machine, longest-waiting first. Both read `GET …/queue` every five seconds plus the outbox, one row per
@@ -511,10 +517,6 @@ transcript, the same row (`send:<id>`) becomes the ordinary delivered bubble in 
 
 ## Declared gaps
 
-- **A drain after the first attempt loses the agenda reference prefix.** The composer wraps its client with
-  `withReferencePrefix` (the `[re !A3 …]` line). The outbox carries that sender for the first attempt only; a
-  message drained later, after a reload or a reconnect, goes through the plain client and arrives without the
-  prefix. The reference is not stored in the entry yet.
 - **Claude's on-screen queue is measured on 2.1.281 only.** An earlier or later rendering that moves or
   rewords the `ctrl+x ctrl+s to send now` hint reads as `unknown` while the queued placeholder shows
   (unconfirmed, never retyped), and as no queue at all once it does not — where the mid-turn guard above

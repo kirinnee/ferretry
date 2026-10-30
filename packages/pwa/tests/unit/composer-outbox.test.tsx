@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { FyApiClient } from '@ferretry/protocol/client';
 import { FyHttpError, FyTransportError } from '@ferretry/protocol/client';
+import type { AgendaId } from '@ferretry/protocol';
 import { Composer } from '../../src/components/composer.tsx';
+import { withReferencePrefix } from '../../src/lib/answer-chip.ts';
 import type { DaemonConnectionRepository } from '../../src/lib/connections.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { DaemonDraftStore, type DraftStorage } from '../../src/lib/drafts.ts';
@@ -43,17 +45,22 @@ const storeWith = async (send: (...args: unknown[]) => Promise<unknown>) => {
   return store;
 };
 
-const mount = async (send: (...args: unknown[]) => Promise<unknown>, withStore = true) => {
+const mount = async (
+  send: (...args: unknown[]) => Promise<unknown>,
+  withStore = true,
+  chips: readonly AgendaId[] = [],
+) => {
   const store = await storeWith(send);
   const direct: unknown[] = [];
+  const client = {
+    send: async (...args: unknown[]) => {
+      direct.push(args);
+      return (await send(...args)) as never;
+    },
+  };
   const composer = (
     <Composer
-      api={{
-        send: async (...args: unknown[]) => {
-          direct.push(args);
-          return (await send(...args)) as never;
-        },
-      }}
+      api={chips.length === 0 ? client : withReferencePrefix(client, () => chips)}
       daemon={daemon}
       draftStore={new DaemonDraftStore(new Memory())}
       sessionId="s1"
@@ -89,6 +96,28 @@ describe('the composer with a device outbox', () => {
     await submit();
     expect(store.outbox.snapshot().map(entry => entry.message)).toEqual(['thank you']);
     expect(tree.root.findByType('textarea').props.value).toBe('');
+  });
+
+  test('a reply about an Agenda item saved offline is still about it when it leaves later', async () => {
+    let online = false;
+    const arrived: string[] = [];
+    const { store, type, submit } = await mount(
+      async (_session: unknown, body: unknown) => {
+        if (!online) throw new FyTransportError('no carrier', '/send', false, undefined);
+        arrived.push((body as { readonly message: string }).message);
+        return { disposition: 'queued' };
+      },
+      true,
+      ['A3' as AgendaId],
+    );
+    type('yes, ship it');
+    await submit();
+    expect(store.outbox.snapshot()).toMatchObject([{ message: 'yes, ship it', references: ['A3'] }]);
+    online = true;
+    // The drain goes through the machine's plain client, not the composer's: the prefix comes from the entry.
+    await runAsync(async () => await store.outbox.drainAll());
+    expect(arrived).toEqual(['!A3 yes, ship it']);
+    expect(store.outbox.snapshot()).toEqual([]);
   });
 
   test('a message the machine refuses leaves no copy behind and the refusal is raised to the person', async () => {

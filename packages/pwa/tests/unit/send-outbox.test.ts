@@ -255,13 +255,52 @@ describe('SendOutbox', () => {
       const outbox = outboxOver(new MemoryOutboxBackend(), host);
       expect((await outbox.submit(input('x'))).outcome).toEqual({ kind: 'waiting', reason: WAITING_REASON });
     }
-    const typeError = machine({ failWith: () => new TypeError('Failed to fetch') });
-    expect((await outboxOver(new MemoryOutboxBackend(), typeError).submit(input('x'))).outcome.kind).toBe('waiting');
+    for (const words of ['Failed to fetch', 'NetworkError when attempting to fetch resource.', 'Load failed']) {
+      const offline = machine({ failWith: () => new TypeError(words) });
+      expect((await outboxOver(new MemoryOutboxBackend(), offline).submit(input('x'))).outcome.kind).toBe('waiting');
+    }
     const plain = machine({ failWith: () => 'a string' });
     expect((await outboxOver(new MemoryOutboxBackend(), plain).submit(input('x'))).outcome).toMatchObject({
       kind: 'refused',
       reason: 'the machine refused it',
     });
+  });
+
+  test('a TypeError that is not a fetch failing is a bug: shown as a refusal, never retried as offline', async () => {
+    const host = machine({ failWith: () => new TypeError("Cannot read properties of undefined (reading 'id')") });
+    const timers: (() => void)[] = [];
+    const outbox = outboxOver(new MemoryOutboxBackend(), host, { timers });
+    const { outcome } = await outbox.submit(input('x'));
+    expect(outcome).toMatchObject({ kind: 'refused', reason: "Cannot read properties of undefined (reading 'id')" });
+    expect(outbox.snapshot()[0]).toMatchObject({ refused: true });
+    // Nothing is scheduled to try it again: it waits for the person, not for a connection.
+    expect(timers).toEqual([]);
+  });
+
+  test('the Agenda items a message is about go with it on every attempt, after a reload too', async () => {
+    const host = machine({ up: false });
+    const backend = new MemoryOutboxBackend();
+    const first = outboxOver(backend, host);
+    const { entry } = await first.submit({ ...input('yes, ship it'), references: ['A3'] });
+    // The words stay as typed, so an edit shows only what the person wrote.
+    expect(entry).toMatchObject({ message: 'yes, ship it', references: ['A3'] });
+    first.stop();
+    host.state.up = true;
+    const reloaded = outboxOver(backend, host);
+    await reloaded.drainAll();
+    expect(host.received.map(call => call.message)).toEqual(['!A3 yes, ship it']);
+  });
+
+  test('an edit keeps the item a message is about, and a message about none is sent as typed', async () => {
+    const host = machine({ up: false });
+    const outbox = outboxOver(new MemoryOutboxBackend(), host);
+    const about = await outbox.submit({ ...input('ok'), references: ['A3', 'A9'] });
+    await outbox.submit({ ...input('plain'), references: [] });
+    expect(await outbox.edit(about.entry.id, 'ok, do it')).toBe('edited');
+    expect(outbox.snapshot()[1]).not.toHaveProperty('references');
+    host.state.up = true;
+    await outbox.drainAll();
+    expect(host.received.map(call => call.message)).toEqual(['!A3 !A9 ok, do it', 'plain']);
   });
 
   test('attachments upload as part of the drain, before the send, and are not uploaded twice after a failure', async () => {
