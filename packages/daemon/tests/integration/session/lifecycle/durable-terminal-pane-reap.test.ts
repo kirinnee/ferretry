@@ -312,7 +312,9 @@ describe('durable terminal pane reap adapters', () => {
     const later = await counted.observe(original);
 
     // Assert — one listing for the three asked together, a fresh one for the one asked after.
-    should(observed).deepEqual([original, original, original].map(({ daemonId: _d, sessionId: _s, ...pane }) => pane));
+    should(observed).deepEqual(
+      [original, original, original].map(({ daemonId: _d, sessionId: _s, sessionCreated: _c, ...pane }) => pane),
+    );
     should(later).deepEqual(observed[0]);
     should(asked).deepEqual(['list-panes', 'list-panes']);
   });
