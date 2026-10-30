@@ -191,8 +191,8 @@ describe('wardenStatusLine', () => {
     // Assert
     expect(warnings).toEqual([
       'LLM cap hit — flags wait for you until midnight UTC',
-      'Jev cap hit — every flag goes to an investigation until midnight UTC',
-      'Jev cap hit — every flag waits for you until midnight UTC',
+      'Jev paused: daily cap reached — every flag goes to an investigation until midnight UTC',
+      'Jev paused: daily cap reached — every flag waits for you until midnight UTC',
       'No Jev key — every flag goes to an investigation',
       'No Jev key — every flag waits for you',
       'Jev is busy — each flag goes to an investigation',

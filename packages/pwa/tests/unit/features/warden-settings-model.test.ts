@@ -218,21 +218,40 @@ describe('the machine default login', () => {
 });
 
 describe('wardenConfigPatchFrom', () => {
-  it('should carry only what changed, a changed section whole', () => {
+  it('should carry only what changed, and only the changed keys of a section', () => {
     // Arrange
-    const base = wardenConfig();
+    const base = wardenConfig({ layers: { jev: false, llm: true } });
     const next: WardenConfig = {
       ...base,
-      layers: { jev: true, llm: false },
+      layers: { jev: true, llm: true },
       caps: { ...base.caps, jevUsdPerDay: 1 },
+      accounts: [{ agent: 'glm-a' }],
+      intervalMinutes: 10,
     };
 
     // Act
     const patch = wardenConfigPatchFrom(base, next);
 
     // Assert
-    expect(patch).toEqual({ layers: { jev: true, llm: false }, caps: { ...base.caps, jevUsdPerDay: 1 } });
+    expect(patch).toEqual({
+      layers: { jev: true },
+      caps: { jevUsdPerDay: 1 },
+      accounts: [{ agent: 'glm-a' }],
+      intervalMinutes: 10,
+    });
     expect(wardenConfigPatchFrom(base, base)).toEqual({});
+  });
+
+  it('should never restate the Jev price when the owner moves only the leave bar', () => {
+    // Arrange: the price in effect is a stale $2 while the owner's correction waits to be confirmed.
+    const base = wardenConfig({ guard: { threshold: 0.85, model: 'jev-latest', usdPerMillionInputTokens: 2 } });
+    const next: WardenConfig = { ...base, guard: { ...base.guard, threshold: 0.9 } };
+
+    // Act
+    const patch = wardenConfigPatchFrom(base, next);
+
+    // Assert
+    expect(patch).toEqual({ guard: { threshold: 0.9 } });
   });
 });
 

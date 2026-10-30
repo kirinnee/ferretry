@@ -8,6 +8,7 @@ export * from './detect.ts';
 export * from './escalation.ts';
 export * from './failover.ts';
 export * from './feed.ts';
+export * from './jev-checks.ts';
 export * from './leftovers.ts';
 export * from './liveness.ts';
 export * from './liveness-monitor.ts';

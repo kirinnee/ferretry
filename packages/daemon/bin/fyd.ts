@@ -487,6 +487,7 @@ import {
 import {
   ConfigFileWardenConfigStore,
   FileWardenArtifacts,
+  FileWardenJevCheckLog,
   FileWardenStateStore,
   NodeWardenReportFileSystem,
   WardenReportReader,
@@ -3930,6 +3931,8 @@ interface WardenParts {
   readonly reportsReader: WardenReportReader;
   readonly wardenRoot: string;
   readonly reportsDirectory: string;
+  /** Where Jev's checks are kept, beside the reports. */
+  readonly jevChecksDirectory: string;
   readonly supervision: WardenSupervisionState;
   /** The configuration files: `warden.yaml` is read and written through them. */
   readonly config: ConfigFilesService;
@@ -4029,6 +4032,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
         },
       },
       redactor: parts.redactor,
+      jevChecks: new FileWardenJevCheckLog(parts.jevChecksDirectory, () => Date.now()),
       remedies: {
         nudge: async (sessionId, message) => {
           await parts.sends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message });
@@ -10435,6 +10439,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           reportsReader: new WardenReportReader(wardenFiles, wardenPaths.reports),
           wardenRoot: wardenPaths.root,
           reportsDirectory: wardenPaths.reports,
+          jevChecksDirectory: wardenPaths.jevChecks,
           supervision: wardenSupervision,
           config: configFiles,
           reads: operatorReads,

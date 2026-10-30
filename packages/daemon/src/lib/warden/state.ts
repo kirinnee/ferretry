@@ -339,6 +339,8 @@ export interface WardenRuntimeState {
   readonly clearStreaks?: ClearStreakStore;
   /** The flags Jev passed on that still stand (`passedOnKey` in `triage.ts`), so it is not asked about them again. */
   readonly passedOn?: readonly string[];
+  /** The flags handed on unasked because Jev's cap was spent, already written down (`jev-checks.ts` {@link capSkipKey}). */
+  readonly jevCapSkips?: readonly string[];
   /** Why Jev passed each flag on, keyed by {@link jevHandoffKey}: what the owner's notification says about it. */
   readonly jevHandoffs?: Readonly<Record<string, WardenJevHandoff>>;
   /**
@@ -386,6 +388,7 @@ const RuntimeStateSchema = z.object({
   blessings: z.record(z.string(), BlessingSchema).optional(),
   clearStreaks: z.record(z.string(), ClearStreakSchema).optional(),
   passedOn: z.array(z.string().min(1)).optional(),
+  jevCapSkips: z.array(z.string().min(1)).optional(),
   jevHandoffs: z.record(z.string(), JevHandoffSchema).optional(),
   notified: z.record(z.string(), Instant).optional(),
   assignments: z.record(z.string(), AssignmentSchema).optional(),

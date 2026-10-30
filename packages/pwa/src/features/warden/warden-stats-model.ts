@@ -12,6 +12,10 @@
  *      say so ("recent"), because that list is capped.
  *   3. ONE ACTOR, ONE COLOUR, ONE NAME. The tiles, the chart and the row chips all read the same
  *      vocabulary (`ACTOR_LABEL`, `ACTOR_DOT`).
+ *   4. JEV'S WORK IS ITS CHECKS. A daemon that keeps Jev's checks per day (`day.jev`) is read by them:
+ *      every flag Jev looked at, including the ones it was not sure of and handed on — which are in no
+ *      outcome, so a day Jev handed everything on used to show Jev doing nothing. An older daemon's day
+ *      is read as it was, by its decisions and its actions.
  */
 
 import {
@@ -124,18 +128,24 @@ const TILE_LABEL: Readonly<Record<StatTileKey, string>> = {
 
 const TILE_ORDER: readonly StatTileKey[] = ['flagged', 'moved', 'cleared', 'stopped', 'asked'];
 
-const decidedBy = (jevDecisions: number, investigations: number): string =>
-  `Jev decided ${jevDecisions} · LLM investigated ${investigations}`;
+const decidedBy = (jevDecisions: number, investigations: number, verb = 'decided'): string =>
+  `Jev ${verb} ${jevDecisions} · LLM investigated ${investigations}`;
+
+/** Jev's figure for a run of days: its checks when every day kept them, its decisions otherwise. */
+const jevFigure = (days: readonly WardenDayStats[]): { readonly count: number; readonly verb: string } =>
+  days.every(day => day.jev !== undefined)
+    ? { count: days.reduce((total, day) => total + (day.jev?.checks ?? 0), 0), verb: 'checked' }
+    : { count: days.reduce((total, day) => total + day.jevDecisions, 0), verb: 'decided' };
 
 const tilesFromDays = (days: readonly WardenDayStats[]): readonly StatTile[] => {
   const sum = (outcome: WardenOutcome): WardenActorCounts =>
     days.reduce<WardenActorCounts>((total, day) => addCounts(total, day[outcome]), NO_COUNTS);
   const flags = days.reduce((total, day) => total + day.flags, 0);
-  const jev = days.reduce((total, day) => total + day.jevDecisions, 0);
+  const jev = jevFigure(days);
   const llm = days.reduce((total, day) => total + day.investigations, 0);
   return TILE_ORDER.map(key =>
     key === 'flagged'
-      ? { key, label: TILE_LABEL[key], value: flags, split: [], sub: decidedBy(jev, llm) }
+      ? { key, label: TILE_LABEL[key], value: flags, split: [], sub: decidedBy(jev.count, llm, jev.verb) }
       : { key, label: TILE_LABEL[key], value: totalOf(sum(key)), split: actorSplit(sum(key)) },
   );
 };
@@ -237,13 +247,29 @@ export const layerLines = (status: WardenStatusView): readonly LayerLine[] => {
   if (config.layers.jev) {
     const paced = wardenPacedUntil(status, 'jev');
     const capped = spend.capsHit.includes('jev');
-    const pause = paced !== undefined ? ` · paused until ${paced}` : capped ? ' · cap hit, back at midnight UTC' : '';
+    const checks = today?.jev;
+    const pause =
+      paced !== undefined
+        ? ` · Jev paused until ${paced}: this hour’s share of the cap reached`
+        : capped
+          ? ' · Jev paused: daily cap reached, back at midnight UTC'
+          : '';
+    const work =
+      checks === undefined
+        ? plural(decisions, 'decision')
+        : `${plural(checks.checks, 'check')}: ${checks.healthy} healthy · ${checks.acted} acted · ${checks.handedOn} handed on`;
+    const clauses = [
+      ...(checks === undefined || checks.skippedForCap === 0
+        ? []
+        : [`${plural(checks.skippedForCap, 'flag')} not checked for the cap`]),
+      ...(savings.savedUsd === undefined ? [] : [`~${usd(savings.savedUsd)} saved vs investigating all`]),
+    ];
     const ratio = ratioOf(spend.jevUsd, spend.jevCapUsd);
     lines.push({
       key: 'jev',
       name: 'Jev',
-      summary: `${plural(decisions, 'decision')} · ${usd(spend.jevUsd)} of ${usd(spend.jevCapUsd)} today${pause}`,
-      ...(savings.savedUsd === undefined ? {} : { clause: `~${usd(savings.savedUsd)} saved vs investigating all` }),
+      summary: `${work} · ${usd(spend.jevUsd)} of ${usd(spend.jevCapUsd)} today${pause}`,
+      ...(clauses.length === 0 ? {} : { clause: clauses.join(' · ') }),
       ...(ratio === undefined ? {} : { ratio }),
       warn: capped || paced !== undefined,
     });
@@ -274,13 +300,16 @@ export const CHART_SERIES: readonly MetricChartSeries[] = [
   { key: 'llm', label: ACTOR_LABEL.llm, tone: 'accent' },
 ];
 
+/** What each actor did on one day: its actions — and for Jev, when the day kept them, its checks. */
 const dayActors = (day: WardenDayStats): Readonly<Record<WardenActor, number>> => {
   const total = (actor: WardenActor): number =>
     OUTCOMES.reduce((sum, outcome) => sum + countOf(day[outcome], actor), 0);
-  return { auto: total('auto'), jev: total('jev'), llm: total('llm'), owner: total('owner') };
+  return { auto: total('auto'), jev: day.jev?.checks ?? total('jev'), llm: total('llm'), owner: total('owner') };
 };
 
 export interface WardenDayChart {
+  /** `Actions per day`, or `Actions and Jev checks per day` once a day in it kept Jev's checks. */
+  readonly title: string;
   readonly points: readonly MetricChartPoint[];
   /** How many of the seven days have no record, so the chart can say what its `?` means. */
   readonly missing: number;
@@ -290,12 +319,23 @@ const readoutFor = (day: WardenDayStats): string => {
   const { weekday, date } = dayParts(day.day);
   const actors = dayActors(day);
   const total = actors.auto + actors.jev + actors.llm;
+  const checked = day.jev !== undefined;
   const who = (['auto', 'jev', 'llm', 'owner'] as const)
     .filter(actor => actors[actor] > 0)
-    .map(actor => `${ACTOR_LABEL[actor]} ${actors[actor]}`)
+    .map(actor =>
+      actor === 'jev' && checked
+        ? `${ACTOR_LABEL.jev} ${plural(actors.jev, 'check')}`
+        : `${ACTOR_LABEL[actor]} ${actors[actor]}`,
+    )
     .join(', ');
-  const head =
-    total === 0 && actors.owner === 0 ? 'no actions' : `${plural(total, 'action')}${who === '' ? '' : ` — ${who}`}`;
+  // Jev's checks are not actions, so a day that kept them is said actor by actor, without a total.
+  const head = checked
+    ? who === ''
+      ? 'nothing done'
+      : who
+    : total === 0 && actors.owner === 0
+      ? 'no actions'
+      : `${plural(total, 'action')}${who === '' ? '' : ` — ${who}`}`;
   return `${weekday} ${date} · ${head} · ${plural(day.flags, 'flag')}`;
 };
 
@@ -328,7 +368,8 @@ export const wardenDayChart = (status: WardenStatusView, now: number): WardenDay
       readout: readoutFor(entry),
     };
   });
-  return { points, missing };
+  const title = history.some(entry => entry.jev !== undefined) ? 'Actions and Jev checks per day' : 'Actions per day';
+  return { title, points, missing };
 };
 
 /** Whole-number ticks from zero to at least `max`: 0-1-2-3, or steps of 2, 5, 10… once the day is busy. */

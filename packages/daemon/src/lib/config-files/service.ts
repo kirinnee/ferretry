@@ -379,10 +379,23 @@ export class ConfigFilesService {
     this.#acknowledged.set(path, { etag: this.deps.digest(text), text, at: this.deps.now().getTime() });
   }
 
-  /** Write a file the daemon owns the decision for (the Warden form): acknowledged, then written. */
-  async writeOwn(path: string, text: string): Promise<void> {
+  /**
+   * Write a file the daemon owns the decision for (the Warden form): acknowledged, then written.
+   *
+   * `inEffect` is for a file with an edit held for the owner: the owner's change is made to BOTH
+   * versions, so `text` (the held edit, changed) is written and `inEffect` (the version in effect,
+   * changed) is recorded as accepted. The owner's act is in effect at once, and the held edit is still
+   * held — judged against the new record by the load — rather than discarded by a save that never
+   * mentioned it, or put into effect by one that never confirmed it.
+   */
+  async writeOwn(path: string, text: string, inEffect: string = text): Promise<void> {
     await this.#serial(async () => {
-      this.acknowledge(path, text);
+      if (inEffect === text) this.acknowledge(path, text);
+      else {
+        const accepted = { ...(await this.deps.accepted.read()) };
+        accepted[path] = { etag: this.deps.digest(inEffect), text: inEffect };
+        await this.deps.accepted.write(accepted);
+      }
       await this.deps.directory.write(path, text);
       await this.#load();
     });

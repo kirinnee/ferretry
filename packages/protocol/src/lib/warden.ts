@@ -776,6 +776,90 @@ export const WardenActorCountsSchema = z.object({
 });
 export type WardenActorCounts = z.infer<typeof WardenActorCountsSchema>;
 
+// ── Jev's checks ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * What became of one flag Jev was put to. `healthy` it was sure the ferret is fine and the flag was left;
+ * `acted` it carried out an act alone; `handed_on` it passed the flag on — to an investigation, or to
+ * the owner — because it was not sure enough, the act was the owner's to make, the call failed or the act
+ * did not take; `skipped` it was never asked, because its daily cap (or this hour's share of it) was
+ * already spent.
+ */
+export const WardenJevCheckVerdictSchema = z.enum(['healthy', 'acted', 'handed_on', 'skipped']);
+export type WardenJevCheckVerdict = z.infer<typeof WardenJevCheckVerdictSchema>;
+
+/** Why Jev handed a flag on, or was not asked. The first nine are the first responder's own reasons. */
+export const WardenJevCheckWhySchema = z.enum([
+  /** Jev answered `unsure`. */
+  'unsure',
+  /** Less sure than the bar for what it chose. */
+  'not_sure_enough',
+  /** The owner's bar for that act is 100%: Jev never does it alone. */
+  'never_alone',
+  /** The owner has not let the Warden do that act alone. */
+  'not_allowed',
+  /** A nudge without a message Jev was as sure of. */
+  'no_message',
+  /** A failover: Jev cannot name the login to move to. */
+  'cannot_choose_login',
+  /** An act that was not offered for this flag. */
+  'not_offered',
+  /** No real answer came back: no key, a timeout, a refusal, a back-off, a snapshot that could not be masked. */
+  'failed',
+  /** Jev already acted on this subject and it is still flagged. */
+  'already_acted',
+  /** Jev chose an act it was sure enough of, and the act did not take. */
+  'act_failed',
+  /** `skipped`: today's Jev cap was spent. */
+  'jev_cap',
+  /** `skipped`: this hour's share of the Jev cap was spent. */
+  'jev_paced',
+]);
+export type WardenJevCheckWhy = z.infer<typeof WardenJevCheckWhySchema>;
+
+/** Where a flag went after Jev handed it on. */
+export const WardenJevCheckRouteSchema = z.enum(['investigation', 'owner']);
+export type WardenJevCheckRoute = z.infer<typeof WardenJevCheckRouteSchema>;
+
+/**
+ * One of Jev's checks, as the Warden keeps it beside its reports: the ferret, the flag, what Jev made of
+ * it, how sure it was and what the call cost. Deliberately no text — no reason, no transcript, no screen —
+ * so the record can never carry what the vault redactor masked on the way out.
+ */
+export const WardenJevCheckSchema = z.object({
+  at: InstantSchema,
+  /** The flagged ferret. */
+  sessionId: z.string().min(1),
+  /** The flag. */
+  anomalyKind: WardenAnomalyKindSchema,
+  verdict: WardenJevCheckVerdictSchema,
+  /** `acted`: the act carried out. `handed_on`: the act Jev chose and did not carry out alone. */
+  act: WardenActionKindSchema.exclude(['bless', 'close_leftover']).optional(),
+  /** `handed_on` and `skipped`: why. */
+  why: WardenJevCheckWhySchema.optional(),
+  /** `handed_on` and `skipped`: who looks at it next. */
+  route: WardenJevCheckRouteSchema.optional(),
+  /** How sure Jev was of what it chose; `0` when it gave no answer. */
+  confidence: z.number().min(0).max(1),
+  /** What the call cost, in US dollars; `0` when there was none. */
+  costUsd: NonNegativeFiniteSchema,
+});
+export type WardenJevCheck = z.infer<typeof WardenJevCheckSchema>;
+
+/**
+ * One UTC day of Jev's checks, counted as each happens. `checks` is every flag Jev was asked about, so
+ * `healthy + acted + handedOn = checks`: a flag it was not sure of and handed to an investigation was a
+ * check too. `skippedForCap` counts the flags it was NOT asked about because its cap was spent, each once.
+ */
+export const WardenJevDayStatsSchema = z.object({
+  checks: NonNegativeIntegerSchema,
+  healthy: NonNegativeIntegerSchema,
+  acted: NonNegativeIntegerSchema,
+  handedOn: NonNegativeIntegerSchema,
+  skippedForCap: NonNegativeIntegerSchema,
+});
+export type WardenJevDayStats = z.infer<typeof WardenJevDayStatsSchema>;
+
 /**
  * One UTC day of the Warden's work, rolled up from its persisted state as it happened — never
  * reconstructed from the capped action list, which a busy day overflows.
@@ -795,6 +879,8 @@ export const WardenDayStatsSchema = z.object({
   cleared: WardenActorCountsSchema,
   stopped: WardenActorCountsSchema,
   asked: WardenActorCountsSchema,
+  /** Jev's checks this day. Absent from an older daemon, which kept only `jevDecisions`. */
+  jev: WardenJevDayStatsSchema.optional(),
 });
 export type WardenDayStats = z.infer<typeof WardenDayStatsSchema>;
 
@@ -863,6 +949,8 @@ export const WardenStatusViewSchema = z.object({
    * kept a record for: a day it did not is missing, never a zero. Absent from an older daemon.
    */
   history: z.array(WardenDayStatsSchema).optional(),
+  /** Jev's most recent checks, newest first, from the record kept beside the reports. Absent from an older daemon. */
+  jevChecks: z.array(WardenJevCheckSchema).optional(),
 });
 export type WardenStatusView = z.infer<typeof WardenStatusViewSchema>;
 

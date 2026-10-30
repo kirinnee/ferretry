@@ -1,13 +1,16 @@
 /**
  * The Warden's work, rolled up per UTC day by who acted — what the status shows as `history`.
  *
- * TWO KINDS OF COUNTER, ONE DOCUMENT. What became of a flag (`moved`, `cleared`, `stopped`, `asked`,
+ * THREE KINDS OF COUNTER, ONE DOCUMENT. What became of a flag (`moved`, `cleared`, `stopped`, `asked`,
  * each split by actor) is counted AS IT HAPPENS, at the one place an action is recorded
  * ({@link recordWardenOutcome}): the action list is capped, so a busy day could never be rebuilt from
  * it. The rest — flags raised, Jev's decisions and spend, investigations and their cost — already live
  * in the state as today's triage counters and the investigation records, so they are FOLDED in
  * ({@link foldWardenDaily}) rather than counted twice. A fold only ever raises a number: a record
- * pruned from the capped list must not take a day's count down with it.
+ * pruned from the capped list must not take a day's count down with it. Jev's checks — every flag it was
+ * asked about, whatever it made of it, and every flag it was not asked about because its cap was spent —
+ * are counted as they happen too ({@link recordWardenJevCheck}): a check that handed the flag on is in no
+ * outcome, and was invisible before.
  *
  * Pure: no IO, no clock, no globals.
  */
@@ -17,12 +20,14 @@ import {
   type WardenActorCounts,
   type WardenAction,
   type WardenDayStats,
+  type WardenJevCheck,
   WARDEN_HISTORY_DAYS,
   wardenActionActor,
   wardenActionOutcome,
   type WardenOutcome,
 } from '@ferretry/protocol';
 import type { WardenEscalationReasonKind } from './escalation.ts';
+import { countJevCheck, jevCheckDay } from './jev-checks.ts';
 import type { WardenRuntimeState } from './state.ts';
 import { instantMs } from './time.ts';
 import { triageDayFor, utcDay, type WardenTriageDay } from './triage.ts';
@@ -109,6 +114,13 @@ export function recordWardenAsk(state: WardenRuntimeState, at: string, actor: Wa
   if (ms === undefined) return state;
   const day = utcDay(ms);
   return { ...state, daily: withDay(state.daily ?? [], count(dayOf(state.daily, day), 'asked', actor)) };
+}
+
+/** Count one of Jev's checks into the day it was made (`jev-checks.ts`). */
+export function recordWardenJevCheck(state: WardenRuntimeState, check: WardenJevCheck): WardenRuntimeState {
+  const day = jevCheckDay(check);
+  if (day === undefined) return state;
+  return { ...state, daily: withDay(state.daily ?? [], countJevCheck(dayOf(state.daily, day), check)) };
 }
 
 const higher = (stored: number, seen: number): number => Math.max(stored, seen);

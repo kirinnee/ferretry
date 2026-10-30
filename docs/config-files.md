@@ -51,7 +51,12 @@ that is not there). Three rules, in order:
    proved for that act (`loosen-config`) — so a confirmation can never put into effect an edit nobody saw.
 3. **The daemon's own writes are acknowledged.** A reviewed fleet change, a first-run import, a clone and
    the Warden settings form record the text they write as accepted before writing it, so the owner's own
-   act is never held as if somebody else made it.
+   act is never held as if somebody else made it. **A save never discards a held edit:** while an edit to
+   `warden.yaml` waits for confirmation, a save from the Warden settings form makes the owner's change to
+   BOTH versions — the held edit, changed, stays in the file and stays held; the version in effect, changed,
+   is what is recorded as accepted — and the form sends only the keys that changed, never a whole section.
+   (On 2026-10-29 a save of the daily caps rendered the version in effect over the file and put a held price
+   correction, $2 → $0.042, back to $2 a minute after it was written.)
 
 What is in effect is recorded in the state home (`state/config-accepted.json`), file by file with its text,
 so a last good version survives a restart and a confirmed loosening is not asked about again. A missing or
@@ -225,7 +230,7 @@ rewritten to hide it. A login is always spelled by its **runtime name** (`claude
 `caps.investigationUsdPerDay` (default $2) the investigations'; `caps.maxInvestigationsPerHour` (default 6)
 spaces investigations. A cap that is reached turns off **only its own layer** until midnight UTC — with the
 Jev cap hit, flags go straight to an investigation; with the investigation cap hit, Jev still clears what it
-can and the rest wait for you — and the Warden page says so.
+can and the rest wait for you — and the Warden page says so (_Jev paused: daily cap reached_).
 
 **Paced through the day.** No layer may spend more than **a quarter of its daily cap in one UTC hour**
 ($0.125 of Jev's default $0.50, $0.50 of the investigations' $2), so one burst of flags cannot spend the
@@ -244,10 +249,27 @@ Jev acting: an act costs the one Jev answer it came from.
 it is recorded, under what became of the flag — **moved** (a nudge, resume, restart or failover), **cleared**
 (a bless), **stopped**, or **asked** (anything held for you) — and under who acted: **auto** (a rule: the liveness
 reflex, a leftover browser) · **jev** (Jev acting alone) · **llm** (an investigation's verdict) · **owner** (_Leave it
-longer_). A failed attempt and a closed leftover browser count as none. Flags raised, Jev's decisions and spend, and
+longer_). A failed attempt and a closed leftover browser count as none. Each day also counts **Jev's checks** (`jev`, below)
+as they happen. Flags raised, Jev's decisions and spend, and
 investigations and their cost are folded in from the counters above, and a number only ever goes up, so a record
 pruned from the capped list does not take a day's count down. A cost priced the next day lands on the day its
 investigation started. An action that came from an investigation also names it (`investigator`).
+
+**Every Jev check is kept and counted.** A flag Jev was not sure of and handed on is in none of the outcomes
+above — on 2026-10-29 Jev answered 102 flags, handed every one to an investigation, and the Warden page said it
+did nothing. So each check is written beside the reports, one JSON line in
+`warden/jev-checks/<UTC day>.jsonl` (owner-only; the last **30 days** kept, older days dropped on the next
+write): the ferret, the flag, the verdict — **healthy** (left), **acted** (done alone), **handed on** (to an
+investigation or to you: not sure, below the bar, the act is yours, the call failed, the act did not take) or
+**skipped** (not asked, because the day's cap or this hour's share of it is spent) — with why, where the flag
+went, how sure Jev was and what the call cost. **No text**: never Jev's reason, a transcript line or the
+screen. A check is written once per standing flag, and a skip once while the flag stands. A call that was never
+made (a back-off, a snapshot that could not be masked) is no check. The day counts them as `jev`: `checks`
+(= healthy + acted + handed on), each verdict, and `skippedForCap`; the status carries the newest 50 as
+`jevChecks`. The Warden page reads them: the Flagged tile says _Jev checked N_, Jev's line spells out the
+checks (_6 checks: 1 healthy · 0 acted · 5 handed on_) and says **Jev paused: daily cap reached** while it is,
+the chart draws Jev's bar as its checks, and Recent actions lists every check that settled nothing as a
+_Handed on_ or _Skipped_ row of Jev's. A day from before this has no `jev` and reads as it did.
 
 **Investigators are named `warden-000001` … `warden-FFFFFF`**, from a counter in `warden/state.json`
 (`investigatorSequence`) that wraps to 1 and skips a name a live session still holds — never from the first-name

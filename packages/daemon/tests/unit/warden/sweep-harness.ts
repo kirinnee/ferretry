@@ -1,3 +1,4 @@
+import type { WardenJevCheck } from '@ferretry/protocol';
 import type { TriageDecision, TriageSnapshot } from '../../../src/lib/speedups/jev.ts';
 import {
   type AttentionBoardInput,
@@ -94,6 +95,8 @@ export interface Harness {
   /** Every snapshot the Jev guard was shown, after redaction. */
   readonly guarded: readonly TriageSnapshot[];
   readonly guardSettings: readonly unknown[];
+  /** Every Jev check the sweep wrote down, oldest first. */
+  readonly jevChecks: readonly WardenJevCheck[];
   /** Every act a verdict carried out. */
   readonly remedies: readonly { readonly action: string; readonly sessionId: string; readonly detail: string }[];
   /** The live rows of one node's board, as the fake store now holds them. */
@@ -146,6 +149,8 @@ export function harness(
     readonly feedBoards?: Readonly<Record<string, AttentionBoardInput | undefined>>;
     /** The clock, for the tests that let time pass. Fixed at noon otherwise. */
     readonly now?: () => number;
+    /** Make the Jev check record refuse writes, or reads. */
+    readonly jevChecksFail?: 'append' | 'recent';
     /** Whether the liveness monitor has stopped seeing. The port is absent unless a test sets it. */
     readonly monitorStalled?: () => boolean;
   } = {},
@@ -165,6 +170,7 @@ export function harness(
   let capability = 0;
   const guarded: TriageSnapshot[] = [];
   const guardSettings: unknown[] = [];
+  const jevChecks: WardenJevCheck[] = [];
   const remedies: { readonly action: string; readonly sessionId: string; readonly detail: string }[] = [];
   let guardCall = 0;
   const remedy = (action: string, sessionId: string, detail: string): void => {
@@ -303,6 +309,16 @@ export function harness(
       },
     },
     journal: { record: (type, data) => void journal.push({ type, data: { ...data } }) },
+    jevChecks: {
+      append: async check => {
+        if (options.jevChecksFail === 'append') throw new Error('disk full');
+        jevChecks.push(check);
+      },
+      recent: async limit => {
+        if (options.jevChecksFail === 'recent') throw new Error('unreadable');
+        return jevChecks.toReversed().slice(0, limit);
+      },
+    },
     nowMs: () => options.now?.() ?? NOW,
     capabilities: () => {
       capability += 1;
@@ -319,6 +335,7 @@ export function harness(
     resolved,
     guarded,
     guardSettings,
+    jevChecks,
     remedies,
     board: sessionId => boards.get(sessionId) ?? [],
     seedBoard: (sessionId, items) => void boards.set(sessionId, items),

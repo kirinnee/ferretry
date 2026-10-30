@@ -635,6 +635,42 @@ describe('ConfigFilesService.acknowledge and writeOwn', () => {
     should(service.current().evaluation.effective.warden.layers.llm).be.true();
     should(service.current().evaluation.pending).eql([]);
   });
+
+  it('should record the version in effect apart from the file, so a held edit stays held', async () => {
+    // Arrange: the corrected price waits for the owner while $2 is in effect.
+    const priced = (usd: number, cap: number): string =>
+      `guard:\n  usdPerMillionInputTokens: ${usd}\ncaps:\n  jevUsdPerDay: ${cap}\n`;
+    const { service, directory, store } = setup(
+      { 'warden.yaml': priced(0.042, 0.5) },
+      acceptedAs('warden.yaml', priced(2, 0.5)),
+    );
+    await service.load();
+
+    // Act: the owner raises the daily cap; the held price travels in the file, not in the record.
+    await service.writeOwn('warden.yaml', priced(0.042, 1), priced(2, 1));
+
+    // Assert
+    should(directory.files.get('warden.yaml')).equal(priced(0.042, 1));
+    should(store.value).eql(acceptedAs('warden.yaml', priced(2, 1)));
+    const { effective, pending } = service.current().evaluation;
+    should(effective.warden.caps.jevUsdPerDay).equal(1);
+    should(effective.warden.guard.usdPerMillionInputTokens).equal(2);
+    should(pending).containDeep([{ path: 'warden.yaml', etag: digest(priced(0.042, 1)) }]);
+  });
+
+  it('should put the file into effect when the version in effect it is written beside no longer holds it', async () => {
+    // Arrange: a held edit the owner's own change has caught up with.
+    const { service, store } = setup({ 'warden.yaml': WARDEN_ON }, acceptedAs('warden.yaml', WARDEN_OFF));
+    await service.load();
+
+    // Act
+    await service.writeOwn('warden.yaml', WARDEN_ON, `${WARDEN_ON}# the owner's own copy\n`);
+
+    // Assert
+    should(service.current().evaluation.pending).eql([]);
+    should(service.current().evaluation.effective.warden.layers.llm).be.true();
+    should(store.value).eql(acceptedAs('warden.yaml', WARDEN_ON));
+  });
 });
 
 describe('ConfigFilesService.confirm', () => {

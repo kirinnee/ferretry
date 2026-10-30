@@ -51,7 +51,11 @@ describe('warden paths', () => {
     const paths = createWardenPaths('/state');
 
     // Assert
-    should(paths).eql({ root: '/state/warden', reports: '/state/warden/reports' });
+    should(paths).eql({
+      root: '/state/warden',
+      reports: '/state/warden/reports',
+      jevChecks: '/state/warden/jev-checks',
+    });
   });
 });
 
