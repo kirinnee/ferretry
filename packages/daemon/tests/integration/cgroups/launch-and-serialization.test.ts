@@ -4,41 +4,48 @@ import should from 'should';
 import { TmuxSessionLifecycleLauncher } from '../../../src/adapters/session/lifecycle/tmux-session-lifecycle-launcher.ts';
 import { TmuxResumeLauncher } from '../../../src/adapters/session/resume/tmux-resume-launcher.ts';
 import { KeyedSerialExecutor } from '../../../src/adapters/system/keyed-serial-executor.ts';
+import type { TmuxPaneDelivery } from '../../../src/adapters/tmux/pane-delivery.ts';
 import {
-  CgroupLaunchPlanner,
-  CgroupService,
-  defaultCgroupConfig,
-  FLEET_SLICE,
   type CgroupApplyStatusStore,
   type CgroupCommandPort,
   type CgroupConfigStore,
   type CgroupHostFacts,
+  CgroupLaunchPlanner,
+  CgroupService,
+  defaultCgroupConfig,
+  FLEET_SLICE,
   type SessionSpawnFacts,
 } from '../../../src/lib/cgroups/index.ts';
-import type { SessionEffectKey, SessionEffectLedger } from '../../../src/lib/session/effects/index.ts';
-import {
-  defaultSessionLifecycleSettings,
-  SessionLifecycleService,
-  type SessionLifecycleEvent,
-  type SessionLifecycleRecord,
-  type SessionLifecycleRepository,
-} from '../../../src/lib/session/lifecycle/index.ts';
-import {
-  defaultSessionResumeSettings,
-  SessionResumeService,
-  UnregisteredResumeReplacement,
-  type ResumeTarget,
-  type ResumeTransition,
-} from '../../../src/lib/session/resume/index.ts';
 import {
   parseSessionId,
   type SessionId,
   type TmuxCommandPort,
   type TmuxCommandResult,
 } from '../../../src/lib/index.ts';
+import type { SessionEffectKey, SessionEffectLedger } from '../../../src/lib/session/effects/index.ts';
+import {
+  defaultSessionLifecycleSettings,
+  type SessionLifecycleEvent,
+  type SessionLifecycleRecord,
+  type SessionLifecycleRepository,
+  SessionLifecycleService,
+} from '../../../src/lib/session/lifecycle/index.ts';
+import {
+  defaultSessionResumeSettings,
+  type ResumeTarget,
+  type ResumeTransition,
+  SessionResumeService,
+  UnregisteredResumeReplacement,
+} from '../../../src/lib/session/resume/index.ts';
 import { TmuxController } from '../../../src/lib/tmux/index.ts';
 import { WARDEN_LABEL } from '../../../src/lib/warden/index.ts';
-import type { TmuxPaneDelivery } from '../../../src/adapters/tmux/pane-delivery.ts';
+
+/**
+ * Let everything already queued run. Every port here is an in-memory fake that settles in microtasks, and a
+ * macrotask never starts before the microtask queue is empty — so one turn of the event loop is the proof
+ * that a save which COULD have interleaved with the parked launch already has, with no wall-clock time in it.
+ */
+const turn = async (): Promise<void> => await new Promise<void>(resolve => setImmediate(resolve));
 
 /**
  * The launch seam and the serialization barrier, assembled exactly as the composition root does.
@@ -623,7 +630,7 @@ describe('the barrier a resource-limit save and a session RESUME share', () => {
 
     // Act
     const saving = subject.limits.updateConfig({ perAgent: { cpuPercent: 5, memoryPercent: 5 } });
-    await Bun.sleep(20);
+    await turn();
     const beforeRelease = [...subject.log];
     open();
     await resuming;
@@ -658,7 +665,7 @@ describe('the barrier a resource-limit save and a session RESUME share', () => {
     const saving = subject.limits.updateConfig({ perAgent: { cpuPercent: 5, memoryPercent: 5 } });
     await atHost;
     const resuming = subject.serial.run(id, async () => await subject.resume.relaunch(id));
-    await Bun.sleep(20);
+    await turn();
     const beforeRelease = [...subject.tmux.calls];
     releaseHost();
     await saving;
@@ -682,7 +689,7 @@ describe('the barrier a resource-limit save and a session bootstrap share', () =
     // Act — fired while the pane does not yet exist. A per-session key would let this straight in.
     const saving = subject.limits.updateConfig({ perAgent: { cpuPercent: 5, memoryPercent: 5 } });
     // Give the save every chance to interleave before the launch is released.
-    await Bun.sleep(20);
+    await turn();
     const beforeRelease = [...subject.log];
     open();
     await starting;
@@ -703,7 +710,7 @@ describe('the barrier a resource-limit save and a session bootstrap share', () =
 
     // Act
     const saving = subject.limits.updateConfig({ perAgent: { cpuPercent: 5, memoryPercent: 5 } });
-    await Bun.sleep(20);
+    await turn();
     open();
     await starting;
     await saving;
@@ -776,7 +783,7 @@ describe('the barrier a resource-limit save and a session bootstrap share', () =
     const saving = limits.updateConfig({ enabled: true });
     await atHost;
     const creating = lifecycle.createAndStart(create);
-    await Bun.sleep(20);
+    await turn();
     const beforeRelease = [...log];
     releaseHost();
     await saving;

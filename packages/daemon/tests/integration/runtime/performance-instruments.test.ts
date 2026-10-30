@@ -114,7 +114,8 @@ describe('instrumentChildProcesses', () => {
     await host.spawn(['/usr/bin/env', 'true', 'secret text']).exited;
     await host.spawn({ cmd: ['true', 'status'] }).exited;
     host.spawnSync(['true', '--flag']);
-    await Bun.sleep(10);
+    // One macrotask turn drains the exit reactions the wrapper registered before this test awaited the same promises.
+    await new Promise<void>(resolve => setImmediate(resolve));
     recorder.close(window);
     restore();
 
@@ -187,7 +188,8 @@ describe('instrumentChildProcesses', () => {
 
     // Act
     host.spawn(['tmux', 'ls']);
-    await Bun.sleep(5);
+    // The rejection reaction is a microtask: one macrotask turn lets it run, so an exit WOULD be recorded by now.
+    await new Promise<void>(resolve => setImmediate(resolve));
 
     // Assert
     const [entry] = window.tables(60_000).childProcesses.commands;

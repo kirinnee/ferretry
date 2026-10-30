@@ -23,6 +23,7 @@ import {
   WebRtcEngineUnavailable,
   WebRtcOfferRefused,
 } from '../../../src/lib/webrtc/index.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 /** A data channel that records what it was sent and lets a case decide what comes back. */
 class FakeChannel implements EngineDataChannel {
@@ -484,11 +485,7 @@ async function loopbackOffer(): Promise<{
 }
 
 async function until(what: string, condition: () => boolean): Promise<void> {
-  for (let waited = 0; waited < 5_000; waited += 10) {
-    if (condition()) return;
-    await new Promise(resolve => setTimeout(resolve, 10));
-  }
-  throw new Error(`timed out waiting for ${what}`);
+  await waitFor(condition, what);
 }
 
 describe('the node-datachannel engine’s lifetime', () => {

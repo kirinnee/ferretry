@@ -4,14 +4,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import {
+  classifyStreamLink,
   HarnessProcessProvenance,
   ProcfsProcessTree,
   PsProcessTree,
   processTreeFor,
   SigtermProcessSignal,
-  classifyStreamLink,
 } from '../../../../src/adapters/session/processes/index.ts';
 import type { ProcessDetailRow } from '../../../../src/lib/session/processes/ports.ts';
+import { waitFor, waitForValue } from '../../support/wait-for.ts';
 
 /**
  * THE LINUX PROCESS-TREE READER, over real processes. The test process is the root of the walk, so only
@@ -48,12 +49,10 @@ async function waitForRow(
   tree: ProcfsProcessTree,
   wanted: (rows: readonly ProcessDetailRow[]) => ProcessDetailRow | undefined,
 ): Promise<readonly ProcessDetailRow[]> {
-  for (let attempt = 0; attempt < 100; attempt++) {
+  return await waitForValue(async () => {
     const read = await tree.tree(process.pid);
-    if (read.kind === 'read' && wanted(read.rows) !== undefined) return read.rows;
-    await Bun.sleep(50);
-  }
-  throw new Error('the spawned process never appeared in the tree');
+    return read.kind === 'read' && wanted(read.rows) !== undefined ? read.rows : undefined;
+  }, 'the spawned process to appear in the tree');
 }
 
 /**
@@ -68,11 +67,7 @@ async function kernelState(pid: number): Promise<string | undefined> {
 /** Stops `pid` and waits until the kernel shows it stopped: a state that, unlike running or sleeping, holds still. */
 async function stopped(pid: number): Promise<void> {
   process.kill(pid, 'SIGSTOP');
-  for (let attempt = 0; attempt < 100; attempt++) {
-    if ((await kernelState(pid)) === 'T') return;
-    await Bun.sleep(20);
-  }
-  throw new Error(`process ${pid} never stopped`);
+  await waitFor(async () => (await kernelState(pid)) === 'T', `process ${String(pid)} to be stopped`);
 }
 
 describe('ProcfsProcessTree', () => {

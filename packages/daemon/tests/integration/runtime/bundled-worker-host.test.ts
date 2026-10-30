@@ -15,6 +15,7 @@ import {
   type HostedAnswer,
   type HostedWorker,
 } from '../../../src/adapters/runtime/bundled-worker-host.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 type Request = { readonly id: number; readonly ask: string } | { readonly hello: true };
 type Response =
@@ -164,10 +165,12 @@ describe('BundledWorkerHost', () => {
     })();
     await held.pending;
     const settled = host.inFlight;
-    await Bun.sleep(30);
+    await waitFor(() => threads[0]?.terminated === true, 'the idle thread to be ended');
     const endedWhenIdle = threads[0]?.terminated;
     idleMs = 10_000;
     await ask('y');
+    // A negative wait that cannot fail a correct host: its idle timer is ten seconds, so this pause only
+    // gives a host that read the old five milliseconds time to end the thread (a bug), never the reverse.
     await Bun.sleep(30);
     const keptWhenIdle = threads[1]?.terminated;
     host.close();
@@ -190,7 +193,7 @@ describe('BundledWorkerHost', () => {
     await ask('x');
     idleMs = 5;
     host.notify({ id: 0, ask: 'news' });
-    await Bun.sleep(30);
+    await waitFor(() => threads[0]?.terminated === true, 'the idle thread to be ended after the notice');
     const sent = threads[0]?.sent.map(each => ('id' in each ? each.ask : 'greeting'));
     const endedAfterNotice = threads[0]?.terminated;
     host.close();
@@ -203,15 +206,17 @@ describe('BundledWorkerHost', () => {
 
   it('should leave an idle thread running when a notice arrives while a request is still waiting', async () => {
     // Arrange
+    const asked = Promise.withResolvers<() => void>();
     const { host, threads } = hostOf((request, thread) => {
       if ('id' in request && request.ask === 'slow')
-        setTimeout(() => thread.reply({ id: request.id, value: 'done' }), 20);
+        asked.resolve(() => thread.reply({ id: request.id, value: 'done' }));
     });
     const id = host.nextId();
 
-    // Act
+    // Act — the answer is held until the notice has arrived, so the request is certainly still waiting.
     const pending = host.request(id, { id, ask: 'slow' }, 'answer');
     host.notify({ id: 0, ask: 'news' });
+    (await asked.promise)();
     const answered = await pending;
     host.close();
 
@@ -257,11 +262,11 @@ describe('BundledWorkerHost', () => {
 
   it('should refuse everything waiting on a closed thread', async () => {
     // Arrange
-    const { host, ask } = hostOf(() => undefined);
+    const { host, threads, ask } = hostOf(() => undefined);
 
     // Act
     const waiting = refusal(ask('x'));
-    await Bun.sleep(1);
+    await waitFor(() => threads[0]?.sent.length === 1, 'the thread to be sent the request');
     host.close();
 
     // Assert

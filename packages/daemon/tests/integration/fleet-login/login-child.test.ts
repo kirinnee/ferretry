@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import { harnessLoginTimer, spawnHarnessLoginChild } from '../../../src/adapters/fleet-login/login-child.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 const temporaryDirectories: string[] = [];
 
@@ -50,8 +51,6 @@ async function run(
   });
   const wrote = options.write === undefined ? undefined : await child.write(options.write);
   const code = await child.exited;
-  // The pumps are not awaited by the caller, so give the last chunks a turn to be decoded and split.
-  await new Promise(resolve => setTimeout(resolve, 50));
   return { lines, code, ...(wrote === undefined ? {} : { wrote }) };
 }
 
@@ -188,13 +187,14 @@ describe('spawnHarnessLoginChild', () => {
     // ceremony, it is the only thing that learns. The value here is one line, which is the only size
     // this adapter ever writes: the wire schema caps a submitted code at 4 KiB.
     // Arrange
-    const path = await script('exec 0<&-\nsleep 0.5\n');
+    const path = await script('exec 0<&-\necho stdin-closed\nsleep 30\n');
+    const lines: string[] = [];
     const child = spawnHarnessLoginChild({
       command: [path],
       environment: { PATH: '/usr/bin:/bin' },
-      onLine: () => undefined,
+      onLine: line => lines.push(line),
     });
-    await new Promise(resolve => setTimeout(resolve, 150));
+    await waitFor(() => lines.includes('stdin-closed'), 'the child to close its stdin');
 
     // Act
     const actual = await child.write('pasted-authorization-code\n');
@@ -246,7 +246,7 @@ describe('spawnHarnessLoginChild', () => {
       environment: { PATH: '/usr/bin:/bin' },
       onLine: line => lines.push(line),
     });
-    for (let turn = 0; turn < 100 && lines.length === 0; turn += 1) await new Promise(r => setTimeout(r, 20));
+    await waitFor(() => lines.length > 0, 'the launcher to name the binary it started');
     const binary = Number(/^binary (\d+)$/u.exec(lines[0] ?? '')?.[1]);
     should(Number.isInteger(binary)).be.true();
 
@@ -264,7 +264,7 @@ describe('spawnHarnessLoginChild', () => {
         return false;
       }
     };
-    for (let turn = 0; turn < 100 && alive(); turn += 1) await new Promise(r => setTimeout(r, 20));
+    await waitFor(() => !alive(), 'the killed binary to be reaped');
     should(alive()).be.false();
   });
 
@@ -315,7 +315,7 @@ describe('harnessLoginTimer', () => {
     harnessLoginTimer.after(1, () => {
       fired = true;
     });
-    await new Promise(resolve => setTimeout(resolve, 30));
+    await waitFor(() => fired, 'the timer to fire');
 
     // Assert
     should(fired).be.true();
@@ -330,7 +330,12 @@ describe('harnessLoginTimer', () => {
 
     // Act
     disarm();
-    await new Promise(resolve => setTimeout(resolve, 30));
+    // Timers fire in order of their delay, so once a later one has fired the disarmed one would have.
+    let later = false;
+    harnessLoginTimer.after(5, () => {
+      later = true;
+    });
+    await waitFor(() => later, 'a later timer to fire');
 
     // Assert
     should(fired).be.false();

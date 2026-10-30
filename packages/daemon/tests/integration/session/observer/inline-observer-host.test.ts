@@ -34,6 +34,7 @@ import {
   type TranscriptEvent,
   type TurnPaneEvidence,
 } from '../../../../src/lib/index.ts';
+import { waitFor } from '../../support/wait-for.ts';
 
 const NOW = '2026-10-22T08:00:00.000Z';
 const cleanups: Array<() => Promise<void>> = [];
@@ -85,6 +86,8 @@ interface World {
   readonly looks: string[];
   /** When set, the next state read waits for it before answering. */
   gate?: Promise<void>;
+  /** Set once a read has its document in hand and is waiting at the gate. */
+  held?: boolean;
   busy?: SessionId;
   brokenLedger?: SessionId;
 }
@@ -99,7 +102,10 @@ async function world(): Promise<World> {
     const gate = subject.gate;
     subject.gate = undefined;
     const value = await readState(id);
-    if (gate !== undefined) await gate;
+    if (gate !== undefined) {
+      subject.held = true;
+      await gate;
+    }
     return value;
   };
   return subject;
@@ -232,7 +238,7 @@ describe('InlineObserverHost — facts', () => {
 
     // Act
     const tick = observer.turns.run();
-    await Bun.sleep(20);
+    await waitFor(() => subject.held === true, 'the first read to hold the old document at the gate');
     await subject.storage.updateState(A, raw => ({ ...(raw as Record<string, unknown>), status: 'stopped' }));
     release();
     await tick;
@@ -296,7 +302,7 @@ describe('InlineObserverHost — armed', () => {
     observer.arm();
     observer.arm();
     ticks[0]?.tick();
-    for (let wait = 0; wait < 100 && (await turnStateOf(subject, A)) === undefined; wait += 1) await Bun.sleep(5);
+    await waitFor(async () => (await turnStateOf(subject, A)) !== undefined, "the tick to record A's turn state");
     await observer.close();
     await observer.close();
 

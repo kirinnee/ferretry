@@ -16,6 +16,7 @@ import type { ProcessProbePort, ProcessTableRead } from '../../../src/lib/migrat
 import { descendantsOf, type ProcRow, parseProcessTable } from '../../../src/lib/migrate/process-table.ts';
 import type { TmuxCommandPort, TmuxCommandResult } from '../../../src/lib/tmux/contracts.ts';
 import { PANE_PROOF_FORMAT } from '../../../src/lib/tmux/pane-proof.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 /**
  * A tmux that answers per COMMAND, because absence is now two questions rather than one.
@@ -344,10 +345,14 @@ describe('BunProcessProbe, reading one subtree from procfs', () => {
         stdout: 'ignore',
         stderr: 'ignore',
       });
-      await Bun.sleep(300);
       const subject = new BunProcessProbe(ps);
 
       try {
+        await waitFor(
+          async () => (await subject.descendants(tree.pid))?.length === 4,
+          'the shell to have started its process tree',
+        );
+
         // Act
         const actual = await subject.descendants(tree.pid);
         const table = await subject.processTable();

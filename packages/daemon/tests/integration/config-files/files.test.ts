@@ -12,6 +12,8 @@ import { watchConfigFiles } from '../../../src/lib/config-files/watcher.ts';
 import { FileEventHub } from '../../../src/lib/file-events/hub.ts';
 import { createFoundationPaths } from '../../../src/lib/paths.ts';
 import { resolveStateHome } from '../../../src/lib/state-home.ts';
+import { armed } from '../file-events/real-file-system.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 const temporaryDirectories: string[] = [];
 
@@ -76,8 +78,14 @@ describe('FileConfigDirectory', () => {
     const hub = new FileEventHub(platformFileEventSource(), unrefFileEventTimers, { settleMs: 10 });
     let loads = 0;
     const errors: unknown[] = [];
+    let baselines = 0;
+    const subscribed = new Set<string>();
     const stop = watchConfigFiles({
-      fingerprint: async () => await subject.directory.fingerprint(),
+      fingerprint: async () => {
+        const read = await subject.directory.fingerprint();
+        baselines += 1;
+        return read;
+      },
       onChange: async () => {
         loads += 1;
       },
@@ -90,25 +98,31 @@ describe('FileConfigDirectory', () => {
       },
       events: {
         directories: async () => await subject.directory.directories(),
-        subscribeDirectory: (path, listener) => hub.subscribeDirectory(path, listener),
+        subscribeDirectory: (path, listener) => {
+          subscribed.add(path);
+          return hub.subscribeDirectory(path, listener);
+        },
       },
       debounceMs: 20,
     });
     try {
-      await Bun.sleep(50);
+      // The watch is armed when the baseline is taken and the root is heard to change: a file written before
+      // that is part of the baseline, not a change. The watcher renews its directories before each baseline.
+      await waitFor(() => baselines > 0 && subscribed.has(subject.config), 'the watcher to take its baseline');
+      await armed(hub, subject.config);
+      const before = loads;
 
-      // Act: components/ and components/mcp/ do not exist when the watch begins.
+      // Act: components/ and components/mcp/ do not exist when the watch begins. The watcher renews the
+      // set of watched directories before each fingerprint, so no pause is needed between these writes.
       await mkdir(join(subject.config, 'components', 'mcp'), { recursive: true });
-      await Bun.sleep(50);
       await writeFile(join(subject.config, 'components', 'mcp', 'github.yaml'), 'name: github\n');
-      const deadline = Date.now() + 3_000;
-      while (loads === 0 && Date.now() < deadline) await Bun.sleep(10);
+      await waitFor(() => loads > before, 'a load for the file written in the new directory');
       const afterFile = loads;
       await writeFile(join(subject.config, 'components', 'mcp', 'github.yaml'), 'name: github-2\n');
-      while (loads === afterFile && Date.now() < deadline) await Bun.sleep(10);
+      await waitFor(() => loads > afterFile, 'a load for the file rewritten in the new directory');
 
       // Assert
-      should(afterFile).be.aboveOrEqual(1);
+      should(afterFile).be.above(before);
       should(loads).be.above(afterFile);
       should(errors).deepEqual([]);
     } finally {

@@ -14,6 +14,7 @@ import {
   SurfaceControl,
 } from '../../../../src/lib/index.ts';
 import { FakeTerminals } from '../../../unit/runtime/mounts/support.ts';
+import { waitFor } from '../../support/wait-for.ts';
 
 /**
  * THE MACHINE'S AGENT BROWSER, AGAINST A REAL HEADLESS CHROME.
@@ -133,7 +134,10 @@ describe('the machine agent browser, in a real Chrome', () => {
       })(),
       browser.actOnPage('watch', 'mirror', { action: 'type', selector: '#q', text: 'moving' }),
     ]);
-    await Bun.sleep(1_000);
+    await waitFor(
+      () => personFrames.length > 0 && agentFrames.length > 0,
+      'both viewers to receive a screencast frame',
+    );
     const personsTree = await browser.actOnPage('s1', personsPage, { action: 'read', mode: 'a11y' });
     const agentsTree = await tools.call(agent('s1'), { tool: 'browser.read', name: 'app', mode: 'a11y' });
     viewer.detach();

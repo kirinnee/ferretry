@@ -200,7 +200,7 @@ describe('StorageTaskBoardSessionDirectory', () => {
       documentsInFlight += 1;
       peakDocuments = Math.max(peakDocuments, documentsInFlight);
       try {
-        await Bun.sleep(1);
+        await new Promise(resolve => setImmediate(resolve));
         return answer;
       } finally {
         documentsInFlight -= 1;

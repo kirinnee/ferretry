@@ -7,7 +7,7 @@
  * saves, and every way a document can change that must still be seen.
  */
 import { afterEach, describe, it } from 'bun:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -226,8 +226,9 @@ describe('the session document cache', () => {
     // Act — a replacement, then an in-place edit that keeps the size and only moves the times.
     await writeFile(state, JSON.stringify({ id: 'cached-1', status: 'stopped', turn: 1 }));
     const replaced = (await storage.readState(ID)) as Record<string, unknown>;
-    await Bun.sleep(5);
+    const moved = new Date((await stat(state)).mtimeMs + 5_000);
     await writeFile(state, JSON.stringify({ id: 'cached-1', status: 'stopper', turn: 1 }));
+    await utimes(state, moved, moved);
     const edited = (await storage.readState(ID)) as Record<string, unknown>;
 
     // Assert

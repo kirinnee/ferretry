@@ -22,6 +22,7 @@ import {
   SESSION_WORKER_ATTACH_FLAGS,
 } from '../../../src/lib/tmux/control-protocol.ts';
 import { isTmuxServerAbsent } from '../../../src/lib/tmux/server-absent.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 const TMUX = Bun.which('tmux');
 const cleanups: (() => Promise<void>)[] = [];
@@ -168,12 +169,14 @@ describe('a session worker’s pane subscription', () => {
     // Act
     const took = await subject.watch('fy-pane', PANE_WATCH_FORMAT);
     const connected = subject.connected;
-    await Bun.sleep(1_200);
+    await waitFor(() => values.some(value => parsePaneWatch(value)?.dead === false), 'the first report of a live pane');
     await direct.execute(['send-keys', '-t', 'agent', 'drawn', 'Enter']);
-    await Bun.sleep(1_500);
+    await waitFor(
+      async () => (await direct.execute(['capture-pane', '-p', '-t', 'agent'])).stdout.includes('drawn'),
+      'the pane to draw what was typed',
+    );
     await direct.execute(['send-keys', '-t', 'agent', 'C-d']);
-    for (let wait = 0; wait < 40 && !values.some(value => parsePaneWatch(value)?.dead === true); wait += 1)
-      await Bun.sleep(100);
+    await waitFor(() => values.some(value => parsePaneWatch(value)?.dead === true), 'the report that the pane died');
 
     // Assert
     should(took).be.true();

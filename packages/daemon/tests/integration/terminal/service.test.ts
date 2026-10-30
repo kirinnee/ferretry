@@ -296,7 +296,7 @@ describe('ManagedTerminalService — one create at a time', () => {
     const runtime = new FakeRuntime();
     const create = runtime.create.bind(runtime);
     runtime.create = async input => {
-      await Bun.sleep(10);
+      await new Promise<void>(resolve => setImmediate(resolve));
       return await create(input);
     };
     let minted = 0;

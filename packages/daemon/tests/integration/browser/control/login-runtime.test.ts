@@ -3,14 +3,14 @@ import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/pr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { BrowserControlError } from '../../../../src/lib/index.ts';
 import {
-  NodeBrowserLoginRuntime,
-  XvfbDisplay,
   type BrowserDisplayPort,
   type BrowserLoginChild,
+  NodeBrowserLoginRuntime,
   type XvfbChild,
+  XvfbDisplay,
 } from '../../../../src/adapters/index.ts';
+import { BrowserControlError } from '../../../../src/lib/index.ts';
 
 /**
  * The host effects the human login window performs, over real spawns of FAKE executables.
@@ -508,17 +508,25 @@ describe('NodeBrowserLoginRuntime', () => {
     const root = await workspace();
     const profile = join(root, 'profile');
     await mkdir(profile, { recursive: true });
+    // The marker appears during the wait's first poll interval, which is what makes this a wait rather than a
+    // check — and it is written by the wait's own sleep port, so no real time decides when.
+    let polls = 0;
     const subject = new NodeBrowserLoginRuntime({
       display: fakeDisplay(),
       secretsDirectory: root,
       pollIntervalMs: 1,
+      sleep: async () => {
+        polls += 1;
+        if (polls === 1) await writeFile(join(profile, 'SingletonLock'), '');
+      },
     });
     const child = fakeChild(running());
-    // Appears while the wait is polling, which is what makes this a wait rather than a check.
-    setTimeout(() => void writeFile(join(profile, 'SingletonLock'), ''), 5);
 
-    // Act + Assert
+    // Act
     await subject.waitForChrome(profile, child);
+
+    // Assert
+    should(polls).equal(1);
   });
 
   it('should report a Chrome that exited before it started, however it exited', async () => {

@@ -33,6 +33,7 @@ import {
   parseSessionId,
   resolveStateHome,
 } from '../../../../src/lib/index.ts';
+import { waitForValue } from '../../support/wait-for.ts';
 
 const homes = new Set<string>();
 const NOW = '2026-07-31T10:00:00.000Z';
@@ -541,8 +542,10 @@ describe('system monotonic clock', () => {
 
     // Act
     const first = clock.elapsedMs();
-    await Bun.sleep(2);
-    const second = clock.elapsedMs();
+    const second = await waitForValue(() => {
+      const reading = clock.elapsedMs();
+      return reading > first ? reading : undefined;
+    }, 'the monotonic clock to advance');
 
     // Assert
     should(second).be.greaterThanOrEqual(first);

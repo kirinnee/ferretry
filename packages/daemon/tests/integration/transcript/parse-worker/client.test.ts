@@ -10,14 +10,10 @@
  */
 import { describe, it } from 'bun:test';
 import { join } from 'node:path';
-import {
-  TranscriptImageError,
-  type TranscriptImageLookup,
-} from '../../../../src/lib/session/transcript/image-reader.ts';
 import should from 'should';
 import {
-  TranscriptParseWorker,
   type TranscriptParseThread,
+  TranscriptParseWorker,
   type TranscriptParseWorkerOptions,
   WorkerConversationDescriber,
   WorkerConversationIndex,
@@ -42,6 +38,10 @@ import {
   ConversationDigestError,
   type PortableConversationRow,
 } from '../../../../src/lib/session/transcript/digest.ts';
+import {
+  TranscriptImageError,
+  type TranscriptImageLookup,
+} from '../../../../src/lib/session/transcript/image-reader.ts';
 import type { TranscriptRowsIndex } from '../../../../src/lib/session/transcript/reader.ts';
 import type {
   TranscriptBatch,
@@ -50,6 +50,7 @@ import type {
   TranscriptSource,
   TranscriptWindow,
 } from '../../../../src/lib/transcript/types.ts';
+import { waitFor } from '../../support/wait-for.ts';
 
 type Sent = TranscriptParseRequest | TranscriptParseGreeting;
 
@@ -442,11 +443,14 @@ describe('WorkerTranscriptSource.window', () => {
     // Act
     const first = window.next();
     const second = window.next();
-    await Bun.sleep(5);
+    await waitFor(() => threads[0]?.asked.length === 1, 'the first step to reach the worker');
+    // Negative: the second step must NOT be sent yet. One macrotask turn is enough for an eager send to show; a
+    // wrong send landing later could only turn this red late, never a false PASS on a correct queue.
+    await new Promise(resolve => setImmediate(resolve));
     const sentBefore = threads[0]?.asked.length;
     answers[0]?.({ kind: 'step', more: true });
     const one = await first;
-    await Bun.sleep(5);
+    await waitFor(() => threads[0]?.asked.length === 2, 'the second step to reach the worker once the first answered');
     const sentAfter = threads[0]?.asked.length;
     answers[1]?.({ kind: 'step', more: false });
     const two = await second;

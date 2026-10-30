@@ -23,8 +23,9 @@ import type {
   TerminalRuntimePort,
 } from '../../../src/lib/index.ts';
 import { AGENT_SESSION_CAPABILITY_HEADER } from '../../../src/lib/runtime/mounts/agent-tools.ts';
-import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 import { OS_CHOSEN_PORT, recordedPort } from '../support/os-port.ts';
+import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
+import { waitFor, waitForValue } from '../support/wait-for.ts';
 
 /**
  * The agent tools, driven end to end through the production composition root.
@@ -227,13 +228,11 @@ async function seedFleet(home: string): Promise<void> {
   );
 }
 
-async function untilListening(port: number): Promise<void> {
-  for (let attempt = 0; attempt < 600; attempt += 1) {
-    if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) return;
-    await Bun.sleep(50);
-  }
-  throw new Error('the daemon never started listening');
-}
+const untilListening = (port: number): Promise<void> =>
+  waitFor(
+    async () => (await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true,
+    'the daemon to start listening',
+  );
 
 /** The world under test, with the session credentials each session was delivered. */
 async function bootAgentToolsDaemon(home: string) {
@@ -492,8 +491,11 @@ describe('the agent tools, through the production composition root', () => {
       headers: daemon.human,
       body: JSON.stringify({}),
     });
-    await Bun.sleep(100);
-    const stoppedCredential = await tool(marinCapability, { tool: 'terminal.list' });
+    await waitFor(() => !daemon.browser.has('page-5'), "the stopped session's pages to close");
+    const stoppedCredential = await waitForValue(async () => {
+      const refused = await tool(marinCapability, { tool: 'terminal.list' });
+      return refused.status === 403 ? refused : undefined;
+    }, "the stopped session's credential to be refused");
 
     const audit = AuditViewSchema.parse(
       await (await fetch(`${daemon.base}/v1/audit?limit=200`, { headers: daemon.human })).json(),

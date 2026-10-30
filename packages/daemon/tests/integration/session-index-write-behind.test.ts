@@ -32,6 +32,7 @@ import {
   parseSessionId,
   resolveStateHome,
 } from '../../src/lib/index.ts';
+import { waitFor } from './support/wait-for.ts';
 
 const directories = new Set<string>();
 
@@ -89,11 +90,13 @@ function sequencesIn(database: Database, id = A): readonly number[] {
 class RecordingPersister implements IndexPersister {
   readonly batches: (readonly IndexWrite[])[] = [];
   closed = 0;
+  calls = 0;
   failures = 0;
   #release: (() => void) | undefined;
   hold = false;
 
   async persist(writes: readonly IndexWrite[]): Promise<void> {
+    this.calls += 1;
     if (this.hold) await new Promise<void>(resolve => (this.#release = resolve));
     if (this.failures > 0) {
       this.failures -= 1;
@@ -126,8 +129,6 @@ function memoryIndex(): BunSqliteIndex {
   return new BunSqliteIndex(database);
 }
 
-const settle = (milliseconds: number): Promise<void> => new Promise(resolve => setTimeout(resolve, milliseconds));
-
 describe('WriteBehindSessionIndex', () => {
   it('should answer reads from memory at once and persist the writes behind them in one batch', async () => {
     // Arrange
@@ -147,7 +148,7 @@ describe('WriteBehindSessionIndex', () => {
       count: subject.countEvents(A),
       pending: subject.pendingWrites,
     };
-    await settle(40);
+    await waitFor(() => persister.batches.length === 1 && subject.pendingWrites === 0, 'the one batch to land');
 
     // Assert — the session's two writes became one; the other session's stayed its own.
     should(before).equal(0);
@@ -187,17 +188,19 @@ describe('WriteBehindSessionIndex', () => {
     const persister = new RecordingPersister();
     persister.failures = 1;
     const failures: string[] = [];
-    const subject = new WriteBehindSessionIndex(memoryIndex(), persister, {
+    const subject: WriteBehindSessionIndex = new WriteBehindSessionIndex(memoryIndex(), persister, {
       batchMs: 5,
       retryMs: 20,
-      persistFailed: error => failures.push(error.message),
+      persistFailed: error => {
+        failures.push(error.message);
+        // Queued inside the failure report, so it is behind the failed batch before the retry can be scheduled.
+        subject.removeSession(B);
+      },
     });
 
     // Act
     subject.replaceSession(session(A, 1), pointers(1));
-    await settle(12);
-    subject.removeSession(B);
-    await settle(60);
+    await waitFor(() => persister.batches.length === 1, 'the failed batch to be sent again with what queued behind it');
 
     // Assert
     should(failures).deepEqual(['disk said no']);
@@ -216,12 +219,12 @@ describe('WriteBehindSessionIndex', () => {
     persister.hold = true;
     const subject = new WriteBehindSessionIndex(memoryIndex(), persister, { batchMs: 5 });
     subject.replaceSession(session(A, 1), pointers(1));
-    await settle(15);
+    await waitFor(() => persister.calls === 1, 'the first batch to reach the persister');
 
     // Act
     subject.replaceAll({ sessions: [session(B, 0)], events: [], problems: [] });
     persister.release();
-    await settle(40);
+    await waitFor(() => persister.batches.length === 2 && subject.pendingWrites === 0, 'both batches to land');
 
     // Assert
     should(persister.batches).deepEqual([
@@ -237,7 +240,7 @@ describe('WriteBehindSessionIndex', () => {
     persister.hold = true;
     const subject = new WriteBehindSessionIndex(memoryIndex(), persister, { batchMs: 1 });
     subject.replaceSession(session(A, 1), pointers(1));
-    await settle(10);
+    await waitFor(() => persister.calls === 1, 'the first batch to reach the persister');
     subject.refreshSession(session(B, 0));
 
     // Act

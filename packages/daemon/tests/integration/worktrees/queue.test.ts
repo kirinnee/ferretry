@@ -2,7 +2,8 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { WorktreeOperationQueue } from '../../../src/adapters/worktrees/index.ts';
 
-const settle = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 1));
+/** One turn of the event loop, so overlapping work would interleave if the queue allowed it. */
+const settle = (): Promise<void> => new Promise(resolve => setImmediate(resolve));
 
 describe('WorktreeOperationQueue', () => {
   it('should run operations on one repository strictly one at a time', async () => {

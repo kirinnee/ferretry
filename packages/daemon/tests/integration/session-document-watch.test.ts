@@ -13,6 +13,8 @@ import { mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
+import { unrefFileEventTimers } from '../../src/adapters/file-events/bun-file-event-source.ts';
+import { platformFileEventSource } from '../../src/adapters/file-events/platform.ts';
 import {
   BunSqliteIndexFactory,
   type DaemonStorage,
@@ -25,10 +27,9 @@ import {
   StateHomeLayout,
   SystemClock,
 } from '../../src/adapters/index.ts';
-import { unrefFileEventTimers } from '../../src/adapters/file-events/bun-file-event-source.ts';
-import { platformFileEventSource } from '../../src/adapters/file-events/platform.ts';
 import { FileEventHub } from '../../src/lib/file-events/hub.ts';
 import { createSessionPaths, type FileSystemPort, type FoundationPaths, parseSessionId } from '../../src/lib/index.ts';
+import { waitFor, waitForValue } from './support/wait-for.ts';
 
 const homes: string[] = [];
 const closers: Array<() => Promise<void> | void> = [];
@@ -271,14 +272,19 @@ describe('a watched session document', () => {
     // Arrange — the real file-event hub, on this platform's watcher.
     const hub = new FileEventHub(platformFileEventSource(), unrefFileEventTimers);
     closers.push(() => hub.close());
+    let heard = 0;
     const { storage, fileSystem, paths } = await seeded({
-      subscribe: (path, listener) => hub.subscribe(path, () => listener()),
+      subscribe: (path, listener) =>
+        hub.subscribe(path, () => {
+          heard += 1;
+          listener();
+        }),
     });
     await storage.readConfig(ID, 'heard');
     await storage.readConfig(ID, 'heard');
     // The hub's first check reports a new subscription once; let it, so the quiet reads below are quiet.
     await writeFile(join(paths.directory, 'nudge'), 'x');
-    await Bun.sleep(200);
+    await waitFor(() => heard > 0, 'the hub to report the new subscription');
     await storage.readConfig(ID, 'heard');
     fileSystem.identities = [];
     for (let read = 0; read < 5; read += 1) await storage.readConfig(ID, 'heard');
@@ -288,13 +294,10 @@ describe('a watched session document', () => {
     const temporary = join(paths.directory, 'config.json.edit');
     await writeFile(temporary, JSON.stringify({ id: 'watched-1', status: 'stopped', turn: 1 }));
     await rename(temporary, paths.config);
-    const started = Date.now();
-    let seen: unknown;
-    while (Date.now() - started < 2_000) {
-      seen = ((await storage.readConfig(ID, 'heard')) as Record<string, unknown>).status;
-      if (seen === 'stopped') break;
-      await Bun.sleep(5);
-    }
+    const seen = await waitForValue(async () => {
+      const status = ((await storage.readConfig(ID, 'heard')) as Record<string, unknown>).status;
+      return status === 'stopped' ? status : undefined;
+    }, 'the hub to report the edit made from outside');
 
     // Assert
     should(quiet).equal(0);
