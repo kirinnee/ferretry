@@ -167,18 +167,18 @@ describe("a resumed conversation hears this launch's sections", () => {
   });
 
   it('should give up on a harness that answers --help by starting a session, and still launch', () => {
-    // Arrange — a stand-in that, like a harness taking `--help` for a prompt, never exits.
+    // Arrange — a stand-in that, like a harness taking `--help` for a prompt, never exits. It outlives
+    // this tier's per-test timeout, so a wrapper that waited for it fails here by timing out; no clock
+    // reading is needed to tell the two apart.
     const directory = mkdtempSync(join(tmpdir(), 'fy-wrapper-hang-'));
     const file = join(directory, 'claude');
-    writeFileSync(file, '#!/bin/sh\nprintf "> "\nwhile IFS= read -r _turn; do :; done\nexec sleep 30\n');
+    writeFileSync(file, '#!/bin/sh\nprintf "> "\nwhile IFS= read -r _turn; do :; done\nexec sleep 3600\n');
     chmodSync(file, 0o755);
-    const started = Date.now();
 
     // Act
     const args = launchArguments(render(account({ flags: [`--append-system-prompt=${BASE}`] })), {}, directory);
 
     // Assert
-    should(Date.now() - started).be.below(10_000);
     should(args.filter(arg => arg.includes('system-prompt-snapshot'))).be.empty();
     should(args.at(-1)).equal('the task');
   });
