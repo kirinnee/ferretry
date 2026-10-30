@@ -6,7 +6,7 @@ import { registerNotifyCommands } from '../../../src/lib/notify/commands';
 import { ProtocolNotifyGateway } from '../../../src/lib/notify/gateway';
 import type { NotifyApiClient } from '../../../src/lib/notify/ports';
 import { Command } from 'commander';
-import { snapshot } from '../../unit/attention/fixtures';
+import { snapshot } from '../../unit/agenda/fixtures';
 import { CapturingOutput, SESSION } from '../../unit/notify/fixtures';
 import { sessionView } from '../../unit/session/session-fixtures';
 

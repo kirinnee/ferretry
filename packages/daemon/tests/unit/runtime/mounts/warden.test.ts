@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import {
-  WardenAttentionViewSchema,
+  WardenAgendaViewSchema,
   WardenConfigViewSchema,
   WardenInvestigateViewSchema,
   WardenLeaveViewSchema,
@@ -287,7 +287,7 @@ describe('the "who needs you" feed', () => {
     // Assert
     should(owner.status).equal(200);
     should(live.status).equal(200);
-    should(() => WardenAttentionViewSchema.parse(JSON.parse(owner.body))).not.throw();
+    should(() => WardenAgendaViewSchema.parse(JSON.parse(owner.body))).not.throw();
   });
 
   it('should restate a refusal from the feed', async () => {

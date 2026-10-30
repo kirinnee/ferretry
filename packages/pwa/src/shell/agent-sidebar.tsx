@@ -63,7 +63,7 @@ import type { ModeCounts, SessionGroup } from '../lib/fleet-grouping.ts';
 import type { LineageIndex } from '../lib/lineage.ts';
 import { daemonNewSessionPath } from '../lib/pages/routes.ts';
 import { drawerFocusPolicy, pinScopedFirst } from './agent-sidebar-model.ts';
-import { type AttentionCountFor, GroupBlock } from './agent-sidebar-rows.tsx';
+import { type AgendaCountFor, GroupBlock } from './agent-sidebar-rows.tsx';
 import { FleetFilters, type FleetFilterValues } from './fleet-filters.tsx';
 import { RouteLink } from './route-link.tsx';
 import type { OpenSessionMenu } from './row-context-gesture.ts';
@@ -105,7 +105,7 @@ export interface SidebarBodyProps {
   readonly onSearchClear?: () => void;
   readonly onFocusFolder: (path: string) => void;
   readonly activeId?: string;
-  readonly attentionCountFor?: AttentionCountFor;
+  readonly agendaCountFor?: AgendaCountFor;
   /** Drawer/touch context: folder headers take the 44px touch floor. */
   readonly coarse?: boolean;
   readonly autoFocusSearch?: boolean;
@@ -116,7 +116,7 @@ export interface SidebarBodyProps {
 /** Filters, the one scroller, and the footer — shared by the column and drawer. */
 export function SidebarBody({
   activeId,
-  attentionCountFor,
+  agendaCountFor,
   autoFocusSearch,
   canMutate,
   coarse,
@@ -158,7 +158,7 @@ export function SidebarBody({
               {groups.map(group => (
                 <GroupBlock
                   activeId={activeId}
-                  attentionCountFor={attentionCountFor}
+                  agendaCountFor={agendaCountFor}
                   byId={fleet.byId}
                   canMutate={canMutate}
                   coarse={coarse}

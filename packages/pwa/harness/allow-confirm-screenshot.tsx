@@ -5,7 +5,7 @@
  *
  *   bun harness/allow-confirm-screenshot.tsx [out-dir]   # writes allow-confirm-*.png (default harness/out)
  *
- * It renders the REAL `AttentionCard` with `AttentionConfigChange` spliced in at the top of the card's
+ * It renders the REAL `AgendaCard` with `AgendaConfigChange` spliced in at the top of the card's
  * scroll by a build plugin, which stands in for the one-line wiring the agenda v2 card adds; the item is the
  * one `fy agenda add --confirms warden.yaml` raises (the daemon's own ask, answers and premise). Two states:
  * the change as raised, and the card restated after the file was edited. Every width — 320px included — is
@@ -29,15 +29,15 @@ const fail = (message: string): never => {
 
 const PAGE_ENTRY = `
 import { createRoot } from 'react-dom/client';
-import type { AttentionItem } from '@ferretry/protocol';
-import { AttentionCard } from '../../src/features/attention/attention-card.tsx';
+import type { AgendaItem } from '@ferretry/protocol';
+import { AgendaCard } from '../../src/features/agenda/agenda-card.tsx';
 
 const NOW = Date.parse('2026-10-30T09:00:00.000Z');
 const PRICE = 'the Jev price the cap counts with goes down from 2 to 0.042';
 const allow = { label: 'Allow', description: 'Apply this change to warden.yaml now' };
 const deny = { label: 'Deny', description: 'Keep it held: nothing changes, nothing is lost' };
 const discard = { label: 'Discard change', description: 'Put warden.yaml back to the version in effect' };
-const item = (restated: boolean): AttentionItem => ({
+const item = (restated: boolean): AgendaItem => ({
   id: 'A47',
   source: 'agent-raised',
   sourceRef: null,
@@ -70,14 +70,14 @@ if (root === null) throw new Error('missing #root');
 createRoot(root).render(
   <div className="kt-shell flex min-h-full justify-center bg-bg p-4">
     <div className="w-full" style={{ maxWidth: 560 }}>
-      <AttentionCard item={item(restated)} now={NOW} onAct={() => undefined} swipeHints />
+      <AgendaCard item={item(restated)} now={NOW} onAct={() => undefined} swipeHints />
     </div>
   </div>,
 );
 `;
 
 /** The one-line wiring the agenda v2 card adds, spliced in for the capture: the change, first in the card. */
-const SCROLL = '<div className="fy-attn-card__scroll" data-attention-scroll="">';
+const SCROLL = '<div className="fy-attn-card__scroll" data-agenda-scroll="">';
 const wiring = {
   name: 'allow-confirm-wiring',
   setup(build: Bun.PluginBuilder) {
@@ -86,9 +86,9 @@ const wiring = {
       if (!text.includes(SCROLL)) fail('the card has no scroll to put the change in');
       return {
         loader: 'tsx',
-        contents: `import { AttentionConfigChange } from './attention-config-change.tsx';\n${text.replace(
+        contents: `import { AgendaConfigChange } from './agenda-config-change.tsx';\n${text.replace(
           SCROLL,
-          `${SCROLL}\n<AttentionConfigChange item={item} />`,
+          `${SCROLL}\n<AgendaConfigChange item={item} />`,
         )}`,
       };
     });
@@ -164,7 +164,7 @@ try {
         const page = await context.newPage();
         for (const state of ['raised', 'restated'] as const) {
           await page.goto(`${server.url}?theme=studio-${scheme}&state=${state}`);
-          const change = page.locator('[data-attention-confirms]');
+          const change = page.locator('[data-agenda-confirms]');
           await change.waitFor({ state: 'visible' });
           const where = `${state} at ${viewport.name}/${scheme}`;
           const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);

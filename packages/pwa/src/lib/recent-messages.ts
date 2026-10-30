@@ -1,5 +1,5 @@
 /**
- * THE LAST FEW THINGS A FERRET SAID, read through the session messages route — so the Attention page can
+ * THE LAST FEW THINGS A FERRET SAID, read through the session messages route — so the Agenda page can
  * show what led up to an item without opening the whole conversation.
  *
  * The route reads FORWARD only, from the start of the conversation, so the tail is found by walking to
@@ -20,7 +20,7 @@ export type MessagesClient = Pick<IFyApiClient, 'messages'>;
 
 /** How many rows one request asks for: the route's own ceiling. */
 const RECENT_PAGE = 1_000;
-/** How many of the ferret's last messages the Attention page shows. */
+/** How many of the ferret's last messages the Agenda page shows. */
 export const RECENT_MESSAGE_COUNT = 3;
 /** How many pages one read walks before it gives up on reaching the end. */
 const RECENT_MAX_PAGES = 40;

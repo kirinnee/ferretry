@@ -14,7 +14,7 @@ import type {
   SessionView,
   TaskBoardGrantRequestView,
   UsageFeedView,
-  WardenAttentionView,
+  WardenAgendaView,
   WardenConfig,
   WardenConfigView,
   WardenInvestigateView,
@@ -212,7 +212,7 @@ export const wardenStatusView = {
   blessings: [],
 } satisfies WardenStatusView;
 
-export const wardenAttentionView = {
+export const wardenAgendaView = {
   generatedAt: INSTANT,
   lastSweepAt: INSTANT,
   outcome: 'items',
@@ -232,7 +232,7 @@ export const wardenAttentionView = {
   ],
   boardsWithParseErrors: [],
   verdictCoverage: { limit: 100, truncated: false },
-} satisfies WardenAttentionView;
+} satisfies WardenAgendaView;
 
 export const wardenInvestigateView = {
   sessionId: 'session-1',

@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   type AnswerOperationRecord,
-  STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
+  STRUCTURED_ANSWER_UNCONFIRMED_AGENDA_KIND,
 } from '../../../../src/lib/session/question/answer-ledger.ts';
 import {
   projectStructuredQuestion,
@@ -30,8 +30,8 @@ const record = (outcome: AnswerOperationRecord['outcome'], toolUseId = 'tool-1')
   outcome,
 });
 
-const unconfirmedAttention = (toolUseId: string) => ({
-  needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
+const unconfirmedAgenda = (toolUseId: string) => ({
+  needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_AGENDA_KIND,
   needsHuman: `answer request request-1 for ${toolUseId} may have reached the form, and release was not confirmed; inspect the session before continuing`,
 });
 
@@ -90,7 +90,7 @@ describe('structured question projection branches', () => {
     should(patch).match({
       status: 'awaiting_user',
       pendingQuestion: undefined,
-      needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
+      needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_AGENDA_KIND,
       needsHuman: /the bound question remains blocked/u,
     });
   });
@@ -102,7 +102,7 @@ describe('structured question projection branches', () => {
       status: 'awaiting_question' as const,
       turn: 1,
       pendingQuestion: { toolUseId: 'tool-1', questions: [{ question: 'Ship?' }] },
-      ...unconfirmedAttention('tool-1'),
+      ...unconfirmedAgenda('tool-1'),
     };
 
     // Act
@@ -118,7 +118,7 @@ describe('structured question projection branches', () => {
     const standing = {
       id: 's1',
       turn: 1,
-      ...unconfirmedAttention('tool-1'),
+      ...unconfirmedAgenda('tool-1'),
     };
     const clearing = { needsHuman: undefined, needsHumanKind: undefined };
 

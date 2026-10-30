@@ -10,7 +10,7 @@ import { createRoot } from 'react-dom/client';
 import { MachineNotificationList, NotificationsOffBanner } from '../src/features/settings/notification-machines.tsx';
 import { daemonId } from '../src/lib/daemon-connection.ts';
 import type { MachineNotificationRow } from '../src/lib/machine-notifications.ts';
-import { daemonAttentionPath } from '../src/lib/pages/routes.ts';
+import { daemonAgendaPath } from '../src/lib/pages/routes.ts';
 import { SessionsBar } from '../src/shell/sessions-bar.tsx';
 import { sessionView } from '../tests/support/sessions.ts';
 
@@ -66,25 +66,20 @@ function Banner(): ReactElement {
   );
 }
 
-const ferret = (
-  id: string,
-  teammate: string,
-  label: string,
-  attention?: { open: number; ask: string; minutes: number },
-) =>
+const ferret = (id: string, teammate: string, label: string, agenda?: { open: number; ask: string; minutes: number }) =>
   sessionView(id, {
     config: { teammate: teammate as never, label, cwd: `/home/kirin/Workspace/${id}` },
     state: {
       lastActivityAt: ago(1),
-      ...(attention === undefined
+      ...(agenda === undefined
         ? {}
-        : { attention: { open: attention.open, first: 'A1', ask: attention.ask, latestAt: ago(attention.minutes) } }),
+        : { attention: { open: agenda.open, first: 'A1', ask: agenda.ask, latestAt: ago(agenda.minutes) } }),
     },
   });
 
 const SESSIONS: readonly SessionView[] = [
   ferret('dw', 'wren', 'Docs sweep'),
-  ferret('fr', 'ottilie', 'Attention inbox wiring', { open: 1, ask: 'Rebase onto main now?', minutes: 2 }),
+  ferret('fr', 'ottilie', 'Agenda inbox wiring', { open: 1, ask: 'Rebase onto main now?', minutes: 2 }),
   ferret('nl', 'zelda', 'Nightly benchmarks'),
   ferret('hm', 'hadi', 'Relay advertisement', { open: 2, ask: 'Restart the staging relay?', minutes: 9 }),
 ];
@@ -101,8 +96,8 @@ function Bar({ grouped }: { readonly grouped: boolean }): ReactElement {
       <SessionsBar
         active={null}
         activeSessionId="dw"
-        attentionHref={daemonAttentionPath(STUDIO)}
-        attentionTotal={3}
+        agendaHref={daemonAgendaPath(STUDIO)}
+        agendaTotal={3}
         daemonId={STUDIO}
         groupNeedsYou={grouped}
         initialMode={mode}

@@ -89,7 +89,7 @@ export function PageHost({ route, connection, slots }: PageHostProps) {
     case 'learning':
       return <slots.Learning connection={matchedConnection} />;
     case 'attention':
-      if (slots.Attention === undefined) throw new Error('the attention route is not mounted');
+      if (slots.Attention === undefined) throw new Error('the agenda route is not mounted');
       return <slots.Attention connection={matchedConnection} />;
     case 'imported-history':
       if (slots.ImportedHistory === undefined) throw new Error('the imported-history route is not mounted');

@@ -19,6 +19,9 @@ const WORKER_ENTRY: BrowserWorkerProgram = {
 /** A worker the injected `connectWorker` stands in for, so its path is never spawned. */
 const INJECTED_WORKER: BrowserWorkerProgram = { kind: 'source', entry: '/worker.ts' };
 
+/** The shipped launcher gives a Chrome that ignores SIGTERM two seconds before SIGKILL; these cases only need the escalation. */
+const SHORT_SHUTDOWN = { shutdownTimeoutMs: 250 };
+
 const roots: string[] = [];
 const opened: BrowserAutomation[] = [];
 afterEach(async () => {
@@ -368,6 +371,7 @@ describe('NodeSessionBrowserLauncher', () => {
         worker = await BrowserWorkerClient.connect(options);
         return worker;
       },
+      SHORT_SHUTDOWN,
     );
     const browser = await launcher.launch({ width: 800, height: 600 });
     opened.push(browser);
@@ -438,6 +442,7 @@ describe('NodeSessionBrowserLauncher', () => {
         worker = await BrowserWorkerClient.connect(options);
         return worker;
       },
+      SHORT_SHUTDOWN,
     );
     const browser = await launcher.launch({ width: 800, height: 600 });
     opened.push(browser);

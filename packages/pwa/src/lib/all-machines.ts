@@ -25,12 +25,12 @@
  */
 
 import type { SessionView } from '@ferretry/protocol';
-import { attentionFirst } from './attention-inbox.ts';
+import { agendaFirst } from './agenda-inbox.ts';
 import {
   listedBeforeMode,
   listTallies,
   matchesMode,
-  hasAttention,
+  hasAgenda,
   type SessionsListFilter,
 } from '../shell/sessions-bar-model.ts';
 import type { ConnectionHealthState } from './connection-health.ts';
@@ -195,7 +195,7 @@ export const allMachinesView = (
     };
     hiddenStopped += tallies.hiddenStopped;
     const shown = pool.filter(view => listedBeforeMode(view, filter, kept) && matchesMode(view, filter.mode));
-    const wantsYou = (view: SessionView): boolean => hasAttention(view);
+    const wantsYou = (view: SessionView): boolean => hasAgenda(view);
     const moves = groupNeedsYou && actionable(machine.reach) ? shown.filter(wantsYou) : [];
     for (const view of moves) pinned.push({ daemonId: machine.daemonId, machineName: machine.name, view, order });
     const stays = moves.length === 0 ? shown : shown.filter(view => !wantsYou(view));
@@ -221,7 +221,7 @@ export const allMachinesView = (
   );
   // Attention is the primary signal: its sessions lead, newest first (a stable sort, so equal instants
   // keep the status order above), and the status-based ones follow in the order they always had.
-  const ordered = attentionFirst(pinned, entry => entry.view);
+  const ordered = agendaFirst(pinned, entry => entry.view);
   return {
     needsYou: ordered.map(({ order: _order, ...entry }) => entry),
     // A kind other than All shows only the machines it found something on; All shows every machine,

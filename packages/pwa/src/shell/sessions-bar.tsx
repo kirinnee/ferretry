@@ -7,7 +7,7 @@
  *   - the machine this page belongs to, which is also the machine switcher, and ＋ for a new session;
  *   - ONE search: the finder (⌘K) everywhere, or this session's own file search on a session page;
  *   - ATTENTION, a door to the inbox with the open-item count as an accent badge (always reachable, calm
- *     at zero) — given by the host as `attentionHref` and `attentionTotal`, so it is the count across
+ *     at zero) — given by the host as `agendaHref` and `agendaTotal`, so it is the count across
  *     EVERY machine;
  *   - Interactive · All · Agents, each with the count choosing it would show, and "Show stopped";
  *   - "Needs you" first: every session with open Attention, newest first, each bold with an accent count
@@ -52,7 +52,7 @@ import { NewSessionMenu, withReach } from './new-session-menu.tsx';
 import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from './palette-shortcut.ts';
 import { RouteLink } from './route-link.tsx';
 import { type OpenRowMenu, SessionMenuContext, type SessionMenuState } from './session-menu-context.ts';
-import { SessionsBarAttention } from './sessions-bar-attention.tsx';
+import { SessionsBarAgenda } from './sessions-bar-agenda.tsx';
 import { SessionsBarOptions } from './sessions-bar-density.tsx';
 import { SessionsRailDot } from './sessions-bar-dot.tsx';
 import { SessionsBarFilters, sessionsBarEmptyMessage } from './sessions-bar-filters.tsx';
@@ -105,12 +105,12 @@ export interface SessionsBarProps {
   /** The place the page belongs to, if any. Pass `'attention'` on the inbox page. */
   readonly active: SessionsBarPlace | null;
   /**
-   * Open Attention items across EVERY paired machine: the badge on the bar's Attention entry. Absent
-   * is zero. The entry is drawn only when `attentionHref` is given too.
+   * Open Agenda items across EVERY paired machine: the badge on the bar's Attention entry. Absent
+   * is zero. The entry is drawn only when `agendaHref` is given too.
    */
-  readonly attentionTotal?: number;
+  readonly agendaTotal?: number;
   /** Where the Attention entry goes (the inbox route). Absent: the bar draws no such entry. */
-  readonly attentionHref?: string;
+  readonly agendaHref?: string;
   readonly presentation: SessionsBarPresentation;
   readonly onNavigate: (to: string) => void;
   /** Opens the finder. */
@@ -389,14 +389,14 @@ function SessionsBarBody(props: SessionsBarProps & ListFilterProps & { readonly 
           </>
         )}
       </div>
-      {props.attentionHref === undefined ? null : (
-        <div className="fy-sbar__attention-slot">
-          <SessionsBarAttention
+      {props.agendaHref === undefined ? null : (
+        <div className="fy-sbar__agenda-slot">
+          <SessionsBarAgenda
             current={active === 'attention'}
-            href={props.attentionHref}
+            href={props.agendaHref}
             onNavigate={navigate}
             rail={false}
-            total={props.attentionTotal ?? 0}
+            total={props.agendaTotal ?? 0}
           />
         </div>
       )}
@@ -601,13 +601,13 @@ function SessionsRail(props: SessionsBarProps & ListFilterProps) {
       )}
       <NewSessionControl marked={false} navigate={onNavigate} props={props} />
       <FindButton iconOnly onOpen={props.onOpenPalette} shortcut />
-      {props.attentionHref === undefined ? null : (
-        <SessionsBarAttention
+      {props.agendaHref === undefined ? null : (
+        <SessionsBarAgenda
           current={active === 'attention'}
-          href={props.attentionHref}
+          href={props.agendaHref}
           onNavigate={onNavigate}
           rail
-          total={props.attentionTotal ?? 0}
+          total={props.agendaTotal ?? 0}
         />
       )}
       <ul className="fy-sbar__list fy-sbar__dots scroll-thin">

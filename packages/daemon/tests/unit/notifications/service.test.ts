@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { AttentionItemSchema, AttentionSnapshotSchema, type PushDeliveryResult } from '@ferretry/protocol';
+import { AgendaItemSchema, AgendaSnapshotSchema, type PushDeliveryResult } from '@ferretry/protocol';
 import should from 'should';
 import { KeyedSerialExecutor } from '../../../src/adapters/system/keyed-serial-executor.ts';
 import { NotificationService } from '../../../src/lib/notifications/service.ts';
@@ -117,7 +117,7 @@ function fixture(
   };
 }
 
-const item = AttentionItemSchema.parse({
+const item = AgendaItemSchema.parse({
   id: 'A1',
   source: 'agent-raised',
   sourceRef: null,
@@ -131,7 +131,7 @@ const item = AttentionItemSchema.parse({
   raisedByName: 'Ada',
 });
 
-const snapshot = AttentionSnapshotSchema.parse({
+const snapshot = AgendaSnapshotSchema.parse({
   v: 1,
   sessionId: SESSION,
   items: [item],
@@ -140,11 +140,11 @@ const snapshot = AttentionSnapshotSchema.parse({
   parseErrors: 0,
   updatedAt: AT,
 });
-const second = AttentionItemSchema.parse({ ...item, id: 'A2', subject: 'Choose a region' });
-const twoWaiting = AttentionSnapshotSchema.parse({ ...snapshot, items: [item, second], count: 2 });
-const notice = AttentionItemSchema.parse({ ...item, id: 'A3', notice: true, subject: 'Build is green' });
-const pinging = AttentionItemSchema.parse({ ...notice, id: 'A4', ping: true });
-const due = AttentionItemSchema.parse({ ...item, neededBy: '2026-08-06T12:00:00.000Z' });
+const second = AgendaItemSchema.parse({ ...item, id: 'A2', subject: 'Choose a region' });
+const twoWaiting = AgendaSnapshotSchema.parse({ ...snapshot, items: [item, second], count: 2 });
+const notice = AgendaItemSchema.parse({ ...item, id: 'A3', notice: true, subject: 'Build is green' });
+const pinging = AgendaItemSchema.parse({ ...notice, id: 'A4', ping: true });
+const due = AgendaItemSchema.parse({ ...item, neededBy: '2026-08-06T12:00:00.000Z' });
 
 const requested = (world: ReturnType<typeof fixture>) =>
   world.ledger.records.filter(record => record.phase === 'requested');
@@ -183,8 +183,8 @@ describe('NotificationService stop push', () => {
   it('should push nothing when no item waits on the owner', async () => {
     // Arrange
     const world = fixture();
-    const ferretTurn = AttentionItemSchema.parse({ ...item, waitingOn: 'ferret', askedAt: AT });
-    const waiting = AttentionSnapshotSchema.parse({ ...snapshot, items: [ferretTurn, notice], count: 2 });
+    const ferretTurn = AgendaItemSchema.parse({ ...item, waitingOn: 'ferret', askedAt: AT });
+    const waiting = AgendaSnapshotSchema.parse({ ...snapshot, items: [ferretTurn, notice], count: 2 });
 
     // Act
     await world.service.stopped(SESSION, AT, waiting);
@@ -302,10 +302,10 @@ describe('NotificationService delivered count', () => {
     await failing.service.raised(SESSION, pinging, snapshot);
 
     // Assert
-    should(await world.service.attentionDelivered(SESSION, 'A4')).equal(2);
-    should(await world.service.attentionDelivered(SESSION, 'A9')).equal(0);
-    should(await failing.service.attentionDelivered(SESSION, 'A4')).equal(0);
-    should(await unreadable.service.attentionDelivered(SESSION, 'A4')).equal(0);
+    should(await world.service.agendaDelivered(SESSION, 'A4')).equal(2);
+    should(await world.service.agendaDelivered(SESSION, 'A9')).equal(0);
+    should(await failing.service.agendaDelivered(SESSION, 'A4')).equal(0);
+    should(await unreadable.service.agendaDelivered(SESSION, 'A4')).equal(0);
   });
 });
 
@@ -332,7 +332,7 @@ function legacyRecord(key: string, extra: Record<string, unknown>): Notification
     origin: 'attention',
     attribution: 'attention:agent:session-1',
     sessionId: SESSION,
-    attentionId: 'A1',
+    agendaId: 'A1',
     ...extra,
     sent: { kind: 'attention', interactive: true, title: 'earlier', body: 'earlier' },
     enrolled: 1,
@@ -358,7 +358,7 @@ describe('NotificationService across the agenda rename', () => {
       [
         legacyRecord(`attention:${SESSION}:stopped:${AT}`, { stoppedAt: AT }),
         legacyRecord(`attention:${SESSION}:A1:deadline`, { deadline: true }),
-        legacyRecord(`attention:${SESSION}:A4:ping`, { attentionId: 'A4', ping: true }),
+        legacyRecord(`attention:${SESSION}:A4:ping`, { agendaId: 'A4', ping: true }),
       ],
     );
     const world = fixture({ ledger });
@@ -392,7 +392,7 @@ describe('NotificationService across the agenda rename', () => {
     const ledger = new MemoryLedger(
       [],
       [
-        legacyRecord(`attention:${SESSION}:A4:ping`, { attentionId: 'A4', ping: true }),
+        legacyRecord(`attention:${SESSION}:A4:ping`, { agendaId: 'A4', ping: true }),
         NotificationRecordSchema.parse({
           v: 1,
           phase: 'outcome',
@@ -406,7 +406,7 @@ describe('NotificationService across the agenda rename', () => {
     const world = fixture({ ledger });
 
     // Act / Assert
-    should(await world.service.attentionDelivered(SESSION, 'A4')).equal(2);
+    should(await world.service.agendaDelivered(SESSION, 'A4')).equal(2);
   });
 });
 
@@ -417,7 +417,7 @@ describe('NotificationRecordSchema across the agenda rename', () => {
     at: AT,
     attribution: 'attention:agent:session-1',
     sessionId: SESSION,
-    attentionId: 'A1',
+    agendaId: 'A1',
     ping: true,
     sent: { kind: 'attention', interactive: true, title: 't', body: 'b' },
     enrolled: 1,

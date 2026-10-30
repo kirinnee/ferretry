@@ -1,7 +1,7 @@
 import type { SessionHandoverRequest, SessionTransferPlan } from '@ferretry/protocol';
 import { HandoverError } from '../../../src/lib/handover/types.ts';
 import type {
-  HandoverAttentionRequest,
+  HandoverAgendaRequest,
   HandoverFailure,
   HandoverBoardMembership,
   HandoverBoardObservation,
@@ -422,14 +422,14 @@ class FakePreflight {
   }
 }
 
-class FakeAttention {
-  readonly raised: HandoverAttentionRequest[] = [];
+class FakeAgenda {
+  readonly raised: HandoverAgendaRequest[] = [];
   failure: string | null = null;
 
-  async raise(input: HandoverAttentionRequest): Promise<void> {
+  async raise(input: HandoverAgendaRequest): Promise<void> {
     if (this.failure !== null) {
       this.failure = null;
-      throw new Error('attention ledger unavailable');
+      throw new Error('agenda ledger unavailable');
     }
     this.raised.push(input);
   }
@@ -487,7 +487,7 @@ export interface HandoverHarness {
   readonly preparer: FakePreparer;
   readonly importer: FakeImporter;
   readonly preflight: FakePreflight;
-  readonly attention: FakeAttention;
+  readonly attention: FakeAgenda;
   readonly journal: FakeJournal;
   readonly clock: FakeClock;
 }
@@ -501,7 +501,7 @@ export function harness(source: HandoverSessionView = sessionView()): HandoverHa
   const preparer = new FakePreparer();
   const importer = new FakeImporter();
   const preflight = new FakePreflight();
-  const attention = new FakeAttention();
+  const agenda = new FakeAgenda();
   const journal = new FakeJournal();
   const clock = new FakeClock();
   const ports: HandoverPorts = {
@@ -513,7 +513,7 @@ export function harness(source: HandoverSessionView = sessionView()): HandoverHa
     preparer,
     importer,
     preflight,
-    attention,
+    attention: agenda,
     journal,
     identity: new FakeIdentity(),
     clock,
@@ -528,7 +528,7 @@ export function harness(source: HandoverSessionView = sessionView()): HandoverHa
     preparer,
     importer,
     preflight,
-    attention,
+    attention: agenda,
     journal,
     clock,
   };

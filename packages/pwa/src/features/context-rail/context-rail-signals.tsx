@@ -1,17 +1,17 @@
 /**
  * Signals: what this agent is waiting on you for, and what you already answered.
  *
- * The answer controls are the attention board's own (`AttentionAnswerControls`), so an answer given here
+ * The answer controls are the attention board's own (`AgendaAnswerControls`), so an answer given here
  * is exactly the answer the board, the action modal and the chat card would have sent — one presenter of
  * an ask's valid answers, never a second.
  */
 
-import type { AttentionResponse, AttentionSnapshot } from '@ferretry/protocol';
+import type { AgendaResponse, AgendaSnapshot } from '@ferretry/protocol';
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import type { AttentionLoadStatus } from '../../lib/attention-store.ts';
+import type { AgendaLoadStatus } from '../../lib/agenda-store.ts';
 import { cn } from '../../lib/class-names.ts';
 import { Button } from '../../shell/primitives.tsx';
-import { AttentionAnswerControls } from '../attention/attention-answer-controls.tsx';
+import { AgendaAnswerControls } from '../agenda/agenda-answer-controls.tsx';
 import {
   CONTEXT_RAIL_SEARCH_LABEL,
   contextEmptyCopy,
@@ -27,12 +27,12 @@ import { ContextFailure, ContextFilterBar, ContextNote, loadFailureReason } from
 import type { ContextSignalsPort } from './context-rail-ports.ts';
 
 export interface ContextSignalsRead {
-  readonly status: AttentionLoadStatus;
-  readonly snapshot: AttentionSnapshot | undefined;
+  readonly status: AgendaLoadStatus;
+  readonly snapshot: AgendaSnapshot | undefined;
 }
 
 /**
- * This agent's attention board, live, read on first use. A failed read is left for the panel to report:
+ * This agent's agenda board, live, read on first use. A failed read is left for the panel to report:
  * the store already holds the `error` status, so swallowing the rejection here loses nothing.
  */
 export function useContextSignals(port: ContextSignalsPort): ContextSignalsRead {
@@ -140,7 +140,7 @@ interface SignalItemProps {
   readonly nowMs: number;
   readonly busy: boolean;
   readonly refusal: string | null;
-  readonly onRespond: (response: AttentionResponse) => void;
+  readonly onRespond: (response: AgendaResponse) => void;
   readonly onResolve: () => void;
 }
 
@@ -168,7 +168,7 @@ function SignalItem({ row, agentName, nowMs, busy, refusal, onRespond, onResolve
           </Button>
         </div>
       ) : (
-        <AttentionAnswerControls ask={row.item.ask} busy={busy} onRespond={onRespond} />
+        <AgendaAnswerControls ask={row.item.ask} busy={busy} onRespond={onRespond} />
       )}
       {refusal === null ? null : (
         <p className="m-0 break-words text-meta text-err" role="alert" data-context-signal-refusal="">

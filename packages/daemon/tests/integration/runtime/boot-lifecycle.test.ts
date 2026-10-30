@@ -59,6 +59,7 @@ import {
   BrowserLoginWindowService,
   BrowserProfileStore,
   type BunRelayCarrier,
+  DaemonHealthProbe,
 } from '../../../src/adapters/index.ts';
 import { FileSessionEnvironmentStore } from '../../../src/adapters/session/lifecycle/index.ts';
 import {
@@ -1627,7 +1628,7 @@ describe('daemon boot lifecycle', () => {
    * the case checks by reading a file out of it. A session the index does not hold is absent, and a
    * session whose documents no longer satisfy the protocol is refused rather than reported missing.
    *
-   * The mounted attention board is held to those same two answers on those same two ids, because its
+   * The mounted agenda board is held to those same two answers on those same two ids, because its
    * existence proof is this registry. A board with no ledger file is legitimately empty, so a check
    * that read only the ledger would answer `200 { count: 0 }` both for a session that does not exist
    * and for one whose documents are damaged — the failure mode that hides a session waiting on the
@@ -1700,7 +1701,7 @@ describe('daemon boot lifecycle', () => {
     // Without this line the two refusals below could be a route that fails for everyone.
     should(liveBoard.status).equal(200);
     should((await liveBoard.json()) as { count: number }).have.property('count', 0);
-    // The attention board answers on the same two ids, and a missing ledger file is an empty board
+    // The agenda board answers on the same two ids, and a missing ledger file is an empty board
     // ONLY when the registry can prove the session. A session nothing holds is not-found rather than
     // a 200 board with nothing on it, which is what a ledger-only existence check would have served.
     should(absentBoard.status).equal(404);
@@ -5780,7 +5781,13 @@ describe('daemon boot lifecycle', () => {
     const silent = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data: () => {} } });
     const cleanups: Array<() => void | Promise<void>> = [];
     const said = recordingNotices();
-    const world = { ...(await worldAt(home, silent.port, async () => {})), notices: said.port };
+    const shipped = await worldAt(home, silent.port, async () => {});
+    // The shipped probe gives a silent address two seconds; this one gives it a tenth of that, against
+    // the same real listener, so the case proves the refusal without waiting the full window out.
+    const probe = new DaemonHealthProbe({
+      fetch: (url, init) => fetch(url, { ...init, signal: AbortSignal.timeout(150) }),
+    });
+    const world = { ...shipped, boot: { ...shipped.boot, probe }, notices: said.port };
 
     // Act
     const code = await start(world, cleanups);

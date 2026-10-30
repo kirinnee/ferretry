@@ -2,13 +2,13 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   type AnswerOperationRecord,
-  STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
-  STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
+  STRUCTURED_ANSWER_RELEASED_AGENDA_KIND,
+  STRUCTURED_ANSWER_UNCONFIRMED_AGENDA_KIND,
 } from '../../../../src/lib/session/question/answer-ledger.ts';
 import {
-  firstWriteReleasedAnswerAttention,
+  firstWriteReleasedAnswerAgenda,
   projectStructuredQuestion,
-  releasedAnswerAttentionOwnedBy,
+  releasedAnswerAgendaOwnedBy,
   structuredQuestionStatePatch,
 } from '../../../../src/lib/session/question/projection.ts';
 import type { TranscriptEvent } from '../../../../src/lib/transcript/types.ts';
@@ -36,21 +36,21 @@ const answer = (outcome: AnswerOperationRecord['outcome'], patch: Partial<Answer
 
 // The EXACT messages the daemon mints. Ownership fixtures must use them: a hand-written summary
 // would pass a substring test while proving nothing about which tool the attention names.
-const unconfirmedAttention = (toolUseId = 'tool-1', requestId = 'request-1') => ({
-  needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
+const unconfirmedAgenda = (toolUseId = 'tool-1', requestId = 'request-1') => ({
+  needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_AGENDA_KIND,
   needsHuman: `answer request ${requestId} for ${toolUseId} may have reached the form, and release was not confirmed; inspect the session before continuing`,
 });
 
-const releasedAttention = (toolUseId = 'tool-1', requestId = 'request-1') => ({
-  needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
+const releasedAgenda = (toolUseId = 'tool-1', requestId = 'request-1') => ({
+  needsHumanKind: STRUCTURED_ANSWER_RELEASED_AGENDA_KIND,
   needsHuman: `answer request ${requestId} for ${toolUseId} may have reached the form; the form was released, so prose may continue, but the original answer remains unconfirmed`,
 });
 
 // The composition root's first write, spelled out here ON PURPOSE rather than built from the
 // exported builder: an independent copy is what catches the builder drifting away from the sentence
 // the predicate has to recognize.
-const compositionRootReleasedAttention = (toolUseId: string) => ({
-  needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
+const compositionRootReleasedAgenda = (toolUseId: string) => ({
+  needsHumanKind: STRUCTURED_ANSWER_RELEASED_AGENDA_KIND,
   needsHuman: `an answer to ${toolUseId} may have reached the form and was never confirmed; the form was released, so prose may continue, but do not assume the original answer landed`,
 });
 
@@ -151,7 +151,7 @@ describe('structured question projection', () => {
     should(patch).match({
       status: 'awaiting_question',
       pendingQuestion: { toolUseId: 'tool-1' },
-      needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
+      needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_AGENDA_KIND,
       reason: 'daemon restarted during the drive',
     });
   });
@@ -163,7 +163,7 @@ describe('structured question projection', () => {
         status: 'awaiting_question',
         turn: 1,
         pendingQuestion: { toolUseId: 'tool-1', questions: [{ question: 'Ship?' }] },
-        ...unconfirmedAttention(),
+        ...unconfirmedAgenda(),
       },
       projectStructuredQuestion([question]),
       [answer('failed', { reason: 'reply in prose' })],
@@ -184,7 +184,7 @@ describe('structured question projection', () => {
     should(patch).match({
       status: 'awaiting_user',
       pendingQuestion: undefined,
-      needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
+      needsHumanKind: STRUCTURED_ANSWER_RELEASED_AGENDA_KIND,
       needsHuman: /tool-1/u,
     });
   });
@@ -205,7 +205,7 @@ describe('structured question projection', () => {
         id: 's1',
         status: 'awaiting_user',
         turn: 1,
-        ...releasedAttention(),
+        ...releasedAgenda(),
       },
       { kind: 'resolved', toolUseId: 'tool-1' },
       [answer('quarantined')],
@@ -221,7 +221,7 @@ describe('structured question projection', () => {
         status: 'awaiting_question',
         turn: 1,
         pendingQuestion: { toolUseId: 'tool-1', questions: [{ question: 'Ship?' }] },
-        ...unconfirmedAttention(),
+        ...unconfirmedAgenda(),
       },
       projectStructuredQuestion([question]),
       [answer('quarantined', { reason: 'inspect the terminal' })],
@@ -230,7 +230,7 @@ describe('structured question projection', () => {
     should(patch).match({
       status: 'awaiting_user',
       pendingQuestion: undefined,
-      needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
+      needsHumanKind: STRUCTURED_ANSWER_RELEASED_AGENDA_KIND,
       needsHuman: /tool-1/u,
       reason: 'inspect the terminal',
     });
@@ -260,7 +260,7 @@ describe('structured question projection', () => {
         id: 's1',
         status: 'awaiting_user',
         turn: 1,
-        ...unconfirmedAttention(),
+        ...unconfirmedAgenda(),
       },
       projectStructuredQuestion([newer]),
       [answer('accepted')],
@@ -269,7 +269,7 @@ describe('structured question projection', () => {
     should(patch).match({
       status: 'awaiting_question',
       pendingQuestion: { toolUseId: 'tool-2' },
-      needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
+      needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_AGENDA_KIND,
       needsHuman: /tool-1/u,
     });
   });
@@ -297,7 +297,7 @@ describe('structured question projection', () => {
     should(patch).match({
       status: 'awaiting_question',
       pendingQuestion: { toolUseId: 'tool-1' },
-      needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
+      needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_AGENDA_KIND,
     });
   });
 
@@ -314,7 +314,7 @@ describe('structured question projection', () => {
       id: 's1',
       status: 'awaiting_user' as const,
       turn: 1,
-      ...releasedAttention(),
+      ...releasedAgenda(),
     };
     const patch = structuredQuestionStatePatch(current, projectStructuredQuestion([newer]), [answer('quarantined')]);
 
@@ -322,7 +322,7 @@ describe('structured question projection', () => {
     should(patch).not.have.property('needsHumanKind');
     should(patch).not.have.property('needsHuman');
     should({ ...current, ...patch }).match({
-      needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
+      needsHumanKind: STRUCTURED_ANSWER_RELEASED_AGENDA_KIND,
       needsHuman: /tool-1/u,
     });
   });
@@ -345,7 +345,7 @@ describe('structured question projection', () => {
     should(patch).match({
       status: 'awaiting_question',
       pendingQuestion: { toolUseId: 'tool-2' },
-      needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
+      needsHumanKind: STRUCTURED_ANSWER_RELEASED_AGENDA_KIND,
       needsHuman: /tool-1/u,
       reason: 'the earlier form advanced without a state stamp',
     });
@@ -359,7 +359,7 @@ describe('structured question projection', () => {
     should(patch).match({
       status: 'awaiting_user',
       pendingQuestion: undefined,
-      needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
+      needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_AGENDA_KIND,
       needsHuman: /tool-1/u,
       reason: 'the daemon restarted before release was confirmed',
     });
@@ -372,7 +372,7 @@ describe('structured question projection', () => {
         status: 'running',
         turn: 2,
         lastAnsweredQuestionToolUseId: 'tool-1',
-        ...releasedAttention(),
+        ...releasedAgenda(),
       },
       { kind: 'resolved', toolUseId: 'tool-1' },
       [answer('quarantined')],
@@ -390,7 +390,7 @@ describe('structured question projection', () => {
         status: 'awaiting_question',
         turn: 2,
         pendingQuestion: { toolUseId: 'tool-1', questions: [{ question: 'Ship?' }] },
-        ...unconfirmedAttention(),
+        ...unconfirmedAgenda(),
       },
       projectStructuredQuestion([question]),
       [answer('accepted'), answer('acknowledged', { requestId: 'human-clear' })],
@@ -407,7 +407,7 @@ describe('structured question projection', () => {
       id: 's1',
       status: 'awaiting_user' as const,
       turn: 2,
-      ...releasedAttention(),
+      ...releasedAgenda(),
     };
     const records = [answer('quarantined'), answer('acknowledged', { requestId: 'human-clear' })];
 
@@ -419,7 +419,7 @@ describe('structured question projection', () => {
       const patch = structuredQuestionStatePatch(current, projection, records);
       should(patch).deepEqual({});
       should({ ...current, ...patch }).match({
-        needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
+        needsHumanKind: STRUCTURED_ANSWER_RELEASED_AGENDA_KIND,
         needsHuman: /tool-1/u,
       });
     }
@@ -439,7 +439,7 @@ describe('structured question projection', () => {
         questions: [{ question: 'Deploy?', options: [{ label: 'Now' }], multiple: false }],
       },
     } satisfies TranscriptEvent;
-    const current = { id: 's1', status: 'awaiting_user' as const, turn: 2, ...releasedAttention() };
+    const current = { id: 's1', status: 'awaiting_user' as const, turn: 2, ...releasedAgenda() };
     const patch = structuredQuestionStatePatch(current, projectStructuredQuestion([newer]), [
       answer('quarantined'),
       answer('acknowledged', { requestId: 'human-clear' }),
@@ -449,7 +449,7 @@ describe('structured question projection', () => {
     should(patch).not.have.property('needsHumanKind');
     should(patch).not.have.property('needsHuman');
     should({ ...current, ...patch }).match({
-      needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
+      needsHumanKind: STRUCTURED_ANSWER_RELEASED_AGENDA_KIND,
       needsHuman: /tool-1/u,
     });
   });
@@ -464,7 +464,7 @@ describe('structured question projection', () => {
       },
     } satisfies TranscriptEvent;
     const patch = structuredQuestionStatePatch(
-      { id: 's1', status: 'awaiting_user', turn: 2, ...unconfirmedAttention() },
+      { id: 's1', status: 'awaiting_user', turn: 2, ...unconfirmedAgenda() },
       projectStructuredQuestion([newer]),
       [answer('failed')],
     );
@@ -476,7 +476,7 @@ describe('structured question projection', () => {
 
   it('retires a standing blocking state from an acknowledgement whose form left the tail', () => {
     const patch = structuredQuestionStatePatch(
-      { id: 's1', status: 'awaiting_user', turn: 2, ...unconfirmedAttention() },
+      { id: 's1', status: 'awaiting_user', turn: 2, ...unconfirmedAgenda() },
       { kind: 'none' },
       [answer('accepted'), answer('acknowledged', { requestId: 'human-clear' })],
     );
@@ -494,7 +494,7 @@ describe('structured question projection', () => {
         status: 'running',
         turn: 2,
         lastAnsweredQuestionToolUseId: 'tool-1',
-        ...releasedAttention('tool-10', 'request-10'),
+        ...releasedAgenda('tool-10', 'request-10'),
       },
       { kind: 'resolved', toolUseId: 'tool-1' },
       [answer('confirmed'), answer('quarantined', { requestId: 'request-10', toolUseId: 'tool-10' })],
@@ -505,7 +505,7 @@ describe('structured question projection', () => {
 
   it('never lets an acknowledged tool-1 retire the blocking advisory that names tool-10', () => {
     const patch = structuredQuestionStatePatch(
-      { id: 's1', status: 'running', turn: 2, ...unconfirmedAttention('tool-10', 'request-10') },
+      { id: 's1', status: 'running', turn: 2, ...unconfirmedAgenda('tool-10', 'request-10') },
       { kind: 'none' },
       [
         answer('acknowledged', { requestId: 'human-clear' }),
@@ -523,7 +523,7 @@ describe('structured question projection', () => {
         status: 'running',
         turn: 2,
         lastAnsweredQuestionToolUseId: 'tool-10',
-        ...compositionRootReleasedAttention('tool-10'),
+        ...compositionRootReleasedAgenda('tool-10'),
       },
       { kind: 'resolved', toolUseId: 'tool-10' },
       [answer('quarantined', { requestId: 'request-10', toolUseId: 'tool-10' })],
@@ -538,7 +538,7 @@ describe('structured question projection', () => {
         status: 'running',
         turn: 2,
         lastAnsweredQuestionToolUseId: 'tool-1',
-        ...compositionRootReleasedAttention('tool-10'),
+        ...compositionRootReleasedAgenda('tool-10'),
       },
       { kind: 'resolved', toolUseId: 'tool-1' },
       [answer('confirmed'), answer('quarantined', { requestId: 'request-10', toolUseId: 'tool-10' })],
@@ -548,14 +548,14 @@ describe('structured question projection', () => {
 
   it('owns an advisory whose request id contains spaces, still tool by tool', () => {
     const standing = structuredQuestionStatePatch(
-      { id: 's1', status: 'awaiting_user', turn: 2, ...releasedAttention('tool-1', 'req 42') },
+      { id: 's1', status: 'awaiting_user', turn: 2, ...releasedAgenda('tool-1', 'req 42') },
       { kind: 'none' },
       [answer('quarantined', { requestId: 'req 42' })],
     );
     should(standing).deepEqual({});
 
     const collided = structuredQuestionStatePatch(
-      { id: 's1', status: 'awaiting_user', turn: 2, ...releasedAttention('tool-10', 'req 42') },
+      { id: 's1', status: 'awaiting_user', turn: 2, ...releasedAgenda('tool-10', 'req 42') },
       { kind: 'none' },
       [answer('quarantined', { requestId: 'req 42' })],
     );
@@ -563,23 +563,23 @@ describe('structured question projection', () => {
   });
 
   it('writes the composition root’s first-write advisory exactly, for any id', () => {
-    should(firstWriteReleasedAnswerAttention('tool-10')).equal(
+    should(firstWriteReleasedAnswerAgenda('tool-10')).equal(
       'an answer to tool-10 may have reached the form and was never confirmed; the form was released, so prose may continue, but do not assume the original answer landed',
     );
-    should(firstWriteReleasedAnswerAttention('tool 10')).equal(
+    should(firstWriteReleasedAnswerAgenda('tool 10')).equal(
       'an answer to tool 10 may have reached the form and was never confirmed; the form was released, so prose may continue, but do not assume the original answer landed',
     );
 
     // The predicate's first-write branch reads that same sentence, so the writer and the reader
     // cannot drift apart: whatever the builder emits is exactly what owns the advisory.
     should(
-      releasedAnswerAttentionOwnedBy(
+      releasedAnswerAgendaOwnedBy(
         {
           id: 's1',
           status: 'awaiting_user',
           turn: 2,
-          needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
-          needsHuman: firstWriteReleasedAnswerAttention('tool 10'),
+          needsHumanKind: STRUCTURED_ANSWER_RELEASED_AGENDA_KIND,
+          needsHuman: firstWriteReleasedAnswerAgenda('tool 10'),
         },
         answer('quarantined', { requestId: 'req 42', toolUseId: 'tool 10' }),
       ),
@@ -595,26 +595,26 @@ describe('structured question projection', () => {
     });
     const record = answer('quarantined', { requestId: 'req 42', toolUseId: 'tool 10' });
 
-    should(releasedAnswerAttentionOwnedBy(state(releasedAttention('tool 10', 'req 42')), record)).be.true();
-    should(releasedAnswerAttentionOwnedBy(state(compositionRootReleasedAttention('tool 10')), record)).be.true();
+    should(releasedAnswerAgendaOwnedBy(state(releasedAgenda('tool 10', 'req 42')), record)).be.true();
+    should(releasedAnswerAgendaOwnedBy(state(compositionRootReleasedAgenda('tool 10')), record)).be.true();
 
     // A different request id, a colliding tool id, a delimiter-bearing id, the blocking kind and an
     // unrecognized message are all NOT owners: an acknowledgment may never clear on any of them.
-    should(releasedAnswerAttentionOwnedBy(state(releasedAttention('tool 10', 'req 43')), record)).be.false();
-    should(releasedAnswerAttentionOwnedBy(state(releasedAttention('tool 1', 'req 42')), record)).be.false();
-    should(releasedAnswerAttentionOwnedBy(state(releasedAttention('10', 'req 42 for tool')), record)).be.false();
-    should(releasedAnswerAttentionOwnedBy(state(unconfirmedAttention('tool 10', 'req 42')), record)).be.false();
+    should(releasedAnswerAgendaOwnedBy(state(releasedAgenda('tool 10', 'req 43')), record)).be.false();
+    should(releasedAnswerAgendaOwnedBy(state(releasedAgenda('tool 1', 'req 42')), record)).be.false();
+    should(releasedAnswerAgendaOwnedBy(state(releasedAgenda('10', 'req 42 for tool')), record)).be.false();
+    should(releasedAnswerAgendaOwnedBy(state(unconfirmedAgenda('tool 10', 'req 42')), record)).be.false();
     should(
-      releasedAnswerAttentionOwnedBy(
-        state({ needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND, needsHuman: 'inspect tool 10' }),
+      releasedAnswerAgendaOwnedBy(
+        state({ needsHumanKind: STRUCTURED_ANSWER_RELEASED_AGENDA_KIND, needsHuman: 'inspect tool 10' }),
         record,
       ),
     ).be.false();
-    should(releasedAnswerAttentionOwnedBy(state({}), record)).be.false();
+    should(releasedAnswerAgendaOwnedBy(state({}), record)).be.false();
   });
 
   it('owns a released advisory for a tool id containing whitespace, and only that id', () => {
-    const standing = { id: 's1', status: 'awaiting_user' as const, turn: 2, ...releasedAttention('tool 10', 'req 42') };
+    const standing = { id: 's1', status: 'awaiting_user' as const, turn: 2, ...releasedAgenda('tool 10', 'req 42') };
     should(
       structuredQuestionStatePatch(standing, { kind: 'none' }, [
         answer('quarantined', { requestId: 'req 42', toolUseId: 'tool 10' }),
@@ -633,7 +633,7 @@ describe('structured question projection', () => {
       id: 's1',
       status: 'awaiting_user' as const,
       turn: 2,
-      ...unconfirmedAttention('tool 10', 'req 42'),
+      ...unconfirmedAgenda('tool 10', 'req 42'),
     };
     should(
       structuredQuestionStatePatch(standing, { kind: 'none' }, [
@@ -651,12 +651,12 @@ describe('structured question projection', () => {
   // A rendered sentence is not an injective encoding of the pair that built it: (requestId 'r',
   // toolUseId 't for u') and (requestId 'r for t', toolUseId 'u') render the SAME message. Two
   // owners must fail closed everywhere, or one tool's evidence settles the other tool's advisory.
-  const ambiguousReleased = releasedAttention('t for u', 'r');
-  const ambiguousBlocking = unconfirmedAttention('t for u', 'r');
+  const ambiguousReleased = releasedAgenda('t for u', 'r');
+  const ambiguousBlocking = unconfirmedAgenda('t for u', 'r');
 
   it('renders one message for two distinct records, and never clears a released advisory on it', () => {
-    should(ambiguousReleased.needsHuman).equal(releasedAttention('u', 'r for t').needsHuman);
-    should(ambiguousBlocking.needsHuman).equal(unconfirmedAttention('u', 'r for t').needsHuman);
+    should(ambiguousReleased.needsHuman).equal(releasedAgenda('u', 'r for t').needsHuman);
+    should(ambiguousBlocking.needsHuman).equal(unconfirmedAgenda('u', 'r for t').needsHuman);
 
     const patch = structuredQuestionStatePatch(
       {
@@ -686,7 +686,7 @@ describe('structured question projection', () => {
       ],
     );
 
-    should(patch).have.property('needsHumanKind', STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND);
+    should(patch).have.property('needsHumanKind', STRUCTURED_ANSWER_RELEASED_AGENDA_KIND);
     should(patch).have.property('needsHuman', ambiguousReleased.needsHuman);
   });
 
@@ -700,7 +700,7 @@ describe('structured question projection', () => {
       ],
     );
 
-    should(patch).have.property('needsHumanKind', STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND);
+    should(patch).have.property('needsHumanKind', STRUCTURED_ANSWER_UNCONFIRMED_AGENDA_KIND);
     should(patch).have.property('needsHuman', ambiguousBlocking.needsHuman);
   });
 
@@ -714,7 +714,7 @@ describe('structured question projection', () => {
       ],
     );
 
-    should(patch).have.property('needsHumanKind', STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND);
+    should(patch).have.property('needsHumanKind', STRUCTURED_ANSWER_UNCONFIRMED_AGENDA_KIND);
     should(patch).have.property('needsHuman', ambiguousBlocking.needsHuman);
   });
 
@@ -725,7 +725,7 @@ describe('structured question projection', () => {
         status: 'running',
         turn: 2,
         lastAnsweredQuestionToolUseId: 'tool-1',
-        ...releasedAttention('1 for tool-1', 'request-9'),
+        ...releasedAgenda('1 for tool-1', 'request-9'),
       },
       { kind: 'resolved', toolUseId: 'tool-1' },
       [answer('confirmed'), answer('quarantined', { requestId: 'request-9', toolUseId: '1 for tool-1' })],
@@ -736,7 +736,7 @@ describe('structured question projection', () => {
 
   it('never lets a tool id spelled into another advisory own the blocking one', () => {
     const patch = structuredQuestionStatePatch(
-      { id: 's1', status: 'running', turn: 2, ...unconfirmedAttention('1 for tool-1', 'request-9') },
+      { id: 's1', status: 'running', turn: 2, ...unconfirmedAgenda('1 for tool-1', 'request-9') },
       { kind: 'none' },
       [
         answer('acknowledged', { requestId: 'human-clear' }),
@@ -752,7 +752,7 @@ describe('structured question projection', () => {
       id: 's1',
       status: 'awaiting_user' as const,
       turn: 2,
-      needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
+      needsHumanKind: STRUCTURED_ANSWER_RELEASED_AGENDA_KIND,
       needsHuman: 'inspect tool-1 before continuing',
     };
     const records = [answer('quarantined')];
@@ -760,7 +760,7 @@ describe('structured question projection', () => {
     const remint = structuredQuestionStatePatch(current, { kind: 'none' }, records);
     should(remint).match({
       status: 'awaiting_user',
-      needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
+      needsHumanKind: STRUCTURED_ANSWER_RELEASED_AGENDA_KIND,
       needsHuman: /^answer request request-1 for tool-1 may have reached the form/u,
     });
 
@@ -776,7 +776,7 @@ describe('structured question projection', () => {
     should(patch).match({
       status: 'awaiting_user',
       pendingQuestion: undefined,
-      needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
+      needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_AGENDA_KIND,
       needsHuman: /request-2 for tool-2/u,
     });
   });
@@ -790,7 +790,7 @@ describe('structured question projection', () => {
     should(patch).match({
       status: 'awaiting_user',
       pendingQuestion: undefined,
-      needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
+      needsHumanKind: STRUCTURED_ANSWER_RELEASED_AGENDA_KIND,
       needsHuman: /request-2 for tool-2/u,
     });
   });
@@ -848,7 +848,7 @@ describe('structured question projection', () => {
       should(patch).match({
         status: 'awaiting_question',
         pendingQuestion: { toolUseId: 'tool-1' },
-        needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
+        needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_AGENDA_KIND,
         reason: 'the drive was interrupted before release was confirmed',
       });
     }
@@ -861,7 +861,7 @@ describe('structured question projection', () => {
         status: 'awaiting_question',
         turn: 1,
         pendingQuestion: { toolUseId: 'tool-1', questions: [{ question: 'Ship?' }] },
-        ...unconfirmedAttention('tool-2', 'request-2'),
+        ...unconfirmedAgenda('tool-2', 'request-2'),
       },
       projectStructuredQuestion([question]),
       [answer('failed', { reason: 'reply in prose' })],

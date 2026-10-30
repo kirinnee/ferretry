@@ -4,7 +4,7 @@ import should from 'should';
 import { DISCOVERED_RELAY_CARRIER, IMPLIED_TUNNEL_CARRIER, OS_CHOSEN_PORT } from '../../../src/lib/runtime/carriers.ts';
 import {
   advertisesForeignAddress,
-  attentionBlockNotice,
+  agendaBlockNotice,
   choosesPortAtBind,
   configuredAt,
   defaultDaemonConfig,
@@ -758,7 +758,7 @@ describe('the session-worker pool size', () => {
   });
 });
 
-describe('the attention resurface timer', () => {
+describe('the agenda resurface timer', () => {
   it('should be off unless configured, and accept a limit of one minute to a week', () => {
     should(defaultDaemonConfig().attention.resurfaceAfterMinutes).be.undefined();
     should(parseDaemonConfig({ attention: { resurfaceAfterMinutes: 45 } }).attention.resurfaceAfterMinutes).equal(45);
@@ -775,7 +775,7 @@ describe('the attention resurface timer', () => {
   });
 });
 
-describe('the attention reply window', () => {
+describe('the agenda reply window', () => {
   it('should hold answers ten seconds after the last, and two minutes after the first, unless told otherwise', () => {
     // Assert
     should(defaultDaemonConfig().attention).deepEqual({
@@ -872,7 +872,7 @@ describe('the agenda block beside the older attention block', () => {
 
     // Assert
     should(actual.attention).deepEqual({ ...RESOLVED_DEFAULTS, replySettleSeconds: 30, deadlineWarnHours: 6 });
-    should(actual.attentionSpelling).equal('attention');
+    should(actual.agendaSpelling).equal('attention');
   });
 
   it('should load the agenda block alone into the value every consumer reads', () => {
@@ -882,7 +882,7 @@ describe('the agenda block beside the older attention block', () => {
     // Assert
     should(actual.attention).deepEqual({ ...RESOLVED_DEFAULTS, replySettleSeconds: 30, resurfaceAfterMinutes: 45 });
     should(actual.agenda).equal(actual.attention);
-    should(actual.attentionSpelling).equal('agenda');
+    should(actual.agendaSpelling).equal('agenda');
   });
 
   it('should resolve to the defaults, and report neither spelling, when neither is written', () => {
@@ -891,7 +891,7 @@ describe('the agenda block beside the older attention block', () => {
 
     // Assert
     should(actual.attention).deepEqual(RESOLVED_DEFAULTS);
-    should(actual.attentionSpelling).equal('none');
+    should(actual.agendaSpelling).equal('none');
   });
 
   it('should let the agenda block win key by key and read the attention block for the keys it leaves out', () => {
@@ -909,7 +909,7 @@ describe('the agenda block beside the older attention block', () => {
       deadlineWarnHours: 6,
       resurfaceAfterMinutes: 15,
     });
-    should(actual.attentionSpelling).equal('both');
+    should(actual.agendaSpelling).equal('both');
   });
 
   it('should let an agenda key equal to a default still beat a different attention value', () => {
@@ -962,9 +962,9 @@ describe('the agenda block beside the older attention block', () => {
   });
 
   it('should say nothing for a document that never wrote the older block, and name the new key otherwise', () => {
-    should(attentionBlockNotice('none')).be.undefined();
-    should(attentionBlockNotice('agenda')).be.undefined();
-    should(attentionBlockNotice('attention')).match(/renamed to "agenda".*agenda removal release/);
-    should(attentionBlockNotice('both')).match(/"agenda" wins/);
+    should(agendaBlockNotice('none')).be.undefined();
+    should(agendaBlockNotice('agenda')).be.undefined();
+    should(agendaBlockNotice('attention')).match(/renamed to "agenda".*agenda removal release/);
+    should(agendaBlockNotice('both')).match(/"agenda" wins/);
   });
 });

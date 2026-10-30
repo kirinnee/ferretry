@@ -8,11 +8,11 @@
  *   ?view=status-sending  nothing on the agenda, an answer still on its way: "Sending…" alone
  *   ?attention=A5         a notification tap: A5's full card opens on arrival
  *
- * Every component is the REAL one (`useAttentionAgenda` through `AgendaChatHarness`); only the data is
+ * Every component is the REAL one (`useAgenda` through `AgendaChatHarness`); only the data is
  * invented and the answers go nowhere.
  */
 
-import type { AttentionId, AttentionItem, AttentionSnapshot, ResolvedAttentionItem } from '@ferretry/protocol';
+import type { AgendaId, AgendaItem, AgendaSnapshot, ResolvedAgendaItem } from '@ferretry/protocol';
 import { agendaReMessage } from '@ferretry/protocol';
 import { createRoot } from 'react-dom/client';
 import type { TranscriptEntry } from '../src/lib/session-screens.ts';
@@ -22,7 +22,7 @@ const NOW = Date.parse('2026-10-29T09:00:00.000Z');
 const ago = (minutes: number): string => new Date(NOW - minutes * 60_000).toISOString();
 const ahead = (minutes: number): string => new Date(NOW + minutes * 60_000).toISOString();
 
-const item = (id: string, minutes: number, patch: Partial<AttentionItem>): AttentionItem =>
+const item = (id: string, minutes: number, patch: Partial<AgendaItem>): AgendaItem =>
   ({
     id,
     source: 'agent-raised',
@@ -35,7 +35,7 @@ const item = (id: string, minutes: number, patch: Partial<AttentionItem>): Atten
     raisedBySession: 'fr',
     raisedByName: 'ottilie',
     ...patch,
-  }) as AttentionItem;
+  }) as AgendaItem;
 
 const FENCE = '```';
 const DIAGRAM = [
@@ -84,7 +84,7 @@ const A5 = item('A5', 12, {
     `${FENCE}fy-render\ntype: svg\nalt: Raised items go to the ledger, which is stored in one SQLite file\n---\n${DIAGRAM}\n${FENCE}\n\n` +
     'A restart then reads the file back, so nothing resolved is forgotten.',
   blockingNow: true,
-} as Partial<AttentionItem>);
+} as Partial<AgendaItem>);
 
 // …after the ferret edited it twice: the third context bullet and the decided line are new.
 const A5_UPDATED = {
@@ -105,26 +105,26 @@ const A5_UPDATED = {
       },
     },
   ],
-} as AttentionItem;
+} as AgendaItem;
 
 const A3 = item('A3', 2, {
   title: 'Rebase onto main now?',
   subject: 'Rebase onto main now, or wait for #768 to merge?',
-  why: 'main moved 14 commits since this branch was cut and two of them touch the attention store.',
+  why: 'main moved 14 commits since this branch was cut and two of them touch the agenda store.',
   willBlock: 'the release cut',
   ask: { kind: 'multiple-choice', options: [{ label: 'Rebase now' }, { label: 'Wait' }] },
   answers: [
     { direction: 'right', does: 'choose', label: 'Rebase now' },
     { direction: 'left', does: 'choose', label: 'Wait' },
   ],
-} as Partial<AttentionItem>);
+} as Partial<AgendaItem>);
 const A2 = item('A2', 9, {
   title: 'Restart the staging relay?',
   subject: 'Can I restart the staging relay? It drops live sessions for about ten seconds.',
   why: 'The relay is serving a stale advertisement.',
   neededBy: ahead(480),
   ask: { kind: 'permission' },
-} as Partial<AttentionItem>);
+} as Partial<AgendaItem>);
 const A6 = item('A6', 25, {
   title: 'Which login should the runtime use?',
   subject: 'Which login should the new runtime use, the personal one or the team one?',
@@ -137,8 +137,8 @@ const A8 = item('A8', 14, {
   why: 'The old key was pasted into a chat; rotate it before the release cut.',
   ask: { kind: 'task' },
   steps: ['Store the new key: `fy secret set RELAY_KEY`', 'Restart the relay: `fy daemon restart`'],
-} as Partial<AttentionItem>);
-const WITH_FERRET = (id: string, minutes: number, title: string, subject: string): AttentionItem =>
+} as Partial<AgendaItem>);
+const WITH_FERRET = (id: string, minutes: number, title: string, subject: string): AgendaItem =>
   item(id, minutes + 20, {
     title,
     subject,
@@ -147,7 +147,7 @@ const WITH_FERRET = (id: string, minutes: number, title: string, subject: string
     waitingOn: 'ferret',
     waitingFor: 'discussion',
     askedAt: ago(minutes),
-  } as Partial<AttentionItem>);
+  } as Partial<AgendaItem>);
 const A9 = WITH_FERRET(
   'A9',
   11,
@@ -157,10 +157,10 @@ const A9 = WITH_FERRET(
 const A10 = WITH_FERRET('A10', 4, 'Which cache to drop?', 'Which of the two stale build caches is safe to drop?');
 
 const snapshot = (
-  items: readonly AttentionItem[],
-  patch: Partial<AttentionSnapshot> = {},
-  resolved: AttentionSnapshot['resolved'] = [],
-): AttentionSnapshot => ({
+  items: readonly AgendaItem[],
+  patch: Partial<AgendaSnapshot> = {},
+  resolved: AgendaSnapshot['resolved'] = [],
+): AgendaSnapshot => ({
   v: 1,
   sessionId: 'fr',
   items: [...items],
@@ -183,7 +183,7 @@ const SENT = {
   resolvedBy: 'human',
   resolvedBySession: null,
   resolvedByName: null,
-} as unknown as ResolvedAttentionItem;
+} as unknown as ResolvedAgendaItem;
 
 // THE PERMISSION ITEM, with its own terms and a revision, for the item view.
 const A2_FULL = {
@@ -201,7 +201,7 @@ const A2_FULL = {
       previous: { subject: 'Can I restart the staging relay?' },
     },
   ],
-} as AttentionItem;
+} as AgendaItem;
 
 // A PERMISSION ITEM THAT CONFIRMS A CONFIG CHANGE: the daemon also writes the change into premise for old apps.
 const CHANGES = [
@@ -214,7 +214,7 @@ const A2_CONFIG = {
   subject: "Can I loosen the Warden's spending limits in warden.yaml?",
   premise: CHANGES.map(change => `- ${change}`).join('\n'),
   confirms: { path: 'warden.yaml', etag: 'a'.repeat(64), changes: CHANGES },
-} as unknown as AttentionItem;
+} as unknown as AgendaItem;
 
 // A LONG ITEM: many bullets, a table of terms, a diagram and a long body — the one body scrolls.
 const LONG_LINES = (stem: string, count: number): string =>
@@ -232,7 +232,7 @@ const A5_LONG = {
     term: `Term ${at + 1}`,
     meaning: 'A meaning that runs to a full sentence so that the second column wraps on a phone.',
   })),
-} as AttentionItem;
+} as AgendaItem;
 
 const owner = (id: string, at: number, text: string) => ({ id, kind: 'user', text, at: NOW - at * 60_000 });
 const ferretSays = (id: string, at: number, text: string) => ({ id, kind: 'assistant', text, at: NOW - at * 60_000 });
@@ -245,7 +245,7 @@ const HISTORY_ENTRIES = [
 
 const params = new URLSearchParams(location.search);
 const view = params.get('view') ?? 'board';
-const target = (params.get('attention') ?? params.get('agenda') ?? null) as AttentionId | null;
+const target = (params.get('attention') ?? params.get('agenda') ?? null) as AgendaId | null;
 const withHistory = params.get('history') === '1';
 const long = params.get('long') === '1';
 const fakeKeyboard = params.get('kb') === '1';
@@ -265,13 +265,13 @@ const items = AGENDA.map(entry =>
       : entry,
 );
 
-const board: AttentionSnapshot =
+const board: AgendaSnapshot =
   view === 'updated'
     ? snapshot([A5_UPDATED, ...AGENDA.slice(1)])
     : view === 'status-both'
-      ? snapshot(AGENDA, { delivery: { sending: ['A1' as AttentionId] } }, [SENT])
+      ? snapshot(AGENDA, { delivery: { sending: ['A1' as AgendaId] } }, [SENT])
       : view === 'status-sending'
-        ? snapshot([], { delivery: { sending: ['A1' as AttentionId] } }, [SENT])
+        ? snapshot([], { delivery: { sending: ['A1' as AgendaId] } }, [SENT])
         : view === 'one'
           ? snapshot([A3])
           : snapshot(items);
