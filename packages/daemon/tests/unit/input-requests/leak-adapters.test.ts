@@ -407,7 +407,7 @@ describe('the value is unfindable outside the program it was typed into, over th
     await world.service.raise(SESSION, RAISE);
     const everything = [JSON.stringify(await world.service.list(HOST)), ...world.emitted].join('\n');
 
-    should(everything).containEql('sudo --password=[redacted:input');
+    should(everything).not.containEql('sudo --password');
     for (const piece of piecesOf(scenario.value)) should(everything).not.containEql(piece);
   });
 

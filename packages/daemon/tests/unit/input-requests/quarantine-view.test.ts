@@ -76,6 +76,70 @@ describe('the viewer of a quarantined terminal', () => {
     }
   });
 
+  it('should not draw a screen that was read before the quarantine began (capture in flight)', async () => {
+    let held: number | undefined;
+    const slow = {
+      ...inner,
+      capture: async () => {
+        const before = SCREEN;
+        held = 130_000;
+        return before;
+      },
+    };
+    const view = new RedactingTerminalStreamService(
+      slow,
+      NO_REDACTION,
+      () => held,
+      () => 100_000,
+    );
+
+    const shown = await view.capture('s', 't', 50);
+
+    should(shown.lines[0]).containEql('Kept from view');
+    should(JSON.stringify(shown)).not.containEql('hunter2');
+  });
+
+  it('should not draw a screen whose redaction finished after the quarantine began', async () => {
+    let held: number | undefined;
+    const slowRedactor = {
+      ...NO_REDACTION,
+      batch: async <T>(work: (scrub: never) => T): Promise<T> => {
+        held = 130_000;
+        return await NO_REDACTION.batch(work as never);
+      },
+    };
+    const view = new RedactingTerminalStreamService(
+      inner,
+      slowRedactor,
+      () => held,
+      () => 100_000,
+    );
+
+    const shown = await view.capture('s', 't', 50);
+
+    should(shown.lines[0]).containEql('Kept from view');
+    should(JSON.stringify(shown)).not.containEql('hunter2');
+  });
+
+  it('should show the notice on every capture a delta or a re-attach asks for, then the pane when it ends', async () => {
+    let held: number | undefined = 130_000;
+    const view = new RedactingTerminalStreamService(
+      inner,
+      NO_REDACTION,
+      () => held,
+      () => 100_000,
+    );
+
+    const first = await view.capture('s', 't', 50);
+    const reattached = await view.capture('s', 't', 50);
+    held = undefined;
+    const after = await view.capture('s', 't', 50);
+
+    should(first.lines[0]).containEql('Kept from view');
+    should(reattached).eql(first);
+    should(after.lines.join('\n')).containEql('hunter2');
+  });
+
   it('should still pass keystrokes and resizes through while the pane is hidden', async () => {
     const calls: string[] = [];
     const view = new RedactingTerminalStreamService(

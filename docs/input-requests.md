@@ -11,21 +11,31 @@ Which parts are live is the phase table at the end.
 
 ## The one rule
 
-**The value never passes through the agent, a tool call, the transcript, the journal, `agenda.json`,
-the audit log, a push payload or disk.** This extends [secrets](secrets.md) ("use, never read"): no
-route, command or API returns a value or a digest of one, and nothing logs a body.
+**This applies to a `secret` value (a password or passphrase). A `plain` value (a username, an email, a
+hostname, `y`) is not secret: the card says so and the ferret may see it.**
 
-| Place                                            | Holds the value?                                                                                  |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
-| Agent context, tool calls, harness transcript    | **Never.** No agent tool takes or returns it.                                                     |
-| `agenda.json`, journal, audit log, push, ledgers | **Never.** The schemas have no field for it, and a test walks every schema to keep it that way.   |
-| Disk                                             | **Never**, unless the owner ticks "save as secret NAME": then only the encrypted vault.           |
-| The app                                          | Only the controlled field until Send. Cleared on send, on unmount and when the page is hidden.    |
-| The wire                                         | Only inside the end-to-end sealed carrier, **padded** to a 256-byte bucket (see below).           |
-| Daemon RAM while handling                        | From body parse to inject. No reference is kept after the handler returns.                        |
-| Daemon RAM, the **redaction window**             | The one retained copy: a per-session map, 10 minutes by default and 60 at most. Never serialized. |
-| A **plain** value                                | Not held. It is not secret: the card says the ferret can see it, and the agent may get it back.   |
-| The target                                       | It now lives in the target program. That is the point.                                            |
+**The bridge never carries a `secret` value through the agent, a tool call, the journal, `agenda.json`, the
+audit log, a push payload or disk.** This extends [secrets](secrets.md) ("use, never read"): no route,
+command or API returns a value or a digest of one, and nothing logs a body.
+
+That is a promise about how the **bridge** handles the value, and one more: for a limited window
+(the quarantine below) the daemon keeps the **terminal** the value was typed into from the agent and from
+the viewer. It is **not** a promise that the value can never be read off the target afterwards. After the
+window ends, or when the owner ends it or chooses "Show anyway", what the target program printed is read
+back through best-effort masking, and masking cannot recognise every form of a value. See the honest
+limits.
+
+| Place                                            | Holds the value?                                                                                      |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| Agent context, tool calls, harness transcript    | Not through the bridge: no agent tool takes or returns it. The terminal's own output: see below.      |
+| `agenda.json`, journal, audit log, push, ledgers | **Never.** The schemas have no field for it, and a test walks every schema to keep it that way.       |
+| Disk (the bridge's own files)                    | **Never**, unless the owner ticks "save as secret NAME": then only the encrypted vault.               |
+| The app                                          | Only the controlled field until Send. Cleared on send, on unmount and when the page is hidden.        |
+| The wire                                         | Only inside the end-to-end sealed carrier, **padded** to a 256-byte bucket (see below).               |
+| Daemon RAM while handling                        | From body parse to inject. No reference is kept after the handler returns.                            |
+| Daemon RAM, the **redaction window**             | The one retained copy: a per-session map, 10 minutes by default and 60 at most. Never serialized.     |
+| A **plain** value                                | Not held. It is not secret: the card says the ferret can see it, and the agent may get it back.       |
+| The target                                       | It now lives in the target program, and in whatever that program prints or stores. That is the point. |
 
 `InputDeliverBodySchema` is the only schema with a value, and only as `padded`. It is a request body:
 nothing stores or returns it.
@@ -137,23 +147,43 @@ rows, an escape payload or a program that echoes it differently all defeat a mat
 
 ### The pane quarantine
 
-When a `secret` is delivered the terminal is **quarantined** for `INPUT_QUARANTINE_SECONDS` (120):
+When a `secret` is delivered the terminal is **quarantined** for `INPUT_QUARANTINE_SECONDS` (120) from
+the write:
 
-- **The agent cannot read it.** `terminal.read` and `terminal.wait` (every poll of a wait too) are
-  refused with a `conflict` error that says when the quarantine ends. The agent can still send keys.
+- **Nobody reads it through an ordinary tool.** `terminal.read` and `terminal.wait` are refused with a
+  `conflict` error that says when the quarantine ends, for the agent **and for the owner's ordinary
+  terminal-tools endpoint** (`POST /v1/sessions/:sessionId/surfaces/terminals/tools`); the owner's way to
+  look is the viewer's "Show anyway", which is audited. The agent can still send keys.
+- **A read that was already in flight is not published.** The check is made again after every awaited
+  capture, redaction and wait tail, and before a result is returned, matched against a predicate or drawn
+  as a stream frame (full, delta and re-attach). A screen read before the quarantine began is discarded
+  if the quarantine began before the read finished.
+- **Every projection of what the daemon saw is covered.** While a pane is quarantined the prompt line, the
+  program name and the argv in the card, the owner's list, the agent's view, the audit record and a
+  restored request are replaced with a notice, not just masked.
 - **A viewer gets a notice instead of the pane**, unless that viewer chose "Show anyway". That choice
   is per connection (`?reveal=1` on the viewer socket), owner-gated, and audited as
   `input.quarantine_revealed`.
 - **The owner can end it early** (`POST /v1/sessions/:sessionId/input-quarantines/:key/end`, audited as
   `input.quarantine_ended`); `GET .../input-quarantines` lists the live ones.
-- **It begins before the write.** The quarantine starts before `surface.input_delivering` is journalled,
-  and is lifted again only if the journal write fails or the write was neither typed nor uncertain.
-- **It survives a restart.** The daemon journals the terminal's names and the end time
-  (`surface.input_quarantined`, `surface.input_quarantine_ended`; no value, digest or length) and
-  restores them on start. A quarantine whose window has passed is not restored.
+- **It is durable before the write, or nothing is written.** The hold is journalled before the first byte
+  is typed. If the journal cannot record it, the delivery is aborted with nothing typed. While the write is
+  in flight the hold reads as "now plus the window" and so cannot expire before the write; once the write
+  returns, the window runs in full from that moment.
+- **Each delivery attempt has its own hold.** An attempt that fails, is refused or is uncertain releases
+  only its own hold, never one an earlier delivery left on the same terminal, live or after a restart.
+- **It survives a restart, and a restart reads closed.** The daemon journals the terminal's names, the end
+  time and the hold (`surface.input_quarantined`, `surface.input_quarantine_ended`; no value, digest or
+  length) and replays them on start. Until every session's quarantines are replayed, every terminal reads
+  as quarantined; a session whose replay fails stays quarantined for a window. A quarantine whose window
+  has passed is not restored, and a request interrupted mid-write on restart starts a fresh window.
+- **"Show anyway" is audited, and is refused if it cannot be.** If the daemon cannot record that the owner
+  chose to see the terminal, it does not show it. The audit log itself may report a persistence failure
+  rather than propagate it, so a lost audit record is a limit, below.
 - **A terminal is known by every name** (its key, name and id), so a read by any of them is refused.
-- **Raise-time rules**: a `secret` on an echoing terminal is refused (409 `echo_on`) so a value is never
-  typed onto a screen that shows it; `private` is refused.
+- **Raise-time rules**: a `secret` on a terminal that is not known to have echo off is refused (409
+  `echo_on`), and the check is made again at delivery. That is the compare-and-enqueue check below, not a
+  proof that nothing is ever shown; `private` is refused.
 
 The daemon holds each delivered `secret` in RAM, for the window above, and masks it as
 `[redacted:input !A7]` wherever it scrubs text: the operator's screen, transcript and journal reads,
@@ -164,8 +194,9 @@ and (after the quarantine) the agent's `terminal.read` and `terminal.wait`. Reda
   through it, so an owner read never shows what an agent read hides. The two stores are masked as a
   **union**: both are asked where they match in the original text, overlapping matches are merged and
   each run is replaced once, so a vault secret overlapping a typed value cannot leave a tail behind.
-- **`terminal.wait` tests scrubbed text.** Its predicate runs on the redacted screen, so waiting for a
-  prefix of the value never reveals whether the screen holds it.
+- **`terminal.wait` tests scrubbed text.** Its predicate runs on the redacted screen, so once the
+  quarantine is over, waiting for a prefix of a value masking recognises does not reveal whether the
+  screen holds it. Masking is best effort: a value it cannot recognise is not covered by this.
 - **What the daemon saw is a projection, made once.** The prompt line, the program name (`comm`) and
   the argv are masked WHOLE first and only then cut to their limits (200, 64 and 200 characters), so a
   clipped echo cannot leave the front of a value. A prompt line that ends with the start of a value, or
@@ -208,10 +239,14 @@ and (after the quarantine) the agent's `terminal.read` and `terminal.wait`. Reda
   with a saved secret. The bridge **reduces accidents and makes phishing visible**. It is the same
   boundary `sudo` has ([secrets](secrets.md)). Answering and cancelling are owner-only by an
   honest-client rule, as everything under the admin token is.
-- **A hand-typed value is masked for the window only.** Afterwards a program that echoes it is not
-  masked, unless the value was saved to the vault. The quarantine is the stronger boundary but is also a
-  window: it ends after 120 seconds or when the owner ends it, and the secret is expected to be in a
-  program that does not echo it.
+- **A hand-typed value is masked for the window only, and masking is best effort.** Afterwards a program
+  that echoes it is not masked, unless the value was saved to the vault, and a value it cannot recognise
+  (cut at a row edge, wrapped, inside an escape, printed differently) is shown. The quarantine is the
+  stronger boundary but is a finite window: it ends after 120 seconds, or when the owner ends it or
+  chooses "Show anyway". After that, target output can expose the value.
+- **The audit trail is best effort.** The reveal and end acts are recorded through the common audit log,
+  which reports a persistence failure instead of propagating it. A reveal is refused if the call to record
+  it is rejected, but a record the log silently loses is lost.
 - **The quarantine hides the pane from the agent's reads, not from the pane's program.** An agent that
   can send keys can still make the program print what it received; the agent's `terminal.read` of it is
   refused, but a process the agent started in another pane or a file it redirected to is not covered.

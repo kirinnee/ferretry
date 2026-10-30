@@ -40,10 +40,14 @@ export class RedactingTerminalStreamService implements TerminalStreamService {
   }
 
   async capture(sessionId: string, terminalId: string, historyLines: number): Promise<TerminalCapture> {
-    const until = this.quarantined?.(sessionId, terminalId);
     const capture = await this.inner.capture(sessionId, terminalId, historyLines);
-    if (until !== undefined) return notice(capture, until, this.now());
-    return await redactCapture(capture, this.redactor);
+    const early = this.quarantined?.(sessionId, terminalId);
+    if (early !== undefined) return notice(capture, early, this.now());
+    const redacted = await redactCapture(capture, this.redactor);
+    // Asked again once the capture and the redaction are done: a secret typed while they were in flight
+    // must not be drawn from a screen that was read before it.
+    const late = this.quarantined?.(sessionId, terminalId);
+    return late === undefined ? redacted : notice(capture, late, this.now());
   }
 }
 

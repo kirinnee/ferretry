@@ -7158,6 +7158,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   const secretRedactor = new EphemeralAwareRedactor(new SecretRedactor(secretVault), justTyped);
   // The terminals a secret was just typed into, kept from an agent and from a viewer for a window.
   const quarantined = new QuarantineRegistry({ now: () => Date.now() });
+  // Held whole until the journal has been replayed: a restart must not open a terminal the last run closed.
+  quarantined.lock();
   // ONE executor for the callsign ledger. It is what makes a claim atomic across concurrent starts:
   // the read-modify-write of that one file must never interleave with another start's.
   const callsignClaims = new KeyedSerialExecutor();

@@ -287,9 +287,7 @@ export class AgentToolService {
       case 'terminal.read': {
         this.assertReadable(caller, surface, reference);
         const lines = call.lines ?? AGENT_TOOL_DEFAULT_READ_LINES;
-        const output = clipOutput(
-          this.scrubbed(sessionId, await this.ports.terminals.text(sessionId, surface.id, lines)),
-        );
+        const output = clipOutput(await this.readText(caller, surface, reference, lines));
         return { summary: `The last ${plural(lines, 'line')} of ${reference}.`, output };
       }
       case 'terminal.wait':
@@ -406,7 +404,7 @@ export class AgentToolService {
     this.assertReadable(caller, surface, reference);
     const deadline = this.ports.clock.now() + (call.timeoutMs ?? AGENT_TOOL_DEFAULT_WAIT_MS);
     const tail = async (): Promise<string> =>
-      clipOutput(this.scrubbed(sessionId, await this.ports.terminals.text(sessionId, surface.id, WAIT_TAIL_LINES)));
+      clipOutput(await this.readText(caller, surface, reference, WAIT_TAIL_LINES));
     for (;;) {
       await this.ports.sleep(AGENT_TOOL_POLL_MS);
       if (caller.kind === 'agent') await this.assertFree(sessionId, surface);
@@ -416,10 +414,7 @@ export class AgentToolService {
       const matched =
         call.text === undefined
           ? await this.ended(sessionId, surface)
-          : this.scrubbed(
-              sessionId,
-              await this.ports.terminals.text(sessionId, surface.id, WAIT_SEARCH_LINES),
-            ).includes(call.text);
+          : (await this.readText(caller, surface, reference, WAIT_SEARCH_LINES)).includes(call.text);
       if (matched === 'closed') return { summary: `${reference} closed while waiting.`, matched: true };
       if (matched) {
         const what = call.text === undefined ? 'The command ended' : 'The text appeared';
@@ -435,13 +430,31 @@ export class AgentToolService {
    * recognise, so the terminal is closed to the agent's eyes until the window ends. Typing stays allowed.
    */
   private assertReadable(caller: AgentToolCaller, surface: ResolvedSurface, reference: string): void {
-    if (caller.kind !== 'agent') return;
     const until = this.ports.quarantinedUntil?.(caller.sessionId, [surface.name, surface.id]);
     if (until === undefined) return;
+    const when = new Date(until).toISOString();
     throw new AgentToolError(
       'conflict',
-      `${reference} is quarantined until ${new Date(until).toISOString()}: the owner's secret was just typed there, so you cannot read it for a short while. You can still send keys. Try again after that time, or ask the owner.`,
+      caller.kind === 'agent'
+        ? `${reference} is quarantined until ${when}: the owner's secret was just typed there, so you cannot read it for a short while. You can still send keys. Try again after that time, or ask the owner.`
+        : `${reference} is quarantined until ${when}: a secret was just typed there. Read it in the terminal viewer with "Show anyway", or end the quarantine there, or try again after that time.`,
     );
+  }
+
+  /**
+   * The screen text a caller may be given. A read is the one place text leaves the daemon, so the quarantine
+   * is checked again after the capture comes back: a secret typed while the capture was in flight must not
+   * be published by a read that began before it.
+   */
+  private async readText(
+    caller: AgentToolCaller,
+    surface: ResolvedSurface,
+    reference: string,
+    lines: number,
+  ): Promise<string> {
+    const text = await this.ports.terminals.text(caller.sessionId, surface.id, lines);
+    this.assertReadable(caller, surface, reference);
+    return this.scrubbed(caller.sessionId, text);
   }
 
   /** Runs `work` as one turn in the session when input requests are wired; just runs it where they are not. */

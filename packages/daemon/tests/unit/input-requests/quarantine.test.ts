@@ -9,11 +9,16 @@ function registry(window = 120_000) {
   return { clock, quarantine: new QuarantineRegistry({ now: () => clock.ms }, window) };
 }
 
+const settled = (quarantine: QuarantineRegistry, session: string, names: string[]): number => {
+  const hold = quarantine.begin(session, names);
+  return quarantine.settle(hold);
+};
+
 describe('QuarantineRegistry', () => {
   it('should hold a terminal under every name it is known by, until the window ends', () => {
     const { clock, quarantine } = registry();
 
-    const until = quarantine.start(SESSION, ['dev', '000000000001']);
+    const until = settled(quarantine, SESSION, ['dev', '000000000001']);
 
     should(until).equal(1_120_000);
     should(quarantine.until(SESSION, ['000000000001'])).equal(until);
@@ -25,24 +30,69 @@ describe('QuarantineRegistry', () => {
     should(quarantine.sessions()).eql([]);
   });
 
-  it('should extend one entry rather than add a second when the same terminal is held again', () => {
+  it('should keep a hold in flight open for a full window from now, however long the delivery takes', () => {
     const { clock, quarantine } = registry();
-    quarantine.start(SESSION, ['dev', 'a']);
-    clock.ms += 60_000;
+    const hold = quarantine.begin(SESSION, ['dev']);
 
-    const until = quarantine.start(SESSION, ['a', 'b']);
+    clock.ms += 10 * 120_000;
 
-    should(quarantine.list(SESSION)).eql([{ key: 'a', until }]);
-    should(quarantine.until(SESSION, ['dev'])).be.undefined();
-    should(quarantine.until(SESSION, ['b'])).equal(until);
+    should(quarantine.until(SESSION, ['dev'])).equal(clock.ms + 120_000);
+    should(quarantine.list(SESSION)).eql([{ key: 'dev', until: clock.ms + 120_000 }]);
+    const until = quarantine.settle(hold);
+    clock.ms += 119_999;
+    should(quarantine.until(SESSION, ['dev'])).equal(until);
   });
 
-  it('should end one terminal and give back the names it was known by', () => {
+  it('should settle a hold that was lost back into the registry', () => {
     const { quarantine } = registry();
-    quarantine.start(SESSION, ['dev', 'a']);
-    quarantine.start(SESSION, ['logs']);
+    const hold = quarantine.begin(SESSION, ['dev']);
+    quarantine.drop(SESSION);
 
-    should(quarantine.end(SESSION, 'a')).eql(['dev', 'a']);
+    const until = quarantine.settle(hold);
+
+    should(quarantine.until(SESSION, ['dev'])).equal(until);
+  });
+
+  it('should add a hold for the same terminal rather than replace the one before it', () => {
+    const { clock, quarantine } = registry();
+    const first = settled(quarantine, SESSION, ['dev', 'a']);
+    clock.ms += 60_000;
+
+    const second = settled(quarantine, SESSION, ['a', 'b']);
+
+    should(quarantine.list(SESSION).length).equal(2);
+    should(quarantine.until(SESSION, ['dev'])).equal(first);
+    should(quarantine.until(SESSION, ['a'])).equal(second);
+    should(quarantine.until(SESSION, ['b'])).equal(second);
+  });
+
+  it('should let a failed attempt release only its own hold, never an earlier delivery', () => {
+    const { clock, quarantine } = registry();
+    const delivered = settled(quarantine, SESSION, ['dev', 'a']);
+    clock.ms += 30_000;
+    const failed = quarantine.begin(SESSION, ['dev', 'a']);
+
+    const remaining = quarantine.release(failed);
+
+    should(remaining).equal(delivered);
+    should(quarantine.until(SESSION, ['dev'])).equal(delivered);
+  });
+
+  it('should say nothing is left when the only hold is released', () => {
+    const { quarantine } = registry();
+    const hold = quarantine.begin(SESSION, ['dev']);
+
+    should(quarantine.release(hold)).be.undefined();
+    should(quarantine.sessions()).eql([]);
+  });
+
+  it('should end every settled hold on a terminal and give back the names it was known by', () => {
+    const { quarantine } = registry();
+    settled(quarantine, SESSION, ['dev', 'a']);
+    settled(quarantine, SESSION, ['a', 'b']);
+    settled(quarantine, SESSION, ['logs']);
+
+    should([...(quarantine.end(SESSION, 'a') ?? [])].sort()).eql(['a', 'b', 'dev']);
     should(quarantine.end(SESSION, 'a')).be.undefined();
     should(quarantine.list(SESSION).map(entry => entry.key)).eql(['logs']);
     should(quarantine.end(SESSION, 'logs')).eql(['logs']);
@@ -50,10 +100,18 @@ describe('QuarantineRegistry', () => {
     should(quarantine.end('x-1', 'dev')).be.undefined();
   });
 
+  it('should not let the owner end a hold on a delivery in flight', () => {
+    const { quarantine } = registry();
+    quarantine.begin(SESSION, ['dev']);
+
+    should(quarantine.end(SESSION, 'dev')).be.undefined();
+    should(quarantine.until(SESSION, ['dev'])).not.be.undefined();
+  });
+
   it('should list what is held and forget a whole session', () => {
     const { quarantine } = registry();
-    quarantine.start(SESSION, ['dev']);
-    quarantine.start('x-1', ['dev']);
+    settled(quarantine, SESSION, ['dev']);
+    settled(quarantine, 'x-1', ['dev']);
 
     should([...quarantine.sessions()].sort()).eql([SESSION, 'x-1']);
     quarantine.drop(SESSION);
@@ -80,5 +138,36 @@ describe('QuarantineRegistry', () => {
     quarantine.purge();
 
     should(quarantine.list(SESSION).map(entry => entry.key)).eql(['long']);
+  });
+
+  it('should hold every terminal of every session while locked, until unlocked', () => {
+    const { quarantine } = registry();
+
+    quarantine.lock();
+    should(quarantine.until('x-1', ['anything'])).equal(1_120_000);
+    quarantine.unlock();
+
+    should(quarantine.until('x-1', ['anything'])).be.undefined();
+  });
+
+  it('should release a timed lock when its time has passed', () => {
+    const { clock, quarantine } = registry();
+    quarantine.lock(clock.ms + 5_000);
+
+    should(quarantine.until(SESSION, ['dev'])).not.be.undefined();
+    clock.ms += 5_000;
+    should(quarantine.until(SESSION, ['dev'])).be.undefined();
+  });
+
+  it('should hold every terminal of one session, and none of another, when its replay failed', () => {
+    const { clock, quarantine } = registry();
+
+    quarantine.lockSession(SESSION);
+
+    should(quarantine.until(SESSION, ['anything'])).equal(clock.ms + 120_000);
+    should(quarantine.until('x-1', ['anything'])).be.undefined();
+    should(quarantine.list(SESSION)).eql([]);
+    clock.ms += 120_000;
+    should(quarantine.until(SESSION, ['anything'])).be.undefined();
   });
 });

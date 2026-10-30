@@ -444,18 +444,95 @@ describe('AgentToolService — a terminal the owner just typed a secret into', (
     should(error.code).equal('conflict');
   });
 
-  it('should still let the agent send keys, and let a person read, while the terminal is held', async () => {
+  it('should still let the agent send keys while the terminal is held', async () => {
     // Arrange
     const world = agentToolWorld({ quarantinedUntil: held });
     await world.service.call(agent, { tool: 'terminal.open', name: 'dev' });
 
     // Act
     const sent = await world.service.call(agent, { tool: 'terminal.send', name: 'dev', keys: ['ctrl-c'] });
-    const read = await world.service.call(person, { tool: 'terminal.read', name: 'dev' });
 
     // Assert
     should(sent.summary).startWith('Sent 1 key');
-    should(read.summary).startWith('The last');
+  });
+
+  it('should refuse the owner’s ordinary terminal tools too, and point at the viewer’s own way to look', async () => {
+    // Arrange
+    const world = agentToolWorld({ quarantinedUntil: held });
+    await world.service.call(agent, { tool: 'terminal.open', name: 'dev' });
+    world.terminals.screens.set('000000000001', 'password: hunter2\n');
+
+    // Act
+    const read = await refusal(world.service.call(person, { tool: 'terminal.read', name: 'dev' }));
+    const waited = await refusal(world.service.call(person, { tool: 'terminal.wait', name: 'dev', text: 'password' }));
+
+    // Assert
+    for (const error of [read, waited]) {
+      should(error.code).equal('conflict');
+      should(error.message).containEql('Show anyway');
+      should(error.message).not.containEql('hunter2');
+    }
+  });
+
+  describe('when the quarantine begins while a read is already in flight', () => {
+    const racing = async () => {
+      let quarantined = false;
+      const world = agentToolWorld({ quarantinedUntil: () => (quarantined ? until : undefined) });
+      await world.service.call(agent, { tool: 'terminal.open', name: 'dev' });
+      const calls: number[] = [];
+      const text = world.terminals.text.bind(world.terminals);
+      world.terminals.text = async (...args: Parameters<typeof text>) => {
+        calls.push(calls.length);
+        const captured = await text(...args);
+        if (flipOn.has(calls.length)) quarantined = true;
+        return `${captured}password: hunt`;
+      };
+      return world;
+    };
+    const flipOn = new Set<number>();
+
+    it('should not return a screen read before the secret was typed (terminal.read)', async () => {
+      flipOn.clear();
+      flipOn.add(1);
+      const world = await racing();
+
+      const error = await refusal(world.service.call(agent, { tool: 'terminal.read', name: 'dev' }));
+
+      should(error.code).equal('conflict');
+      should(error.message).not.containEql('hunt');
+    });
+
+    it('should not match against, or report on, a screen read before the secret was typed (terminal.wait predicate)', async () => {
+      flipOn.clear();
+      flipOn.add(1);
+      const world = await racing();
+
+      const error = await refusal(world.service.call(agent, { tool: 'terminal.wait', name: 'dev', text: 'hunt' }));
+
+      should(error.code).equal('conflict');
+    });
+
+    it('should not return the tail of a matched wait when the quarantine began during it (terminal.wait tail)', async () => {
+      flipOn.clear();
+      flipOn.add(2);
+      const world = await racing();
+
+      const error = await refusal(world.service.call(agent, { tool: 'terminal.wait', name: 'dev', text: 'hunt' }));
+
+      should(error.code).equal('conflict');
+    });
+
+    it('should not return the tail of a wait that timed out when the quarantine began during it', async () => {
+      flipOn.clear();
+      flipOn.add(2);
+      const world = await racing();
+
+      const error = await refusal(
+        world.service.call(agent, { tool: 'terminal.wait', name: 'dev', text: 'never', timeoutMs: 1 }),
+      );
+
+      should(error.code).equal('conflict');
+    });
   });
 
   it('should read normally once the quarantine is gone', async () => {

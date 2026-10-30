@@ -384,6 +384,11 @@ export type InputEvent = z.infer<typeof InputEventSchema>;
 /**
  * The journal event that keeps a quarantine across a restart: the terminal's names (its key and its id, because
  * a reader may hold either), when the window ends, and nothing else. `ended` closes the window early.
+ *
+ * `hold` is an opaque id for the one delivery attempt that made the event. A later `started` with the same
+ * `hold` replaces that attempt's end time, and an `ended` with it lets go of that attempt's hold alone, so
+ * an attempt that failed never lifts the hold of a value delivered before it. An event without a `hold`
+ * (the owner ending a quarantine) ends every hold on the names.
  */
 export const INPUT_QUARANTINE_EVENT_TYPES = {
   started: 'surface.input_quarantined',
@@ -393,6 +398,7 @@ export const InputQuarantineEventSchema = z.strictObject({
   type: z.enum([INPUT_QUARANTINE_EVENT_TYPES.started, INPUT_QUARANTINE_EVENT_TYPES.ended]),
   sessionId: boundedLine(128),
   names: z.array(SurfaceKeySchema).min(1).max(4),
+  hold: boundedLine(128).optional(),
   until: InstantSchema,
   at: InstantSchema,
 });
