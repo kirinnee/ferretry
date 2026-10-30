@@ -156,23 +156,34 @@ describe('which sessions the bar lists', () => {
     expect(kept.hiddenStopped).toBe(1);
   });
 
-  test('the line under a name is the task, else its name, else its folder', () => {
-    expect(sessionsBarSubline(sessionView('a', { config: { label: 'Fix the sign-in' } }))).toBe('Fix the sign-in');
+  test('the line under a name is its name, else its folder, and a label never replaces the name', () => {
+    expect(sessionsBarSubline(sessionView('a', { config: { name: 'Fix the sign-in', label: 'diene-cyan' } }))).toBe(
+      'Fix the sign-in',
+    );
     expect(sessionsBarSubline(sessionView('b', { config: { name: 'Session b' } }))).toBe('Session b');
     expect(sessionsBarSubline(sessionView('c', { config: { name: undefined as never } }))).toBe('/work/c');
   });
 
-  test('a row is titled by its task, the ferret second; with no task the ferret is the title', () => {
+  test('a row is titled by its name, the ferret second; with no name the ferret is the title', () => {
     const names = (config: Record<string, unknown>) => sessionsBarNames(sessionView('a', { config: config as never }));
-    expect(names({ teammate: 'hadi', label: 'Home Manager' })).toEqual({ title: 'Home Manager', ferret: 'Hadi' });
     expect(names({ teammate: 'hadi', label: undefined, name: 'Diene Work' })).toEqual({
       title: 'Diene Work',
       ferret: 'Hadi',
     });
-    expect(names({ teammate: 'hadi', label: '  ', name: undefined })).toEqual({ title: 'Hadi', ferret: null });
-    expect(names({ teammate: 'hadi', label: 'Hadi' })).toEqual({ title: 'Hadi', ferret: null });
-    expect(names({ teammate: undefined, label: 'Home Manager' })).toEqual({ title: 'Home Manager', ferret: null });
+    expect(names({ teammate: 'hadi', label: undefined, name: '  ' })).toEqual({ title: 'Hadi', ferret: null });
+    expect(names({ teammate: 'hadi', label: undefined, name: 'Hadi' })).toEqual({ title: 'Hadi', ferret: null });
+    expect(names({ teammate: undefined, label: undefined, name: 'Home Manager' })).toEqual({
+      title: 'Home Manager',
+      ferret: null,
+    });
     expect(names({ teammate: undefined, label: undefined, name: undefined })).toEqual({ title: 'a', ferret: null });
+  });
+
+  test('a batch label never takes the row title: a renamed, labelled session shows its new name', () => {
+    const names = (name: string) =>
+      sessionsBarNames(sessionView('a', { config: { teammate: 'hadi', name, label: 'diene-cyan' } }));
+    expect(names('CyanPrint')).toEqual({ title: 'CyanPrint', ferret: 'Hadi' });
+    expect(names('CyanPrint, renamed')).toEqual({ title: 'CyanPrint, renamed', ferret: 'Hadi' });
   });
 
   test('the directory line is the folder, with a home directory written as ~', () => {

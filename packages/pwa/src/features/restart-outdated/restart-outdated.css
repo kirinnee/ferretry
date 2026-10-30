@@ -1,21 +1,12 @@
-/* "Outdated" mark (outdated-mark.tsx) and the one "Restart outdated (N)" strip (restart-outdated-strip.tsx).
-   Warn tokens: the word means "act when you can", not "something is broken". */
+/* "Outdated" mark (outdated-mark.tsx): a refresh glyph in the warn ink, the size of a mode icon, and the one "Restart outdated (N)" strip
+   (restart-outdated-strip.tsx). Warn tokens: it means "act when you can", not "something is broken". */
 .fy-outdated-mark {
   display: inline-flex;
   flex-shrink: 0;
   align-items: center;
-  padding: 0 6px;
-  border: var(--stroke-control) solid var(--warn-border);
-  border-radius: var(--radius-control);
-  background: var(--warn-bg);
   color: var(--warn);
-  font-size: 11px;
-  line-height: 16px;
-  white-space: nowrap;
 }
 .fy-sbar__session[aria-current='page'] .fy-outdated-mark {
-  border-color: currentColor;
-  background: transparent;
   color: var(--nav-sel-fg, var(--warn));
 }
 .fy-restart-outdated {
@@ -49,9 +40,7 @@
   text-decoration: underline;
   cursor: pointer;
 }
-/* A restart waiting for the ferret's idle moment: the same chip, in muted ink, so it reads as "in hand". */
+/* A restart waiting for the ferret's idle moment: the same glyph, in muted ink, so it reads as "in hand". */
 .fy-outdated-mark--queued {
-  border-color: var(--border);
-  background: transparent;
   color: var(--muted);
 }
