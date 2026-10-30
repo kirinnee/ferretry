@@ -826,7 +826,7 @@ the guard too (O4, resolved in §14).
 
 ### 8.5 The CI guard
 
-A CI job, `harness-contract`, runs against the **nix-pinned** `claude-code` and `codex` in a
+A CI job, `harness-contract` (in the realworld tier's workflow), runs against the **nix-pinned** `claude-code` and `codex` in a
 throwaway `HOME`, with fake tokens and `HTTPS_PROXY` pointed at a dead port. It fails the build when a
 harness update breaks a mechanism this design relies on.
 

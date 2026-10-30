@@ -466,7 +466,7 @@ trust a reading it should not. A unit test pins this.
 Every PR keeps the full suite green. Each body carries a before/after `fy daemon profile` from the owner-scale
 fixture and from the live box, plus on the Mac once PR 2 ships.
 
-**Baseline for the CI idle budget** (`tests/integration/runtime/idle-budget.test.ts:36-49`, measured by #702):
+**Baseline for the CI idle budget** (`tests/realworld/runtime/idle-budget.test.ts:36-49`, measured by #702):
 
 |               | Measured | Ceiling |
 | ------------- | -------- | ------- |

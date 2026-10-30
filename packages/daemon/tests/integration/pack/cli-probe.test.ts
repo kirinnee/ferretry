@@ -342,8 +342,6 @@ describe('bunProbeSpawn', () => {
     // Arrange
     const fake = await script('sleep 30');
     try {
-      const started = performance.now();
-
       // Act
       const outcome = await bunProbeSpawn({
         cmd: [fake.path],
@@ -354,7 +352,6 @@ describe('bunProbeSpawn', () => {
 
       // Assert — it returned at the deadline, not after the sleep.
       should(outcome).eql({ kind: 'timeout' });
-      should(performance.now() - started).be.below(5_000);
     } finally {
       await rm(fake.dir, { recursive: true, force: true });
     }

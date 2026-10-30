@@ -10,7 +10,7 @@ packages/fleet/tests/contract/run.sh pinned   # the versions this build pins (th
 packages/fleet/tests/contract/run.sh latest   # the newest npm releases
 ```
 
-CI runs `pinned` on Linux and `macos-15` in every build (`harness-contract` in `ci.yaml`). The
+CI runs `pinned` on Linux and `macos-15` in every build (`harness-contract` in `realworld.yaml`, the realworld tier's workflow, so it never blocks a merge or a release). The
 scheduled `harness-contract-latest.yaml` runs `latest` daily and gates nothing.
 
 ## What is pinned

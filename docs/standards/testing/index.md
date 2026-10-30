@@ -45,15 +45,51 @@ slow, expensive, and few. A healthy codebase has many unit tests, some contract 
 integration tests, and a small number of SIT journeys covering the paths an operator actually
 takes.
 
-### The three tiers, concretely
+### The four tiers, concretely
 
-| Tier            | Lives in             | Coverage ledger (100% goal)     | Config             | Command          |
-| --------------- | -------------------- | ------------------------------- | ------------------ | ---------------- |
-| unit + contract | `tests/unit/`        | `src/lib/**` only               | `bunfig.unit.toml` | `task test:unit` |
-| integration     | `tests/integration/` | `src/adapters/**` only          | `bunfig.int.toml`  | `task test:int`  |
-| SIT             | `tests/sit/`         | full system (in-process driver) | `bunfig.sit.toml`  | `task test:sit`  |
+| Tier            | Lives in             | Outcome depends on       | Blocks a merge | Coverage ledger (100% goal)     | Config                  | Command               |
+| --------------- | -------------------- | ------------------------ | -------------- | ------------------------------- | ----------------------- | --------------------- |
+| unit + contract | `tests/unit/`        | the code                 | yes            | `src/lib/**` only               | `bunfig.unit.toml`      | `task test:unit`      |
+| integration     | `tests/integration/` | the code                 | yes            | `src/adapters/**` only          | `bunfig.int.toml`       | `task test:int`       |
+| SIT             | `tests/sit/`         | the code                 | yes            | full system (in-process driver) | `bunfig.sit.toml`       | `task test:sit`       |
+| realworld       | `tests/realworld/`   | the code and the machine | no             | none                            | `bunfig.realworld.toml` | `task test:realworld` |
 
-`task test` runs all three. `task test:coverage` runs every coverage-capable suite and writes
+Every `*.test.ts(x)` lives in exactly one of those directories (or in `tests/contract/` or
+`tests/e2e/`); `scripts/validate/test-tiers.sh` refuses one anywhere else.
+
+- **Unit** is deterministic by construction: no real clock, no real network, nothing whose answer
+  depends on the machine. The unit preload enforces that at runtime.
+- **Integration** exercises real adapters against real collaborators, and its outcome is still
+  deterministic. It asserts no wall-clock speed, memory or rate, sleeps for no fixed time, pins its
+  tools, seals its environment (`offline-environment.ts`) and binds ports to `:0`. Wait for an event with a
+  bounded deadline that names what never arrived; never wait for time to pass.
+- **SIT** drives the whole CLI the way an operator does.
+- **Realworld** holds every claim whose outcome depends on the machine as much as on the code: the
+  idle daemon stays under a CPU and memory ceiling, the event loop is never blocked for more than 200 ms
+  while the disk is saturated, a daemon stops within its bound, a worker holds under 25 MB. These are
+  real and worth defending, and they cannot be deterministic, so they cannot block a merge. They run
+  in their own workflow (`.github/workflows/realworld.yaml`) on a quiet dedicated runner, on every
+  push to `main`, nightly, on demand, and on a pull request that touches them. A failure there files one
+  issue per failing test (`realworld: <file> > <test>`, label `realworld`); it never fails a pull
+  request's required checks and never holds a release (see [CI/CD](../ci-cd/index.md#release-gating)).
+  Also part of this tier, and already shaped like it: the daily `harness-contract-latest.yaml`, which
+  runs the contract suite against the newest upstream harnesses and gates nothing. The macOS jobs
+  that need a real Mac (`Containment (macOS)`, `Sandbox Shell (Safari)`, the `macos-15` Harness
+  Contract) live in the same workflow for the same reason.
+
+**A flake in the unit or integration tier is a bug in the test or in the product. Fix the root; never
+retry.** A test that fails one run in fifty is telling you something is unordered, unawaited or
+timing-dependent. Moving it to realworld is only right when the claim itself is about the machine
+(a speed, a size, a rate). A test whose point is a behaviour and which flakes under load is rewritten
+to wait for the event, not moved. `bun test --retry` and a rerun loop are not used for these tiers, and
+the quarantine below only keeps a known flake from holding a release hostage while its fix is written.
+
+**Splitting a mixed test.** When one file asserts a behaviour and a speed, the behaviour stays in
+`tests/integration/` without the timing, and the speed claim goes to the same path under
+`tests/realworld/` with the same file name. A rig both need lives in `tests/integration/support/`, where
+the realworld test imports it.
+
+`task test` runs the three blocking tiers; `task test:realworld` runs the fourth on request. `task test:coverage` runs every coverage-capable suite and writes
 lcov + text reports under `coverage/<tier>/`.
 
 **The ledgers are disjoint on purpose.** Each `bunfig.*.toml` sets
@@ -289,7 +325,7 @@ white-box: the test knows it is testing an adapter and sets up whatever that ada
 
 - **Scope:** One adapter plus its real collaborator
 - **Visibility:** White-box — knows it is testing an adapter
-- **Speed:** Slower than unit tests (real IO, real libraries); `bunfig.int.toml` allows a
+- **Speed:** Slower than unit tests (real IO, real libraries), but never asserted: a claim about how fast or how big belongs in `tests/realworld/`. `bunfig.int.toml` allows a
   120-second timeout
 - **Coverage goal:** 100% of `src/adapters/**`
 
@@ -411,15 +447,14 @@ have measured its flake rate ([CI/CD](../ci-cd/index.md#e2e-tier)). Browser test
 brittle and expensive tests there are, so its journeys cover what only a whole product can show and
 leave edge cases to the tiers below.
 
-**No load or performance tier.** Throughput and latency testing belongs with the daemon
-(`fyd`), which is also a placeholder today.
-
-**One budget lives in the integration tier instead.** `packages/daemon/tests/integration/runtime/boot-stalls.test.ts`
-boots a real `fyd` over a fleet built at the size of the one that stalled in production
+**No throughput or latency suite.** What exists is a handful of budgets, and they live in the
+realworld tier. `packages/daemon/tests/realworld/runtime/boot-stalls.test.ts` boots a real `fyd`
+over a fleet built at the size of the one that stalled in production
 (`tests/integration/support/scaled-fleet.ts`: 36 sessions, three 200 MB transcripts, 2,000 Codex
 rollouts) and fails if the event loop is ever blocked for more than 200 ms. A failure carries the
-stacks the runtime sampled during the block. It is an integration test because it asserts a property
-of the composed daemon, not throughput; it is not the start of a performance tier.
+stacks the runtime sampled during the block. It asserts a property of the composed daemon, but the
+number it checks is the machine's as much as the code's, so it files an issue instead of failing a
+merge.
 
 Do not add a tier speculatively. A tier that exists but is empty is worse than no tier: it
 implies coverage that is not there.
@@ -506,6 +541,7 @@ task test                # unit + integration + SIT (SIT compiles first)
 task test:unit           # fast inner loop
 task test:int
 task test:sit            # compiles, then drives the binary black-box
+task test:realworld      # the machine-dependent tier (CI runs it in realworld.yaml)
 task test:watch          # watch the unit suite
 task test:coverage       # every coverage-capable suite, lcov + text
 task test:unit:coverage
@@ -610,7 +646,14 @@ group ends every agent.
 - [ ] One adapter plus its real collaborator
 - [ ] White-box: asserts on what the adapter actually does
 - [ ] Doubles anything beyond the adapter under test
+- [ ] Asserts no wall-clock speed, memory or rate (that is a realworld test)
 - [ ] Lives in `tests/integration/`, credited against `src/adapters/**`
+
+**Realworld tests:**
+
+- [ ] The outcome depends on the machine (a speed, size or rate), not only on the code
+- [ ] Same path and file name as the integration test it was split from, if any
+- [ ] Lives in `tests/realworld/`; it files an issue when it fails and never gates a merge
 
 **SIT:**
 

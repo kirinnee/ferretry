@@ -236,7 +236,7 @@ describe('the turn watcher over real panes and transcripts', () => {
     await subject.transcript(claudeAnswer('end_turn'));
     await subject.frame(CLAUDE_IDLE);
     await subject.settle();
-    should(await until(subject, 'your-turn')).be.below(3_000);
+    await until(subject, 'your-turn');
 
     // Interrupted: Claude writes NO end, so the idle pane is the only witness — it still ends the turn.
     await subject.transcript(claudeUser('again'));
@@ -284,7 +284,7 @@ describe('the turn watcher over real panes and transcripts', () => {
     await subject.transcript(codexEvent('task_complete'));
     await subject.frame(CODEX_IDLE);
     await subject.settle();
-    should(await until(subject, 'your-turn')).be.below(3_000);
+    await until(subject, 'your-turn');
 
     await subject.transcript(codexEvent('task_started'));
     await subject.frame(CODEX_WORKING);

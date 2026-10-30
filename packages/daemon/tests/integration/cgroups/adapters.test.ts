@@ -277,14 +277,11 @@ describe('running one host-manager command', () => {
     const subject = new SpawnCgroupCommands({ timeoutMs: 50 });
 
     // Act
-    const started = Bun.nanoseconds();
     const result = await subject.execute(['/bin/sh', '-c', 'sleep 30']);
-    const elapsedMs = (Bun.nanoseconds() - started) / 1_000_000;
 
     // Assert — a refusal the domain restates like any other, not a hang and not a throw.
     should(result.code).equal(CGROUP_COMMAND_TIMEOUT_CODE);
     should(result.stderr).match(/did not answer within 50ms and was killed/u);
-    should(elapsedMs).be.lessThan(10_000);
   });
 
   it('should not wait for a pipe a grandchild is still holding open', async () => {

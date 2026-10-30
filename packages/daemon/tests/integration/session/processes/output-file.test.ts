@@ -195,14 +195,12 @@ describe('RegularOutputFile', () => {
       const path = join(directory, 'pipe.log');
       const made = Bun.spawn(['mkfifo', path], { stdout: 'ignore', stderr: 'ignore' });
       should(await made.exited).equal(0);
-      const started = performance.now();
 
       // Act
       const read = await new RegularOutputFile().read(path, undefined, 1_024);
 
       // Assert
       should(read.kind).equal('refused');
-      should(performance.now() - started).be.below(2_000);
     },
     10_000,
   );

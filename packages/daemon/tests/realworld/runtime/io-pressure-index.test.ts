@@ -36,13 +36,13 @@ import {
 import type { HostedWorker } from '../../../src/adapters/runtime/bundled-worker-host.ts';
 import type { IndexWriterRequest, IndexWriterResponse } from '../../../src/adapters/storage/index-writer-program.ts';
 import { createFoundationPaths, type EventPointer, parseSessionId, resolveStateHome } from '../../../src/lib/index.ts';
-import { SlowCommitDatabase } from '../support/slow-sqlite.ts';
+import { SlowCommitDatabase } from '../../integration/support/slow-sqlite.ts';
 
 /** What one commit costs on the saturated disk: a second and a half, inside what was measured. */
 const COMMIT_MS = 1_500;
 /** The daemon's ceiling for any one stall under IO pressure (docs/performance.md). */
 const BUDGET_MS = 200;
-const SLOW_WRITER = resolve(import.meta.dir, '../support/slow-index-writer.worker.ts');
+const SLOW_WRITER = resolve(import.meta.dir, '../../integration/support/slow-index-writer.worker.ts');
 
 const homes = new Set<string>();
 

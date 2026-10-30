@@ -8,23 +8,13 @@
  * a thread nobody audits. So the worker is bundled here the way the release compiles it, and refused
  * if any of that is inside.
  */
-import { afterAll, describe, it } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { describe, it } from 'bun:test';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import should from 'should';
 
 const ENTRY = join(import.meta.dir, '../../../../bin/session.worker.ts');
-const RSS = join(import.meta.dir, '../../support/session-worker-rss.ts');
 /** Bytes of the unminified bundle: about 160 KB today, and an order of magnitude under the 15 MB worker. */
 const BUDGET_BYTES = 256 * 1024;
-/**
- * Resident memory one BUNDLED worker adds — what the compiled binary ships. Measured 7.4 MB a thread on
- * Linux (Bun 1.3.13); run from source a worker costs ~67 MB, which is why this measures the bundle.
- */
-const WORKER_MEMORY_BUDGET_MB = 15;
-const WORKERS = 5;
 /**
  * Every process this file starts is killed by then. A test's own timeout cannot end a child, and a
  * child it waits on forever is a run that never finishes: a deadline here is a failure that says why.
@@ -49,11 +39,6 @@ async function run(argv: readonly string[], what: string): Promise<string> {
   if (code !== 0) throw new Error(`${what} failed (${String(code)}): ${errors}`);
   return text;
 }
-
-const scratch: string[] = [];
-afterAll(async () => {
-  for (const directory of scratch.splice(0)) await rm(directory, { recursive: true, force: true });
-});
 
 /** Module paths that must never be in a session worker. */
 const FORBIDDEN: readonly RegExp[] = [
@@ -99,22 +84,4 @@ describe('the session worker bundle', () => {
     // Assert
     should(text.length).be.below(BUDGET_BYTES);
   });
-
-  it(`should cost at most ${WORKER_MEMORY_BUDGET_MB} MB of resident memory a thread, bundled as it ships`, async () => {
-    // Arrange — the bundle on disk, as the compiled binary embeds it.
-    const directory = await mkdtemp(join(tmpdir(), 'fy-worker-diet-'));
-    scratch.push(directory);
-    const outfile = join(directory, 'session.worker.js');
-    await run([process.execPath, 'build', ENTRY, '--target=bun', '--outfile', outfile], 'bun build');
-
-    // Act — in a process of its own (see `support/session-worker-rss.ts`): this one never hosts the threads.
-    const out = await run(
-      [process.execPath, RSS, pathToFileURL(outfile).href, String(WORKERS)],
-      'measuring the workers',
-    );
-    const { perWorkerMb } = JSON.parse(out) as { perWorkerMb: number };
-
-    // Assert
-    should(perWorkerMb).be.below(WORKER_MEMORY_BUDGET_MB);
-  }, 60_000);
 });

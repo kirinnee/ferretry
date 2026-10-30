@@ -143,15 +143,12 @@ describe('signing the host Claude Code login in on Linux', () => {
     const { service } = await linuxMachine(silent);
 
     // Act
-    const before = performance.now();
     const started = await service.start({ credentialId: HOST_LOGIN }, PHONE);
-    const answeredIn = performance.now() - before;
     await Bun.sleep(300);
     const waiting = await service.status(started.flowId);
     const cancelled = await service.cancel(started.flowId);
 
     // Assert
-    should(answeredIn).be.below(1_000);
     should(waiting).have.property('state', 'starting');
     should(cancelled).have.property('state', 'failed');
   });

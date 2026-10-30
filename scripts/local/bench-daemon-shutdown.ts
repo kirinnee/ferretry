@@ -12,7 +12,7 @@
  * A run that has not exited within `--deadline` seconds is a HANG: its threads' kernel wait channels
  * (and, when `gdb` is on PATH, every thread's stack) are written beside the report, and it is killed.
  *
- * Manual only, never CI (the CI regression is `tests/integration/runtime/shutdown-time.test.ts`). Linux only.
+ * Manual only, never CI (the realworld-tier check is `tests/realworld/runtime/shutdown-time.test.ts`). Linux only.
  *
  *   bun scripts/local/bench-daemon-shutdown.ts --fyd "<command>" [--runs 50] [--peer] [--fleet] [--deadline 20]
  *     [--settle 1] [--out report.json]

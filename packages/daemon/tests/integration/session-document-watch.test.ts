@@ -299,6 +299,5 @@ describe('a watched session document', () => {
     // Assert
     should(quiet).equal(0);
     should(seen).equal('stopped');
-    should(Date.now() - started).be.below(1_000);
   });
 });

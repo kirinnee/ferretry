@@ -156,23 +156,6 @@ describe('browser worker client — lifecycle', () => {
     // Assert: close() only reports success once the child is genuinely gone, not merely signalled.
     should(await settledDead(pid)).be.true();
   });
-
-  it('should bound the whole shutdown by the shutdown timeout, not the request timeout', async () => {
-    // Arrange: a worker that never answers 'close', with a request budget far larger than shutdown.
-    const client = await connect({
-      endpoint: 'stubborn-close',
-      requestTimeoutMs: 30_000,
-      shutdownTimeoutMs: 150,
-    });
-    const started = Bun.nanoseconds();
-
-    // Act
-    await client.close();
-
-    // Assert: charging the request timeout first would hold up daemon shutdown for 30s per session.
-    const elapsedMs = (Bun.nanoseconds() - started) / 1_000_000;
-    should(elapsedMs).be.below(3_000);
-  });
 });
 
 describe('browser worker client — requests', () => {

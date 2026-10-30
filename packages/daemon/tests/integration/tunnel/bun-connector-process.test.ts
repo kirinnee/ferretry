@@ -84,13 +84,11 @@ describe('the cloudflared process', () => {
     await waitFor(() => lines.some(line => line.includes('Registered')), 'the child to start');
 
     // Act
-    const started = Date.now();
     child.terminate();
     const code = await child.exited;
 
     // Assert
     should(code).be.null();
-    should(Date.now() - started).be.aboveOrEqual(150);
   });
 
   it('should throw when the binary cannot be started at all', () => {

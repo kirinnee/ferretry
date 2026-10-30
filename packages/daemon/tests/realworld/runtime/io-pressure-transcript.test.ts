@@ -37,7 +37,7 @@ import { afterAll, beforeAll, describe, it } from 'bun:test';
 import { mkdir, open } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import should from 'should';
-import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
+import { cleanupTempDirectories, tempDirectory } from '../../integration/support/repository.ts';
 
 /** The budget: no single block of the event loop longer than this, on any path. */
 const BLOCK_BUDGET_MS = 200;

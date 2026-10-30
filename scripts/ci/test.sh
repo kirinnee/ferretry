@@ -10,13 +10,28 @@ export FY_UPDATE_CHECK="${FY_UPDATE_CHECK:-off}"
 
 mode="${1:-}"
 group="${2:-}"
-[[ ${mode} != "unit" && ${mode} != "int" && ${mode} != "sit" ]] && echo "❌ usage: $0 <unit|int|sit> [group]" >&2 && exit 2
+[[ ${mode} != "unit" && ${mode} != "int" && ${mode} != "sit" && ${mode} != "realworld" ]] && echo "❌ usage: $0 <unit|int|sit|realworld> [group]" >&2 && exit 2
+[[ ${mode} == "realworld" && -n ${group} ]] && echo "❌ the realworld tier has no groups" >&2 && exit 2
 
 root_dir="$(git rev-parse --show-toplevel)"
 cd "${root_dir}"
 
 ./scripts/ci/setup.sh
 ./scripts/validate/pinned-toolchain.sh
+if [[ ${mode} == "realworld" ]]; then
+  # THE REALWORLD TIER (bunfig.realworld.toml): machine-dependent tests, swept like every other tier but
+  # with no ledger, no quarantine and no rerun — a failure here files an issue, it never gates anything.
+  # The repo validators above and below belong to the blocking tiers, which run them.
+  mkdir -p coverage/realworld
+  echo "🧪 Running realworld tests..."
+  set +e
+  ./scripts/test/swept.sh bun test --config=bunfig.realworld.toml --timeout 120000 --reporter=junit --reporter-outfile=coverage/realworld/junit.xml 2>&1 | tee coverage/realworld/console.log
+  realworld_status=${PIPESTATUS[0]}
+  set -e
+  [[ ${realworld_status} -ne 0 ]] && echo "❌ realworld tests failed (exit ${realworld_status})" >&2 && exit "${realworld_status}"
+  echo "✅ realworld tests passed"
+  exit 0
+fi
 ./scripts/validate/pages-config.sh
 # The hosted relay's Worker config, deploy workflow and control-plane projections have no test that
 # can fail for them — `bun test` never reads a wrangler config or a workflow's shell. This is the
@@ -25,6 +40,8 @@ cd "${root_dir}"
 # The macOS jobs a pull request runs only when their inputs change: the path lists must cover every
 # input of the scripts those jobs run, or a macOS break reaches `main` unseen.
 ./scripts/validate/macos-relevance.sh
+# Every test lives in a tier, and the integration tier asserts no wall-clock or memory bound.
+./scripts/validate/test-tiers.sh
 
 # The per-test budget, ON THE COMMAND LINE. `[test] timeout` in a bunfig is ignored by
 # Bun, so a tier that needs longer than the 5-second default has to say so here. The
@@ -66,7 +83,7 @@ if [[ -n ${group} ]]; then
   [[ -n ${stray} ]] && echo "❌ test groups only collect *.test.ts(x) files, and Bun would also run ${stray}" >&2 && exit 1
   mapfile -t files < <(
     find packages -path '*/node_modules' -prune -o -type f \( -name '*.test.ts' -o -name '*.test.tsx' \) \
-      -not -path "*/tests/${other_tier}/*" -not -path '*/tests/sit/*' -print | sort |
+      -not -path "*/tests/${other_tier}/*" -not -path '*/tests/sit/*' -not -path '*/tests/realworld/*' -print | sort |
       jq -R -r --slurpfile groups "${groups}" --arg mode "${mode}" --arg group "${group}" '
         . as $file
         | [$groups[0][$mode][] | select(any(.prefixes[]; . as $prefix | $file | startswith($prefix)))][0].name

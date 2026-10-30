@@ -1,6 +1,6 @@
 /**
  * How much resident memory each of `count` bundled session workers adds to a process, in MB, printed as
- * JSON (`tests/integration/session/observer/worker-diet.test.ts`). Run in a process of its own, for two
+ * JSON (`tests/realworld/session/observer/worker-diet.test.ts`). Run in a process of its own, for two
  * reasons.
  *
  * Resident memory never shrinks back, so a measurement in the test runner's process would be measuring

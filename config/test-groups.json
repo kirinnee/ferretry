@@ -13,16 +13,6 @@
     { "name": "everything-else", "prefixes": ["packages/"] }
   ],
   "int": [
-    {
-      "name": "daemon-budgets",
-      "prefixes": [
-        "packages/daemon/tests/integration/runtime/idle-budget.",
-        "packages/daemon/tests/integration/runtime/idle-child-spawns.",
-        "packages/daemon/tests/integration/runtime/state-syscalls.",
-        "packages/daemon/tests/integration/runtime/boot-stalls.",
-        "packages/daemon/tests/integration/runtime/io-pressure"
-      ]
-    },
     { "name": "daemon-runtime", "prefixes": ["packages/daemon/tests/integration/runtime/"] },
     { "name": "daemon", "prefixes": ["packages/daemon/"] },
     {

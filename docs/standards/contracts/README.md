@@ -26,29 +26,30 @@ laundered a defect into something every gate was right to pass.
 
 ## Validators
 
-| Script                        | Runs as                                  | Enforces                                                                        |
-| ----------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------- |
-| `action-pins.sh`              | `a-action-pins-trusted`, `…-non-trusted` | GitHub Action pinning policy                                                    |
-| `cli-contracts.sh`            | `a-cli-contracts`                        | the 20 workspace/CLI/release contracts below                                    |
-| `closed-set-agreement.sh`     | `a-closed-set-agreement`                 | copied cross-package closed sets have identical members                         |
-| `commit-msg.sh`               | `a-commit-msg` (`commit-msg` stage)      | conventional commit subjects                                                    |
-| `composition-invocation.sh`   | `a-composition-invocation`               | every constructed composition-root field has a caller                           |
-| `composition-reachability.sh` | `a-composition-reachability`             | production modules are used by their composition root                           |
-| `conflict-markers.sh`         | `a-conflict-markers`                     | marker shapes occur only in explicitly declared teaching docs                   |
-| `contract-registry.sh`        | `a-contract-registry`                    | executable, documented and wired contract inventories agree                     |
-| `cors-header-agreement.sh`    | `a-cors-header-agreement`                | the transport admits every header the browser code can send                     |
-| `daemon-scope.sh`             | `a-daemon-scope`                         | no PWA surface can read one daemon's data as another's                          |
-| `executable-shells.sh`        | `a-enforce-exec`                         | every tracked `*.sh` is executable                                              |
-| `fetch-binding.sh`            | `a-fetch-binding`                        | no unbound `fetch` builtin is stored, and no PWA network call skips the carrier |
-| `macos-relevance.sh`          | `a-macos-relevance`, `task test:gate`    | the optional macOS jobs' path lists cover every input their scripts read        |
-| `no-fy-render-in-docs.sh`     | `a-no-fy-render-in-docs`                 | `fy-render` fence openers appear only in their three teaching files             |
-| `no-legacy-state.sh`          | `a-no-legacy-state`                      | package code names no legacy state, and package source no owner fleet wrapper   |
-| `no-pattern-kill.sh`          | `a-no-pattern-kill`                      | no test tree kills processes by pattern (`pkill`, `killall`)                    |
-| `pages-config.sh`             | `task test:gate`                         | the PWA build and Pages deployment publish the same directory                   |
-| `pinned-toolchain.sh`         | `task test:gate`, `build-pwa.sh`         | `node` and `bun` resolve inside `/nix/store`, never to the runner image         |
-| `relay-config.sh`             | `a-relay-config`, `task test:gate`       | relay code, bindings, discovery and deployment agree                            |
-| `route-agreement.sh`          | `a-route-agreement`                      | client/daemon paths, verbs and declared method debt agree                       |
-| `typecheck.sh`                | `typecheck`                              | every workspace package participates in the TypeScript build                    |
+| Script                        | Runs as                                  | Enforces                                                                                         |
+| ----------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `action-pins.sh`              | `a-action-pins-trusted`, `…-non-trusted` | GitHub Action pinning policy                                                                     |
+| `cli-contracts.sh`            | `a-cli-contracts`                        | the 20 workspace/CLI/release contracts below                                                     |
+| `closed-set-agreement.sh`     | `a-closed-set-agreement`                 | copied cross-package closed sets have identical members                                          |
+| `commit-msg.sh`               | `a-commit-msg` (`commit-msg` stage)      | conventional commit subjects                                                                     |
+| `composition-invocation.sh`   | `a-composition-invocation`               | every constructed composition-root field has a caller                                            |
+| `composition-reachability.sh` | `a-composition-reachability`             | production modules are used by their composition root                                            |
+| `conflict-markers.sh`         | `a-conflict-markers`                     | marker shapes occur only in explicitly declared teaching docs                                    |
+| `contract-registry.sh`        | `a-contract-registry`                    | executable, documented and wired contract inventories agree                                      |
+| `cors-header-agreement.sh`    | `a-cors-header-agreement`                | the transport admits every header the browser code can send                                      |
+| `daemon-scope.sh`             | `a-daemon-scope`                         | no PWA surface can read one daemon's data as another's                                           |
+| `executable-shells.sh`        | `a-enforce-exec`                         | every tracked `*.sh` is executable                                                               |
+| `fetch-binding.sh`            | `a-fetch-binding`                        | no unbound `fetch` builtin is stored, and no PWA network call skips the carrier                  |
+| `macos-relevance.sh`          | `a-macos-relevance`, `task test:gate`    | the optional macOS jobs' path lists cover every input their scripts read                         |
+| `no-fy-render-in-docs.sh`     | `a-no-fy-render-in-docs`                 | `fy-render` fence openers appear only in their three teaching files                              |
+| `no-legacy-state.sh`          | `a-no-legacy-state`                      | package code names no legacy state, and package source no owner fleet wrapper                    |
+| `no-pattern-kill.sh`          | `a-no-pattern-kill`                      | no test tree kills processes by pattern (`pkill`, `killall`)                                     |
+| `pages-config.sh`             | `task test:gate`                         | the PWA build and Pages deployment publish the same directory                                    |
+| `pinned-toolchain.sh`         | `task test:gate`, `build-pwa.sh`         | `node` and `bun` resolve inside `/nix/store`, never to the runner image                          |
+| `relay-config.sh`             | `a-relay-config`, `task test:gate`       | relay code, bindings, discovery and deployment agree                                             |
+| `route-agreement.sh`          | `a-route-agreement`                      | client/daemon paths, verbs and declared method debt agree                                        |
+| `test-tiers.sh`               | `a-test-tiers`, `task test:gate`         | every test lives in a tier, no integration timing or memory bound, test groups match their files |
+| `typecheck.sh`                | `typecheck`                              | every workspace package participates in the TypeScript build                                     |
 
 Hook wiring lives in `nix/pre-commit.nix` — see [Linting](../linting/index.md).
 

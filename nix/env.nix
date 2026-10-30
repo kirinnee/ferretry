@@ -30,7 +30,7 @@ with packages;
   # The private display a Linux agent browser in Browser mode "Real window" draws into
   # (docs/browser-mode.md), so its integration tests run a real headed Chrome here and in CI.
   # strace counts the daemon's file system calls for the per-tick budget test
-  # (packages/daemon/tests/integration/runtime/state-syscalls.test.ts).
+  # (packages/daemon/tests/realworld/runtime/state-syscalls.test.ts).
   ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
     pkgs.xvfb
     pkgs.strace
