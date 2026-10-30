@@ -1,3 +1,13 @@
+## [4.120.0](https://github.com/kirinnee/ferretry/compare/v4.119.1...v4.120.0) (2026-10-30)
+
+### Features
+
+* **cli:** fy task and fy board speak the project board (U4) ([#955](https://github.com/kirinnee/ferretry/issues/955)) ([6f6f571](https://github.com/kirinnee/ferretry/commit/6f6f571f9163052bd74b82e53a26582f2f0f8b67))
+
+### Fixes
+
+* **pwa:** keep the Inbox above the phone tab bar ([#967](https://github.com/kirinnee/ferretry/issues/967)) ([b732c83](https://github.com/kirinnee/ferretry/commit/b732c83219316509aa6c27874f3ce2ef8f29b9d9))
+
 ## [4.119.1](https://github.com/kirinnee/ferretry/compare/v4.119.0...v4.119.1) (2026-10-30)
 
 ### Fixes

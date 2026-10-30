@@ -1,3 +1,10 @@
+## [4.119.1](https://github.com/kirinnee/ferretry/compare/v4.119.0...v4.119.1) (2026-10-30)
+
+### Fixes
+
+* **daemon:** stop live-feed backlog scans from starving session writes ([#964](https://github.com/kirinnee/ferretry/issues/964)) ([3b406f6](https://github.com/kirinnee/ferretry/commit/3b406f665798014570abc4b840c93d851d2d19c2))
+* **pwa:** do not repeat a reply card's own reference in its body ([#963](https://github.com/kirinnee/ferretry/issues/963)) ([9cc4ec0](https://github.com/kirinnee/ferretry/commit/9cc4ec07545e7d6c6058c74d62579b05d99ca173))
+
 ## [4.119.0](https://github.com/kirinnee/ferretry/compare/v4.118.0...v4.119.0) (2026-10-30)
 
 ### Features
