@@ -57,7 +57,11 @@ export class ClaudeObservedInputObserver implements TranscriptInputObserver {
     if (record.type === 'attachment') {
       const attachment = transcriptObject(record.attachment);
       const origin = transcriptObject(attachment?.origin);
-      const text = transcriptString(attachment?.prompt);
+      // Content blocks, not a string, when Claude drains a prompt that carries an image or a paste, or
+      // several queued prompts at once (measured on 2.1.281). Read as a string only, such a drain proved
+      // nothing: the tracker called a message the agent had read lost, typed it three more times, and
+      // the owner's phone showed it "not delivered".
+      const text = claudeUserText(attachment?.prompt);
       if (
         attachment?.type !== 'queued_command' ||
         attachment.commandMode !== 'prompt' ||

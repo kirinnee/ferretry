@@ -385,11 +385,10 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
     }
     if (record.path === 'revive') return await this.unprovenRevive(id, record, verdict, hold, now);
     const target = await this.ports.repository.read(id);
-    if (target === undefined || TERMINAL_SEND_STATUSES.has(target.status))
-      return await this.settle(id, record, 'timed_out', 'session_ended');
+    if (target === undefined || TERMINAL_SEND_STATUSES.has(target.status)) return await this.ended(id, record);
     const pane = await this.ports.terminal.observe(id).catch(() => undefined);
     if (pane === undefined) return await this.settle(id, record, 'unaccounted', 'pane_unreadable');
-    if (!pane.alive || pane.dead) return await this.settle(id, record, 'timed_out', 'session_ended');
+    if (!pane.alive || pane.dead) return await this.ended(id, record);
     // Not delivered, and nothing will be until somebody answers the dialog: retyping would type into it.
     if (pane.blockingPrompt !== undefined) return await this.settle(id, record, 'unaccounted', 'blocked_by_prompt');
     // A send typed into a mid-turn pane is in the harness's queue, and the queue is where a frame can
@@ -470,6 +469,18 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
       return await this.settle(id, record, 'timed_out', 'session_ended');
     const typed = await this.ports.attempts.reattempt(id, record.sendId).catch(() => undefined);
     return typed === undefined || typed.untyped === true ? await this.wait(id, record, now) : typed;
+  }
+
+  /**
+   * A TYPED send whose session ended before anything proved it: UNCONFIRMED, never "not delivered".
+   *
+   * The session ending says nothing about the message — a harness queue holding it at a restart, or a
+   * turn that read it as the pane died, delivers it all the same — and "not delivered" told the owner a
+   * message the lead had read never arrived. It stays watched, so a transcript record found later proves
+   * it delivered after all. Only a send nothing was ever typed for (`untyped`) is proven absent.
+   */
+  private async ended(id: SessionId, record: SendRecord): Promise<SendRecord> {
+    return await this.settle(id, record, record.untyped === true ? 'timed_out' : 'unaccounted', 'session_ended');
   }
 
   /** Pushes the look out rather than counting it against an attempt, up to the hold ceiling. */

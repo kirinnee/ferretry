@@ -469,7 +469,9 @@ describe('a send past its deadline', () => {
     should(blocked.only.unaccountedReason).equal('blocked_by_prompt');
   });
 
-  it('times out a send whose session ended or whose pane is gone, without offering a plain retry', async () => {
+  it('calls a typed send whose session ended or whose pane is gone unconfirmed, never not delivered', async () => {
+    // A harness queue holding it at a restart delivers it all the same: the lead read tremaine's
+    // message on 2026-10-30, and the owner's phone said "not delivered".
     const ended = new World(record());
     ended.target = { id: ID, status: 'stopped', mode: 'auto', turn: 4 };
     await ended.checkAt(60_000);
@@ -481,7 +483,16 @@ describe('a send past its deadline', () => {
     await dead.checkAt(60_000);
 
     for (const world of [ended, vanished, dead])
-      should(world.only).match({ fate: 'timed_out', unaccountedReason: 'session_ended', retryable: false });
+      should(world.only).match({ fate: 'unaccounted', unaccountedReason: 'session_ended', retryable: false });
+  });
+
+  it('times out a send nothing was ever typed for when its session ends: that one is proven absent', async () => {
+    const world = new World(record({ untyped: true }));
+    world.target = { id: ID, status: 'stopped', mode: 'auto', turn: 4 };
+
+    await world.checkAt(60_000);
+
+    should(world.only).match({ fate: 'timed_out', unaccountedReason: 'session_ended', retryable: false });
   });
 });
 
@@ -647,11 +658,31 @@ describe('the tracker as the daemon runs it', () => {
     await world.checkAt(100_000);
     should(world.only.fate).equal('delivered');
 
-    const stale = new World(record({ fate: 'timed_out' }), record({ sendId: 'held', held: true }));
+    const stale = new World(
+      record({ fate: 'unaccounted', unaccountedReason: 'timeout' }),
+      record({ sendId: 'held', held: true }),
+    );
     stale.nowMs = T0 + 7_200_000;
     should(await stale.tracker.watching(ID)).be.false();
     await stale.checkAt(7_200_000);
-    should(stale.only.fate).equal('timed_out');
+    should(stale.only.fate).equal('unaccounted');
+  });
+
+  it('corrects a timed-out send the transcript proves the agent had, for as long as a repair is looked for', async () => {
+    // The reader once missed Claude's drained prompts, so a message the lead had read was called absent.
+    const world = new World(record({ fate: 'timed_out', unaccountedReason: 'not_delivered', retryable: true }));
+    world.nowMs = T0 + 7_200_000;
+    should(await world.tracker.watching(ID)).be.true();
+    world.evidence(new ClaudeObservedInputObserver(), [claude.user('ship it now please', 30_000)]);
+
+    await world.checkAt(7_200_000);
+
+    should(world.only.fate).equal('delivered');
+    should(world.only).not.have.property('retryable');
+
+    const old = new World(record({ fate: 'timed_out', unaccountedReason: 'not_delivered' }));
+    old.nowMs = T0 + defaultSendTrackerSettings.repairLimitMs;
+    should(await old.tracker.watching(ID)).be.false();
   });
 
   it('settles nothing it could not record, and leaves a settled send alone', async () => {
@@ -844,7 +875,7 @@ describe('a look that fails', () => {
     // Assert
     should((failed as Error).message).equal('session file unreadable');
     should(retry?.delayMs).equal(defaultSendTrackerSettings.busyExtensionMs);
-    should(world.only.fate).equal('timed_out');
+    should(world.only.fate).equal('unaccounted');
     should(world.only.unaccountedReason).equal('session_ended');
   });
 });
