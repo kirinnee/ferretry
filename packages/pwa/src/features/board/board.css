@@ -1083,5 +1083,5 @@
 .fy-board-card[data-highlighted] {
   border-color: var(--accent);
   background: var(--accent-soft);
-  box-shadow: 0 0 0 2px var(--accent-border, var(--accent));
+  box-shadow: 0 0 0 var(--focus-width) var(--ring);
 }

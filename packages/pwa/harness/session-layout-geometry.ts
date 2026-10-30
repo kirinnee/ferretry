@@ -407,11 +407,9 @@ export function planSessionLayoutGeometry(run: SessionLayoutRun): {
         );
       if (status !== null && status.height > 46)
         fail(`${where}: the composer's status line is ${status.height}px — it wrapped onto a second row`);
-      // The owner's phone (2026-10-30): the bar is ☰ · name · card · one dot · ▾. Interrupt and ⓘ live in ▾ there.
-      if (barAction !== null || info !== null)
-        fail(
-          `${where}: the phone bar still draws ${barAction === null ? '' : 'Interrupt '}${info === null ? '' : 'ⓘ'}— they belong in ▾`,
-        );
+      // The phone bar is ☰ · name · one dot · ⓘ · ▾ (owner 2026-10-30). Interrupt lives in ▾ there.
+      if (barAction !== null || info === null)
+        fail(`${where}: the phone bar must draw ⓘ and no Interrupt (that one belongs in ▾)`);
       if (
         tabs === null ||
         firstTab === null ||
