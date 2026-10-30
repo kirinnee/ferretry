@@ -39,6 +39,7 @@
         "src/main.tsx",
         "vite.config.ts",
         "tests/**/*.test.{ts,tsx}",
+        "tests/integration/support/happy-dom-gc-probe.ts",
         "harness/screenshot.ts",
         "harness/attention-cards-screenshot.ts",
         "harness/attention-cards-page.tsx",

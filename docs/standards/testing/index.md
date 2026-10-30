@@ -237,6 +237,40 @@ A test that reads the real clock, the real filesystem, or the real environment i
 will fail on someone else's machine at some point. Inject the dependency instead — that is what
 [Stateless OOP and Dependency Injection](../stateless-oop-di/index.md) is for.
 
+#### The unit tier enforces it at runtime
+
+Every unit-tier flake in the week to 2026-10-29 was the real world leaking in: a real timer racing a
+render, a wall-clock wait that ran out on a loaded runner, a `fetch` to a host that was not there. So
+`bunfig.unit.toml` preloads `packages/daemon/tests/support/unit-determinism.ts`, and a unit test has no
+real world to read:
+
+- **Time is virtual.** `Date.now()`, `new Date()`, `performance.now()`, `process.hrtime` and
+  `Bun.nanoseconds()` read one clock that starts every test at 2026-10-30T12:00:00Z, in UTC. Every
+  delayed timer — `setTimeout`, `setInterval`, `Bun.sleep`, `AbortSignal.timeout`, animation frames —
+  waits on it. The clock **advances on idle, in order**: when timers wait and nothing else is in hand
+  (no queued task, no WebCrypto or file promise in flight), it jumps to the next one. Off-thread work
+  therefore takes zero virtual time, a deadline can never beat the handshake it guards, and a
+  five-minute poll costs nothing. A zero-delay timer runs after the queued immediates and only once no
+  off-thread work is in flight, so a fixed number of zero-delay turns means the same thing everywhere.
+- **The outside world is refused.** A real socket (`fetch`, `WebSocket`, `node:net`/`tls`/`http`,
+  `Bun.serve`/`connect`), a real program or thread (`child_process`, `Bun.spawn`, `Worker`), a
+  synchronous `Bun.gc(true)` and `Bun.sleepSync` throw `UnitDeterminismError`, naming the rule, the
+  line that asked, and what to use instead. A test that needs one of them is an integration test.
+
+Most tests never mention the clock. When one must, it imports `unitClock` from
+`packages/daemon/tests/support/unit-clock.ts`:
+
+| Need                                               | Use                                                                                                                                                  |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Look at the screen BEFORE a timer fires            | `unitClock.hold()`, then `unitClock.advance(ms)` / `next()` — a held test that goes idle with timers waiting fails at once, naming each timer's line |
+| Poll a condition                                   | `settleUntil` (pwa) or `unitClock.turn()` — each turn lets queued work drain, then moves the clock one timer                                         |
+| Let WebCrypto land under a clock of the test's own | `await unitClock.quiet()`                                                                                                                            |
+| A test whose subject IS real time (rare)           | `unitClock.useRealTime('why')` — per test, greppable, counted by `scripts/validate/test-tiers.sh`                                                    |
+
+Timers a test leaves behind are kept for the next one, moved so they are due as far ahead of its start
+as they were — a module-level singleton (one shared ticker for the page) set its timer once and must
+keep hearing it.
+
 ---
 
 ## Contract Tests (Black-Box)
