@@ -43,6 +43,7 @@
         "harness/screenshot.ts",
         "harness/attention-cards-screenshot.ts",
         "harness/attention-cards-page.tsx",
+        "harness/allow-confirm-screenshot.tsx",
         "harness/agenda-screenshot.ts",
         "harness/agenda-page.tsx",
         "harness/inbox-page.tsx",

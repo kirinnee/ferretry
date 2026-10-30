@@ -37,6 +37,7 @@
   display: flex;
   margin: 0;
   padding-left: 1.25em;
+  list-style: disc;
   flex-direction: column;
   gap: 2px;
 }
@@ -51,4 +52,8 @@
 }
 .fy-attn-change__allow {
   margin: 0;
+}
+.fy-attn-change__head svg,
+.fy-attn-change__restated svg {
+  flex-shrink: 0;
 }
