@@ -321,9 +321,14 @@ export interface ThemeToggleProps {
    * `useTheme`. The shell root follows the same tab-wide store, so every publisher writes one value.
    */
   readonly store?: ThemePreferenceStore;
+  /**
+   * A phone's bar: the trigger is the icon alone, with a 44px target whatever the pointer. The panel is
+   * the same one the desktop strip opens, so the control is one thing at every width.
+   */
+  readonly touch?: boolean;
 }
 
-export function ThemeToggle({ store }: ThemeToggleProps = {}) {
+export function ThemeToggle({ store, touch = false }: ThemeToggleProps = {}) {
   const theme = useTheme(store);
   const { family, mode, resolved, families } = theme;
   const [open, setOpen] = useState(false);
@@ -467,6 +472,8 @@ export function ThemeToggle({ store }: ThemeToggleProps = {}) {
         ref={triggerRef}
         variant="ghost"
         size="sm"
+        className={cn(touch && 'min-h-[44px] min-w-[44px] justify-center')}
+        data-theme-trigger=""
         onClick={() => (open ? close(true) : setOpen(true))}
         title={summary}
         aria-label={summary}
@@ -475,7 +482,9 @@ export function ThemeToggle({ store }: ThemeToggleProps = {}) {
         aria-controls={open ? panelId : undefined}
       >
         <Palette size={14} aria-hidden="true" />
-        <span className="hidden text-meta font-medium sm:inline">{activeFamily?.label ?? 'Theme'}</span>
+        {touch ? null : (
+          <span className="hidden text-meta font-medium sm:inline">{activeFamily?.label ?? 'Theme'}</span>
+        )}
       </Button>
 
       {open && (
@@ -491,9 +500,28 @@ export function ThemeToggle({ store }: ThemeToggleProps = {}) {
           // geometry rather than a fixed 8px/8px.
           className="absolute right-0 top-full z-50 mt-1 w-[272px] rounded-panel border border-border bg-surface p-panel shadow-popover sm:w-[292px]"
         >
+          <p className="mb-2 mt-0 flex items-baseline justify-between gap-2 text-meta">
+            <span className="font-semibold text-fg">Theme</span>
+            <span className="text-faint" data-theme-scope="">
+              This device
+            </span>
+          </p>
           <ThemeSettings theme={theme} constrained listRef={listRef} />
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * The quick switch's corner on layouts wider than a phone. Those layouts have no shared header — each
+ * page draws its own — so the corner is a slim strip of the shell's own, and no page's header can
+ * collide with it.
+ */
+export function ThemeCornerStrip() {
+  return (
+    <div data-shell-theme-strip="" className="flex shrink-0 items-center justify-end px-panel pt-xs">
+      <ThemeToggle />
     </div>
   );
 }

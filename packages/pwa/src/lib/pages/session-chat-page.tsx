@@ -27,6 +27,7 @@ import {
 } from '../../components/runtime-controls.tsx';
 import type { TerminalDeckDependencies } from '../../components/session-terminal-deck.tsx';
 import { SessionTopBar, sessionDisplayName } from '../../components/session-top-bar.tsx';
+import { ThemeToggle } from '../../shell/theme-toggle.tsx';
 import type { SendDismiss, SendExpand } from '../../components/settled-send-note.tsx';
 import { SubFerretIndicator } from '../../components/sub-ferrets.tsx';
 import type { PaneSnapshotReader } from '../../components/terminal-snapshot.tsx';
@@ -1306,6 +1307,7 @@ export function SessionChatPage({
         compact={compact}
         infoOpen={info.open}
         menu={actionsMenu}
+        {...(compact ? { trailing: <ThemeToggle touch /> } : {})}
         project={project}
         session={session}
         status={

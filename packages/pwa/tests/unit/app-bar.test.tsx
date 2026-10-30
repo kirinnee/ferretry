@@ -484,7 +484,7 @@ describe('AppBar update chip', () => {
 });
 
 describe('AppBar theme slot', () => {
-  it('shows the theme control on desktop and hides it behind Settings on a phone', async () => {
+  it('shows the theme quick switch top-right on desktop and on a phone, after the Find button', async () => {
     setViewport(DESKTOP);
     const mounted = await mount(bar({ themeToggle: <span data-theme-toggle="" /> }));
 
@@ -495,7 +495,8 @@ describe('AppBar theme slot', () => {
     setViewport(PHONE);
     const phone = await mount(bar({ themeToggle: <span data-theme-toggle="" /> }));
 
-    expect(phone.container.querySelector('[data-theme-toggle]')).toBeNull();
+    const end = phone.container.querySelector('[data-app-bar-primary]')?.lastElementChild;
+    expect(end?.lastElementChild?.matches('[data-theme-toggle]')).toBe(true);
 
     await phone.unmount();
   });

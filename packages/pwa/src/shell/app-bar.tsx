@@ -385,7 +385,7 @@ export interface AppBarProps {
   readonly active?: AppBarDestinationId | null;
   /** How the host commits an in-app navigation. */
   readonly onNavigate?: (to: string) => void;
-  /** The theme control, on layouts wide enough for it. */
+  /** The theme quick switch, drawn top-right at every width. */
   readonly themeToggle?: ReactNode;
   /**
    * Item #6 owns the actual current-session file/task search. The bar owns its
@@ -481,10 +481,6 @@ export function AppBar({
               />
             </div>
           )}
-          {/* Keep the established standalone picker for desktop. On a phone the
-              only theme control is Settings, so hidden chrome does not mount a
-              second theme instance behind the sheet. */}
-          {layout !== 'drawer' && themeToggle}
           {layout === 'drawer' && !tabBarShown && (
             <button
               type="button"
@@ -498,6 +494,9 @@ export function AppBar({
               <Search size={18} aria-hidden="true" />
             </button>
           )}
+          {/* The theme quick switch is the last thing in the bar at every width: top-right, where a
+              thumb or a pointer finds it without opening Settings. */}
+          {themeToggle}
         </div>
       </div>
 

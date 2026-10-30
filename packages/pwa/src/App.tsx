@@ -162,6 +162,7 @@ import {
 } from './hooks/use-service-worker-update.ts';
 import { useSttSettings } from './hooks/use-stt-settings.ts';
 import { useTheme } from './hooks/use-theme.ts';
+import { ThemeCornerStrip, ThemeToggle } from './shell/theme-toggle.tsx';
 import { type MachineSource, machineDisplayOrder } from './lib/all-machines.ts';
 import { attentionTargetFromSearch } from './lib/attention-inbox.ts';
 import { inboxSourceFromSearch } from './lib/attention-inbox-list.ts';
@@ -2566,8 +2567,10 @@ export function AppShell() {
                     onNavigate={navigate}
                     tabBarShown={showsTabBar(pageRoute)}
                     attentionCount={attentionInbox.total}
+                    themeToggle={<ThemeToggle touch />}
                   />
                 ) : null}
+                {phone ? null : <ThemeCornerStrip />}
                 <ConnectionHealthNotice health={store.connectionHealth} machines={noticeMachines} />
                 <NewDeviceNotices connections={connectionSnapshot.connections} clients={store.clients} />
                 {pageRoute.kind === 'settings' ? null : (

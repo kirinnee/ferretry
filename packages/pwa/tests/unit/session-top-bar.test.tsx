@@ -144,6 +144,23 @@ describe('SessionTopBar', () => {
   });
 });
 
+describe('SessionTopBar trailing slot', () => {
+  test('draws the trailing control last, after the Actions menu', async () => {
+    view = await mount(
+      <SessionTopBar
+        actions={null}
+        compact
+        menu={<button type="button">Actions</button>}
+        project={null}
+        session={sessionView('s1')}
+        trailing={<span data-trailing-slot="" />}
+      />,
+    );
+    const bar = must(view.container.querySelector('[data-session-bar]'), 'the session bar');
+    expect(bar.lastElementChild?.matches('[data-trailing-slot]')).toBe(true);
+  });
+});
+
 describe('SessionTopBar turn word', () => {
   test('says which dialog a needs-input session is parked on, and only then', async () => {
     const prompt = 'Make auto mode your default permission mode?';
