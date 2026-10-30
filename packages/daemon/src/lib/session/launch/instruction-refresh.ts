@@ -9,12 +9,12 @@
  * (`ALWAYS_ON_SECTIONS`) whose fingerprint differs from the one its launch recorded.
  *
  * - **An owner's message triggers it, and never carries it.** The owner's words go out exactly as typed;
- *   the note is queued in the ferret's agenda outbox, so it rides the same quiet window and the same
- *   hold while the ferret is mid-turn as the owner's answers, and joins a batch of them as ONE message.
- *   Only an owner's message triggers it: a release must not start a turn for every idle ferret on the
- *   machine, and a teammate's message never does. A ferret nobody writes to does not need the rule until
- *   somebody does.
- * - **Once.** The note is queued under a key made from its words, so the outbox never takes the same note
+ *   the note is its own message, queued right behind them, and says who sent it and what it is about as
+ *   METADATA — Ferretry · Instructions, and the names of the sections it restates — never as a tag in its
+ *   words (docs/message-delivery.md). Only an owner's message triggers it: a release must not start a turn
+ *   for every idle ferret on the machine, and a teammate's message never does. A ferret nobody writes to
+ *   does not need the rule until somebody does.
+ * - **Once.** The note is queued under an id made from its words, so the queue never takes the same note
  *   twice; once it is durably queued the launch record says those sections were told, so the next message
  *   queues nothing. A restart records what it launched with, which is the same thing.
  * - **Only what can be proved.** A record with no fingerprint compares sizes; a session with no record at
@@ -26,8 +26,22 @@
 import { type AlwaysOnSection, instructionDigest } from '@ferretry/fleet';
 import type { LaunchInstructionSection, SessionLaunchInstructions } from '@ferretry/protocol';
 
-/** The first words of the note, so a reader (and a test) can tell it from the owner's own. */
-export const INSTRUCTIONS_UPDATED_MARK = '[instructions updated]';
+/** The sender chip's feature for the note: the app says "Ferretry · Instructions", never a tag in the text. */
+export const INSTRUCTIONS_FEATURE = 'Instructions';
+
+/** Each always-on section by the name a person reads it under. */
+const SECTION_NAMES: Readonly<Record<AlwaysOnSection['id'], string>> = {
+  tools: 'Tools',
+  settings: 'Settings',
+  notify: 'Notify',
+  board: 'Board',
+  'sub-ferret': 'Sub-ferret',
+};
+
+/** The names of the sections a note restates, in prompt order: its metadata, for a row that names them. */
+export function instructionSectionNames(sections: readonly AlwaysOnSection[]): readonly string[] {
+  return sections.map(section => SECTION_NAMES[section.id]);
+}
 
 /** Whether a recorded section still matches the words every agent is told now. */
 const current = (told: LaunchInstructionSection, section: AlwaysOnSection): boolean =>
@@ -51,7 +65,7 @@ export function changedInstructions(
 /** The note the ferret is sent: the new words, each section whole. */
 export function instructionsUpdatedNote(sections: readonly AlwaysOnSection[]): string {
   const words = sections.map(section => section.text).join('\n\n');
-  return `${INSTRUCTIONS_UPDATED_MARK} Ferretry changed part of the instructions you were started with. Follow these words in place of the matching part of your system prompt:\n\n${words}`;
+  return `Ferretry changed part of the instructions you were started with. Follow these words in place of the matching part of your system prompt:\n\n${words}`;
 }
 
 /**
@@ -90,10 +104,10 @@ export interface InstructionRefreshPorts {
     update: (current: SessionLaunchInstructions | undefined) => SessionLaunchInstructions | undefined,
   ) => Promise<void>;
   /**
-   * Queues the note in the ferret's outbox under a key made from the note's `digest`; resolves once it is
-   * DURABLE, and takes the same digest once however often it is offered.
+   * Queues the note under an id made from the note's `digest`, with the names of the `sections` it restates as
+   * its metadata; resolves once it is DURABLE, and takes the same digest once however often it is offered.
    */
-  readonly queue: (sessionId: string, digest: string, note: string) => Promise<void>;
+  readonly queue: (sessionId: string, digest: string, note: string, sections: readonly string[]) => Promise<void>;
 }
 
 /**
@@ -111,7 +125,7 @@ export class InstructionRefresh {
     const told = changedInstructions(recorded, this.ports.sections(subFerret));
     if (told.length === 0) return;
     const note = instructionsUpdatedNote(told);
-    const queued = await this.ports.queue(sessionId, instructionDigest(note), note).then(
+    const queued = await this.ports.queue(sessionId, instructionDigest(note), note, instructionSectionNames(told)).then(
       () => true,
       () => false,
     );

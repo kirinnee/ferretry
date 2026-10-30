@@ -4,7 +4,7 @@ import type { SessionLaunchInstructions } from '@ferretry/protocol';
 import should from 'should';
 import {
   changedInstructions,
-  INSTRUCTIONS_UPDATED_MARK,
+  instructionSectionNames,
   InstructionRefresh,
   type InstructionRefreshPorts,
   instructionsUpdatedNote,
@@ -68,13 +68,28 @@ describe('changedInstructions', () => {
   });
 });
 
+describe('instructionSectionNames', () => {
+  it('should name every always-on section the way a person reads it, in prompt order', () => {
+    should(
+      instructionSectionNames([
+        { id: 'tools', text: '' },
+        { id: 'settings', text: '' },
+        { id: 'notify', text: '' },
+        { id: 'board', text: '' },
+        { id: 'sub-ferret', text: '' },
+      ]),
+    ).eql(['Tools', 'Settings', 'Notify', 'Board', 'Sub-ferret']);
+  });
+});
+
 describe('instructionsUpdatedNote', () => {
-  it('should mark the note and carry each changed section whole', () => {
+  it('should say what the note is in a sentence, no tag, and carry each changed section whole', () => {
     // Act
     const actual = instructionsUpdatedNote(NOW.slice(1));
 
-    // Assert
-    should(actual).startWith(INSTRUCTIONS_UPDATED_MARK);
+    // Assert — who it is from is metadata (Ferretry · Instructions), never a bracketed tag in the words.
+    should(actual).startWith('Ferretry changed part of the instructions you were started with.');
+    should(actual).not.match(/^\[/u);
     should(actual).endWith('\n\nSettings: read the guide.\n\nNotify: tell the owner with a notice.');
   });
 });
@@ -112,7 +127,7 @@ describe('InstructionRefresh', () => {
     failing: 'read' | 'write' | 'queue' | false = false,
   ) => {
     let stored = recorded;
-    const queued: Array<{ sessionId: string; digest: string; note: string }> = [];
+    const queued: Array<{ sessionId: string; digest: string; note: string; sections: readonly string[] }> = [];
     const ports: InstructionRefreshPorts = {
       sections: () => NOW,
       recorded: async () => {
@@ -123,9 +138,9 @@ describe('InstructionRefresh', () => {
         if (failing === 'write') throw new Error('unwritable');
         stored = update(stored) ?? stored;
       },
-      queue: async (sessionId, digest, note) => {
-        if (failing === 'queue') throw new Error('outbox unwritable');
-        queued.push({ sessionId, digest, note });
+      queue: async (sessionId, digest, note, sections) => {
+        if (failing === 'queue') throw new Error('queue unwritable');
+        queued.push({ sessionId, digest, note, sections });
       },
     };
     return { refresh: new InstructionRefresh(ports), stored: () => stored, queued };
@@ -142,8 +157,9 @@ describe('InstructionRefresh', () => {
     // Assert
     should(queued).have.length(1);
     should(queued[0]?.sessionId).equal('s-1');
-    should(queued[0]?.note).startWith(INSTRUCTIONS_UPDATED_MARK);
+    should(queued[0]?.note).startWith('Ferretry changed part of the instructions');
     should(queued[0]?.note).endWith('Notify: tell the owner with a notice.');
+    should(queued[0]?.sections).eql(['Notify']);
     should(queued[0]?.digest).equal(instructionDigest(queued[0]?.note ?? ''));
     should(stored()?.sections.find(section => section.id === 'notify')?.digest).equal(
       instructionDigest('Notify: tell the owner with a notice.'),
