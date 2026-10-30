@@ -20,7 +20,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import should from 'should';
 import { buildWorld } from '../../../bin/fyd.ts';
-import { freeLoopbackPort } from '../../integration/support/booted-daemon.ts';
+import { OS_CHOSEN_PORT, recordedPort } from '../../integration/support/os-port.ts';
 import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../../integration/support/repository.ts';
 import { dialWebRtc, type WebRtcPhone } from '../../integration/support/webrtc-phone.ts';
 
@@ -57,7 +57,6 @@ async function bootServing(): Promise<{
   readonly home: string;
 }> {
   const home = await tempDirectory('fyd-shutdown-');
-  const port = await freeLoopbackPort();
   const previous = process.env.FY_HOME;
   process.env.FY_HOME = home;
   await (await buildWorld({}, { userHome: ABSENT_USER_HOME }).storage.open()).storage.close();
@@ -68,7 +67,7 @@ async function bootServing(): Promise<{
     join(home, 'config', 'daemon.json'),
     JSON.stringify({
       host: '127.0.0.1',
-      port,
+      port: OS_CHOSEN_PORT,
       relay: { url: 'ws://127.0.0.1:9', enabled: false },
       webrtc: { enabled: true, iceServers: [] },
     }),
@@ -82,7 +81,7 @@ async function bootServing(): Promise<{
     stderr: Bun.file(join(home, 'fyd.err')),
   });
   children.push(child);
-  const base = `http://127.0.0.1:${String(port)}`;
+  const base = `http://127.0.0.1:${String(await recordedPort(home))}`;
   // `ready`, not `/healthz`: the routes answer while the boot is still arming its loops, and the stop
   // this suite holds to a bound is the one a SERVING daemon makes.
   for (let attempt = 0; attempt < 400; attempt += 1) {

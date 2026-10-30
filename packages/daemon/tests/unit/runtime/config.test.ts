@@ -1,10 +1,11 @@
 import { describe, it } from 'bun:test';
 import { FY_DEFAULT_DAEMON_PORT, recordedBindAddress } from '@ferretry/protocol';
 import should from 'should';
-import { DISCOVERED_RELAY_CARRIER, IMPLIED_TUNNEL_CARRIER } from '../../../src/lib/runtime/carriers.ts';
+import { DISCOVERED_RELAY_CARRIER, IMPLIED_TUNNEL_CARRIER, OS_CHOSEN_PORT } from '../../../src/lib/runtime/carriers.ts';
 import {
   advertisesForeignAddress,
   attentionBlockNotice,
+  choosesPortAtBind,
   configuredAt,
   defaultDaemonConfig,
   defaultDaemonConfigDocument,
@@ -157,6 +158,43 @@ describe('daemon configuration', () => {
     should(unrecorded.port).equal(FY_DEFAULT_DAEMON_PORT);
     should(recorded.portIsRecorded).be.true();
     should(recorded.bindUrl).equal('http://127.0.0.1:9100');
+  });
+
+  it('should treat port 0 as a request for the operating system to choose, never as a claim', () => {
+    // Act
+    const asked = parseDaemonConfig({ port: OS_CHOSEN_PORT });
+    const carrier = parseDaemonConfig({ carriers: [{ kind: 'bind', host: '127.0.0.1', port: OS_CHOSEN_PORT }] });
+    const bound = configuredAt(asked, 41_873);
+
+    // Assert — it is not recorded, so nothing refuses over it; it only becomes a claim once a port is settled.
+    should(asked.portIsRecorded).be.false();
+    should(choosesPortAtBind(asked)).be.true();
+    should(choosesPortAtBind(carrier)).be.true();
+    should(carrier.portIsRecorded).be.false();
+    should(choosesPortAtBind(parseDaemonConfig({ port: 9100 }))).be.false();
+    should(choosesPortAtBind(parseDaemonConfig({}))).be.false();
+    // The bound port moves every derived address with it, exactly as a walked port does.
+    should(bound.portIsRecorded).be.true();
+    should(choosesPortAtBind(bound)).be.false();
+    should(bound.bindUrl).equal('http://127.0.0.1:41873');
+    should(bound.publicUrl).equal('http://127.0.0.1:41873');
+    should(bound.carrierSet.bind).deepEqual({ kind: 'bind', host: '127.0.0.1', port: 41_873 });
+    // Anything outside a port is still refused: 0 is the single new value, not a wider range.
+    should(() => parseDaemonConfig({ port: -1 })).throw();
+    should(() => parseDaemonConfig({ port: 65_536 })).throw();
+  });
+
+  it('should write the port the operating system gave over the 0 that asked for it', () => {
+    // Act
+    const legacy = recordedPortDocument({ host: '127.0.0.1', port: OS_CHOSEN_PORT }, 41_873);
+    const carriers = recordedPortDocument(
+      { carriers: [{ kind: 'bind', host: '127.0.0.1', port: OS_CHOSEN_PORT }] },
+      41_873,
+    );
+
+    // Assert
+    should(legacy).deepEqual({ host: '127.0.0.1', port: 41_873 });
+    should(carriers).deepEqual({ carriers: [{ kind: 'bind', host: '127.0.0.1', port: 41_873 }] });
   });
 
   it('should move a derived advertisement with the port and leave a stated one alone', () => {

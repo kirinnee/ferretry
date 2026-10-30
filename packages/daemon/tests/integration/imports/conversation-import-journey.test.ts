@@ -20,6 +20,7 @@ import should from 'should';
 import { buildWorld, type DaemonWorld, start } from '../../../bin/fyd.ts';
 import { NO_RELAY_DIRECTORY, type RelayAdvertisement } from '../../../src/lib/index.ts';
 import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
+import { OS_CHOSEN_PORT, recordedPort } from '../support/os-port.ts';
 
 const ACCOUNT = '00000000-0000-4000-8000-0000000000c1';
 const WRAPPER = 'claude-auto-import';
@@ -43,14 +44,6 @@ function world(): DaemonWorld {
     ...buildWorld({}, { userHome: ABSENT_USER_HOME }),
     relayDirectory: { read: async (): Promise<RelayAdvertisement> => NO_RELAY_DIRECTORY },
   };
-}
-
-async function freeLoopbackPort(): Promise<number> {
-  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('probe') });
-  const port = server.port;
-  await server.stop(true);
-  if (port === undefined) throw new Error('the fixture server reported no port');
-  return port;
 }
 
 async function waitForHealth(port: number): Promise<void> {
@@ -167,14 +160,15 @@ describe('keeping an existing conversation as a ferret, on a booted daemon', () 
     const project = await tempDirectory('ferretry-import-project-');
     process.env.CLAUDE_CONFIG_DIR = join(owner, '.claude');
     process.env.CODEX_HOME = join(owner, '.codex');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     let release = (): void => {};
     process.env.FY_HOME = home;
     const opened = await world().storage.open();
     await opened.storage.close();
     await mkdir(join(home, 'config'), { recursive: true });
-    await writeFile(join(home, 'config', 'daemon.json'), JSON.stringify({ host: '127.0.0.1', port }), { mode: 0o600 });
+    await writeFile(join(home, 'config', 'daemon.json'), JSON.stringify({ host: '127.0.0.1', port: OS_CHOSEN_PORT }), {
+      mode: 0o600,
+    });
     const runtimeHome = await seedRuntime(home);
     const source = await seedOwnerConversation(owner, project);
     const original = await readFile(source, 'utf8');
@@ -182,6 +176,7 @@ describe('keeping an existing conversation as a ferret, on a booted daemon', () 
       release = resolve;
     });
     const exit = start({ ...world(), untilShutdown: () => shutdown }, cleanups);
+    const port = await recordedPort(home);
     await waitForHealth(port);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = {
@@ -284,14 +279,15 @@ describe('keeping an existing conversation as a ferret, on a booted daemon', () 
     const project = await tempDirectory('ferretry-sync-project-');
     process.env.CLAUDE_CONFIG_DIR = join(owner, '.claude');
     process.env.CODEX_HOME = join(owner, '.codex');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     let release = (): void => {};
     process.env.FY_HOME = home;
     const opened = await world().storage.open();
     await opened.storage.close();
     await mkdir(join(home, 'config'), { recursive: true });
-    await writeFile(join(home, 'config', 'daemon.json'), JSON.stringify({ host: '127.0.0.1', port }), { mode: 0o600 });
+    await writeFile(join(home, 'config', 'daemon.json'), JSON.stringify({ host: '127.0.0.1', port: OS_CHOSEN_PORT }), {
+      mode: 0o600,
+    });
     await seedRuntime(home);
     const source = await seedOwnerConversation(owner, project);
     const original = await readFile(source, 'utf8');
@@ -299,6 +295,7 @@ describe('keeping an existing conversation as a ferret, on a booted daemon', () 
       release = resolve;
     });
     const exit = start({ ...world(), untilShutdown: () => shutdown }, cleanups);
+    const port = await recordedPort(home);
     await waitForHealth(port);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = {

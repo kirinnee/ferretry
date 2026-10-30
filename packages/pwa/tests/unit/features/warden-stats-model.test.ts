@@ -4,6 +4,8 @@ import {
   actorSplit,
   hasHistory,
   layerLines,
+  spendTotals,
+  spendUsd,
   utcDay,
   wardenDayChart,
   wardenStats,
@@ -367,9 +369,11 @@ describe('wardenDayChart', () => {
     const chart = wardenDayChart(status, NOW);
 
     // Assert
-    expect(chart?.points[6]?.readout).toBe('Fri 31 Jul · 13 actions — Auto 3, Jev 7, LLM 3 · 5 flags');
-    expect(chart?.points[4]?.readout).toBe('Wed 29 Jul · no actions · 2 flags');
-    expect(chart?.points[0]?.readout).toBe('Sat 25 Jul · 1 action — Auto 1 · 4 flags');
+    expect(chart?.points[6]?.readout).toBe(
+      'Fri 31 Jul · 13 actions — Auto 3, Jev 7, LLM 3 · 5 flags · Jev $0.00, LLM $0.00',
+    );
+    expect(chart?.points[4]?.readout).toBe('Wed 29 Jul · no actions · 2 flags · Jev $0.00, LLM $0.00');
+    expect(chart?.points[0]?.readout).toBe('Sat 25 Jul · 1 action — Auto 1 · 4 flags · Jev $0.00, LLM $0.00');
   });
 });
 
@@ -433,7 +437,7 @@ describe('Jev’s checks', () => {
     expect(jev).toMatchObject({
       summary:
         '6 checks: 1 healthy · 0 acted · 5 handed on · $0.51 of $0.50 today · Jev paused: daily cap reached, back at midnight UTC',
-      clause: '3 flags not checked for the cap',
+      clause: '~$0.09 per check · 3 flags not checked for the cap',
       warn: true,
     });
   });
@@ -458,7 +462,7 @@ describe('Jev’s checks', () => {
 
     // Assert
     expect(jev?.summary).toEndWith(' · Jev paused until 13:00 UTC: this hour’s share of the cap reached');
-    expect(jev?.clause).toBe('~$0.40 saved vs investigating all');
+    expect(jev?.clause).toBe('~$0.02 per check · ~$0.40 saved vs investigating all');
   });
 
   it('should say nothing about a pause while Jev is under its cap', () => {
@@ -485,9 +489,9 @@ describe('Jev’s checks', () => {
     expect(chart?.title).toBe('Actions and Jev checks per day');
     expect(chart?.points[6]).toMatchObject({
       values: [0, 6, 1],
-      readout: 'Fri 31 Jul · Jev 6 checks, LLM 1 · 9 flags',
+      readout: 'Fri 31 Jul · Jev 6 checks, LLM 1 · 9 flags · Jev $0.00, LLM $0.00',
     });
-    expect(chart?.points[5]?.readout).toBe('Thu 30 Jul · no actions · 1 flag');
+    expect(chart?.points[5]?.readout).toBe('Thu 30 Jul · no actions · 1 flag · Jev $0.00, LLM $0.00');
   });
 
   it('should say a day that kept checks and did nothing did nothing', () => {
@@ -497,11 +501,60 @@ describe('Jev’s checks', () => {
     ]);
 
     // Act / Assert
-    expect(wardenDayChart(status, NOW)?.points[6]?.readout).toBe('Fri 31 Jul · nothing done · 0 flags');
+    expect(wardenDayChart(status, NOW)?.points[6]?.readout).toBe(
+      'Fri 31 Jul · nothing done · 0 flags · Jev $0.00, LLM $0.00',
+    );
   });
 
   it('should keep the old title for a week no day of which kept checks', () => {
     // Act / Assert
     expect(wardenDayChart(withHistory(WEEK), NOW)?.title).toBe('Actions per day');
+  });
+});
+
+describe('spend at a glance', () => {
+  const spending = (layers: { jev: boolean; llm: boolean }, jevUsd: number, investigationUsd: number) =>
+    wardenStatus({
+      config: wardenConfig({ layers }),
+      spend: { ...wardenStatus().spend, jevUsd, investigationUsd },
+    });
+
+  it('should give both layers and their sum, an amount under a cent to four places', () => {
+    // Act / Assert
+    expect(spendTotals(spending({ jev: true, llm: true }, 0.0055, 1.2))).toBe(
+      'Today: Jev $0.0055 · LLM $1.20 · together $1.21',
+    );
+  });
+
+  it('should leave out a layer that is off, and the sum with it', () => {
+    // Act / Assert
+    expect(spendTotals(spending({ jev: true, llm: false }, 0.51, 0))).toBe('Today: Jev $0.51');
+    expect(spendTotals(spending({ jev: false, llm: true }, 0, 0))).toBe('Today: LLM $0.00');
+    expect(spendTotals(spending({ jev: false, llm: false }, 0, 0))).toBeUndefined();
+  });
+
+  it('should never round a spend under a cent down to nothing', () => {
+    // Act / Assert
+    expect(spendUsd(0.0004)).toBe('$0.0004');
+    expect(spendUsd(0)).toBe('$0.00');
+    expect(spendUsd(0.25)).toBe('$0.25');
+  });
+
+  it('should say what one Jev check costs, at the real price too', () => {
+    // Arrange: six checks at $0.0042 each.
+    const status = withHistory(
+      [day('2026-07-31', { jev: { checks: 6, healthy: 1, acted: 0, handedOn: 5, skippedForCap: 0 } })],
+      {
+        config: wardenConfig({ layers: { jev: true, llm: false } }),
+        spend: { ...wardenStatus().spend, jevUsd: 0.0252 },
+      },
+    );
+
+    // Act
+    const [jev] = layerLines(status);
+
+    // Assert
+    expect(jev?.summary).toContain('$0.03 of $0.50 today');
+    expect(jev?.clause).toBe('~$0.0042 per check');
   });
 });

@@ -6,14 +6,17 @@ set -euo pipefail
 # A test's tier is decided by where it lives, and each tier makes a promise the pull-request gate
 # relies on. The promise this script can hold from the outside is the integration tier's: its outcome
 # is deterministic, so it never asserts that something was fast enough, small enough or rare enough on
-# THIS machine. Such a claim is real and worth keeping, but it belongs in the realworld tier, which is
-# non-blocking and files an issue instead of failing a merge. Three checks:
+# THIS machine, and it never hands a server a port it guessed. Such a timing claim is real and worth
+# keeping, but it belongs in the realworld tier, which is non-blocking and files an issue instead of
+# failing a merge. Four checks:
 #
 #   1. every `*.test.ts(x)` lives under tests/{unit,integration,realworld,sit,contract,e2e}/ of a
 #      package, so Bun's tiers (bunfig.*.toml) and the CI groups see every test exactly once;
 #   2. nothing under tests/integration/ asserts an UPPER bound on elapsed time or on memory;
 #   3. config/test-groups.json names only tiers `scripts/ci/test.sh` runs, and every group and every
-#      prefix of it still matches a test file of its tier.
+#      prefix of it still matches a test file of its tier;
+#   4. no test or local bench defines or calls a probe-then-close port helper (`freeLoopbackPort`,
+#      a `freePort` definition): a daemon is given `port: 0` and its recorded port is read back (`recordedPort`).
 #
 # It also counts the unit tier's `unitClock.useRealTime(` escapes and refuses one with no reason, so a
 # reviewer sees the number grow. The unit tier's timing rules themselves are enforced where they run,
@@ -105,6 +108,24 @@ for tier in $(jq -r 'keys[] | select(. != "schemaVersion")' "${groups}"); do
       )')
 done
 
+# ─── 4. no guessed ports ────────────────────────────────────────────────────────────────────────
+
+# Binding port 0, reading the number and closing the socket leaves a window in which another process
+# can take the port before the daemon binds it. The daemon asks the OS itself (`"port": 0` in
+# config/daemon.json) and records what it got; a server the test starts binds port 0 and reads .port.
+# This covers only the test trees and the local benches: a PRODUCT adapter that must hand a number to
+# Chrome's remote-debugging flag (src/adapters/browser/...) is not a test fixture, and the pages-dev and
+# Safari harnesses wrap binaries (wrangler, safaridriver) that have no way to report a port they chose.
+# A DEFINITION of `freePort` is the probe helper; a stub or a call of the product's own `freePort` adapter
+# member (login-window, login-runtime) is not. The one definition left is start-over.test.ts: a child
+# process it spawns binds the callback port, and the service under test is configured with that number.
+guessed='\bfreeLoopbackPort\b|\b(function|const|let)[[:space:]]+freePort\b'
+allowed='packages/daemon/tests/integration/fleet-login/start-over.test.ts'
+while IFS=: read -r file line _; do
+  [[ -n ${file} && ${file} != "${allowed}" ]] || continue
+  refuse "${file}:${line}: a probe-then-close port helper races the daemon's bind; write \"port\": 0 and read the bound port with recordedPort(home) (packages/daemon/tests/integration/support/os-port.ts), or bind Bun.serve port 0"
+done < <(rg -n --no-heading -e "${guessed}" --glob 'packages/*/tests/**' --glob 'scripts/local/**' packages scripts/local || true)
+
 # ─── the unit tier's real-time escapes ──────────────────────────────────────────────────────────
 
 # Each call names why it needs the real clock; the reviewer reads the list, and the count only grows on purpose.
@@ -129,4 +150,4 @@ if [[ ${failures} -gt 0 ]]; then
   echo "❌ ${failures} test-tier violation(s)" >&2
   exit 1
 fi
-echo "✅ test tiers hold: ${#tests[@]} test files in a tier, no integration timing or memory bound, groups match their files"
+echo "✅ test tiers hold: ${#tests[@]} test files in a tier, no integration timing or memory bound, groups match their files, no guessed ports"
