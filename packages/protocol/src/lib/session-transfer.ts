@@ -64,6 +64,8 @@ const ReferenceCountsSchema = z.strictObject({
   file: NonNegativeIntegerSchema,
   task: NonNegativeIntegerSchema,
   attention: NonNegativeIntegerSchema,
+  /** The later spelling of `attention`. Accepted now, written only from the agenda removal release: this object is strict, so an older reader refuses a key it does not know. */
+  agenda: NonNegativeIntegerSchema.optional(),
   skill: NonNegativeIntegerSchema,
   terminal: NonNegativeIntegerSchema,
   browser: NonNegativeIntegerSchema,

@@ -136,6 +136,7 @@ export interface NotificationSpec {
 
 const bodyFor = (view: SessionView, kind: SessionNotifyKind): string => {
   switch (kind) {
+    case 'agenda':
     case 'attention':
       return view.state.turnState === 'your-turn'
         ? 'Your turn — finished and waiting for you.'

@@ -5,6 +5,19 @@ import { IoPressureViewSchema } from './io-pressure.ts';
 import { SessionWorkerPoolSchema } from './performance.ts';
 import { AccountAvailabilitySchema, AccountUnavailableReasonSchema } from './session.ts';
 
+/**
+ * One older wire name this daemon still answers (a route marked legacy), and when a client last used it.
+ * The agenda removal release waits for every one to be unused for 14 days (docs/agenda.md § Compatibility).
+ */
+export const LegacyWireUseSchema = z.object({
+  route: z.string().min(1),
+  firstAt: InstantSchema,
+  lastAt: InstantSchema,
+  count: PositiveIntegerSchema,
+  /** The `x-fy-version` the last caller sent; absent when it sent none. */
+  lastClientVersion: z.string().min(1).optional(),
+});
+export type LegacyWireUse = z.infer<typeof LegacyWireUseSchema>;
 export const HealthViewSchema = z.object({
   ok: z.boolean(),
   bootstrapping: z.boolean(),
@@ -36,6 +49,8 @@ export const HealthViewSchema = z.object({
   features: z.array(z.string()).optional(),
   /** The disk's pressure now, where the host reports it (Linux PSI). Absent from an older daemon and from a host without PSI. */
   io: IoPressureViewSchema.optional(),
+  /** The older wire names clients still used, by route; absent from an older daemon and empty when none was used. */
+  legacyWire: z.array(LegacyWireUseSchema).optional(),
   time: InstantSchema,
 });
 export type HealthView = z.infer<typeof HealthViewSchema>;
