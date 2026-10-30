@@ -268,7 +268,7 @@ describe('PushService.forgetDevice', () => {
 });
 
 describe('PushService.notify', () => {
-  const attention = {
+  const agenda = {
     version: 1 as const,
     eventKey: 'e1',
     title: 'A session needs you',
@@ -285,7 +285,7 @@ describe('PushService.notify', () => {
     const two = record({ id: 'push-66666666-6666-4666-8666-666666666666' });
     const { service, transport } = world({ records: [one, two], outcomes: ['delivered', 'failed'] });
 
-    should(await service.notify({ payload: attention })).eql({ delivered: 1, failed: 1 });
+    should(await service.notify({ payload: agenda })).eql({ delivered: 1, failed: 1 });
     should(transport.sent).have.length(2);
     should(JSON.parse(transport.sent[0]?.payload ?? '{}')).match({ sessionId: 's1' });
   });
@@ -295,7 +295,7 @@ describe('PushService.notify', () => {
     const two = record({ id: 'push-77777777-7777-4777-8777-777777777777' });
     const { service, transport } = world({ records: [one, two] });
 
-    should(await service.notify({ payload: attention }, [two.id])).eql({ delivered: 1, failed: 0 });
+    should(await service.notify({ payload: agenda }, [two.id])).eql({ delivered: 1, failed: 0 });
     should(transport.sent.map(sent => sent.subscription.endpoint)).eql([two.subscription.endpoint]);
   });
 
@@ -305,7 +305,7 @@ describe('PushService.notify', () => {
     const enrolled = record();
     const { service, transport } = world({ records: [enrolled] });
 
-    should(await service.notify({ payload: attention })).eql({ delivered: 1, failed: 0 });
+    should(await service.notify({ payload: agenda })).eql({ delivered: 1, failed: 0 });
     should(transport.sent).have.length(1);
   });
 
@@ -314,7 +314,7 @@ describe('PushService.notify', () => {
     const dead = record({ id: 'push-88888888-8888-4888-8888-888888888888' });
     const { service, store } = world({ records: [alive, dead], outcomes: ['delivered', 'expired'] });
 
-    should(await service.notify({ payload: attention })).eql({ delivered: 1, failed: 1 });
+    should(await service.notify({ payload: agenda })).eql({ delivered: 1, failed: 1 });
     // This is the only place in the daemon that can learn a browser is unreachable, so it is the only
     // place that may act on it.
     should(store.records.map(entry => entry.id)).eql([alive.id]);
@@ -323,7 +323,7 @@ describe('PushService.notify', () => {
   it('should tell nobody when nobody is enrolled', async () => {
     const { service, store } = world();
 
-    should(await service.notify({ payload: attention })).eql({ delivered: 0, failed: 0 });
+    should(await service.notify({ payload: agenda })).eql({ delivered: 0, failed: 0 });
     should(store.forgotten).be.empty();
   });
 });

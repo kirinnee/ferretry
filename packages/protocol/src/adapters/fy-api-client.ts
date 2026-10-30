@@ -157,11 +157,11 @@ import {
   type VersionSkew,
 } from '../lib/version-skew.ts';
 import {
-  WARDEN_ATTENTION_PATH,
+  LEGACY_WARDEN_ATTENTION_PATH,
   WARDEN_INVESTIGATE_PATH,
   WARDEN_LEAVE_PATH,
-  type WardenAttentionView,
-  WardenAttentionViewSchema,
+  type WardenAgendaView,
+  WardenAgendaViewSchema,
   type WardenConfigPatch,
   WardenConfigPatchSchema,
   type WardenConfigView,
@@ -649,8 +649,8 @@ export class FyApiClient implements IFyApiClient {
     );
   }
 
-  wardenAttention(): Promise<WardenAttentionView> {
-    return this.request(WARDEN_ATTENTION_PATH, WardenAttentionViewSchema);
+  wardenAgenda(): Promise<WardenAgendaView> {
+    return this.request(LEGACY_WARDEN_ATTENTION_PATH, WardenAgendaViewSchema);
   }
 
   wardenInvestigate(request: WardenInvestigateRequest): Promise<WardenInvestigateView> {

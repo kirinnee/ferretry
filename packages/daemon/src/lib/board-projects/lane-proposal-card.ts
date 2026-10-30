@@ -7,14 +7,14 @@
  * of an older one names a version that has moved on.
  */
 import {
-  type AttentionAsk,
-  type AttentionCardAnswer,
+  type AgendaAsk,
+  type AgendaCardAnswer,
   type BoardProjectId,
   BoardProjectIdSchema,
   clipAtWord,
   type LaneSet,
-  MAX_ATTENTION_SUBJECT_LENGTH,
-  type ResolvedAttentionItem,
+  MAX_AGENDA_SUBJECT_LENGTH,
+  type ResolvedAgendaItem,
 } from '@ferretry/protocol';
 
 /** The option labels ARE the decision, so a client that knows nothing of lanes answers correctly by choosing. */
@@ -29,8 +29,8 @@ export interface LaneProposalCard {
   readonly subject: string;
   readonly title: string;
   readonly kind: 'choice';
-  readonly ask: AttentionAsk;
-  readonly answers: AttentionCardAnswer[];
+  readonly ask: AgendaAsk;
+  readonly answers: AgendaCardAnswer[];
   readonly why: string;
   readonly howToResolve: string;
 }
@@ -43,7 +43,7 @@ export const laneProposalCard = (projectName: string, laneSet: LaneSet): LanePro
   };
   const path = laneSet.lanes.map(lane => lane.name).join(' → ');
   return {
-    subject: clipAtWord(`Lanes for ${projectName}: ${path}`, MAX_ATTENTION_SUBJECT_LENGTH),
+    subject: clipAtWord(`Lanes for ${projectName}: ${path}`, MAX_AGENDA_SUBJECT_LENGTH),
     title: clipAtWord(`Lanes for ${projectName}`, 60),
     kind: 'choice',
     ask: { kind: 'multiple-choice', options: [accept, edit] },
@@ -62,7 +62,7 @@ export const laneProposalCard = (projectName: string, laneSet: LaneSet): LanePro
  * card, a dismissal, Edit, or the owner's own words.
  */
 export const acceptedProposal = (
-  addressed: ResolvedAttentionItem,
+  addressed: ResolvedAgendaItem,
 ): { readonly projectId: BoardProjectId; readonly version: number } | undefined => {
   const { sourceRef, response } = addressed;
   if (sourceRef === null || !sourceRef.startsWith(REFERENCE_PREFIX)) return undefined;

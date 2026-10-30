@@ -18,7 +18,7 @@
  * the same facts.
  */
 import { z } from 'zod';
-import { AttentionIdSchema } from './attention.ts';
+import { AgendaIdSchema } from './agenda.ts';
 import {
   BoardProjectIdSchema,
   type BoardResult,
@@ -85,7 +85,7 @@ export const taskIdPrefix = (kind: TaskKind): string => TASK_KIND_ID_PREFIX[kind
 // ---------------------------------------------------------------------------------------------------
 
 /** An agenda item, named. Agenda ids still repeat per session, so the session is part of the name. */
-export const AgendaRefSchema = z.strictObject({ sessionId: SessionIdSchema, id: AttentionIdSchema });
+export const AgendaRefSchema = z.strictObject({ sessionId: SessionIdSchema, id: AgendaIdSchema });
 export type AgendaRef = z.infer<typeof AgendaRefSchema>;
 
 /** The sigil of the `!attention` reference kind. Tasks are `&`, agenda items `!`, and the two never swap. */

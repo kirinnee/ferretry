@@ -446,7 +446,7 @@ describe('what a verdict does', () => {
 
     // Act
     await subject.service.run({ force: false });
-    const feed = await subject.service.attention();
+    const feed = await subject.service.agenda();
 
     // Assert
     should(subject.remedies).be.empty();
@@ -1033,8 +1033,8 @@ describe('who needs you', () => {
     await guarded.service.run({ force: false });
 
     // Act
-    const shown = await rules.service.attention();
-    const quiet = await guarded.service.attention();
+    const shown = await rules.service.agenda();
+    const quiet = await guarded.service.agenda();
 
     // Assert
     should(shown.items).match([
@@ -1076,7 +1076,7 @@ describe('who needs you', () => {
     await subject.service.run({ force: false });
 
     // Act
-    const actual = await subject.service.attention();
+    const actual = await subject.service.agenda();
 
     // Assert
     should(actual.items).match([{ sessionId: 's1', id: 'A2', anomalyKind: 'agent_frozen' }]);
@@ -1091,7 +1091,7 @@ describe('who needs you', () => {
     await subject.service.run({ force: false });
 
     // Act
-    const actual = await subject.service.attention();
+    const actual = await subject.service.agenda();
 
     // Assert
     should(subject.raises).be.empty();
@@ -1104,7 +1104,7 @@ describe('who needs you', () => {
     await subject.service.run({ force: false });
 
     // Act
-    const actual = await subject.service.attention();
+    const actual = await subject.service.agenda();
 
     // Assert
     should(actual.outcome).equal('degraded');
@@ -1118,7 +1118,7 @@ describe('who needs you', () => {
     await subject.service.run({ force: false });
 
     // Act
-    const actual = await subject.service.attention();
+    const actual = await subject.service.agenda();
 
     // Assert
     should(actual.outcome).equal('items');
@@ -1133,7 +1133,7 @@ describe('who needs you', () => {
     });
 
     // Act
-    const actual = await subject.service.attention();
+    const actual = await subject.service.agenda();
 
     // Assert
     should(actual.wardenDegraded?.reason).match(/exhausted/u);
@@ -1144,7 +1144,7 @@ describe('who needs you', () => {
     const subject = harness({ fleet: [session({ id: 's1' })], feedBoards: {} });
 
     // Act
-    const actual = await subject.service.attention();
+    const actual = await subject.service.agenda();
 
     // Assert
     should(actual.outcome).equal('degraded');

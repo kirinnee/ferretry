@@ -25,7 +25,7 @@
 
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import {
-  type AttentionSnapshot,
+  type AgendaSnapshot,
   CONVERSATION_IMPORT_PATH,
   DAEMON_CAPABILITIES,
   DoctorReportSchema,
@@ -38,7 +38,7 @@ import {
   type SessionView,
   TUNNEL_OFF_SENTENCE,
   type TunnelStatusView,
-  type WardenAttentionView,
+  type WardenAgendaView,
   type WardenStatusView,
 } from '@ferretry/protocol';
 import type { FyApiClient } from '@ferretry/protocol/client';
@@ -86,7 +86,7 @@ import { interact, type Mounted, mount, must, pressKey } from '../support/dom.ts
 import { fetcherDaemons, newDaemonIdentity, relayCrypto, testDevice } from '../support/relay.ts';
 import { sessionView } from '../support/sessions.ts';
 import { settleUntil } from '../support/settle.ts';
-import { attentionItem, wardenAttention, wardenInvestigation, wardenStatus } from '../support/warden.ts';
+import { agendaItem, wardenAgenda, wardenInvestigation, wardenStatus } from '../support/warden.ts';
 
 /** A connection-health clock whose timers never fire: a suite drives recovery by sending requests. */
 const idleConnectionHealth = {
@@ -199,7 +199,7 @@ const doctorReport = {
   limitation: 'PATH presence is all this report proves.',
 };
 
-const externalAttentionItem: AttentionSnapshot['items'][number] = {
+const externalAgendaItem: AgendaSnapshot['items'][number] = {
   id: 'A3',
   source: 'agent-raised',
   sourceRef: null,
@@ -214,11 +214,11 @@ const externalAttentionItem: AttentionSnapshot['items'][number] = {
   raisedByName: 'zoe',
 };
 
-const attentionSnapshot = (
+const agendaSnapshot = (
   sessionId: string,
-  items: AttentionSnapshot['items'] = [],
+  items: AgendaSnapshot['items'] = [],
   updatedAt = '2026-07-31T12:00:00.000Z',
-): AttentionSnapshot => ({
+): AgendaSnapshot => ({
   v: 1,
   sessionId,
   items,
@@ -378,7 +378,7 @@ interface ShellOptions {
   /** Sessions the stub daemon answers `list` with. */
   readonly sessions?: readonly string[];
   /** Open Attention the stub daemon's `list` reports on every listed session. */
-  readonly listedAttention?: { open: number; first: string; ask: string; latestAt: string };
+  readonly listedAgenda?: { open: number; first: string; ask: string; latestAt: string };
   /** The kind the Sessions bar was left on: 'all' unless a test says otherwise, null for a device that never chose. */
   readonly sessionsMode?: 'all' | 'auto' | 'interactive' | null;
   /** Makes `get` reject, which is the session route's failure path. */
@@ -414,8 +414,8 @@ interface ShellOptions {
   readonly sessionState?: Partial<SessionView['state']>;
   /** Daemon-owned normalized transcript tail returned by `logs`. */
   readonly transcript?: string | ((daemonId: DaemonId, sessionId: string) => string);
-  /** Complete Attention board returned by this daemon/session route. */
-  readonly attention?: (sessionId: string) => AttentionSnapshot;
+  /** Complete Agenda board returned by this daemon/session route. */
+  readonly attention?: (sessionId: string) => AgendaSnapshot;
   /**
    * What this daemon answers `/v1/tunnel` with: told `undefined` on a read and the requested switch on a
    * change. Absent, the path answers an empty document and no machine says anything about its tunnel.
@@ -424,13 +424,13 @@ interface ShellOptions {
   /** Replaces the store's WebRTC round-trip read, which is the only thing a suite without a dialer lacks. */
   readonly webrtcRttMs?: (daemonId: DaemonId) => Promise<number | undefined>;
   /** Attention actions a daemon was sent (POSTs to a session's board), as `sessionId:body`. */
-  readonly attentionPosts?: string[];
+  readonly agendaPosts?: string[];
   /** Each session's conversation as the messages route serves it, in one page; absent: an empty one. */
   readonly messages?: (sessionId: string) => readonly { readonly role: 'user' | 'assistant'; readonly text: string }[];
   /** The Warden status this daemon answers; the default is a quiet, freshly swept one. */
   readonly wardenStatus?: () => Promise<WardenStatusView>;
   /** The "who needs you" feed this daemon answers; the default is a clean sweep. */
-  readonly wardenAttention?: () => Promise<WardenAttentionView>;
+  readonly wardenAgenda?: () => Promise<WardenAgendaView>;
   /** The durable project registry this daemon answers `/v1/projects` with. */
   readonly projects?: readonly ProjectInfo[];
   /** The runtimes `GET /v1/fleet/runtimes` answers with. */
@@ -527,11 +527,11 @@ const appStore = async (
     // The board a live session reads. A test that wants to watch a refresh
     // land supplies its own answer per read; every other test gets the same
     // empty deck the shell has always been given here.
-    const attentionRoute = new URL(url).pathname.match(/^\/v1\/sessions\/([^/]+)\/attention$/u);
-    if (attentionRoute?.[1] !== undefined) {
-      const sessionId = decodeURIComponent(attentionRoute[1]);
-      if (init?.method === 'POST') options.attentionPosts?.push(`${sessionId}:${String(init.body)}`);
-      return Response.json(options.attention?.(sessionId) ?? attentionSnapshot(sessionId));
+    const agendaRoute = new URL(url).pathname.match(/^\/v1\/sessions\/([^/]+)\/attention$/u);
+    if (agendaRoute?.[1] !== undefined) {
+      const sessionId = decodeURIComponent(agendaRoute[1]);
+      if (init?.method === 'POST') options.agendaPosts?.push(`${sessionId}:${String(init.body)}`);
+      return Response.json(options.attention?.(sessionId) ?? agendaSnapshot(sessionId));
     }
     // The Processes tab's list, which the open session reads for the count on its tab: nothing runs.
     const processesRoute = new URL(url).pathname.match(/^\/v1\/sessions\/([^/]+)\/processes$/u);
@@ -617,7 +617,7 @@ const appStore = async (
             sessionView(id, {
               state: {
                 status: options.sessionStatus?.() ?? 'running',
-                ...(options.listedAttention === undefined ? {} : { attention: options.listedAttention }),
+                ...(options.listedAgenda === undefined ? {} : { attention: options.listedAgenda }),
               },
             }),
           ),
@@ -695,8 +695,7 @@ const appStore = async (
             ? wardenStatus({ fingerprint: 'alpha-fingerprint' })
             : await options.wardenStatus(),
         wardenVerdicts: async () => [],
-        wardenAttention: async () =>
-          options.wardenAttention === undefined ? wardenAttention() : await options.wardenAttention(),
+        wardenAgenda: async () => (options.wardenAgenda === undefined ? wardenAgenda() : await options.wardenAgenda()),
         wardenRun: async () => ({ sweptAt: '2026-07-31T12:00:00.000Z', anomalies: [] }),
         wardenInvestigate: async ({ sessionId }: { readonly sessionId: string }) => ({
           sessionId,
@@ -1603,7 +1602,7 @@ describe('AppShell', () => {
     await settle();
 
     const session = view.container.querySelector('[data-session="shared"]');
-    // The session's scoped Attention ledger is now hydrated with the same
+    // The session's scoped Agenda ledger is now hydrated with the same
     // carrier router. That first successful daemon read is a real direct
     // measurement, so the route need not wait for another unrelated action.
     expect(session?.getAttribute('data-carrier-kind')).toBe('direct');
@@ -2284,9 +2283,9 @@ describe('AppShell', () => {
     await view.unmount();
   });
 
-  it('revalidates a ready Attention board through the mounted workspace refresh', async () => {
-    let items: AttentionSnapshot['items'] = [];
-    let attentionReads = 0;
+  it('revalidates a ready Agenda board through the mounted workspace refresh', async () => {
+    let items: AgendaSnapshot['items'] = [];
+    let agendaReads = 0;
     let refresh: (() => void) | undefined;
     const restoreInterval = patchGlobal(globalThis, 'setInterval', (callback: () => void, milliseconds: number) => {
       if (milliseconds === 3_000 && refresh === undefined) refresh = callback;
@@ -2307,8 +2306,8 @@ describe('AppShell', () => {
           },
         },
         attention: sessionId => {
-          attentionReads += 1;
-          return attentionSnapshot(sessionId, items);
+          agendaReads += 1;
+          return agendaSnapshot(sessionId, items);
         },
       });
       try {
@@ -2320,16 +2319,16 @@ describe('AppShell', () => {
         expect(store.attention.store.status(scope)).toBe('ready');
         expect(store.attention.store.count(scope)).toBe(0);
         // Nothing waiting: no agenda line.
-        expect(view.container.querySelector('[data-attention-card]')).toBeNull();
+        expect(view.container.querySelector('[data-agenda-card]')).toBeNull();
         expect(view.container.querySelector('[data-agenda-line]')).toBeNull();
         expect(view.container.querySelector('button[data-needs-you]')).toBeNull();
         expect(view.container.querySelector('[data-fy-reference="attention:A3"]')).toBeNull();
 
-        const initialAttentionReads = attentionReads;
-        items = [externalAttentionItem];
+        const initialAgendaReads = agendaReads;
+        items = [externalAgendaItem];
         await interact(() => refresh?.());
         await settle();
-        expect(attentionReads).toBeGreaterThan(initialAttentionReads);
+        expect(agendaReads).toBeGreaterThan(initialAgendaReads);
         expect(store.attention.store.count(scope)).toBe(1);
 
         // The item is one line above the composer, never a second chip in the header.
@@ -2348,19 +2347,19 @@ describe('AppShell', () => {
   });
 
   it('lists the item under its ferret in the inbox as a link into that ferret’s chat at the item', async () => {
-    const todo = { ...externalAttentionItem, ask: { kind: 'task' }, steps: ['Plug the key in', 'Approve it'] };
+    const todo = { ...externalAgendaItem, ask: { kind: 'task' }, steps: ['Plug the key in', 'Approve it'] };
     const { view } = await renderShell(`/d/${ALPHA}/inbox`, [alpha.daemonId], {
       sessions: ['shared'],
-      listedAttention: { open: 1, first: 'A3', ask: 'task', latestAt: '2026-07-31T11:30:00.000Z' },
+      listedAgenda: { open: 1, first: 'A3', ask: 'task', latestAt: '2026-07-31T11:30:00.000Z' },
       sessionState: { attention: { open: 1, first: 'A3', ask: 'task', latestAt: '2026-07-31T11:30:00.000Z' } },
-      attention: sessionId => attentionSnapshot(sessionId, [todo as typeof externalAttentionItem]),
+      attention: sessionId => agendaSnapshot(sessionId, [todo as typeof externalAgendaItem]),
     });
     try {
       for (let turn = 0; turn < 6; turn += 1) await settle();
-      const row = must(view.container.querySelector<HTMLAnchorElement>('[data-attention-row]'), 'the item row');
+      const row = must(view.container.querySelector<HTMLAnchorElement>('[data-agenda-row]'), 'the item row');
       expect(row.getAttribute('href')).toBe(`/d/${ALPHA}/session/shared?agenda=A3`);
-      expect(view.container.querySelector('[data-attention-pane]')).toBeNull();
-      expect(view.container.querySelector('[data-attention-chat]')).toBeNull();
+      expect(view.container.querySelector('[data-agenda-pane]')).toBeNull();
+      expect(view.container.querySelector('[data-agenda-chat]')).toBeNull();
     } finally {
       await view.unmount();
     }
@@ -2370,9 +2369,9 @@ describe('AppShell', () => {
     const restore = patchGlobal(window, 'innerWidth', 390);
     const { view } = await renderShell(`/d/${ALPHA}/inbox`, [alpha.daemonId], {
       sessions: ['shared'],
-      listedAttention: { open: 1, first: 'A3', ask: 'permission', latestAt: '2026-07-31T11:30:00.000Z' },
+      listedAgenda: { open: 1, first: 'A3', ask: 'permission', latestAt: '2026-07-31T11:30:00.000Z' },
       sessionState: { attention: { open: 1, first: 'A3', ask: 'permission', latestAt: '2026-07-31T11:30:00.000Z' } },
-      attention: sessionId => attentionSnapshot(sessionId, [externalAttentionItem]),
+      attention: sessionId => agendaSnapshot(sessionId, [externalAgendaItem]),
       messages: () => [
         { role: 'user', text: 'Can you rotate the key?' },
         { role: 'assistant', text: 'Rotated; waiting on your approval.' },
@@ -2380,17 +2379,17 @@ describe('AppShell', () => {
     });
     try {
       for (let turn = 0; turn < 6; turn += 1) await settle();
-      const quick = must(view.container.querySelector<HTMLButtonElement>('[data-attention-quick]'), 'Answer quickly');
+      const quick = must(view.container.querySelector<HTMLButtonElement>('[data-agenda-quick]'), 'Answer quickly');
       await interact(() => quick.click());
       await settle();
       const toggle = must(
-        view.container.querySelector<HTMLButtonElement>('[data-attention-recent-toggle]'),
+        view.container.querySelector<HTMLButtonElement>('[data-agenda-recent-toggle]'),
         'the last-messages fold',
       );
       await interact(() => toggle.click());
       for (let turn = 0; turn < 4; turn += 1) await settle();
       const shown = Array.from(
-        view.container.querySelectorAll('[data-attention-recent-message]'),
+        view.container.querySelectorAll('[data-agenda-recent-message]'),
         node => node.textContent ?? '',
       ).join('\n');
       expect(shown).toContain('Rotated; waiting on your approval.');
@@ -2583,14 +2582,14 @@ describe('AppShell', () => {
       return 1;
     });
     const restoreClearInterval = patchGlobal(globalThis, 'clearInterval', () => {});
-    const attention = async (): Promise<WardenAttentionView> => {
+    const agenda = async (): Promise<WardenAgendaView> => {
       reads += 1;
       if (reads > 1) throw new Error('the feed is temporarily unavailable');
-      return wardenAttention({ outcome: 'items', items: [attentionItem({ sessionId: 'session-a' })] });
+      return wardenAgenda({ outcome: 'items', items: [agendaItem({ sessionId: 'session-a' })] });
     };
 
     try {
-      const { view } = await renderShell(`/d/${ALPHA}/warden`, [alpha.daemonId], { wardenAttention: attention });
+      const { view } = await renderShell(`/d/${ALPHA}/warden`, [alpha.daemonId], { wardenAgenda: agenda });
       try {
         await settle();
         expect(view.container.textContent).toContain('1 Warden notification in Inbox');

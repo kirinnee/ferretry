@@ -1,3 +1,11 @@
+## [4.114.0](https://github.com/kirinnee/ferretry/compare/v4.113.0...v4.114.0) (2026-10-30)
+
+### Features
+
+* **daemon:** project board store, BoardService and /v1/board routes ([#933](https://github.com/kirinnee/ferretry/issues/933)) ([ff4301e](https://github.com/kirinnee/ferretry/commit/ff4301ed262a347c4220055503af94b55880b38d))
+* **pwa:** agenda drawer rows and a full-height item focus view ([#934](https://github.com/kirinnee/ferretry/issues/934)) ([971f06c](https://github.com/kirinnee/ferretry/commit/971f06ccce455455ee72fbed58cbe4e85d31c8c1))
+* show context window usage as a ring ([#937](https://github.com/kirinnee/ferretry/issues/937)) ([b7f8e96](https://github.com/kirinnee/ferretry/commit/b7f8e96c02329986935bfb16b002c96227bbc62a))
+
 ## [4.113.0](https://github.com/kirinnee/ferretry/compare/v4.112.0...v4.113.0) (2026-10-30)
 
 ### Features

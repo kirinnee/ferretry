@@ -1,5 +1,5 @@
 import { beforeEach, describe, test } from 'bun:test';
-import type { AttentionId, SessionView } from '@ferretry/protocol';
+import type { AgendaId, SessionView } from '@ferretry/protocol';
 import should from 'should';
 import {
   ReferenceSurfaceProvider,
@@ -78,7 +78,7 @@ describe('sessionReferenceSurface', () => {
     // "cannot prove", which is not the same as "nothing matches".
     should(bare.agentReferenceResolver).be.undefined();
     should(bare.taskReferenceResolver).be.undefined();
-    should(bare.attentionReferenceResolver).be.undefined();
+    should(bare.agendaReferenceResolver).be.undefined();
     should(bare.skillReferenceResolver).be.undefined();
     should(bare.onNavigate).be.undefined();
     should(bare.surfaceReferenceResolver).be.a.Function();
@@ -109,15 +109,15 @@ describe('sessionReferenceSurface', () => {
       fetcher: browserFetch,
       scope,
       tasks: [{ id: 'F12' }],
-      attentionIds: ['A3' as AttentionId],
+      agendaIds: ['A3' as AgendaId],
       skills: ['summary'],
     });
 
     // Assert
     should(surface.taskReferenceResolver?.('f12')).be.true();
     should(surface.taskReferenceResolver?.('F99')).be.false();
-    should(surface.attentionReferenceResolver?.('A3' as AttentionId)).be.true();
-    should(surface.attentionReferenceResolver?.('A4' as AttentionId)).be.false();
+    should(surface.agendaReferenceResolver?.('A3' as AgendaId)).be.true();
+    should(surface.agendaReferenceResolver?.('A4' as AgendaId)).be.false();
     should(surface.skillReferenceResolver?.('summary')).be.true();
     should(surface.skillReferenceResolver?.('missing')).be.false();
   });
@@ -209,54 +209,54 @@ describe('sessionReferenceSurface', () => {
       connection,
       scope,
       fetcher: browserFetch,
-      attentionIds: ['A3' as AttentionId],
+      agendaIds: ['A3' as AgendaId],
     });
     const before = readSidePaneTabsState(scope).active;
 
     // Act
-    surface.onAttentionOpen?.('A3' as AttentionId);
+    surface.onAgendaOpen?.('A3' as AgendaId);
 
     // Assert — proved, and still prose, because `hasOpener` reads the omission.
-    should(surface.attentionReferenceResolver?.('A3' as AttentionId)).be.true();
-    should(surface.onAttentionOpen).be.undefined();
+    should(surface.agendaReferenceResolver?.('A3' as AgendaId)).be.true();
+    should(surface.onAgendaOpen).be.undefined();
     should(readSidePaneTabsState(scope).active).equal(before);
   });
 
   test('should never open Attention as a side-pane tab even when the host supplies a modal', () => {
     // Arrange
-    const opened: [AttentionId, HTMLElement | null | undefined][] = [];
+    const opened: [AgendaId, HTMLElement | null | undefined][] = [];
     const surface = sessionReferenceSurface({
       connection,
       fetcher: browserFetch,
       scope,
-      attentionIds: ['A3' as AttentionId],
-      onAttentionOpen: (id, opener) => opened.push([id, opener]),
+      agendaIds: ['A3' as AgendaId],
+      onAgendaOpen: (id, opener) => opened.push([id, opener]),
     });
     const before = readSidePaneTabsState(scope).active;
 
     // Act
-    surface.onAttentionOpen?.('A3' as AttentionId, null);
+    surface.onAgendaOpen?.('A3' as AgendaId, null);
 
     // Assert — the request reaches the modal, and the bento box stays untouched.
-    should(opened).deepEqual([['A3' as AttentionId, null]]);
+    should(opened).deepEqual([['A3' as AgendaId, null]]);
     should(readSidePaneTabsState(scope).active).equal(before);
   });
 
   test('should refuse an opener that has no ledger to prove the id against', () => {
     // Arrange — an opener alone would link an id nothing proved.
-    const opened: AttentionId[] = [];
+    const opened: AgendaId[] = [];
 
     // Act
     const surface = sessionReferenceSurface({
       connection,
       scope,
       fetcher: browserFetch,
-      onAttentionOpen: id => opened.push(id),
+      onAgendaOpen: id => opened.push(id),
     });
 
     // Assert
-    should(surface.attentionReferenceResolver).be.undefined();
-    should(surface.onAttentionOpen).be.undefined();
+    should(surface.agendaReferenceResolver).be.undefined();
+    should(surface.onAgendaOpen).be.undefined();
     should(opened).be.empty();
   });
 

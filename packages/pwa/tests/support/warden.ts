@@ -7,10 +7,10 @@
 
 import {
   DEFAULT_WARDEN_CONFIG,
-  type FleetAttentionItem,
+  type FleetAgendaItem,
   type WardenAction,
   type WardenAnomaly,
-  type WardenAttentionView,
+  type WardenAgendaView,
   type WardenConfig,
   type WardenFailoverAccountView,
   type WardenFailoverStatus,
@@ -94,7 +94,7 @@ export const wardenStatus = (overrides: Partial<WardenStatusView> = {}): WardenS
   };
 };
 
-export const attentionItem = (overrides: Partial<FleetAttentionItem> = {}): FleetAttentionItem => ({
+export const agendaItem = (overrides: Partial<FleetAgendaItem> = {}): FleetAgendaItem => ({
   sessionId: 'sess-1',
   id: 'item-1',
   source: 'question',
@@ -105,7 +105,7 @@ export const attentionItem = (overrides: Partial<FleetAttentionItem> = {}): Flee
   ...overrides,
 });
 
-export const wardenAttention = (overrides: Partial<WardenAttentionView> = {}): WardenAttentionView => ({
+export const wardenAgenda = (overrides: Partial<WardenAgendaView> = {}): WardenAgendaView => ({
   generatedAt: '2026-07-31T11:59:00.000Z',
   lastSweepAt: '2026-07-31T11:59:00.000Z',
   outcome: 'clean-sweep',

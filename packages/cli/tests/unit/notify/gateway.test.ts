@@ -4,7 +4,7 @@ import type { z } from 'zod';
 import { agendaModePath, ProtocolNotifyGateway } from '../../../src/lib/notify/gateway';
 import type { NotifyApiClient } from '../../../src/lib/notify/ports';
 import { composeNoticeRequest } from '../../../src/lib/notify/request';
-import { snapshot } from '../attention/fixtures';
+import { snapshot } from '../agenda/fixtures';
 import { sessionView } from '../session/session-fixtures';
 import { SESSION } from './fixtures';
 

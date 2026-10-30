@@ -20,7 +20,7 @@ import root from '../../../package.json' with { type: 'json' };
 import daemonPkg from '../../daemon/package.json' with { type: 'json' };
 import pkg from '../package.json' with { type: 'json' };
 import { SessionCredentialGateway } from '../src/adapters/agent-tools/session-credential-gateway';
-import { AttentionBriefInput } from '../src/adapters/attention/brief-input';
+import { AgendaBriefInput } from '../src/adapters/agenda/brief-input';
 import { FileScreenshotWriter } from '../src/adapters/browser/screenshot-writer';
 import { FileConfigFiles } from '../src/adapters/config/files';
 import { StdinConfigText } from '../src/adapters/config/stdin';
@@ -80,9 +80,9 @@ import {
 } from '../src/lib/agent-tools';
 import { registerAnalyticsCommands } from '../src/lib/analytics/commands';
 import { AnalyticsController } from '../src/lib/analytics/controller';
-import { registerAttentionCommands } from '../src/lib/attention/commands';
-import { AttentionController } from '../src/lib/attention/controller';
-import { ProtocolAttentionGateway } from '../src/lib/attention/gateway';
+import { registerAgendaCommands } from '../src/lib/agenda/commands';
+import { AgendaController } from '../src/lib/agenda/controller';
+import { ProtocolAgendaGateway } from '../src/lib/agenda/gateway';
 import { registerAuditCommands } from '../src/lib/audit/commands';
 import { AuditController } from '../src/lib/audit/controller';
 import { ProtocolAuditGateway } from '../src/lib/audit/gateway';
@@ -836,13 +836,13 @@ function accountCommandDeps(world: CliWorld, client: SharedDaemonClient): Accoun
 const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
   ({ program, world, client, ownSessionId }) => {
     const notifyPorts = { gateway: new ProtocolNotifyGateway(client, ownSessionId), out: world.io, ownSessionId };
-    registerAttentionCommands(
+    registerAgendaCommands(
       program,
-      new AttentionController(
-        new ProtocolAttentionGateway(client, ownSessionId),
+      new AgendaController(
+        new ProtocolAgendaGateway(client, ownSessionId),
         world.io,
         ownSessionId,
-        new AttentionBriefInput(world.cwd),
+        new AgendaBriefInput(world.cwd),
       ),
       async (words, options) => await runNotify(notifyPorts, words, options),
     );
