@@ -663,6 +663,15 @@ function putMachineSettings(
     consequences.push('Applies the next time the daemon starts.');
   }
 
+  // A client that predates Agenda mode leaves it out, and leaves it as it is.
+  const agendaMode = change.agendaMode ?? model.machine.agendaMode;
+  if (agendaMode !== model.machine.agendaMode) {
+    draft.machine.agendaMode = agendaMode;
+    parts.push(`agenda mode for new ferrets ${agendaMode ? 'on' : 'off'}`);
+    // Recorded on each ferret as it starts: a ferret that exists keeps the switch it has.
+    consequences.push('Applies to ferrets started after this; ferrets that already exist keep their own switch.');
+  }
+
   if (parts.length === 0) return 'Keep machine settings the same';
   return `Set ${parts.join('; ')}`;
 }

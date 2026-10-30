@@ -47,6 +47,7 @@ export function renderMachine(machine: FleetMachineView, binaryName: string): st
       `Default runtime for new agents: ${machine.defaultRuntime ?? 'none set, and no claude-default runtime exists yet'}`,
       `What agents may control: ${AGENT_CONTROL_WORDS(machine.agentControl)}`,
       ...autoResumeLines(machine),
+      ...agendaModeLines(machine),
       `Sessions running: ${machine.runningSessions}`,
       'Tools:',
       ...machine.tools.map(
@@ -73,6 +74,11 @@ function autoResumeLines(machine: FleetMachineView): string[] {
           ...last.skipped.map(item => `  Couldn't auto-resume ${item.sessionId}: ${item.reason}`),
         ]),
   ];
+}
+
+/** "Agenda mode for new ferrets"; nothing for a daemon that predates it. */
+function agendaModeLines(machine: FleetMachineView): string[] {
+  return machine.agendaMode === undefined ? [] : [`Agenda mode for new ferrets: ${machine.agendaMode ? 'on' : 'off'}`];
 }
 
 /** How installing one tool ended, in words. */
@@ -152,6 +158,7 @@ function machineSettingsEdit(
   defaultRuntime: string | null;
   agentControl: FleetAgentControl;
   autoResume?: boolean;
+  agendaMode?: boolean;
 } {
   const base = {
     agentPermissions: current.agentPermissions,
@@ -188,6 +195,11 @@ function machineSettingsEdit(
     if (state !== 'on' && state !== 'off') throw new AccountCommandError('Say on or off.');
     return { ...base, autoResume: state === 'on' };
   }
+  if (setting === 'agenda-mode') {
+    const [state] = value;
+    if (state !== 'on' && state !== 'off') throw new AccountCommandError('Say on or off.');
+    return { ...base, agendaMode: state === 'on' };
+  }
   throw new AccountCommandError(
     `"${setting}" is not a machine setting. Try: ${binaryName} machine set agent-permissions auto`,
   );
@@ -207,9 +219,9 @@ export function registerMachineCommands(program: Command, deps: AccountCommandDe
     machine
       .command('set')
       .description(
-        'change a machine setting: agent-permissions auto|skip, default-runtime <name>|automatic, agent-control terminals|browsers|files|settings on|off, auto-resume on|off',
+        'change a machine setting: agent-permissions auto|skip, default-runtime <name>|automatic, agent-control terminals|browsers|files|settings on|off, auto-resume on|off, agenda-mode on|off',
       )
-      .argument('<setting>', 'agent-permissions, default-runtime, agent-control, or auto-resume')
+      .argument('<setting>', 'agent-permissions, default-runtime, agent-control, auto-resume, or agenda-mode')
       .argument('<value...>', 'the new value — two words for agent-control'),
   ).action(async (setting: string, value: string[], _options: unknown, command: Command) => {
     const options = mergedOptions(command);
