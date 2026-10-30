@@ -354,7 +354,7 @@
   content: '';
 }
 
-/* A ferret's switch marks (`switch-marks.tsx`): Learning, Hypermedia and Pack mode, each only while on.
+/* A ferret's switch marks (`switch-marks.tsx`): Learning, Hypermedia, Pack mode and Agenda mode, each only while on.
    Accent ink like the graduation cap they sit beside; the open row's accent is its fill, so there the
    marks take the row's own ink. */
 .fy-switch-marks {

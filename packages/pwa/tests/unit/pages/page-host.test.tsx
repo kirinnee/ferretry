@@ -16,7 +16,8 @@ import { type PageRoute, parseRoute } from '../../../src/lib/pages/routes.ts';
 
 const pageRoute = (path: string): PageRoute => {
   const route = parseRoute(path);
-  if (route.kind === 'legacy-tasks-redirect') throw new Error('test path unexpectedly redirected');
+  if (route.kind === 'legacy-tasks-redirect' || route.kind === 'legacy-attention-redirect')
+    throw new Error('test path unexpectedly redirected');
   return route;
 };
 

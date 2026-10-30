@@ -15,6 +15,7 @@ import {
   type LaunchInstructionSectionId,
   type ManagedWorktreeView,
   type SessionView,
+  sessionAgendaEnabled,
   sessionHypermediaEnabled,
 } from '@ferretry/protocol';
 import { launchedModel } from '../../components/composer-runtime.tsx';
@@ -61,6 +62,8 @@ export const INFO_HINT = {
   remoteControl:
     'Whether this Claude Code session is published to claude.ai/code and the Claude app so another device can drive it. Ferretry starts every session with it off unless it was asked for in New session › Advanced options. Takes effect at the next launch.',
   pack: 'Pack mode: whether this ferret is told it may delegate to sub-ferrets and pick the model each one runs on. The machine’s own switch and the depth limit still apply. A change takes effect at its next launch. Change it in Actions.',
+  agenda:
+    'Agenda mode: whether this ferret is told to keep an agenda of open items you can see in chat and the inbox. Off, it only has the short notify rule. A change takes effect at its next launch. Change it in Actions.',
 } as const;
 
 /** The CLI a harness is, in words. */
@@ -166,13 +169,22 @@ export const hypermediaLabel = (on: boolean): string =>
  */
 export const packOn = (view: SessionView): boolean => view.config.pack !== false;
 
+/** Whether a ferret is told to keep an agenda (docs/agenda.md). ABSENT MEANS OFF. */
+export const agendaOn = (view: SessionView): boolean => sessionAgendaEnabled(view.config);
+
+/** The Agenda mode row's value: said as what the ferret is told. */
+export const agendaLabel = (on: boolean): string =>
+  on ? 'On · keeps an agenda of open items' : 'Off · notify rule only';
+
 /** Each Ferretry system-prompt section, by the name a person knows it by. */
 export const LAUNCH_SECTION_LABEL: Readonly<Record<LaunchInstructionSectionId, string>> = {
   tools: 'Ferretry tools',
   settings: 'Settings rules',
-  attention: 'Attention',
+  attention: 'Notify rule',
+  notify: 'Notify rule',
   hypermedia: 'Hypermedia',
   pack: 'Pack mode',
+  agenda: 'Agenda mode',
   learning: 'Learning',
 };
 

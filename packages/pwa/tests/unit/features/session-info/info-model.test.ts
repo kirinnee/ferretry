@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import type { ManagedWorktreeView } from '@ferretry/protocol';
 import {
+  agendaLabel,
+  agendaOn,
   charsLabel,
   effortLabel,
   harnessLabel,
@@ -219,6 +221,20 @@ describe('learningLabel', () => {
   });
 });
 
+describe('agenda mode', () => {
+  it('reads a session with no switch as off, and an explicit value as itself', () => {
+    expect(agendaOn(sessionView('legacy', { config: { mode: 'interactive' } }))).toBe(false);
+    expect(agendaOn(sessionView('on', { config: { agenda: true } }))).toBe(true);
+    expect(agendaOn(sessionView('off', { config: { agenda: false } }))).toBe(false);
+  });
+
+  it('says what the ferret is told, and that a change waits for its next launch', () => {
+    expect(agendaLabel(true)).toBe('On · keeps an agenda of open items');
+    expect(agendaLabel(false)).toBe('Off · notify rule only');
+    expect(INFO_HINT.agenda).toContain('takes effect at its next launch');
+  });
+});
+
 describe('hypermedia', () => {
   it('reads a session with no switch as its mode default (on interactive, off auto), and an explicit value as itself', () => {
     expect(hypermediaOn(sessionView('legacy', { config: { mode: 'interactive' } }))).toBe(true);
@@ -303,8 +319,10 @@ describe('launchInstructionFacts', () => {
       'tools',
       'settings',
       'attention',
+      'notify',
       'hypermedia',
       'pack',
+      'agenda',
       'learning',
     ]);
   });

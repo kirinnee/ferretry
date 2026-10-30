@@ -122,7 +122,7 @@ describe('attention controller add', () => {
           kind: 'reply',
           why: 'pick a cluster',
           context: null,
-          howToResolve: 'Answer this item on the attention board (it records who answered).',
+          howToResolve: 'Answer this item on the agenda (it records who answered).',
           ask: { kind: 'open-question' },
         },
       },
@@ -168,7 +168,7 @@ describe('attention controller add', () => {
     await controller.add(['same', 'subject'], { title: 'Pick a cluster' });
 
     // Assert
-    should(out.messages[0]).startWith('attention !A2 recorded');
+    should(out.messages[0]).startWith('agenda !A2 recorded');
   });
 
   it('should read the board before writing so the new id can be identified', async () => {
@@ -193,7 +193,7 @@ describe('attention controller add', () => {
     await controller.add(['ours'], { title: 'Pick a cluster' });
 
     // Assert
-    should(out.messages[0]).startWith('attention recorded — 2 unresolved items');
+    should(out.messages[0]).startWith('agenda item recorded — 2 unresolved items');
   });
 
   it('should raise the brief a --json-file body describes', async () => {
@@ -375,8 +375,8 @@ describe('attention controller resolve and dismiss', () => {
     const { controller, gateway } = build(SESSION);
 
     // Act + Assert
-    await should(controller.resolve('nope', {})).be.rejectedWith(/is not an attention reference/u);
-    await should(controller.dismiss('nope', {})).be.rejectedWith(/is not an attention reference/u);
+    await should(controller.resolve('nope', {})).be.rejectedWith(/is not an agenda reference/u);
+    await should(controller.dismiss('nope', {})).be.rejectedWith(/is not an agenda reference/u);
     should(gateway.applied).be.empty();
   });
 
@@ -398,110 +398,6 @@ describe('attention controller resolve and dismiss', () => {
 
     // Assert
     should(JSON.parse(String(out.messages[0])).count).equal(0);
-  });
-});
-
-describe('attention controller notify', () => {
-  const raised = snapshot([humanItem('A1', 'approve the deploy'), agentItem('A2', 'the build is green')]);
-
-  it('should raise an info item instead of pushing a bare notification', async () => {
-    // Arrange
-    const { controller, gateway, out } = build(SESSION, raised);
-
-    // Act
-    await controller.notify(['the', 'build', 'is', 'green'], { title: 'CI' });
-
-    // Assert
-    should(gateway.applied).have.length(1);
-    should(gateway.applied[0]?.request).containDeep({
-      action: 'add',
-      kind: 'info',
-      title: 'CI',
-      subject: 'the build is green',
-      answers: [{ direction: 'right', does: 'done', label: 'Got it' }],
-    });
-    should(gateway.applied[0]?.request).not.have.property('ask');
-    should(out.messages[0]).startWith('info !A2 raised — 2 unresolved items');
-  });
-
-  it('should title the item with the start of the text, clipped at a word to 40, when no title is given', async () => {
-    // Arrange
-    const { controller, gateway } = build(SESSION, raised);
-
-    // Act
-    await controller.notify(['The nightly build finished and every check passed this time around'], {});
-
-    // Assert
-    const request = gateway.applied[0]?.request;
-    should(request).have.property('title', 'The nightly build finished and every…');
-    should(request).have.property('subject', 'The nightly build finished and every check passed this time around');
-    should(request).have.property('context', null);
-  });
-
-  it('should keep a text too long for one line whole in the context and clip the ask', async () => {
-    // Arrange
-    const { controller, gateway } = build(SESSION, raised);
-    const long = `${'word '.repeat(80)}end`;
-
-    // Act
-    await controller.notify([long], { title: 'Long one' });
-
-    // Assert
-    const request = gateway.applied[0]?.request;
-    should(request).have.property('context', long);
-    should(String((request as { subject: string }).subject).length).be.belowOrEqual(MAX_ATTENTION_SUBJECT_LENGTH);
-    should((request as { subject: string }).subject).endWith('…');
-  });
-
-  it('should refuse an empty notification', async () => {
-    // Arrange
-    const { controller, gateway } = build(SESSION);
-
-    // Act + Assert
-    await should(controller.notify([' ', ''], {})).be.rejectedWith(/notify needs the notification text/u);
-    should(gateway.applied).be.empty();
-  });
-
-  it('should refuse --kind completed and failed with the advice, raising nothing', async () => {
-    // Arrange
-    const { controller, gateway } = build(SESSION);
-    const advice =
-      'progress and finishing never notify the owner — raise an item (fy attention add) only when they must decide or do something';
-
-    // Act + Assert
-    await should(controller.notify(['all done'], { kind: 'completed' })).be.rejectedWith(advice);
-    await should(controller.notify(['it broke'], { kind: 'failed' })).be.rejectedWith(advice);
-    should(gateway.applied).be.empty();
-    should(gateway.read).be.empty();
-  });
-
-  it('should refuse any other --kind too', async () => {
-    // Arrange
-    const { controller, gateway } = build(SESSION);
-
-    // Act + Assert
-    await should(controller.notify(['x'], { kind: 'urgent' })).be.rejectedWith(/notify takes no --kind/u);
-    should(gateway.applied).be.empty();
-  });
-
-  it('should refuse a title past the limit', async () => {
-    // Arrange
-    const { controller, gateway } = build(SESSION);
-
-    // Act + Assert
-    await should(controller.notify(['x'], { title: 't'.repeat(61) })).be.rejectedWith(/title may not exceed 60/u);
-    should(gateway.applied).be.empty();
-  });
-
-  it('should emit the snapshot under --json', async () => {
-    // Arrange
-    const { controller, out } = build(SESSION, raised);
-
-    // Act
-    await controller.notify(['x'], { json: true });
-
-    // Assert
-    should(JSON.parse(String(out.messages[0])).count).equal(2);
   });
 });
 
@@ -680,6 +576,33 @@ describe('attention controller discuss', () => {
     // Assert
     should(gateway.applied[0]?.request).deepEqual({ action: 'discuss', id: 'A1' });
     await should(controller.discuss('nope', {})).be.rejected();
+    should(gateway.applied).have.length(1);
+  });
+});
+
+describe('attention controller surface', () => {
+  it('should surface with a trimmed why, and say the item is on the owner queue', async () => {
+    // Arrange
+    const { controller, gateway, out } = build(SESSION, snapshot([humanItem('A1', 'log in')]));
+
+    // Act
+    await controller.surface('?A1', { why: '  Still open: the account  ' });
+
+    // Assert
+    should(gateway.applied[0]?.request).deepEqual({ action: 'surface', id: 'A1', why: 'Still open: the account' });
+    should(out.messages[0]).containEql('surfaced !A1');
+  });
+
+  it('should send no why when none was given, and reject a bad reference before the daemon', async () => {
+    // Arrange
+    const { controller, gateway } = build(SESSION, snapshot([]));
+
+    // Act
+    await controller.surface('A1', {});
+
+    // Assert
+    should(gateway.applied[0]?.request).deepEqual({ action: 'surface', id: 'A1' });
+    await should(controller.surface('nope', {})).be.rejected();
     should(gateway.applied).have.length(1);
   });
 });

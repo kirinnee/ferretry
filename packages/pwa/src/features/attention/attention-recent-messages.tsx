@@ -10,7 +10,7 @@ import { ChevronRight } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
 import { ChatProse } from '../../components/chat-prose.tsx';
 import { Spinner } from '../../components/spinner.tsx';
-import type { RecentMessage } from '../../lib/recent-messages.ts';
+import { describeRecentFailure, type RecentFailure, type RecentMessage } from '../../lib/recent-messages.ts';
 import { attentionAge } from './attention-board.tsx';
 
 /** How much of one message the fold shows; the rest is in the conversation. */
@@ -29,7 +29,7 @@ const ago = (timestamp: string | undefined, now: number | undefined): string | n
 type Reading =
   | { readonly state: 'reading' }
   | { readonly state: 'ready'; readonly messages: readonly RecentMessage[] }
-  | { readonly state: 'failed'; readonly message: string };
+  | ({ readonly state: 'failed' } & RecentFailure);
 
 export interface AttentionRecentMessagesProps {
   readonly ferret: string;
@@ -48,8 +48,7 @@ export function AttentionRecentMessages({ ferret, read, now, initiallyOpen = fal
     setReading(current => (current.state === 'ready' ? current : { state: 'reading' }));
     read().then(
       messages => setReading({ state: 'ready', messages }),
-      (error: unknown) =>
-        setReading({ state: 'failed', message: error instanceof Error ? error.message : String(error) }),
+      (error: unknown) => setReading({ state: 'failed', ...describeRecentFailure(error) }),
     );
   };
   const toggle = (): void => {
@@ -83,8 +82,8 @@ export function AttentionRecentMessages({ ferret, read, now, initiallyOpen = fal
               Reading {ferret}’s conversation…
             </p>
           ) : reading.state === 'failed' ? (
-            <p className="fy-attn-recent__note" role="alert">
-              Couldn’t read the conversation: {reading.message}
+            <p className="fy-attn-recent__note" data-attention-recent-error="" role="alert" title={reading.raw}>
+              Recent messages unavailable — {reading.reason}
             </p>
           ) : reading.messages.length === 0 ? (
             <p className="fy-attn-recent__note">{ferret} hasn’t written anything yet.</p>

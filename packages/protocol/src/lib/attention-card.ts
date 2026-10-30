@@ -61,7 +61,7 @@ export const DISCUSS_LABEL = 'Discuss';
 export const attentionCanDiscuss = (item: { readonly raisedBy: 'human' | 'agent' | 'daemon' }): boolean =>
   item.raisedBy === 'agent';
 
-/** Whether an open item is in discussion: the owner asked to talk it through and the ferret has not updated it. */
+/** Whether an open item is in discussion: still being talked through in chat, not yet surfaced to the owner's queue. */
 export const attentionInDiscussion = (item: {
   readonly waitingOn?: 'ferret' | undefined;
   readonly waitingFor?: 'info' | 'discussion' | undefined;
@@ -277,3 +277,19 @@ export const attentionTitle = (item: Pick<AttentionCardSource, 'title' | 'subjec
 /** Whether the card has a title of its own, rather than one cut from its ask. */
 export const hasOwnTitle = (item: Pick<AttentionCardSource, 'title' | 'subject'>): boolean =>
   (item.title?.trim() ?? '') !== '';
+
+/**
+ * WHOSE TURN an item is on the ferret's agenda: the OWNER's (it waits on them — the only turn that can stop a
+ * ferret on the owner), the FERRET's (the owner replied, asked for more, or wants to talk it through, and the
+ * ferret has not updated it yet), or DONE (resolved or dismissed). The internal discussion state is the ferret's
+ * turn; the app shows no separate "in discussion" mode. A NOTICE (`fy notify`) is nobody's turn: it is read,
+ * not answered, so it reads as `done` and never counts toward what waits on the owner.
+ */
+export type AttentionTurn = 'owner' | 'ferret' | 'done';
+
+export const attentionTurn = (item: {
+  readonly waitingOn?: 'ferret' | undefined;
+  readonly resolvedAt?: string | undefined;
+  readonly notice?: true | undefined;
+}): AttentionTurn =>
+  item.resolvedAt !== undefined || item.notice === true ? 'done' : item.waitingOn === 'ferret' ? 'ferret' : 'owner';

@@ -187,7 +187,7 @@ worker.addEventListener('push', event => {
         // `kind` to filter on — this branch never reaches the decision below at all.
         await worker.registration.showNotification(unreadablePushTitle(machine), {
           ...notificationBrand(),
-          body: 'Something needs your attention.',
+          body: 'Something is waiting in your Inbox.',
         });
         return;
       }

@@ -1,58 +1,47 @@
 /**
- * ONE ATTENTION ITEM, AS A CARD THAT STANDS ALONE: a header (what kind of card, which ferret and machine,
- * how long it has waited), the TITLE — then, scrolling inside the card, everything the owner needs to
- * decide, every section OPEN and in one fixed order (premise, context, the question, what is already
- * decided, options, recommendation, terms, steps, more detail; `AttentionBriefSections`) — and the answer
- * bar pinned under it. Nothing hides behind a click except a long "More detail".
+ * ONE ATTENTION ITEM, AS A MINIMAL CARD THAT STANDS ALONE. Answering is replying, so the card has no text box:
+ * the owner types in the ferret's normal message box, and a picked option carries that text as its note.
  *
- * It is the one card every place draws — the Attention inbox's deck, where it also swipes, and the
- * sheet over the ferret's own conversation — so an answer reads, and is sent, the same in both. It
- * holds no transport: every answer leaves through `onAct` as an {@link InboxAction}, and the host
- * decides whether it waits out an undo window (the inbox) or goes at once (the sheet).
+ * What it holds, top to bottom: a header (what kind of card, which ferret and machine, how long it has
+ * waited), the HEADING — the question itself when the item asks one in a sentence, else its title — and one
+ * plain "why it matters" line. Then the options as buttons (three at most; the recommended one tagged, its
+ * reason said once in a line under them) and a quiet second row: Skip, "Details ›" (only when the item has
+ * more to read, which opens `AttentionDetail` in the host's side panel or full view) and a ⋯ menu holding
+ * "Not needed…", which dismisses. A text-only ask has no options and says to reply in the message box.
+ * An item with several questions keeps one picker per question and a single "Send answers".
  *
- * THE ANSWERS ARE THE CARD'S OWN (`cardAnswers`), laid out in the direction a swipe points them, and the
- * reply typed in the box rides along with whichever one is given. An item with several questions is
- * answered one answer per question and sends them together.
+ * It is the one card every place draws — the Attention inbox's deck, where it also swipes, and the pinned
+ * card over the ferret's conversation — so an answer reads, and is sent, the same in both. It holds no
+ * transport: every answer leaves through `onAct` as an {@link InboxAction}, and the host decides whether
+ * it waits out an undo window (the inbox) or goes at once, and attaches the message box's text
+ * (`withComposerNote`).
+ *
+ * `flat` draws the same card with no frame, shadow or swipe arrows, held to a readable column of 720px at
+ * most, for a pane that is the card's whole page; the answer bar stays pinned at the bottom of that pane.
  */
 
-import type { AttentionItem } from '@ferretry/protocol';
-import {
-  attentionTitle,
-  DEFAULT_ANSWER_LABELS,
-  hasOwnTitle,
-  singleAttentionQuestion,
-  unswipedChoices,
-} from '@ferretry/protocol';
+import type { AttentionItem, AttentionRevisableField } from '@ferretry/protocol';
 import { ArrowRight } from 'lucide-react';
-import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
+import { type ReactNode, useId, useState } from 'react';
 import { ChatProse } from '../../components/chat-prose.tsx';
+import { answerAction, CLEAR_ACTION, kindWord, optionAction } from '../../lib/attention-answers.ts';
+import { cardModel } from '../../lib/attention-card-model.ts';
 import {
-  answerAction,
-  canDiscussNow,
-  cardAnswers,
-  discussAction,
-  isTextOnlyAsk,
-  kindWord,
-  optionAction,
-} from '../../lib/attention-answers.ts';
-import {
-  answersPerQuestion,
+  DISMISS_ACTION,
   historyLine,
   type InboxAction,
-  isWaitingOnFerret,
   questionAnswersAction,
-  replyAction,
   updatedSinceAsked,
-  visibleWhy,
-  waitingSentence,
 } from '../../lib/attention-inbox.ts';
+import { decidedSummary, type RevisionHighlight, revisionHighlight } from '../../lib/attention-revisions.ts';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { AttentionActions } from './attention-actions.tsx';
 import { attentionAge, attentionKindMeta } from './attention-board.tsx';
-import { AttentionBriefSections } from './attention-brief.tsx';
+import { AttentionBriefSections, cardLede } from './attention-brief.tsx';
 import { AttentionDelivery } from './attention-delivery.tsx';
-import { useReplyDraft } from './attention-reply-draft.tsx';
-import { AttentionBody, AttentionSteps } from './attention-steps.tsx';
+import { attentionHasDetail } from './attention-detail.tsx';
+import { AttentionBody } from './attention-steps.tsx';
+import { AttentionDecidedSummary, AttentionUpdated } from './attention-updated.tsx';
 
 /** Where the card came from, in the inbox. Inside its own conversation there is nothing to say. */
 export interface AttentionCardOrigin {
@@ -81,18 +70,29 @@ export interface AttentionCardProps {
   /** How the ask's context is drawn — the conversation renders references; the inbox, prose. */
   readonly renderProse?: (text: string) => ReactNode;
   readonly onAct: (action: InboxAction) => void;
-  /** Ticks or unticks one step on the machine; a rejection rolls the tick back. Absent: the steps are read-only. */
+  /**
+   * @deprecated The steps are read in `AttentionDetail`, which ticks them. Accepted only so a host that has
+   * not moved over yet still compiles; the card draws no steps and ignores it.
+   */
   readonly onProgress?: (step: number, done: boolean) => Promise<void>;
-  /** Pinned above the composer: no origin, the detail scrolling inside a height cap. */
+  /** Pinned above the composer: no origin. */
   readonly pinned?: boolean;
   /** A control at the end of the header, after the age — the pinned card's fold button. */
   readonly headerSlot?: ReactNode;
   /** Extra DOM id for scroll targets. */
   readonly id?: string;
-  /** Drawn last inside the scrolling detail — the Attention page's "Last messages" toggle. */
+  /** Drawn last under the question — the Attention page's "Last messages" toggle. */
   readonly detailEnd?: ReactNode;
   /** Skips the card without answering it; draws a quiet "Skip" in the answer bar's second row. Absent: no Skip. */
   readonly onSkip?: () => void;
+  /**
+   * Drawn FLAT, not as a card: no frame, shadow or rounded surface, no swipe arrows, the text held to a
+   * readable width and left-aligned, the answer bar pinned at the bottom of the pane. A wide pointer screen,
+   * where nothing swipes, draws the item this way; the phone, the deck and the pinned card keep the card.
+   */
+  readonly flat?: boolean;
+  /** Opens what the item knows beyond its question (`AttentionDetail`): the side panel, or the phone's full view. */
+  readonly onOpenDetail?: () => void;
 }
 
 const markdownProse = (text: string): ReactNode => <ChatProse text={text} />;
@@ -107,86 +107,30 @@ export function AttentionCard({
   now = Date.now(),
   renderProse = markdownProse,
   onAct,
-  onProgress,
   id,
   pinned = false,
   headerSlot,
   detailEnd,
   onSkip,
+  flat = false,
+  onOpenDetail,
 }: AttentionCardProps) {
   const titleId = useId();
-  const draft = useReplyDraft();
-  const [localReply, setLocalReply] = useState('');
-  const [replyOpen, setReplyOpen] = useState(false);
-  const [localTick, setLocalTick] = useState(0);
   const [picks, setPicks] = useState<readonly string[]>([]);
-  const replyRef = useRef<HTMLTextAreaElement>(null);
-  const pendingFocus = useRef(false);
-  const reply = draft?.text ?? localReply;
-  const setReply = draft?.setText ?? setLocalReply;
   const kind = attentionKindMeta(item);
   const KindIcon = kind.icon;
-  const answers = cardAnswers(item);
-  const extras = unswipedChoices(item);
-  const perQuestion = answersPerQuestion(item);
-  const textOnly = isTextOnlyAsk(item);
-  const why = visibleWhy(item);
+  const model = cardModel(item);
+  const { answers, extras, perQuestion, heading, showAsk, asking, recommendation, recommended } = model;
   const history = historyLine(item.history);
   const updated = updatedSinceAsked(item);
-  const body = item.body?.trim() ? item.body : null;
   const questions = item.questions ?? [];
-  const sendable = perQuestion ? questionAnswersAction(questions, picks) : null;
-  // An item from before titles is headed by its whole ask, said once: a title cut from the ask would only
-  // repeat its first words above it. (A push still cuts one, to fit a lock screen: `attentionTitle`.)
-  const title = hasOwnTitle(item) ? attentionTitle(item) : item.subject.trim();
-  const showAsk = item.subject.trim() !== title;
-  // `fy attention add --recommend` puts a lone question's pick ON the question: the card says it in its
-  // Recommendation all the same, so it never depends on where the ferret wrote it.
-  const lone = singleAttentionQuestion(item);
-  const recommendation =
-    item.recommendation ??
-    (lone?.recommended === undefined
-      ? undefined
-      : { decision: lone.recommended, ...(lone.why === undefined ? {} : { why: lone.why }) });
-  const optionDirections = Object.fromEntries(
-    answers.filter(answer => answer.does === 'choose').map(answer => [answer.label.trim(), answer.direction]),
-  );
-  const hasDismissAnswer = answers.some(answer => answer.does === 'dismiss');
-  const focusRequests = (draft?.focusTick ?? 0) + localTick;
-
-  const openReply = (): void => {
-    if (replyRef.current !== null) {
-      replyRef.current.focus();
-      return;
-    }
-    pendingFocus.current = true;
-    setReplyOpen(true);
-  };
-  // The deck asks for the box when a swipe needs text it has not got.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: only a new request opens the box; openReply is stable in effect
-  useEffect(() => {
-    if (focusRequests > 0) openReply();
-  }, [focusRequests]);
-  useEffect(() => {
-    if (!replyOpen || !pendingFocus.current) return;
-    pendingFocus.current = false;
-    replyRef.current?.focus();
-  }, [replyOpen]);
-
-  const give = (action: InboxAction | null): void => {
-    if (action === null) {
-      setLocalTick(tick => tick + 1);
-      return;
-    }
+  const sendable =
+    perQuestion && picks.some(pick => pick.trim() !== '') ? questionAnswersAction(questions, picks) : null;
+  const lede = cardLede(item, model.why);
+  const highlight = revisionHighlight(item);
+  const give = (action: InboxAction): void => {
     if (busy) return;
     onAct(action);
-    setReply('');
-  };
-  const sendReply = (): void => {
-    const action = replyAction(item, reply);
-    if (action === null || busy) return;
-    onAct(action);
-    setReply('');
   };
   const sendAnswers = (): void => {
     if (sendable === null || busy) return;
@@ -213,12 +157,13 @@ export function AttentionCard({
       className="kt-attn fy-attn-card"
       data-attention-card={item.id}
       data-highlighted={highlighted || undefined}
+      data-flat={flat || undefined}
       data-kind={kind.tone}
       data-pinned={pinned || undefined}
       id={id}
     >
       <header className="fy-attn-card__meta">
-        <span className="kt-attn-chip kt-label inline-flex shrink-0 items-center gap-1 px-badge-x py-0.5">
+        <span className="fy-attn-kind">
           <KindIcon size={11} aria-hidden="true" />
           <span data-attention-kind="">{kindWord(item)}</span>
         </span>
@@ -245,39 +190,45 @@ export function AttentionCard({
       </header>
       <AttentionDelivery busy={busy} ferret={origin?.ferret} item={item} onAct={onAct} />
       <h3 className="fy-attn-card__title" data-attention-title="" id={titleId}>
-        {title}
+        {heading}
       </h3>
+      {lede.line === null ? null : (
+        <p
+          className="fy-attn-card__why m-0"
+          data-attention-changed={changedCard(highlight, 'why', 'context') ? 'changed' : undefined}
+          data-attention-why=""
+        >
+          {lede.line}
+        </p>
+      )}
+      {item.revisions === undefined && decidedSummary(item) === null ? null : (
+        <p className="fy-attn-card__living m-0" data-attention-living="">
+          <AttentionDecidedSummary item={item} />
+          <AttentionUpdated item={item} />
+        </p>
+      )}
       <div className="fy-attn-card__scroll" data-attention-scroll="">
         {updated === null ? null : (
-          <p className="fy-attn-card__updated m-0" data-attention-updated="">
-            <span className="kt-attn-chip kt-label px-badge-x py-0.5">New</span>
+          <p className="fy-attn-card__updated m-0" data-attention-resurfaced="">
+            <span className="fy-attn-kind">New</span>
             Needs you again — the ferret updated this
             {updated.note === undefined ? '.' : `: ${updated.note}`}
           </p>
         )}
-        <AttentionBriefSections
-          askShown
-          collapsible={false}
-          detail={body === null ? undefined : <AttentionBody renderProse={renderProse} text={body} />}
-          item={item}
-          optionDirections={optionDirections}
-          recommendation={recommendation}
-          renderProse={renderProse}
-          steps={
-            item.steps === undefined ? undefined : (
-              <AttentionSteps
-                disabled={busy}
-                done={item.stepsDone ?? []}
-                renderProse={renderProse}
-                steps={item.steps}
-                {...(onProgress === undefined ? {} : { onProgress })}
-              />
-            )
-          }
-          why={why}
-          {...(showAsk ? { ask: item.subject } : {})}
-          {...(picker === undefined ? {} : { picker })}
-        />
+        {model.notice && item.body?.trim() ? <AttentionBody renderProse={renderProse} text={item.body} /> : null}
+        {showAsk || picker !== undefined ? (
+          <AttentionBriefSections
+            askShown
+            {...(showAsk && asking ? { askLabel: null } : {})}
+            collapsible={false}
+            item={item}
+            part="card"
+            renderProse={renderProse}
+            {...(perQuestion && recommendation !== undefined ? { recommendation } : {})}
+            {...(showAsk ? { ask: item.subject } : {})}
+            {...(picker === undefined ? {} : { picker })}
+          />
+        ) : null}
         {history === null ? null : (
           <p className="fy-attn-card__history m-0 text-meta text-faint" data-attention-history="">
             {history}
@@ -292,31 +243,26 @@ export function AttentionCard({
       )}
       <AttentionActions
         answers={answers}
+        arrows={!flat && (swipeHints || pinned)}
         busy={busy}
-        canSendReply={replyAction(item, reply) !== null}
-        dismissInMenu={!hasDismissAnswer}
+        dismissInMenu={model.dismissInMenu && !model.notice}
         extraOptions={extras}
-        onAnswer={answer => give(answerAction(answer, reply))}
-        {...(onSkip === undefined ? {} : { onSkip })}
-        onDismiss={() => {
-          const action = answerAction(
-            { direction: 'left', does: 'dismiss', label: DEFAULT_ANSWER_LABELS.dismiss },
-            reply,
-          );
-          give(action === null ? null : { ...action, label: 'Dismiss' });
+        onAnswer={answer => {
+          const action = answerAction(answer, '');
+          if (action !== null) give(action);
         }}
-        onOption={option => give(optionAction(option, reply))}
-        onReplyChange={setReply}
-        onReplyOpenChange={open => (open ? openReply() : setReplyOpen(false))}
-        onSendReply={sendReply}
-        reply={reply}
-        replyIsAnswer={textOnly && !perQuestion}
-        replyOpen={replyOpen}
-        replyRef={replyRef}
-        arrows={swipeHints || pinned}
-        swipeHints={swipeHints}
-        {...(isWaitingOnFerret(item) ? { waiting: waitingSentence(item, origin?.ferret) } : {})}
-        {...(canDiscussNow(item) ? { onDiscuss: () => give(discussAction(reply)) } : {})}
+        onDismiss={() => give(DISMISS_ACTION)}
+        onOption={option => give(optionAction(option, ''))}
+        recommendationLine={model.recommendationLine}
+        recommended={recommended}
+        swipeHints={swipeHints && !flat}
+        {...(model.composerHint === undefined ? {} : { composerHint: model.composerHint })}
+        {...(model.notice ? { clear: () => give(CLEAR_ACTION) } : {})}
+        {...(onSkip === undefined ? {} : { onSkip })}
+        {...(onOpenDetail !== undefined && !model.notice && attentionHasDetail(item) ? { onOpenDetail } : {})}
+        {...(item.waitingOn === 'ferret' && !model.notice
+          ? { waiting: `With ${origin?.ferret ?? 'the ferret'} — it will update this.` }
+          : {})}
         {...(perQuestion ? { sendAnswers: { ready: sendable !== null, onSend: sendAnswers } } : {})}
       />
       {origin === undefined || pinned ? null : (
@@ -333,3 +279,6 @@ export function AttentionCard({
     </article>
   );
 }
+
+const changedCard = (highlight: RevisionHighlight, ...fields: readonly AttentionRevisableField[]): boolean =>
+  fields.some(field => highlight.fields.has(field));

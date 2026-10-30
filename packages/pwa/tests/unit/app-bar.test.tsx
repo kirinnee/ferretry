@@ -158,7 +158,7 @@ describe('AppBar destinations', () => {
 
     expect(hrefs).toEqual([
       '/d/workshop',
-      '/d/workshop/attention',
+      '/d/workshop/inbox',
       '/d/workshop/projects',
       '/d/workshop/analytics',
       '/d/workshop/warden',
@@ -178,7 +178,7 @@ describe('AppBar destinations', () => {
 
     expect(linksOf(mounted.container, 'Destinations').map(link => link.getAttribute('href'))).toEqual([
       '/d/laptop',
-      '/d/laptop/attention',
+      '/d/laptop/inbox',
       '/d/laptop/projects',
       '/d/laptop/analytics',
       '/d/laptop/warden',
@@ -216,7 +216,7 @@ describe('AppBar destinations', () => {
     ) as HTMLAnchorElement;
 
     expect(attention.querySelector('.fy-unread-badge [aria-hidden="true"]')?.textContent).toBe('12');
-    expect(attention.textContent).toBe('Attention1212 open Attention items');
+    expect(attention.textContent).toBe('Inbox1212 open Inbox items');
     expect(mounted.container.querySelectorAll('.fy-unread-badge')).toHaveLength(1);
 
     await mounted.render(bar());
@@ -544,7 +544,7 @@ describe('AppTabBar', () => {
     ]);
     expect([...nav.querySelectorAll('[data-app-tab]')].map(item => item.textContent)).toEqual([
       'Sessions',
-      'Attention',
+      'Inbox',
       'Projects',
       'Find',
       'Settings',
@@ -552,7 +552,7 @@ describe('AppTabBar', () => {
     ]);
     expect([...nav.querySelectorAll('a')].map(link => link.getAttribute('href'))).toEqual([
       '/d/workshop',
-      '/d/workshop/attention',
+      '/d/workshop/inbox',
       '/d/workshop/projects',
       '/d/workshop/settings',
     ]);
@@ -560,7 +560,7 @@ describe('AppTabBar', () => {
     await mounted.render(tabBar({ daemon: OTHER }));
     expect([...nav.querySelectorAll('a')].map(link => link.getAttribute('href'))).toEqual([
       '/d/laptop',
-      '/d/laptop/attention',
+      '/d/laptop/inbox',
       '/d/laptop/projects',
       '/d/laptop/settings',
     ]);
@@ -616,18 +616,18 @@ describe('AppTabBar', () => {
       mounted.container.querySelector('[data-app-tab="attention"]') as HTMLAnchorElement;
     const badge = (): HTMLElement | null => tab().querySelector('[data-unread-badge] [aria-hidden="true"]');
 
-    expect(tab().getAttribute('href')).toBe('/d/workshop/attention');
+    expect(tab().getAttribute('href')).toBe('/d/workshop/inbox');
     expect(badge()?.textContent).toBe('3');
     expect(badge()?.getAttribute('aria-hidden')).toBe('true');
-    expect(tab().textContent).toBe('33 open Attention itemsAttention');
+    expect(tab().textContent).toBe('33 open Inbox itemsInbox');
 
     await mounted.render(tabBar({ attentionCount: 250 }));
     expect(badge()?.textContent).toBe('99+');
-    expect(tab().textContent).toContain('250 open Attention items');
+    expect(tab().textContent).toContain('250 open Inbox items');
 
     await mounted.render(tabBar({ attentionCount: 0 }));
     expect(badge()).toBeNull();
-    expect(tab().textContent).toBe('Attention');
+    expect(tab().textContent).toBe('Inbox');
 
     // No other tab ever carries the badge.
     await mounted.render(tabBar({ attentionCount: 5 }));

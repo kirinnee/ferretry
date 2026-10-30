@@ -9,7 +9,6 @@ import {
 import should from 'should';
 import {
   boardReplyMessage,
-  conversationResponse,
   conversationTurn,
   discussMessage,
   needsInfoMessage,
@@ -107,12 +106,12 @@ describe('Attention in a conversation', () => {
 
     // Act / Assert
     should(boardReplyMessage(answered)).equal('[answer to !A2 «Rebase onto main now?»] Wait');
-    should(boardReplyMessage(answeredWithNote)).equal('[answer to !A3 «Which region?»] eu-west-1\n\nNote: cheapest');
-    should(boardReplyMessage(replied)).equal('[answer to !A4 «Deploy?»] Done.\n\nNote: Only after 6pm');
+    should(boardReplyMessage(answeredWithNote)).equal('[answer to !A3 «Which region?»] eu-west-1 · note: cheapest');
+    should(boardReplyMessage(replied)).equal('[answer to !A4 «Deploy?»] Done · note: Only after 6pm');
     should(boardReplyMessage(bareDone)).equal('[done !A5 «Look at the flaky test»] The owner marked this done.');
-    should(boardReplyMessage(dismissed)).equal('[dismissed !A5 «Look at the flaky test»] No longer needed');
+    should(boardReplyMessage(dismissed)).equal('[dismissed !A5 «Look at the flaky test»] Not needed: No longer needed');
     should(boardReplyMessage(bareDismiss)).equal(
-      '[dismissed !A5 «Look at the flaky test»] The owner dismissed this without an answer.',
+      '[dismissed !A5 «Look at the flaky test»] Not needed — the owner dismissed this without a reason.',
     );
   });
 
@@ -166,20 +165,44 @@ describe('Attention in a conversation', () => {
     // Assert
     should(lines).deepEqual({
       choose: '[answer to !A2 «Rebase onto main now?»] Rebase now',
-      chooseNote: '[answer to !A2 «Rebase onto main now?»] Rebase now\n\nNote: after lunch',
+      chooseNote: '[answer to !A2 «Rebase onto main now?»] Rebase now · note: after lunch',
       approve: '[answer to !A4 «Deploy?»] Approved.',
-      approveNote: '[answer to !A4 «Deploy?»] Approved.\n\nNote: only for this repo',
+      approveNote: '[answer to !A4 «Deploy?»] Approved. · note: only for this repo',
       reject: '[answer to !A4 «Deploy?»] Rejected.',
-      rejectNote: '[answer to !A4 «Deploy?»] Rejected.\n\nNote: use the staging account',
+      rejectNote: '[answer to !A4 «Deploy?»] Rejected. · note: use the staging account',
       good: '[answer to !A6 «Is the summary right?»] Your answer is good.',
-      goodNote: '[answer to !A6 «Is the summary right?»] Your answer is good.\n\nNote: nice and short',
+      goodNote: '[answer to !A6 «Is the summary right?»] Your answer is good. · note: nice and short',
       done: '[done !A5 «Look at the flaky test»] The owner marked this done.',
-      doneNote: '[answer to !A5 «Look at the flaky test»] Done.\n\nNote: merged it myself',
-      dismiss: '[dismissed !A5 «Look at the flaky test»] The owner dismissed this without an answer.',
-      dismissNote: '[dismissed !A5 «Look at the flaky test»] not this week',
+      doneNote: '[answer to !A5 «Look at the flaky test»] Done · note: merged it myself',
+      dismiss: '[dismissed !A5 «Look at the flaky test»] Not needed — the owner dismissed this without a reason.',
+      dismissNote: '[dismissed !A5 «Look at the flaky test»] Not needed: not this week',
       needsInfo: '[needs more info !A5 «Ask A5?»] The owner needs more information.',
       needsInfoNote: '[needs more info !A5 «Ask A5?»] which account?',
     });
+  });
+
+  it('should tell an other answer apart from a chosen option, with or without a note', () => {
+    // Arrange
+    const other = closed(CHOICE, { response: { kind: 'other', answer: 'Neither — rewrite it' } });
+    const otherWithNote = closed(CHOICE, {
+      response: { kind: 'other', answer: 'Neither — rewrite it' },
+      resolutionNote: 'by Friday',
+    });
+    const otherNoteEqualsWords = closed(CHOICE, {
+      response: { kind: 'other', answer: 'Neither' },
+      resolutionNote: 'Other answer (none of the options): Neither',
+    });
+
+    // Act / Assert
+    should(boardReplyMessage(other)).equal(
+      '[answer to !A2 «Rebase onto main now?»] Other answer (none of the options): Neither — rewrite it',
+    );
+    should(boardReplyMessage(otherWithNote)).equal(
+      '[answer to !A2 «Rebase onto main now?»] Other answer (none of the options): Neither — rewrite it · note: by Friday',
+    );
+    should(boardReplyMessage(otherNoteEqualsWords)).equal(
+      '[answer to !A2 «Rebase onto main now?»] Other answer (none of the options): Neither',
+    );
   });
 
   it('should read a non-default answer label as the start of the owner’s reply, after the answer', () => {
@@ -197,11 +220,11 @@ describe('Attention in a conversation', () => {
 
     // Act / Assert
     should(boardReplyMessage(always)).equal(
-      '[answer to !A4 «Deploy?»] Approved.\n\nNote: Always allow — it is the same repo every time',
+      '[answer to !A4 «Deploy?»] Approved. · note: Always allow — it is the same repo every time',
     );
-    should(boardReplyMessage(alwaysBare)).equal('[answer to !A4 «Deploy?»] Approved.\n\nNote: Always allow');
+    should(boardReplyMessage(alwaysBare)).equal('[answer to !A4 «Deploy?»] Approved. · note: Always allow');
     should(boardReplyMessage(skip)).equal(
-      '[dismissed !A5 «Look at the flaky test»] Skip — the owner of that test is away',
+      '[dismissed !A5 «Look at the flaky test»] Not needed: Skip — the owner of that test is away',
     );
   });
 
@@ -216,18 +239,59 @@ describe('Attention in a conversation', () => {
     should(message).startWith(`[answer to !A6 «${'x'.repeat(120)}…»]`);
   });
 
-  it('should prefix a message that references open items and answer them', () => {
-    // Arrange / Act
-    const turn = conversationTurn('!A3 eu-west-1, and !A2 Wait', [CHOICE, OPEN]);
+  it('should prefix a message that references open items with their titles, and resolve nothing', () => {
+    // Arrange
+    const titled = item('A7', { title: 'Release window' });
+
+    // Act
+    const turn = conversationTurn('!A3 eu-west-1, and !A7 soon', [OPEN, titled]);
 
     // Assert
-    should(turn.message).equal(
-      '[answer to !A2 «Rebase onto main now?», !A3 «Which region?»] !A3 eu-west-1, and !A2 Wait',
-    );
-    should(turn.answers.map(each => each.id)).deepEqual(['A2', 'A3']);
+    should(turn.message).equal('[re !A3 «Which region?», !A7 «Release window»] !A3 eu-west-1, and !A7 soon');
+    should(turn.referenced.map(each => each.id)).deepEqual(['A3', 'A7']);
   });
 
-  it('should deliver a plain message exactly as typed, however many items are open, and resolve none', () => {
+  it('should name each referenced item once, in board order, however it is repeated', () => {
+    // Arrange / Act
+    const turn = conversationTurn('!A3 and !A2 and !A3 again', [CHOICE, OPEN]);
+
+    // Assert
+    should(turn.message).startWith('[re !A2 «Rebase onto main now?», !A3 «Which region?»] ');
+    should(turn.referenced.map(each => each.id)).deepEqual(['A2', 'A3']);
+  });
+
+  it('should treat a message about an item already on the ferret’s turn the same way: referenced, nothing resolved', () => {
+    // Arrange
+    const talking = item('A8', {
+      subject: 'Which region?',
+      ask: { kind: 'open-question' },
+      waitingOn: 'ferret',
+      askedAt: AT,
+      waitingFor: 'discussion',
+    });
+
+    // Act
+    const turn = conversationTurn('!A8 eu-west-1 sounds right', [talking]);
+
+    // Assert
+    should(turn.message).equal('[re !A8 «Which region?»] !A8 eu-west-1 sounds right');
+    should(turn.referenced.map(each => each.id)).deepEqual(['A8']);
+  });
+
+  it('should never reference a notice: it is read, not talked about', () => {
+    // Arrange
+    const notice = item('A9', { notice: true, kind: 'info' });
+
+    // Act
+    const turn = conversationTurn('!A9 thanks, and !A3 eu', [notice, OPEN]);
+
+    // Assert
+    should(turn.message).startWith('[re !A3 «Which region?»] ');
+    should(turn.referenced.map(each => each.id)).deepEqual(['A3']);
+    should(conversationTurn('!A9 thanks', [notice])).deepEqual({ message: '!A9 thanks', referenced: [] });
+  });
+
+  it('should deliver a plain message exactly as typed, however many items are open, and reference none', () => {
     // Arrange
     const open = [CHOICE, OPEN, PERMISSION, PLAIN, item('A6'), item('A7')];
 
@@ -236,11 +300,11 @@ describe('Attention in a conversation', () => {
     const empty = conversationTurn('How is it going?', []);
 
     // Assert
-    should(turn).deepEqual({ message: 'How is it going?', answers: [] });
-    should(empty).deepEqual({ message: 'How is it going?', answers: [] });
+    should(turn).deepEqual({ message: 'How is it going?', referenced: [] });
+    should(empty).deepEqual({ message: 'How is it going?', referenced: [] });
   });
 
-  it('should still answer a harness prompt the message references, and leave an unreferenced one alone', () => {
+  it('should reference a harness prompt the message names, and leave an unreferenced one alone', () => {
     // Arrange
     const harness = item('A6', {
       source: 'question',
@@ -254,29 +318,11 @@ describe('Attention in a conversation', () => {
 
     // Act
     const plain = conversationTurn('How is it going?', [harness, OPEN]);
-    const answered = conversationTurn('!A6 eu', [harness]);
+    const named = conversationTurn('!A6 eu', [harness]);
 
     // Assert
-    should(plain).deepEqual({ message: 'How is it going?', answers: [] });
-    should(answered.answers.map(each => each.id)).deepEqual(['A6']);
-  });
-
-  it('should take a chat answer only in the forms its ask accepts', () => {
-    // Arrange / Act
-    const open = conversationResponse(OPEN, '!A3 eu-west-1');
-    const choice = conversationResponse(CHOICE, '!A2  rebase NOW ');
-    const notAChoice = conversationResponse(CHOICE, '!A2 rebase it tomorrow');
-    const permission = conversationResponse(PERMISSION, '!A4 yes');
-    const plain = conversationResponse(PLAIN, '!A5 done');
-    const blank = conversationResponse(OPEN, '   ');
-
-    // Assert
-    should(open).deepEqual({ kind: 'open-question', answer: 'eu-west-1' });
-    should(choice).deepEqual({ kind: 'multiple-choice', choice: 'Rebase now' });
-    should(notAChoice).be.undefined();
-    should(permission).be.undefined();
-    should(plain).be.undefined();
-    should(blank).be.undefined();
+    should(plain).deepEqual({ message: 'How is it going?', referenced: [] });
+    should(named.referenced.map(each => each.id)).deepEqual(['A6']);
   });
 
   it('should summarise a board for the session list: count, oldest, its ask and the newest raise', () => {
@@ -303,6 +349,29 @@ describe('Attention in a conversation', () => {
     should(sessionAttentionSummary(empty)).be.undefined();
   });
 
+  it('should leave notices out of the counts, the first item and the newest raise', () => {
+    // Arrange
+    const notice = item('A1', { notice: true, kind: 'info', waitingSince: '2026-10-23T13:00:00.000Z' });
+    const board = (items: AttentionItem[]) =>
+      AttentionSnapshotSchema.parse({
+        v: 1,
+        sessionId: 'session-1',
+        items,
+        resolved: [],
+        count: items.length,
+        parseErrors: 0,
+        updatedAt: AT,
+      });
+
+    // Act
+    const mixed = sessionAttentionSummary(board([notice, OPEN]));
+    const onlyNotice = sessionAttentionSummary(board([notice]));
+
+    // Assert
+    should(mixed).deepEqual({ open: 1, first: 'A3', ask: 'Which region?', latestAt: AT });
+    should(onlyNotice).be.undefined();
+  });
+
   it('should count the items in discussion apart, and open the row to the oldest one still needing the owner', () => {
     // Arrange
     const discussing = item('A2', { waitingOn: 'ferret', askedAt: AT, waitingFor: 'discussion', infoRequests: 1 });
@@ -327,22 +396,15 @@ describe('Attention in a conversation', () => {
     should(onlyTalk).deepEqual({ open: 1, first: 'A2', ask: 'Ask A2?', latestAt: AT, discussing: 1 });
   });
 
-  it('should never take a chat message as the answer to an item in discussion: talking it through is the discussion', () => {
-    // Arrange
-    const discussing = item('A2', {
-      ask: { kind: 'open-question' },
-      waitingOn: 'ferret',
-      askedAt: AT,
-      waitingFor: 'discussion',
-      infoRequests: 1,
+  it('should leave a reference inside the text alone once the prefix is built, and take only the open board', () => {
+    // Arrange / Act
+    const turn = conversationTurn('!A2 why does it need the prod key? and !A99 too', [OPEN]);
+
+    // Assert
+    should(turn).deepEqual({
+      message: '!A2 why does it need the prod key? and !A99 too',
+      referenced: [],
     });
-
-    // Act
-    const turn = conversationTurn('!A2 why does it need the prod key? and !A3 eu-west-1', [discussing, OPEN]);
-
-    // Assert — the open question is answered; the one in discussion is only talked about.
-    should(turn.answers.map(each => each.id)).deepEqual(['A3']);
-    should(turn.message).startWith('[answer to !A3 «Which region?»] ');
   });
 });
 
@@ -388,7 +450,7 @@ describe('discussMessage', () => {
 
     // Assert
     should(message).equal(
-      '[discuss !A14 «Release window»] The owner wants to talk this through before answering: I do not understand the premise. Reply in chat to clear it up; then update the item (`ferret attention edit A14`) or close it if the premise was wrong (`ferret attention done A14`).',
+      '[discuss !A14 «Release window»] The owner wants to talk this through before answering: I do not understand the premise. Reply in chat to clear it up; then update the item (`ferret agenda edit A14`) or close it if the premise was wrong (`ferret agenda done A14`).',
     );
   });
 

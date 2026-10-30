@@ -14,16 +14,16 @@ import {
 const NOW: readonly AlwaysOnSection[] = [
   { id: 'tools', text: 'Tools: drive terminals.' },
   { id: 'settings', text: 'Settings: read the guide.' },
-  { id: 'attention', text: 'Attention: raise every ask as an item.' },
+  { id: 'notify', text: 'Notify: tell the owner with a notice.' },
 ];
 
 const told = (id: AlwaysOnSection['id'], text: string) => ({ id, chars: text.length, digest: instructionDigest(text) });
 
-const launched = (attention: string): SessionLaunchInstructions => ({
+const launched = (notify: string): SessionLaunchInstructions => ({
   sections: [
     told('tools', 'Tools: drive terminals.'),
     told('settings', 'Settings: read the guide.'),
-    told('attention', attention),
+    told('notify', notify),
     { id: 'pack', chars: 40 },
   ],
   mode: 'auto',
@@ -33,15 +33,15 @@ const launched = (attention: string): SessionLaunchInstructions => ({
 describe('changedInstructions', () => {
   it('should name only the always-on sections whose words changed since the launch', () => {
     // Act
-    const actual = changedInstructions(launched('Attention: an older rule.'), NOW);
+    const actual = changedInstructions(launched('Notify: an older rule.'), NOW);
 
     // Assert
-    should(actual.map(section => section.id)).deepEqual(['attention']);
+    should(actual.map(section => section.id)).deepEqual(['notify']);
   });
 
   it('should name nothing for a launch on the current words', () => {
     // Assert
-    should(changedInstructions(launched('Attention: raise every ask as an item.'), NOW)).be.empty();
+    should(changedInstructions(launched('Notify: tell the owner with a notice.'), NOW)).be.empty();
   });
 
   it('should compare sizes for a record made before fingerprints were kept', () => {
@@ -58,8 +58,8 @@ describe('changedInstructions', () => {
     // Act
     const actual = changedInstructions(old, NOW);
 
-    // Assert — settings changed size; attention was never told at all.
-    should(actual.map(section => section.id)).deepEqual(['settings', 'attention']);
+    // Assert — settings changed size; notify was never told at all.
+    should(actual.map(section => section.id)).deepEqual(['settings', 'notify']);
   });
 
   it('should tell a session with no record nothing: nothing says what it has', () => {
@@ -75,7 +75,7 @@ describe('instructionsUpdatedNote', () => {
 
     // Assert
     should(actual).startWith(INSTRUCTIONS_UPDATED_MARK);
-    should(actual).endWith('\n\nSettings: read the guide.\n\nAttention: raise every ask as an item.');
+    should(actual).endWith('\n\nSettings: read the guide.\n\nNotify: tell the owner with a notice.');
   });
 });
 
@@ -96,7 +96,7 @@ describe('recordTold', () => {
       sections: [
         told('tools', 'Tools: drive terminals.'),
         told('settings', 'Settings: read the guide.'),
-        told('attention', 'Attention: raise every ask as an item.'),
+        told('notify', 'Notify: tell the owner with a notice.'),
         { id: 'pack', chars: 40 },
       ],
       mode: 'interactive',
@@ -133,7 +133,7 @@ describe('InstructionRefresh', () => {
 
   it('should queue the note once as its own message, then queue nothing on the next call', async () => {
     // Arrange
-    const { refresh, stored, queued } = harness(launched('Attention: an older rule.'));
+    const { refresh, stored, queued } = harness(launched('Notify: an older rule.'));
 
     // Act
     await refresh.queueIfStale('s-1');
@@ -143,16 +143,16 @@ describe('InstructionRefresh', () => {
     should(queued).have.length(1);
     should(queued[0]?.sessionId).equal('s-1');
     should(queued[0]?.note).startWith(INSTRUCTIONS_UPDATED_MARK);
-    should(queued[0]?.note).endWith('Attention: raise every ask as an item.');
+    should(queued[0]?.note).endWith('Notify: tell the owner with a notice.');
     should(queued[0]?.digest).equal(instructionDigest(queued[0]?.note ?? ''));
-    should(stored()?.sections.find(section => section.id === 'attention')?.digest).equal(
-      instructionDigest('Attention: raise every ask as an item.'),
+    should(stored()?.sections.find(section => section.id === 'notify')?.digest).equal(
+      instructionDigest('Notify: tell the owner with a notice.'),
     );
   });
 
   it('should queue nothing for a ferret on the current words', async () => {
     // Arrange
-    const { refresh, queued } = harness(launched('Attention: raise every ask as an item.'));
+    const { refresh, queued } = harness(launched('Notify: tell the owner with a notice.'));
 
     // Act
     await refresh.queueIfStale('s-1');
@@ -172,13 +172,13 @@ describe('InstructionRefresh', () => {
 
   it('should not record the note as told when it could not be queued, so the next message offers it again', async () => {
     // Arrange
-    const { refresh, stored } = harness(launched('Attention: an older rule.'), 'queue');
+    const { refresh, stored } = harness(launched('Notify: an older rule.'), 'queue');
 
     // Act
     await should(refresh.queueIfStale('s-1')).be.fulfilled();
 
     // Assert
-    should(changedInstructions(stored(), NOW).map(section => section.id)).deepEqual(['attention']);
+    should(changedInstructions(stored(), NOW).map(section => section.id)).deepEqual(['notify']);
   });
 
   it('should never fail when the record cannot be written, and write nothing for a vanished record', async () => {

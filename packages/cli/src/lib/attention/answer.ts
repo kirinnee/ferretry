@@ -11,12 +11,15 @@ export interface AnswerFlags {
   readonly good?: boolean;
   readonly clarify?: string;
   readonly answer?: string;
+  /** The owner's own words instead of the options: "none of these". */
+  readonly other?: string;
 }
 
-const ONE_ANSWER = 'give exactly one answer: --approve/--reject, --yes/--no, --choice, --good/--clarify, or --answer';
+const ONE_ANSWER =
+  'give exactly one answer: --approve/--reject, --yes/--no, --choice, --good/--clarify, --answer, or --other';
 
 /**
- * Read the answer a `attention done` carries, or nothing when the item had no ask.
+ * Read the answer an `agenda done` carries, or nothing when the item had no ask.
  *
  * Every conflicting combination is refused here rather than sent: the daemon would reject a response
  * whose kind does not match the ask anyway, and a local message can name the flag that clashed.
@@ -25,9 +28,14 @@ export function parseAnswer(flags: AnswerFlags): AttentionResponse | undefined {
   const permission = flags.approve === true || flags.reject === true;
   const yesNo = flags.yes === true || flags.no === true;
   const review = flags.good === true || flags.clarify !== undefined;
-  const chosen = [permission, yesNo, flags.choice !== undefined, review, flags.answer !== undefined].filter(
-    Boolean,
-  ).length;
+  const chosen = [
+    permission,
+    yesNo,
+    flags.choice !== undefined,
+    review,
+    flags.answer !== undefined,
+    flags.other !== undefined,
+  ].filter(Boolean).length;
 
   if (chosen === 0) return undefined;
   if (chosen > 1) throw new Error(ONE_ANSWER);
@@ -47,6 +55,7 @@ export function parseAnswer(flags: AnswerFlags): AttentionResponse | undefined {
       clarification: required(flags.clarify, '--clarify', 'the clarification text'),
     };
   }
+  if (flags.other !== undefined) return { kind: 'other', answer: required(flags.other, '--other', 'the answer text') };
   return { kind: 'open-question', answer: required(flags.answer ?? '', '--answer', 'the answer text') };
 }
 
@@ -61,6 +70,8 @@ export function describeAnswer(response: AttentionResponse): string {
       return response.verdict === 'good' ? 'answer accepted' : `clarification requested: ${response.clarification}`;
     case 'open-question':
       return `answered: ${response.answer}`;
+    case 'other':
+      return `answered with none of the options: ${response.answer}`;
   }
 }
 

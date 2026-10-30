@@ -152,7 +152,7 @@ describe('SidebarRow', () => {
     const sessions = [sessionView('s-1')];
     const screen = await render(sessions, { attentionCountFor: (id: string) => (id === 's-1' ? 3 : 0) });
     const badge = must(screen.container.querySelector('[role="status"]'), 'the attention badge');
-    expect(badge.getAttribute('aria-label')).toBe('3 unresolved attention items');
+    expect(badge.getAttribute('aria-label')).toBe('3 unresolved Inbox items');
     expect(badge.textContent).toContain('3');
     await screen.unmount();
   });
@@ -161,7 +161,7 @@ describe('SidebarRow', () => {
     const sessions = [sessionView('s-1')];
     const one = await render(sessions, { attentionCountFor: () => 1 });
     expect(must(one.container.querySelector('[role="status"]'), 'the badge').getAttribute('aria-label')).toBe(
-      '1 unresolved attention item',
+      '1 unresolved Inbox item',
     );
     await one.unmount();
 

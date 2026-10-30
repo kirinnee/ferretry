@@ -2320,18 +2320,16 @@ try {
             continue;
           }
           if (ATTENTION_ONLY) {
-            // Pressing the real strip is the point — this proves the journey (folded line → open
-            // panel), not just that the component renders.
-            const panel = page.locator('#harness-attention-panel');
-            const strip = panel.locator('[data-attention-strip]');
-            await strip.scrollIntoViewIfNeeded();
-            await strip.click();
-            await panel.locator('[data-attention-panel]').waitFor({ state: 'visible' });
-            const target = join(outDir, `attention-panel-${viewport.name}.png`);
-            await captureElement(page, panel, target);
-            process.stdout.write(
-              `📸 attention panel ${viewport.name} ${viewport.width}x${viewport.height} -> ${target}\n`,
-            );
+            // Pressing the real line is the point — this proves the journey (the line → the open drawer),
+            // not just that the component renders.
+            const harness = page.locator('[data-harness="agenda"]');
+            const line = harness.locator('[data-agenda-line-toggle]');
+            await line.scrollIntoViewIfNeeded();
+            await line.click();
+            await harness.locator('[data-agenda-drawer]').waitFor({ state: 'visible' });
+            const target = join(outDir, `agenda-${viewport.name}.png`);
+            await captureElement(page, harness, target);
+            process.stdout.write(`📸 agenda ${viewport.name} ${viewport.width}x${viewport.height} -> ${target}\n`);
             continue;
           }
           if (WARDEN_ONLY) {
@@ -3563,11 +3561,11 @@ try {
           // a tall viewport to capture the full, real phone-width board.
           const attentionTarget = join(outDir, `attention-${viewport.name}.png`);
           await page.setViewportSize({ width: viewport.width, height: 2_400 });
-          const attention = page.getByLabel('Attention ledger');
+          const attention = page.getByLabel('Inbox ledger');
           await attention.locator('summary').filter({ hasText: 'Resolution audit' }).click();
           await captureElement(page, attention, attentionTarget);
           await page.setViewportSize({ width: viewport.width, height: viewport.height });
-          process.stdout.write(`📸 Attention ledger -> ${attentionTarget}\n`);
+          process.stdout.write(`📸 Inbox ledger -> ${attentionTarget}\n`);
           const pinsTriggerTarget = join(outDir, `pins-trigger-${viewport.name}.png`);
           await captureElement(page, page.getByLabel('Pins trigger'), pinsTriggerTarget);
           process.stdout.write(`📸 Pins trigger -> ${pinsTriggerTarget}\n`);

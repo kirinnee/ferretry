@@ -65,7 +65,7 @@ export const attentionKindMeta = (
     default:
       return {
         tone: 'unknown',
-        label: 'Damaged attention',
+        label: 'Damaged Inbox',
         icon: CircleHelp,
         action: 'The requested action is malformed. Repair it before treating this as resolved',
       };
@@ -193,7 +193,7 @@ export function AttentionBoard({
   return (
     <section
       className="flex h-full min-h-0 flex-1 flex-col"
-      aria-label="Attention ledger"
+      aria-label="Inbox ledger"
       data-daemon={connection.daemonId}
     >
       <header className="shrink-0 border-b border-border-soft px-panel pb-row-y">
@@ -202,7 +202,7 @@ export function AttentionBoard({
             <CircleAlert size={16} aria-hidden="true" />
           </span>
           <div className="min-w-0">
-            <h1 className="m-0 font-display text-title font-semibold tracking-display text-fg">Attention</h1>
+            <h1 className="m-0 font-display text-title font-semibold tracking-display text-fg">Inbox</h1>
             <p className="m-0 text-meta text-faint">
               {items.length} unresolved · oldest first · every clear records who did it
             </p>
@@ -268,11 +268,11 @@ function AttentionUnavailable({ damaged = false }: { readonly damaged?: boolean 
   return (
     <div className="py-10 text-center" role="alert">
       <CircleAlert size={18} className="mx-auto mb-sm text-err" aria-hidden="true" />
-      <p className="m-0 text-cell font-medium text-fg">Attention needs human verification.</p>
+      <p className="m-0 text-cell font-medium text-fg">The Inbox needs human verification.</p>
       <p className="m-0 mt-xs text-meta text-faint">
         {damaged
-          ? 'The daemon reported damaged attention data. Repair it before assuming no action is needed.'
-          : 'The attention ledger could not be read. Reconnect or repair the paired daemon before assuming no action is needed.'}
+          ? 'The daemon reported damaged Inbox data. Repair it before assuming no action is needed.'
+          : 'The Inbox could not be read. Reconnect or repair the paired daemon before assuming no action is needed.'}
       </p>
     </div>
   );
@@ -349,7 +349,7 @@ function AttentionRow({
         </p>
         {kind.tone === 'unknown' ? (
           <p role="alert" className="m-0 text-meta text-err">
-            Cannot offer a response for this damaged attention item. Repair it before treating it as resolved.
+            Cannot offer a response for this damaged Inbox item. Repair it before treating it as resolved.
           </p>
         ) : item.ask ? (
           <AttentionAnswerControls ask={item.ask} busy={busy} onRespond={response => onAction(item.id, response)} />

@@ -1,34 +1,21 @@
 /**
- * THE ANSWER BAR OF ONE ATTENTION CARD, pinned under its detail: the card's answers as buttons in the
- * order a swipe points — LEFT · UP · RIGHT — each with its arrow, the right one (the recommended one)
- * primary; an old choice's options past the third as plain buttons with no arrow; a collapsed
- * "Reply…" that opens a text box (open from the start on a `reply` card, which has nothing else to
- * answer with); a fixed "Discuss" button — the fourth answer, the downward swipe, on every card a ferret
- * raised, never taking one of the three direction slots; and a ⋯ menu that holds Dismiss, the one answer
- * nobody means to press by accident.
+ * THE ANSWER BAR OF ONE ITEM CARD, pinned under its question. Answering is replying, so there is no
+ * text box here: the owner types in the ferret's normal message box, and a picked option carries that text.
  *
- * The reply is OPTIONAL on every card: whatever answer is given afterwards carries it as its note. An
- * item answered one answer per question swaps all of that for a single "Send answers" button. Nothing
+ *  1. The card's own answers as buttons (three at most; an old choice's options past the third plain, with
+ *     no arrow), the recommended one tagged "Recommended" and the reason said once, in one line, under them.
+ *     An arrow on each only where the card can be swiped.
+ *  2. A text-only ask has no options: a line says to reply in the message box below.
+ *  3. A quiet second row: Skip — move on, unanswered (only where the host can) · "Details ›" (only where the
+ *     item has more to read) · a ⋯ menu holding "Not needed…", which dismisses.
+ *
+ * An item answered one answer per question swaps the answers for a single "Send answers" button. Nothing
  * here sends anything: every answer leaves through the callbacks.
  */
 
 import type { AttentionAskOption, AttentionCardAnswer } from '@ferretry/protocol';
-import {
-  ArrowDown,
-  ArrowLeft,
-  ArrowRight,
-  ArrowUp,
-  ChevronDown,
-  ChevronRight,
-  CornerDownLeft,
-  Ellipsis,
-  LoaderCircle,
-  Pencil,
-  MessagesSquare,
-  Send,
-  X,
-} from 'lucide-react';
-import { type KeyboardEvent, type ReactNode, type RefObject, useEffect, useId, useRef, useState } from 'react';
+import { ArrowLeft, ArrowRight, ArrowUp, Check, ChevronRight, Ellipsis, LoaderCircle, Send, X } from 'lucide-react';
+import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import type { AnswerDirection } from '../../lib/attention-answers.ts';
 
 const ARROWS: Readonly<Record<AnswerDirection, ReactNode>> = {
@@ -42,6 +29,20 @@ const SWIPE_WORD: Readonly<Record<AnswerDirection, string>> = {
   up: 'swipe up',
   right: 'swipe right',
 };
+
+const sameLabel = (a: string, b: string | undefined): boolean =>
+  b !== undefined && a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/** The small tag on the recommended option. Words, not colour alone, so a screen reader says it too. */
+function RecommendedTag() {
+  return (
+    <span className="fy-attn-tag" data-attention-recommended="">
+      <span className="sr-only">, </span>
+      <Check aria-hidden="true" size={11} />
+      Recommended
+    </span>
+  );
+}
 
 /** A ⋯ button and the menu it opens: arrows move, Esc closes and returns focus, outside taps close. */
 function ActionMenu({ busy, onDismiss }: { readonly busy: boolean; readonly onDismiss: () => void }) {
@@ -60,15 +61,12 @@ function ActionMenu({ busy, onDismiss }: { readonly busy: boolean; readonly onDi
     return () => document.removeEventListener('pointerdown', away);
   }, [open]);
 
-  const close = (): void => {
-    setOpen(false);
-    trigger.current?.focus();
-  };
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (event.key === 'Escape') {
       event.preventDefault();
       event.stopPropagation();
-      close();
+      setOpen(false);
+      trigger.current?.focus();
     }
   };
   return (
@@ -103,7 +101,7 @@ function ActionMenu({ busy, onDismiss }: { readonly busy: boolean; readonly onDi
             type="button"
           >
             <X aria-hidden="true" size={14} />
-            Dismiss
+            Not needed…
           </button>
         </div>
       ) : null}
@@ -111,33 +109,7 @@ function ActionMenu({ busy, onDismiss }: { readonly busy: boolean; readonly onDi
   );
 }
 
-/** The fixed Discuss answer: talk it through before answering. Tab-reachable, named, and the swipe down. */
-function DiscussButton({
-  busy,
-  swipeHints,
-  onDiscuss,
-}: {
-  readonly busy: boolean;
-  readonly swipeHints: boolean;
-  readonly onDiscuss: () => void;
-}) {
-  return (
-    <button
-      aria-label={swipeHints ? 'Discuss, or swipe down' : 'Discuss'}
-      className="kt-btn fy-attn-discuss"
-      data-attention-discuss=""
-      disabled={busy}
-      onClick={onDiscuss}
-      title="Talk it through with the ferret before you answer"
-      type="button"
-    >
-      {swipeHints ? <ArrowDown aria-hidden="true" size={14} /> : <MessagesSquare aria-hidden="true" size={14} />}
-      Discuss
-    </button>
-  );
-}
-
-/** Skip: move on without answering. Quiet like Discuss, after it; absent where the host cannot skip. */
+/** Skip: move on without answering; absent where the host cannot skip. */
 function SkipButton({ busy, onSkip }: { readonly busy: boolean; readonly onSkip: () => void }) {
   return (
     <button
@@ -154,17 +126,35 @@ function SkipButton({ busy, onSkip }: { readonly busy: boolean; readonly onSkip:
   );
 }
 
+/** "Details ›": what the item knows beyond its question — the side panel, or the phone's full view. */
+function DetailsButton({ onOpen }: { readonly onOpen: () => void }) {
+  return (
+    <button
+      className="kt-btn fy-attn-details"
+      data-attention-details=""
+      onClick={onOpen}
+      title="Read what is going on, why it matters and what is decided"
+      type="button"
+    >
+      Details
+      <ChevronRight aria-hidden="true" size={14} />
+    </button>
+  );
+}
+
 function AnswerButton({
   answer,
   busy,
   swipeHints,
   arrows,
+  recommended,
   onAnswer,
 }: {
   readonly answer: AttentionCardAnswer;
   readonly busy: boolean;
   readonly swipeHints: boolean;
   readonly arrows: boolean;
+  readonly recommended: boolean;
   readonly onAnswer: (answer: AttentionCardAnswer) => void;
 }) {
   const hintId = useId();
@@ -175,6 +165,7 @@ function AnswerButton({
       className="kt-btn fy-attn-answer"
       data-attention-answer={answer.direction}
       data-attention-option={answer.label}
+      data-recommended={recommended || undefined}
       data-variant={answer.direction === 'right' ? 'primary' : undefined}
       disabled={busy}
       onClick={() => onAnswer(answer)}
@@ -183,6 +174,7 @@ function AnswerButton({
     >
       {answer.direction === 'right' ? null : arrow}
       <span className="fy-attn-answer__label">{answer.label}</span>
+      {recommended ? <RecommendedTag /> : null}
       {answer.direction === 'right' ? arrow : null}
       {swipeHints ? <span className="sr-only">, or {SWIPE_WORD[answer.direction]}</span> : null}
       {answer.description === undefined ? null : (
@@ -201,30 +193,36 @@ export interface AttentionActionsProps {
   readonly extraOptions: readonly AttentionAskOption[];
   /** The card can be swiped: each answer also says which way, aloud. */
   readonly swipeHints: boolean;
-  /** Draws each answer's direction arrow. Defaults to `swipeHints`; a card that cannot be swiped may still show them. */
+  /** Draws each answer's direction arrow. Defaults to `swipeHints`. */
   readonly arrows?: boolean;
   readonly busy: boolean;
-  /** An item waiting on its ferret says so, above the bar: "Waiting on Piper", "In discussion with Piper". */
+  /** The option the ferret recommends, tagged on its button. */
+  readonly recommended?: string | undefined;
+  /** The one line under the buttons: why the recommendation. */
+  readonly recommendationLine?: string | undefined;
+  /** An item waiting on its ferret says so, above the bar: "Waiting on Piper". */
   readonly waiting?: string;
-  /** Asks to discuss; present only where the card can be discussed (a ferret raised it and it is not already). */
-  readonly onDiscuss?: () => void;
-  /** Skips the card unanswered; present only where the host can skip. A quiet "Skip ›" after Discuss. */
+  /** Skips the card unanswered; present only where the host can skip. */
   readonly onSkip?: () => void;
-  readonly reply: string;
-  readonly onReplyChange: (text: string) => void;
-  readonly replyOpen: boolean;
-  readonly onReplyOpenChange: (open: boolean) => void;
-  readonly replyRef: RefObject<HTMLTextAreaElement | null>;
-  /** The card is a text-only ask: the box is the answer, and a Send button sends it. */
-  readonly replyIsAnswer: boolean;
-  readonly canSendReply: boolean;
-  readonly onSendReply: () => void;
+  /** Opens the detail; present only where the item has something to read beyond its question. */
+  readonly onOpenDetail?: () => void;
+  /** Says the answer is the message box's text: a text-only ask, or a review that wants changes written. */
+  readonly composerHint?: string;
   readonly onAnswer: (answer: AttentionCardAnswer) => void;
   readonly onOption: (option: AttentionAskOption) => void;
-  /** Whether Dismiss is in the ⋯ menu — it is not when an answer already is one (a Skip). */
+  /** Whether "Not needed…" is in the ⋯ menu — it is not when an answer already dismisses (a Skip). */
   readonly dismissInMenu: boolean;
+  /** Dismisses as not needed; the host attaches the message box's text as the reason. */
   readonly onDismiss: () => void;
-  /** Several questions: one "Send answers" button replaces the answers and the reply box. */
+  /** A plain notification: the one action is "Clear". */
+  readonly clear?: () => void;
+  /** Quiet extras in the second row (the full card's "Add to reply"), between `secondaryLead` and the ⋯ menu. */
+  readonly secondaryExtra?: ReactNode;
+  /** The start of the second row (the full card's `‹ 1 of 7 ›`). */
+  readonly secondaryLead?: ReactNode;
+  /** The end of the second row, after the ⋯ menu (the full card's ✕). */
+  readonly secondaryTail?: ReactNode;
+  /** Several questions: one "Send answers" button replaces the answers. */
   readonly sendAnswers?: { readonly ready: boolean; readonly onSend: () => void };
 }
 
@@ -234,29 +232,46 @@ export function AttentionActions({
   swipeHints,
   arrows = swipeHints,
   busy,
+  recommended,
+  recommendationLine,
   waiting,
-  onDiscuss,
   onSkip,
-  reply,
-  onReplyChange,
-  replyOpen,
-  onReplyOpenChange,
-  replyRef,
-  replyIsAnswer,
-  canSendReply,
-  onSendReply,
+  onOpenDetail,
+  composerHint,
   onAnswer,
   onOption,
   dismissInMenu,
   onDismiss,
+  clear,
+  secondaryExtra,
+  secondaryLead,
+  secondaryTail,
   sendAnswers,
 }: AttentionActionsProps) {
-  const replyId = useId();
-  const boxId = useId();
+  const hintId = useId();
   const menu = dismissInMenu ? <ActionMenu busy={busy} onDismiss={onDismiss} /> : null;
   const skip = onSkip === undefined ? null : <SkipButton busy={busy} onSkip={onSkip} />;
-  const discuss =
-    onDiscuss === undefined ? null : <DiscussButton busy={busy} onDiscuss={onDiscuss} swipeHints={swipeHints} />;
+  const details = onOpenDetail === undefined ? null : <DetailsButton onOpen={onOpenDetail} />;
+  const hosted = secondaryLead !== undefined || secondaryExtra !== undefined || secondaryTail !== undefined;
+  const secondary =
+    skip === null && details === null && menu === null && !hosted ? null : (
+      <div className="fy-attn-actions__row fy-attn-actions__row--secondary" data-hosted={hosted || undefined}>
+        {secondaryLead}
+        {skip}
+        {details}
+        {secondaryExtra}
+        {menu}
+        {secondaryTail}
+      </div>
+    );
+  const waitingLine =
+    waiting === undefined ? null : (
+      <p className="fy-attn-actions__waiting m-0 text-meta text-muted" data-attention-waiting="" role="status">
+        <LoaderCircle aria-hidden="true" size={13} />
+        {waiting}
+      </p>
+    );
+
   if (sendAnswers !== undefined) {
     return (
       <div className="fy-attn-actions" data-attention-actions="">
@@ -276,32 +291,45 @@ export function AttentionActions({
             )}
             Send answers
           </button>
-          {discuss}
-          {skip}
-          {menu}
+          {hosted ? null : skip}
+          {hosted ? null : details}
+          {hosted ? null : menu}
         </div>
+        {hosted ? secondary : null}
       </div>
     );
   }
+
   const hasAnswerButtons = answers.length > 0 || extraOptions.length > 0;
   return (
     <div className="fy-attn-actions" data-attention-actions="">
-      {waiting === undefined ? null : (
-        <p className="fy-attn-actions__waiting m-0 text-meta text-muted" data-attention-waiting="" role="status">
-          <LoaderCircle aria-hidden="true" size={13} />
-          {waiting}
-        </p>
+      {waitingLine}
+      {clear === undefined ? null : (
+        <div className="fy-attn-actions__row">
+          <button
+            className="kt-btn fy-attn-actions__send-answers"
+            data-attention-clear=""
+            data-variant="primary"
+            disabled={busy}
+            onClick={clear}
+            type="button"
+          >
+            <Check aria-hidden="true" size={14} />
+            Clear
+          </button>
+        </div>
       )}
       {hasAnswerButtons ? (
         <fieldset aria-label="Answers" className="fy-attn-answers" data-count={answers.length}>
           {answers.map(answer => (
             <AnswerButton
               answer={answer}
+              arrows={arrows}
               busy={busy}
               key={answer.direction}
               onAnswer={onAnswer}
+              recommended={sameLabel(answer.label, recommended)}
               swipeHints={swipeHints}
-              arrows={arrows}
             />
           ))}
         </fieldset>
@@ -310,9 +338,10 @@ export function AttentionActions({
         <fieldset aria-label="More choices" className="fy-attn-extras">
           {extraOptions.map(option => (
             <button
-              aria-describedby={option.description === undefined ? undefined : `${replyId}-${option.label}`}
+              aria-describedby={option.description === undefined ? undefined : `${hintId}-${option.label}`}
               className="kt-btn fy-attn-extra"
               data-attention-option={option.label}
+              data-recommended={sameLabel(option.label, recommended) || undefined}
               disabled={busy}
               key={option.label}
               onClick={() => onOption(option)}
@@ -320,8 +349,9 @@ export function AttentionActions({
               type="button"
             >
               {option.label}
+              {sameLabel(option.label, recommended) ? <RecommendedTag /> : null}
               {option.description === undefined ? null : (
-                <span className="sr-only" id={`${replyId}-${option.label}`}>
+                <span className="sr-only" id={`${hintId}-${option.label}`}>
                   {option.description}
                 </span>
               )}
@@ -329,85 +359,17 @@ export function AttentionActions({
           ))}
         </fieldset>
       )}
-      {!replyIsAnswer ? (
-        <div className="fy-attn-actions__row">
-          <button
-            aria-controls={replyOpen ? boxId : undefined}
-            aria-expanded={replyOpen}
-            className="kt-btn fy-attn-reply-toggle"
-            data-attention-reply-toggle=""
-            disabled={busy}
-            onClick={() => onReplyOpenChange(!replyOpen)}
-            type="button"
-          >
-            <Pencil aria-hidden="true" size={14} />
-            {reply.trim() === '' ? 'Reply…' : 'Reply added'}
-            <ChevronDown
-              aria-hidden="true"
-              className="fy-attn-reply-toggle__chevron"
-              data-open={replyOpen || undefined}
-              size={14}
-            />
-          </button>
-          {discuss}
-          {skip}
-          {menu}
-        </div>
-      ) : null}
-      {replyOpen || replyIsAnswer ? (
-        <form
-          className="fy-attn-actions__row"
-          onSubmit={event => {
-            event.preventDefault();
-            if (replyIsAnswer) onSendReply();
-          }}
-        >
-          <label className="sr-only" htmlFor={boxId}>
-            {replyIsAnswer ? 'Your answer' : 'Reply (optional, sent with your answer)'}
-          </label>
-          <div className="fy-attn-reply">
-            <textarea
-              className="kt-input fy-attn-reply__box"
-              data-attention-reply=""
-              disabled={busy}
-              id={boxId}
-              onChange={event => onReplyChange(event.target.value)}
-              onKeyDown={event => {
-                if (replyIsAnswer && event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-                  event.preventDefault();
-                  onSendReply();
-                }
-              }}
-              placeholder={replyIsAnswer ? 'Write your answer…' : 'Add a note — sent with your answer'}
-              ref={replyRef}
-              rows={3}
-              value={reply}
-            />
-            {replyIsAnswer ? (
-              <button
-                aria-label="Send answer"
-                className="fy-attn-reply__send"
-                data-attention-send=""
-                disabled={busy || !canSendReply}
-                type="submit"
-              >
-                {busy ? (
-                  <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
-                ) : (
-                  <CornerDownLeft size={14} aria-hidden="true" />
-                )}
-              </button>
-            ) : null}
-          </div>
-          {replyIsAnswer ? menu : null}
-        </form>
-      ) : null}
-      {replyIsAnswer && (discuss !== null || skip !== null) ? (
-        <div className="fy-attn-actions__row fy-attn-actions__row--end">
-          {discuss}
-          {skip}
-        </div>
-      ) : null}
+      {recommendationLine === undefined ? null : (
+        <p className="fy-attn-actions__reason m-0" data-attention-recommendation="">
+          {recommendationLine}
+        </p>
+      )}
+      {composerHint === undefined ? null : (
+        <p className="fy-attn-actions__reason m-0" data-attention-composer-hint="">
+          {composerHint}
+        </p>
+      )}
+      {secondary}
     </div>
   );
 }

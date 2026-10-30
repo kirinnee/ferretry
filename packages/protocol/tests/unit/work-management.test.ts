@@ -332,6 +332,17 @@ const attentionCases: SchemaCase[] = [
   { name: 'attention source', schema: attention.AttentionSourceSchema, value: 'agent-raised' },
   { name: 'card kind', schema: attention.AttentionKindSchema, value: 'yesno' },
   { name: 'swipe direction', schema: attention.AttentionDirectionSchema, value: 'up' },
+  { name: 'revisable field', schema: attention.AttentionRevisableFieldSchema, value: 'stillOpen' },
+  {
+    name: 'revision',
+    schema: attention.AttentionRevisionSchema,
+    value: {
+      at: '2026-05-01T10:00:00.000Z',
+      by: 'agent',
+      changed: ['decided', 'stillOpen'],
+      previous: { stillOpen: '- who signs' },
+    },
+  },
   { name: 'answer effect', schema: attention.AttentionAnswerEffectSchema, value: 'needs-info' },
   {
     name: 'card answer',
@@ -417,6 +428,11 @@ const attentionCases: SchemaCase[] = [
     name: 'attention answers on their way',
     schema: attention.AttentionDeliverySchema,
     value: { sending: ['A2'], heldForComposer: true },
+  },
+  {
+    name: 'an agenda field an edit can clear',
+    schema: attention.AttentionClearableFieldSchema,
+    value: 'neededBy',
   },
   {
     name: 'an undelivered retry',
@@ -1198,6 +1214,24 @@ describe('attention schemas', () => {
       },
       { action: 'progress', id: 'A1', step: 0, done: true },
       { action: 'needs-info', id: 'A1' },
+      {
+        action: 'add',
+        notice: true,
+        ping: true,
+        subject: 'CI is green',
+        why: 'The branch builds again.',
+        howToResolve: 'Nothing to do.',
+      },
+      {
+        action: 'add',
+        subject: 'Approve the deploy',
+        why: 'Blocked',
+        howToResolve: 'Reply',
+        blockingNow: true,
+        willBlock: 'the release',
+        neededBy: INSTANT,
+      },
+      { action: 'edit', id: 'A1', willBlock: 'the release', clear: ['blockingNow', 'neededBy'] },
     ];
 
     // Act + Assert
@@ -1234,6 +1268,22 @@ describe('attention schemas', () => {
       ).be.true();
     }
     for (const value of actions) should(attention.AttentionActionRequestSchema.safeParse(value).success).be.true();
+  });
+
+  it('should accept an other answer on a resolved item whose ask offers options, and no other', () => {
+    // Arrange
+    const other = { kind: 'other', answer: 'neither, rewrite it' };
+    const withAsk = (ask: unknown) => ({ ...resolvedAttention, ask, response: other });
+
+    // Act / Assert
+    for (const ask of [
+      { kind: 'multiple-choice', options: [{ label: 'A' }, { label: 'B' }] },
+      { kind: 'permission' },
+      { kind: 'answer-review' },
+    ])
+      should(attention.ResolvedAttentionItemSchema.safeParse(withAsk(ask)).success).be.true();
+    for (const ask of [{ kind: 'open-question' }, { kind: 'task' }, undefined])
+      should(attention.ResolvedAttentionItemSchema.safeParse(withAsk(ask)).success).be.false();
   });
 
   it('should reject ambiguous attention and resolution state', () => {

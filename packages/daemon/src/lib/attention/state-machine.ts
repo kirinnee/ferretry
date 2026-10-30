@@ -2,6 +2,7 @@ import {
   ATTENTION_SCHEMA_VERSION,
   type AttentionAsk,
   type AttentionBrief,
+  type AttentionClearableField,
   type AttentionCardAnswer,
   type AttentionErrorCode,
   type AttentionHistoryEntry,
@@ -9,13 +10,17 @@ import {
   type AttentionItem,
   AttentionItemSchema,
   type AttentionKind,
+  type AttentionRevisableField,
+  type AttentionRevision,
   type AttentionResponse,
   type AttentionSnapshot,
   type AttentionSource,
   type AttentionUndelivered,
   attentionBriefOf,
+  attentionNoticeProblems,
   MAX_ATTENTION_HISTORY,
   MAX_ATTENTION_PER_SESSION,
+  MAX_ATTENTION_REVISIONS,
   MAX_ATTENTION_RESOLUTIONS,
   type ResolvedAttentionItem,
   ResolvedAttentionItemSchema,
@@ -70,6 +75,10 @@ export interface RaiseAttentionRequest extends AttentionBrief, AttentionCardFiel
   readonly waitingSince?: string;
   readonly howToResolve: string;
   readonly ask?: AttentionAsk;
+  /** A plain notification (`fy notify`): kind info, no ask, never a turn. */
+  readonly notice?: true;
+  /** The notice asks the phone to buzz; only a notice can. */
+  readonly ping?: true;
 }
 
 /** The writing an edit may change: never the ask, the kind, the answers, the reason or who raised the item. */
@@ -77,6 +86,8 @@ export interface EditAttentionPatch extends AttentionBrief {
   readonly subject?: string;
   readonly title?: string;
   readonly context?: string | null;
+  /** Agenda fields to take off the item (`--not-blocking`, `--clear-will-block`, `--clear-by`). */
+  readonly clear?: readonly AttentionClearableField[];
 }
 
 export type AttentionCommand =
@@ -139,6 +150,24 @@ export type AttentionCommand =
     }
   | {
       /**
+       * The owner's chat message named this open item (`[re !A5 «title»] …`): it is now the FERRET's turn. Nothing
+       * resolves and nobody is pushed — the message itself is the delivery. Only the owner replies.
+       */
+      readonly action: 'reply';
+      readonly actor: AttentionActor;
+      readonly id: AttentionId;
+      readonly at: string;
+    }
+  | {
+      /** An item leaves discussion for the owner's queue; `why` is the one line kept in its history. */
+      readonly action: 'surface';
+      readonly actor: AttentionActor;
+      readonly id: AttentionId;
+      readonly why?: string | null;
+      readonly at: string;
+    }
+  | {
+      /**
        * The owner's action on an agent-raised item never reached the ferret (docs/attention.md § Delivery):
        * the item is open again, as a card, with what the owner did kept for a retry. `request` names the
        * request for more information or to discuss it that was not delivered; absent for an answer.
@@ -170,6 +199,8 @@ export type AttentionChange =
   | 'progressed'
   | 'needs-info'
   | 'discussing'
+  | 'replied'
+  | 'surfaced'
   | 'info-added'
   | 'reopened'
   | 'answered'
@@ -318,6 +349,10 @@ function applyToLedger(ledger: AttentionLedger, command: AttentionCommand): Atte
       return needsInfo(ledger, command);
     case 'discuss':
       return discuss(ledger, command);
+    case 'reply':
+      return reply(ledger, command);
+    case 'surface':
+      return surface(ledger, command);
     case 'undelivered':
       return undelivered(ledger, command);
     case 'resolve-source':
@@ -331,6 +366,8 @@ type EditCommand = Extract<AttentionCommand, { action: 'edit' }>;
 type ProgressCommand = Extract<AttentionCommand, { action: 'progress' }>;
 type NeedsInfoCommand = Extract<AttentionCommand, { action: 'needs-info' }>;
 type DiscussCommand = Extract<AttentionCommand, { action: 'discuss' }>;
+type ReplyCommand = Extract<AttentionCommand, { action: 'reply' }>;
+type SurfaceCommand = Extract<AttentionCommand, { action: 'surface' }>;
 type ResolveSourceCommand = Extract<AttentionCommand, { action: 'resolve-source' }>;
 type UndeliveredCommand = Extract<AttentionCommand, { action: 'undelivered' }>;
 
@@ -342,7 +379,12 @@ function raise(ledger: AttentionLedger, command: RaiseCommand): AttentionMutatio
   if (request.sourceRef !== null && actor.kind !== 'daemon') {
     return failure('forbidden', 'stable attention source references are reserved for trusted daemon producers');
   }
-  if (request.ask === undefined && request.kind !== 'info' && actor.kind !== 'daemon') {
+  const noticeProblem = attentionNoticeProblems(request)[0];
+  if (noticeProblem !== undefined) return failure('invalid', noticeProblem);
+  if (request.notice === true && actor.kind === 'human') {
+    return failure('forbidden', 'only a ferret or the daemon sends a notice');
+  }
+  if (request.ask === undefined && request.kind !== 'info' && request.notice !== true && actor.kind !== 'daemon') {
     return failure(
       'invalid',
       'human and agent attention must declare a structured ask, or be kind info (something to know, no ask)',
@@ -396,6 +438,9 @@ function raise(ledger: AttentionLedger, command: RaiseCommand): AttentionMutatio
       ...(request.ask === undefined ? {} : { ask: request.ask }),
       ...cardFieldsOf(request),
       ...attentionBriefOf(request),
+      // A new ask is the OWNER's turn: no `waitingOn`. The ferret's turn begins only when the owner replies.
+      ...(request.notice === true ? { notice: true as const } : {}),
+      ...(request.ping === true ? { ping: true as const } : {}),
     },
     actor,
   );
@@ -437,11 +482,19 @@ function refreshStable(
     kind: request.kind,
     answers: request.answers,
     // A refresh replaces the brief whole: a field the new request leaves out is cleared, not kept.
+    premise: request.premise,
+    decided: request.decided,
+    stillOpen: request.stillOpen,
     terms: request.terms,
     questions: request.questions,
     recommendation: request.recommendation,
     impact: request.impact,
     urgency: request.urgency,
+    blockingNow: request.blockingNow,
+    willBlock: request.willBlock,
+    neededBy: request.neededBy,
+    notice: request.notice,
+    ping: request.ping,
     links: request.links,
     steps: request.steps,
     body: request.body,
@@ -600,7 +653,10 @@ function canAddressAttention(actor: AttentionActor, entry: AttentionEntry): bool
 }
 
 function responseMatchesAsk(ask: AttentionAsk | undefined, response: AttentionResponse): boolean {
-  if (ask === undefined || ask.kind !== response.kind) return false;
+  if (ask === undefined) return false;
+  // The owner's own words instead of the options: any ask that offers options takes them.
+  if (response.kind === 'other') return ask.kind !== 'open-question' && ask.kind !== 'task';
+  if (ask.kind !== response.kind) return false;
   if (ask.kind !== 'multiple-choice' || response.kind !== 'multiple-choice') return true;
   return ask.options.some(option => option.label === response.choice);
 }
@@ -612,6 +668,8 @@ function sameRequest(item: AttentionItem, request: RaiseAttentionRequest): boole
     (item.context ?? null) === (request.context ?? null) &&
     item.howToResolve === request.howToResolve &&
     JSON.stringify(item.ask ?? null) === JSON.stringify(request.ask ?? null) &&
+    item.notice === request.notice &&
+    item.ping === request.ping &&
     JSON.stringify(cardFieldsOf(item)) === JSON.stringify(cardFieldsOf(request)) &&
     JSON.stringify(attentionBriefOf(item)) === JSON.stringify(attentionBriefOf(request))
   );
@@ -708,15 +766,21 @@ const EDITABLE_FIELDS = [
   'subject',
   'title',
   'context',
+  'premise',
+  'decided',
+  'stillOpen',
   'terms',
   'questions',
   'recommendation',
   'impact',
   'urgency',
+  'blockingNow',
+  'willBlock',
+  'neededBy',
   'links',
   'steps',
   'body',
-] as const;
+] as const satisfies readonly AttentionRevisableField[];
 
 /** The option labels of each question, in order — what an edit must leave alone to keep the ask true. */
 function questionShape(questions: AttentionBrief['questions']): string {
@@ -725,11 +789,20 @@ function questionShape(questions: AttentionBrief['questions']): string {
   );
 }
 
+/** Whether a patch value says what the item already says; an absent context and a null one are the same. */
+function sameField(left: unknown, right: unknown): boolean {
+  return sortedJson(left ?? null) === sortedJson(right ?? null);
+}
+
 /**
- * Rewords an OPEN item in place. The writing changes (summary, context, terms, question wording,
- * recommendation, impact, urgency, links); the ask, the reason and the raiser do not, and neither does
- * the item's place in line, so an edit never re-notifies. Only whoever may close an item may edit it.
- * Questions keep their count and their options, because the ask was derived from them.
+ * Rewords an OPEN item in place. The writing changes (summary, context, premise, what is decided and still
+ * open, terms, question wording, recommendation, impact, urgency, links); the ask, the reason and the raiser
+ * do not, and neither does the item's place in line, so an edit never re-notifies. Only whoever may close an
+ * item may edit it. Questions keep their count and their options, because the ask was derived from them.
+ *
+ * Every edit that changes something appends ONE revision (who, which fields, what they said before) so the
+ * card can be read as a living summary of its discussion; an edit that changes nothing adds none. An edit of
+ * an item on the FERRET's turn by the ferret hands it back to the owner (`surface` does the same without words); it pings nobody.
  */
 function edit(ledger: AttentionLedger, command: EditCommand): AttentionMutation {
   const target = ledger.entries.filter(isActiveAttention).find(entry => entry.item.id === command.id);
@@ -738,54 +811,63 @@ function edit(ledger: AttentionLedger, command: EditCommand): AttentionMutation 
     return failure('forbidden', 'an agent or daemon may edit only an attention item it raised');
   }
   const patch = command.patch;
-  if (EDITABLE_FIELDS.every(field => patch[field] === undefined)) {
+  const clears = (patch.clear ?? []).filter(field => target.item[field] !== undefined);
+  if (EDITABLE_FIELDS.every(field => patch[field] === undefined) && (patch.clear ?? []).length === 0) {
     return failure('invalid', `nothing to edit: give at least one of ${EDITABLE_FIELDS.join(', ')}`);
   }
   if (patch.questions !== undefined && questionShape(patch.questions) !== questionShape(target.item.questions)) {
     return failure('invalid', 'questions may be reworded but not added, removed or given other options');
   }
+  const changed = EDITABLE_FIELDS.filter(
+    field =>
+      clears.some(cleared => cleared === field) ||
+      (patch[field] !== undefined && !sameField(patch[field], target.item[field])),
+  );
+  // The ferret's edit answers its turn: the item goes back to the owner, whether or not the words changed.
+  const handsBack = target.item.waitingOn !== undefined && command.actor.kind === 'agent';
+  if (changed.length === 0 && !handsBack) return unchanged(ledger);
   const { stepsDone, waitingOn: _waitingOn, askedAt: _askedAt, waitingFor: _waitingFor, ...kept } = target.item;
-  const stepsChanged = patch.steps !== undefined && !sameSteps(target.item.steps, patch.steps);
-  const keepsWaiting = target.item.waitingOn === undefined || command.actor.kind !== 'agent';
-  const item: AttentionItem = {
+  const revision: AttentionRevision = {
+    at: command.at,
+    by: command.actor.kind,
+    changed,
+    previous: Object.fromEntries(
+      changed.flatMap(field => (target.item[field] === undefined ? [] : [[field, target.item[field]]])),
+    ),
+  };
+  const edited: AttentionItem = {
     ...kept,
-    ...(keepsWaiting && target.item.waitingOn !== undefined
+    ...(!handsBack && target.item.waitingOn !== undefined
       ? {
           waitingOn: target.item.waitingOn,
           ...(target.item.askedAt === undefined ? {} : { askedAt: target.item.askedAt }),
           ...(target.item.waitingFor === undefined ? {} : { waitingFor: target.item.waitingFor }),
         }
       : {}),
-    ...(stepsDone === undefined || stepsChanged ? {} : { stepsDone }),
-    ...(patch.subject === undefined ? {} : { subject: patch.subject }),
-    ...(patch.title === undefined ? {} : { title: patch.title }),
-    ...(patch.context === undefined ? {} : { context: patch.context }),
-    ...(patch.terms === undefined ? {} : { terms: patch.terms }),
-    ...(patch.questions === undefined ? {} : { questions: patch.questions }),
-    ...(patch.recommendation === undefined ? {} : { recommendation: patch.recommendation }),
-    ...(patch.impact === undefined ? {} : { impact: patch.impact }),
-    ...(patch.urgency === undefined ? {} : { urgency: patch.urgency }),
-    ...(patch.links === undefined ? {} : { links: patch.links }),
-    ...(patch.steps === undefined ? {} : { steps: patch.steps }),
-    ...(patch.body === undefined ? {} : { body: patch.body }),
+    ...(stepsDone === undefined || changed.includes('steps') ? {} : { stepsDone }),
+    ...Object.fromEntries(
+      changed.map(field => [field, clears.some(cleared => cleared === field) ? undefined : patch[field]]),
+    ),
+    ...(changed.length === 0
+      ? {}
+      : { revisions: [...(target.item.revisions ?? []), revision].slice(-MAX_ATTENTION_REVISIONS) }),
   };
-  const before = keepsWaiting
-    ? target.item
-    : (({ waitingOn: _w, askedAt: _a, waitingFor: _f, ...rest }) => rest)(target.item);
-  if (sortedJson(item) === sortedJson(before)) return unchanged(ledger);
-  // The ferret's edit that answers an open request clears the mark and says so in the history.
-  const answers = !keepsWaiting;
-  const final: AttentionItem = answers
-    ? { ...item, history: withHistory(item.history, { at: command.at, kind: 'updated' }) }
-    : item;
-  return replaceItem(ledger, final, command.at, answers ? 'info-added' : 'refreshed');
+  const final: AttentionItem = handsBack
+    ? { ...edited, history: withHistory(edited.history, { at: command.at, kind: 'updated' }) }
+    : edited;
+  // Only an answer to a request for MORE INFORMATION is `info-added`; a discussion handed back is a plain refresh.
+  const change = handsBack && target.item.waitingFor !== 'discussion' ? 'info-added' : 'refreshed';
+  return replaceItem(ledger, final, command.at, change);
 }
 
 function replaceItem(
   ledger: AttentionLedger,
   item: AttentionItem,
   at: string,
-  change: Extract<AttentionChange, 'refreshed' | 'needs-info' | 'discussing' | 'info-added' | 'reopened'>,
+  change: Extract<
+    AttentionChange,
+    'refreshed' | 'needs-info' | 'discussing' | 'replied' | 'surfaced' | 'info-added' | 'reopened'
+  >,
 ): AttentionMutation {
   const next: AttentionLedger = {
     ...ledger,
@@ -867,6 +949,68 @@ function discuss(ledger: AttentionLedger, command: DiscussCommand): AttentionMut
     history: withHistory(target.item.history, { at: command.at, kind: 'discuss', ...(note === '' ? {} : { note }) }),
   };
   return replaceItem(ledger, item, command.at, 'discussing');
+}
+
+/**
+ * The owner's chat message named an open item: the item is now the FERRET's turn (internally
+ * `waitingOn: 'ferret'`, `waitingFor: 'discussion'`). Nothing resolves, `infoRequests` does not move and
+ * nobody is pushed or messaged by this change — the owner's message is itself what the ferret reads. The
+ * ferret's `edit`, a `surface`, or any closing hands it back. A reply to an item already on the ferret's
+ * turn is no change; one that finds the ferret owing more information turns that wait into a discussion.
+ * Only the owner replies, and only an open item is replied to.
+ */
+function reply(ledger: AttentionLedger, command: ReplyCommand): AttentionMutation {
+  if (command.actor.kind !== 'human') return failure('forbidden', 'only the owner replies to an item');
+  const target = ledger.entries.filter(isActiveAttention).find(entry => entry.item.id === command.id);
+  if (target === undefined) return failure('not-found', `no unresolved attention item ${command.id} in this session`);
+  if (target.item.notice === true) return failure('invalid', 'a notice is read, not replied to');
+  if (target.item.waitingOn !== undefined && target.item.waitingFor === 'discussion') return unchanged(ledger);
+  const { undelivered: _undelivered, ...current } = target.item;
+  const item: AttentionItem = {
+    ...current,
+    waitingOn: 'ferret',
+    askedAt: command.at,
+    waitingFor: 'discussion',
+  };
+  return replaceItem(ledger, item, command.at, 'replied');
+}
+
+/**
+ * An item leaves discussion for the owner's queue: the owner did not answer it in chat. The raising ferret
+ * surfaces it (so does the owner, and the daemon's own timer), and only an open item in discussion moves.
+ * An item already in the queue is left as it is, so surfacing twice is surfacing once; an item that waits on
+ * the ferret for more information is not in discussion, and is answered by editing it.
+ */
+function surface(ledger: AttentionLedger, command: SurfaceCommand): AttentionMutation {
+  const target = ledger.entries.filter(isActiveAttention).find(entry => entry.item.id === command.id);
+  if (target === undefined) {
+    return ledger.entries.some(entry => entry.lifecycle === 'addressed' && entry.item.id === command.id)
+      ? unchanged(ledger)
+      : failure('not-found', `no unresolved attention item ${command.id} in this session`);
+  }
+  // The daemon's resurface timer (`system`) may surface any item; a warden or a source may surface only its own.
+  const allowed =
+    command.actor.kind === 'daemon' && command.actor.cause === 'system'
+      ? true
+      : canAddressAttention(command.actor, target);
+  if (!allowed) {
+    return failure('forbidden', 'only the owner, the ferret that raised an item, or the daemon timer may surface it');
+  }
+  if (target.item.waitingOn === undefined) return unchanged(ledger);
+  if (target.item.waitingFor !== 'discussion') {
+    return failure('invalid', `${command.id} waits on more information, not on a discussion: edit it instead`);
+  }
+  const why = command.why?.trim() ?? '';
+  const { waitingOn: _w, askedAt: _a, waitingFor: _f, ...open } = target.item;
+  const item: AttentionItem = {
+    ...open,
+    history: withHistory(target.item.history, {
+      at: command.at,
+      kind: 'surfaced',
+      ...(why === '' ? {} : { note: why }),
+    }),
+  };
+  return replaceItem(ledger, item, command.at, 'surfaced');
 }
 
 /**

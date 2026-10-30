@@ -22,7 +22,7 @@ describe('attention references', () => {
   it('should reject anything that is not an attention id', () => {
     // Act + Assert
     for (const value of ['', 'A0', 'A', '!B3', 'A3x', '3', '!!A3', 'A03']) {
-      should(() => parseAttentionReference(value)).throw(/is not an attention reference/u);
+      should(() => parseAttentionReference(value)).throw(/is not an agenda reference/u);
     }
   });
 

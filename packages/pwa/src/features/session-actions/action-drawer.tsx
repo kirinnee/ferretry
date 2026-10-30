@@ -23,7 +23,7 @@ export function ActionDrawer({
   onClose,
   children,
 }: {
-  /** The accessible name and the close buttons' label: "Resolved Attention". */
+  /** The accessible name and the close buttons' label: "Resolved in Inbox". */
   readonly title: string;
   /** The visible heading, when it says more than the name: "Resolved · 7". */
   readonly heading?: string;

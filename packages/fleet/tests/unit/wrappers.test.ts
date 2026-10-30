@@ -5,14 +5,15 @@ import { join } from 'node:path';
 import { MAX_ROUTING_PROMPT_CHARS } from '@ferretry/protocol';
 import should from 'should';
 import {
+  AGENDA_INSTRUCTION,
   AGENT_INSTRUCTION,
   AGENT_TOOLS_INSTRUCTION,
-  ATTENTION_INSTRUCTION,
   CLAUDE_NO_QUESTIONS_FLAG,
   CODEX_QUESTIONS_FEATURE,
   fixedLayerFor,
   HYPERMEDIA_INSTRUCTION,
   LESSONS_INSTRUCTION,
+  NOTIFY_INSTRUCTION,
   PACK_INSTRUCTION,
   SET_UP_FERRETRY_INSTRUCTION,
   TOOLS_SERVER_INSTRUCTIONS,
@@ -686,9 +687,10 @@ describe("each ferret's sections of the appended system prompt", () => {
 
     // Act
     const none = prompt({});
-    const off = prompt({ FY_HYPERMEDIA: '0', FY_PACK: '0', FY_LEARNING_PASSIVE: '0' });
+    const off = prompt({ FY_HYPERMEDIA: '0', FY_PACK: '0', FY_AGENDA: '0', FY_LEARNING_PASSIVE: '0' });
     const pack = prompt({ FY_PACK: '1' });
-    const all = prompt({ FY_HYPERMEDIA: '1', FY_PACK: '1', FY_LEARNING_PASSIVE: '1' });
+    const agenda = prompt({ FY_AGENDA: '1' });
+    const all = prompt({ FY_HYPERMEDIA: '1', FY_PACK: '1', FY_AGENDA: '1', FY_LEARNING_PASSIVE: '1' });
 
     // Assert
     should(none).equal(`--append-system-prompt=${BASE}`);
@@ -697,7 +699,11 @@ describe("each ferret's sections of the appended system prompt", () => {
     should(pack).not.containEql('Hypermedia:');
     should(all?.indexOf('\n\nHypermedia:')).be.above(0);
     should(all?.indexOf('\n\nPack mode:')).be.above(all?.indexOf('\n\nHypermedia:') ?? 0);
-    should(all?.indexOf('\n\nLessons:')).be.above(all?.indexOf('\n\nPack mode:') ?? 0);
+    should(all?.indexOf('\n\nAgenda mode:')).be.above(all?.indexOf('\n\nPack mode:') ?? 0);
+    should(all?.indexOf('\n\nLessons:')).be.above(all?.indexOf('\n\nAgenda mode:') ?? 0);
+    should(agenda).startWith(`--append-system-prompt=${BASE}\n\nAgenda mode: `);
+    should(none).not.containEql('Agenda mode:');
+    should(off).not.containEql('Agenda mode:');
     should(all).containEql('`fy lesson suggest');
   });
 
@@ -781,6 +787,7 @@ describe('the appended system prompt of a real agent runtime, for every combinat
   const SWITCHES = [
     { env: 'FY_HYPERMEDIA', text: HYPERMEDIA_INSTRUCTION },
     { env: 'FY_PACK', text: PACK_INSTRUCTION('fy') },
+    { env: 'FY_AGENDA', text: AGENDA_INSTRUCTION('fy') },
     { env: 'FY_LEARNING_PASSIVE', text: LESSONS_INSTRUCTION('fy') },
   ] as const;
   const combinations = Array.from({ length: 2 ** SWITCHES.length }, (_, mask) =>
@@ -822,7 +829,7 @@ describe('the appended system prompt of a real agent runtime, for every combinat
   );
 
   it.each(['claude', 'codex'] as const)(
-    'should give a %s ferret the attention section even with every switch off',
+    'should give a %s ferret the notify rule, and not the agenda, even with every switch off',
     harness => {
       // Arrange
       const env = Object.fromEntries(SWITCHES.map(section => [section.env, '0']));
@@ -838,8 +845,9 @@ describe('the appended system prompt of a real agent runtime, for every combinat
             );
 
       // Assert — the binary is named by the wrapper's own command, never a hard-coded name
-      should(prompt).containEql(ATTENTION_INSTRUCTION('fy'));
-      should(prompt).containEql('`fy attention add --title "<what it is about>" "<the ask>"`');
+      should(prompt).containEql(NOTIFY_INSTRUCTION('fy'));
+      should(prompt).containEql('`fy notify "<summary>" [--body "<detail>"]`');
+      should(prompt).not.containEql('Agenda mode:');
     },
   );
 
@@ -856,21 +864,23 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     const sizes = {
       tools: AGENT_TOOLS_INSTRUCTION.length,
       settings: SET_UP_FERRETRY_INSTRUCTION('fy').length,
-      attention: ATTENTION_INSTRUCTION('fy').length,
+      notify: NOTIFY_INSTRUCTION('fy').length,
       hypermedia: HYPERMEDIA_INSTRUCTION.length,
       pack: PACK_INSTRUCTION('fy').length,
+      agenda: AGENDA_INSTRUCTION('fy').length,
       lessons: LESSONS_INSTRUCTION('fy').length,
     };
 
     // Assert — the whole prompt, every section on and the longest routing prompt as its one `Routing: ` line,
-    // stays under 7.1 KB (docs/pack-mode.md records the sizes: raised from 6.7 KB for Attention's steps and
-    // hypermedia's `chart`)
+    // stays under 7.4 KB (docs/pack-mode.md records the sizes: raised from 6.7 KB for Attention's steps and
+    // hypermedia's `chart`; the notify rule replaced Attention's 1 KB, Agenda mode adds its own section)
     const longestRouting = 1 + 'Routing: '.length + MAX_ROUTING_PROMPT_CHARS;
-    should(Object.values(sizes).reduce((sum, size) => sum + size, 0) + longestRouting).be.below(7_100);
+    should(Object.values(sizes).reduce((sum, size) => sum + size, 0) + longestRouting).be.below(7_400);
     should(sizes.pack).be.below(1_050);
     should(sizes.tools).be.below(1_100);
     should(sizes.settings).be.below(600);
-    should(sizes.attention).be.below(1_050);
+    should(sizes.notify).be.below(450);
+    should(sizes.agenda).be.below(1_300);
   });
 
   it('should tell every ferret to hand the owner a terminal or page, driven as far as it goes, rather than describe the step', () => {

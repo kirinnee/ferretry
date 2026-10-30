@@ -116,6 +116,8 @@ class FakeAttentionDaemon {
           ...(request.kind === undefined ? {} : { kind: request.kind }),
           ...(request.answers === undefined ? {} : { answers: request.answers }),
           ...attentionBriefOf(request),
+          ...(request.notice === true ? { notice: true } : {}),
+          ...(request.ping === true ? { ping: true } : {}),
           raisedBy: 'agent',
           raisedBySession: SESSION,
           raisedByName: null,
@@ -124,7 +126,7 @@ class FakeAttentionDaemon {
       return;
     }
 
-    if (request.action === 'edit' || request.action === 'progress') {
+    if (request.action === 'edit' || request.action === 'progress' || request.action === 'surface') {
       throw new Error(`the fake daemon does not ${request.action} items`);
     }
     const index = this.#items.findIndex(item => item.id === request.id);
@@ -273,7 +275,7 @@ describe(`attention lifecycle (SIT, ${useInProcess ? 'in-process' : 'compiled bi
 
       // Assert
       should(added.code).equal(0, added.err);
-      should(added.out).containEql('attention !A5 recorded');
+      should(added.out).containEql('agenda !A5 recorded');
       should(listed.out).containEql('Approve the OCI work-login plan');
       should(listed.out).containEql('Work login plan');
       should(listed.out).containEql('answers: ← Changes · → Defaults');
@@ -329,18 +331,22 @@ describe(`attention lifecycle (SIT, ${useInProcess ? 'in-process' : 'compiled bi
     should(refused.err).containEql('a card offers at most 3 answers');
   });
 
-  it('raises an info card for a notification and refuses to notify progress', async () => {
+  it('sends a plain notification through the deprecated alias, and pings only when asked', async () => {
     // Act
-    const notified = await cli(['notify', 'the build is green', '--title', 'CI']);
+    const notified = await cli(['notify', 'the build is green']);
+    const pinged = await cli(['notify', 'the deploy needs your login', '--ping']);
     const listed = await cli(['ls']);
-    const refused = await cli(['notify', 'all done', '--kind', 'completed']);
+    const retired = await cli(['notify', 'the build is green', '--title', 'CI']);
 
     // Assert
     should(notified.code).equal(0, notified.err);
-    should(notified.out).containEql('!A7');
-    should(listed.out).containEql('!A7  [agent-raised]  CI');
-    should(listed.out).containEql('answers: → Got it');
-    should(refused.code).not.equal(0);
-    should(refused.err).containEql('progress and finishing never notify the owner');
+    should(notified.out).containEql('Sent.');
+    should(pinged.code).equal(0, pinged.err);
+    should(pinged.out).containEql('their phone buzzes');
+    should(listed.out).containEql('!A7');
+    should(listed.out).containEql('notice: read, not answered');
+    should(listed.out).containEql('notice: read, not answered (pinged)');
+    should(retired.code).not.equal(0);
+    should(retired.err).containEql("unknown option '--title'");
   });
 });

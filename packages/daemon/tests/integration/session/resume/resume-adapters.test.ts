@@ -498,7 +498,7 @@ describe('tmux resume launcher', () => {
     should(told?.sections.map(section => section.id)).deepEqual([
       'tools',
       'settings',
-      'attention',
+      'notify',
       'hypermedia',
       'learning',
     ]);

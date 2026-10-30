@@ -19,7 +19,7 @@ import { z } from 'zod';
 import { type AskFlags, type CardAsk, parseAsk, parseKind, TOO_MANY_ANSWERS } from './ask.ts';
 
 /** The default `howToResolve` when the raiser did not name a concrete action. */
-const DEFAULT_HOW_TO_RESOLVE = 'Answer this item on the attention board (it records who answered).';
+const DEFAULT_HOW_TO_RESOLVE = 'Answer this item on the agenda (it records who answered).';
 
 /** The flags that describe a new item, beside its one-line summary. */
 export interface BriefFlags extends AskFlags {
@@ -33,12 +33,20 @@ export interface BriefFlags extends AskFlags {
   /** One line that describes the `up` answer. */
   readonly upWhy?: string;
   readonly why?: string;
+  /** The ferret is stopped until the owner answers. */
+  readonly blocking?: boolean;
+  /** What this will block, in a few words. */
+  readonly willBlock?: string;
+  /** The instant it is needed by, already read from `--by`. */
+  readonly neededBy?: string;
   /** Repeated: the situation, one point each; more than one becomes bullets. */
   readonly premise?: string | readonly string[];
   /** Repeated: why it matters now, one point each; more than one becomes bullets. */
   readonly context?: string | readonly string[];
   /** Repeated: earlier answers that bear on this, one point each. */
   readonly decided?: string | readonly string[];
+  /** Repeated: what is still open to decide, one point each. */
+  readonly stillOpen?: string | readonly string[];
   readonly resolve?: string;
   /** `TERM=meaning`, repeated. */
   readonly term?: readonly string[];
@@ -76,6 +84,7 @@ const BriefFileSchema = z.strictObject({
   premise: Prose.optional(),
   context: Prose.optional(),
   decided: Prose.optional(),
+  stillOpen: Prose.optional(),
   resolve: z.string().optional(),
   kind: z.string().optional(),
   options: z.array(OptionInput).optional(),
@@ -99,6 +108,9 @@ const BriefFileSchema = z.strictObject({
   links: z.array(LinkInput).optional(),
   steps: z.array(z.string()).optional(),
   body: z.string().optional(),
+  blocking: z.boolean().optional(),
+  willBlock: z.string().optional(),
+  neededBy: z.string().optional(),
 });
 export type BriefFile = z.infer<typeof BriefFileSchema>;
 
@@ -116,7 +128,7 @@ export function parseBriefFile(text: string): BriefFile {
 }
 
 /**
- * Compose the add request one `fy attention add` describes: the words, the flags and, when given, the
+ * Compose the add request one `fy agenda add` describes: the words, the flags and, when given, the
  * JSON body. A flag wins over the same field in the body, so a script can reuse a body and change one
  * thing.
  *
@@ -149,7 +161,11 @@ export function composeAddRequest(
   const premise = prose(flags.premise) ?? prose(file.premise);
   const context = prose(flags.context) ?? prose(file.context);
   const decided = prose(flags.decided) ?? prose(file.decided);
+  const stillOpen = prose(flags.stillOpen) ?? prose(file.stillOpen);
   const body = text(flags.body) ?? text(file.body);
+  const blocking = flags.blocking === true || file.blocking === true;
+  const willBlock = text(flags.willBlock) ?? text(file.willBlock);
+  const neededBy = text(flags.neededBy) ?? text(file.neededBy);
   const answers = defaultAttentionAnswers(
     card.kind,
     ask,
@@ -172,6 +188,7 @@ export function composeAddRequest(
     context: context ?? null,
     ...(premise === undefined ? {} : { premise }),
     ...(decided === undefined ? {} : { decided }),
+    ...(stillOpen === undefined ? {} : { stillOpen }),
     howToResolve: text(flags.resolve) ?? text(file.resolve) ?? DEFAULT_HOW_TO_RESOLVE,
     ...(ask === undefined ? {} : { ask }),
     ...(answers.length === 0 ? {} : { answers }),
@@ -183,6 +200,9 @@ export function composeAddRequest(
     ...(links === undefined || links.length === 0 ? {} : { links }),
     ...(steps === undefined ? {} : { steps }),
     ...(body === undefined ? {} : { body }),
+    ...(blocking ? { blockingNow: true as const } : {}),
+    ...(willBlock === undefined ? {} : { willBlock }),
+    ...(neededBy === undefined ? {} : { neededBy }),
   };
   const parsed = AttentionActionRequestSchema.safeParse(request);
   if (!parsed.success) throw new Error(describeIssues(parsed.error));
@@ -192,7 +212,7 @@ export function composeAddRequest(
 
 function askLineFrom(summary: string | undefined): string {
   if (summary === undefined) {
-    throw new Error('say what you need as words (or --ask), or choose ls, done, dismiss, notify or history');
+    throw new Error('say what you need as words (or --ask), or choose ls, done, dismiss or history');
   }
   const line = summary.replaceAll(/\s+/gu, ' ').trim();
   if (line.length > MAX_ATTENTION_SUBJECT_LENGTH) {
@@ -396,13 +416,15 @@ function describeIssues(error: z.ZodError): string {
     .join('; ');
 }
 
-/** The fields `fy attention edit` may change, as flags. */
+/** The fields `fy agenda edit` may change, as flags. */
 export interface EditFlags {
   readonly title?: string;
   readonly summary?: string;
   readonly premise?: string | readonly string[];
   readonly context?: string | readonly string[];
   readonly decided?: string | readonly string[];
+  /** Repeated: what is still open to decide, one point each. */
+  readonly stillOpen?: string | readonly string[];
   readonly term?: readonly string[];
   /** The new wording of the item's questions, in order — as many as it has. */
   readonly question?: readonly string[];
@@ -415,10 +437,17 @@ export interface EditFlags {
   readonly step?: readonly string[];
   /** The text of `--body-file`: replaces the body. */
   readonly body?: string;
+  readonly blocking?: boolean;
+  readonly notBlocking?: boolean;
+  readonly willBlock?: string;
+  readonly clearWillBlock?: boolean;
+  /** The instant it is needed by, already read from `--by`. */
+  readonly neededBy?: string;
+  readonly clearBy?: boolean;
 }
 
 /**
- * The edit request one `fy attention edit <id>` describes, merged onto the item as it stands: only the
+ * The edit request one `fy agenda edit <id>` describes, merged onto the item as it stands: only the
  * writing changes. New question words replace the old in order and keep each question's options,
  * recommendation and reason, so reading the item again is never needed to reword it.
  */
@@ -432,6 +461,7 @@ export function composeEditRequest(
   const premise = prose(flags.premise);
   const context = prose(flags.context);
   const decided = prose(flags.decided);
+  const stillOpen = prose(flags.stillOpen);
   const impact = prose(flags.impact);
   const urgency = text(flags.urgency);
   const decision = text(flags.recommend);
@@ -440,6 +470,19 @@ export function composeEditRequest(
   const links = flags.link !== undefined && flags.link.length > 0 ? flags.link.map(link) : undefined;
   const steps = stepsFrom(flags.step);
   const body = text(flags.body);
+  const willBlock = text(flags.willBlock);
+  const neededBy = text(flags.neededBy);
+  if (flags.blocking === true && flags.notBlocking === true)
+    throw new Error('--blocking and --not-blocking contradict');
+  if (willBlock !== undefined && flags.clearWillBlock === true) {
+    throw new Error('--will-block and --clear-will-block contradict');
+  }
+  if (neededBy !== undefined && flags.clearBy === true) throw new Error('--by and --clear-by contradict');
+  const clear = [
+    ...(flags.notBlocking === true ? ['blockingNow' as const] : []),
+    ...(flags.clearWillBlock === true ? ['willBlock' as const] : []),
+    ...(flags.clearBy === true ? ['neededBy' as const] : []),
+  ];
   const words = (flags.question ?? []).map(question => question.trim()).filter(question => question !== '');
   if (words.length > 0 && current === undefined) throw new Error(`no unresolved attention item ${id} to reword`);
   const before = current?.questions ?? [];
@@ -458,6 +501,7 @@ export function composeEditRequest(
     ...(premise === undefined ? {} : { premise }),
     ...(context === undefined ? {} : { context }),
     ...(decided === undefined ? {} : { decided }),
+    ...(stillOpen === undefined ? {} : { stillOpen }),
     ...(terms === undefined ? {} : { terms }),
     ...(questions === undefined ? {} : { questions }),
     ...(decision === undefined ? {} : { recommendation: { decision, ...(why === undefined ? {} : { why }) } }),
@@ -466,6 +510,10 @@ export function composeEditRequest(
     ...(links === undefined ? {} : { links }),
     ...(steps === undefined ? {} : { steps }),
     ...(body === undefined ? {} : { body }),
+    ...(flags.blocking === true ? { blockingNow: true as const } : {}),
+    ...(willBlock === undefined ? {} : { willBlock }),
+    ...(neededBy === undefined ? {} : { neededBy }),
+    ...(clear.length === 0 ? {} : { clear }),
   };
   const parsed = AttentionActionRequestSchema.safeParse(request);
   if (!parsed.success) throw new Error(describeIssues(parsed.error));

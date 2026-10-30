@@ -130,10 +130,10 @@ describe('the sessions page with Attention', () => {
     const big = must(view.container.querySelector('[data-session-row="big"]'), 'the busy card');
     expect(big.hasAttribute('data-session-unread')).toBe(true);
     expect(big.querySelector('[data-unread-badge]')?.textContent).toContain('99+');
-    expect(big.querySelector('.sr-only')?.textContent).toBe('150 open Attention items');
+    expect(big.querySelector('.sr-only')?.textContent).toBe('150 open Inbox items');
     expect(big.querySelector('.font-bold')).not.toBeNull();
     const one = must(view.container.querySelector('[data-session-row="one"]'), 'the single-item card');
-    expect(one.querySelector('.sr-only')?.textContent).toBe('1 open Attention item');
+    expect(one.querySelector('.sr-only')?.textContent).toBe('1 open Inbox item');
     const calm = must(view.container.querySelector('[data-session-row="calm"]'), 'the calm card');
     expect(calm.hasAttribute('data-session-unread')).toBe(false);
     expect(calm.querySelector('[data-unread-badge]')).toBeNull();
@@ -157,7 +157,7 @@ describe('the sessions page with Attention', () => {
       const needs = must(view.container.querySelector('[data-needs-you-group]'), 'the Needs you group');
       const link = must(needs.querySelector('a[href*="attention=A6"]'), `the ${density} table link`);
       expect(link.querySelector('[data-unread-badge]')?.textContent).toContain('3');
-      expect(link.querySelector('.sr-only')?.textContent).toBe('3 open Attention items');
+      expect(link.querySelector('.sr-only')?.textContent).toBe('3 open Inbox items');
       expect(needs.querySelector('tr[data-session-unread]')).not.toBeNull();
       await view.unmount();
       view = null;

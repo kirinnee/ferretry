@@ -48,7 +48,7 @@ export interface DirectNotificationSubsystem {
 }
 
 const NOTIFY_KIND_REFUSAL =
-  'progress and finishing never notify the owner — raise an item (fy attention add) only when they must decide or do something';
+  'progress and finishing never notify the owner — raise an item (fy agenda add) only when they must decide or do something';
 
 /**
  * How each domain refusal is reported.
@@ -179,11 +179,13 @@ async function apply(
           ? attention.needsInfo(sessionId, request.id, actor, request.note)
           : request.action === 'discuss'
             ? attention.discuss(sessionId, request.id, actor, request.note)
-            : request.action === 'dismiss'
-              ? attention.dismiss(sessionId, request.id, actor, request.note)
-              : request.response === undefined
-                ? attention.resolve(sessionId, request.id, actor, request.note)
-                : attention.answer(sessionId, request.id, request.response, actor, request.note));
+            : request.action === 'surface'
+              ? attention.surface(sessionId, request.id, actor, request.why)
+              : request.action === 'dismiss'
+                ? attention.dismiss(sessionId, request.id, actor, request.note)
+                : request.response === undefined
+                  ? attention.resolve(sessionId, request.id, actor, request.note)
+                  : attention.answer(sessionId, request.id, request.response, actor, request.note));
   if (!mutation.ok) return refusal(mutation.error);
   const written = mutation.change === 'created' || mutation.change === 'refreshed' || mutation.change === 'info-added';
   const warnings = written && mutation.item !== undefined ? lintAttentionWriting(mutation.item) : [];
@@ -213,8 +215,8 @@ function editPatch(request: Extract<AttentionActionRequest, { action: 'edit' }>)
 }
 
 /**
- * The `info` item an old notify request becomes: its title is the request's own or the start of the text,
- * its ask the text on one line, and the whole text rides in the context when the ask had to be cut.
+ * The notice an old notify request becomes: its title is the request's own or the start of the text,
+ * its subject the text on one line, and the whole text rides in the context when the ask had to be cut.
  */
 function infoRequest(request: DirectNotificationRequest): RaiseAttentionRequest {
   const line = request.body.replaceAll(/\s+/gu, ' ').trim();
@@ -223,11 +225,12 @@ function infoRequest(request: DirectNotificationRequest): RaiseAttentionRequest 
     source: 'agent-raised',
     sourceRef: null,
     kind: 'info',
+    notice: true,
     title: clipAtWord(request.title ?? line, ATTENTION_PUSH_TITLE_LENGTH),
     subject,
     why: 'The ferret sent you a message that needs no decision.',
     ...(subject === line ? {} : { context: request.body.trim() }),
-    howToResolve: 'Read it, then tap Got it.',
+    howToResolve: 'Nothing to do: it is a notice.',
   };
 }
 
@@ -240,7 +243,8 @@ async function notify(
   const actor = attentionActor(context.actor);
   const request = await parseBody(context.request, DirectNotificationRequestSchema);
   if (request.kind !== undefined) return refusal({ code: 'invalid', message: NOTIFY_KIND_REFUSAL });
-  const mutation = await attention.raise(sessionId, infoRequest(request), actor);
+  const sender: AttentionActor = actor.kind === 'human' ? { kind: 'daemon', cause: 'system' } : actor;
+  const mutation = await attention.raise(sessionId, infoRequest(request), sender);
   if (!mutation.ok) return refusal(mutation.error);
   const delivered =
     mutation.change === 'created' && mutation.item !== undefined

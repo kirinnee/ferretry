@@ -85,6 +85,7 @@ import { type SessionDialogSubsystem, sessionDialogRoutes } from './session-dial
 import { type SessionMediaRoot, sessionFilesystemRoutes } from './session-filesystem.ts';
 import { type SessionForkSubsystem, sessionForkRoutes } from './session-fork.ts';
 import { type SessionHandoverSubsystem, sessionHandoverRoutes } from './session-handover.ts';
+import { type SessionAgendaModeSubsystem, sessionAgendaModeRoutes } from './session-agenda-mode.ts';
 import { type SessionHypermediaSubsystem, sessionHypermediaRoutes } from './session-hypermedia.ts';
 import { type SessionMcpSubsystem, sessionMcpRoutes } from './session-mcp.ts';
 import { type SessionMigrateSubsystem, sessionMigrateRoutes } from './session-migrate.ts';
@@ -270,6 +271,8 @@ export interface MountedSubsystems {
   /** Renaming an agent: a new first name, claimed through the same allocator a start uses, and a new
    *  task title. */
   readonly sessionRename: SessionRenameSubsystem;
+  /** Whether a ferret keeps an agenda, from its next launch (docs/agenda.md). */
+  readonly sessionAgendaMode: SessionAgendaModeSubsystem;
   /** Whether a ferret is told it may explain with hypermedia, from its next launch (docs/hypermedia.md). */
   readonly sessionHypermedia: SessionHypermediaSubsystem;
   /** Pack mode: its settings view, recommendations, sub-ferret starts, results and the per-ferret switch (docs/pack-mode.md). */
@@ -579,6 +582,8 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // Same shape and depth as the rename: a one-segment pattern whose final literal (`hypermedia`) no
         // other route uses, so it can neither shadow nor be shadowed.
         ...sessionHypermediaRoutes(subsystems.sessionHypermedia),
+        // `agenda-mode` is a final literal no other one-segment session route uses.
+        ...sessionAgendaModeRoutes(subsystems.sessionAgendaMode),
         // `/v1/pack…` is a prefix no other route uses; the two session paths end in literals (`result`,
         // `pack`) no other one-segment session route uses, so none can shadow or be shadowed.
         ...packRoutes(subsystems.pack),

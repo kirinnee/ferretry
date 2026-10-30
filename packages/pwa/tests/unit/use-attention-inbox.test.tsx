@@ -199,7 +199,7 @@ describe('useAttentionInboxModel', () => {
     expect(calls.filter(call => call.method === 'revalidate').map(call => call.sessionId)).toEqual(['a']);
     expect(read.total).toBe(0);
     expect(read.cards).toEqual([]);
-    expect(read.discussing.map(card => `${card.daemonId}/${card.item.id}`)).toEqual(['studio/A1']);
+    expect(read.withFerret.map(card => `${card.daemonId}/${card.item.id}`)).toEqual(['studio/A1']);
   });
 
   test('sends a held answer to the right machine, by kind, when the window closes', async () => {

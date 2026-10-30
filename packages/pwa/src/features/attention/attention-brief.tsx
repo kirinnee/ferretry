@@ -1,50 +1,118 @@
 /**
  * THE STRUCTURED PART OF AN ATTENTION ITEM, as sections in ONE fixed order, each only when the item has it:
- * Premise · Context · The question · Already decided · Options · Recommendation · Impact · Terms · Steps ·
- * More detail · Links. Every surface draws the same ones (the inbox card, the in-ferret sheet and the board
- * page), so a reader learns one layout.
+ * What's going on (premise) · Why it matters (context) · the questions · Decided so far · Still open · Options · Impact ·
+ * Terms · Steps · More detail · Links. Every surface draws the same ones (the inbox card, the in-ferret sheet
+ * and the board page), so a reader learns one layout.
  *
  * PREMISE AND CONTEXT ARE TWO THINGS. The premise is the situation the item comes out of — what is going
  * on, in point form, so a cold reader starts there. The context is why it matters now. They have their own
- * headings and their own look so they are never read as one block.
+ * headings so they are never read as one block — no tinted boxes, no stripes: a bold sentence-case heading
+ * in the ink colour, and room.
  *
- * Two layouts. The CARD's is open: every section is drawn in full under a small heading, because a card
+ * Two layouts. The CARD's is open: every section is drawn in full under its heading, because a card
  * stands alone and nothing on it hides behind a click (only a long "More detail" is previewed). The
- * BOARD's is collapsible: native `<details>`, closed except the first question.
+ * recommendation is NOT a section there: the answer bar tags the recommended option and says why under the
+ * buttons. The BOARD's is collapsible: native `<details>`, closed except the first question.
  *
  * An item with SEVERAL questions and an open-question ask is answered one answer per question: each
  * question gets its own picker here, and the answers leave together (`composeQuestionAnswers`).
  */
 
-import type { AttentionItem, AttentionLink, AttentionQuestion, AttentionRecommendation } from '@ferretry/protocol';
+import type {
+  AttentionItem,
+  AttentionLink,
+  AttentionQuestion,
+  AttentionRecommendation,
+  AttentionRevisableField as RevisionField,
+} from '@ferretry/protocol';
 import { attentionCardKind, recommendedAttentionOption } from '@ferretry/protocol';
-import { ArrowLeft, ArrowRight, ArrowUp, Check, ChevronRight, ExternalLink } from 'lucide-react';
-import { Fragment, type ReactNode, useId } from 'react';
+import { Check, ChevronRight, ExternalLink } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { bulletPoints, type RevisionHighlight } from '../../lib/attention-revisions.ts';
 
 type AttentionProse = (text: string) => ReactNode;
 
-const POINT = /^\s*[-*•]\s+(\S.*)$/u;
+export { bulletPoints };
 
-/** The points of a text written as bullets (every non-blank line one), or `null` when it is prose. */
-export function bulletPoints(text: string): readonly string[] | null {
-  const lines = text.split(/\r?\n/u).filter(line => line.trim() !== '');
-  const points = lines.map(line => POINT.exec(line)?.[1]?.trim());
-  return lines.length > 0 && points.every(point => point !== undefined) ? (points as string[]) : null;
+const EMPHASIS = /(\*\*[^*\n]+\*\*|\*[^*\s][^*\n]*\*|`[^`\n]+`)/u;
+
+/**
+ * Plain text with its inline emphasis drawn: `**bold**` (a key number), `*italic*` and `code`. Anything
+ * else stays text — React escapes it — so a ferret's point never injects markup.
+ */
+function renderEmphasis(text: string): ReactNode {
+  return text.split(EMPHASIS).map((part, index) => {
+    // biome-ignore lint/suspicious/noArrayIndexKey: the pieces of one line keep their order
+    const key = index;
+    if (part.length > 4 && part.startsWith('**') && part.endsWith('**'))
+      return <strong key={key}>{part.slice(2, -2)}</strong>;
+    if (part.length > 2 && part.startsWith('*') && part.endsWith('*')) return <em key={key}>{part.slice(1, -1)}</em>;
+    if (part.length > 2 && part.startsWith('`') && part.endsWith('`'))
+      return <code key={key}>{part.slice(1, -1)}</code>;
+    return part;
+  });
 }
 
 /** Plain text drawn in point form: a bullet list when it is written as bullets, a paragraph otherwise. */
-export function PointForm({ text, className = '' }: { readonly text: string; readonly className?: string }) {
+export function PointForm({
+  text,
+  className = '',
+  fresh,
+}: {
+  readonly text: string;
+  readonly className?: string;
+  /** Points the last edit added or reworded: drawn highlighted, and said "new" in words. */
+  readonly fresh?: ReadonlySet<string> | undefined;
+}) {
   const points = bulletPoints(text);
-  if (points === null) return <p className={`${className} m-0 whitespace-pre-wrap break-words`.trim()}>{text}</p>;
+  if (points === null)
+    return <p className={`${className} m-0 whitespace-pre-wrap break-words`.trim()}>{renderEmphasis(text)}</p>;
   return (
     <ul className={`fy-attn-points ${className}`.trim()}>
-      {points.map((point, index) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: points repeat; their order is their identity
-        <li key={index}>{point}</li>
-      ))}
+      {points.map((point, index) => {
+        const isNew = fresh?.has(point.trim()) === true;
+        return (
+          // biome-ignore lint/suspicious/noArrayIndexKey: points repeat; their order is their identity
+          <li data-attention-changed={isNew ? 'new' : undefined} key={index}>
+            {isNew ? <NewMarker word="new" /> : null}
+            {renderEmphasis(point)}
+          </li>
+        );
+      })}
     </ul>
   );
 }
+
+/** The small word that says a line is new or changed, so the highlight never rests on colour alone. */
+function NewMarker({ word }: { readonly word: 'new' | 'changed' }) {
+  return <span className="fy-attn-new">{word}</span>;
+}
+
+/** The one plain line under a card's heading, and what is left of the context once it is said. */
+export interface CardLede {
+  readonly line: string | null;
+  /** What "Why it matters" still draws: the context less its lead point, or `null` when nothing is left. */
+  readonly context: string | null;
+}
+
+/**
+ * "Why it matters" as ONE plain line under the heading: the item's own `why` when it adds something, else
+ * the first point of its context (the first bullet, or the first paragraph) — which the section then does
+ * not say again.
+ */
+export const cardLede = (item: Pick<AttentionItem, 'context'>, why: string | null): CardLede => {
+  const context = item.context?.trim() ? item.context : null;
+  if (why !== null) return { line: why, context };
+  if (context === null) return { line: null, context: null };
+  const points = bulletPoints(context);
+  if (points !== null) {
+    const [first = '', ...rest] = points;
+    return { line: first, context: rest.length === 0 ? null : rest.map(point => `- ${point}`).join('\n') };
+  }
+  const [first = '', ...rest] = context.split(/\n\s*\n/u);
+  const left = rest.join('\n\n').trim();
+  return { line: first.trim(), context: left === '' ? null : left };
+};
 
 /** The picks a several-question item collects before "Send answers". */
 interface QuestionAnswers {
@@ -55,12 +123,6 @@ interface QuestionAnswers {
 
 /** The word the badge on a recommended option says; a badge, so the pick never rests on colour alone. */
 const RECOMMENDED_WORD = 'Recommended';
-
-const OPTION_ARROWS: Readonly<Record<'left' | 'up' | 'right', ReactNode>> = {
-  left: <ArrowLeft aria-hidden="true" size={13} />,
-  up: <ArrowUp aria-hidden="true" size={13} />,
-  right: <ArrowRight aria-hidden="true" size={13} />,
-};
 
 function RecommendedBadge() {
   return (
@@ -86,9 +148,12 @@ function Section({
   title,
   fold,
   open = false,
+  changed = false,
   children,
 }: {
   readonly name: string;
+  /** The last edit changed this whole section: it is highlighted and says "changed" in words. */
+  readonly changed?: boolean;
   readonly title: string;
   /** Collapsible (`<details>`) rather than always drawn open. */
   readonly fold: boolean;
@@ -97,17 +162,30 @@ function Section({
 }) {
   if (!fold) {
     return (
-      <div className={`fy-attn-sec fy-attn-sec--open fy-attn-sec--${name}`} data-attention-section={name}>
-        <h4 className="fy-attn-sec__heading">{title}</h4>
+      <div
+        className={`fy-attn-sec fy-attn-sec--open fy-attn-sec--${name}`}
+        data-attention-changed={changed ? 'changed' : undefined}
+        data-attention-section={name}
+      >
+        <h4 className="fy-attn-sec__heading">
+          {title}
+          {changed ? <NewMarker word="changed" /> : null}
+        </h4>
         <div className="fy-attn-sec__body">{children}</div>
       </div>
     );
   }
   return (
-    <details className="fy-attn-sec" data-attention-section={name} open={open}>
+    <details
+      className="fy-attn-sec"
+      data-attention-changed={changed ? 'changed' : undefined}
+      data-attention-section={name}
+      open={open}
+    >
       <summary className="fy-attn-sec__title">
         <ChevronRight aria-hidden="true" className="fy-attn-sec__chevron" size={14} />
         {title}
+        {changed ? <NewMarker word="changed" /> : null}
       </summary>
       <div className="fy-attn-sec__body">{children}</div>
     </details>
@@ -154,10 +232,8 @@ function QuestionPicker({
   readonly index: number;
   readonly picker: QuestionAnswers;
 }) {
-  const textId = useId();
   const answer = picker.answers[index] ?? '';
   const recommended = question.recommended?.trim();
-  const selected = question.options?.some(option => option.label === answer) ?? false;
   return (
     <div className="fy-attn-q__picker">
       {question.options === undefined ? null : (
@@ -183,18 +259,11 @@ function QuestionPicker({
           ))}
         </fieldset>
       )}
-      <label className="sr-only" htmlFor={textId}>
-        {`Your own answer to question ${index + 1}`}
-      </label>
-      <input
-        className="kt-input fy-attn-q__text"
-        disabled={picker.disabled}
-        id={textId}
-        onChange={event => picker.onAnswer(index, event.target.value)}
-        placeholder={question.options === undefined ? 'Your answer…' : 'Or write your own…'}
-        type="text"
-        value={selected ? '' : answer}
-      />
+      {question.options === undefined ? (
+        <p className="fy-attn-q__composer m-0" data-attention-composer-hint="">
+          Answer this one in the message box below.
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -236,7 +305,7 @@ export interface AttentionBriefProps {
   /** Present only when the item is answered one answer per question. */
   readonly picker?: QuestionAnswers;
   /**
-   * Sections fold behind a `<summary>` (the board). `false` draws every section open under a small heading
+   * Sections fold behind a `<summary>` (the board). `false` draws every section open under a bold heading
    * (the card). Default: collapsible.
    */
   readonly collapsible?: boolean;
@@ -247,18 +316,30 @@ export interface AttentionBriefProps {
    * is left out. Several questions, or one answered here (a picker), still draw.
    */
   readonly askShown?: boolean;
-  /** The ask itself, drawn at the head of "The question" — when it is not already the card's title. */
+  /** The ask itself, drawn first — when it is not already the card's heading. */
   readonly ask?: string;
-  /** The item's `why` when it adds something, drawn with the context under "Why it matters now". */
-  readonly why?: string | null;
-  /** What to draw as the recommendation; defaults to the item's own. A lone question's pick goes here. */
+  /**
+   * What the ask is headed with. Absent: the item's own word (a note says what happened, a to-do is something
+   * to do). `null`: no heading — the ask is the first line of the body, as a card that asks reads it.
+   */
+  readonly askLabel?: string | null;
+  /**
+   * What to draw as the recommendation. The folded layout defaults to the item's own; the open layout draws it
+   * only when handed one, because the card's answer bar says it under the options.
+   */
   readonly recommendation?: AttentionRecommendation | undefined;
-  /** Which way each option swipes, by label: the card draws it as an arrow in front of the option. */
-  readonly optionDirections?: Readonly<Record<string, 'left' | 'up' | 'right'>>;
   /** The steps checklist, drawn under "Steps". */
   readonly steps?: ReactNode;
   /** The body, drawn under "More detail" — the one section that may start folded. */
   readonly detail?: ReactNode;
+  /**
+   * Which half to draw. `card`: only what the minimal card needs (the ask when it is not the heading, the
+   * per-question pickers, a recommendation handed in). `detail`: everything else — what the item knows beyond
+   * its question. Default `all`: the board's folded brief.
+   */
+  readonly part?: 'all' | 'card' | 'detail';
+  /** What the last edit changed: its new points and changed sections are marked. */
+  readonly highlight?: RevisionHighlight;
 }
 
 /** The options of a choice, when at least one says what happens if it is picked: the point of listing them. */
@@ -280,43 +361,80 @@ export function AttentionBriefSections({
   expanded = false,
   askShown = false,
   ask,
-  why = null,
-  recommendation = item.recommendation,
-  optionDirections,
+  askLabel,
+  recommendation: given,
   steps,
   detail,
+  part = 'all',
+  highlight,
 }: AttentionBriefProps) {
   const fold = collapsible;
   const open = expanded || !collapsible;
-  const premise = item.premise?.trim() ? item.premise : null;
-  const decided = item.decided?.trim() ? item.decided : null;
-  const context = item.context?.trim() ? item.context : null;
+  const asCard = part === 'card';
+  const asDetail = part === 'detail';
+  const premise = !asCard && item.premise?.trim() ? item.premise : null;
+  const decided = !asCard && item.decided?.trim() ? item.decided : null;
+  const context = !asCard && item.context?.trim() ? item.context : null;
+  const stillOpen = !asCard && item.stillOpen?.trim() ? item.stillOpen : null;
+  const changedWhole = (...fields: readonly RevisionField[]): boolean =>
+    fields.some(field => highlight?.fields.has(field) === true);
   const all = item.questions ?? [];
   const several = all.length > 1;
-  const questions = askShown && !several && picker === undefined ? [] : all;
-  const options = describedOptions(item, several);
+  const questions =
+    asDetail || (askShown && !several && picker === undefined) || (asCard && picker === undefined) ? [] : all;
+  const options = asCard ? [] : describedOptions(item, several);
   const pick = recommendedAttentionOption(item);
-  const termsLine = item.terms ?? null;
+  const termsLine = asCard ? null : (item.terms ?? null);
+  // The board folds the item's own recommendation. A card's answer bar says it under the options, so a card
+  // draws a section only when it is handed one — the per-question card, whose bar has no options to tag.
+  const recommendation = asDetail ? undefined : (given ?? (fold ? item.recommendation : undefined));
+  const heading = askLabel === undefined ? askHeading(item, several) : askLabel;
   return (
     <div className="fy-attn-secs" data-layout={fold ? 'fold' : 'open'}>
+      {asDetail || ask === undefined || heading !== null ? null : (
+        <p className="fy-attn-card__ask" data-attention-ask="">
+          {ask}
+        </p>
+      )}
       {premise === null ? null : (
-        <Section fold={fold} name="premise" open={open} title={fold ? "What's going on" : 'Premise'}>
-          <PointForm className="fy-attn-prose" text={premise} />
+        <Section changed={changedWhole('premise')} fold={fold} name="premise" open={open} title="What's going on">
+          <PointForm className="fy-attn-prose" fresh={highlight?.points.premise} text={premise} />
         </Section>
       )}
-      {context === null && why === null ? null : (
-        <Section fold={fold} name="context" open={open} title="Context">
-          {why === null ? null : (
-            <div className="fy-attn-prose" data-attention-why="">
-              {renderProse(why)}
-            </div>
+      {context === null ? null : (
+        <Section
+          changed={changedWhole('context', 'why')}
+          fold={fold}
+          name="context"
+          open={open}
+          title={fold ? 'Context' : 'Why it matters'}
+        >
+          {highlight?.points.context === undefined ? (
+            <div className="fy-attn-prose">{renderProse(context)}</div>
+          ) : (
+            <PointForm className="fy-attn-prose" fresh={highlight.points.context} text={context} />
           )}
-          {context === null ? null : <div className="fy-attn-prose">{renderProse(context)}</div>}
         </Section>
       )}
-      {ask === undefined && questions.length === 0 ? null : (
-        <Section fold={fold} name="questions" open title={askHeading(item, several)}>
-          {ask === undefined ? null : (
+      {decided === null ? null : (
+        <Section
+          changed={changedWhole('decided')}
+          fold={fold}
+          name="decided"
+          open={open}
+          title={fold ? 'Already decided' : 'Decided so far'}
+        >
+          <PointForm className="fy-attn-prose" fresh={highlight?.points.decided} text={decided} />
+        </Section>
+      )}
+      {stillOpen === null ? null : (
+        <Section changed={changedWhole('stillOpen')} fold={fold} name="still-open" open={open} title="Still open">
+          <PointForm className="fy-attn-prose" fresh={highlight?.points.stillOpen} text={stillOpen} />
+        </Section>
+      )}
+      {asDetail || ((ask === undefined || heading === null) && questions.length === 0) ? null : (
+        <Section fold={fold} name="questions" open title={heading ?? askHeading(item, several)}>
+          {ask === undefined || heading === null ? null : (
             <p className="fy-attn-card__ask" data-attention-ask="">
               {ask}
             </p>
@@ -361,40 +479,25 @@ export function AttentionBriefSections({
           )}
         </Section>
       )}
-      {decided === null ? null : (
-        <Section fold={fold} name="decided" open={open} title="Already decided">
-          <PointForm className="fy-attn-prose" text={decided} />
-        </Section>
-      )}
       {options.length === 0 ? null : (
         <Section fold={fold} name="options" open={open} title="Options">
           <ul className="fy-attn-options">
-            {options.map(option => {
-              const direction = optionDirections?.[option.label.trim()];
-              return (
-                <li className="fy-attn-options__row" data-attention-option-detail={option.label} key={option.label}>
-                  {direction === undefined || fold ? null : (
-                    <span className="fy-attn-options__arrow" data-direction={direction}>
-                      {OPTION_ARROWS[direction]}
-                    </span>
+            {options.map(option => (
+              <li className="fy-attn-options__row" data-attention-option-detail={option.label} key={option.label}>
+                <span className="fy-attn-options__text">
+                  <strong>{option.label}</strong>
+                  {option.description === undefined ? null : (
+                    <span className="fy-attn-options__what"> — {option.description}</span>
                   )}
-                  <span className="fy-attn-options__text">
-                    <strong>{option.label}</strong>
-                    {option.description === undefined ? null : (
-                      <span className="fy-attn-options__what"> — {option.description}</span>
-                    )}
-                    {pick === option.label.trim() && (fold || recommendation === undefined) ? (
-                      <RecommendedBadge />
-                    ) : null}
-                  </span>
-                </li>
-              );
-            })}
+                  {pick === option.label.trim() ? <RecommendedBadge /> : null}
+                </span>
+              </li>
+            ))}
           </ul>
         </Section>
       )}
       {recommendation === undefined ? null : (
-        <Section fold={fold} name="recommendation" open={open} title={fold ? 'Recommendation' : 'Recommended'}>
+        <Section fold={fold} name="recommendation" open={open} title="Recommendation">
           <p className="fy-attn-card__rec" data-attention-recommendation="">
             <RecommendedBadge />
             <span>
@@ -404,7 +507,7 @@ export function AttentionBriefSections({
           </p>
         </Section>
       )}
-      {item.impact === undefined && item.urgency === undefined ? null : (
+      {asCard || (item.impact === undefined && item.urgency === undefined) ? null : (
         <Section fold={fold} name="impact" open={open} title="Impact">
           {item.impact === undefined ? null : <PointForm className="fy-attn-prose" text={item.impact} />}
           {item.urgency === undefined ? null : (
@@ -412,11 +515,6 @@ export function AttentionBriefSections({
               <strong>Urgency:</strong> {item.urgency}
             </p>
           )}
-        </Section>
-      )}
-      {steps === undefined ? null : (
-        <Section fold={fold} name="steps" open={open} title="Steps">
-          {steps}
         </Section>
       )}
       {termsLine === null ? null : (
@@ -431,25 +529,36 @@ export function AttentionBriefSections({
               ))}
             </dl>
           ) : (
-            <p className="fy-attn-terms-line" data-attention-terms-line="">
-              {termsLine.map((entry, index) => (
-                <Fragment key={entry.term}>
-                  {index === 0 ? null : <span aria-hidden="true"> · </span>}
-                  <span className="fy-attn-terms-line__item">
-                    <strong>{entry.term}</strong> = {entry.meaning}
-                  </span>
-                </Fragment>
-              ))}
-            </p>
+            <table className="fy-attn-terms-table" data-attention-terms="">
+              <thead className="sr-only">
+                <tr>
+                  <th scope="col">Term</th>
+                  <th scope="col">Meaning</th>
+                </tr>
+              </thead>
+              <tbody>
+                {termsLine.map(entry => (
+                  <tr key={entry.term}>
+                    <th scope="row">{entry.term}</th>
+                    <td>{entry.meaning}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           )}
         </Section>
       )}
-      {detail === undefined ? null : (
+      {asCard || steps === undefined ? null : (
+        <Section fold={fold} name="steps" open={open} title="Steps">
+          {steps}
+        </Section>
+      )}
+      {asCard || detail === undefined ? null : (
         <Section fold={fold} name="more" open={open} title="More detail">
           {detail}
         </Section>
       )}
-      {item.links === undefined ? null : (
+      {asCard || item.links === undefined ? null : (
         <Section fold={fold} name="links" open={open} title={fold ? `Links (${item.links.length})` : 'Links'}>
           <ul className="fy-attn-links">
             {item.links.map(link => (

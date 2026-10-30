@@ -1,4 +1,4 @@
-import { HYPERMEDIA_ENV, PACK_ENV, PASSIVE_LEARNING_ENV, SESSION_MODE_ENV } from '@ferretry/fleet';
+import { AGENDA_ENV, HYPERMEDIA_ENV, PACK_ENV, PASSIVE_LEARNING_ENV, SESSION_MODE_ENV } from '@ferretry/fleet';
 
 /**
  * WHICH OF ITS OWN SECTIONS A FERRET LAUNCHED WITH (docs/hypermedia.md), read from the launch environment
@@ -11,7 +11,7 @@ import { HYPERMEDIA_ENV, PACK_ENV, PASSIVE_LEARNING_ENV, SESSION_MODE_ENV } from
 
 /** One per-ferret section, in the order the wrapper appends them. */
 interface InstructionSection {
-  readonly id: 'hypermedia' | 'pack' | 'lessons';
+  readonly id: 'hypermedia' | 'pack' | 'agenda' | 'lessons';
   readonly label: string;
   readonly on: boolean;
   /** How the owner turns it on; `undefined` when it already is. */
@@ -41,6 +41,7 @@ const SECTIONS = [
     action: 'Pack mode',
     also: ' Settings › Pack mode, the machine’s switch, must be on too.',
   },
+  { id: 'agenda', label: 'Agenda mode', env: AGENDA_ENV, action: 'Agenda mode', also: '' },
   { id: 'lessons', label: 'Lessons', env: PASSIVE_LEARNING_ENV, action: 'Passive learning', also: '' },
 ] as const;
 

@@ -5,6 +5,7 @@ import {
   connectionPickerPath,
   daemonAnalyticsPath,
   daemonAnalyticsQueryPath,
+  daemonAttentionPath,
   daemonImportedHistoryPath,
   daemonLearningPath,
   daemonMachineSetupPath,
@@ -300,5 +301,20 @@ describe('the Analytics Query address', () => {
     should(daemonAnalyticsQueryPath(daemonId('daemon-b'), ' sum(cost_usd) by (model) [7d] ')).equal(
       '/d/daemon-b/analytics/query?q=sum(cost_usd)%20by%20(model)%20%5B7d%5D',
     );
+  });
+});
+
+describe('the Inbox route', () => {
+  it('makes /inbox canonical and keeps /attention as a redirect to it', () => {
+    const canonical = parseRoute('/d/daemon-b/inbox');
+    const legacy = parseRoute('/d/daemon-b/attention');
+
+    should(daemonAttentionPath(daemonB)).equal('/d/daemon-b/inbox');
+    should(canonical).deepEqual({ kind: 'attention', daemonId: daemonB });
+    should(legacy).deepEqual({
+      kind: 'legacy-attention-redirect',
+      to: { kind: 'attention', daemonId: daemonB },
+    });
+    should([routePath(legacy), routePageKey(legacy)]).deepEqual(['/d/daemon-b/inbox', routePageKey(canonical)]);
   });
 });

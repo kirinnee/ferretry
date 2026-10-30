@@ -2297,6 +2297,15 @@ describe('AppShell', () => {
     try {
       const { store, view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId], {
         transcript: 'assistant/message: Review !A3 before continuing.',
+        sessionState: {
+          attention: {
+            open: 1,
+            first: 'A3',
+            ask: 'permission',
+            latestAt: '2026-07-31T11:30:00.000Z',
+            agendaMode: true,
+          },
+        },
         attention: sessionId => {
           attentionReads += 1;
           return attentionSnapshot(sessionId, items);
@@ -2310,8 +2319,9 @@ describe('AppShell', () => {
         await settleUntil(() => store.attention.store.status(scope) === 'ready', 'the first board read', interact);
         expect(store.attention.store.status(scope)).toBe('ready');
         expect(store.attention.store.count(scope)).toBe(0);
-        // Nothing waiting: no pinned "Needs you" block.
+        // Nothing waiting: no agenda line.
         expect(view.container.querySelector('[data-attention-card]')).toBeNull();
+        expect(view.container.querySelector('[data-agenda-line]')).toBeNull();
         expect(view.container.querySelector('button[data-needs-you]')).toBeNull();
         expect(view.container.querySelector('[data-fy-reference="attention:A3"]')).toBeNull();
 
@@ -2322,13 +2332,10 @@ describe('AppShell', () => {
         expect(attentionReads).toBeGreaterThan(initialAttentionReads);
         expect(store.attention.store.count(scope)).toBe(1);
 
-        // The item is pinned above the composer, never a second chip in the header.
-        const pinned = must(
-          view.container.querySelector<HTMLElement>('[data-attention-panel] [data-attention-card]'),
-          'the refreshed pinned "Needs you" item',
-        );
-        expect(pinned.getAttribute('data-pinned')).toBe('true');
-        expect(view.container.querySelector('section[aria-label="Needs you"][data-attention-panel]')).not.toBeNull();
+        // The item is one line above the composer, never a second chip in the header.
+        const line = must(view.container.querySelector<HTMLElement>('[data-agenda-line]'), 'the refreshed agenda line');
+        expect(line.textContent).toContain('1 need you');
+        expect(line.getAttribute('data-composer-status')).toBe('agenda');
         expect(view.container.querySelector('button[data-needs-you]')).toBeNull();
         expect(view.container.querySelector('[data-fy-reference="attention:A3"]')?.textContent).toBe('!A3');
       } finally {
@@ -2340,42 +2347,57 @@ describe('AppShell', () => {
     }
   });
 
-  it('mounts the selected item as its card beside the inbox, with no chat around it', async () => {
-    const posts: string[] = [];
+  it('lists the item under its ferret in the inbox as a link into that ferret’s chat at the item', async () => {
     const todo = { ...externalAttentionItem, ask: { kind: 'task' }, steps: ['Plug the key in', 'Approve it'] };
-    const { view } = await renderShell(`/d/${ALPHA}/attention`, [alpha.daemonId], {
+    const { view } = await renderShell(`/d/${ALPHA}/inbox`, [alpha.daemonId], {
       sessions: ['shared'],
       listedAttention: { open: 1, first: 'A3', ask: 'task', latestAt: '2026-07-31T11:30:00.000Z' },
       sessionState: { attention: { open: 1, first: 'A3', ask: 'task', latestAt: '2026-07-31T11:30:00.000Z' } },
       attention: sessionId => attentionSnapshot(sessionId, [todo as typeof externalAttentionItem]),
-      attentionPosts: posts,
+    });
+    try {
+      for (let turn = 0; turn < 6; turn += 1) await settle();
+      const row = must(view.container.querySelector<HTMLAnchorElement>('[data-attention-row]'), 'the item row');
+      expect(row.getAttribute('href')).toBe(`/d/${ALPHA}/session/shared?attention=A3`);
+      expect(view.container.querySelector('[data-attention-pane]')).toBeNull();
+      expect(view.container.querySelector('[data-attention-chat]')).toBeNull();
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('reads the ferret’s last messages for the phone deck through the machine the item came from', async () => {
+    const restore = patchGlobal(window, 'innerWidth', 390);
+    const { view } = await renderShell(`/d/${ALPHA}/inbox`, [alpha.daemonId], {
+      sessions: ['shared'],
+      listedAttention: { open: 1, first: 'A3', ask: 'permission', latestAt: '2026-07-31T11:30:00.000Z' },
+      sessionState: { attention: { open: 1, first: 'A3', ask: 'permission', latestAt: '2026-07-31T11:30:00.000Z' } },
+      attention: sessionId => attentionSnapshot(sessionId, [externalAttentionItem]),
       messages: () => [
-        { role: 'assistant', text: 'Paired the laptop.' },
-        { role: 'user', text: 'ok' },
-        { role: 'assistant', text: 'Raised !A3 for the key.' },
+        { role: 'user', text: 'Can you rotate the key?' },
+        { role: 'assistant', text: 'Rotated; waiting on your approval.' },
       ],
     });
     try {
       for (let turn = 0; turn < 6; turn += 1) await settle();
-      const pane = must(view.container.querySelector<HTMLElement>('[data-attention-pane]'), 'the card pane');
-      expect(pane.querySelector('[data-attention-card]')?.getAttribute('data-attention-card')).toBe('A3');
-      expect(view.container.querySelector('[data-attention-chat]')).toBeNull();
-      // The fold reads the ferret's own words through the session messages route.
-      await interact(() =>
-        must(pane.querySelector<HTMLButtonElement>('[data-attention-recent-toggle]'), 'the fold').click(),
+      const quick = must(view.container.querySelector<HTMLButtonElement>('[data-attention-quick]'), 'Answer quickly');
+      await interact(() => quick.click());
+      await settle();
+      const toggle = must(
+        view.container.querySelector<HTMLButtonElement>('[data-attention-recent-toggle]'),
+        'the last-messages fold',
       );
+      await interact(() => toggle.click());
       for (let turn = 0; turn < 4; turn += 1) await settle();
-      expect([...pane.querySelectorAll('[data-attention-recent-message]')].map(message => message.textContent)).toEqual(
-        ['Paired the laptop.', 'Raised !A3 for the key.'],
-      );
-      // A step ticks on the machine the card came from.
-      await interact(() =>
-        must(pane.querySelector<HTMLInputElement>('input[type="checkbox"]'), 'the first step').click(),
-      );
-      for (let turn = 0; turn < 4; turn += 1) await settle();
-      expect(posts.some(post => post.startsWith('shared:') && post.includes('"progress"'))).toBe(true);
+      const shown = Array.from(
+        view.container.querySelectorAll('[data-attention-recent-message]'),
+        node => node.textContent ?? '',
+      ).join('\n');
+      expect(shown).toContain('Rotated; waiting on your approval.');
+      expect(shown).not.toContain('Can you rotate the key?');
     } finally {
       await view.unmount();
+      restore();
     }
   });
 
@@ -2412,7 +2434,7 @@ describe('AppShell', () => {
       [`/d/${ALPHA}/warden`, 'Sessions, Warden'],
       [`/d/${ALPHA}/analytics`, 'Sessions, Analytics'],
       [`/d/${ALPHA}/learning`, 'Sessions, Learning'],
-      [`/d/${ALPHA}/attention`, 'Sessions, Attention'],
+      [`/d/${ALPHA}/inbox`, 'Sessions, Inbox'],
       [`/d/${ALPHA}/history`, 'Sessions, Imported history'],
       [`/d/${ALPHA}/session/one`, 'Sessions, one'],
     ] as const) {

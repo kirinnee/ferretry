@@ -17,20 +17,16 @@ import {
   DISMISS_ACTION,
   DONE_ACTION,
   directionOfAction,
-  discussingCards,
-  discussingSessions,
   historyLine,
   type InboxCard,
   inboxCardKey,
   inboxCards,
   inboxOptions,
   inboxResolved,
-  isInDiscussion,
   NEEDS_INFO_ACTION,
   needsYouCount,
   needsYouItems,
   RESOLVED_READ_LIMIT,
-  replyAction,
   SWIPE_SLOP_PX,
   sessionAttention,
   sessionsToReadForResolved,
@@ -42,7 +38,8 @@ import {
   unreadSessions,
   unreadTotal,
   updatedSinceAsked,
-  waitingSentence,
+  withFerretCards,
+  withFerretSessions,
 } from '../../src/lib/attention-inbox.ts';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
 import { sessionView } from '../support/sessions.ts';
@@ -244,25 +241,6 @@ describe('swipes', () => {
 });
 
 describe('replies', () => {
-  test('an open question takes the text as its answer', () => {
-    expect(replyAction({ ask: { kind: 'open-question' } }, '  ship it ')).toMatchObject({
-      kind: 'respond',
-      response: { kind: 'open-question', answer: 'ship it' },
-    });
-  });
-
-  test('a review takes it as the clarification, every other kind as a Done note', () => {
-    expect(replyAction({ ask: { kind: 'answer-review' } }, 'why?')).toMatchObject({
-      response: { kind: 'answer-review', verdict: 'clarify', clarification: 'why?' },
-    });
-    expect(replyAction({ ask: choice('A', 'B') }, 'neither')).toEqual({
-      kind: 'resolve',
-      label: 'Reply',
-      note: 'neither',
-    });
-    expect(replyAction({}, '   ')).toBeNull();
-  });
-
   test('says what it is holding', () => {
     expect(actionSentence(DISMISS_ACTION, 'A3')).toBe('Dismissed !A3');
     expect(actionSentence(DONE_ACTION, 'A3')).toBe('Marked !A3 done');
@@ -297,42 +275,22 @@ describe('an item the ferret edited after being asked', () => {
 describe('Discuss', () => {
   const agent = { raisedBy: 'agent' as const };
 
-  test('is the fixed down swipe of a ferret-raised card, never one of its three answers', () => {
+  test('has no down swipe, even on a ferret-raised card: three answers at most', () => {
     const map = swipeMap(card({ ...agent, ask: choice('A', 'B', 'C') }));
-    expect(Object.keys(map).sort()).toEqual(['down', 'left', 'right', 'up']);
-    expect(map.down).toEqual({ kind: 'discuss', label: 'Discuss' });
-    expect(swipeMap(card({ ...agent, ask: { kind: 'open-question' } }))).toEqual({
-      down: { kind: 'discuss', label: 'Discuss' },
-    });
-    expect(swipeMap(card({ raisedBy: 'human', ask: choice('A', 'B') })).down).toBeUndefined();
+    expect(Object.keys(map).sort()).toEqual(['left', 'right', 'up']);
+    expect(swipeMap(card({ ...agent, ask: { kind: 'open-question' } }))).toEqual({});
   });
 
-  test('commits a deliberate downward drag, and only where the card can discuss', () => {
+  test('reads a drag down as nothing, never committing it', () => {
     expect(swipeIntent(0, 200, 360, swipeMap(card({ ...agent })))).toMatchObject({
-      direction: 'down',
-      committed: true,
-    });
-    expect(swipeIntent(0, 200, 360, swipeMap(card({ raisedBy: 'human' })))).toMatchObject({
-      direction: 'down',
+      direction: null,
       committed: false,
     });
     expect(swipeIntent(0, 5, 360, swipeMap(card({ ...agent }))).direction).toBeNull();
   });
 
-  test('finds the discuss action in the map, and says what is being held', () => {
-    const map = swipeMap(card({ ...agent }));
-    expect(directionOfAction(map, { kind: 'discuss', label: 'Discuss', note: 'why?' })).toBe('down');
+  test('still says what an old discuss held, for an answer that was in flight', () => {
     expect(actionSentence({ kind: 'discuss', label: 'Discuss' }, 'A3')).toBe('Asked to discuss !A3');
-  });
-
-  test('reads "In discussion" with or without the ferret, and "Waiting on" otherwise', () => {
-    const discussing = { waitingOn: 'ferret', waitingFor: 'discussion' } as const;
-    expect(isInDiscussion(discussing)).toBe(true);
-    expect(isInDiscussion({ waitingOn: 'ferret', waitingFor: 'info' })).toBe(false);
-    expect(waitingSentence(discussing)).toBe('In discussion');
-    expect(waitingSentence(discussing, 'Piper')).toBe('In discussion with Piper');
-    expect(waitingSentence({ waitingOn: 'ferret', waitingFor: 'info' }, 'Piper')).toBe('Waiting on Piper');
-    expect(waitingSentence({ waitingOn: 'ferret' })).toBe('Waiting on the ferret');
   });
 
   test('puts "You asked to discuss" in the history line', () => {
@@ -558,7 +516,7 @@ describe('items in discussion', () => {
       ['s', 'A1'],
     ]);
     expect(
-      discussingCards(discussingSessions(sources), boardFor).map(card => [card.view.config.id, card.item.id]),
+      withFerretCards(withFerretSessions(sources), boardFor).map(card => [card.view.config.id, card.item.id]),
     ).toEqual([
       ['s', 'A2'],
       ['only', 'A1'],
@@ -585,7 +543,7 @@ describe('items in discussion', () => {
   });
 
   test('should list the sessions that hold a discussion, whether or not they also need the owner', () => {
-    expect(discussingSessions(sources).map(entry => entry.view.config.id)).toEqual(['s', 'only']);
+    expect(withFerretSessions(sources).map(entry => entry.view.config.id)).toEqual(['s', 'only']);
   });
 
   test('should move the summary key when a discussion starts or ends', () => {

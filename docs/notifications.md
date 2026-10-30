@@ -1,0 +1,234 @@
+# Notifications
+
+How a ferret tells the owner something, and exactly when the owner's phone buzzes.
+
+Two rules carry everything here:
+
+- **The Inbox is the owner's channel; the phone is the exception.** Everything a ferret sends lands in the
+  Inbox and moves its badge. The phone buzzes only at the three moments in [When the phone buzzes](#when-the-phone-buzzes).
+- **Every ferret gets the notify rule; only some keep an agenda.** Plain notices are for everyone.
+  Agenda items — things only the owner can decide or do — are for ferrets in
+  [agenda mode](#agenda-mode). The agenda itself is [agenda.md](agenda.md).
+
+## `fy notify`
+
+```
+fy notify "<summary>" [--body "<markdown>"] [--ping]
+```
+
+Tells the owner one thing: a result, a blocker, a decision the ferret made for them. It raises a **notice**
+on the ferret's board (`notice: true`, see [agenda.md § Notices](agenda.md#notices)): no ask, no answers,
+nobody's turn. The summary is the whole notification; `--body` is the longer reading behind it.
+
+- A notice only moves the **Inbox badge**. It clears when the owner reads it.
+- `--ping` ALSO buzzes the phone, once. It is for the rare notice that cannot wait for the Inbox.
+- Progress and finishing are never notices. A ferret that is only waiting, or has just finished, tells nobody.
+- `fy attention notify` is the same command under its old name (deprecated, like the rest of `fy attention`).
+- A notice's summary cannot be exactly `agenda`: `fy notify agenda` is the mode switch below.
+- The legacy `POST /v1/sessions/:id/notify` route raises the same notice, as the daemon's own act when the
+  caller is a person.
+
+Every ferret is told this rule, whatever its mode (`NOTIFY_INSTRUCTION` in `@ferretry/fleet`, quoted
+verbatim; `fy` is the binary name):
+
+> Notify: the owner reads the Inbox, not your replies. To tell them something worth their time (a result, a blocker, a decision you made for them) run `fy notify "<summary>" [--body "<detail>"]`: a quiet Inbox notice. Add `--ping` only when it must reach their phone now. Never notify progress or chatter.
+
+## When the phone buzzes
+
+Only these three. Everything else — a new item while the ferret works, an edit, a change of whose turn it
+is, a notice without `--ping`, the owner's own moves — moves the Inbox badge and nothing more.
+
+| #   | Moment                                                                                     | Push                                                              | How often                               |
+| --- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- | --------------------------------------- |
+| 1   | The ferret **stops on the owner**: it went idle with at least one item on the owner's turn | ONE grouped push: "<ferret> is stopped · N need you"              | Once per stop (however many items wait) |
+| 2   | An item's **`neededBy`** comes within `attention.deadlineWarnHours` (default 3 hours)      | The item's title; "Needed in 25 min" / "Overdue" ahead of its ask | Once per item                           |
+| 3   | A notice with **`--ping`**                                                                 | The notice's summary                                              | Once per notice                         |
+
+Each push opens the ferret's chat at the item that triggered it (`?attention=<id>`): the first blocking item
+for a stop, else the oldest.
+
+**What counts as a stop.** The ferret's session state says its turn ended on the owner (`turnState` is
+`your-turn` or `needs-input`, with `turnStateAt`), and at least one non-notice item is on the owner's turn
+(no `waitingOn: 'ferret'`, unresolved). A stop is named by that `turnStateAt` instant, so the same stop
+never pushes twice — across a daemon restart too — and the next idle period is a new stop.
+
+**What never buzzes.**
+
+- The owner's own actions. A phone is never buzzed by what its owner just did.
+- A ferret that is working. Items raised mid-turn wait for the stop.
+- A ferret that was **already idle when the daemon started**. The start-up pass looks at deadlines only;
+  a stop is something the daemon sees happen.
+- An item on the ferret's turn (the owner replied; the ferret has the ball).
+
+**Duplicate suppression is durable.** Each push is recorded in the notification ledger before it is
+sent, under a key naming its reason — `attention:<session>:stopped:<stoppedAt>`,
+`attention:<session>:<id>:deadline`, `attention:<session>:<id>:ping` — so a repeat of the same stop,
+item or notice is no second push. Keys of the retired pushes (`:info-N`, `:surfaced`) still read, so an
+old ledger loads.
+
+**Deadlines** are checked when a board changes, and by a sweep every five minutes. The sweep looks at
+deadlines only.
+
+| Key in `config/daemon.json`   | Default | Range (hours) | What it bounds                               |
+| ----------------------------- | ------- | ------------- | -------------------------------------------- |
+| `attention.deadlineWarnHours` | 3       | 0.25–168      | how near `neededBy` must be for its one push |
+
+Read at start; a change needs a restart.
+
+### What a push says
+
+- **A stop:** the title is "<ferret> is stopped · 3 need you" (a lone item: "1 needs you"). The count
+  always survives a lock screen: a long ferret name is trimmed to 24 characters first. The body is the
+  title of the item the owner most likely wants first.
+- **A deadline or a ping:** the card's title as the heading and its ask as the text, nothing else. The
+  title is trimmed to 40 characters at a word boundary; an item from before titles uses the start of its
+  ask (`attentionTitle`). The body is at most 120 characters, trimmed with `…`. A push never carries the
+  context, the options or the recommendation.
+
+A title is an agent's own words, so it must never read as the daemon's new-device alert title. Only a name
+that reads as that alert is labelled, as `Ferret “…”`: any spelling, case or punctuation, and Cyrillic, Greek
+and accented look-alikes (`attentionNotificationTitle`). Every other title is as written.
+
+## Where a tap goes
+
+The push's `url` is relative to the machine's own pages: `/session/<id>?attention=A3`
+(`attentionNotificationPath`). The daemon never knows which name a browser files it under. The
+browser's per-machine push worker places the path under that machine, so it opens
+`/d/<daemonId>/session/<id>?attention=A3` (`packages/pwa/src/lib/push-scope.ts`). It reuses an open app
+window when there is one, whichever worker controls it, and never a sign-in popup.
+
+Every push names a page, and the worker opens a page even when one does not:
+
+- **A push with no item** (a legacy notify) opens the conversation it came from: `/session/<id>`
+  (`sessionNotificationPath`).
+- **A push that names no page it may open** opens the conversation its `sessionId` names, on its
+  machine. A daemon older than #768 sent every push with `url: '/'`, an ask included. A push about no
+  conversation (a new device, enrolment, a passkey) opens that machine's sessions.
+- **Which window.** An app window wins over the landing page, which has no router. Among app windows,
+  the one the reader is looking at wins.
+- **How the window gets there.** The worker brings the window forward and asks the app to route there
+  in place (`packages/pwa/src/lib/notification-open.ts`). The app's entry point listens before React
+  mounts, so a tap that lands while the app is still starting is routed once it is up. It moves the app
+  to the tapped machine, and the conversation opens at the item, again on every new tap.
+- **A window that never answers** (an app too old for the message) cannot be navigated by a machine's
+  worker, which controls no page. So the worker opens the conversation in a window of its own.
+- **Old workers.** The browser never re-checks a machine's push worker on its own, because no page loads
+  under `/push/<daemonId>/`. So the app asks for each machine's worker update at every start
+  (`containerPushEnrolment.reconcile`). Without that, a phone enrolled before a fix kept the old tap.
+
+`packages/pwa/tests/integration/notification-open.test.ts` proves each case in Chromium, through the
+built worker.
+
+Every notification carries the Ferretry mark: `icons/icon-192.png` as its icon, and `icons/badge-96.png`
+as its badge. The badge is the mono logomark on transparent, because Android paints a badge from its
+alpha alone. iOS has no badge and ignores it. The manifest also names the badge as its `monochrome`
+icon, and its home-screen icons are maskable (the art carries its own safe zone).
+
+### Edge on Android shows Edge's icon, and we cannot change that
+
+On Android, only **Chrome (on devices with Google Play services) and Samsung Internet** install a PWA
+as a real app, a **WebAPK**. Every other browser, Edge included, adds a browser-badged home-screen
+shortcut ([MDN, "Making PWAs installable"](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Guides/Making_PWAs_installable)).
+A push is then posted by the browser's own Android app. So the status bar's small icon and the app
+name on the notification are **Edge's**, whatever `badge`, `icon` or manifest icons the page names.
+Edge does not paint our `badge` into the status bar as Chrome does. Our `icon` still shows as the
+notification's large image where Android draws one.
+
+Everything a page controls is set: the `badge`, the `icon`, the `monochrome` manifest icon and the
+maskable icons. **The remedy is the browser**: install Ferretry from Chrome on Android. A WebAPK posts
+notifications as Ferretry, with the mono mark in the status bar.
+
+## The unread signal
+
+`SessionView.state.attention` is `{ open, first, ask, latestAt }` while anything is open, and absent
+otherwise. Absent always means "nothing waits on the owner", never "unknown". It also carries
+`agendaMode` (the ferret works in agenda mode) and `stopped` (it is stopped on the owner, the instant it
+went idle), which are what the list shows beside the badge.
+
+- The daemon rewrites it after every board change, and when a ferret's mode or idleness moves with no board
+  change. It re-reads the board under one lock per session, so an out-of-order notice can never show an
+  answered item as open.
+- Notices are not counted: a notice moves the Inbox, not the "needs you" mark.
+- Every board change also journals `attention.changed`. The fleet feed watches that, so lists update
+  without polling.
+- On start, the daemon reconciles every session once, in the background.
+- It clears only when items resolve. Viewing a conversation does not clear it.
+
+## Agenda mode
+
+A ferret keeps an agenda only when it is told to. **Agenda mode** is a switchable section of its
+instructions, like Pack mode, and it is **OFF by default**. With it on, the ferret is taught to put each
+thing only the owner can decide or do on the agenda, as its own item (`fy agenda add …`, see
+[agenda.md](agenda.md)); with it off, it is told only the notify rule above.
+
+The section (`AGENDA_INSTRUCTION` in `@ferretry/fleet`, about 1,000 characters, capped at 1,300 by a
+test) names the verbs and flags `fy agenda` takes, what `--blocking`, `--will-block` and `--by` mean, and
+that `"[answer to !A3 …]"` is an answer while `"[re !A3 …]"` is chat.
+
+- **The switch** is the session's own recorded setting, `config.agenda` (`sessionAgendaEnabled`, absent
+  means OFF), exactly like `config.hypermedia` and `config.pack`. At each launch the daemon turns it into
+  the launch environment variable `FY_AGENDA=1|0` (`AGENDA_ENV`), and it is what sets `agendaMode` on the
+  session summary, so with the switch off the summary carries no `agendaMode` and the chat draws no agenda
+  line or drawer.
+- **Flipping it in the app:** the ferret's **Actions › Agenda mode** toggle (beside Hypermedia and Pack
+  mode, in the header and the sessions list), or the **Agenda mode** mark in the header. The ferret's
+  Info › Runtime tab shows it as a row, and the sidebar / header marks (a to-do list icon) show it only
+  while it is on.
+- **Flipping it from a ferret:** `fy notify agenda` reads the mode, `fy notify agenda on|off` switches it,
+  over `GET`/`PATCH /v1/sessions/:id/agenda-mode` (operator scope; no capability, like the Pack switch).
+  `PATCH` answers `{ view, restartRequired, note }` like the Hypermedia and Pack switches: a running ferret
+  reads its instructions once, at launch, so the change takes effect when the ferret next starts.
+- **The nudge follows the mode.** The turn-end check (the safety net for a reply that asks the owner to act
+  but raised nothing) names `fy agenda add …` for a ferret in agenda mode, and `fy notify …` for one that
+  is not.
+- **Size:** [pack-mode.md](pack-mode.md) has the whole instruction budget (its Size table).
+
+## Migration
+
+Before agenda mode, a ferret's open items WERE its agenda. So once, on the first start of a daemon that
+knows about the mode:
+
+1. every ferret with at least one **open non-notice item** gets agenda mode ON (it records `config.agenda: true`, which sets its launch
+   environment and its summary);
+2. the items are left exactly as they are;
+3. the daemon records that it ran, in `agenda-mode-migration.json` in its home.
+
+It is **idempotent and once**. The marker is written only when every session was handled; a start that
+finds it does nothing, so an owner who later turns a ferret's mode off is never overruled by a restart.
+A start that could not switch some session writes no marker and tries again next time (switching a
+ferret already on is a no-op). It never stops the daemon starting.
+
+## Every automatic push, and why it stays or goes
+
+| Path                                             | Where                                          | Decision                                                                                                               |
+| ------------------------------------------------ | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| A ferret stops on the owner                      | daemon `AttentionBuzz` → `NotificationService` | **The** push. One per stop, grouped. See above.                                                                        |
+| An item's `neededBy` comes near                  | daemon `AttentionBuzz`                         | **One push** per item.                                                                                                 |
+| A notice with `--ping`                           | `fy notify --ping`                             | **One push** per notice.                                                                                               |
+| An item is created, edited, surfaced or answered | daemon                                         | **Never pushed.** Inbox badge only. (The per-turn grouped push, the surfaced push and the more-info push are retired.) |
+| A notice without `--ping`                        | `fy notify`, legacy `POST …/notify`            | **Never pushed.** Inbox badge only.                                                                                    |
+| Enrolment confirmation                           | daemon `PushService.register`                  | Kept. One push, only to the browser that just enrolled.                                                                |
+| A new device was paired                          | daemon audit log                               | Kept. This is a security alert.                                                                                        |
+| A harness parks on its own prompt                | daemon `HarnessPromptAttention`                | **An item** like any other: it buzzes through a stop, not by itself.                                                   |
+| A session starts, finishes or idles              | daemon                                         | Never pushed on its own (a stop is idle **with** an item waiting).                                                     |
+| `failed` / `stalled` / `kill_failed`             | PWA page watcher                               | Kept. A dead ferret cannot raise an item.                                                                              |
+| Notifications a device's own filter hides        | push worker                                    | Kept as one quiet, silent line per machine (a push that shows nothing gets a subscription revoked). Carries the mark.  |
+
+## GAPs
+
+- **Agenda mode is per ferret, not per profile or runtime.** There is no default that new ferrets inherit;
+  the migration switches existing ones on once, and new ones start off. A profile- or runtime-level
+  default is not built.
+- **The app has no agenda switch yet.** Only `fy notify agenda` and the route flip it; the Info panel names
+  the instruction section but does not toggle it.
+- **A running ferret keeps its launch-time instructions.** Flipping the mode changes the next launch, not
+  the current turn; the owner restarts the ferret to apply it.
+- **A stop is seen, not reconstructed.** A ferret idle on the owner when the daemon starts does not buzz at
+  start-up (only its deadlines are swept); it buzzes the next time it stops.
+- **A ferret whose state cannot be read** has no stop, so it never makes the stopped push; deadlines and
+  pings are unaffected.
+- **A notice carries no "needs you".** A ferret that sends a notice when it needed a decision pings the
+  owner without leaving anything to answer; the safety-net nudge catches the reply that asks, not the
+  notice that should have been an item.
+- **Page-level notifications for a new item.** A device with no push enrolment learns about an item only
+  from the unread mark while the app is open.

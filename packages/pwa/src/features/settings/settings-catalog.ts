@@ -72,8 +72,8 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     id: 'group-needs-you',
     label: 'Group Needs you at the top',
     description:
-      'Lift the sessions with open Attention items into a Needs you group at the top of the sessions list. Off leaves them in their project, with just the Attention badge. Applies to this device.',
-    keywords: ['attention', 'needs you', 'pin', 'group', 'top', 'sessions', 'sidebar'],
+      'Lift the sessions with open Inbox items into a Needs you group at the top of the sessions list. Off leaves them in their project, with just the Inbox badge. Applies to this device.',
+    keywords: ['inbox', 'attention', 'needs you', 'pin', 'group', 'top', 'sessions', 'sidebar'],
   },
   {
     id: 'chat-width',

@@ -271,7 +271,7 @@ describe('AttentionBoard', () => {
         onAction={() => undefined}
       />,
     );
-    expect(unavailable.container.textContent).toContain('Attention needs human verification.');
+    expect(unavailable.container.textContent).toContain('The Inbox needs human verification.');
     expect(unavailable.container.textContent).not.toContain('Nothing needs attention.');
 
     const damaged = await mount(
@@ -283,8 +283,8 @@ describe('AttentionBoard', () => {
         onAction={() => undefined}
       />,
     );
-    expect(damaged.container.textContent).toContain('Attention needs human verification.');
-    expect(damaged.container.textContent).toContain('damaged attention data');
+    expect(damaged.container.textContent).toContain('The Inbox needs human verification.');
+    expect(damaged.container.textContent).toContain('damaged Inbox data');
     expect(damaged.container.textContent).not.toContain('Nothing needs attention.');
   });
 
@@ -302,8 +302,8 @@ describe('AttentionBoard', () => {
         onAction={() => undefined}
       />,
     );
-    expect(container.textContent).toContain('Damaged attention');
-    expect(container.textContent).toContain('Cannot offer a response for this damaged attention item.');
+    expect(container.textContent).toContain('Damaged Inbox');
+    expect(container.textContent).toContain('Cannot offer a response for this damaged Inbox item.');
     expect(container.textContent).not.toContain('Send answer');
   });
 

@@ -458,6 +458,34 @@ describe('attention routes', () => {
     should(item?.context).equal(long.trim());
   });
 
+  it('should raise a notify as a notice, for a ferret and for a human operator alike', async () => {
+    // Arrange
+    const dispatch = fixture();
+
+    // Act
+    const byFerret = await dispatch({
+      method: 'POST',
+      path: '/v1/sessions/s1/notify',
+      headers: agentIn('s1'),
+      body: JSON.stringify({ body: 'The backup finished.' }),
+    });
+    const byOperator = await dispatch({
+      method: 'POST',
+      path: '/v1/sessions/s1/notify',
+      headers: human,
+      body: JSON.stringify({ body: 'A different note.' }),
+    });
+    const board = await dispatch({ path: '/v1/sessions/s1/attention', headers: human });
+
+    // Assert
+    should(byFerret.status).equal(200);
+    should(byOperator.status).equal(200);
+    const items = jsonBody(board).items as readonly { notice?: boolean; kind: string; ask?: unknown }[];
+    should(items.length).equal(2);
+    for (const item of items) should(item).containDeep({ notice: true, kind: 'info' });
+    for (const item of items) should(item.ask).be.undefined();
+  });
+
   it('should not raise the same notify twice while its item is still open, and report no devices', async () => {
     // Arrange
     const notifications = new FakeNotifications();
@@ -680,6 +708,213 @@ describe('attention route needs-info', () => {
     should(edited.status).equal(200);
     should((jsonBody(edited).items as readonly Record<string, unknown>[])[0]).not.have.property('waitingOn');
     should(jsonBody(edited)).have.property('warnings');
+  });
+});
+
+describe('attention route surface', () => {
+  it('should let a ferret surface an item the owner took into discussion, and keep surface idempotent', async () => {
+    // Arrange
+    const dispatch = fixture();
+    const raised = await dispatch(post(raise, agentIn('s1')));
+    await dispatch(post({ action: 'discuss', id: 'A1', note: 'Let us talk it through' }));
+
+    // Act
+    const surfaced = await dispatch(
+      post({ action: 'surface', id: 'A1', why: 'Still open: the branch' }, agentIn('s1')),
+    );
+    const again = await dispatch(post({ action: 'surface', id: 'A1' }, agentIn('s1')));
+
+    // Assert — a new ask is the owner's turn, not the ferret's.
+    should((jsonBody(raised).items as readonly Record<string, unknown>[])[0]).not.have.property('waitingOn');
+    should(surfaced.status).equal(200);
+    const [item] = jsonBody(surfaced).items as readonly {
+      waitingOn?: string;
+      history: { kind: string; note?: string }[];
+    }[];
+    should(item).not.have.property('waitingOn');
+    should(item?.history.at(-1)).containDeep({ kind: 'surfaced', note: 'Still open: the branch' });
+    should(again.status).equal(200);
+  });
+
+  it('should let the owner surface it, refuse another ferret and an unknown item, and leave a closed one alone', async () => {
+    // Arrange
+    const dispatch = fixture();
+    await dispatch(post(raise, agentIn('s1')));
+    await dispatch(post({ ...raise, subject: 'second' }, agentIn('s1')));
+
+    // Act
+    const other = await dispatch(post({ action: 'surface', id: 'A1' }, agentIn('s2')));
+    const unknown = await dispatch(post({ action: 'surface', id: 'A9' }));
+    const owner = await dispatch(post({ action: 'surface', id: 'A2' }));
+    await dispatch(post({ action: 'resolve', id: 'A1' }));
+    const closed = await dispatch(post({ action: 'surface', id: 'A1' }));
+
+    // Assert
+    should(other.status).equal(403);
+    should(unknown.status).equal(404);
+    should(owner.status).equal(200);
+    should(closed.status).equal(200);
+  });
+});
+
+describe('attention route add: the agenda fields, notices and the old surface flag', () => {
+  const items = (response: ApiResponse) => jsonBody(response).items as readonly Record<string, unknown>[];
+  const notice = {
+    action: 'add',
+    notice: true,
+    title: 'CI is green',
+    subject: 'CI is green on main',
+    why: 'The release branch builds again.',
+    howToResolve: 'Nothing to do.',
+  } as const;
+
+  it('should accept and ignore the old surface flag: a new ask is the owner’s turn either way', async () => {
+    // Arrange
+    const dispatch = fixture();
+
+    // Act
+    const withFlag = await dispatch(post({ ...raise, surface: true }, agentIn('s1')));
+    const without = await dispatch(post({ ...raise, subject: 'second' }, agentIn('s1')));
+
+    // Assert
+    should(withFlag.status).equal(200);
+    should(items(withFlag)[0]).not.have.property('waitingOn');
+    should(items(without).find(item => item.subject === 'second')).not.have.property('waitingOn');
+  });
+
+  it('should take a notice and a ping from a ferret, and keep the notice off the owner’s turn', async () => {
+    // Arrange
+    const dispatch = fixture();
+
+    // Act
+    const plain = await dispatch(post(notice, agentIn('s1')));
+    const pinged = await dispatch(post({ ...notice, subject: 'a second notice', ping: true }, agentIn('s1')));
+
+    // Assert
+    should(plain.status).equal(200);
+    should(items(plain)[0]).containDeep({ notice: true });
+    should(items(plain)[0]).not.have.property('waitingOn');
+    should(pinged.status).equal(200);
+    should(items(pinged).find(item => item.subject === 'a second notice')).containDeep({ notice: true, ping: true });
+  });
+
+  it('should refuse a notice from the owner, and one that carries an ask, answers, steps or a kind other than info', async () => {
+    // Arrange
+    const dispatch = fixture();
+
+    // Act
+    const byHuman = await dispatch(post(notice));
+    const withAsk = await dispatch(post({ ...notice, ask: { kind: 'open-question' } }, agentIn('s1')));
+    const withAnswers = await dispatch(post({ ...notice, answers: [{ label: 'ok' }] }, agentIn('s1')));
+    const withSteps = await dispatch(post({ ...notice, steps: ['Run it'] }, agentIn('s1')));
+    const wrongKind = await dispatch(post({ ...notice, kind: 'task' }, agentIn('s1')));
+
+    // Assert
+    should(byHuman.status).equal(403);
+    for (const refused of [withAsk, withAnswers, withSteps, wrongKind]) should(refused.status).equal(400);
+    should(jsonBody(withAsk).error).containEql('a notice has no ask');
+    should(jsonBody(withSteps).error).containEql('a notice has no steps');
+    should(jsonBody(wrongKind).error).containEql('a notice is kind info');
+  });
+
+  it('should refuse a ping on anything but a notice, and a key the request does not know', async () => {
+    // Arrange
+    const dispatch = fixture();
+
+    // Act
+    const ping = await dispatch(post({ ...raise, ping: true }, agentIn('s1')));
+    const unknown = await dispatch(post({ ...raise, urgentNow: true }, agentIn('s1')));
+    const falseNotice = await dispatch(post({ ...notice, notice: false }, agentIn('s1')));
+
+    // Assert
+    should(ping.status).equal(400);
+    should(jsonBody(ping).error).containEql('ping is only for a notice');
+    should(unknown.status).equal(400);
+    should(falseNotice.status).equal(400);
+  });
+
+  it('should keep the agenda fields a raise names', async () => {
+    // Arrange
+    const dispatch = fixture();
+
+    // Act
+    const raised = await dispatch(
+      post(
+        { ...raise, blockingNow: true, willBlock: 'the deploy', neededBy: '2026-12-01T09:00:00.000Z' },
+        agentIn('s1'),
+      ),
+    );
+
+    // Assert
+    should(items(raised)[0]).containDeep({
+      blockingNow: true,
+      willBlock: 'the deploy',
+      neededBy: '2026-12-01T09:00:00.000Z',
+    });
+  });
+});
+
+describe('attention route edit: clearing agenda fields', () => {
+  const items = (response: ApiResponse) => jsonBody(response).items as readonly Record<string, unknown>[];
+  const agenda = {
+    ...raise,
+    blockingNow: true,
+    willBlock: 'the deploy',
+    neededBy: '2026-12-01T09:00:00.000Z',
+  } as const;
+
+  it('should clear the fields an edit names and leave the others', async () => {
+    // Arrange
+    const dispatch = fixture();
+    await dispatch(post(agenda, agentIn('s1')));
+
+    // Act
+    const cleared = await dispatch(
+      post({ action: 'edit', id: 'A1', clear: ['blockingNow', 'neededBy'] }, agentIn('s1')),
+    );
+
+    // Assert
+    should(cleared.status).equal(200);
+    should(items(cleared)[0]).not.have.property('blockingNow');
+    should(items(cleared)[0]).not.have.property('neededBy');
+    should(items(cleared)[0]).containDeep({ willBlock: 'the deploy' });
+  });
+
+  it('should clear one field while it sets another in the same edit', async () => {
+    // Arrange
+    const dispatch = fixture();
+    await dispatch(post(agenda, agentIn('s1')));
+
+    // Act
+    const edited = await dispatch(
+      post({ action: 'edit', id: 'A1', willBlock: 'the release', clear: ['neededBy'] }, agentIn('s1')),
+    );
+
+    // Assert
+    should(edited.status).equal(200);
+    should(items(edited)[0]).containDeep({ willBlock: 'the release', blockingNow: true });
+    should(items(edited)[0]).not.have.property('neededBy');
+  });
+
+  it('should refuse a field both set and cleared, an empty or unknown clear list, and a key it does not know', async () => {
+    // Arrange
+    const dispatch = fixture();
+    await dispatch(post(agenda, agentIn('s1')));
+
+    // Act
+    const both = await dispatch(
+      post({ action: 'edit', id: 'A1', willBlock: 'x', clear: ['willBlock'] }, agentIn('s1')),
+    );
+    const empty = await dispatch(post({ action: 'edit', id: 'A1', clear: [] }, agentIn('s1')));
+    const unknownField = await dispatch(post({ action: 'edit', id: 'A1', clear: ['title'] }, agentIn('s1')));
+    const unknownKey = await dispatch(post({ action: 'edit', id: 'A1', clearAll: true }, agentIn('s1')));
+
+    // Assert
+    should(both.status).equal(400);
+    should(jsonBody(both).error).containEql('willBlock cannot be set and cleared at once');
+    should(empty.status).equal(400);
+    should(unknownField.status).equal(400);
+    should(unknownKey.status).equal(400);
   });
 });
 

@@ -198,6 +198,14 @@ export const AttentionResponseSchema = z.union([
     kind: z.literal('open-question'),
     answer: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH),
   }),
+  /**
+   * The owner's own words INSTEAD of the item's options — "none of these". Any ask with options takes it
+   * (a choice, a permission, a review), so the ferret reads it apart from a picked option and its note.
+   */
+  z.strictObject({
+    kind: z.literal('other'),
+    answer: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH),
+  }),
 ]);
 export type AttentionResponse = z.infer<typeof AttentionResponseSchema>;
 
@@ -291,6 +299,11 @@ export const AttentionBriefShape = {
   premise: z.preprocess(asBullets, prose(MAX_ATTENTION_REASON_LENGTH)).optional(),
   /** Earlier answers that bear on this one, in point form: what the owner already decided. */
   decided: z.preprocess(asBullets, prose(MAX_ATTENTION_REASON_LENGTH)).optional(),
+  /**
+   * What is STILL OPEN after the discussion so far, in point form: it shrinks as `decided` grows, so a card read
+   * after several rounds of talk says where things stand, not where they started.
+   */
+  stillOpen: z.preprocess(asBullets, prose(MAX_ATTENTION_REASON_LENGTH)).optional(),
   /** Jargon the item uses, each spelled out. */
   terms: z.array(AttentionTermSchema).min(1).max(MAX_ATTENTION_TERMS).optional(),
   /** What the owner is asked, one entry per decision. */
@@ -301,6 +314,12 @@ export const AttentionBriefShape = {
   impact: z.preprocess(asBullets, prose(MAX_ATTENTION_REASON_LENGTH)).optional(),
   /** By when it matters, in words: "before the 14:00 deploy", "no rush". */
   urgency: singleLine(MAX_ATTENTION_URGENCY_LENGTH).optional(),
+  /** It stops the ferret NOW: nothing else can move until the owner answers ("Blocking now"). */
+  blockingNow: z.literal(true).optional(),
+  /** What it WILL block when the ferret gets there, in a few words ("Will block: the deploy"). */
+  willBlock: singleLine(MAX_ATTENTION_URGENCY_LENGTH).optional(),
+  /** When the owner's answer is needed by (`--by`): a few hours before, the owner is pinged once. */
+  neededBy: InstantSchema.optional(),
   /** PRs, files and references worth opening. */
   links: z.array(AttentionLinkSchema).min(1).max(MAX_ATTENTION_LINKS).optional(),
   /** Ordered Markdown steps the owner follows, one thing to do each: complete instructions, never a secret. */
@@ -318,15 +337,44 @@ export type AttentionBrief = {
 export const attentionBriefOf = (value: AttentionBrief): AttentionBrief => ({
   ...(value.premise === undefined ? {} : { premise: value.premise }),
   ...(value.decided === undefined ? {} : { decided: value.decided }),
+  ...(value.stillOpen === undefined ? {} : { stillOpen: value.stillOpen }),
   ...(value.terms === undefined ? {} : { terms: value.terms }),
   ...(value.questions === undefined ? {} : { questions: value.questions }),
   ...(value.recommendation === undefined ? {} : { recommendation: value.recommendation }),
   ...(value.impact === undefined ? {} : { impact: value.impact }),
   ...(value.urgency === undefined ? {} : { urgency: value.urgency }),
+  ...(value.blockingNow === undefined ? {} : { blockingNow: value.blockingNow }),
+  ...(value.willBlock === undefined ? {} : { willBlock: value.willBlock }),
+  ...(value.neededBy === undefined ? {} : { neededBy: value.neededBy }),
   ...(value.links === undefined ? {} : { links: value.links }),
   ...(value.steps === undefined ? {} : { steps: value.steps }),
   ...(value.body === undefined ? {} : { body: value.body }),
 });
+
+/**
+ * What a raise may not say when it is a NOTICE (`fy notify`): a notice is read, not answered, so it carries no
+ * ask, answers or steps and is kind info; and only a notice can ask the phone to buzz (`ping`).
+ */
+export const attentionNoticeProblems = (value: {
+  readonly notice?: true | undefined;
+  readonly ping?: true | undefined;
+  readonly ask?: unknown;
+  readonly answers?: readonly unknown[] | undefined;
+  readonly steps?: readonly unknown[] | undefined;
+  readonly kind?: string | undefined;
+}): string[] => {
+  if (value.notice !== true) return value.ping === true ? ['ping is only for a notice'] : [];
+  return [
+    ...(value.ask === undefined ? [] : ['a notice has no ask']),
+    ...(value.answers === undefined ? [] : ['a notice has no answers']),
+    ...(value.steps === undefined ? [] : ['a notice has no steps: it is read, not done']),
+    ...(value.kind === undefined || value.kind === 'info' ? [] : ['a notice is kind info']),
+  ];
+};
+
+/** The agenda fields an edit can clear: they have no empty value to write, so clearing is named. */
+export const AttentionClearableFieldSchema = z.enum(['blockingNow', 'willBlock', 'neededBy']);
+export type AttentionClearableField = z.infer<typeof AttentionClearableFieldSchema>;
 
 /**
  * The one question an item asks, when it asks exactly one — the only case where its options are
@@ -356,15 +404,66 @@ export const MAX_ATTENTION_HISTORY = 20;
 
 /**
  * One thing that happened to an item after it was raised, for "You asked for more info 10:42 · updated 10:44":
- * the owner asked for more information (`needs-info`) or to talk it through (`discuss`), or the ferret
- * updated it (`updated`).
+ * the owner asked for more information (`needs-info`) or to talk it through (`discuss`), the ferret
+ * updated it (`updated`), or the item left discussion for the queue (`surfaced`, the why as its note).
  */
 export const AttentionHistoryEntrySchema = z.strictObject({
   at: InstantSchema,
-  kind: z.enum(['needs-info', 'discuss', 'updated']),
+  kind: z.enum(['needs-info', 'discuss', 'updated', 'surfaced']),
   note: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH).optional(),
 });
 export type AttentionHistoryEntry = z.infer<typeof AttentionHistoryEntrySchema>;
+
+/** The most revisions an item keeps, oldest dropped. */
+export const MAX_ATTENTION_REVISIONS = 10;
+
+/** The fields an edit can change, by name: what a revision says changed. */
+export const AttentionRevisableFieldSchema = z.enum([
+  'subject',
+  'why',
+  'context',
+  'howToResolve',
+  'ask',
+  'title',
+  'kind',
+  'answers',
+  'premise',
+  'decided',
+  'stillOpen',
+  'terms',
+  'questions',
+  'recommendation',
+  'impact',
+  'urgency',
+  'blockingNow',
+  'willBlock',
+  'neededBy',
+  'links',
+  'steps',
+  'body',
+]);
+export type AttentionRevisableField = z.infer<typeof AttentionRevisableFieldSchema>;
+
+/**
+ * ONE EDIT OF AN ITEM, kept so a card that is a living summary of its discussion can show what changed and what
+ * it said before: who edited it, when, which fields changed, and those fields as they were (`previous` — a field
+ * absent there was absent before the edit).
+ */
+export const AttentionRevisionSchema = z.strictObject({
+  at: InstantSchema,
+  by: z.enum(['human', 'agent', 'daemon']),
+  changed: z.array(AttentionRevisableFieldSchema).min(1),
+  previous: z.strictObject({
+    subject: singleLine(MAX_ATTENTION_SUBJECT_LENGTH).optional(),
+    why: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH).optional(),
+    context: z.string().max(MAX_ATTENTION_DETAIL_LENGTH).nullable().optional(),
+    howToResolve: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH).optional(),
+    ask: AttentionAskSchema.optional(),
+    ...AttentionCardShape,
+    ...AttentionBriefShape,
+  }),
+});
+export type AttentionRevision = z.infer<typeof AttentionRevisionSchema>;
 
 export const AttentionDispositionSchema = z.enum(['done', 'dismissed']);
 export type AttentionDisposition = z.infer<typeof AttentionDispositionSchema>;
@@ -429,22 +528,36 @@ const AttentionItemBaseShape = {
   ...AttentionBriefShape,
   /** The indices of the steps the owner has ticked: sorted, unique, each below `steps.length`; absent when none. */
   stepsDone: z.array(NonNegativeIntegerSchema).min(1).max(MAX_ATTENTION_STEPS).optional(),
-  /** Set while the owner has asked the raising ferret for more information, or to discuss it, and it has not yet updated it. */
+  /**
+   * Set while the item waits on its raising ferret: the ask is IN DISCUSSION (every ferret-raised ask starts
+   * there, until `surface`), or the owner asked for more information and it has not yet updated it.
+   */
   waitingOn: z.literal('ferret').optional(),
-  /** When the owner asked; present exactly while `waitingOn` is. */
+  /** When the wait began (the raise, for an ask born in discussion); present exactly while `waitingOn` is. */
   askedAt: InstantSchema.optional(),
   /**
-   * What the owner is waiting on the ferret FOR, only while `waitingOn` is set: `discussion` when the owner
-   * wants to talk the item through before answering ("in discussion"). Absent reads as `info`, so an item
-   * written before discussions existed reads exactly as it did.
+   * What the wait is FOR, only while `waitingOn` is set: `discussion` while the ask is being talked through in
+   * the ferret's chat, before it reaches the owner's queue ("in discussion"); an ask a ferret raises starts
+   * there, and the owner's `discuss` puts a surfaced one back. Absent reads as `info`, so an item written
+   * before discussions existed reads exactly as it did.
    */
   waitingFor: z.enum(['info', 'discussion']).optional(),
   /** How many times the owner has asked for more information or to discuss it: one request counter for both. */
   infoRequests: PositiveIntegerSchema.optional(),
   /** Bounded, oldest first: when the owner asked for more information and when the ferret added it. */
   history: z.array(AttentionHistoryEntrySchema).min(1).max(MAX_ATTENTION_HISTORY).optional(),
+  /** Bounded, oldest first: every edit since the item was raised (`AttentionRevision`). Absent: never edited. */
+  revisions: z.array(AttentionRevisionSchema).min(1).max(MAX_ATTENTION_REVISIONS).optional(),
   /** The owner's last action on this item never reached the ferret; present only on an open item. */
   undelivered: AttentionUndeliveredSchema.optional(),
+  /**
+   * A PLAIN NOTIFICATION (`fy notify`), not an agenda item: a summary the owner reads in the ferret's Inbox
+   * group and taps to open its chat. It has no answers and no turn; reading or clearing it resolves it. An old
+   * app reads it as an info card.
+   */
+  notice: z.literal(true).optional(),
+  /** The ferret asked for the phone to buzz for this notification (`fy notify --ping`). */
+  ping: z.literal(true).optional(),
 };
 
 export const AttentionItemSchema = z
@@ -523,13 +636,19 @@ const AttentionResolutionSchema = z.discriminatedUnion('resolvedBy', [
   }),
 ]);
 
+/** A response fits its ask by kind, except `other`: the owner's own words, which any ask with options takes. */
+function responseKindFitsAsk(ask: string | undefined, response: string): boolean {
+  if (response === 'other') return ask !== undefined && ask !== 'open-question' && ask !== 'task';
+  return ask === response;
+}
+
 export const ResolvedAttentionItemSchema = z
   .intersection(AttentionItemSchema, AttentionResolutionSchema)
   .superRefine((value, context) => {
     if (value.disposition === 'dismissed' && value.response !== undefined) {
       context.addIssue({ code: 'custom', message: 'a dismissed item may not carry a response', path: ['response'] });
     }
-    if (value.response !== undefined && value.ask?.kind !== value.response.kind) {
+    if (value.response !== undefined && !responseKindFitsAsk(value.ask?.kind, value.response.kind)) {
       context.addIssue({ code: 'custom', message: 'response kind must match the original ask', path: ['response'] });
     }
     if (value.response?.kind === 'multiple-choice' && value.ask?.kind === 'multiple-choice') {
@@ -630,6 +749,12 @@ const AddAttentionRequestSchema = z.strictObject({
   context: z.preprocess(asBullets, z.string().max(MAX_ATTENTION_DETAIL_LENGTH)).nullable().optional(),
   howToResolve: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH),
   ask: AttentionAskSchema.optional(),
+  /** Sent by older CLIs: a new ask is the owner's turn now, so there is nothing to surface to. Accepted, ignored. */
+  surface: z.boolean().optional(),
+  /** A plain notification (`fy notify`): kind info, no ask or answers, never a turn (docs/agenda.md). */
+  notice: z.literal(true).optional(),
+  /** The ferret asked for the phone to buzz for this notice; only a notice can ask. */
+  ping: z.literal(true).optional(),
   ...AttentionBriefShape,
 });
 
@@ -644,6 +769,8 @@ export const AttentionActionRequestSchema = z
       title: AttentionCardShape.title,
       context: z.preprocess(asBullets, z.string().max(MAX_ATTENTION_DETAIL_LENGTH)).nullable().optional(),
       ...AttentionBriefShape,
+      /** Agenda fields to take off the item (`--not-blocking`, `--clear-will-block`, `--clear-by`). */
+      clear: z.array(AttentionClearableFieldSchema).min(1).max(3).optional(),
     }),
     z.strictObject({
       action: z.literal('resolve'),
@@ -665,15 +792,24 @@ export const AttentionActionRequestSchema = z
       note: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH).optional(),
     }),
     /**
-     * The owner wants to talk an item through before answering — the premise is wrong, or the card is not
-     * understood. The item stays open, marked in discussion (`waitingFor: 'discussion'`), and the raising
-     * ferret is told `[discuss !A3 «title»] …` to reply in chat. Every card a ferret raised takes it; it is
-     * never one of the card's three answers.
+     * The owner wants to talk a SURFACED item through before answering — the premise is wrong, or the card is
+     * not understood. The item stays open, marked in discussion (`waitingFor: 'discussion'`), and the raising
+     * ferret is told `[discuss !A3 «title»] …` to reply in chat. Kept for older apps: the current app talks
+     * to the ferret in chat, where the ask already starts.
      */
     z.strictObject({
       action: z.literal('discuss'),
       id: AttentionIdSchema,
       note: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH).optional(),
+    }),
+    /**
+     * The raising ferret (or the owner) moves an item out of discussion into the owner's queue: the owner did
+     * not answer it in chat. The optional `why` is one line kept in the item's history.
+     */
+    z.strictObject({
+      action: z.literal('surface'),
+      id: AttentionIdSchema,
+      why: singleLine(MAX_ATTENTION_SUBJECT_LENGTH).optional(),
     }),
     z.strictObject({
       action: z.literal('dismiss'),
@@ -682,9 +818,19 @@ export const AttentionActionRequestSchema = z
     }),
   ])
   .superRefine((value, context) => {
+    if (value.action === 'edit') {
+      for (const field of value.clear ?? []) {
+        if (value[field] !== undefined)
+          context.addIssue({ code: 'custom', message: `${field} cannot be set and cleared at once`, path: ['clear'] });
+      }
+      return;
+    }
     if (value.action !== 'add') return;
     for (const [path, message] of attentionAnswerProblems(value.answers ?? [], value.ask)) {
       context.addIssue({ code: 'custom', message, path: path.split('.') });
+    }
+    for (const problem of attentionNoticeProblems(value)) {
+      context.addIssue({ code: 'custom', message: problem });
     }
   });
 export type AttentionActionRequest = z.infer<typeof AttentionActionRequestSchema>;
@@ -736,10 +882,15 @@ export const SessionAttentionSummarySchema = z.object({
   /** When the NEWEST open item was raised: "newest needing you first" sorts by it. */
   latestAt: InstantSchema,
   /**
-   * How many of the `open` items are in discussion (`waitingFor: 'discussion'`): waiting on the ferret,
-   * not on the owner, so they are not counted as needing the owner. Absent when none is.
+   * How many of the `open` items are in discussion (`waitingFor: 'discussion'`): still being talked through
+   * in the ferret's chat, not on the owner's queue, so they are not counted as needing the owner. Absent
+   * when none is.
    */
   discussing: PositiveIntegerSchema.optional(),
+  /** The ferret works in AGENDA MODE (a switchable instruction section, off by default): the chat draws its agenda. */
+  agendaMode: z.literal(true).optional(),
+  /** The ferret is STOPPED on the owner: idle, with at least one item on the owner's turn. */
+  stopped: z.literal(true).optional(),
 });
 export type SessionAttentionSummary = z.infer<typeof SessionAttentionSummarySchema>;
 

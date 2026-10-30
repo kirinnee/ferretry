@@ -53,6 +53,7 @@ import {
   sessionSearchTaskHaystack,
   TASK_SCHEMA_VERSION,
 } from '@ferretry/protocol';
+import { AgendaChatHarness } from './agenda-chat.tsx';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { type ConnectionChoice, chooseConnection } from '@ferretry/relay';
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -123,7 +124,6 @@ import {
   SessionAnalyticsSurface,
 } from '../src/features/analytics/session-analytics-surface.tsx';
 import { AttentionBoard } from '../src/features/attention/attention-board.tsx';
-import { AttentionPanel } from '../src/features/attention/attention-panel.tsx';
 import { BrowserLoginBanner, type BrowserLoginView } from '../src/features/browser/browser-login-banner.tsx';
 import { InAppBrowserSurface } from '../src/features/browser/in-app-browser.tsx';
 import type { BrowserDestination } from '../src/features/browser/in-app-browser-model.ts';
@@ -3965,38 +3965,14 @@ const PALETTE_COMMANDS = [
 const PALETTE_SETTINGS: PaletteSettingsSource = (daemon, query) => settingsPaletteEntries(daemon, query);
 
 /**
- * The Attention panel, exactly as it sits at the top of a ferret's conversation: folded to one line
- * until pressed, then every open item as a card and the resolved ones behind their disclosure.
- *
- * It starts FOLDED, as the shipped page does; `harness/screenshot.ts --attention-only` presses the
- * strip and captures the panel, which proves the journey rather than just the render.
+ * A ferret's agenda in its chat: the line above the composer, pressed open into its drawer.
+ * `harness/screenshot.ts --attention-only` presses the line and captures it, which proves the journey
+ * rather than just the render.
  */
-function AttentionPanelHarness() {
-  const [selected, setSelected] = useState<string | null>(null);
-  const client = useMemo(
-    () => ({
-      respond: async () => undefined,
-      resolve: async () => undefined,
-      dismiss: async () => undefined,
-      needsInfo: async () => undefined,
-      discuss: async () => undefined,
-      progress: async () => undefined,
-    }),
-    [],
-  );
+function AgendaHarness() {
   return (
-    <Card className="overflow-hidden" data-harness="attention-panel">
-      <AttentionPanel
-        client={client}
-        connection={daemon}
-        id="harness-attention-panel"
-        now={HARNESS_NOW}
-        onSelect={setSelected}
-        scope={scope}
-        selectedId={selected}
-        snapshot={ATTENTION}
-        status="ready"
-      />
+    <Card className="overflow-hidden" data-harness="agenda" style={{ height: 520 }}>
+      <AgendaChatHarness board={ATTENTION} now={HARNESS_NOW} />
     </Card>
   );
 }
@@ -6736,7 +6712,7 @@ function Shell() {
       render: () => <SettingsPageHarness />,
     },
     {
-      label: 'Attention ledger',
+      label: 'Inbox ledger',
       render: () => (
         <Card className="min-h-[360px] overflow-hidden">
           <AttentionBoard
@@ -6751,8 +6727,8 @@ function Shell() {
       ),
     },
     {
-      label: 'Attention panel',
-      render: () => <AttentionPanelHarness />,
+      label: 'Agenda',
+      render: () => <AgendaHarness />,
     },
     {
       label: 'Pins ledger',

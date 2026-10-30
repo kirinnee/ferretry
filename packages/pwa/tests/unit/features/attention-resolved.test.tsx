@@ -123,7 +123,7 @@ describe('the resolved menu entry as a drawer', () => {
   test('opens as a drawer headed "Resolved · N", not as a popover form', () => {
     const records = [record('A1', '2026-07-31T10:00:00.000Z'), record('A2', '2026-07-31T11:00:00.000Z')];
     const entry = resolvedActionContribution(records, 'attn', null).build(undefined);
-    expect(entry).toMatchObject({ presentation: 'drawer', heading: 'Resolved · 2', title: 'Resolved Attention' });
+    expect(entry).toMatchObject({ presentation: 'drawer', heading: 'Resolved · 2', title: 'Resolved in Inbox' });
   });
 });
 

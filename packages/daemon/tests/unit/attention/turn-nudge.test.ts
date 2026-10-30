@@ -8,6 +8,7 @@ import {
   attentionNudge,
   attentionNudgeMessage,
   attentionNudgeSendId,
+  discussionNudgeMessage,
   type FinishedTurn,
   finishedTurn,
   isTurnEnd,
@@ -34,13 +35,16 @@ const result = (): TranscriptEvent => ({
 
 const LEAD_REPLY =
   '**Done:** PR opened.\n\nNext steps:\n- You: run `hms` to apply the new skill\n- You: approve the deploy\n- Me: babysit CI';
-const TOP: NudgeSubject = { parent: false, mode: 'auto' };
+const TOP: NudgeSubject = { parent: false, mode: 'auto', agenda: true };
+const NOTICES: NudgeSubject = { ...TOP, agenda: false };
 
 const turn = (overrides: Partial<FinishedTurn> = {}): FinishedTurn => ({
   opener: 'please ship it',
   reply: LEAD_REPLY,
   replyKey: 'k',
   raised: 0,
+  discussed: [],
+  handled: [],
   ...overrides,
 });
 
@@ -67,7 +71,7 @@ describe('finishedTurn', () => {
     should(actual?.raised).equal(0);
   });
 
-  it('should count the turn’s own raising calls: the CLI under any binary, ask_owner and the question tool', () => {
+  it('should count the turn’s own raising calls: the CLI under any binary, notify, ask_owner and the question tool', () => {
     // Arrange
     const events = [
       owner('go'),
@@ -76,6 +80,9 @@ describe('finishedTurn', () => {
       call('mcp__ferretry__terminal_ask_owner', { name: 'dev' }),
       call('mcp__ferretry__browser_open', { name: 'app', askOwner: 'log in' }),
       call('AskUserQuestion', { questions: [] }),
+      call('Bash', { command: 'fy agenda add --title "Approve" "the deploy"' }),
+      call('Bash', { command: 'fy notify "CI is green" --ping' }),
+      call('Bash', { command: 'fy agenda ls' }),
       call('Bash', { command: 'fy attention ls' }),
       call('mcp__ferretry__browser_open', { name: 'app' }),
       result(),
@@ -86,7 +93,7 @@ describe('finishedTurn', () => {
     const actual = finishedTurn(events);
 
     // Assert
-    should(actual?.raised).equal(5);
+    should(actual?.raised).equal(7);
   });
 
   it('should not count raising calls from an earlier turn', () => {
@@ -154,6 +161,90 @@ describe('finishedTurn', () => {
   });
 });
 
+describe('finishedTurn — a message about items', () => {
+  const REPLY = '[re !A5 «Approve the deploy»] ship it on friday';
+
+  it('should read every item named in the one prefix, once each', () => {
+    // Act
+    const actual = finishedTurn([
+      owner('[re !A5 «Approve the deploy», !A7 «Roll back», !A5 «Approve the deploy»] ship it'),
+      said('Noted.'),
+    ]);
+
+    // Assert
+    should(actual?.discussed).deepEqual(['A5', 'A7']);
+    should(actual?.handled).deepEqual([]);
+  });
+
+  it('should read a title that holds a bracket, and stop at the bracket that closes the prefix', () => {
+    // Act
+    const actual = finishedTurn([owner('[re !A5 «Fix [wip] build»] and also look at !A9'), said('Noted.')]);
+
+    // Assert
+    should(actual?.discussed).deepEqual(['A5']);
+  });
+
+  it('should not read a later [re …] inside the owner’s own text as an opener', () => {
+    // Act
+    const actual = finishedTurn([owner('please ship it\n[re !A9 «x»] is what I meant'), said('Noted.')]);
+
+    // Assert
+    should(actual?.discussed).deepEqual([]);
+  });
+
+  it('should not read the old [reply about …] prefix', () => {
+    // Act
+    const actual = finishedTurn([owner('[reply about !A5 «x»] ok'), said('Noted.')]);
+
+    // Assert
+    should(actual?.discussed).deepEqual([]);
+  });
+
+  it('should count an item the turn edited, closed, dismissed or surfaced as handled, under either verb', () => {
+    // Arrange
+    const events = (command: string): TranscriptEvent[] => [
+      owner(REPLY),
+      call('Bash', { command }),
+      result(),
+      said('Updated.'),
+    ];
+
+    // Act + Assert
+    for (const command of [
+      'fy agenda edit A5 --decided "ship friday"',
+      'fy agenda done A5',
+      'fy agenda dismiss A5 --note x',
+      'fy agenda surface A5 --why "needs you"',
+      'fy agenda edit !A5 --still-open "rollback plan"',
+      'fy agenda edit A5 --clear neededBy',
+      'fy attention edit A5 --decided "ship friday"',
+      'fy attention done A5',
+    ]) {
+      should(finishedTurn(events(command))?.handled).deepEqual(['A5']);
+    }
+  });
+
+  it('should not count a command about another ask, or a read, as handling it', () => {
+    // Arrange
+    const events = [
+      owner(REPLY),
+      call('Bash', { command: 'fy agenda edit A50 --decided "x"' }),
+      call('Bash', { command: 'fy agenda show A5' }),
+      call('Bash', { command: 'fy agenda ls' }),
+      call('Bash', { command: 'fy attention show A5' }),
+      said('Looked.'),
+    ];
+
+    // Act + Assert
+    should(finishedTurn(events)?.handled).deepEqual([]);
+  });
+
+  it('should have no discussed asks for an ordinary owner message', () => {
+    // Assert
+    should(finishedTurn([owner('please ship it'), said('Done.')])?.discussed).deepEqual([]);
+  });
+});
+
 describe('attentionNudge', () => {
   it('should nudge a top-level ferret whose reply asks the owner to act and raised nothing', () => {
     // Act
@@ -174,7 +265,7 @@ describe('attentionNudge', () => {
 
   it('should never nudge a sub-ferret: its reply goes to the ferret that started it', () => {
     // Assert
-    should(attentionNudge(turn(), { parent: true, mode: 'auto' }, 'fy')).be.undefined();
+    should(attentionNudge(turn(), { parent: true, mode: 'auto', agenda: true }, 'fy')).be.undefined();
   });
 
   it('should never nudge the turn a nudge started, so a reply to it ends the exchange', () => {
@@ -191,14 +282,99 @@ describe('attentionNudge', () => {
   });
 });
 
+describe('attentionNudge — notices when agenda mode is off', () => {
+  it('should word the fix as a notice and never as an agenda item', () => {
+    // Act
+    const actual = attentionNudge(turn(), NOTICES, 'fy');
+
+    // Assert
+    should(actual?.message).containEql('`fy notify "<summary>"`');
+    should(actual?.message).not.containEql('agenda add');
+    should(actual?.message).not.match(/Attention/u);
+  });
+
+  it('should still be quiet once the turn raised enough', () => {
+    // Assert
+    should(attentionNudge(turn({ raised: 2 }), NOTICES, 'fy')).be.undefined();
+  });
+});
+
+describe('attentionNudge — an item written about and left as it was', () => {
+  const left = (overrides: Partial<FinishedTurn> = {}): FinishedTurn =>
+    turn({ opener: '[re !A5 «x»] ok', reply: 'Understood, thanks.', discussed: ['A5'], ...overrides });
+
+  it('should nudge once to update the card, surface it or close it', () => {
+    // Act
+    const actual = attentionNudge(left(), TOP, 'fy');
+
+    // Assert
+    should(actual?.asks).deepEqual(['discussed !A5']);
+    should(actual?.message).startWith(ATTENTION_NUDGE_MARK);
+    should(actual?.message).containEql('The owner wrote about !A5 and it is your turn');
+    should(actual?.message).containEql('fy agenda edit A5');
+    should(actual?.message).containEql('fy agenda surface A5');
+    should(actual?.message).containEql('fy agenda done A5');
+    should(actual?.message).not.match(/Attention/u);
+  });
+
+  it('should stay quiet when the turn edited, closed or surfaced the ask', () => {
+    // Assert
+    should(attentionNudge(left({ handled: ['A5'] }), TOP, 'fy')).be.undefined();
+  });
+
+  it('should name only the asks it left, not the ones it handled', () => {
+    // Act
+    const actual = attentionNudge(left({ discussed: ['A5', 'A6'], handled: ['A5'] }), TOP, 'fy');
+
+    // Assert
+    should(actual?.asks).deepEqual(['discussed !A6']);
+  });
+
+  it('should never nudge the turn a nudge started, so it cannot loop', () => {
+    // Assert
+    should(
+      attentionNudge(left({ opener: `${ATTENTION_NUDGE_MARK} The owner wrote about !A5 — …` }), TOP, 'fy'),
+    ).be.undefined();
+  });
+
+  it('should never nudge a sub-ferret', () => {
+    // Assert
+    should(attentionNudge(left(), { parent: true, mode: 'auto', agenda: true }, 'fy')).be.undefined();
+  });
+
+  it('should fold the raise line in when the reply also asks the owner to act', () => {
+    // Act
+    const actual = attentionNudge(left({ reply: LEAD_REPLY }), TOP, 'fy');
+
+    // Assert
+    should(actual?.asks).deepEqual(['discussed !A5', 'run `hms` to apply the new skill', 'approve the deploy']);
+    should(actual?.message.startsWith(ATTENTION_NUDGE_MARK)).be.true();
+    should(actual?.message.split(ATTENTION_NUDGE_MARK)).have.length(2);
+    should(actual?.message).containEql('Your last reply asked the owner to:');
+  });
+});
+
+describe('discussionNudgeMessage', () => {
+  it('should name every item and use the binary’s name', () => {
+    // Act
+    const actual = discussionNudgeMessage(['A5', 'A6'], 'zz');
+
+    // Assert
+    should(actual).containEql('The owner wrote about !A5, !A6');
+    should(actual).containEql('`zz agenda edit A5`');
+    should(actual).containEql('`zz agenda done A5`');
+  });
+});
+
 describe('attentionNudgeMessage', () => {
   it('should list each ask, say how to raise one under the binary’s name, and allow a reason not to', () => {
     // Act
-    const actual = attentionNudgeMessage(['approve the deploy'], 0, 'auto', 'zz');
+    const actual = attentionNudgeMessage(['approve the deploy'], 0, { mode: 'auto', agenda: true }, 'zz');
 
     // Assert
     should(actual).startWith(`${ATTENTION_NUDGE_MARK} Your last reply asked the owner to:\n- approve the deploy\n`);
-    should(actual).containEql('`zz attention add --title "<what>" "<the ask>" --step …`');
+    should(actual).containEql('`zz agenda add --title "<what>" "<the ask>" --step …`');
+    should(actual).not.match(/Attention/u);
     should(actual).containEql('say why not in one line');
     should(actual).not.containEql('question tool');
     should(actual).not.containEql('You raised');
@@ -206,7 +382,24 @@ describe('attentionNudgeMessage', () => {
 
   it('should offer the question tool only to an interactive ferret, which has one', () => {
     // Assert
-    should(attentionNudgeMessage(['x'], 0, 'interactive', 'fy')).containEql('or your question tool');
+    should(attentionNudgeMessage(['x'], 0, { mode: 'interactive', agenda: true }, 'fy')).containEql(
+      'or your question tool',
+    );
+  });
+
+  it('should word a notice, with no agenda and no question tool, when agenda mode is off', () => {
+    // Act
+    const auto = attentionNudgeMessage(['approve the deploy'], 0, { mode: 'auto', agenda: false }, 'zz');
+    const interactive = attentionNudgeMessage(['x'], 1, { mode: 'interactive', agenda: false }, 'zz');
+
+    // Assert
+    should(auto).startWith(`${ATTENTION_NUDGE_MARK} Your last reply asked the owner to:\n- approve the deploy\n`);
+    should(auto).containEql('`zz notify "<summary>"`');
+    should(auto).containEql('say why not in one line');
+    should(auto).not.containEql('agenda add');
+    should(auto).not.match(/Attention/u);
+    should(interactive).not.containEql('question tool');
+    should(interactive).containEql('You raised 1 this turn; raise the rest.');
   });
 });
 
@@ -282,6 +475,44 @@ describe('AttentionTurnNudge', () => {
     should(harness.sent[0]?.[1]).equal(harness.sent[1]?.[1]);
   });
 
+  it('should nudge a discussed ask once per owner reply, under the same id when seen twice', async () => {
+    // Arrange
+    const harness = ports({
+      tail: async () => [owner('[re !A5 «x»] ok'), said('Understood.', 'm-3')],
+    });
+    const nudge = new AttentionTurnNudge(harness.ports, 'fy');
+
+    // Act
+    const first = await nudge.check('s-1');
+    await nudge.check('s-1');
+
+    // Assert
+    should(first).be.true();
+    should(harness.sent[0]?.[2]).containEql('The owner wrote about !A5');
+    should(harness.sent[0]?.[1]).equal(harness.sent[1]?.[1]);
+    should(harness.recorded).have.length(2);
+  });
+
+  it('should not nudge after the ferret edited the discussed ask, nor after a nudge-caused turn', async () => {
+    // Arrange
+    const edited = ports({
+      tail: async () => [
+        owner('[re !A5 «x»] ok'),
+        call('Bash', { command: 'fy agenda edit A5 --decided "go"' }),
+        result(),
+        said('Updated the card.'),
+      ],
+    });
+    const caused = ports({
+      tail: async () => [owner(`${ATTENTION_NUDGE_MARK} The owner wrote about !A5 — …`), said('On it.')],
+    });
+
+    // Act + Assert
+    should(await new AttentionTurnNudge(edited.ports, 'fy').check('s-1')).be.false();
+    should(await new AttentionTurnNudge(caused.ports, 'fy').check('s-1')).be.false();
+    should(edited.sent.concat(caused.sent)).be.empty();
+  });
+
   it('should do nothing while the machine’s switch is off', async () => {
     // Arrange
     const harness = ports({ enabled: async () => false });
@@ -293,7 +524,7 @@ describe('AttentionTurnNudge', () => {
 
   it('should not read the transcript of a sub-ferret or of a session it cannot read', async () => {
     // Arrange
-    const child = ports({ subject: async () => ({ parent: true, mode: 'auto' }) });
+    const child = ports({ subject: async () => ({ parent: true, mode: 'auto', agenda: true }) });
     const unreadable = ports({ subject: async () => undefined });
 
     // Act + Assert

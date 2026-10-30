@@ -326,7 +326,7 @@ export const PACK_ROUTING_ENV = 'FY_PACK_ROUTING';
 
 /** One per-ferret section: the name a surface shows it by, the variable that turns it on, and its text. */
 export interface FerretSection {
-  readonly id: Extract<LaunchInstructionSectionId, 'hypermedia' | 'pack' | 'learning'>;
+  readonly id: Extract<LaunchInstructionSectionId, 'hypermedia' | 'pack' | 'agenda' | 'learning'>;
   readonly env: string;
   readonly text: string;
 }
@@ -335,6 +335,7 @@ export interface FerretSection {
 export const FERRET_SECTIONS = (fy: string): readonly FerretSection[] => [
   { id: 'hypermedia', env: HYPERMEDIA_ENV, text: HYPERMEDIA_INSTRUCTION },
   { id: 'pack', env: PACK_ENV, text: PACK_INSTRUCTION(fy) },
+  { id: 'agenda', env: AGENDA_ENV, text: AGENDA_INSTRUCTION(fy) },
   { id: 'learning', env: PASSIVE_LEARNING_ENV, text: LESSONS_INSTRUCTION(fy) },
 ];
 
@@ -400,24 +401,40 @@ export const SET_UP_FERRETRY_INSTRUCTION = (fy: string): string =>
   `Ferretry settings: this machine's logins, MCP servers, skills, profiles, runtimes and its Warden, Learning, Voice and Pack settings are YAML files (\`${fy} config path\`). Before changing any, read \`${fy} config guide\` and follow it: never write a secret value into a file (\`${fy} secret set NAME\`, then \${secret:NAME}), run \`${fy} config check\` after every edit, and an edit that loosens what the machine may spend or what agents may do waits for the owner — tell them; never work around it.`;
 
 /**
- * Attention — how an agent asks the human for something. Notifications ARE the Attention system, so the
- * one command that raises an item is what reaches them. Every agent runtime gets it; `notify` is left
- * out on purpose (an item notifies by being raised).
+ * AGENDA MODE — a per-FERRET section (docs/agenda.md): this ferret keeps a list of what only the owner can
+ * do or decide, and the daemon pushes the phone once when it stops with items waiting. Off unless the
+ * daemon writes {@link AGENDA_ENV} `1`. docs/agenda.md quotes this text verbatim.
  */
-export const ATTENTION_INSTRUCTION = (fy: string): string =>
-  `Attention: the owner reads the board, not your replies, and every notification is an Attention item (never progress). Before ending a reply that asks them to decide or DO anything, raise each ask as its OWN item: \`${fy} attention add --title "<what it is about>" "<the ask>"\`. Title ≤40 chars (push heading); ask ≤120. Isolation test: could the owner answer with nothing else open? No "as above", ticket/PR numbers, paths or unexplained acronyms (\`--term "X=meaning"\`). Point form (ADHD-friendly): \`--premise\` = situation, \`--context\` = why now, \`--decided\` = earlier answers; charts: fy-render fence in \`--body\`. \`--kind task|yesno|permission|choice|review|info\`. Choice: 2–3 \`--option\`s (what each does); \`--recommend <pick> --recommend-why <line>\`. \`--up "<label>"\`: 3rd answer (task, permission). To-do: \`--step "<md>"\` each (exact commands, no secrets). Replies: "[answer to !A3 …]"; "[needs more info !A3 …]" → \`${fy} attention edit <id>\`; "[discuss !A3 …]" reply in chat, then edit/done. Moot? \`${fy} attention done <id>\`. Open: \`${fy} attention ls\`.`;
+export const AGENDA_ENV = 'FY_AGENDA';
+
+/** The Agenda mode teaching. Short on purpose — it is in every prompt that turns it on. */
+export const AGENDA_INSTRUCTION = (fy: string): string =>
+  [
+    `Agenda mode: keep an agenda of what ONLY the owner can do or decide. Before ending a reply that asks them to decide or DO anything, add each ask as its OWN item: \`${fy} agenda add --title "<what it is about>" "<the ask>"\`. Title ≤40 chars; ask ≤120. The owner reads it cold: no "as above", ticket/PR numbers, paths or unexplained acronyms (\`--term "X=meaning"\`).`,
+    `\`--premise\` = situation, \`--context\` = why now, \`--decided\` = settled, \`--still-open\` = left; \`--body\`: a SMALL diagram (fy-render svg|html|mermaid). \`--kind task|yesno|permission|choice|review|info\`. Choice: 2–3 \`--option\`s with \`--recommend <pick> --recommend-why <line>\`. To-do: \`--step "<md>"\`.`,
+    `\`--blocking\`: you cannot go on without it; \`--will-block\`: it will block later; \`--by <time>\`: when it is needed (the phone is buzzed near it).`,
+    `"[answer to !A3 …]" is the answer; "[re !A3 …]" is chat: \`${fy} agenda edit <id>\` its card. \`${fy} agenda done <id>\` what it settled, \`${fy} agenda surface <id>\` what still needs them. Open: \`${fy} agenda ls\`.`,
+  ].join('\n');
+
+/**
+ * NOTIFY — how an agent tells the human something outside a reply. Every agent runtime gets it, in a
+ * rule short enough to sit in every prompt; the bigger, switchable teaching of an agenda is
+ * {@link AGENDA_INSTRUCTION}. docs/notifications.md quotes this text verbatim.
+ */
+export const NOTIFY_INSTRUCTION = (fy: string): string =>
+  `Notify: the owner reads the Inbox, not your replies. To tell them something worth their time (a result, a blocker, a decision you made for them) run \`${fy} notify "<summary>" [--body "<detail>"]\`: a quiet Inbox notice. Add \`--ping\` only when it must reach their phone now. Never notify progress or chatter.`;
 
 /**
  * Everything every agent runtime is told, as ONE appended system prompt section: the tools, the
- * settings rules, then how to raise Attention. A ferret's own sections follow it (`FERRET_SECTIONS`),
+ * settings rules, then the notify rule. A ferret's own sections follow it (`FERRET_SECTIONS`),
  * added by its wrapper.
  */
 export const AGENT_INSTRUCTION = (fy: string): string =>
-  `${AGENT_TOOLS_INSTRUCTION}\n\n${SET_UP_FERRETRY_INSTRUCTION(fy)}\n\n${ATTENTION_INSTRUCTION(fy)}`;
+  `${AGENT_TOOLS_INSTRUCTION}\n\n${SET_UP_FERRETRY_INSTRUCTION(fy)}\n\n${NOTIFY_INSTRUCTION(fy)}`;
 
 /** One section every agent runtime is told, whatever its switches: its id and its exact text. */
 export interface AlwaysOnSection {
-  readonly id: 'tools' | 'settings' | 'attention';
+  readonly id: 'tools' | 'settings' | 'notify';
   readonly text: string;
 }
 
@@ -428,7 +445,7 @@ export interface AlwaysOnSection {
 export const ALWAYS_ON_SECTIONS = (fy: string): readonly AlwaysOnSection[] => [
   { id: 'tools', text: AGENT_TOOLS_INSTRUCTION },
   { id: 'settings', text: SET_UP_FERRETRY_INSTRUCTION(fy) },
-  { id: 'attention', text: ATTENTION_INSTRUCTION(fy) },
+  { id: 'notify', text: NOTIFY_INSTRUCTION(fy) },
 ];
 
 /**
@@ -454,7 +471,7 @@ export function instructionDigest(text: string): string {
  * tool is left in.
  *
  * Read off the same constants the wrapper renders (`../wrappers.ts`), so it cannot describe a prompt
- * the wrapper would not build: the tools, settings and attention sections always (each with its {@link instructionDigest}), each {@link FERRET_SECTIONS}
+ * the wrapper would not build: the tools, settings and notify sections always (each with its {@link instructionDigest}), each {@link FERRET_SECTIONS}
  * entry whose variable is exactly `1`, and the question tool only for a launch whose
  * {@link SESSION_MODE_ENV} is `interactive` (O3) — the same rule for Claude and Codex. It describes an
  * AGENT runtime's wrapper, the only kind a session can be started on.

@@ -1,53 +1,107 @@
 /**
- * THE ATTENTION PAGE'S LIST, as pure decisions: how the open items are grouped by the conversation that
- * raised them, what each row is headed by, which ones a machine filter or a search keeps, and which item
- * is selected after the selected one leaves the list.
+ * THE INBOX'S LIST, as pure decisions: how the open items are grouped by the FERRET that holds them, which
+ * of three sections each group sits in, what a row is headed by, which rows a machine filter, Find or the
+ * Warden chip keep, and which item is selected after the selected one leaves the list.
  *
- * A ROW IS HEADED BY ITS ITEM, never by its conversation. Ten items from one ferret used to read as ten
- * rows all titled with the project's name; the conversation is said once, on its group's header.
+ * A GROUP IS A FERRET (a conversation on a machine), said once on its header. A ROW IS HEADED BY ITS ITEM,
+ * never by its conversation: ten items from one ferret used to read as ten rows all titled with the
+ * project's name.
+ *
+ * THREE SECTIONS, in the order the owner should look: "Stopped on you" (the ferret is idle until the owner
+ * answers — the daemon's `stopped`), "Needs you" (items on the owner's turn), then "With ferrets" (items on
+ * the ferret's turn, nothing for the owner to do). A ferret sits in ONE of the first two, never both; it may
+ * ALSO sit in "With ferrets" for the items it holds.
  */
 
-import { attentionTitle, type SessionView } from '@ferretry/protocol';
+import { type AttentionItem, attentionTitle, type SessionView } from '@ferretry/protocol';
 import { sessionsBarNames } from '../shell/sessions-bar-model.ts';
+import { sortAgenda } from './agenda-status.ts';
 import type { InboxCard, InboxResolved } from './attention-inbox.ts';
 import { visibleWhy } from './attention-inbox.ts';
 import type { DaemonId } from './daemon-connection.ts';
 
-/** One conversation's open items, under one collapsible header. */
-export interface InboxGroup {
+/** One ferret's open items on one machine, under one header. */
+export interface FerretGroup {
   /** `(daemonId, sessionId)`, collision-safe. */
   readonly key: string;
-  /** What the conversation is working on, else the ferret's name. */
-  readonly title: string;
-  /** The ferret, when the title is not already its name. */
-  readonly ferret: string | null;
+  readonly daemonId: DaemonId;
+  readonly view: SessionView;
+  /** The ferret's name: what a group is scanned by. */
+  readonly ferret: string;
+  /** What the conversation is working on, when that is not just the ferret's name. */
+  readonly task: string | null;
   readonly machineName: string;
-  readonly cards: readonly InboxCard[];
+  /** The ferret is idle until the owner answers. */
+  readonly stopped: boolean;
+  /** Agenda items (not plain notifications), in the agenda's order. */
+  readonly items: readonly InboxCard[];
+  /** Plain notifications: a line and a time, nothing to answer. Newest first. */
+  readonly notices: readonly InboxCard[];
 }
 
-const inboxGroupKey = (daemonId: DaemonId, sessionId: string): string => JSON.stringify([daemonId, sessionId]);
+const groupKey = (daemonId: DaemonId, sessionId: string): string => JSON.stringify([daemonId, sessionId]);
 
-/** The words a group header says: "diene-migrate · Johnnie". */
-const groupNames = (view: SessionView): { readonly title: string; readonly ferret: string | null } =>
-  sessionsBarNames(view);
+const isNoticeCard = (card: InboxCard): boolean => card.item.notice === true;
+
+/** The cards grouped by ferret. Each group's items are in the agenda's order; its notices keep their (newest-first) order. */
+const buildGroups = (cards: readonly InboxCard[]): readonly FerretGroup[] => {
+  const grouped = new Map<string, InboxCard[]>();
+  for (const card of cards) {
+    const key = groupKey(card.daemonId, card.view.config.id);
+    const members = grouped.get(key);
+    if (members === undefined) grouped.set(key, [card]);
+    else members.push(card);
+  }
+  const groups = [...grouped.entries()].map(([key, members]): FerretGroup => {
+    const head = members[0] as InboxCard;
+    const names = sessionsBarNames(head.view);
+    const ordered = sortAgenda(members.filter(card => !isNoticeCard(card)).map(card => card.item));
+    const byItem = new Map(members.map(card => [card.item, card] as const));
+    return {
+      key,
+      daemonId: head.daemonId,
+      view: head.view,
+      ferret: names.ferret ?? names.title,
+      task: names.ferret === null ? null : names.title,
+      machineName: head.machineName,
+      stopped: head.view.state.attention?.stopped === true,
+      items: ordered.flatMap(item => byItem.get(item) ?? []),
+      notices: members.filter(isNoticeCard),
+    };
+  });
+  // The group whose first row is the most urgent leads: blocking, then the nearest deadline, then longest waiting.
+  const lead = (group: FerretGroup): AttentionItem | undefined => (group.items[0] ?? group.notices[0])?.item;
+  const rank = new Map<AttentionItem, FerretGroup>();
+  for (const group of groups) {
+    const item = lead(group);
+    if (item !== undefined) rank.set(item, group);
+  }
+  return sortAgenda([...rank.keys()]).flatMap(item => rank.get(item) ?? []);
+};
+
+/** The inbox's three sections. */
+export interface InboxSections {
+  readonly stopped: readonly FerretGroup[];
+  readonly needsYou: readonly FerretGroup[];
+  readonly withFerrets: readonly FerretGroup[];
+}
 
 /**
- * The cards grouped by conversation. The groups keep the order of their first card, so the group with
- * the newest item leads; inside a group the cards keep their order (newest first).
+ * `ownerCards` (on the owner's turn) and `ferretCards` (on the ferret's turn) sorted into the three sections.
+ * A ferret that is stopped heads the first; one with anything else on the owner's turn is in the second.
  */
-export const inboxGroups = (cards: readonly InboxCard[]): readonly InboxGroup[] => {
-  const groups = new Map<string, { readonly head: InboxCard; readonly cards: InboxCard[] }>();
-  for (const card of cards) {
-    const key = inboxGroupKey(card.daemonId, card.view.config.id);
-    const group = groups.get(key);
-    if (group === undefined) groups.set(key, { head: card, cards: [card] });
-    else group.cards.push(card);
-  }
-  return [...groups.entries()].map(([key, { head, cards: members }]) => {
-    const names = groupNames(head.view);
-    return { key, title: names.title, ferret: names.ferret, machineName: head.machineName, cards: members };
-  });
+export const inboxSections = (ownerCards: readonly InboxCard[], ferretCards: readonly InboxCard[]): InboxSections => {
+  const owners = buildGroups(ownerCards);
+  return {
+    stopped: owners.filter(group => group.stopped),
+    needsYou: owners.filter(group => !group.stopped),
+    withFerrets: buildGroups(ferretCards).map(group => ({ ...group, stopped: false })),
+  };
 };
+
+/** Every card of a set of groups, in the order the page draws them: the keyboard's order. */
+export const groupCards = (groups: readonly FerretGroup[]): readonly InboxCard[] =>
+  groups.flatMap(group => [...group.items, ...group.notices]);
 
 /** The row's headline: the item's own title, else the start of its ask. Never the conversation's name. */
 export const inboxRowTitle = (item: InboxCard['item']): string => attentionTitle(item);
@@ -77,13 +131,32 @@ export const inboxMachines = (
   return [...seen.entries()].map(([daemonId, name]) => ({ daemonId, name }));
 };
 
-/** What the header narrows the list to: one machine (or all), and the words typed into Find. */
+/** Where a filtered Inbox keeps to: only what the machine's Warden raised. */
+export type InboxSource = 'warden';
+
+/** What the header narrows the list to: one machine (or all), the words typed into Find, and where it came from. */
 export interface InboxListFilter {
   readonly machine: DaemonId | null;
   readonly query: string;
+  /** `/inbox?from=warden`: only what the Warden raised. */
+  readonly from?: InboxSource | null;
 }
 
 export const NO_FILTER: InboxListFilter = { machine: null, query: '' };
+
+/** The `?from=` value an Inbox link names, or `null` for none or one this app does not know. */
+export const inboxSourceFromSearch = (search: string): InboxSource | null =>
+  new URLSearchParams(search).get('from') === 'warden' ? 'warden' : null;
+
+/**
+ * Whether the Warden raised this: the daemon's own hand AND a `warden:` source (`warden:ask:<kind>`,
+ * `warden:ask:fleet:<kind>:<key>`). Both, so a ferret that merely names a Warden in its text is not one.
+ */
+export const isFromWarden = (item: Pick<AttentionItem, 'raisedBy' | 'sourceRef'>): boolean =>
+  item.raisedBy === 'daemon' && (item.sourceRef ?? '').startsWith('warden:');
+
+const fromKept = (filter: InboxListFilter, item: Pick<AttentionItem, 'raisedBy' | 'sourceRef'>): boolean =>
+  filter.from !== 'warden' || isFromWarden(item);
 
 const folded = (text: string): string => text.toLocaleLowerCase().replace(/\s+/gu, ' ').trim();
 
@@ -101,7 +174,7 @@ const searchable = (
   machineName: string,
   item: Pick<InboxCard['item'], 'id' | 'subject' | 'why'> & { readonly title?: string | undefined },
 ): readonly (string | undefined)[] => {
-  const names = groupNames(view);
+  const names = sessionsBarNames(view);
   return [
     item.title,
     item.subject,
@@ -119,6 +192,7 @@ export const filterInboxCards = (cards: readonly InboxCard[], filter: InboxListF
   cards.filter(
     card =>
       (filter.machine === null || card.daemonId === filter.machine) &&
+      fromKept(filter, card.item) &&
       matchesWords(searchable(card.view, card.machineName, card.item), filter.query),
   );
 
@@ -130,6 +204,7 @@ export const filterInboxResolved = (
   rows.filter(
     row =>
       (filter.machine === null || row.daemonId === filter.machine) &&
+      fromKept(filter, row.record) &&
       matchesWords(searchable(row.view, row.machineName, row.record), filter.query),
   );
 

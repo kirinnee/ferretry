@@ -10,6 +10,7 @@ import {
 import { z } from 'zod';
 import type { SerialExecutor } from '../ports.ts';
 import type { PushDispatch } from '../push/types.ts';
+import { notificationKey } from './policy.ts';
 
 /**
  * The ledger excludes push endpoints, key material, push enrolment ids, and device names. A paired
@@ -52,20 +53,23 @@ export const AttentionNotificationRequestedRecordSchema = z
     attribution: z.string().min(1),
     sessionId: z.string().min(1),
     attentionId: AttentionIdSchema,
-    /** Present on the push that announces the information a ferret added: which request of the owner's it answers. */
+    /** Legacy: the push that announced the information a ferret added (this daemon no longer makes it). */
     infoRequest: PositiveIntegerSchema.optional(),
+    /** Legacy: the push that announced an item moved out of discussion (this daemon no longer makes it). */
+    surfaced: z.literal(true).optional(),
+    /** The push for a ferret STOPPED on the owner: the idle period it was made for. At most one per period. */
+    stoppedAt: z.string().min(1).optional(),
+    /** The push for an item whose `neededBy` came near. At most one per item. */
+    deadline: z.literal(true).optional(),
+    /** The push for a notice the ferret asked to buzz for (`fy notify --ping`). At most one per notice. */
+    ping: z.literal(true).optional(),
     sent: SentNotificationSchema,
     enrolled: NonNegativeIntegerSchema,
   })
-  .refine(
-    record =>
-      record.key ===
-      `attention:${record.sessionId}:${record.attentionId}${record.infoRequest === undefined ? '' : `:info-${record.infoRequest}`}`,
-    {
-      message: 'the attention notification key does not name its session and item',
-      path: ['key'],
-    },
-  );
+  .refine(record => record.key === notificationKey(record), {
+    message: 'the attention notification key does not name its session and item',
+    path: ['key'],
+  });
 
 export const NotificationRequestedRecordSchema = z.union([
   DirectNotificationRequestedRecordSchema,

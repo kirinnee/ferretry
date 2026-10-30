@@ -1,8 +1,7 @@
-import type { AttentionItem, AttentionSnapshot, SessionAttentionSummary } from '@ferretry/protocol';
+import type { SessionAttentionSummary } from '@ferretry/protocol';
 import type { SerialExecutor } from '../ports.ts';
 import {
   boardReplyMessage,
-  conversationResponse,
   conversationTurn,
   discussMessage,
   needsInfoMessage,
@@ -22,6 +21,7 @@ import type {
   AttentionService,
 } from './service.ts';
 import { attentionSnapshot, emptyAttentionLedger } from './state-machine.ts';
+import { type AgendaModes, decoratedSummary, type SessionStops } from './stopped.ts';
 
 /** Every observer told, in order, each on its own: one that throws never silences the next. */
 export class AttentionChangeFanout implements AttentionChangeObserver {
@@ -53,6 +53,9 @@ export interface SessionAttentionState {
  * order, but their observers may run out of order, and writing the earlier snapshot last would show an
  * answered item as still open. Re-reading under one lock per session makes the last write the current
  * board, whatever order the notices arrive in.
+ *
+ * The summary also says whether the ferret works in agenda mode and whether it is STOPPED on the owner, so
+ * both are read at the same moment as the board.
  */
 export class SessionAttentionProjection implements AttentionChangeObserver {
   constructor(
@@ -60,10 +63,17 @@ export class SessionAttentionProjection implements AttentionChangeObserver {
     private readonly state: SessionAttentionState,
     private readonly serial: Pick<SerialExecutor, 'run'>,
     private readonly now: () => string,
+    private readonly modes: AgendaModes = { enabled: async () => false },
+    private readonly stops: SessionStops = { current: async () => undefined },
   ) {}
 
   async changed(sessionId: string, change: AttentionBoardChange): Promise<void> {
     await this.project(sessionId, change);
+  }
+
+  /** The session's mode or idleness moved with no board change: the summary is brought in line. Total. */
+  async refresh(sessionId: string): Promise<void> {
+    await this.project(sessionId, undefined).catch(() => undefined);
   }
 
   /**
@@ -78,7 +88,14 @@ export class SessionAttentionProjection implements AttentionChangeObserver {
   private async project(sessionId: string, change: AttentionBoardChange | undefined): Promise<void> {
     await this.serial.run(`attention-projection:${sessionId}`, async () => {
       const ledger = (await this.boards.read(sessionId)) ?? emptyAttentionLedger(sessionId, this.now());
-      await this.state.write(sessionId, sessionAttentionSummary(attentionSnapshot(ledger)), change);
+      const snapshot = attentionSnapshot(ledger);
+      const summary = decoratedSummary(
+        sessionAttentionSummary(snapshot),
+        snapshot.items,
+        await this.modes.enabled(sessionId).catch(() => false),
+        await this.stops.current(sessionId).catch(() => undefined),
+      );
+      await this.state.write(sessionId, summary, change);
     });
   }
 }
@@ -140,60 +157,26 @@ export class AttentionBoardUndelivered implements AttentionUndeliveredSink {
   }
 }
 
-/** Announces that a ferret added the information the owner asked for: the one push an edit ever makes. */
-export interface MoreInfoAnnouncer {
-  /** `discussion`: the wait the edit cleared was the owner's request to talk the item through. */
-  moreInfoAdded(
-    sessionId: string,
-    item: AttentionItem,
-    snapshot: AttentionSnapshot,
-    discussion: boolean,
-  ): Promise<void>;
-}
-
-/**
- * The ONE exception to "an edit never pushes": the raising ferret's edit that answers an open request for
- * more information or to discuss the item (`info-added`) pushes once more. The state machine clears the
- * request in the same commit, so a retried edit is no change and pushes nothing, and the announcer keys the
- * push on the item and its request counter. The cleared wait is read from the history: the edit appends
- * `updated` after the entry that opened the wait, so that entry is the one before the last.
- */
-export class AttentionMoreInfoPush implements AttentionChangeObserver {
-  constructor(private readonly announcer: MoreInfoAnnouncer) {}
-
-  async changed(sessionId: string, change: AttentionBoardChange): Promise<void> {
-    if (change.change !== 'info-added' || change.item === undefined) return;
-    const history = change.item.history ?? [];
-    await this.announcer.moreInfoAdded(sessionId, change.item, change.snapshot, history.at(-2)?.kind === 'discuss');
-  }
-}
-
 /**
  * A person's chat message, read against the ferret's open items (`conversationTurn`): the words to
- * deliver, and — once they are accepted — the items they answered resolved in the owner's name.
+ * deliver, and — once they are accepted — each item they named made the ferret's turn. Nothing resolves.
  *
  * Total on the way in: a board that cannot be read leaves the message exactly as written, because a
  * person's words must never be refused for the sake of a decoration.
  */
 export class AttentionConversation {
-  constructor(private readonly attention: Pick<AttentionService, 'list' | 'answer' | 'resolve'>) {}
+  constructor(private readonly attention: Pick<AttentionService, 'list' | 'reply'>) {}
 
   async prepare(sessionId: string, message: string): Promise<ReturnType<typeof conversationTurn>> {
     const listed = await this.attention.list(sessionId).catch(() => undefined);
-    if (listed === undefined || !listed.ok) return { message, answers: [] };
+    if (listed === undefined || !listed.ok) return { message, referenced: [] };
     return conversationTurn(message, listed.value.items);
   }
 
-  /** Resolves every item the accepted message answered; each on its own, none able to fail the send. */
-  async settle(sessionId: string, turn: ReturnType<typeof conversationTurn>, original: string): Promise<void> {
-    for (const item of turn.answers) {
-      const response = conversationResponse(item, original);
-      const note = original.trim().slice(0, 2_048);
-      await (
-        response === undefined
-          ? this.attention.resolve(sessionId, item.id, { kind: 'human' }, note, 'conversation')
-          : this.attention.answer(sessionId, item.id, response, { kind: 'human' }, null, 'conversation')
-      ).catch(() => undefined);
+  /** Makes every item the accepted message named the ferret's turn; each on its own, none able to fail the send. */
+  async settle(sessionId: string, turn: ReturnType<typeof conversationTurn>): Promise<void> {
+    for (const item of turn.referenced) {
+      await this.attention.reply(sessionId, item.id, { kind: 'human' }).catch(() => undefined);
     }
   }
 }

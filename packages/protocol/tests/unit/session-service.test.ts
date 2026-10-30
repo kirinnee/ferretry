@@ -399,6 +399,11 @@ const sessionCases: SchemaCase[] = [
     schema: session.SessionConfigSchema,
     value: { ...sessionView.config, hypermedia: false },
   },
+  {
+    name: 'a session config that says agenda',
+    schema: session.SessionConfigSchema,
+    value: { ...sessionView.config, agenda: true },
+  },
   { name: 'agent name', schema: session.AgentNameSchema, value: 'Hadi' },
   { name: 'send disposition', schema: session.SendDispositionSchema, value: 'delivered' },
   { name: 'send result', schema: session.SendResultSchema, value: { ...sessionView, disposition: 'delivered' } },
@@ -470,6 +475,13 @@ describe('session schemas', () => {
     should(session.sessionHypermediaEnabled(config('auto'))).be.false();
     should(session.sessionHypermediaEnabled(config('auto', true))).be.true();
     should(session.sessionHypermediaEnabled(config('interactive', false))).be.false();
+  });
+
+  it('should resolve agenda mode from the recorded switch, else off', () => {
+    // Arrange + Act + Assert
+    should(session.sessionAgendaEnabled({})).be.false();
+    should(session.sessionAgendaEnabled({ agenda: true })).be.true();
+    should(session.sessionAgendaEnabled({ agenda: false })).be.false();
   });
 
   it('should round-trip every public session schema', () => {

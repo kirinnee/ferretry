@@ -58,14 +58,15 @@ checked cannot break either harness's quoting.
 
 Built-in subagents are **discouraged, not blocked**: nothing is taken away from the harness.
 
-**Size.** Every Ferretry instruction together is at most about 7.1 KB (≈ 1,765 tokens) with every section on
+**Size.** Every Ferretry instruction together is at most about 7.4 KB (≈ 1,860 tokens) with every section on
 and the longest routing prompt:
 
 | Section                                  | Characters | ≈ tokens | When                        |
 | ---------------------------------------- | ---------- | -------- | --------------------------- |
 | Tools (terminals, browser pages)         | 1,001      | 250      | every agent runtime         |
 | Ferretry settings (short "Set up" skill) | 478        | 120      | every agent runtime         |
-| Attention (raise an item, with steps)    | 1,027      | 257      | every agent runtime         |
+| Notify (`fy notify`, the Inbox)          | 303        | 76       | every agent runtime         |
+| Agenda (`fy agenda`, with steps)         | 1,000      | 250      | `FY_AGENDA=1`               |
 | Hypermedia                               | 1,920      | 480      | `FY_HYPERMEDIA=1`           |
 | Pack mode                                | 1,003      | 251      | `FY_PACK=1`                 |
 | Its routing line                         | ≤ 1,210    | ≤ 303    | `FY_PACK=1`                 |
@@ -74,7 +75,7 @@ and the longest routing prompt:
 
 The full "Set up Ferretry" skill (4.2 KB) is no longer in any prompt; the settings section points at
 `fy config guide`, which prints it. A test keeps the whole prompt, with the longest routing prompt, under
-7.1 KB (the Attention section grew by 116 characters to teach `--step`, so its cap went from 950 to 1,050, and Hypermedia by 335 to teach `chart`; the whole-prompt cap went from 6.7 KB) and the Pack section itself under 1,050 characters. The routing line grew from a 150-character
+7.4 KB (the old always-on Attention section became the short Notify rule, and its words moved into the Agenda section, which only a ferret in agenda mode carries — [notifications.md](notifications.md#agenda-mode); Hypermedia grew by 335 to teach `chart`) and the Pack section itself under 1,050 characters. The routing line grew from a 150-character
 summary to the whole prompt when the use-case guide became one routing prompt, so the agent decides with
 exactly what Jev is told.
 

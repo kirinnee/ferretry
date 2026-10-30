@@ -145,8 +145,10 @@ describe('SessionsBar as a column', () => {
     expect(chip('nameless')).toBeNull();
   });
 
-  test('marks Hypermedia and Pack mode beside the cap, only while each is on', async () => {
-    const told = sessionView('told-1', { config: { teammate: 'ora', mode: 'interactive', cwd: '/work/ferretry' } });
+  test('marks Hypermedia, Pack mode and Agenda mode beside the cap, only while each is on', async () => {
+    const told = sessionView('told-1', {
+      config: { teammate: 'ora', mode: 'interactive', agenda: true, cwd: '/work/ferretry' },
+    });
     const untold = sessionView('untold-1', {
       config: { teammate: 'pim', mode: 'interactive', hypermedia: false, pack: false, cwd: '/work/ferretry' },
     });
@@ -156,7 +158,7 @@ describe('SessionsBar as a column', () => {
       [...(view?.container.querySelectorAll(`[data-sbar-session="${id}"] [data-switch-marks] > *`) ?? [])].map(
         node => node.getAttribute('data-switch-mark') ?? 'learning',
       );
-    expect(marks('told-1')).toEqual(['learning', 'hypermedia', 'pack']);
+    expect(marks('told-1')).toEqual(['learning', 'hypermedia', 'pack', 'agenda']);
     expect(marks('untold-1')).toEqual([]);
     // A row is a link, so its marks are pictures with words, never controls of their own.
     expect(view.container.querySelector('[data-sbar-session="told-1"] button')).toBeNull();
@@ -539,11 +541,7 @@ describe('SessionsBar as a rail', () => {
     view = await mount(element);
     expect(view.container.querySelector('[data-sessions-bar="rail"]')).not.toBeNull();
     const dots = [...view.container.querySelectorAll<HTMLAnchorElement>('.fy-sbar__dot')];
-    expect(dots.map(dot => dot.getAttribute('aria-label'))).toEqual([
-      'Maryah — 1 open Attention item',
-      'nameless',
-      'Hadi',
-    ]);
+    expect(dots.map(dot => dot.getAttribute('aria-label'))).toEqual(['Maryah — 1 open Inbox item', 'nameless', 'Hadi']);
     expect(dots.find(dot => dot.getAttribute('aria-current') === 'page')?.getAttribute('aria-label')).toBe('Hadi');
     expect(view.container.querySelector('[aria-label="Projects"]')?.getAttribute('aria-current')).toBe('page');
     await click(dots[0] ?? null, 'a dot');
@@ -758,8 +756,8 @@ describe('SessionsBar across every machine', () => {
     view = await mount(element);
     const dots = [...view.container.querySelectorAll('.fy-sbar__dot')];
     expect(dots.map(dot => dot.getAttribute('aria-label'))).toEqual([
-      'Ora on kirin-box — 1 open Attention item',
-      'Maryah on work-mac — 1 open Attention item',
+      'Ora on kirin-box — 1 open Inbox item',
+      'Maryah on work-mac — 1 open Inbox item',
       'Hadi on work-mac',
       'nameless on work-mac',
       'Pim on kirin-box',

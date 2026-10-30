@@ -68,3 +68,34 @@ export const readRecentMessages = async (
 };
 
 export type RecentMessagesMemory = Map<string, Walk>;
+
+/** Why "Last messages" could not be shown: a short reason for the reader, and the raw text for a tooltip. */
+export interface RecentFailure {
+  readonly reason: string;
+  readonly raw: string;
+}
+
+const NETWORK_WORDS = /failed to fetch|network|load failed|unreachable|offline|econn|socket|timed? ?out/iu;
+
+/**
+ * Maps whatever the read threw to a few plain words — never the daemon's own sentence, which is for an
+ * operator. Known daemon refusals get their own reason; a lost connection says the machine was not
+ * reached; anything else is a generic short reason. The raw text is kept for `title`.
+ */
+export const describeRecentFailure = (error: unknown): RecentFailure => {
+  const raw = error instanceof Error ? error.message : String(error);
+  const name = error instanceof Error ? error.name : '';
+  const status = (error as { readonly status?: unknown } | null)?.status;
+  const code = (error as { readonly code?: unknown } | null)?.code;
+  const reason =
+    code === 'transcript_unreadable' || /proved transcript this daemon could not read completely/iu.test(raw)
+      ? "part of this conversation couldn't be read yet (it may still be being written, or it is too large)"
+      : name === 'FyTransportError' || NETWORK_WORDS.test(raw)
+        ? "couldn't reach the machine"
+        : status === 401 || status === 403
+          ? "this device isn't allowed to read it"
+          : status === 404
+            ? 'the conversation is no longer there'
+            : 'something went wrong reading it';
+  return { reason, raw };
+};

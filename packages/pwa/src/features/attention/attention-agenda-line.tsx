@@ -1,0 +1,258 @@
+/**
+ * THE AGENDA'S PARTS IN A FERRET'S CHAT, all siblings of the composer so its own box never moves:
+ *
+ * - the ONE LINE above it — "● Agenda · 5 need you · 2 with Johnnie ▴" — with what is on its way ("Sending…")
+ *   on its right;
+ * - the DRAWER the line opens upward, bounded and scrolling on its own, one row per item;
+ * - the removable "re: <title> ✕" CHIPS of the items the next message is about;
+ * - the DOCKED PANEL a wide screen can keep beside the chat instead of the drawer.
+ */
+
+import type { AttentionId, AttentionItem } from '@ferretry/protocol';
+import { ChevronUp, LoaderCircle, X } from 'lucide-react';
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { agendaSegments, type AgendaCounts } from '../../lib/agenda-chat.ts';
+import type { InboxAction } from '../../lib/attention-answers.ts';
+import { AttentionAgendaRow } from './attention-agenda-row.tsx';
+import { attentionHeading } from './attention-delivery.tsx';
+
+interface AgendaSending {
+  readonly count: number;
+  /** What is on its way, for the tooltip. */
+  readonly headings: readonly string[];
+}
+
+export interface AttentionAgendaLineProps {
+  readonly ferret: string;
+  /** Absent: the agenda is off or empty, and the line says only what is sending. */
+  readonly counts?: AgendaCounts;
+  readonly open: boolean;
+  /** The drawer's DOM id, for `aria-controls`. */
+  readonly controls: string;
+  /** Docked: the agenda is beside the chat, so the line is a plain summary. */
+  readonly docked: boolean;
+  readonly onToggle: () => void;
+  readonly sending: AgendaSending;
+  /** Drawn on the right instead of "Sending…" while the machine holds answers ("Sending in 8 s… Send now"). */
+  readonly repliesSlot?: ReactNode;
+}
+
+export function AttentionAgendaLine({
+  ferret,
+  counts,
+  open,
+  controls,
+  docked,
+  onToggle,
+  sending,
+  repliesSlot,
+}: AttentionAgendaLineProps) {
+  const hasStatus = repliesSlot !== undefined || sending.count > 0;
+  if (counts === undefined && !hasStatus) return null;
+  const segments = counts === undefined ? [] : agendaSegments(counts, ferret);
+  const urgent = counts !== undefined && counts.needYou > 0;
+  const state = counts === undefined ? 'sending' : hasStatus ? 'both' : 'agenda';
+  const summary = (
+    <>
+      <span aria-hidden="true" className="fy-agenda-line__dot" data-urgent={urgent || undefined} />
+      <span className="fy-agenda-line__words">
+        <strong className="fy-agenda-line__name">Agenda</strong>
+        {segments.map(segment => (
+          <span className="fy-agenda-line__segment" key={segment.words}>
+            {segment.count === null ? null : (
+              <>
+                <strong className="fy-agenda-line__n">{segment.count}</strong>{' '}
+              </>
+            )}
+            {segment.words}
+          </span>
+        ))}
+      </span>
+    </>
+  );
+  return (
+    <div
+      className="fy-agenda-line"
+      data-composer-status={state}
+      {...(counts === undefined ? {} : { 'data-agenda-line': '' })}
+    >
+      {counts === undefined ? (
+        <span className="fy-agenda-line__fill" />
+      ) : docked ? (
+        <p className="fy-agenda-line__main" data-agenda-line-summary="">
+          {summary}
+        </p>
+      ) : (
+        <button
+          aria-controls={controls}
+          aria-expanded={open}
+          className="fy-agenda-line__main"
+          data-agenda-line-toggle=""
+          onClick={onToggle}
+          type="button"
+        >
+          {summary}
+          <ChevronUp aria-hidden="true" className="fy-agenda-line__chevron" data-open={open || undefined} size={14} />
+        </button>
+      )}
+      <AgendaLineStatus repliesSlot={repliesSlot} sending={sending} />
+    </div>
+  );
+}
+
+/** The line's right end: the held-replies notice when there is one, else what is on its way, else nothing. */
+function AgendaLineStatus({
+  repliesSlot,
+  sending,
+}: {
+  readonly repliesSlot: ReactNode | undefined;
+  readonly sending: AgendaSending;
+}) {
+  if (repliesSlot !== undefined) return <div className="fy-agenda-line__status">{repliesSlot}</div>;
+  if (sending.count === 0) return null;
+  return (
+    <span
+      className="fy-agenda-line__status fy-agenda-sending"
+      data-attention-sending-line=""
+      role="status"
+      title={sending.headings.length === 0 ? undefined : sending.headings.join(', ')}
+    >
+      <LoaderCircle aria-hidden="true" className="animate-spin motion-reduce:animate-none" size={14} />
+      {sending.count === 1 ? 'Sending…' : `Sending ${sending.count}…`}
+    </span>
+  );
+}
+
+interface AgendaRowsProps {
+  readonly items: readonly AttentionItem[];
+  readonly ferret: string;
+  readonly now?: number;
+  readonly busy: ReadonlySet<AttentionId>;
+  readonly referenced: readonly AttentionId[];
+  readonly onAct: (item: AttentionItem, action: InboxAction) => void;
+  readonly onAddReply: (item: AttentionItem) => void;
+  readonly onOpen: (item: AttentionItem) => void;
+}
+
+function AgendaRows({ items, ferret, now, busy, referenced, onAct, onAddReply, onOpen }: AgendaRowsProps) {
+  return (
+    <ul className="fy-agenda-rows">
+      {items.map(item => (
+        <li className="fy-agenda-rows__item" key={item.id}>
+          <AttentionAgendaRow
+            busy={busy.has(item.id)}
+            ferret={ferret}
+            item={item}
+            onAct={action => onAct(item, action)}
+            onAddReply={() => onAddReply(item)}
+            onOpen={() => onOpen(item)}
+            referenced={referenced.includes(item.id)}
+            {...(now === undefined ? {} : { now })}
+          />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export interface AttentionAgendaDrawerProps extends AgendaRowsProps {
+  readonly id: string;
+}
+
+/** Whether a scroller has more below what it shows, so a fade can say so. */
+const useMoreBelow = () => {
+  const ref = useRef<HTMLElement | null>(null);
+  const [more, setMore] = useState(false);
+  const measure = useCallback(() => {
+    const box = ref.current;
+    if (box !== null) setMore(box.scrollHeight - box.scrollTop - box.clientHeight > 2);
+  }, []);
+  useEffect(() => {
+    measure();
+    const box = ref.current;
+    if (box === null || typeof ResizeObserver === 'undefined') return undefined;
+    const watch = new ResizeObserver(measure);
+    watch.observe(box);
+    if (box.firstElementChild !== null) watch.observe(box.firstElementChild);
+    return () => watch.disconnect();
+  }, [measure]);
+  return { ref, more, measure };
+};
+
+/** Opens upward from the line, between the chat and the composer; bounded, with its own scroll and a fade when more rows are below. */
+export function AttentionAgendaDrawer({ id, ...rows }: AttentionAgendaDrawerProps) {
+  const { ref, more, measure } = useMoreBelow();
+  return (
+    <section
+      aria-label={`${rows.ferret}’s agenda`}
+      className="fy-agenda-drawer"
+      data-agenda-drawer=""
+      data-more={more || undefined}
+      id={id}
+      onScroll={measure}
+      ref={ref}
+    >
+      <AgendaRows {...rows} />
+    </section>
+  );
+}
+
+export interface AttentionAgendaPanelProps extends AgendaRowsProps {
+  readonly onClose: () => void;
+}
+
+/** The agenda docked beside the chat on a wide screen: the same rows, in a column of their own. */
+export function AttentionAgendaPanel({ onClose, ...rows }: AttentionAgendaPanelProps) {
+  return (
+    <aside aria-label={`${rows.ferret}’s agenda`} className="fy-agenda-panel" data-agenda-panel="">
+      <header className="fy-agenda-panel__head">
+        <h2 className="fy-agenda-panel__title">Agenda</h2>
+        <button
+          aria-label="Undock the agenda"
+          className="fy-agenda-panel__close"
+          data-agenda-panel-close=""
+          onClick={onClose}
+          type="button"
+        >
+          <X aria-hidden="true" size={16} />
+        </button>
+      </header>
+      <AgendaPanelBody {...rows} />
+    </aside>
+  );
+}
+
+/** The docked panel's rows, or a plain line when there are none. */
+function AgendaPanelBody(rows: AgendaRowsProps) {
+  if (rows.items.length === 0) return <p className="fy-agenda-panel__empty">Nothing on the agenda.</p>;
+  return <AgendaRows {...rows} />;
+}
+
+export interface AttentionReferenceChipsProps {
+  readonly items: readonly AttentionItem[];
+  readonly onRemove: (id: AttentionId) => void;
+}
+
+/** "re: <title> ✕" for each item the next message is about. Nothing drawn when there are none. */
+export function AttentionReferenceChips({ items, onRemove }: AttentionReferenceChipsProps) {
+  if (items.length === 0) return null;
+  return (
+    <ul aria-label="This message is about" className="fy-agenda-chips" data-agenda-chips="">
+      {items.map(item => (
+        <li className="fy-agenda-ref" data-agenda-chip={item.id} key={item.id}>
+          <span className="fy-agenda-ref__lead">re:</span>
+          <span className="fy-agenda-ref__title">{attentionHeading(item)}</span>
+          <button
+            aria-label={`Stop replying about ${attentionHeading(item)}`}
+            className="fy-agenda-ref__clear"
+            data-agenda-chip-clear={item.id}
+            onClick={() => onRemove(item.id)}
+            type="button"
+          >
+            <X aria-hidden="true" size={14} />
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}

@@ -13,6 +13,7 @@ import { mkdir, realpath, rm, stat } from 'node:fs/promises';
 import { hostname, tmpdir, userInfo } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import {
+  AGENDA_ENV,
   ALWAYS_ON_SECTIONS,
   CredentialStatusService,
   configJsonSchemaFiles,
@@ -59,6 +60,7 @@ import {
   type FleetCredentialList,
   FY_DEFAULT_DAEMON_PORT,
   type Harness,
+  ioPressureView,
   type LearningConfig,
   localOnlyNotice,
   type MigrationConversation,
@@ -78,16 +80,15 @@ import {
   type SessionWorkerPool,
   type SignalSessionRequest,
   type StartSessionRequest,
+  sessionAgendaEnabled,
   sessionHypermediaEnabled,
   type TaskBoardChildAccess,
   TERMINAL_MAX_GLOBAL,
   TERMINAL_MAX_PER_SESSION,
   type TranscriptProvenance,
   type WardenGuardConfig,
-  ioPressureView,
 } from '@ferretry/protocol';
 import { processIncarnationFor } from '@ferretry/protocol/process-incarnation';
-import { ProcessHistory, SessionProcessService } from '../src/lib/session/processes/index.ts';
 // One WebCrypto binding of the relay's crypto port serves the daemon, the browser and the Worker that
 // verifies the claim. Two implementations that agree about a primitive and disagree about an encoding
 // is the class of bug this removes.
@@ -102,8 +103,8 @@ import {
   BunSqliteAnalyticsStoreFactory,
   HttpAnalyticsPricingFeed,
   InlineAnalyticsPersister,
-  WorkerAnalyticsPersister,
   readAnalyticsTranscriptEvidence,
+  WorkerAnalyticsPersister,
   WorkerTranscriptFolds,
 } from '../src/adapters/analytics/index.ts';
 import {
@@ -113,6 +114,7 @@ import {
   NodeRawDeflate,
   probePdfDecryptWorker,
 } from '../src/adapters/attachments/index.ts';
+import { FileAgendaMigrationMarker } from '../src/adapters/attention/file-agenda-migration-marker.ts';
 import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
 import { FileAttentionOutboxRepository } from '../src/adapters/attention/file-attention-outbox-repository.ts';
 import { KeyedAttentionReplyTimers } from '../src/adapters/attention/keyed-attention-reply-timers.ts';
@@ -121,20 +123,16 @@ import {
   PaneAttentionComposer,
   SendAttentionMessenger,
 } from '../src/adapters/attention/send-attention-delivery.ts';
+import { SessionConfigAgendaModes } from '../src/adapters/attention/session-agenda-modes.ts';
+import { armSessionTurnChanges, StorageSessionStops } from '../src/adapters/attention/session-turn-stops.ts';
+import { armAttentionNudge, StorageAttentionNudgeSessions } from '../src/adapters/attention/storage-attention-nudge.ts';
 import {
   StorageHarnessPromptJournal,
   StorageHarnessPromptStates,
   StorageHarnessQuestionAnswerer,
 } from '../src/adapters/attention/storage-harness-prompt.ts';
-import { armAttentionNudge, StorageAttentionNudgeSessions } from '../src/adapters/attention/storage-attention-nudge.ts';
 import { StorageSessionAttentionState } from '../src/adapters/attention/storage-session-attention-state.ts';
 import { FileAcceptedConfigStore, FileConfigDirectory } from '../src/adapters/config-files/files.ts';
-import {
-  HarnessProcessProvenance,
-  processTreeFor,
-  RegularOutputFile,
-  SigtermProcessSignal,
-} from '../src/adapters/session/processes/index.ts';
 import { unrefFileEventTimers } from '../src/adapters/file-events/bun-file-event-source.ts';
 import { platformFileEventSource } from '../src/adapters/file-events/platform.ts';
 // U12 launch policy: old runtime names, and what a Codex runtime leaves behind when its session ends.
@@ -183,8 +181,6 @@ import {
   BunSecretChildRunner,
   BunSecretShell,
   BunSqliteIndexFactory,
-  InlineIndexFile,
-  WorkerIndexFile,
   bundledWorkerUrl,
   CachedUsageFeed,
   CliUpdateLauncher,
@@ -226,6 +222,7 @@ import {
   HostInstallFacts,
   HttpUsageSource,
   hostCgroupFacts,
+  InlineIndexFile,
   JournalGrantAudit,
   JscStackSampler,
   KeyedSerialExecutor,
@@ -278,6 +275,7 @@ import {
   WebCryptoSecretCipher,
   WebPushFetchTransport,
   type WorkerClientOptions,
+  WorkerIndexFile,
   WorkerLoopWatchdog,
   type WorkerProbeReport,
   XvfbDisplay,
@@ -382,6 +380,12 @@ import {
   WorkerObserverHost,
   WorkerSupervisor,
 } from '../src/adapters/session/observer/index.ts';
+import {
+  HarnessProcessProvenance,
+  processTreeFor,
+  RegularOutputFile,
+  SigtermProcessSignal,
+} from '../src/adapters/session/processes/index.ts';
 import { StorageSessionProvenanceStore } from '../src/adapters/session/provenance/index.ts';
 import { FileAnswerLedger, TmuxStructuredQuestionDriver } from '../src/adapters/session/question/index.ts';
 import {
@@ -443,11 +447,11 @@ import {
 } from '../src/adapters/tasks/index.ts';
 import {
   ManagedTerminalService,
+  systemLoginShell,
   TerminalRuntimeError,
   TerminalServiceError,
   TerminalStreamBridge,
   type TerminalStreamScheduler,
-  systemLoginShell,
   TmuxTerminalRuntime,
 } from '../src/adapters/terminal/index.ts';
 import {
@@ -514,6 +518,7 @@ import { createFleetCredentialsSubsystem, FleetCredentialCatalog } from '../src/
 import { createFleetSetupSubsystem } from '../src/lib/fleet/setup-service.ts';
 import { type RuntimeNamesPort, resolveStartAccount } from '../src/lib/fleet/start-resolution.ts';
 import { polledDirectoryLimitations } from '../src/lib/performance/fallbacks.ts';
+import { ProcessHistory, SessionProcessService } from '../src/lib/session/processes/index.ts';
 import { OpenUrlService } from '../src/lib/system/open-url.ts';
 
 /** The ordinary revive a send uses, as the auto-resume pass sees it. */
@@ -572,12 +577,13 @@ import {
   type ArgumentAnswer,
   type AssigneeObservation,
   type AttentionActor,
+  AttentionBoardUndelivered,
+  AttentionBuzz,
   AttentionChangeFanout,
   AttentionConversation,
-  AttentionMoreInfoPush,
-  AttentionBoardUndelivered,
   AttentionReplyBatcher,
   AttentionReplyDelivery,
+  AttentionResurfacer,
   AttentionService,
   AttentionTurnNudge,
   AUDIT_FOLD_WINDOW_MS,
@@ -734,8 +740,10 @@ import {
   harnessQuirks,
   InitialAttachmentError,
   InstructionRefresh,
-  instructionsReplyKey,
   InvalidDeadlineRefused,
+  type IoPressurePort,
+  type IoPressureSourcePort,
+  instructionsReplyKey,
   isControlAttachable,
   isQuestionScopedRequestId,
   isReapTerminalStatus,
@@ -773,6 +781,7 @@ import {
   mcpCheckBaseEnvironment,
   mcpInventoryFolders,
   messageWithAttachments,
+  migrateToAgendaMode,
   modelCatalogPricingRates,
   modelCatalogsView,
   type NameAllocationErrorCode,
@@ -782,8 +791,6 @@ import {
   SystemCallsignIssuer,
   type NameClaim,
   type NameSubsystem,
-  type IoPressurePort,
-  type IoPressureSourcePort,
   NO_IO_PRESSURE,
   NO_STACK_SAMPLER,
   NO_WATCHDOG,
@@ -893,6 +900,8 @@ import {
   SendTracker,
   SendUnconfirmed,
   type SerialExecutor,
+  SessionAgendaModeService,
+  type SessionAgendaModeSubsystem,
   type SessionAncestor,
   SessionAnswerError,
   type SessionAnswerSubsystem,
@@ -1008,6 +1017,7 @@ import {
   type TunnelEntryStorePort,
   type TunnelServicePort,
   type TunnelSwitchPort,
+  TurnChanges,
   tailTranscriptEvents,
   taskBoardTaskActionAuthorizer,
   temporaryFilePath,
@@ -3053,8 +3063,8 @@ function createSessionSendSubsystem(
   readHandoff: (sessionId: SessionId, name: string) => Promise<SessionHandoff | undefined>,
   /**
    * A PERSON's message read against the ferret's open Attention (`AttentionConversation`): the words it
-   * receives, and the items it answered resolved once it was accepted. A teammate's message is never
-   * read this way — only the owner answers the owner's items.
+   * receives, and the items it named made the ferret's turn once it was accepted (nothing resolves). A
+   * teammate's message is never read this way — only the owner talks about the owner's items.
    */
   conversation: Pick<AttentionConversation, 'prepare' | 'settle'>,
   /**
@@ -3092,7 +3102,9 @@ function createSessionSendSubsystem(
               );
             });
       const person = request.senderSessionId === undefined;
-      const turn = person ? await conversation.prepare(id, request.message) : { message: request.message, answers: [] };
+      const turn = person
+        ? await conversation.prepare(id, request.message)
+        : { message: request.message, referenced: [] };
       const outcome = await service
         .send({
           id,
@@ -3104,9 +3116,9 @@ function createSessionSendSubsystem(
           ...(request.senderSessionId === undefined ? {} : { senderReference: request.senderSessionId }),
         })
         .catch((error: unknown) => sendRefusal(error));
-      // Resolved only once the words were accepted: an item must never read as answered by a message the
+      // Only once the words were accepted: an item must never read as the ferret's turn for a message the
       // ferret was not given.
-      if (turn.answers.length > 0) await conversation.settle(id, turn, request.message);
+      if (turn.referenced.length > 0) await conversation.settle(id, turn);
       if (person) await instructions.queueIfStale(id);
       return {
         ...(await view(id, 'took the message')),
@@ -3669,6 +3681,9 @@ interface SessionPackHooks {
 }
 
 /** A session status after which no process runs until the session is launched again. */
+/** How often the deadline sweep looks for an item whose `neededBy` came near with nothing else touching its board. */
+const ATTENTION_DEADLINE_SWEEP_MS = 5 * 60_000;
+
 const HYPERMEDIA_NOT_RUNNING: ReadonlySet<string> = new Set(['completed', 'failed', 'stalled', 'stopped']);
 
 /**
@@ -3785,6 +3800,18 @@ function createSessionPackHooks(
       });
     },
   };
+}
+
+/**
+ * Agenda mode's hook into every launch (docs/agenda.md): `FY_AGENDA` follows the switch recorded on the session
+ * document, so the pane is told what every surface shows. A session the documents cannot show derives nothing.
+ */
+async function agendaLaunchDefault(
+  sessions: SessionDirectorySubsystem,
+  id: SessionId,
+): Promise<Readonly<Record<string, string>>> {
+  const view = await sessions.get(id).catch(() => undefined);
+  return view === undefined ? {} : { [AGENDA_ENV]: sessionAgendaEnabled(view.config) ? '1' : '0' };
 }
 
 /** One ferret's own Pack switch: the document and the launch variable, under the session's lock. */
@@ -4137,8 +4164,8 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
                 howToResolve: request.howToResolve,
                 // A plain notification from the Warden: no ask and no answers — reading it is acting on
                 // it, and it opens the ferret's chat. Old apps read it as an `info` card.
-                // TODO(notice): pass `notice: request.notice, ping: request.ping` once
-                // `RaiseAttentionRequest` accepts them (the Attention model's daemon unit).
+                notice: request.notice,
+                ping: request.ping,
                 title: request.title,
                 kind: 'info',
                 premise: request.premise,
@@ -8771,7 +8798,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         packConfig,
         async () => await packRouting(),
       );
-      launchSwitchDefaults = async id => await packHooks.launchDefault(id);
+      launchSwitchDefaults = async id => ({
+        ...(await packHooks.launchDefault(id)),
+        ...(await agendaLaunchDefault(sessions, id)),
+      });
       // ONE claim surface over the ledger for the start and the rename, so both take names through the
       // same allocator and the same file.
       const nameClaims = createCallsignClaims(storage, stateFiles, paths, callsignClaims);
@@ -8951,11 +8981,24 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       );
       // Answers held across a restart are delivered, in the background, once the daemon is up.
       void attentionReplies.resume(storage.listSessions().map(session => session.id)).catch(() => undefined);
+      const agendaModes = new SessionConfigAgendaModes(sessions);
+      const sessionStops = new StorageSessionStops(storage);
       const attentionProjection = new SessionAttentionProjection(
         attentionBoards,
         new StorageSessionAttentionState(storage),
         new KeyedSerialExecutor(),
         () => clock.now(),
+        agendaModes,
+        sessionStops,
+      );
+      // THE PHONE BUZZES ONLY when a ferret stops on the owner, when an item's deadline is near, or for a
+      // notice with `ping` (docs/notifications.md); everything else only moves the Inbox badge.
+      const attentionBuzz = new AttentionBuzz(
+        attentionBoards,
+        sessionStops,
+        notifications,
+        clock,
+        attentionConfig.deadlineWarnHours,
       );
       // Boards that moved before summaries were kept (or while this daemon was down) are caught up once,
       // in the background: a list served before it finishes is only missing an unread mark.
@@ -8986,15 +9029,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // rather than being flattened into "no attention".
           has: async id => (await sessions.get(id)) !== undefined,
         },
-        notifications,
+        attentionBuzz,
         new AttentionChangeFanout([
           // The session list's unread signal, kept true to the board.
           attentionProjection,
           // The owner's answer, told to the ferret that asked — through its outbox, which holds a burst of
           // answers for a few seconds and delivers them as ONE message.
           new AttentionReplyDelivery(attentionReplies, CLIENT_NAME),
-          // The ferret's edit that answers the owner's request for more information: pushed once more.
-          new AttentionMoreInfoPush(notifications),
+          // A board that now leaves an idle ferret stopped on the owner, or an item whose deadline is near.
+          attentionBuzz,
           // The owner's answer to a harness question, typed into its form. DETACHED: a drive watches the
           // pane for seconds, and the answer is already on the board.
           {
@@ -9003,6 +9046,85 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             },
           },
         ]),
+      );
+      // Off unless `attention.resurfaceAfterMinutes` is set: asks left in discussion that long surface themselves.
+      if (attentionConfig.resurfaceAfterMinutes !== undefined) {
+        new AttentionResurfacer(
+          attentionBoards,
+          attention,
+          () => storage.listSessions().map(session => session.id),
+          new KeyedAttentionReplyTimers(),
+          () => clock.now(),
+          attentionConfig.resurfaceAfterMinutes,
+        ).start();
+      }
+      // A ferret that goes idle with an agenda item on the owner is STOPPED on them: pushed once for that stop,
+      // and its summary says so. Learned from the fleet as it stands first, so a daemon that starts announces nobody.
+      const turnChanges = new TurnChanges();
+      armSessionTurnChanges(storage, turnChanges, async sessionId => {
+        await attentionProjection.refresh(sessionId);
+        await attentionBuzz.turnChanged(sessionId);
+      });
+      // An item whose `neededBy` is within `attention.deadlineWarnHours` is pushed once; the sweep finds the ones
+      // whose time came while nothing else touched their board.
+      const sweepDeadlines = asActivity(activities, 'attention-deadlines', async () => {
+        await attentionBuzz.sweep(storage.listSessions().map(session => session.id));
+      });
+      setInterval(sweepDeadlines, ATTENTION_DEADLINE_SWEEP_MS).unref();
+      setTimeout(sweepDeadlines, 30_000).unref();
+      // Agenda mode: the switch (the session document and its launch variable, written together like Pack's and
+      // hypermedia's) and the one-time migration that turns it on for every ferret that already had open items —
+      // they ARE its agenda.
+      const writeAgendaMode = async (reference: string, enabled: boolean, at: string): Promise<void> => {
+        const id = parseSessionId(reference);
+        await sessionMutations.run(`session:${id}`, async () => {
+          await storage.updateConfig(id, current => ({
+            ...(jsonObject(current) ?? {}),
+            agenda: enabled,
+            updatedAt: at,
+          }));
+          await sessionEnvironments.write(id, {
+            ...(await sessionEnvironments.read(id)),
+            [AGENDA_ENV]: enabled ? '1' : '0',
+          });
+        });
+        await attentionProjection.refresh(id);
+      };
+      const agendaModeService = new SessionAgendaModeService({
+        facts: async reference => {
+          const id = tryParseSessionId(reference);
+          const view = id === undefined ? undefined : await sessions.get(id);
+          return view === undefined
+            ? undefined
+            : {
+                enabled: sessionAgendaEnabled(view.config),
+                running: !HYPERMEDIA_NOT_RUNNING.has(view.state.status),
+              };
+        },
+        write: writeAgendaMode,
+        now: () => new Date(clock.now()).toISOString(),
+      });
+      const sessionAgendaMode: SessionAgendaModeSubsystem = {
+        get: async reference => await agendaModeService.get(reference),
+        set: async (reference, enabled) => {
+          const outcome = await agendaModeService.set(reference, enabled);
+          const view = await sessions.get(parseSessionId(reference));
+          if (view === undefined)
+            throw new Error(`session ${reference} was switched but its documents do not satisfy the protocol`);
+          return { view, outcome };
+        },
+      };
+      void migrateToAgendaMode(
+        storage.listSessions().map(session => session.id),
+        {
+          marker: new FileAgendaMigrationMarker(join(paths.home, 'agenda-mode-migration.json')),
+          boards: attentionBoards,
+          modes: {
+            enabled: async sessionId => await agendaModes.enabled(sessionId),
+            enable: async sessionId => await writeAgendaMode(sessionId, true, new Date(clock.now()).toISOString()),
+          },
+          now: () => clock.now(),
+        },
       );
       // A harness parked on its own prompt waits on the owner, so it is an item on the board, raised and
       // cleared from the state documents storage writes — and caught up once at start, in the background.
@@ -9013,11 +9135,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       );
       storage.subscribeStates((id, state) => void harnessPrompts.stateWritten(id, state));
       void harnessPrompts.reconcile(storage.listSessions().map(session => session.id)).catch(() => undefined);
-      // The turn-end check (docs/attention.md § The turn-end check): a reply that asks the owner to act,
+      // The turn-end check (docs/agenda.md, nudge-once): a reply that asks the owner to act,
       // from a turn that raised no item for it, gets one nudge. Read after the transcript has settled, since
       // the turn's end can be seen on the pane before its last words reach the file; a listener must never
       // throw into the journal's append path, and a check that cannot read says nothing.
-      const nudgeSessions = new StorageAttentionNudgeSessions(storage);
+      const nudgeSessions = new StorageAttentionNudgeSessions(storage, {
+        read: async sessionId => await agendaModes.enabled(sessionId),
+      });
       const attentionNudge = new AttentionTurnNudge(
         {
           enabled: async () => (await effectiveAccountModel())?.machine.attentionNudge ?? true,
@@ -10111,6 +10235,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sessionAttachments,
         sessionSignal: createSessionSignalSubsystem(storage, sessions, signals),
         sessionRename: createSessionRenameSubsystem(storage, sessions, nameClaims, clock),
+        sessionAgendaMode,
         sessionHypermedia: createSessionHypermediaSubsystem(
           storage,
           sessions,

@@ -113,6 +113,10 @@ export interface ComposerProps {
   readonly quota?: ComposerQuotaProps['quota'];
   readonly draftStore?: DaemonDraftStore;
   readonly onSent?: () => void;
+  /** Told the draft's text whenever it changes — the agenda sends it along as the note of an option picked outside the composer. */
+  readonly onDraftChange?: (text: string) => void;
+  /** A new value empties the draft: the text was used by an answer sent from outside the composer. */
+  readonly clearSignal?: number;
   /**
    * The machine answers right now (its connection health reads `connected`). A send that failed on an
    * outage stops saying so the moment this turns true.
@@ -350,6 +354,8 @@ export function Composer({
   quota,
   draftStore = documentDraftStore,
   onSent,
+  onDraftChange,
+  clearSignal = 0,
   connectionLive = false,
   compact = false,
   offerCamera,
@@ -662,6 +668,19 @@ export function Composer({
     window.addEventListener(REINSERT_TRANSCRIPTION_EVENT, onReinsert);
     return () => window.removeEventListener(REINSERT_TRANSCRIPTION_EVENT, onReinsert);
   }, [setDraft]);
+
+  const draftChange = useRef(onDraftChange);
+  draftChange.current = onDraftChange;
+  useEffect(() => {
+    draftChange.current?.(draft);
+  }, [draft]);
+  const clearedAt = useRef(clearSignal);
+  useEffect(() => {
+    if (clearSignal === clearedAt.current) return;
+    clearedAt.current = clearSignal;
+    setDraft('');
+    draftStore.clear(scope);
+  }, [clearSignal, draftStore, scope, setDraft]);
 
   useEffect(() => {
     const timer = setTimeout(() => draftStore.save(scope, draft), 400);

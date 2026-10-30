@@ -232,6 +232,7 @@ export function harnessQuestionAnswers(pending: PendingQuestion, response: Atten
       return { ok: false, reason: 'the chosen option is not one the question form offers' };
     return { ok: true, answers: [{ kind: 'selection', labels: [response.choice] }] };
   }
+  if (response.kind === 'other') return { ok: false, reason: 'an answer outside the options cannot fill a form' };
   if (response.kind !== 'open-question') return { ok: false, reason: `a ${response.kind} answer cannot fill a form` };
   const answer = response.answer.trim();
   const only = questions.length === 1 ? questions[0] : undefined;
