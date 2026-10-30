@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Which of the three optional macOS jobs of the REALWORLD workflow has anything to prove? Writes to $GITHUB_OUTPUT:
+# Which of the optional jobs of the REALWORLD workflow has anything to prove — the three macOS ones, and
+# the Linux tmux 3.8 leg? Writes to $GITHUB_OUTPUT:
 #
 #   containment=true|false   Containment (macOS)         scripts/ci/darwin-confinement.sh
 #   safari=true|false        Sandbox Shell (Safari)      scripts/ci/safari-render-proof.sh
 #   harness=true|false       Harness Contract (macos-15) packages/fleet/tests/contract/run.sh pinned
 #   harness_os=[...]         the `os` matrix of `Harness Contract`: always ubuntu-latest, plus macos-15
 #                            when `harness` is true
+#   tmux38=true|false        Integration Tests (tmux 3.8)  the tmux-driven integration groups on tmux 3.8
 #
 # `Smoke darwin-arm64` is NOT decided here: it runs the shipped binary and almost every pull request
 # changes the binary, so it stays on every run.
@@ -61,6 +63,13 @@ harness+='|^packages/fleet/'
 harness+='|^packages/protocol/(package\.json|src/lib/harness-update\.ts)'
 harness+='|^packages/daemon/(package\.json|tests/contract/|src/(adapters|lib)/transcript/|src/lib/migrate/)'
 
+# The 3.8 leg (nix/env.nix says why CI pins 3.7b): anything of the daemon's named for tmux, the session
+# lifecycle and health code that reads dead panes, their integration tests, and how the groups run.
+tmux38="${common}|^scripts/ci/test\.sh$|^config/test-groups\.json$"
+tmux38+='|^packages/daemon/src/.*tmux'
+tmux38+='|^packages/daemon/src/(adapters|lib)/session/(lifecycle|health)/'
+tmux38+='|^packages/daemon/tests/integration/(tmux|session/lifecycle)/'
+
 emit() {
   local why="$1"
   {
@@ -72,15 +81,16 @@ emit() {
     else
       echo 'harness_os=["ubuntu-latest"]'
     fi
+    echo "tmux38=$5"
   } >>"${out}"
-  echo "🧭 macos jobs: containment=$2 safari=$3 harness=$4 — ${why}"
+  echo "🧭 optional jobs: containment=$2 safari=$3 harness=$4 tmux38=$5 — ${why}"
   exit 0
 }
 
 [ "${MACOS_RELEVANCE_FILES:-}" = "" ] && [ "${GITHUB_EVENT_NAME:-}" != "pull_request" ] &&
-  emit "not a pull request (${GITHUB_EVENT_NAME:-local}): every proof runs" true true true
+  emit "not a pull request (${GITHUB_EVENT_NAME:-local}): every proof runs" true true true true
 [ "${MACOS_RELEVANCE_FILES:-}" = "" ] && [ -z "${PR_NUMBER:-}" ] &&
-  emit "no pull request number" true true true
+  emit "no pull request number" true true true true
 
 if [ -n "${MACOS_RELEVANCE_FILES:-}" ]; then
   files="$(cat "${MACOS_RELEVANCE_FILES}")"
@@ -89,13 +99,14 @@ else
   files="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --jq '.[].filename')"
   listed=$?
   set -e
-  [ "${listed}" -ne 0 ] && emit "the pull request's files could not be listed" true true true
+  [ "${listed}" -ne 0 ] && emit "the pull request's files could not be listed" true true true true
 fi
-[ -z "${files}" ] && emit "the pull request lists no files" true true true
+[ -z "${files}" ] && emit "the pull request lists no files" true true true true
 
 matches() { grep -Eq "$1" <<<"${files}" && echo true || echo false; }
 
 c="$(matches "${containment}")"
 s="$(matches "${safari}")"
 h="$(matches "${harness}")"
-emit "$(wc -l <<<"${files}") changed files" "${c}" "${s}" "${h}"
+t="$(matches "${tmux38}")"
+emit "$(wc -l <<<"${files}") changed files" "${c}" "${s}" "${h}" "${t}"

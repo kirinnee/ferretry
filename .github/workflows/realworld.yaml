@@ -39,6 +39,7 @@ on:
       - 'scripts/ci/realworld-report.sh'
       - 'scripts/ci/macos-relevance.sh'
       - 'scripts/ci/test.sh'
+      - 'config/test-groups.json'
       - 'scripts/ci/darwin-confinement.sh'
       - 'scripts/ci/safari-render-proof.sh'
       - 'scripts/test/swept.sh'
@@ -123,7 +124,7 @@ jobs:
   # job and not a `paths` filter, and what is deliberately generous). `main`, the nightly and manual
   # dispatch decide `true` for all of them. A job it leaves out is SKIPPED, which counts as passed.
   changes:
-    name: macOS Relevance
+    name: Optional Job Relevance
     timeout-minutes: 5
     permissions:
       contents: read
@@ -134,6 +135,7 @@ jobs:
       containment: ${{ steps.decide.outputs.containment }}
       safari: ${{ steps.decide.outputs.safari }}
       harness_os: ${{ steps.decide.outputs.harness_os }}
+      tmux38: ${{ steps.decide.outputs.tmux38 }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -257,12 +259,39 @@ jobs:
           path: ${{ runner.temp }}/harness-contract/
           if-no-files-found: warn
 
+  # TMUX 3.8, the release Homebrew ships and the owner runs. CI pins nixpkgs' 3.7b, a cached binary (nix/env.nix
+  # says why); 3.8 differs again — a dead pane prints no pid — so the integration groups that drive a real
+  # tmux run here on 3.8 as well, through the `ci-tmux38` shell. It builds tmux from source, which is why
+  # it is not a blocking job; move the pin to 3.8 and drop this once nixpkgs ships a 3.8 binary. A pull
+  # request runs it only when it touches tmux or the session lifecycle (scripts/ci/macos-relevance.sh).
+  tmux-38:
+    name: Integration Tests (tmux 3.8, ${{ matrix.group }})
+    timeout-minutes: 20
+    needs: changes
+    if: needs.changes.outputs.tmux38 == 'true'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [daemon-runtime, daemon, everything-else]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/install-nix
+      - name: Run the ${{ matrix.group }} integration tests on tmux 3.8
+        env:
+          TEST_GROUP: ${{ matrix.group }}
+        run: nix develop .#ci-tmux38 -c ./scripts/ci/test.sh int "$TEST_GROUP"
+
   # A red night nobody reads is a night nobody acts on, so a failed `main` or nightly run files (or adds to)
   # one issue per failing test, `realworld: <file> > <test>`. A pull-request run measures the change
   # itself and stays quiet: its author reads the run.
   report:
     name: Report failed realworld tests
-    needs: [realworld, darwin-confinement, safari-sandbox-shell, harness-contract]
+    needs: [realworld, darwin-confinement, safari-sandbox-shell, harness-contract, tmux-38]
     # `failure()` is true when any needed job failed; a skipped macOS job is not a failure.
     if: ${{ failure() && github.event_name != 'pull_request' }}
     timeout-minutes: 10
