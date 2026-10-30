@@ -56,6 +56,15 @@ const LOG = [
   '    The staging deploy is queued behind mine.',
   '    </pasted_content id="p1">',
   '[01:48:30] user/message: [ferretry] Your message to aniya did not reach it.',
+  '[01:49:00] user/message: Queued behind the running turn',
+  '[01:49:05] user/message: Queued while its box holds a draft',
+  '[01:49:10] user/message: Queued while a question is open',
+  '[01:49:15] user/message: Being typed in right now',
+  '[01:49:20] user/message: Typed and submitted',
+  '[01:49:25] user/message: Read by the agent',
+  '[01:49:30] user/message: The pane never came back',
+  '[01:49:35] user/message: Taken back before it was typed',
+  '[01:49:40] user/message: The session ended before the proof arrived',
 ].join('\\n');
 
 const base = { acceptedAt: '2026-10-18T01:45:00.000Z', attachmentIds: [] as string[] };
@@ -67,6 +76,20 @@ const FATES: Record<number, { fate: string; held?: boolean }> = {
   5: { fate: 'unaccounted' },
   6: { fate: 'timed_out' },
 };
+const at = '2026-10-18T01:49:00.000Z';
+const queue = (state: string, extra: object = {}) => ({ queue: { state, stateAt: at, revision: 1, ...extra } });
+const QUEUED_FATES: Record<number, object> = {
+  9: { fate: 'accepted', ...queue('queued', { waitReason: 'busy' }) },
+  10: { fate: 'accepted', ...queue('queued', { waitReason: 'draft' }) },
+  11: { fate: 'accepted', ...queue('queued', { waitReason: 'question' }) },
+  12: { fate: 'accepted', ...queue('typing') },
+  13: { fate: 'delivered', ...queue('delivered') },
+  14: { fate: 'delivered', ...queue('read') },
+  15: { fate: 'timed_out', ...queue('failed', { failure: 'the pane never came back' }) },
+  16: { fate: 'cancelled', ...queue('cancelled') },
+  17: { fate: 'timed_out', unaccountedReason: 'session_ended' },
+};
+Object.assign(FATES, QUEUED_FATES);
 const ANSWERED = new Set([0]);
 
 const now = Date.UTC(2026, 9, 18, 2, 0, 0);

@@ -978,7 +978,8 @@ button.fy-receipt {
   color: var(--fy-muted);
   flex: 0 0 auto;
 }
-.fy-receipt-line .fy-receipt[data-send-receipt='answered'] .fy-receipt-mark {
+.fy-receipt-line .fy-receipt[data-send-receipt='answered'] .fy-receipt-mark,
+.fy-receipt-line .fy-receipt[data-send-receipt='read'] .fy-receipt-mark {
   color: var(--fy-accent);
 }
 .fy-receipt-line .fy-receipt[data-send-receipt='failed'] .fy-receipt-mark {

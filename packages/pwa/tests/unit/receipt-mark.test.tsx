@@ -11,6 +11,7 @@ const KINDS: readonly SendReceiptKind[] = [
   'typed',
   'delivered',
   'answered',
+  'read',
   'unconfirmed',
   'failed',
   'cancelled',
@@ -50,6 +51,15 @@ describe('ReceiptMark', () => {
     ).toEqual(double.map(path => path.props.d));
   });
 
+  test('read is the same check three times, one more step to the right each, in a box that holds them', () => {
+    const paths = draw('read')
+      .findAllByType('path')
+      .map(path => path.props.d);
+    expect(paths).toEqual(['M2 8.5 5.5 12 12 4.5', 'M5.5 8.5 9 12 15.5 4.5', 'M9 8.5 12.5 12 19 4.5']);
+    expect(draw('read').props.width).toBeGreaterThan(draw('delivered').props.width);
+    expect(draw('read').props.height).toBe(14);
+  });
+
   test('a clock, a question mark and a ! are each their own drawing, and sending and held share the clock', () => {
     const shapes = new Set(
       KINDS.map(kind =>
@@ -79,11 +89,12 @@ describe('MessageMarksLegend', () => {
       'typed',
       'delivered',
       'answered',
+      'read',
       'unconfirmed',
       'failed',
       'cancelled',
     ]);
-    expect(legend.root.findAllByType('dd')).toHaveLength(8);
-    expect(JSON.stringify(legend.toJSON())).toContain('Waiting in the agent’s queue in Claude or Codex.');
+    expect(legend.root.findAllByType('dd')).toHaveLength(9);
+    expect(JSON.stringify(legend.toJSON())).toContain('Saved and waiting to be typed in.');
   });
 });

@@ -365,6 +365,47 @@ describe('startSessionWorkspaceRefresh', () => {
     // Said, not swallowed: the rows left on screen are about to claim a fate nobody is reading.
     expect(failures).toEqual(['older daemon']);
   });
+  test('reads the durable queue on the same beat, keeps the last messages when a read fails, and asks nothing of an api without one', async () => {
+    const browser = environment();
+    const seen: unknown[] = [];
+    let fail = false;
+    const queued = { id: 'm1' } as never;
+    const control = startSessionWorkspaceRefresh({
+      api: {
+        logs: async () => '',
+        get: async () => sessionView('s-1'),
+        queue: async () => {
+          if (fail) throw new Error('boom');
+          return [queued];
+        },
+      },
+      sessionId: 's-1',
+      environment: browser.env,
+      onTranscript: () => undefined,
+      onSession: () => undefined,
+      onQueue: messages => seen.push(messages),
+      onError: () => undefined,
+    });
+    await control.initial;
+    fail = true;
+    await control.refresh();
+    control.stop();
+    // The failed read neither calls back nor blanks the queue already on screen.
+    expect(seen).toEqual([[queued]]);
+
+    const bare = startSessionWorkspaceRefresh({
+      api: { logs: async () => '', get: async () => sessionView('s-1') },
+      sessionId: 's-1',
+      environment: environment().env,
+      onTranscript: () => undefined,
+      onSession: () => undefined,
+      onQueue: messages => seen.push(messages),
+      onError: () => undefined,
+    });
+    await bare.initial;
+    bare.stop();
+    expect(seen).toHaveLength(1);
+  });
   test('says when the daemon can prove no transcript is this session’s, apart from other failures', async () => {
     const browser = environment();
     const unbound: boolean[] = [];
