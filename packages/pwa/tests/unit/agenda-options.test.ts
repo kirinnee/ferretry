@@ -6,6 +6,7 @@ import {
   letteredOptions,
   needsOptionsSection,
   optionLetter,
+  rowLettered,
   shortLabel,
 } from '../../src/lib/agenda-options.ts';
 import { agendaItem, choices } from '../support/agenda-inbox.tsx';
@@ -61,5 +62,28 @@ describe('a button’s short text', () => {
     expect(
       needsOptionsSection(letteredOptions([{ label: 'Yes' }], [{ label: 'Yes', detail: 'Why.' }], undefined)),
     ).toBe(true);
+  });
+});
+
+describe('a row of quick replies', () => {
+  test('reads one way: one long lettered label letters the whole row', () => {
+    const row = [
+      { label: 'Use SQLite', letter: 'A' },
+      { label: 'Use Postgres', letter: 'B' },
+      { label: 'Keep it in memory', letter: 'C' },
+    ];
+    expect(rowLettered(row)).toBe(true);
+    expect(row.map(reply => shortLabel(reply.label, reply.letter, rowLettered(row)))).toEqual(['A', 'B', 'C']);
+  });
+
+  test('keeps short labels when every lettered one is short, and ignores replies with no letter', () => {
+    expect(
+      rowLettered([
+        { label: 'Looks good', letter: 'A' },
+        { label: 'Skip', letter: 'B' },
+      ]),
+    ).toBe(false);
+    expect(rowLettered([{ label: 'Send more comments now', letter: undefined }])).toBe(false);
+    expect(shortLabel('Looks good', 'A', false)).toBe('Looks good');
   });
 });

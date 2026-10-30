@@ -23,7 +23,7 @@ import {
   type SwipeMap,
   swipeIntent,
 } from '../../lib/agenda-inbox.ts';
-import { letterOf, shortLabel } from '../../lib/agenda-options.ts';
+import { letterOf, rowLettered, shortLabel } from '../../lib/agenda-options.ts';
 import { ActionMenu } from './agenda-actions.tsx';
 import { isDownSwipe } from './use-down-swipe.ts';
 
@@ -86,6 +86,8 @@ interface Drag {
 interface ChipProps {
   readonly label: string;
   readonly letter: string | undefined;
+  /** The row is drawn as letters (`rowLettered`), so this button is too. */
+  readonly lettered: boolean;
   readonly recommended: boolean;
   readonly busy: boolean;
   readonly arrow?: AnswerDirection | undefined;
@@ -98,7 +100,7 @@ interface ChipProps {
 const chipName = (label: string, recommended: boolean, swipe: string | null): string =>
   [label, recommended ? 'recommended' : null, swipe === null ? null : `or ${swipe}`].filter(Boolean).join(', ');
 
-function Chip({ label, letter, recommended, busy, arrow, swipeable, primary = false, onTap }: ChipProps) {
+function Chip({ label, letter, lettered, recommended, busy, arrow, swipeable, primary = false, onTap }: ChipProps) {
   return (
     <button
       aria-label={chipName(label, recommended, arrow !== undefined && swipeable ? SWIPE_WORD[arrow] : null)}
@@ -113,7 +115,7 @@ function Chip({ label, letter, recommended, busy, arrow, swipeable, primary = fa
       type="button"
     >
       {arrow !== undefined && swipeable ? ARROWS[arrow] : null}
-      <span className="fy-qr__label">{shortLabel(label, letter)}</span>
+      <span className="fy-qr__label">{shortLabel(label, letter, lettered)}</span>
     </button>
   );
 }
@@ -273,6 +275,8 @@ export function AgendaQuickReplies({
 
   const recommended = model.recommended;
   const showMenu = model.dismissInMenu && !model.notice;
+  const replies = repliesOf(model, options);
+  const lettered = rowLettered(replies);
   if (!hasReplies(model, sending) && error === null && waitingOn === undefined) return null;
   return (
     <div
@@ -315,7 +319,7 @@ export function AgendaQuickReplies({
             Clear
           </button>
         ) : null}
-        {repliesOf(model, options).map(reply =>
+        {replies.map(reply =>
           'answer' in reply ? (
             <AnswerChip
               answer={reply.answer}
@@ -323,6 +327,7 @@ export function AgendaQuickReplies({
               give={give}
               key={reply.label}
               letter={reply.letter}
+              lettered={lettered}
               recommended={recommended}
               swipeable={swipeable}
             />
@@ -332,6 +337,7 @@ export function AgendaQuickReplies({
               key={reply.label}
               label={reply.label}
               letter={reply.letter}
+              lettered={lettered}
               onTap={() => give(optionAction(reply.option, ''))}
               recommended={sameLabel(reply.label, recommended)}
               swipeable={swipeable}
@@ -350,6 +356,7 @@ function AnswerChip({
   busy,
   give,
   letter,
+  lettered,
   recommended,
   swipeable,
 }: {
@@ -357,6 +364,7 @@ function AnswerChip({
   readonly busy: boolean;
   readonly give: (action: InboxAction) => void;
   readonly letter: string | undefined;
+  readonly lettered: boolean;
   readonly recommended: string | undefined;
   readonly swipeable: boolean;
 }) {
@@ -366,6 +374,7 @@ function AnswerChip({
       busy={busy}
       label={answer.label}
       letter={letter}
+      lettered={lettered}
       onTap={() => {
         const action = answerAction(answer, '');
         if (action !== null) give(action);

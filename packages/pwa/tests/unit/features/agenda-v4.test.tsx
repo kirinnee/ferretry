@@ -147,9 +147,12 @@ describe('the quick replies, lettered', () => {
     expect(buttons()[1]?.hasAttribute('data-recommended')).toBe(false);
   });
 
-  test('a label of one or two words is its own button text, even beside a letter', async () => {
+  test('a row reads one way: short labels stay words, but one long label letters the whole row', async () => {
     await draw(agendaItem('A60', { ask: choices('Looks good', 'Needs a different approach') } as Partial<AgendaItem>));
-    expect(buttons().map(button => button.textContent)).toEqual(['Looks good', 'B']);
+    expect(buttons().map(button => button.textContent)).toEqual(['A', 'B']);
+    await view?.unmount();
+    await draw(agendaItem('A63', { ask: choices('Looks good', 'Skip') } as Partial<AgendaItem>));
+    expect(buttons().map(button => button.textContent)).toEqual(['Looks good', 'Skip']);
   });
 
   test('an old choice past the third option keeps its letter on the plain button, in order', async () => {

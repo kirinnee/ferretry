@@ -54,14 +54,28 @@ const SHORT_LABEL_WORDS = 2;
  * What a quick-reply button says: the label when it is one or two words ("Looks good"), else its letter. A label
  * too long with no letter is left whole — the row clips it, and its full text is the accessible name.
  */
-export const shortLabel = (label: string, letter: string | undefined): string => {
-  const words = label.trim().split(/\s+/u).length;
-  return words <= SHORT_LABEL_WORDS || letter === undefined ? label : letter;
+export const shortLabel = (label: string, letter: string | undefined, lettered = false): string => {
+  if (letter === undefined) return label;
+  return lettered || wordCount(label) > SHORT_LABEL_WORDS ? letter : label;
 };
+
+const wordCount = (label: string): number => label.trim().split(/\s+/u).length;
+
+/**
+ * Whether a ROW of quick replies is drawn as letters: one lettered label too long to stand as a button letters the
+ * whole row, so it reads one way ("A B C"), never a mix of words and letters.
+ */
+export const rowLettered = (
+  replies: readonly { readonly label: string; readonly letter: string | undefined }[],
+): boolean => replies.some(reply => reply.letter !== undefined && wordCount(reply.label) > SHORT_LABEL_WORDS);
 
 /**
  * Whether the Options section earns its place: some option says more than its label, or some quick reply is
  * drawn as a bare letter that the section has to explain. A plain "Yes / No" would only repeat its buttons.
  */
-export const needsOptionsSection = (options: readonly LetteredOption[]): boolean =>
-  options.some(option => option.detail !== undefined || shortLabel(option.label, option.letter) !== option.label);
+export const needsOptionsSection = (options: readonly LetteredOption[]): boolean => {
+  const lettered = rowLettered(options);
+  return options.some(
+    option => option.detail !== undefined || shortLabel(option.label, option.letter, lettered) !== option.label,
+  );
+};
