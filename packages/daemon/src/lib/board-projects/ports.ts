@@ -1,4 +1,5 @@
 import type { BoardProjectId, LaneSet } from '@ferretry/protocol';
+import type { ProjectGitFacts } from './template-inference.ts';
 import type { LaneProposalCard } from './lane-proposal-card.ts';
 
 /**
@@ -36,4 +37,9 @@ export interface LaneProposalAgenda {
  */
 export interface CardRelocator {
   relocate(projectId: BoardProjectId, moves: Readonly<Record<string, string>>): Promise<void>;
+}
+
+/** Reads {@link ProjectGitFacts} for a folder. Never rejects: a folder it cannot read is a folder with no repository. */
+export interface ProjectGitFactSource {
+  inspect(path: string): Promise<ProjectGitFacts>;
 }

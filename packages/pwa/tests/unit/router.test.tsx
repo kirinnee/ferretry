@@ -87,7 +87,7 @@ describe('RouterProvider', () => {
     await view.unmount();
   });
 
-  it('replaces the legacy tasks bookmark with the canonical daemon sessions path', async () => {
+  it('replaces the legacy tasks bookmark with the canonical board path', async () => {
     setPath('/d/daemon-a/tasks');
     const view = await mount(
       <RouterProvider>
@@ -96,8 +96,8 @@ describe('RouterProvider', () => {
     );
 
     const output = view.container.querySelector('output');
-    expect(window.location.pathname).toBe('/d/daemon-a');
-    expect(output?.dataset.kind).toBe('sessions');
+    expect(window.location.pathname).toBe('/d/daemon-a/board');
+    expect(output?.dataset.kind).toBe('board');
     expect(output?.dataset.daemon).toBe('daemon-a');
     await view.unmount();
   });
@@ -510,10 +510,10 @@ describe('RouterProvider history entries', () => {
     try {
       // Assert
       expect(browser.entries).toHaveLength(1);
-      expect(browser.location.pathname).toBe('/d/daemon-a');
+      expect(browser.location.pathname).toBe('/d/daemon-a/board');
       expect(browser.current.state).toEqual({ fyEntry: 'entry-1', fyIndex: 0 });
       expect(entryOf(view)).toBe('entry-1');
-      expect(kindOf(view)).toBe('sessions');
+      expect(kindOf(view)).toBe('board');
     } finally {
       await view.unmount();
     }

@@ -621,6 +621,23 @@ describe('dependencies', () => {
   });
 });
 
+describe('reading a card by the old task it came from', () => {
+  it('should serve the card whose legacyRef matches, and say when none does', async () => {
+    // Arrange
+    const store = new MemoryBoardStore([card({ legacyRef: 'abc:F12' }), card({ id: 'F2', legacyRef: 'abc:F13' })]);
+    const { service } = serviceWith([], { store });
+
+    // Act
+    const found = await service.taskByLegacyRef('abc:F13');
+    const missing = await refusal(service.taskByLegacyRef('abc:F14'));
+
+    // Assert
+    should(found.task.id).equal('F2');
+    should(missing.code).equal('not-found');
+    should(missing.message).containEql('abc:F14');
+  });
+});
+
 describe('everything else on a card', () => {
   it('should focus the calling ferret without writing the card', async () => {
     // Arrange
