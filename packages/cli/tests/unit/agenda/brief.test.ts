@@ -471,22 +471,22 @@ describe('agenda brief card kinds and answers', () => {
     should(request).not.have.property('answers');
   });
 
-  it('should lay a two-option choice out with the first option on the right', () => {
+  it('should lay a two-option choice out with the first option in the middle', () => {
     // Act + Assert
-    should(answersOf({ option: ['Ship', 'Hold'] })).deepEqual(['left:choose:Hold', 'right:choose:Ship']);
+    should(answersOf({ option: ['Ship', 'Hold'] })).deepEqual(['left:choose:Hold', 'up:choose:Ship']);
   });
 
-  it('should lay a three-option choice out left, up and right, recommended on the right', () => {
+  it('should lay a three-option choice out left, up and right, recommended in the middle', () => {
     // Act + Assert
-    should(answersOf({ option: ['A', 'B', 'C'] })).deepEqual(['left:choose:C', 'up:choose:B', 'right:choose:A']);
+    should(answersOf({ option: ['A', 'B', 'C'] })).deepEqual(['left:choose:B', 'up:choose:A', 'right:choose:C']);
     should(answersOf({ option: ['A', 'B', 'C'], recommend: 'B' })).deepEqual([
-      'left:choose:C',
-      'up:choose:A',
-      'right:choose:B',
+      'left:choose:A',
+      'up:choose:B',
+      'right:choose:C',
     ]);
   });
 
-  it('should put a recommended option from a JSON body on the right too', () => {
+  it('should put a recommended option from a JSON body in the middle too', () => {
     // Arrange
     const file = parseBriefFile(JSON.stringify({ options: ['A', 'B'], recommendation: 'B' }));
 
@@ -495,7 +495,7 @@ describe('agenda brief card kinds and answers', () => {
 
     // Assert
     should(request.answers?.map(a => a.label)).deepEqual(['A', 'B']);
-    should(request.answers?.find(a => a.direction === 'right')?.label).equal('B');
+    should(request.answers?.find(a => a.direction === 'up')?.label).equal('B');
   });
 
   it('should carry the option descriptions from a JSON body onto the answers', () => {
@@ -673,5 +673,81 @@ describe('a confirmation of a held configuration change (--confirms)', () => {
       add(['Allow it?'], { confirms: 'warden.yaml', option: ['a', 'b'], question: ['which?'], up: 'Skip' }),
     ).throw(/drop --option, --question, --up$/u);
     should(() => add(['Allow it?'], { confirms: 'warden.yaml' }, { up: { label: 'Skip' } })).throw(/drop --up$/u);
+  });
+});
+
+describe('agenda option details', () => {
+  const options = ['Go', 'Wait'];
+
+  it('should split "Label: detail" on the first colon when the label is short, leaving the label as the option', () => {
+    // Arrange / Act
+    const request = add(['Ship it?'], { option: ['Go: Ship now: it is **ready**', 'Wait'] });
+
+    // Assert
+    should(request).containDeep({
+      ask: { kind: 'multiple-choice', options: [{ label: 'Go' }, { label: 'Wait' }] },
+      optionDetails: [{ label: 'Go', detail: 'Ship now: it is **ready**' }],
+    });
+  });
+
+  it('should keep a long lead as the whole label, and a label with nothing after the colon', () => {
+    // Arrange
+    const long = 'A very long option label that runs past forty characters: why';
+
+    // Act
+    const request = add(['Ship it?'], { option: [long, 'Wait: '] });
+
+    // Assert
+    should(request).not.have.property('optionDetails');
+    should(request).containDeep({ ask: { options: [{ label: long }, { label: 'Wait:' }] } });
+  });
+
+  it('should read --option-detail as label=markdown, the later words winning over the same option', () => {
+    // Arrange / Act
+    const request = add(['Ship it?'], {
+      option: ['Go: first words', 'Wait'],
+      optionDetail: ['Wait=Cheaper, see `plan.md`', 'Go=Final = **words**'],
+    });
+
+    // Assert
+    should(request).containDeep({
+      optionDetails: [
+        { label: 'Go', detail: 'Final = **words**' },
+        { label: 'Wait', detail: 'Cheaper, see `plan.md`' },
+      ],
+    });
+  });
+
+  it('should take the details from the JSON body too, and refuse one that names no option', () => {
+    // Arrange
+    const file = parseBriefFile(JSON.stringify({ optionDetails: [{ label: 'Go', detail: 'Now.' }] }));
+
+    // Act / Assert
+    should(add(['Ship it?'], { option: options }, file)).containDeep({
+      optionDetails: [{ label: 'Go', detail: 'Now.' }],
+    });
+    should(() => add(['Ship it?'], { option: options, optionDetail: ['Stop=x'] })).throw(/"Stop"/u);
+  });
+
+  it('should refuse an --option-detail that is not label=markdown', () => {
+    // Arrange / Act / Assert
+    should(() => add(['Ship it?'], { option: options, optionDetail: ['Go'] })).throw(
+      '--option-detail needs label=markdown, got "Go"',
+    );
+    should(() => add(['Ship it?'], { option: options, optionDetail: ['=x'] })).throw(/needs label=markdown/u);
+  });
+
+  it('should edit the details through either flag, and refuse a bare option, which an edit cannot add', () => {
+    // Arrange / Act
+    const edit = composeEditRequest('A1', { option: ['Go: Now.'], optionDetail: ['Wait=Later.'] }, undefined);
+
+    // Assert
+    should(edit).containDeep({
+      optionDetails: [
+        { label: 'Go', detail: 'Now.' },
+        { label: 'Wait', detail: 'Later.' },
+      ],
+    });
+    should(() => composeEditRequest('A1', { option: ['Go'] }, undefined)).throw(/cannot change the options/u);
   });
 });

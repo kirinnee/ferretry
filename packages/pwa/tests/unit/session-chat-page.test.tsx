@@ -16,7 +16,7 @@ import type { RuntimeModelControls } from '../../src/components/runtime-controls
 import { SessionTopBar, sessionDisplayName } from '../../src/components/session-top-bar.tsx';
 import { Transcript } from '../../src/components/transcript.tsx';
 import { AgendaItemView } from '../../src/features/agenda/agenda-item-view.tsx';
-import { AgendaDrawer, AgendaLine, AgendaReferenceChips } from '../../src/features/agenda/agenda-line.tsx';
+import { AgendaDrawer, AgendaLine } from '../../src/features/agenda/agenda-line.tsx';
 import { AgendaRow } from '../../src/features/agenda/agenda-row.tsx';
 import { SessionAnalyticsSurface } from '../../src/features/analytics/session-analytics-surface.tsx';
 import { BoardSideTab } from '../../src/features/board/board-side-tab.tsx';
@@ -2751,7 +2751,7 @@ describe('SessionChatPage', () => {
       }
     });
 
-    test('sends the next message about the open item, then closes the view and the chip', async () => {
+    test('sends the next message about the open item, then closes the view', async () => {
       const sent: string[] = [];
       const spy = {
         ...client([], agendaSession()),
@@ -2763,41 +2763,18 @@ describe('SessionChatPage', () => {
       try {
         const send = (text: string) =>
           page.root.findByType(Composer).props.api.send('shared', { message: text, now: false });
-        const chips = () =>
-          page.root
-            .findAllByType(AgendaReferenceChips)
-            .flatMap(entry => entry.props.items.map((it: { id: string }) => it.id));
-        // No item open: the message goes out exactly as typed.
+        // No item open: the message goes out exactly as typed, under the normal placeholder.
         await send('plain');
+        expect(page.root.findByType(Composer).props.placeholder).toBeUndefined();
         press(page.root);
         run(() => page.root.findByType(AgendaRow).props.onOpen());
-        expect(chips()).toEqual(['A3']);
+        expect(page.root.findByType(Composer).props.placeholder).toBe('Reply about !A3…');
         await send('ship it');
         run(() => page.root.findByType(Composer).props.onSent());
-        expect(chips()).toEqual([]);
+        expect(page.root.findByType(Composer).props.placeholder).toBeUndefined();
         expect(cards(page.root)).toHaveLength(0);
         await send('later');
         expect(sent).toEqual(['plain', '!A3 ship it', 'later']);
-      } finally {
-        run(() => page.unmount());
-      }
-    });
-
-    test('a message sent with the chip taken off is plain chat, and the view stays open', async () => {
-      const sent: string[] = [];
-      const spy = {
-        ...client([], agendaSession()),
-        send: async (_id: string, body: { message: string }) => {
-          sent.push(body.message);
-        },
-      };
-      const page = renderSessionChatPage(agendaPage({ client: spy as never }));
-      try {
-        run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onAgendaOpen('A3', null));
-        run(() => page.root.findByType(AgendaReferenceChips).props.onRemove('A3'));
-        await page.root.findByType(Composer).props.api.send('shared', { message: 'unrelated', now: false });
-        expect(sent).toEqual(['unrelated']);
-        expect(cards(page.root)).toHaveLength(1);
       } finally {
         run(() => page.unmount());
       }

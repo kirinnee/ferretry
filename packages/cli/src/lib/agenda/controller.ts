@@ -2,6 +2,7 @@ import {
   type AgendaActionRequest,
   type AgendaId,
   type AgendaSnapshot,
+  agendaBriefRequiredProblems,
   DAEMON_FEATURES,
   formatTaskRef,
   type TaskRef,
@@ -26,6 +27,23 @@ import {
   renderRepliesSent,
 } from './render.ts';
 import { parseNeededBy } from './when.ts';
+
+/**
+ * Refuses a new item that does not say what is going on and why now: the owner reads it cold, so the premise
+ * and the context are required (the daemon refuses too). A confirmation's premise is the daemon's own — the
+ * held change, in its words — so only its context is asked for.
+ */
+const requireBrief = (request: Extract<AgendaActionRequest, { action: 'add' }>): void => {
+  const missing = agendaBriefRequiredProblems({
+    ...request,
+    ...(request.confirms === undefined ? {} : { premise: 'the held change' }),
+  });
+  if (missing.length === 0) return;
+  const flags = missing.map(problem => (problem.startsWith('premise') ? '--premise' : '--context')).join(' and ');
+  throw new Error(
+    `agenda add needs ${flags}: ${missing.join('; ')}. The owner reads the card cold, so say --premise "<what is going on>" --context "<why it matters now>"`,
+  );
+};
 
 /** Options every agenda command accepts. */
 export interface AgendaCommandOptions {
@@ -138,6 +156,7 @@ export class AgendaController {
       },
       file,
     );
+    requireBrief(composed);
     const request = flag.card === undefined ? composed : await this.#withCard(composed, flag.card);
     const sessionId = this.#target(options);
 

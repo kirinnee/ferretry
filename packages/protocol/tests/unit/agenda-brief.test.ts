@@ -260,3 +260,99 @@ describe('attention writing shapes', () => {
     should(AgendaActionRequestSchema.safeParse({ action: 'edit', id: 'A1', note: 'x' }).success).be.false();
   });
 });
+
+describe('agenda option details', () => {
+  const choice = {
+    ...minimal,
+    ask: { kind: 'multiple-choice', options: [{ label: 'Go' }, { label: 'Wait' }] },
+  } as const;
+  const raise = {
+    action: 'add',
+    subject: 'Pick',
+    why: 'Pick',
+    howToResolve: 'Answer it.',
+    ask: choice.ask,
+  } as const;
+
+  it('should read an item with a Markdown detail per option, and carry it in the brief', () => {
+    // Arrange / Act
+    const item = AgendaItemSchema.parse({
+      ...choice,
+      optionDetails: [{ label: 'Go', detail: 'Ship it **now**, see `plan.md`.' }],
+    });
+
+    // Assert
+    should(agendaBriefOf(item).optionDetails).deepEqual([{ label: 'Go', detail: 'Ship it **now**, see `plan.md`.' }]);
+  });
+
+  it('should leave the option objects as strict as older apps read them', () => {
+    // Arrange / Act
+    const withDetail = AgendaItemSchema.safeParse({
+      ...choice,
+      ask: { kind: 'multiple-choice', options: [{ label: 'Go', detail: 'x' }, { label: 'Wait' }] },
+    });
+
+    // Assert
+    should(withDetail.success).be.false();
+  });
+
+  it('should accept details on an add and an edit, and read the options of questions and card answers too', () => {
+    // Arrange
+    const details = [{ label: 'Go', detail: 'Now.' }];
+
+    // Act / Assert
+    should(AgendaActionRequestSchema.safeParse({ ...raise, optionDetails: details }).success).be.true();
+    should(AgendaActionRequestSchema.safeParse({ action: 'edit', id: 'A1', optionDetails: details }).success).be.true();
+    should(
+      AgendaActionRequestSchema.safeParse({
+        action: 'add',
+        subject: 'Pick',
+        why: 'Pick',
+        howToResolve: 'Answer it.',
+        questions: [plan],
+        optionDetails: [{ label: 'Reply with changes', detail: 'Say what.' }],
+      }).success,
+    ).be.true();
+  });
+
+  it('should refuse a detail that names no option, one option twice, and a bad detail', () => {
+    // Arrange / Act
+    const unknown = AgendaActionRequestSchema.safeParse({ ...raise, optionDetails: [{ label: 'Stop', detail: 'x' }] });
+    const twice = AgendaActionRequestSchema.safeParse({
+      ...raise,
+      optionDetails: [
+        { label: 'Go', detail: 'a' },
+        { label: 'Go', detail: 'b' },
+      ],
+    });
+    const blank = AgendaActionRequestSchema.safeParse({ ...raise, optionDetails: [{ label: 'Go', detail: '  ' }] });
+    const long = AgendaActionRequestSchema.safeParse({
+      ...raise,
+      optionDetails: [{ label: 'Go', detail: 'x'.repeat(1_001) }],
+    });
+    const multiline = AgendaActionRequestSchema.safeParse({
+      ...raise,
+      optionDetails: [{ label: 'Go\nStop', detail: 'x' }],
+    });
+    const stored = AgendaItemSchema.safeParse({ ...choice, optionDetails: [{ label: 'Stop', detail: 'x' }] });
+
+    // Assert
+    should(unknown.success).be.false();
+    should(unknown.error?.issues[0]?.message).containEql('"Stop"');
+    should(twice.success).be.false();
+    should(blank.success).be.false();
+    should(long.success).be.false();
+    should(multiline.success).be.false();
+    should(stored.success).be.false();
+    should(stored.error?.issues.map(issue => issue.message).join()).containEql('"Stop"');
+  });
+
+  it('should allow at most one detail per option the schema offers', () => {
+    // Arrange
+    const many = Array.from({ length: 13 }, (_, index) => ({ label: `O${index}`, detail: 'x' }));
+
+    // Act / Assert
+    should(AgendaActionRequestSchema.safeParse({ ...raise, optionDetails: many }).success).be.false();
+    should(AgendaActionRequestSchema.safeParse({ ...raise, optionDetails: [] }).success).be.false();
+  });
+});

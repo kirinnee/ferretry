@@ -496,6 +496,11 @@ export const SessionConfigSchema = z.object({
    */
   focusTask: TaskRefSchema.optional(),
   /**
+   * The card this session's own delegations go under: set only on purpose (`fy task focus`, creating a card, or the
+   * card a start gave it), never by merely writing to a card. `focusTask` follows every touch; this does not.
+   */
+  focusAnchor: TaskRefSchema.optional(),
+  /**
    * Why this session's work has no card (`fy task skip`): the turn-end check stays quiet while it stands. Cleared
    * when the session takes a card, so it covers the work it was recorded for and no later ask.
    */

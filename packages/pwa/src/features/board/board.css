@@ -2,13 +2,22 @@
    theme tokens only, so light, dark and every family restyle it without a rule here. The card is the one
    renderer: the phone and the side pane set `data-density='side'` and nothing else changes. */
 
+/* THE BOARD IS THE PAGE'S ONE VERTICAL SCROLLER, like every other page (`h-full min-h-0 overflow-y-auto`):
+   the shell's page region clips, it never scrolls. Nothing inside it scrolls up and down; the strips
+   scroll sideways only. Its children never shrink, so a tall board scrolls instead of squeezing the rows. */
 .fy-board {
   display: flex;
+  height: 100%;
+  min-height: 0;
   min-width: 0;
   flex-direction: column;
   gap: var(--gap-sm);
   width: 100%;
+  overflow-y: auto;
   padding: var(--gap-md) var(--gap-md) calc(64px + var(--safe-bottom, 0px));
+}
+.fy-board > * {
+  flex-shrink: 0;
 }
 
 /* ---- Header --------------------------------------------------------------------------------------- */
@@ -267,6 +276,40 @@
   border-radius: var(--radius-control);
   background: var(--warn-bg);
   color: var(--fg);
+}
+.fy-board__notice[data-compact] {
+  min-height: 28px;
+  padding: 0 0 0 var(--gap-sm);
+  font-size: var(--text-xs);
+}
+.fy-board__notice-text {
+  min-width: 0;
+  flex: 1 1 0;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fy-board__notice[data-open] .fy-board__notice-text {
+  padding: var(--gap-xs) 0;
+  white-space: normal;
+}
+.fy-board__notice[data-compact] .fy-board__notice-x {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  min-width: 0;
+  min-height: 0;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  align-self: flex-start;
 }
 .fy-board__notice-x,
 .fy-board__retry {
@@ -686,6 +729,8 @@
     max-width: 100%;
     flex-wrap: nowrap;
     overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
     scrollbar-width: none;
   }
   .fy-board__view {
@@ -714,21 +759,42 @@
 
 /* ---- Phone (the `drawer` layout): one lane under a chip strip, thumb-sized rows ------------------- */
 .fy-board[data-phone] {
-  padding-inline: 12px;
+  --fy-board-gutter: 12px;
+  --fy-board-pad-top: 4px;
+  gap: 4px;
+  padding: var(--fy-board-pad-top) var(--fy-board-gutter) var(--gap-md);
+}
+.fy-board[data-phone] .fy-board__views {
+  align-self: flex-start;
+}
+.fy-board[data-phone] .fy-board__view {
+  min-height: 24px;
 }
 .fy-board[data-phone] .fy-board-phone {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: var(--gap-sm);
+  gap: var(--gap-xs);
 }
+/* THE ONE STICKY PIECE: everything above it scrolls away with the list, the lane tabs stay under the app bar.
+   Full-bleed (the page's gutter is paid back as negative margin) so no card shows beside it, and opaque so
+   none shows through it. Sideways only: `overflow-y: hidden` keeps it from being a vertical scroller. */
 .fy-board-phone__strip {
-  position: relative;
+  position: sticky;
+  /* Sticky measures from the CONTENT edge, so the page's top padding is paid back: the strip meets the app
+     bar, and no card shows above it. */
+  top: calc(var(--fy-board-pad-top, 0px) * -1);
+  z-index: 2;
   display: flex;
   min-width: 0;
+  margin-inline: calc(var(--fy-board-gutter, 12px) * -1);
   gap: var(--gap-xs);
   overflow-x: auto;
-  padding-bottom: 2px;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  padding: 3px var(--fy-board-gutter, 12px);
+  background: var(--bg);
+  border-bottom: var(--stroke) solid var(--border-soft);
   scrollbar-width: none;
   scroll-snap-type: x proximity;
 }
@@ -737,7 +803,7 @@
 }
 .fy-board-phone__chip {
   display: inline-flex;
-  min-height: 40px;
+  min-height: 32px;
   flex: none;
   align-items: center;
   gap: var(--gap-xs);
@@ -751,6 +817,17 @@
   white-space: nowrap;
   scroll-snap-align: center;
   cursor: pointer;
+}
+/* Under a coarse pointer the shell floors every button at 44px (`:root button`); the board's phone chrome sits
+   below it on purpose, as its count pills already do — the compact board is the point. Lane tabs keep a 32px
+   box with a thumb-sized gap between them. */
+.fy-board[data-phone] .fy-board-phone__chip,
+.fy-board[data-phone] .fy-board__notice-text {
+  min-width: 0;
+  min-height: 32px;
+}
+.fy-board[data-phone] .fy-board__notice-text {
+  min-height: 28px;
 }
 .fy-board-phone__chip[aria-selected='true'] {
   border-color: var(--accent);
@@ -776,8 +853,36 @@
   /* A sideways drag is the lane switch; the page still scrolls up and down. */
   touch-action: pan-y;
 }
+/* Dense rows: the title and the meta line set the height, not the menu button. The ⋮ is drawn small and its
+   44px hit area is an overlay, so a finger still lands on it but the row does not grow to hold it. */
 .fy-board[data-phone] .fy-board-card {
-  padding: 8px var(--gap-sm);
+  align-items: center;
+  padding: 6px var(--gap-xs) 6px var(--gap-sm);
+}
+.fy-board[data-phone] .fy-board-card__title,
+.fy-board[data-phone] .fy-board-card__meta {
+  line-height: 1.25;
+}
+.fy-board[data-phone] .fy-board-card__main {
+  min-height: 0;
+  align-self: stretch;
+  justify-content: center;
+}
+.fy-board[data-phone] .fy-board-card__more {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  min-width: 0;
+  min-height: 0;
+}
+.fy-board[data-phone] .fy-board-card__more::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
+  content: '';
 }
 .fy-board[data-phone] .fy-board-card__verdict {
   gap: var(--gap-sm);
@@ -796,7 +901,22 @@
   align-items: center;
   gap: var(--gap-xs);
   overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
   scrollbar-width: none;
+}
+.fy-board__phone-bar .fy-board__scope,
+.fy-board__phone-bar .fy-board__lanes {
+  flex: none;
+}
+.fy-board__phone-bar .fy-board__scope-option {
+  min-height: 24px;
+  max-width: 9rem;
+  font-size: var(--text-xs);
+}
+.fy-board__phone-bar .fy-board__lanes {
+  min-height: 30px;
+  white-space: nowrap;
 }
 .fy-board__phone-bar::-webkit-scrollbar {
   display: none;
@@ -816,12 +936,12 @@
 .fy-board[data-phone] .fy-board-count,
 .fy-board[data-phone] .fy-board-count[data-kind='pill'] {
   flex: none;
-  min-height: 32px;
+  min-height: 30px;
   font-size: var(--text-xs);
 }
 .fy-board[data-phone] .fy-board-filters__toggle,
 .fy-board[data-phone] .fy-board-filters__clear {
-  min-height: 32px;
+  min-height: 30px;
   font-size: var(--text-xs);
 }
 .fy-board[data-phone] .fy-board-filters__toggle {
@@ -839,7 +959,7 @@
 }
 .fy-board[data-phone] .fy-board-counts__closed {
   flex: none;
-  min-height: 32px;
+  min-height: 30px;
   padding: 0 var(--gap-sm);
   border: var(--stroke) solid var(--border-soft);
   border-radius: var(--radius-pill);

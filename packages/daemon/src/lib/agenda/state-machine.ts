@@ -19,7 +19,9 @@ import {
   type AgendaSource,
   type AgendaUndelivered,
   agendaBriefOf,
+  agendaBriefRequiredProblems,
   agendaNoticeProblems,
+  agendaOptionDetailProblems,
   MAX_AGENDA_DETAIL_LENGTH,
   MAX_AGENDA_HISTORY,
   MAX_AGENDA_PER_SESSION,
@@ -459,9 +461,14 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
   }
   const noticeProblem = agendaNoticeProblems(request)[0];
   if (noticeProblem !== undefined) return failure('invalid', noticeProblem);
+  const optionDetailProblem = agendaOptionDetailProblems(request)[0];
+  if (optionDetailProblem !== undefined) return failure('invalid', optionDetailProblem);
   if (request.notice === true && actor.kind === 'human') {
     return failure('forbidden', 'only a ferret or the daemon sends a notice');
   }
+  // A ferret's new item carries its premise and context; the daemon's and the Warden's raises write their own.
+  const briefProblems = actor.kind === 'agent' ? agendaBriefRequiredProblems(request) : [];
+  if (briefProblems.length > 0) return failure('invalid', `a new agenda item needs both: ${briefProblems.join('; ')}`);
   if (request.ask === undefined && request.kind !== 'info' && request.notice !== true && actor.kind !== 'daemon') {
     return failure(
       'invalid',
@@ -568,6 +575,7 @@ function refreshStable(
     terms: request.terms,
     questions: request.questions,
     recommendation: request.recommendation,
+    optionDetails: request.optionDetails,
     impact: request.impact,
     urgency: request.urgency,
     blockingNow: request.blockingNow,
@@ -861,6 +869,7 @@ const EDITABLE_FIELDS = [
   'terms',
   'questions',
   'recommendation',
+  'optionDetails',
   'impact',
   'urgency',
   'blockingNow',
@@ -914,6 +923,11 @@ function edit(ledger: AgendaLedger, command: EditCommand): AgendaMutation {
   if (patch.questions !== undefined && questionShape(patch.questions) !== questionShape(target.item.questions)) {
     return failure('invalid', 'questions may be reworded but not added, removed or given other options');
   }
+  const optionDetailProblem = agendaOptionDetailProblems({
+    ...target.item,
+    ...(patch.optionDetails === undefined ? {} : { optionDetails: patch.optionDetails }),
+  })[0];
+  if (optionDetailProblem !== undefined) return failure('invalid', optionDetailProblem);
   const changed = EDITABLE_FIELDS.filter(
     field =>
       clears.some(cleared => cleared === field) ||

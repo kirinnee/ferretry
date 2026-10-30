@@ -154,8 +154,8 @@ export function agendaNudgeMessage(
   }
   const how =
     subject.mode === 'interactive'
-      ? `\`${binary} agenda add --title "<what>" "<the ask>" --step …\` (a to-do) or with \`--kind choice --option\` (a choice), or your question tool`
-      : `\`${binary} agenda add --title "<what>" "<the ask>" --step …\` (a to-do) or with \`--kind choice --option\` (a choice)`;
+      ? `\`${binary} agenda add --title "<what>" "<the ask>" --premise … --context … --step …\` (a to-do) or with \`--kind choice --option\` (a choice), or your question tool`
+      : `\`${binary} agenda add --title "<what>" "<the ask>" --premise … --context … --step …\` (a to-do) or with \`--kind choice --option\` (a choice)`;
   return `${AGENDA_NUDGE_MARK} Your last reply asked the owner to:\n${listed}\nThe owner reads the agenda, not every reply.${already} Raise each as its own agenda item — ${how} — or, if an open item already covers it or it needs no owner, say why not in one line.`;
 }
 

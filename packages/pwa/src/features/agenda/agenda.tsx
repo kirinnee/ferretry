@@ -12,9 +12,10 @@
  *   ask, one scrolling body, the quick replies directly above the composer. The row and the REAL composer stay
  *   visible and typeable. The transcript stays mounted underneath, so it is exactly where it was when the view
  *   closes without sending. ‹ › page through the agenda, ✕ / Esc / ↓ go back.
- * - While an item is open the composer carries a small removable "about !A5 ×" chip: what is typed goes with the
- *   item's reference (`withReferencePrefix`). × means plain chat. A send, or a quick-reply tap, sends AND closes the
- *   view, and the conversation returns to the new message. A quick reply carries the composer's text as its note.
+ * - While an item is open the pill and the row's chips are hidden — only the composer stays under the view — and what
+ *   is typed goes with the item's reference (`withReferencePrefix`), said in the composer's placeholder ("Reply about
+ *   !A5…"). ✕ or Esc is plain chat. A send, or a quick-reply tap, sends AND closes the view, and the conversation
+ *   returns to the new message. A quick reply carries the composer's text as its note.
  * - A wide screen with a mouse can DOCK the agenda beside the chat; the view opens over the chat column.
  * - `?agenda=A5` or `?attention=A5` (a notification tap, a proved `!A5`) arrives as a `focus` request: an open
  *   item opens its card, a resolved one opens in the resolved list, and an id the board does not hold is said
@@ -34,17 +35,17 @@ import { withComposerNote } from '../../lib/agenda-reply.ts';
 import { sortAgenda } from '../../lib/agenda-status.ts';
 import type { AgendaLoadStatus } from '../../lib/agenda-store.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { laneEditDestination } from '../../lib/lane-proposal-link.ts';
-import { useOptionalRouter } from '../../lib/router.tsx';
 import { type DaemonSessionScope, daemonSessionKey } from '../../lib/daemon-scope.ts';
+import { laneEditDestination } from '../../lib/lane-proposal-link.ts';
 import { composerQuoteTarget } from '../../lib/quote.ts';
+import { useOptionalRouter } from '../../lib/router.tsx';
 import type { TranscriptEntry } from '../../lib/session-screens.ts';
 import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
 import { agendaReference } from './agenda-board.tsx';
 import { useAgendaDock } from './agenda-collapse.ts';
 import { AgendaDeliveryContext, agendaHeading, deliveringIds } from './agenda-delivery.tsx';
 import { AgendaItemView } from './agenda-item-view.tsx';
-import { AgendaDrawer, AgendaLine, AgendaPanel, AgendaReferenceChips } from './agenda-line.tsx';
+import { AgendaDrawer, AgendaLine, AgendaPanel } from './agenda-line.tsx';
 
 /** What the chat sends of the agenda client, and nothing else of it. */
 export type AgendaActionClient = Pick<
@@ -159,8 +160,10 @@ export interface Agenda {
   readonly side: ReactNode;
   /** The header's "Agenda" button that docks the panel (a wide screen only). */
   readonly dockButton: ReactNode;
-  /** The ids the next message is about: the open item, unless the owner took its chip off. */
+  /** The ids the next message is about: the open item. */
   readonly references: () => readonly AgendaId[];
+  /** The composer's placeholder while an item is open ("Reply about !A57…"); absent in plain chat. */
+  readonly placeholder: string | undefined;
   /** Wire this into the Composer: a message went, so the open item closes. */
   readonly composer: { readonly onSent: () => void };
 }
@@ -196,14 +199,12 @@ export const useAgenda = ({
     readonly key: string;
     readonly drawer: boolean;
     readonly card: AgendaId | null;
-    /** The owner took the "about" chip off: the next message is plain chat. */
-    readonly plain: boolean;
-  }>({ key: scopeKey, drawer: false, card: null, plain: false });
-  const here = shown.key === scopeKey ? shown : { key: scopeKey, drawer: false, card: null, plain: false };
+  }>({ key: scopeKey, drawer: false, card: null });
+  const here = shown.key === scopeKey ? shown : { key: scopeKey, drawer: false, card: null };
   const update = useCallback(
     (change: (current: typeof here) => Partial<typeof here>): void =>
       setShown(current => {
-        const base = current.key === scopeKey ? current : { key: scopeKey, drawer: false, card: null, plain: false };
+        const base = current.key === scopeKey ? current : { key: scopeKey, drawer: false, card: null };
         return { ...base, ...change(base) };
       }),
     [scopeKey],
@@ -212,13 +213,12 @@ export const useAgenda = ({
   const [dock, toggleDock] = useAgendaDock();
   const docked = desktop && dock;
   const cardId = here.card !== null && byId.has(here.card) ? here.card : null;
-  const aboutItem = cardId === null || here.plain ? undefined : byId.get(cardId);
   const aboutRef = useRef<readonly AgendaId[]>([]);
-  aboutRef.current = aboutItem === undefined ? [] : [aboutItem.id];
+  aboutRef.current = cardId === null ? [] : [cardId];
 
   const [busy, setBusy] = useState<ReadonlyMap<AgendaId, string | null>>(new Map());
   const [announcement, setAnnouncement] = useState('');
-  const onSent = useCallback((): void => update(() => ({ card: null, plain: false })), [update]);
+  const onSent = useCallback((): void => update(() => ({ card: null })), [update]);
 
   const setCard = useCallback((id: AgendaId, state: string | null | undefined): void => {
     setBusy(current => {
@@ -240,7 +240,7 @@ export const useAgenda = ({
         setAnnouncement(actionSentence(sent, item.id));
         if (note.trim() !== '') spendDraft(scope);
         // The answer is a message in the conversation: the view closes and the chat returns to it.
-        update(current => (current.card === item.id ? { card: null, plain: false } : {}));
+        update(current => (current.card === item.id ? { card: null } : {}));
         onAnswered?.();
         // Edit on a lane proposal: the answer is sent, now the editor opens.
         const editor = laneEditDestination(connection.daemonId, item, action);
@@ -250,7 +250,7 @@ export const useAgenda = ({
     );
   };
 
-  const openCard = (item: AgendaItem): void => update(() => ({ card: item.id, drawer: false, plain: false }));
+  const openCard = (item: AgendaItem): void => update(() => ({ card: item.id, drawer: false }));
 
   // A REQUEST IS HONOURED ONCE, when it can be: after the board that says where the item is has been read.
   const handled = useRef<number | null>(null);
@@ -333,13 +333,9 @@ export const useAgenda = ({
         onToggle={() => update(current => ({ drawer: !current.drawer }))}
         open={drawerOpen}
         sending={{ count: sendingCount, headings: sendingHeadings }}
-        {...(counts === undefined ? {} : { counts })}
+        {...(counts === undefined || cardId !== null ? {} : { counts })}
         {...(live === undefined ? {} : { live })}
         {...(repliesSlot === undefined ? {} : { repliesSlot })}
-      />
-      <AgendaReferenceChips
-        items={aboutItem === undefined ? NO_ITEMS : [aboutItem]}
-        onRemove={() => update(() => ({ plain: true }))}
       />
     </AgendaDeliveryContext.Provider>
   );
@@ -360,13 +356,13 @@ export const useAgenda = ({
           item={cardItem}
           key={cardItem.id}
           onAct={action => act(cardItem, action, composerDraft(scope))}
-          onClose={() => update(() => ({ card: null, plain: false }))}
+          onClose={() => update(() => ({ card: null }))}
           position={{ index: at, total: agenda.length }}
           renderProse={proseText => <ChatProse copyable={copyWriter} text={proseText} />}
           swipeable={swipeable}
           {...(now === undefined ? {} : { now })}
-          {...(previous === undefined ? {} : { onPrevious: () => update(() => ({ card: previous.id, plain: false })) })}
-          {...(next === undefined ? {} : { onNext: () => update(() => ({ card: next.id, plain: false })) })}
+          {...(previous === undefined ? {} : { onPrevious: () => update(() => ({ card: previous.id })) })}
+          {...(next === undefined ? {} : { onNext: () => update(() => ({ card: next.id })) })}
           {...(client === undefined ? {} : { onProgress: stepTicker(client, connection, scope, cardItem.id) })}
         />
       </AgendaDeliveryContext.Provider>
@@ -413,6 +409,7 @@ export const useAgenda = ({
     side,
     dockButton,
     references: () => aboutRef.current,
+    placeholder: cardId === null ? undefined : `Reply about ${agendaReference(cardId)}…`,
     composer: { onSent },
   };
 };

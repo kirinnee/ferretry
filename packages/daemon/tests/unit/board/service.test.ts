@@ -898,6 +898,114 @@ describe('everything else on a card', () => {
     should(same.code).equal('invalid');
   });
 
+  describe('re-parenting a card', () => {
+    const cards = () => [
+      card({ id: 'F1', owner: 'lead', assignee: 'child' }),
+      card({ id: 'F2', owner: 'lead' }),
+      card({ id: 'F3', owner: 'stranger', assignee: 'stranger' }),
+    ];
+
+    it('should move the card under another, with the words in its history', async () => {
+      // Arrange
+      const { ports, service } = serviceWith(cards());
+
+      // Act
+      const response = await service.act(
+        'F1',
+        action({ action: 'reparent', parent: { id: 'F2' }, reason: 'it is part of the board work' }),
+        lead,
+      );
+
+      // Assert
+      should(response.task.parent).eql({ id: 'F2' });
+      should(stored(ports).parent).eql({ id: 'F2' });
+      should(lastEvent(ports)).match({
+        type: 'reparented',
+        from: null,
+        to: { id: 'F2' },
+        reason: 'it is part of the board work',
+        actor: { kind: 'ferret', sessionId: 'lead' },
+      });
+    });
+
+    it('should lift a card to the top level with --none, and refuse a move that changes nothing', async () => {
+      // Arrange
+      const { ports, service } = serviceWith([
+        card({ id: 'F1', owner: 'lead', parent: { id: 'F2' } }),
+        card({ id: 'F2', owner: 'lead' }),
+      ]);
+
+      // Act
+      const same = await refusal(service.act('F1', action({ action: 'reparent', parent: { id: 'F2' } }), lead));
+      await service.act('F1', action({ action: 'reparent', parent: null }), lead);
+      const again = await refusal(service.act('F1', action({ action: 'reparent', parent: null }), lead));
+
+      // Assert
+      should(stored(ports).parent).be.null();
+      should(lastEvent(ports)).match({ type: 'reparented', from: { id: 'F2' }, to: null, reason: null });
+      should(again.code).equal('invalid');
+      should(same.code).equal('invalid');
+    });
+
+    it('should let the human, the owner and an ancestor re-parent', async () => {
+      // Arrange
+      const human = serviceWith(cards());
+      const ancestor = serviceWith([card({ id: 'F1', owner: 'child' }), card({ id: 'F2', owner: 'lead' })]);
+
+      // Act
+      await human.service.act('F1', action({ action: 'reparent', parent: { id: 'F2' } }), owner);
+      await ancestor.service.act('F1', action({ action: 'reparent', parent: { id: 'F2' } }), lead);
+
+      // Assert
+      should(stored(human.ports).parent).eql({ id: 'F2' });
+      should(stored(ancestor.ports).parent).eql({ id: 'F2' });
+    });
+
+    it("should refuse the card's worker and a stranger", async () => {
+      // Arrange
+      const { ports, service } = serviceWith(cards());
+
+      // Act
+      const worker = await refusal(service.act('F1', action({ action: 'reparent', parent: { id: 'F2' } }), child));
+      const reader = await refusal(service.act('F1', action({ action: 'reparent', parent: { id: 'F2' } }), stranger));
+
+      // Assert
+      should(worker.code).equal('forbidden');
+      should(reader.code).equal('forbidden');
+      should(stored(ports).parent).be.null();
+    });
+
+    it('should refuse a ferret that cannot write the tree it would move the card onto', async () => {
+      // Arrange
+      const { ports, service } = serviceWith(cards());
+
+      // Act
+      const error = await refusal(service.act('F1', action({ action: 'reparent', parent: { id: 'F3' } }), lead));
+
+      // Assert
+      should(error.code).equal('forbidden');
+      should(stored(ports).parent).be.null();
+    });
+
+    it('should refuse a loop, a missing parent and a card from another machine', async () => {
+      // Arrange
+      const { service } = serviceWith([
+        card({ id: 'F1', owner: 'lead' }),
+        card({ id: 'F2', owner: 'lead', parent: { id: 'F1' } }),
+      ]);
+
+      // Act
+      const loop = await refusal(service.act('F1', action({ action: 'reparent', parent: { id: 'F2' } }), lead));
+      const self = await refusal(service.act('F1', action({ action: 'reparent', parent: { id: 'F1' } }), lead));
+      const missing = await refusal(service.act('F1', action({ action: 'reparent', parent: { id: 'F99' } }), lead));
+
+      // Assert
+      should(loop.code).equal('cycle');
+      should(self.code).equal('cycle');
+      should(missing.code).equal('not-found');
+    });
+  });
+
   it('should refuse a write that would leave the card invalid', async () => {
     // Arrange: a card already at the clarification bound.
     const full = card({
@@ -917,6 +1025,33 @@ describe('everything else on a card', () => {
     // Assert
     should(error.code).equal('invalid');
     should(error.message).containEql('clarifications');
+  });
+});
+
+describe('handing a card to a sub-ferret', () => {
+  it('should refuse a card dropped after the lead chose it', async () => {
+    // Arrange
+    const { service, ports } = serviceWith([card({ id: 'F1', owner: 'lead', dropped: { at: NOW, reason: 'x' } })]);
+
+    // Act
+    const error = await refusal(service.handOver('F1', 'lead', 'child'));
+
+    // Assert
+    should(error.code).equal('invalid');
+    should(error.message).containEql('is dropped');
+    should(ports.store.writes).be.empty();
+  });
+
+  it('should still hand the card over, with a warning, when the sub-ferret cannot be focused', async () => {
+    // Arrange
+    const { service, ports } = serviceWith([card({ id: 'F1', owner: 'lead' })], { focus: new FakeFocus(new Set()) });
+
+    // Act
+    const handed = await service.handOver('F1', 'lead', 'child');
+
+    // Assert
+    should(handed).match({ id: 'F1', assignee: 'child' });
+    should(ports.warnings.some(warning => warning.includes('could not focus child'))).be.true();
   });
 });
 

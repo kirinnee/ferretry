@@ -341,42 +341,6 @@
 .fy-attn-deck__peek > * > * {
   visibility: hidden;
 }
-/* The option a drag would send: an opaque banner flush across the top of the card in the hand, so no word
-   of the card reads through or beside it. */
-.fy-attn-deck__stamp {
-  position: absolute;
-  z-index: 4;
-  top: 0;
-  right: 0;
-  left: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border-bottom: var(--stroke-heavy) solid var(--accent);
-  border-radius: var(--radius-panel) var(--radius-panel) 0 0;
-  background: var(--surface-3);
-  padding: 12px 14px;
-  color: var(--accent);
-  font-family: var(--font-display);
-  font-size: var(--text-lg);
-  font-weight: var(--weight-strong);
-  pointer-events: none;
-}
-.fy-attn-deck__stamp > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-/* Past the threshold: letting go sends it. */
-.fy-attn-deck__stamp[data-committed] {
-  background: var(--accent);
-  color: var(--accent-fg);
-}
-.fy-attn-deck__stamp[data-empty] {
-  border-color: var(--border-strong);
-  color: var(--faint);
-}
 /* A committed card flying off, from wherever the finger let go. Decoration: the answer is already held. */
 .fy-attn-deck__leaving {
   position: absolute;
@@ -572,6 +536,7 @@
   font-weight: var(--weight-strong);
 }
 .fy-inbox-group__task,
+.fy-inbox-group__card,
 .fy-inbox-group__machine {
   min-width: 0;
   overflow-wrap: anywhere;
@@ -1101,4 +1066,142 @@
 /* The peeking cards' 22px under a dealt card (agenda-inbox.css, the deck). */
 .fy-attn-inbox__deck--end > .fy-attn-end {
   margin-bottom: 22px;
+}
+
+/* ---- THE OPEN ITEM: who and what, the chat's own item view, the swipe hint and the ferret's composer ---------------
+   The card the deck holds is the full item view (agenda-item-view.tsx) at the deck's measured room, its sticky top and
+   quick replies outside its one scroller as in the chat; under the deck sit the hint and the real composer. */
+.fy-attn-inbox__deck--open {
+  display: flex;
+  position: relative;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+.fy-inbox-open {
+  display: flex;
+  box-sizing: border-box;
+  height: var(--deck-room, max(20rem, calc(100dvh - 22rem)));
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: var(--stroke) solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--bg);
+  box-shadow: var(--shadow-panel);
+}
+/* In the deck the view is a card, not a layer over a chat: it takes the card's height and keeps its own column. */
+.fy-inbox-open > .fy-item-view {
+  --chat-column: 100%;
+  z-index: auto;
+  flex: 1 1 auto;
+  border-radius: 0 0 var(--radius-panel) var(--radius-panel);
+}
+/* A peek is only an edge (see the deck above): its view is drawn, but nothing of it shows. */
+.fy-attn-deck__peek .fy-inbox-open {
+  height: 100%;
+}
+/* Who and what: the ferret and its task, then its card and machine, then the way to its chat. A swipe can start here.
+   The line WRAPS rather than cut the task: the card, the machine and "Open chat" move down a line first, and the
+   task is cut only when it alone is wider than the card. */
+.fy-inbox-who {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--gap-sm);
+  border-bottom: var(--stroke) solid var(--divider-color, var(--border));
+  background: var(--surface-2, var(--surface));
+  padding: var(--gap-xs) var(--gap-md);
+  color: var(--muted);
+  font-size: var(--text-sm);
+  touch-action: none;
+}
+/* Never cut with "…": a task wider than the card wraps between its words. */
+.fy-inbox-who__main {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: break-word;
+}
+.fy-inbox-who__meta {
+  white-space: nowrap;
+}
+.fy-inbox-who__ferret {
+  color: var(--fg);
+  font-weight: var(--weight-strong);
+}
+.fy-inbox-who__task {
+  color: var(--fg);
+}
+.fy-inbox-who__card {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs, var(--text-sm));
+}
+.fy-inbox-who__dot {
+  margin: 0 var(--gap-xs);
+  color: var(--faint);
+}
+.fy-inbox-who__chat {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  color: var(--accent);
+  font-weight: var(--weight-strong);
+  text-decoration: none;
+}
+.fy-inbox-who__chat:hover {
+  text-decoration: underline;
+}
+.fy-inbox-who__chat:focus-visible {
+  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
+  outline-offset: 2px;
+}
+/* The deck reads every drag that starts on the item's head or its quick replies; the body keeps scrolling. */
+.fy-inbox-open [data-agenda-top],
+.fy-inbox-open [data-agenda-quick-replies] {
+  touch-action: none;
+}
+/* A card held mid-drag passes OVER what is under the deck, never under it. */
+.fy-attn-inbox__deck--open > .fy-attn-deck {
+  z-index: 1;
+}
+.fy-inbox-deck-foot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+}
+.fy-inbox-composer {
+  min-width: 0;
+}
+/* The last messages, opened, scroll on their own: the composer under them never leaves the screen. */
+.fy-inbox-deck-foot > .fy-attn-recent {
+  max-height: 32vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* On a phone the open item is as wide as the screen, exactly as wide as it is in the chat, so its quick-reply row
+   gets the chat's room; the bar above and the composer below keep the page's gutter. */
+.fy-attn-inbox[data-agenda-inbox='card'][data-phone] {
+  padding-right: 0;
+  padding-left: 0;
+}
+.fy-attn-inbox[data-agenda-inbox='card'][data-phone] .fy-attn-inbox__cardbar,
+.fy-attn-inbox[data-agenda-inbox='card'][data-phone] .fy-inbox-deck-foot {
+  padding-right: 16px;
+  padding-left: 16px;
+}
+.fy-attn-inbox[data-agenda-inbox='card'][data-phone] .fy-inbox-open {
+  border-right: 0;
+  border-left: 0;
+  border-radius: 0;
+}
+/* On a wide screen the open item and its composer share one comfortable measure. */
+@media (min-width: 768px) {
+  .fy-attn-inbox[data-agenda-inbox='card']:not([data-phone]) .fy-attn-inbox__deck--open {
+    width: 100%;
+    max-width: 46rem;
+    margin: 0 auto;
+  }
 }

@@ -78,8 +78,8 @@ describe('structured-item rules', () => {
   test('swipes the own answers of a card however many questions or options it has', () => {
     const ask = { kind: 'multiple-choice' as const, options: [{ label: 'One' }, { label: 'Two' }] };
     const several = swipeMap({ subject: 'Pick', ask, questions: [{ question: 'a' }, { question: 'b' }] });
-    expect(Object.keys(several).sort()).toEqual(['left', 'right']);
-    expect(several.right).toMatchObject({ kind: 'respond', label: 'One' });
+    expect(Object.keys(several).sort()).toEqual(['left', 'up']);
+    expect(several.up).toMatchObject({ kind: 'respond', label: 'One' });
     expect(several.left).toMatchObject({ kind: 'respond', label: 'Two' });
     expect(swipeMap({ subject: 'Pick', ask, questions: [{ question: 'a' }] })).toEqual(several);
   });

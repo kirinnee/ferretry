@@ -105,6 +105,25 @@ describe('the item view', () => {
     expect(top.querySelector('[data-agenda-body]')).toBeNull();
   });
 
+  test('keeps the head to ONE row: the title beside the status dot, n of N, ‹ › and ✕', async () => {
+    await draw(richItem);
+    const row = one('[data-agenda-top] .fy-item-view__nav');
+    expect(row.querySelector('[data-agenda-title]')).not.toBeNull();
+    expect(row.querySelector('[data-agenda-where]')).not.toBeNull();
+    expect(row.querySelector('[data-agenda-close]')).not.toBeNull();
+    const status = row.querySelector<HTMLElement>('.fy-item-view__status');
+    expect(status === null || (status.title !== '' && status.querySelector('[data-agenda-status]') !== null)).toBe(
+      true,
+    );
+  });
+
+  test('draws no arrow on a quick reply: the position alone is the swipe', async () => {
+    await draw(richItem, { swipeable: true });
+    const chips = root().querySelectorAll('[data-agenda-answer]');
+    expect(chips.length).toBeGreaterThan(0);
+    for (const chip of chips) expect(chip.querySelector('svg')).toBeNull();
+  });
+
   test('reads like a conversation: what is going on, why, decided, still open, a terms table, then history', async () => {
     const entries: TranscriptEntry[] = [
       {
@@ -129,9 +148,28 @@ describe('the item view', () => {
     expect([...table.querySelectorAll('thead th')].map(head => head.textContent)).toEqual(['Term', 'Meaning']);
     expect([...table.querySelectorAll('tbody th')].map(term => term.textContent)).toEqual(['WAL', 'ACID']);
     const history = must(body.querySelector('[data-agenda-history]'), 'the history');
-    expect(history.querySelector('[data-agenda-history-latest]')?.textContent).toContain('SQLite');
-    expect(history.querySelector('[data-agenda-history-toggle]')?.getAttribute('aria-expanded')).toBe('false');
+    expect(history.textContent).toContain('SQLite');
+    expect(history.textContent).toContain('changed');
     expect(body.lastElementChild?.contains(history)).toBe(true);
+  });
+
+  test('folds nothing: no disclosure, no toggle, History and every section open as plain text', async () => {
+    const entries: TranscriptEntry[] = [
+      {
+        id: 'u1',
+        kind: 'user',
+        text: agendaAnswerMessage({ id: 'A47', quote: 'Which database' } as never, 'SQLite'),
+        at: NOW - 1_000,
+      } as TranscriptEntry,
+    ];
+    await draw(richItem, {}, itemHistory(richItem, entries));
+    expect(root().querySelector('details, summary, [data-agenda-history-toggle]')).toBeNull();
+    expect(one('.fy-item-view__body').querySelector('[aria-expanded]')).toBeNull();
+    const history = one('[data-agenda-history]');
+    expect(history.querySelectorAll('li').length).toBeGreaterThanOrEqual(2);
+    const text = one('[data-agenda-body]').textContent ?? '';
+    expect(text).toContain('The board keeps every finished item');
+    expect(text).toContain('Reads are rare');
   });
 
   test('leaves the history out when there is none', async () => {
@@ -175,24 +213,44 @@ describe('moving through the items', () => {
     expect(one<HTMLButtonElement>('[aria-label="Next item"]').disabled).toBe(true);
   });
 
-  test('✕, Esc and ↓ all go back to the chat', async () => {
+  test('✕ and Esc go back to the chat', async () => {
     const spy = await draw(richItem);
     await interact(() => one<HTMLButtonElement>('[data-agenda-close]').click());
     await press('Escape');
+    expect(spy.closed).toBe(2);
+    expect(spy.next).toBe(0);
+  });
+
+  test('↓ skips to the next item, and goes back to the chat when there is none', async () => {
+    const spy = await draw(richItem);
     await press('ArrowDown');
-    expect(spy.closed).toBe(3);
+    expect([spy.next, spy.closed]).toEqual([1, 0]);
+    await view?.unmount();
+    const last = await draw(richItem, { onNext: undefined });
+    await press('ArrowDown');
+    expect([last.next, last.closed]).toEqual([0, 1]);
+  });
+
+  test('draws no floating label while a pull is dragged: the card teaches nothing, it just moves on', async () => {
+    await draw(richItem);
+    const lane = one<HTMLElement>('.fy-qr');
+    const touch = (type: string, y: number): PointerEvent =>
+      new PointerEvent(type, { bubbles: true, clientX: 200, clientY: y, pointerId: 5, pointerType: 'touch' });
+    await interact(() => lane.dispatchEvent(touch('pointerdown', 200)));
+    await interact(() => lane.dispatchEvent(touch('pointermove', 260)));
+    expect(root().querySelector('.fy-qr__stamp')).toBeNull();
   });
 });
 
 describe('the keys', () => {
-  test('← and → answer with the item’s own answers, ↑ only where there is one', async () => {
+  test('← ↑ → answer with the item’s own answers where there is one (→ has none here)', async () => {
     const spy = await draw(richItem);
     await press('ArrowRight');
     await press('ArrowLeft');
     await press('ArrowUp');
     expect(spy.acted.map(action => (action as { response?: { choice?: string } }).response?.choice)).toEqual([
-      'SQLite',
       'Postgres',
+      'SQLite',
     ]);
   });
 
@@ -225,7 +283,8 @@ describe('the quick replies', () => {
   test('sit under the body as chips, the recommended one tagged, and a tap answers', async () => {
     const spy = await draw(richItem);
     const chip = one<HTMLButtonElement>('[data-agenda-quick-replies] [data-agenda-option="SQLite"]');
-    expect(chip.querySelector('[data-agenda-recommended]')).not.toBeNull();
+    expect(chip.hasAttribute('data-recommended')).toBe(true);
+    expect(chip.getAttribute('aria-label')).toContain('SQLite, recommended');
     await interact(() => chip.click());
     expect(spy.acted).toHaveLength(1);
     expect(spy.acted[0]).toMatchObject({ kind: 'respond', response: { choice: 'SQLite' } });
@@ -334,8 +393,8 @@ describe('several questions, drawn once each', () => {
   test('tags "Recommended" on the matching option of each question, and offers "All recommended"', async () => {
     const spy = await draw(asked);
     const monday = one('[data-agenda-pick="Monday"]');
-    expect(monday.querySelector('[data-agenda-recommended]')).not.toBeNull();
-    expect(one('[data-agenda-pick="Friday"]').querySelector('[data-agenda-recommended]')).toBeNull();
+    expect(monday.getAttribute('aria-label')).toBe('Monday, recommended');
+    expect(one('[data-agenda-pick="Friday"]').getAttribute('aria-label')).toBe('Friday');
     await interact(() => one<HTMLButtonElement>('[data-agenda-use-recommended]').click());
     expect(one('[data-agenda-pick="Monday"]').getAttribute('aria-pressed')).toBe('true');
     expect(one('[data-agenda-pick="Zoe"]').getAttribute('aria-pressed')).toBe('true');
@@ -374,14 +433,14 @@ describe('several questions, drawn once each', () => {
 });
 
 describe('the ask', () => {
-  test('a long ask is cut to one line in the top and said whole in the body', async () => {
+  test('a long ask is said once, whole, in the top — never again in the body', async () => {
     const long = 'Which database should keep every one of the board’s finished items for the next two years?';
     await draw(
       agendaItem('A10', { title: 'Database', subject: long, ask: { kind: 'permission' } } as Partial<AgendaItem>),
     );
     const top = one('[data-agenda-top]');
-    expect(top.querySelector('[data-agenda-ask]')).not.toBeNull();
-    expect(one('.fy-item-view__body').textContent).toContain(long);
+    expect(top.querySelector('[data-agenda-ask]')?.textContent).toContain(long);
+    expect(one('.fy-item-view__body').textContent).not.toContain(long);
   });
 
   test('a short ask is said once, in the top', async () => {
@@ -421,13 +480,19 @@ describe('the pull down over the head', () => {
     await interact(() => head.dispatchEvent(pointer('pointerup', to, init)));
   };
 
-  test('a clear pull down on touch closes the view', async () => {
+  test('a clear pull down on touch skips to the next item', async () => {
     const spy = await draw(richItem);
     await pull(300);
-    expect(spy.closed).toBe(1);
+    expect([spy.next, spy.closed]).toEqual([1, 0]);
   });
 
-  test('a short pull, a mouse, a bar that does not swipe and a pointer it never saw close nothing', async () => {
+  test('a clear pull down on the last item closes the view', async () => {
+    const spy = await draw(richItem, { onNext: undefined });
+    await pull(300);
+    expect([spy.next, spy.closed]).toEqual([0, 1]);
+  });
+
+  test('a short pull, a mouse, a bar that does not swipe and a pointer it never saw skip nothing', async () => {
     const spy = await draw(richItem);
     await pull(140);
     await pull(300, { pointerType: 'mouse' });
@@ -436,11 +501,11 @@ describe('the pull down over the head', () => {
     await interact(() => head.dispatchEvent(pointer('pointerup', 300, { pointerId: 9 })));
     await interact(() => head.dispatchEvent(pointer('pointercancel', 300)));
     await interact(() => head.dispatchEvent(pointer('pointerup', 300)));
-    expect(spy.closed).toBe(0);
+    expect([spy.closed, spy.next]).toEqual([0, 0]);
     await view?.unmount();
     const still = await draw(richItem, { swipeable: false });
     await pull(300);
-    expect(still.closed).toBe(0);
+    expect([still.closed, still.next]).toEqual([0, 0]);
   });
 });
 
@@ -461,5 +526,18 @@ describe('a change to the Ferretry config', () => {
     await draw(richItem);
     expect(root().querySelector('[data-agenda-confirms]')).toBeNull();
     expect(root().textContent).toContain('The board keeps every finished item');
+  });
+});
+
+describe('the Inbox’s item view', () => {
+  test('names ✕ as the host asks: "Back to the chat" unless it is somewhere else', async () => {
+    await draw(richItem);
+    const closeLabel = (): string | null | undefined =>
+      view?.container.querySelector('[data-agenda-close]')?.getAttribute('aria-label');
+    expect(closeLabel()).toBe('Back to the chat');
+    await view?.unmount();
+    view = null;
+    await draw(richItem, { closeLabel: 'Back to the Inbox' });
+    expect(closeLabel()).toBe('Back to the Inbox');
   });
 });

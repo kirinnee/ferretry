@@ -42,7 +42,7 @@ import {
 } from '@ferretry/protocol';
 import { type BoardOperation, type BoardStanding, mayDo, OPERATION_STANDINGS, refusalMessage } from './authority.ts';
 import { BoardError } from './errors.ts';
-import { type BoardIndex, blockedBy, dependencyCycle, type LaneSets } from './graph.ts';
+import { type BoardIndex, blockedBy, dependencyCycle, type LaneSets, parentLoop } from './graph.ts';
 import { laneFromFacts } from './lane-facts.ts';
 
 /** The facts every rule may consult, gathered by the service before it calls one. */
@@ -540,16 +540,59 @@ const refile = (
   return { task: reconcileFacts(refiled, { ...context, laneSet: target }) ?? refiled };
 };
 
+const sameParent = (left: TaskRef | null, right: TaskRef | null): boolean =>
+  left === null || right === null ? left === right : sameRef(left, right);
+
+/**
+ * Moves a card under another card, or to the top level. The card's owner, its leads and the owner (human)
+ * may; the new parent must also be a card the caller may add a child under (`parentStanding`), so a card
+ * never lands on a tree its caller cannot write.
+ */
+const reparent = (
+  card: BoardTask,
+  action: Extract<BoardTaskActionRequest, { action: 'reparent' }>,
+  context: CardContext,
+  parentStanding: BoardStanding | null,
+): CardOutcome => {
+  requireStanding('reparent', context.standing, card);
+  const ref = formatTaskRef(card);
+  let to: TaskRef | null = null;
+  if (action.parent !== null) {
+    const parent = requireLocalCard(context.index, action.parent, 'parent');
+    requireStanding('adopt', parentStanding ?? 'reader', parent);
+    if (parentLoop(context.index, card.id, { id: parent.id })) {
+      throw new BoardError(
+        'cycle',
+        `${ref} cannot sit under ${formatTaskRef(parent)}: that card is ${ref} or inside it`,
+      );
+    }
+    to = { id: parent.id };
+  }
+  if (sameParent(card.parent, to)) {
+    throw new BoardError(
+      'invalid',
+      `${ref} is already ${to === null ? 'at the top level' : `under ${formatTaskRef(to)}`}`,
+    );
+  }
+  return {
+    task: {
+      ...withEvent(card, { type: 'reparented', from: card.parent, to, reason: action.reason ?? null }, context),
+      parent: to,
+    },
+  };
+};
+
 /**
  * Applies one action request to one card. `focus` changes nothing on the card (the service records it
  * on the session), so it answers `task: null` once its authority is proved. `refile` needs the target
- * board's lanes, which the service reads first.
+ * board's lanes, which the service reads first. `reparent` needs the caller's standing on the NEW parent.
  */
 export const applyAction = (
   card: BoardTask,
   action: BoardTaskActionRequest,
   context: CardContext,
   refileTarget: LaneSet | null = null,
+  parentStanding: BoardStanding | null = null,
 ): CardOutcome => {
   const ref = formatTaskRef(card);
   switch (action.action) {
@@ -632,6 +675,8 @@ export const applyAction = (
       };
     case 'refile':
       return refile(card, action, refileTarget, context);
+    case 'reparent':
+      return reparent(card, action, context, parentStanding);
   }
 };
 

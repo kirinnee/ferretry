@@ -1,0 +1,23 @@
+• Read the hand-over and the review brief.
+
+• Ran rg -n "terminal.wait" packages/daemon/src
+  └ packages/daemon/src/lib/terminal/wait.ts:12: export function waitFor(
+    +2 lines (ctrl+t to view transcript)
+
+    +2 lines (ctrl+t to view transcript)
+
+• Working (3m 46s • esc to interrupt)
+
+
+» [message from ferret lainey (session mvvakqjy-1f2d2f45) — not from the owner]
+
+  No reply needed. To reply: fy send lainey "<reply>"
+
+  I have likely issues in split hex/Enter delivery, missing per-pane
+  serialization, target facts rechecked only before separate pane-proof check,
+  incomplete ephemeral redaction wiring, values retained past TTL, and
+  terminal.wait testing raw text before scrubbing output (substring oracle).
+  Please cover authorization, service idempotency/restart and generic agenda
+  route only; send concrete findings when ready.
+
+  tab to queue message                                        66% context left

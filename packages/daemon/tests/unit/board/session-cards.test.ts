@@ -12,8 +12,8 @@ import {
   BoardService,
   cardFooterLine,
   cardTitle,
+  type DelegationRequest,
   type QuietItem,
-  type SessionCardFacts,
   SessionCards,
   type SessionCardsPorts,
 } from '../../../src/lib/board/index.ts';
@@ -43,7 +43,6 @@ interface Options {
   readonly cards?: readonly BoardTask[];
   /** Where each session works; absent means PROJECT. */
   readonly projects?: Readonly<Record<string, BoardProjectId>>;
-  readonly facts?: Readonly<Record<string, SessionCardFacts>>;
   /** What a proposal answers; absent proposes nothing. */
   readonly proposed?: LaneSet | 'fail';
   readonly pendingFails?: boolean;
@@ -84,7 +83,6 @@ const build = (options: Options = {}) => {
     projects: { nameOf: async projectId => NAMES[projectId] ?? projectId },
     focus,
     parents: new FakeParents({ child: 'lead' }),
-    sessions: { facts: async sessionId => options.facts?.[sessionId] },
     pending: {
       append: async (sessionId, items) => {
         if (options.pendingFails === true) throw new Error('pending context is full');
@@ -119,6 +117,9 @@ describe('what a start card is called and asks', () => {
     // Act / Assert
     should(cardFooterLine('F413', 'Ferretry', 'fy')).equal(
       'Your card is &F413 on the Ferretry board; move it as you work (`fy task …`).',
+    );
+    should(cardFooterLine('F413', 'Ferretry', 'fy', { id: 'F85' })).equal(
+      'Your card is &F413 on the Ferretry board, under &F85; move it as you work (`fy task …`).',
     );
     should(cardFooterLine('F413', undefined, 'ferret')).equal(
       "Your card is &F413 on the project's board; move it as you work (`ferret task …`).",
@@ -162,93 +163,248 @@ describe('a session started with a brief', () => {
     should(stored(ports, 'F1').ask).deepEqual({ text: 'Survey the agenda', source: 'session:lead' });
   });
 
-  it("should put a fy new's card under the lead's focus card, owned by the lead and worked by the child", async () => {
-    // Arrange
-    const { subject, ports, focus } = build({ cards: [card({ id: 'F1', owner: 'lead', laneId: 'implement' })] });
-    focus.focused.set('lead', { id: 'F1' });
+  describe('the parent of the card a fy new makes', () => {
+    const delegate = (subject: SessionCards, brief: string, extra: Partial<DelegationRequest> = {}) =>
+      subject.delegate('lead', { brief, name: 'Build the board store', ...extra }, true);
 
-    // Act
-    const { delegation } = await subject.delegate('lead', 'Build the board store', true);
-    const opened = await subject.open({
-      sessionId: 'child',
-      brief: 'Build the board store\n\n---\nfooter',
-      parent: 'lead',
-      delegation,
+    it("should put the card under the lead's anchor, owned by the lead and worked by the child", async () => {
+      // Arrange
+      const { subject, ports, focus } = build({ cards: [card({ id: 'F1', owner: 'lead', laneId: 'implement' })] });
+      focus.anchors.set('lead', { id: 'F1' });
+      focus.focused.set('lead', { id: 'F1' });
+
+      // Act
+      const { delegation } = await delegate(subject, 'Build the board store');
+      const opened = await subject.open({
+        sessionId: 'child',
+        brief: 'Build the board store\n\n---\nfooter',
+        parent: 'lead',
+        delegation,
+      });
+
+      // Assert
+      should(delegation).deepEqual({
+        lead: 'lead',
+        brief: 'Build the board store',
+        id: 'F2',
+        existing: false,
+        parent: { id: 'F1' },
+        parentFrom: 'focus',
+        project: 'Ferretry',
+      });
+      should(opened.card).match({
+        id: 'F2',
+        owner: 'lead',
+        assignee: 'child',
+        parent: { id: 'F1' },
+        brief: 'Build the board store',
+        ask: { text: 'Build the board store', source: 'session:lead' },
+      });
+      should(focus.focused.get('child')).deepEqual({ id: 'F2' });
+      should(focus.anchors.get('child')).deepEqual({ id: 'F2' });
+      should(focus.focused.get('lead')).deepEqual({ id: 'F1' });
+      should(stored(ports, 'F2').createdBy).deepEqual({ kind: 'daemon', sessionId: 'lead' });
     });
 
-    // Assert
-    should(delegation).deepEqual({
-      lead: 'lead',
-      brief: 'Build the board store',
-      id: 'F2',
-      parent: { id: 'F1' },
-      project: 'Ferretry',
-      notes: [],
+    it("should prefer the card the brief names over the lead's anchor", async () => {
+      // Arrange
+      const { subject, focus } = build({
+        cards: [card({ id: 'F1', owner: 'lead' }), card({ id: 'F138', owner: 'lead' })],
+      });
+      focus.anchors.set('lead', { id: 'F1' });
+
+      // Act
+      const { delegation, notes } = await delegate(subject, 'Your card is &F138. Build the thing; see also &F1.');
+
+      // Assert
+      should(delegation).match({ parent: { id: 'F138' }, parentFrom: 'brief' });
+      should(notes).be.empty();
     });
-    should(opened.card).match({
-      id: 'F2',
-      owner: 'lead',
-      assignee: 'child',
-      parent: { id: 'F1' },
-      brief: 'Build the board store',
-      ask: { text: 'Build the board store', source: 'session:lead' },
+
+    it('should use the anchor when the brief names no card, and when the card it names is gone or dropped', async () => {
+      // Arrange
+      const { subject, focus } = build({
+        cards: [
+          card({ id: 'F1', owner: 'lead' }),
+          card({ id: 'F7', owner: 'lead', dropped: { at: NOW, reason: 'x' } }),
+        ],
+      });
+      focus.anchors.set('lead', { id: 'F1' });
+
+      // Act
+      const plain = await delegate(subject, 'Build the board store');
+      const missing = await delegate(subject, 'see &F99 for background');
+      const dropped = await delegate(subject, 'see &F7 for background');
+
+      // Assert
+      should(plain.delegation).match({ parent: { id: 'F1' }, parentFrom: 'focus' });
+      should(missing.delegation).match({ parent: { id: 'F1' }, parentFrom: 'focus' });
+      should(dropped.delegation).match({ parent: { id: 'F1' }, parentFrom: 'focus' });
     });
-    should(focus.focused.get('child')).deepEqual({ id: 'F2' });
-    should(focus.focused.get('lead')).deepEqual({ id: 'F1' });
-    should(stored(ports, 'F2').createdBy).deepEqual({ kind: 'daemon', sessionId: 'lead' });
+
+    it('should never use a card the lead merely touched last: no anchor means a top-level card, said once', async () => {
+      // Arrange
+      const { subject, ports, focus } = build({ cards: [card({ id: 'F1', owner: 'lead' })] });
+      focus.focused.set('lead', { id: 'F1' });
+
+      // Act
+      const { delegation, notes } = await delegate(subject, 'Build the board store');
+      const opened = await subject.open({ sessionId: 'child', brief: 'x', parent: 'lead', delegation });
+
+      // Assert
+      should(delegation?.parent).be.null();
+      should(delegation).not.have.property('parentFrom');
+      should(notes).deepEqual([
+        "The sub-ferret's card has no parent, so it is at the top level of the board: `fy task reparent &F2 --parent <id>` moves it, and `fy task focus <id>` (or `--card <id>`) says where your sub-ferrets' cards go next time.",
+      ]);
+      should(opened.card?.parent).be.null();
+      should(stored(ports, 'F2').parent).be.null();
+    });
+
+    it('should set an anchor only by choice: a focus, a create or a start does; a note does not', async () => {
+      // Arrange
+      const { ports, focus } = build({ cards: [card({ id: 'F1', owner: 'lead', assignee: null })] });
+      const board = new BoardService({ ...ports, parents: new FakeParents({ child: 'lead' }) });
+      const lead = { kind: 'ferret', sessionId: 'lead' } as const;
+
+      // Act
+      await board.act('F1', { action: 'note', text: 'a thought' }, lead);
+      const touched = await focus.anchorOf('lead');
+      await board.act('F1', { action: 'focus' }, lead);
+      const focused = await focus.anchorOf('lead');
+
+      // Assert
+      should(touched).be.null();
+      should(focused).deepEqual({ id: 'F1' });
+    });
   });
 
-  it('should make the lead a card from its own session first when it has none, and say so', async () => {
-    // Arrange
-    const { subject, ports, focus } = build({
-      facts: { lead: { name: 'Board design', prompt: 'design it', latestOwnerMessage: 'flesh out the board' } },
+  describe('a fy new that must not twin a card', () => {
+    const request = { brief: 'Build the board store', name: 'build the board store!' };
+
+    it("should assign the lead's own open card with the same title instead of making a second", async () => {
+      // Arrange
+      const { subject, ports, focus } = build({
+        cards: [card({ id: 'F5', owner: 'lead', title: 'Build the Board Store', parent: { id: 'F1' } })],
+      });
+
+      // Act
+      const { delegation, notes } = await subject.delegate('lead', request, true);
+      const opened = await subject.open({ sessionId: 'child', brief: 'x', parent: 'lead', delegation });
+
+      // Assert
+      should(delegation).deepEqual({
+        lead: 'lead',
+        brief: 'Build the board store',
+        id: 'F5',
+        existing: true,
+        parent: { id: 'F1' },
+        project: 'Ferretry',
+      });
+      should(notes[0]).startWith('You already had &F5 ("Build the Board Store")');
+      should(opened.card).match({ id: 'F5', owner: 'lead', assignee: 'child' });
+      should([...ports.store.cards.keys()]).deepEqual(['F5']);
+      should(focus.focused.get('child')).deepEqual({ id: 'F5' });
+      should(focus.anchors.get('child')).deepEqual({ id: 'F5' });
+      should(focus.focused.has('lead')).be.false();
     });
 
-    // Act
-    const { delegation, notes } = await subject.delegate('lead', 'Build it', true);
+    it("should not reuse a card that is someone else's, already worked, closed, dropped or on another board", async () => {
+      // Arrange
+      const title = 'Build the Board Store';
+      const { subject } = build({
+        cards: [
+          card({ id: 'F2', owner: 'stranger', title }),
+          card({ id: 'F3', owner: 'lead', assignee: 'worker', title }),
+          card({ id: 'F4', owner: 'lead', title, laneId: 'closed' }),
+          card({ id: 'F5', owner: 'lead', title, dropped: { at: NOW, reason: 'x' } }),
+          card({ id: 'F6', owner: 'lead', title, projectId: OTHER_PROJECT, laneId: 'todo' }),
+        ],
+      });
 
-    // Assert
-    should(delegation).match({ id: 'F2', parent: { id: 'F1' }, leadCard: 'F1' });
-    should(notes).deepEqual([
-      'You had no card, so &F1 was made for you from your session ("Board Design") on the Ferretry board; your sub-ferret\'s card sits under it.',
-    ]);
-    should(stored(ports, 'F1')).match({
-      title: 'Board Design',
-      owner: 'lead',
-      assignee: null,
-      brief: 'design it',
-      ask: { text: 'flesh out the board', source: 'owner' },
+      // Act
+      const { delegation } = await subject.delegate('lead', request, true);
+
+      // Assert
+      should(delegation).match({ id: 'F7', existing: false });
     });
-    should(focus.focused.get('lead')).deepEqual({ id: 'F1' });
+
+    it('should not look for a twin when the child runs in another folder', async () => {
+      // Arrange
+      const { subject } = build({ cards: [card({ id: 'F5', owner: 'lead', title: 'Build the Board Store' })] });
+
+      // Act
+      const { delegation } = await subject.delegate('lead', request, false);
+
+      // Assert
+      should(delegation).match({ id: 'F6', existing: false });
+    });
   });
 
-  it("should ask with the lead's own brief, else its title, when no owner message was recorded", async () => {
-    // Arrange
-    const briefed = build({ facts: { lead: { prompt: 'Survey the boards', parent: 'root' } } });
-    const bare = build({ facts: { lead: { name: 'Quick chat' } } });
+  describe('a fy new --card', () => {
+    it("should assign the lead's existing card to the child, keep its owner and parent, and make no second card", async () => {
+      // Arrange
+      const { subject, ports, focus } = build({
+        cards: [
+          card({ id: 'F9', owner: 'lead', title: 'Something else', parent: { id: 'F1' } }),
+          card({ id: 'F1', owner: 'lead' }),
+        ],
+      });
+      focus.focused.set('lead', { id: 'F1' });
 
-    // Act
-    await briefed.subject.delegate('lead', 'x', true);
-    await bare.subject.delegate('lead', 'x', true);
+      // Act
+      const { delegation, refusal } = await subject.delegate('lead', { brief: 'Build it', card: 'F9' }, true);
+      const opened = await subject.open({ sessionId: 'child', brief: 'Build it', parent: 'lead', delegation });
 
-    // Assert
-    should(stored(briefed.ports, 'F1').ask).deepEqual({ text: 'Survey the boards', source: 'session:root' });
-    should(stored(bare.ports, 'F1').ask).deepEqual({ text: 'Quick Chat', source: 'owner' });
+      // Assert
+      should(refusal).be.undefined();
+      should(delegation).match({ id: 'F9', existing: true, parent: { id: 'F1' }, project: 'Ferretry' });
+      should(opened.card).match({ id: 'F9', owner: 'lead', assignee: 'child', title: 'Something else' });
+      should(stored(ports, 'F9').history.at(-1)).match({ type: 'assigned', to: 'child' });
+      should([...ports.store.cards.keys()].sort()).deepEqual(['F1', 'F9']);
+      should(focus.focused.get('child')).deepEqual({ id: 'F9' });
+      should(focus.anchors.get('child')).deepEqual({ id: 'F9' });
+      should(focus.focused.get('lead')).deepEqual({ id: 'F1' });
+    });
+
+    it("should refuse, not start without a card, when the card is missing, dropped or not the lead's to give", async () => {
+      // Arrange
+      const { subject, ports } = build({
+        cards: [
+          card({ id: 'F2', owner: 'stranger', assignee: 'stranger' }),
+          card({ id: 'F3', owner: 'lead', dropped: { at: NOW, reason: 'x' } }),
+        ],
+      });
+
+      // Act
+      const missing = await subject.delegate('lead', { brief: 'x', card: 'F99' }, true);
+      const foreign = await subject.delegate('lead', { brief: 'x', card: 'F2' }, true);
+      const dropped = await subject.delegate('lead', { brief: 'x', card: 'F3' }, true);
+
+      // Assert
+      should(missing.refusal).match(/no card &F99/u);
+      should(foreign.refusal).be.a.String();
+      should(dropped.refusal).match(/&F3 is dropped/u);
+      should(missing.delegation).be.undefined();
+      should(ports.store.writes).be.empty();
+    });
   });
 
-  it('should make no card for a lead the daemon does not hold, and not name a board a named folder may miss', async () => {
+  it('should start without a card, and say why, when the card cannot be read', async () => {
     // Arrange
-    const unknown = build();
-    const focused = build({ cards: [card({ id: 'F1', owner: 'lead' })] });
-    focused.focus.focused.set('lead', { id: 'F1' });
+    const store = new MemoryBoardStore([card({ id: 'F9', owner: 'lead' })]);
+    store.read = async () => {
+      throw new TypeError('the board is unreadable');
+    };
+    const { subject } = build({ world: { store } });
 
     // Act
-    const none = await unknown.subject.delegate('ghost', 'x', true);
-    const elsewhere = await focused.subject.delegate('lead', 'x', false);
+    const outcome = await subject.delegate('lead', { brief: 'x', card: 'F9' }, true);
 
     // Assert
-    should(none).deepEqual({ notes: ['there is no session ghost to make a card for'] });
-    should(elsewhere.delegation).not.have.property('project');
+    should(outcome.delegation).be.undefined();
+    should(outcome.refusal).be.undefined();
+    should(outcome.notes).deepEqual(['No card was made for the sub-ferret: the board is unreadable']);
   });
 
   it('should say where the card really is when the child runs on another board than the brief said', async () => {
@@ -257,8 +413,8 @@ describe('a session started with a brief', () => {
       cards: [card({ id: 'F1', owner: 'lead' })],
       projects: { child: OTHER_PROJECT },
     });
-    focus.focused.set('lead', { id: 'F1' });
-    const { delegation } = await subject.delegate('lead', 'x', true);
+    focus.anchors.set('lead', { id: 'F1' });
+    const { delegation } = await subject.delegate('lead', { brief: 'x' }, true);
 
     // Act
     const opened = await subject.open({ sessionId: 'child', brief: 'x', parent: 'lead', delegation });
@@ -295,7 +451,6 @@ describe('a session started with a brief', () => {
       projects: { nameOf: async projectId => NAMES[projectId] ?? projectId },
       focus: new FakeFocus(),
       parents: new FakeParents(),
-      sessions: { facts: async () => undefined },
       pending: { append: async () => undefined },
       clock: { now: () => NOW },
       diagnostics: { warn: () => undefined },
@@ -399,7 +554,7 @@ describe('a session started with a brief', () => {
 
     // Act
     const opened = await subject.open({ sessionId: 'worker', brief: 'x' });
-    const delegated = await subject.delegate('lead', 'x', true);
+    const delegated = await subject.delegate('lead', { brief: 'x' }, true);
 
     // Assert
     should(opened.card).be.undefined();

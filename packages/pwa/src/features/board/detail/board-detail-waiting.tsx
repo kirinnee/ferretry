@@ -4,6 +4,7 @@ import type { AgendaRef, AgendaResponse } from '@ferretry/protocol';
 import { useState } from 'react';
 import { cardModel } from '../../../lib/agenda-card-model.ts';
 import { swipeMap } from '../../../lib/agenda-inbox.ts';
+import { itemOptions } from '../../../lib/agenda-options.ts';
 import type { CardAsks } from '../../../lib/board-detail.ts';
 import type { FerretNames } from '../../../lib/board-present.ts';
 import { agendaHeading } from '../../agenda/agenda-delivery.tsx';
@@ -56,7 +57,8 @@ export function WaitingOnYou({ asks, names, onAnswer }: WaitingOnYouProps) {
                         setError(failed);
                       });
                     }}
-                    onClose={() => undefined}
+                    onSkip={() => undefined}
+                    options={itemOptions(item)}
                     swipeable={false}
                   />
                 )}

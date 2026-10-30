@@ -6,6 +6,7 @@ import { ReferenceSurfaceProvider } from '../../../src/components/reference-surf
 import { agendaKindMeta } from '../../../src/features/agenda/agenda-board.tsx';
 import { AgendaCard } from '../../../src/features/agenda/agenda-card.tsx';
 import { AgendaDetail } from '../../../src/features/agenda/agenda-detail.tsx';
+import { AgendaBody } from '../../../src/features/agenda/agenda-steps.tsx';
 import type { ClipboardWriter } from '../../../src/features/onboarding/copy-button.tsx';
 import {
   DONE_ACTION,
@@ -103,16 +104,22 @@ describe('agenda card Markdown and hypermedia', () => {
     expect(written).toEqual(['echo one', 'echo two']);
   });
 
-  test('previews a long body behind Show more, and says how to get the rest', async () => {
+  test('an item view draws a long body whole: no preview, no Show more', async () => {
     const item = todo({ body: Array.from({ length: 40 }, (_, line) => `line ${line}`).join('\n\n') });
     view = await mount(<AgendaDetail layout="panel" item={item} renderProse={chatProse()} />);
     const body = must(view.container.querySelector('[data-agenda-body]'), 'body');
-    const toggle = must(body.querySelector<HTMLButtonElement>('[data-agenda-body-toggle]'), 'toggle');
-    expect(body.hasAttribute('data-folded')).toBe(true);
-    expect(toggle.textContent).toBe('Show more');
-    await interact(() => toggle.click());
+    expect(body.querySelector('[data-agenda-body-toggle]')).toBeNull();
     expect(body.hasAttribute('data-folded')).toBe(false);
-    expect(toggle.textContent).toBe('Show less');
+    expect(body.textContent).toContain('line 39');
+  });
+
+  test('a long body is drawn whole, with no Show more', async () => {
+    const text = Array.from({ length: 40 }, (_, line) => `line ${line}`).join('\n\n');
+    view = await mount(<AgendaBody renderProse={chatProse()} text={text} />);
+    const body = must(view.container.querySelector('[data-agenda-body]'), 'body');
+    expect(body.querySelector('[data-agenda-body-toggle]')).toBeNull();
+    expect(body.hasAttribute('data-folded')).toBe(false);
+    expect(body.textContent).toContain('line 39');
   });
 
   test('does not fold a short body', async () => {

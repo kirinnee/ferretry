@@ -7,6 +7,7 @@ import {
   PackNewRequestSchema,
   type PackRecommendRequest,
 } from '@ferretry/protocol';
+import { requireCardRef } from '../board/board-request.ts';
 import { type IProgress, NO_PROGRESS, withStep } from '../progress/index.ts';
 import { titleFromReferencedBrief } from '../tasks/task-title.ts';
 import type { IPackGateway } from './gateway.ts';
@@ -66,6 +67,8 @@ export interface PackNewOptions {
   readonly auto?: boolean;
   readonly cwd?: string;
   readonly name?: string;
+  /** An existing card the sub-ferret works on (`--card`): `&F21`, or `F21`. */
+  readonly card?: string;
   readonly mode?: 'auto' | 'interactive';
   readonly promptFile?: string;
   readonly json?: boolean;
@@ -261,6 +264,7 @@ export class PackController {
           : {}),
       ...(options.allowScratch === true ? { allowScratch: true } : {}),
       ...(name === undefined ? {} : { name }),
+      ...(options.card === undefined ? {} : { card: requireCardRef(options.card, 'card id').id }),
       ...(options.mode === undefined ? {} : { mode: options.mode }),
     });
     const outcome = await withStep(

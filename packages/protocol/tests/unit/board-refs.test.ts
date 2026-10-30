@@ -8,6 +8,7 @@ import {
   BoardTaskIdSchema,
   boardErr,
   boardOk,
+  firstTaskRefIn,
   formatTaskRef,
   MachineIdSchema,
   parseTaskRef,
@@ -84,6 +85,15 @@ describe('board task refs', () => {
     for (const input of ['&&F1', '!A3', 'F0', '&F', 'F1 F2', '@F1']) {
       should(parseTaskRef(input)).deepEqual({ ok: false, error: { code: 'malformed', input } });
     }
+  });
+
+  it('should find the first card a text names, and only a whole reference', () => {
+    should(firstTaskRefIn('Your card is &F138 on the board; see &F1')).deepEqual({ id: 'F138' });
+    should(firstTaskRefIn('no card here')).be.undefined();
+    for (const text of ['PR&F1 merged', '&&F1', '&F1x', '&F0', '#F138', 'the F138 card']) {
+      should(firstTaskRefIn(text)).be.undefined();
+    }
+    should(firstTaskRefIn('(&B63)')).deepEqual({ id: 'B63' });
   });
 
   it('should build both rails of a result', () => {

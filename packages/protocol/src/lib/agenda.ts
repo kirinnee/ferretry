@@ -228,6 +228,8 @@ export const MAX_AGENDA_STEPS = 20;
 export const MAX_AGENDA_STEP_LENGTH = 2_000;
 /** The longest instruction document an item carries, as one block of Markdown. */
 export const MAX_AGENDA_BODY_LENGTH = 8_000;
+/** The longest Markdown explanation one option carries (`optionDetails`). */
+export const MAX_AGENDA_OPTION_DETAIL_MARKDOWN_LENGTH = 1_000;
 
 const prose = (maximum: number) => z.string().trim().min(1).max(maximum);
 
@@ -285,6 +287,16 @@ export const AgendaRecommendationSchema = z.strictObject({
 });
 export type AgendaRecommendation = z.infer<typeof AgendaRecommendationSchema>;
 
+/**
+ * The longer explanation of ONE option, as Markdown. It rides beside the options rather than inside them
+ * (an option is a strict object in every app released before this field), and names its option by label.
+ */
+export const AgendaOptionDetailSchema = z.strictObject({
+  label: singleLine(MAX_AGENDA_ASK_OPTION_LENGTH),
+  detail: prose(MAX_AGENDA_OPTION_DETAIL_MARKDOWN_LENGTH),
+});
+export type AgendaOptionDetail = z.infer<typeof AgendaOptionDetailSchema>;
+
 /** A PR, a file or a reference the reader may want to open. The target is a URL, a path or a reference. */
 export const AgendaLinkSchema = z.strictObject({
   label: singleLine(MAX_AGENDA_LINK_LABEL_LENGTH).optional(),
@@ -314,6 +326,8 @@ export const AgendaBriefShape = {
   questions: z.array(AgendaQuestionSchema).min(1).max(MAX_AGENDA_QUESTIONS).optional(),
   /** The asker's overall suggested decision. */
   recommendation: AgendaRecommendationSchema.optional(),
+  /** A longer Markdown explanation per option, each naming its option by label: the card's Options section. */
+  optionDetails: z.array(AgendaOptionDetailSchema).min(1).max(MAX_AGENDA_ASK_OPTIONS).optional(),
   /** What happens if nobody answers. */
   impact: z.preprocess(asBullets, prose(MAX_AGENDA_REASON_LENGTH)).optional(),
   /** By when it matters, in words: "before the 14:00 deploy", "no rush". */
@@ -345,6 +359,7 @@ export const agendaBriefOf = (value: AgendaBrief): AgendaBrief => ({
   ...(value.terms === undefined ? {} : { terms: value.terms }),
   ...(value.questions === undefined ? {} : { questions: value.questions }),
   ...(value.recommendation === undefined ? {} : { recommendation: value.recommendation }),
+  ...(value.optionDetails === undefined ? {} : { optionDetails: value.optionDetails }),
   ...(value.impact === undefined ? {} : { impact: value.impact }),
   ...(value.urgency === undefined ? {} : { urgency: value.urgency }),
   ...(value.blockingNow === undefined ? {} : { blockingNow: value.blockingNow }),
@@ -354,6 +369,36 @@ export const agendaBriefOf = (value: AgendaBrief): AgendaBrief => ({
   ...(value.steps === undefined ? {} : { steps: value.steps }),
   ...(value.body === undefined ? {} : { body: value.body }),
 });
+
+/** Every option label an item offers: its ask's options, each question's options and its `choose` answers. */
+export const agendaOptionLabels = (item: {
+  readonly ask?: AgendaAsk | undefined;
+  readonly questions?: readonly AgendaQuestion[] | undefined;
+  readonly answers?: readonly AgendaCardAnswer[] | undefined;
+}): readonly string[] => [
+  ...(item.ask?.kind === 'multiple-choice' ? item.ask.options.map(option => option.label.trim()) : []),
+  ...(item.questions ?? []).flatMap(question => (question.options ?? []).map(option => option.label.trim())),
+  ...(item.answers ?? []).filter(answer => answer.does === 'choose').map(answer => answer.label.trim()),
+];
+
+/** What is wrong with an item's `optionDetails`: a label that names no option, or one named twice. */
+export const agendaOptionDetailProblems = (item: {
+  readonly ask?: AgendaAsk | undefined;
+  readonly questions?: readonly AgendaQuestion[] | undefined;
+  readonly answers?: readonly AgendaCardAnswer[] | undefined;
+  readonly optionDetails?: readonly AgendaOptionDetail[] | undefined;
+}): string[] => {
+  const details = item.optionDetails;
+  if (details === undefined) return [];
+  const labels = new Set(agendaOptionLabels(item));
+  const named = details.map(detail => detail.label.trim());
+  return [
+    ...(new Set(named).size === named.length ? [] : ['optionDetails may explain each option once']),
+    ...named
+      .filter(label => !labels.has(label))
+      .map(label => `optionDetails names "${label}", which is not one of the options`),
+  ];
+};
 
 /**
  * What a raise may not say when it is a NOTICE (`fy notify`): a notice is read, not answered, so it carries no
@@ -373,6 +418,25 @@ export const agendaNoticeProblems = (value: {
     ...(value.answers === undefined ? [] : ['a notice has no answers']),
     ...(value.steps === undefined ? [] : ['a notice has no steps: it is read, not done']),
     ...(value.kind === undefined || value.kind === 'info' ? [] : ['a notice is kind info']),
+  ];
+};
+
+/**
+ * What a NEW ferret-raised item lacks of the two fields a cold reader starts from: the premise (the situation)
+ * and the context (why it matters now). Both are required on every new item a ferret raises; a notice is read,
+ * not answered, so it is exempt, and an item already on the board keeps working without them — this is checked
+ * when an item is raised, never when one is read. A blank field counts as missing.
+ */
+export const agendaBriefRequiredProblems = (value: {
+  readonly notice?: true | undefined;
+  readonly premise?: string | undefined;
+  readonly context?: string | null | undefined;
+}): string[] => {
+  if (value.notice === true) return [];
+  const blank = (field: string | null | undefined): boolean => (field ?? '').trim() === '';
+  return [
+    ...(blank(value.premise) ? ['premise (--premise) is required: the situation, what is going on'] : []),
+    ...(blank(value.context) ? ['context (--context) is required: why it matters now'] : []),
   ];
 };
 
@@ -436,6 +500,7 @@ export const AgendaRevisableFieldSchema = z.enum([
   'terms',
   'questions',
   'recommendation',
+  'optionDetails',
   'impact',
   'urgency',
   'blockingNow',
@@ -670,6 +735,9 @@ export const AgendaItemSchema = z
   .superRefine((value, context) => {
     for (const [path, message] of agendaAnswerProblems(value.answers ?? [], value.ask)) {
       context.addIssue({ code: 'custom', message, path: path.split('.') });
+    }
+    for (const message of agendaOptionDetailProblems(value)) {
+      context.addIssue({ code: 'custom', message, path: ['optionDetails'] });
     }
     for (const problem of agendaInputProblems(value)) {
       context.addIssue({ code: 'custom', message: problem, path: ['input'] });
@@ -954,6 +1022,9 @@ export const AgendaActionRequestSchema = z
     if (value.action !== 'add') return;
     for (const [path, message] of agendaAnswerProblems(value.answers ?? [], value.ask)) {
       context.addIssue({ code: 'custom', message, path: path.split('.') });
+    }
+    for (const message of agendaOptionDetailProblems(value)) {
+      context.addIssue({ code: 'custom', message, path: ['optionDetails'] });
     }
     if (value.kind === 'input') {
       context.addIssue({

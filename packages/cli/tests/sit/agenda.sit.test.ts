@@ -155,8 +155,21 @@ class FakeAgendaDaemon {
 let driver: CliDriver;
 let daemon: FakeAgendaDaemon;
 
-function cli(args: string[]): Promise<CliResult> {
-  return driver.run(['attention', ...args, '--session', SESSION], {
+/**
+ * Every new item a ferret raises must carry a premise and a context: an `add` here gets a stand-in for whichever
+ * it does not name, so a journey about another flag reads as that flag alone. `bare` sends the words as typed.
+ */
+const withBrief = (args: readonly string[]): string[] =>
+  args[0] !== 'add'
+    ? [...args]
+    : [
+        ...args,
+        ...(args.includes('--premise') ? [] : ['--premise', 'A ferret needs the owner.']),
+        ...(args.includes('--context') ? [] : ['--context', 'The work waits on this answer.']),
+      ];
+
+function cli(args: string[], bare = false): Promise<CliResult> {
+  return driver.run(['attention', ...(bare ? args : withBrief(args)), '--session', SESSION], {
     FY_URL: daemon.baseUrl,
     FY_TOKEN: 'sit-test-token',
     FY_SESSION_ID: SESSION,
@@ -283,7 +296,7 @@ describe(`attention lifecycle (SIT, ${useInProcess ? 'in-process' : 'compiled bi
       should(added.out).containEql('agenda !A5 recorded');
       should(listed.out).containEql('Approve the OCI work-login plan');
       should(listed.out).containEql('Work login plan');
-      should(listed.out).containEql('answers: ← Changes · → Defaults');
+      should(listed.out).containEql('answers: ← Changes · ↑ Defaults');
       should(listed.out).containEql('recommended: Defaults');
       should(listed.out).containEql('impact: You stay logged out — by today');
       should(listed.out).containEql('terms: OCI = Oracle Cloud Infrastructure');
@@ -300,6 +313,23 @@ describe(`attention lifecycle (SIT, ${useInProcess ? 'in-process' : 'compiled bi
     // Assert
     should(refused.code).not.equal(0);
     should(refused.err).containEql('urgency');
+  });
+
+  it('refuses a card with no premise or no context before anything is sent, naming the flags', async () => {
+    // Act
+    const neither = await cli(['add', 'approve the deploy', '--title', 'Deploy'], true);
+    const noContext = await cli(
+      ['add', 'approve the deploy', '--title', 'Deploy', '--premise', 'A deploy waits'],
+      true,
+    );
+    const listed = await cli(['ls']);
+
+    // Assert
+    should(neither.code).not.equal(0);
+    should(neither.err).containEql('agenda add needs --premise and --context');
+    should(noContext.code).not.equal(0);
+    should(noContext.err).containEql('agenda add needs --context');
+    should(listed.out).not.containEql('approve the deploy');
   });
 
   it('refuses a card with no title before anything is sent', async () => {

@@ -573,3 +573,88 @@ describe('BoardPage — lane editor entry', () => {
     expect(root.querySelector('[data-board-lanes]')).toBeNull();
   });
 });
+
+describe('BoardPage — the phone header', () => {
+  const FROM = { daemonId: laptop.daemonId, sessionId: LEAD };
+  const twoMachines = [
+    { connection: laptop, name: 'laptop' },
+    { connection: workstation, name: 'workstation' },
+  ];
+  const silentWorkstation = (message: () => string) =>
+    fakePort({
+      board: async daemon => {
+        if (daemon.daemonId === workstation.daemonId) throw new Error(message());
+        return boardAnswer(OPEN, { projectId: PROJECT, laneSet: laneSetFor() });
+      },
+      projects: async () => [{ id: PROJECT, name: 'ferretry', path: null, laneSet: laneSetFor() }],
+    });
+
+  it('drops the in-page title and tools row, and keeps the scope toggle and Lanes in the pill row', async () => {
+    const { root } = await open({ props: { phone: true, origin: FROM } });
+    expect(root.querySelector('.fy-board__title')).toBeNull();
+    expect(root.querySelector('.fy-board__tools')).toBeNull();
+    const bar = must(root.querySelector('.fy-board__phone-bar'), 'the pill row');
+    expect(bar.querySelector('[data-board-scope]')).not.toBeNull();
+    expect(bar.querySelector('[data-board-lanes="header"]')).not.toBeNull();
+  });
+
+  it('keeps the title and the tools row on a wide screen', async () => {
+    const { root } = await open({ props: { origin: FROM } });
+    expect(root.querySelector('h1.fy-board__title')?.textContent).toBe('Board');
+    const tools = must(root.querySelector('.fy-board__tools'), 'the tools row');
+    expect(tools.querySelector('[data-board-scope]')).not.toBeNull();
+    expect(tools.querySelector('[data-board-lanes="header"]')).not.toBeNull();
+    expect(root.querySelector('.fy-board__phone-bar')).toBeNull();
+  });
+
+  it('draws a silent machine as one folded, dismissible line on a phone', async () => {
+    const { root } = await open({
+      machines: twoMachines,
+      props: {
+        phone: true,
+        store: new DaemonBoardStore(
+          silentWorkstation(() => 'offline'),
+          fakeEnvironment(),
+        ),
+      },
+    });
+    const note = must(root.querySelector('[data-machine="daemon/workstation"]'), 'the machine notice');
+    expect(note.hasAttribute('data-compact')).toBe(true);
+    expect(note.textContent).toContain('workstation did not answer: offline');
+    await click(root, '[data-machine="daemon/workstation"] .fy-board__notice-x');
+    expect(root.querySelector('[data-machine="daemon/workstation"]')).toBeNull();
+  });
+
+  it('keeps a silent machine’s notice on a wide screen, with nothing to dismiss', async () => {
+    const { root } = await open({
+      machines: twoMachines,
+      props: {
+        store: new DaemonBoardStore(
+          silentWorkstation(() => 'offline'),
+          fakeEnvironment(),
+        ),
+      },
+    });
+    const note = must(root.querySelector('[data-machine="daemon/workstation"]'), 'the machine notice');
+    expect(note.hasAttribute('data-compact')).toBe(false);
+    expect(note.querySelector('.fy-board__notice-x')).toBeNull();
+  });
+
+  it('brings a dismissed machine notice back when the machine says something different', async () => {
+    let said = 'offline';
+    const store = new DaemonBoardStore(
+      silentWorkstation(() => said),
+      fakeEnvironment(),
+    );
+    const { root } = await open({
+      machines: [{ connection: workstation, name: 'workstation' }],
+      props: { phone: true, store },
+    });
+    await click(root, '[data-machine="daemon/workstation"] .fy-board__notice-x');
+    expect(root.querySelector('[data-machine="daemon/workstation"]')).toBeNull();
+    said = 'timed out';
+    await click(root, '.fy-board__retry');
+    await interact(() => flush());
+    expect(root.querySelector('[data-machine="daemon/workstation"]')?.textContent).toContain('timed out');
+  });
+});

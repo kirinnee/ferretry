@@ -100,16 +100,16 @@ describe('attention card', () => {
       should(answers.map(each => each.does)).eql(['reject', 'approve', 'approve']);
     });
 
-    it('puts the recommended option right and the other left on a two-way choice', () => {
-      should(layout(defaultAgendaAnswers('choice', choice('Ship', 'Wait'), 'Wait'))).eql(['left:Ship', 'right:Wait']);
+    it('puts the recommended option in the middle and the other left on a two-way choice', () => {
+      should(layout(defaultAgendaAnswers('choice', choice('Ship', 'Wait'), 'Wait'))).eql(['left:Ship', 'up:Wait']);
     });
 
-    it('lays a three-way choice out as ←C ↑B →recommended', () => {
-      should(layout(defaultAgendaAnswers('choice', choice('A', 'B', 'C'), 'A'))).eql(['left:C', 'up:B', 'right:A']);
+    it('lays a three-way choice out as ←B ↑recommended →C', () => {
+      should(layout(defaultAgendaAnswers('choice', choice('A', 'B', 'C'), 'A'))).eql(['left:B', 'up:A', 'right:C']);
     });
 
     it('recommends the first option when the ferret recommends none', () => {
-      should(answerInDirection(defaultAgendaAnswers('choice', choice('A', 'B')), 'right')?.label).equal('A');
+      should(answerInDirection(defaultAgendaAnswers('choice', choice('A', 'B')), 'up')?.label).equal('A');
     });
 
     it('puts Needs changes left and Looks good right on a review', () => {
@@ -131,16 +131,16 @@ describe('attention card', () => {
       const old = AgendaItemSchema.parse({ ...item, ask: choice('Renew', 'Leave it', 'Ask me each time') });
       should(old.title).be.undefined();
       should(agendaCardKind(old)).equal('choice');
-      should(layout(agendaCardAnswers(old))).eql(['left:Ask me each time', 'up:Leave it', 'right:Renew']);
+      should(layout(agendaCardAnswers(old))).eql(['left:Leave it', 'up:Renew', 'right:Ask me each time']);
     });
 
-    it('takes the old brief recommendation as the right-hand answer', () => {
+    it('takes the old brief recommendation as the middle answer', () => {
       const old = AgendaItemSchema.parse({
         ...item,
         ask: choice('Renew', 'Leave it'),
         recommendation: { decision: 'Leave it' },
       });
-      should(answerInDirection(agendaCardAnswers(old), 'right')?.label).equal('Leave it');
+      should(answerInDirection(agendaCardAnswers(old), 'up')?.label).equal('Leave it');
     });
 
     it('offers an old choice past three options as buttons, not swipes', () => {

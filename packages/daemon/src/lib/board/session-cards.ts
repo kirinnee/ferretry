@@ -5,10 +5,12 @@
  * - **`fy start` and the app's New session**: the session owns its own card. Title from `--name`, brief and
  *   ask the prompt verbatim — the ask's source is the starting ferret (`session:<parent>`) or the owner —
  *   in the first backlog lane, and the session's focus.
- * - **`fy new`** (Pack): the card is the LEAD's delegation. Owner the lead, assignee the child, parent the
- *   lead's focus card, on the board the child inherits. A lead with no focus card first gets one made from
- *   its own session (its title, and the owner's latest message as the ask), and the start says so. The
- *   card's id is reserved BEFORE the start, because the child's brief names it.
+ * - **`fy new`** (Pack): the card is the LEAD's delegation. Owner the lead, assignee the child, on the board
+ *   the child inherits. Its parent comes from the lead's INTENT, never from the card it touched last: the
+ *   card the brief names (`&F138`), else the lead's explicit focus card (`config.focusAnchor`), else none —
+ *   a top-level card, said in the start's output. `--card <id>` names an EXISTING card instead: it is
+ *   assigned to the child, and so is the lead's own open card with the same title, so a delegation never
+ *   leaves a twin. The card's id is reserved BEFORE the start, because the child's brief names it.
  *
  * The card is written after the session's record and before its agent launches, so the agent's first turn
  * already has its focus card, and a start refused earlier leaves no card behind. **A board failure never
@@ -24,6 +26,7 @@ import {
   type BoardTaskCreateRequest,
   type BoardTaskId,
   deriveTaskTitle,
+  firstTaskRefIn,
   formatTaskRef,
   MAX_BOARD_BRIEF_LENGTH,
   type TaskMessage,
@@ -31,6 +34,8 @@ import {
   taskTitleFor,
   UNFILED_PROJECT_ID,
 } from '@ferretry/protocol';
+import { effectiveAssignee } from './authority.ts';
+import { cardCategory } from './graph.ts';
 import type { PendingContext } from './pending-context.ts';
 import type {
   BoardClock,
@@ -42,6 +47,7 @@ import type {
   SessionParents,
 } from './ports.ts';
 import type { BoardService, SignalDoneOutcome } from './service.ts';
+import { BoardError } from './errors.ts';
 import { clip, doneQuietText } from './signal-done.ts';
 
 /** The longest ask a card keeps; a longer brief is cut, and the brief field says so. */
@@ -53,35 +59,20 @@ const OWNER_ASK_SOURCE = 'owner';
 /** The source an ask carries when a ferret's brief said it. */
 const sessionAskSource = (sessionId: string): string => `session:${sessionId}`;
 
-/** What a session that needs a card made after the fact is, as its own documents say. */
-export interface SessionCardFacts {
-  readonly name?: string | undefined;
-  readonly prompt?: string | undefined;
-  readonly parent?: string | undefined;
-  /** The owner's latest message to it, verbatim; absent when none was recorded. */
-  readonly latestOwnerMessage?: string | undefined;
-}
-
-export interface SessionCardSessions {
-  /** `undefined` when there is no such session. */
-  facts(sessionId: string): Promise<SessionCardFacts | undefined>;
-}
-
 /** The board's name as the owner reads it. */
 interface BoardProjectNames {
   nameOf(projectId: BoardProjectId): Promise<string>;
 }
 
 export interface SessionCardsPorts {
-  readonly board: Pick<BoardService, 'reserve' | 'spawn' | 'signalDone'>;
+  readonly board: Pick<BoardService, 'reserve' | 'spawn' | 'signalDone' | 'snapshot' | 'requireHandOver' | 'handOver'>;
   readonly lanes: LaneSetSource;
   readonly proposer: LaneProposer;
   /** Registers the repository of a session on the Unfiled board, so its card goes on that project's board. */
   readonly adoption?: ProjectAdopter;
   readonly projects: BoardProjectNames;
-  readonly focus: Pick<SessionFocus, 'focusOf'>;
+  readonly focus: Pick<SessionFocus, 'anchorOf'>;
   readonly parents: SessionParents;
-  readonly sessions: SessionCardSessions;
   readonly pending: PendingContext;
   readonly clock: BoardClock;
   readonly diagnostics: BoardDiagnostics;
@@ -89,21 +80,50 @@ export interface SessionCardsPorts {
   readonly bin: string;
 }
 
+/** Where a delegated card's parent came from: the brief that names it, or the lead's explicit focus card. */
+export type ParentFrom = 'brief' | 'focus';
+
 /** A `fy new`'s card, decided before the child exists so its brief can name it. */
 export interface Delegation {
   readonly lead: string;
   /** The sub-ferret's brief as the lead wrote it, without the footer the daemon adds. */
   readonly brief: string;
-  /** The child's card id, reserved. */
+  /** The child's card id: reserved for a new card, the lead's own for an existing one. */
   readonly id: BoardTaskId;
-  /** The lead's focus card, the child card's parent. */
-  readonly parent: TaskRef;
-  /** The board the child will be on when it runs in the lead's folder; `undefined` when it may not be. */
+  /** The card already exists (`--card`, or the lead's open card with this title): it is assigned, not made. */
+  readonly existing: boolean;
+  /** The card the child's card sits under; `null` for a top-level card. */
+  readonly parent: TaskRef | null;
+  /** Why it sits there; absent for a top-level card and for an existing card, which keeps the parent it had. */
+  readonly parentFrom?: ParentFrom;
+  /** The board's name as the owner reads it; `undefined` when the child may run on another board. */
   readonly project?: string;
-  /** The lead's card, when the lead had none and one was made for it first. */
-  readonly leadCard?: BoardTaskId;
+}
+
+/** What delegating a card came to: the delegation, or why the start must not go on. */
+export interface DelegationOutcome {
+  readonly delegation?: Delegation;
+  /** Set when `--card` named a card the lead may not hand over: the start is refused with this. */
+  readonly refusal?: string;
   readonly notes: readonly string[];
 }
+
+/** What a `fy new` hands the board to decide its card from. */
+export interface DelegationRequest {
+  readonly brief: string;
+  /** The name the child session is given, which titles a new card. */
+  readonly name?: string | undefined;
+  /** An existing card the child works on (`--card`). */
+  readonly card?: BoardTaskId | undefined;
+}
+
+/** A card's title as compared for twins: case, spacing and punctuation do not tell two titles apart. */
+const normalisedTitle = (title: string): string =>
+  title
+    .normalize('NFKC')
+    .toLowerCase()
+    .replaceAll(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
 
 /** What a start is about to launch. */
 export interface StartedSession {
@@ -133,8 +153,13 @@ export const cardTitle = (name: string | undefined, brief: string): string =>
 export const askOf = (text: string, source: string): TaskMessage => ({ text: clip(text, MAX_ASK_LENGTH), source });
 
 /** The line a sub-ferret's brief gains (`subFerretFooter`): its card and where it is. */
-export const cardFooterLine = (id: BoardTaskId, project: string | undefined, bin: string): string =>
-  `Your card is ${formatTaskRef({ id })} on the ${project === undefined ? "project's" : project} board; move it as you work (\`${bin} task …\`).`;
+export const cardFooterLine = (
+  id: BoardTaskId,
+  project: string | undefined,
+  bin: string,
+  parent: TaskRef | null = null,
+): string =>
+  `Your card is ${formatTaskRef({ id })} on the ${project === undefined ? "project's" : project} board${parent === null ? '' : `, under ${formatTaskRef(parent)}`}; move it as you work (\`${bin} task …\`).`;
 
 /** A card request the daemon fills for a start. */
 const startRequest = (fields: {
@@ -166,43 +191,51 @@ export class SessionCards {
   constructor(private readonly ports: SessionCardsPorts) {}
 
   /**
-   * A `fy new`'s card, before the child starts: the lead's focus card (made now if it has none) as the
-   * parent, and the child's id reserved. `inLeadFolder` says the child runs where the lead does, so it
-   * inherits the lead's board and the footer can name it. `undefined` when the board can do nothing: the
-   * child then starts with no card, and `notes` is what to say.
+   * A `fy new`'s card, before the child starts, and the child's id reserved (or the existing card named).
+   * Its parent comes from intent: the card the brief names, else the lead's explicit focus card, else none.
+   * `inLeadFolder` says the child runs where the lead does, so it inherits the lead's board and the footer can
+   * name it. No delegation when the board can do nothing (the child then starts with no card, and `notes` is
+   * what to say) or when `--card` named a card that cannot be handed over (`refusal`).
    */
-  async delegate(
-    lead: string,
-    brief: string,
-    inLeadFolder: boolean,
-  ): Promise<{ readonly delegation?: Delegation; readonly notes: readonly string[] }> {
+  async delegate(lead: string, request: DelegationRequest, inLeadFolder: boolean): Promise<DelegationOutcome> {
     try {
-      const notes: string[] = [];
-      let parent = await this.ports.focus.focusOf(lead);
-      let leadCard: BoardTaskId | undefined;
-      if (parent === null) {
-        const made = await this.leadCard(lead);
-        if (made.card === undefined) return { notes: made.notes };
-        parent = { id: made.card.id };
-        leadCard = made.card.id;
-        notes.push(
-          `You had no card, so ${formatTaskRef(parent)} was made for you from your session ("${made.card.title}") on the ${made.project ?? 'project'} board; your sub-ferret's card sits under it.`,
-          ...made.notes,
-        );
+      if (request.card !== undefined) return await this.existingCard(lead, request.card);
+      const title = cardTitle(request.name, request.brief);
+      const projectId = inLeadFolder ? await this.ports.lanes.projectOf(lead) : undefined;
+      const project = projectId === undefined ? undefined : await this.ports.projects.nameOf(projectId);
+      const twin = projectId === undefined ? undefined : await this.twinOf(lead, projectId, title);
+      if (twin !== undefined) {
+        return {
+          delegation: {
+            lead,
+            brief: request.brief,
+            id: twin.id,
+            existing: true,
+            parent: twin.parent,
+            ...(project === undefined ? {} : { project }),
+          },
+          notes: [
+            `You already had ${formatTaskRef(twin)} ("${twin.title}") for this work, so it was assigned to the sub-ferret instead of making a second card.`,
+          ],
+        };
       }
+      const { parent, from } = await this.parentFor(lead, request.brief);
       const id = await this.ports.board.reserve('feature');
-      const project = inLeadFolder
-        ? await this.ports.projects.nameOf(await this.ports.lanes.projectOf(lead))
-        : undefined;
+      const notes =
+        parent === null
+          ? [
+              `The sub-ferret's card has no parent, so it is at the top level of the board: \`${this.ports.bin} task reparent ${formatTaskRef({ id })} --parent <id>\` moves it, and \`${this.ports.bin} task focus <id>\` (or \`--card <id>\`) says where your sub-ferrets' cards go next time.`,
+            ]
+          : [];
       return {
         delegation: {
           lead,
-          brief,
+          brief: request.brief,
           id,
+          existing: false,
           parent,
+          ...(from === undefined ? {} : { parentFrom: from }),
           ...(project === undefined ? {} : { project }),
-          ...(leadCard === undefined ? {} : { leadCard }),
-          notes,
         },
         notes,
       };
@@ -211,6 +244,57 @@ export class SessionCards {
       this.ports.diagnostics.warn(note);
       return { notes: [note] };
     }
+  }
+
+  /** `--card`: the lead's existing card, handed over; refused (not failed) when it cannot be. */
+  private async existingCard(lead: string, id: BoardTaskId): Promise<DelegationOutcome> {
+    let card: BoardTask;
+    try {
+      card = await this.ports.board.requireHandOver(id, lead);
+    } catch (error) {
+      if (error instanceof BoardError) return { refusal: error.message, notes: [] };
+      throw error;
+    }
+    const project = await this.ports.projects.nameOf(card.projectId);
+    return {
+      delegation: { lead, brief: '', id, existing: true, parent: card.parent, project },
+      notes: [],
+    };
+  }
+
+  /**
+   * The parent a NEW card goes under, from the lead's intent in priority order: the first card the brief
+   * names, then the lead's explicit focus card. Neither is the card the lead merely touched last.
+   */
+  private async parentFor(
+    lead: string,
+    brief: string,
+  ): Promise<{ readonly parent: TaskRef | null; readonly from?: ParentFrom }> {
+    const named = firstTaskRefIn(brief);
+    const { cards } = await this.ports.board.snapshot();
+    const usable = (ref: TaskRef | null | undefined): TaskRef | null => {
+      const found = ref === null || ref === undefined ? undefined : cards.find(card => card.id === ref.id);
+      return found === undefined || found.dropped !== null ? null : { id: found.id };
+    };
+    const fromBrief = usable(named);
+    if (fromBrief !== null) return { parent: fromBrief, from: 'brief' };
+    const anchored = usable(await this.ports.focus.anchorOf(lead));
+    return anchored === null ? { parent: null } : { parent: anchored, from: 'focus' };
+  }
+
+  /**
+   * The lead's own open card for this very work — same board, same title once case and punctuation are set
+   * aside, still the lead's to give (nobody else is on it) — so a delegation reuses it rather than twinning it.
+   */
+  private async twinOf(lead: string, projectId: BoardProjectId, title: string): Promise<BoardTask | undefined> {
+    const { cards, laneSets } = await this.ports.board.snapshot();
+    const wanted = normalisedTitle(title);
+    return cards.find(card => {
+      if (card.owner !== lead || card.projectId !== projectId || card.dropped !== null) return false;
+      if (effectiveAssignee(card) !== lead || normalisedTitle(card.title) !== wanted) return false;
+      const category = cardCategory(card, laneSets);
+      return category === 'backlog' || category === 'active' || category === 'review';
+    });
   }
 
   /**
@@ -223,6 +307,7 @@ export class SessionCards {
       const owner = delegation?.lead ?? start.sessionId;
       const from = delegation?.lead ?? start.parent;
       const brief = delegation?.brief ?? start.brief;
+      if (delegation?.existing === true) return await this.handOver(delegation, start.sessionId);
       const placed = await this.place(start.sessionId, owner);
       const id = delegation?.id ?? (await this.ports.board.reserve('feature'));
       const card = await this.ports.board.spawn(
@@ -248,6 +333,12 @@ export class SessionCards {
       this.ports.diagnostics.warn(note);
       return { notes: [note] };
     }
+  }
+
+  /** The lead's existing card, assigned to the session just started; it keeps its owner and its parent. */
+  private async handOver(delegation: Delegation, sessionId: string): Promise<OpenedCard> {
+    const card = await this.ports.board.handOver(delegation.id, delegation.lead, sessionId);
+    return { card, project: await this.ports.projects.nameOf(card.projectId), notes: [] };
   }
 
   /**
@@ -281,28 +372,6 @@ export class SessionCards {
         );
     }
     return outcome;
-  }
-
-  /** A card for a lead that has none, from its own session (§3.1 item 2), and its focus. */
-  private async leadCard(lead: string): Promise<OpenedCard> {
-    const facts = await this.ports.sessions.facts(lead);
-    if (facts === undefined) return { notes: [`there is no session ${lead} to make a card for`] };
-    const owner = facts.latestOwnerMessage?.trim();
-    const brief = facts.prompt ?? '';
-    const ask =
-      owner !== undefined && owner !== ''
-        ? askOf(owner, OWNER_ASK_SOURCE)
-        : askOf(
-            brief.trim() === '' ? cardTitle(facts.name, brief) : brief,
-            facts.parent === undefined ? OWNER_ASK_SOURCE : sessionAskSource(facts.parent),
-          );
-    const placed = await this.place(lead, lead);
-    const card = await this.ports.board.spawn(
-      await this.ports.board.reserve('feature'),
-      startRequest({ title: cardTitle(facts.name, brief), brief, ask, parent: null, assignee: null }),
-      { owner: lead, by: lead, focus: lead, projectId: placed.projectId },
-    );
-    return { card, project: placed.project, notes: placed.notes };
   }
 
   /** The repository's board for a session on the Unfiled board; `null` when it stays where it is. */

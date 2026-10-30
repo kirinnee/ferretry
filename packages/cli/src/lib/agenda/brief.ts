@@ -5,6 +5,7 @@ import {
   type AgendaAskOption,
   type AgendaItem,
   type AgendaLink,
+  type AgendaOptionDetail,
   type AgendaQuestion,
   type AgendaTerm,
   defaultAgendaAnswers,
@@ -64,6 +65,8 @@ export interface BriefFlags extends AskFlags {
   readonly body?: string;
   /** A configuration file whose held change the owner's Allow puts into effect (`--confirms`). */
   readonly confirms?: string;
+  /** `label=markdown`, repeated: the longer explanation of one option. */
+  readonly optionDetail?: readonly string[];
 }
 
 const OptionInput = z.union([z.string(), z.object({ label: z.string(), description: z.string().optional() })]);
@@ -112,6 +115,7 @@ const BriefFileSchema = z.strictObject({
   willBlock: z.string().optional(),
   neededBy: z.string().optional(),
   confirms: z.string().optional(),
+  optionDetails: z.array(z.object({ label: z.string(), detail: z.string() })).optional(),
 });
 export type BriefFile = z.infer<typeof BriefFileSchema>;
 
@@ -146,7 +150,15 @@ export function composeAddRequest(
     text(words.join(' ')) ?? text(flags.ask) ?? text(flags.summary) ?? text(file.ask) ?? text(file.summary),
   );
   const title = titleFrom(text(flags.title) ?? text(file.title));
-  const options = flags.option !== undefined && flags.option.length > 0 ? flags.option : undefined;
+  const picked = (flags.option ?? []).map(splitOption);
+  const options = picked.length > 0 ? picked.map(each => each.label) : undefined;
+  const optionDetails = optionDetailsFrom(
+    [
+      ...(file.optionDetails ?? []),
+      ...picked.flatMap(each => (each.detail === undefined ? [] : [{ label: each.label, detail: each.detail }])),
+    ],
+    flags.optionDetail,
+  );
   const fileOptions = file.options?.map(option);
   const questions = questionsFrom(flags, file, options);
   const steps = stepsFrom(flags.step) ?? stepsFrom(file.steps);
@@ -202,6 +214,7 @@ export function composeAddRequest(
     ...(terms === undefined || terms.length === 0 ? {} : { terms }),
     ...(questions === undefined ? {} : { questions }),
     ...(recommendation === undefined ? {} : { recommendation }),
+    ...(optionDetails === undefined ? {} : { optionDetails }),
     ...(impact === undefined ? {} : { impact }),
     ...(urgency === undefined ? {} : { urgency }),
     ...(links === undefined || links.length === 0 ? {} : { links }),
@@ -408,6 +421,39 @@ function fileQuestion(value: NonNullable<BriefFile['questions']>[number]): Agend
   };
 }
 
+/** The longest label part `--option "Label: detail"` is read as; a longer lead is a sentence, not a label. */
+const OPTION_LABEL_SPLIT_MAX = 40;
+
+/** `--option "Label: detail"`: the label, and its detail when the text before the first ": " is short. */
+function splitOption(raw: string): { readonly label: string; readonly detail?: string } {
+  const at = raw.indexOf(': ');
+  const label = at < 0 ? '' : raw.slice(0, at).trim();
+  const detail = at < 0 ? '' : raw.slice(at + 2).trim();
+  if (label === '' || label.length > OPTION_LABEL_SPLIT_MAX || detail === '') return { label: raw.trim() };
+  return { label, detail };
+}
+
+/** `label=markdown`, split at the first `=`. */
+function optionDetailFrom(raw: string): AgendaOptionDetail {
+  const at = raw.indexOf('=');
+  const label = at < 0 ? '' : raw.slice(0, at).trim();
+  const detail = at < 0 ? '' : raw.slice(at + 1).trim();
+  if (label === '' || detail === '') throw new Error(`--option-detail needs label=markdown, got "${raw}"`);
+  return { label, detail };
+}
+
+/** Every option's detail, however it was given; one option said twice keeps its last words, in first-said order. */
+function optionDetailsFrom(
+  said: readonly AgendaOptionDetail[],
+  flags: readonly string[] | undefined,
+): AgendaOptionDetail[] | undefined {
+  const byLabel = new Map<string, AgendaOptionDetail>();
+  for (const each of [...said, ...(flags ?? []).map(optionDetailFrom)]) {
+    byLabel.set(each.label.trim(), { label: each.label.trim(), detail: each.detail.trim() });
+  }
+  return byLabel.size === 0 ? undefined : [...byLabel.values()];
+}
+
 /** `TERM=meaning`, split at the first `=`. */
 function termFrom(raw: string): AgendaTerm {
   const at = raw.indexOf('=');
@@ -489,6 +535,10 @@ export interface EditFlags {
   /** The instant it is needed by, already read from `--by`. */
   readonly neededBy?: string;
   readonly clearBy?: boolean;
+  /** `Label: detail`: the longer explanation of one of the item's options (an edit never changes the options). */
+  readonly option?: readonly string[];
+  /** `label=markdown`, repeated: the longer explanation of one option. */
+  readonly optionDetail?: readonly string[];
 }
 
 /**
@@ -517,6 +567,18 @@ export function composeEditRequest(
   const body = text(flags.body);
   const willBlock = text(flags.willBlock);
   const neededBy = text(flags.neededBy);
+  const optionDetails = optionDetailsFrom(
+    (flags.option ?? []).map(raw => {
+      const picked = splitOption(raw);
+      if (picked.detail === undefined) {
+        throw new Error(
+          `an edit cannot change the options: give --option "Label: detail", or --option-detail, for ${raw.trim()}`,
+        );
+      }
+      return { label: picked.label, detail: picked.detail };
+    }),
+    flags.optionDetail,
+  );
   if (flags.blocking === true && flags.notBlocking === true)
     throw new Error('--blocking and --not-blocking contradict');
   if (willBlock !== undefined && flags.clearWillBlock === true) {
@@ -550,6 +612,7 @@ export function composeEditRequest(
     ...(terms === undefined ? {} : { terms }),
     ...(questions === undefined ? {} : { questions }),
     ...(decision === undefined ? {} : { recommendation: { decision, ...(why === undefined ? {} : { why }) } }),
+    ...(optionDetails === undefined ? {} : { optionDetails }),
     ...(impact === undefined ? {} : { impact }),
     ...(urgency === undefined ? {} : { urgency }),
     ...(links === undefined ? {} : { links }),

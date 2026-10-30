@@ -373,7 +373,7 @@ describe('agendaNudgeMessage', () => {
 
     // Assert
     should(actual).startWith(`${AGENDA_NUDGE_MARK} Your last reply asked the owner to:\n- approve the deploy\n`);
-    should(actual).containEql('`zz agenda add --title "<what>" "<the ask>" --step …`');
+    should(actual).containEql('`zz agenda add --title "<what>" "<the ask>" --premise … --context … --step …`');
     should(actual).not.match(/Attention/u);
     should(actual).containEql('say why not in one line');
     should(actual).not.containEql('question tool');

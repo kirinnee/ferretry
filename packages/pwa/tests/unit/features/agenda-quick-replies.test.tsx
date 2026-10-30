@@ -4,6 +4,7 @@ import {
   AgendaQuickReplies,
   type AgendaQuickRepliesProps,
 } from '../../../src/features/agenda/agenda-quick-replies.tsx';
+import { itemOptions } from '../../../src/lib/agenda-options.ts';
 import { cardModel } from '../../../src/lib/agenda-card-model.ts';
 import { type InboxAction, swipeMap } from '../../../src/lib/agenda-inbox.ts';
 import { agendaItem, choices } from '../../support/agenda-inbox.tsx';
@@ -22,11 +23,11 @@ const chosen = agendaItem('A47', {
 
 interface Spy {
   readonly acted: InboxAction[];
-  closed: number;
+  skipped: number;
 }
 
 const draw = async (item: AgendaItem, extra: Partial<AgendaQuickRepliesProps> = {}): Promise<Spy> => {
-  const spy: Spy = { acted: [], closed: 0 };
+  const spy: Spy = { acted: [], skipped: 0 };
   await view?.unmount();
   view = await mount(
     <AgendaQuickReplies
@@ -35,8 +36,9 @@ const draw = async (item: AgendaItem, extra: Partial<AgendaQuickRepliesProps> = 
       map={swipeMap(item)}
       model={cardModel(item)}
       onAct={action => spy.acted.push(action)}
-      onClose={() => {
-        spy.closed += 1;
+      options={itemOptions(item)}
+      onSkip={() => {
+        spy.skipped += 1;
       }}
       swipeable
       {...extra}
@@ -78,10 +80,12 @@ describe('the quick replies', () => {
     expect(one('[data-agenda-quick-replies]')).toBeDefined();
     expect(one('fieldset').getAttribute('aria-label')).toBe('Quick replies');
     expect(root().querySelector('textarea, input')).toBeNull();
-    expect(answer('SQLite').dataset.agendaAnswer).toBe('right');
+    expect(answer('SQLite').dataset.agendaAnswer).toBe('up');
     expect(answer('Postgres').dataset.agendaAnswer).toBe('left');
     expect(answer('SQLite').hasAttribute('data-recommended')).toBe(true);
-    expect(answer('SQLite').querySelector('[data-agenda-recommended]')).not.toBeNull();
+    expect(answer('SQLite').getAttribute('aria-label')).toBe('SQLite, recommended, or swipe up');
+    expect(answer('SQLite').querySelector('.lucide-check')).toBeNull();
+    expect(answer('Postgres').getAttribute('aria-label')).toBe('Postgres, or swipe left');
     expect(answer('Postgres').hasAttribute('data-recommended')).toBe(false);
   });
 
@@ -98,34 +102,66 @@ describe('the quick replies', () => {
     expect(spy.acted).toEqual([]);
   });
 
-  test('draws extra options as plain chips, tagging the one the recommendation names', async () => {
+  test('puts the recommended option on ↑ even when it is the last of three', async () => {
     const spy = await draw(
       agendaItem('A9', {
         ask: choices('Yes', 'No', 'Later'),
         recommendation: { decision: 'Later' },
       } as Partial<AgendaItem>),
     );
-    const extras = [...root().querySelectorAll<HTMLButtonElement>('[data-agenda-option]')].map(
-      button => button.dataset.agendaOption,
-    );
-    expect(extras).toContain('Later');
+    expect(answer('Later').dataset.agendaAnswer).toBe('up');
+    expect(answer('Later').hasAttribute('data-recommended')).toBe(true);
     await interact(() => answer('Later').click());
     expect(spy.acted).toHaveLength(1);
   });
 
-  test('draws the options past the swipe directions as plain chips, which answer too', async () => {
+  test('lays the buttons out by direction: ← left, ↑ middle, → right, the slot left blank when there is no answer', async () => {
+    await draw(chosen);
+    expect(one('fieldset').hasAttribute('data-slots')).toBe(true);
+    expect([...root().querySelectorAll<HTMLElement>('.fy-qr__chip')].map(chip => chip.dataset.agendaAnswer)).toEqual([
+      'left',
+      'up',
+    ]);
+    expect(root().querySelector('[data-agenda-answer="right"]')).toBeNull();
+    await draw(
+      agendaItem('A12', {
+        ask: choices('Now', 'Later', 'Never'),
+        recommendation: { decision: 'Never' },
+      } as Partial<AgendaItem>),
+    );
+    expect([...root().querySelectorAll<HTMLElement>('.fy-qr__chip')].map(chip => chip.dataset.agendaAnswer)).toEqual([
+      'left',
+      'up',
+      'right',
+    ]);
+    expect(answer('Never').dataset.agendaAnswer).toBe('up');
+    expect(answer('Now').dataset.agendaAnswer).toBe('left');
+    expect(answer('Later').dataset.agendaAnswer).toBe('right');
+  });
+
+  test('draws three swipe buttons at most; the options past them are a second, tap-only row that answers too', async () => {
     const many = agendaItem('A8', {
-      ask: choices('Now', 'Later', 'Never', 'Maybe'),
+      ask: choices('Now', 'Later', 'Never', 'Maybe', 'Soon'),
       recommendation: { decision: 'Maybe' },
     } as Partial<AgendaItem>);
     const spy = await draw(many);
-    const extra = [...root().querySelectorAll<HTMLButtonElement>('[data-agenda-option]')].filter(
-      chip => !chip.hasAttribute('data-agenda-answer'),
-    );
-    expect(extra.map(chip => chip.dataset.agendaOption)).toEqual(['Never']);
-    expect(extra[0]?.hasAttribute('data-recommended')).toBe(false);
-    await interact(() => must(extra[0], 'an extra chip').click());
+    expect(root().querySelectorAll('[data-agenda-answer]')).toHaveLength(3);
+    expect(answer('Maybe').dataset.agendaAnswer).toBe('up');
+    const more = one('[data-agenda-more-row]');
+    expect([...more.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Never', 'Soon']);
+    expect(more.querySelector('[data-agenda-answer]')).toBeNull();
+    expect(root().querySelector('[aria-haspopup="menu"]')).toBeNull();
+    await interact(() => answer('Never').click());
     expect(spy.acted[0]).toMatchObject({ kind: 'respond', response: { choice: 'Never' } });
+  });
+
+  test('offers Not needed as a plain button, never a menu, and has no second row when three options are all', async () => {
+    const spy = await draw(agendaItem('A9', { ask: choices('Now', 'Later', 'Never') } as Partial<AgendaItem>));
+    expect(root().querySelector('[data-agenda-more-row]')).toBeNull();
+    const dismiss = one<HTMLButtonElement>('[data-agenda-dismiss]');
+    expect(dismiss.textContent).toBe('Not needed');
+    await interact(() => dismiss.click());
+    expect(spy.acted.at(-1)?.kind).toBe('dismiss');
   });
 
   test('has no arrows on a mouse', async () => {
@@ -193,11 +229,22 @@ describe('several questions', () => {
 });
 
 describe('the swipe over the chips', () => {
-  test('a long drag to the right sends the right answer', async () => {
+  test('a long drag up sends the middle (recommended) answer', async () => {
     const spy = await draw(chosen);
-    await drag({ x: 400, y: 200 });
+    await drag({ x: 200, y: 0 });
     expect(spy.acted).toHaveLength(1);
     expect(spy.acted[0]).toMatchObject({ response: { choice: 'SQLite' } });
+  });
+
+  test('a long drag to the right sends the right answer when there is one', async () => {
+    const spy = await draw(
+      agendaItem('A12', {
+        ask: choices('Now', 'Later', 'Never'),
+        recommendation: { decision: 'Never' },
+      } as Partial<AgendaItem>),
+    );
+    await drag({ x: 400, y: 200 });
+    expect(spy.acted[0]).toMatchObject({ response: { choice: 'Later' } });
   });
 
   test('a long drag to the left sends the left answer', async () => {
@@ -209,7 +256,7 @@ describe('the swipe over the chips', () => {
   test('a short drag, or one toward nothing, sends nothing, and the click after it is swallowed', async () => {
     const spy = await draw(chosen);
     await drag({ x: 240, y: 200 });
-    await drag({ x: 200, y: 500 });
+    await drag({ x: 400, y: 200 });
     expect(spy.acted).toEqual([]);
     await interact(() => answer('SQLite').click());
     expect(spy.acted).toEqual([]);
@@ -226,74 +273,71 @@ describe('the swipe over the chips', () => {
     expect(spy.acted).toHaveLength(1);
   });
 
-  test('shows what the drag would send while it goes, and drops it when cancelled', async () => {
-    await draw(chosen);
+  test('names nothing while a drag goes, and a cancelled drag sends nothing', async () => {
+    const spy = await draw(chosen);
     await interact(() => lane().dispatchEvent(pointer('pointerdown', 200, 200)));
-    await interact(() => lane().dispatchEvent(pointer('pointermove', 260, 200)));
-    expect(one('.fy-qr__stamp').textContent).toContain('SQLite');
-    expect(one('.fy-qr__stamp').hasAttribute('data-committed')).toBe(false);
-    await interact(() => lane().dispatchEvent(pointer('pointermove', 400, 200)));
-    expect(one('.fy-qr__stamp').hasAttribute('data-committed')).toBe(true);
-    await interact(() => lane().dispatchEvent(pointer('pointercancel', 400, 200)));
+    await interact(() => lane().dispatchEvent(pointer('pointermove', 200, 0)));
     expect(root().querySelector('.fy-qr__stamp')).toBeNull();
+    await interact(() => lane().dispatchEvent(pointer('pointercancel', 400, 200)));
+    expect(spy.acted).toEqual([]);
   });
 
   test('says nothing of a drag toward a direction without an answer', async () => {
     await draw(chosen);
     await interact(() => lane().dispatchEvent(pointer('pointerdown', 200, 200)));
-    await interact(() => lane().dispatchEvent(pointer('pointermove', 200, 100)));
+    await interact(() => lane().dispatchEvent(pointer('pointermove', 400, 200)));
     expect(root().querySelector('.fy-qr__stamp')).toBeNull();
   });
 
   test('ignores a mouse, a busy item, a row that does not swipe and a pointer it never saw', async () => {
     const spy = await draw(chosen);
-    await drag({ x: 400, y: 200 }, { pointerType: 'mouse' });
-    await interact(() => lane().dispatchEvent(pointer('pointermove', 400, 200)));
-    await interact(() => lane().dispatchEvent(pointer('pointerup', 400, 200)));
+    await drag({ x: 0, y: 200 }, { pointerType: 'mouse' });
+    await interact(() => lane().dispatchEvent(pointer('pointermove', 0, 200)));
+    await interact(() => lane().dispatchEvent(pointer('pointerup', 0, 200)));
     await interact(() => lane().dispatchEvent(pointer('pointerdown', 200, 200)));
-    await interact(() => lane().dispatchEvent(pointer('pointermove', 400, 200, { pointerId: 99 })));
-    await interact(() => lane().dispatchEvent(pointer('pointerup', 400, 200, { pointerId: 99 })));
+    await interact(() => lane().dispatchEvent(pointer('pointermove', 0, 200, { pointerId: 99 })));
+    await interact(() => lane().dispatchEvent(pointer('pointerup', 0, 200, { pointerId: 99 })));
     expect(spy.acted).toEqual([]);
     const busy = await draw(chosen, { busy: true });
-    await drag({ x: 400, y: 200 });
+    await drag({ x: 0, y: 200 });
     const still = await draw(chosen, { swipeable: false });
-    await drag({ x: 400, y: 200 });
+    await drag({ x: 0, y: 200 });
     expect(busy.acted).toEqual([]);
     expect(still.acted).toEqual([]);
   });
 });
 
 describe('the pull down over the chips', () => {
-  test('a clear pull down closes the item view', async () => {
+  test('a clear pull down skips', async () => {
     const spy = await draw(chosen);
     await drag({ x: 200, y: 400 });
-    expect(spy.closed).toBe(1);
+    expect(spy.skipped).toBe(1);
     expect(spy.acted).toEqual([]);
   });
 
-  test('a short pull down, or one more sideways than down, closes nothing', async () => {
+  test('a short pull down, or one more sideways than down, skips nothing', async () => {
     const spy = await draw(chosen);
     await drag({ x: 200, y: 240 });
     await drag({ x: 300, y: 260 });
-    expect(spy.closed).toBe(0);
+    expect(spy.skipped).toBe(0);
   });
 
-  test('says where a pull down goes while it is dragged, and commits it past the threshold', async () => {
-    await draw(chosen);
+  test('a pull down shows no floating label, and commits past the threshold', async () => {
+    const spy = await draw(chosen);
     await interact(() => lane().dispatchEvent(pointer('pointerdown', 200, 200)));
     await interact(() => lane().dispatchEvent(pointer('pointermove', 200, 260)));
-    expect(one<HTMLElement>('.fy-qr__stamp').dataset.swipe).toBe('down');
-    expect(one('.fy-qr__stamp').hasAttribute('data-committed')).toBe(false);
+    expect(root().querySelector('.fy-qr__stamp')).toBeNull();
     await interact(() => lane().dispatchEvent(pointer('pointermove', 200, 420)));
-    expect(one('.fy-qr__stamp').hasAttribute('data-committed')).toBe(true);
+    await interact(() => lane().dispatchEvent(pointer('pointerup', 200, 420)));
+    expect(spy.skipped).toBe(1);
   });
 
-  test('a row that does not swipe, or a mouse, does not close on a pull down', async () => {
+  test('a row that does not swipe, or a mouse, does not skip on a pull down', async () => {
     const still = await draw(chosen, { swipeable: false });
     await drag({ x: 200, y: 400 });
-    expect(still.closed).toBe(0);
+    expect(still.skipped).toBe(0);
     const mouse = await draw(chosen);
     await drag({ x: 200, y: 400 }, { pointerType: 'mouse' });
-    expect(mouse.closed).toBe(0);
+    expect(mouse.skipped).toBe(0);
   });
 });

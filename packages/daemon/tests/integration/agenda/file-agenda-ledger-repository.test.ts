@@ -33,6 +33,8 @@ const request = {
   sourceRef: null,
   subject: 'Choose deployment region',
   why: 'The rollout is blocked.',
+  premise: 'A rollout is ready.',
+  context: 'It cannot start until a region is chosen.',
   howToResolve: 'Choose a region.',
   ask: {
     kind: 'multiple-choice' as const,

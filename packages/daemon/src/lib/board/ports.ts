@@ -84,9 +84,15 @@ export interface SessionFocus {
   /**
    * `false` when there is no such session to focus. Taking a card clears the session's {@link skip}. The card's
    * `title` also becomes the name of a session the daemon titled itself, so an unnamed one is called by its work.
+   * `anchor` also makes the card the session's delegation anchor ({@link anchorOf}).
    */
-  setFocus(sessionId: string, task: TaskRef, title?: string): Promise<boolean>;
+  setFocus(sessionId: string, task: TaskRef, title?: string, options?: { readonly anchor?: boolean }): Promise<boolean>;
   focusOf(sessionId: string): Promise<TaskRef | null>;
+  /**
+   * The card the session's own delegations go under (`config.focusAnchor`): set only on purpose (`fy task
+   * focus`, creating a card, the card a start gave it), never by a plain touch like `focusTask` is.
+   */
+  anchorOf(sessionId: string): Promise<TaskRef | null>;
   /**
    * Records why the session's work has no card (`fy task skip`, `config.boardSkip`), replacing any earlier one.
    * `false` when there is no such session.

@@ -1,16 +1,13 @@
 /* A ferret's agenda inside its chat (agenda.tsx): ONE ROW above the composer (what is running on its
-   left, the agenda pill on its right), a raised drawer over a scrim that opens upward from the pill, "re:" chips,
+   left, the agenda pill on its right), a raised drawer over a scrim that opens upward from the pill,
    the item's card in place of the transcript and a docked side panel. Everything above the composer is a sibling
    of it, so the composer's own box never moves. Theme role tokens only, so Studio, Mission Control, Neo-Brutalism
    and Geist, light and dark, each draw it from their own palette. */
 /* ONE ROW, NEVER WRAPPED. The row is its own container: a narrow chat shortens the pill to "Agenda · 7", and what
    is running truncates with an ellipsis. Its side inset is the composer's own: the box's stroke and padding, so the
    spinner, the pill, the chips and the box's text start on one edge. */
-.fy-agenda-line,
-.fy-agenda-chips {
-  --agenda-inset: calc(var(--stroke-control, 1px) + var(--pad-panel));
-}
 .fy-agenda-line {
+  --agenda-inset: calc(var(--stroke-control, 1px) + var(--pad-panel));
   container-type: inline-size;
   display: flex;
   min-height: 44px;
@@ -331,71 +328,6 @@ button.fy-agenda-line__main:focus-visible {
   from {
     opacity: 0;
   }
-}
-
-/* THE CHIP: "about !A47 <title> ✕", directly above the composer. */
-.fy-agenda-chips {
-  display: flex;
-  margin: 0;
-  padding: 0 var(--agenda-inset) var(--gap-xs);
-  min-width: 0;
-  flex-wrap: wrap;
-  gap: var(--gap-xs);
-  list-style: none;
-}
-.fy-agenda-ref {
-  display: inline-flex;
-  min-width: 0;
-  /* One chip above the composer, as wide as its title needs. */
-  max-width: min(100%, 28rem);
-  min-height: 32px;
-  align-items: center;
-  gap: var(--gap-xs);
-  padding: 0 0 0 var(--gap-md);
-  border: var(--stroke) solid var(--divider-color);
-  border-radius: var(--radius-input);
-  background: var(--surface);
-  color: var(--fg);
-  font-size: var(--text-sm);
-}
-.fy-agenda-ref__lead {
-  color: var(--muted);
-}
-.fy-agenda-ref__id {
-  flex-shrink: 0;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
-.fy-agenda-ref__title {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: var(--weight-strong);
-}
-.fy-agenda-ref__clear {
-  display: inline-flex;
-  width: 32px;
-  height: 32px;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: var(--radius-input);
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-}
-.fy-agenda-ref__clear:hover {
-  background: var(--surface-2);
-  color: var(--fg);
-}
-.fy-agenda-ref__clear:active {
-  background: var(--accent-soft);
-}
-.fy-agenda-ref__clear:focus-visible {
-  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
-  outline-offset: -2px;
 }
 
 /* THE DOCKED PANEL: a wide screen with a mouse keeps the agenda beside the chat. */

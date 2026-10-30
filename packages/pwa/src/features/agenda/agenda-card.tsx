@@ -191,13 +191,13 @@ export function AgendaCard({
         {heading}
       </h3>
       {lede.line === null ? null : (
-        <p
-          className="fy-attn-card__why m-0"
+        <div
+          className="fy-attn-card__why"
           data-agenda-changed={changedCard(highlight, 'why', 'context') ? 'changed' : undefined}
           data-agenda-why=""
         >
-          {lede.line}
-        </p>
+          {renderProse(lede.line)}
+        </div>
       )}
       {item.revisions === undefined && decidedSummary(item) === null ? null : (
         <p className="fy-attn-card__living m-0" data-agenda-living="">

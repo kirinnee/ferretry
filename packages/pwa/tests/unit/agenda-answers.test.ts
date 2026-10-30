@@ -154,7 +154,7 @@ describe('the swipe map is built from the card’s answers', () => {
     expect(canDiscussNow({ kind: 'info' } as never)).toBe(false);
   });
 
-  it('gives a choice its recommended option on the right, then up, then left', () => {
+  it('gives a choice its recommended option up, then the first other left, then the next right', () => {
     const item = agendaItem('A1', {
       ask: choices('Alpha', 'Beta', 'Gamma'),
       questions: [
@@ -166,8 +166,9 @@ describe('the swipe map is built from the card’s answers', () => {
       ],
     });
     const targets = swipeTargets(item);
-    expect(targets.right?.label).toBe('Beta');
-    expect([targets.up?.label, targets.left?.label].sort()).toEqual(['Alpha', 'Gamma']);
+    expect(targets.up?.label).toBe('Beta');
+    expect(targets.left?.label).toBe('Alpha');
+    expect(targets.right?.label).toBe('Gamma');
   });
 
   it('gives a card with no answers no swipe at all, so no direction ever commits', () => {

@@ -59,6 +59,8 @@ const raise = {
   title: 'Release unblock',
   subject: 'which base branch?',
   why: 'the ticket names two',
+  premise: 'A ferret needs the owner.',
+  context: 'The work waits on this answer.',
   howToResolve: 'name the branch to target',
   ask: { kind: 'multiple-choice', options: [{ label: 'main' }, { label: 'develop' }] },
 } as const;
@@ -177,12 +179,58 @@ describe('attention routes', () => {
     });
   });
 
-  it('should warn, never refuse, a decision raised with no premise and no context', async () => {
+  it('should refuse a ferret’s new item with no premise or no context, naming what is missing', async () => {
+    // Arrange
+    const dispatch = fixture();
+    const { premise: _premise, context: _context, ...bare } = raise;
+
+    // Act
+    const neither = await dispatch(post(bare, agentIn('s1')));
+    const noContext = await dispatch(post({ ...bare, premise: 'A ferret needs the owner.' }, agentIn('s1')));
+    const blank = await dispatch(post({ ...raise, premise: '   ' }, agentIn('s1')));
+
+    // Assert
+    should(neither.status).equal(400);
+    should(JSON.stringify(jsonBody(neither)))
+      .match(/premise \(--premise\) is required/u)
+      .match(/context \(--context\)/u);
+    should(noContext.status).equal(400);
+    should(JSON.stringify(jsonBody(noContext)))
+      .match(/context \(--context\) is required/u)
+      .not.match(/premise \(--premise/u);
+    should(blank.status).equal(400);
+  });
+
+  it('should let a ferret’s notice go without a premise or a context', async () => {
     // Arrange
     const dispatch = fixture();
 
     // Act
-    const response = await dispatch(post(raise, agentIn('s1')));
+    const response = await dispatch(
+      post(
+        {
+          action: 'add',
+          subject: 'Build is green',
+          why: 'FYI',
+          howToResolve: 'Nothing to do.',
+          kind: 'info',
+          notice: true,
+        },
+        agentIn('s1'),
+      ),
+    );
+
+    // Assert
+    should(response.status).equal(200);
+  });
+
+  it('should warn, never refuse, a human’s decision raised with no premise and no context', async () => {
+    // Arrange: only a ferret must give them; an item the owner raises is still only warned about
+    const dispatch = fixture();
+    const { premise: _premise, context: _context, ...bare } = raise;
+
+    // Act
+    const response = await dispatch(post(bare));
 
     // Assert
     should(response.status).equal(200);
@@ -645,6 +693,8 @@ describe('agenda route needs-info', () => {
     action: 'add',
     subject: 'Log in to the cloud',
     why: 'The deploy needs it',
+    premise: 'A ferret needs the owner.',
+    context: 'The work waits on this answer.',
     howToResolve: 'Follow the steps',
     ask: { kind: 'task' },
     steps: ['Run the login'],
@@ -757,6 +807,8 @@ describe('agenda route add: the agenda fields, notices and the old surface flag'
     title: 'CI is green',
     subject: 'CI is green on main',
     why: 'The release branch builds again.',
+    premise: 'A ferret needs the owner.',
+    context: 'The work waits on this answer.',
     howToResolve: 'Nothing to do.',
   } as const;
 
@@ -915,6 +967,8 @@ describe('agenda route progress', () => {
     action: 'add',
     subject: 'Log in to the cloud',
     why: 'The deploy needs it',
+    premise: 'A ferret needs the owner.',
+    context: 'The work waits on this answer.',
     howToResolve: 'Follow the steps',
     ask: { kind: 'task' },
     steps: ['Run the login', 'Confirm the account'],

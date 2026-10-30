@@ -11,9 +11,12 @@
  * answers — the daemon's `stopped`), "Needs you" (items on the owner's turn), then "With ferrets" (items on
  * the ferret's turn, nothing for the owner to do). A ferret sits in ONE of the first two, never both; it may
  * ALSO sit in "With ferrets" for the items it holds.
+ *
+ * WHO AND WHAT, never the callsign alone: a group, and the open item, say the ferret, what it is working on (its
+ * task's name and its card, `&F12`) and the machine ({@link inboxWho}).
  */
 
-import { type AgendaItem, agendaTitle, type SessionView } from '@ferretry/protocol';
+import { type AgendaItem, agendaTitle, formatTaskRef, type SessionView } from '@ferretry/protocol';
 import { sessionsBarNames } from '../shell/sessions-bar-model.ts';
 import { sortAgenda } from './agenda-status.ts';
 import { sessionAgendaSummary } from './agenda-wire.ts';
@@ -31,6 +34,8 @@ export interface FerretGroup {
   readonly ferret: string;
   /** What the conversation is working on, when that is not just the ferret's name. */
   readonly task: string | null;
+  /** The board card the conversation works on, as it is written (`&F12`); `null` when it has none. */
+  readonly card: string | null;
   readonly machineName: string;
   /** The ferret is idle until the owner answers. */
   readonly stopped: boolean;
@@ -43,6 +48,32 @@ export interface FerretGroup {
 const groupKey = (daemonId: DaemonId, sessionId: string): string => JSON.stringify([daemonId, sessionId]);
 
 const isNoticeCard = (card: InboxCard): boolean => card.item.notice === true;
+
+/** The card a conversation works on, as it is written: `&F12`. */
+const cardOf = (view: SessionView): string | null =>
+  view.config.focusTask === undefined ? null : formatTaskRef(view.config.focusTask);
+
+/** Who asked and what about: the ferret, its task's name, its card and its machine. */
+export interface InboxWho {
+  readonly ferret: string;
+  readonly task: string | null;
+  readonly card: string | null;
+  readonly machine: string;
+}
+
+/**
+ * Who an item is from, never the callsign alone: the ferret, what it works on and the machine. The card is the
+ * item's own (`task`, the card it was raised about) when it names one, else the conversation's focus card.
+ */
+export const inboxWho = (card: InboxCard): InboxWho => {
+  const names = sessionsBarNames(card.view);
+  return {
+    ferret: names.ferret ?? names.title,
+    task: names.ferret === null ? null : names.title,
+    card: card.item.task == null ? cardOf(card.view) : formatTaskRef(card.item.task),
+    machine: card.machineName,
+  };
+};
 
 /** The cards grouped by ferret. Each group's items are in the agenda's order; its notices keep their (newest-first) order. */
 const buildGroups = (cards: readonly InboxCard[]): readonly FerretGroup[] => {
@@ -64,6 +95,7 @@ const buildGroups = (cards: readonly InboxCard[]): readonly FerretGroup[] => {
       view: head.view,
       ferret: names.ferret ?? names.title,
       task: names.ferret === null ? null : names.title,
+      card: cardOf(head.view),
       machineName: head.machineName,
       stopped: sessionAgendaSummary(head.view.state)?.stopped === true,
       items: ordered.flatMap(item => byItem.get(item) ?? []),
