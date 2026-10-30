@@ -3,9 +3,10 @@
  * and `GroupBlock` halves of kteam `ui/src/components/AgentSidebar.tsx`.
  *
  * A row says FOUR facts and no more: the task, the teammate, the labels, and a
- * status mark. No model, no context %, no quota, no age — those are dashboard
- * columns, and a row carrying them would be the noise wall the sidebar exists to
- * remove, at a third of the width. The task comes first because it is the thing
+ * status mark. No model, no quota, no age — those are dashboard columns, and a row
+ * carrying them would be the noise wall the sidebar exists to remove, at a third of
+ * the width. The one exception is a context ring, and only from 90% full: a session
+ * about to run out of room is worth a glance in a list, one with room is noise. The task comes first because it is the thing
  * being looked for ("where's the transcript fix?"); the teammate second because
  * it is how the session is referred to.
  *
@@ -37,9 +38,11 @@
 import type { SessionView } from '@ferretry/protocol';
 import { CircleAlert, FolderGit2 } from 'lucide-react';
 import { useMemo } from 'react';
+import { ContextRing } from '../components/context-ring.tsx';
 import { TaskName } from '../features/tasks/task-name.tsx';
 import { displayCallsign } from '../lib/callsign.ts';
 import { cn } from '../lib/class-names.ts';
+import { contextReadout } from '../lib/context-ring.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import type { SessionGroup } from '../lib/fleet-grouping.ts';
 import {
@@ -186,6 +189,9 @@ export function SidebarRow({
               size="sm"
               teammate={config.teammate}
             />
+            {view.context !== undefined && contextReadout(view.context).tone === 'err' ? (
+              <ContextRing context={view.context} />
+            ) : null}
             {attentionCount > 0 ? (
               <span
                 aria-label={attentionLabel}

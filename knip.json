@@ -87,6 +87,7 @@
         "harness/stuck-messages-screenshot.tsx",
         "harness/live-activity-screenshot.tsx",
         "harness/compaction-screenshot.tsx",
+        "harness/context-ring-screenshot.tsx",
         "harness/handoff-screenshot.tsx",
         "harness/chat-images-screenshot.tsx",
         "harness/agenda-message-screenshot.tsx",

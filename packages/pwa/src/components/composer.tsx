@@ -1,4 +1,4 @@
-import type { IFyApiClient, SessionView } from '@ferretry/protocol';
+import type { IFyApiClient, SessionContext, SessionView } from '@ferretry/protocol';
 import { ArrowUp, Plus, Zap } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { OccupiedComposerNotice } from '../features/occupied-composer/occupied-composer-notice.tsx';
@@ -54,6 +54,7 @@ import {
 } from './composer-autocomplete-providers.ts';
 import { ComposerFormatToolbar } from './composer-format-toolbar.tsx';
 import { ComposerQuota, type ComposerQuotaProps } from './composer-quota.tsx';
+import { ContextRing } from './context-ring.tsx';
 import { DictationControl } from './dictation-control.tsx';
 import { ImageViewer, type ViewerImage } from './image-viewer.tsx';
 import { LiveMarkdownEditor } from './live-markdown-editor.tsx';
@@ -177,8 +178,12 @@ export interface ComposerProps {
   readonly uploadAttachment?: ComposerAttachmentUploader;
   /** The session's runtime chips (model, effort), drawn at the start of the status line. */
   readonly statusSlot?: ReactNode;
-  /** How full the session's context window is, when the harness reported it. */
-  readonly contextPercent?: number;
+  /** How much of the context window the session has used; absent while the window or the size is unknown. */
+  readonly context?: SessionContext;
+  /** Whether the harness is compacting right now: the ring shows that instead of a size about to be wrong. */
+  readonly compacting?: boolean;
+  /** Where a tap on the context ring goes (Info › Usage). */
+  readonly onOpenContext?: () => void;
 }
 
 /**
@@ -373,7 +378,9 @@ export function Composer({
   vimMode = false,
   uploadAttachment,
   statusSlot,
-  contextPercent,
+  context,
+  compacting,
+  onOpenContext,
 }: ComposerProps) {
   const scope = useMemo(() => daemonSessionScope(daemon, sessionId), [daemon, sessionId]);
   const uploader = useMemo<ComposerAttachmentUploader>(
@@ -1362,10 +1369,12 @@ export function Composer({
             unmount, so an open chip keeps its state), leaving the transcript the room. */}
         <span className="fy-composer-status-chrome" data-composer-status-chrome="">
           {statusSlot}
-          {contextPercent === undefined ? null : (
-            <span className="fy-composer-context" title="How full this session's context window is">
-              ctx {Math.round(contextPercent)}%
-            </span>
+          {context === undefined ? null : (
+            <ContextRing
+              context={context}
+              {...(compacting === undefined ? {} : { compacting })}
+              {...(onOpenContext === undefined ? {} : { onOpen: onOpenContext })}
+            />
           )}
           <ComposerQuota quota={quota} />
         </span>

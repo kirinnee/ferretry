@@ -75,6 +75,17 @@ export interface SessionContextWindowEvidence {
  * percentage roughly fivefold. Both strings are checked.
  */
 export function contextWindowFor(evidence: ContextWindowEvidence): number {
+  return knownContextWindow(evidence) ?? DEFAULT_CONTEXT_WINDOW;
+}
+
+/**
+ * The window the evidence STATES, or `undefined` when nothing does.
+ *
+ * {@link contextWindowFor} answers a planning question and so must fall back to the default; a display
+ * must not. A session whose model states no size is not a 200k session — it is one whose size is
+ * unknown, and a percentage computed against the default would be a guess presented as a measurement.
+ */
+export function knownContextWindow(evidence: ContextWindowEvidence): number | undefined {
   const reported = positive(evidence.reportedWindow);
   if (reported !== undefined) return reported;
 
@@ -88,7 +99,7 @@ export function contextWindowFor(evidence: ContextWindowEvidence): number {
 
   const extended = configured?.includes(EXTENDED_MARKER) === true || served?.includes(EXTENDED_MARKER) === true;
   if (extended) return EXTENDED_CONTEXT_WINDOW;
-  return positive(evidence.declaredWindow) ?? DEFAULT_CONTEXT_WINDOW;
+  return positive(evidence.declaredWindow);
 }
 
 /**
@@ -101,13 +112,22 @@ export function contextWindowFor(evidence: ContextWindowEvidence): number {
  * distinction wrong can incorrectly permit a smaller target window.
  */
 export function contextWindowForSession(evidence: SessionContextWindowEvidence): number {
-  return contextWindowFor({
+  return contextWindowFor(sessionWindowEvidence(evidence));
+}
+
+function sessionWindowEvidence(evidence: SessionContextWindowEvidence): ContextWindowEvidence {
+  return {
     configuredModel: evidence.configuredModel ?? evidence.modelHint,
     servedModel: evidence.observedModel,
     ...(evidence.reportedWindow === undefined ? {} : { reportedWindow: evidence.reportedWindow }),
     ...(evidence.overrides === undefined ? {} : { overrides: evidence.overrides }),
     ...(evidence.declaredWindow === undefined ? {} : { declaredWindow: evidence.declaredWindow }),
-  });
+  };
+}
+
+/** {@link contextWindowForSession} without the default: the window this session's evidence states, or `undefined`. */
+export function knownContextWindowForSession(evidence: SessionContextWindowEvidence): number | undefined {
+  return knownContextWindow(sessionWindowEvidence(evidence));
 }
 
 /** How much of the window a transcript has consumed, as a percentage that never exceeds 100. */

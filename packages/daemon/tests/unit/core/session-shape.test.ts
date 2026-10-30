@@ -4,6 +4,8 @@ import {
   contextPercent,
   contextWindowFor,
   contextWindowForSession,
+  knownContextWindow,
+  knownContextWindowForSession,
   harnessDisplayName,
   remoteControlArgs,
   resolveParent,
@@ -279,5 +281,49 @@ describe('contextWindowFor, with a window the catalog declares', () => {
     should([declared, reported, overridden, marked, nonsense, session]).deepEqual([
       1_000_000, 400_000, 128_000, 1_000_000, 200_000, 1_000_000,
     ]);
+  });
+});
+
+describe('knownContextWindow', () => {
+  it('should state the window the evidence states', () => {
+    // Arrange / Act / Assert
+    should(knownContextWindow({ reportedWindow: 272_000 })).equal(272_000);
+    should(knownContextWindow({ configuredModel: 'model-a[1m]' })).equal(1_000_000);
+    should(knownContextWindow({ servedModel: 'model-c', overrides: { 'model-c': 64_000 } })).equal(64_000);
+    should(knownContextWindow({ declaredWindow: 400_000 })).equal(400_000);
+  });
+
+  it('should state nothing, never the default, when no evidence names a window', () => {
+    // Arrange / Act / Assert
+    should(knownContextWindow({})).be.undefined();
+    should(knownContextWindow({ servedModel: 'model-d', declaredWindow: 0 })).be.undefined();
+  });
+});
+
+describe('knownContextWindowForSession', () => {
+  it('should match the extended selector the harness strips from the served id', () => {
+    // Arrange / Act
+    const window = knownContextWindowForSession({
+      configuredModel: 'claude-opus-4-8[1m]',
+      observedModel: 'claude-opus-4-8',
+    });
+
+    // Assert
+    should(window).equal(1_000_000);
+  });
+
+  it('should fall back to the model hint, then to what the catalog declares, then to nothing', () => {
+    // Arrange / Act / Assert
+    should(knownContextWindowForSession({ modelHint: 'opus[1m]' })).equal(1_000_000);
+    should(knownContextWindowForSession({ modelHint: 'opus', declaredWindow: 500_000 })).equal(500_000);
+    should(knownContextWindowForSession({ modelHint: 'opus' })).be.undefined();
+  });
+
+  it('should honour a reported window and the overrides', () => {
+    // Arrange / Act / Assert
+    should(knownContextWindowForSession({ reportedWindow: 258_400, observedModel: 'm' })).equal(258_400);
+    should(knownContextWindowForSession({ observedModel: 'glm-5.2', overrides: { 'glm-5.2': 131_072 } })).equal(
+      131_072,
+    );
   });
 });

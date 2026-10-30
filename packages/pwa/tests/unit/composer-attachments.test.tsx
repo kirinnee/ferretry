@@ -288,15 +288,37 @@ describe('composer attachments', () => {
     run(() => composer.unmount());
   });
 
-  test('the status line carries the host’s runtime chips and the context reading', () => {
+  test('the status line carries the host’s runtime chips and the context ring', () => {
     const { composer } = mountComposer({
       upload: async file => view('a', file),
-      contextPercent: 30.6,
+      context: { usedTokens: 118_000, windowTokens: 1_000_000, percent: 11.8, at: '2026-10-30T08:00:00.000Z' },
       statusSlot: <span data-runtime-chips="">opus</span>,
     });
     const status = composer.root.findByProps({ 'data-composer-status': '' });
     expect(status.findByProps({ 'data-runtime-chips': '' }).children).toEqual(['opus']);
-    expect(status.findByProps({ className: 'fy-composer-context' }).children.join('')).toBe('ctx 31%');
+    expect(status.findByProps({ 'data-context-ring': '' }).props.title).toBe('118k of 1M tokens (12%)');
+    run(() => composer.unmount());
+  });
+
+  test('the status line draws no ring while the context is unknown', () => {
+    const { composer } = mountComposer({ upload: async file => view('a', file) });
+    const status = composer.root.findByProps({ 'data-composer-status': '' });
+    expect(status.findAllByProps({ 'data-context-ring': '' })).toEqual([]);
+    run(() => composer.unmount());
+  });
+
+  test('a tap on the ring goes where the host sends it, and a compaction shows on it', () => {
+    const opened: string[] = [];
+    const { composer } = mountComposer({
+      upload: async file => view('a', file),
+      context: { usedTokens: 50_000, windowTokens: 200_000, percent: 25, at: '2026-10-30T08:00:00.000Z' },
+      compacting: true,
+      onOpenContext: () => opened.push('usage'),
+    });
+    const ring = composer.root.findByProps({ 'data-context-ring': '' });
+    expect(ring.props['data-compacting']).toBe('');
+    run(() => ring.props.onClick());
+    expect(opened).toEqual(['usage']);
     run(() => composer.unmount());
   });
 });

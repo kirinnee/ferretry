@@ -135,6 +135,9 @@ describe('observerFactsOf', () => {
       observedModelAt: '2026-10-22T08:00:00.000Z',
       observedReasoningEffort: 'high',
       observedFast: false,
+      contextTokens: 118_000,
+      contextAt: '2026-10-22T08:00:01.000Z',
+      contextWindow: 1_000_000,
       reason: 'not a fact the observer is told',
     } as unknown as SessionState;
 
@@ -153,6 +156,9 @@ describe('observerFactsOf', () => {
       observedModelAt: '2026-10-22T08:00:00.000Z',
       observedReasoningEffort: 'high',
       observedFast: false,
+      contextTokens: 118_000,
+      contextAt: '2026-10-22T08:00:01.000Z',
+      contextWindow: 1_000_000,
     });
     should(observerFactsOf({ id: 'a', status: 'running', turn: 1 } as SessionState)).deepEqual({
       status: 'running',

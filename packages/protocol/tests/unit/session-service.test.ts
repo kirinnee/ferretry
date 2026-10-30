@@ -225,6 +225,11 @@ const sessionCases: SchemaCase[] = [
   { name: 'launch instructions', schema: session.SessionLaunchInstructionsSchema, value: launchInstructions },
   { name: 'outdated instructions', schema: session.SessionOutdatedSchema, value: { sections: ['tools', 'pack'] } },
   {
+    name: 'session context',
+    schema: session.SessionContextSchema,
+    value: { usedTokens: 118_000, windowTokens: 1_000_000, percent: 11.8, at: '2026-10-30T08:00:00.000Z' },
+  },
+  {
     name: 'session state with launch instructions',
     schema: session.SessionStateSchema,
     value: { ...sessionView.state, launchInstructions },
