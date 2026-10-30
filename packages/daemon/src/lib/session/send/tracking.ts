@@ -178,12 +178,48 @@ const CONTAINED_MATCH_MIN = 12;
 function carries(observed: string, needle: string): boolean {
   if (observed === needle) return true;
   if (needle.length >= CONTAINED_MATCH_MIN && observed.includes(needle)) return true;
-  return carriesThroughPlaceholders(observed, needle);
+  return carriesThroughPlaceholders(observed, needle) || carriesThroughPaste(observed, needle);
 }
 
 /** An exact match, or one that differs only where the harness swapped something for a placeholder. */
 function sameText(observed: string, needle: string): boolean {
-  return observed === needle || carriesThroughPlaceholders(observed, needle);
+  return observed === needle || carriesThroughPlaceholders(observed, needle) || carriesThroughPaste(observed, needle);
+}
+
+/** The tags Claude Code wraps a bracketed paste in when it records one: `<pasted_content id="703a">`. */
+const PASTE_WRAPPER = /<\/?pasted_content(?:\s+id="[^"]*")?\s*>/giu;
+
+/** A placeholder standing for a file the harness attached: `[Image #7]`, `[Audio #2]`. */
+const FILE_PLACEHOLDERS = /\[(?:image|audio)[^\]\n]*\]/giu;
+
+/** One whitespace-free token that names an image file by path, as a message types one. */
+const IMAGE_PATH = /^\S*\/\S+\.(?:png|jpe?g|gif|webp|heic|bmp|tiff?)$/iu;
+
+const withoutImagePaths = (text: string): { readonly text: string; readonly removed: number } => {
+  const tokens = text.split(' ');
+  const kept = tokens.filter(token => !IMAGE_PATH.test(token));
+  return { text: kept.join(' '), removed: tokens.length - kept.length };
+};
+
+/**
+ * Whether the harness recorded this send as a PASTE it lifted images out of.
+ *
+ * Claude Code records a long typed message as `<pasted_content id="…">…</pasted_content id="…">`, and an
+ * image path in it that names a real file becomes an attachment: the path leaves the text and an
+ * `[Image #7]` goes in FRONT of the paste, not where the path was — so neither the wrapper's text nor the
+ * placeholder's position matches what was typed. On 2026-10-30 that is how a ferret's message the lead had
+ * read four times was called "not delivered". With the wrapper and the file placeholders taken out of the
+ * record, and every image-path token out of both, the two must be the same text: the send had at least one
+ * image path to lift, and the record at least one placeholder for it, so plain text never matches this way.
+ */
+function carriesThroughPaste(observed: string, needle: string): boolean {
+  if (!observed.match(PASTE_WRAPPER)) return false;
+  const placeholders = observed.match(FILE_PLACEHOLDERS)?.length ?? 0;
+  if (placeholders === 0) return false;
+  const sent = withoutImagePaths(needle);
+  if (sent.removed === 0) return false;
+  const recorded = withoutImagePaths(normalized(observed.replace(PASTE_WRAPPER, ' ').replace(FILE_PLACEHOLDERS, ' ')));
+  return sent.text.length >= CONTAINED_MATCH_MIN && recorded.text === sent.text;
 }
 
 const PLACEHOLDER = new RegExp(PASTE_PLACEHOLDER_PATTERN, 'giu');

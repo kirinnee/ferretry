@@ -242,6 +242,22 @@ send stays watched for the repair window (`repairLimitMs`, 3 days), like a cance
 the transcript holds corrects it to delivered: the rows the old reader got wrong correct themselves the
 next time their ferret's sends are read.
 
+**A paste Claude lifted an image out of is the same message.** Claude Code records a long typed message as
+`<pasted_content id="…">…</pasted_content id="…">`, and an image path in it that names a real file becomes an
+attachment: the path leaves the text, an `[Image #N]` goes in FRONT of the paste (not where the path was), and
+the paste is re-wrapped. Neither the wrapper's text nor the placeholder's place matches what was typed, so on
+2026-10-30 a ferret's message the lead had read four times was called "not delivered". With the wrapper and the
+file placeholders out of the record, and every image-path token out of both, the two must be the same text —
+and the send must have had an image path to lift and the record a placeholder for it.
+
+**The pre-queue "not delivered" rows are re-proved once** (`LegacySendReproof`, marker
+`send-reproof-migration.json` in the daemon's home). After the tracker is armed, every session's typed
+`timed_out` rows — however old — are read against the recipient's transcript with the same incremental
+evidence reader, one session at a time, judging every look: found is `delivered` (journalled as a
+correction), read to the end and not found is `unaccounted` (`landing_unconfirmed`), and a transcript that
+cannot be read to its end is `unaccounted` (`transcript_unreadable`). None stays red: only a send nothing
+was ever typed for keeps "not delivered". A stop mid-pass writes no marker, so the next start finishes it.
+
 **A long transcript is slow, not unreadable.** The tracker reads a session's transcript through a window it
 holds from the oldest send it watches, appending only what is new on each later look, and a look reads at
 most `WINDOW_STEP_LIMIT` batches. A window that stopped at that budget kept its place and has more to read
