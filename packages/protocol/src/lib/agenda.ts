@@ -449,11 +449,12 @@ export const MAX_AGENDA_HISTORY = 20;
 /**
  * One thing that happened to an item after it was raised, for "You asked for more info 10:42 · updated 10:44":
  * the owner asked for more information (`needs-info`) or to talk it through (`discuss`), the ferret
- * updated it (`updated`), or the item left discussion for the queue (`surfaced`, the why as its note).
+ * updated it (`updated`), the item left discussion for the queue (`surfaced`, the why as its note), or the
+ * owner replied and closed it (`replied`, their words as its note; the ferret's `surface` or `edit` reopens it).
  */
 export const AgendaHistoryEntrySchema = z.strictObject({
   at: InstantSchema,
-  kind: z.enum(['needs-info', 'discuss', 'updated', 'surfaced']),
+  kind: z.enum(['needs-info', 'discuss', 'updated', 'surfaced', 'replied']),
   note: z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH).optional(),
 });
 export type AgendaHistoryEntry = z.infer<typeof AgendaHistoryEntrySchema>;
@@ -510,7 +511,12 @@ export const AgendaRevisionSchema = z.strictObject({
 });
 export type AgendaRevision = z.infer<typeof AgendaRevisionSchema>;
 
-export const AgendaDispositionSchema = z.enum(['done', 'dismissed']);
+/**
+ * How a closed item ended: answered or resolved (`done`), closed unanswered (`dismissed`), or the owner wrote
+ * about it and nothing more is needed unless the ferret asks again (`replied`; the ferret reopens it with
+ * `surface` or `edit`).
+ */
+export const AgendaDispositionSchema = z.enum(['done', 'dismissed', 'replied']);
 export type AgendaDisposition = z.infer<typeof AgendaDispositionSchema>;
 
 export const AgendaIdSchema = z.string().regex(/^A[1-9][0-9]*$/u);
@@ -737,8 +743,8 @@ function responseKindFitsAsk(ask: string | undefined, response: string): boolean
 export const ResolvedAgendaItemSchema = z
   .intersection(AgendaItemSchema, AgendaResolutionSchema)
   .superRefine((value, context) => {
-    if (value.disposition === 'dismissed' && value.response !== undefined) {
-      context.addIssue({ code: 'custom', message: 'a dismissed item may not carry a response', path: ['response'] });
+    if (value.disposition !== 'done' && value.response !== undefined) {
+      context.addIssue({ code: 'custom', message: 'only a done item may carry a response', path: ['response'] });
     }
     if (value.response !== undefined && !responseKindFitsAsk(value.ask?.kind, value.response.kind)) {
       context.addIssue({ code: 'custom', message: 'response kind must match the original ask', path: ['response'] });

@@ -69,11 +69,11 @@ function world(afterMinutes = 30) {
 }
 
 describe('Attention resurfacer', () => {
-  it('should surface an ask that has sat in discussion since the owner replied past the limit, and say the timer did it', async () => {
+  it('should surface an ask that has sat in discussion since the owner asked to talk it through past the limit, and say the timer did it', async () => {
     // Arrange
     const { attention: agenda, clock, resurfacer } = world(30);
     await agenda.raise(SESSION, ASK, AGENT);
-    await agenda.reply(SESSION, 'A1', HUMAN);
+    await agenda.discuss(SESSION, 'A1', HUMAN);
     clock.at = '2026-10-23T10:31:00.000Z';
 
     // Act
@@ -95,7 +95,7 @@ describe('Attention resurfacer', () => {
     // Arrange
     const { attention: agenda, clock, resurfacer } = world(30);
     await agenda.raise(SESSION, ASK, AGENT);
-    await agenda.reply(SESSION, 'A1', HUMAN);
+    await agenda.discuss(SESSION, 'A1', HUMAN);
     await agenda.raise(SESSION, { ...ASK, subject: 'Which cluster?' }, AGENT);
     clock.at = '2026-10-23T10:29:00.000Z';
 
@@ -113,7 +113,7 @@ describe('Attention resurfacer', () => {
     // Arrange
     const { attention: agenda, clock, resurfacer, timers } = world(30);
     await agenda.raise(SESSION, ASK, AGENT);
-    await agenda.reply(SESSION, 'A1', HUMAN);
+    await agenda.discuss(SESSION, 'A1', HUMAN);
     clock.at = '2026-10-23T10:31:00.000Z';
 
     // Act

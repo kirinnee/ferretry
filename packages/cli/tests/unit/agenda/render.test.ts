@@ -280,6 +280,16 @@ describe('attention history', () => {
     should(actual).containEql('· dismissed by human at');
   });
 
+  it('should name an owner reply as a reply, not a resolution', () => {
+    // Act
+    const actual = renderAgendaHistory(
+      snapshot([], { resolved: [resolvedItem('A1', 'which region', { disposition: 'replied' })] }),
+    );
+
+    // Assert
+    should(actual).containEql('· replied by human at');
+  });
+
   it('should show the recorded answer and note', () => {
     // Act
     const actual = renderAgendaHistory(

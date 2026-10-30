@@ -764,7 +764,7 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql('no "as above", ticket/PR numbers, paths or unexplained acronyms');
     should(text).containEql('`--term "X=meaning"`');
     should(text).containEql('`--decided` = settled, `--still-open` = left');
-    should(text).containEql('`--body`: hypermedia (fy-render image|chart|mermaid|svg) where it helps');
+    should(text).containEql('`--body`: hypermedia (fy-render image|chart|mermaid|svg).');
     should(text).containEql('`--kind todo|yesno|permission|choice|review|info`');
     // Each item stands alone, in full Markdown, and each option is a short letter-able label plus a one-line reason.
     should(text).containEql('Each item stands ALONE: full Markdown (`code` names, **bold** key point)');
@@ -775,14 +775,14 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql('`--will-block`');
     should(text).containEql('`--by <time>`');
     // The answer and discussion loops, then resolving and reading.
-    should(text).containEql('"[answer to !A3 …]" is the answer');
-    should(text).containEql('"[re !A3 …]" is chat.');
-    // Every item stays current: edited, closed or handed back.
-    should(text).containEql('KEEP ITEMS CURRENT');
-    should(text).containEql('changed or discussed → `zz agenda edit <id>`');
-    should(text).containEql('settled → `zz agenda done <id>`');
-    should(text).containEql('still theirs → `zz agenda surface <id>`');
-    should(text).containEql('`zz agenda ls`');
+    should(text).containEql('"[answer to !A3 …]" is the answer;');
+    should(text).containEql('"[re !A3 …]" is chat that closes it');
+    should(text).containEql('re-raise (`zz agenda surface <id>`) only if the owner must still decide or act');
+    // Every item stays current, in the turn the facts changed: edited or closed, never left stale.
+    should(text).containEql('KEEP ITEMS CURRENT this turn');
+    should(text).containEql('agenda `edit <id>` if changed');
+    should(text).containEql('`done <id>` if settled');
+    should(text).containEql('`ls` = open');
     should(text).not.containEql('Attention');
     should(text).not.containEql('`fy ');
   });

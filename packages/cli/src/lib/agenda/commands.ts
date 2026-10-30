@@ -285,7 +285,9 @@ function mountVerbs(
   scoped(
     agenda
       .command('surface')
-      .description('hand an item back to the owner: it is their turn again, with nothing changed (never pings)')
+      .description(
+        'hand an item back to the owner, or bring back one their reply closed: it is their turn again (never pings)',
+      )
       .argument('<id>', 'the item reference, like !A3')
       .option('-w, --why <line>', 'one line on why the owner must look now, for example what is still open'),
   ).action(async (id: string, _flags: unknown, command: Command) => {

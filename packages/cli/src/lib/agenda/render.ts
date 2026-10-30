@@ -195,7 +195,7 @@ export function renderAgendaItem(item: AgendaItem | ResolvedAgendaItem): string 
 }
 
 function resolutionLine(item: ResolvedAgendaItem): string {
-  const verb = item.disposition === 'dismissed' ? 'dismissed' : 'resolved';
+  const verb = item.disposition === 'dismissed' ? 'dismissed' : item.disposition === 'replied' ? 'replied' : 'resolved';
   const answer = item.response === undefined ? '' : ` — ${compact(describeAnswer(item.response), SHORT_WIDTH)}`;
   const note =
     item.resolutionNote === null || item.resolutionNote.trim() === ''

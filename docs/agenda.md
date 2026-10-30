@@ -40,20 +40,22 @@ reason — "task" means a board card — and `--kind task` is still read as its 
 
 Every open item is somebody's turn. `agendaTurn(item)` (protocol) is the one definition:
 
-| Turn       | When                                                                 |
-| ---------- | -------------------------------------------------------------------- |
-| **owner**  | A new ask. The owner has not answered, or the ferret handed it back. |
-| **ferret** | The owner wrote about it in chat, or asked for more information.     |
-| **done**   | Resolved (answered or dismissed), or the item is a notice.           |
+| Turn       | When                                                                   |
+| ---------- | ---------------------------------------------------------------------- |
+| **owner**  | A new ask. The owner has not answered, or the ferret handed it back.   |
+| **ferret** | The owner asked to talk it through (Discuss), or asked for more info.  |
+| **done**   | Resolved (answered, dismissed or replied to), or the item is a notice. |
 
 A new ask is the owner's turn. Nothing starts "in discussion": the ferret raises it, the owner reads it.
 
 Internally the ferret's turn is `waitingOn: 'ferret'` with `waitingFor` either `'discussion'` (the owner
-replied) or `'info'` (the owner asked for more information). Clients read the turn, not those two fields.
+asked to discuss it) or `'info'` (the owner asked for more information). Clients read the turn, not those two
+fields. **A chat reply is not a turn at all: it closes the item** (see "Replying closes the item").
 
 ## Handing it back
 
-On the ferret's turn there are three ways out. **None of the first two pings the owner.**
+On the ferret's turn there are three ways out. The same two verbs also bring back an item the owner's
+reply closed (see "Replying closes the item"). **None of the first two pings the owner.**
 
 - `fy agenda edit <id> …` — change the card (settled answers, what is still open, new options). Any edit by
   the raising agent on its own turn hands the item back to the owner, even one that changes nothing.
@@ -71,13 +73,42 @@ The ferret receives the message as
 [re !A5 «title», !A7 «title»] <text>
 ```
 
-**Nothing resolves.** There is no answer-by-chat. Each referenced item becomes the ferret's turn and is
-recorded as such (a silent `replied` change that no observer reacts to). A notice is never referenced.
-If the ferret finishes a turn without touching a referenced item, the daemon nudges it once (nudge-once
-keys on the `[re !A…` opener); after that it stays quiet.
+**A reply is not an answer, and it is not "still open" either.** Each referenced item is closed for the
+owner at once (next section). The message itself is the delivery: the ferret reads `[re !A5 …]` in its chat,
+and the daemon sends nothing else (a `replied` change that no observer reacts to). A notice is never
+referenced. If the ferret finishes a turn without touching a referenced item, the daemon nudges it once
+(nudge-once keys on the `[re !A…` opener); after that it stays quiet.
 
 Picking an option on the card (`respond`) still answers the item, exactly as before. `--other "<words>"`
 remains on the CLI and in the app for "none of the options"; chat no longer guesses it.
+
+## Replying closes the item
+
+An item the owner replied to leaves the owner's open list, the Inbox, the badge counts and "Needs you" the
+moment the message is accepted. Otherwise an item a ferret never touches would hang there for ever.
+
+- **The outcome is its own resolution**, `disposition: 'replied'`: "the owner replied; nothing more is needed
+  unless the ferret asks again". It sits in the resolved list ("Replied" in the app, "replied by you" in
+  `fy agenda show`). Buttons, options and `[answer to !A…]` are unchanged: they still resolve with a
+  response, as `done`.
+- **The words are kept.** The reply text is a `replied` entry in the item's history (the resolution note
+  too), cut at the detail limit. A reply with no words (a bare chip) records the entry without a note.
+- **The ferret can bring it back.** `fy agenda surface <id> [--why "…"]` and the raising ferret's
+  `fy agenda edit <id> …` reopen a `replied` item on the owner's turn, keeping its id, history and edits
+  (change: `reopened`; `surface` records a `surfaced` entry, `edit` an `updated` one with the new
+  wording). The resurface timer may reopen one too. A board that already holds the per-session cap refuses
+  (`full`). Only a `replied` item comes back this way; a done or dismissed one is final.
+- **Warden items follow the same rule.** A daemon-raised item ("&F118 has nobody on it") the owner replied to
+  closes like any other. It is not raised again for the same anomaly: the Warden's "already told" record
+  holds until the anomaly clears.
+- **Discuss is separate.** The owner's explicit Discuss (and a request for more information) still puts the
+  item on the ferret's turn and counts as a request.
+
+**Migration.** An item an earlier daemon left on the ferret's turn _only_ because of an owner reply
+(`waitingFor: 'discussion'`, asked after it was raised, with no `discuss` entry at that instant) is closed as
+`replied` when its board is read, at the instant of the reply, and the next write persists it. A Discuss
+or information request, and an item born in discussion, are left alone. It is pure and idempotent
+(`closeOwnerReplies`).
 
 ## What an item blocks
 
@@ -168,8 +199,8 @@ cryptographic one — the same boundary `fy config confirm` has.
 | Verb                    | Does                                                                    |
 | ----------------------- | ----------------------------------------------------------------------- |
 | `add`                   | Raise an item (the owner's turn). `--title` and the ask are required.   |
-| `edit <id>`             | Reword; on the ferret's turn also hands the item back (silent).         |
-| `surface <id>`          | Hand it back to the owner without changing it (silent).                 |
+| `edit <id>`             | Reword; on the ferret's turn, or a replied item, hands it to the owner. |
+| `surface <id>`          | Hand it back to the owner, or reopen a replied one, unchanged (silent). |
 | `done <id>`             | Resolve, optionally answering its ask (`--choice`, `--yes`, `--other`…) |
 | `dismiss <id>`          | Close without answering; agents only their own.                         |
 | `ls` / `show`           | Open items with turn and blocking fields / one item in full.            |

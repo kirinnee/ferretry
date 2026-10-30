@@ -3272,9 +3272,9 @@ function createSessionSendSubsystem(
           (sent, line) => sent.record.message.includes(line),
         )
         .catch((error: unknown) => sendRefusal(error));
-      // Only once the words were accepted: an item must never read as the ferret's turn for a message the
+      // Only once the words were accepted: an item must never close as replied for a message the
       // ferret was not given.
-      if (turn.referenced.length > 0) await conversation.settle(id, turn);
+      if (turn.referenced.length > 0) await conversation.settle(id, turn, request.message);
       if (person) await instructions.queueIfStale(id);
       return {
         ...(await view(id, 'took the message')),

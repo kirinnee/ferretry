@@ -304,7 +304,7 @@ export const LESSONS_INSTRUCTION = (fy: string): string =>
 export const HYPERMEDIA_ENV = 'FY_HYPERMEDIA';
 
 /**
- * The hypermedia teaching. Short on purpose — it is in every prompt, so only mermaid, svg and     `Each item stands ALONE in full Markdown (\`code\` names, **bold** key point): \`--premise\` = situation, \`--context\` = why now, \`--decided\` = settled, \`--still-open\` = left; \`--body\`: show it (fy-render image|chart|mermaid). are taught
+ * The hypermedia teaching. Short on purpose — it is in every prompt, so only mermaid, svg and html are taught
  * whole; chart keeps one line and every other type is one `render guide <type>` away. docs/hypermedia.md quotes it.
  */
 export const HYPERMEDIA_INSTRUCTION = (fy: string): string =>
@@ -443,10 +443,10 @@ export const AGENDA_ENV = 'FY_AGENDA';
 /** The Agenda mode teaching. Short on purpose — it is in every prompt that turns it on. */
 export const AGENDA_INSTRUCTION = (fy: string): string =>
   [
-    `Agenda mode: keep an agenda of what ONLY the owner can do or decide. Before asking them to decide or DO anything, add each ask as its OWN item: \`${fy} agenda add --title "<topic>" --premise "<situation>" --context "<why now>" "<the ask>"\` (required). Title ≤40 chars; ask ≤120. Read cold: no "as above", ticket/PR numbers, paths or unexplained acronyms (\`--term "X=meaning"\`).`,
-    `Each item stands ALONE: full Markdown (\`code\` names, **bold** key point), \`--decided\` = settled, \`--still-open\` = left; \`--body\`: hypermedia (fy-render image|chart|mermaid|svg) where it helps. \`--kind todo|yesno|permission|choice|review|info\`. Choice: 2–3 \`--option "Label: why"\`; \`--recommend <label> --recommend-why <line>\`. To-do: \`--step "<md>"\`.`,
+    `Agenda mode: keep an agenda of what ONLY the owner can do or decide. To ask them to decide or DO anything, add each ask as its OWN item: \`${fy} agenda add --title "<topic>" --premise "<situation>" --context "<why now>" "<the ask>"\` (required). Title ≤40 chars; ask ≤120. Read cold: no "as above", ticket/PR numbers, paths or unexplained acronyms (\`--term "X=meaning"\`).`,
+    `Each item stands ALONE: full Markdown (\`code\` names, **bold** key point), \`--decided\` = settled, \`--still-open\` = left; \`--body\`: hypermedia (fy-render image|chart|mermaid|svg). \`--kind todo|yesno|permission|choice|review|info\`. Choice: 2–3 \`--option "Label: why"\`; \`--recommend <label> --recommend-why <line>\`. To-do: \`--step "<md>"\`.`,
     `\`--blocking\`: you cannot go on; \`--will-block\`: blocks later; \`--by <time>\`: when needed.`,
-    `"[answer to !A3 …]" is the answer; "[re !A3 …]" is chat. KEEP ITEMS CURRENT: changed or discussed → \`${fy} agenda edit <id>\`; settled → \`${fy} agenda done <id>\`; still theirs → \`${fy} agenda surface <id>\`. Open: \`${fy} agenda ls\`.`,
+    `"[answer to !A3 …]" is the answer; "[re !A3 …]" is chat that closes it: re-raise (\`${fy} agenda surface <id>\`) only if the owner must still decide or act. KEEP ITEMS CURRENT this turn: agenda \`edit <id>\` if changed, \`done <id>\` if settled; \`ls\` = open.`,
   ].join('\n');
 
 /**

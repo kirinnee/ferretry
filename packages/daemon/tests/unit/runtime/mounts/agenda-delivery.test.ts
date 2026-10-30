@@ -390,7 +390,7 @@ describe('the attention loop, from a ferret’s raise to its delivered answer', 
     should(sends.sent.size).equal(0);
   });
 
-  it('should deliver a `!A1` reply in chat as the one message, and put the item in discussion without closing it', async () => {
+  it('should deliver a `!A1` reply in chat as the one message, and close the item as replied', async () => {
     // Arrange
     const { sends, timers, attention: agenda, raise } = loop();
     const id = await raise('What should I call the next test item?');
@@ -399,16 +399,16 @@ describe('the attention loop, from a ferret’s raise to its delivered answer', 
 
     // Act — what the send route does with a person's chat message: prepare, deliver, then settle.
     const turn = await conversation.prepare(SESSION, words);
-    await conversation.settle(SESSION, turn);
+    await conversation.settle(SESSION, turn, words);
 
-    // Assert — the chat message itself is the delivery, and now it is the ferret's turn; nothing is held or resent.
+    // Assert — the chat message itself is the delivery, and the item is closed for the owner; nothing is held or resent.
     should(turn.message).equal(`[re !${id} «What should I call the next test item?»] ${words}`);
     should(turn.referenced.map(item => item.id)).deepEqual([id]);
     should(timers.armed.size).equal(0);
     should(sends.sent.size).equal(0);
     const board = await agenda.list(SESSION);
-    should(board.ok && board.value.resolved).be.empty();
-    should(board.ok && board.value.items[0]).containDeep({ id, waitingOn: 'ferret', waitingFor: 'discussion' });
+    should(board.ok && board.value.items).be.empty();
+    should(board.ok && board.value.resolved[0]).containDeep({ id, disposition: 'replied' });
   });
 
   it('should deliver what a restart interrupted, once, under the same send id', async () => {
