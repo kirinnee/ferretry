@@ -203,7 +203,7 @@ describe('transcript evidence for the tracker', () => {
     const reader = new FakeReader();
     reader.script = [
       [{ batch: batch([], [issue('oversized-record')]), more: false }],
-      [{ batch: batch([input('k')], [issue('source-truncated')]), more: false }],
+      [{ batch: batch([input('k')], [issue('window-capped')]), more: false }],
     ];
     const lossy = evidence(reader);
     const capped = evidence(reader);
@@ -251,6 +251,26 @@ describe('transcript evidence for the tracker', () => {
     should(first).match({ readable: false, catchingUp: true });
     should(second).match({ readable: true, inputs: [{ proofKey: 'late' }] });
     should(reader.opened).have.length(1);
+  });
+
+  it('proves absence once a transcript paged in many truncated steps is read to its end', async () => {
+    // Every step of a window over a transcript larger than one step (8 MiB) stops at its read limit and says
+    // so. That is paging, not loss: read to the end, the window saw every record, and a send it did not see
+    // is absent. Counted as blind, no send to a big conversation could ever be proven absent.
+    const reader = new FakeReader();
+    reader.script = [
+      [
+        ...Array.from({ length: 70 }, () => ({ batch: batch([], [issue('source-truncated')]), more: true })),
+        { batch: batch([input('late')]), more: false },
+      ],
+    ];
+    const subject = evidence(reader);
+
+    const first = await subject.read(ID, AT);
+    const second = await subject.read(ID, AT);
+
+    should(first).match({ readable: false, catchingUp: true });
+    should(second).match({ readable: true, inputs: [{ proofKey: 'late' }] });
   });
 
   it('tells an unknown session, an unbound transcript and a missing source apart', async () => {

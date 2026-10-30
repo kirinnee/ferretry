@@ -225,8 +225,16 @@ export type TranscriptIssueCode =
   | 'unsupported-record'
   | 'source-missing'
   | 'source-read-failed'
-  /** Bytes past the bounded read limit were deliberately not consumed. */
+  /**
+   * Bytes past the bounded read limit were deliberately not consumed. From a window or a follower this is
+   * ordinary paging — the next step reads on from there — and a reader that reached the end missed nothing.
+   */
   | 'source-truncated'
+  /**
+   * A `since` window could not reach back to the instant it was asked for: the file is longer behind that
+   * instant than a window may reach, so it starts later, and what came before its start was never read.
+   */
+  | 'window-capped'
   /** A single unterminated record outgrew the pending buffer and was discarded. */
   | 'oversized-record'
   | 'source-watch-failed';

@@ -352,14 +352,17 @@ describe('foldSendEvidenceBatch', () => {
     // Act
     const appended = foldSendEvidenceBatch(start, batch({ observedInputs: [input('b')] }));
     const reset = foldSendEvidenceBatch(appended, batch({ reset: true, observedInputs: [input('c')] }));
-    const truncated = foldSendEvidenceBatch(reset, batch({ issues: [{ code: 'source-truncated' } as never] }));
+    const capped = foldSendEvidenceBatch(reset, batch({ issues: [{ code: 'window-capped' } as never] }));
     const unrelated = foldSendEvidenceBatch(start, batch({ issues: [{ code: 'invalid-record' } as never] }));
+    // A step that stopped at its read limit is paging: the next step reads on, so nothing was missed.
+    const paged = foldSendEvidenceBatch(start, batch({ issues: [{ code: 'source-truncated' } as never] }));
 
     // Assert
     should(appended).deepEqual({ inputs: [input('a'), input('b')], blind: false, partial: false });
     should(reset.inputs).deepEqual([input('c')]);
-    should(truncated).deepEqual({ inputs: [input('c')], blind: true, partial: true });
+    should(capped).deepEqual({ inputs: [input('c')], blind: true, partial: true });
     should(unrelated).deepEqual(start);
+    should(paged).deepEqual(start);
   });
 });
 

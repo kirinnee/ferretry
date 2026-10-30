@@ -178,8 +178,8 @@ function referenceLiveness(
 const BLIND: ReadonlySet<TranscriptIssueCode> = new Set([
   'source-missing',
   'source-read-failed',
-  'source-truncated',
   'oversized-record',
+  'window-capped',
 ]);
 
 /** `TranscriptSendEvidence.read`'s drain loop before 3a. */
@@ -195,7 +195,7 @@ function referenceSendEvidence(
     if (batch.reset) inputs = [];
     inputs = [...inputs, ...batch.observedInputs];
     if (batch.issues.some(issue => BLIND.has(issue.code))) blind = true;
-    if (batch.issues.some(issue => issue.code === 'source-truncated')) partial = true;
+    if (batch.issues.some(issue => issue.code === 'window-capped')) partial = true;
   }
   return { readable: finished && !blind, inputs, partial };
 }

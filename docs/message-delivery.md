@@ -264,8 +264,11 @@ most `WINDOW_STEP_LIMIT` batches. A window that stopped at that budget kept its 
 (`catchingUp`), so the send WAITS for the next look rather than settling `unaccounted`
 (`transcript_unreadable`) — the lead's 369 MB transcript was called unreadable on every look, each send to
 it read "unconfirmed", and each sender was told it might need sending again, though every one had arrived.
-Only a read that fails, or a window that cannot start where it was asked, is unreadable; the hold ceiling
-still ends a read that never finishes.
+Only a read that fails, or a window that cannot start where it was asked (`window-capped`), is unreadable;
+the hold ceiling still ends a read that never finishes. A step that stops at its read limit (8 MiB) reports
+`source-truncated`, and that is paging: the next step reads on from there, so a window read to its end saw
+every record. Counting it as blind meant no send to a transcript longer than one step could ever be proven
+absent — an 11 MB conversation's sends all read "transcript unreadable".
 
 The incident: one `fy send` to a mid-turn Claude ferret was not recognised as held, so at each deadline
 (15 s, 30 s, 60 s) the tracker called it absent and typed it again — **four copies in one queue**, and
