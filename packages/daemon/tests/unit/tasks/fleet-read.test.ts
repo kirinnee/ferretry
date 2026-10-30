@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { readTaskBoardFleet } from '../../../src/lib/task-boards/fleet-read.ts';
+import { readTaskBoardFleet } from '../../../src/lib/tasks/fleet-read.ts';
 
 /**
  * The one way the task-board domain walks every session.

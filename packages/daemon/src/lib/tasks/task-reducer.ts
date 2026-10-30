@@ -240,7 +240,11 @@ const movePhase = (
   const grant = human
     ? undefined
     : markDoneAuthorizationFor(context.actor, options.completionFingerprint, context.sessionId);
-  const verifiesDone = human || grant !== undefined;
+  // An agent closing its OWN session's live task is a claim, not a verification: the board's grant ACL is
+  // gone, so ownership is the authority and the record says "claimed" rather than attesting anyone checked.
+  const claimsDone =
+    !human && grant === undefined && context.actor.kind === 'agent' && context.actor.sessionId === context.sessionId;
+  const verifiesDone = human || grant !== undefined || claimsDone;
   const clearingManualBlock = current.status === 'blocked' && to === current.phase;
   if (!clearingManualBlock) {
     assertTaskPhaseTransition(current, to, { human, verifiesDone, reopen: options.reopen });
@@ -258,6 +262,7 @@ const movePhase = (
   const completedLive = current.phase === 'live' && to === 'done';
   const verifiedByHuman = completedLive && human;
   const verifiedByTopAgent = completedLive && grant !== undefined;
+  const completionClaim = completedLive && claimsDone;
   // Every attestation this code writes says so, POSITIVELY. A reader must not have to decide from a
   // clock whether the writer drew the identity/authority distinction: the instant this reaches any
   // one daemon is unknowable here, and an un-upgraded host goes on writing conflated records long
@@ -280,6 +285,7 @@ const movePhase = (
         ...(approvedByHuman ? { approvedByHuman: true } : {}),
         ...(verifiedByHuman ? { verifiedByHuman: true } : {}),
         ...(verifiedByTopAgent ? { verifiedByTopAgent: true, authorization: grant } : {}),
+        ...(completionClaim ? { completionClaim: true } : {}),
         ...(attests ? { attestationSemantics: ACTOR_AUTHORITY_SPLIT_SEMANTICS } : {}),
       },
     },

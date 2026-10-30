@@ -18,7 +18,7 @@
  *   BEFORE  the pattern `37af20d4` replaced — one awaited `subsystem.board(id).list()` per session,
  *           in index order, reimplemented below because it no longer exists in the tree to call.
  *   AFTER   the real route, dispatched through the production `ApiRouter`/`ApiDispatcher`, which
- *           reaches `readTaskBoardFleet` in `packages/daemon/src/lib/task-boards/fleet-read.ts`.
+ *           reaches `readTaskBoardFleet` in `packages/daemon/src/lib/tasks/fleet-read.ts`.
  *
  * The AFTER path therefore carries routing, authorization and serialization overhead that the
  * BEFORE path does not. That is deliberate and it biases a meaningful overlapping-read result
@@ -219,7 +219,7 @@ const { boards, latency, samples } = options(Bun.argv.slice(2));
 console.log('╭─ fleet task read benchmark ────────────────────────────────────────────────');
 console.log(`│ capability   GET /v1/tasks — the aggregate fleet board behind \`fy task list\``);
 console.log(`│ file set     packages/daemon/src/lib/runtime/mounts/tasks.ts`);
-console.log(`│              packages/daemon/src/lib/task-boards/fleet-read.ts`);
+console.log(`│              packages/daemon/src/lib/tasks/fleet-read.ts`);
 console.log(`│              (packages/daemon/src/adapters/tasks/file-task-store.ts is ONE file read per board)`);
 console.log(`│ not in scope /v1/sessions/:sessionId/tasks — the PWA pane reads one board, no fleet walk`);
 console.log(`│ fixture      FakeTaskBoard (packages/daemon/tests/unit/runtime/mounts/support.ts), in memory`);

@@ -126,10 +126,6 @@ import { SessionSignalError, type SessionSignalSubsystem } from '../../../../src
 import { type SessionDirectorySubsystem, SessionReadError } from '../../../../src/lib/runtime/mounts/sessions.ts';
 import type { SpeedupsSubsystem } from '../../../../src/lib/runtime/mounts/speedups.ts';
 import type { SttEnhancementSubsystem } from '../../../../src/lib/runtime/mounts/stt.ts';
-import type {
-  TaskBoardSubsystem,
-  TaskBoardTaskActionAuthorizer,
-} from '../../../../src/lib/runtime/mounts/task-boards.ts';
 import type { AssigneeObservation, TaskBoardPort, TaskSubsystem } from '../../../../src/lib/runtime/mounts/tasks.ts';
 import type { BoardSubsystem } from '../../../../src/lib/runtime/mounts/board.ts';
 import { BoardError } from '../../../../src/lib/board/index.ts';
@@ -169,16 +165,6 @@ import type { StoredSessionEvent } from '../../../../src/lib/session/reads/index
 import type { ObservedTerminalPane, RegisteredTerminalPane } from '../../../../src/lib/session/reap.ts';
 import type { ResumeActor } from '../../../../src/lib/session/resume/index.ts';
 import { SttEnhancementError } from '../../../../src/lib/stt/errors.ts';
-import type { TaskBoardError } from '../../../../src/lib/task-boards/error.ts';
-import {
-  EMPTY_TASK_BOARD_REPOSITORY_STATE,
-  type TaskBoardCoordinatorReplacementCapabilityIdentity,
-  type TaskBoardCredentialIssuer,
-  type TaskBoardRepository,
-  type TaskBoardRepositoryState,
-  type TaskBoardSession,
-  type TaskBoardSessionDirectory,
-} from '../../../../src/lib/task-boards/types.ts';
 import {
   applyTaskAction,
   assertActorCanWriteSession,
@@ -358,7 +344,6 @@ export interface TaskWorld {
   readonly observed?: string[][];
   /** Session ids the layout refuses, so the mount's bad-request path can be driven. */
   readonly unusable?: readonly string[];
-  readonly boardActions?: TaskBoardTaskActionAuthorizer;
 }
 
 /** A task subsystem over in-memory boards, with a fixed instant so a body can be asserted exactly. */
@@ -387,7 +372,6 @@ export function taskSubsystem(world: TaskWorld = {}): TaskSubsystem {
       );
     },
     now: () => AT,
-    boardActions: world.boardActions,
   };
 }
 
@@ -1038,7 +1022,6 @@ export function sessionView(
       incarnation: `${id}-1`,
       runtimeGeneration: 1,
       name: 'Wire Subsystems',
-      boardAccess: 'none',
       agent: 'claude-auto',
       harness: 'claude',
       modelHint: 'opus',
@@ -1105,12 +1088,6 @@ export class FakeSessionControl implements SessionControlSubsystem {
   readonly requested: Array<readonly [string, boolean]> = [];
   /** The inline attachments each start carried, so a mount that dropped them is visible. */
   readonly attached: Array<StartSessionRequest['initialAttachments']> = [];
-  /** The board access each start asked for and the capability it presented, as the mount passed
-   *  them down. A mount that read the capability from the body instead of the header, or dropped it,
-   *  is visible here. */
-  readonly boardAsks: Array<readonly [StartSessionRequest['boardAccess'], string | undefined]> = [];
-  /** Board access the fake refuses, as the domain would: the role that is refused, and why. */
-  boardRefusal: { readonly role: string; readonly error: TaskBoardError } | undefined;
   private readonly spent = new Map<string, { readonly id: string; readonly payload: string }>();
   private minted = 0;
 
@@ -1121,17 +1098,9 @@ export class FakeSessionControl implements SessionControlSubsystem {
     private readonly unknownAgents: readonly string[] = [],
   ) {}
 
-  async start(
-    request: StartSessionRequest,
-    requestId: string,
-    payload: string,
-    boardCapability?: string,
-  ): Promise<SessionView> {
+  async start(request: StartSessionRequest, requestId: string, payload: string): Promise<SessionView> {
     this.starts.push([requestId, request.agent]);
     this.attached.push(request.initialAttachments);
-    this.boardAsks.push([request.boardAccess, boardCapability]);
-    if (this.boardRefusal !== undefined && this.boardRefusal.role === request.boardAccess)
-      throw this.boardRefusal.error;
     if (request.teammate !== undefined) this.requested.push([request.teammate, request.teammateFallback === true]);
     const already = this.spent.get(requestId);
     if (already !== undefined) {
@@ -1584,126 +1553,6 @@ export class FakeSessionMigrate implements SessionMigrateSubsystem {
       },
     };
   }
-}
-
-/**
- * A task-board world held entirely in memory.
- *
- * The REDUCERS are production code — this fake supplies only the four ports they were written against
- * — so a board built through these routes is authorized by the same policy a real one is. What is
- * faked is the document (a variable rather than a file), the clock, the randomness, and the delivery
- * channel, which is recorded so a test can assert that a minted capability was handed to the session
- * it was minted for rather than merely produced.
- */
-export class FakeTaskBoards implements TaskBoardSubsystem {
-  /** The authoritative state, exactly as a committed document would hold it. */
-  state: TaskBoardRepositoryState = EMPTY_TASK_BOARD_REPOSITORY_STATE;
-  /** Every delivery, in order: `[sessionId, variables]`. */
-  readonly delivered: [string, Readonly<Record<string, string>>][] = [];
-  /** Ids are sequential so an assertion can name one. */
-  private minted = 0;
-  /** Capabilities are counted separately so exact replays can prove they never ask for new authority. */
-  private capabilitiesMinted = 0;
-  /** Raised by `deliver` when set, so the failure of a delivery is drivable. */
-  deliveryFailure?: Error;
-  /** Raised once after a transaction commits, standing in for a lost HTTP receipt. */
-  transactionFailureAfterCommit?: Error;
-
-  constructor(
-    private readonly directory: readonly TaskBoardSession[] = [],
-    /** The operator's capability. A test presenting anything else must be refused. */
-    readonly operatorCapability = 'operator-secret',
-  ) {}
-
-  readonly issuer: TaskBoardCredentialIssuer = {
-    id: kind => {
-      this.minted += 1;
-      return `${kind}-${this.minted}`;
-    },
-    capability: () => {
-      this.capabilitiesMinted += 1;
-      this.minted += 1;
-      const value = `capability-${this.minted}`;
-      return { value, hash: this.issuer.hash(value) };
-    },
-    // A prefix rather than a digest, so a failing assertion names the secret it was derived from.
-    hash: value => `hash:${value}`,
-  };
-
-  readonly coordinatorReplacementCapabilities = {
-    derive: async (identity: TaskBoardCoordinatorReplacementCapabilityIdentity) => {
-      const value = `recoverable:${this.issuer.hash(
-        JSON.stringify([
-          'fake-coordinator-replacement-seed',
-          identity.requestId.trim(),
-          identity.boardId,
-          identity.memberSessionId,
-          identity.replacementSessionId,
-          identity.replacementRootSessionId,
-          identity.replacementSessionIncarnation,
-          identity.replacementRuntimeGeneration,
-        ]),
-      )}`;
-      return { value, hash: this.issuer.hash(value) };
-    },
-  };
-
-  readonly repository: TaskBoardRepository = {
-    snapshot: async () => this.state,
-    transaction: async operation => {
-      const mutation = await operation(this.state);
-      this.state = mutation.state;
-      if (this.transactionFailureAfterCommit !== undefined) {
-        const failure = this.transactionFailureAfterCommit;
-        this.transactionFailureAfterCommit = undefined;
-        throw failure;
-      }
-      return mutation.result;
-    },
-  };
-
-  readonly sessions: TaskBoardSessionDirectory = { snapshot: async () => this.directory };
-
-  /** The instant every mutation is stamped with. Settable so a test can let an invitation expire. */
-  instant: string = AT;
-
-  now(): string {
-    return this.instant;
-  }
-
-  async operatorCapabilityHash(): Promise<string> {
-    return this.issuer.hash(this.operatorCapability);
-  }
-
-  async deliver(sessionId: string, variables: Readonly<Record<string, string>>): Promise<void> {
-    if (this.deliveryFailure !== undefined) throw this.deliveryFailure;
-    this.delivered.push([sessionId, variables]);
-  }
-
-  /** Number of calls to the random capability issuer, excluding id allocation and deterministic derivation. */
-  get capabilityMintCount(): number {
-    return this.capabilitiesMinted;
-  }
-
-  /** The plaintext capability the board issued to one session, as its binding holds it. */
-  capabilityFor(sessionId: string): string | undefined {
-    return this.state.bindings.find(binding => binding.sessionId === sessionId)?.capability;
-  }
-}
-
-/** A session the board domain can address: it carries a credential hash, so a grant can bind to it. */
-export function boardSession(input: Partial<TaskBoardSession> & Pick<TaskBoardSession, 'id'>): TaskBoardSession {
-  return {
-    id: input.id,
-    incarnation: input.incarnation ?? `${input.id}-1`,
-    runtimeGeneration: input.runtimeGeneration ?? 1,
-    parentSessionId: input.parentSessionId ?? null,
-    mode: input.mode ?? 'interactive',
-    active: input.active ?? true,
-    name: input.name ?? null,
-    teammate: input.teammate ?? null,
-    sessionCapabilityHash: input.sessionCapabilityHash ?? `hash:session:${input.id}`,
-  };
 }
 
 /**

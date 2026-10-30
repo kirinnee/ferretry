@@ -163,7 +163,6 @@ export class SessionTransferPreparer {
         /** Both halves of this seam produce a TOP-LEVEL session. */
         parentSessionId: null,
         /** I3, stated in the payload as well as enforced by the importer's port set. */
-        boardAccess: 'none',
         // The source label remains inventoried above. The target follows the same shield rule as a
         // normal spawn: warden descent forces the detector's operational label.
         label: transferTargetLabel(lineage.value, source.label),

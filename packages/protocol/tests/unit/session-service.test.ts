@@ -173,7 +173,6 @@ const sessionCases: SchemaCase[] = [
   { name: 'session turn state', schema: session.SessionTurnStateSchema, value: 'your-turn' },
   { name: 'question option', schema: session.PendingQuestionOptionSchema, value: { label: 'Yes' } },
   { name: 'pending question', schema: session.PendingQuestionSchema, value: pendingQuestion },
-  { name: 'board access', schema: session.TaskBoardAccessSchema, value: 'worker' },
   { name: 'transcript identity', schema: session.TranscriptIdentitySchema, value: 'minted' },
   { name: 'transcript provenance', schema: session.TranscriptProvenanceSchema, value: transcriptProvenance },
   {
@@ -268,7 +267,7 @@ const sessionCases: SchemaCase[] = [
   {
     name: 'start request',
     schema: session.StartSessionRequestSchema,
-    value: { agent: 'agent', mode: 'auto', prompt: 'Do work', boardAccess: 'none', effort: 'high' },
+    value: { agent: 'agent', mode: 'auto', prompt: 'Do work', effort: 'high' },
   },
   {
     name: 'start request with harness flags',
@@ -276,7 +275,6 @@ const sessionCases: SchemaCase[] = [
     value: {
       agent: 'agent',
       mode: 'interactive',
-      boardAccess: 'none',
       harnessFlags: ['--settings', '{"hooks":{}}', ''],
     },
   },
@@ -682,8 +680,21 @@ describe('session schemas', () => {
 
     // Assert
     should(parsedAuto.mode).equal('auto');
-    should(parsedAuto.boardAccess).equal('none');
     should(parsedInteractive.mode).equal('interactive');
+  });
+
+  it('should strip the retired boardAccess key from a start request instead of rejecting it', () => {
+    // Arrange
+    const legacy = { agent: 'agent', mode: 'auto', prompt: 'work', parent: 'parent', boardAccess: 'worker' };
+
+    // Act
+    const parsed = session.StartSessionRequestSchema.parse(legacy);
+
+    // Assert
+    should(parsed).deepEqual({ agent: 'agent', mode: 'auto', prompt: 'work', parent: 'parent' });
+    should(session.withoutBoardAccess('not an object')).equal('not an object');
+    should(session.withoutBoardAccess(null)).equal(null);
+    should(session.withoutBoardAccess(['boardAccess'])).eql(['boardAccess']);
   });
 
   it('should reject impossible or untrusted session requests', () => {
@@ -708,16 +719,6 @@ describe('session schemas', () => {
         name: 'auto without prompt',
         schema: session.StartSessionRequestSchema,
         value: { agent: 'agent', mode: 'auto' },
-      },
-      {
-        name: 'board access without parent',
-        schema: session.StartSessionRequestSchema,
-        value: { agent: 'agent', mode: 'auto', prompt: 'work', boardAccess: 'worker' },
-      },
-      {
-        name: 'interactive board access',
-        schema: session.StartSessionRequestSchema,
-        value: { agent: 'agent', mode: 'interactive', parent: 'parent', boardAccess: 'worker' },
       },
       {
         name: 'malformed attachment bytes',

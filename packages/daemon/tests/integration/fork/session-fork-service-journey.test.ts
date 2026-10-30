@@ -251,7 +251,6 @@ function sourceConfiguration(seed: SourceSeed): Record<string, unknown> {
     name: SOURCE_NAME,
     teammate: 'alistair',
     label: 'f117',
-    boardAccess: 'worker',
     agent: 'claude-auto-source',
     harness: 'claude',
     modelHint: 'opus',
@@ -910,7 +909,6 @@ describe('the fork journey over real storage', () => {
     should(config.id).equal(outcome.targetSessionId);
     should(config.incarnation).equal(`${outcome.targetSessionId}-1`);
     should(config.runtimeGeneration).equal(1);
-    should(config.boardAccess).equal('none');
     should(config.parent).equal(undefined);
     should(config.teammate).equal(undefined);
     should(config.name).not.equal(SOURCE_NAME);
