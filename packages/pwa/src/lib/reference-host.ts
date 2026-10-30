@@ -3,7 +3,7 @@ import type { AgendaId } from '@ferretry/protocol';
 
 import { agendaConversationPath } from './agenda-inbox.ts';
 import type { DaemonId } from './daemon-connection.ts';
-import { daemonSessionPath } from './pages/routes.ts';
+import { daemonBoardCardPath, daemonSessionPath } from './pages/routes.ts';
 import type { CodeReference } from './references.ts';
 
 export interface ReferenceOpenHost {
@@ -27,7 +27,7 @@ export const sessionReferenceHost = (
   if (!sessionId?.trim()) return {};
   const openSession = (): void => onNavigate(daemonSessionPath(daemonId, sessionId));
   return {
-    onTaskOpen: openSession,
+    onTaskOpen: id => onNavigate(daemonBoardCardPath(daemonId, id.toUpperCase())),
     onCodeReferenceOpen: openSession,
     onAgendaOpen: id => onNavigate(agendaConversationPath(daemonId, sessionId, id)),
   };

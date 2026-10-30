@@ -102,15 +102,15 @@ never rewritten.
 
 ## 4. What each click opens
 
-| Reference    | Click opens                                                                   |
-| ------------ | ----------------------------------------------------------------------------- |
-| `:agent`     | That agent's session, **on the daemon the reference was proved against**      |
-| `@file`      | A file tab in the session workspace, scrolled to the referenced line or range |
-| `&task`      | That task's card detail on this machine's board                               |
-| `!attention` | The agenda panel at the top of this conversation, at that item                |
-| `/skill`     | The Skills tab of this session's "This folder" context                        |
-| `%terminal:` | That exact terminal instance's workspace tab, opened if it is not open        |
-| `%browser:`  | That page's workspace tab, opened if it is not open, with the page in view    |
+| Reference    | Click opens                                                                           |
+| ------------ | ------------------------------------------------------------------------------------- |
+| `:agent`     | That agent's session, **on the daemon the reference was proved against**              |
+| `@file`      | A file tab in the session workspace, scrolled to the referenced line or range         |
+| `&task`      | The card detail on **this machine's board** (`/d/<daemon>/board/<id>`), in a chat too |
+| `!attention` | The agenda panel at the top of this conversation, at that item                        |
+| `/skill`     | The Skills tab of this session's "This folder" context                                |
+| `%terminal:` | That exact terminal instance's workspace tab, opened if it is not open                |
+| `%browser:`  | That page's workspace tab, opened if it is not open, with the page in view            |
 
 The `!attention` reference kind keeps its name in the grammar and in the proof table below; it points at the
 agenda (renamed in a later release).
@@ -213,10 +213,23 @@ What "proved" means per kind:
 | ----------- | -------------------------------------------------------------- |
 | `agent`     | A session in **this daemon's** fleet slice holds that callsign |
 | `file`      | The session filesystem answers with a canonical, readable path |
-| `task`      | The id is on this machine's board                              |
+| `task`      | The id is on this machine's board (see the GAP below)          |
 | `attention` | The id is in this session's agenda ledger, open or resolved    |
 | `skill`     | The name is in this session's skills catalog                   |
 | `surface`   | The session's owner is holding that terminal or page right now |
+
+**A `&task` click opens the card, not a sheet.** The card detail is the Board's own route, so the link
+survives a reload, Back leaves it, and the id is no longer dropped on the way (the Tasks sheet opened
+with no card selected). Chat included: the host's own Tasks destination is only the fallback when the card
+route is unavailable (an older daemon without `/v1/board`, or a host with no router). A card id is unique on
+its machine only, so the destination always carries the daemon the reference was proved against.
+
+> **GAP — task proof still reads the session's task catalog.** The proof set behind `&F12` is the
+> composer's per-session task catalog, not a read of the machine's whole board; a card the board holds
+> that this session never touched stays prose, and the detail itself answers "no card" for an id the
+> machine does not have. Closing it needs a machine-wide id read in the session page; U16's `legacyRef`
+> lookup (old per-session `#T3` ids) is not wired into the resolver yet either, so an old per-session
+> id opens "no such card" rather than its migrated card.
 
 A reader with no resolver for a kind cannot prove it, so that kind stays prose there. A missing
 answer is refusal, never assumption: a fleet that has not been read yet is **not** a fleet with

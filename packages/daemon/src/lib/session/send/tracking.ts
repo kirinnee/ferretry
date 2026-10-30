@@ -88,11 +88,16 @@ export function isOpenSend(record: SendRecord): boolean {
 
 /**
  * A settled send the transcript may still prove delivered: one unconfirmed only because the
- * transcript could not be read, or one a person cancelled — usually while it read as unconfirmed.
+ * transcript could not be read, one a person cancelled — usually while it read as unconfirmed — and one
+ * that timed out. A timed-out send was called absent from what the transcript reader understood at the
+ * time, and the reader has been wrong: Claude's drained prompts recorded as content blocks went unread,
+ * so a message the agent had read showed "not delivered" and was typed again. Watching it lets the
+ * record that is there correct it.
  */
 export function isRepairableSend(record: SendRecord): boolean {
   return (
     record.fate === 'cancelled' ||
+    record.fate === 'timed_out' ||
     (record.fate === 'unaccounted' && record.unaccountedReason === 'transcript_unreadable')
   );
 }

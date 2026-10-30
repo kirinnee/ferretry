@@ -53,6 +53,30 @@ function codexUser(content: unknown, overrides: Record<string, unknown> = {}): R
 }
 
 describe('ClaudeObservedInputObserver', () => {
+  it('should prove a queued prompt Claude drained as content blocks, an image or a paste among them', () => {
+    // Arrange — the drain that carried a ferret's message into the lead's running turn on 2026-10-30,
+    // shaped as Claude 2.1.281 wrote it: a pasted image, then the queued messages' text.
+    const subject = new ClaudeObservedInputObserver();
+    const drained = queuedClaude('', { imagePasteIds: [5] });
+    (drained.attachment as Record<string, unknown>).prompt = [
+      { type: 'text', text: '[Image #5]' },
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } },
+      { type: 'text', text: 'Bug B23 fix is up: https://github.com/kirinnee/ferretry/pull/967' },
+    ];
+
+    // Act
+    const observed = subject.observe(drained, context());
+
+    // Assert
+    should(observed).containDeep([
+      {
+        harness: 'claude',
+        text: '[Image #5]\nBug B23 fix is up: https://github.com/kirinnee/ferretry/pull/967',
+        proof: 'native-queue-drain',
+      },
+    ]);
+  });
+
   it('should emit normal user proof while excluding tool results and non-human records', () => {
     // Arrange
     const subject = new ClaudeObservedInputObserver();

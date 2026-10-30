@@ -13,6 +13,7 @@ import {
   SendRetryRequestSchema,
   SendSubmitRequestSchema,
   type QueuedMessage,
+  QueueEditRequestSchema,
   type SessionHandoff,
   SessionHandoffNameSchema,
   type SessionView,
@@ -100,6 +101,10 @@ export interface SessionSendSubsystem {
   sendStatus(sessionId: string, sendId: string): Promise<SendRecord>;
   /** Every message the session's durable queue holds, oldest first (`lib/session/queue`). */
   queue(sessionId: string): Promise<readonly QueuedMessage[]>;
+  /** New words for a queued message that is still waiting; refused once a key has gone to the pane. */
+  editQueued(sessionId: string, messageId: string, text: string): Promise<QueuedMessage>;
+  /** Takes back a queued message that is still waiting; nothing of it was ever typed. */
+  cancelQueued(sessionId: string, messageId: string): Promise<QueuedMessage>;
   /** Re-attempts one send under its original id, as a person asked. */
   retry(sessionId: string, sendId: string, force: boolean): Promise<SendRecord>;
   /** Takes back one send not proven delivered, erasing it from the composer when it is typed there. */
@@ -269,6 +274,14 @@ function pathSendId(context: RouteContext): string {
   return decoded;
 }
 
+/** The queued message id in the path, decoded. */
+function pathMessageId(context: RouteContext): string {
+  const decoded = decodeParameter(context.params.get('messageId') ?? '');
+  if (decoded === undefined || decoded === '')
+    throw new ApiError(400, 'the message id in the path is not usable', 'invalid_message_id');
+  return decoded;
+}
+
 /**
  * `operator` minimum on the three ledger routes, for the reason the send itself carries it: a send
  * row is the message text, and a retry types it into a live terminal again.
@@ -292,6 +305,28 @@ function sendLedgerRoutes(subsystem: SessionSendSubsystem): readonly ApiRoute[] 
       minimum: 'operator',
       noStore: true,
       handle: async context => jsonResponse({ messages: await subsystem.queue(pathSessionId(context)).catch(refuse) }),
+    },
+    // Editing or taking back a message only while it waits: the words are the sender's until a key goes
+    // to the pane, and the agent's after. Governed as the send itself is.
+    {
+      method: 'PATCH',
+      path: '/v1/sessions/:sessionId/queue/:messageId',
+      minimum: 'operator',
+      noStore: true,
+      handle: async context => {
+        const id = pathSessionId(context);
+        const messageId = pathMessageId(context);
+        const request = await parseBody(context.request, QueueEditRequestSchema);
+        return jsonResponse(await subsystem.editQueued(id, messageId, request.text).catch(refuse));
+      },
+    },
+    {
+      method: 'DELETE',
+      path: '/v1/sessions/:sessionId/queue/:messageId',
+      minimum: 'operator',
+      noStore: true,
+      handle: async context =>
+        jsonResponse(await subsystem.cancelQueued(pathSessionId(context), pathMessageId(context)).catch(refuse)),
     },
     {
       method: 'GET',

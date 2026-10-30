@@ -18,6 +18,7 @@
 @import '../features/agenda/agenda-panel.css';
 @import '../features/agenda/agenda-inbox.css';
 @import '../features/board/board.css';
+@import '../features/board/detail/board-detail.css';
 @import '../features/workspace/workspace.css';
 @import '../features/workspace/processes.css';
 @import '../shell/sessions-bar.css';
