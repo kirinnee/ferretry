@@ -124,8 +124,13 @@ function lineIndexOfComposer(lines: readonly string[]): number | undefined {
   return undefined;
 }
 
-/** Where the composer ends: the indented rows under its prompt line, up to the first blank row or box closer. */
+/**
+ * Where the composer ends: the indented rows under its prompt line, up to the first blank row or box
+ * closer — or, for a Claude composer that its rule closes, up to that rule, blank rows and all.
+ */
 function lastLineOfComposer(lines: readonly string[], at: number): number {
+  const ruled = ruledEnd(lines, at);
+  if (ruled !== undefined) return ruled;
   let end = at;
   for (let index = at + 1; index < lines.length; index += 1) {
     const line = lines[index] as string;
@@ -133,6 +138,34 @@ function lastLineOfComposer(lines: readonly string[], at: number): number {
     end = index;
   }
   return end;
+}
+
+/**
+ * The last drawn row of a Claude draft that runs to the rule closing its composer, or `undefined`
+ * when the rows under the prompt are not that shape.
+ *
+ * Claude draws a draft's blank lines as blank rows INSIDE its composer, between the two rules. A Warden
+ * notice is three paragraphs, so the composer used to end at its first blank row: the cursor, parked
+ * at the end of the third paragraph, then sat below the composer, the reading proved neither a
+ * placeholder nor input, and the composer read `unreadable`. A notice the pane never submitted
+ * therefore refused every later send as "could not be read" — the owner's own message included — and
+ * the landing proof for that same notice could not see it either, so it was never submitted.
+ *
+ * Only `❯`/`>` composers qualify, and only when every row before the rule is blank or an indented
+ * continuation: Codex (`›`) draws no rule under its composer, and its footer is not a draft.
+ */
+function ruledEnd(lines: readonly string[], at: number): number | undefined {
+  const glyph = PROMPT_LINE.exec(lines[at] as string)?.[1];
+  if (glyph !== '❯' && glyph !== '>') return undefined;
+  let end = at;
+  for (let index = at + 1; index < lines.length; index += 1) {
+    const line = lines[index] as string;
+    if (CLOSER.test(line)) return end;
+    if (line.trim() === '') continue;
+    if (!CLAUDE_QUEUE_CONTINUATION.test(line)) return undefined;
+    end = index;
+  }
+  return undefined;
 }
 
 /**

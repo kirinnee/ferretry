@@ -13,7 +13,11 @@ decisions are in `packages/daemon/src/lib/tmux/` and `packages/daemon/src/lib/se
 Every proof reads **the composer itself** — the last prompt-glyph line (`›`, `❯`, `>`) and the indented
 lines a multi-line draft wraps onto, up to the first blank row — together with the cursor tmux reports
 beside the capture (`lib/tmux/composer-screen.ts`). It never asks whether the message's words appear
-somewhere on screen.
+somewhere on screen. A Claude composer (`❯`/`>`) that its rule closes runs to that rule, blank rows
+included: a multi-paragraph draft (a Warden notice is three paragraphs) draws its blank lines inside the
+composer, and ending it at the first one put the cursor below it, read the composer `unreadable`, and
+refused every later send — the owner's included — while the notice itself was never proven landed, so
+never submitted.
 
 That search was the bug the owner hit on Codex ("sometimes Enter doesn't work, and then the message is
 stuck forever"):
