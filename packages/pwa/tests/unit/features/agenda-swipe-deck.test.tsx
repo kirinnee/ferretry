@@ -4,11 +4,10 @@ import { AgendaInboxPage, type AgendaInboxPageProps } from '../../../src/feature
 import {
   AgendaSwipeDeck,
   agendaKeyDirection,
+  bodyTargets,
   deckRoom,
   dragOffset,
-  scrollStartOf,
   swipeKeyHint,
-  verticalTargets,
 } from '../../../src/features/agenda/agenda-swipe-deck.tsx';
 import { AgendaUndoToast } from '../../../src/features/agenda/agenda-undo-toast.tsx';
 import { swipeTargets } from '../../../src/lib/agenda-answers.ts';
@@ -251,10 +250,10 @@ describe('AgendaInboxPage on a phone: the swipe deck', () => {
     await mounted.unmount();
   });
 
-  it('swipes up to the recommended answer in the middle, with a pan-down touch-action so up is the card’s', async () => {
+  it('swipes up from the head to the recommended answer in the middle, the card handing the body its vertical pan', async () => {
     const fake = fakeInbox();
     const mounted = await mount(deckPage(fake, [threeWay, twoWay]));
-    expect(deckTop(mounted).style.touchAction).toBe('pan-down');
+    expect(deckTop(mounted).style.touchAction).toBe('pan-y');
     const target = await dragBy(mounted, 0, -200);
     expect(stamp(mounted)?.getAttribute('data-swipe-direction')).toBe('up');
     expect(stamp(mounted)?.getAttribute('data-swipe-answer')).toBe('Rebase now');
@@ -303,12 +302,24 @@ describe('AgendaInboxPage on a phone: the swipe deck', () => {
     await mounted.unmount();
   });
 
-  it('ignores a right-click drag and springs back when the browser takes the gesture', async () => {
+  it('never swipes with a mouse or a pen, so a mouse drag stays the reader selecting text', async () => {
     const mounted = await mount(deckPage(fakeInbox(), [threeWay]));
     const title = must(deckTop(mounted).querySelector('.fy-attn-card__title'), 'the title');
-    await interact(() => title.dispatchEvent(pointer('pointerdown', 100, 300, { pointerType: 'mouse', button: 2 })));
-    await interact(() => title.dispatchEvent(pointer('pointermove', 300, 300)));
+    for (const init of [{ pointerType: 'mouse' }, { pointerType: 'mouse', button: 2 }, { pointerType: 'pen' }]) {
+      await interact(() => title.dispatchEvent(pointer('pointerdown', 100, 300, init)));
+      await interact(() => title.dispatchEvent(pointer('pointermove', 300, 300)));
+      expect(stamp(mounted)).toBeNull();
+      expect(deckTop(mounted).hasAttribute('data-dragging')).toBe(false);
+    }
+    const body = must(deckTop(mounted).querySelector('[data-agenda-scroll]'), 'the body');
+    await interact(() => body.dispatchEvent(pointer('pointerdown', 100, 300, { pointerType: 'mouse' })));
+    await interact(() => body.dispatchEvent(pointer('pointermove', 300, 300)));
     expect(stamp(mounted)).toBeNull();
+    await mounted.unmount();
+  });
+
+  it('springs back when the browser takes the gesture', async () => {
+    const mounted = await mount(deckPage(fakeInbox(), [threeWay]));
 
     const target = await dragBy(mounted, 200, 0);
     await interact(() => target.dispatchEvent(pointer('pointercancel', 300, 300, { pointerId: 99 })));
@@ -513,49 +524,129 @@ describe('Down is nothing', () => {
   });
 });
 
-describe('verticalTargets', () => {
+describe('bodyTargets', () => {
   const targets = swipeTargets(threeWay.item);
 
-  it('keeps every answer for a drag from the header, the title or the answer bar', () => {
-    expect(verticalTargets(targets, null)).toEqual(targets);
+  it('keeps every answer for a drag from the head', () => {
+    expect(bodyTargets(targets, true)).toEqual(targets);
   });
 
-  it('keeps only the sideways answers mid-way through a scrolling detail, and up at its bottom edge', () => {
-    expect(Object.keys(verticalTargets(targets, { atTop: false, atBottom: false })).sort()).toEqual(['left', 'right']);
-    expect(Object.keys(verticalTargets(targets, { atTop: true, atBottom: false })).sort()).toEqual(['left', 'right']);
-    expect(Object.keys(verticalTargets(targets, { atTop: false, atBottom: true })).sort()).toEqual([
-      'left',
-      'right',
-      'up',
-    ]);
+  it('keeps only the sideways answers for a drag from the body, where up is the reader scrolling', () => {
+    expect(Object.keys(bodyTargets(targets, false)).sort()).toEqual(['left', 'right']);
   });
 
   it('never adds a direction the card does not take', () => {
-    const { up: _up, ...sideways } = targets;
-    expect(verticalTargets(sideways, { atTop: true, atBottom: true })).toEqual(sideways);
+    const { up: _up, left: _left, ...rightOnly } = targets;
+    expect(bodyTargets(rightOnly, false)).toEqual(rightOnly);
   });
 });
 
-describe('scrollStartOf', () => {
-  const detail = (scrollHeight: number, clientHeight: number, scrollTop: number): HTMLElement => {
-    const scroller = document.createElement('div');
-    scroller.setAttribute('data-agenda-scroll', '');
-    for (const [key, value] of Object.entries({ scrollHeight, clientHeight, scrollTop }))
-      Object.defineProperty(scroller, key, { configurable: true, value });
-    const inside = document.createElement('p');
-    scroller.append(inside);
-    return inside;
-  };
+describe('a swipe from anywhere on the card', () => {
+  const bodyOf = (mounted: Mounted): HTMLElement =>
+    must(deckTop(mounted).querySelector<HTMLElement>('[data-agenda-scroll]'), 'the card body');
+  const touch = (target: Element, type: string, x: number, y: number) =>
+    interact(() => target.dispatchEvent(pointer(type, x, y)));
 
-  it('is null outside a detail, and for a detail that fits whole', () => {
-    expect(scrollStartOf(document.createElement('p'))).toBeNull();
-    expect(scrollStartOf(null)).toBeNull();
-    expect(scrollStartOf(detail(200, 200, 0))).toBeNull();
+  it('starts in the middle of the body, and a sideways swipe there answers by direction', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(deckPage(fake, [threeWay, twoWay]));
+    const body = bodyOf(mounted);
+    await touch(body, 'pointerdown', 100, 300);
+    await touch(body, 'pointermove', 190, 304);
+    expect(stamp(mounted)?.getAttribute('data-swipe-direction')).toBe('right');
+    await touch(body, 'pointermove', 300, 304);
+    await touch(body, 'pointerup', 300, 304);
+    expect(pending(fake)).toEqual(['Skip']);
+    await mounted.unmount();
   });
 
-  it('says whether an overflowing detail sat at its top or its bottom', () => {
-    expect(scrollStartOf(detail(900, 200, 0))).toEqual({ atTop: true, atBottom: false });
-    expect(scrollStartOf(detail(900, 200, 300))).toEqual({ atTop: false, atBottom: false });
-    expect(scrollStartOf(detail(900, 200, 700))).toEqual({ atTop: false, atBottom: true });
+  it('decides nothing before 10px of travel, then locks sideways', async () => {
+    const mounted = await mount(deckPage(fakeInbox(), [threeWay]));
+    const body = bodyOf(mounted);
+    await touch(body, 'pointerdown', 100, 300);
+    await touch(body, 'pointermove', 106, 303);
+    expect(deckTop(mounted).hasAttribute('data-dragging')).toBe(false);
+    await touch(body, 'pointermove', 112, 303);
+    expect(deckTop(mounted).hasAttribute('data-dragging')).toBe(true);
+    await mounted.unmount();
+  });
+
+  it('hands a vertical drag from the body to the browser: the card never moves and a later sideways drift is no swipe', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(deckPage(fake, [threeWay, twoWay]));
+    const body = bodyOf(mounted);
+    await touch(body, 'pointerdown', 100, 300);
+    await touch(body, 'pointermove', 104, 260);
+    expect(deckTop(mounted).hasAttribute('data-dragging')).toBe(false);
+    await touch(body, 'pointermove', 300, 262);
+    await touch(body, 'pointerup', 300, 262);
+    expect(deckTop(mounted).hasAttribute('data-dragging')).toBe(false);
+    expect(pending(fake)).toEqual([]);
+    expect(topId(mounted)).toBe('A3');
+    await mounted.unmount();
+  });
+
+  it('never answers up or skips from a drag that began in the body and locked sideways', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(deckPage(fake, [threeWay, twoWay]));
+    const body = bodyOf(mounted);
+    await touch(body, 'pointerdown', 100, 300);
+    await touch(body, 'pointermove', 130, 300);
+    await touch(body, 'pointermove', 130, 60);
+    expect(stamp(mounted)?.hasAttribute('data-swipe-answer')).toBe(false);
+    await touch(body, 'pointerup', 130, 60);
+    expect(pending(fake)).toEqual([]);
+    await mounted.unmount();
+  });
+
+  it('keeps the head’s vertical drag a swipe: the head does not scroll', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(deckPage(fake, [threeWay, twoWay]));
+    const title = must(deckTop(mounted).querySelector('.fy-attn-card__title'), 'the title');
+    await touch(title, 'pointerdown', 100, 300);
+    await touch(title, 'pointermove', 100, 200);
+    expect(stamp(mounted)?.getAttribute('data-swipe-direction')).toBe('up');
+    await touch(title, 'pointercancel', 100, 200);
+    await mounted.unmount();
+  });
+
+  it('never starts on a link, a field or anything else that answers a touch itself', async () => {
+    const mounted = await mount(deckPage(fakeInbox(), [threeWay]));
+    const body = bodyOf(mounted);
+    for (const tag of ['a', 'select', 'summary']) {
+      const element = document.createElement(tag);
+      if (tag === 'a') element.setAttribute('href', '#x');
+      body.appendChild(element);
+      await touch(element, 'pointerdown', 100, 300);
+      await touch(element, 'pointermove', 220, 300);
+      expect(stamp(mounted)).toBeNull();
+    }
+    await mounted.unmount();
+  });
+
+  it('leaves a drag that begins inside a sideways-scrolling table or box to that scroller', async () => {
+    const mounted = await mount(deckPage(fakeInbox(), [threeWay]));
+    const body = bodyOf(mounted);
+    const wide = document.createElement('div');
+    wide.style.overflowX = 'auto';
+    for (const [key, value] of Object.entries({ scrollWidth: 900, clientWidth: 200 }))
+      Object.defineProperty(wide, key, { configurable: true, value });
+    const cell = document.createElement('td');
+    wide.appendChild(cell);
+    body.appendChild(wide);
+    await touch(cell, 'pointerdown', 100, 300);
+    await touch(cell, 'pointermove', 220, 300);
+    expect(stamp(mounted)).toBeNull();
+    expect(deckTop(mounted).hasAttribute('data-dragging')).toBe(false);
+
+    const fits = document.createElement('div');
+    fits.style.overflowX = 'auto';
+    for (const [key, value] of Object.entries({ scrollWidth: 200, clientWidth: 200 }))
+      Object.defineProperty(fits, key, { configurable: true, value });
+    body.appendChild(fits);
+    await touch(fits, 'pointerdown', 100, 300);
+    await touch(fits, 'pointermove', 220, 300);
+    expect(stamp(mounted)?.getAttribute('data-swipe-direction')).toBe('right');
+    await mounted.unmount();
   });
 });
