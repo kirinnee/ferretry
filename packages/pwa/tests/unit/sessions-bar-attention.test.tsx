@@ -124,10 +124,10 @@ describe('unread rows in the sessions bar', () => {
     const { element, calls } = bar();
     view = await mount(element);
     const row = must(view.container.querySelector('[data-sbar-session="old-1"]'), 'the row');
-    expect(row.getAttribute('href') ?? '').toContain('/session/old-1?attention=A2');
+    expect(row.getAttribute('href') ?? '').toContain('/session/old-1?agenda=A2');
     expect(row.querySelector('[data-sbar-ask]')?.textContent).toBe('Ask A2?');
     await click(row, 'the unread row');
-    expect(calls.at(-1)).toBe('navigate:/d/alpha/session/old-1?attention=A2');
+    expect(calls.at(-1)).toBe('navigate:/d/alpha/session/old-1?agenda=A2');
     await click(view.container.querySelector('[data-sbar-session="calm-1"]'), 'the calm row');
     expect(calls.at(-1)).toBe('navigate:/d/alpha/session/calm-1');
   });
@@ -185,7 +185,7 @@ describe('the pure model', () => {
     const loud = unread('loud', 3, 'A4', 1);
     expect(hasAttention(loud)).toBe(true);
     expect(hasAttention(calm('calm'))).toBe(false);
-    expect(sessionRowPath(DAEMON, loud)).toBe('/d/alpha/session/loud?attention=A4');
+    expect(sessionRowPath(DAEMON, loud)).toBe('/d/alpha/session/loud?agenda=A4');
     expect(sessionRowPath(DAEMON, calm('calm'))).toBe('/d/alpha/session/calm');
     expect(attentionWords(1)).toBe('1 open Inbox item');
     expect(attentionWords(3)).toBe('3 open Inbox items');
@@ -235,7 +235,7 @@ describe('the pure model', () => {
 });
 
 describe('the collapsed rail', () => {
-  test('puts the count on the unread dot, links it to ?attention=<first>, and sorts unread dots first', async () => {
+  test('puts the count on the unread dot, links it to ?agenda=<first>, and sorts unread dots first', async () => {
     const { element, calls } = bar({ presentation: 'rail', onExpand: () => undefined, activeSessionId: 'calm-1' });
     view = await mount(element);
     const dots = [...view.container.querySelectorAll('.fy-sbar__dot')];
@@ -250,7 +250,7 @@ describe('the collapsed rail', () => {
     expect(dots[4]?.querySelector('[data-unread-badge]')).toBeNull();
     expect(dots[4]?.getAttribute('aria-current')).toBe('page');
     await click(dots[3] ?? null, 'the unread dot');
-    expect(calls.at(-1)).toBe('navigate:/d/alpha/session/old-1?attention=A2');
+    expect(calls.at(-1)).toBe('navigate:/d/alpha/session/old-1?agenda=A2');
   });
 
   test('caps the dot badge at 99+', async () => {
@@ -338,7 +338,7 @@ describe('across every machine', () => {
     const newer = must(group.querySelector('[data-sbar-session="newer"]'), 'the newer row');
     expect(newer.querySelector('[data-unread-badge]')?.textContent).toContain('3');
     await click(newer, 'the newer row');
-    expect(calls.at(-1)).toBe('navigate:/d/beta/session/newer?attention=A8');
+    expect(calls.at(-1)).toBe('navigate:/d/beta/session/newer?agenda=A8');
   });
 
   test('the rail badges the unread dots and puts them first', async () => {
@@ -354,6 +354,6 @@ describe('across every machine', () => {
     expect(dots.map(dot => dot.getAttribute('data-sbar-unread'))).toEqual(['', '', null]);
     expect(dots[0]?.querySelector('[data-unread-badge]')?.textContent).toBe('3');
     await click(dots[0] ?? null, 'the first dot');
-    expect(calls.at(-1)).toBe('navigate:/d/beta/session/newer?attention=A8');
+    expect(calls.at(-1)).toBe('navigate:/d/beta/session/newer?agenda=A8');
   });
 });

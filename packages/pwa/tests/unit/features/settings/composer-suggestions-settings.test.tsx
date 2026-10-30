@@ -64,8 +64,8 @@ describe('ComposerSuggestionsSettings', () => {
     const tree = JSON.stringify(view.toJSON());
 
     expect(tree).toContain('Open suggestions with');
-    expect(tree).toContain('@ files · @@ agents · @@@ attention');
-    expect(tree).toContain('@ files · : agents · ! attention · % terminals');
+    expect(tree).toContain('@ files · @@ agents · @@@ agenda');
+    expect(tree).toContain('@ files · : agents · ! agenda · % terminals');
     expect(tree).not.toContain('task');
     expect(tree).toContain('$name skill form');
 

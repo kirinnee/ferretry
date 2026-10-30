@@ -313,7 +313,7 @@ export function AttentionAnswerControls({ ask, busy, swipeEnabled = false, onRes
   // explicit role on a generic element, and a fieldset carries the same implicit
   // grouping with a real accessible name.
   return (
-    <fieldset className="m-0 flex min-w-0 flex-col gap-xs border-0 p-0" aria-label="Valid attention answers">
+    <fieldset className="m-0 flex min-w-0 flex-col gap-xs border-0 p-0" aria-label="Valid agenda answers">
       {attentionAnswerChoices(ask).map(choice => (
         <SwipeAttentionAction
           key={choice.key}

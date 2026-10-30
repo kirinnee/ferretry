@@ -293,7 +293,7 @@ describe('composer autocomplete popover', () => {
     expect(active[0]?.children).toContain('agents');
     expect(texts(view)).toContain('1 suggestion');
     // The footer names the keys, what Enter inserts, and what one more @ reaches.
-    expect(texts(view).join(' ')).toContain('type @ again for attention');
+    expect(texts(view).join(' ')).toContain('type @ again for agenda');
   });
 
   test('names the keys in the footer and marks an agent’s status as a dot', () => {

@@ -40,7 +40,7 @@ const candidate = (
 describe('COMPOSER_REFERENCE_TIERS', () => {
   test('should list the three families in frequency order, sigil run matching tier', () => {
     // Assert — kept as data so provider routing, UI teaching and tests cannot drift.
-    should(COMPOSER_REFERENCE_TIERS.map(item => item.label)).deepEqual(['Files', 'Agents', 'Attention']);
+    should(COMPOSER_REFERENCE_TIERS.map(item => item.label)).deepEqual(['Files', 'Agents', 'Agenda']);
     should(COMPOSER_REFERENCE_TIERS.every(item => item.trigger === '@'.repeat(item.tier))).equal(true);
   });
 

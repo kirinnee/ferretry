@@ -643,7 +643,7 @@ describe('composer reference families', () => {
       detail: 'Choose the rollout window',
       replacement: '!A3',
     });
-    expect(attentionRows?.contextLabel).toBe('Attention');
+    expect(attentionRows?.contextLabel).toBe('Agenda');
     for (const result of [agents, attentionRows]) {
       expect(result?.candidates.every(candidate => decodeURIComponent(candidate.id).includes('daemon-a'))).toBe(true);
       expect(result?.candidates.every(candidate => decodeURIComponent(candidate.id).includes('same/session'))).toBe(
@@ -692,7 +692,7 @@ describe('composer reference families', () => {
     const unsupported = await provider.candidates(referenceContext(4, ''));
     expect(unsupported.candidates).toEqual([]);
     expect(unsupported.notice).toContain('one to three @ signs');
-    expect(provider.legend?.map(item => item.label)).toEqual(['Files', 'Agents', 'Attention']);
+    expect(provider.legend?.map(item => item.label)).toEqual(['Files', 'Agents', 'Agenda']);
     // No task tier, no pins family, and nothing that could quietly become a template library.
     expect(provider.legend?.some(item => /task|pin|template/iu.test(item.label))).toBe(false);
   });
@@ -779,7 +779,7 @@ describe('composer reference families', () => {
       candidates: [{ replacement: ':ottis' }],
     });
     expect(attentionProvider?.initialCandidates?.(context('!', 'A3'))).toMatchObject({
-      contextLabel: '! unresolved attention',
+      contextLabel: '! unresolved agenda items',
       candidates: [{ replacement: '!A3' }],
     });
     // The same rows the ladder offers, from the same read — one fact, two doors.

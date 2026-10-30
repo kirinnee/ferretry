@@ -74,7 +74,7 @@ export function ContextSignalsPanel({
     return read.status === 'error' ? (
       <ContextFailure
         title="Couldn’t read what this agent is waiting on"
-        reason="The attention board did not load."
+        reason="The agenda did not load."
         onRetry={() => {
           port.load().catch(() => undefined);
         }}

@@ -732,7 +732,7 @@ const attentionCandidates = (
       label: reference,
       detail: item.subject,
       keywords: `${item.id} ${item.subject} ${item.source}`,
-      group: 'Attention',
+      group: 'Agenda',
       badge: item.source,
       replacement: reference,
       append: 'space',
@@ -857,7 +857,7 @@ export function createReferencesProvider({
 
   const tierResult = (tier: number, query: string): ComposerProviderResult => {
     if (tier === 2) return agentsResult(scope, getSessions(scope), query, 'Agents');
-    if (tier === 3) return attentionResult(scope, getAttentionItems(scope), query, 'Attention');
+    if (tier === 3) return attentionResult(scope, getAttentionItems(scope), query, 'Agenda');
     return {
       candidates: [],
       filterQuery: query,
@@ -937,18 +937,18 @@ export function createDirectReferenceProviders({
     {
       id: scopedId('attention', scope),
       trigger: '!',
-      label: 'Attention',
+      label: 'Agenda',
       shouldOpen: allow,
       get snapshotKey() {
         return trackAttention([getAttentionItems(scope)]);
       },
       initialCandidates: ({ query, signal }) =>
         initialUnlessWarming(waitForAttentionItems, signal, () =>
-          attentionResult(scope, getAttentionItems(scope), query, '! unresolved attention'),
+          attentionResult(scope, getAttentionItems(scope), query, '! unresolved agenda items'),
         ),
       candidates: ({ query, signal }) =>
         warmed(waitForAttentionItems, signal, () =>
-          attentionResult(scope, getAttentionItems(scope), query, '! unresolved attention'),
+          attentionResult(scope, getAttentionItems(scope), query, '! unresolved agenda items'),
         ),
     },
   ];
