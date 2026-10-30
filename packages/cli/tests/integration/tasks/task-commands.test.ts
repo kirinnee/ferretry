@@ -226,6 +226,39 @@ describe('fy task lifecycle verbs', () => {
   });
 });
 
+describe('every remaining task verb', () => {
+  const verbs: readonly (readonly [string, readonly string[], string])[] = [
+    ['focus', ['focus', 'F412'], 'focus'],
+    ['block', ['block', 'F412', 'waiting', 'on', 'legal'], 'block'],
+    ['unblock', ['unblock', 'F412'], 'unblock'],
+    ['depend', ['depend', 'F412', 'F2', '--until', 'released'], 'depend'],
+    ['undepend', ['undepend', 'F412', 'F2'], 'undepend'],
+    ['drop', ['drop', 'F412', '--reason', 'superseded'], 'drop'],
+    ['reopen', ['reopen', 'F412', '--to', 'implement', '--ask', 'one more thing'], 'reopen'],
+    ['clarify', ['clarify', 'F412', 'also', 'the', 'header', '--source', 'chat://2'], 'clarify'],
+    ['link', ['link', 'F412', '--branch', 'feat/x'], 'link'],
+    ['order', ['order', 'F412', '3'], 'order'],
+    ['file', ['file', 'F412', 'src/a.ts'], 'file'],
+    ['edit', ['edit', 'F412', '--summary', 'a line', '--term', 'x=y'], 'edit'],
+    ['refile', ['refile', 'F412', '--project', 'Ferretry'], 'refile'],
+    ['feedback', ['feedback', 'F412', 'nice'], 'note'],
+  ];
+
+  for (const [name, argv, action] of verbs) {
+    it(`should send ${name} as the ${action} action`, async () => {
+      // Arrange
+      const { run, gateway } = harness();
+
+      // Act
+      await run('task', ...argv);
+
+      // Assert
+      should(gateway.acted?.id).equal('F412');
+      should(gateway.acted?.request).have.property('action', action);
+    });
+  }
+});
+
 describe('the transition shims', () => {
   it('should refuse fy task status with the new spelling', async () => {
     const { run } = harness();
