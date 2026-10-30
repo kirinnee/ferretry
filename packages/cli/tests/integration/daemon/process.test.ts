@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import { BunDaemonProcess } from '../../../src/adapters/daemon/process';
+import { waitFor } from '../support/wait-for';
 
 /**
  * Real processes, but only ones this test started, and only inside a temp directory.
@@ -72,8 +73,10 @@ describe('bun daemon process', () => {
     // Assert
     should(handle.pid).be.a.Number();
     if (handle.pid !== undefined) spawned.push(handle.pid);
-    await Bun.sleep(150);
-    const written = await Bun.file(logFile).text();
+    const written = await waitFor(async () => {
+      const text = await Bun.file(logFile).text();
+      return text.includes('started') && text.includes('warned') ? text : undefined;
+    }, 'the child to write both its stdout and its stderr lines to the log');
     should(written).containEql('started');
     should(written).containEql('warned');
   });
@@ -111,7 +114,10 @@ describe('bun daemon process', () => {
       logFile,
     });
     if (handle.pid !== undefined) spawned.push(handle.pid);
-    await Bun.sleep(150);
+    await waitFor(
+      async () => (await Bun.file(logFile).text()).includes('later'),
+      'the child to append its line to the log',
+    );
 
     // Assert
     should(await Bun.file(logFile).text()).equal('earlier run\nlater\n');
@@ -128,7 +134,10 @@ describe('bun daemon process', () => {
       logFile,
     });
     if (handle.pid !== undefined) spawned.push(handle.pid);
-    await Bun.sleep(150);
+    await waitFor(
+      async () => (await Bun.file(logFile).text()).includes('extra='),
+      'the child to write its environment line to the log',
+    );
 
     // Assert
     should(await Bun.file(logFile).text()).equal(`home=${root} extra=unset\n`);
@@ -154,27 +163,30 @@ describe('bun daemon process', () => {
     // Act + Assert
     should(subject.alive(pid)).be.true();
     should(subject.signal(pid, 'SIGTERM')).be.true();
-    for (let attempt = 0; attempt < 50 && subject.alive(pid); attempt += 1) await Bun.sleep(20);
+    await waitFor(() => !subject.alive(pid), 'the child to be gone');
     should(subject.alive(pid)).be.false();
   });
 
   it('should escalate to an unconditional kill', async () => {
-    // Arrange — a shell that ignores SIGTERM is exactly the case escalation exists for.
+    // Arrange — a shell that sees SIGTERM and carries on is exactly the case escalation exists for. It
+    // says when its trap is armed and when it has taken the signal, so no timer stands in for either.
+    const logFile = join(root, 'fyd.log');
     const handle = await subject.spawnDetached({
-      argv: ['sh', '-c', 'trap "" TERM; sleep 30'],
+      argv: ['sh', '-c', "trap 'echo term-seen' TERM; echo armed; while :; do sleep 30 & wait $!; done"],
       environment: { PATH: process.env.PATH ?? '' },
-      logFile: join(root, 'fyd.log'),
+      logFile,
     });
     const pid = handle.pid ?? 0;
     spawned.push(pid);
-    await Bun.sleep(150);
+    const logged = async (line: string) => (await Bun.file(logFile).text()).includes(line);
+    await waitFor(() => logged('armed'), 'the shell to arm its SIGTERM trap');
 
     // Act
     subject.signal(pid, 'SIGTERM');
-    await Bun.sleep(150);
+    await waitFor(() => logged('term-seen'), 'the shell to take the SIGTERM without exiting');
     const survived = subject.alive(pid);
     subject.signal(pid, 'SIGKILL');
-    for (let attempt = 0; attempt < 50 && subject.alive(pid); attempt += 1) await Bun.sleep(20);
+    await waitFor(() => !subject.alive(pid), 'the child to be gone');
 
     // Assert
     should(survived).be.true();
@@ -196,13 +208,16 @@ describe('bun daemon process', () => {
     await writeFile(other, '');
     const handle = await open(held, 'r');
     const child = await subject.spawnDetached({
-      argv: ['sh', '-c', `exec 3<"${other}"; sleep 30`],
+      argv: ['sh', '-c', `exec 3<"${other}"; echo open; sleep 30`],
       environment: { PATH: process.env.PATH ?? '' },
       logFile: join(root, 'child.log'),
     });
     const childPid = child.pid ?? 0;
     spawned.push(childPid);
-    await Bun.sleep(150);
+    await waitFor(
+      async () => (await Bun.file(join(root, 'child.log')).text()).includes('open'),
+      'the child to hold the file open',
+    );
 
     try {
       // Act

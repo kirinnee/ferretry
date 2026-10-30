@@ -20,6 +20,7 @@ import { resolveDaemonLayout } from '../../../src/lib/daemon/layout.ts';
 import { DirectSupervisor } from '../../../src/lib/daemon/supervisor.ts';
 import { StateHomeClaimService } from '../../../src/lib/state-home/claim.ts';
 import { TEARDOWN_TIMEOUT_MS, tearDownSupervisedDaemons } from '../support/supervised-daemon-teardown.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 /**
  * A session started on a daemon that `fy daemon start` launched — the way the bug hid.
@@ -166,12 +167,11 @@ async function arrange(
 }
 
 async function waitForHealth(port: number, logFile: string): Promise<void> {
-  for (let attempt = 0; attempt < 400; attempt += 1) {
-    if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) return;
-    await Bun.sleep(50);
-  }
-  const log = await readFile(logFile, 'utf8').catch(() => '(no log)');
-  throw new Error(`the daemon never answered its health probe:\n${log}`);
+  await waitFor(
+    async () => (await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true,
+    'the daemon to answer its health probe',
+    { pollMs: 50, evidence: async () => await readFile(logFile, 'utf8').catch(() => '(no log)') },
+  );
 }
 
 interface BootedDaemon {
@@ -279,15 +279,18 @@ describe('a session on a daemon `fy daemon start` launched', () => {
     if (terminal === undefined) throw new Error(`the daemon's tmux server has no session\n${await logOf(daemon)}`);
     await Bun.spawn([TMUX, '-S', socket, 'send-keys', '-t', terminal, '-l', 'go']).exited;
     await Bun.spawn([TMUX, '-S', socket, 'send-keys', '-t', terminal, 'Enter']).exited;
-    const exitedAt = Date.now();
-    let actual = await read();
-    // Generous for a loaded CI host: a dead pane whose exit status tmux has not recorded yet is left
-    // running for the next tick, so the settle may take a few intervals. The old behaviour never left
-    // `running` at all, so any deadline separates the two.
-    while (actual.state.status === 'running' && Date.now() - exitedAt < 20_000) {
-      await Bun.sleep(100);
-      actual = await read();
-    }
+    // A dead pane whose exit status tmux has not recorded yet is left running for the next tick, so the
+    // settle takes however many ticks it takes. The old behaviour never left `running` at all.
+    const settled: { view?: Awaited<ReturnType<typeof read>> } = {};
+    await waitFor(
+      async () => {
+        settled.view = await read();
+        return settled.view.state.status !== 'running';
+      },
+      'the session to leave running after its agent exited',
+      { pollMs: 100, evidence: async () => `${JSON.stringify(settled.view?.state)}\n${await logOf(daemon)}` },
+    );
+    const actual = settled.view ?? (await read());
 
     // Assert
     should(actual.state).match(
