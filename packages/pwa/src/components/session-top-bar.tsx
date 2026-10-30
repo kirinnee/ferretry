@@ -80,6 +80,8 @@ export interface SessionTopBarProps {
   readonly onToggleInfo?: () => void;
   /** Actions ▾, rendered by the page that owns every action. */
   readonly menu?: ReactNode;
+  /** The far-right control after Actions ▾: the phone's theme quick switch. */
+  readonly trailing?: ReactNode;
   /** Phone only: opens the sessions drawer. */
   readonly onOpenSessions?: () => void;
   /** The ferret that started this one, as a link to it. Absent for a ferret a person started. */
@@ -104,6 +106,7 @@ export function SessionTopBar({
   infoOpen = false,
   onToggleInfo,
   menu,
+  trailing,
   onOpenSessions,
   startedBy,
   subFerrets,
@@ -193,6 +196,7 @@ export function SessionTopBar({
         </button>
       )}
       {menu}
+      {trailing}
     </header>
   );
 }

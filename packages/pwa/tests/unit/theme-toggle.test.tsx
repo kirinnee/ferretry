@@ -303,6 +303,44 @@ describe('ThemeToggle', () => {
     await view.unmount();
   });
 
+  it('is an icon-only 44px target in touch mode, and says the choice is for this device', async () => {
+    // Arrange
+    installMatchMedia();
+    const view = await mount(<ThemeToggle touch store={new ThemePreferenceStore(memoryStorage())} />);
+    const button = trigger(view.container);
+
+    // Assert — no family label beside the icon, and a target no smaller than 44px at any pointer.
+    expect(button.textContent).toBe('');
+    expect(button.className).toContain('min-h-[44px]');
+    expect(button.className).toContain('min-w-[44px]');
+
+    // Act
+    await open(view.container);
+
+    // Assert
+    expect(panel()?.querySelector('[data-theme-scope]')?.textContent).toBe('This device');
+    await view.unmount();
+  });
+
+  it('writes the same stored value the Settings page reads, so there is one source of truth', async () => {
+    // Arrange
+    installMatchMedia();
+    const seed: Record<string, string> = {};
+    const store = new ThemePreferenceStore(memoryStorage(seed));
+    const view = await mount(<ThemeToggle store={store} />);
+    await open(view.container);
+
+    // Act
+    await interact(() => modeControl('dark').click());
+    await interact(() => familyControls()[2]?.click());
+
+    // Assert
+    expect(store.snapshot().mode).toBe('dark');
+    expect(store.snapshot().family).toBe('neo');
+    expect(Object.keys(seed).length).toBeGreaterThan(0);
+    await view.unmount();
+  });
+
   it('opens on the family in force and points aria-controls at the live panel', async () => {
     // Arrange
     installMatchMedia();
