@@ -136,6 +136,12 @@ describe('composer autocomplete popover', () => {
       toggle.props.onPointerUp({ pointerId: 7 });
     });
     expect(flips).toEqual([true, true]);
+    run(() => {
+      toggle.props.onPointerDown({ pointerId: 8, preventDefault: () => undefined });
+      toggle.props.onPointerCancel();
+      toggle.props.onPointerUp({ pointerId: 8 });
+    });
+    expect(flips).toEqual([true, true]);
 
     run(() =>
       view.update(

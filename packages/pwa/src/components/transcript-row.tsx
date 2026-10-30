@@ -268,7 +268,8 @@ function HandoffRow({
   const { reading, source } = useHandoffReading(handoff.name);
   const notice = reading.state === 'read' ? parseFerretryNotice(reading.handoff.message) : null;
   if (notice !== null) return <HandoffNoticeRow entry={entry} notice={notice} rhythm={rhythm} />;
-  const instructions = reading.state === 'read' ? parseInstructionsUpdate(reading.handoff.message, entry.send?.queue?.by) : null;
+  const instructions =
+    reading.state === 'read' ? parseInstructionsUpdate(reading.handoff.message, entry.send?.queue?.by) : null;
   if (instructions !== null) return <InstructionsUpdateRow entry={entry} rhythm={rhythm} update={instructions} />;
   const parsed = reading.state === 'read' ? parsePeerEnvelope(reading.handoff.message) : null;
   if (parsed !== null && source !== null && reading.state === 'read')
