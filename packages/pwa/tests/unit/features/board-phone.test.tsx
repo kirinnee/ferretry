@@ -315,20 +315,21 @@ describe('Board on a phone — counts and filters', () => {
 });
 
 describe('Board on a phone — rows waiting to be tested', () => {
-  it('puts ✓ Works and ✗ Not good right on the row', async () => {
+  it('puts ✓ Done and ✗ Not good right on the row', async () => {
     const { root } = await open('at=tested');
     const row = must(root.querySelector('[data-task="F4"]'), 'the To test row');
+    expect(row.querySelector('.fy-board-done')?.textContent).toBe('Done');
+    expect(row.querySelector('.fy-board-done')?.getAttribute('aria-label')).toBe(
+      'Mark Try the thing done and close it',
+    );
     const buttons = [...row.querySelectorAll<HTMLButtonElement>('.fy-board-verdict')];
-    expect(buttons.map(button => button.textContent)).toEqual(['Works', 'Not good']);
-    expect(buttons.map(button => button.getAttribute('aria-label'))).toEqual([
-      'Works: close Try the thing',
-      'Not good: send back Try the thing',
-    ]);
+    expect(buttons.map(button => button.textContent)).toEqual(['Not good']);
+    expect(buttons.map(button => button.getAttribute('aria-label'))).toEqual(['Not good: send back Try the thing']);
   });
 
-  it('closes the card in one tap on Works', async () => {
+  it('closes the card in one tap on Done', async () => {
     const { root, acts } = await open('at=tested');
-    await click(root, '[data-task="F4"] [data-verdict="works"]');
+    await click(root, '[data-task="F4"] .fy-board-done');
     expect(acts).toEqual([{ id: 'F4', request: { action: 'move', to: 'closed' } }]);
   });
 

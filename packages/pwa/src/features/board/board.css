@@ -541,6 +541,14 @@
   font-size: var(--text-xs);
   cursor: pointer;
 }
+.fy-board-card__verdict .fy-board-done {
+  min-width: 0;
+  flex: 1 1 0;
+  justify-content: center;
+}
+.fy-board-menu__item[data-done='done'] {
+  color: var(--ok);
+}
 .fy-board-verdict[data-verdict='works'] {
   border-color: var(--ok);
   background: var(--ok-bg);

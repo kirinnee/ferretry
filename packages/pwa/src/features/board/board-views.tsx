@@ -62,6 +62,7 @@ interface PlacedProps {
 export function PlacedCard({ card, env, lane, depth }: PlacedProps) {
   const place = env.places.get(card.key);
   const moves = place === undefined ? undefined : env.movesFor(card, place);
+  const done = place === undefined ? undefined : env.doneFor?.(card, place);
   return (
     <BoardCard
       card={card}
@@ -75,6 +76,7 @@ export function PlacedCard({ card, env, lane, depth }: PlacedProps) {
       showMachine={env.showMachine}
       touch={env.touch === true}
       {...(moves === undefined ? {} : { moves })}
+      {...(done === undefined ? {} : { done })}
       {...(lane === undefined ? {} : { lane })}
       {...(depth === undefined ? {} : { depth })}
     />

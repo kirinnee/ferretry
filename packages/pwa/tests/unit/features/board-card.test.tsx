@@ -216,6 +216,72 @@ describe('BoardCard', () => {
     expect(side.querySelector('.fy-board-card__verdict')).toBeNull();
   });
 
+  it('closes a card waiting to be tried with the shared Done, in place of Close, and keeps Not good', async () => {
+    const log: string[] = [];
+    const done = { done: { kind: 'done', laneId: 'closed' } as const, press: () => void log.push('done') };
+    const root = await draw({ category: 'verify', done, moves: moves(log) });
+    expect(root.querySelector('[data-verdict="works"]')).toBeNull();
+    const button = must(root.querySelector<HTMLButtonElement>('.fy-board-card__verdict .fy-board-done'), 'Done');
+    expect(button.textContent).toContain('Done');
+    await interact(() => button.click());
+    await interact(() => must(root.querySelector<HTMLButtonElement>('[data-verdict="not-good"]'), 'Not good').click());
+    expect(log).toEqual(['done', 'move:implement']);
+    await release();
+    const touch = await draw({ category: 'verify', done, moves: moves(), touch: true });
+    expect(touch.querySelector('.fy-board-card__verdict .fy-board-done')).not.toBeNull();
+  });
+
+  it('keeps Works → Close when the card has no Done to offer', async () => {
+    const reopen = { done: { kind: 'reopen', laneId: 'implement' } as const, press: () => undefined };
+    const root = await draw({ category: 'verify', done: reopen, moves: moves() });
+    expect(root.querySelector('[data-verdict="works"]')).not.toBeNull();
+    expect(root.querySelector('.fy-board-done')).toBeNull();
+  });
+
+  it('gives a Released card its own Done row, and none where Done does not apply', async () => {
+    const log: string[] = [];
+    const done = { done: { kind: 'done', laneId: 'closed' } as const, press: () => void log.push('done') };
+    const root = await draw({ category: 'shipped', done, moves: moves() });
+    await interact(() =>
+      must(root.querySelector<HTMLButtonElement>('.fy-board-card__verdict .fy-board-done'), 'Done').click(),
+    );
+    expect(log).toEqual(['done']);
+    await release();
+    const side = await draw({ category: 'shipped', density: 'side', done, moves: moves() });
+    expect(side.querySelector('.fy-board-done')).toBeNull();
+    await release();
+    const other = await draw({ category: 'active', done, moves: moves() });
+    expect(other.querySelector('.fy-board-card__verdict')).toBeNull();
+    await release();
+    const bare = await draw({ category: 'shipped' });
+    expect(bare.querySelector('.fy-board-done')).toBeNull();
+  });
+
+  it('puts Done (or Reopen) first in the ⋯ menu, even when there are no lanes to move to', async () => {
+    const log: string[] = [];
+    const done = { done: { kind: 'done', laneId: 'closed' } as const, press: () => void log.push('done') };
+    const root = await draw({ done, moves: moves(log) });
+    await interact(() =>
+      must(root.querySelector<HTMLButtonElement>('.fy-board-card__more'), 'the menu button').click(),
+    );
+    const first = must(root.querySelector<HTMLButtonElement>('[role="menuitem"]'), 'the first item');
+    expect(first.textContent).toBe('Done');
+    expect(first.dataset.done).toBe('done');
+    await interact(() => first.click());
+    expect(log).toEqual(['done']);
+    expect(root.querySelector('[role="menu"]')).toBeNull();
+    await release();
+    const reopen = { done: { kind: 'reopen', laneId: 'implement' } as const, press: () => void log.push('reopen') };
+    const closed = await draw({ category: 'closed', done: reopen, moves: moves([], { choices: [] }) });
+    await interact(() =>
+      must(closed.querySelector<HTMLButtonElement>('.fy-board-card__more'), 'the menu button').click(),
+    );
+    const only = [...closed.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+    expect(only.map(item => item.textContent)).toEqual(['Reopen']);
+    await interact(() => must(only[0], 'Reopen').click());
+    expect(log).toEqual(['done', 'reopen']);
+  });
+
   it('marks a card whose lane is unknown as unplaced', async () => {
     const root = await draw({ category: null });
     expect(must(root.querySelector('li'), 'the card').dataset.category).toBe('unplaced');
