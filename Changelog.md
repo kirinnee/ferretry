@@ -1,3 +1,10 @@
+## [4.120.1](https://github.com/kirinnee/ferretry/compare/v4.120.0...v4.120.1) (2026-10-30)
+
+### Fixes
+
+* **daemon:** settle launches a restart interrupted, and bound stop behind a live launch ([#969](https://github.com/kirinnee/ferretry/issues/969)) ([7cc382d](https://github.com/kirinnee/ferretry/commit/7cc382d67b040217dd8e3128ab266af2bae9c53b))
+* **pwa:** session rows always show the session name; outdated becomes an icon ([#949](https://github.com/kirinnee/ferretry/issues/949)) ([978f205](https://github.com/kirinnee/ferretry/commit/978f205b7b23bb0f545937b7913a0f9726f13c8a))
+
 ## [4.120.0](https://github.com/kirinnee/ferretry/compare/v4.119.1...v4.120.0) (2026-10-30)
 
 ### Features
