@@ -8,6 +8,9 @@
  *
  * A card is a real link to its detail (`/d/<id>/board/<taskId>`). When the page can move cards it is also
  * draggable, and a "Move to…" menu does the same job from the keyboard; both end in the same `onMove`.
+ *
+ * `touch` is the phone: thumb-sized targets, no drag (a finger scrolls, it does not drag), and the two
+ * answers on a card waiting to be tried drawn as full-width **✓ Works** and **✗ Not good** buttons.
  */
 
 import type { LaneCategory } from '@ferretry/protocol';
@@ -51,6 +54,8 @@ export interface BoardCardProps {
   readonly lane?: string;
   /** Nesting under a lead, for the Tree. */
   readonly depth?: number;
+  /** A phone: bigger targets, the verdict buttons spelled out, no drag. */
+  readonly touch?: boolean;
 }
 
 export function BoardCard({
@@ -66,6 +71,7 @@ export function BoardCard({
   dragging = false,
   lane,
   depth,
+  touch = false,
 }: BoardCardProps) {
   const { task } = card;
   const segments = cardSegments(task, {
@@ -85,7 +91,8 @@ export function BoardCard({
       data-dragging={dragging ? '' : undefined}
       data-kind={task.kind}
       data-task={task.id}
-      draggable={moves !== undefined}
+      data-touch={touch ? '' : undefined}
+      draggable={moves !== undefined && !touch}
       style={depth === undefined ? undefined : ({ '--fy-board-depth': depth } as CSSProperties)}
       onDragEnd={moves?.onDragEnd}
       onDragStart={
@@ -127,38 +134,49 @@ export function BoardCard({
         </span>
       </RouteLink>
       {moves !== undefined && moves.choices.length > 0 ? <BoardMoveMenu card={card} moves={moves} /> : null}
-      {toTest ? <ToTestActions card={card} moves={moves} /> : null}
+      {toTest ? <ToTestActions card={card} moves={moves} touch={touch} /> : null}
     </li>
   );
 }
 
 /** The two one-tap answers on a card waiting to be tried: it works, or it does not. */
-function ToTestActions({ card, moves }: { readonly card: BoardCardOf; readonly moves: BoardCardMoves }) {
+function ToTestActions({
+  card,
+  moves,
+  touch,
+}: {
+  readonly card: BoardCardOf;
+  readonly moves: BoardCardMoves;
+  readonly touch: boolean;
+}) {
   const { closeLaneId, reworkLaneId } = moves;
   if (closeLaneId === null && reworkLaneId === null) return null;
+  const size = touch ? 16 : 11;
   return (
-    <div className="fy-board-card__verdict">
+    <div className="fy-board-card__verdict" data-touch={touch ? '' : undefined}>
       {closeLaneId === null ? null : (
         <button
+          aria-label={touch ? `Works: close ${card.task.title}` : undefined}
           className="fy-board-verdict"
           data-verdict="works"
           onClick={() => moves.onMove(card, closeLaneId)}
           title="Works → Close"
           type="button"
         >
-          <Check aria-hidden="true" size={11} />
-          Close
+          <Check aria-hidden="true" size={size} />
+          {touch ? 'Works' : 'Close'}
         </button>
       )}
       {reworkLaneId === null ? null : (
         <button
+          aria-label={touch ? `Not good: send back ${card.task.title}` : undefined}
           className="fy-board-verdict"
           data-verdict="not-good"
           onClick={() => moves.onMove(card, reworkLaneId)}
           title="Not good → back for rework"
           type="button"
         >
-          <X aria-hidden="true" size={11} />
+          <X aria-hidden="true" size={size} />
           Not good
         </button>
       )}

@@ -123,6 +123,7 @@ import { WhatsNewSheet } from './features/whats-new/whats-new-sheet.tsx';
 import { useAccountPickerSlice } from './hooks/use-account-picker.ts';
 import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
+import { type BoardMachine, useBoard } from './hooks/use-board.ts';
 import { useAgendaSession, useAgendaSnapshot } from './hooks/use-agenda.ts';
 import { AgendaInboxContext, useAgendaInbox, useAgendaInboxModel, useInboxMachines } from './hooks/use-agenda-inbox.ts';
 import { useAgendaReplies } from './hooks/use-agenda-replies.ts';
@@ -163,6 +164,8 @@ import { useTheme } from './hooks/use-theme.ts';
 import { type MachineSource, machineDisplayOrder } from './lib/all-machines.ts';
 import { AgendaWireProbes } from './lib/agenda-wire-react.tsx';
 import { agendaTargetFromSearch } from './lib/agenda-inbox.ts';
+import { NO_BOARD_FILTERS } from './lib/board-model.ts';
+import { boardBadgeCount } from './lib/board-phone.ts';
 import { inboxSourceFromSearch } from './lib/agenda-inbox-list.ts';
 import { transcriptIsCurrent } from './lib/background-fresh.ts';
 import { DEFAULT_CARRIER_PREFERENCE } from './lib/carrier-preference.ts';
@@ -242,6 +245,7 @@ import { tunnelNote } from './lib/tunnel-service.ts';
 import {
   AppBar,
   AppTabBar,
+  type AppTabBarProps,
   appBarDestinationForRoute,
   type Crumb,
   showsTabBar,
@@ -1986,12 +1990,11 @@ function AgendaRoute({ connection }: DaemonPageProps) {
  * The Board across every paired machine. The query string carries the filters and the view, so a view is a
  * link; a change replaces the entry (the back button leaves the board, it does not walk every filter).
  */
-function BoardRoute(_props: BoardPageProps) {
+function useBoardMachines(): readonly BoardMachine[] {
   const store = useAppStore();
-  const { navigate } = useRouter();
   const { connections } = useConnectionSnapshot();
   const savedOrder = useMachineOrder(store.controls).saved;
-  const machines = useMemo(
+  return useMemo(
     () =>
       machineDisplayOrder(connections, savedOrder).map(record => ({
         connection: record,
@@ -1999,6 +2002,23 @@ function BoardRoute(_props: BoardPageProps) {
       })),
     [connections, savedOrder],
   );
+}
+
+/**
+ * The phone's bottom bar with the Board tab's number on it. It shares the Board page's own unfiltered read
+ * (the same store key), so the badge costs no request of its own; only this subtree renders when it moves.
+ */
+function PhoneTabBar(props: Omit<AppTabBarProps, 'boardCount'>) {
+  const store = useAppStore();
+  const machines = useBoardMachines();
+  const { model } = useBoard(store.board, machines, NO_BOARD_FILTERS);
+  return <AppTabBar {...props} boardCount={boardBadgeCount(model.counts)} />;
+}
+
+function BoardRoute(_props: BoardPageProps) {
+  const store = useAppStore();
+  const { navigate } = useRouter();
+  const machines = useBoardMachines();
   const fleet = useSyncExternalStore(
     listener => store.fleet.subscribe(listener),
     () => store.fleet.getSnapshot(),
@@ -2021,7 +2041,7 @@ function BoardRoute(_props: BoardPageProps) {
     <BoardPage
       agenda={store.attention}
       callsigns={callsigns}
-      compact={phone}
+      phone={phone}
       machines={machines}
       onNavigate={navigate}
       onSearch={onSearch}
@@ -2657,7 +2677,7 @@ export function AppShell() {
                   </PullToPaletteRegion>
                   {/* The phone's level one sits under the page, above the home indicator. */}
                   {phone && showsTabBar(pageRoute) ? (
-                    <AppTabBar
+                    <PhoneTabBar
                       daemon={connection.daemonId}
                       agendaCount={agendaInbox.total}
                       active={appBarDestinationForRoute(pageRoute)}

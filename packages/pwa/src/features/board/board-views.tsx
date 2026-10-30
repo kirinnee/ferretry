@@ -40,6 +40,8 @@ export interface BoardCardEnv {
   readonly places: ReadonlyMap<string, BoardCardPlace>;
   /** The card being dragged, and the board it came from: only that board's lanes take the drop. */
   readonly dragging: { readonly cardKey: string; readonly groupKey: string } | null;
+  /** A phone: thumb-sized cards and the To test buttons spelled out. */
+  readonly touch?: boolean;
 }
 
 interface PlacedProps {
@@ -49,7 +51,7 @@ interface PlacedProps {
   readonly depth?: number;
 }
 
-function PlacedCard({ card, env, lane, depth }: PlacedProps) {
+export function PlacedCard({ card, env, lane, depth }: PlacedProps) {
   const place = env.places.get(card.key);
   const moves = place === undefined ? undefined : env.movesFor(card, place);
   return (
@@ -63,6 +65,7 @@ function PlacedCard({ card, env, lane, depth }: PlacedProps) {
       now={env.now}
       onNavigate={env.onNavigate}
       showMachine={env.showMachine}
+      touch={env.touch === true}
       {...(moves === undefined ? {} : { moves })}
       {...(lane === undefined ? {} : { lane })}
       {...(depth === undefined ? {} : { depth })}
