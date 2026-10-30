@@ -3,7 +3,8 @@
  * where they are, visible and typeable, below it; the transcript stays mounted underneath (its scroll position is
  * simply kept) and nothing of it shows or takes focus while this is open.
  *
- *   top     STICKY   the title, the one-line ask, where the item stands, ‹ n of N › and ✕
+ *   top     STICKY   the title, the one-line ask, where the item stands, ‹ n of N › and ✕ — on a PHONE one line:
+ *                    the title cut to fit, and the ask is the body's first paragraph unless ⓘ pins it here
  *   body    SCROLLS  the ONE scroller (`overscroll-behavior: contain`, no nested scroller): the questions, what's
  *                    going on, why it matters, decided, still open, options, terms as a Term | Meaning table, steps,
  *                    mock-ups, then the history — what the owner said and what changed
@@ -16,8 +17,9 @@
  */
 
 import type { AgendaItem, AgendaQuestion } from '@ferretry/protocol';
-import { ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Info, X } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 'react';
+import { readAskPinned, writeAskPinned } from '../../lib/agenda-ask-pin.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import type { HistoryEvent } from '../../lib/agenda-history.ts';
 import { type InboxAction, questionAnswersAction, swipeMap } from '../../lib/agenda-inbox.ts';
@@ -89,6 +91,8 @@ export function AgendaItemView({
 }: AgendaItemViewProps) {
   const root = useRef<HTMLElement | null>(null);
   const [picks, setPicks] = useState<readonly string[]>([]);
+  // On a phone the head is one line and the ask is the body's first paragraph; ⓘ pins it in the head instead.
+  const [pinned, setPinned] = useState(readAskPinned);
   const model = cardModel(item);
   const map = swipeMap(item);
   const questions = item.questions ?? [];
@@ -144,6 +148,7 @@ export function AgendaItemView({
       aria-modal="true"
       className="fy-item-view"
       data-agenda-view={item.id}
+      data-ask-pinned={pinned || undefined}
       onKeyDown={onKeyDown}
       ref={root}
       role="dialog"
@@ -180,6 +185,21 @@ export function AgendaItemView({
             >
               <ChevronRight aria-hidden="true" size={18} />
             </button>
+            {ask === null ? null : (
+              <button
+                aria-label="Pin the ask here"
+                aria-pressed={pinned}
+                className="fy-item-view__step fy-item-view__info"
+                data-agenda-info=""
+                onClick={() => {
+                  writeAskPinned(!pinned);
+                  setPinned(!pinned);
+                }}
+                type="button"
+              >
+                <Info aria-hidden="true" size={18} />
+              </button>
+            )}
             <button
               aria-label={closeLabel}
               className="fy-item-view__step fy-item-view__close"
@@ -202,6 +222,11 @@ export function AgendaItemView({
       </header>
       <div className="fy-item-view__body" data-agenda-body="">
         <div className="fy-item-view__column">
+          {ask === null ? null : (
+            <div className="fy-item-view__body-ask" data-agenda-body-ask="">
+              {renderProse(ask)}
+            </div>
+          )}
           <AgendaDelivery busy={busy} ferret={ferret} item={item} onAct={onAct} />
           <AgendaConfigChange item={item} />
           <AgendaDetail
