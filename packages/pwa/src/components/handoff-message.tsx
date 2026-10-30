@@ -21,6 +21,7 @@ import { FileText, Info } from 'lucide-react';
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { StoredTranscriptAttachment } from '../lib/attachments.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
+import { AgendaMessageOr } from './agenda-message.tsx';
 import { TranscriptAttachmentGallery } from './attachment-gallery.tsx';
 import { Markdown } from './markdown.tsx';
 
@@ -201,7 +202,7 @@ export function HandoffBody({ handoff, source }: { readonly handoff: SessionHand
   const named = handoff.attachments.filter(attachment => attachment.attachmentId === undefined);
   return (
     <>
-      {handoff.message.trim() === '' ? null : <Markdown className="fy-handoff-text" text={handoff.message} />}
+      {handoff.message.trim() === '' ? null : <HandoffText text={handoff.message} />}
       {stored.length === 0 ? null : (
         <TranscriptAttachmentGallery className="fy-handoff-files" daemon={source.daemon} images={stored} />
       )}
@@ -227,7 +228,7 @@ export function HandoffBody({ handoff, source }: { readonly handoff: SessionHand
 function HandoffDraftBody({ draft }: { readonly draft: HandoffDraft }) {
   return (
     <>
-      {draft.message.trim() === '' ? null : <Markdown className="fy-handoff-text" text={draft.message} />}
+      {draft.message.trim() === '' ? null : <HandoffText text={draft.message} />}
       {draft.files.length === 0 ? null : (
         <ul className="fy-handoff-chips">
           {draft.files.map(file => {
@@ -243,6 +244,14 @@ function HandoffDraftBody({ draft }: { readonly draft: HandoffDraft }) {
       )}
     </>
   );
+}
+
+/**
+ * A handed-over message's words: Markdown, or the agenda cards a burst of answers reads as (`agenda-message.tsx`) —
+ * a batch is several paragraphs, so it travels as a file.
+ */
+function HandoffText({ text }: { readonly text: string }) {
+  return <AgendaMessageOr fallback={<Markdown className="fy-handoff-text" text={text} />} text={text} />;
 }
 
 /** When the file is gone the line is simply shown, because then it is the only thing explaining the faded pointer above it. */
