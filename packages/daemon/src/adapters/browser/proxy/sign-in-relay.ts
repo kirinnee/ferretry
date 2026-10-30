@@ -1,16 +1,16 @@
-import { createServer, connect as tcpConnect, type AddressInfo, type Server, type Socket } from 'node:net';
+import { type AddressInfo, createServer, type Server, type Socket, connect as tcpConnect } from 'node:net';
 import { connect as tlsConnect } from 'node:tls';
 import {
-  type Destination,
-  type ProxyEndpoint,
-  CONNECT_ESTABLISHED,
-  MAX_HEAD_BYTES,
   badRequest,
   basicProxyAuthorization,
+  CONNECT_ESTABLISHED,
   connectHead,
+  type Destination,
   forwardedHead,
   gatewayFailure,
   headEnd,
+  MAX_HEAD_BYTES,
+  type ProxyEndpoint,
   parseAuthority,
   parsePlainTarget,
   parseRequestHead,
@@ -83,7 +83,7 @@ class Reader {
   }
 }
 
-function dial(upstream: ProxyEndpoint): Promise<Socket> {
+function dial(upstream: ProxyEndpoint, timeoutMs: number): Promise<Socket> {
   return new Promise((resolve, reject) => {
     const socket =
       upstream.scheme === 'https'
@@ -92,7 +92,7 @@ function dial(upstream: ProxyEndpoint): Promise<Socket> {
     const timer = setTimeout(() => {
       socket.destroy();
       reject(new Error('timed out'));
-    }, CONNECT_TIMEOUT_MS);
+    }, timeoutMs);
     socket.once(upstream.scheme === 'https' ? 'secureConnect' : 'connect', () => {
       clearTimeout(timer);
       socket.setNoDelay(true);
@@ -118,11 +118,16 @@ export class ProxySignInRelay {
     private readonly server: Server,
     private readonly upstream: ProxyEndpoint,
     private readonly credentials: ProxyCredentials,
+    private readonly connectTimeoutMs: number,
   ) {}
 
-  static async start(upstream: ProxyEndpoint, credentials: ProxyCredentials): Promise<ProxySignInRelay> {
+  static async start(
+    upstream: ProxyEndpoint,
+    credentials: ProxyCredentials,
+    connectTimeoutMs = CONNECT_TIMEOUT_MS,
+  ): Promise<ProxySignInRelay> {
     const server = createServer();
-    const relay = new ProxySignInRelay(server, upstream, credentials);
+    const relay = new ProxySignInRelay(server, upstream, credentials, connectTimeoutMs);
     server.on('connection', socket => {
       relay.track(socket);
       void relay.serve(socket);
@@ -202,7 +207,7 @@ export class ProxySignInRelay {
       this.splice(client, reader, opened);
       return;
     }
-    const socket = await dial(this.upstream);
+    const socket = await dial(this.upstream, this.connectTimeoutMs);
     this.track(socket);
     const auth = basicProxyAuthorization(this.credentials.username, this.credentials.password);
     socket.write(forwardedHead(head, head.target, auth));
@@ -223,7 +228,7 @@ export class ProxySignInRelay {
   private async open(destination: Destination): Promise<{ socket: Socket; leftover: Uint8Array } | string> {
     let socket: Socket;
     try {
-      socket = await dial(this.upstream);
+      socket = await dial(this.upstream, this.connectTimeoutMs);
     } catch {
       return proxyUnreachable(this.upstream);
     }

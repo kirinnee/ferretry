@@ -76,7 +76,7 @@ async function exchange(relayPort: number, open: string, then: string | undefine
         sent = true;
         socket.write(then);
       }
-      if (then !== undefined && received.includes('echo:')) socket.destroy();
+      if (received.includes('echo:')) socket.destroy();
     });
     socket.on('close', () => resolve(received));
   });
@@ -144,5 +144,58 @@ describe('ProxySignInRelay', () => {
     const started = await relay('http', 1);
     const reply = await exchange(started.port, 'NOT A REQUEST\r\n\r\n', undefined);
     should(reply).startWith('HTTP/1.1 400');
+  });
+
+  it('should say the proxy could not be reached when a plain request cannot dial it', async () => {
+    const started = await relay('http', 1);
+    const reply = await exchange(
+      started.port,
+      'GET http://example.test/a HTTP/1.1\r\nHost: example.test\r\n\r\n',
+      undefined,
+    );
+    should(reply).startWith('HTTP/1.1 502');
+    should(reply).containEql('could not be reached');
+  });
+
+  it('should forward a plain request through a SOCKS5 proxy', async () => {
+    const proxy = await socksProxy(await origin());
+    const started = await relay('socks5', proxy);
+    const reply = await exchange(
+      started.port,
+      'GET http://example.test/a HTTP/1.1\r\nHost: example.test\r\n\r\n',
+      undefined,
+    );
+    should(reply).containEql('echo:GET /a HTTP/1.1');
+  });
+
+  it('should name the status a proxy answered when it is neither a sign-in nor a tunnel', async () => {
+    const proxy = await listen(
+      createServer(client => client.once('data', () => client.end('HTTP/1.1 403 Forbidden\r\n\r\n'))),
+    );
+    const started = await relay('http', proxy);
+    const reply = await exchange(started.port, 'CONNECT example.test:443 HTTP/1.1\r\nHost: x\r\n\r\n', undefined);
+    should(reply).startWith('HTTP/1.1 502');
+    should(reply).containEql('answered 403');
+  });
+
+  it('should say the proxy could not be reached when it resets the connection mid-handshake', async () => {
+    const proxy = await listen(createServer(client => client.once('data', () => client.resetAndDestroy())));
+    const started = await relay('http', proxy);
+    const reply = await exchange(started.port, 'CONNECT example.test:443 HTTP/1.1\r\nHost: x\r\n\r\n', undefined);
+    should(reply).startWith('HTTP/1.1 502');
+    should(reply).containEql('could not be reached');
+  });
+
+  it('should give up on an HTTPS proxy that never completes its handshake', async () => {
+    const silent = await listen(createServer(() => undefined));
+    const started = await ProxySignInRelay.start(
+      { scheme: 'https', host: '127.0.0.1', port: silent },
+      { username: 'user', password: 'pass' },
+      50,
+    );
+    relays.push(started);
+    const reply = await exchange(started.port, 'CONNECT example.test:443 HTTP/1.1\r\nHost: x\r\n\r\n', undefined);
+    should(reply).startWith('HTTP/1.1 502');
+    should(reply).containEql('could not be reached');
   });
 });
