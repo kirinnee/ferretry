@@ -23,6 +23,7 @@ import { daemonSessionPath, daemonSessionsPath, daemonSettingsPath } from '../li
 import type { DaemonProjectsStore } from '../lib/projects-store.ts';
 import type { DaemonUsageSlice, DaemonUsageStore } from '../lib/usage-store.ts';
 import { Button, Card, PanelBody, Textarea } from '../shell/primitives.tsx';
+import { PageThemeSwitch } from '../shell/theme-toggle.tsx';
 import type { AccountPickerOption, AccountUsageRow } from './daemon-picker-model.ts';
 import { projectPickerOptions } from './daemon-picker-model.ts';
 import { DaemonProjectPicker } from './daemon-pickers.tsx';
@@ -356,6 +357,9 @@ export function NewSessionPage({
         <h1 className="m-0 text-title font-semibold tracking-tight" id="new-session-heading">
           New session
         </h1>
+        <div className="ml-auto">
+          <PageThemeSwitch />
+        </div>
       </div>
 
       {createFleetClient === undefined ? null : (

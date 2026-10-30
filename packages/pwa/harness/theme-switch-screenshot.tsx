@@ -1,9 +1,10 @@
 /**
- * Screenshots of the theme quick switch in the top-right corner. Each scene is shot closed and with the popover
- * open, in the light and dark studio themes:
+ * Screenshots of the theme quick switch, which lives in a header that is already there. Each scene is shot
+ * closed and with the popover open, in the light and dark studio themes:
  *
- *   * desktop — the shell's own corner strip above a page's header (the REAL `ThemeCornerStrip` and
- *     `SessionTopBar`, 1440px).
+ *   * desktop — the session header's action row, the switch last after Actions (the REAL `SessionTopBar`, 1440px).
+ *   * desktop-page — a page with no session header: the Insights tab strip carries it at its right end (the REAL
+ *     `InsightsFrame` and `PageThemeSwitch`, 1440px).
  *   * phone — the top bar of a non-session page (the REAL `AppBar` with its theme slot, 390px).
  *   * phone-session — the session page's compact bar, where the switch is the last control after Actions.
  *
@@ -35,7 +36,8 @@ const PAGE_ENTRY = `
 import { createRoot } from 'react-dom/client';
 import { AppBar, AppTabBar } from '../../src/shell/app-bar.tsx';
 import { SessionTopBar } from '../../src/components/session-top-bar.tsx';
-import { ThemeCornerStrip, ThemeToggle } from '../../src/shell/theme-toggle.tsx';
+import { InsightsFrame } from '../../src/shell/insights-frame.tsx';
+import { ThemeToggle } from '../../src/shell/theme-toggle.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { sessionView } from '../../tests/support/sessions.ts';
 
@@ -46,7 +48,7 @@ const scene = new URLSearchParams(location.search).get('scene');
 
 const Body = () => (
   <div className="flex-1 p-4 text-ui text-muted">
-    <p className="m-0">The page under the bar. The corner never overlaps it.</p>
+    <p className="m-0">The page under the bar. The switch shares the bar; there is no strip of its own.</p>
   </div>
 );
 const Menu = () => (
@@ -55,17 +57,30 @@ const Menu = () => (
 
 const desktop = (
   <div className="kt-shell flex flex-col overflow-hidden">
-    <ThemeCornerStrip />
     <SessionTopBar
-      actions={<button type="button" className="kt-btn kt-btn--sm">Interrupt</button>}
+      actions={
+        <>
+          <button type="button" className="kt-btn kt-btn--sm">Interrupt</button>
+          <button type="button" className="kt-btn kt-btn--sm" data-variant="danger">Stop</button>
+        </>
+      }
       compact={false}
       menu={<Menu />}
       onToggleInfo={noop}
       project="ferretry"
       session={session}
+      trailing={<ThemeToggle iconOnly />}
       turn="your-turn"
     />
     <Body />
+  </div>
+);
+
+const desktopPage = (
+  <div className="kt-shell flex flex-col overflow-hidden">
+    <InsightsFrame current="analytics" daemonId={connection.daemonId} onNavigate={noop}>
+      <Body />
+    </InsightsFrame>
   </div>
 );
 
@@ -96,14 +111,16 @@ const phoneSession = (
       onToggleInfo={noop}
       project="ferretry"
       session={session}
-      trailing={<ThemeToggle touch />}
+      trailing={<ThemeToggle iconOnly touch />}
       turn="your-turn"
     />
     <Body />
   </div>
 );
 
-createRoot(document.getElementById('root')).render(scene === 'desktop' ? desktop : scene === 'phone' ? phone : phoneSession);
+createRoot(document.getElementById('root')).render(
+  scene === 'desktop' ? desktop : scene === 'desktop-page' ? desktopPage : scene === 'phone' ? phone : phoneSession,
+);
 `;
 
 const html = `<!doctype html>
@@ -143,6 +160,7 @@ const executablePath =
 const browser = await chromium.launch({ executablePath, headless: true });
 const SCENES = [
   { name: 'desktop', width: 1440, height: 900, mobile: false },
+  { name: 'desktop-page', width: 1440, height: 900, mobile: false },
   { name: 'phone', width: 390, height: 844, mobile: true },
   { name: 'phone-session', width: 390, height: 844, mobile: true },
 ] as const;

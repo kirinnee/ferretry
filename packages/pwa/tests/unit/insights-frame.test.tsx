@@ -26,6 +26,19 @@ describe('InsightsFrame', () => {
     await interact(() => must(tabs[2], 'Learning').click());
     expect(went).toEqual(['/d/alpha/analytics', '/d/alpha/learning']);
   });
+
+  test('carries the theme switch at the right end of the same strip, not on a bar of its own', async () => {
+    view = await mount(
+      <InsightsFrame current="analytics" daemonId={'alpha' as DaemonId} onNavigate={() => {}}>
+        <p data-page="">Analytics page</p>
+      </InsightsFrame>,
+    );
+    const switches = view.container.querySelectorAll<HTMLElement>('[data-page-theme-switch]');
+    expect(switches).toHaveLength(1);
+    const strip = must(switches[0]?.parentElement, 'strip');
+    expect(strip.lastElementChild).toBe(switches[0] ?? null);
+    expect(strip.querySelector('[data-insights-tab]')).not.toBeNull();
+  });
 });
 
 describe('InsightsFrame geometry', () => {

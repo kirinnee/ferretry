@@ -16,6 +16,7 @@ import type { ReactNode } from 'react';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import { daemonAnalyticsPath, daemonLearningPath, daemonWardenPath } from '../lib/pages/routes.ts';
 import { UnderlineTabs } from './underline-tabs.tsx';
+import { PageThemeSwitch } from './theme-toggle.tsx';
 
 export type InsightsView = 'analytics' | 'warden' | 'learning';
 
@@ -41,9 +42,10 @@ export interface InsightsFrameProps {
 export function InsightsFrame({ daemonId, current, onNavigate, children }: InsightsFrameProps) {
   return (
     <div className="flex h-full min-h-0 w-full flex-col" data-insights={current}>
-      <div className={`shrink-0 pt-2 ${INSIGHTS_GUTTER_CLASS}`}>
+      <div className={`flex shrink-0 items-end gap-2 pt-2 ${INSIGHTS_GUTTER_CLASS}`}>
         <h1 className="sr-only">Insights</h1>
         <UnderlineTabs
+          className="min-w-0 flex-1"
           current={current}
           label="Insights"
           marker="data-insights-tab"
@@ -52,6 +54,7 @@ export function InsightsFrame({ daemonId, current, onNavigate, children }: Insig
           }
           tabs={INSIGHTS_TABS}
         />
+        <PageThemeSwitch />
       </div>
       <div className={`flex min-h-0 flex-1 flex-col ${INSIGHTS_GUTTER_CLASS}`} data-insights-body="">
         {children}

@@ -34,6 +34,7 @@ import { AddProjectForm } from './add-project-form.tsx';
 import { ProjectDiscoveries } from './project-discoveries.tsx';
 import { ProjectProvenance } from './project-provenance.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
+import { PageThemeSwitch } from '../../shell/theme-toggle.tsx';
 import {
   confirmDiscoveryRequest,
   emptyProjectRegistrationDraft,
@@ -158,6 +159,7 @@ export function ProjectsHub({
             <Plus size={14} aria-hidden="true" />
             Add project
           </button>
+          <PageThemeSwitch />
         </div>
         {open && (
           <div id={FORM_ID}>

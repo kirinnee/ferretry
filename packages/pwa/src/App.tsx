@@ -164,7 +164,7 @@ import {
 } from './hooks/use-service-worker-update.ts';
 import { useSttSettings } from './hooks/use-stt-settings.ts';
 import { useTheme } from './hooks/use-theme.ts';
-import { ThemeCornerStrip, ThemeToggle } from './shell/theme-toggle.tsx';
+import { ThemeToggle } from './shell/theme-toggle.tsx';
 import { type MachineSource, machineDisplayOrder } from './lib/all-machines.ts';
 import { AgendaWireProbes } from './lib/agenda-wire-react.tsx';
 import { attentionTargetFromSearch } from './lib/attention-inbox.ts';
@@ -2576,7 +2576,6 @@ export function AppShell() {
                       themeToggle={<ThemeToggle touch />}
                     />
                   ) : null}
-                  {phone ? null : <ThemeCornerStrip />}
                   <ConnectionHealthNotice health={store.connectionHealth} machines={noticeMachines} />
                   <NewDeviceNotices connections={connectionSnapshot.connections} clients={store.clients} />
                   {pageRoute.kind === 'settings' ? null : (

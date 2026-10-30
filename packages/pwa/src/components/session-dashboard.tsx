@@ -40,6 +40,7 @@ import { daemonNewSessionPath, daemonSessionsPath } from '../lib/pages/routes.ts
 import type { SessionQuotaResolver } from '../lib/usage.ts';
 import { type NewSessionMachine, NewSessionMenu, withReach } from '../shell/new-session-menu.tsx';
 import { RouteLink } from '../shell/route-link.tsx';
+import { PageThemeSwitch } from '../shell/theme-toggle.tsx';
 import { ViewTabs } from '../shell/view-tabs.tsx';
 import { CacheUpdating } from './cache-updating.tsx';
 import { MachineStatusRow } from './machine-status.tsx';
@@ -278,6 +279,7 @@ export function SessionDashboard({
               <span className="hidden sm:inline">New session</span>
             </RouteLink>
           )}
+          <PageThemeSwitch />
         </div>
       </div>
 
