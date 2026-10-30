@@ -65,6 +65,10 @@ const LOG = [
   '[01:49:30] user/message: The pane never came back',
   '[01:49:35] user/message: Taken back before it was typed',
   '[01:49:40] user/message: The session ended before the proof arrived',
+  '[01:49:45] user/message: [ferretry] [board] Task F12 moved to review',
+  '[01:49:50] user/message: [ferretry] [warden] A push to main was held for you',
+  '[01:49:55] user/message: [re !A12 — Ship it?] yes, ship it',
+  '[01:50:00] user/message: [message from ferret sada (session mvuzx42l-a9f7db82) — not from the owner]\\nNo reply needed. To reply: fy send sada "<reply>"\\n\\nthe build is green',
 ].join('\\n');
 
 const base = { acceptedAt: '2026-10-18T01:45:00.000Z', attachmentIds: [] as string[] };
@@ -88,6 +92,10 @@ const QUEUED_FATES: Record<number, object> = {
   15: { fate: 'timed_out', ...queue('failed', { failure: 'the pane never came back' }) },
   16: { fate: 'cancelled', ...queue('cancelled') },
   17: { fate: 'timed_out', unaccountedReason: 'session_ended' },
+  18: { fate: 'delivered', senderKind: 'daemon' },
+  19: { fate: 'delivered', senderKind: 'daemon' },
+  20: { fate: 'delivered' },
+  21: { fate: 'delivered' },
 };
 Object.assign(FATES, QUEUED_FATES);
 const ANSWERED = new Set([0]);
