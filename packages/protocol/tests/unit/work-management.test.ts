@@ -234,6 +234,11 @@ const agendaCases: SchemaCase[] = [
     value: { term: 'OCI', meaning: 'Oracle Cloud Infrastructure' },
   },
   {
+    name: 'option detail',
+    schema: agenda.AgendaOptionDetailSchema,
+    value: { label: 'Use SQLite', detail: 'One file, **no server**. Set `journal_mode=WAL`.' },
+  },
+  {
     name: 'brief question',
     schema: agenda.AgendaQuestionSchema,
     value: {
