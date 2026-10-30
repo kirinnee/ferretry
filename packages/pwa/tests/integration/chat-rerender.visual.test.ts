@@ -89,8 +89,17 @@ afterAll(async () => {
 });
 
 const shoot = async (tab: Page, name: string): Promise<void> => {
-  if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${tag}-${name}.png`) });
+  if (shotsDir === '') return;
+  await tab.waitForTimeout(150);
+  await tab.screenshot({ path: join(shotsDir, `${tag}-${name}.png`) });
 };
+
+/** Waits until two animation frames have run, so React's commit and the iframe's reaction have settled. */
+const framesSettled = async (tab: Page): Promise<void> =>
+  await tab.evaluate(() => new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
+
+/** The words the scene's record at this second shows (see `fullLog` in the scene). */
+const wordsAt = (second: number): string => (second % 2 === 0 ? `question ${second}` : `Here is answer ${second}.`);
 
 describe('what the reader is doing survives new messages', () => {
   it('keeps the interactive frame, its picked tab and an open tool group through five new messages', async () => {
@@ -120,15 +129,14 @@ describe('what the reader is doing survives new messages', () => {
       expect(await tab.locator(GROUP_BODY).count()).toBe(1);
       expect(await day2.getAttribute('aria-pressed')).toBe('true');
       await tab.locator(FRAME).scrollIntoViewIfNeeded();
-      await tab.waitForTimeout(150);
       await shoot(tab, '1-interacted');
 
       // Five messages arrive, one by one; each slides the window.
       for (let message = 0; message < 5; message++) {
         await tab.evaluate(() => window.__appendMessages(1));
-        await tab.waitForTimeout(150);
+        await tab.waitForFunction(words => document.body.innerText.includes(words), wordsAt(14 + message));
+        await framesSettled(tab);
       }
-      await tab.waitForTimeout(300);
       await shoot(tab, '2-after-5-messages');
 
       // The same iframe, still on Day 2, and the group still open.
