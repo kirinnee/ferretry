@@ -382,30 +382,8 @@ export function planSessionLayoutGeometry(run: SessionLayoutRun): {
     });
   const assertPhoneComfort = async (): Promise<void> => {
     const idle = new Map<string, Awaited<ReturnType<typeof readComfort>>>();
-    await openEach('phone', FAMILY_IDS, 'turn=your-turn&pickers&chat-width=readable', async (page, where, family) => {
+    await openEach('phone', FAMILY_IDS, 'turn=your-turn&pickers&chat-width=readable', async (page, _where, family) => {
       idle.set(family, await readComfort(page));
-      // EMPTY, THE PHONE COMPOSER IS ONE LINE (owner: an empty one took about 260px): attach, the mic,
-      // the field and Send side by side, the row (inside the theme's own inset) no taller than one 44px control.
-      const field = page
-        .locator('[data-session-input] .fy-composer-input-layer :is(textarea, [contenteditable])')
-        .first();
-      await field.click();
-      await page.keyboard.press('ControlOrMeta+A');
-      await page.keyboard.press('Backspace');
-      await page.locator('[data-session-input] form[data-composer-empty]').waitFor();
-      if (process.env.FY_EMPTY_COMPOSER_SHOT !== undefined)
-        await page.screenshot({ path: `${process.env.FY_EMPTY_COMPOSER_SHOT}-${family}.png` });
-      const row = await page.locator('[data-session-input] .fy-composer-row').boundingBox();
-      const attach = await page.locator('[data-session-input] [data-composer-dock="start"]').boundingBox();
-      const send = await page.locator('[data-session-input] [data-composer-dock=""]').boundingBox();
-      if (row === null || attach === null || send === null) fail(`${where}: the empty phone composer is not drawn`);
-      const inner = await page.locator('[data-session-input] .fy-composer-row').evaluate(node => {
-        const style = getComputedStyle(node);
-        return node.clientHeight - Number.parseFloat(style.paddingTop) - Number.parseFloat(style.paddingBottom);
-      });
-      if (inner > 44) fail(`${where}: the empty phone composer is ${Math.round(inner)}px tall inside, not one line`);
-      if (attach.height > 44 || send.height > 44 || !near(attach.y + attach.height, send.y + send.height))
-        fail(`${where}: the empty phone composer's controls are not on one line`);
     });
     await openEach('phone', FAMILY_IDS, 'turn=working&pickers&chat-width=readable', async (page, where, family) => {
       const r = await readComfort(page);
@@ -448,6 +426,39 @@ export function planSessionLayoutGeometry(run: SessionLayoutRun): {
         `   session layout ${where}: composer ${(composer.right - composer.left).toFixed(0)}px wide, field ${field.width.toFixed(0)}×${field.height.toFixed(0)} idle and working\n`,
       );
       checks += 1;
+    });
+    // A SEPARATE PASS, after the idle/working comparison: emptying the box changes the session's shared
+    // draft, so the words are put back before the page closes and no other page ever reads it empty.
+    await openEach('phone', FAMILY_IDS, 'turn=your-turn&pickers&chat-width=readable', async (page, where, family) => {
+      const kept = await page
+        .locator('[data-session-input] .fy-composer-input-layer :is(textarea, [contenteditable])')
+        .first()
+        .evaluate(node => (node instanceof HTMLTextAreaElement ? node.value : (node.textContent ?? '')));
+      // EMPTY, THE PHONE COMPOSER IS ONE LINE (owner: an empty one took about 260px): attach, the mic,
+      // the field and Send side by side, the row (inside the theme's own inset) no taller than one 44px control.
+      const field = page
+        .locator('[data-session-input] .fy-composer-input-layer :is(textarea, [contenteditable])')
+        .first();
+      await field.click();
+      await page.keyboard.press('ControlOrMeta+A');
+      await page.keyboard.press('Backspace');
+      await page.locator('[data-session-input] form[data-composer-empty]').waitFor();
+      if (process.env.FY_EMPTY_COMPOSER_SHOT !== undefined)
+        await page.screenshot({ path: `${process.env.FY_EMPTY_COMPOSER_SHOT}-${family}.png` });
+      const row = await page.locator('[data-session-input] .fy-composer-row').boundingBox();
+      const attach = await page.locator('[data-session-input] [data-composer-dock="start"]').boundingBox();
+      const send = await page.locator('[data-session-input] [data-composer-dock=""]').boundingBox();
+      if (row === null || attach === null || send === null) fail(`${where}: the empty phone composer is not drawn`);
+      const inner = await page.locator('[data-session-input] .fy-composer-row').evaluate(node => {
+        const style = getComputedStyle(node);
+        return node.clientHeight - Number.parseFloat(style.paddingTop) - Number.parseFloat(style.paddingBottom);
+      });
+      if (inner > 44) fail(`${where}: the empty phone composer is ${Math.round(inner)}px tall inside, not one line`);
+      if (attach.height > 44 || send.height > 44 || !near(attach.y + attach.height, send.y + send.height))
+        fail(`${where}: the empty phone composer's controls are not on one line`);
+      await page.keyboard.insertText(kept);
+      await page.locator('[data-session-input] form:not([data-composer-empty])').waitFor();
+      await page.waitForTimeout(800);
     });
   };
 
