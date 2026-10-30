@@ -91,9 +91,11 @@ export type SignalRow =
   | { readonly state: 'open'; readonly item: AgendaItem }
   | { readonly state: 'answered'; readonly item: ResolvedAgendaItem };
 
-/** Open items first, oldest wait first; answered ones after, most recent first. */
+/** Open items first, oldest wait first; answered ones after, most recent first. A parked item (snoozed, or replied
+ * to) is neither: it waits on nobody, and the Inbox lists it under Snoozed or Replied. */
 export const signalRows = (snapshot: AgendaSnapshot): SignalRow[] => [
-  ...[...snapshot.items]
+  ...snapshot.items
+    .filter(item => item.parked === undefined)
     .sort((left, right) => Date.parse(left.waitingSince) - Date.parse(right.waitingSince))
     .map(item => ({ state: 'open' as const, item })),
   ...[...snapshot.resolved]

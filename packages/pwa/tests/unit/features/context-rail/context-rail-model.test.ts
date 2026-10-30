@@ -47,6 +47,21 @@ describe('signals', () => {
     ]);
   });
 
+  it('leaves a parked item (snoozed, or replied to) out of the open rows', () => {
+    const parked = snapshot(
+      [
+        openItem({
+          id: 'A5',
+          parked: { reason: 'snoozed', at: '2026-10-16T10:00:00.000Z', until: '2026-10-17T09:00:00.000Z' },
+        }),
+        openItem({ id: 'A6', parked: { reason: 'replied', at: '2026-10-16T10:00:00.000Z' } }),
+        openItem(),
+      ],
+      [],
+    );
+    expect(signalRows(parked).map(row => `${row.state}:${row.item.id}`)).toEqual(['open:A1']);
+  });
+
   it('counts each chip under the search, and shows only the chosen one', () => {
     const rows = signalRows(board);
     expect(signalChips(rows, '')).toEqual([
