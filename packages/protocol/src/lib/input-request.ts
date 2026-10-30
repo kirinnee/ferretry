@@ -392,7 +392,7 @@ export const InputAuditDetailSchema = z.strictObject({
 export type InputAuditDetail = z.infer<typeof InputAuditDetailSchema>;
 
 const encoder = new TextEncoder();
-const decoder = new TextDecoder('utf-8', { fatal: true });
+const decoder = new TextDecoder();
 const LENGTH_WIDTH = 5;
 
 const hasControlCharacter = (text: string): boolean => /\p{Cc}/u.test(text);
@@ -444,9 +444,5 @@ export function unpadInputValue(padded: string): string | undefined {
   ) {
     return undefined;
   }
-  try {
-    return decoder.decode(bytes.subarray(LENGTH_WIDTH + 1, end));
-  } catch {
-    return undefined;
-  }
+  return decoder.decode(bytes.subarray(LENGTH_WIDTH + 1, end));
 }

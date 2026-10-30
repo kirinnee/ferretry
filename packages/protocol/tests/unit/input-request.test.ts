@@ -273,6 +273,7 @@ describe('padding a value for the wire', () => {
     should(unpadInputValue(good.replace('00007', '09999'))).be.undefined();
     should(unpadInputValue(good.replace('00007:', '0000x:'))).be.undefined();
     should(unpadInputValue('é'.repeat(256))).be.undefined();
+    should(unpadInputValue(`${good}${' '.repeat(256)}`)).be.undefined();
   });
 });
 
