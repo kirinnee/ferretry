@@ -1,6 +1,6 @@
 /**
  * Screenshots of the Board's card detail at a 390px phone and a 1440px desktop, light and dark, plus a
- * 🧪 Manually tested card and a card with a blocking ask:
+ * 🧪 To test card and a card with a blocking ask:
  *
  *   bun harness/board-detail-screenshot.ts [outDir]    # default /tmp/claude-1000, files board-u12-*.png
  *

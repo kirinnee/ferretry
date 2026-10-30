@@ -242,7 +242,7 @@ describe('BoardDetail — moving', () => {
       'Review/CI',
       'Merged',
       'Released',
-      'Manually tested',
+      'To test',
       'Closed',
     ]);
     expect(menuItem(root, 'Todo').hasAttribute('data-backward')).toBe(true);
