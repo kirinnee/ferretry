@@ -241,6 +241,12 @@ raise agenda items or notify the owner; tell your lead: fy send <lead-callsign> 
 Their prompt carries no Agenda mode section even when the switch is on
 ([pack-mode.md](pack-mode.md#sub-ferret-limits)).
 
+**A lead clears its sub-ferrets' agenda.** The lead (and any ancestor) may `edit`, `surface`, `done` and `dismiss`
+items on the board of a session it started: `fy agenda done !A1 -s <sub-session>`. `AgendaService.apply` proves the
+lineage from `config.parent` and marks the actor for the state machine (`overSubFerret`; a request cannot set it);
+anyone else keeps `forbidden: an agent may change the agenda only in its own session`. The change is recorded as the
+lead's. Warden escalations are not the lead's to close.
+
 `fy attention …` runs the same handlers and prints one line to stderr first
 (its text says `fy attention` is now `fy agenda`). It is hidden from help and will be removed.
 
