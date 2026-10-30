@@ -1,3 +1,14 @@
+## [4.127.0](https://github.com/kirinnee/ferretry/compare/v4.126.0...v4.127.0) (2026-10-30)
+
+### Features
+
+* **browser:** honest user agent and a per-machine browser proxy ([#971](https://github.com/kirinnee/ferretry/issues/971)) ([09b501d](https://github.com/kirinnee/ferretry/commit/09b501d86c8e297981246de5796c3c395e3b9f46))
+
+### Fixes
+
+* **daemon:** read a multi-paragraph Claude draft whole, so it never blocks every send as unreadable ([#987](https://github.com/kirinnee/ferretry/issues/987)) ([ab81bcb](https://github.com/kirinnee/ferretry/commit/ab81bcbd13d986bf9d6766c1eb15fb353552f7dc))
+* **pwa:** give the chat's message list the log's one grid cell, so an open agenda item shows and the chat scrolls ([#988](https://github.com/kirinnee/ferretry/issues/988)) ([99d849b](https://github.com/kirinnee/ferretry/commit/99d849b640dde0c942b389f743aa5bac4a582beb))
+
 ## [4.126.0](https://github.com/kirinnee/ferretry/compare/v4.125.0...v4.126.0) (2026-10-30)
 
 ### Features
