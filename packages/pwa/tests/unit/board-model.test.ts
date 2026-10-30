@@ -16,6 +16,7 @@ import {
   NO_DATE_RANGE,
   parseBoardFilters,
   runningOn,
+  showsAgents,
   serverQueryKey,
   toServerQuery,
 } from '../../src/lib/board-model.ts';
@@ -26,6 +27,7 @@ import {
   laneSetFor,
   laptop,
   OTHER_PROJECT,
+  originCard,
   PROJECT,
   phone,
   workstation,
@@ -113,6 +115,50 @@ describe('mergeBoard', () => {
     expect(isMine(card('F2'))).toBe(false);
   });
 
+  it('hides agent cards unless asked, or unless a ferret or an activity is chosen', () => {
+    const machines = [data(laptop, 'laptop', [originCard('F1', 'human'), originCard('F2', 'agent', { id: 'F1' })])];
+    const ids = (filters: BoardFilters) => mergeBoard(machines, filters).cards.map(entry => entry.task.id);
+    expect(ids(NO_BOARD_FILTERS)).toEqual(['F1']);
+    expect(ids({ ...NO_BOARD_FILTERS, agents: true })).toEqual(['F1', 'F2']);
+    expect(ids({ ...NO_BOARD_FILTERS, ferret: CHILD })).toEqual(['F1', 'F2']);
+    expect(ids({ ...NO_BOARD_FILTERS, activity: 'active' })).toEqual(['F1', 'F2']);
+    expect(showsAgents(NO_BOARD_FILTERS)).toBe(false);
+    expect(mergeBoard(machines, NO_BOARD_FILTERS).splitsAgents).toBe(true);
+  });
+
+  it('takes the agent cards the board is not showing out of the header counts, so a pill and its cards agree', () => {
+    const laneSet = laneSetFor();
+    const counted = (cards: ReturnType<typeof originCard>[]) =>
+      mergeBoard(
+        [{ ...data(laptop, 'laptop', cards), counts: { ...COUNTS, toTest: 3, active: 4, waitingOnYou: 1 } }],
+        NO_BOARD_FILTERS,
+      ).counts;
+    expect(laneSet.lanes.some(lane => lane.id === 'tested' && lane.category === 'verify')).toBe(true);
+    const cards = [
+      originCard('F1', 'human', null, { laneId: 'tested' }),
+      originCard('F2', 'agent', { id: 'F1' }, { laneId: 'tested', activity: 'active' }),
+      originCard('F3', 'agent', null, {
+        laneId: 'tested',
+        waitingOnOwner: [{ sessionId: CHILD, id: 'A1' }],
+        openAsks: [{ sessionId: CHILD, id: 'A1' }],
+      }),
+    ];
+    expect(counted(cards)).toMatchObject({ toTest: 1, active: 2, waitingOnYou: 0 });
+    const shown = mergeBoard([{ ...data(laptop, 'laptop', cards), counts: { ...COUNTS, toTest: 3 } }], {
+      ...NO_BOARD_FILTERS,
+      agents: true,
+    });
+    expect(shown.counts.toTest).toBe(3);
+    expect(counted([originCard('F9', 'agent', null, { laneId: 'tested' })]).toTest).toBe(2);
+  });
+
+  it('shows every card and offers no toggle when the daemon does not say who asked', () => {
+    const machines = [data(laptop, 'laptop', [card('F1'), card('F2')])];
+    const model = mergeBoard(machines, NO_BOARD_FILTERS);
+    expect(model.cards.map(entry => entry.task.id)).toEqual(['F1', 'F2']);
+    expect(model.splitsAgents).toBe(false);
+  });
+
   it('orders a lane by order, then longest untouched, then id', () => {
     const model = mergeBoard(
       [
@@ -183,6 +229,7 @@ describe('filters and the URL', () => {
     state: 'all',
     activity: 'waiting_on_you',
     mine: true,
+    agents: true,
     lane: 'Review/CI',
     created: { preset: '7d', from: null, to: null },
     touched: { preset: null, from: '2026-10-01', to: '2026-10-30' },
@@ -196,6 +243,9 @@ describe('filters and the URL', () => {
   it('leaves the defaults out, so the plain board has a plain URL', () => {
     expect(boardFiltersToSearch(NO_BOARD_FILTERS).toString()).toBe('');
     expect(boardFiltersToSearch({ ...NO_BOARD_FILTERS, mine: true }).toString()).toBe('mine=1');
+    expect(boardFiltersToSearch({ ...NO_BOARD_FILTERS, agents: true }).toString()).toBe('agents=1');
+    expect(parseBoardFilters('agents=1').agents).toBe(true);
+    expect(parseBoardFilters('agents=0').agents).toBe(false);
   });
 
   it('writes a lane and each date range in the URL, a preset or a custom range but never both', () => {

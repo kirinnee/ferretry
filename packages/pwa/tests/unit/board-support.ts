@@ -90,6 +90,14 @@ export const card = (id: string, extra: Record<string, unknown> = {}): BoardTask
     ...extra,
   });
 
+/** A card as a newer daemon serves it: who it was asked for, and (when given) the human card it serves. */
+export const originCard = (
+  id: string,
+  origin: 'human' | 'agent',
+  humanParent?: { id: string } | null,
+  extra: Record<string, unknown> = {},
+): BoardTaskView => Object.assign(card(id, extra), humanParent === undefined ? { origin } : { origin, humanParent });
+
 export const boardAnswer = (cards: readonly BoardTaskView[], extra: Partial<BoardResponse> = {}): BoardResponse => ({
   projectId: null,
   laneSet: null,
