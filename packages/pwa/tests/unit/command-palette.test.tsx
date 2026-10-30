@@ -159,20 +159,20 @@ describe('the resting palette', () => {
 
   it('shows the key hints to a keyboard reader', async () => {
     await open();
-    expect(document.body.textContent).toContain('outside text fields');
+    expect(document.body.textContent).toContain('from anywhere');
   });
 
   it('drops the key hints on a touch phone, which has no arrows, return or esc', async () => {
     await atWidth(390, async () => {
       await open({ touchAffected: true });
-      expect(document.body.textContent).not.toContain('outside text fields');
+      expect(document.body.textContent).not.toContain('from anywhere');
     });
   });
 
   it('keeps the key hints for a wide touch-affected screen, a laptop with its keyboard', async () => {
     await atWidth(1280, async () => {
       await open({ touchAffected: true });
-      expect(document.body.textContent).toContain('outside text fields');
+      expect(document.body.textContent).toContain('from anywhere');
     });
   });
 });

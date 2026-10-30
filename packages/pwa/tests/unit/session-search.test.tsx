@@ -28,7 +28,6 @@ import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { registerComposerQuoteTarget } from '../../src/lib/quote.ts';
 import { browserFetch } from '../../src/lib/runtime-models.ts';
-import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from '../../src/shell/palette-shortcut.ts';
 import { render, run, runAsync } from '../support/react.ts';
 import { type TaskSummaryOverrides, taskSummary } from '../support/tasks.ts';
 
@@ -1705,7 +1704,7 @@ describe('current-session search control', () => {
   };
 
   const mountControl = async (
-    props: { readonly shortcutTarget?: boolean; readonly touchAffected?: boolean } = {},
+    props: { readonly shortcutTarget?: boolean } = {},
     openers?: { readonly onFile: (path: string) => void; readonly onTasks: () => void },
   ) => {
     const view = render(
@@ -2198,27 +2197,13 @@ describe('current-session search control', () => {
     }
   });
 
-  test('prints a shortcut only on a device that has one, in that platform’s own spelling', async () => {
-    const keyboard = await mountControl({ touchAffected: false });
+  test('neither prints nor claims Cmd/Ctrl+K: that chord opens the global finder', async () => {
+    const view = await mountControl();
     try {
-      const hint = keyboard.root.findAll(node => node.props['data-search-shortcut'] !== undefined);
-      expect(hint).toHaveLength(1);
-      expect(JSON.stringify(keyboard.toJSON())).toContain(paletteShortcutLabel());
-      expect(keyboard.root.findByType('input').props['aria-keyshortcuts']).toBe(PALETTE_KEYSHORTCUTS);
+      expect(view.root.findAll(node => node.props['data-search-shortcut'] !== undefined)).toHaveLength(0);
+      expect(view.root.findByType('input').props['aria-keyshortcuts']).toBeUndefined();
     } finally {
-      run(() => keyboard.unmount());
-    }
-
-    // A phone has no ⌘ and no Ctrl. Printing one is the exact mistake
-    // `palette-shortcut.ts` exists to prevent, so the slot stays empty — while
-    // the shortcut itself remains DECLARED, because a paired keyboard can still
-    // press it.
-    const touch = await mountControl({ touchAffected: true });
-    try {
-      expect(touch.root.findAll(node => node.props['data-search-shortcut'] !== undefined)).toHaveLength(0);
-      expect(touch.root.findByType('input').props['aria-keyshortcuts']).toBe(PALETTE_KEYSHORTCUTS);
-    } finally {
-      run(() => touch.unmount());
+      run(() => view.unmount());
     }
   });
 
@@ -2233,7 +2218,7 @@ describe('current-session search control', () => {
     // never runs without a node mock — the effect would look proved and be dead.
     const view = render(
       <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
-        <SessionSearchControl shortcutTarget touchAffected={true} />
+        <SessionSearchControl shortcutTarget />
       </SessionSearchProvider>,
       {
         createNodeMock: element =>
@@ -2249,12 +2234,16 @@ describe('current-session search control', () => {
             : null,
       },
     );
+    // The reader was somewhere else when the chord came: that control is remembered for the way back.
+    const outside = document.createElement('button');
+    document.body.append(outside);
+    outside.focus();
     try {
       await settle();
       run(() =>
         view.update(
           <SessionSearchProvider connection={daemon} focusSignal={2} scope={scope}>
-            <SessionSearchControl shortcutTarget touchAffected={true} />
+            <SessionSearchControl shortcutTarget />
           </SessionSearchProvider>,
         ),
       );
@@ -2269,6 +2258,7 @@ describe('current-session search control', () => {
       expect(view.root.findAll(node => String(node.props.className).includes('z-[80]'))).toHaveLength(1);
       expect(JSON.stringify(view.toJSON())).toContain("Type to search this session's files and tasks.");
     } finally {
+      outside.remove();
       run(() => view.unmount());
     }
   });

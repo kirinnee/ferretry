@@ -177,7 +177,6 @@ import { type DaemonSessionScope, daemonSessionKey, daemonSessionScope } from '.
 import { browserFleetFeedEnvironment } from './lib/fleet-feed.ts';
 import { projectKeyFor } from './lib/fleet-grouping.ts';
 import { installBanner } from './lib/install-prompt.ts';
-import { isKeyboardCaptured } from './lib/keyboard-capture.ts';
 import { placeLedgerRows } from './lib/ledger-placement.ts';
 import { createLiveActivityHub } from './lib/live-activity-feed.ts';
 import { moveMachine } from './lib/machine-order.ts';
@@ -334,21 +333,6 @@ const isModalShortcutTarget = (target: EventTarget | null): boolean => {
   if (target === null || typeof target !== 'object') return false;
   const closest = (target as ShortcutTargetLike).closest;
   return typeof closest === 'function' && closest.call(target, 'dialog, [role="dialog"], [aria-modal="true"]') !== null;
-};
-
-/**
- * The two text-entry places where current-session Cmd/Ctrl+K is intentional.
- *
- * The composer is where a session reader normally stands, and the search box
- * itself supports the ordinary re-select gesture. Every other editable field
- * keeps its native chord even on a session route.
- */
-const isSessionSearchShortcutTarget = (target: EventTarget | null): boolean => {
-  if (target === null || typeof target !== 'object') return false;
-  const closest = (target as ShortcutTargetLike).closest;
-  return (
-    typeof closest === 'function' && closest.call(target, 'form.fy-composer, [data-current-session-search]') !== null
-  );
 };
 
 const notificationPermission = (): NotificationPermissionState =>
@@ -2461,7 +2445,6 @@ export function AppShell() {
   const fleetSnapshot = useCallback(() => store.fleet.getSnapshot(), [store.fleet]);
   const fleet = useSyncExternalStore(subscribeFleet, fleetSnapshot);
   const [palette, setPalette] = useState({ open: false, focusSignal: 0 });
-  const [sessionSearchFocusSignal, setSessionSearchFocusSignal] = useState(0);
   const openPalette = useCallback(
     () => setPalette(current => ({ open: true, focusSignal: current.focusSignal + 1 })),
     [],
@@ -2531,7 +2514,7 @@ export function AppShell() {
    */
   /**
    * WHERE THIS SESSION'S SEARCH IS MOUNTED: in the sessions bar's full column, on a session page. A rail
-   * and a phone have no room for it, so there Cmd/Ctrl+K opens the finder instead of focusing nothing.
+   * and a phone have no room for it.
    */
   const barSessionSearch = currentSessionScope !== null && layout !== 'drawer' && !sidebarCollapsed;
   const pageKey = routePageKey(effectiveRoute);
@@ -2553,35 +2536,32 @@ export function AppShell() {
   }, [currentSessionScope]);
 
   /**
-   * THE SHORTCUT YIELDS TO A FIELD ONLY WHERE THERE IS SOMETHING TO YIELD FOR.
+   * Cmd/Ctrl+K OPENS THE GLOBAL FINDER, ON EVERY PAGE, FROM ANY FOCUS.
    *
-   * Off a session route the chord opens the global palette, and yielding to a
-   * focused field is deliberate — see the test that presses it inside an input,
-   * a textarea, a select and a contenteditable and requires the keystroke to
-   * survive.
+   * It was once split by context — the finder off a session route, the session's own file search on
+   * one — and it yielded to inputs and to a terminal, so the same chord opened different things (or
+   * nothing) depending on where focus happened to be. One chord, one meaning now. The listener is a
+   * capture-phase window listener so the composer, a terminal's keyboard capture and a remote
+   * browser's cannot eat it. The only exception is an open modal dialog, which owns its keyboard
+   * interaction and must not be escaped through by a global listener.
    *
-   * ON a session route it is item #6's current-session search, and the field the
-   * reader is almost always in is the composer — a `<textarea>`. That one field,
-   * and the search itself, deliberately reach the palette. Other editable and
-   * modal contexts keep the chord: a rename field or an open dialog owns its
-   * keyboard interaction and must not be escaped through by a global listener.
+   * COST, deliberately accepted: inside a terminal Ctrl+K is no longer readline's kill-to-end-of-line;
+   * the finder wins. The finder itself and the in-session file search are one click away from the
+   * app bar and the sessions bar.
    */
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.isComposing || event.keyCode === 229) return;
       if (event.key !== 'k' && event.key !== 'K') return;
       if (event.shiftKey || event.altKey || (!event.metaKey && !event.ctrlKey)) return;
-      const sessionScoped = barSessionSearch;
-      if (isKeyboardCaptured(event.target)) return;
       if (isModalShortcutTarget(event.target)) return;
-      if (isTextEntryTarget(event.target) && (!sessionScoped || !isSessionSearchShortcutTarget(event.target))) return;
       event.preventDefault();
-      if (sessionScoped) setSessionSearchFocusSignal(current => current + 1);
-      else openPalette();
+      event.stopPropagation();
+      openPalette();
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [barSessionSearch, openPalette]);
+  }, [openPalette]);
 
   let content: ReactNode;
   if (effectiveRoute.kind === 'setup') {
@@ -2642,16 +2622,16 @@ export function AppShell() {
         onOpenPalette={openPalette}
         presentation={presentation}
         route={pageRoute}
-        // ONE SEARCH. On a session page it is that session's own file search, which Cmd/Ctrl+K focuses;
-        // everywhere else the bar's box opens the finder.
-        search={barSessionSearch ? <SessionSearchControl shortcutTarget /> : undefined}
+        // On a session page the bar's box is that session's own file search; everywhere else it opens the finder.
+        // Cmd/Ctrl+K is the finder on both.
+        search={barSessionSearch ? <SessionSearchControl /> : undefined}
         updateReady={updateReady}
         onApplyUpdate={applyUpdate}
         onPairPhone={pairPhoneAllowed ? openPairPhone : undefined}
       />
     );
     content = (
-      <SessionSearchProvider connection={connection} focusSignal={sessionSearchFocusSignal} scope={currentSessionScope}>
+      <SessionSearchProvider connection={connection} scope={currentSessionScope}>
         <BoardOriginProvider value={boardOrigin}>
           <WhatsNewProvider value={whatsNew.entry}>
             <RestartOverlayProvider>
@@ -2730,7 +2710,6 @@ export function AppShell() {
                     onNavigate={navigate}
                     settings={paletteSettings}
                     touchAffected={touchAffected}
-                    shortcutAvailable={!barSessionSearch}
                     commands={[
                       ...(pairPhoneAllowed
                         ? [

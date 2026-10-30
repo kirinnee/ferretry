@@ -5,7 +5,7 @@
  * box. What is on it, top to bottom:
  *
  *   - the machine this page belongs to, which is also the machine switcher, and ＋ for a new session;
- *   - ONE search: the finder (⌘K) everywhere, or this session's own file search on a session page;
+ *   - the finder (⌘K, every page); on a session page also that session's own file search;
  *   - ATTENTION, a door to the inbox with the open-item count as an accent badge (always reachable, calm
  *     at zero) — given by the host as `agendaHref` and `agendaTotal`, so it is the count across
  *     EVERY machine;
@@ -297,22 +297,11 @@ function MachineSwitcher(
   );
 }
 
-/**
- * The finder's opener. It claims Cmd/Ctrl+K only where the chord opens it: on a session page the
- * chord belongs to that session's own search, so the icon beside it stays silent about a key.
- */
-function FindButton({
-  onOpen,
-  iconOnly,
-  shortcut,
-}: {
-  readonly onOpen: () => void;
-  readonly iconOnly: boolean;
-  readonly shortcut: boolean;
-}) {
+/** The finder's opener. Cmd/Ctrl+K opens it on every page, so every copy says so. */
+function FindButton({ onOpen, iconOnly }: { readonly onOpen: () => void; readonly iconOnly: boolean }) {
   return (
     <button
-      aria-keyshortcuts={shortcut ? PALETTE_KEYSHORTCUTS : undefined}
+      aria-keyshortcuts={PALETTE_KEYSHORTCUTS}
       aria-label="Find sessions, settings and places"
       className={iconOnly ? 'fy-sbar__icon' : 'kt-findbox fy-sbar__find'}
       data-app-bar-destination-search=""
@@ -324,7 +313,7 @@ function FindButton({
       {iconOnly ? null : (
         <>
           <span>Find</span>
-          {shortcut ? <kbd>{paletteShortcutLabel()}</kbd> : null}
+          <kbd>{paletteShortcutLabel()}</kbd>
         </>
       )}
     </button>
@@ -387,11 +376,11 @@ function SessionsBarBody(props: SessionsBarProps & ListFilterProps & { readonly 
       )}
       <div className="fy-sbar__search">
         {props.search === undefined ? (
-          <FindButton iconOnly={false} onOpen={props.onOpenPalette} shortcut />
+          <FindButton iconOnly={false} onOpen={props.onOpenPalette} />
         ) : (
           <>
             <div className="min-w-0 flex-1">{props.search}</div>
-            <FindButton iconOnly onOpen={props.onOpenPalette} shortcut={false} />
+            <FindButton iconOnly onOpen={props.onOpenPalette} />
           </>
         )}
       </div>
@@ -615,7 +604,7 @@ function SessionsRail(props: SessionsBarProps & ListFilterProps) {
         </button>
       )}
       <NewSessionControl marked={false} navigate={onNavigate} props={props} />
-      <FindButton iconOnly onOpen={props.onOpenPalette} shortcut />
+      <FindButton iconOnly onOpen={props.onOpenPalette} />
       {props.agendaHref === undefined ? null : (
         <SessionsBarAgenda
           current={active === 'attention'}

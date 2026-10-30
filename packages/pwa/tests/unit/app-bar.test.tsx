@@ -406,8 +406,8 @@ describe('AppBar current-session search seam', () => {
     expect(slot.contains(search)).toBe(true);
     expect(destinations).toHaveLength(APP_NAVIGATION.length);
     expect(destinations.every(link => !slot.contains(link))).toBe(true);
-    expect(finder.getAttribute('aria-keyshortcuts')).toBeNull();
-    expect(finder.textContent).not.toContain(paletteShortcutLabel());
+    expect(finder.getAttribute('aria-keyshortcuts')).not.toBeNull();
+    expect(finder.textContent).toContain(paletteShortcutLabel());
 
     await mounted.unmount();
   });
