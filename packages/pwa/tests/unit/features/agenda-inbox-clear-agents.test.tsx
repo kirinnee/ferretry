@@ -8,6 +8,7 @@ import { agendaItem, fakeInbox, InboxHarness, inboxCard } from '../../support/ag
 import { interact, mount, must } from '../../support/dom.ts';
 import { healthOf } from '../../support/health.ts';
 import { sessionView } from '../../support/sessions.ts';
+import { settleUntil } from '../../support/settle.ts';
 
 const NOW = Date.parse('2026-08-01T12:00:00.000Z');
 const WORKSHOP = daemonConnection({ daemonId: 'workshop', baseUrl: 'https://workshop.example.test', deviceId: 't1' });
@@ -30,9 +31,17 @@ const laptopCard = inboxCard(
   LAPTOP.daemonId,
 );
 
-const settle = async (): Promise<void> => {
-  for (let turn = 0; turn < 6; turn += 1) await interact(async () => await Promise.resolve());
-};
+/**
+ * Waits until the count or the clear has finished — nothing says "Counting…" or "Clearing…" any more. A fixed
+ * number of microtask turns only finished when this file ran alone: the reads' promises reach the page through
+ * the unit tier's ordered task queue, so the wait is on the condition, a turn of that queue at a time.
+ */
+const settle = async (): Promise<void> =>
+  await settleUntil(
+    () => !/Counting…|Clearing…/u.test(document.body.textContent ?? ''),
+    'the clear dialog to finish counting or clearing',
+    interact,
+  );
 
 const mountPage = async (withPort: boolean, health: Record<string, DaemonHealthRead>, calls: string[] = []) => {
   const fake = fakeInbox();
