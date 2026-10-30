@@ -352,7 +352,7 @@ and this exact benchmark command after acquiring `/tmp/ferretry-f117-heavy-gate.
 fd 9 and passing both the trusted and independent direct `/proc` audits before execution:
 
 ```sh
-FERRETRY_F117_TRUSTED_HEAVY_AUDIT=passed bun scripts/local/bench-tasks-pane.ts
+FERRETRY_F117_TRUSTED_HEAVY_AUDIT=passed bun scripts/local/bench-tasks-pane.ts  # (script and harness deleted with the per-session task pane, U18b)
 ```
 
 The fixture was 40 tasks and 25 directories with two files each plus a README, with deterministic

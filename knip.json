@@ -133,7 +133,6 @@
         "harness/app-screenshot.ts",
         "harness/analytics-screenshots.ts",
         "harness/main.tsx",
-        "harness/tasks-pane-benchmark.tsx",
         "harness/parakeet-smoke.ts",
         "harness/parakeet-smoke-page.ts",
         "harness/sherpa-smoke.ts",

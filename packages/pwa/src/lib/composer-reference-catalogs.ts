@@ -1,9 +1,9 @@
 /**
  * One session-scoped catalog feeding both composer autocomplete and Markdown proof.
  *
- * Tasks, Attention and skills are each daemon facts. A standalone reader can
- * hydrate all three once; the session page — the only production host today —
- * instead supplies tasks and skills from their existing workspace owners — and
+ * Tasks, Attention and skills are each daemon facts. Tasks are this ferret's slice of the board, which
+ * only a host that holds the board store can supply. A standalone reader hydrates Attention and skills;
+ * the session page — the only production host today — instead supplies tasks and skills from their existing owners — and
  * Attention too, when it subscribes to the session's LIVE board — so this module
  * reads only the family no owner holds. Either way, preview and autocomplete
  * receive the same arrays. A failed family stays `undefined`: that is "not
@@ -15,19 +15,17 @@ import {
   type IFyApiClient,
   type SessionSkills,
   SessionSkillsSchema,
-  SessionTaskListResponseSchema,
-  type TaskSummary,
 } from '@ferretry/protocol';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type AgendaWire, sessionAgendaPath } from './agenda-wire.ts';
+import type { SessionCard } from './session-cards.ts';
 
 export type ComposerReferenceCatalogFamily = 'tasks' | 'attention' | 'skills';
 /**
- * What proof needs (`id`, `title`, `status`) plus the optional facts the `&` menu prints on a row. A host that
- * knows only the first three still proves; the row then says less rather than guessing.
+ * One card of this ferret's board slice: what proof needs (`id`, `legacyId`) and what the `&` menu prints on a row.
+ * The board is read by the host (U10's store), never here.
  */
-export type ComposerReferenceTask = Pick<TaskSummary, 'id' | 'title' | 'status'> &
-  Partial<Pick<TaskSummary, 'phase' | 'blocked' | 'assignee' | 'createdAt' | 'updatedAt'>>;
+export type ComposerReferenceTask = SessionCard;
 
 export interface ComposerReferenceCatalogs {
   readonly tasks?: readonly ComposerReferenceTask[];
@@ -70,9 +68,8 @@ const failureMessage = (reason: unknown): string => (reason instanceof Error ? r
  * a client path the gate cannot read is a client path nothing checks against the
  * daemon's route table — which is the whole defect that gate exists to catch. So
  * the final segment is a literal at each call site, and the gate can see all
- * three.
+ * the two it reads.
  */
-const sessionTasksPath = (sessionId: string): string => `/v1/sessions/${encodeURIComponent(sessionId)}/tasks`;
 const sessionSkillsPath = (sessionId: string): string => `/v1/sessions/${encodeURIComponent(sessionId)}/skills`;
 
 const sameSession = <Value extends { readonly sessionId: string }>(sessionId: string, value: Value): Value => {
@@ -81,7 +78,7 @@ const sameSession = <Value extends { readonly sessionId: string }>(sessionId: st
 };
 
 /**
- * Start all three reads once, then report each family from those same promises.
+ * Start both reads once, then report each family from those same promises.
  * A slow sibling cannot withhold a proved family from the page, while the final
  * promise still represents the one complete in-flight host read menus await.
  */
@@ -92,9 +89,6 @@ async function readComposerReferenceCatalogsIncrementally(
   publish: (patch: ComposerReferenceCatalogPatch) => void,
   wire: AgendaWire,
 ): Promise<ComposerReferenceCatalogs> {
-  const tasks = client
-    .request(sessionTasksPath(sessionId), SessionTaskListResponseSchema, { signal })
-    .then(value => sameSession(sessionId, value));
   const agenda = client
     .request(sessionAgendaPath(sessionId, wire), AgendaSnapshotSchema, { signal })
     .then(value => sameSession(sessionId, value));
@@ -102,16 +96,6 @@ async function readComposerReferenceCatalogsIncrementally(
   const publishIfLive = (patch: ComposerReferenceCatalogPatch): void => {
     if (!signal.aborted) publish(patch);
   };
-  const reportedTasks = tasks.then(
-    value => {
-      publishIfLive({ tasks: value.tasks, failures: {} });
-      return value;
-    },
-    reason => {
-      publishIfLive({ failures: { tasks: failureMessage(reason) } });
-      throw reason;
-    },
-  );
   const reportedAgenda = agenda.then(
     value => {
       publishIfLive({ attention: value.items, failures: {} });
@@ -132,16 +116,14 @@ async function readComposerReferenceCatalogsIncrementally(
       throw reason;
     },
   );
-  const settled = await Promise.allSettled([reportedTasks, reportedAgenda, reportedSkills] as const);
+  const settled = await Promise.allSettled([reportedAgenda, reportedSkills] as const);
   if (signal.aborted) throw signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
 
-  const [taskResult, agendaResult, skillResult] = settled;
+  const [agendaResult, skillResult] = settled;
   const failures: Partial<Record<ComposerReferenceCatalogFamily, string>> = {};
-  if (taskResult.status === 'rejected') failures.tasks = failureMessage(taskResult.reason);
   if (agendaResult.status === 'rejected') failures.attention = failureMessage(agendaResult.reason);
   if (skillResult.status === 'rejected') failures.skills = failureMessage(skillResult.reason);
   return {
-    ...(taskResult.status === 'fulfilled' ? { tasks: taskResult.value.tasks } : {}),
     ...(agendaResult.status === 'fulfilled' ? { attention: agendaResult.value.items } : {}),
     ...(skillResult.status === 'fulfilled' ? { skills: skillResult.value } : {}),
     failures,
@@ -172,8 +154,7 @@ async function readComposerAgendaIncrementally(
 }
 
 /**
- * The standalone three-family read: one refused family must not erase two valid
- * ones.
+ * The standalone two-family read: one refused family must not erase the other.
  *
  * NOTHING IN THE APP CALLS THIS TODAY, and that is a stated position rather
  * than an oversight. The session page is the only production host, and it
@@ -186,7 +167,7 @@ async function readComposerAgendaIncrementally(
  * So its tests exercise a path production does not take, deliberately. What
  * they hold is the promise made to a caller that has no workspace around it,
  * and inventing a production caller to justify it would be the wrong repair:
- * the app would then read three families it already owns two of.
+ * the app would then read families it already owns.
  */
 export async function readComposerReferenceCatalogs(
   client: ComposerReferenceCatalogReader,

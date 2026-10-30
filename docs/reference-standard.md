@@ -209,14 +209,14 @@ that goes nowhere costs the reader a tap and their trust.
 
 What "proved" means per kind:
 
-| Kind        | Proof                                                          |
-| ----------- | -------------------------------------------------------------- |
-| `agent`     | A session in **this daemon's** fleet slice holds that callsign |
-| `file`      | The session filesystem answers with a canonical, readable path |
-| `task`      | The id is on this machine's board (see the GAP below)          |
-| `attention` | The id is in this session's agenda ledger, open or resolved    |
-| `skill`     | The name is in this session's skills catalog                   |
-| `surface`   | The session's owner is holding that terminal or page right now |
+| Kind        | Proof                                                                                                                     |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `agent`     | A session in **this daemon's** fleet slice holds that callsign                                                            |
+| `file`      | The session filesystem answers with a canonical, readable path                                                            |
+| `task`      | A card of this ferret on this machine's board, or the old id of one of this session's imported tasks (see the GAPs below) |
+| `attention` | The id is in this session's agenda ledger, open or resolved                                                               |
+| `skill`     | The name is in this session's skills catalog                                                                              |
+| `surface`   | The session's owner is holding that terminal or page right now                                                            |
 
 **A `&task` click opens the card, not a sheet.** The card detail is the Board's own route, so the link
 survives a reload, Back leaves it, and the id is no longer dropped on the way (the Tasks sheet opened
@@ -224,12 +224,22 @@ with no card selected). Chat included: the host's own Tasks destination is only 
 route is unavailable (an older daemon without `/v1/board`, or a host with no router). A card id is unique on
 its machine only, so the destination always carries the daemon the reference was proved against.
 
-> **GAP — task proof still reads the session's task catalog.** The proof set behind `&F12` is the
-> composer's per-session task catalog, not a read of the machine's whole board; a card the board holds
-> that this session never touched stays prose, and the detail itself answers "no card" for an id the
-> machine does not have. Closing it needs a machine-wide id read in the session page; U16's `legacyRef`
-> lookup (old per-session `#T3` ids) is not wired into the resolver yet either, so an old per-session
-> id opens "no such card" rather than its migrated card.
+> **GAP — task proof reads this ferret's slice of the board, not the whole machine.** The proof set
+> behind `&F12` is ONE board read, `ferret = <session>` with `state = all`, made through the PWA's board
+> store and shared by the chat's task search, the `&` menu and this proof (no request per reference). A
+> card the machine's board holds that this session neither owns nor is assigned stays prose, and the
+> detail itself answers "no card" for an id the machine does not have. Closing it needs a machine-wide id
+> read in the session page.
+>
+> **Old references resolve through the same read.** A card imported from one of this session's old tasks
+> carries `legacyRef = <session>:<oldId>`. `&F12` in the transcript is proved when `F12` is a card on the
+> slice, or when it is the old id of one: it stays written as `&F12` and its click opens the card that
+> replaced it. A card on the slice wins over an old id that spells the same; the two cannot be told
+> apart by their text, which is the GAP — a session whose old `F12` and a new machine-board `F12` both
+> exist always means the new one. Because the lookup is the slice itself, it needs no
+> `GET /v1/board/tasks?legacyRef=` call per reference and nothing to batch or cache beyond the board
+> store's own cache; the ferret-slice limit above applies to old ids too, so an imported task whose card
+> another ferret now owns stays prose.
 
 A reader with no resolver for a kind cannot prove it, so that kind stays prose there. A missing
 answer is refusal, never assumption: a fleet that has not been read yet is **not** a fleet with

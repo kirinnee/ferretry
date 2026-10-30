@@ -12,8 +12,7 @@
  * focus and real key input shows that.
  *
  * WHAT IS REAL. The shipped `Composer`, the shipped entry points — the transcript's "Quote in
- * composer" menu, the terminal list's Add to chat, a task row's Add to chat (wired exactly as the
- * session search wires it) and the skills surface's "Use in chat" — inside a reference surface that
+ * composer" menu, the terminal list's Add to chat and the skills surface's "Use in chat" — inside a reference surface that
  * proves the tokens they add, the app's whole stylesheet, real mouse and keyboard input. Every claim
  * about what is sent is the exact message the agent would receive (`window.__sent`).
  *
@@ -99,12 +98,6 @@ const ENTRY_POINTS: readonly EntryPoint[] = [
     token: '%terminal:dev',
     expected: draft => (draft === '' ? '%terminal:dev ' : `${draft} %terminal:dev `),
     deliver: page => page.locator('[data-surface-key="dev"]').getByRole('button', { name: 'Add to chat' }).click(),
-  },
-  {
-    name: "a task row's Add to chat",
-    token: '&F12',
-    expected: draft => (draft === '' ? '&F12 ' : `${draft} &F12 `),
-    deliver: page => page.getByRole('button', { name: 'Add &F12 to chat' }).click(),
   },
   {
     name: "a skill's Use in chat",
