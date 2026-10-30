@@ -15,7 +15,7 @@
 }
 /* A batch: each answer its own block, a hairline apart. */
 .fy-agenda-msg-part + .fy-agenda-msg-part {
-  border-top: var(--border-width) solid var(--border-soft);
+  border-top: var(--border-width) solid var(--border);
   padding-top: var(--gap-md);
 }
 .fy-message .fy-agenda-msg-head {
