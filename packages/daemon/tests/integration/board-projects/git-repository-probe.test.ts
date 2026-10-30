@@ -17,6 +17,12 @@ describe('the git repository probe', () => {
     });
   });
 
+  it('should answer null when git cannot be started', async () => {
+    await withTempRoot(async root => {
+      should(await new GitRepositoryProbe(join(root, 'no-such-git')).commonDirectory(root)).equal(null);
+    });
+  });
+
   it('should answer null for a folder that does not exist', async () => {
     await withTempRoot(async root => {
       should(await new GitRepositoryProbe().commonDirectory(join(root, 'missing'))).equal(null);

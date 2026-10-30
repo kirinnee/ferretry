@@ -4,9 +4,11 @@ import type { RepositoryProbe } from '../../lib/board-projects/index.ts';
 
 /** Asks git for the common directory a folder belongs to, so every worktree of one repository agrees. */
 export class GitRepositoryProbe implements RepositoryProbe {
+  constructor(private readonly gitBinary = 'git') {}
+
   async commonDirectory(cwd: string): Promise<string | null> {
     try {
-      const process = Bun.spawn(['git', '-C', cwd, 'rev-parse', '--git-common-dir'], {
+      const process = Bun.spawn([this.gitBinary, '-C', cwd, 'rev-parse', '--git-common-dir'], {
         stdout: 'pipe',
         stderr: 'pipe',
       });
