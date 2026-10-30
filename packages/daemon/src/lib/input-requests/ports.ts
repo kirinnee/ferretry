@@ -4,6 +4,7 @@ import type {
   InputAuditDetail,
   InputAuditEvent,
   InputEvent,
+  InputQuarantineEvent,
   InputTarget,
   InputTargetFacts,
 } from '@ferretry/protocol';
@@ -16,7 +17,12 @@ import type {
  */
 
 export type ObserveResult =
-  | { readonly ok: true; readonly facts: InputTargetFacts }
+  | {
+      readonly ok: true;
+      readonly facts: InputTargetFacts;
+      /** Every name the surface is known by (its key and its id), so a quarantine holds whichever a reader uses. */
+      readonly names?: readonly string[];
+    }
   | { readonly ok: false; readonly reason: 'target_gone' | 'unsupported' };
 
 /**
@@ -77,13 +83,17 @@ export interface InputAgentNotifier {
 export interface InputJournal {
   publish(sessionId: string, event: InputEvent): Promise<void>;
   history(sessionId: string): Promise<readonly InputEvent[]>;
+  /** A quarantine starting or ending: names and an end time, so a restart keeps it. */
+  quarantine(sessionId: string, event: InputQuarantineEvent): Promise<void>;
+  quarantines(sessionId: string): Promise<readonly InputQuarantineEvent[]>;
 }
 
 export interface InputAuditEntry {
   readonly event: InputAuditEvent;
   readonly sessionId: string;
   readonly actor: InputActor | { readonly kind: 'agent' } | { readonly kind: 'daemon' };
-  readonly requestId: string;
+  /** Absent for an act that belongs to no request (the owner ending a quarantine). */
+  readonly requestId?: string;
   readonly detail: InputAuditDetail;
 }
 

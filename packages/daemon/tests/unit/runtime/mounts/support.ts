@@ -14,8 +14,8 @@ import {
   PIN_SCHEMA_VERSION,
   type Pin,
   type PinSnapshot,
-  type SecretName,
   type QueuedMessage,
+  type SecretName,
   type SendRecord,
   type SendResult,
   SessionConfigSchema,
@@ -452,9 +452,15 @@ export class FakeTerminals implements TerminalSubsystem {
    * a case needs to assert is that the attachment it gets back is bound to the terminal it named —
    * not that tmux produced bytes, which `TerminalStreamBridge` has its own integration coverage for.
    */
-  async stream(sessionId: string, terminalId: string, downstream: SocketDownstream): Promise<SocketHandler> {
+  async stream(
+    sessionId: string,
+    terminalId: string,
+    downstream: SocketDownstream,
+    options?: { readonly reveal?: boolean },
+  ): Promise<SocketHandler> {
     const target = `${this.session(sessionId)}/${this.require(this.session(sessionId), terminalId).id}`;
     this.streamed.push(target);
+    this.reveals.push(options?.reveal === true);
     return {
       open: async () => {
         downstream.send(new TextEncoder().encode(`open:${target}`));
@@ -470,6 +476,8 @@ export class FakeTerminals implements TerminalSubsystem {
 
   /** Every `session/terminal` a socket was attached to, in order. */
   readonly streamed: string[] = [];
+  /** For each stream, whether the viewer asked to see a quarantined terminal anyway. */
+  readonly reveals: boolean[] = [];
   readonly received: string[] = [];
   readonly closedStreams: string[] = [];
 

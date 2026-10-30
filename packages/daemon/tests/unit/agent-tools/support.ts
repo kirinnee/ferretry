@@ -191,7 +191,7 @@ class FakeBrowserPages implements Pick<BrowserSubsystem, 'status' | 'openPage' |
 }
 
 /** A whole agent-tools domain over fakes, with every collaborator exposed for assertions. */
-export function agentToolWorld(extra: Pick<AgentToolPorts, 'input' | 'scrub'> = {}) {
+export function agentToolWorld(extra: Pick<AgentToolPorts, 'input' | 'scrub' | 'quarantinedUntil'> = {}) {
   const terminals = new FakeTerminals(['s1', 's2']);
   const browser = new FakeBrowserPages();
   const audit = new RecordingAudit();

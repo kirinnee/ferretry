@@ -70,6 +70,8 @@ export const AUDIT_EVENTS = [
   'input.refused',
   'input.expired',
   'input.cancelled',
+  'input.quarantine_ended',
+  'input.quarantine_revealed',
   'link.opened',
 ] as const;
 export const AuditEventSchema = z.enum(AUDIT_EVENTS);

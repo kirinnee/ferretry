@@ -9,7 +9,10 @@ import type { ProgramRunner, TerminalModes } from './terminal-modes.ts';
 
 /** Finds the tmux session behind a terminal the agent named (`dev`) or an id, in that session's own listing. */
 export interface TerminalLocator {
-  locate(sessionId: string, key: string): Promise<{ readonly tmuxSession: string } | undefined>;
+  locate(
+    sessionId: string,
+    key: string,
+  ): Promise<{ readonly tmuxSession: string; readonly id?: string; readonly name?: string } | undefined>;
 }
 
 const TTY_PATH = /^\/dev\/[A-Za-z0-9._/-]+$/u;
@@ -36,7 +39,12 @@ interface WriteGuard {
 }
 
 type Sight =
-  | { readonly ok: true; readonly facts: InputTargetFacts; readonly guard: WriteGuard }
+  | {
+      readonly ok: true;
+      readonly facts: InputTargetFacts;
+      readonly guard: WriteGuard;
+      readonly names: readonly string[];
+    }
   | { readonly ok: false; readonly reason: 'target_gone' };
 
 interface Described {
@@ -100,7 +108,7 @@ export class TmuxInputTarget implements InputTargetPort {
   async observe(sessionId: string, target: InputTarget): Promise<ObserveResult> {
     if (target.kind !== 'terminal') return { ok: false, reason: 'unsupported' };
     const sight = await this.look(sessionId, target.key);
-    return sight.ok ? { ok: true, facts: sight.facts } : sight;
+    return sight.ok ? { ok: true, facts: sight.facts, names: sight.names } : sight;
   }
 
   private async describe(pane: string): Promise<Described | undefined> {
@@ -172,7 +180,12 @@ export class TmuxInputTarget implements InputTargetPort {
       promptLineDigest: digestLine(promptLine),
       recognisedConsumer: recognisedConsumer(foreground.comm),
     };
-    return { ok: true, facts, guard: { panePid: sighting.pid, command: last.command, cursorRow } };
+    return {
+      ok: true,
+      facts,
+      guard: { panePid: sighting.pid, command: last.command, cursorRow },
+      names: [...new Set([key, located.name, located.id].filter((name): name is string => name !== undefined))],
+    };
   }
 
   async type(

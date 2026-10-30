@@ -2,12 +2,12 @@ import { describe, it } from 'bun:test';
 import type { InputTargetFacts } from '@ferretry/protocol';
 import should from 'should';
 import { digestFacts, digestLine } from '../../../src/lib/input-requests/digest.ts';
+import type { TerminalModes } from '../../../src/lib/input-requests/terminal-modes.ts';
 import {
   parseForeground,
   type TerminalLocator,
   TmuxInputTarget,
 } from '../../../src/lib/input-requests/terminal-target.ts';
-import type { TerminalModes } from '../../../src/lib/input-requests/terminal-modes.ts';
 import type { TmuxCommandPort, TmuxCommandResult } from '../../../src/lib/tmux/contracts.ts';
 
 const SESSION = 'fy-webterm-Hadi-0a1b2c3d-abc123abc123';
@@ -374,7 +374,7 @@ describe('typing into a terminal an input request aims at', () => {
   });
 });
 
-describe('the write is bound at the injection boundary (a change DURING the final observation or the write)', () => {
+describe('the write is guarded by the tmux server comparison (a change DURING the final observation or the write)', () => {
   const finalWrite = (change: (w: World) => void) => (call: readonly string[], w: World) => {
     if (call[0] === 'if-shell') change(w);
   };

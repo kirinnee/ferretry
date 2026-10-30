@@ -22,8 +22,8 @@ import { ChallengeLedger, StepUpRegistry, StepUpService } from '../../../../src/
 import { MemoryTranscript } from '../../../support/transcript-images.ts';
 import { agentToolWorld } from '../../agent-tools/support.ts';
 import { fixedClock, request } from '../../api/support.ts';
-import { inputRequestService } from '../../input-requests/support.ts';
 import { NOT_AUDITED, NOT_AUDITED_SOCKETS } from '../../audit/not-audited.ts';
+import { inputRequestService } from '../../input-requests/support.ts';
 import { FakeRootPinner, FakeSessionGit } from '../../session/filesystem/support.ts';
 import {
   agendaService,
@@ -826,7 +826,7 @@ describe('the mounted daemon surface', () => {
       3 + // the skills inventory: the machine listing, one session's listing, and the Open read of a listed SKILL.md
       3 + // a ferret's processes: the list, one process's output, and Stop
       3 + // the board's projects: the list, one project's lanes, and a propose, edit or confirm of them
-      4 + // the owner's input requests: the two lists, and deliver or cancel one (docs/input-requests.md)
+      6 + // the owner's input requests: the two lists, deliver or cancel one, and the quarantine list and its end (docs/input-requests.md)
       2; // the board's legacy import: the old-reference lookup, and the one-time import (owner only)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status,
@@ -1090,6 +1090,8 @@ describe('the mounted daemon surface', () => {
       'GET /v1/input-requests',
       'GET /v1/sessions/:sessionId/input-requests',
       'POST /v1/sessions/:sessionId/input-requests/:requestId/deliver',
+      'GET /v1/sessions/:sessionId/input-quarantines',
+      'POST /v1/sessions/:sessionId/input-quarantines/:key/end',
       'POST /v1/sessions/:sessionId/input-requests/:requestId/cancel',
       'GET /v1/sessions/:sessionId/terminals',
       'POST /v1/sessions/:sessionId/terminals',

@@ -144,7 +144,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'terminal_request_input',
     tool: 'terminal.request_input',
     description:
-      'Ask the owner to type ONE value into a terminal: a password, sudo password, passphrase, one-time code or 2FA code. Have the program show its prompt first; then raise this and the owner types the value on a card, so you never hold it. Returns the card (!A<n>) at once; call input_wait. "prompt" is shown to the owner as "the agent says", never as fact: say what the value is for. Put no secret anywhere in the call. The value is never returned to you, and terminal_send is blocked on this terminal until the card is answered, cancelled or expires.',
+      'Ask the owner to type ONE value into a terminal: a password, sudo password or passphrase (sensitivity secret), or a plain answer such as a username, hostname or y/N (sensitivity plain). Have the program show its prompt first, with echo off for a secret; then raise this and the owner types the value on a card, so you never hold it. Returns the card (!A<n>) at once; call input_wait. "prompt" is shown to the owner as "the agent says", never as fact: say what the value is for. Put no secret anywhere in the call. A secret is never returned to you, and terminal_read and terminal_wait on that terminal are refused for about two minutes after it is typed (you can still send keys); a plain answer is NOT secret and the card tells the owner you can see it. terminal_send is blocked on this terminal until the card is answered, cancelled or expires.',
     inputSchema: object(
       {
         name: NAME,
@@ -158,7 +158,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
           type: 'string',
           enum: ['secret', 'private', 'plain'],
           description:
-            'secret: a password or passphrase (echo must be off). private: a one-time or 2FA code, a username or an e-mail. plain: nothing sensitive.',
+            'secret: a password or passphrase; the terminal must have echo off. plain: a username, e-mail, hostname or y/N, which you may see. private (a code that shows on screen) is not supported in terminals yet: ask the owner in chat.',
         },
         submit: {
           type: 'string',

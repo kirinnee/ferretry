@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import { AgendaIdSchema } from './agenda.ts';
-import { SurfaceKeySchema, SurfaceKindSchema } from './surface-names.ts';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 import { SecretNameSchema } from './secrets.ts';
+import { SurfaceKeySchema, SurfaceKindSchema } from './surface-names.ts';
 
 /**
  * THE INPUT REQUEST: the contract between an agent stuck at a password, sudo, one-time-code or 2FA prompt
@@ -25,6 +25,11 @@ export const INPUT_MAX_EXPIRY_SECONDS = 3_600;
 /** How long a delivered value stays masked from reads: the default and the cap. */
 export const INPUT_DEFAULT_REDACTION_SECONDS = 600;
 export const INPUT_MAX_REDACTION_SECONDS = 3_600;
+/**
+ * How long a terminal is QUARANTINED after the daemon types a secret into it: the agent's reads of it are
+ * refused and the owner's viewer shows a cover instead of the screen. The owner can end it sooner.
+ */
+export const INPUT_QUARANTINE_SECONDS = 120;
 /** Per session: requests open at once, and raises an hour. Past either, the raise is refused with a sentence. */
 export const INPUT_MAX_PENDING_PER_SESSION = 3;
 export const INPUT_MAX_RAISES_PER_HOUR = 20;
@@ -327,6 +332,8 @@ export const INPUT_ERROR_CODES = {
   inputPending: 'input_pending',
   /** 429: too many pending or recent requests. */
   rateLimited: 'rate_limited',
+  /** 409: an agent read a terminal the daemon just typed a secret into; the read is refused until the window ends. */
+  quarantined: 'quarantined',
 } as const;
 
 /** The session-journal events a request is published as; the payload is {@link InputEventSchema}. */
@@ -374,6 +381,29 @@ export const InputEventSchema = z.strictObject({
 });
 export type InputEvent = z.infer<typeof InputEventSchema>;
 
+/**
+ * The journal event that keeps a quarantine across a restart: the terminal's names (its key and its id, because
+ * a reader may hold either), when the window ends, and nothing else. `ended` closes the window early.
+ */
+export const INPUT_QUARANTINE_EVENT_TYPES = {
+  started: 'surface.input_quarantined',
+  ended: 'surface.input_quarantine_ended',
+} as const;
+export const InputQuarantineEventSchema = z.strictObject({
+  type: z.enum([INPUT_QUARANTINE_EVENT_TYPES.started, INPUT_QUARANTINE_EVENT_TYPES.ended]),
+  sessionId: boundedLine(128),
+  names: z.array(SurfaceKeySchema).min(1).max(4),
+  until: InstantSchema,
+  at: InstantSchema,
+});
+export type InputQuarantineEvent = z.infer<typeof InputQuarantineEventSchema>;
+
+/** One terminal that is quarantined now and when its window ends, as the owner's client reads it. */
+export const InputQuarantineSchema = z.strictObject({ key: SurfaceKeySchema, until: InstantSchema });
+export type InputQuarantine = z.infer<typeof InputQuarantineSchema>;
+export const InputQuarantineListSchema = z.strictObject({ quarantines: z.array(InputQuarantineSchema) });
+export type InputQuarantineList = z.infer<typeof InputQuarantineListSchema>;
+
 /** The audit events this feature writes (general store, activity). Wired into `AUDIT_EVENTS` by the daemon PR. */
 export const INPUT_AUDIT_EVENTS = [
   'input.requested',
@@ -381,6 +411,8 @@ export const INPUT_AUDIT_EVENTS = [
   'input.refused',
   'input.expired',
   'input.cancelled',
+  'input.quarantine_ended',
+  'input.quarantine_revealed',
 ] as const;
 export const InputAuditEventSchema = z.enum(INPUT_AUDIT_EVENTS);
 export type InputAuditEvent = z.infer<typeof InputAuditEventSchema>;
@@ -393,6 +425,8 @@ export const InputAuditDetailSchema = z.strictObject({
   targetKind: SurfaceKindSchema,
   consumer: boundedLine(160).optional(),
   sensitivity: InputSensitivitySchema,
+  /** The terminal a quarantine was about: its name, never what was typed there. */
+  surface: SurfaceKeySchema.optional(),
   recognised: z.boolean().optional(),
   source: z.enum(['typed', 'saved']).optional(),
   secretName: SecretNameSchema.optional(),

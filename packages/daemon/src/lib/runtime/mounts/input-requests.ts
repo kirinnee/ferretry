@@ -1,7 +1,8 @@
 import {
+  type InputActor,
   InputCancelBodySchema,
   InputDeliverBodySchema,
-  type InputActor,
+  type InputQuarantineList,
   type InputRequestList,
 } from '@ferretry/protocol';
 import { isHumanAdminActor } from '../../api/actor.ts';
@@ -41,13 +42,13 @@ const STATUS: Readonly<Record<InputRequestError['code'], number>> = {
   gone: 410,
 };
 
-function answered(error: unknown): never {
+export function answered(error: unknown): never {
   if (error instanceof InputRequestError)
     throw new ApiError(STATUS[error.code], error.message, error.reason ?? error.code);
   throw error;
 }
 
-function ownerOf(context: RouteContext): InputCaller {
+export function ownerOf(context: RouteContext): InputCaller {
   const credential = context.credential;
   const device = credential?.tokenClass === 'device';
   if (!device && !isHumanAdminActor(context.actor))
@@ -107,6 +108,32 @@ export function inputRequestRoutes(service: InputRequestService): readonly ApiRo
         return jsonResponse(
           await service.deliver(sessionOf(context), requestOf(context), body, caller).catch(answered),
         );
+      },
+    },
+    {
+      method: 'GET',
+      path: '/v1/sessions/:sessionId/input-quarantines',
+      minimum: 'operator',
+      capability: { capability: 'terminal', axis: 'use' },
+      noStore: true,
+      handle: context => {
+        const body: InputQuarantineList = {
+          quarantines: [...service.quarantines(ownerOf(context), sessionOf(context))],
+        };
+        return Promise.resolve(jsonResponse(body));
+      },
+    },
+    {
+      method: 'POST',
+      path: '/v1/sessions/:sessionId/input-quarantines/:key/end',
+      minimum: 'operator',
+      capability: { capability: 'terminal', axis: 'use' },
+      noStore: true,
+      handle: async context => {
+        const caller = ownerOf(context);
+        const key = context.params.get('key') ?? '';
+        await service.endQuarantine(caller, sessionOf(context), key).catch(answered);
+        return jsonResponse({ ended: true });
       },
     },
     {

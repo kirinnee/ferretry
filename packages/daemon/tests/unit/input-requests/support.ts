@@ -1,5 +1,6 @@
 import type { AgendaId, InputEvent, InputRaise, InputTargetFacts } from '@ferretry/protocol';
 import { EphemeralValues } from '../../../src/lib/input-requests/ephemeral-values.ts';
+import { QuarantineRegistry } from '../../../src/lib/input-requests/quarantine.ts';
 import { InputRequestService } from '../../../src/lib/input-requests/service.ts';
 
 export const SESSION = 'mvv6b4qw-49d0158d';
@@ -47,7 +48,12 @@ export function inputRequestService(options: { readonly crash?: () => boolean } 
       promptOf: async () => 'sudo wants your password',
     },
     notifier: { tell: async () => undefined },
-    journal: { publish: async (_session, event) => void events.push(event), history: async () => [] },
+    journal: {
+      publish: async (_session, event) => void events.push(event),
+      history: async () => [],
+      quarantine: async () => undefined,
+      quarantines: async () => [],
+    },
     audit: { record: async () => undefined },
     clock,
     ids: { requestId: () => (id++).toString(16).padStart(32, '0') },
@@ -55,6 +61,7 @@ export function inputRequestService(options: { readonly crash?: () => boolean } 
     trusted: { isTrusted: () => false, trust: () => undefined },
     sessions: { ended: async candidate => candidate !== SESSION, all: async () => [SESSION] },
     values,
+    quarantine: new QuarantineRegistry(clock),
     redact: async text => values.scrubAll(text),
   });
   return { service, writes, events };

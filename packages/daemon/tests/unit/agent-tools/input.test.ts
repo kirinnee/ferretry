@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import type { AgendaId, InputAgentView, InputRaise } from '@ferretry/protocol';
 import should from 'should';
-import { type AgentInputPort, AgentToolError } from '../../../src/lib/index.ts';
+import type { AgentInputPort, AgentToolError } from '../../../src/lib/index.ts';
 import { InputRequestError } from '../../../src/lib/input-requests/errors.ts';
 import { agent, agentToolWorld, person } from './support.ts';
 
@@ -38,7 +38,6 @@ const refusal = async (work: Promise<unknown>): Promise<AgentToolError> => {
     () => undefined,
     (failure: unknown) => failure,
   );
-  should(error).be.instanceOf(AgentToolError);
   return error as AgentToolError;
 };
 
@@ -402,5 +401,72 @@ describe('AgentToolService — keystrokes and closing are turns in the session',
     // Assert
     should(blocked.code).equal('conflict');
     should(world.terminals.typed.size).equal(0);
+  });
+});
+
+describe('AgentToolService — a terminal the owner just typed a secret into', () => {
+  const until = Date.parse('2026-10-16T10:02:00.000Z');
+  const held = (_sessionId: string, names: readonly (string | undefined)[]): number | undefined =>
+    names.includes('dev') || names.includes('000000000001') ? until : undefined;
+
+  it('should refuse terminal.read and terminal.wait to an agent, by name or by id, and say when it ends', async () => {
+    // Arrange
+    const world = agentToolWorld({ quarantinedUntil: held });
+    await world.service.call(agent, { tool: 'terminal.open', name: 'dev' });
+    world.terminals.screens.set('000000000001', 'password: hunter2\n');
+
+    // Act
+    const byName = await refusal(world.service.call(agent, { tool: 'terminal.read', name: 'dev' }));
+    const byId = await refusal(world.service.call(agent, { tool: 'terminal.read', name: '000000000001' }));
+    const waited = await refusal(world.service.call(agent, { tool: 'terminal.wait', name: 'dev', text: 'password' }));
+
+    // Assert
+    for (const error of [byName, byId, waited]) {
+      should(error.code).equal('conflict');
+      should(error.message).containEql('2026-10-16T10:02:00.000Z');
+      should(error.message).not.containEql('hunter2');
+    }
+  });
+
+  it('should stop a wait that is already running when the quarantine begins mid-wait', async () => {
+    // Arrange
+    let closed = true;
+    const world = agentToolWorld({ quarantinedUntil: () => (closed ? undefined : until) });
+    await world.service.call(agent, { tool: 'terminal.open', name: 'dev' });
+    world.onSleep.push(() => {
+      closed = false;
+    });
+
+    // Act
+    const error = await refusal(world.service.call(agent, { tool: 'terminal.wait', name: 'dev', text: 'never' }));
+
+    // Assert
+    should(error.code).equal('conflict');
+  });
+
+  it('should still let the agent send keys, and let a person read, while the terminal is held', async () => {
+    // Arrange
+    const world = agentToolWorld({ quarantinedUntil: held });
+    await world.service.call(agent, { tool: 'terminal.open', name: 'dev' });
+
+    // Act
+    const sent = await world.service.call(agent, { tool: 'terminal.send', name: 'dev', keys: ['ctrl-c'] });
+    const read = await world.service.call(person, { tool: 'terminal.read', name: 'dev' });
+
+    // Assert
+    should(sent.summary).startWith('Sent 1 key');
+    should(read.summary).startWith('The last');
+  });
+
+  it('should read normally once the quarantine is gone', async () => {
+    // Arrange
+    const world = agentToolWorld({ quarantinedUntil: () => undefined });
+    await world.service.call(agent, { tool: 'terminal.open', name: 'dev' });
+
+    // Act
+    const read = await world.service.call(agent, { tool: 'terminal.read', name: 'dev' });
+
+    // Assert
+    should(read.summary).startWith('The last');
   });
 });

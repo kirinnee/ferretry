@@ -16,7 +16,9 @@ import type { TerminalCapture } from './redraw.ts';
 const ESC = '\u001b';
 const ESCAPE = new RegExp(`${ESC}(?:\\[[0-?]*[ -/]*[@-~]|\\][^\\u0007${ESC}]*(?:\\u0007|${ESC}\\\\)|.)`, 'suy');
 const NO_WIDTH = /^[\p{Mn}\p{Me}\p{Cf}]$/u;
-const WIDE = /^(?:[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹯＀-｠￠-￦\u{1F300}-\u{1FAFF}\u{20000}-\u{3FFFD}]|\p{Emoji_Presentation})$/u;
+// East Asian wide ranges (UAX #11 W/F, as xterm and tmux count them): U+303F and the halfwidth forms are one cell.
+const WIDE =
+  /^(?:[\u{1100}-\u{115F}\u{2E80}-\u{303E}\u{3041}-\u{33FF}\u{3400}-\u{4DBF}\u{4E00}-\u{9FFF}\u{A000}-\u{A4CF}\u{A960}-\u{A97F}\u{AC00}-\u{D7A3}\u{F900}-\u{FAFF}\u{FE30}-\u{FE6F}\u{FF00}-\u{FF60}\u{FFE0}-\u{FFE6}\u{1F300}-\u{1F64F}\u{1F900}-\u{1F9FF}\u{20000}-\u{3FFFD}]|\p{Emoji_Presentation})$/u;
 const FILL = '*';
 
 /** One character of a row, with the colour codes that come before it. */
@@ -32,25 +34,43 @@ interface Row {
   readonly cells: readonly Cell[];
   /** The codes after the last character (tmux ends a row with a reset). */
   readonly tail: string;
+  /** Whether an escape that is not a colour code was dropped from this row: the row must be rewritten. */
+  readonly stripped: boolean;
 }
 
 const SGR = new RegExp(`${ESC}\\[([0-9;:]*)m`, 'gu');
+const SGR_CODE = new RegExp(`^${ESC}\\[[0-9;:]*m$`, 'u');
 
-/** The painted state after `codes`: a background colour or reverse video on, given whether it was on before. */
-function paintedAfter(codes: string, before: boolean): boolean {
-  let painted = before;
+/** What paints a blank cell: a background colour and reverse video are tracked apart, each cleared only by its own reset. */
+interface Paint {
+  readonly background: boolean;
+  readonly reverse: boolean;
+}
+
+const UNPAINTED: Paint = { background: false, reverse: false };
+
+/** The paint after `codes`, given the paint before. */
+function paintAfter(codes: string, before: Paint): Paint {
+  let { background, reverse } = before;
   for (const [, params = ''] of codes.matchAll(SGR)) {
-    const list = params === '' ? ['0'] : params.split(/[;:]/u);
-    for (let at = 0; at < list.length; at += 1) {
-      const code = Number(list[at]);
+    const groups = params === '' ? ['0'] : params.split(';');
+    for (let at = 0; at < groups.length; at += 1) {
+      const group = groups[at] ?? '';
+      const code = Number(group.split(':')[0]);
       if (code === 38 || code === 48) {
-        painted = code === 48 || painted;
-        at += list[at + 1] === '5' ? 2 : 4;
-      } else if (code === 0 || code === 49 || code === 27) painted = false;
-      else if (code === 7 || (code >= 40 && code <= 47) || (code >= 100 && code <= 107)) painted = true;
+        if (code === 48) background = true;
+        // A colon group carries its own colour; a semicolon one is followed by 2 (index) or 4 (rgb) more.
+        if (!group.includes(':')) at += groups[at + 1] === '5' ? 2 : 4;
+      } else if (code === 0) {
+        background = false;
+        reverse = false;
+      } else if (code === 49) background = false;
+      else if (code === 27) reverse = false;
+      else if (code === 7) reverse = true;
+      else if ((code >= 40 && code <= 47) || (code >= 100 && code <= 107)) background = true;
     }
   }
-  return painted;
+  return { background, reverse };
 }
 
 const widthOf = (char: string): number => (NO_WIDTH.test(char) ? 0 : WIDE.test(char) ? 2 : 1);
@@ -58,23 +78,26 @@ const widthOf = (char: string): number => (NO_WIDTH.test(char) ? 0 : WIDE.test(c
 function cellsOf(line: string): Row {
   const cells: Cell[] = [];
   let prefix = '';
-  let painted = false;
+  let paint = UNPAINTED;
+  let stripped = false;
   let at = 0;
   while (at < line.length) {
     ESCAPE.lastIndex = at;
     const code = ESCAPE.exec(line);
     if (code !== null) {
-      prefix += code[0];
+      // Only colour codes are kept: any other escape (a hyperlink's URL, a title) is metadata that can carry a value.
+      if (SGR_CODE.test(code[0])) prefix += code[0];
+      else stripped = true;
       at += code[0].length;
       continue;
     }
     const char = String.fromCodePoint(line.codePointAt(at) ?? 0);
-    painted = paintedAfter(prefix, painted);
-    cells.push({ prefix, char, width: widthOf(char), painted });
+    paint = paintAfter(prefix, paint);
+    cells.push({ prefix, char, width: widthOf(char), painted: paint.background || paint.reverse });
     prefix = '';
     at += char.length;
   }
-  return { cells, tail: prefix };
+  return { cells, tail: prefix, stripped };
 }
 
 function redactRows(capture: TerminalCapture, ranges: (text: string) => readonly TextRange[]): TerminalCapture {
@@ -83,7 +106,7 @@ function redactRows(capture: TerminalCapture, ranges: (text: string) => readonly
   let offset = 0;
   let next = 0;
   const lines = rows.map(({ line, row }) => {
-    let touched = false;
+    let touched = row.stripped;
     const cells = row.cells.map(cell => {
       const start = offset;
       offset += cell.char.length;

@@ -567,3 +567,49 @@ describe('the mounted terminal stream', () => {
     should(terminals.streamed).be.empty();
   });
 });
+
+describe('the mounted terminal stream: "show anyway" for a quarantined terminal', () => {
+  const asked: string[] = [];
+  const recorder = {
+    revealed: async (_caller: unknown, sessionId: string, key: string) => void asked.push(`${sessionId}/${key}`),
+  };
+  const sockets = (terminals: FakeTerminals) =>
+    new ApiSocketDispatcher(new ApiRouter(terminalSocketRoutes(terminals, recorder)), CREDENTIALS, GRANTED);
+
+  it('should reveal only when the viewer asks, and record that one viewer’s choice', async () => {
+    const terminals = new FakeTerminals();
+    const { terminal } = await withTerminal(terminals);
+    const base = `/v1/sessions/s1/terminals/${terminal.id}/stream`;
+    asked.length = 0;
+
+    const plain = await sockets(terminals).upgrade(request({ path: base, headers: human }));
+    const shown = await sockets(terminals).upgrade(request({ path: base, query: [['reveal', '1']], headers: human }));
+    if (plain.outcome === 'accepted')
+      await plain.attach({ send: () => undefined, close: () => undefined, bufferedBytes: () => 0 });
+    if (shown.outcome === 'accepted')
+      await shown.attach({ send: () => undefined, close: () => undefined, bufferedBytes: () => 0 });
+
+    should(terminals.reveals).eql([false, true]);
+    should(asked).eql([`s1/${terminal.id}`]);
+  });
+
+  it('should ignore a reveal request where nothing can record it', async () => {
+    const terminals = new FakeTerminals();
+    const { terminal } = await withTerminal(terminals);
+    const decision = await new ApiSocketDispatcher(
+      new ApiRouter(terminalSocketRoutes(terminals)),
+      CREDENTIALS,
+      GRANTED,
+    ).upgrade(
+      request({
+        path: `/v1/sessions/s1/terminals/${terminal.id}/stream`,
+        query: [['reveal', '1']],
+        headers: human,
+      }),
+    );
+    if (decision.outcome === 'accepted')
+      await decision.attach({ send: () => undefined, close: () => undefined, bufferedBytes: () => 0 });
+
+    should(terminals.reveals).eql([false]);
+  });
+});

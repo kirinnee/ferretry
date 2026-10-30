@@ -8,14 +8,14 @@ import {
   type AuditOutcome,
   type BrowserActionResult,
   type InputAgentView,
-  type SurfaceControlRequest,
   type SurfaceController,
+  type SurfaceControlRequest,
   type SurfaceControlView,
   type SurfaceKind,
   type SurfaceOpener,
 } from '@ferretry/protocol';
 import type { AuditSink } from '../audit/types.ts';
-import { BrowserSessionError, type BrowserPageAction, type BrowserSubsystem } from '../browser/runtime/index.ts';
+import { type BrowserPageAction, BrowserSessionError, type BrowserSubsystem } from '../browser/runtime/index.ts';
 import type { AgentControlPolicy } from '../fleet/agent-control.ts';
 import { InputRequestError } from '../input-requests/errors.ts';
 import { TerminalMountError, type TerminalSubsystem } from '../runtime/mounts/terminals.ts';
@@ -73,6 +73,11 @@ export interface AgentToolPorts {
   readonly input?: AgentInputPort;
   /** Masks the values the daemon just typed out of any screen text handed to the agent. */
   readonly scrub?: (sessionId: string, text: string) => string;
+  /**
+   * When the quarantine on a terminal ends (epoch milliseconds), or nothing when it is not quarantined. `names` are
+   * every way the terminal is known. An agent's read and wait are refused while it is quarantined.
+   */
+  readonly quarantinedUntil?: (sessionId: string, names: readonly (string | undefined)[]) => number | undefined;
 }
 
 /** The tools that change what a person would see, and so put up the driving marker. */
@@ -280,6 +285,7 @@ export class AgentToolService {
           return { summary: `Sent ${parts.join(' and ')} to ${reference}.` };
         });
       case 'terminal.read': {
+        this.assertReadable(caller, surface, reference);
         const lines = call.lines ?? AGENT_TOOL_DEFAULT_READ_LINES;
         const output = clipOutput(
           this.scrubbed(sessionId, await this.ports.terminals.text(sessionId, surface.id, lines)),
@@ -397,12 +403,14 @@ export class AgentToolService {
     reference: string,
   ): Promise<AgentToolResult> {
     const { sessionId } = caller;
+    this.assertReadable(caller, surface, reference);
     const deadline = this.ports.clock.now() + (call.timeoutMs ?? AGENT_TOOL_DEFAULT_WAIT_MS);
     const tail = async (): Promise<string> =>
       clipOutput(this.scrubbed(sessionId, await this.ports.terminals.text(sessionId, surface.id, WAIT_TAIL_LINES)));
     for (;;) {
       await this.ports.sleep(AGENT_TOOL_POLL_MS);
       if (caller.kind === 'agent') await this.assertFree(sessionId, surface);
+      this.assertReadable(caller, surface, reference);
       // The predicate sees what the agent may see: a value the daemon just typed is masked BEFORE the match,
       // so neither "matched" nor "not matched" can tell the agent whether a guess is in the hidden text.
       const matched =
@@ -420,6 +428,20 @@ export class AgentToolService {
       if (this.ports.clock.now() >= deadline)
         return { summary: `Still waiting on ${reference}: the wait timed out.`, matched: false, output: await tail() };
     }
+  }
+
+  /**
+   * An agent does not read a terminal the daemon just typed a secret into: masking can only hide a value it can
+   * recognise, so the terminal is closed to the agent's eyes until the window ends. Typing stays allowed.
+   */
+  private assertReadable(caller: AgentToolCaller, surface: ResolvedSurface, reference: string): void {
+    if (caller.kind !== 'agent') return;
+    const until = this.ports.quarantinedUntil?.(caller.sessionId, [surface.name, surface.id]);
+    if (until === undefined) return;
+    throw new AgentToolError(
+      'conflict',
+      `${reference} is quarantined until ${new Date(until).toISOString()}: the owner's secret was just typed there, so you cannot read it for a short while. You can still send keys. Try again after that time, or ask the owner.`,
+    );
   }
 
   /** Runs `work` as one turn in the session when input requests are wired; just runs it where they are not. */

@@ -49,6 +49,8 @@ export interface FakeDeck {
   readonly copied: string[];
   /** Stream URLs the deck resolved, so a test can prove daemon binding. */
   readonly urls: string[];
+  /** The `reveal` choice of every attach, so a test can prove a viewer asked to see a quarantined pane. */
+  readonly reveals: boolean[];
   confirm: boolean;
   /** Every hyperlink the deck asked about, and the answer it is given. */
   readonly linkQuestions: { visible: string; href: string }[];
@@ -128,6 +130,7 @@ export const fakeDeck = (
     closed: [],
     copied: [],
     urls: [],
+    reveals: [],
     linkQuestions: [],
     confirmLinks: true,
     confirm: true,
@@ -147,7 +150,8 @@ export const fakeDeck = (
       deck.closed.push(id);
       return { closed: true, id };
     },
-    attach: async (daemon, scope, id, handlers) => {
+    attach: async (daemon, scope, id, handlers, options) => {
+      deck.reveals.push(options?.reveal === true);
       const url = `wss://${daemon.daemonId}/v1/sessions/${scope.sessionId}/terminals/${id}/stream?ticket=t`;
       deck.urls.push(url);
       const socket = new FakeSocket(url, handlers);

@@ -84,13 +84,50 @@ describe('redactCapture', () => {
     should(out.lines[0]).equal('go **** now');
   });
 
-  it('should read OSC and CSI escapes as zero-width and keep a marker already on screen as ordinary text', async () => {
+  it('should drop non-colour escapes, which are metadata, and keep a marker already on screen as ordinary text', async () => {
     const out = await redactCapture(
       captureOf([`${ESC}]0;title\u0007[redacted:input A9] then hunter2`]),
       redactorOf('hunter2'),
     );
 
-    should(out.lines[0]).equal(`${ESC}]0;title\u0007[redacted:input A9] then *******`);
+    should(out.lines[0]).equal('[redacted:input A9] then *******');
+  });
+
+  it('should drop a hyperlink payload even when the visible cells hold nothing to mask', async () => {
+    const link = `${ESC}]8;;https://example.test/?code=hunter2${ESC}\\label${ESC}]8;;${ESC}\\`;
+    const out = await redactCapture(
+      captureOf([link, `${ESC}]8;;https://example.test/?code=hunter2 ${ESC}]8;;`]),
+      redactorOf('hunter2'),
+    );
+
+    should(out.lines[0]).equal('label');
+    should(out.lines.join('')).not.containEql('hunter2');
+    should(out.lines[1]).equal('');
+  });
+
+  it('should keep colour codes and trim only what is neither text nor paint', async () => {
+    const out = await redactCapture(
+      captureOf([
+        `${ESC}[44;7mab  ${ESC}[27m  ${ESC}[0m  `,
+        `${ESC}[7;44mab${ESC}[49m  ${ESC}[0m  `,
+        `${ESC}[48;2;1;2;3mab  ${ESC}[0m  `,
+        `${ESC}[48:2::1:2:3mx ${ESC}[49m  `,
+        `${ESC}[38;5;7mab ${ESC}[0m  `,
+      ]),
+      redactorOf('zzzz'),
+    );
+
+    should(out.lines[0]).equal(`${ESC}[44;7mab  ${ESC}[27m  ${ESC}[0m`);
+    should(out.lines[1]).equal(`${ESC}[7;44mab${ESC}[49m  ${ESC}[0m`);
+    should(out.lines[2]).equal(`${ESC}[48;2;1;2;3mab  ${ESC}[0m`);
+    should(out.lines[3]).equal(`${ESC}[48:2::1:2:3mx ${ESC}[49m`);
+    should(out.lines[4]).equal(`${ESC}[38;5;7mab${ESC}[0m`);
+  });
+
+  it('should count a single-cell wide-range neighbour (U+303F) as one cell and a CJK character as two', async () => {
+    const out = await redactCapture(captureOf(['〿hunter2中']), redactorOf('〿hunter2中'));
+
+    should(out.lines[0]).equal('*'.repeat(10));
   });
 
   it('should cover two values that sit side by side as one run', async () => {

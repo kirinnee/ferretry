@@ -1,5 +1,11 @@
 import { describe, it } from 'bun:test';
-import { type AgendaId, type InputDeliverBody, type InputEvent, padInputValue } from '@ferretry/protocol';
+import {
+  type AgendaId,
+  type InputDeliverBody,
+  type InputEvent,
+  type InputQuarantineEvent,
+  padInputValue,
+} from '@ferretry/protocol';
 import should from 'should';
 import {
   RedactingTerminalStreamService,
@@ -9,14 +15,16 @@ import {
   type TerminalStreamService,
   TmuxTerminalRuntime,
 } from '../../../src/adapters/index.ts';
+import { digestLine } from '../../../src/lib/input-requests/digest.ts';
 import { EphemeralAwareRedactor } from '../../../src/lib/input-requests/ephemeral-redactor.ts';
 import { EphemeralValues } from '../../../src/lib/input-requests/ephemeral-values.ts';
 import type { InputAuditEntry, InputCaller } from '../../../src/lib/input-requests/ports.ts';
+import { QuarantineRegistry } from '../../../src/lib/input-requests/quarantine.ts';
 import { InputRequestService } from '../../../src/lib/input-requests/service.ts';
-import { digestLine } from '../../../src/lib/input-requests/digest.ts';
 import { TmuxInputTarget } from '../../../src/lib/input-requests/terminal-target.ts';
+import { NO_REDACTION, SecretRedactor, type TextRedactor } from '../../../src/lib/secrets/redaction.ts';
+import type { SecretVault } from '../../../src/lib/secrets/vault.ts';
 import { OperatorReadService } from '../../../src/lib/session/reads/service.ts';
-import { NO_REDACTION, type TextRedactor } from '../../../src/lib/secrets/redaction.ts';
 import type { TerminalRecord } from '../../../src/lib/terminal/contracts.ts';
 import type { TmuxCommandPort, TmuxCommandResult } from '../../../src/lib/tmux/contracts.ts';
 
@@ -143,7 +151,16 @@ function fakeTmux(pane: Pane): TmuxCommandPort {
   };
 }
 
-function composed(scenario: Scenario, options: { history?: readonly InputEvent[]; failWrite?: boolean } = {}) {
+function composed(
+  scenario: Scenario,
+  options: {
+    history?: readonly InputEvent[];
+    failWrite?: boolean;
+    vault?: TextRedactor;
+    quarantineLog?: InputQuarantineEvent[];
+    clockAt?: number;
+  } = {},
+) {
   const trusted = new Set<string>();
   const pane: Pane = {
     physical: ['[sudo] password for kirin:'],
@@ -156,13 +173,15 @@ function composed(scenario: Scenario, options: { history?: readonly InputEvent[]
   };
   const tmux = fakeTmux(pane);
   const runtime = new TmuxTerminalRuntime(tmux, () => 1, { shell: async () => '/bin/sh' } as never);
-  let nowMs = Date.parse('2026-10-30T12:00:00.000Z');
+  let nowMs = options.clockAt ?? Date.parse('2026-10-30T12:00:00.000Z');
   const clock = { now: () => nowMs };
   const advance = (ms: number): void => {
     nowMs += ms;
   };
   const values = new EphemeralValues(clock);
-  const redactor = new EphemeralAwareRedactor(NO_REDACTION, values);
+  const redactor = new EphemeralAwareRedactor(options.vault ?? NO_REDACTION, values);
+  const quarantine = new QuarantineRegistry(clock);
+  const quarantineLog = options.quarantineLog ?? [];
   const emitted: string[] = [];
   const events: InputEvent[] = [...(options.history ?? [])];
   let card = 1;
@@ -189,6 +208,8 @@ function composed(scenario: Scenario, options: { history?: readonly InputEvent[]
         emitted.push(JSON.stringify(event));
       },
       history: async () => events,
+      quarantine: async (_session, event) => void quarantineLog.push(event),
+      quarantines: async () => quarantineLog,
     },
     audit: { record: async (entry: InputAuditEntry) => void emitted.push(JSON.stringify(entry)) },
     clock,
@@ -197,6 +218,7 @@ function composed(scenario: Scenario, options: { history?: readonly InputEvent[]
     trusted: { isTrusted: digest => trusted.has(digest), trust: digest => void trusted.add(digest) },
     sessions: { ended: async () => false, all: async () => [SESSION] },
     values,
+    quarantine,
     redact: async text => await redactor.redact(text),
   });
   const underlying: TerminalStreamService = {
@@ -213,7 +235,21 @@ function composed(scenario: Scenario, options: { history?: readonly InputEvent[]
     undefined,
     redactor,
   );
-  return { pane, runtime, service, values, redactor, emitted, events, underlying, scenario, trusted, reader, advance };
+  return {
+    pane,
+    runtime,
+    service,
+    values,
+    redactor,
+    emitted,
+    events,
+    underlying,
+    scenario,
+    trusted,
+    reader,
+    advance,
+    quarantine,
+  };
 }
 
 const RAISE = {
@@ -237,8 +273,8 @@ const piecesOf = (value: string): string[] => [value.trim(), value.slice(0, 6), 
 /** Opens a viewer, then lets `polls` more captures happen, `between` each one: the open frame, then deltas. */
 async function streamed(
   service: TerminalStreamService,
-  options: { polls?: number; between?: () => void } = {},
-): Promise<{ frames: string; closed: number }> {
+  options: { polls?: number; between?: () => void; resize?: { cols: number; rows: number } } = {},
+): Promise<{ frames: string; closed: number; sent: readonly string[] }> {
   const frames: string[] = [];
   let closed = 0;
   const downstream: TerminalStreamDownstream = {
@@ -259,13 +295,17 @@ async function streamed(
   };
   const bridge = new TerminalStreamBridge(service, SESSION, RECORD.id, downstream, scheduler);
   await bridge.open();
+  if (options.resize !== undefined) {
+    bridge.fromClient(JSON.stringify({ type: 'resize', ...options.resize }));
+    await new Promise<void>(resolve => setTimeout(resolve, 5));
+  }
   for (let poll = 0; poll < (options.polls ?? 0); poll += 1) {
     options.between?.();
     pending?.();
     await new Promise<void>(resolve => setTimeout(resolve, 5));
   }
   bridge.close();
-  return { frames: frames.join('\n'), closed };
+  return { frames: frames.join('\n'), closed, sent: frames };
 }
 
 async function typedInto(world: ReturnType<typeof composed>): Promise<void> {
@@ -444,5 +484,106 @@ describe('the value is unfindable outside the program it was typed into, over th
     should(world.pane.typed.length).equal(0);
     should((await restored.service.list(HOST)).length).equal(0);
     for (const piece of piecesOf(scenario.value)) should(everything.join('\n')).not.containEql(piece);
+  });
+});
+
+const FULL_REDRAW = `${ESC}[3J${ESC}[2J${ESC}[H`;
+const QUARANTINE_NOTICE = 'Kept from view';
+
+describe('the quarantine is the boundary, over the real adapters (masking is only behind it)', () => {
+  const scenario = SCENARIOS[0] as Scenario;
+  const gateOf = (world: ReturnType<typeof composed>) => (session: string, terminal: string) =>
+    world.service.quarantinedUntil(session, [terminal, RECORD.title]);
+
+  it('should show the viewer a notice and not one byte of the pane while the quarantine runs, full and delta', async () => {
+    const world = composed(scenario);
+    await typedInto(world);
+    const view = new RedactingTerminalStreamService(world.underlying, world.redactor, gateOf(world), () => 1);
+    const echoed = world.pane.physical;
+    world.pane.physical = ['[sudo] password for kirin:'];
+    const result = await streamed(view, {
+      polls: 3,
+      resize: { cols: scenario.cols, rows: 5 },
+      between: () => {
+        world.pane.physical = echoed;
+      },
+    });
+
+    should(result.frames).containEql(QUARANTINE_NOTICE);
+    should(result.frames).not.containEql('sudo');
+    for (const piece of piecesOf(scenario.value)) should(result.frames).not.containEql(piece);
+  });
+
+  it('should send a real delta frame once the viewer has said how big it is, and keep the value out of it', async () => {
+    const world = composed(scenario);
+    await typedInto(world);
+    world.quarantine.end(SESSION, 'dev');
+    const view = new RedactingTerminalStreamService(world.underlying, world.redactor);
+    const screen = (rows: readonly string[]): string[] => [...rows, '', '', '', ''].slice(0, 5);
+    const echoed = screen(world.pane.physical);
+    world.pane.physical = screen(['[sudo] password for kirin:']);
+    let poll = 0;
+    const result = await streamed(view, {
+      polls: 3,
+      resize: { cols: scenario.cols, rows: 5 },
+      between: () => {
+        poll += 1;
+        world.pane.physical = poll === 1 ? echoed : echoed.map(row => row.replace('Password', `Pass${poll}ord`));
+      },
+    });
+
+    should(result.sent.some(frame => frame !== '' && !frame.startsWith(FULL_REDRAW))).be.true();
+    should(result.frames).containEql('*');
+    for (const piece of piecesOf(scenario.value)) should(result.frames).not.containEql(piece);
+  });
+
+  it('should show the value to a viewer that chose to reveal it, and only to that viewer', async () => {
+    const world = composed(scenario);
+    await typedInto(world);
+    const revealed = await streamed(new RedactingTerminalStreamService(world.underlying, world.redactor));
+    const hidden = await streamed(
+      new RedactingTerminalStreamService(world.underlying, world.redactor, gateOf(world), () => 1),
+    );
+
+    should(revealed.frames).not.containEql(QUARANTINE_NOTICE);
+    should(hidden.frames).containEql(QUARANTINE_NOTICE);
+  });
+
+  it('should keep the quarantine across a restart after a SUCCESSFUL write, and let it end on time', async () => {
+    const log: InputQuarantineEvent[] = [];
+    const world = composed(scenario, { quarantineLog: log });
+    await typedInto(world);
+    const restarted = composed(scenario, { quarantineLog: log, history: world.events });
+    await restarted.service.restore();
+
+    should(world.pane.typed.length).equal(1);
+    should(log.some(event => event.type === 'surface.input_quarantined')).be.true();
+    should(restarted.service.quarantinedUntil(SESSION, ['dev'])).be.a.Number();
+    should(JSON.stringify(log)).not.containEql(scenario.value);
+    restarted.advance(121 * 1000);
+    should(restarted.service.quarantinedUntil(SESSION, ['dev'])).be.undefined();
+  });
+
+  it('should mask a vault secret that overlaps the typed value from the operator’s screen read, as one run', async () => {
+    const vault = new SecretRedactor({
+      values: async () => new Map([['TOKEN' as never, 'Tr0ub4dor&3-LEAKPROBE'.slice(5, 14)]]),
+    } as unknown as SecretVault);
+    const world = composed(scenario, { vault });
+    await typedInto(world);
+    const screen = await world.reader.snapshot(SESSION);
+
+    should(screen).containEql('[redacted');
+    for (const piece of piecesOf(scenario.value)) should(screen).not.containEql(piece);
+    should(screen).not.containEql('4dor&3-L');
+  });
+
+  it('should drop a hyperlink payload carrying the value from the viewer’s frames', async () => {
+    const world = composed(scenario);
+    await typedInto(world);
+    world.quarantine.end(SESSION, 'dev');
+    world.pane.physical = [`${ESC}]8;;https://example.test/?code=${scenario.value}${ESC}\\go${ESC}]8;;${ESC}\\`];
+    const result = await streamed(new RedactingTerminalStreamService(world.underlying, world.redactor));
+
+    for (const piece of piecesOf(scenario.value)) should(result.frames).not.containEql(piece);
   });
 });

@@ -14,7 +14,6 @@ import { hostname, tmpdir, userInfo } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import {
   AGENDA_ENV,
-  SUB_FERRET_ENV,
   ALWAYS_ON_SECTIONS,
   agendaNudgeEnabled,
   CredentialStatusService,
@@ -35,6 +34,7 @@ import {
   PASSIVE_LEARNING_ENV,
   resolveDefaultRuntime,
   runtimeIdsPath,
+  SUB_FERRET_ENV,
   sanitizeHarnessEnv,
   sharedHistoryPoolDirectory,
   wrapperNameOf,
@@ -65,6 +65,10 @@ import {
   type FleetCredentialList,
   FY_DEFAULT_DAEMON_PORT,
   type Harness,
+  type InputEvent,
+  InputEventSchema,
+  type InputQuarantineEvent,
+  InputQuarantineEventSchema,
   ioPressureView,
   type LearningConfig,
   localOnlyNotice,
@@ -79,8 +83,6 @@ import {
   type RuntimeModelChoice,
   refusalNotice,
   type SessionConfig,
-  type InputEvent,
-  InputEventSchema,
   SessionConfigSchema,
   type SessionHandoff,
   SessionStateSchema,
@@ -553,13 +555,12 @@ import {
   BoardService,
   BoardSweep,
   BoardTurnCheck,
-  LivenessActivityDeriver,
   DoneDeliveryLadder,
+  LivenessActivityDeriver,
   ReopenDeliveryLadder,
   SessionCards,
   type SessionLivenessSource,
 } from '../src/lib/board/index.ts';
-import { isSubFerret, nudgeTarget } from '../src/lib/sub-ferret/index.ts';
 import { GitHubWatcher } from '../src/lib/board-github/index.ts';
 import { BoardImporter, LaneSetImportProjects, type TaskAssigneeCandidate } from '../src/lib/board-import/index.ts';
 import {
@@ -584,6 +585,7 @@ import { type RuntimeNamesPort, resolveStartAccount } from '../src/lib/fleet/sta
 import { polledDirectoryLimitations } from '../src/lib/performance/fallbacks.ts';
 import { withSystemCallsign } from '../src/lib/runtime/mounts/system-session-control.ts';
 import { ProcessHistory, SessionProcessService } from '../src/lib/session/processes/index.ts';
+import { isSubFerret, nudgeTarget } from '../src/lib/sub-ferret/index.ts';
 import { OpenUrlService } from '../src/lib/system/open-url.ts';
 
 /** The ordinary revive a send uses, as the auto-resume pass sees it. */
@@ -629,6 +631,7 @@ import {
   AgendaService,
   AgendaTurnNudge,
   AgendaWaker,
+  type AgentInputPort,
   AgentSendFailureNotifier,
   AgentToolService,
   ANALYTICS_BACKSTOP_MS,
@@ -757,6 +760,8 @@ import {
   dialledRelayUrl,
   directCarrierSocketRoute,
   doneMarkerCertifiesTurn,
+  EphemeralAwareRedactor,
+  EphemeralValues,
   EventLoopLagMeter,
   type ExecutableResolverPort,
   effectiveAnalyticsPricing,
@@ -810,6 +815,11 @@ import {
   harnessQuirks,
   InferredLaneProposer,
   InitialAttachmentError,
+  InputAgendaAdapter,
+  InputAgentNotifierAdapter,
+  InputAuditAdapter,
+  InputCardClosedObserver,
+  InputRequestService,
   InstructionRefresh,
   type InterruptedLaunchOutcome,
   InterruptedLaunchReconciler,
@@ -920,6 +930,7 @@ import {
   previousConversation,
   publishableDirectCarrier,
   QUEUE_ANSWER_WAIT_MS,
+  QuarantineRegistry,
   QueueDeliverer,
   QueueingSends,
   QueueRefused,
@@ -1070,6 +1081,7 @@ import {
   StructuredQuestionService,
   SttEnhancementService,
   type SttEnhancementSubsystem,
+  SttyTerminalModes,
   SurfaceControl,
   SystemCallsignIssuer,
   searchTranscript,
@@ -1091,7 +1103,9 @@ import {
   type TerminalSessionResolver,
   type TerminalSubsystem,
   type TextRedactor,
+  type TmuxCommandPort,
   TmuxController,
+  TmuxInputTarget,
   type TmuxLaunchGuard,
   type TranscriptEvent,
   type TranscriptFileResolver,
@@ -1160,17 +1174,6 @@ import {
   withLivenessLedger,
   withOutdated,
   xvfbMissingMessage,
-  EphemeralAwareRedactor,
-  EphemeralValues,
-  InputAgendaAdapter,
-  InputAgentNotifierAdapter,
-  InputAuditAdapter,
-  InputCardClosedObserver,
-  InputRequestService,
-  SttyTerminalModes,
-  TmuxInputTarget,
-  type AgentInputPort,
-  type TmuxCommandPort,
 } from '../src/lib/index.ts';
 import {
   admitChild,
@@ -5964,6 +5967,7 @@ function createAgentToolsSubsystem(input: {
   readonly policy: AgentControlPolicy;
   readonly input: AgentInputPort;
   readonly scrub: (sessionId: string, text: string) => string;
+  readonly quarantinedUntil: (sessionId: string, names: readonly (string | undefined)[]) => number | undefined;
 }): MountedSubsystems['agentTools'] {
   const clock = { now: () => Date.now() };
   const control = new SurfaceControl(
@@ -5995,6 +5999,7 @@ function createAgentToolsSubsystem(input: {
       audit: input.audit,
       input: input.input,
       scrub: input.scrub,
+      quarantinedUntil: input.quarantinedUntil,
       clock,
       sleep: async milliseconds => await Bun.sleep(milliseconds),
     }),
@@ -6020,6 +6025,7 @@ function createInputRequestService(input: {
   readonly agentReplies: AgendaReplyBatcher;
   readonly audit: AuditLog;
   readonly values: EphemeralValues;
+  readonly quarantine: QuarantineRegistry;
   readonly redact: (text: string) => Promise<string>;
 }): InputRequestService {
   const clock = { now: () => Date.now() };
@@ -6044,6 +6050,26 @@ function createInputRequestService(input: {
       publish: async (sessionId, event) => {
         const id = tryParseSessionId(sessionId);
         if (id !== undefined) await input.storage.append(id, event.type, { ...event });
+      },
+      quarantine: async (sessionId, event) => {
+        const id = tryParseSessionId(sessionId);
+        if (id !== undefined) await input.storage.append(id, event.type, { ...event });
+      },
+      quarantines: async sessionId => {
+        const id = tryParseSessionId(sessionId);
+        const events: InputQuarantineEvent[] = [];
+        if (id === undefined || input.storage.findSession(id) === undefined) return events;
+        for (let after = 0; ; ) {
+          const page = await input.storage.replay(id, after, 10_000);
+          for (const recorded of page.events) {
+            const parsed = recorded.type.startsWith('surface.input_quarantine')
+              ? InputQuarantineEventSchema.safeParse(recorded.data)
+              : undefined;
+            if (parsed?.success === true) events.push(parsed.data);
+          }
+          if (!page.hasMore || page.nextSequence === undefined) return events;
+          after = page.nextSequence;
+        }
       },
       history: async sessionId => {
         const id = tryParseSessionId(sessionId);
@@ -6077,6 +6103,7 @@ function createInputRequestService(input: {
       all: async () => input.storage.listSessions().map(session => session.id),
     },
     values: input.values,
+    quarantine: input.quarantine,
     redact: input.redact,
   });
 }
@@ -6151,6 +6178,7 @@ function createTerminalSubsystem(
   runtime: TerminalRuntimePort,
   clock: MillisecondClockPort,
   redactor: TextRedactor,
+  quarantine: QuarantineRegistry,
 ): TerminalSubsystem {
   const sessions: TerminalSessionResolver = {
     resolve: async reference => {
@@ -6217,9 +6245,13 @@ function createTerminalSubsystem(
      * frame, bounds unwritten input, and drops output for a viewer that has stopped reading — the
      * mount hands it a socket and nothing more.
      */
-    stream: async (sessionId, terminalId, downstream) =>
+    stream: async (sessionId, terminalId, downstream, options) =>
       new TerminalStreamBridge(
-        new RedactingTerminalStreamService(service, redactor),
+        new RedactingTerminalStreamService(
+          service,
+          redactor,
+          options?.reveal === true ? undefined : (session, terminal) => quarantine.until(session, [terminal]),
+        ),
         sessionId,
         terminalId,
         downstream,
@@ -7124,6 +7156,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   // every read below that takes this redactor (screen, transcript, journal, processes) hides them too.
   const justTyped = new EphemeralValues({ now: () => Date.now() });
   const secretRedactor = new EphemeralAwareRedactor(new SecretRedactor(secretVault), justTyped);
+  // The terminals a secret was just typed into, kept from an agent and from a viewer for a window.
+  const quarantined = new QuarantineRegistry({ now: () => Date.now() });
   // ONE executor for the callsign ledger. It is what makes a claim atomic across concurrent starts:
   // the read-modify-write of that one file must never interleave with another start's.
   const callsignClaims = new KeyedSerialExecutor();
@@ -9634,6 +9668,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         agentReplies: agendaReplies,
         audit: auditLog,
         values: justTyped,
+        quarantine: quarantined,
         redact: async text => await secretRedactor.redact(text),
       });
       inputRequests = inputRequestService;
@@ -10285,7 +10320,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // with its last known word rather than a "Checking" that would outlive the read.
       credentialList = async () => await fleetCredentials.list({ settled: true });
       paneLimits = async () => await storagePaneLimits(storage, Date.now());
-      const terminalSubsystem = createTerminalSubsystem(storage, terminals, { now: () => Date.now() }, secretRedactor);
+      const terminalSubsystem = createTerminalSubsystem(
+        storage,
+        terminals,
+        { now: () => Date.now() },
+        secretRedactor,
+        quarantined,
+      );
       // A session browser nobody watches or drives stops after this long, so a forgotten one does not
       // hold the one shared profile away from every other session.
       const browserService = new BrowserSessionService(sessions, browserLauncher, () => Date.now(), {
@@ -11080,6 +11121,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           policy: agentControl,
           input: inputRequestService,
           scrub: (sessionId, text) => inputRequestService.scrub(sessionId, text),
+          quarantinedUntil: (sessionId, names) => inputRequestService.quarantinedUntil(sessionId, names),
         }),
         configFiles: createConfigFilesSubsystem({
           activities,

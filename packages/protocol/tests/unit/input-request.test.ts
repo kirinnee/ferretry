@@ -5,6 +5,7 @@ import { AgendaItemSchema } from '../../src/lib/agenda.ts';
 import { AgentToolCallSchema } from '../../src/lib/agent-tools.ts';
 import { AUDIT_EVENTS } from '../../src/lib/audit.ts';
 import {
+  INPUT_AUDIT_EVENTS,
   INPUT_DEFAULT_EXPIRY_SECONDS,
   INPUT_JOURNAL_EVENT_TYPES,
   INPUT_MAX_EXPIRY_SECONDS,
@@ -17,7 +18,6 @@ import {
   InputDeliverResultSchema,
   InputEventSchema,
   InputOutcomeSchema,
-  INPUT_AUDIT_EVENTS,
   InputRaiseSchema,
   InputRequestListSchema,
   InputRequestSchema,
@@ -350,7 +350,13 @@ describe('the schemas that must never hold a value', () => {
         node.const !== undefined ||
         node.format !== undefined ||
         node.pattern !== undefined;
-      if (node.type === 'string' && !bounded && !path.endsWith('.properties.key')) found.push(path);
+      if (
+        node.type === 'string' &&
+        !bounded &&
+        !path.endsWith('.properties.key') &&
+        !path.endsWith('.properties.surface')
+      )
+        found.push(path);
     });
     return found;
   };

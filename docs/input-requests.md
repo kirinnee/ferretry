@@ -24,6 +24,7 @@ route, command or API returns a value or a digest of one, and nothing logs a bod
 | The wire                                         | Only inside the end-to-end sealed carrier, **padded** to a 256-byte bucket (see below).           |
 | Daemon RAM while handling                        | From body parse to inject. No reference is kept after the handler returns.                        |
 | Daemon RAM, the **redaction window**             | The one retained copy: a per-session map, 10 minutes by default and 60 at most. Never serialized. |
+| A **plain** value                                | Not held. It is not secret: the card says the ferret can see it, and the agent may get it back.   |
 | The target                                       | It now lives in the target program. That is the point.                                            |
 
 `InputDeliverBodySchema` is the only schema with a value, and only as `padded`. It is a request body:
@@ -62,14 +63,18 @@ through the input tool; the generic add refuses it.
 
 ### Sensitivity
 
-| Value     | Meaning                                                       | Checks                                                            |
-| --------- | ------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `secret`  | A password, passphrase or token. Redacted, never shown back.  | Echo must be **off** (unknown counts as on), or a password field. |
-| `private` | An OTP, 2FA code, username or email. Redacted for the window. | The field must be a real input.                                   |
-| `plain`   | A hostname, `y`. Not sensitive.                               | Target binding only.                                              |
+| Value     | Meaning                                                              | Checks                                                                                        |
+| --------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `secret`  | A password or passphrase. Never reaches the agent, a log or disk.    | Echo must be **off** (unknown counts as on): raising on an echoing terminal is 409 `echo_on`. |
+| `plain`   | A username, email, hostname or `y`. **Not secret.**                  | Target binding only. The card says "Not secret: the ferret can see this value." and flags it. |
+| `private` | A code that echoes (a 2FA code typed into a terminal). **Deferred.** | Refused at raise (400 `bad_request`) until it has a design: masking cannot make an echo safe. |
 
-`secret` and `private` values containing a control character or a line break are refused ("this would
-press keys"). `plain` allows Tab. `inputValueProblem` is that rule.
+`secret` values (and the deferred `private`) containing a control character or a line break are refused
+("this would press keys"). `plain` allows Tab. `inputValueProblem` is that rule.
+
+A `plain` value is typed the same way and is not held in the redaction window, so the agent's next read
+shows it as the terminal shows it. The card says it is visible to the ferret; nothing about it is
+hidden. Handing the value back in the agent's result arrives with the multi-field card (P2).
 
 ## Who may do what
 
@@ -89,8 +94,10 @@ press keys"). `plain` allows Tab. `inputValueProblem` is that rule.
 - **The write is guarded by tmux itself.** Deliver looks at the target, compares it with the facts the
   owner was shown (`observedDigest`, a keyed HMAC whose key lives only in this daemon process), and
   then sends **one** `tmux if-shell -F` command whose condition tmux evaluates in its own server in the
-  same step as the write: the pane (by id), the pane's shell pid, the foreground command name, the
-  cursor row and "the pane is not dead". Any mismatch types nothing and answers 409 `target_changed`;
+  immediately before it queues the write (see the honest limits for what that does not prove): the
+  pane (by id), the pane's shell pid, tmux's `pane_current_command`, the cursor row and "the pane is
+  not dead". The foreground facts shown on the card come from `ps` and are digested; tmux can only be
+  asked about its own command name, so that name is what the guard compares. Any mismatch types nothing and answers 409 `target_changed`;
   a refused or failed command is _uncertain_. A foreground program whose name tmux cannot compare
   safely is refused. Three failed checks end the request. **What tmux cannot bind** is in the honest
   limits below.
@@ -124,13 +131,39 @@ The relay sees message sizes. The value is length-prefixed and padded to the nex
 
 ## Redaction
 
-The daemon holds each delivered value in RAM, for the window above, and masks it as
+Masking can only hide a value it can recognise: a prefix cut at a row edge, a value wrapped over
+rows, an escape payload or a program that echoes it differently all defeat a matcher. So masking is
+**defence in depth**; the confidentiality boundary is the quarantine below.
+
+### The pane quarantine
+
+When a `secret` is delivered the terminal is **quarantined** for `INPUT_QUARANTINE_SECONDS` (120):
+
+- **The agent cannot read it.** `terminal.read` and `terminal.wait` (every poll of a wait too) are
+  refused with a `conflict` error that says when the quarantine ends. The agent can still send keys.
+- **A viewer gets a notice instead of the pane**, unless that viewer chose "Show anyway". That choice
+  is per connection (`?reveal=1` on the viewer socket), owner-gated, and audited as
+  `input.quarantine_revealed`.
+- **The owner can end it early** (`POST /v1/sessions/:sessionId/input-quarantines/:key/end`, audited as
+  `input.quarantine_ended`); `GET .../input-quarantines` lists the live ones.
+- **It begins before the write.** The quarantine starts before `surface.input_delivering` is journalled,
+  and is lifted again only if the journal write fails or the write was neither typed nor uncertain.
+- **It survives a restart.** The daemon journals the terminal's names and the end time
+  (`surface.input_quarantined`, `surface.input_quarantine_ended`; no value, digest or length) and
+  restores them on start. A quarantine whose window has passed is not restored.
+- **A terminal is known by every name** (its key, name and id), so a read by any of them is refused.
+- **Raise-time rules**: a `secret` on an echoing terminal is refused (409 `echo_on`) so a value is never
+  typed onto a screen that shows it; `private` is refused.
+
+The daemon holds each delivered `secret` in RAM, for the window above, and masks it as
 `[redacted:input !A7]` wherever it scrubs text: the operator's screen, transcript and journal reads,
-and the agent's `terminal.read` and `terminal.wait`. Redaction fails closed.
+and (after the quarantine) the agent's `terminal.read` and `terminal.wait`. Redaction fails closed.
 
 - **The same text is scrubbed everywhere.** The ephemeral window and the vault's `SecretRedactor` are
   composed into one redactor (`EphemeralAwareRedactor`), and the operator's list and read routes go
-  through it, so an owner read never shows what an agent read hides.
+  through it, so an owner read never shows what an agent read hides. The two stores are masked as a
+  **union**: both are asked where they match in the original text, overlapping matches are merged and
+  each run is replaced once, so a vault secret overlapping a typed value cannot leave a tail behind.
 - **`terminal.wait` tests scrubbed text.** Its predicate runs on the redacted screen, so waiting for a
   prefix of the value never reveals whether the screen holds it.
 - **What the daemon saw is a projection, made once.** The prompt line, the program name (`comm`) and
@@ -147,7 +180,10 @@ and the agent's `terminal.read` and `terminal.wait`. Redaction fails closed.
   exactly those cells are overwritten in place with `*` of the same width (two for a wide character, none
   for a combining mark). Nothing is rewritten, so rows, columns and the cursor keep their shape, colours
   survive, and no marker exists that another value could collide with. A value that wrapped over rows is
-  masked in each row it sat in. A redactor that fails closes the stream.
+  masked in each row it sat in. A redactor that fails closes the stream. Only colour codes (SGR) are
+  kept on a row; every other escape (a hyperlink's URL, a title) is dropped, because its payload is
+  metadata that can carry a value. Background and reverse video are tracked apart, so a blank that is
+  still painted is never trimmed. Cell widths follow the East Asian wide ranges tmux and xterm use.
 - **Captures keep their trailing spaces until masked.** The viewer capture and the prompt-line read use
   `capture-pane -N`, so tmux does not trim a value typed with trailing spaces before it is matched;
   the trailing spaces are dropped only after masking. Values of one or two characters count half of
@@ -169,11 +205,17 @@ and the agent's `terminal.read` and `terminal.wait`. Redaction fails closed.
 
 - **Not a sandbox.** An agent running as the owner's user that builds a capture program and talks the
   owner past the warning can get the value. So can one that reads the admin token and calls deliver
-  with a saved secret. The bridge makes **accidents impossible and phishing visible**. It is the same
+  with a saved secret. The bridge **reduces accidents and makes phishing visible**. It is the same
   boundary `sudo` has ([secrets](secrets.md)). Answering and cancelling are owner-only by an
   honest-client rule, as everything under the admin token is.
 - **A hand-typed value is masked for the window only.** Afterwards a program that echoes it is not
-  masked, unless the value was saved to the vault.
+  masked, unless the value was saved to the vault. The quarantine is the stronger boundary but is also a
+  window: it ends after 120 seconds or when the owner ends it, and the secret is expected to be in a
+  program that does not echo it.
+- **The quarantine hides the pane from the agent's reads, not from the pane's program.** An agent that
+  can send keys can still make the program print what it received; the agent's `terminal.read` of it is
+  refused, but a process the agent started in another pane or a file it redirected to is not covered.
+- **A `plain` value is visible by design.** It is marked on the card.
 - **A browser `private` code can appear in an after-screenshot** (a later phase).
 - **Not zeroed, not locked.** Strings are immutable in the runtime. "Dropped" means unreachable. Swap
   and core dumps are out of scope.
@@ -186,14 +228,14 @@ and the agent's `terminal.read` and `terminal.wait`. Redaction fails closed.
   anything that changes between the queue and the program reading the bytes. In that gap the foreground
   can become **any** command (a different name as well as a same-named replacement), echo can flip, and
   the prompt can change; the bytes then go to whatever reads the pty next. Unit tests pin each of these as
-  a declared limit. The remaining defences are the owner's warning card, the trusted-program gate, the
+  a declared limit. One unit test pins the gap (`DECLARED LIMIT` in `terminal-target.test.ts`). The remaining defences are the owner's warning card, the trusted-program gate, the
   short window and the masking above. The `if-shell` syntax itself is exercised against a real tmux
   in CI (`tmux-input-guard.test.ts`); if a tmux build rejects it the write fails closed as _uncertain_,
   never as a silent type.
-- **A value cut by the capture window is not matched.** The viewer masks what one capture holds. A value
-  that wrapped so that only its tail is left in the first captured row (its head scrolled out of the
-  capture) is not found as a whole. The prompt-line projection catches pieces at the edge of its own line,
-  the viewer does not.
+- **A value cut by the capture window is not matched, which is why the quarantine exists.** The viewer
+  masks what one capture holds; a value whose head scrolled out of the capture, or a fragment at a row
+  edge, is not found as a whole. The quarantine hides the whole pane for the window, so this is only
+  reachable after it ends, when the value has by then normally left the screen.
 - **An uncertain write is not a retry.** If the single write fails or throws the owner is told the
   value may have been typed, and must raise a new request. Typing it again could put the password in
   the wrong place twice.
@@ -210,11 +252,11 @@ and the agent's `terminal.read` and `terminal.wait`. Redaction fails closed.
 
 ## Phases
 
-| Phase | What                                                                                    | State       |
-| ----- | --------------------------------------------------------------------------------------- | ----------- |
-| P0    | This contract and the schemas                                                           | done        |
-| P1    | Terminal secret: the daemon service, agent tools, deliver and cancel routes, `fy input` | this change |
-| P2    | The app card                                                                            | later       |
-| P3    | Saved secrets (one tap) and "save as"                                                   | later       |
-| P4    | Browser fields, and the agent-instruction extension for the browser                     | later       |
-| P5    | Multi-step chains, consumer configuration, a per-daemon remote cap                      | later       |
+| Phase | What                                                                                        | State       |
+| ----- | ------------------------------------------------------------------------------------------- | ----------- |
+| P0    | This contract and the schemas                                                               | done        |
+| P1    | Terminal secret and plain: service, agent tools, deliver and cancel, quarantine, `fy input` | this change |
+| P2    | The app card                                                                                | later       |
+| P3    | Saved secrets (one tap) and "save as"                                                       | later       |
+| P4    | Browser fields, and the agent-instruction extension for the browser                         | later       |
+| P5    | Multi-step chains, consumer configuration, a per-daemon remote cap                          | later       |

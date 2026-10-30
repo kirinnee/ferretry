@@ -35,6 +35,8 @@ const EVENT_WORDS: Readonly<Record<AuditEvent, string>> = {
   'input.refused': 'A value for a ferret was not typed',
   'input.expired': 'A request for a value ran out of time',
   'input.cancelled': 'A request for a value was cancelled',
+  'input.quarantine_ended': 'A terminal that a ferret was kept out of was opened up again',
+  'input.quarantine_revealed': 'A viewer chose to see a terminal a ferret was kept out of',
   'link.opened': 'A link was opened in this computer’s browser',
 };
 

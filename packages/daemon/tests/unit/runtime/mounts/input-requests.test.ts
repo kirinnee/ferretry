@@ -161,3 +161,36 @@ describe('the input request routes', () => {
     should(response.body).not.containEql(VALUE);
   });
 });
+
+describe('the quarantine routes', () => {
+  const list = (headers: Readonly<Record<string, string>> = human) =>
+    request({ method: 'GET', path: `/v1/sessions/${SESSION}/input-quarantines`, headers });
+  const end = (key: string, headers: Readonly<Record<string, string>> = human) =>
+    post(`/v1/sessions/${SESSION}/input-quarantines/${key}/end`, {}, headers);
+
+  it('should list a quarantine once a secret was typed, and end it for the owner', async () => {
+    const { dispatch, requestId, digest } = await served();
+    await dispatch.dispatch(post(path(requestId, 'deliver'), deliverBody(digest)));
+
+    const held = await dispatch.dispatch(list());
+    const ended = await dispatch.dispatch(end('dev'));
+    const after = await dispatch.dispatch(list());
+    const again = await dispatch.dispatch(end('dev'));
+
+    should(held.status).equal(200);
+    should((jsonBody(held).quarantines as { key: string }[]).map(entry => entry.key)).eql(['dev']);
+    should(ended.status).equal(200);
+    should(jsonBody(after).quarantines).eql([]);
+    should(again.status).equal(404);
+  });
+
+  it('should refuse an agent on both routes', async () => {
+    const { dispatch, requestId, digest } = await served();
+    await dispatch.dispatch(post(path(requestId, 'deliver'), deliverBody(digest)));
+
+    const read = await dispatch.dispatch(list(agentIn(SESSION)));
+    const stop = await dispatch.dispatch(end('dev', agentIn(SESSION)));
+
+    should([read.status, stop.status]).eql([403, 403]);
+  });
+});

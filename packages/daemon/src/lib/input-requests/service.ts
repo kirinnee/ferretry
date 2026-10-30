@@ -1,17 +1,5 @@
 import {
   type AgendaId,
-  type InputActor,
-  type InputAgentView,
-  type InputAuditDetail,
-  type InputAuditEvent,
-  type InputDeliverBody,
-  type InputDeliverResult,
-  type InputEvent,
-  type InputRaise,
-  type InputReason,
-  type InputRequest,
-  type InputTarget,
-  type InputTargetFacts,
   INPUT_DEFAULT_EXPIRY_SECONDS,
   INPUT_ERROR_CODES,
   INPUT_JOURNAL_EVENT_TYPES,
@@ -19,6 +7,21 @@ import {
   INPUT_MAX_PENDING_PER_SESSION,
   INPUT_MAX_RAISES_PER_HOUR,
   INPUT_PROMPT_MAX_LENGTH,
+  INPUT_QUARANTINE_EVENT_TYPES,
+  type InputActor,
+  type InputAgentView,
+  type InputAuditDetail,
+  type InputAuditEvent,
+  type InputDeliverBody,
+  type InputDeliverResult,
+  type InputEvent,
+  type InputQuarantine,
+  type InputQuarantineEvent,
+  type InputRaise,
+  type InputReason,
+  type InputRequest,
+  type InputTarget,
+  type InputTargetFacts,
   inputValueProblem,
   unpadInputValue,
 } from '@ferretry/protocol';
@@ -39,6 +42,7 @@ import type {
   InputTrustedPrograms,
   TypeResult,
 } from './ports.ts';
+import type { QuarantineRegistry } from './quarantine.ts';
 import { SessionLock } from './session-lock.ts';
 
 /**
@@ -103,6 +107,8 @@ export interface InputRequestServiceDependencies {
   readonly trusted: InputTrustedPrograms;
   readonly sessions: InputSessionDirectory;
   readonly values: EphemeralValues;
+  /** The terminals a secret was just typed into, which an agent may not read until the window ends. */
+  readonly quarantine: QuarantineRegistry;
   /** Masks every known secret and every just-typed value in text shown to the owner; rejects when it cannot. */
   readonly redact: (text: string) => Promise<string>;
 }
@@ -143,13 +149,14 @@ export class InputRequestService {
           : 'that target cannot take an input request',
       );
     }
+    this.guardScope(raise, seen.facts);
     const shown = await this.project(sessionId, seen.facts);
     const expiresAt = instant(now + (raise.expiresInSeconds ?? INPUT_DEFAULT_EXPIRY_SECONDS) * 1000);
     const requestId = this.deps.ids.requestId();
     const card = await this.deps.agenda.raise(sessionId, {
       requestId,
       title: TITLES[raise.sensitivity],
-      ask: askOf(shown),
+      ask: askOf(shown, raise.sensitivity),
       prompt: raise.prompt,
       blocking: raise.blocking ?? raise.sensitivity === 'secret',
       expiresAt,
@@ -181,6 +188,27 @@ export class InputRequestService {
     this.noteRaise(sessionId, now);
     await this.record(request, 'input.requested', { kind: 'agent' }, auditDetail(request));
     return this.view(request);
+  }
+
+  /**
+   * The narrow v1: a terminal takes a `secret` only while the program is not echoing it, and a `plain` answer the
+   * card calls visible. A code that echoes (`private`) is not typed by the daemon into a terminal yet, because
+   * the screen would then hold it where the agent reads.
+   */
+  private guardScope(raise: InputRaise, facts: InputTargetFacts): void {
+    if (raise.sensitivity === 'private')
+      throw new InputRequestError(
+        'bad_request',
+        'a code that shows on screen cannot be typed for you into a terminal yet; ask the owner in chat to type it there',
+      );
+    if (raise.sensitivity === 'secret' && facts.kind === 'terminal' && facts.echo !== 'off')
+      throw new InputRequestError(
+        'conflict',
+        facts.echo === 'on'
+          ? 'the terminal is echoing what is typed, so a secret would show on screen; wait for a password prompt, or raise this as plain if it is not secret'
+          : 'Ferretry could not tell whether the terminal echoes, so it will not ask for a secret here',
+        INPUT_ERROR_CODES.echoOn,
+      );
   }
 
   /** What the agent reads about its request: where it stands, never the value. Waits up to `waitMs` for a final state. */
@@ -317,6 +345,7 @@ export class InputRequestService {
    */
   async sessionEnded(sessionId: string): Promise<void> {
     this.deps.values.drop(sessionId);
+    this.deps.quarantine.drop(sessionId);
     for (const held of [...this.held.values()]) {
       if (held.request.sessionId === sessionId && held.request.state === 'pending')
         await this.finish(held, 'cancelled', 'interrupted', undefined, { closeCard: true, tellAgent: false });
@@ -349,7 +378,64 @@ export class InputRequestService {
         if (event.sessionId === sessionId) latest.set(event.requestId, event);
       }
       for (const event of latest.values()) await this.revive(event, now);
+      await this.restoreQuarantines(sessionId, now);
     }
+  }
+
+  /** A quarantine still running when the daemon stopped is running again, for the time it had left. */
+  private async restoreQuarantines(sessionId: string, now: number): Promise<void> {
+    const latest = new Map<string, InputQuarantineEvent>();
+    for (const event of await this.deps.journal.quarantines(sessionId)) {
+      if (event.sessionId === sessionId) latest.set(event.names.join('\u0000'), event);
+    }
+    for (const event of latest.values()) {
+      if (event.type !== INPUT_QUARANTINE_EVENT_TYPES.started) continue;
+      const until = Date.parse(event.until);
+      if (until > now) this.deps.quarantine.restore(sessionId, event.names, until);
+    }
+  }
+
+  /** The terminals of a session kept from an agent's eyes now, for the owner's viewer. Owner only. */
+  quarantines(caller: InputCaller, sessionId: string): readonly InputQuarantine[] {
+    requireOwner(caller);
+    return this.deps.quarantine.list(sessionId).map(({ key, until }) => ({ key, until: instant(until) }));
+  }
+
+  /** When a terminal's quarantine ends, for a reader that must refuse until then. */
+  quarantinedUntil(sessionId: string, names: readonly (string | undefined)[]): number | undefined {
+    return this.deps.quarantine.until(sessionId, names);
+  }
+
+  /** The owner opens a quarantined terminal to the agent again. Owner only; it is recorded and journalled. */
+  async endQuarantine(caller: InputCaller, sessionId: string, key: string): Promise<void> {
+    const owner = requireOwner(caller);
+    const names = this.deps.quarantine.end(sessionId, key);
+    if (names === undefined) throw new InputRequestError('not_found', `${key} is not quarantined`);
+    const at = instant(this.deps.clock.now());
+    await this.deps.journal
+      .quarantine(sessionId, { type: INPUT_QUARANTINE_EVENT_TYPES.ended, sessionId, names: [...names], until: at, at })
+      .catch(() => undefined);
+    await this.deps.audit
+      .record({
+        event: 'input.quarantine_ended',
+        sessionId,
+        actor: owner,
+        detail: { targetKind: 'terminal', sensitivity: 'secret', surface: key },
+      })
+      .catch(() => undefined);
+  }
+
+  /** The owner's viewer chose to see a quarantined terminal anyway: recorded as that one viewer's act. */
+  async revealed(caller: InputCaller, sessionId: string, key: string): Promise<void> {
+    const owner = requireOwner(caller);
+    await this.deps.audit
+      .record({
+        event: 'input.quarantine_revealed',
+        sessionId,
+        actor: owner,
+        detail: { targetKind: 'terminal', sensitivity: 'secret', surface: key },
+      })
+      .catch(() => undefined);
   }
 
   private async revive(event: InputEvent, now: number): Promise<void> {
@@ -469,12 +555,14 @@ export class InputRequestService {
         body,
       );
       if (refusal !== undefined) return await fail(refusal.reason, refusal.error);
+      const quarantined = request.sensitivity === 'secret' ? await this.quarantineFor(request, seen.names) : undefined;
       try {
         await this.journal(request, 'delivering', undefined, undefined, body.deliveryId);
       } catch {
+        await this.liftQuarantine(request.sessionId, quarantined);
         throw new InputRequestError('unavailable', 'Ferretry could not record the attempt, so nothing was typed');
       }
-      this.deps.values.hold(request.sessionId, value, request.agendaItemId);
+      if (request.sensitivity === 'secret') this.deps.values.hold(request.sessionId, value, request.agendaItemId);
       const typed: TypeResult = await this.deps.target
         .type(request.sessionId, request.target, value, submitted, seen.facts)
         .catch((): TypeResult => 'uncertain');
@@ -490,6 +578,7 @@ export class InputRequestService {
         );
       }
       if (typed !== 'typed') {
+        await this.liftQuarantine(request.sessionId, quarantined);
         await this.journalQuietly({ ...held.request, state: 'pending' }, 'requested');
         return await fail(typed, targetChanged());
       }
@@ -504,6 +593,41 @@ export class InputRequestService {
       if (held.request.state === 'delivering') held.request = { ...held.request, state: 'pending' };
       throw error;
     }
+  }
+
+  /**
+   * The terminal is quarantined BEFORE the value is typed, in the same step as the attempt is recorded, so
+   * there is no moment when the secret is on its way and an agent may still read the screen. The journal
+   * has the names and the end time (never the value) so a restart keeps it.
+   */
+  private async quarantineFor(
+    request: InputRequest,
+    seenNames: readonly string[] | undefined,
+  ): Promise<readonly string[]> {
+    const names = [...new Set([request.target.key, ...(seenNames ?? [])])].slice(0, 4);
+    const until = this.deps.quarantine.start(request.sessionId, names);
+    const at = instant(this.deps.clock.now());
+    await this.deps.journal
+      .quarantine(request.sessionId, {
+        type: INPUT_QUARANTINE_EVENT_TYPES.started,
+        sessionId: request.sessionId,
+        names,
+        until: instant(until),
+        at,
+      })
+      .catch(() => undefined);
+    return names;
+  }
+
+  /** Nothing was typed after all: the terminal is opened up again. */
+  private async liftQuarantine(sessionId: string, names: readonly string[] | undefined): Promise<void> {
+    const [key] = names ?? [];
+    if (names === undefined || key === undefined) return;
+    this.deps.quarantine.end(sessionId, key);
+    const at = instant(this.deps.clock.now());
+    await this.deps.journal
+      .quarantine(sessionId, { type: INPUT_QUARANTINE_EVENT_TYPES.ended, sessionId, names: [...names], until: at, at })
+      .catch(() => undefined);
   }
 
   private consumerRefusal(
@@ -693,8 +817,11 @@ function targetChanged(): InputRequestError {
   );
 }
 
-function askOf(facts: InputTargetFacts): string {
-  return facts.kind === 'terminal' ? `Type it into ${facts.foreground.comm}` : 'Type it into the page';
+const PLAIN_FLAG = 'Not secret: the ferret can see this value.';
+
+function askOf(facts: InputTargetFacts, sensitivity: InputRequest['sensitivity']): string {
+  const where = facts.kind === 'terminal' ? `Type it into ${facts.foreground.comm}` : 'Type it into the page';
+  return sensitivity === 'plain' ? `${where}. ${PLAIN_FLAG}` : where;
 }
 
 function auditDetail(request: InputRequest): InputAuditDetail {

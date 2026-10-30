@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto';
 import { describe, it } from 'bun:test';
+import { createHash } from 'node:crypto';
 import {
   type AgendaId,
   type InputDeliverBody,
@@ -8,21 +8,22 @@ import {
   padInputValue,
 } from '@ferretry/protocol';
 import should from 'should';
-import { AgendaService } from '../../../src/lib/agenda/index.ts';
 import type { AgendaLedger, AgendaLedgerRepository, AgendaMutation } from '../../../src/lib/agenda/index.ts';
+import { AgendaService } from '../../../src/lib/agenda/index.ts';
+import type { AuditEntry } from '../../../src/lib/audit/types.ts';
 import {
   InputAgendaAdapter,
   InputAgentNotifierAdapter,
   InputCardClosedObserver,
 } from '../../../src/lib/input-requests/agenda-adapter.ts';
-import type { AuditEntry } from '../../../src/lib/audit/types.ts';
 import { InputAuditAdapter } from '../../../src/lib/input-requests/audit-adapter.ts';
 import { EphemeralAwareRedactor } from '../../../src/lib/input-requests/ephemeral-redactor.ts';
 import { EphemeralValues } from '../../../src/lib/input-requests/ephemeral-values.ts';
 import { InputRequestError } from '../../../src/lib/input-requests/errors.ts';
 import type { InputCaller, ObserveResult, TypeResult } from '../../../src/lib/input-requests/ports.ts';
-import { NO_REDACTION } from '../../../src/lib/secrets/redaction.ts';
+import { QuarantineRegistry } from '../../../src/lib/input-requests/quarantine.ts';
 import { InputRequestService } from '../../../src/lib/input-requests/service.ts';
+import { NO_REDACTION } from '../../../src/lib/secrets/redaction.ts';
 import { agent, agentToolWorld } from '../agent-tools/support.ts';
 
 const SESSION = 's1';
@@ -122,6 +123,8 @@ function composed(options: { type?: () => TypeResult } = {}) {
         record('fs:session-journal')(event);
       },
       history: async () => journal,
+      quarantine: async () => undefined,
+      quarantines: async () => [],
     },
     audit: new InputAuditAdapter({ record: async (entry: AuditEntry) => void record('fs:audit-log')(entry) }),
     clock,
@@ -130,6 +133,7 @@ function composed(options: { type?: () => TypeResult } = {}) {
     trusted: { isTrusted: () => false, trust: () => undefined },
     sessions: { ended: async candidate => candidate !== SESSION, all: async () => [SESSION] },
     values,
+    quarantine: new QuarantineRegistry(clock),
     redact: async text => await redactor.redact(text),
   });
   return { service, tools, agenda, emitted, now, values, record };
