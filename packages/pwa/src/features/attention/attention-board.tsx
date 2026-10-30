@@ -190,6 +190,7 @@ export function AttentionBoard({
   const [background, setBackground] = useState<Record<string, boolean>>({});
   const items = snapshot?.items ?? [];
   const resolved = snapshot?.resolved ?? [];
+  const healthyEmpty = snapshot !== null && !error && items.length === 0 && (snapshot.parseErrors ?? 0) === 0;
   return (
     <section
       className="flex h-full min-h-0 flex-1 flex-col"
@@ -204,7 +205,9 @@ export function AttentionBoard({
           <div className="min-w-0">
             <h1 className="m-0 font-display text-title font-semibold tracking-display text-fg">Inbox</h1>
             <p className="m-0 text-meta text-faint">
-              {items.length} unresolved · oldest first · every clear records who did it
+              {healthyEmpty
+                ? 'Nothing needs you.'
+                : `${items.length} unresolved · oldest first · every clear records who did it`}
             </p>
           </div>
         </div>

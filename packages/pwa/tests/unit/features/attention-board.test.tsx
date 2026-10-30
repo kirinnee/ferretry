@@ -217,6 +217,8 @@ describe('AttentionBoard', () => {
       />,
     );
     expect(empty.container.textContent).toContain('Nothing needs you.');
+    expect(empty.container.querySelector('header')?.textContent).toContain('Nothing needs you.');
+    expect(empty.container.querySelector('header')?.textContent).not.toContain('oldest first');
     const loading = await mount(
       <AttentionBoard connection={connection} snapshot={null} loading error={null} onAction={() => undefined} />,
     );
@@ -286,6 +288,7 @@ describe('AttentionBoard', () => {
     expect(damaged.container.textContent).toContain('The Inbox needs human verification.');
     expect(damaged.container.textContent).toContain('damaged Inbox data');
     expect(damaged.container.textContent).not.toContain('Nothing needs you.');
+    expect(damaged.container.querySelector('header')?.textContent).toContain('0 unresolved · oldest first');
   });
 
   it('fails closed for an attention kind a newer or damaged runtime sends directly to the board', async () => {
