@@ -1,3 +1,9 @@
+## [4.140.0](https://github.com/kirinnee/ferretry/compare/v4.139.0...v4.140.0) (2026-10-30)
+
+### Features
+
+* **pwa:** let a file picked offline wait in the outbox with its message ([#1048](https://github.com/kirinnee/ferretry/issues/1048)) ([412d009](https://github.com/kirinnee/ferretry/commit/412d0090a93c57b3d616f7e37dce6cc34f788865))
+
 ## [4.139.0](https://github.com/kirinnee/ferretry/compare/v4.138.0...v4.139.0) (2026-10-30)
 
 ### Features
