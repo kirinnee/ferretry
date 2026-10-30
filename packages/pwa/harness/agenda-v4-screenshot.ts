@@ -181,14 +181,14 @@ const checkSlots = async (page: Page, label: string): Promise<void> => {
   });
   if (found === null || !found.slotted) return;
   check(found.buttons.length <= 3, `${label}: the row holds ${found.buttons.length} answer buttons`);
-  for (const button of found.buttons) {
-    const slot = SLOT[button.direction as keyof typeof SLOT];
-    const start = found.starts[slot];
-    check(
-      slot !== undefined && start !== undefined && Math.abs(button.x - start) < 2,
-      `${label}: "${button.letter}" (${button.direction}) is at x=${Math.round(button.x)}, its slot starts at ${Math.round(found.starts[slot ?? 0] ?? -1)}`,
-    );
-  }
+  // Positions follow the swipe: read left to right, the buttons' directions run ← ↑ →. (A slot may grow past its
+  // equal share to hold its longest word, so an exact x is not the rule — the order is.)
+  const order = [...found.buttons].sort((a, b) => a.x - b.x).map(button => SLOT[button.direction as keyof typeof SLOT]);
+  check(
+    order.every((slot, index) => slot !== undefined && (index === 0 || slot > (order[index - 1] ?? -1))),
+    `${label}: the row is not in ← ↑ → order: ${found.buttons.map(button => button.direction).join(', ')}`,
+  );
+  check(found.starts.length === 3, `${label}: the row has no three slots`);
 };
 
 /** Nothing in an item view folds: no disclosure, no summary, no toggle, nothing expandable in the body. */
@@ -254,11 +254,13 @@ const checkOverlay = async (page: Page, form: Form, label: string, composerRest:
       (found): found is Box => found !== null,
     );
     await checkSlots(page, label);
-    const widths = boxes.filter(box => box.width > 0).map(box => box.width);
-    check(
-      Math.max(...widths) - Math.min(...widths) < 2,
-      `${label}: the quick replies are not equal width: ${widths.map(Math.round).join(', ')}`,
+    // Every label is whole: never clipped, never broken inside a word ("Postgre / s").
+    const clipped = await row.evaluate(element =>
+      [...element.querySelectorAll<HTMLElement>('.fy-qr__label')]
+        .filter(text => text.scrollWidth > text.clientWidth + 1)
+        .map(text => text.textContent ?? ''),
     );
+    check(clipped.length === 0, `${label}: a quick-reply label does not fit its button: ${clipped.join(', ')}`);
     check(new Set(boxes.map(box => Math.round(box.y))).size === 1, `${label}: the quick replies are not one row`);
   }
   await checkNoFolds(page, label);

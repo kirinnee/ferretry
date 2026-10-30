@@ -285,7 +285,9 @@
    the "…" menu is the fourth, narrow column. */
 .fy-qr__row[data-slots] {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  /* Each slot is at least as wide as its longest word, so a label wraps only between words — never "Postgre / s".
+     Labels with a word over 8 characters are drawn as letters, so three slots and "…" still fit a phone card. */
+  grid-template-columns: repeat(3, minmax(min-content, 1fr)) auto;
 }
 .fy-qr__row[data-slots] > [data-agenda-answer='left'] {
   grid-column: 1;
@@ -314,7 +316,9 @@
   display: -webkit-box;
   min-width: 0;
   overflow: hidden;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
   text-align: center;
   white-space: normal;
   -webkit-box-orient: vertical;
