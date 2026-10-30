@@ -6,6 +6,7 @@ import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { daemonProjectsPath, daemonSessionPath } from '../../lib/pages/routes.ts';
 import { useRouter } from '../../lib/router.tsx';
 import { useAppStore } from '../../lib/store.tsx';
+import { PageThemeSwitch } from '../../shell/theme-toggle.tsx';
 import { ProjectBoards } from './project-boards.tsx';
 import { activeProjectSessions, projectBoardSessions, projectSessions } from './project-detail-model.ts';
 import { ProjectFiles } from './project-files.tsx';
@@ -81,7 +82,10 @@ function ProjectDetailView({
           <p className="m-0 text-meta font-semibold uppercase tracking-wide text-muted">Workspace registry / project</p>
           <h1 className="m-0 font-display text-display font-bold tracking-display">{project.name}</h1>
         </div>
-        <ProjectLaunch project={project} onLaunch={onLaunch} />
+        <div className="flex flex-wrap items-start gap-md">
+          <ProjectLaunch project={project} onLaunch={onLaunch} />
+          <PageThemeSwitch />
+        </div>
       </div>
 
       <div className="grid gap-panel lg:grid-cols-[minmax(16rem,0.72fr)_minmax(0,1.5fr)]">

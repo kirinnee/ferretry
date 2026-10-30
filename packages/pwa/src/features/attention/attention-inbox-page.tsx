@@ -58,6 +58,7 @@ import type { RecentMessage } from '../../lib/recent-messages.ts';
 import { AttentionCountBadge } from '../../shell/app-bar.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { sessionsBarNames } from '../../shell/sessions-bar-model.ts';
+import { PageThemeSwitch } from '../../shell/theme-toggle.tsx';
 import { AgendaStatusPill } from './agenda-status-pill.tsx';
 import { attentionAge, attentionReference } from './attention-board.tsx';
 import { AttentionCard, type AttentionCardOrigin } from './attention-card.tsx';
@@ -755,6 +756,7 @@ export function AttentionInboxPage({
           </select>
         ) : null}
         <FindBox onChange={setQuery} query={query} />
+        <PageThemeSwitch />
       </div>
     </header>
   );

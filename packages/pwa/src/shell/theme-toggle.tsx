@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type RefObject } from 'react';
 import { Check, Monitor, Moon, Palette, Sun } from 'lucide-react';
 import { isTopEscapeLayer, pushEscapeLayer } from '../hooks/use-dialog-focus.ts';
+import { useLayoutMode } from '../hooks/use-layout-mode.ts';
 import { useKeyboardOpen } from '../hooks/use-keyboard-open.ts';
 import { useTheme, type ThemeState } from '../hooks/use-theme.ts';
 import type { ResolvedMode, ThemeMode, ThemePreferenceStore } from '../lib/theme-preferences.ts';
@@ -326,9 +327,14 @@ export interface ThemeToggleProps {
    * the same one the desktop strip opens, so the control is one thing at every width.
    */
   readonly touch?: boolean;
+  /**
+   * A desktop header's slot: the trigger is the icon alone (the theme's name is its tooltip and its
+   * accessible name), so it sits in a row of buttons without widening it.
+   */
+  readonly iconOnly?: boolean;
 }
 
-export function ThemeToggle({ store, touch = false }: ThemeToggleProps = {}) {
+export function ThemeToggle({ store, touch = false, iconOnly = false }: ThemeToggleProps = {}) {
   const theme = useTheme(store);
   const { family, mode, resolved, families } = theme;
   const [open, setOpen] = useState(false);
@@ -482,7 +488,7 @@ export function ThemeToggle({ store, touch = false }: ThemeToggleProps = {}) {
         aria-controls={open ? panelId : undefined}
       >
         <Palette size={14} aria-hidden="true" />
-        {touch ? null : (
+        {touch || iconOnly ? null : (
           <span className="hidden text-meta font-medium sm:inline">{activeFamily?.label ?? 'Theme'}</span>
         )}
       </Button>
@@ -514,14 +520,14 @@ export function ThemeToggle({ store, touch = false }: ThemeToggleProps = {}) {
 }
 
 /**
- * The quick switch's corner on layouts wider than a phone. Those layouts have no shared header — each
- * page draws its own — so the corner is a slim strip of the shell's own, and no page's header can
- * collide with it.
+ * The quick switch in a page's own top row, at the right end. A phone's bar carries it itself, so there
+ * this renders nothing rather than a second instance. No page gets a bar just for it.
  */
-export function ThemeCornerStrip() {
-  return (
-    <div data-shell-theme-strip="" className="flex shrink-0 items-center justify-end px-panel pt-xs">
-      <ThemeToggle />
+export function PageThemeSwitch() {
+  const phone = useLayoutMode() === 'drawer';
+  return phone ? null : (
+    <div data-page-theme-switch="" className="shrink-0">
+      <ThemeToggle iconOnly />
     </div>
   );
 }

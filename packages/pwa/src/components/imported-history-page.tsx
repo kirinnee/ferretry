@@ -1,6 +1,7 @@
 import type { ForeignHistoryListing, ImportedConversationDetail } from '@ferretry/protocol';
 import { useEffect, useState } from 'react';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
+import { PageThemeSwitch } from '../shell/theme-toggle.tsx';
 
 export interface ImportedHistoryPageProps {
   readonly connection: DaemonConnection;
@@ -34,7 +35,10 @@ export function ImportedHistoryPage({ connection, readHistory, readConversation 
 
   return (
     <section aria-labelledby="imported-history-heading" className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-8">
-      <p className="fy-eyebrow [overflow-wrap:anywhere]">Archive · {connection.daemonId}</p>
+      <div className="flex items-start justify-between gap-2">
+        <p className="fy-eyebrow [overflow-wrap:anywhere]">Archive · {connection.daemonId}</p>
+        <PageThemeSwitch />
+      </div>
       <div className="mt-2 border-l-heavy border-accent pl-5">
         <h1 id="imported-history-heading" className="font-display text-3xl font-bold tracking-display">
           Imported history
