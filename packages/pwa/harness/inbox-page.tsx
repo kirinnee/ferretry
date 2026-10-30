@@ -15,7 +15,10 @@ import { AgendaInboxPage } from '../src/features/agenda/agenda-inbox-page.tsx';
 import type { AgendaInbox } from '../src/hooks/use-agenda-inbox.ts';
 import { DeferredAgendaActions, type InboxCard, inboxCardKey } from '../src/lib/agenda-inbox.ts';
 import { daemonId } from '../src/lib/daemon-connection.ts';
+import { ScrollMemory } from '../src/lib/scroll-memory.ts';
 import { AppTabBar } from '../src/shell/app-bar.tsx';
+import { PageScrollRegion } from '../src/shell/page-scroll-region.tsx';
+import { PullToPaletteRegion } from '../src/shell/pull-to-palette-region.tsx';
 import { sessionView } from '../tests/support/sessions.ts';
 
 const NOW = Date.parse('2026-10-29T09:00:00.000Z');
@@ -144,6 +147,7 @@ const FERRET: readonly InboxCard[] = [
   card(WITH('A10', 4, 'Which cache to drop?'), NIGHTLY, 'studio'),
 ];
 
+const memory = new ScrollMemory(null);
 const deferred = new DeferredAgendaActions(async () => undefined);
 
 function Inbox({
@@ -171,27 +175,35 @@ function Inbox({
     connectionFor: () => undefined,
   };
   return (
-    <div className="flex h-dvh flex-col bg-bg" data-fixture="">
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <AgendaInboxPage
-          from={source}
-          inbox={inbox}
-          now={NOW}
-          onClearFrom={() => setSource(null)}
-          onNavigate={() => undefined}
-          phone={phone}
-          withFerretsOpen={withFerretsOpen}
-        />
+    <div className={`kt-shell flex overflow-hidden ${phone ? 'flex-col' : 'flex-row'}`} data-fixture="">
+      <div data-shell-main="" className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <PullToPaletteRegion
+          className={`relative min-h-0 min-w-0 flex-1 px-1 sm:px-3${phone ? ' overflow-clip' : ''}`}
+          enabled={false}
+          onOpen={() => undefined}
+        >
+          <PageScrollRegion entryKey="inbox" memory={memory}>
+            <AgendaInboxPage
+              from={source}
+              inbox={inbox}
+              now={NOW}
+              onClearFrom={() => setSource(null)}
+              onNavigate={() => undefined}
+              phone={phone}
+              withFerretsOpen={withFerretsOpen}
+            />
+          </PageScrollRegion>
+        </PullToPaletteRegion>
+        {phone ? (
+          <AppTabBar
+            active="attention"
+            agendaCount={inbox.total}
+            daemon={STUDIO}
+            onNavigate={() => undefined}
+            onOpenPalette={() => undefined}
+          />
+        ) : null}
       </div>
-      {phone ? (
-        <AppTabBar
-          active="attention"
-          agendaCount={inbox.total}
-          daemon={STUDIO}
-          onNavigate={() => undefined}
-          onOpenPalette={() => undefined}
-        />
-      ) : null}
     </div>
   );
 }

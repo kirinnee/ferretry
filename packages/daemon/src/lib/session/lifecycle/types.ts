@@ -10,6 +10,25 @@ import { z } from 'zod';
 import { MAX_SESSION_TITLE_LENGTH } from '../../names/types.ts';
 import { type SessionId, SessionIdSchema } from '../../session-id.ts';
 
+/**
+ * A stop that did not run because a launch of the same session is still in flight in this daemon.
+ *
+ * Distinct from a stop that failed: nothing was attempted and nothing was written, so the session is
+ * exactly as it was and the stop can simply be asked again once the launch settles.
+ */
+export class SessionStopPending extends Error {
+  constructor(
+    readonly sessionId: string,
+    waitedMs: number,
+  ) {
+    super(
+      `session ${sessionId} is still launching after ${Math.round(waitedMs / 1_000)}s; nothing was stopped — ` +
+        'stop it again once the launch settles',
+    );
+    this.name = 'SessionStopPending';
+  }
+}
+
 export const LifecycleSessionStatusSchema = z.enum([
   'created',
   'starting',

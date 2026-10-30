@@ -18,9 +18,9 @@ import {
   type BoardSnapshot,
   type BoardStore,
   type BoardWrite,
+  type AgendaLinkSource,
   type LaneSetSource,
   LivenessActivityDeriver,
-  NoAgendaLinks,
   type ReopenNotice,
   type ReopenNotifier,
   type SessionFocus,
@@ -29,6 +29,9 @@ import {
   type SessionParents,
   type SessionRoster,
 } from '../../../src/lib/board/index.ts';
+
+/** An agenda that names no card. */
+const NO_ASKS: AgendaLinkSource = { asksFor: async () => new Map() };
 
 export const MACHINE = 'machine-1';
 export const NOW = '2026-10-30T10:00:00.000Z';
@@ -246,7 +249,7 @@ export const world = (overrides: Partial<ServiceWorld> = {}): ServiceWorld => {
     focus: new FakeFocus(),
     reopen: new FakeReopen(),
     activity: new LivenessActivityDeriver({ sessions: new FakeSessions(), clock: { now: () => NOW } }),
-    agenda: new NoAgendaLinks(),
+    agenda: NO_ASKS,
     changes: new FakeChanges(),
     clock: { now: () => NOW },
     diagnostics: { warn: message => warnings.push(message) },

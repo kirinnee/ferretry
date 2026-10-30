@@ -1,5 +1,5 @@
 import { basename } from 'node:path';
-import { HARNESS_LABEL, HYPERMEDIA_ENV } from '@ferretry/fleet';
+import { HARNESS_LABEL, HYPERMEDIA_ENV, QUESTION_ASKED_FILE_ENV } from '@ferretry/fleet';
 import {
   type BoardProjectId,
   assignedTaskDocument as protocolAssignedTaskDocument,
@@ -150,24 +150,33 @@ export function firstTurnInstruction(taskFile: string): string {
  * an interactive ferret with hypermedia silently off.
  *
  * THE MEDIA FOLDER IS DERIVED TOO, and written last for the same reason as the id: a stored variable
- * must not be able to point an agent's "show this" files somewhere the media route does not read.
+ * must not be able to point an agent's "show this" files somewhere the media route does not read. So is
+ * the question file Claude's hook records an asked question in: the observer reads only the session's own.
  */
 export function sessionPaneEnvironment(
   id: SessionId,
   stored: Readonly<Record<string, string>>,
   mode: 'auto' | 'interactive',
-  media?: string,
+  files?: SessionPaneFiles,
 ): Readonly<Record<string, string>> {
   return {
     [HYPERMEDIA_ENV]: mode === 'interactive' ? '1' : '0',
     ...stored,
     [SESSION_ID_VARIABLE]: id,
-    ...(media === undefined ? {} : { [SESSION_MEDIA_VARIABLE]: media }),
+    ...(files === undefined
+      ? {}
+      : { [SESSION_MEDIA_VARIABLE]: files.media, [QUESTION_ASKED_FILE_ENV]: files.questionAsked }),
   };
 }
 
-/** Creates (if needed) and names one session's media folder; see `SessionPaths.media`. */
-export type SessionMediaDirectory = (id: SessionId) => Promise<string>;
+/** The session's own files a pane is handed by name; see `SessionPaths.media` and `SessionPaths.questionAsked`. */
+export interface SessionPaneFiles {
+  readonly media: string;
+  readonly questionAsked: string;
+}
+
+/** Creates (if needed) the session's media folder and names it and the session's other pane files. */
+export type SessionPaneFolders = (id: SessionId) => Promise<SessionPaneFiles>;
 
 /** Everything the daemon had to resolve before a record could be built. */
 export interface SessionRecordContext {

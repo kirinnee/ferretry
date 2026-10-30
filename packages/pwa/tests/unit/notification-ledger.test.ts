@@ -99,7 +99,7 @@ describe('notification payloads', () => {
     const waiting = view('same/id', 'awaiting_user', { teammate: 'zelda' });
     const aSpec = buildNotification(a, waiting, 'attention');
     const bSpec = buildNotification(b, waiting, 'attention');
-    should(aSpec.title).equal('[Zelda] Session same/id');
+    should(aSpec.title).equal('Session same/id · Zelda');
     should(aSpec.body).equal('Waiting for you at the prompt.');
     const yours = buildNotification(
       a,
@@ -123,8 +123,12 @@ describe('notification payloads', () => {
   it('should preserve composed titles, clamp counts, and use kind-specific bodies', () => {
     const scope = daemonSessionScope({ daemonId: daemonA }, 's1');
     const composed = view('s1', 'failed', { name: '[Zelda] already composed' });
-    should(buildNotification(scope, composed, 'failed', 999).title).equal('[Zelda] already composed');
-    should(notificationTitle(composed)).equal('[Zelda] already composed');
+    should(buildNotification(scope, composed, 'failed', 999).title).equal('already composed · Zelda');
+    should(notificationTitle(composed)).equal('already composed · Zelda');
+    should(notificationTitle(view('s1', 'failed', { name: '[Zelda] already composed', teammate: 'moe' }))).equal(
+      'already composed · Moe',
+    );
+    should(notificationTitle(view('s1', 'failed', { name: '', teammate: undefined }))).equal('s1');
     should(buildNotification(scope, composed, 'failed', 999).count).equal(100);
     const failed = view('s1', 'stalled');
     failed.state.reason = 'pane died';

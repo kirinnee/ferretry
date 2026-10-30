@@ -160,6 +160,8 @@ const eventItem = (view: BoardTaskView, event: BoardTaskEvent, board: SweepBoard
   const item = (key: string, text: string): QuietItem => ({ key: `${view.id}:${key}`, text, at: event.at });
   switch (event.type) {
     case 'moved': {
+      // `fy signal done` already told the lead, with the ferret's own words (`SessionCards.signalled`).
+      if (event.trigger === 'signal.done') return null;
       const pr = view.links.prs.at(-1);
       const fromPr = event.trigger?.startsWith('pr.') === true || event.trigger === 'ci.green';
       const suffix = fromPr && pr !== undefined ? ` (PR #${pr.number})` : '';

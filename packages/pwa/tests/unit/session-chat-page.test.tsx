@@ -2567,7 +2567,7 @@ describe('SessionChatPage', () => {
       }
     });
 
-    test('opens the drawer upward from the line, and a row title opens the item over the whole chat column', () => {
+    test('opens the drawer upward from the line, and a row title opens the item over the message list only', () => {
       const page = renderSessionChatPage(agendaPage());
       try {
         const composerBefore = names(column(page.root)).at(-1);
@@ -2580,34 +2580,30 @@ describe('SessionChatPage', () => {
         run(() => page.root.findByType(AgendaRow).props.onOpen());
         expect(drawers(page.root)).toHaveLength(0);
         expect(cards(page.root)).toHaveLength(1);
-        // Focus mode: the item is a direct child of the chat surface, over the log AND the composer.
-        const last = surface(page.root).children.at(-1);
-        expect(typeof last === 'string' ? 0 : last?.findAllByType(AgendaItemView).length).toBe(1);
-        expect(surface(page.root).findAllByType(AgendaItemView)).toHaveLength(1);
-        expect(log(page.root).findAllByType(AgendaItemView)).toHaveLength(0);
+        // The item is laid over the message list only: the agenda row and the composer stay where they are.
+        expect(log(page.root).findAllByType(AgendaItemView)).toHaveLength(1);
         expect(column(page.root).findAllByType(AgendaItemView)).toHaveLength(0);
-        // The chat stays mounted underneath, so its scroll position is kept.
         expect(column(page.root).findAllByType(Composer)).toHaveLength(1);
+        expect(column(page.root).findAllByType(AgendaLine)).toHaveLength(1);
         expect(names(column(page.root)).at(-1)).toBe(composerBefore);
       } finally {
         run(() => page.unmount());
       }
     });
 
-    test('covers the messages and the composer while an item shows, and gives them back when it closes', () => {
+    test('covers the messages, never the composer, while an item shows, and gives them back when it closes', () => {
       const page = renderSessionChatPage(agendaPage());
       try {
-        expect(surface(page.root).props['data-agenda-focus']).toBeUndefined();
-        expect(log(page.root).props.inert).toBeUndefined();
-        expect(chatInput(page.root).props.inert).toBeUndefined();
+        const hidden = () => page.root.find(node => node.type === 'div' && node.props.className === 'contents');
+        expect(hidden().props.inert).toBeUndefined();
         run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onAgendaOpen('A3', null));
-        expect(surface(page.root).props['data-agenda-focus']).toBe(true);
-        expect(log(page.root).props.inert).toBe(true);
-        expect(chatInput(page.root).props.inert).toBe(true);
-        run(() => page.root.findByType(AgendaItemView).props.onClose());
-        expect(surface(page.root).props['data-agenda-focus']).toBeUndefined();
-        expect(log(page.root).props.inert).toBeUndefined();
+        expect(hidden().props.inert).toBe(true);
+        expect(hidden().findAllByType(Transcript)).toHaveLength(1);
+        expect(hidden().findAllByType(AgendaItemView)).toHaveLength(0);
         expect(chatInput(page.root).props.inert).toBeUndefined();
+        expect(surface(page.root).props['data-agenda-focus']).toBeUndefined();
+        run(() => page.root.findByType(AgendaItemView).props.onClose());
+        expect(hidden().props.inert).toBeUndefined();
       } finally {
         run(() => page.unmount());
       }
@@ -2678,7 +2674,7 @@ describe('SessionChatPage', () => {
       }
     });
 
-    test('sends the next message about the items chipped to it, then clears the chips', async () => {
+    test('sends the next message about the open item, then closes the view and the chip', async () => {
       const sent: string[] = [];
       const spy = {
         ...client([], agendaSession()),
@@ -2690,19 +2686,41 @@ describe('SessionChatPage', () => {
       try {
         const send = (text: string) =>
           page.root.findByType(Composer).props.api.send('shared', { message: text, now: false });
-        // No chip: the message goes out exactly as typed.
+        const chips = () =>
+          page.root
+            .findAllByType(AgendaReferenceChips)
+            .flatMap(entry => entry.props.items.map((it: { id: string }) => it.id));
+        // No item open: the message goes out exactly as typed.
         await send('plain');
         press(page.root);
         run(() => page.root.findByType(AgendaRow).props.onOpen());
-        run(() => page.root.findByType(AgendaItemView).props.onReply(''));
-        expect(page.root.findByType(AgendaReferenceChips).props.items.map((item: { id: string }) => item.id)).toEqual([
-          'A3',
-        ]);
+        expect(chips()).toEqual(['A3']);
         await send('ship it');
         run(() => page.root.findByType(Composer).props.onSent());
-        expect(page.root.findAllByType(AgendaReferenceChips).every(chips => chips.props.items.length === 0)).toBe(true);
+        expect(chips()).toEqual([]);
+        expect(cards(page.root)).toHaveLength(0);
         await send('later');
         expect(sent).toEqual(['plain', '!A3 ship it', 'later']);
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+
+    test('a message sent with the chip taken off is plain chat, and the view stays open', async () => {
+      const sent: string[] = [];
+      const spy = {
+        ...client([], agendaSession()),
+        send: async (_id: string, body: { message: string }) => {
+          sent.push(body.message);
+        },
+      };
+      const page = renderSessionChatPage(agendaPage({ client: spy as never }));
+      try {
+        run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onAgendaOpen('A3', null));
+        run(() => page.root.findByType(AgendaReferenceChips).props.onRemove('A3'));
+        await page.root.findByType(Composer).props.api.send('shared', { message: 'unrelated', now: false });
+        expect(sent).toEqual(['unrelated']);
+        expect(cards(page.root)).toHaveLength(1);
       } finally {
         run(() => page.unmount());
       }

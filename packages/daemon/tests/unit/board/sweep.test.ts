@@ -317,6 +317,33 @@ describe('the sweep plan: quiet events', () => {
     should(Object.keys(plan.memory.seen)).eql(['F1', 'F2']);
   });
 
+  it("should leave a done move to the done's own quiet line", () => {
+    // Arrange
+    const done = childCard(
+      [
+        {
+          at: EARLIER,
+          actor: { kind: 'daemon' },
+          type: 'moved',
+          from: 'implement',
+          to: 'review',
+          backward: false,
+          reason: 'shipped the sweep',
+          auto: true,
+          trigger: 'signal.done',
+        },
+      ],
+      { laneId: 'review' },
+    );
+
+    // Act
+    const plan = planSweep(sawChild(), board(leadCard, view(done)), everyone, NOW);
+
+    // Assert
+    should(plan.quiet).eql([]);
+    should(plan.memory.seen['F2']?.seq).equal(2);
+  });
+
   it('should read a card created since the last tick from its first event, and skip a closed one never seen', () => {
     // Arrange
     const fresh = childCard(

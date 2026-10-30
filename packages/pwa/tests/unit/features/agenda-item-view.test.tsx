@@ -7,7 +7,6 @@ import type { InboxAction } from '../../../src/lib/agenda-inbox.ts';
 import type { TranscriptEntry } from '../../../src/lib/session-screens.ts';
 import { agendaItem, choices } from '../../support/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must, pressKey } from '../../support/dom.ts';
-import { typeInto } from '../../support/learning-dom.ts';
 
 let view: Mounted | null = null;
 afterEach(async () => {
@@ -36,10 +35,8 @@ const richItem = agendaItem('A47', {
 } as unknown as Partial<AgendaItem>);
 
 interface Spy {
-  readonly acted: { action: InboxAction; note: string }[];
-  readonly sent: string[];
+  readonly acted: InboxAction[];
   closed: number;
-  replied: number;
   previous: number;
   next: number;
   progress: [number, boolean][];
@@ -50,7 +47,7 @@ const draw = async (
   extra: Partial<AgendaItemViewProps> = {},
   history: readonly HistoryEvent[] = [],
 ): Promise<Spy> => {
-  const spy: Spy = { acted: [], sent: [], closed: 0, replied: 0, previous: 0, next: 0, progress: [] };
+  const spy: Spy = { acted: [], closed: 0, previous: 0, next: 0, progress: [] };
   view = await mount(
     <AgendaItemView
       busy={false}
@@ -59,7 +56,7 @@ const draw = async (
       history={history}
       item={item}
       now={NOW}
-      onAct={(action, note) => spy.acted.push({ action, note })}
+      onAct={action => spy.acted.push(action)}
       onClose={() => {
         spy.closed += 1;
       }}
@@ -71,12 +68,6 @@ const draw = async (
       }}
       onProgress={async (step, done) => {
         spy.progress.push([step, done]);
-      }}
-      onReply={() => {
-        spy.replied += 1;
-      }}
-      onSend={async text => {
-        spy.sent.push(text);
       }}
       position={{ index: 1, total: 3 }}
       renderProse={text => text}
@@ -93,14 +84,16 @@ const press = (key: string, init: KeyboardEventInit = {}, target: EventTarget = 
   interact(() => pressKey(target, key, init));
 
 describe('the item view', () => {
-  test('is a dialog laid over the chat, with the top, ONE scrolling body and the bar as its three parts', async () => {
+  test('is a dialog laid over the message list, with the top, ONE scrolling body and the quick replies as its three parts', async () => {
     await draw(richItem);
     const section = one('section');
     expect(section.getAttribute('role')).toBe('dialog');
     expect(section.getAttribute('aria-modal')).toBe('true');
     expect(section.getAttribute('data-agenda-view')).toBe('A47');
-    expect([...section.children].map(child => child.tagName)).toEqual(['HEADER', 'DIV', 'FOOTER']);
-    expect(root().querySelectorAll('[data-agenda-body]')).toHaveLength(1);
+    expect([...section.children].map(child => child.tagName)).toEqual(['HEADER', 'DIV', 'DIV']);
+    expect(root().querySelectorAll('.fy-item-view__body')).toHaveLength(1);
+    expect(section.lastElementChild?.hasAttribute('data-agenda-quick-replies')).toBe(true);
+    expect(root().querySelector('textarea, input[type="text"]')).toBeNull();
   });
 
   test('puts the title, the short ask, where it stands and the pager in the sticky top', async () => {
@@ -136,6 +129,8 @@ describe('the item view', () => {
     expect([...table.querySelectorAll('thead th')].map(head => head.textContent)).toEqual(['Term', 'Meaning']);
     expect([...table.querySelectorAll('tbody th')].map(term => term.textContent)).toEqual(['WAL', 'ACID']);
     const history = must(body.querySelector('[data-agenda-history]'), 'the history');
+    expect(history.querySelector('[data-agenda-history-latest]')?.textContent).toContain('SQLite');
+    expect(history.querySelector('[data-agenda-history-toggle]')?.getAttribute('aria-expanded')).toBe('false');
     expect(body.lastElementChild?.contains(history)).toBe(true);
   });
 
@@ -157,8 +152,6 @@ describe('the item view', () => {
         item={agendaItem('A48', { ask: { kind: 'permission' } } as Partial<AgendaItem>)}
         onAct={() => undefined}
         onClose={() => undefined}
-        onReply={() => undefined}
-        onSend={async () => undefined}
         position={{ index: 0, total: 1 }}
         renderProse={text => text}
         swipeable={false}
@@ -197,11 +190,10 @@ describe('the keys', () => {
     await press('ArrowRight');
     await press('ArrowLeft');
     await press('ArrowUp');
-    expect(spy.acted.map(entry => (entry.action as { response?: { choice?: string } }).response?.choice)).toEqual([
+    expect(spy.acted.map(action => (action as { response?: { choice?: string } }).response?.choice)).toEqual([
       'SQLite',
       'Postgres',
     ]);
-    expect(spy.acted.every(entry => entry.note === '')).toBe(true);
   });
 
   test('do nothing while the item is busy, with a modifier, or for a key it does not own', async () => {
@@ -219,38 +211,34 @@ describe('the keys', () => {
     expect(spy.closed).toBe(0);
   });
 
-  test('stay out of a field and a button, which keep their own keys', async () => {
+  test('stay out of a button, which keeps its own keys', async () => {
     const spy = await draw(richItem);
-    await press('ArrowRight', {}, one('[data-agenda-field]'));
-    await press('Escape', {}, one('[data-agenda-field]'));
-    await press('ArrowLeft', {}, one('[data-agenda-add-reply]'));
+    await press('ArrowRight', {}, one('[data-agenda-option="SQLite"]'));
+    await press('Escape', {}, one('[data-agenda-option="Postgres"]'));
+    await press('ArrowLeft', {}, one('[aria-label="Next item"]'));
     expect(spy.acted).toEqual([]);
     expect(spy.closed).toBe(0);
   });
 });
 
-describe('the action bar', () => {
-  test('sends the typed text as a reply about the item, and answers with it as the note', async () => {
+describe('the quick replies', () => {
+  test('sit under the body as chips, the recommended one tagged, and a tap answers', async () => {
     const spy = await draw(richItem);
-    await typeInto(one<HTMLTextAreaElement>('[data-agenda-field]'), 'on staging first');
-    await interact(() =>
-      must(
-        [...root().querySelectorAll<HTMLButtonElement>('[data-agenda-answer]')].find(
-          button => button.dataset.agendaOption === 'SQLite',
-        ),
-        'SQLite',
-      ).click(),
-    );
-    expect(spy.acted[0]?.note).toBe('on staging first');
-    await typeInto(one<HTMLTextAreaElement>('[data-agenda-field]'), 'and a reply');
-    await interact(() => one<HTMLButtonElement>('[data-agenda-send]').click());
-    expect(spy.sent).toEqual(['and a reply']);
+    const chip = one<HTMLButtonElement>('[data-agenda-quick-replies] [data-agenda-option="SQLite"]');
+    expect(chip.querySelector('[data-agenda-recommended]')).not.toBeNull();
+    await interact(() => chip.click());
+    expect(spy.acted).toHaveLength(1);
+    expect(spy.acted[0]).toMatchObject({ kind: 'respond', response: { choice: 'SQLite' } });
   });
 
-  test('"Add to reply" is the bar’s own', async () => {
-    const spy = await draw(richItem);
-    await interact(() => one<HTMLButtonElement>('[data-agenda-add-reply]').click());
-    expect(spy.replied).toBe(1);
+  test('say an item with its ferret is being waited on', async () => {
+    await draw(agendaItem('A9', { ask: { kind: 'permission' }, waitingOn: 'ferret' } as Partial<AgendaItem>));
+    expect(root().textContent).toContain('With Zoe — it will update this.');
+  });
+
+  test('say what the machine refused', async () => {
+    await draw(richItem, { error: 'No.' });
+    expect(one('[role="alert"]').textContent).toBe('Not sent: No.');
   });
 });
 
@@ -272,16 +260,15 @@ describe('several questions', () => {
     interact(() => must(root().querySelector<HTMLButtonElement>(`[data-agenda-pick="${label}"]`), label).click());
   const send = () => one<HTMLButtonElement>('[data-agenda-send-answers]');
 
-  test('collect a pick for each, then send them as ONE answer carrying the typed text', async () => {
+  test('collect a pick for each, then send them as ONE answer', async () => {
     const spy = await draw(several);
     expect(send().disabled).toBe(true);
     await pick('Friday');
-    expect(send().disabled).toBe(false);
+    expect(send().disabled).toBe(true);
     await pick('Kit');
-    await typeInto(one<HTMLTextAreaElement>('[data-agenda-field]'), 'thanks');
+    expect(send().disabled).toBe(false);
     await interact(() => send().click());
     expect(spy.acted).toHaveLength(1);
-    expect(spy.acted[0]?.note).toBe('thanks');
     expect(send().disabled).toBe(true);
   });
 
@@ -302,10 +289,8 @@ describe('several questions', () => {
         ferret="Zoe"
         history={[]}
         item={several}
-        onAct={(action, note) => spy.acted.push({ action, note })}
+        onAct={action => spy.acted.push(action)}
         onClose={() => undefined}
-        onReply={() => undefined}
-        onSend={async () => undefined}
         position={{ index: 0, total: 1 }}
         renderProse={text => text}
         swipeable={false}
@@ -313,6 +298,102 @@ describe('several questions', () => {
     );
     await interact(() => send().click());
     expect(spy.acted).toEqual([]);
+  });
+});
+
+describe('several questions, drawn once each', () => {
+  const asked = agendaItem('A5', {
+    title: 'Plan the launch',
+    ask: { kind: 'open-question' },
+    questions: [
+      {
+        question: 'Which day should it ship?',
+        options: [{ label: 'Monday' }, { label: 'Friday' }],
+        recommended: 'Monday',
+        why: 'The team is in.',
+      },
+      {
+        question: 'Who should announce it?',
+        options: [{ label: 'Zoe' }, { label: 'Kit' }],
+        recommended: 'Zoe',
+      },
+    ],
+  } as Partial<AgendaItem>);
+  const count = (text: string, part: string): number => text.split(part).length - 1;
+
+  test('each question and its reason appear once, with no boilerplate about the message box', async () => {
+    await draw(asked);
+    const text = one('.fy-item-view__body').textContent ?? '';
+    expect(count(text, 'Which day should it ship?')).toBe(1);
+    expect(count(text, 'Who should announce it?')).toBe(1);
+    expect(count(text, 'The team is in.')).toBe(1);
+    expect(text).not.toContain('message box');
+    expect(root().querySelector('[data-agenda-composer-hint]')).toBeNull();
+  });
+
+  test('tags "Recommended" on the matching option of each question, and offers "All recommended"', async () => {
+    const spy = await draw(asked);
+    const monday = one('[data-agenda-pick="Monday"]');
+    expect(monday.querySelector('[data-agenda-recommended]')).not.toBeNull();
+    expect(one('[data-agenda-pick="Friday"]').querySelector('[data-agenda-recommended]')).toBeNull();
+    await interact(() => one<HTMLButtonElement>('[data-agenda-use-recommended]').click());
+    expect(one('[data-agenda-pick="Monday"]').getAttribute('aria-pressed')).toBe('true');
+    expect(one('[data-agenda-pick="Zoe"]').getAttribute('aria-pressed')).toBe('true');
+    await interact(() => one<HTMLButtonElement>('[data-agenda-send-answers]').click());
+    expect(spy.acted).toHaveLength(1);
+    expect(spy.acted[0]).toMatchObject({ kind: 'respond' });
+  });
+
+  test('offers no "All recommended" when a question has no recommendation', async () => {
+    await draw(
+      agendaItem('A6', {
+        ask: { kind: 'open-question' },
+        questions: [
+          { question: 'Which day?', options: [{ label: 'Monday' }], recommended: 'Monday' },
+          { question: 'Who?', options: [{ label: 'Zoe' }] },
+        ],
+      } as Partial<AgendaItem>),
+    );
+    expect(root().querySelector('[data-agenda-use-recommended]')).toBeNull();
+    expect(one<HTMLButtonElement>('[data-agenda-send-answers]').disabled).toBe(true);
+  });
+
+  test('has no "Send answers" for questions that have no options: they are answered in the composer', async () => {
+    await draw(
+      agendaItem('A7', {
+        ask: { kind: 'open-question' },
+        questions: [{ question: 'Which day?' }, { question: 'Who?' }],
+      } as Partial<AgendaItem>),
+    );
+    expect(root().querySelector('[data-agenda-send-answers]')).toBeNull();
+    expect(root().querySelector('[data-agenda-quick-replies]')).toBeNull();
+    const text = one('.fy-item-view__body').textContent ?? '';
+    expect(count(text, 'Which day?')).toBe(1);
+    expect(count(text, 'Who?')).toBe(1);
+  });
+});
+
+describe('the ask', () => {
+  test('a long ask is cut to one line in the top and said whole in the body', async () => {
+    const long = 'Which database should keep every one of the board’s finished items for the next two years?';
+    await draw(
+      agendaItem('A10', { title: 'Database', subject: long, ask: { kind: 'permission' } } as Partial<AgendaItem>),
+    );
+    const top = one('[data-agenda-top]');
+    expect(top.querySelector('[data-agenda-ask]')).not.toBeNull();
+    expect(one('.fy-item-view__body').textContent).toContain(long);
+  });
+
+  test('a short ask is said once, in the top', async () => {
+    await draw(
+      agendaItem('A11', {
+        title: 'Database',
+        subject: 'Which engine?',
+        ask: { kind: 'permission' },
+      } as Partial<AgendaItem>),
+    );
+    expect(one('[data-agenda-top]').textContent).toContain('Which engine?');
+    expect((one('.fy-item-view__body').textContent ?? '').split('Which engine?').length - 1).toBeLessThanOrEqual(1);
   });
 });
 

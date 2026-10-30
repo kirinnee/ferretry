@@ -1,6 +1,6 @@
 import {
-  captureRowsArguments,
   capturePaneArguments,
+  captureRowsArguments,
   deleteBufferArguments,
   hasSessionArguments,
   killPaneArguments,
@@ -12,12 +12,16 @@ import {
   paneIdentityArguments,
   paneIdentityTableArguments,
   paneMetadataArguments,
+  paneSessionClientsArguments,
+  parseControlClients,
   pasteBufferArguments,
+  releasedKillArguments,
   remainOnExitArguments,
   sendKeyArguments,
   sendLiteralArguments,
+  sessionClientsArguments,
 } from './commands.ts';
-import type { PaneActivity, PaneState, TmuxCommandPort, TmuxLaunch } from './contracts.ts';
+import type { PaneActivity, PaneState, TmuxCommandPort, TmuxCommandResult, TmuxLaunch } from './contracts.ts';
 import type { TmuxLaunchGuard } from './harness-guard.ts';
 import {
   type PaneIdentity,
@@ -29,6 +33,9 @@ import {
 } from './pane.ts';
 import { type PaneSighting, paneProofArguments, parsePaneSighting } from './pane-proof.ts';
 import { isTmuxServerAbsent } from './server-absent.ts';
+
+/** How many times a kill is tried against clients that keep leaving before its failure is answered. */
+const RELEASED_KILL_ATTEMPTS = 3;
 
 /** Orchestrates only validated tmux commands; spawning remains in an injected adapter. */
 export class TmuxController {
@@ -122,7 +129,7 @@ export class TmuxController {
   }
 
   async killPaneExact(paneId: string): Promise<void> {
-    const result = await this.commands.execute(killPaneArguments(paneId));
+    const result = await this.releasedKill(paneSessionClientsArguments(paneId), killPaneArguments(paneId));
     if (result.code !== 0) throw new Error(result.stderr.trim() || 'tmux could not kill the pane');
   }
 
@@ -165,7 +172,26 @@ export class TmuxController {
 
   async stop(session: string): Promise<void> {
     if (!(await this.alive(session))) return;
-    const result = await this.commands.execute(killSessionArguments(session));
+    const result = await this.releasedKill(sessionClientsArguments(session), killSessionArguments(session));
     if (result.code !== 0) throw new Error(result.stderr.trim() || 'tmux could not stop the session');
+  }
+
+  /**
+   * Kills `kill`'s target only after releasing the control clients on its session, in one command list
+   * (`releasedKillArguments` says why: tmux 3.6a otherwise crashes the whole server).
+   *
+   * Retried when it fails with clients in the list, because the usual cause is one of them leaving
+   * between the listing and the kill — and the next listing no longer names it. A failure with no
+   * client to release is the kill's own and is answered at once. A listing tmux would not give is
+   * read as no clients: the session is almost always gone by then, and refusing to kill one that is
+   * not would be a stop that never stops.
+   */
+  private async releasedKill(listing: readonly string[], kill: readonly string[]): Promise<TmuxCommandResult> {
+    for (let attempt = 1; ; attempt += 1) {
+      const listed = await this.commands.execute(listing);
+      const clients = listed.code === 0 ? parseControlClients(listed.stdout) : [];
+      const result = await this.commands.execute(releasedKillArguments(clients, kill));
+      if (result.code === 0 || clients.length === 0 || attempt >= RELEASED_KILL_ATTEMPTS) return result;
+    }
   }
 }

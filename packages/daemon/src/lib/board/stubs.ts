@@ -3,19 +3,12 @@
  * does not know, and each is replaced, not extended:
  *
  * - {@link StubLaneSetSource} → U3 (projects and lanes)
- * - {@link NoopReopenNotifier} and {@link NoAgendaLinks} → U7 (spawn, signal and agenda links)
+ * - {@link NoLaneProposals} → U3 (lane proposals)
  *
  * They do no IO, which is why they live in the domain tier and are unit tested.
  */
-import {
-  type BoardProjectId,
-  type BoardTask,
-  type BoardTaskId,
-  LANE_TEMPLATES,
-  type LaneSet,
-  UNFILED_PROJECT_ID,
-} from '@ferretry/protocol';
-import type { AgendaLinkSource, CardAsks, LaneSetSource, ReopenNotifier } from './ports.ts';
+import { type BoardProjectId, LANE_TEMPLATES, type LaneSet, UNFILED_PROJECT_ID } from '@ferretry/protocol';
+import type { LaneProposer, LaneSetSource } from './ports.ts';
 
 /** Who a stub lane set says proposed it. Not a session id: nothing proposed it. */
 export const STUB_LANE_SET_PROPOSER = 'stub';
@@ -42,17 +35,12 @@ export class StubLaneSetSource implements LaneSetSource {
   }
 }
 
-/** STUB, REPLACED BY U7. No agenda item names a card yet, so no card has asks. */
-export class NoAgendaLinks implements AgendaLinkSource {
-  async asksFor(_cards: readonly BoardTask[]): Promise<ReadonlyMap<BoardTaskId, CardAsks>> {
-    return new Map();
-  }
-}
-
 /**
- * STUB, REPLACED BY U7. Delivers nothing: the reopen is recorded on the card, and the card's ferret
- * learns of it only by reading the card until U7 queues `[reopened &F412 by owner: …]` to it.
+ * STUB, REPLACED BY U3's lane proposals. Proposes nothing: until U3 lands every project reads the stub's
+ * lanes, so a start never finds a project without them.
  */
-export class NoopReopenNotifier implements ReopenNotifier {
-  async reopened(): Promise<void> {}
+export class NoLaneProposals implements LaneProposer {
+  async propose(): Promise<LaneSet | null> {
+    return null;
+  }
 }

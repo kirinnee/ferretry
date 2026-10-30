@@ -150,7 +150,11 @@ function mountVerbs(
       .option(`-k, --kind <kind>`, `what the human does: ${ASK_KIND_NAMES.join(', ')}`)
       .option('--up <label>', 'the extra up-swipe answer of a task (dismisses, e.g. "Skip") or a permission (approves)')
       .option('--up-why <line>', 'one line that describes the --up answer')
-      .option('--task', 'a to-do: the human does something; nothing to choose (steps with no question imply it)')
+      .option(
+        '--task [card]',
+        'the board card this item belongs to (F18 or &F18; your focus card when omitted); a bare --task is the older --todo',
+      )
+      .option('--todo', 'a to-do: the human does something; nothing to choose (steps with no question imply it)')
       .option('-o, --option <label>', 'a choice label; repeat for each option', collect, [])
       .option('--premise <point>', 'the situation: what is going on; repeat for bullet points', collect, [])
       .option(

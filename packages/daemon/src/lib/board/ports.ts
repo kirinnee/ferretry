@@ -6,7 +6,7 @@
  * that is honest about what it does not know, and the unit named on it replaces the stub:
  *
  * - {@link LaneSetSource} — U3 (projects and lanes)
- * - {@link ReopenNotifier} and {@link AgendaLinkSource} — U7 (spawn, signal and agenda links)
+ * - {@link LaneProposer} — U3 (lane proposals; U7 calls it for a start in a project with no lanes)
  */
 import type {
   AgendaRef,
@@ -145,6 +145,16 @@ export interface ReopenNotice {
  */
 export interface ReopenNotifier {
   reopened(notice: ReopenNotice): Promise<void>;
+}
+
+/**
+ * Puts lanes on a project that has none (`board-design.md` §5 step 4), so a card a start makes there lands
+ * on the project's real board: the template inferred from the project (a repository with `v*` tags →
+ * `pr-release-verify`, a repository → `pr`, a folder → `quick`), UNCONFIRMED, proposed as `sessionId`,
+ * which raises the one agenda choice for the owner. `null` when it could not.
+ */
+export interface LaneProposer {
+  propose(projectId: BoardProjectId, sessionId: string): Promise<LaneSet | null>;
 }
 
 /** Publishes `board.changed` on the fleet feed, journalled on `sessionId`'s event log. */

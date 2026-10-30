@@ -25,7 +25,6 @@ import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'rea
 import { Spinner } from '../../components/spinner.tsx';
 
 import type { AgendaInbox } from '../../hooks/use-agenda-inbox.ts';
-import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
 import { CLEAR_ACTION, canDiscussNow, kindWord } from '../../lib/agenda-answers.ts';
 import {
   actionSentence,
@@ -52,6 +51,7 @@ import {
   skipSelection,
   stepSelection,
 } from '../../lib/agenda-inbox-list.ts';
+import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { daemonAgendaPath, daemonSessionPath } from '../../lib/pages/routes.ts';
 import type { RecentMessage } from '../../lib/recent-messages.ts';
@@ -59,11 +59,11 @@ import { AgendaCountBadge } from '../../shell/app-bar.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { sessionsBarNames } from '../../shell/sessions-bar-model.ts';
 import { PageThemeSwitch } from '../../shell/theme-toggle.tsx';
-import { AgendaStatusPill } from './agenda-status-pill.tsx';
 import { agendaAge, agendaReference } from './agenda-board.tsx';
 import { AgendaCard, type AgendaCardOrigin } from './agenda-card.tsx';
 import { AgendaRecentMessages } from './agenda-recent-messages.tsx';
 import { ResolvedRow } from './agenda-resolved.tsx';
+import { AgendaStatusPill } from './agenda-status-pill.tsx';
 import { AgendaSwipeDeck } from './agenda-swipe-deck.tsx';
 import { AgendaUndoToast } from './agenda-undo-toast.tsx';
 

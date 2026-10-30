@@ -26,8 +26,7 @@ export interface InfoOverviewProps {
   readonly onOpenTasks?: () => void;
 }
 
-const sessionName = (view: SessionView): string =>
-  displayCallsign(view.config.teammate) || view.config.label || view.config.name;
+const sessionName = (view: SessionView): string => displayCallsign(view.config.teammate) || view.config.name;
 
 export function InfoOverview({
   view,
@@ -69,7 +68,8 @@ export function InfoOverview({
           </button>
         )}
       </InfoRow>
-      <InfoRow label="Task">{view.config.label ?? view.config.name}</InfoRow>
+      <InfoRow label="Task">{view.config.name}</InfoRow>
+      {view.config.label === undefined ? null : <InfoRow label="Label">{view.config.label}</InfoRow>}
       <InfoRow label="Project">{project ?? <span className="fy-info-muted">Not in a project</span>}</InfoRow>
       <InfoRow copy={view.config.cwd} hint={INFO_HINT.folder} label="Folder" mono write={write}>
         {view.config.cwd}

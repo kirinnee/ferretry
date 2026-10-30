@@ -96,6 +96,17 @@ export interface CardLede {
 }
 
 /**
+ * A ferret that wrote its own picks into the context ("My picks: A delete · B accept") is suggesting answers, not
+ * saying why the item matters: that context is headed "Suggested answers", so a pick never reads as a reason.
+ */
+const SUGGESTED_PICKS = /^\s*(?:[-*•]\s*)?my picks?\b/iu;
+
+export const contextHeading = (context: string, fold: boolean): string => {
+  if (SUGGESTED_PICKS.test(context)) return 'Suggested answers';
+  return fold ? 'Context' : 'Why it matters';
+};
+
+/**
  * "Why it matters" as ONE plain line under the heading: the item's own `why` when it adds something, else
  * the first point of its context (the first bullet, or the first paragraph) — which the section then does
  * not say again.
@@ -253,12 +264,27 @@ function QuestionPicker({
           ))}
         </fieldset>
       )}
-      {question.options === undefined ? (
-        <p className="fy-attn-q__composer m-0" data-agenda-composer-hint="">
-          Answer this one in the message box below.
-        </p>
-      ) : null}
     </div>
+  );
+}
+
+/** The line under a question: why the pick, or the pick itself when it has no button to be tagged on. */
+function QuestionReason({ question, showWhy }: { readonly question: AgendaQuestion; readonly showWhy: boolean }) {
+  const recommended = question.recommended?.trim();
+  if (recommended === undefined || !showWhy) return null;
+  const onButton = question.options?.some(option => option.label === recommended) === true;
+  if (onButton && question.why === undefined) return null;
+  return (
+    <p className="fy-attn-q__why" data-agenda-question-why="">
+      {onButton ? (
+        question.why
+      ) : (
+        <>
+          <strong>Suggested:</strong> {recommended}
+          {question.why === undefined ? null : <> — {question.why}</>}
+        </>
+      )}
+    </p>
   );
 }
 
@@ -268,6 +294,7 @@ function Question({
   numbered,
   picker,
   showWhy,
+  showAsk = true,
 }: {
   readonly question: AgendaQuestion;
   readonly index: number;
@@ -275,20 +302,18 @@ function Question({
   readonly picker: QuestionAnswers | undefined;
   /** Show the recommendation's reason here; the option buttons live elsewhere for a single question. */
   readonly showWhy: boolean;
+  /** False where the question's text is already drawn (a folded row's summary): it is said once. */
+  readonly showAsk?: boolean;
 }) {
-  const recommended = question.recommended?.trim();
   return (
     <>
-      <p className="fy-attn-q__ask">
-        {numbered ? <span className="fy-attn-q__n">{index + 1}.</span> : null} {question.question}
-      </p>
-      {picker === undefined ? null : <QuestionPicker index={index} picker={picker} question={question} />}
-      {recommended === undefined || !showWhy ? null : (
-        <p className="fy-attn-q__why">
-          <strong>{question.options === undefined ? 'Suggested' : RECOMMENDED_WORD}:</strong> {recommended}
-          {question.why === undefined ? null : <> — {question.why}</>}
+      {showAsk ? (
+        <p className="fy-attn-q__ask">
+          {numbered ? <span className="fy-attn-q__n">{index + 1}.</span> : null} {question.question}
         </p>
-      )}
+      ) : null}
+      {picker === undefined ? null : <QuestionPicker index={index} picker={picker} question={question} />}
+      <QuestionReason question={question} showWhy={showWhy} />
     </>
   );
 }
@@ -382,7 +407,61 @@ export function AgendaBriefSections({
   // The board folds the item's own recommendation. A card's answer bar says it under the options, so a card
   // draws a section only when it is handed one — the per-question card, whose bar has no options to tag.
   const recommendation = asDetail ? undefined : (given ?? (fold ? item.recommendation : undefined));
+  // A recommendation that names a listed option is marked on that option and its reason said right under the list.
+  const reasonUnderOptions =
+    recommendation !== undefined &&
+    options.some(option => option.label.trim().toLowerCase() === recommendation.decision.trim().toLowerCase());
   const heading = askLabel === undefined ? askHeading(item, several) : askLabel;
+  // The open layout asks first: what is being asked is the item, what is going on is its background.
+  const questionsBlock =
+    asDetail || ((ask === undefined || heading === null) && questions.length === 0) ? null : (
+      <Section fold={fold} name="questions" open title={heading ?? askHeading(item, several)}>
+        {ask === undefined || heading === null ? null : (
+          <p className="fy-attn-card__ask" data-agenda-ask="">
+            {ask}
+          </p>
+        )}
+        {questions.length === 0 ? null : (
+          <ol className="fy-attn-q" data-several={several || undefined}>
+            {questions.map((question, index) =>
+              !fold || index === 0 || !several ? (
+                <li className="fy-attn-q__item" data-agenda-question={index} key={question.question}>
+                  <Question
+                    index={index}
+                    numbered={several}
+                    picker={picker}
+                    question={question}
+                    showWhy={picker !== undefined || !several}
+                  />
+                </li>
+              ) : (
+                <li className="fy-attn-q__item" data-agenda-question={index} key={question.question}>
+                  <details className="fy-attn-sec fy-attn-sec--nested" open={open}>
+                    <summary className="fy-attn-sec__title">
+                      <ChevronRight aria-hidden="true" className="fy-attn-sec__chevron" size={14} />
+                      {`${index + 1}. ${question.question}`}
+                      {(picker?.answers[index] ?? '') === '' ? null : (
+                        <Check aria-label="answered" className="fy-attn-q__done" size={12} />
+                      )}
+                    </summary>
+                    <div className="fy-attn-sec__body">
+                      <Question
+                        index={index}
+                        numbered={false}
+                        picker={picker}
+                        question={question}
+                        showAsk={false}
+                        showWhy={picker !== undefined}
+                      />
+                    </div>
+                  </details>
+                </li>
+              ),
+            )}
+          </ol>
+        )}
+      </Section>
+    );
   return (
     <div className="fy-attn-secs" data-layout={fold ? 'fold' : 'open'}>
       {asDetail || ask === undefined || heading !== null ? null : (
@@ -390,6 +469,7 @@ export function AgendaBriefSections({
           {ask}
         </p>
       )}
+      {fold ? null : questionsBlock}
       {premise === null ? null : (
         <Section changed={changedWhole('premise')} fold={fold} name="premise" open={open} title="What's going on">
           <PointForm className="fy-attn-prose" fresh={highlight?.points.premise} text={premise} />
@@ -401,7 +481,7 @@ export function AgendaBriefSections({
           fold={fold}
           name="context"
           open={open}
-          title={fold ? 'Context' : 'Why it matters'}
+          title={contextHeading(context, fold)}
         >
           {highlight?.points.context === undefined ? (
             <div className="fy-attn-prose">{renderProse(context)}</div>
@@ -426,53 +506,7 @@ export function AgendaBriefSections({
           <PointForm className="fy-attn-prose" fresh={highlight?.points.stillOpen} text={stillOpen} />
         </Section>
       )}
-      {asDetail || ((ask === undefined || heading === null) && questions.length === 0) ? null : (
-        <Section fold={fold} name="questions" open title={heading ?? askHeading(item, several)}>
-          {ask === undefined || heading === null ? null : (
-            <p className="fy-attn-card__ask" data-agenda-ask="">
-              {ask}
-            </p>
-          )}
-          {questions.length === 0 ? null : (
-            <ol className="fy-attn-q" data-several={several || undefined}>
-              {questions.map((question, index) =>
-                index === 0 || !several ? (
-                  <li className="fy-attn-q__item" data-agenda-question={index} key={question.question}>
-                    <Question
-                      index={index}
-                      numbered={several}
-                      picker={picker}
-                      question={question}
-                      showWhy={picker !== undefined || !several}
-                    />
-                  </li>
-                ) : (
-                  <li className="fy-attn-q__item" data-agenda-question={index} key={question.question}>
-                    <details className="fy-attn-sec fy-attn-sec--nested" open={open}>
-                      <summary className="fy-attn-sec__title">
-                        <ChevronRight aria-hidden="true" className="fy-attn-sec__chevron" size={14} />
-                        {`${index + 1}. ${question.question}`}
-                        {(picker?.answers[index] ?? '') === '' ? null : (
-                          <Check aria-label="answered" className="fy-attn-q__done" size={12} />
-                        )}
-                      </summary>
-                      <div className="fy-attn-sec__body">
-                        <Question
-                          index={index}
-                          numbered={false}
-                          picker={picker}
-                          question={question}
-                          showWhy={picker !== undefined}
-                        />
-                      </div>
-                    </details>
-                  </li>
-                ),
-              )}
-            </ol>
-          )}
-        </Section>
-      )}
+      {fold ? questionsBlock : null}
       {options.length === 0 ? null : (
         <Section fold={fold} name="options" open={open} title="Options">
           <ul className="fy-attn-options">
@@ -488,9 +522,14 @@ export function AgendaBriefSections({
               </li>
             ))}
           </ul>
+          {reasonUnderOptions && recommendation?.why !== undefined ? (
+            <p className="fy-attn-options__why m-0" data-agenda-recommendation="">
+              {recommendation.why}
+            </p>
+          ) : null}
         </Section>
       )}
-      {recommendation === undefined ? null : (
+      {recommendation === undefined || reasonUnderOptions ? null : (
         <Section fold={fold} name="recommendation" open={open} title="Recommendation">
           <p className="fy-attn-card__rec" data-agenda-recommendation="">
             <RecommendedBadge />

@@ -5,12 +5,11 @@ import {
   BoardError,
   BoardUnavailableError,
   BOARD_UNAVAILABLE_MESSAGE,
-  NoAgendaLinks,
-  NoopReopenNotifier,
+  NoLaneProposals,
   STUB_LANE_SET_PROPOSER,
   StubLaneSetSource,
 } from '../../../src/lib/board/index.ts';
-import { card, PROJECT } from './support.ts';
+import { PROJECT } from './support.ts';
 
 describe('the stubs later units replace', () => {
   it('should file every session on Unfiled and give every board the pr-release-verify lanes, unconfirmed', async () => {
@@ -32,14 +31,12 @@ describe('the stubs later units replace', () => {
     should(laneSet.lanes.map(lane => lane.id)).eql(LANE_TEMPLATES['pr-release-verify'].lanes.map(lane => lane.id));
   });
 
-  it('should know of no asks and deliver no reopen', async () => {
+  it('should propose no lanes', async () => {
     // Act
-    const asks = await new NoAgendaLinks().asksFor([card()]);
-    const delivered = await new NoopReopenNotifier().reopened();
+    const proposed = await new NoLaneProposals().propose();
 
     // Assert
-    should(asks.size).equal(0);
-    should(delivered).be.undefined();
+    should(proposed).be.null();
   });
 });
 

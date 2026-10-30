@@ -97,9 +97,13 @@ export function useMachinesPoll(
   /** Each machine's fleet feed; absent, the lists are polled as they always were. */
   openFleetFeed?: MachineFleetFeedOpener,
   feedEnvironment: FleetFeedEnvironment = browserFleetFeedEnvironment,
+  /** Every event a machine's feed delivers, with the machine it came from. */
+  onFeedEvent?: (daemonId: DaemonId, event: FyEvent) => void,
 ): void {
   const latest = useRef(machines);
   latest.current = machines;
+  const feedEvent = useRef(onFeedEvent);
+  feedEvent.current = onFeedEvent;
   const key = pairingKey(machines);
   /** Each machine's feed, as it last said, and when its list was last read: shared by both effects. */
   const feeds = useRef(new Map<DaemonId, FleetFeedStatus>());
@@ -155,6 +159,7 @@ export function useMachinesPoll(
           lastRead.current.set(machine.daemonId, now());
           void fleet.hydrate(machine).catch(() => undefined);
         },
+        onEvent: event => feedEvent.current?.(paired.daemonId, event),
         onStatus: status => statuses.set(paired.daemonId, status),
         environment: feedEnvironment,
       }),

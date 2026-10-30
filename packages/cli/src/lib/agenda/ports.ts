@@ -22,6 +22,8 @@ export interface IAgendaGateway {
   apply(sessionId: string, request: AgendaActionRequest): Promise<AgendaSnapshot>;
   /** Deliver the answers held for the ferret now, skipping the settle window; the board as it was left. */
   sendReplies(sessionId: string): Promise<AgendaSnapshot>;
+  /** The features the daemon reports (`DAEMON_FEATURES`); empty when it reports none or cannot be asked. */
+  features(): Promise<readonly string[]>;
 }
 
 /** The only client capability the attention gateway consumes. */

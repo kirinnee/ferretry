@@ -897,7 +897,10 @@ export async function buildPlan(root: string): Promise<Plan> {
     for (const pair of pairs) {
       const [from, to] = pair.split('\0') as [string, string];
       if (from === to) continue;
-      if (present.has(to)) {
+      // Two symbols clash only when the file declares or imports BOTH names. An old name the file neither
+      // declares nor imports, beside the new one, is a stale spelling of that same symbol — a hunk kept from a
+      // branch merged after the rename — and renaming it is exactly the fix, not a collision.
+      if (present.has(to) && present.has(from)) {
         const key = `ident:${file}:${from}`;
         if (!seenKeys.has(key)) {
           seenKeys.add(key);

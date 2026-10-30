@@ -1,8 +1,8 @@
+import type { IndexWrite } from './index-writes.ts';
 import type { FoundationPaths } from './paths.ts';
 import type { SessionId } from './session-id.ts';
 import type { StateHomeInput } from './state-home.ts';
 import type { EventPointer, IndexedSession, JournalFingerprint, RebuildPlan } from './storage-types.ts';
-import type { IndexWrite } from './index-writes.ts';
 
 export interface EnvironmentPort {
   stateHomeInput(): StateHomeInput;
@@ -146,4 +146,16 @@ export interface SessionIndexFactory {
 export interface SerialExecutor {
   run<T>(key: string, work: () => Promise<T>): Promise<T>;
   runExclusive<T>(work: () => Promise<T>): Promise<T>;
+}
+
+/**
+ * A {@link SerialExecutor} that can also queue exclusive work BEHIND keyed work.
+ *
+ * `runExclusiveYielding` is exclusive once it runs, exactly as `runExclusive` is, but while it only waits
+ * it holds no barrier: keyed work queued after it still runs first. It is for read-side reconciliation —
+ * a live feed's backlog proof — which must never make a session write wait for a pass that has not
+ * started yet.
+ */
+export interface YieldingSerialExecutor extends SerialExecutor {
+  runExclusiveYielding<T>(work: () => Promise<T>): Promise<T>;
 }

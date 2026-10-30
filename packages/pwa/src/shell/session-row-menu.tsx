@@ -50,9 +50,9 @@ const ACTION_ICON: Record<RowMenuAction, ReactNode> = {
   migrate: <ServerCog size={13} aria-hidden="true" />,
 };
 
-/** A session named the way the fleet talks about it, for the menu's accessible name. */
+/** A session named by its title, for the menu's accessible name. */
 export const sessionMenuLabel = (view: SessionView): string =>
-  `Actions for ${displayCallsign(view.config.teammate) || view.config.name || view.config.id}`;
+  `Actions for ${view.config.name || displayCallsign(view.config.teammate) || view.config.id}`;
 
 export interface SessionRowMenuCallbacks {
   /** A per-session action other than a stop — the owner runs or opens it. */

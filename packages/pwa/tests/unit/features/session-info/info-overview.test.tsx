@@ -52,6 +52,17 @@ describe('InfoOverview', () => {
     expect(written).toEqual(['session-a']);
   });
 
+  it("shows the task by its name and a batch label on its own row, never in the name's place", async () => {
+    const labelled = sessionView('session-b', { config: { name: 'CyanPrint', label: 'diene-cyan' } });
+    const { root } = await show({ view: labelled });
+    expect(root.querySelector('[data-info-row="Task"]')?.textContent).toContain('CyanPrint');
+    expect(root.querySelector('[data-info-row="Label"]')?.textContent).toContain('diene-cyan');
+    await mounted?.unmount();
+
+    const plain = await show({ view: sessionView('session-c', { config: { name: 'CyanPrint' } }) });
+    expect(plain.root.querySelector('[data-info-row="Label"]')).toBeNull();
+  });
+
   it('says a ferret has no project with a muted note', async () => {
     const { root } = await show({ project: null });
     expect(root.textContent).toContain('Not in a project');
@@ -125,9 +136,9 @@ describe('InfoOverview', () => {
   });
 
   it('links to a resolved parent and to every child, and falls back to plain text with no onOpenSession', async () => {
-    const parent = sessionView('parent-a', { config: { label: 'Parent one' } });
+    const parent = sessionView('parent-a', { config: { name: 'Parent one', label: 'diene-cyan' } });
     const child = sessionView('child-a', { config: { parent: 'parent-a' } });
-    const kid = sessionView('kid-a', { config: { parent: 'child-a', label: 'Kid one' } });
+    const kid = sessionView('kid-a', { config: { parent: 'child-a', name: 'Kid one' } });
     const opened: string[] = [];
     const { root } = await show({
       view: child,
