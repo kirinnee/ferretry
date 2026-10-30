@@ -145,7 +145,6 @@ import {
   StorageSessionFocus,
   StorageSessionParents,
 } from '../src/adapters/board/session-board-adapters.ts';
-import { CatalogProjectNames } from '../src/adapters/board/catalog-project-names.ts';
 import { SendReopenMessenger } from '../src/adapters/board/send-reopen-messenger.ts';
 import { StorageSessionCardFacts } from '../src/adapters/board/storage-session-card-facts.ts';
 import {
@@ -156,7 +155,6 @@ import {
   NoPendingContext,
   ReopenDeliveryLadder,
   SessionCards,
-  StubLaneSetSource,
 } from '../src/lib/board/index.ts';
 import { FileAcceptedConfigStore, FileConfigDirectory } from '../src/adapters/config-files/files.ts';
 import { unrefFileEventTimers } from '../src/adapters/file-events/bun-file-event-source.ts';
@@ -1840,8 +1838,9 @@ interface BoardWorld {
  * The project boards (v2): one file per card under `<state>/board`, written under ownership and lineage,
  * and the cards every start with a brief gets (`SessionCards`, board-design.md §3.1).
  *
- * Some ports are STUBS until their units land, and each is named so: lanes and projects
- * (`StubLaneSetSource` and `NoLaneProposals`, U3), and activity and the lead's pending context
+ * Lanes and projects are U3's `LaneSetService`. Some ports are STUBS until their units land, and each is
+ * named so: lane proposals for a project with none (`NoLaneProposals`, until the template inference lands, so
+ * such a card is filed on Unfiled with a hint), and activity and the lead's pending context
  * (`HistoryActivityDeriver` and `NoPendingContext`, U5). The agenda link reads each ferret's agenda through
  * the agenda service, and a reopen is delivered through the ordinary send path. The machine id is the
  * pairing identity's daemon id, which a write waits for rather than inventing one.
@@ -1852,13 +1851,14 @@ function createBoardWorld(
   storage: DaemonStorage,
   clock: SystemClock,
   machineId: () => string | undefined,
+  /** Which board a session works on, each board's lanes and its name (U3's `LaneSetService`). */
+  lanes: Pick<LaneSetService, 'projectOf' | 'laneSet' | 'project'>,
   sends: Pick<SessionSendService, 'send'>,
   /** One ferret's open agenda items; read lazily, because the agenda service is built after the board. */
   agendaItems: (sessionId: string) => Promise<readonly AttentionItem[]>,
   bin: string,
 ): BoardWorld {
   const diagnostics = { warn: (message: string) => void process.stderr.write(`board: ${message}\n`) };
-  const lanes = new StubLaneSetSource();
   const parents = new StorageSessionParents(storage);
   const focus = new StorageSessionFocus(storage);
   const board = new BoardService({
@@ -1879,7 +1879,8 @@ function createBoardWorld(
     board,
     lanes,
     proposer: new NoLaneProposals(),
-    projects: new CatalogProjectNames(new FileProjectCatalog(join(paths.state, 'projects.json'))),
+    // The name the board list shows: a registered project's, `Unfiled`, or the id of one no longer listed.
+    projects: { nameOf: async projectId => (await lanes.project(projectId))?.name ?? projectId },
     focus,
     parents,
     sessions: new StorageSessionCardFacts(storage, id => createSessionPaths(paths, id).directory),
@@ -8867,6 +8868,26 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // its own repository handle over the same document, and the atomicity of `transaction` is what
       // the whole authorization model rests on.
       const boards = createTaskBoardSubsystem(paths, stateFiles, storage, clock, sessionEnvironments, sessionMutations);
+      // The board's projects and their lanes (U3), built before the board that reads them. A proposal is raised
+      // on the proposing ferret's agenda, and the owner's Accept confirms it (in the agenda's change fanout).
+      // The agenda and the board are read lazily: both are built after this.
+      const laneSets = new LaneSetService(
+        new FileLaneSetStore(join(paths.home, 'board', 'lanes')),
+        { projects: async () => await catalogs.projects() },
+        new SessionProjects(
+          new StorageSessionFacts(storage),
+          { projects: async () => await catalogs.projects() },
+          new GitRepositoryProbe(),
+          [...COMMON_SCRATCH_ROOTS, tmpdir()],
+        ),
+        new AttentionLaneAgenda({ raise: async (...parameters) => await attention.raise(...parameters) }),
+        // A lane edit that removed lanes moves their cards to the lanes it named, in the board store.
+        {
+          relocate: async (projectId, moves) => {
+            await boardWorld.board.relocate(projectId, moves);
+          },
+        },
+      );
       // BEFORE session control and Pack, which make a card with every start that has a brief. The agenda link
       // reads the agenda service lazily: it is built further down, and a board is only read once requests flow.
       const boardWorld = createBoardWorld(
@@ -8875,6 +8896,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         storage,
         clock,
         () => attachmentDaemonId,
+        laneSets,
         sends,
         async sessionId => {
           const listed = await attention.list(sessionId);
@@ -9214,21 +9236,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         new StorageHarnessPromptJournal(storage),
         // Read lazily: the service is built just below, and this is only called after it commits.
         { raise: async (...parameters) => await attention.raise(...parameters) },
-      );
-      // The board's projects and their lanes. A proposal is raised on the proposing ferret's agenda, and the
-      // owner's Accept confirms it (below, in the change fanout). The agenda is read lazily: it is built next.
-      const laneSets = new LaneSetService(
-        new FileLaneSetStore(join(paths.home, 'board', 'lanes')),
-        { projects: async () => await catalogs.projects() },
-        new SessionProjects(
-          new StorageSessionFacts(storage),
-          { projects: async () => await catalogs.projects() },
-          new GitRepositoryProbe(),
-          [...COMMON_SCRATCH_ROOTS, tmpdir()],
-        ),
-        new AttentionLaneAgenda({ raise: async (...parameters) => await attention.raise(...parameters) }),
-        // The board store (U2) takes over moving a deleted lane's cards; until it lands there are none to move.
-        { relocate: async () => undefined },
       );
       const attention = new AttentionService(
         attentionBoards,

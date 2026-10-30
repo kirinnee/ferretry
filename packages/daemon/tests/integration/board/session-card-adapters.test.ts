@@ -2,12 +2,9 @@ import { afterEach, describe, it } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { UNFILED_PROJECT_ID } from '@ferretry/protocol';
 import should from 'should';
-import { CatalogProjectNames, UNFILED_BOARD_NAME } from '../../../src/adapters/board/catalog-project-names.ts';
 import { SendReopenMessenger } from '../../../src/adapters/board/send-reopen-messenger.ts';
 import { latestOwnerMessage, StorageSessionCardFacts } from '../../../src/adapters/board/storage-session-card-facts.ts';
-import { FileProjectCatalog } from '../../../src/adapters/catalog/file-project-catalog.ts';
 import {
   BunSqliteIndexFactory,
   DaemonStorageFactory,
@@ -24,14 +21,13 @@ import { SendPending, SendUnconfirmed } from '../../../src/lib/session/send/type
 
 /**
  * The adapters behind the cards a start makes and the reopens it delivers, over a real state home and real
- * files: a session's facts from its config and inbox log, a board's name from `projects.json`, and a reopen
- * through the send path's dispositions. Temp `FY_HOME`; no daemon, no tmux.
+ * files: a session's facts from its config and inbox log, and a reopen through the send path's
+ * dispositions. Temp `FY_HOME`; no daemon, no tmux.
  */
 
 const homes = new Set<string>();
 const storages = new Set<{ close(): Promise<void> | void }>();
 const NOW = '2026-10-30T10:00:00.000Z';
-const PROJECT = '11111111-1111-4111-8111-111111111111';
 
 async function home(): Promise<string> {
   const path = await mkdtemp(join(tmpdir(), 'ferretry-session-cards-'));
@@ -142,28 +138,6 @@ describe("a session's facts for its card", () => {
     });
     should(latestOwnerMessage(JSON.stringify({ type: 'question', message: 'x' }))).be.undefined();
     should(latestOwnerMessage(`${JSON.stringify({ type: 'message', message: '  ' })}\n[1]`)).be.undefined();
-  });
-});
-
-describe("a board's name", () => {
-  it("should be the registered project's name, Unfiled's own, or the id of one the registry lacks", async () => {
-    // Arrange
-    const root = await home();
-    const file = join(root, 'projects.json');
-    await writeFile(
-      file,
-      JSON.stringify([
-        { id: PROJECT, name: 'Ferretry', path: '/workspace/ferretry', source: 'existing-folder', createdAt: NOW },
-      ]),
-    );
-    const names = new CatalogProjectNames(new FileProjectCatalog(file));
-    const unreadable = new CatalogProjectNames({ projects: async () => Promise.reject(new Error('EACCES')) });
-
-    // Act / Assert
-    should(await names.nameOf(PROJECT)).equal('Ferretry');
-    should(await names.nameOf(UNFILED_PROJECT_ID)).equal(UNFILED_BOARD_NAME);
-    should(await names.nameOf('22222222-2222-4222-8222-222222222222')).equal('22222222-2222-4222-8222-222222222222');
-    should(await unreadable.nameOf(PROJECT)).equal(PROJECT);
   });
 });
 

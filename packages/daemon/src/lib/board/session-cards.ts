@@ -67,7 +67,7 @@ export interface SessionCardSessions {
 }
 
 /** The board's name as the owner reads it. */
-export interface BoardProjectNames {
+interface BoardProjectNames {
   nameOf(projectId: BoardProjectId): Promise<string>;
 }
 
