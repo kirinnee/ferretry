@@ -414,3 +414,20 @@
 .fy-sbar__session[aria-current='page'] .fy-switch-mark {
   color: var(--nav-sel-fg, var(--accent));
 }
+
+/* The card and "Open board" are links to somewhere else: accent, never the quiet grey of a plain value. */
+.fy-info-inline-action[data-info-card],
+.fy-info-inline-action[data-info-open-board] {
+  min-height: 28px;
+  border: var(--stroke) solid var(--accent-border);
+  color: var(--accent);
+}
+.fy-info-inline-action[data-info-card] + .fy-info-inline-action[data-info-open-board] {
+  margin-left: 6px;
+}
+@media (pointer: coarse) {
+  .fy-info-inline-action[data-info-card],
+  .fy-info-inline-action[data-info-open-board] {
+    min-height: 40px;
+  }
+}

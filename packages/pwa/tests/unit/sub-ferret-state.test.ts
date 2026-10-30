@@ -5,7 +5,6 @@ import {
   subFerretModel,
   subFerretName,
   subFerretState,
-  subFerretSummary,
   subFerretsOf,
 } from '../../src/lib/sub-ferret-state.ts';
 import { type SessionFixtureOverrides, sessionView } from '../support/sessions.ts';
@@ -80,21 +79,5 @@ describe('a sub-ferret as the parent lists it', () => {
       sessionView('other', { config: { parent: 'someone' } }),
     ];
     expect(subFerretsOf('lead', sessions).map(view => view.config.id)).toEqual(['new', 'old']);
-  });
-
-  test('the summary counts the total, then only what wants attention or is still running', () => {
-    expect(subFerretSummary([child('a')])).toBe('1 sub-ferret · 1 running');
-    expect(
-      subFerretSummary([
-        child('a'),
-        child('b', { status: 'starting' }),
-        child('c', { status: 'awaiting_user' }),
-        child('d', { status: 'failed' }),
-        child('e', { status: 'completed' }),
-      ]),
-    ).toBe('5 sub-ferrets · 1 needs you · 2 running · 1 failed');
-    expect(subFerretSummary([child('e', { status: 'completed' }), child('f', { status: 'completed' })])).toBe(
-      '2 sub-ferrets',
-    );
   });
 });

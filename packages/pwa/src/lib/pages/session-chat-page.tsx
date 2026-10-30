@@ -1,6 +1,6 @@
 import type { AgendaId, AgendaSnapshot, IFyApiClient, SessionView } from '@ferretry/protocol';
 import { WorktreeListResponseSchema } from '@ferretry/protocol';
-import { Info, Palette, Pause, Play } from 'lucide-react';
+import { Palette, Pause, Play } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { AgendaItemsProvider } from '../../components/agenda-message.tsx';
 import { AttachmentGalleryProvider } from '../../components/attachment-gallery.tsx';
@@ -29,7 +29,6 @@ import {
 import type { TerminalDeckDependencies } from '../../components/session-terminal-deck.tsx';
 import { SessionTopBar, sessionDisplayName } from '../../components/session-top-bar.tsx';
 import type { SendDismiss, SendExpand } from '../../components/settled-send-note.tsx';
-import { SubFerretIndicator } from '../../components/sub-ferrets.tsx';
 import type { PaneSnapshotReader } from '../../components/terminal-snapshot.tsx';
 import { readPaneSnapshot } from '../../components/terminal-snapshot-model.ts';
 import { Transcript } from '../../components/transcript.tsx';
@@ -46,7 +45,6 @@ import { fetchSessionAnalytics } from '../../features/analytics/analytics-api.ts
 import { analyticsIdQuery } from '../../features/analytics/session-analytics-query.ts';
 import { SessionAnalyticsSurface } from '../../features/analytics/session-analytics-surface.tsx';
 import { BoardSideTab } from '../../features/board/board-side-tab.tsx';
-import { ChatCardChip } from '../../features/board/chat-card-chip.tsx';
 import { browserPageLabel } from '../../features/browser/browser-surface-list.tsx';
 import { InAppBrowserWorkspace } from '../../features/browser/in-app-browser.tsx';
 import type { UnifiedBrowserDependencies } from '../../features/browser/unified-browser-surface.tsx';
@@ -107,10 +105,9 @@ import { Button } from '../../shell/primitives.tsx';
 import { type SessionAction, type SessionActionSpec, sessionActionSpecs } from '../../shell/session-actions.ts';
 import type { SidePaneTabPresentation } from '../../shell/side-pane-tab-model.ts';
 import { statusMark, TERMINAL_STATUSES } from '../../shell/status-mark.tsx';
-import { ThemeSettingsPanel, ThemeToggle } from '../../shell/theme-toggle.tsx';
+import { ThemeSettingsPanel } from '../../shell/theme-toggle.tsx';
 import type { DaemonAccountPickerStore } from '../account-picker-store.ts';
 import type { DaemonAgendaClient } from '../agenda-client.ts';
-import { needsYouItems, unreadCount } from '../agenda-inbox.ts';
 import type { AgendaLoadStatus } from '../agenda-store.ts';
 import { sessionAgendaSummary } from '../agenda-wire.ts';
 import { useAgendaWire } from '../agenda-wire-react.tsx';
@@ -126,7 +123,6 @@ import type { DaemonConnection } from '../daemon-connection.ts';
 import { sameDaemonConnection } from '../daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionScope } from '../daemon-scope.ts';
 import { answerHarnessDialog } from '../harness-dialogs.ts';
-import { lineageLabel } from '../lineage.ts';
 import type { LiveActivityFeed } from '../live-activity-feed.ts';
 import { answerPermissionRequest } from '../permission-requests.ts';
 import type { DaemonPinClient } from '../pin-client.ts';
@@ -137,12 +133,11 @@ import { sessionTurn } from '../session-activity.ts';
 import type { TranscriptEntry } from '../session-screens.ts';
 import { useDaemonClient, useDaemonFetch } from '../store.tsx';
 import type { SttSettings } from '../stt/stt-settings.ts';
-import { subFerretsOf } from '../sub-ferret-state.ts';
 import { terminalIdForSurfaceKey } from '../surface-references.ts';
 import type { DaemonUsageStore } from '../usage-store.ts';
 import { WorkspaceLayoutStore } from '../workspace-layout-store.ts';
 import { type WorkspaceRailPreferenceStore, workspaceRailPreferences } from '../workspace-rail-preferences.ts';
-import { daemonBoardCardPath, daemonSessionPath } from './routes.ts';
+import { daemonBoardCardPath, daemonBoardForFerretPath, daemonSessionPath } from './routes.ts';
 
 /** Only daemon operations this workspace can truthfully invoke. */
 export type SessionChatClient = Pick<IFyApiClient, 'answer' | 'interrupt' | 'resume' | 'send' | 'stop'> &
@@ -580,6 +575,11 @@ export function SessionChatPage({
   const { show: showInfo } = info;
   const hasBoard = cardChat !== null;
   const cardHref = cardChat?.chip.kind === 'card' ? daemonBoardCardPath(connection.daemonId, cardChat.chip.id) : '';
+  const boardHref = daemonBoardForFerretPath(
+    connection.daemonId,
+    session.config.id,
+    cardChat?.chip.kind === 'card' ? cardChat.chip.id : undefined,
+  );
   const callsigns = useMemo(() => {
     const names = new Map<string, string>();
     for (const other of daemonSessions ?? []) {
@@ -1120,13 +1120,11 @@ export function SessionChatPage({
     setActionForm(AGENDA_RESOLVED_ACTION_ID);
   }, []);
   const finePointer = useFinePointer();
-  const wide = formFactor === 'desktop' && finePointer;
   const agendaMode = agendaModel !== undefined && sessionAgendaSummary(session.state)?.agendaMode === true;
   const agenda = useAgenda({
     agendaMode,
     client: agendaModel?.client,
     connection,
-    desktop: wide,
     ferret: sessionDisplayName(session),
     focus: agendaFocus,
     onOpenResolved: openResolved,
@@ -1164,50 +1162,44 @@ export function SessionChatPage({
     setActionForm(next);
     if (next !== AGENDA_RESOLVED_ACTION_ID) setResolvedTarget(null);
   }, []);
-  // A PHONE'S BAR IS ☰, the name, the card's reference, one status dot and ▾ (`session-top-bar.tsx`): what a
-  // wider bar draws beside the name — Interrupt, ⓘ Info and the theme switch — is the top of ▾ instead.
+  // THE BAR'S ONE OVERFLOW (`session-top-bar.tsx`): Info and the theme are the top of ▾ at every width, and on
+  // a phone Interrupt too — a phone's bar is ☰, the name, one status dot and ▾.
   const interruptSpec = barActions.find(spec => spec.action === 'interrupt');
-  const phoneBarActions: readonly SessionActionContribution<CoreActionContext>[] = compact
-    ? [
-        {
-          group: 'session',
-          order: 0,
-          build: () =>
-            interruptSpec === undefined
-              ? null
-              : {
-                  kind: 'run',
-                  id: 'interrupt',
-                  label: interruptSpec.label,
-                  icon: Pause,
-                  ...(pendingAction === null ? {} : { unavailable: 'Another action is still running.' }),
-                  run: () => runAction('interrupt'),
-                },
-        },
-        {
-          group: 'session',
-          order: 1,
-          build: () =>
-            contextDependencies === undefined
-              ? null
-              : { kind: 'run', id: 'info', label: info.open ? 'Close Info' : 'Info', icon: Info, run: info.toggle },
-        },
-        {
-          group: 'session',
-          order: 2,
-          build: () => ({
-            kind: 'form',
-            id: 'theme',
-            label: 'Theme…',
-            title: 'Theme',
-            icon: Palette,
-            render: () => <ThemeSettingsPanel />,
-          }),
-        },
-      ]
-    : NO_CONTRIBUTIONS;
+  const barOverflowActions: readonly SessionActionContribution<CoreActionContext>[] = [
+    ...(compact
+      ? [
+          {
+            group: 'session',
+            order: 0,
+            build: () =>
+              interruptSpec === undefined
+                ? null
+                : {
+                    kind: 'run',
+                    id: 'interrupt',
+                    label: interruptSpec.label,
+                    icon: Pause,
+                    ...(pendingAction === null ? {} : { unavailable: 'Another action is still running.' }),
+                    run: () => runAction('interrupt'),
+                  },
+          } satisfies SessionActionContribution<CoreActionContext>,
+        ]
+      : []),
+    {
+      group: 'session',
+      order: 2,
+      build: () => ({
+        kind: 'form',
+        id: 'theme',
+        label: 'Theme…',
+        title: 'Theme',
+        icon: Palette,
+        render: () => <ThemeSettingsPanel />,
+      }),
+    },
+  ];
   const contributions: readonly SessionActionContribution<CoreActionContext>[] = [
-    ...phoneBarActions,
+    ...barOverflowActions,
     ...CORE_SESSION_ACTIONS,
     resolvedActionContribution(agendaModel?.snapshot?.resolved ?? [], agendaId, resolvedTarget),
     ...actionContributions,
@@ -1332,6 +1324,22 @@ export function SessionChatPage({
               browser={browserPages.status}
               driving={driving}
               name={agentName}
+              about={{
+                agenda: agenda.section(presentation === 'sheet' ? info.close : undefined),
+                ...(switches === undefined
+                  ? {}
+                  : {
+                      switches: {
+                        learning: infoLearning === true,
+                        hypermedia: switches.hypermedia,
+                        pack: switches.pack,
+                        ...(canControl ? { onToggle: switches.onToggle } : {}),
+                      },
+                    }),
+                ...(canControl && !TERMINAL_STATUSES.has(session.state.status)
+                  ? { onRestart: restartSurfacingRefusal }
+                  : {}),
+              }}
               onOpenAnalytics={() => setUtility('analytics')}
               {...(cardChat === null
                 ? {}
@@ -1339,6 +1347,7 @@ export function SessionChatPage({
                     card: {
                       chip: cardChat.chip,
                       onOpen: () => onNavigate?.(cardHref),
+                      ...(onNavigate === undefined ? {} : { onOpenBoard: () => onNavigate(boardHref) }),
                       tasks: (
                         <BoardSideTab
                           callsigns={callsigns}
@@ -1389,41 +1398,13 @@ export function SessionChatPage({
           ),
         };
 
-  const parentSession = daemonSessions?.find(candidate => candidate.config.id === session.config.parent);
-  const startedBy =
-    parentSession === undefined || onNavigate === undefined
-      ? undefined
-      : {
-          name: lineageLabel(parentSession).text,
-          onOpen: () => onNavigate(daemonSessionPath(connection.daemonId, parentSession.config.id)),
-        };
-
   const header = (): ReactNode => (
     <>
       <SessionTopBar
         actions={lifecycleActions}
-        agendaOpen={
-          agendaModel?.snapshot === null || agendaModel?.snapshot === undefined
-            ? unreadCount(session)
-            : needsYouItems(agendaModel.snapshot.items)
-        }
-        turn={turn}
         compact={compact}
-        {...(cardChat === null
-          ? {}
-          : {
-              cardChip: (
-                <ChatCardChip
-                  chip={cardChat.chip}
-                  href={cardHref}
-                  {...(onNavigate === undefined ? {} : { onNavigate })}
-                />
-              ),
-            })}
         infoOpen={info.open}
         menu={actionsMenu}
-        trailing={<ThemeToggle iconOnly touch={compact} />}
-        project={project}
         session={session}
         status={
           <>
@@ -1432,30 +1413,11 @@ export function SessionChatPage({
                 healthy, a word and Reconnect once it is not — on a phone too, which is where a screen
                 lock or a Wi-Fi roam most often drops the socket. */}
             {liveStream === undefined ? null : <LiveStreamIndicator {...liveStream} compact={compact} quiet />}
-            {agenda.dockButton}
           </>
         }
+        turn={turn}
         {...(infoSlot === undefined ? {} : { onToggleInfo: info.toggle })}
         {...(onOpenSessions === undefined ? {} : { onOpenSessions })}
-        {...(startedBy === undefined ? {} : { startedBy })}
-        {...(switches === undefined
-          ? {}
-          : {
-              switches: {
-                learning: infoLearning === true,
-                hypermedia: switches.hypermedia,
-                pack: switches.pack,
-                ...(canControl ? { onToggle: switches.onToggle } : {}),
-              },
-            })}
-        subFerrets={
-          <SubFerretIndicator
-            sessions={subFerretsOf(session.config.id, daemonSessions ?? [])}
-            {...(onNavigate === undefined
-              ? {}
-              : { onOpenSession: (id: string) => onNavigate(daemonSessionPath(connection.daemonId, id)) })}
-          />
-        }
       />
       {/* NOT a live region. App.tsx owns the single announcement for a refresh
         failure and hands down a finished sentence; a second `role=status`
@@ -1624,17 +1586,6 @@ export function SessionChatPage({
     </div>
   );
 
-  // The wrapper stays for as long as the agenda can dock, so docking never remounts the conversation.
-  const chatWithAgenda =
-    wide && agendaMode ? (
-      <div className="fy-agenda-split">
-        {chat}
-        {agenda.side}
-      </div>
-    ) : (
-      chat
-    );
-
   return (
     // Every Markdown reader inside the conversation — transcript prose, notices, file previews in the
     // workspace and whatever a later item renders here — reads references through this one surface.
@@ -1660,9 +1611,7 @@ export function SessionChatPage({
                 // The in-app browser host around the chat: under Settings › Appearance › "Open links in" ›
                 // Ferretry side panel, a tapped link opens BESIDE the conversation on a desktop, and as a
                 // sheet over it on a tablet or phone, where two columns would leave the chat unreadable.
-                chat={
-                  <InAppBrowserWorkspace compact={formFactor !== 'desktop'}>{chatWithAgenda}</InAppBrowserWorkspace>
-                }
+                chat={<InAppBrowserWorkspace compact={formFactor !== 'desktop'}>{chat}</InAppBrowserWorkspace>}
                 connection={connection}
                 driving={driving}
                 formFactor={formFactor}

@@ -1,5 +1,5 @@
 /**
- * ONE ROW OF A FERRET'S AGENDA, in the drawer above the composer (and the docked panel on a wide screen): ONE
+ * ONE ROW OF A FERRET'S AGENDA, in the drawer above the composer (and Info’s agenda section): ONE
  * button, the whole row. A bold one-line title, the ask under it (two lines at most) and the status mark (whose
  * turn, what it blocks). Nothing else is on it — no answer chips, no reply — because everything to decide is on
  * the item's card, which the tap opens in place of the conversation.

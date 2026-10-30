@@ -1034,97 +1034,6 @@
   }
 }
 
-/* ---- Per-chat card chip and Tasks tab ------------------------------------------------------------- */
-.fy-card-chip {
-  display: inline-flex;
-  min-width: 0;
-  max-width: 100%;
-  align-items: center;
-  gap: 6px;
-  padding: 1px var(--gap-sm);
-  overflow: hidden;
-  border: var(--stroke) solid var(--border-soft);
-  border-radius: var(--radius-pill);
-  background: var(--surface);
-  color: var(--muted);
-  font-size: var(--text-xs);
-  line-height: 1.5;
-  text-decoration: none;
-  white-space: nowrap;
-}
-a.fy-card-chip:hover {
-  border-color: var(--border);
-  color: var(--fg);
-}
-.fy-card-chip[data-tone='warn'] {
-  border-color: var(--warn);
-  background: var(--warn-bg);
-  color: var(--warn);
-}
-.fy-card-chip__ref {
-  flex: none;
-  color: var(--accent);
-  font-family: var(--font-mono);
-  font-weight: var(--weight-medium);
-}
-.fy-card-chip__title {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--fg);
-  text-overflow: ellipsis;
-}
-.fy-card-chip__lane,
-.fy-card-chip__activity {
-  flex: none;
-}
-.fy-card-chip__lane::before,
-.fy-card-chip__activity::before {
-  margin-right: 6px;
-  color: var(--faint);
-  content: '·';
-}
-.fy-card-chip__activity {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-}
-.fy-card-chip__dot {
-  font-size: 0.7em;
-}
-.fy-card-chip__activity[data-tone='ok'] {
-  color: var(--ok);
-}
-.fy-card-chip__activity[data-tone='warn'] {
-  color: var(--warn);
-}
-.fy-card-chip__activity[data-tone='err'] {
-  color: var(--err);
-}
-/* ON A PHONE THE CHIP IS ITS REFERENCE ALONE, and it gives way before anything else in the bar does. Its title, lane
-   and activity left it no room: an unshrinkable "&F11 · ● active" ran under Interrupt and ▾, and the bar's one status
-   dot already says how the ferret is doing. "No card" is a nudge for a wide screen, not worth a phone's row. */
-.fy-session-bar[data-compact] .fy-card-chip__title,
-.fy-session-bar[data-compact] .fy-card-chip__lane,
-.fy-session-bar[data-compact] .fy-card-chip__activity,
-.fy-session-bar[data-compact] .fy-card-chip[data-card-chip='none'] {
-  display: none;
-}
-/* A link's 44px touch floor made the pill a fat circle round four characters: on a phone the reference is drawn as
-   the link it is, with no outline, and keeps the whole floor as its target. */
-.fy-session-bar[data-compact] .fy-card-chip {
-  flex: 0 1 auto;
-  align-self: center;
-  justify-content: center;
-  padding: 0 2px;
-  border-color: transparent;
-  background: transparent;
-}
-.fy-session-bar[data-compact] .fy-card-chip__ref {
-  min-width: 0;
-  flex: 0 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 .fy-board-side {
   display: flex;
   min-width: 0;
@@ -1168,4 +1077,11 @@ a.fy-card-chip:hover {
   min-width: 0;
   max-width: none;
   flex: none;
+}
+
+/* The card Info's "Open board" pointed at: an accent edge and wash, so it is found at once in a full lane. */
+.fy-board-card[data-highlighted] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--accent-border, var(--accent));
 }

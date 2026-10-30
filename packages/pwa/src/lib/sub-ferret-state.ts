@@ -85,24 +85,3 @@ export const subFerretsOf = (parentId: string, sessions: readonly SessionView[])
   sessions
     .filter(view => view.config.parent === parentId && view.config.id !== parentId)
     .toSorted((left, right) => right.config.createdAt.localeCompare(left.config.createdAt));
-
-/**
- * The header's summary: `3 sub-ferrets · 1 needs you · 1 working`. Only the live states are counted
- * beside the total — a finished one is in the total and in the list.
- */
-export const subFerretSummary = (children: readonly SessionView[]): string => {
-  const readings = children.map(subFerretState);
-  const count = (state: SubFerretState): number => readings.filter(one => one.state === state).length;
-  const total = `${children.length} sub-ferret${children.length === 1 ? '' : 's'}`;
-  const needs = count('needs-you');
-  const working = count('working') + count('starting');
-  const failed = count('failed');
-  return [
-    total,
-    needs > 0 ? `${needs} needs you` : '',
-    working > 0 ? `${working} running` : '',
-    failed > 0 ? `${failed} failed` : '',
-  ]
-    .filter(Boolean)
-    .join(' · ');
-};
