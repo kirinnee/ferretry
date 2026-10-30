@@ -13,6 +13,7 @@ export interface QueueRequest {
   readonly fromName?: string | undefined;
   readonly text: string;
   readonly attachmentIds?: readonly string[] | undefined;
+  readonly replyExpected?: boolean | undefined;
 }
 
 /** What an enqueue did: made the message, or found the one a first request already made. */
@@ -73,6 +74,7 @@ export class SessionQueueService {
         ...(request.fromName === undefined ? {} : { fromName: request.fromName }),
         text: request.text,
         attachmentIds: [...(request.attachmentIds ?? [])],
+        ...(request.replyExpected === true ? { replyExpected: true } : {}),
         enqueuedAt: at,
         state: 'queued',
         stateAt: at,

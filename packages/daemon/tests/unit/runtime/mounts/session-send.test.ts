@@ -6,6 +6,7 @@ import {
   FY_REQUEST_ID_HEADER,
   SEND_UNCONFIRMED_CODE,
   type QueuedMessage,
+  QueuedMessageSchema,
   SendListResponseSchema,
   type SendRecord,
   SendRecordSchema,
@@ -316,6 +317,46 @@ describe('the session send ledger routes', () => {
     should(found.status).equal(200);
     should(SessionQueueSchema.parse(JSON.parse(found.body)).messages).deepEqual([message]);
     should(absent.status).equal(404);
+  });
+
+  it('should edit and take back a queued message only while it waits, and refuse the rest', async () => {
+    // Arrange
+    const sessions = new FakeSessionSend();
+    const waiting: QueuedMessage = {
+      v: 1,
+      id: 'q-1',
+      sender: 'human',
+      text: 'ship it',
+      attachmentIds: [],
+      enqueuedAt: '2026-08-01T12:00:00.000Z',
+      state: 'queued',
+      stateAt: '2026-08-01T12:00:00.000Z',
+      revision: 1,
+    };
+    sessions.queued = [waiting, { ...waiting, id: 'q-2', state: 'delivered' }];
+    const subject = dispatcher(sessions);
+    const patch = (path: string, body: unknown) =>
+      subject.dispatch(request({ method: 'PATCH', path, headers: human, body: JSON.stringify(body) }));
+
+    // Act
+    const edited = await patch('/v1/sessions/s1/queue/q-1', { text: 'ship it now' });
+    const cancelled = await subject.dispatch(
+      request({ method: 'DELETE', path: '/v1/sessions/s1/queue/q-1', headers: human }),
+    );
+    const tooLate = await patch('/v1/sessions/s1/queue/q-2', { text: 'too late' });
+    const missing = await subject.dispatch(
+      request({ method: 'DELETE', path: '/v1/sessions/s1/queue/nope', headers: human }),
+    );
+    const empty = await patch('/v1/sessions/s1/queue/q-1', { text: '   ' });
+    const unusable = await patch('/v1/sessions/s1/queue/%2F', { text: 'x' });
+
+    // Assert
+    should(QueuedMessageSchema.parse(JSON.parse(edited.body))).containEql({ text: 'ship it now', revision: 2 });
+    should(QueuedMessageSchema.parse(JSON.parse(cancelled.body)).state).equal('cancelled');
+    should(tooLate.status).equal(409);
+    should(missing.status).equal(404);
+    should(empty.status).equal(400);
+    should(unusable.status).equal(400);
   });
 
   it('should retry under the same id, passing a deliberate "send again anyway" through', async () => {
