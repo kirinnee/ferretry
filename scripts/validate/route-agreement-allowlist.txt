@@ -102,6 +102,7 @@ unreached GET /v1/board # the project board (v2) lands daemon-first; the CLI (bo
 unreached POST /v1/board/tasks # the project board (v2) lands daemon-first; the CLI (board U4) and the PWA (board U10) dial it next
 unreached GET /v1/board/tasks/:taskId # the project board (v2) lands daemon-first; the CLI (board U4) and the PWA (board U10) dial it next
 unreached POST /v1/board/tasks/:taskId # the project board (v2) lands daemon-first; the CLI (board U4) and the PWA (board U10) dial it next
+unreached GET /v1/board/tasks # the old-reference lookup (board U16) lands daemon-first; the PWA reference code (board U12) dials it next
 
 # ── verb-unproven: the address agrees, the method is not proved ────────────────────────────────
 

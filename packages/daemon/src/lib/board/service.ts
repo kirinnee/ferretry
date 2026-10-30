@@ -139,6 +139,14 @@ export class BoardService {
     return await this.view(await this.ports.store.read(), id);
   }
 
+  /** The card an old task became: `<session>:<old id>`, as `legacyRef` records it. */
+  async taskByLegacyRef(legacyRef: string): Promise<BoardTaskResponse> {
+    const snapshot = await this.ports.store.read();
+    const card = snapshot.cards.find(candidate => candidate.legacyRef === legacyRef);
+    if (card === undefined) throw new BoardError('not-found', `no card came from the old task ${legacyRef}`);
+    return await this.view(snapshot, card.id);
+  }
+
   // -------------------------------------------------------------------------------------------------
   // Writes
   // -------------------------------------------------------------------------------------------------

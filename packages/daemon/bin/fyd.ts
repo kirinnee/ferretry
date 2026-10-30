@@ -139,6 +139,13 @@ import {
 import { StorageSessionAgendaState } from '../src/adapters/agenda/storage-session-agenda-state.ts';
 import { FileBoardStore } from '../src/adapters/board/file-board-store.ts';
 import {
+  AgendaImportAgenda,
+  FileBoardImportMarker,
+  FileLegacyTaskSource,
+  StorageImportSessions,
+} from '../src/adapters/board-import/index.ts';
+import { BoardImporter, LaneSetImportProjects } from '../src/lib/board-import/index.ts';
+import {
   JournalBoardChanges,
   StorageSessionFocus,
   StorageSessionParents,
@@ -222,6 +229,7 @@ import {
   FileModelCatalogCache,
   AgendaLaneAgenda,
   FileLaneSetStore,
+  GitProjectFacts,
   GitRepositoryProbe,
   StorageSessionFacts,
   FileProjectCatalog,
@@ -1830,16 +1838,22 @@ export interface BrowserTransportWorld {
  * delivery (`NoAgendaLinks`, `NoopReopenNotifier`, U7). The machine id is the pairing identity's daemon
  * id, which a write waits for rather than inventing one.
  */
+const boardDiagnostics = { warn: (message: string) => void process.stderr.write(`board: ${message}\n`) };
+
+/** The project boards' cards, one file each. ONE store per daemon: the service and the import share its id counter. */
+function createBoardStore(paths: FoundationPaths, stateFiles: FileSystemPort): FileBoardStore {
+  return new FileBoardStore(join(paths.state, 'board'), stateFiles, new KeyedSerialExecutor(), boardDiagnostics);
+}
+
 function createBoardService(
-  paths: FoundationPaths,
-  stateFiles: FileSystemPort,
+  store: FileBoardStore,
   storage: DaemonStorage,
   clock: SystemClock,
   machineId: () => string | undefined,
 ): BoardService {
-  const diagnostics = { warn: (message: string) => void process.stderr.write(`board: ${message}\n`) };
+  const diagnostics = boardDiagnostics;
   return new BoardService({
-    store: new FileBoardStore(join(paths.state, 'board'), stateFiles, new KeyedSerialExecutor(), diagnostics),
+    store,
     lanes: new StubLaneSetSource(),
     parents: new StorageSessionParents(storage),
     focus: new StorageSessionFocus(storage),
@@ -9155,6 +9169,42 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // The board store (U2) takes over moving a deleted lane's cards; until it lands there are none to move.
         { relocate: async () => undefined },
       );
+      // The one-time import of the old per-session task files onto the project boards. It shares the board's
+      // store with the board service (one id counter), proposes lanes through the lane service above, and
+      // points the open agenda items at their cards. Total: a bad file is reported, never a failed start.
+      const boardStore = createBoardStore(paths, stateFiles);
+      const boardService = createBoardService(boardStore, storage, clock, () => attachmentDaemonId);
+      const boardImporter = new BoardImporter({
+        tasks: new FileLegacyTaskSource(
+          () => storage.listSessions().map(session => session.id),
+          id => join(createSessionPaths(paths, parseSessionId(id)).directory, 'tasks.json'),
+        ),
+        store: boardStore,
+        projects: new LaneSetImportProjects(laneSets, new GitProjectFacts()),
+        sessions: new StorageImportSessions(
+          () => storage.listSessions().map(session => session.id),
+          async () => await assigneeCandidates(storage),
+        ),
+        agenda: new AgendaImportAgenda(agendaBoards, () => new Date(clock.now()).toISOString()),
+        marker: new FileBoardImportMarker(join(paths.home, 'board-import.json')),
+        clock: { now: () => new Date(clock.now()).toISOString() },
+        machineId: () => attachmentDaemonId,
+      });
+      unrefTimer(2000, () => {
+        void boardImporter
+          .run()
+          .then(summary => {
+            if (summary.skipped) return;
+            const said = `board import: ${summary.imported} imported, ${summary.alreadyImported} already there, ${summary.linkedAsks} asks linked, ${summary.problems.length} problems`;
+            process.stderr.write(`${said}\n`);
+            for (const problem of summary.problems) {
+              process.stderr.write(
+                `board import: ${problem.sessionId ?? '-'} ${problem.taskId ?? ''} ${problem.detail}\n`,
+              );
+            }
+          })
+          .catch(() => undefined);
+      });
       const agenda = new AgendaService(
         agendaBoards,
         clock,
@@ -10483,7 +10533,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
         }),
         tasks: createTaskSubsystem(paths, storage, clock, taskBoards, taskBoardTaskActionAuthorizer(boards)),
-        board: createBoardService(paths, stateFiles, storage, clock, () => attachmentDaemonId),
+        board: {
+          board: async query => await boardService.board(query),
+          task: async id => await boardService.task(id),
+          taskByLegacyRef: async legacyRef => await boardService.taskByLegacyRef(legacyRef),
+          create: async (request, caller) => await boardService.create(request, caller),
+          act: async (id, request, caller) => await boardService.act(id, request, caller),
+          importLegacy: async options => await boardImporter.run({ dryRun: options.dryRun, force: true }),
+        },
         taskBoards: boards,
         analytics: createAnalyticsSubsystem(analyticsIngestion, () => analyticsMachineName ?? hostname()),
         analyticsPricing,
