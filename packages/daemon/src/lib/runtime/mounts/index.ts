@@ -65,6 +65,7 @@ import { harnessUpdateRoutes } from './harness-update.ts';
 import type { LegacyWireUseRecorder } from '../../legacy-wire/index.ts';
 import { type DaemonHealthSubsystem, daemonHealthRoutes } from './health.ts';
 import { type LearningSubsystem, learningRoutes } from './learning.ts';
+import { type LegacyTaskSubsystem, legacyTaskRoutes } from './legacy-tasks.ts';
 import { type McpInventorySubsystem, mcpInventoryRoutes } from './mcp-inventory.ts';
 import { type McpOAuthSubsystem, mcpOAuthRoutes } from './mcp-oauth.ts';
 import { type ModelsSubsystem, modelRoutes } from './models.ts';
@@ -330,6 +331,8 @@ export interface MountedSubsystems {
    *  unserved route, and before this field `fy migrate` was a manual operation with nothing watching
    *  the quota that makes it necessary. */
   readonly quotaFailover: QuotaFailoverLoop;
+  /** The retired per-session task store's two list reads, answered empty for older clients (see legacy-tasks.ts). */
+  readonly legacyTasks: LegacyTaskSubsystem;
   /** The project boards (v2): every project's cards, one file per card, written under ownership and lineage. */
   readonly board: BoardSubsystem;
   /** The board's GitHub watcher (board-design.md §3.1): it serves no route, and it is a mounted subsystem
@@ -616,6 +619,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
           configFilesConfirmations(subsystems.configFiles.service),
         ),
         ...pinRoutes(subsystems.pins),
+        ...legacyTaskRoutes(subsystems.legacyTasks),
         // The project boards live under `/v1/board`, which no other subsystem uses, and their fixed
         // literals are registered before the patterns beneath them.
         ...boardRoutes(subsystems.board),

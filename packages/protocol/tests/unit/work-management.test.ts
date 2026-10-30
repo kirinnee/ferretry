@@ -135,6 +135,11 @@ const taskCases: SchemaCase[] = [
     },
   },
   {
+    name: 'fleet task list',
+    schema: tasks.FleetTaskListResponseSchema,
+    value: { v: 1, sessionId: null, tasks: [], parseErrors: 0, updatedAt: INSTANT },
+  },
+  {
     name: 'scoped detail',
     schema: tasks.ScopedTaskDetailResponseSchema,
     value: { sessionId: 'session-1', task: { ...taskView, sessionId: 'session-1' }, activity: [] },

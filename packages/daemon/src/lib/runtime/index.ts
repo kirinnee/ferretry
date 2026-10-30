@@ -13,6 +13,7 @@ export * from './mounts/fleet-events.ts';
 export * from './mounts/health.ts';
 export * from './mounts/index.ts';
 export * from './mounts/learning.ts';
+export * from './mounts/legacy-tasks.ts';
 export * from './mounts/names.ts';
 export * from './mounts/pack.ts';
 export * from './mounts/pairing.ts';

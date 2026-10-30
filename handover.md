@@ -338,7 +338,7 @@ in `packages/pwa/src/components/files-api.ts` uses the shared `browserFetch` tra
 filtering `??` rows; `packages/pwa/tests/unit/files-api.test.ts` keeps that final path covered.
 **#5 is complete (2026-08-07), with the two performance histories kept distinct.** The earlier
 `37af20d4` (`fix(tasks): parallelize fleet board reads (#282)`) bounded the fleet-wide aggregate
-`GET /v1/tasks` walk used by the CLI (route deleted in U18a); it did not accelerate the current-session PWA pane. The pane's
+`GET /v1/tasks` walk used by the CLI (now a deprecated empty stub, U18a); it did not accelerate the current-session PWA pane. The pane's
 historical source at `e222f87d25f0712eac47325722b1fdd742c0a207` fetched one list, one detail per
 task, and recursively walked files in the browser. The production source at
 `b81c64e69e64a058fa7df884c55d6303d8c036b7` instead consumes bounded task summaries, delegates the

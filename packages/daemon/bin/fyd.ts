@@ -10843,6 +10843,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             return () => clearInterval(handle);
           },
         }),
+        legacyTasks: { now: () => clock.now() },
         board: {
           board: async query => await boardWorld.board.board(query),
           task: async id => await boardWorld.board.task(id),

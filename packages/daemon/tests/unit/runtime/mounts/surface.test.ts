@@ -583,6 +583,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       throw new Error('not exercised by the surface inventory');
     },
   },
+  legacyTasks: { now: () => '2026-07-30T12:00:00.000Z' },
   board: boardSubsystem(),
   boardGitHub: { arm: () => () => undefined },
   analytics: analyticsSubsystem(),
@@ -776,7 +777,7 @@ describe('the mounted daemon surface', () => {
     // total, which git merges without a conflict — exactly how a route goes missing with this test
     // green. Two additions here both have to rewrite the line that carries the terminating `;`.
     const operatorRoutes =
-      106 + // the session table and everything that is not the account model (three of them the agenda spellings of the agenda routes, kept beside them for the legacy window; six of them the send ledger: its read, one send, a retry under the same id, a cancel, an Enter for one typed and not sent, and the hand-off document behind a pointer; three the session's durable message queue: its read, an edit and a take-back of a message still waiting; one the Enter or erase for a person's own draft in the composer) (three socket-ticket counters gone: a device opens streams inside its session; the operator password's set and unlock routes gone: the passkey step-up replaced them)
+      108 + // the session table and everything that is not the account model (three of them the agenda spellings of the agenda routes, kept beside them for the legacy window; six of them the send ledger: its read, one send, a retry under the same id, a cancel, an Enter for one typed and not sent, and the hand-off document behind a pointer; three the session's durable message queue: its read, an edit and a take-back of a message still waiting; one the Enter or erase for a person's own draft in the composer) (three socket-ticket counters gone: a device opens streams inside its session; the operator password's set and unlock routes gone: the passkey step-up replaced them)
       5 + // the project boards: the board query, one card, a new card, an action on a card (board-design.md §2), and a ferret's skip (§3.4)
       4 + // the credential sign-in family: start, then read, answer or cancel one flow
       5 + // the MCP sign-in family: its status read, start, finish, cancel and sign out (docs/mcp-oauth.md)
@@ -1058,6 +1059,8 @@ describe('the mounted daemon surface', () => {
       'POST /v1/sessions/:sessionId/notify',
       'GET /v1/sessions/:sessionId/pins',
       'POST /v1/sessions/:sessionId/pins',
+      'GET /v1/tasks',
+      'GET /v1/sessions/:sessionId/tasks',
       'GET /v1/board',
       'POST /v1/board/tasks',
       'POST /v1/board/skip',

@@ -148,7 +148,8 @@
 # `packages/daemon/src/lib/agent-tools/fleet-read.ts`.
 
 # PR #10 — port the task record system and its file store: DELETED (U18a), nothing to list.
-# The per-session store and its routes are gone; the importer only reads the old tasks.json.
+# The per-session store and its writes are gone; two deprecated empty list reads remain for older clients
+# (mounts/legacy-tasks.ts, removed after one release) and the importer only reads the old tasks.json.
 # `task-title.ts` was DELETED rather than wired: it duplicated packages/cli/src/lib/tasks/
 # task-title.ts, which the CLI already uses for its own --title guidance, and the API boundary
 # enforces the five-word rule through the protocol's TaskTitleSchema.

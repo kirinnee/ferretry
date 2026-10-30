@@ -584,6 +584,11 @@ export const SessionTaskListResponseSchema = z.object({
 });
 export type SessionTaskListResponse = z.infer<typeof SessionTaskListResponseSchema>;
 
+export const FleetTaskListResponseSchema = SessionTaskListResponseSchema.extend({
+  sessionId: z.null(),
+});
+export type FleetTaskListResponse = z.infer<typeof FleetTaskListResponseSchema>;
+
 export const ScopedTaskDetailResponseSchema = z.object({
   sessionId: z.string().nullable(),
   task: TaskViewSchema.safeExtend({ sessionId: z.string().nullable() }),
