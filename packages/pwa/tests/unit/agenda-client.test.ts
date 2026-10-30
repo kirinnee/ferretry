@@ -7,6 +7,7 @@ import {
   DaemonAgendaClient,
   fetchAgendaCount,
   fetchAgendaSnapshot,
+  SNOOZE_NEEDS_UPDATE,
   sendAgendaReplies,
 } from '../../src/lib/agenda-client.ts';
 import { AgendaWireDirectory } from '../../src/lib/agenda-wire.ts';
@@ -215,6 +216,67 @@ describe('DaemonAgendaClient', () => {
       { action: 'snooze', id: 'A1', until: '2026-10-30T15:00:00.000Z' },
       { action: 'unsnooze', id: 'A1' },
     ]);
+  });
+
+  it('never sends a snooze to a machine older than agenda.snooze.1, and says it needs an update', async () => {
+    const sent: unknown[] = [];
+    const wires = new AgendaWireDirectory();
+    const client = new DaemonAgendaClient(
+      undefined,
+      async (_input, init) => {
+        sent.push(init?.body);
+        return response(snapshot('same/session'));
+      },
+      wires,
+    );
+    wires.note(daemonA.daemonId, { kind: 'read', health: healthOf('4.137.0', [DAEMON_FEATURES.agendaWire]) });
+
+    await should(client.snooze(daemonA, scopeA, 'A1', '2026-10-30T15:00:00.000Z')).be.rejectedWith(SNOOZE_NEEDS_UPDATE);
+    await should(client.unsnooze(daemonA, scopeA, 'A1')).be.rejectedWith(SNOOZE_NEEDS_UPDATE);
+    should(sent).be.empty();
+    should(wires.snoozeOf(daemonA.daemonId)).be.false();
+    await client.dismiss(daemonA, scopeA, 'A1');
+    should(sent).have.length(1);
+    wires.clearDaemon(daemonA.daemonId);
+    should(wires.snoozeOf(daemonA.daemonId)).be.undefined();
+  });
+
+  it('says a machine not yet read needs an update when it refuses the snooze as an unknown action', async () => {
+    const refusal = {
+      error: 'the request body is invalid — action: Invalid discriminator value',
+      code: 'invalid_request',
+    };
+    const old = new DaemonAgendaClient(undefined, async () => response(refusal, 400));
+    const other = new DaemonAgendaClient(undefined, async () =>
+      response({ error: 'no such item', code: 'not-found' }, 404),
+    );
+
+    await should(old.snooze(daemonA, scopeA, 'A1', '2026-10-30T15:00:00.000Z')).be.rejectedWith(SNOOZE_NEEDS_UPDATE);
+    await should(old.dismiss(daemonA, scopeA, 'A1')).be.rejectedWith(/request body is invalid/u);
+    await should(other.snooze(daemonA, scopeA, 'A1', '2026-10-30T15:00:00.000Z')).be.rejectedWith('no such item');
+  });
+
+  it('snoozes on a machine that offers agenda.snooze.1', async () => {
+    const wires = new AgendaWireDirectory();
+    const actions: unknown[] = [];
+    const client = new DaemonAgendaClient(
+      undefined,
+      async (_input, init) => {
+        actions.push(JSON.parse(String(init?.body)));
+        return response(snapshot('same/session'));
+      },
+      wires,
+    );
+    wires.note(daemonA.daemonId, {
+      kind: 'read',
+      health: healthOf('4.141.1', [DAEMON_FEATURES.agendaWire, DAEMON_FEATURES.agendaSnooze]),
+    });
+    wires.note(daemonA.daemonId, { kind: 'failed' });
+
+    await client.snooze(daemonA, scopeA, 'A1', '2026-10-30T15:00:00.000Z');
+
+    should(wires.snoozeOf(daemonA.daemonId)).be.true();
+    should(actions).deepEqual([{ action: 'snooze', id: 'A1', until: '2026-10-30T15:00:00.000Z' }]);
   });
 
   it('marks a current full load or mutation as errored when its daemon request fails', async () => {

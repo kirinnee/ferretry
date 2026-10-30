@@ -125,6 +125,9 @@ The owner can put an open item away ("we are waiting for approval"): **for** a w
   changes its words). Only `--now` — it is urgent — wakes it, and a ferret may do that **once an hour per item**
   (`urgentAt`; a second try inside the hour is refused as `rate-limited`).
 - Only the owner snoozes and unsnoozes; only the daemon's own timer wakes. A notice is read, not snoozed.
+- **The app ships first**: a daemon reports `agenda.snooze.1` on `GET /v1/health`, and the app sends snooze or
+  unsnooze only to a machine that lists it. To an older machine it sends nothing and says the machine needs an
+  update; a machine not yet read that refuses the request as an unknown action is told apart the same way.
 
 **Migration.** Replies used to close items (`disposition: 'replied'`), and before that they left an item on the
 ferret's turn. When a board is read, an item still waiting on the ferret only because of an owner reply is
