@@ -440,6 +440,51 @@ describe('fy wait', () => {
     should(clock.sleeps).eql([1_000, 1_000]);
   });
 
+  it('should ask less often while nothing moves, when the caller names no interval', async () => {
+    // Arrange
+    const { controller, io, clock } = build({ views: [sessionView(sessionState({ status: 'running', turn: 3 }))] });
+
+    // Act
+    await controller.wait('s1', { timeout: 21 });
+
+    // Assert — soon at first, then the ladder's last rung until the deadline.
+    should(io.exitCode).equal(124);
+    should(clock.sleeps).eql([1_000, 2_000, 3_000, 5_000, 5_000, 5_000]);
+  });
+
+  it('should ask soon again once the session moves', async () => {
+    // Arrange — three still asks, then a new turn, then still again, then the end.
+    const still = sessionView(sessionState({ status: 'running', turn: 3 }));
+    const { controller, io, clock } = build({
+      views: [
+        still,
+        still,
+        still,
+        sessionView(sessionState({ status: 'running', turn: 4 })),
+        sessionView(sessionState({ status: 'running', turn: 4 })),
+        sessionView(sessionState({ status: 'completed', turn: 4 })),
+      ],
+    });
+
+    // Act
+    await controller.wait('s1', {});
+
+    // Assert
+    should(io.exitCode).equal(0);
+    should(clock.sleeps).eql([1_000, 2_000, 3_000, 1_000, 2_000]);
+  });
+
+  it('should keep the interval the caller named, however still the session is', async () => {
+    // Arrange
+    const { controller, clock } = build({ views: [sessionView(sessionState({ status: 'running' }))] });
+
+    // Act
+    await controller.wait('s1', { timeout: 8, interval: 2 });
+
+    // Assert
+    should(clock.sleeps).eql([2_000, 2_000, 2_000, 2_000]);
+  });
+
   it('should trust the deliverable over a completion claim', async () => {
     // Arrange — the session claims completion on the first poll and the file lands on the second.
     const { controller, io, marker } = build({ views: [sessionView(sessionState({ status: 'completed' }))] }, [
