@@ -66,7 +66,7 @@ function jsonl(value: unknown): string {
 async function nextResult(
   iterator: AsyncIterator<TranscriptBatch>,
   label: string,
-  timeoutMs = 2_000,
+  timeoutMs = 30_000,
 ): Promise<IteratorResult<TranscriptBatch>> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {

@@ -7,6 +7,7 @@ on:
 
 jobs:
   goreleaser:
+    timeout-minutes: 30
     name: GoReleaser Publish
     permissions:
       contents: write
@@ -29,6 +30,7 @@ jobs:
   # settings. Until the owner creates DAEMON_RELEASE_SIGNING_KEY this job says so and signs nothing,
   # and standalone self-updates refuse — every other install method is unaffected.
   sign:
+    timeout-minutes: 15
     name: Sign daemon release
     needs: goreleaser
     environment: daemon-release

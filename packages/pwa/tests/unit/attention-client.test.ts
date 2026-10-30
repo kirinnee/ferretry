@@ -1,15 +1,19 @@
 import { describe, it } from 'bun:test';
-import type { AttentionResponse } from '@ferretry/protocol';
+import { type AttentionResponse, DAEMON_FEATURES } from '@ferretry/protocol';
 import should from 'should';
 import {
+  ATTENTION_READS_PER_DAEMON,
   applyAttentionAction,
   DaemonAttentionClient,
   fetchAttentionCount,
   fetchAttentionSnapshot,
+  sendAttentionReplies,
 } from '../../src/lib/attention-client.ts';
+import { AgendaWireDirectory } from '../../src/lib/agenda-wire.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { DaemonResponseError } from '../../src/lib/runtime-models.ts';
+import { healthOf } from '../support/health.ts';
 
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
 const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'token-b' });
@@ -48,6 +52,11 @@ const deferred = <Value>() => {
     reject = fail;
   });
   return { promise, resolve, reject };
+};
+
+/** Let queued continuations run. */
+const tick = async (): Promise<void> => {
+  for (let spin = 0; spin < 5; spin += 1) await new Promise(resolve => setTimeout(resolve, 0));
 };
 
 describe('attention transport', () => {
@@ -573,5 +582,141 @@ describe('DaemonAttentionClient', () => {
     should(oldRefreshes).equal(0);
     should(client.store.attention(rotatedScope)?.updatedAt).equal('2026-07-31T04:00:00.000Z');
     should(client.store.count(rotatedScope)).equal(2);
+  });
+});
+
+describe('attention transport on the agenda wire', () => {
+  const recorder = () => {
+    const calls: Array<{ url: string; method: string | undefined }> = [];
+    const fetcher = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      calls.push({ url: String(input), method: init?.method });
+      return response(snapshot('same/session'));
+    };
+    return { calls, fetcher };
+  };
+
+  it('dials the agenda routes for board, badge, mutation and send-now when told the daemon speaks them', async () => {
+    const { calls, fetcher } = recorder();
+
+    await fetchAttentionSnapshot(daemonA, scopeA, fetcher, 'agenda');
+    await fetchAttentionCount(daemonA, scopeA, fetcher, 'agenda');
+    await applyAttentionAction(daemonA, scopeA, { action: 'dismiss', id: 'A1' }, fetcher, 'agenda');
+    await sendAttentionReplies(daemonA, scopeA, fetcher, 'agenda');
+
+    should(calls).deepEqual([
+      { url: 'https://a.example.test/v1/sessions/same%2Fsession/agenda', method: undefined },
+      { url: 'https://a.example.test/v1/sessions/same%2Fsession/agenda', method: undefined },
+      { url: 'https://a.example.test/v1/sessions/same%2Fsession/agenda', method: 'POST' },
+      { url: 'https://a.example.test/v1/sessions/same%2Fsession/agenda/replies', method: 'POST' },
+    ]);
+  });
+
+  it('dials the older routes by default, send-now included', async () => {
+    const { calls, fetcher } = recorder();
+
+    await fetchAttentionSnapshot(daemonA, scopeA, fetcher);
+    await sendAttentionReplies(daemonA, scopeA, fetcher);
+
+    should(calls.map(call => call.url)).deepEqual([
+      'https://a.example.test/v1/sessions/same%2Fsession/attention',
+      'https://a.example.test/v1/sessions/same%2Fsession/attention/replies',
+    ]);
+  });
+
+  it('speaks to a new and an old daemon at once, each its own way, and starts old until health is read', async () => {
+    const { calls, fetcher } = recorder();
+    const wires = new AgendaWireDirectory();
+    const client = new DaemonAttentionClient(undefined, fetcher, wires);
+
+    await client.hydrate(daemonA, scopeA);
+    wires.note(daemonA.daemonId, { kind: 'read', health: healthOf('4.108.0', [DAEMON_FEATURES.agendaWire]) });
+    wires.note(daemonB.daemonId, { kind: 'read', health: healthOf('4.84.0') });
+    await client.revalidate(daemonA, scopeA);
+    await client.hydrateCount(daemonB, scopeB);
+    await client.dismiss(daemonA, scopeA, 'A1');
+    await client.sendReplies(daemonA, scopeA);
+    await client.dismiss(daemonB, scopeB, 'A1');
+    await client.sendReplies(daemonB, scopeB);
+
+    should(calls.map(call => call.url)).deepEqual([
+      'https://a.example.test/v1/sessions/same%2Fsession/attention',
+      'https://a.example.test/v1/sessions/same%2Fsession/agenda',
+      'https://b.example.test/v1/sessions/same%2Fsession/attention',
+      'https://a.example.test/v1/sessions/same%2Fsession/agenda',
+      'https://a.example.test/v1/sessions/same%2Fsession/agenda/replies',
+      'https://b.example.test/v1/sessions/same%2Fsession/attention',
+      'https://b.example.test/v1/sessions/same%2Fsession/attention/replies',
+    ]);
+  });
+});
+
+describe('DaemonAttentionClient reading many boards', () => {
+  it('asks one daemon for a few boards at a time, in order, without holding another daemon behind it', async () => {
+    // The inbox reads a board for every session with an open item. Fired at once, that burst ended the
+    // relay session every panel shares (`4400`); bounded, every board still arrives.
+    const gates: ReturnType<typeof deferred<Response>>[] = [];
+    const asked: string[] = [];
+    let inFlight = 0;
+    let peak = 0;
+    const client = new DaemonAttentionClient(undefined, async input => {
+      const url = String(input);
+      if (url.startsWith('https://b.')) return response(snapshot('same/session'));
+      asked.push(url);
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      const gate = deferred<Response>();
+      gates.push(gate);
+      const answer = await gate.promise;
+      inFlight -= 1;
+      return answer;
+    });
+    const sessions = Array.from({ length: 40 }, (_, index) => `s${index}`);
+    const reads = sessions.map(id => client.revalidate(daemonA, daemonSessionScope(daemonA, id)));
+    await client.revalidate(daemonB, scopeB);
+    await tick();
+    should(asked).have.length(ATTENTION_READS_PER_DAEMON);
+    for (const [index, id] of sessions.entries()) {
+      while (gates.length <= index) await tick();
+      gates[index]?.resolve(response(snapshot(id)));
+    }
+    await Promise.all(reads);
+    should(peak).equal(ATTENTION_READS_PER_DAEMON);
+    should(asked).deepEqual(sessions.map(id => `https://a.example.test/v1/sessions/${id}/attention`));
+    should(client.store.attention(daemonSessionScope(daemonA, 's39'))?.sessionId).equal('s39');
+  });
+
+  it('frees a slot when a board read fails', async () => {
+    let calls = 0;
+    const client = new DaemonAttentionClient(undefined, async () => {
+      calls += 1;
+      return calls <= ATTENTION_READS_PER_DAEMON ? response({ error: 'down' }, 503) : response(snapshot('last'));
+    });
+    const failing = Array.from({ length: ATTENTION_READS_PER_DAEMON }, (_, index) =>
+      client.revalidate(daemonA, daemonSessionScope(daemonA, `s${index}`)).catch(() => 'failed'),
+    );
+    await client.revalidate(daemonA, daemonSessionScope(daemonA, 'last'));
+    should(await Promise.all(failing)).deepEqual(Array.from({ length: ATTENTION_READS_PER_DAEMON }, () => 'failed'));
+    should(client.store.attention(daemonSessionScope(daemonA, 'last'))?.sessionId).equal('last');
+  });
+
+  it('sends nothing for a board read still waiting for a slot when its machine is unpaired', async () => {
+    const gates: ReturnType<typeof deferred<Response>>[] = [];
+    const asked: string[] = [];
+    const client = new DaemonAttentionClient(undefined, async input => {
+      asked.push(String(input));
+      const gate = deferred<Response>();
+      gates.push(gate);
+      return await gate.promise;
+    });
+    const reads = Array.from({ length: ATTENTION_READS_PER_DAEMON + 1 }, (_, index) =>
+      client.revalidate(daemonA, daemonSessionScope(daemonA, `s${index}`)),
+    );
+    await tick();
+    should(asked).have.length(ATTENTION_READS_PER_DAEMON);
+    client.clearDaemon(daemonA.daemonId);
+    for (const [index, gate] of gates.entries()) gate.resolve(response(snapshot(`s${index}`)));
+    await Promise.allSettled(reads);
+    should(asked).have.length(ATTENTION_READS_PER_DAEMON);
+    should(client.store.attention(daemonSessionScope(daemonA, 's0'))).be.undefined();
   });
 });

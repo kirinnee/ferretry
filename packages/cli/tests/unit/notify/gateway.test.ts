@@ -40,7 +40,7 @@ describe('protocol notify gateway', () => {
     await gateway.raise(SESSION, request);
 
     // Assert
-    should(calls[0]?.path).equal(`/v1/sessions/${SESSION}/attention`);
+    should(calls[0]?.path).equal(`/v1/sessions/${SESSION}/agenda`);
     should(calls[0]?.init?.method).equal('POST');
     should(calls[0]?.init?.headers).deepEqual({
       'content-type': 'application/json',

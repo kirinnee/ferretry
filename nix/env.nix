@@ -24,6 +24,17 @@ with packages;
     jq
     nodejs_24
     ripgrep
+    # Every session lives in a tmux pane, and the integration tier drives a real tmux. It used to be the
+    # runner image's (3.6a on Linux, Homebrew's 3.8 on macOS), so two machines ran two programs with two
+    # sets of races: 3.6a wedges a server whose control client loses its daemon mid-kill-server, and 3.8
+    # prints no pid for a dead pane. Three of the integration flakes of the week to 2026-10-29 were those
+    # two versions. One flake-locked tmux on every runner makes it one program;
+    # scripts/validate/pinned-toolchain.sh refuses a tmux from anywhere else and prints its version.
+    # It is nixpkgs' 3.7b, a cached binary, so no runner builds it. Homebrew users run 3.8, which differs
+    # again (a dead pane prints no pid), so the realworld workflow runs the tmux-heavy integration groups
+    # on 3.8 too, through the `ci-tmux38` shell (nix/shells.nix). Move this pin to 3.8 once nixpkgs ships
+    # a 3.8 binary, and drop that shell.
+    tmux
     wrangler
     yq-go
   ]

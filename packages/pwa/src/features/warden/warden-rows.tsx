@@ -33,6 +33,10 @@ interface ListProps {
 const TIME_CLASS = 'w-8 shrink-0 text-meta leading-base text-faint [font-variant-numeric:tabular-nums]';
 const ROW_CLASS =
   'flex min-h-[44px] min-w-0 flex-wrap items-center gap-x-sm gap-y-0 px-cell-x py-xs sm:min-h-0 sm:flex-nowrap sm:py-row-y';
+/** What Jev did first: a quiet line of its own under the row, at every width, lined up with the name. */
+const JEV_LINE_CLASS =
+  'order-last basis-full pl-[calc(2rem+theme(spacing.sm))] pb-xs text-meta leading-base text-faint sm:pb-0';
+
 /** The second phone line: it stays one line, and dissolves into the row's own line from `sm` up. */
 const SECOND_LINE_CLASS = 'order-last flex min-w-0 basis-full items-center gap-xs sm:contents';
 
@@ -58,7 +62,12 @@ export function InvestigationList({
           {rows.map(row => {
             const { reportPath } = row;
             return (
-              <li key={row.key} className={ROW_CLASS} data-warden-investigation={row.key} title={row.title}>
+              <li
+                key={row.key}
+                className={`${ROW_CLASS} sm:flex-wrap`}
+                data-warden-investigation={row.key}
+                title={row.title}
+              >
                 <span className={TIME_CLASS} title={row.at === undefined ? undefined : fullTime(row.at)}>
                   {compactAgo(row.at, now)}
                 </span>
@@ -97,10 +106,14 @@ export function InvestigationList({
                           reportPath,
                           ...(row.at === undefined ? {} : { at: row.at }),
                           ...(row.verdict === undefined ? {} : { verdict: row.verdict }),
+                          jev: row.jev,
                         })
                       }
                     />
                   )}
+                </span>
+                <span className={JEV_LINE_CLASS} data-warden-jev>
+                  {row.jev}
                 </span>
               </li>
             );

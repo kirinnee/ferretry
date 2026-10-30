@@ -12,6 +12,7 @@ concurrency:
 
 jobs:
   release:
+    timeout-minutes: 20
     name: Semantic Release
     if: github.event.workflow_run.conclusion == 'success'
     permissions:

@@ -87,13 +87,7 @@ export function sha256(text: string): string {
   return new Bun.CryptoHasher('sha256').update(text).digest('hex');
 }
 
-export async function waitFor(predicate: () => boolean | Promise<boolean>, what: string): Promise<void> {
-  for (let attempt = 0; attempt < 400; attempt += 1) {
-    if (await predicate()) return;
-    await Bun.sleep(25);
-  }
-  throw new Error(`timed out waiting for ${what}`);
-}
+export { waitFor } from '../support/wait-for.ts';
 
 const crypto_ = new WebCryptoRelayCrypto();
 

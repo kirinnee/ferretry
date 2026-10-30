@@ -37,6 +37,9 @@ export interface SessionObserverHost {
   pane(id: SessionId): Promise<PaneState | undefined>;
   /** The send tracker's transcript evidence for a session since `since`. */
   sendEvidence(id: SessionId, since: string): Promise<SendEvidenceReading>;
-  /** Ends whatever the host started (worker threads); the timers that drive it are the root's to stop. */
-  close(): void;
+  /**
+   * Ends whatever the host started (worker threads), and settles once the tmux clients those started have
+   * exited; the timers that drive it are the root's to stop.
+   */
+  close(): Promise<void>;
 }

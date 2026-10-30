@@ -36,7 +36,8 @@ export interface WorkerTmuxClient {
   watch(): Promise<boolean>;
   /** Every value of that subscription, as tmux reports it changing. */
   onPaneWatch(listener: (value: string) => void): () => void;
-  close(): void;
+  /** Disconnect, and settle once the client's process has EXITED — killed if it would not go. */
+  stop(): Promise<unknown>;
 }
 
 /** How a worker paces its looks. */
@@ -64,7 +65,7 @@ export const DEFAULT_SESSION_WORKER_PACING: SessionWorkerPacing = {
 /** What a session worker reads through. Nothing here can write: no storage, no file write, no `send-keys`. */
 export interface SessionWorkerDeps {
   readonly post: (message: FromSessionWorker) => void;
-  /** The session's own read-only attached control client (`bin/session.worker.ts` builds it). */
+  /** The session's own attached observe-only control client (`bin/session.worker.ts` builds it). */
   readonly tmux: (binding: SessionBinding['tmux']) => WorkerTmuxClient;
   readonly transcripts: Readonly<Record<'claude' | 'codex', TranscriptSource>>;
   readonly stat: (file: string) => Promise<{ readonly size: number; readonly mtimeMs: number } | undefined>;
@@ -136,7 +137,7 @@ const LIVENESS_EVENTS = 20;
  * A SESSION WORKER'S PROGRAM: the session observer, for the sessions this thread hosts, looking only when
  * something happened (stage 3c of `docs/design/session-workers.md`).
  *
- * WHEN IT LOOKS. The session's own read-only attached tmux client is subscribed to its panes'
+ * WHEN IT LOOKS. The session's own attached observe-only tmux client is subscribed to its panes'
  * `#{pane_dead} #{window_activity}` — tmux reports a change at most once a second and streams no pane bytes
  * at all — and the main thread forwards the file-event hub's notice when the transcript changes. Either
  * arms a look after a short settle, never sooner than the throttle after the last one, so a pane drawing
@@ -153,6 +154,8 @@ const LIVENESS_EVENTS = 20;
  */
 export class SessionWorkerRuntime {
   private readonly hosted = new Map<string, Hosted>();
+  /** Every client this worker let go whose process may not have exited yet: what {@link stop} waits out. */
+  private readonly ending = new Set<Promise<unknown>>();
   private readonly pacing: SessionWorkerPacing;
 
   constructor(private readonly deps: SessionWorkerDeps) {
@@ -193,7 +196,7 @@ export class SessionWorkerRuntime {
         if (hosted === undefined) return;
         if (!sameTmux(hosted.binding.tmux, input.binding.tmux)) {
           hosted.stopWatching();
-          hosted.tmux.close();
+          this.end(hosted.tmux);
           Object.assign(
             hosted,
             this.open(input.binding.tmux, value => this.paneDrew(hosted, value)),
@@ -220,12 +223,38 @@ export class SessionWorkerRuntime {
       case 'detach':
         if (this.current(input.session, input.generation) !== undefined) this.drop(input.session);
         return;
+      case 'stop':
+        await this.stop();
+        this.deps.post({ kind: 'stopped' });
+        return;
     }
   }
 
   /** Ends every attached client and timer: the thread is going away. */
   close(): void {
     for (const session of [...this.hosted.keys()]) this.drop(session);
+  }
+
+  /**
+   * {@link close}, and settle only once every client this worker started has EXITED — what a stopping
+   * daemon waits for before it ends the thread. A thread that is merely terminated leaves its clients to
+   * notice the daemon's exit, still detaching from the server for a moment after it has gone; a
+   * `kill-server` in that moment keeps the server AND the client running for good (measured on 3.6a for
+   * the daemon's shared client, and found by CI's tmux sweep on 3.7b for a worker's — see
+   * `ControlModeTmuxProcess.stop`).
+   */
+  async stop(): Promise<void> {
+    this.close();
+    await Promise.all([...this.ending]);
+  }
+
+  /** Let a client go: it is ended now and forgotten once its process has exited. */
+  private end(client: WorkerTmuxClient): void {
+    const ended: Promise<unknown> = client
+      .stop()
+      .catch(() => undefined)
+      .finally(() => this.ending.delete(ended));
+    this.ending.add(ended);
   }
 
   private attach(session: string, generation: number, facts: ObserverFacts, binding: SessionBinding): void {
@@ -532,7 +561,7 @@ export class SessionWorkerRuntime {
     hosted.look?.cancel();
     hosted.backstop?.();
     hosted.stopWatching();
-    hosted.tmux.close();
+    this.end(hosted.tmux);
     hosted.frames.forget(hosted.binding.tmux.target);
   }
 }

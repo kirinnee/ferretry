@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import should from 'should';
 import { BunTmuxProcess } from '../../../../src/adapters/index.ts';
 import { SessionConsoleError, SessionConsoleService } from '../../../../src/lib/index.ts';
+import { waitForValue } from '../../support/wait-for.ts';
 
 /**
  * THE CONSOLE OVER A REAL tmux SERVER: what the reader typed is what the pane received.
@@ -28,12 +29,13 @@ async function world() {
   const screen = async (): Promise<string> =>
     (await server.execute(['capture-pane', '-p', '-t', paneId])).stdout.replaceAll(/\n+$/gu, '');
   const until = async (expected: string): Promise<string> => {
-    for (let attempt = 0; attempt < 50; attempt += 1) {
-      const text = await screen();
-      if (text.includes(expected)) return text;
-      await Bun.sleep(20);
-    }
-    return await screen();
+    return await waitForValue(
+      async () => {
+        const text = await screen();
+        return text.includes(expected) ? text : undefined;
+      },
+      `the pane to show ${JSON.stringify(expected)}`,
+    );
   };
   return {
     server,

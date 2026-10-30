@@ -7,7 +7,9 @@ import {
   AttentionSnapshotSchema,
   FY_REQUEST_ID_HEADER,
 } from '@ferretry/protocol';
+import { type AgendaWire, AgendaWireDirectory, sessionAgendaPath, sessionAgendaRepliesPath } from './agenda-wire.ts';
 import { DaemonAttentionStore } from './attention-store.ts';
+import { ConcurrencyLimit } from './concurrency-limit.ts';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from './daemon-scope.ts';
 import { daemonRequest } from './daemon-transport.ts';
@@ -16,9 +18,6 @@ import { browserFetch, type DaemonFetch, DaemonResponseError } from './runtime-m
 const assertScopeDaemon = (daemon: DaemonConnection, scope: DaemonSessionScope): void => {
   if (daemon.daemonId !== scope.daemonId) throw new Error('attention scope must belong to the requested daemon');
 };
-
-export const attentionPath = (scope: DaemonSessionScope): string =>
-  `/v1/sessions/${encodeURIComponent(scope.sessionId)}/attention`;
 
 const responseError = async (response: Response): Promise<DaemonResponseError> => {
   const body = (await response.json().catch(() => ({}))) as { error?: unknown; code?: unknown };
@@ -54,8 +53,9 @@ export const fetchAttentionSnapshot = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   fetcher: DaemonFetch = browserFetch,
+  wire: AgendaWire = 'attention',
 ): Promise<AttentionSnapshot> =>
-  parseSnapshot(scope, await fetchAttention(daemon, scope, attentionPath(scope), {}, fetcher));
+  parseSnapshot(scope, await fetchAttention(daemon, scope, sessionAgendaPath(scope.sessionId, wire), {}, fetcher));
 
 /**
  * Reads the mounted full snapshot route and derives its count for a badge
@@ -65,8 +65,9 @@ export const fetchAttentionCount = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   fetcher: DaemonFetch = browserFetch,
+  wire: AgendaWire = 'attention',
 ): Promise<AttentionCountResponse> => {
-  const snapshot = await fetchAttentionSnapshot(daemon, scope, fetcher);
+  const snapshot = await fetchAttentionSnapshot(daemon, scope, fetcher, wire);
   return { sessionId: snapshot.sessionId, count: snapshot.count };
 };
 
@@ -76,12 +77,13 @@ export const applyAttentionAction = async (
   scope: DaemonSessionScope,
   action: AttentionActionRequest,
   fetcher: DaemonFetch = browserFetch,
+  wire: AgendaWire = 'attention',
 ): Promise<AttentionSnapshot> => {
   const body = AttentionActionRequestSchema.parse(action);
   const value = await fetchAttention(
     daemon,
     scope,
-    attentionPath(scope),
+    sessionAgendaPath(scope.sessionId, wire),
     {
       method: 'POST',
       headers: { 'content-type': 'application/json', [FY_REQUEST_ID_HEADER]: crypto.randomUUID() },
@@ -97,13 +99,14 @@ export const sendAttentionReplies = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   fetcher: DaemonFetch = browserFetch,
+  wire: AgendaWire = 'attention',
 ): Promise<AttentionSnapshot> =>
   parseSnapshot(
     scope,
     await fetchAttention(
       daemon,
       scope,
-      `${attentionPath(scope)}/replies`,
+      sessionAgendaRepliesPath(scope.sessionId, wire),
       {
         method: 'POST',
         headers: { 'content-type': 'application/json', [FY_REQUEST_ID_HEADER]: crypto.randomUUID() },
@@ -112,6 +115,18 @@ export const sendAttentionReplies = async (
       fetcher,
     ),
   );
+
+/**
+ * How many boards one daemon is asked for at once.
+ *
+ * THE INBOX READS ONE BOARD PER SESSION THAT HAS AN OPEN ITEM, across the daemon's whole session list —
+ * finished children included — and it used to fire them all in one tick. On a busy machine that was
+ * dozens of reads queued on the one relay session every panel shares, which ended that session for every
+ * caller (`4400`, "too many records waiting on credit") and painted "Tasks are unavailable" on a surface
+ * that had asked for nothing unusual. Four keeps the inbox filling quickly and leaves the rest of the
+ * daemon's sixteen request slots to the panels a person is looking at.
+ */
+export const ATTENTION_READS_PER_DAEMON = 4;
 
 interface ConnectionBinding {
   readonly baseUrl: string;
@@ -138,10 +153,14 @@ export class DaemonAttentionClient {
   readonly #generations = new Map<DaemonId, number>();
   /** Board freshness only: badge reads observe it but may never advance it. */
   readonly #boardRevisions = new Map<string, number>();
+  /** Board reads in flight, bounded per daemon: see {@link ATTENTION_READS_PER_DAEMON}. */
+  readonly #reads = new Map<DaemonId, ConcurrencyLimit>();
 
   constructor(
     readonly store: DaemonAttentionStore = new DaemonAttentionStore(),
     private readonly fetcher: DaemonFetch = browserFetch,
+    /** Which spelling each machine speaks; a machine nobody has read health for is spoken to the older way. */
+    readonly wires: AgendaWireDirectory = new AgendaWireDirectory(),
   ) {}
 
   hydrate(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<void> {
@@ -191,9 +210,17 @@ export class DaemonAttentionClient {
     // A live refresh must not replace an already usable board with a loading
     // state. Initial hydration and retries still expose that they are loading.
     if (this.store.status(scope) !== 'ready') this.store.beginLoad(scope);
-    const promise = fetchAttentionSnapshot(daemon, scope, this.fetcher)
+    // Asked again once a slot is free, for the reason it is asked above: a read that waited behind others
+    // may reach its turn after the machine was unpaired or re-paired, and then it sends nothing at all.
+    // The wire is read when the slot comes, so a health answer that arrived meanwhile picks the route.
+    const promise = this.#readLimit(daemon.daemonId)
+      .run(async () =>
+        this.#currentConnection(daemon, generation)
+          ? await fetchAttentionSnapshot(daemon, scope, this.fetcher, this.wires.wireOf(daemon.daemonId))
+          : null,
+      )
       .then(snapshot => {
-        if (this.#current(daemon, generation, key, revision)) {
+        if (snapshot !== null && this.#current(daemon, generation, key, revision)) {
           this.#advanceBoardRevision(key);
           this.store.applySnapshot(scope, snapshot);
         }
@@ -205,6 +232,14 @@ export class DaemonAttentionClient {
     return promise;
   }
 
+  #readLimit(daemonId: DaemonId): ConcurrencyLimit {
+    const existing = this.#reads.get(daemonId);
+    if (existing !== undefined) return existing;
+    const limit = new ConcurrencyLimit(ATTENTION_READS_PER_DAEMON);
+    this.#reads.set(daemonId, limit);
+    return limit;
+  }
+
   hydrateCount(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<void> {
     assertScopeDaemon(daemon, scope);
     const generation = this.#bind(daemon);
@@ -214,7 +249,7 @@ export class DaemonAttentionClient {
     if (existing?.generation === generation) return existing.promise;
 
     const revision = this.#boardRevisions.get(key) ?? 0;
-    const promise = fetchAttentionCount(daemon, scope, this.fetcher)
+    const promise = fetchAttentionCount(daemon, scope, this.fetcher, this.wires.wireOf(daemon.daemonId))
       .then(count => {
         if (this.#current(daemon, generation, key, revision)) this.store.applyCount(scope, count);
       })
@@ -277,7 +312,9 @@ export class DaemonAttentionClient {
 
   /** Delivers the answers the daemon is holding for this ferret now. */
   sendReplies(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<void> {
-    return this.#mutate(daemon, scope, () => sendAttentionReplies(daemon, scope, this.fetcher));
+    return this.#mutate(daemon, scope, () =>
+      sendAttentionReplies(daemon, scope, this.fetcher, this.wires.wireOf(daemon.daemonId)),
+    );
   }
 
   #mutate(
@@ -290,7 +327,9 @@ export class DaemonAttentionClient {
     const key = daemonSessionKey(scope);
     const revision = this.#advanceBoardRevision(key);
     const promise = (
-      typeof action === 'function' ? action() : applyAttentionAction(daemon, scope, action, this.fetcher)
+      typeof action === 'function'
+        ? action()
+        : applyAttentionAction(daemon, scope, action, this.fetcher, this.wires.wireOf(daemon.daemonId))
     )
       .then(snapshot => {
         if (this.#current(daemon, generation, key, revision)) {

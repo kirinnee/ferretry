@@ -47,11 +47,12 @@ import { sessionView } from '../support/sessions.ts';
 /** Requests a minute an idle fleet page may send: 3.1 measured with the fleet feed (5.3 without it). */
 const FLEET_PAGE_BUDGET = 4;
 /**
- * Requests a minute an idle session page may send: 8.5 measured, the same on every run. The 5.8 this
- * used to quote (5.5 to 6.6 run to run on 2026-10-30) undercounted: a poll schedules its next one only
- * once its request has answered, and the clock used to jump while a sealed session's WebCrypto was still
- * in flight, so polls were lost to how fast the machine was. `unitClock.quiet()` now lets every request
- * land first; the processes poll alone is 3.2 of the 8.5.
+ * Requests a minute an idle session page may send: 8.8 measured, identical in 48 of 48 runs under
+ * 12-way parallel load (2026-10-30). The 5.8 this used to quote (5.5 to 6.6 run to run) undercounted, and
+ * a later 8.5 (9.2 on a loaded runner) was still ordering luck: a poll schedules its next one only once
+ * its request has answered, and whether a sealed session's WebCrypto landed before the clock moved
+ * decided how many polls fit. The unit clock now delivers off-thread results in call order and never
+ * moves past one in flight, so the count is the app's alone; the processes poll is 3.6 of the 8.8.
  */
 const SESSION_PAGE_BUDGET = 9;
 
@@ -337,8 +338,9 @@ const settle = async (): Promise<void> => {
   for (let round = 0; round < MAX_SETTLE_ROUNDS && quiet < QUIET_ROUNDS; round += 1) {
     const before = traffic;
     await turns(10);
+    // Ends on quiet(), never on bare turns: a turn can start a seal, and the clock must not move past a
+    // handshake deadline while that seal is still in flight — that race put 9.2 req/min on a loaded runner.
     await unitClock.quiet();
-    await turns(10);
     quiet = traffic === before ? quiet + 1 : 0;
   }
 };

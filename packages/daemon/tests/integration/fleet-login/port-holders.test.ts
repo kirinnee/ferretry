@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import should from 'should';
 import { systemPortHolders } from '../../../src/adapters/fleet-login/port-holders.ts';
 import { isLeftoverCodexLogin } from '../../../src/lib/fleet-login/port-holders.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 const temporaryDirectories: string[] = [];
 const running: Bun.Subprocess[] = [];
@@ -68,16 +69,18 @@ async function listener(
   return { pid: child.pid, port: Number(text.trim()) };
 }
 
-const exited = async (pid: number): Promise<boolean> => {
-  for (let tries = 0; tries < 100; tries += 1) {
-    try {
-      process.kill(pid, 0);
-    } catch {
-      return true;
-    }
-    await Bun.sleep(20);
+const gone = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch {
+    return true;
   }
-  return false;
+};
+
+const exited = async (pid: number): Promise<boolean> => {
+  await waitFor(() => gone(pid), `process ${pid} to exit`);
+  return true;
 };
 
 describe('systemPortHolders', () => {

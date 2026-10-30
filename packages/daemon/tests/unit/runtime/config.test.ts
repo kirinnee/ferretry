@@ -1,9 +1,11 @@
 import { describe, it } from 'bun:test';
 import { FY_DEFAULT_DAEMON_PORT, recordedBindAddress } from '@ferretry/protocol';
 import should from 'should';
-import { DISCOVERED_RELAY_CARRIER, IMPLIED_TUNNEL_CARRIER } from '../../../src/lib/runtime/carriers.ts';
+import { DISCOVERED_RELAY_CARRIER, IMPLIED_TUNNEL_CARRIER, OS_CHOSEN_PORT } from '../../../src/lib/runtime/carriers.ts';
 import {
   advertisesForeignAddress,
+  attentionBlockNotice,
+  choosesPortAtBind,
   configuredAt,
   defaultDaemonConfig,
   defaultDaemonConfigDocument,
@@ -156,6 +158,43 @@ describe('daemon configuration', () => {
     should(unrecorded.port).equal(FY_DEFAULT_DAEMON_PORT);
     should(recorded.portIsRecorded).be.true();
     should(recorded.bindUrl).equal('http://127.0.0.1:9100');
+  });
+
+  it('should treat port 0 as a request for the operating system to choose, never as a claim', () => {
+    // Act
+    const asked = parseDaemonConfig({ port: OS_CHOSEN_PORT });
+    const carrier = parseDaemonConfig({ carriers: [{ kind: 'bind', host: '127.0.0.1', port: OS_CHOSEN_PORT }] });
+    const bound = configuredAt(asked, 41_873);
+
+    // Assert — it is not recorded, so nothing refuses over it; it only becomes a claim once a port is settled.
+    should(asked.portIsRecorded).be.false();
+    should(choosesPortAtBind(asked)).be.true();
+    should(choosesPortAtBind(carrier)).be.true();
+    should(carrier.portIsRecorded).be.false();
+    should(choosesPortAtBind(parseDaemonConfig({ port: 9100 }))).be.false();
+    should(choosesPortAtBind(parseDaemonConfig({}))).be.false();
+    // The bound port moves every derived address with it, exactly as a walked port does.
+    should(bound.portIsRecorded).be.true();
+    should(choosesPortAtBind(bound)).be.false();
+    should(bound.bindUrl).equal('http://127.0.0.1:41873');
+    should(bound.publicUrl).equal('http://127.0.0.1:41873');
+    should(bound.carrierSet.bind).deepEqual({ kind: 'bind', host: '127.0.0.1', port: 41_873 });
+    // Anything outside a port is still refused: 0 is the single new value, not a wider range.
+    should(() => parseDaemonConfig({ port: -1 })).throw();
+    should(() => parseDaemonConfig({ port: 65_536 })).throw();
+  });
+
+  it('should write the port the operating system gave over the 0 that asked for it', () => {
+    // Act
+    const legacy = recordedPortDocument({ host: '127.0.0.1', port: OS_CHOSEN_PORT }, 41_873);
+    const carriers = recordedPortDocument(
+      { carriers: [{ kind: 'bind', host: '127.0.0.1', port: OS_CHOSEN_PORT }] },
+      41_873,
+    );
+
+    // Assert
+    should(legacy).deepEqual({ host: '127.0.0.1', port: 41_873 });
+    should(carriers).deepEqual({ carriers: [{ kind: 'bind', host: '127.0.0.1', port: 41_873 }] });
   });
 
   it('should move a derived advertisement with the port and leave a stated one alone', () => {
@@ -815,5 +854,117 @@ describe('the attention deadline warning', () => {
     should(parseDaemonConfig({ attention: { deadlineWarnHours: 168 } }).attention.deadlineWarnHours).equal(168);
     should(() => parseDaemonConfig({ attention: { deadlineWarnHours: 0.1 } })).throw();
     should(() => parseDaemonConfig({ attention: { deadlineWarnHours: 169 } })).throw();
+  });
+});
+
+describe('the agenda block beside the older attention block', () => {
+  const RESOLVED_DEFAULTS = {
+    replySettleSeconds: 10,
+    replyMaxWaitSeconds: 120,
+    replyComposerWaitSeconds: 600,
+    replyReceiptSeconds: 900,
+    deadlineWarnHours: 3,
+  };
+
+  it('should load the older attention block alone exactly as it always did, and say so', () => {
+    // Act
+    const actual = parseDaemonConfig({ attention: { replySettleSeconds: 30, deadlineWarnHours: 6 } });
+
+    // Assert
+    should(actual.attention).deepEqual({ ...RESOLVED_DEFAULTS, replySettleSeconds: 30, deadlineWarnHours: 6 });
+    should(actual.attentionSpelling).equal('attention');
+  });
+
+  it('should load the agenda block alone into the value every consumer reads', () => {
+    // Act
+    const actual = parseDaemonConfig({ agenda: { replySettleSeconds: 30, resurfaceAfterMinutes: 45 } });
+
+    // Assert
+    should(actual.attention).deepEqual({ ...RESOLVED_DEFAULTS, replySettleSeconds: 30, resurfaceAfterMinutes: 45 });
+    should(actual.agenda).equal(actual.attention);
+    should(actual.attentionSpelling).equal('agenda');
+  });
+
+  it('should resolve to the defaults, and report neither spelling, when neither is written', () => {
+    // Act
+    const actual = defaultDaemonConfig();
+
+    // Assert
+    should(actual.attention).deepEqual(RESOLVED_DEFAULTS);
+    should(actual.attentionSpelling).equal('none');
+  });
+
+  it('should let the agenda block win key by key and read the attention block for the keys it leaves out', () => {
+    // Act
+    const actual = parseDaemonConfig({
+      attention: { replySettleSeconds: 30, replyMaxWaitSeconds: 60, deadlineWarnHours: 6 },
+      agenda: { replySettleSeconds: 20, resurfaceAfterMinutes: 15 },
+    });
+
+    // Assert
+    should(actual.attention).deepEqual({
+      ...RESOLVED_DEFAULTS,
+      replySettleSeconds: 20,
+      replyMaxWaitSeconds: 60,
+      deadlineWarnHours: 6,
+      resurfaceAfterMinutes: 15,
+    });
+    should(actual.attentionSpelling).equal('both');
+  });
+
+  it('should let an agenda key equal to a default still beat a different attention value', () => {
+    // Act
+    const actual = parseDaemonConfig({ attention: { deadlineWarnHours: 6 }, agenda: { deadlineWarnHours: 3 } });
+
+    // Assert
+    should(actual.attention.deadlineWarnHours).equal(3);
+  });
+
+  it('should ignore an agenda key written as undefined, so the attention value stands', () => {
+    // Act
+    const actual = parseDaemonConfig({ attention: { deadlineWarnHours: 6 }, agenda: { deadlineWarnHours: undefined } });
+
+    // Assert
+    should(actual.attention.deadlineWarnHours).equal(6);
+  });
+
+  it('should refuse an unknown agenda key, as the attention block refuses one', () => {
+    should(() => parseDaemonConfig({ agenda: { replySettleSecond: 5 } })).throw();
+    should(() => parseDaemonConfig({ attention: { replySettleSecond: 5 } })).throw();
+  });
+
+  it('should hold the agenda block to the same bounds', () => {
+    should(() => parseDaemonConfig({ agenda: { replySettleSeconds: 0 } })).throw();
+    should(() => parseDaemonConfig({ agenda: { replyComposerWaitSeconds: 5 } })).throw();
+    should(() => parseDaemonConfig({ agenda: { replyReceiptSeconds: 10 } })).throw();
+    should(() => parseDaemonConfig({ agenda: { resurfaceAfterMinutes: 10_081 } })).throw();
+    should(() => parseDaemonConfig({ agenda: { deadlineWarnHours: 0.1 } })).throw();
+  });
+
+  it('should refuse a settle longer than the max wait inside the agenda block, naming the new key', () => {
+    should(() => parseDaemonConfig({ agenda: { replySettleSeconds: 30, replyMaxWaitSeconds: 20 } })).throw(
+      /agenda\.replySettleSeconds must not exceed agenda\.replyMaxWaitSeconds/,
+    );
+    should(() => parseDaemonConfig({ agenda: { replySettleSeconds: 30 } })).not.throw();
+    should(() => parseDaemonConfig({ agenda: { replyMaxWaitSeconds: 5 } })).throw(/replySettleSeconds/);
+  });
+
+  it('should refuse a settle and a max wait that only conflict across the two spellings', () => {
+    should(() =>
+      parseDaemonConfig({ attention: { replyMaxWaitSeconds: 20 }, agenda: { replySettleSeconds: 30 } }),
+    ).throw(/agenda\.replySettleSeconds/);
+  });
+
+  it('should keep the attention refusal naming the attention keys when only that block is written', () => {
+    should(() => parseDaemonConfig({ attention: { replySettleSeconds: 30, replyMaxWaitSeconds: 20 } })).throw(
+      /attention\.replySettleSeconds/,
+    );
+  });
+
+  it('should say nothing for a document that never wrote the older block, and name the new key otherwise', () => {
+    should(attentionBlockNotice('none')).be.undefined();
+    should(attentionBlockNotice('agenda')).be.undefined();
+    should(attentionBlockNotice('attention')).match(/renamed to "agenda".*agenda removal release/);
+    should(attentionBlockNotice('both')).match(/"agenda" wins/);
   });
 });

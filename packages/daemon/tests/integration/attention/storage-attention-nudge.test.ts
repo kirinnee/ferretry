@@ -21,6 +21,7 @@ import {
 import { ATTENTION_NUDGE_MARK, AttentionTurnNudge } from '../../../src/lib/attention/index.ts';
 import { parseSessionId } from '../../../src/lib/index.ts';
 import type { TranscriptEvent } from '../../../src/lib/transcript/types.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 /**
  * The turn-end check against a real storage: turn ends journalled by the real append path, the session's
@@ -101,12 +102,24 @@ async function open(agendaOn = true) {
   );
   // The settle delay is the composition root's timer; here each scheduled check is collected and run on demand.
   const scheduled: Array<() => void> = [];
-  const unsubscribe = armAttentionNudge(storage, nudge, 2_000, run => {
+  let finished = 0;
+  const counted = {
+    check: async (sessionId: string) => {
+      try {
+        return await nudge.check(sessionId);
+      } finally {
+        finished += 1;
+      }
+    },
+  };
+  const unsubscribe = armAttentionNudge(storage, counted, 2_000, run => {
     scheduled.push(run);
   });
   const settle = async (): Promise<void> => {
-    for (const run of scheduled.splice(0)) run();
-    await Bun.sleep(20);
+    const runs = scheduled.splice(0);
+    const target = finished + runs.length;
+    for (const run of runs) run();
+    await waitFor(() => finished >= target, 'every scheduled nudge check to finish');
   };
   const turnEnds = async (id: typeof LEAD): Promise<void> => {
     await storage.append(id, 'turn.state', { from: 'working', to: 'your-turn' });
@@ -270,7 +283,7 @@ describe('armAttentionNudge', () => {
     // Act
     await world.turnEnds(LEAD);
     for (const run of scheduled.splice(0)) run();
-    await Bun.sleep(20);
+    await waitFor(() => checks === 1, 'the failing check to have run');
     await world.turnEnds(LEAD);
 
     // Assert

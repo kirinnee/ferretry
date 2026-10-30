@@ -38,8 +38,9 @@ import {
 } from '@ferretry/protocol';
 import should from 'should';
 import { writeModelFiles } from '../fleet/config-files-fixture.ts';
-import { type BootedDaemon, bootDaemon, freeLoopbackPort, stopBootedDaemons } from '../support/booted-daemon.ts';
+import { type BootedDaemon, bootDaemon, stopBootedDaemons } from '../support/booted-daemon.ts';
 import { cleanupTempDirectories } from '../support/repository.ts';
+import { waitForValue } from '../support/wait-for.ts';
 
 const KEY_NAME = 'LITELLM_API_KEY';
 const KEY_VALUE = 'sk-litellm-clone-journey-0123456789';
@@ -56,25 +57,28 @@ afterEach(async () => {
 });
 
 /** A provider on this machine: lists models to the exact bearer value and says 401 to anything else. */
-function fakeProvider(port: number): { readonly authorized: () => number; readonly refused: () => number } {
+function fakeProvider(): {
+  readonly port: number;
+  readonly authorized: () => number;
+  readonly refused: () => number;
+} {
   let authorized = 0;
   let refused = 0;
-  servers.push(
-    Bun.serve({
-      hostname: '127.0.0.1',
-      port,
-      fetch: request => {
-        if (new URL(request.url).pathname !== '/v1/models') return new Response('not found', { status: 404 });
-        if (request.headers.get('authorization') === `Bearer ${KEY_VALUE}`) {
-          authorized += 1;
-          return Response.json({ data: [{ id: 'fake-model' }] });
-        }
-        refused += 1;
-        return Response.json({ error: 'bad key' }, { status: 401 });
-      },
-    }),
-  );
-  return { authorized: () => authorized, refused: () => refused };
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch: request => {
+      if (new URL(request.url).pathname !== '/v1/models') return new Response('not found', { status: 404 });
+      if (request.headers.get('authorization') === `Bearer ${KEY_VALUE}`) {
+        authorized += 1;
+        return Response.json({ data: [{ id: 'fake-model' }] });
+      }
+      refused += 1;
+      return Response.json({ error: 'bad key' }, { status: 401 });
+    },
+  });
+  servers.push(server);
+  return { port: Number(server.port), authorized: () => authorized, refused: () => refused };
 }
 
 /** The source's configuration: an API-key login and a Claude Code sign-in, one runtime each. */
@@ -128,23 +132,20 @@ async function testLogin(daemon: BootedDaemon, id: string) {
  * and no answer about the sign-in's slot. Waiting is on the daemon's own word for "no read is running".
  */
 async function settledCredentials(daemon: BootedDaemon) {
-  for (let attempt = 0; attempt < 400; attempt += 1) {
+  return await waitForValue(async () => {
     const listed = FleetCredentialListSchema.parse(await (await daemon.get('/v1/fleet/credentials')).json());
-    if (listed.credentials.every(credential => credential.status.word !== 'checking')) return listed;
-    await Bun.sleep(25);
-  }
-  throw new Error('a credential was still being checked ten seconds after the copy');
+    return listed.credentials.every(credential => credential.status.word !== 'checking') ? listed : undefined;
+  }, 'no credential to be checked any more after the copy');
 }
 
 describe('cloning an API-key login between two booted daemons', () => {
   it('should copy the login with its key so it works, and leave the sign-in an empty slot', async () => {
     // Arrange — the source holds the key, a sign-in's tokens and an MCP sign-in token; the target holds nothing.
-    const providerPort = await freeLoopbackPort();
-    const provider = fakeProvider(providerPort);
+    const provider = fakeProvider();
     const [source, target] = await Promise.all([
       bootDaemon('source', {
         seed: async home => {
-          await writeModelFiles(join(home, 'config'), sourceModel(providerPort));
+          await writeModelFiles(join(home, 'config'), sourceModel(provider.port));
           const login = join(home, 'fleet', 'credentials', 'claude-work');
           await mkdir(login, { recursive: true });
           await writeFile(

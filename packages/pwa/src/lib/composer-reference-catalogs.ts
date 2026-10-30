@@ -19,6 +19,7 @@ import {
   type TaskSummary,
 } from '@ferretry/protocol';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type AgendaWire, sessionAgendaPath } from './agenda-wire.ts';
 
 export type ComposerReferenceCatalogFamily = 'tasks' | 'attention' | 'skills';
 type ComposerReferenceTask = Pick<TaskSummary, 'id' | 'title' | 'status'>;
@@ -58,7 +59,7 @@ export interface ComposerReferenceCatalogSources {
 const failureMessage = (reason: unknown): string => (reason instanceof Error ? reason.message : String(reason));
 
 /**
- * One literal path per family, spelled out.
+ * One literal path per family, spelled out (the agenda family's two spellings live in `agenda-wire.ts`).
  *
  * A `${suffix}` helper reads as `/v1/sessions/*​/*` to `route-agreement.sh`, and
  * a client path the gate cannot read is a client path nothing checks against the
@@ -67,7 +68,6 @@ const failureMessage = (reason: unknown): string => (reason instanceof Error ? r
  * three.
  */
 const sessionTasksPath = (sessionId: string): string => `/v1/sessions/${encodeURIComponent(sessionId)}/tasks`;
-const sessionAttentionPath = (sessionId: string): string => `/v1/sessions/${encodeURIComponent(sessionId)}/attention`;
 const sessionSkillsPath = (sessionId: string): string => `/v1/sessions/${encodeURIComponent(sessionId)}/skills`;
 
 const sameSession = <Value extends { readonly sessionId: string }>(sessionId: string, value: Value): Value => {
@@ -85,12 +85,13 @@ async function readComposerReferenceCatalogsIncrementally(
   sessionId: string,
   signal: AbortSignal,
   publish: (patch: ComposerReferenceCatalogPatch) => void,
+  wire: AgendaWire,
 ): Promise<ComposerReferenceCatalogs> {
   const tasks = client
     .request(sessionTasksPath(sessionId), SessionTaskListResponseSchema, { signal })
     .then(value => sameSession(sessionId, value));
   const attention = client
-    .request(sessionAttentionPath(sessionId), AttentionSnapshotSchema, { signal })
+    .request(sessionAgendaPath(sessionId, wire), AttentionSnapshotSchema, { signal })
     .then(value => sameSession(sessionId, value));
   const skills = client.request(sessionSkillsPath(sessionId), SessionSkillsSchema, { signal });
   const publishIfLive = (patch: ComposerReferenceCatalogPatch): void => {
@@ -148,9 +149,10 @@ async function readComposerAttentionIncrementally(
   sessionId: string,
   signal: AbortSignal,
   publish: (patch: ComposerReferenceCatalogPatch) => void,
+  wire: AgendaWire,
 ): Promise<void> {
   const attention = client
-    .request(sessionAttentionPath(sessionId), AttentionSnapshotSchema, { signal })
+    .request(sessionAgendaPath(sessionId, wire), AttentionSnapshotSchema, { signal })
     .then(value => sameSession(sessionId, value));
   await attention.then(
     value => {
@@ -185,8 +187,9 @@ export async function readComposerReferenceCatalogs(
   client: ComposerReferenceCatalogReader,
   sessionId: string,
   signal: AbortSignal,
+  wire: AgendaWire = 'attention',
 ): Promise<ComposerReferenceCatalogs> {
-  return await readComposerReferenceCatalogsIncrementally(client, sessionId, signal, () => undefined);
+  return await readComposerReferenceCatalogsIncrementally(client, sessionId, signal, () => undefined, wire);
 }
 
 const EMPTY_CATALOGS: ComposerReferenceCatalogs = Object.freeze({ failures: Object.freeze({}) });
@@ -210,6 +213,8 @@ export function useComposerReferenceCatalogs(
   client: Partial<ComposerReferenceCatalogReader>,
   sessionId: string,
   sources?: ComposerReferenceCatalogSources,
+  /** The spelling this machine's daemon speaks (`useAgendaWire`); the older one when the host names none. */
+  wire: AgendaWire = 'attention',
 ): ComposerReferenceCatalogs & {
   /**
    * All in-flight owner reads for THIS session, or nothing once they settle.
@@ -262,12 +267,14 @@ export function useComposerReferenceCatalogs(
           sessionId,
           controller.signal,
           publish,
+          wire,
         )
       : readComposerReferenceCatalogsIncrementally(
           client as ComposerReferenceCatalogReader,
           sessionId,
           controller.signal,
           publish,
+          wire,
         );
     const read = operation
       .then(() => undefined)
@@ -283,7 +290,7 @@ export function useComposerReferenceCatalogs(
       controller.abort();
       pending.current = null;
     };
-  }, [client, sessionId, usesSharedSources, ownsAttention]);
+  }, [client, sessionId, usesSharedSources, ownsAttention, wire]);
 
   const owned = snapshot?.sessionId === sessionId ? snapshot.catalogs : EMPTY_CATALOGS;
   const catalogs = useMemo<ComposerReferenceCatalogs>(() => {

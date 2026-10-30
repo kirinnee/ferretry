@@ -11,7 +11,9 @@ import {
 import should from 'should';
 import { buildWorld, type DaemonWorld, start } from '../../../bin/fyd.ts';
 import type { SessionLifecycleLauncher, SessionLifecycleRecord } from '../../../src/lib/index.ts';
+import { OS_CHOSEN_PORT, recordedPort } from '../support/os-port.ts';
 import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 /**
  * Completing shared live work, driven end to end through the production composition root.
@@ -33,20 +35,6 @@ const WRAPPER = 'claude-auto-boot';
 const ACCOUNT = '00000000-0000-4000-8000-000000000b07';
 /** The caller's own id for the one logical completion this journey performs. */
 const REQUEST_ID = 'mark-done-click-1';
-
-/** Bun declares `port` optional for the unix-socket case; a loopback `serve` always reports one. */
-function boundPort(server: { readonly port?: number }): number {
-  if (server.port === undefined) throw new Error('the fixture server reported no port');
-  return server.port;
-}
-
-/** A port nothing is listening on, learned by letting the kernel pick one and then releasing it. */
-async function freeLoopbackPort(): Promise<number> {
-  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('probe') });
-  const port = boundPort(server);
-  await server.stop(true);
-  return port;
-}
 
 /**
  * A launcher that records instead of spawning a pane.
@@ -148,11 +136,10 @@ async function worldAt(home: string, port: number, untilShutdown: () => Promise<
  * would make the suite flaky about the one thing it is not testing.
  */
 async function untilListening(port: number): Promise<void> {
-  for (let attempt = 0; attempt < 600; attempt += 1) {
-    if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) return;
-    await Bun.sleep(50);
-  }
-  throw new Error('the daemon never started listening');
+  await waitFor(
+    async () => (await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true,
+    'the daemon to start listening',
+  );
 }
 
 const lastStatusActivity = (activity: readonly TaskActivity[]): TaskActivity => {
@@ -173,11 +160,10 @@ describe('completing shared live work', () => {
   it('should honour the board grant and journal the completion as the top agent', async () => {
     // Arrange
     const home = await tempDirectory('fyd-task-done-authorization');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     let release = (): void => {};
     const world = {
-      ...(await worldAt(home, port, async () => {
+      ...(await worldAt(home, OS_CHOSEN_PORT, async () => {
         await new Promise<void>(resolve => {
           release = resolve;
         });
@@ -186,6 +172,7 @@ describe('completing shared live work', () => {
     };
     await seedFleet(home);
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     await untilListening(port);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };

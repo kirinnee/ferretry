@@ -13,6 +13,7 @@ import {
   StateHomeLayout,
   SystemClock,
 } from '../../../../daemon/src/adapters/index.ts';
+import { OS_CHOSEN_PORT } from '../../../../daemon/tests/integration/support/os-port.ts';
 import { BunDaemonProcess } from '../../../src/adapters/daemon/process.ts';
 import { FileServiceStore } from '../../../src/adapters/daemon/service-files.ts';
 import { FileStateHomeClaim } from '../../../src/adapters/state-home/claim-files.ts';
@@ -53,14 +54,6 @@ afterEach(async () => {
   await tearDownSupervisedDaemons({ daemons, sockets, roots }, { tmux: TMUX });
 }, TEARDOWN_TIMEOUT_MS);
 
-async function freeLoopbackPort(): Promise<number> {
-  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('probe') });
-  const port = server.port;
-  await server.stop(true);
-  if (port === undefined) throw new Error('the fixture server reported no port');
-  return port;
-}
-
 async function executable(path: string, lines: readonly string[]): Promise<void> {
   await writeFile(path, `${lines.join('\n')}\n`);
   await chmod(path, 0o755);
@@ -69,7 +62,6 @@ async function executable(path: string, lines: readonly string[]): Promise<void>
 /** A private `PATH`, an empty user home holding the two declared harnesses, and an adopted state home. */
 async function arrange(
   root: string,
-  port: number,
 ): Promise<{ bin: string; userHome: string; stateHome: string; fyd: string; probe: string }> {
   if (TMUX === null) throw new Error('tmux is required for this journey and was not found');
   const bin = join(root, 'bin');
@@ -101,7 +93,7 @@ async function arrange(
     join(stateHome, 'config', 'daemon.json'),
     JSON.stringify({
       host: '127.0.0.1',
-      port,
+      port: OS_CHOSEN_PORT,
       relay: { url: 'https://off.example', enabled: false },
       harness: { paths: { claude: `~/${probe}/claude`, codex: `~/${probe}/codex` } },
     }),
@@ -128,8 +120,7 @@ describe('the user home of a daemon `fy daemon start` launched', () => {
     // Arrange
     const root = await mkdtemp(join(tmpdir(), 'fy-home-'));
     roots.add(root);
-    const port = await freeLoopbackPort();
-    const { bin, userHome, stateHome, fyd, probe } = await arrange(root, port);
+    const { bin, userHome, stateHome, fyd, probe } = await arrange(root);
     const searchPath = `${bin}:/usr/bin:/bin`;
     // Fail closed rather than let the daemon find a real harness through PATH.
     should(Bun.which('claude', { PATH: searchPath })).equal(null);

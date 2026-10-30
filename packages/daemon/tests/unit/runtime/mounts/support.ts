@@ -27,6 +27,7 @@ import {
   type SpeedupTestResult,
   type StartSessionRequest,
   type SttEnhancementResult,
+  type LegacyWireUse,
   type SurfaceOpener,
   type TaskActionRequest,
   type TaskCreateRequestInput,
@@ -1232,6 +1233,8 @@ export interface HealthWorld {
   readonly pid?: number;
   /** The disk pressure the daemon would report, where the host has any. */
   readonly io?: IoPressureView;
+  /** The older wire names clients used, where the daemon counts them. */
+  readonly legacyWire?: readonly LegacyWireUse[];
 }
 
 /**
@@ -1312,6 +1315,7 @@ export function healthSubsystem(world: HealthWorld = {}): DaemonHealthSubsystem 
     pid: world.pid ?? 4321,
     scratch: world.scratch ?? { enabled: false, reclaimedSessions: 0, reclaimedBytes: 0 },
     ...(world.io === undefined ? {} : { io: () => world.io }),
+    ...(world.legacyWire === undefined ? {} : { legacyWire: () => world.legacyWire ?? [] }),
   };
 }
 

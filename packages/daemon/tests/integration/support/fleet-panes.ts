@@ -20,6 +20,7 @@
  */
 import { basename, join } from 'node:path';
 import { assertDisposable } from '../../support/ambient-session.ts';
+import { waitFor } from './wait-for.ts';
 
 export interface FleetPanes {
   readonly socket: string;
@@ -90,18 +91,16 @@ export async function startFleetPanes(
       if (closed) return;
       closed = true;
       Bun.spawnSync([tmux, '-u', '-S', socket, 'kill-server']);
-      for (let attempt = 0; attempt < 40; attempt += 1) {
+      await waitFor(() => {
         const left = tmuxPidsOn(socket);
-        if (left.length === 0) return;
         for (const pid of left)
           try {
             process.kill(pid, 'SIGKILL');
           } catch {
             // Already gone.
           }
-        await Bun.sleep(50);
-      }
-      throw new Error(`tmux processes on ${socket} would not end`);
+        return left.length === 0;
+      }, `the tmux processes on ${socket} to end`);
     },
   };
 }

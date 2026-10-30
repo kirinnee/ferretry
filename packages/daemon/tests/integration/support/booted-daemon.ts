@@ -8,7 +8,9 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { buildWorld } from '../../../bin/fyd.ts';
+import { OS_CHOSEN_PORT, recordedPort } from './os-port.ts';
 import { ABSENT_USER_HOME, tempDirectory } from './repository.ts';
+import { waitFor } from './wait-for.ts';
 
 const FYD_ENTRY = resolve(import.meta.dir, '../../../bin/fyd.ts');
 
@@ -20,14 +22,6 @@ export async function stopBootedDaemons(): Promise<void> {
     child.kill();
     await child.exited;
   }
-}
-
-export async function freeLoopbackPort(): Promise<number> {
-  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('probe') });
-  const port = server.port;
-  await server.stop(true);
-  if (port === undefined) throw new Error('the fixture server reported no port');
-  return port;
 }
 
 export interface BootedDaemon {
@@ -45,7 +39,6 @@ export interface BootOptions {
 
 export async function bootDaemon(label: string, options: BootOptions = {}): Promise<BootedDaemon> {
   const home = await tempDirectory(`ferretry-clone-${label}-`);
-  const port = await freeLoopbackPort();
   const previous = process.env.FY_HOME;
   process.env.FY_HOME = home;
   const opened = await buildWorld({}, { userHome: ABSENT_USER_HOME }).storage.open();
@@ -55,7 +48,7 @@ export async function bootDaemon(label: string, options: BootOptions = {}): Prom
   await mkdir(join(home, 'config'), { recursive: true });
   await writeFile(
     join(home, 'config', 'daemon.json'),
-    JSON.stringify({ host: '127.0.0.1', port, relay: { url: 'ws://127.0.0.1:9', enabled: false } }),
+    JSON.stringify({ host: '127.0.0.1', port: OS_CHOSEN_PORT, relay: { url: 'ws://127.0.0.1:9', enabled: false } }),
     { mode: 0o600 },
   );
   await options.seed?.(home);
@@ -67,13 +60,13 @@ export async function bootDaemon(label: string, options: BootOptions = {}): Prom
     stderr: Bun.file(join(home, 'fyd.err')),
   });
   children.push(child);
-  const base = `http://127.0.0.1:${port}`;
-  let healthy = false;
-  for (let attempt = 0; attempt < 400 && !healthy; attempt += 1) {
-    healthy = (await fetch(`${base}/healthz`).catch(() => undefined))?.ok === true;
-    if (!healthy) await Bun.sleep(50);
-  }
-  if (!healthy) throw new Error(`the ${label} daemon never answered: ${await readFile(join(home, 'fyd.err'), 'utf8')}`);
+  const base = `http://127.0.0.1:${String(await recordedPort(home))}`;
+  await waitFor(async () => {
+    if (child.exitCode !== null) throw new Error(`the ${label} daemon exited (${child.exitCode}) before it answered`);
+    return (await fetch(`${base}/healthz`).catch(() => undefined))?.ok === true;
+  }, `the ${label} daemon to answer /healthz`).catch(async (error: Error) => {
+    throw new Error(`${error.message}: ${await readFile(join(home, 'fyd.err'), 'utf8')}`, { cause: error });
+  });
   const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
   const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
   return {

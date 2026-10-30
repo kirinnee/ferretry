@@ -14,6 +14,7 @@ import { hostname, tmpdir, userInfo } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import {
   AGENDA_ENV,
+  agendaNudgeEnabled,
   ALWAYS_ON_SECTIONS,
   CredentialStatusService,
   configJsonSchemaFiles,
@@ -25,6 +26,7 @@ import {
   hostCodexCredentialFile,
   hostCodexHome,
   InMemoryCredentialStatusStore,
+  launchInstructions,
   type ModelCatalog,
   manifestRuntimes,
   PACK_ENV,
@@ -50,6 +52,7 @@ import {
 } from '@ferretry/fleet/adapters';
 import {
   type Advertisement,
+  DORMANT_AGENT_STATUSES,
   type AnalyticsPricingRate,
   type AutoResumeSummary,
   CONFIG_ACCEPTED_FILE,
@@ -114,6 +117,8 @@ import {
   NodeRawDeflate,
   probePdfDecryptWorker,
 } from '../src/adapters/attachments/index.ts';
+import { FileAgendaFileStore } from '../src/adapters/attention/file-agenda-file-store.ts';
+import { FileAgendaFilesMigrationMarker } from '../src/adapters/attention/file-agenda-files-migration-marker.ts';
 import { FileAgendaMigrationMarker } from '../src/adapters/attention/file-agenda-migration-marker.ts';
 import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
 import { FileAttentionOutboxRepository } from '../src/adapters/attention/file-attention-outbox-repository.ts';
@@ -175,6 +180,8 @@ import {
   BrowserProfileStore,
   BrowserWorkerClient,
   BunApiServer,
+  FileLegacyWireUseStore,
+  systemLegacyWireTimers,
   BunConnectorProcesses,
   BunProcessProbe,
   BunRelayCarrier,
@@ -202,6 +209,7 @@ import {
   FileModelCatalogCache,
   FileProjectCatalog,
   FileQuotaFailoverConfigStore,
+  FileRestartQueue,
   FileQuotaFailoverStateStore,
   FileRoutingCatalog,
   FileScratchCollector,
@@ -637,6 +645,7 @@ import {
   CredentialUsageSource,
   canServeModel,
   childGrantRequester,
+  choosesPortAtBind,
   chooseRelayCarrierSources,
   claimStartName,
   classifyPaneProcesses,
@@ -742,6 +751,10 @@ import {
   InitialAttachmentError,
   InstructionRefresh,
   InvalidDeadlineRefused,
+  outdatedSections,
+  RestartBusy,
+  RestartService,
+  withOutdated,
   type IoPressurePort,
   type IoPressureSourcePort,
   instructionsReplyKey,
@@ -782,6 +795,7 @@ import {
   mcpCheckBaseEnvironment,
   mcpInventoryFolders,
   messageWithAttachments,
+  migrateAgendaFiles,
   migrateToAgendaMode,
   modelCatalogPricingRates,
   modelCatalogsView,
@@ -843,6 +857,7 @@ import {
   RELAY_DIRECTORY_NOT_ASKED,
   RELOAD_THE_APP,
   RETIRED_ACCOUNT_MODEL_NOTICE,
+  attentionBlockNotice,
   RETIRED_FLEET_BLOCK_NOTICE,
   RETIRED_SESSION_WORKERS_SWITCH_NOTICE,
   RecommendError,
@@ -1057,6 +1072,7 @@ import {
   type WebRtcPeerEngine,
   type WebRtcSessionFactory,
   type WebRtcSignallingSubsystem,
+  LegacyWireUseCounter,
   type WorkingDirectoryResolver,
   wardenEventTrigger,
   wardenTriggerEnabled,
@@ -6229,6 +6245,12 @@ async function decideAddress(
   world: DaemonWorld,
   loaded: DaemonConfig,
 ): Promise<{ readonly config: DaemonConfig } | BootRefusal> {
+  if (choosesPortAtBind(loaded)) {
+    // Nothing to probe and nothing to walk: the bind itself asks the kernel, so no number is ever held
+    // between "found free" and "bound". The address is only known — and only recorded — once it is.
+    world.notices.step('address chosen', 'the operating system will assign the port when the daemon binds');
+    return { config: loaded };
+  }
   if (loaded.portIsRecorded) {
     const occupant = await world.boot.probe.identify({ url: loaded.bindUrl });
     if (occupant.kind !== 'vacant')
@@ -8446,7 +8468,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         observerFold,
       );
       // ONE THREAD PER RUNNING SESSION (docs/design/session-workers.md): every running session is observed on
-      // its own worker, through its own read-only attached tmux client on the daemon's server, and only when
+      // its own worker, through its own attached observe-only tmux client on the daemon's server, and only when
       // something happened; this thread still writes every patch. The inline host above observes a session
       // only while it has no worker — starting, backing off, or after its worker crashed five times.
       const observerTranscripts = createTranscriptFileResolver(storage);
@@ -8958,15 +8980,33 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // idea of what a session is waiting for.
       // The ledger repository is handed raw ids from the transport, so the id is parsed here rather than
       // asserted: an id the layout would not accept must never become a directory path.
+      // The agenda files move to their agenda names in the background, and the repositories below hold every read
+      // and write until it settles, so no write can land between the migration's read and its copy. Total: it never
+      // rejects, and a failed session keeps its old file (still read) and is tried again next start.
+      const agendaFilesMigrated = migrateAgendaFiles(
+        storage.listSessions().map(session => session.id),
+        {
+          marker: new FileAgendaFilesMigrationMarker(join(paths.home, 'agenda-files-migration.json')),
+          files: new FileAgendaFileStore(id => createSessionPaths(paths, parseSessionId(id)).directory),
+          now: () => new Date(clock.now()).toISOString(),
+          log: line => process.stderr.write(`${line}\n`),
+        },
+      );
       const attentionBoards = new FileAttentionLedgerRepository(
         id => createSessionPaths(paths, parseSessionId(id)).directory,
+        undefined,
+        agendaFilesMigrated,
       );
       // Each ferret's held answers (docs/attention.md § Delivery). The send is awaited by the batcher, outside
       // its per-session lock: it may wait for a launch or revive a stopped ferret, and the owner's next answer
       // must not wait on that. The send ledger keeps one message per batch send id, and is the one witness of
       // whether it arrived; an answer that did not is reopened on the board, built just below (read lazily).
       const attentionReplies = new AttentionReplyBatcher(
-        new FileAttentionOutboxRepository(id => createSessionPaths(paths, parseSessionId(id)).directory),
+        new FileAttentionOutboxRepository(
+          id => createSessionPaths(paths, parseSessionId(id)).directory,
+          undefined,
+          agendaFilesMigrated,
+        ),
         new SendAttentionMessenger(sends),
         new KeyedAttentionReplyTimers(),
         new KeyedSerialExecutor(),
@@ -9040,7 +9080,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         attentionBoards,
         clock,
         {
-          // A missing attention.json is an empty board only for a session the
+          // A missing agenda.json is an empty board only for a session the
           // registry can prove exists. Session document damage propagates
           // rather than being flattened into "no attention".
           has: async id => (await sessions.get(id)) !== undefined,
@@ -9174,7 +9214,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       });
       const attentionNudge = new AttentionTurnNudge(
         {
-          enabled: async () => (await effectiveAccountModel())?.machine.attentionNudge ?? true,
+          enabled: async () => agendaNudgeEnabled((await effectiveAccountModel())?.machine ?? { attentionNudge: true }),
           subject: async sessionId => await nudgeSessions.subject(sessionId),
           tail: async (sessionId, limit) => {
             const subject = await nudgeSessions.subject(sessionId);
@@ -9268,6 +9308,46 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // make every unrelated document write in the process wait behind it.
         serial: new KeyedSerialExecutor(),
         launch: createSessionLaunch(storage),
+      });
+      // What a launch now would say to a ferret, against what it was launched with: the very renderer a relaunch
+      // uses, over the very environment a relaunch builds, so "outdated" cannot disagree with what a restart fixes.
+      const outdatedFor = async (id: string): Promise<ReturnType<typeof outdatedSections>> => {
+        const parsed = tryParseSessionId(id);
+        if (parsed === undefined) return [];
+        const state = SessionStateSchema.safeParse(await storage.readState(parsed));
+        if (!state.success) return [];
+        return outdatedSections(
+          state.data.launchInstructions,
+          launchInstructions(CLIENT_NAME, await launchEnvironments.read(parsed)),
+        );
+      };
+      // A restart is the same-login migrate with the conversation resumed and NEVER forced: the in-flight gate
+      // is the one a person's Restart meets, and a ferret it refuses is queued until it is idle.
+      const sessionRestartService = new RestartService({
+        subjects: async () =>
+          (await sessions.list()).map(view => ({
+            id: view.config.id,
+            name: view.config.name,
+            running: !DORMANT_AGENT_STATUSES.has(view.state.status),
+            idle: view.state.turnState === 'your-turn' || view.state.waiting !== undefined,
+          })),
+        outdated: outdatedFor,
+        restart: async id => {
+          const view = await sessions.get(id);
+          if (view === undefined) throw new Error(`no session ${id}`);
+          await sessionMigrate
+            .migrate(id, { agent: view.config.agent, allowContextDowngrade: false, forceInflight: false })
+            .catch((error: unknown) => {
+              if (error instanceof SessionMigrateError && error.failure === 'refused')
+                throw new RestartBusy(error.message);
+              throw error;
+            });
+        },
+        gaveUp: async (id, reason) => {
+          await storage.append(parseSessionId(id), 'session.restart_abandoned', { reason });
+        },
+        queue: new FileRestartQueue(paths.state),
+        now: () => new Date(clock.now()).toISOString(),
       });
       // The SAME durable registration ledger the reap sweep reads, over the storage this boot
       // opened. Resource limits and the reap both need "which panes does this daemon own, and which
@@ -10139,7 +10219,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // next process would restart.
           { next: () => crypto.randomUUID() },
         ),
-        sessions,
+        sessions: withOutdated(sessions, { outdated: outdatedFor, now: () => Date.parse(clock.now()), ttlMs: 5_000 }),
         // A name in any `:sessionId` is resolved over the same candidates the send and signal domains read,
         // so a route, the attribution on a message and a declared wait agree on which agent a name means.
         sessionAddresses: {
@@ -10280,6 +10360,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         monitor: new MonitorTickRunner(monitor, join(paths.home, 'monitor.json'), defaultSessionMonitorSettings),
         observer: sessionObserver,
         sessionMigrate,
+        sessionRestart: sessionRestartService,
         sessionFork,
         quotaFailover: createQuotaFailoverSubsystem({
           root: quotaFailoverRoot(paths.home),
@@ -10809,11 +10890,11 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     world.notices.state(decided.message);
     return decided.exitCode;
   }
-  const config = decided.config;
+  const decidedConfig = decided.config;
   // Read ONCE for this boot and handed to every surface that reports a harness, so the milestone
   // below and the doctor route this daemon serves cannot disagree about which `claude` is here.
-  const harnessDiscovery = harnessDeclarations(config, world.userHome);
-  for (const key of supersededCarrierKeys({ rawDocument: peeked.document ?? {}, carriers: config.carriers })) {
+  const harnessDiscovery = harnessDeclarations(decidedConfig, world.userHome);
+  for (const key of supersededCarrierKeys({ rawDocument: peeked.document ?? {}, carriers: decidedConfig.carriers })) {
     world.notices.state(
       `the legacy "${key}" key in ${world.config.path} is superseded by its explicit carriers entry and has no effect`,
     );
@@ -10822,15 +10903,16 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // does not already say it: a recorded port is already written, and a port named on the command
   // line was said about this run only and must not be turned into a claim on disk behind the
   // operator's back. Recording is what makes choosing safe — the next boot binds this or refuses.
-  if (!loaded.portIsRecorded) {
-    await world.config.record(config.port);
-    world.notices.step('address recorded', `${world.config.path} now claims port ${String(config.port)}`);
+  const portComesFromBind = choosesPortAtBind(decidedConfig);
+  if (!loaded.portIsRecorded && !portComesFromBind) {
+    await world.config.record(decidedConfig.port);
+    world.notices.step('address recorded', `${world.config.path} now claims port ${String(decidedConfig.port)}`);
   }
   // Stated rather than refused: advertising an address other than the bound one is a real deployment
   // (a proxy, a tunnel), and it is also what a home written before derived values stopped being
   // persisted looks like. Either way the operator is the one who can tell which, so say it.
-  if (advertisesForeignAddress(config))
-    world.notices.state(foreignAdvertisementNotice(config.bindUrl, config.publicUrl, world.config.path));
+  if (advertisesForeignAddress(decidedConfig))
+    world.notices.state(foreignAdvertisementNotice(decidedConfig.bindUrl, decidedConfig.publicUrl, world.config.path));
   /**
    * The address is bound HERE — as soon as it is decided, and before every step that can take time.
    *
@@ -10850,6 +10932,8 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   const surface = new StagedApiSurface(world.clock, startedAtMs, liveness);
   progress.enter('binding the address');
   let server: ApiServerHandle;
+  // Read on every request, so an OS-chosen port can correct the list once the bind has told it.
+  let originsAdmitted = browserOrigins(decidedConfig);
   try {
     server = await world.boot.binder.bind(
       async () =>
@@ -10857,15 +10941,17 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
           {
             http: surface.http,
             sockets: surface.sockets,
-            corsOrigins: browserOrigins(config),
+            get corsOrigins() {
+              return originsAdmitted;
+            },
           },
           {
-            host: config.host,
-            port: config.port,
+            host: decidedConfig.host,
+            port: decidedConfig.port,
             // A loopback peer is privileged only on a loopback-only direct bind. A wildcard bind
             // can still have a local reverse proxy forwarding a remote browser, so Bun's immediate
             // peer is never enough proof there — even when its public URL is the pairing remedy.
-            directLoopbackIsPrivileged: mayTrustDirectLoopback(config),
+            directLoopbackIsPrivileged: mayTrustDirectLoopback(decidedConfig),
           },
         ),
     );
@@ -10876,7 +10962,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     // operator's to resolve, and a stack trace about a socket says none of it. The exit is non-zero,
     // so a service manager never mistakes a daemon that could not bind for one that is serving.
     const refusal = refuseUnbindableAddress(
-      config.bindUrl,
+      decidedConfig.bindUrl,
       error instanceof Error ? error.message : String(error),
       world.config.path,
     );
@@ -10887,6 +10973,14 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // stops after, so a live terminal stream's redraw timer is told it is over while its socket exists.
   closeLiveSockets = () => server.closeSockets();
   cleanups.push(() => server.stop());
+  // Everything below reads the address the socket really has. For an OS-chosen port that is the first
+  // moment it exists, and writing it down here is what lets whoever started this daemon find it.
+  const config = portComesFromBind ? configuredAt(decidedConfig, server.port) : decidedConfig;
+  if (portComesFromBind) {
+    originsAdmitted = browserOrigins(config);
+    await world.config.record(config.port);
+    world.notices.step('address recorded', `${world.config.path} now claims port ${String(config.port)}`);
+  }
   world.notices.step('listening', `${config.bindUrl} — answering /healthz while the boot continues`);
   /**
    * The runtime relay advertisement is read ONCE, here, before either consumer receives the set.
@@ -10941,6 +11035,8 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // it is still there, so the operator can delete it.
   if (config.retiredAccountModel) world.notices.state(RETIRED_ACCOUNT_MODEL_NOTICE);
   if (config.retiredFleetBlock) world.notices.state(RETIRED_FLEET_BLOCK_NOTICE);
+  const attentionNotice = attentionBlockNotice(config.attentionSpelling);
+  if (attentionNotice !== undefined) world.notices.state(attentionNotice);
   if (config.sessionWorkers.enabled === false) world.notices.state(RETIRED_SESSION_WORKERS_SWITCH_NOTICE);
 
   progress.enter('opening the usage feed');
@@ -11109,7 +11205,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // whether the boot completes or not.
   cleanups.push(async () => await tunnel.stop());
   progress.enter('mounting subsystems');
-  const subsystems = world.createSubsystems(
+  const createdSubsystems = world.createSubsystems(
     opened.storage,
     world.terminalRuntime,
     usage,
@@ -11148,6 +11244,22 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     config.sessionWorkers,
     config.attention,
   );
+  // The older wire names (`legacy: true` routes) are counted into `<home>/legacy-wire-use.json` and shown on
+  // `GET /v1/health`, so the release that removes them can wait for a quiet fortnight. A file that cannot be
+  // read starts the counter again; nothing here can fail a request or the boot.
+  const legacyWireDiagnostics = { warn: (message: string) => world.notices.state(message) };
+  const legacyWire = new LegacyWireUseCounter(
+    new FileLegacyWireUseStore(join(opened.paths.home, 'legacy-wire-use.json'), legacyWireDiagnostics),
+    systemLegacyWireTimers,
+    legacyWireDiagnostics,
+  );
+  await legacyWire.load();
+  cleanups.push(async () => await legacyWire.flush());
+  const subsystems: typeof createdSubsystems = {
+    ...createdSubsystems,
+    health: { ...createdSubsystems.health, legacyWire: () => legacyWire.snapshot() },
+    legacyWire,
+  };
   // Registered BEFORE the address is bound, like every other acquisition: from here on the daemon can
   // be asked to put an X server, a Chrome and a VNC listener on this host, and whatever it took must
   // be released whether the boot completes or fails part-way.
@@ -11431,14 +11543,23 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // changes, and this thread reconciles which session has a worker when something changes — observing on a
   // 2 s cadence only a session no worker has. Spends no tokens.
   subsystems.observer.arm();
-  cleanups.push(() => {
-    // The session workers, and the tmux clients they hold, end with the observer.
-    subsystems.observer.close();
+  cleanups.push(async () => {
+    // The session workers, and the tmux clients they hold, end with the observer — the clients WAITED
+    // OUT, as the shared one is: a client left to notice this process's exit is still on its server
+    // after the process has gone.
+    await subsystems.observer.close();
   });
   cleanups.push(async () => {
     clearInterval(waitTicks);
     await subsystems.monitor.close();
   });
+  // Queued restarts: a busy ferret is restarted at its next idle moment, so the queue is looked at on a short tick.
+  // Nothing happens when it is empty, and the tick never forces: the in-flight gate decides every time.
+  const restartTicks = setInterval(() => {
+    void activities.run('restart queue', async () => await subsystems.sessionRestart.drain()).catch(() => undefined);
+  }, 10_000);
+  restartTicks.unref?.();
+  cleanups.push(() => clearInterval(restartTicks));
   /**
    * The quota-failover tick, armed beside the other background loops and after the bind, because a
    * tick can migrate a session and a migration relaunches an agent.
@@ -11903,6 +12024,10 @@ export async function checkConfiguration(
       say(line);
   }
   const checkExitCode = Math.max(doctor.ready ? 0 : 1, carrierExitCode);
+  if (choosesPortAtBind(config)) {
+    say('address      the operating system will assign the port when this daemon starts, and it is then recorded');
+    return checkExitCode;
+  }
   if (config.portIsRecorded) {
     const occupant = await world.boot.probe.identify({ url: config.bindUrl });
     if (occupant.kind === 'vacant') {

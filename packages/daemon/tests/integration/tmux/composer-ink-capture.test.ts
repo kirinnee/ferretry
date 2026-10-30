@@ -3,8 +3,9 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { BunTmuxProcess, captureFrame, ControlModeTmuxProcess } from '../../../src/adapters/index.ts';
+import { BunTmuxProcess, ControlModeTmuxProcess, captureFrame } from '../../../src/adapters/index.ts';
 import { composerState, TmuxController } from '../../../src/lib/index.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 const TMUX = Bun.which('tmux');
 const cleanups: (() => Promise<void>)[] = [];
@@ -36,7 +37,11 @@ async function paneDrawing(composerRow: string): Promise<TmuxController> {
     '8',
     `printf 'earlier output\\n\\n${composerRow}'; sleep 600`,
   ]);
-  await Bun.sleep(400);
+  // Every composer row these tests draw carries this text, whatever its attributes.
+  await waitFor(
+    async () => (await direct.execute(['capture-pane', '-p', '-t', 'work'])).stdout.includes('go ahead with all three'),
+    'the pane to draw the composer row',
+  );
   return new TmuxController(control);
 }
 

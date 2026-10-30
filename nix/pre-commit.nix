@@ -144,6 +144,17 @@ pre-commit-lib.run {
     # integration test that asserts a wall-clock or memory bound belongs in the realworld tier, which
     # files an issue instead of failing a merge. This also holds config/test-groups.json to the files
     # that exist and counts the unit tier's real-clock escapes.
+    # Every workflow job states `timeout-minutes`, so a wedged job is a red job in minutes instead of a
+    # runner held for GitHub's six-hour default (docs/standards/ci-cd, "Job ceilings").
+    a-job-ceilings = {
+      enable = true;
+      name = "Workflow job ceilings";
+      entry = validator "scripts/validate/job-ceilings.sh";
+      files = "^(\\.github/workflows/.*\\.ya?ml|scripts/validate/job-ceilings\\.sh)$";
+      pass_filenames = false;
+      language = "system";
+    };
+
     a-test-tiers = {
       enable = true;
       name = "Test tiers";

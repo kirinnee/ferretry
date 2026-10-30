@@ -4,60 +4,92 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import { FileAttentionOutboxRepository } from '../../../src/adapters/attention/file-attention-outbox-repository.ts';
-import { KeyedAttentionReplyTimers } from '../../../src/adapters/attention/keyed-attention-reply-timers.ts';
-import { AttentionReplyBatcher } from '../../../src/lib/attention/index.ts';
+import { AttentionReplyBatcher, type AttentionReplyTimers } from '../../../src/lib/attention/index.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 const homes: string[] = [];
-const timersInUse: KeyedAttentionReplyTimers[] = [];
 const SESSION = 'session-1';
 
 afterEach(async () => {
-  for (const timers of timersInUse.splice(0)) timers.close();
   await Promise.all(homes.splice(0).map(async home => await rm(home, { recursive: true, force: true })));
 });
 
-const after = async (ms: number): Promise<void> => await new Promise(resolve => setTimeout(resolve, ms));
 const serial = { run: async <T>(_key: string, task: () => Promise<T>): Promise<T> => await task() };
 
-/** Real files, real timers and the real clock; only the windows are shrunk from seconds to milliseconds. */
+/**
+ * The batcher's timer port and clock, driven by hand: a window closes when the test fires its timer, which
+ * moves the clock to the moment the timer was due. Nothing here waits for time to pass.
+ */
+class ManualWindows implements AttentionReplyTimers {
+  ms = Date.parse('2026-10-29T00:00:00.000Z');
+  scheduled = 0;
+  readonly #timers = new Map<string, { readonly at: number; readonly task: () => void }>();
+
+  now = (): string => new Date(this.ms).toISOString();
+
+  schedule(key: string, delayMs: number, task: () => void): void {
+    this.scheduled += 1;
+    this.#timers.set(key, { at: this.ms + delayMs, task });
+  }
+
+  cancel(key: string): void {
+    this.#timers.delete(key);
+  }
+
+  /** Closes the window on `key`: the clock reaches its due time and the task runs. */
+  fire(key: string): void {
+    const timer = this.#timers.get(key);
+    if (timer === undefined) throw new Error(`no timer is set for ${key}`);
+    this.#timers.delete(key);
+    this.ms = Math.max(this.ms, timer.at);
+    timer.task();
+  }
+}
+
+/** Real files and the real batcher; only the timer port and the clock are the test's. */
 async function world() {
   const home = await mkdtemp(join(tmpdir(), 'ferretry-attention-hold-'));
   homes.push(home);
-  const timers = new KeyedAttentionReplyTimers();
-  timersInUse.push(timers);
-  const sent: Array<{ at: number; message: string }> = [];
+  const windows = new ManualWindows();
+  const sent: Array<{ message: string }> = [];
   const ferret = { busy: false };
   const batcher = new AttentionReplyBatcher(
     new FileAttentionOutboxRepository(sessionId => join(home, 'sessions', sessionId)),
     {
       send: async (_sessionId: string, message: string) => {
-        sent.push({ at: Date.now(), message });
+        sent.push({ message });
       },
     },
-    timers,
+    windows,
     serial,
-    { now: () => new Date().toISOString() },
+    windows,
     { settleMs: 30, capMs: 400, recheckMs: 15, holdCeilingMs: 2_000 },
     { busy: async () => ferret.busy },
   );
-  return { batcher, sent, ferret };
+  return { batcher, sent, ferret, windows };
 }
 
-describe('the attention reply batcher over real files and timers', () => {
+describe('the attention reply batcher over real files and a hand-driven clock', () => {
   it('should hold a due batch while the ferret works, take later answers into it, and send one message once idle', async () => {
     // Arrange
-    const { batcher, sent, ferret } = await world();
+    const { batcher, sent, ferret, windows } = await world();
     ferret.busy = true;
+    const rechecked = async (): Promise<void> => {
+      const before = windows.scheduled;
+      windows.fire(SESSION);
+      await waitFor(() => windows.scheduled > before, 'the held batch to be looked at again');
+    };
 
     // Act — the first answer falls due while busy; a second arrives during the hold.
     await batcher.add(SESSION, 'A1', 'one');
-    await after(80);
+    await rechecked();
     const heldWhileBusy = await batcher.pending(SESSION);
     await batcher.add(SESSION, 'A2', 'two');
-    await after(80);
+    await rechecked();
     const sentWhileBusy = sent.length;
     ferret.busy = false;
-    await after(120);
+    windows.fire(SESSION);
+    await waitFor(() => sent.length === 1, 'the one message to be sent once the ferret is idle');
 
     // Assert
     should(heldWhileBusy?.heldForTurn).be.true();
@@ -68,11 +100,12 @@ describe('the attention reply batcher over real files and timers', () => {
 
   it('should deliver on the settle window alone when the ferret is idle', async () => {
     // Arrange
-    const { batcher, sent } = await world();
+    const { batcher, sent, windows } = await world();
 
     // Act
     await batcher.add(SESSION, 'A1', 'one');
-    await after(120);
+    windows.fire(SESSION);
+    await waitFor(() => sent.length === 1, 'the batch to be sent when its settle window closed');
 
     // Assert
     should(sent.map(each => each.message)).deepEqual(['one']);

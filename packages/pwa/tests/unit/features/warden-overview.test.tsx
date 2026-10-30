@@ -564,6 +564,29 @@ describe('WardenOverview stats', () => {
       await view.unmount();
     }
   });
+
+  it('should say today’s spend for both layers and together, and nothing when neither spends', async () => {
+    // Arrange
+    const base = actionsStatus();
+    const both = wardenStatus({
+      ...base,
+      config: wardenConfig({ layers: { jev: true, llm: true } }),
+      spend: { ...base.spend, jevUsd: 0.0055, investigationUsd: 1.2 },
+    });
+    const view = await render({ status: ready(both) });
+    const rulesOnly = await render({ status: ready(wardenStatus({ ...base, config: wardenConfig() })) });
+    try {
+      // Act
+      const totals = view.container.querySelector('[data-warden-spend]');
+
+      // Assert
+      expect(totals?.textContent).toBe('Today: Jev $0.0055 · LLM $1.20 · together $1.21');
+      expect(rulesOnly.container.querySelector('[data-warden-spend]')).toBeNull();
+    } finally {
+      await view.unmount();
+      await rulesOnly.unmount();
+    }
+  });
 });
 
 describe('WardenOverview recent actions', () => {
@@ -720,8 +743,39 @@ describe('WardenOverview recent actions', () => {
 
       // Assert
       expect(view.calls.reports).toHaveLength(1);
-      expect(view.calls.reports[0]).toMatchObject({ sessionId: 'sess-b', reportPath: 'reports/stop.md' });
+      expect(view.calls.reports[0]).toMatchObject({
+        sessionId: 'sess-b',
+        reportPath: 'reports/stop.md',
+        jev: 'Jev: no record — from before Jev’s results were kept',
+      });
       expect(rows(view.container).filter(row => row.querySelector('[aria-label="Open report"]'))).toHaveLength(1);
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('should say under every LLM row what Jev did first, and under no other', async () => {
+    // Arrange
+    const base = actionsStatus();
+    const status = wardenStatus({
+      ...base,
+      actions: base.actions.map(action =>
+        action.reportPath === undefined
+          ? action
+          : {
+              ...action,
+              jev: { verdict: 'handed_on' as const, why: 'unsure' as const, confidence: 0.21, costUsd: 0.0041 },
+            },
+      ),
+    });
+    const view = await render({ status: ready(status), sessions: known });
+    try {
+      // Act
+      const lines = rows(view.container).map(row => row.querySelector('[data-warden-jev]')?.textContent ?? null);
+
+      // Assert
+      expect(lines.filter(line => line !== null)).toEqual(['Jev: not sure (21%) · $0.0041 → investigated']);
+      expect(must(rows(view.container)[1], 'the LLM row').querySelector('[data-warden-jev]')).not.toBeNull();
     } finally {
       await view.unmount();
     }
@@ -757,6 +811,7 @@ describe('WardenOverview investigations and watching', () => {
           finishedAt: '2026-07-31T11:30:00.000Z',
           costUsd: 0.31,
           wardenName: 'warden-00002a',
+          jev: { verdict: 'skipped', why: 'jev_cap', confidence: 0, costUsd: 0 },
         }),
         wardenInvestigation({
           id: 'run-1',
@@ -796,6 +851,13 @@ describe('WardenOverview investigations and watching', () => {
       expect(unnamed.textContent).toContain('Investigation');
       expect(unnamed.textContent).toContain('investigating');
       expect(view.calls.reports.map(target => target.reportPath)).toEqual(['reports/done.md']);
+      expect(named.querySelector('[data-warden-jev]')?.textContent).toBe(
+        'Jev: skipped — daily cap spent → investigated',
+      );
+      expect(view.calls.reports[0]?.jev).toBe('Jev: skipped — daily cap spent → investigated');
+      expect(unnamed.querySelector('[data-warden-jev]')?.textContent).toBe(
+        'Jev: no record — from before Jev’s results were kept',
+      );
     } finally {
       await view.unmount();
     }

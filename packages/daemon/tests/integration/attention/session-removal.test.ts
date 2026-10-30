@@ -155,7 +155,7 @@ function consistencyPass(opened: OpenedDaemonStorage): StorageConsistencyPass {
 }
 
 function ledgerFile(paths: FoundationPaths, sessionId: string = SESSION): string {
-  return join(createSessionPaths(paths, parseSessionId(sessionId)).directory, 'attention.json');
+  return join(createSessionPaths(paths, parseSessionId(sessionId)).directory, 'agenda.json');
 }
 
 async function ledgerText(paths: FoundationPaths, sessionId: string = SESSION): Promise<string | undefined> {

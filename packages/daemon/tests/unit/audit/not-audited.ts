@@ -33,6 +33,8 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
   'POST /v1/sessions/:sessionId/stop': 'drives an existing session; its journal records it',
   'POST /v1/sessions/:sessionId/resume': 'drives an existing session; its journal records it',
   'POST /v1/sessions/:sessionId/migrate': 'drives an existing session; its journal records it',
+  'POST /v1/restarts': 'drives existing sessions through the migrate; each journal records it',
+  'DELETE /v1/restarts': 'clears a queue of pending restarts of sessions the caller already drives',
   'POST /v1/sessions/:sessionId/handover': 'drives an existing session; its journal records it',
   'POST /v1/sessions/:sessionId/handover/cancel': 'drives an existing session; its journal records it',
   'POST /v1/sessions/:sessionId/runtime': 'drives an existing session; its journal records it',
@@ -52,6 +54,10 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
   'POST /v1/sessions/:sessionId/attention': 'an agent raising attention; the attention list is that history',
   'POST /v1/sessions/:sessionId/attention/replies':
     'the owner skipping the settle window for answers already recorded; the send ledger is that history',
+  'POST /v1/sessions/:sessionId/agenda':
+    'an agent raising an agenda item (the agenda spelling of the attention route above); the agenda list is that history',
+  'POST /v1/sessions/:sessionId/agenda/replies':
+    'the owner skipping the settle window for answers already recorded (the agenda spelling of the attention route above); the send ledger is that history',
   'POST /v1/sessions/:sessionId/notify': 'an agent notifying; its payload is labelled with the agent (see L5)',
   'POST /v1/sessions/:sessionId/pins': 'a bookmark in a transcript',
   'POST /v1/sessions/:sessionId/tasks': 'a task record on a session',

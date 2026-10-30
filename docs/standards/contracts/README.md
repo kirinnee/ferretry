@@ -49,6 +49,7 @@ laundered a defect into something every gate was right to pass.
 | `relay-config.sh`             | `a-relay-config`, `task test:gate`       | relay code, bindings, discovery and deployment agree                                             |
 | `route-agreement.sh`          | `a-route-agreement`                      | client/daemon paths, verbs and declared method debt agree                                        |
 | `test-tiers.sh`               | `a-test-tiers`, `task test:gate`         | every test lives in a tier, no integration timing or memory bound, test groups match their files |
+| `job-ceilings.sh`             | `a-job-ceilings`                         | every workflow job states `timeout-minutes`, a whole number from 1 to 60                         |
 | `typecheck.sh`                | `typecheck`                              | every workspace package participates in the TypeScript build                                     |
 
 Hook wiring lives in `nix/pre-commit.nix` — see [Linting](../linting/index.md).

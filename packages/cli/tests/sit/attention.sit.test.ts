@@ -81,8 +81,14 @@ class FakeAttentionDaemon {
 
   async #handle(request: Request): Promise<Response> {
     const path = new URL(request.url).pathname;
-    if (path !== `/v1/sessions/${encodeURIComponent(SESSION)}/attention`) {
-      return Response.json({ error: 'unknown route' }, { status: 404 });
+    const session = `/v1/sessions/${encodeURIComponent(SESSION)}`;
+    // A daemon of this build answers the agenda spelling and the older attention one alike
+    // (docs/agenda.md § Compatibility), and refuses anything else the way the real one does.
+    if (path !== `${session}/agenda` && path !== `${session}/attention`) {
+      return Response.json(
+        { error: `no route ${request.method} ${path}`, code: 'unknown_route', method: request.method, path },
+        { status: 404 },
+      );
     }
     if (request.method === 'GET') return Response.json(this.#snapshot());
     if (request.method === 'POST') {

@@ -41,6 +41,7 @@ import {
   type WorkerAsk,
   type WorkerChild,
 } from '../../../../src/lib/index.ts';
+import { waitFor } from '../../support/wait-for.ts';
 
 const NOW = '2026-10-22T08:00:00.000Z';
 const cleanups: Array<() => Promise<void>> = [];
@@ -98,6 +99,7 @@ class AnsweringWorker implements ObserverWorker {
     this.sent.push(message);
     queueMicrotask(() => {
       if ('probe' in message) this.emit({ probe: true });
+      else if (message.kind === 'stop') this.emit({ kind: 'stopped' });
       else if (message.kind === 'request') {
         const answer = this.answer(message);
         if (answer !== undefined) this.emit(answer);
@@ -255,13 +257,16 @@ async function rig(
     },
   });
   const host = subject;
-  cleanups.push(async () => host.close());
-  /** One tick, then long enough for the thread to answer its probe, then another: hosted from here on. */
+  cleanups.push(async () => await host.close());
+  /**
+   * One tick, a turn of the loop for the thread to answer its probe, then another: hosted from here on.
+   * The scripted thread answers in a microtask, so a loop turn (which runs after every microtask) is when it has.
+   */
   const hostAll = async () => {
     await host.turns.run();
-    await Bun.sleep(5);
+    await new Promise(resolve => setImmediate(resolve));
     await host.turns.run();
-    await Bun.sleep(5);
+    await new Promise(resolve => setImmediate(resolve));
   };
   return {
     storage,
@@ -301,8 +306,7 @@ describe('WorkerObserverHost — what a worker found', () => {
     // Act — the turn's compare-and-set would refuse if it ran first: the question flips the status.
     subject.observed(A, patches);
     subject.observed(A, []);
-    for (let wait = 0; wait < 100 && (await stateOf(storage, A)).turnState === undefined; wait += 1)
-      await Bun.sleep(10);
+    await waitFor(async () => (await stateOf(storage, A)).turnState !== undefined, "A's turn state to be written");
 
     // Assert
     const state = await stateOf(storage, A);
@@ -327,10 +331,15 @@ describe('WorkerObserverHost — what a worker found', () => {
       },
     ]);
     subject.observed(B, [{ kind: 'turn', change: { from: undefined, to: 'working' } }]);
-    await Bun.sleep(10);
+    // A's patches apply in the order they came, so its turn patch landing proves the question patch before it
+    // was dropped rather than still waiting.
+    subject.observed(A, [{ kind: 'turn', change: { from: undefined, to: 'working' } }]);
+    await waitFor(async () => (await stateOf(storage, A)).turnState === 'working', "A's turn patch to be applied");
 
-    // Assert — A untouched; B has no document, and the refusal stays in its own patch.
-    should(await stateOf(storage, A)).deepEqual({ id: A, status: 'running', turn: 1 });
+    // Assert — the question never reached A (only the turn did); B has no document, and the refusal stays in its own patch.
+    const state = await stateOf(storage, A);
+    should(state.status).equal('running');
+    should(state).not.have.property('pendingQuestion');
   });
 });
 
@@ -539,8 +548,8 @@ describe('countWorkerChildren', () => {
   });
 });
 
-const until = async (done: () => boolean): Promise<void> => {
-  for (let wait = 0; wait < 200 && !done(); wait += 1) await Bun.sleep(5);
+const until = async (done: () => boolean, what: string): Promise<void> => {
+  await waitFor(done, what);
 };
 
 describe('WorkerObserverHost — armed, with no tick', () => {
@@ -553,7 +562,7 @@ describe('WorkerObserverHost — armed, with no tick', () => {
 
     // Act — the worker becoming ready is itself a change: hosting is reconciled again, and A attached.
     subject.arm();
-    await until(() => activities.count >= 2);
+    await until(() => activities.count >= 2, 'the host to reconcile twice');
 
     // Assert
     should(beforeArm).deepEqual([]);
@@ -570,7 +579,7 @@ describe('WorkerObserverHost — armed, with no tick', () => {
 
     // Act
     subject.arm();
-    await until(() => scheduled.includes(30_000));
+    await until(() => scheduled.includes(30_000), 'the 30 s backstop to be scheduled');
 
     // Assert
     should(scheduled).containEql(30_000);
@@ -584,7 +593,7 @@ describe('WorkerObserverHost — armed, with no tick', () => {
 
     // Act
     subject.arm();
-    await until(() => scheduled.includes(TURN_WATCH_INTERVAL_MS));
+    await until(() => scheduled.includes(TURN_WATCH_INTERVAL_MS), 'the 2 s look to be scheduled');
 
     // Assert
     should(scheduled).containEql(TURN_WATCH_INTERVAL_MS);
@@ -606,14 +615,17 @@ describe('WorkerObserverHost — armed, with no tick', () => {
       },
     });
     subject.arm();
-    await until(() => activities.count === 1);
+    await until(() => activities.count === 1, 'the first reconcile to start');
 
     // Act
     subject.poke(0);
-    await Bun.sleep(10);
+    await until(() => scheduled.length >= 2, 'the poke to be scheduled');
+    // A timer made now, and longer than the poke's 0 ms, fires after it: by then the poke has asked for its
+    // reconcile and been told to wait. It cannot make the check pass early; it only gives the poke its turn.
+    await new Promise(resolve => setTimeout(resolve, 20));
     const during = activities.count;
     release();
-    await until(() => activities.count === 2);
+    await until(() => activities.count === 2, 'the reconcile asked for meanwhile to run once the first finished');
 
     // Assert
     should(during).equal(1);

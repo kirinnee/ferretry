@@ -130,7 +130,7 @@ describe('probing the rollout format an installed Codex writes', () => {
       const verdicts = [];
       for (let attempt = 0; attempt < 3; attempt++) {
         verdicts.push(await probe.classify('/bin/codex', '0.170.2'));
-        await Bun.sleep(0);
+        await new Promise(resolve => setImmediate(resolve));
       }
 
       // Assert

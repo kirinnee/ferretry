@@ -200,6 +200,8 @@ async function report(subsystem: WardenSubsystem, context: RouteContext): Promis
  * and the configuration read is what a PATCH must be visible in immediately.
  */
 export function wardenRoutes(subsystem: WardenSubsystem): readonly ApiRoute[] {
+  // Shared by `/v1/warden/agenda` and its older `/v1/warden/attention` twin, so the two cannot differ.
+  const handleAgenda: ApiRoute['handle'] = async () => jsonResponse(await subsystem.attention().catch(refuse));
   return [
     {
       method: 'GET',
@@ -235,11 +237,20 @@ export function wardenRoutes(subsystem: WardenSubsystem): readonly ApiRoute[] {
     },
     {
       method: 'GET',
+      path: '/v1/warden/agenda',
+      minimum: 'authenticated',
+      capability: { capability: 'warden', axis: 'use' },
+      noStore: true,
+      handle: handleAgenda,
+    },
+    {
+      method: 'GET',
       path: '/v1/warden/attention',
       minimum: 'authenticated',
       capability: { capability: 'warden', axis: 'use' },
       noStore: true,
-      handle: async () => jsonResponse(await subsystem.attention().catch(refuse)),
+      legacy: true,
+      handle: handleAgenda,
     },
     {
       method: 'POST',

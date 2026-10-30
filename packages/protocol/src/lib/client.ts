@@ -5,6 +5,7 @@ import type { ConfigChangeFrame } from './config-changes.ts';
 import type { DaemonRestartPatience } from './daemon-restart.ts';
 import type { DaemonUpdateSettingsPatch, DaemonUpdateStartRequest, DaemonUpdateView } from './daemon-update.ts';
 import type { ForeignHistoryListing, ImportedConversationDetail } from './foreign-history.ts';
+import type { RestartCancelResult, RestartRequest, RestartResult, RestartStatus } from './session-restart.ts';
 import type { SessionHandoverReceipt, SessionHandoverRequestInput } from './handover.ts';
 import type { HarnessUpdateStartRequest, HarnessUpdateView } from './harness-update.ts';
 import type {
@@ -204,6 +205,15 @@ export interface IFyApiClient {
    * made. A read: nothing is written and no request id is needed.
    */
   conversionPreview(id: string, agent: string, model?: string): Promise<ConversionPreview>;
+  /**
+   * Restart the ferrets `request` names on their current conversation: the idle ones now, the busy ones
+   * at their next idle moment. `requestId` makes the POST safe to retry (the restart is destructive).
+   */
+  restart(request: RestartRequest, requestId?: string): Promise<RestartResult>;
+  /** The ferrets whose instructions are out of date and the restarts waiting for an idle moment. */
+  restartStatus(): Promise<RestartStatus>;
+  /** Clear every waiting restart. */
+  cancelRestarts(): Promise<RestartCancelResult>;
   /**
    * Start a cross-harness handover of a top-level session. Returns the durable receipt at its current
    * phase (HTTP 202); poll it with `handoverReceipt`. `requestId` is the LOGICAL identity of one handover

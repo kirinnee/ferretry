@@ -16,7 +16,9 @@ import { ConfigConfirmResultSchema, ConfigStatusViewSchema, WardenConfigViewSche
 import should from 'should';
 import { buildWorld, type DaemonWorld, start } from '../../../bin/fyd.ts';
 import { NO_RELAY_DIRECTORY, type RelayAdvertisement } from '../../../src/lib/index.ts';
+import { OS_CHOSEN_PORT, recordedPort } from '../support/os-port.ts';
 import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 afterEach(async () => {
   await cleanupTempDirectories();
@@ -30,38 +32,31 @@ function world(): DaemonWorld {
   };
 }
 
-async function freeLoopbackPort(): Promise<number> {
-  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('probe') });
-  const port = server.port;
-  await server.stop(true);
-  if (port === undefined) throw new Error('the fixture server reported no port');
-  return port;
-}
-
 async function waitForHealth(port: number): Promise<void> {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
-    if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) return;
-    await Bun.sleep(50);
-  }
-  throw new Error('the daemon never answered its health probe');
+  await waitFor(
+    async () => (await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true,
+    'the daemon to answer its health probe',
+  );
 }
 
 describe('a loosening edit to warden.yaml on a booted daemon', () => {
   it('should hold it until the owner confirms it from this machine, then put it into effect', async () => {
     // Arrange
     const home = await tempDirectory('ferretry-config-journey-');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     let release = (): void => {};
     process.env.FY_HOME = home;
     const opened = await world().storage.open();
     await opened.storage.close();
     await mkdir(join(home, 'config'), { recursive: true });
-    await writeFile(join(home, 'config', 'daemon.json'), JSON.stringify({ host: '127.0.0.1', port }), { mode: 0o600 });
+    await writeFile(join(home, 'config', 'daemon.json'), JSON.stringify({ host: '127.0.0.1', port: OS_CHOSEN_PORT }), {
+      mode: 0o600,
+    });
     const shutdown = new Promise<void>(resolve => {
       release = resolve;
     });
     const exit = start({ ...world(), untilShutdown: () => shutdown }, cleanups);
+    const port = await recordedPort(home);
     await waitForHealth(port);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };

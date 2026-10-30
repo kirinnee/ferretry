@@ -1923,7 +1923,15 @@ export class DaemonCarrierRouter {
         // every remaining candidate would be dialled with a credential and a set that were replaced.
         if (reason instanceof RelayStaleEntryError) throw reason;
         if (reason instanceof DeviceKeyMissingError || reason instanceof DeviceKeyUnreadableError) throw reason;
-        probes.push(carrierProbe(method, { kind: 'transport-failure', detail: transportFailure(reason) }));
+        // A SESSION THAT OPENED REACHED THE DAEMON. Its later failure still advances the walk, but it is
+        // not the carrier being unreachable, and saying so blamed a tunnel that carried every frame.
+        probes.push(
+          carrierProbe(method, {
+            kind: 'transport-failure',
+            detail: transportFailure(reason),
+            ...(unsent ? {} : { connected: true as const }),
+          }),
+        );
         seen.push({ method, reason, sent: !unsent });
         refused ||= deviceRefusal(reason);
         outdated ??= await this.#looksOutdated(method, reason);

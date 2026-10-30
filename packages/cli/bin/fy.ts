@@ -93,6 +93,7 @@ import { type InstalledDaemonBinary, resolveDaemonBinaryPath } from '../src/lib/
 import { registerDaemonCommands } from '../src/lib/daemon/commands';
 import { DaemonController } from '../src/lib/daemon/controller';
 import { type DaemonLayout, resolveDaemonLayout, resolveDaemonStateHome } from '../src/lib/daemon/layout';
+import { legacyWireReport } from '../src/lib/daemon/legacy-wire';
 import type { IServiceDefinitionSupervisor } from '../src/lib/daemon/ports';
 import { registerProfileCommands } from '../src/lib/daemon/profile/commands';
 import { ProfileController, ProtocolProfileGateway } from '../src/lib/daemon/profile/controller';
@@ -134,6 +135,8 @@ import { LessonController } from '../src/lib/lesson/controller';
 import { McpServer, McpServersController, ProtocolMcpServersGateway, registerMcpCommands } from '../src/lib/mcp';
 import { registerMigrationCommands } from '../src/lib/migration/commands';
 import { MigrationController } from '../src/lib/migration/controller';
+import { registerRestartCommands } from '../src/lib/restart/commands';
+import { RestartController } from '../src/lib/restart/controller';
 import { registerModelsCommands } from '../src/lib/models/commands';
 import { ModelsController } from '../src/lib/models/controller';
 import { registerNotifyCommands, runNotify } from '../src/lib/notify/commands';
@@ -239,7 +242,8 @@ export function createProgram(): Command {
  * launchability rule a session start uses. Delegating keeps `fy doctor` from growing a second,
  * inevitably divergent definition of a working host.
  */
-function registerDoctorCommand(program: Command, environment: Record<string, string | undefined>): void {
+function registerDoctorCommand(program: Command, world: CliWorld): void {
+  const environment = world.environment;
   program
     .command('doctor')
     .description('check host dependencies and what each missing program prevents')
@@ -252,6 +256,8 @@ function registerDoctorCommand(program: Command, environment: Record<string, str
         );
       const child = Bun.spawn([executable, '--check'], { stdin: 'ignore', stdout: 'inherit', stderr: 'inherit' });
       process.exitCode = await child.exited;
+      const stateHome = resolveDaemonStateHome(world.homeDirectory, environment.FY_HOME, PRODUCT_NAME);
+      for (const line of await legacyWireReport(localDaemonHealth(world, stateHome), Date.now())) world.io.report(line);
     });
 }
 
@@ -406,6 +412,9 @@ type SharedDaemonClient = Pick<
   | 'stop'
   | 'migrate'
   | 'conversionPreview'
+  | 'restart'
+  | 'restartStatus'
+  | 'cancelRestarts'
   | 'scratchPlan'
   | 'scratchSweep'
   | 'harnessUpdate'
@@ -434,6 +443,9 @@ function lazyDaemonClient(client: () => Promise<IFyApiClient>): SharedDaemonClie
     migrate: async (id, agent, model, allowContextDowngrade, requestId, forceInflight, conversation) =>
       (await client()).migrate(id, agent, model, allowContextDowngrade, requestId, forceInflight, conversation),
     conversionPreview: async (id, agent, model) => (await client()).conversionPreview(id, agent, model),
+    restart: async (request, requestId) => (await client()).restart(request, requestId),
+    restartStatus: async () => (await client()).restartStatus(),
+    cancelRestarts: async () => (await client()).cancelRestarts(),
     scratchPlan: async (limit?: number) => (await client()).scratchPlan(limit),
     scratchSweep: async (force?: boolean) => (await client()).scratchSweep(force),
     snapshot: async (id: string) => (await client()).snapshot(id),
@@ -858,6 +870,11 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
     registerMigrationCommands(
       program,
       new MigrationController(client, new SessionPresenter(world.io, new SystemClock()), world.progress),
+    ),
+  ({ program, world, client, ownSessionId }) =>
+    registerRestartCommands(
+      program,
+      new RestartController(client, new SessionPresenter(world.io, new SystemClock()), ownSessionId, world.progress),
     ),
   ({ program, world, client }) => registerScratchCommands(program, new ScratchController(client, world.io)),
   ({ program, world, client }) =>
@@ -1308,7 +1325,7 @@ export function registerDomain(program: Command, world: CliWorld): void {
     ownSessionId,
     restartPatience: patience,
   };
-  registerDoctorCommand(program, environment);
+  registerDoctorCommand(program, world);
   for (const register of DOMAIN_REGISTRARS) register(wiring);
 }
 // ─── END DOMAIN WIRING ────────────────────────────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 export * from './handoff.ts';
 export * from './notifier.ts';
 export * from './policy.ts';
+export * from './send-id.ts';
 export * from './service.ts';
 export * from './settings.ts';
 export * from './stranded.ts';

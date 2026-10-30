@@ -26,6 +26,7 @@ import {
   lintAttentionWriting,
   type RaiseAttentionRequest,
 } from '../../attention/index.ts';
+import { type AttentionConfigPort, answerConfirmation, raiseRequestOf } from './attention-confirms.ts';
 
 /**
  * The attention board's HTTP surface: what a session is blocked on, and the human's answer to it.
@@ -164,13 +165,26 @@ async function apply(
   attention: AttentionService,
   notifications: Pick<DirectNotificationSubsystem, 'enrolledDevices'>,
   replies: HeldReplies,
+  config: AttentionConfigPort | undefined,
   context: RouteContext,
 ): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
   const request = await parseBody(context.request, AttentionActionRequestSchema);
   const actor = attentionActor(context.actor);
+  // An answer to an item that confirms a held configuration change acts on the change first.
+  const confirmed =
+    request.action === 'resolve' && request.response !== undefined && config !== undefined
+      ? await answerConfirmation(attention, config, context, {
+          sessionId,
+          id: request.id,
+          response: request.response,
+          note: request.note,
+          actor,
+        })
+      : undefined;
+  if (confirmed?.proceed === false) return confirmed.response;
   const mutation = await (request.action === 'add'
-    ? attention.raise(sessionId, request, actor)
+    ? attention.raise(sessionId, await raiseRequestOf(request, config), actor)
     : request.action === 'edit'
       ? attention.edit(sessionId, request.id, editPatch(request), actor)
       : request.action === 'progress'
@@ -185,7 +199,7 @@ async function apply(
                 ? attention.dismiss(sessionId, request.id, actor, request.note)
                 : request.response === undefined
                   ? attention.resolve(sessionId, request.id, actor, request.note)
-                  : attention.answer(sessionId, request.id, request.response, actor, request.note));
+                  : attention.answer(sessionId, request.id, request.response, actor, confirmed?.note ?? request.note));
   if (!mutation.ok) return refusal(mutation.error);
   const written = mutation.change === 'created' || mutation.change === 'refreshed' || mutation.change === 'info-added';
   const warnings = written && mutation.item !== undefined ? lintAttentionWriting(mutation.item) : [];
@@ -265,34 +279,67 @@ export function attentionRoutes(
   attention: AttentionService,
   notifications: DirectNotificationSubsystem,
   replies: AttentionRepliesSubsystem,
+  /** The held configuration edits an item may confirm; absent, `--confirms` is refused. */
+  config?: AttentionConfigPort,
 ): readonly ApiRoute[] {
+  // One handler per verb, shared by the agenda route and its older `attention` twin, so the two cannot
+  // answer differently or declare different grants (`agenda.wire.1`, docs/agenda.md § Compatibility).
+  const handleList: ApiRoute['handle'] = async context => await list(attention, replies, context);
+  const handleApply: ApiRoute['handle'] = async context =>
+    await apply(attention, notifications, replies, config, context);
+  const handleReplies: ApiRoute['handle'] = async context => await sendReplies(attention, replies, context);
   return [
+    {
+      method: 'GET',
+      path: '/v1/sessions/:sessionId/agenda',
+      minimum: 'operator',
+      noStore: true,
+      handle: handleList,
+    },
+    {
+      method: 'POST',
+      path: '/v1/sessions/:sessionId/agenda',
+      minimum: 'operator',
+      noStore: true,
+      handle: handleApply,
+    },
+    {
+      method: 'POST',
+      path: '/v1/sessions/:sessionId/agenda/replies',
+      minimum: 'operator',
+      noStore: true,
+      handle: handleReplies,
+    },
     {
       method: 'GET',
       path: '/v1/sessions/:sessionId/attention',
       minimum: 'operator',
       noStore: true,
-      handle: async context => await list(attention, replies, context),
+      legacy: true,
+      handle: handleList,
     },
     {
       method: 'POST',
       path: '/v1/sessions/:sessionId/attention',
       minimum: 'operator',
       noStore: true,
-      handle: async context => await apply(attention, notifications, replies, context),
+      legacy: true,
+      handle: handleApply,
     },
     {
       method: 'POST',
       path: '/v1/sessions/:sessionId/attention/replies',
       minimum: 'operator',
       noStore: true,
-      handle: async context => await sendReplies(attention, replies, context),
+      legacy: true,
+      handle: handleReplies,
     },
     {
       method: 'POST',
       path: '/v1/sessions/:sessionId/notify',
       minimum: 'operator',
       noStore: true,
+      legacy: true,
       handle: async context => await notify(attention, notifications, context),
     },
   ];

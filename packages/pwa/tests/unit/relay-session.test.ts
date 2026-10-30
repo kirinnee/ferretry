@@ -28,10 +28,14 @@ import should from 'should';
 import {
   decodeTunnelDaemonMessage,
   encodeTunnelClientMessage,
+  MAX_QUEUED_REQUESTS,
   MAX_TUNNEL_REQUEST_ID,
+  REQUEST_QUEUE_WAIT_MS,
   RelayClientSession,
   type RelayClientSessionDependencies,
+  RelayRequestNotSentError,
   RelaySessionError,
+  type RelaySessionSchedule,
 } from '../../src/lib/relay-session.ts';
 import {
   controlFrame,
@@ -454,14 +458,39 @@ describe('a serving relay session', () => {
     await failure(first);
   });
 
-  it('should end the session rather than queue more than one window of records', async () => {
-    const { session } = await serving();
-    // No credit is ever returned, so the window fills and the queue is all that grows.
-    const outstanding: Promise<unknown>[] = [];
-    for (let index = 0; index <= CREDIT_WINDOW_FRAMES; index += 1) {
-      outstanding.push(session.request({ method: 'GET', path: `/${index}` }).catch(() => 'refused'));
-    }
-    should(await Promise.all(outstanding)).containEql('refused');
+  it('should keep the session when one surface fires more requests than one window at once', async () => {
+    // The owner's `4400`: a surface fired a burst of reads in one tick, more whole records queued than
+    // one window, and the session ended for every caller on it — though nothing but this browser's own
+    // eagerness was wrong. A burst is back-pressure: everything waits for credit and goes out in order.
+    const { session, socket, daemon } = await serving();
+    const burst = CREDIT_WINDOW_FRAMES + 8;
+    const answers = Array.from({ length: burst }, (_, index) =>
+      session.request({ method: 'GET', path: `/v1/sessions/${index}/tasks` }),
+    );
+    await drain();
+    should(session.live()).be.true();
+    // The window still bounds the wire: the hello, the credential and the first requests fill exactly
+    // one window, and nothing past it leaves until credit comes back.
+    should(socket.sent.length).equal(CREDIT_WINDOW_FRAMES);
+    await daemon.receive(socket.sent[1] as Uint8Array);
+    const sentIds = async (from: number): Promise<number[]> => {
+      const ids: number[] = [];
+      for (const frame of socket.sent.slice(from)) {
+        const record = (await daemon.receive(frame as Uint8Array)) as { readonly id: number };
+        ids.push(record.id);
+      }
+      return ids;
+    };
+    const firstWave = await sentIds(2);
+    // The daemon returns a window of credit; the rest of the burst leaves, still in order.
+    await session.receiveBinary(creditFrame(sessionId, encodeCreditPayload(CREDIT_WINDOW_FRAMES)));
+    await drain();
+    const secondWave = await sentIds(2 + firstWave.length);
+    should([...firstWave, ...secondWave]).eql(Array.from({ length: burst }, (_, index) => index + 1));
+    for (let id = 1; id <= burst; id += 1)
+      await session.receiveBinary(await daemon.record({ t: 'res', id, status: 200, body: '[]' }));
+    should((await Promise.all(answers)).every(answer => answer.status === 200)).be.true();
+    should(session.live()).be.true();
   });
 });
 
@@ -469,6 +498,174 @@ describe('a serving relay session', () => {
 const drain = async (): Promise<void> => {
   for (let spin = 0; spin < 20; spin += 1) await new Promise(resolve => setTimeout(resolve, 0));
 };
+
+/** Whatever a promise rejected with, or `undefined` when it resolved. */
+const rejection = async (promise: Promise<unknown>): Promise<unknown> =>
+  await promise.then(
+    () => undefined,
+    (thrown: unknown) => thrown,
+  );
+
+/** A crypto whose next seal can be held open, so a test can act while a record is being sealed. */
+const gatedSeal = () => {
+  let gate: PromiseWithResolvers<void> | undefined;
+  let entered = Promise.withResolvers<void>();
+  const crypto = new Proxy(relayCrypto, {
+    get(target, key) {
+      const value: unknown = Reflect.get(target, key);
+      if (key !== 'seal') return typeof value === 'function' ? value.bind(target) : value;
+      return async (...args: Parameters<typeof relayCrypto.seal>) => {
+        const held = gate;
+        if (held !== undefined) {
+          entered.resolve();
+          await held.promise;
+        }
+        return await target.seal(...args);
+      };
+    },
+  });
+  return {
+    crypto,
+    /** Hold the next seal; resolves once one is held. */
+    hold: (): Promise<void> => {
+      gate = Promise.withResolvers<void>();
+      entered = Promise.withResolvers<void>();
+      return entered.promise;
+    },
+    release: (): void => {
+      const held = gate;
+      gate = undefined;
+      held?.resolve();
+    },
+  };
+};
+
+/** Timers a test fires by hand, remembering which were cancelled. */
+const manualTimers = () => {
+  const timers: { readonly delayMs: number; readonly run: () => void; cancelled: boolean }[] = [];
+  const schedule: RelaySessionSchedule = (delayMs, run) => {
+    const timer = { delayMs, run, cancelled: false };
+    timers.push(timer);
+    return () => {
+      timer.cancelled = true;
+    };
+  };
+  return { timers, schedule };
+};
+
+describe('a relay session under a burst of its own requests', () => {
+  it('should refuse only the request past the queue bound, unsent and retryable, and keep every other', async () => {
+    const { session, socket } = await serving();
+    const queued = Array.from({ length: MAX_QUEUED_REQUESTS }, (_, index) =>
+      rejection(session.request({ method: 'GET', path: `/v1/${index}` })),
+    );
+    const refused = await rejection(session.request({ method: 'GET', path: '/v1/over' }));
+    should(refused).be.instanceof(RelayRequestNotSentError);
+    should((refused as RelayRequestNotSentError).retryable).be.true();
+    should((refused as Error).message).match(/was not sent; trying again is safe/u);
+    should(session.live()).be.true();
+    await drain();
+    // The refusal took nothing with it: the window is full of the queued ones, in order.
+    should(socket.sent.length).equal(CREDIT_WINDOW_FRAMES);
+    session.close();
+    should((await Promise.all(queued)).every(reason => reason instanceof RelaySessionError)).be.true();
+  });
+
+  it('should withdraw a request whose caller gives up before it leaves, parts and all, and never send it', async () => {
+    const { session, socket, daemon } = await serving();
+    const filling = Array.from({ length: CREDIT_WINDOW_FRAMES }, (_, index) =>
+      rejection(session.request({ method: 'GET', path: `/v1/${index}` })),
+    );
+    const controller = new AbortController();
+    // A body of several parts, so withdrawing it has to take every part, not only its head.
+    const given = session.request(
+      { method: 'POST', path: '/v1/never', body: 'x'.repeat(MAX_PLAINTEXT_BYTES * 3) },
+      controller.signal,
+    );
+    const behind = session.request({ method: 'GET', path: '/v1/behind' });
+    await drain();
+    controller.abort(new Error('the caller left'));
+    should(((await rejection(given)) as Error).message).equal('the caller left');
+    await session.receiveBinary(creditFrame(sessionId, encodeCreditPayload(CREDIT_WINDOW_FRAMES)));
+    await drain();
+    const records: { readonly id?: number; readonly path?: string }[] = [];
+    for (const frame of socket.sent.slice(1)) records.push((await daemon.receive(frame as Uint8Array)) as never);
+    const withdrawn = CREDIT_WINDOW_FRAMES + 1;
+    should(records.some(record => record.id === withdrawn)).be.false();
+    should(records.at(-1)).match({ t: 'req', id: withdrawn + 1, path: '/v1/behind' });
+    await session.receiveBinary(await daemon.record({ t: 'res', id: withdrawn + 1, status: 200 }));
+    should((await behind).status).equal(200);
+    should(session.live()).be.true();
+    session.close();
+    await Promise.all(filling);
+  });
+
+  it('should give up on a request that waits too long for credit, unsent, and keep the session', async () => {
+    const { timers, schedule } = manualTimers();
+    const { session, socket, daemon } = await serving({ schedule });
+    // The hello and the credential took two frames of the window, so this many requests fill the rest.
+    const fits = CREDIT_WINDOW_FRAMES - 2;
+    const leaving = Array.from({ length: fits }, (_, index) =>
+      session.request({ method: 'GET', path: `/v1/${index}` }),
+    );
+    const stuck = session.request({ method: 'GET', path: '/v1/stuck' });
+    await drain();
+    // Every request that left stopped waiting; the one still queued did not.
+    should(timers.slice(0, fits).every(timer => timer.cancelled)).be.true();
+    const waiting = timers[fits];
+    should(waiting?.cancelled).be.false();
+    should(waiting?.delayMs).equal(REQUEST_QUEUE_WAIT_MS);
+    waiting?.run();
+    const refusal = await rejection(stuck);
+    should(refusal).be.instanceof(RelayRequestNotSentError);
+    should((refusal as Error).message).match(/waited 30 s/u);
+    should(session.live()).be.true();
+    // A wait that fires after its request already left changes nothing: that request is still answered.
+    timers[0]?.run();
+    await daemon.receive(socket.sent[1] as Uint8Array);
+    await session.receiveBinary(await daemon.record({ t: 'res', id: 1, status: 200 }));
+    should((await leaving[0])?.status).equal(200);
+    // A session that ends stops every wait still running.
+    const last = rejection(session.request({ method: 'GET', path: '/v1/last' }));
+    await drain();
+    session.close();
+    should(timers.at(-1)?.cancelled).be.true();
+    await last;
+    await Promise.all(leaving.slice(1).map(rejection));
+  });
+
+  it('should still send a request whose caller gave up while it was being sealed, and drop its late answer', async () => {
+    const gated = gatedSeal();
+    const { session, socket, daemon } = await serving({ crypto: gated.crypto });
+    const held = gated.hold();
+    const controller = new AbortController();
+    const given = session.request({ method: 'GET', path: '/v1/sealing' }, controller.signal);
+    await held;
+    controller.abort(new Error('the caller left'));
+    // The seal it is inside finishes either way, and the caller is told what it chose.
+    gated.release();
+    should(((await rejection(given)) as Error).message).equal('the caller left');
+    await drain();
+    await daemon.receive(socket.sent[1] as Uint8Array);
+    should(await daemon.receive(socket.sent[2] as Uint8Array)).match({ t: 'req', id: 1, path: '/v1/sealing' });
+    await session.receiveBinary(await daemon.record({ t: 'res', id: 1, status: 200 }));
+    should(session.live()).be.true();
+  });
+
+  it('should send nothing more once the session ends under a record being sealed', async () => {
+    const gated = gatedSeal();
+    const { session, socket } = await serving({ crypto: gated.crypto });
+    const held = gated.hold();
+    const answer = failure(session.request({ method: 'GET', path: '/v1/sealing' }));
+    await held;
+    const before = socket.sent.length;
+    session.close();
+    gated.release();
+    await answer;
+    await drain();
+    should(socket.sent.length).equal(before);
+  });
+});
 
 describe('a relay session proving its device', () => {
   it('should open with a credential record that proves this session, never one that names a token', async () => {

@@ -9,8 +9,8 @@
  * (its timer runs on the very thread that is stuck). Out here, a wedge is a child the test kills.
  */
 import {
-  TranscriptParseWorker,
   type TranscriptParseThread,
+  TranscriptParseWorker,
   WorkerTranscriptSource,
 } from '../../../src/adapters/transcript/parse-worker/client.ts';
 import type {
@@ -19,6 +19,7 @@ import type {
   TranscriptParseResponse,
 } from '../../../src/adapters/transcript/parse-worker/protocol.ts';
 import type { TranscriptSource } from '../../../src/lib/transcript/types.ts';
+import { waitFor } from './wait-for.ts';
 
 type Sent = TranscriptParseRequest | TranscriptParseGreeting;
 
@@ -57,10 +58,10 @@ const closes = () => threads[0]?.sent.filter(each => 'op' in each && each.op ===
 await (async () => {
   await source.window('/t.jsonl', { start: { at: 'beginning' } }).next();
 })();
-for (let attempt = 0; attempt < 50 && closes().length === 0; attempt += 1) {
+await waitFor(() => {
   Bun.gc(true);
-  await Bun.sleep(5);
-}
+  return closes().length > 0;
+}, 'the finalization registry to release the collected window');
 parse.close();
 process.stdout.write(JSON.stringify(closes()));
 process.exit(0);

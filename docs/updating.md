@@ -220,8 +220,13 @@ failing (`packages/protocol/src/lib/daemon-restart.ts`):
   twice; it fails with the original error.
 - **`fy wait`** is a loop of short reads, so it simply resumes: the read that met the restart waits, and
   the loop goes on.
-- **A timeout, a cancellation and any HTTP answer are never waited on.** The daemon answered, or the
-  caller left.
+- **A daemon that is still starting has not come back yet.** A new daemon binds its address before it
+  mounts its routes, and until then answers every route `503` with code `daemon_starting` ("the daemon
+  is starting (<boot step>); ask again shortly"). It ran nothing, so `fy` and the MCP tools alike read
+  that answer as a refusal and keep waiting (`daemonStartingOf`); only a caller that does not wait sees
+  the sentence.
+- **A timeout, a cancellation and any other HTTP answer are never waited on.** The daemon answered, or
+  the caller left.
 
 ### Declared GAPs
 

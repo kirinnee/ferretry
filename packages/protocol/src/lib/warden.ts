@@ -661,6 +661,8 @@ export const WardenInvestigationSchema = z.object({
   model: z.string().min(1).optional(),
   /** The investigator's name, `warden-0007`. Absent while queued, and from an older daemon. */
   wardenName: z.string().min(1).optional(),
+  /** What Jev did about this flag first. Session investigations only; absent from an older daemon. */
+  jev: z.lazy(() => WardenJevBeforeSchema).optional(),
 });
 export type WardenInvestigation = z.infer<typeof WardenInvestigationSchema>;
 
@@ -727,6 +729,8 @@ export const WardenActionSchema = z.object({
   actor: WardenActorSchema.optional(),
   /** The investigator (`warden-0007`) whose verdict this carried out. Investigation actions only. */
   investigator: z.string().min(1).optional(),
+  /** What Jev did about the flag before that investigation. Investigation actions only; absent from an older daemon. */
+  jev: z.lazy(() => WardenJevBeforeSchema).optional(),
 });
 export type WardenAction = z.infer<typeof WardenActionSchema>;
 
@@ -859,6 +863,41 @@ export const WardenJevDayStatsSchema = z.object({
   skippedForCap: NonNegativeIntegerSchema,
 });
 export type WardenJevDayStats = z.infer<typeof WardenJevDayStatsSchema>;
+
+/**
+ * Why Jev did not settle a flag that went on to an investigation, beyond its own check reasons: Jev was
+ * not asked because the owner asked for the investigation, a forced run skipped it, the flag is of a kind
+ * Jev never judges, it was backing off after a rate limit or an overload, or the snapshot could not be
+ * masked — or the investigation started before Jev's checks were kept (`no_record`).
+ */
+export const WardenJevBeforeWhySchema = z.enum([
+  ...WardenJevCheckWhySchema.options,
+  'owner_request',
+  'forced',
+  'not_judgeable',
+  'backoff',
+  'unredacted',
+  'no_record',
+]);
+export type WardenJevBeforeWhy = z.infer<typeof WardenJevBeforeWhySchema>;
+
+/**
+ * What Jev did about a flag before an LLM investigation looked at it — so an investigation is never shown
+ * without saying whether Jev ran. `handed_on` Jev checked it and passed it on; `skipped` its cap was
+ * spent; `not_asked` it was not put to Jev (`why` says why); `off` the Jev layer is off. For a check,
+ * `at` is the check's time: with the ferret and the flag it names the check's line in the Jev check
+ * record. No text — never Jev's reason.
+ */
+export const WardenJevBeforeSchema = z.object({
+  verdict: z.enum(['handed_on', 'skipped', 'not_asked', 'off']),
+  why: WardenJevBeforeWhySchema.optional(),
+  /** The act Jev chose and did not carry out alone. */
+  act: WardenJevCheckSchema.shape.act,
+  at: InstantSchema.optional(),
+  confidence: z.number().min(0).max(1).optional(),
+  costUsd: NonNegativeFiniteSchema.optional(),
+});
+export type WardenJevBefore = z.infer<typeof WardenJevBeforeSchema>;
 
 /**
  * One UTC day of the Warden's work, rolled up from its persisted state as it happened — never
@@ -1022,6 +1061,10 @@ export type WardenLeaveView = z.infer<typeof WardenLeaveViewSchema>;
 
 // ── Who needs you ───────────────────────────────────────────────────────────────────────────────
 
+/** Where the fleet's "who needs you" view is read (`agenda.wire.1`). */
+export const WARDEN_AGENDA_PATH = '/v1/warden/agenda';
+
+/** The older spelling, still served until the agenda removal release (docs/agenda.md § Compatibility). */
 export const WARDEN_ATTENTION_PATH = '/v1/warden/attention';
 
 export const WardenJudgementStateSchema = z.enum(['judged', 'pending', 'queued', 'failed', 'none']);

@@ -27,7 +27,7 @@ Paths are relative to `packages/daemon/` unless they start with `scripts/` or `d
    `pendingQuestion`, `turnState`, …) instead of the worker re-reading and re-parsing the document every 2 s.
    This is what lets the worker carry **no zod** (§3.4).
 4. **Pane events are owned by the worker; file events are owned by the hub.** Each worker spawns and owns the
-   one read-only `tmux -C` client ATTACHED to its session (the only client that receives `%output` for it) and
+   one observe-only `tmux -C` client ATTACHED to its session (the only client that receives `%output` for it) and
    runs its own in-band `capture-pane` over it. The main thread keeps the ONE shared query client (1c) and the
    ONE `FileEventHub` (2) and forwards per-path "changed" notices (a path and a stamp, never content).
 5. **The observer is a pure per-session fold with ports; the thread is a transport.** `InlineObserverHost`
@@ -324,13 +324,17 @@ executes. Triggers:
 
 ### 3.2 Inside a worker: events first, a slow backstop always
 
-- **Pane**: the attached client (`tmux -N -C attach-session -t =<session> -f ignore-size,read-only`) delivers
+- **Pane**: the attached client (`tmux -N -C attach-session -t =<session> -f ignore-size,no-output`) delivers
   `%output` for that session's pane. A notice arms a **settle** (150 ms), then an in-band `activity` query
   and a visible `capture-pane` on the SAME client. Verified on tmux 3.6a (2026-10-22, private socket): in-band
   `capture-pane -p` and `display-message -p` answer on a `read-only` control client; `%output` arrives for the
   attached session's pane and never for another session's; killing the session yields `%sessions-changed` then
   `%exit`. **`read-only` did NOT refuse an in-band `send-keys`** — the flag guards keyboard input, not control
-  commands — so the worker's control adapter sends only commands on 1c's read allowlist
+  commands — so the worker's control adapter sends only commands on 1c's read allowlist. **And from tmux 3.7
+  `read-only` must not be set at all**: 3.7 refuses a `send-keys` whose TARGET client is read-only, and a
+  `send-keys` naming no `-c` targets the most recently active attached client — which made the worker's client
+  refuse the daemon's own answers, messages and Escapes (`isReadOnlyAttach`, `src/lib/tmux/control-protocol.ts`;
+  `send-keys -c` would pin it, but tmux before 3.4 has no such flag). The allowlist is the only guard
   (`controlCommandLine`, `src/lib/tmux/control-protocol.ts:123-146` on that branch) and mutations stay on main. Captures are throttled to one per `TURN_WATCH_INTERVAL_MS`
   (2 s) so a spinner that prints continuously costs what one tick costs today and two-frame confirmation sees
   frames as far apart as now.
@@ -504,7 +508,7 @@ the rest; 3b removes the remainder for running sessions by making captures in-ba
 - **Which sessions get a worker**: the turn statuses (running, thinking, tool_running, awaiting_user,
   awaiting_question, interrupted) with an attachable tmux session — not yet the wider live set of §3.1, which
   matters only once the question part moves (3c).
-- **The attached client is `ignore-size,read-only,no-output`** and refuses every non-read command itself
+- **The attached client is `ignore-size,no-output`** (never `read-only`, §3.2) and refuses every non-read command itself
   (`ControlModeTmuxProcess` with `mutations: 'refuse'`). `no-output` until 3c reacts to `%output`.
 - **The turn tick still drives the workers** (main sends one `look` per hosted session per 2 s tick and writes
   the answers); the worker owns the pane client, the frame cache, the parsed tail and the two-frame state.
@@ -590,10 +594,12 @@ reviewer checks.
   `session_attached`/`list-clients` (checked), and `ignore-size` keeps the window size the human's client chose. A
   user tmux config with `destroy-unattached` would see different behaviour; the daemon owns its tmux server and its
   config, so pin the option off there.
-- **A control client can mutate the pane.** Because `read-only` does not stop in-band `send-keys` (§3.2), a bug in
+- **A control client can mutate the pane.** Because the client is not `read-only` (§3.2), a bug in
   the worker could type into an agent. The allowlist is the guard; a unit test feeds every non-read command to
   the worker's control adapter and requires a refusal.
-- **Shutdown order**: workers drain (≤ 1 s) and terminate before storage closes; cleanups are registered after the
+- **Shutdown order**: each started worker is told `stop`, ends every tmux client it started and answers `stopped` once
+  their processes have exited (≤ 5 s, then it is terminated anyway) — a client left to notice the daemon's exit can
+  wedge with its server on a `kill-server` — and workers terminate before storage closes; cleanups are registered after the
   storage open, so they run first. A patch arriving after storage closed is dropped and logged, never written.
 - **Transcript resolution stays on main** (Codex rollout discovery reads every session's claims). It runs only until
   a session's transcript is bound, then never again for that session; it moves to the housekeeping worker in stage 4.

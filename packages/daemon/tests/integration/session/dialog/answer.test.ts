@@ -9,10 +9,11 @@ import {
   ProvedPaneCapture,
   parseHarnessDialog,
   SessionConsoleService,
-  type SessionPaneProof,
   SessionDialogService,
+  type SessionPaneProof,
   TmuxController,
 } from '../../../../src/lib/index.ts';
+import { waitForValue } from '../../support/wait-for.ts';
 
 /**
  * ANSWERING A HARNESS DIALOG, end to end over a real tmux server.
@@ -134,12 +135,14 @@ async function pane(fixture: string, mode: Mode = 'normal', other = 'codex-0.156
   );
   // Until the harness has drawn the dialog, there is nothing to read.
   const drawn = async (): Promise<string> => {
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      const frame = await capture.capture(session);
-      if (parseHarnessDialog(frame) !== undefined) return frame;
-      await Bun.sleep(100);
-    }
-    throw new Error(`${fixture} was never drawn`);
+    return await waitForValue(
+      async () => {
+        const frame = await capture.capture(session);
+        return parseHarnessDialog(frame) !== undefined ? frame : undefined;
+      },
+      `${fixture} to be drawn`,
+      { every: 100 },
+    );
   };
   return { session, service, drawn, capture, keys: async () => (await readFile(keys, 'utf8')).replaceAll(' ', '') };
 }

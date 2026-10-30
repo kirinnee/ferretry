@@ -28,19 +28,27 @@ on:
   workflow_dispatch:
 
 # A new push to a PR supersedes the run for its old SHA, so that run is cancelled instead of holding
-# a runner. Everything else — `main`, manual dispatch — gets a group of its own run id: a shared group
-# would still cancel a *pending* main run when a newer one queued, and Release needs every main CI
-# run to complete.
+# a runner.
+#
+# `main` shares ONE group and never cancels in progress: at most one main run runs and one waits, and a
+# newer push replaces the one waiting. Each main run used to have a group of its own, so every merge
+# queued a full run on GitHub's runners; on 2026-10-30 a burst of merges left twelve of them queued for
+# over an hour behind pull-request jobs, and no release went out. Superseding a waiting run loses
+# nothing: Release releases `main`'s head, and the newer run proves every commit the older one held.
+# A run already in progress is never cancelled, so a steady stream of merges cannot starve Release.
+# Manual dispatch keeps a group of its own run id.
 concurrency:
   group: >-
     ${{ github.workflow }}-${{
       github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)
+      || (github.event_name == 'push' && github.ref == 'refs/heads/main') && 'main'
       || github.run_id
     }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   precommit:
+    timeout-minutes: 10
     name: Pre-Commit (${{ matrix.part }})
     permissions:
       contents: read
@@ -82,6 +90,7 @@ jobs:
   # with a one-minute floor and holds a runner and a cache attachment for each, so three 15-second jobs
   # cost three minutes of runner and three cache attachments for 45 seconds of work.
   build-checks:
+    timeout-minutes: 20
     name: Build Checks
     permissions:
       contents: read
@@ -134,6 +143,7 @@ jobs:
         run: ./scripts/ci/nix-store-hygiene.sh
 
   pwa-screenshot:
+    timeout-minutes: 20
     name: PWA ${{ matrix.scope == 'full' && 'Full Gallery' || 'Settings Geometry' }} (${{ matrix.scheme }}${{ matrix.viewport && format(', {0}', matrix.viewport) || '' }})
     permissions:
       contents: read
@@ -205,6 +215,7 @@ jobs:
   # The unit tier in parallel shares (config/test-groups.json), exactly like `int` below. Serially it
   # was ~105s of tests in one process; the slowest group is under a minute.
   test:
+    timeout-minutes: 15
     name: Unit Tests (${{ matrix.group }})
     permissions:
       contents: read
@@ -244,6 +255,7 @@ jobs:
 
   # The unit tier's 100% ledger over every group's, as `int-ledger` does for int; no nix shell.
   unit-ledger:
+    timeout-minutes: 5
     name: Unit Tests
     needs: test
     permissions:
@@ -313,6 +325,7 @@ jobs:
   # merges per file, never per line). Like `smoke`, it enters no nix shell: the gate is bash, awk,
   # grep and jq, all on the runner image, and a nix shell would add ~30s to the critical path.
   int-ledger:
+    timeout-minutes: 5
     name: Integration Tests
     needs: int
     permissions:
@@ -340,6 +353,7 @@ jobs:
           if-no-files-found: warn
 
   compile:
+    timeout-minutes: 15
     name: Compile Binaries
     permissions:
       contents: read
@@ -374,6 +388,7 @@ jobs:
           if-no-files-found: error
 
   sit:
+    timeout-minutes: 10
     name: SIT
     needs: compile
     permissions:
@@ -390,6 +405,7 @@ jobs:
         run: nix develop .#ci -c ./scripts/ci/test.sh sit
 
   smoke:
+    timeout-minutes: 10
     name: Smoke ${{ matrix.target }}
     needs: compile
     permissions:

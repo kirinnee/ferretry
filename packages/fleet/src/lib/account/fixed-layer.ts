@@ -487,14 +487,11 @@ export function launchInstructions(fy: string, env: Readonly<Record<string, stri
       })),
       ...FERRET_SECTIONS(fy)
         .filter(section => env[section.env] === '1')
-        .map(section => ({
-          id: section.id,
-          chars:
-            section.text.length +
-            (section.env === PACK_ENV && (env[PACK_ROUTING_ENV] ?? '') !== ''
-              ? 1 + (env[PACK_ROUTING_ENV] ?? '').length
-              : 0),
-        })),
+        .map(section => {
+          const routing = section.env === PACK_ENV ? (env[PACK_ROUTING_ENV] ?? '') : '';
+          const text = routing === '' ? section.text : `${section.text}\n${routing}`;
+          return { id: section.id, chars: text.length, digest: instructionDigest(text) };
+        }),
     ],
     mode,
     questions: mode === 'interactive',

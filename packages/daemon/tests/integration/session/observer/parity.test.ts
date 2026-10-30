@@ -63,6 +63,7 @@ import {
   structuredQuestionStatePatch,
   TmuxController,
 } from '../../../../src/lib/index.ts';
+import { waitFor } from '../../support/wait-for.ts';
 
 const NOW = '2026-10-22T08:00:00.000Z';
 const clock = { now: () => NOW };
@@ -157,6 +158,14 @@ interface Pair {
 }
 
 type HostKind = 'inline' | 'worker';
+
+/** The last non-blank rows of a frame or a capture, without trailing spaces, to tell whether a pane has drawn it. */
+const lastRows = (text: string, count = 3): readonly string[] =>
+  text
+    .split('\n')
+    .map(row => row.trimEnd())
+    .filter(row => row !== '')
+    .slice(-count);
 
 async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: HostKind): Promise<Pair> {
   const tmux = Bun.which('tmux');
@@ -344,7 +353,7 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: Hos
     });
     observer = workerHost;
     cleanups.add(async () => {
-      observer.close();
+      await observer.close();
       files.close();
     });
     // Hosted before the scenario starts, so both sides begin it with no previous observation.
@@ -352,11 +361,7 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: Hos
     if (session === undefined) throw new Error('the session is not on the roster');
     const wanted = [{ id, facts: session.state, binding: await binding() }];
     supervisor.reconcile(wanted);
-    const started = Date.now();
-    while (!supervisor.hosts(id)) {
-      if (Date.now() - started > 15_000) throw new Error('the session worker never started');
-      await Bun.sleep(20);
-    }
+    await waitFor(() => supervisor.hosts(id), 'the session worker to start');
     workerHost.reconcileWatches(wanted);
   }
 
@@ -378,8 +383,14 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: Hos
     },
     frame: async text => {
       await writeFile(frameFile, text);
-      // Long enough for the player's 50 ms poll to redraw and tmux to show it.
-      await Bun.sleep(400);
+      // Until the pane shows it: the player redraws on its own poll, and a terminal paints bytes in order, so
+      // the frame's last rows on screen mean the rows above them are too.
+      const wanted = lastRows(text);
+      await waitFor(async () => {
+        const screen = await controller.visible(tmuxSession);
+        const shown = screen === undefined ? undefined : lastRows(screen);
+        return shown?.length === wanted.length && shown.every((row, index) => row === wanted[index]);
+      }, 'the pane to draw the frame');
     },
     append: async text => {
       await appendFile(reference.transcript, text);

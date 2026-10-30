@@ -34,11 +34,25 @@ export interface NotificationIdentity {
   readonly surfaced?: boolean;
 }
 
+/** The key's spelling before the agenda rename; a ledger written then holds keys that begin with it. */
+const LEGACY_KEY_PREFIX = 'attention:';
+const KEY_PREFIX = 'agenda:';
+
+/** A key in the spelling this daemon writes, whichever spelling it was read in. */
+export function normalizedNotificationKey(key: string): string {
+  return key.startsWith(LEGACY_KEY_PREFIX) ? `${KEY_PREFIX}${key.slice(LEGACY_KEY_PREFIX.length)}` : key;
+}
+
+/** The same key as an earlier daemon wrote it. */
+export function legacyNotificationKey(key: string): string {
+  return key.startsWith(KEY_PREFIX) ? `${LEGACY_KEY_PREFIX}${key.slice(KEY_PREFIX.length)}` : key;
+}
+
 export function notificationKey(identity: NotificationIdentity): string {
   // A stop is about the ferret, not about one of its items: the item that triggers it may change within
   // the stop, and the key must not.
-  if (identity.stoppedAt !== undefined) return `attention:${identity.sessionId}:stopped:${identity.stoppedAt}`;
-  const base = `attention:${identity.sessionId}:${identity.attentionId}`;
+  if (identity.stoppedAt !== undefined) return `${KEY_PREFIX}${identity.sessionId}:stopped:${identity.stoppedAt}`;
+  const base = `${KEY_PREFIX}${identity.sessionId}:${identity.attentionId}`;
   if (identity.ping === true) return `${base}:ping`;
   if (identity.deadline === true) return `${base}:deadline`;
   return `${base}${identity.infoRequest === undefined ? '' : `:info-${identity.infoRequest}`}${identity.surfaced === true ? ':surfaced' : ''}`;

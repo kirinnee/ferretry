@@ -7,9 +7,11 @@ import { unrefFileEventTimers } from '../../../../src/adapters/file-events/bun-f
 import { platformFileEventSource } from '../../../../src/adapters/file-events/platform.ts';
 import {
   FileTranscriptChanges,
+  type TranscriptFileEvents,
   type TranscriptFileStamp,
 } from '../../../../src/adapters/session/live/file-transcript-changes.ts';
 import { FileEventHub } from '../../../../src/lib/file-events/hub.ts';
+import { waitFor } from '../../support/wait-for.ts';
 
 /**
  * The transcript signal behind `?transcript=1`, over a real file and the real file-event hub.
@@ -47,11 +49,54 @@ const stamp = async (file: string): Promise<TranscriptFileStamp | undefined> =>
     () => undefined,
   );
 
-/** Resolves once `count` changes were heard, or with what was heard after `ms`. */
-async function heardWithin(heard: readonly string[], count: number, ms: number): Promise<number> {
-  const deadline = Date.now() + ms;
-  while (heard.length < count && Date.now() < deadline) await Bun.sleep(10);
+/** What the hub and the stat port have been through, so a test can wait for an event instead of for time. */
+interface Seen {
+  subscriptions: number;
+}
+
+/** The hub, counting its subscriptions. */
+function observing(events: FileEventHub): { readonly files: TranscriptFileEvents; readonly seen: Seen } {
+  const seen: Seen = { subscriptions: 0 };
+  const files: TranscriptFileEvents = {
+    subscribe: (path, listener) => {
+      seen.subscriptions += 1;
+      return events.subscribe(path, listener);
+    },
+  };
+  return { files, seen };
+}
+
+/** Resolves once `count` changes were heard; the safety net only names what never came. */
+async function heardAtLeast(heard: readonly string[], count: number): Promise<number> {
+  await waitFor(() => heard.length >= count, `${String(count)} change(s) to be heard`);
   return heard.length;
+}
+
+/**
+ * A second watch on its own file in the same directory of the same hub. Writing to it and hearing it is the
+ * positive sentinel for "the hub has been through everything written before": the hub looks at every
+ * subscribed path in a directory after any event there, so a probe write is heard only after the writes
+ * before it were seen to.
+ */
+async function probeOn(events: FileEventHub, root: string): Promise<() => Promise<void>> {
+  const file = join(root, 'probe.jsonl');
+  await writeFile(file, '{"probe":0}\n');
+  const heard: string[] = [];
+  const { files, seen } = observing(events);
+  const watch = new FileTranscriptChanges({
+    file: async () => file,
+    stat: stamp,
+    files,
+    clock: { now: () => NOW },
+  }).watch('probe', at => heard.push(at));
+  cleanups.add(() => watch.close());
+  await waitFor(() => seen.subscriptions >= 1, 'the probe to be subscribed');
+  let writes = 0;
+  return async () => {
+    writes += 1;
+    await appendFile(file, `{"probe":${String(writes)}}\n`);
+    await waitFor(() => heard.length >= writes, `probe write ${String(writes)} to be heard`);
+  };
 }
 
 describe('FileTranscriptChanges', () => {
@@ -61,24 +106,24 @@ describe('FileTranscriptChanges', () => {
     const file = join(root, 'session.jsonl');
     await writeFile(file, '{"type":"user"}\n');
     const heard: string[] = [];
+    const { files, seen } = observing(hub());
     const changes = new FileTranscriptChanges({
       file: async () => file,
       stat: stamp,
-      files: hub(),
+      files,
       clock: { now: () => NOW },
     });
     const watch = changes.watch('s1', at => heard.push(at));
     cleanups.add(() => watch.close());
-    // Long enough for the hub's own first report of the path to come and go.
-    await Bun.sleep(200);
+    // The hub's own first report of the path has come and been looked at (the watch's look, then the report's).
+    await waitFor(() => seen.subscriptions >= 1, 'the watch to be subscribed to the transcript');
     const beforeAppend = heard.length;
 
-    // Act
+    // Act — the second append waits for the first to be heard, so the hub has finished its pass.
     await appendFile(file, '{"type":"assistant"}\n');
-    const afterFirst = await heardWithin(heard, 1, 2_000);
-    await Bun.sleep(100);
+    const afterFirst = await heardAtLeast(heard, 1);
     await appendFile(file, '{"type":"assistant","n":2}\n');
-    const afterSecond = await heardWithin(heard, 2, 2_000);
+    const afterSecond = await heardAtLeast(heard, 2);
 
     // Assert
     should(beforeAppend).equal(0);
@@ -93,35 +138,41 @@ describe('FileTranscriptChanges', () => {
     const first = join(root, 'first.jsonl');
     const second = join(root, 'second.jsonl');
     let bound: string | undefined;
+    let resolutions = 0;
+    const events = hub();
     const heard: string[] = [];
     const watch = new FileTranscriptChanges({
-      file: async () => bound,
+      file: async () => {
+        resolutions += 1;
+        return bound;
+      },
       stat: stamp,
-      files: hub(),
+      files: events,
       clock: { now: () => NOW },
     }).watch('s1', at => heard.push(at));
     cleanups.add(() => watch.close());
-    await Bun.sleep(50);
+    const probe = await probeOn(events, root);
+    await waitFor(() => resolutions >= 1, 'the watch to look for the session transcript');
 
     // Act — the first message binds a file; the journal moves; the agent appends.
     await writeFile(first, '{"type":"user"}\n');
     bound = first;
     watch.refresh();
-    await Bun.sleep(200);
-    const onBinding = heard.length;
+    // Binding a first file is itself heard, the moment it is followed.
+    const onBinding = await heardAtLeast(heard, 1);
     await appendFile(first, '{"type":"assistant"}\n');
-    const afterAppend = await heardWithin(heard, onBinding + 1, 2_000);
+    const afterAppend = await heardAtLeast(heard, onBinding + 1);
     // A `/clear` moves the session to another file: that is a change in itself.
     await writeFile(second, '{"type":"user"}\n');
     bound = second;
     watch.refresh();
-    const afterMove = await heardWithin(heard, afterAppend + 1, 2_000);
-    await Bun.sleep(100);
+    const afterMove = await heardAtLeast(heard, afterAppend + 1);
+    // A write to the file left behind; the probe write after it is heard once the hub has been through it.
     await appendFile(first, '{"type":"assistant","stale":true}\n');
-    await Bun.sleep(200);
+    await probe();
     const afterStaleWrite = heard.length;
     await appendFile(second, '{"type":"assistant"}\n');
-    const afterNewWrite = await heardWithin(heard, afterMove + 1, 2_000);
+    const afterNewWrite = await heardAtLeast(heard, afterMove + 1);
 
     // Assert — binding a first file is a change (the reader finds the first message); each later
     // write to the followed file is heard once, the move is heard, and the file left behind is not.
@@ -138,18 +189,21 @@ describe('FileTranscriptChanges', () => {
     const file = join(root, 'session.jsonl');
     await writeFile(file, '{"type":"user"}\n');
     const heard: string[] = [];
+    const events = hub();
+    const { files, seen } = observing(events);
     const watch = new FileTranscriptChanges({
       file: async () => file,
       stat: stamp,
-      files: hub(),
+      files,
       clock: { now: () => NOW },
     }).watch('s1', at => heard.push(at));
-    await Bun.sleep(100);
+    const probe = await probeOn(events, root);
+    await waitFor(() => seen.subscriptions >= 1, 'the watch to be subscribed to the transcript');
 
-    // Act
+    // Act — the probe write is heard only after the hub has been through the append to the closed watch's file.
     watch.close();
     await appendFile(file, '{"type":"assistant"}\n');
-    await Bun.sleep(300);
+    await probe();
 
     // Assert
     should(heard).be.empty();
@@ -166,10 +220,7 @@ describe('FileTranscriptChanges', () => {
     const statEntered = new Promise<void>(resolve => {
       entered = resolve;
     });
-    let released: (() => void) | undefined;
-    const subscriptionReleased = new Promise<void>(resolve => {
-      released = resolve;
-    });
+    let released = false;
     const heard: string[] = [];
     const watch = new FileTranscriptChanges({
       file: async () => '/transcripts/session.jsonl',
@@ -181,7 +232,11 @@ describe('FileTranscriptChanges', () => {
       files: {
         subscribe: path => {
           subscribed.push(path);
-          return { close: () => released?.() };
+          return {
+            close: () => {
+              released = true;
+            },
+          };
         },
       },
       clock: { now: () => NOW },
@@ -191,16 +246,44 @@ describe('FileTranscriptChanges', () => {
     await statEntered;
     watch.close();
     release?.();
-    await Promise.race([
-      subscriptionReleased,
-      Bun.sleep(2_000).then(() => {
-        throw new Error('the late subscription was never released');
-      }),
-    ]);
+    await waitFor(() => released, 'the late subscription to be released');
 
     // Assert — a subscription taken for a closed watch would keep the hub listening for nobody.
     should(subscribed).deepEqual(['/transcripts/session.jsonl']);
     should(heard).be.empty();
+  });
+
+  it('should look again, once, when a look is asked for while another is still running', async () => {
+    // Arrange — the first look for the transcript is held open, so the next ask arrives while it runs.
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const asked: number[] = [];
+    const watch = new FileTranscriptChanges({
+      file: async () => {
+        asked.push(asked.length + 1);
+        if (asked.length === 1) await gate;
+        return undefined;
+      },
+      stat: async () => undefined,
+      files: { subscribe: () => ({ close: () => {} }) },
+      clock: { now: () => NOW },
+    }).watch('s1', () => {});
+    cleanups.add(() => watch.close());
+    await waitFor(() => asked.length === 1, 'the first look for the transcript to start');
+
+    // Act — two more asks while the first look is open fold into one repeat, which runs after it ends.
+    watch.refresh();
+    watch.refresh();
+    release?.();
+    await waitFor(() => asked.length >= 2, 'the repeated look for the transcript to start');
+    // The repeat is a look like any other: a sentinel ask after it runs exactly once more, proving none was queued twice.
+    watch.refresh();
+    await waitFor(() => asked.length >= 3, 'the sentinel look for the transcript to start');
+
+    // Assert
+    should(asked).deepEqual([1, 2, 3]);
   });
 
   it('should say nothing about a file whose stamp cannot be read, rather than guess it changed', async () => {
@@ -209,20 +292,25 @@ describe('FileTranscriptChanges', () => {
     const file = join(root, 'session.jsonl');
     await writeFile(file, '{"type":"user"}\n');
     const heard: string[] = [];
+    const events = hub();
+    const { files, seen } = observing(events);
+    let looks = 0;
     const watch = new FileTranscriptChanges({
       file: async () => file,
       stat: async () => {
+        looks += 1;
         throw new Error('EACCES');
       },
-      files: hub(),
+      files,
       clock: { now: () => NOW },
     }).watch('s1', at => heard.push(at));
     cleanups.add(() => watch.close());
-    await Bun.sleep(100);
+    const probe = await probeOn(events, root);
+    await waitFor(() => looks >= 1 && seen.subscriptions >= 1, 'the watch to have looked and subscribed');
 
-    // Act
+    // Act — the probe write is heard only after the hub has been through the append.
     await appendFile(file, '{"type":"assistant"}\n');
-    await Bun.sleep(300);
+    await probe();
 
     // Assert
     should(heard).be.empty();
@@ -232,8 +320,10 @@ describe('FileTranscriptChanges', () => {
     // Arrange
     const subscribed: string[] = [];
     const heard: string[] = [];
+    let resolutions = 0;
     const watch = new FileTranscriptChanges({
       file: async () => {
+        resolutions += 1;
         throw new Error('the transcript cannot be proved');
       },
       stat: stamp,
@@ -248,8 +338,9 @@ describe('FileTranscriptChanges', () => {
     cleanups.add(() => watch.close());
 
     // Act
+    await waitFor(() => resolutions >= 1, 'the first resolution to have failed');
     watch.refresh();
-    await Bun.sleep(20);
+    await waitFor(() => resolutions >= 2, 'the refreshed resolution to have failed');
 
     // Assert
     should(subscribed).be.empty();

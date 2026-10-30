@@ -6,7 +6,7 @@ import type {
   AttentionItem,
   AttentionResponse,
 } from '@ferretry/protocol';
-import { MAX_ATTENTION_PER_SESSION, MAX_ATTENTION_REVISIONS } from '@ferretry/protocol';
+import { AttentionItemSchema, MAX_ATTENTION_PER_SESSION, MAX_ATTENTION_REVISIONS } from '@ferretry/protocol';
 import should from 'should';
 import {
   type AttentionActor,
@@ -2340,5 +2340,171 @@ describe('Attention state machine: a card is a living summary', () => {
     should(edited.change).equal('info-added');
     should(edited.item?.waitingOn).be.undefined();
     should(edited.item?.revisions).have.length(1);
+  });
+});
+
+describe('an item that confirms a held configuration change', () => {
+  const CONFIRMS = {
+    path: 'warden.yaml',
+    etag: 'a'.repeat(64),
+    changes: ['the Warden may now spend on Jev decisions'],
+  };
+  const NEWER = { path: 'warden.yaml', etag: 'b'.repeat(64), changes: ['the Jev price the cap counts with goes down'] };
+  const CHOICE: AttentionAsk = {
+    kind: 'multiple-choice',
+    options: [{ label: 'Allow' }, { label: 'Deny' }, { label: 'Discard change' }],
+  };
+  const confirming = (): Extract<AttentionMutation, { ok: true }> =>
+    raised(AGENT, { ask: CHOICE, confirms: CONFIRMS, premise: '- before' });
+  const restate = (
+    ledger: AttentionLedger,
+    actor: AttentionActor = { kind: 'daemon', cause: 'system' },
+    confirms = NEWER,
+    premise = '- after',
+    id: AttentionId = 'A1',
+  ): AttentionMutation =>
+    applyAttentionCommand(ledger, { action: 'restate-confirms', actor, id, confirms, premise, at: SECOND });
+  const allow: AttentionResponse = { kind: 'multiple-choice', choice: 'Allow' };
+
+  it('should keep the confirmation the raise recorded', () => {
+    // Arrange / Act
+    const created = confirming();
+
+    // Assert
+    should(created.item?.confirms).deepEqual(CONFIRMS);
+  });
+
+  it('should refuse an answer from the ferret, and from the daemon, but take the owner’s', () => {
+    // Arrange
+    const { ledger } = confirming();
+    const answer = (actor: AttentionActor): AttentionMutation =>
+      applyAttentionCommand(ledger, { action: 'answer', actor, id: 'A1', response: allow, at: SECOND });
+
+    // Act / Assert
+    should(failed(answer(AGENT)).error).deepEqual({
+      code: 'forbidden',
+      message: 'only the owner answers A1: it decides a change to warden.yaml; close it with dismiss instead',
+    });
+    should(failed(answer({ kind: 'daemon', cause: 'system' })).error.code).equal('forbidden');
+    should(succeeded(answer(HUMAN)).change).equal('answered');
+  });
+
+  it('should still let the raising ferret resolve or dismiss it without an answer', () => {
+    // Arrange
+    const { ledger } = confirming();
+
+    // Act / Assert
+    should(
+      succeeded(applyAttentionCommand(ledger, { action: 'resolve', actor: AGENT, id: 'A1', at: SECOND })).change,
+    ).equal('resolved');
+    should(
+      succeeded(applyAttentionCommand(ledger, { action: 'dismiss', actor: AGENT, id: 'A1', at: SECOND })).change,
+    ).equal('dismissed');
+  });
+
+  it('should restate it with the new change, marked restated, its premise kept as a daemon revision', () => {
+    // Arrange
+    const { ledger } = confirming();
+
+    // Act
+    const result = succeeded(restate(ledger));
+
+    // Assert
+    should(result.change).equal('refreshed');
+    should(result.item?.confirms).deepEqual({ ...NEWER, restated: true });
+    should(result.item?.premise).equal('- after');
+    should(result.item?.revisions).deepEqual([
+      { at: SECOND, by: 'daemon', changed: ['premise'], previous: { premise: '- before' } },
+    ]);
+  });
+
+  it('should hand a restated item back to the owner when it waited on the ferret', () => {
+    // Arrange
+    const { ledger } = confirming();
+    const waiting = succeeded(applyAttentionCommand(ledger, { action: 'reply', actor: HUMAN, id: 'A1', at: SECOND }));
+
+    // Act
+    const result = succeeded(restate(waiting.ledger));
+
+    // Assert
+    should(result.item?.waitingOn).be.undefined();
+    should(result.item?.askedAt).be.undefined();
+  });
+
+  it('should add no revision when only the digest moved, and be no change when nothing did', () => {
+    // Arrange
+    const { ledger } = confirming();
+
+    // Act
+    const sameWords = succeeded(restate(ledger, undefined, NEWER, '- before'));
+    const again = succeeded(restate(sameWords.ledger, undefined, NEWER, '- before'));
+
+    // Assert
+    should(sameWords.item?.revisions).be.undefined();
+    should(sameWords.item?.confirms?.etag).equal(NEWER.etag);
+    should(again.change).equal('unchanged');
+  });
+
+  it('should record no previous premise for an item that had none', () => {
+    // Arrange
+    const { ledger } = raised(AGENT, { ask: CHOICE, confirms: CONFIRMS });
+
+    // Act
+    const result = succeeded(restate(ledger));
+
+    // Assert
+    should(result.item?.revisions?.[0]?.previous).deepEqual({});
+  });
+
+  it('should refuse a restatement from anyone but the daemon, of an unknown item, or of another file', () => {
+    // Arrange
+    const { ledger } = confirming();
+    const plain = raised(AGENT).ledger;
+
+    // Act / Assert
+    should(failed(restate(ledger, HUMAN)).error.code).equal('forbidden');
+    should(failed(restate(ledger, AGENT)).error.code).equal('forbidden');
+    should(failed(restate(ledger, undefined, NEWER, '- after', 'A9')).error.code).equal('not-found');
+    should(failed(restate(ledger, undefined, { ...NEWER, path: 'pack.yaml' })).error).deepEqual({
+      code: 'invalid',
+      message: 'A1 does not confirm a change to pack.yaml',
+    });
+    should(failed(restate(plain)).error.code).equal('invalid');
+  });
+
+  it('should read a stored confirmation back from the ledger', () => {
+    // Arrange
+    const { ledger } = confirming();
+
+    // Act
+    const parsed = parseAttentionLedger(JSON.parse(JSON.stringify(ledger)), SESSION_ID);
+
+    // Assert
+    should(parsed?.entries[0]?.item.confirms).deepEqual(CONFIRMS);
+  });
+});
+
+describe('Attention state machine board cards', () => {
+  it('should keep the card an item was raised against, exactly as sent', () => {
+    // Arrange
+    const task = { id: 'F412' };
+    const remote = { machineId: 'mac', id: 'B7' };
+
+    // Act
+    const local = raised(AGENT, { task });
+    const elsewhere = raised(AGENT, { task: remote });
+
+    // Assert
+    should(local.item?.task).deepEqual(task);
+    should(elsewhere.item?.task).deepEqual(remote);
+    should(AttentionItemSchema.parse(local.item).task).deepEqual(task);
+  });
+
+  it('should raise an item that names no card without one', () => {
+    // Act
+    const created = raised();
+
+    // Assert
+    should(created.item?.task).be.undefined();
   });
 });

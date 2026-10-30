@@ -44,7 +44,7 @@ const NO_REFERENCES: ReferenceCounts = {
 
 /** Session-scoped kinds, with the sentence each one needs. Written as prose the operator reads. */
 const SESSION_SCOPED: readonly {
-  readonly kind: keyof ReferenceCounts;
+  readonly kind: Exclude<keyof ReferenceCounts, 'agenda'>;
   readonly token: string;
   readonly why: string;
 }[] = [

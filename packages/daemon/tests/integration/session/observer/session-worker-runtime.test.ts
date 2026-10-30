@@ -26,6 +26,8 @@ import {
   type TmuxCommandResult,
   type ToSessionWorker,
 } from '../../../../src/lib/index.ts';
+import type { TranscriptSource } from '../../../../src/lib/transcript/types.ts';
+import { waitFor } from '../../support/wait-for.ts';
 
 const NOW = '2026-10-22T08:00:00.000Z';
 const cleanups: (() => Promise<void>)[] = [];
@@ -89,6 +91,8 @@ class ScriptedClient {
   readonly asked: string[] = [];
   watches = 0;
   closed = 0;
+  /** What a client's stop waits on: its process exiting. */
+  exit: Promise<void> = Promise.resolve();
   private listener: ((value: string) => void) | undefined;
 
   client(): WorkerTmuxClient {
@@ -117,8 +121,9 @@ class ScriptedClient {
           script.listener = undefined;
         };
       },
-      close: () => {
+      stop: async () => {
         script.closed += 1;
+        await script.exit;
       },
     };
   }
@@ -144,20 +149,50 @@ async function rig() {
   const pane = new ScriptedClient();
   const posted: FromSessionWorker[] = [];
   const stats: string[] = [];
+  // Every read a look makes goes out through a port that counts it, so "the looks finished" is a fact to wait for.
+  let reading = 0;
+  const counted = async <Value>(work: () => Promise<Value>): Promise<Value> => {
+    reading += 1;
+    try {
+      return await work();
+    } finally {
+      reading -= 1;
+    }
+  };
+  const readingThrough = (inner: NodeTranscriptSource): TranscriptSource => ({
+    harness: inner.harness,
+    read: async (file, options) => await counted(async () => await inner.read(file, options)),
+    follow: (file, options) => inner.follow(file, options),
+    window: (file, options) => {
+      const window = inner.window(file, options);
+      return { file: window.file, next: async () => await counted(async () => await window.next()) };
+    },
+  });
   let now = 1_000;
   let timers: Timer[] = [];
   const subject = new SessionWorkerRuntime({
     post: message => posted.push(message),
-    tmux: () => pane.client(),
+    tmux: () => {
+      const client = pane.client();
+      return Object.create(client, {
+        port: {
+          value: {
+            execute: async (arguments_: readonly string[], stdin?: string) =>
+              await counted(async () => await client.port.execute(arguments_, stdin)),
+          },
+        },
+      }) as WorkerTmuxClient;
+    },
     transcripts: {
-      claude: new NodeTranscriptSource(new ClaudeTranscriptParser()),
-      codex: new NodeTranscriptSource(new CodexTranscriptParser()),
+      claude: readingThrough(new NodeTranscriptSource(new ClaudeTranscriptParser())),
+      codex: readingThrough(new NodeTranscriptSource(new CodexTranscriptParser())),
     },
-    stat: async file => {
-      stats.push(file);
-      const info = await stat(file);
-      return { size: info.size, mtimeMs: info.mtimeMs };
-    },
+    stat: async file =>
+      await counted(async () => {
+        stats.push(file);
+        const info = await stat(file);
+        return { size: info.size, mtimeMs: info.mtimeMs };
+      }),
     clock: { now: () => new Date().toISOString() },
     nowMs: () => now,
     schedule: (delayMs, run) => {
@@ -174,9 +209,12 @@ async function rig() {
     tmux: { executable: '/usr/bin/tmux', socket: '/tmp/s', target: 'fy-a' },
     transcript: { file: transcript, harness: 'claude' },
   };
-  /** Lets every look the runtime started finish: they read a real file. */
+  /** Lets every look the runtime started finish: they read a real file. Quiet is no read in flight after a turn of the loop. */
   const settle = async () => {
-    for (let round = 0; round < 20; round += 1) await Bun.sleep(1);
+    await waitFor(async () => {
+      await new Promise(resolve => setImmediate(resolve));
+      return reading === 0;
+    }, 'every look the runtime started to finish its reads');
   };
   /** Moves the clock, running every timer that comes due, in order. */
   const advance = async (ms: number) => {
@@ -651,5 +689,51 @@ describe('SessionWorkerRuntime — hosting', () => {
     // Assert
     should(lookedByThen).equal(1);
     should(looks().length).equal(2);
+  });
+});
+
+describe('a stopping session worker', () => {
+  it('should answer stopped only once every client it started has exited, the ones it let go before included', async () => {
+    // Arrange — one client let go when the session was rebound, still exiting, and the one it was rebound to.
+    const { subject, pane, posted, attach, send, binding, settle } = await rig();
+    await attach();
+    let exited = (): void => undefined;
+    pane.exit = new Promise<void>(resolve => {
+      exited = resolve;
+    });
+    await send({
+      kind: 'bind',
+      session: 'a',
+      generation: 1,
+      binding: { ...binding, tmux: { ...binding.tmux, socket: '/tmp/other' } },
+    });
+    const stoppedOf = () => posted.filter(message => 'kind' in message && message.kind === 'stopped');
+
+    // Act — the daemon says stop; the clients' processes have not exited yet, then they do.
+    const stopping = subject.handle({ kind: 'stop' });
+    await settle();
+    const beforeExit = stoppedOf().length;
+    exited();
+    await stopping;
+
+    // Assert — both clients were ended, nothing is hosted, and stopped came only after the exits.
+    should(pane.closed).equal(2);
+    should(subject.size).equal(0);
+    should(beforeExit).equal(0);
+    should(stoppedOf()).deepEqual([{ kind: 'stopped' }]);
+  });
+
+  it('should still answer stopped when a client could not say it exited', async () => {
+    // Arrange
+    const { subject, pane, posted, attach } = await rig();
+    await attach();
+    pane.exit = Promise.reject(new Error('the client is gone'));
+
+    // Act
+    await subject.handle({ kind: 'stop' });
+
+    // Assert
+    should(pane.closed).equal(1);
+    should(posted.at(-1)).deepEqual({ kind: 'stopped' });
   });
 });

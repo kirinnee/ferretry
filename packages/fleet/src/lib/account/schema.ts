@@ -183,6 +183,12 @@ export const MACHINE_SHAPE = {
    */
   attentionNudge: z.boolean().default(true),
   /**
+   * The same switch under its new name (wire `agenda.wire.1`). `attentionNudge` is still read until the agenda
+   * removal release. It has NO default so that "written" stays distinguishable from "left out": when both are
+   * written this one wins, and `agendaNudgeEnabled` is the one place that decides, so no consumer ever sees two.
+   */
+  agendaNudge: z.boolean().optional(),
+  /**
    * "Agenda mode for new ferrets" (docs/agenda.md § The machine default): whether a ferret that is started or adopted
    * from now on is told to keep an agenda. On by default. It is recorded on the new ferret once, as `config.agenda`, so
    * a ferret that already exists is never touched and an owner's explicit per-ferret switch always wins. Not a
@@ -193,6 +199,11 @@ export const MACHINE_SHAPE = {
 
 export const MachineSchema = z.strictObject(MACHINE_SHAPE).prefault({});
 export type Machine = z.infer<typeof MachineSchema>;
+
+/** Whether the agenda check is on: `agendaNudge` when written, otherwise the older `attentionNudge`. */
+export function agendaNudgeEnabled(machine: Pick<Machine, 'agendaNudge' | 'attentionNudge'>): boolean {
+  return machine.agendaNudge ?? machine.attentionNudge;
+}
 
 // ── Credential ───────────────────────────────────────────────────────────────────────────────────
 

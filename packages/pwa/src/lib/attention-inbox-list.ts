@@ -16,6 +16,7 @@
 import { type AttentionItem, attentionTitle, type SessionView } from '@ferretry/protocol';
 import { sessionsBarNames } from '../shell/sessions-bar-model.ts';
 import { sortAgenda } from './agenda-status.ts';
+import { sessionAgendaSummary } from './agenda-wire.ts';
 import type { InboxCard, InboxResolved } from './attention-inbox.ts';
 import { visibleWhy } from './attention-inbox.ts';
 import type { DaemonId } from './daemon-connection.ts';
@@ -64,7 +65,7 @@ const buildGroups = (cards: readonly InboxCard[]): readonly FerretGroup[] => {
       ferret: names.ferret ?? names.title,
       task: names.ferret === null ? null : names.title,
       machineName: head.machineName,
-      stopped: head.view.state.attention?.stopped === true,
+      stopped: sessionAgendaSummary(head.view.state)?.stopped === true,
       items: ordered.flatMap(item => byItem.get(item) ?? []),
       notices: members.filter(isNoticeCard),
     };

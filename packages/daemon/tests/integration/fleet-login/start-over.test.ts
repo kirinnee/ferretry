@@ -16,7 +16,9 @@ import should from 'should';
 import { harnessLoginTimer, spawnHarnessLoginChild } from '../../../src/adapters/fleet-login/login-child.ts';
 import { systemPortHolders } from '../../../src/adapters/fleet-login/port-holders.ts';
 import type { CallerGovernance } from '../../../src/lib/api/capability.ts';
+import type { HarnessLoginTimer } from '../../../src/lib/fleet-login/ports.ts';
 import { HarnessLoginService } from '../../../src/lib/fleet-login/service.ts';
+import { waitFor, waitForValue } from '../support/wait-for.ts';
 
 const temporaryDirectories: string[] = [];
 const leftovers: Bun.Subprocess[] = [];
@@ -69,14 +71,37 @@ async function fakeCodex(): Promise<{ readonly binary: string; readonly program:
   return { binary, program };
 }
 
-function service(binary: string, port: number, windowMinutes?: number): HarnessLoginService {
+/** The real timer, except that a test can fire a timer by its delay instead of waiting that long. */
+function drivenTimer() {
+  const armed: Array<{ readonly milliseconds: number; readonly run: () => void }> = [];
+  return {
+    timer: {
+      after: (milliseconds: number, run: () => void) => {
+        armed.push({ milliseconds, run });
+        return harnessLoginTimer.after(milliseconds, run);
+      },
+    },
+    fire: (milliseconds: number): void => {
+      const due = armed.find(entry => entry.milliseconds === milliseconds);
+      if (due === undefined) throw new Error(`no timer was armed for ${milliseconds} ms`);
+      due.run();
+    },
+  };
+}
+
+function service(
+  binary: string,
+  port: number,
+  windowMinutes?: number,
+  timer: HarnessLoginTimer = harnessLoginTimer,
+): HarnessLoginService {
   const created = new HarnessLoginService({
     clock: { now: () => Date.now() },
     mintId: () => crypto.randomUUID().replaceAll('-', ''),
     spawn: spawnHarnessLoginChild,
     deliverCallback: async () => 'delivered',
     environment: { PATH: '/usr/bin:/bin' },
-    timer: harnessLoginTimer,
+    timer,
     clientName: 'fy',
     credentialTargets: {
       target: async credentialId => ({
@@ -100,25 +125,23 @@ function service(binary: string, port: number, windowMinutes?: number): HarnessL
 
 /** Read a flow until it stops starting. */
 async function settledOnto(subject: HarnessLoginService, flowId: string): Promise<HarnessLoginFlow> {
-  for (let tries = 0; tries < 200; tries += 1) {
+  return await waitForValue(async () => {
     const flow = await subject.status(flowId);
-    if (flow.state !== 'starting') return flow;
-    await Bun.sleep(25);
-  }
-  throw new Error('the sign-in never got past starting');
+    return flow.state !== 'starting' ? flow : undefined;
+  }, 'the sign-in to get past starting');
 }
 
-/** Whether this port can be listened on again, allowing the killed child a moment to go. */
+/** Whether this port can be listened on again, once the killed child has gone. */
 async function bindable(port: number): Promise<boolean> {
-  for (let tries = 0; tries < 100; tries += 1) {
+  await waitFor(async () => {
     try {
       await Bun.serve({ hostname: '127.0.0.1', port, fetch: () => new Response('') }).stop(true);
       return true;
     } catch {
-      await Bun.sleep(20);
+      return false;
     }
-  }
-  return false;
+  }, `port ${port} to be bindable again`);
+  return true;
 }
 
 describe('starting a Codex sign-in over, for real', () => {
@@ -161,10 +184,10 @@ describe('starting a Codex sign-in over, for real', () => {
   });
 
   it('should name and leave alone a program that is not a Codex sign-in', async () => {
-    // Arrange — somebody's own server on the port.
-    const port = await freePort();
+    // Arrange — somebody's own server on the port, bound by the OS so no number is ever guessed.
     const { binary } = await fakeCodex();
-    const theirs = Bun.serve({ hostname: '127.0.0.1', port, fetch: () => new Response('theirs') });
+    const theirs = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('theirs') });
+    const port = Number(theirs.port);
     try {
       const subject = service(binary, port);
 
@@ -187,15 +210,16 @@ describe('starting a Codex sign-in over, for real', () => {
   });
 
   it('should end a sign-in whose window closed, and free the port its child held', async () => {
-    // Arrange — a window of a fraction of a second, on the real timer.
+    // Arrange — a window of a fraction of a second, fired by the test rather than waited out.
     const port = await freePort();
     const { binary } = await fakeCodex();
-    const subject = service(binary, port, 0.01);
+    const driven = drivenTimer();
+    const subject = service(binary, port, 0.01, driven.timer);
     const started = await subject.start({ credentialId: 'team', method: 'link' }, BROWSER);
     await settledOnto(subject, started.flowId);
 
     // Act
-    await Bun.sleep(900);
+    driven.fire(0.01 * 60_000);
     const ended = await subject.status(started.flowId);
 
     // Assert

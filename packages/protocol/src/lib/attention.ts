@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TaskRefSchema } from './board-refs.ts';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 
 export const ATTENTION_SCHEMA_VERSION = 1 as const;
@@ -513,6 +514,42 @@ export const AttentionUndeliveredSchema = z.strictObject({
 });
 export type AttentionUndelivered = z.infer<typeof AttentionUndeliveredSchema>;
 
+/** The longest configuration file path a confirmation names: a file under the config directory. */
+export const MAX_ATTENTION_CONFIRMS_PATH_LENGTH = 256;
+/** The most loosenings one confirmation lists, each the daemon's own words for it. */
+export const MAX_ATTENTION_CONFIRMS_CHANGES = 12;
+
+/**
+ * The answers of an item that confirms a held configuration change (docs/agenda.md § Confirming a
+ * configuration change): the option labels ARE the decision, so a card that knows nothing about
+ * confirmations still answers it correctly by choosing one.
+ */
+export const ATTENTION_CONFIRMS_ANSWERS = {
+  /** Put the held change into effect, if it is still the one the card shows. */
+  allow: 'Allow',
+  /** Leave it held: nothing is discarded, the tighter version stays in effect. */
+  deny: 'Deny',
+  /** Put the file back to the version in effect, dropping the held change. */
+  discard: 'Discard change',
+} as const;
+
+/**
+ * THE HELD CONFIGURATION CHANGE an item asks the owner to confirm (`fy agenda add --confirms <file>`):
+ * the file, the digest of the held edit (its etag, so Allow confirms exactly the change the card
+ * shows and never a later one), and each loosening in the daemon's words. `restated` is set when the
+ * held edit changed after the item was raised and the card was re-armed with the new one.
+ */
+export const AttentionConfirmsSchema = z.strictObject({
+  path: singleLine(MAX_ATTENTION_CONFIRMS_PATH_LENGTH),
+  etag: singleLine(MAX_ATTENTION_CONFIRMS_PATH_LENGTH),
+  changes: z.array(singleLine(MAX_ATTENTION_WARNING_LENGTH)).min(1).max(MAX_ATTENTION_CONFIRMS_CHANGES),
+  restated: z.literal(true).optional(),
+});
+export type AttentionConfirms = z.infer<typeof AttentionConfirmsSchema>;
+
+/** The `409` code of an Allow or Discard that found the held change moved on: the card shows the new one. */
+export const ATTENTION_CONFIG_CHANGED_CODE = 'config_changed';
+
 const AttentionItemBaseShape = {
   id: AttentionIdSchema,
   source: AttentionSourceSchema,
@@ -558,6 +595,14 @@ const AttentionItemBaseShape = {
   notice: z.literal(true).optional(),
   /** The ferret asked for the phone to buzz for this notification (`fy notify --ping`). */
   ping: z.literal(true).optional(),
+  /** The held configuration change the owner's Allow puts into effect (`AttentionConfirms`). */
+  confirms: AttentionConfirmsSchema.optional(),
+  /**
+   * The board card this item belongs to (`board.ts`): the card derives "waiting on you" from its open,
+   * blocking items. Absent or `null` reads as "no card": an item raised before cards existed, or by a client
+   * that named none. An older app reading a newer board drops the field.
+   */
+  task: TaskRefSchema.nullable().optional(),
 };
 
 export const AttentionItemSchema = z
@@ -755,8 +800,48 @@ const AddAttentionRequestSchema = z.strictObject({
   notice: z.literal(true).optional(),
   /** The ferret asked for the phone to buzz for this notice; only a notice can ask. */
   ping: z.literal(true).optional(),
+  /**
+   * The configuration file whose HELD change this item asks the owner to confirm (`--confirms`). The daemon
+   * records the held edit's digest and words and writes the card's ask and answers; refused when the file has
+   * no held change.
+   */
+  confirms: singleLine(MAX_ATTENTION_CONFIRMS_PATH_LENGTH).optional(),
+  /**
+   * The board card the item belongs to. A daemon released before this field (4.111 and every older one)
+   * refuses an add that carries it, so a client sends it only to a daemon that reports
+   * `DAEMON_FEATURES.agendaTask`.
+   */
+  task: TaskRefSchema.optional(),
   ...AttentionBriefShape,
 });
+
+/**
+ * What a raise may not say when it CONFIRMS a held configuration change: its answers are fixed (Allow, Deny,
+ * Discard change), so it carries no ask, answers, kind or questions of its own, and it is never a notice.
+ */
+export const attentionConfirmsProblems = (value: {
+  readonly confirms?: string | undefined;
+  readonly notice?: true | undefined;
+  readonly ask?: unknown;
+  readonly answers?: readonly unknown[] | undefined;
+  readonly kind?: string | undefined;
+  readonly questions?: readonly unknown[] | undefined;
+}): string[] => {
+  if (value.confirms === undefined) return [];
+  return [
+    ...(value.notice === undefined ? [] : ['a confirmation is answered, so it is not a notice']),
+    ...(value.ask === undefined
+      ? []
+      : ['a confirmation has no ask of its own: its answers are Allow, Deny and Discard change']),
+    ...(value.answers === undefined
+      ? []
+      : ['a confirmation has no answers of its own: they are Allow, Deny and Discard change']),
+    ...(value.kind === undefined ? [] : ['a confirmation has no kind of its own: it is a choice']),
+    ...(value.questions === undefined
+      ? []
+      : ['a confirmation asks one thing, whether to apply the change: no questions']),
+  ];
+};
 
 export const AttentionActionRequestSchema = z
   .discriminatedUnion('action', [
@@ -829,7 +914,7 @@ export const AttentionActionRequestSchema = z
     for (const [path, message] of attentionAnswerProblems(value.answers ?? [], value.ask)) {
       context.addIssue({ code: 'custom', message, path: path.split('.') });
     }
-    for (const problem of attentionNoticeProblems(value)) {
+    for (const problem of [...attentionNoticeProblems(value), ...attentionConfirmsProblems(value)]) {
       context.addIssue({ code: 'custom', message: problem });
     }
   });

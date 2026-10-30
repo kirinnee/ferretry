@@ -71,6 +71,26 @@ describe('effective configuration with provenance', () => {
     should(row(rows, 'analyticsPricing')).deepEqual({ value: '(empty)', origin: 'default' });
   });
 
+  it('should say that an OS-chosen port is assigned at bind and then recorded', () => {
+    // Arrange
+    const document = { host: '127.0.0.1', port: 0 };
+    const base = {
+      document,
+      config: parseDaemonConfig(document),
+      configFile: CONFIG_FILE,
+      stateHome: STATE_HOME,
+      stateHomeFromEnvironment: false,
+    };
+
+    // Act
+    const rows = describeConfiguration({ ...base, overrides: {} });
+    const flagged = describeConfiguration({ ...base, overrides: { port: 9_100 } });
+
+    // Assert — and a port named on the command line is a claim, so it says nothing of the sort.
+    should(rows.find(candidate => candidate.name === 'port')?.note).match(/operating system assigns the port/u);
+    should(flagged.find(candidate => candidate.name === 'port')?.note).be.undefined();
+  });
+
   it('should attribute a value named on the command line to the flag that named it', () => {
     // Arrange
     const document = { host: '127.0.0.1', port: 7_431 };
@@ -281,5 +301,27 @@ describe('the grant posture a `--check` reports', () => {
 
     // Act + Assert
     should(reachableOffHost(config, none).reachable).be.false();
+  });
+});
+
+describe('the agenda reply-window row', () => {
+  it('should show the resolved value under agenda and say it came from the file when the agenda block is written', () => {
+    // Arrange
+    const document = { agenda: { deadlineWarnHours: 6 } };
+
+    // Act
+    const rows = describeConfiguration({
+      document,
+      config: parseDaemonConfig(document),
+      overrides: {},
+      configFile: CONFIG_FILE,
+      stateHome: STATE_HOME,
+      stateHomeFromEnvironment: false,
+    });
+
+    // Assert
+    should(row(rows, 'agenda').origin).equal('config file');
+    should(row(rows, 'agenda').value).match(/"deadlineWarnHours":6/u);
+    should(row(rows, 'attention').value).equal(row(rows, 'agenda').value);
   });
 });

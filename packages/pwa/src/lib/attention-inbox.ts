@@ -30,6 +30,7 @@ import {
   type SessionAttentionSummary,
   type SessionView,
 } from '@ferretry/protocol';
+import { sessionAgendaSummary } from './agenda-wire.ts';
 import { answerActions, type InboxAction, type SwipeDirection, swipeTargets } from './attention-answers.ts';
 import type { DaemonId } from './daemon-connection.ts';
 import { daemonSessionPath } from './pages/routes.ts';
@@ -66,13 +67,13 @@ export const needsYouCount = (summary: Pick<SessionAttentionSummary, 'open' | 'd
  * session whose only open items are in discussion: it reads as read, not as unread.
  */
 export const sessionAttention = (view: SessionView): SessionAttentionSummary | undefined => {
-  const summary = view.state.attention;
+  const summary = sessionAgendaSummary(view.state);
   return summary === undefined || needsYouCount(summary) === 0 ? undefined : summary;
 };
 
 /** How many open items a row's badge shows: the ones that need the owner. */
 export const unreadCount = (view: SessionView): number => {
-  const summary = view.state.attention;
+  const summary = sessionAgendaSummary(view.state);
   return summary === undefined ? 0 : needsYouCount(summary);
 };
 
@@ -132,7 +133,7 @@ export const attentionFirst = <T>(rows: readonly T[], viewOf: (row: T) => Sessio
 export const withFerretSessions = (sources: readonly AttentionInboxSource[]): readonly UnreadSession[] =>
   sources.flatMap(source =>
     (source.sessions ?? []).flatMap(view => {
-      const attention = view.state.attention;
+      const attention = sessionAgendaSummary(view.state);
       return attention === undefined ? [] : [{ daemonId: source.daemonId, machineName: source.name, view, attention }];
     }),
   );

@@ -78,6 +78,33 @@ describe('the unit tier clock', () => {
     expect(expired).toBe(false);
   });
 
+  it('should hand off-thread results back in the order the calls were made, whatever finishes first', async () => {
+    const order: string[] = [];
+    const slow = crypto.subtle.digest('SHA-512', new Uint8Array(8 << 20)).then(() => order.push('slow, called first'));
+    const fast = crypto.subtle.digest('SHA-256', new Uint8Array(1)).then(() => order.push('fast, called second'));
+    await Promise.all([slow, fast]);
+    expect(order).toEqual(['slow, called first', 'fast, called second']);
+  });
+
+  it('should hand an off-thread result back before a zero-delay timer set after the call', async () => {
+    const order: string[] = [];
+    const digest = crypto.subtle.digest('SHA-256', new Uint8Array(1 << 20)).then(() => order.push('digest'));
+    setTimeout(() => order.push('timer'), 0);
+    await digest;
+    await unitClock.quiet();
+    expect(order).toEqual(['digest', 'timer']);
+  });
+
+  it('should wait out off-thread work in quiet(), however long the machine takes over it', async () => {
+    let landed = false;
+    void crypto.subtle.digest('SHA-512', new Uint8Array(16 << 20)).then(() => {
+      landed = true;
+    });
+    // Five turns: enough for the three calm ones quiet() ends on, far fewer than the digest takes.
+    await unitClock.quiet(5);
+    expect(landed).toBe(true);
+  });
+
   it('should abort an AbortSignal.timeout in virtual time', async () => {
     const signal = AbortSignal.timeout(30_000);
     expect(signal.aborted).toBe(false);

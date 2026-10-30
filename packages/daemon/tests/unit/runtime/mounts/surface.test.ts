@@ -287,6 +287,9 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       confirm: async () => {
         throw new Error('not exercised by the surface inventory');
       },
+      discard: async () => {
+        throw new Error('not exercised by the surface inventory');
+      },
     },
     agentControl: { allows: async () => false },
     identities: { resolve: async () => undefined },
@@ -522,9 +525,15 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     midTurn: async () => 0,
     pane: async () => undefined,
     sendEvidence: async () => ({ readable: false, inputs: [] }),
-    close: () => undefined,
+    close: async () => undefined,
   },
   sessionMigrate: new FakeSessionMigrate(),
+  sessionRestart: {
+    restart: async () => ({ restarted: [], queued: [], skipped: [], failed: [] }),
+    status: async () => ({ outdated: [], queued: [] }),
+    cancel: async () => ({ cancelled: 0 }),
+    drain: async () => undefined,
+  },
   // The quota-failover loop serves no route either, and for the same reason the declared-wait loop
   // does not: a background tick is ended by a timer, not by a request.
   quotaFailover: {
@@ -762,7 +771,7 @@ describe('the mounted daemon surface', () => {
     // total, which git merges without a conflict — exactly how a route goes missing with this test
     // green. Two additions here both have to rewrite the line that carries the terminating `;`.
     const operatorRoutes =
-      115 + // the session table and everything that is not the account model (six of them the send ledger: its read, one send, a retry under the same id, a cancel, an Enter for one typed and not sent, and the hand-off document behind a pointer; one the Enter or erase for a person's own draft in the composer) (three socket-ticket counters gone: a device opens streams inside its session; the operator password's set and unlock routes gone: the passkey step-up replaced them)
+      118 + // the session table and everything that is not the account model (three of them the agenda spellings of the attention routes, kept beside them for the legacy window; six of them the send ledger: its read, one send, a retry under the same id, a cancel, an Enter for one typed and not sent, and the hand-off document behind a pointer; one the Enter or erase for a person's own draft in the composer) (three socket-ticket counters gone: a device opens streams inside its session; the operator password's set and unlock routes gone: the passkey step-up replaced them)
       4 + // the credential sign-in family: start, then read, answer or cancel one flow
       5 + // the MCP sign-in family: its status read, start, finish, cancel and sign out (docs/mcp-oauth.md)
       3 + // every MCP server a ferret sees, for the machine and for one ferret, and checking one (docs/mcp-scopes.md)
@@ -795,6 +804,7 @@ describe('the mounted daemon surface', () => {
       4 + // the configuration files: status, one file, an edit and a confirmation (the agent's door is `none`)
       1 + // an owner's request for a Warden investigation (the "who needs you" feed is `authenticated`, like the status)
       1 + // the owner leaving a ferret alone for longer than the Warden would
+      3 + // restarting the ferrets with out-of-date instructions: the restart, the status and clearing the queue (docs/launch-settings.md)
       1 + // a Restart's stale-settings read: would a relaunch change what this session runs on
       1 + // a cross-harness move's preview: what converting the conversation would carry (docs/migration-cross-harness.md)
       3 + // existing conversations kept as ferrets: the listing, one conversation's preview and the adoption
@@ -809,7 +819,7 @@ describe('the mounted daemon surface', () => {
     // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status,
     // and the WebRTC offer: any paired device may ask for a shorter path to its own daemon (§16).
     // It gained the tunnel read too: whether a machine has a tunnel is not a secret (§15).
-    should(minima).deepEqual({ none: 7, authenticated: 10, operator: operatorRoutes, 'admin-token': 1 });
+    should(minima).deepEqual({ none: 7, authenticated: 11, operator: operatorRoutes, 'admin-token': 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual([
@@ -982,6 +992,9 @@ describe('the mounted daemon surface', () => {
       'GET /v1/sessions/:sessionId/relaunch-settings',
       'POST /v1/sessions/:sessionId/conversion-preview',
       'POST /v1/sessions/:sessionId/migrate',
+      'POST /v1/restarts',
+      'GET /v1/restarts',
+      'DELETE /v1/restarts',
       'POST /v1/sessions/:sessionId/handover',
       'GET /v1/sessions/:sessionId/handover',
       'POST /v1/sessions/:sessionId/handover/cancel',
@@ -1022,6 +1035,9 @@ describe('the mounted daemon surface', () => {
       'GET /v1/sessions/:sessionId/attachments/:attachmentId',
       'POST /v1/sessions/:sessionId/attachments/:attachmentId/unlock',
       'DELETE /v1/sessions/:sessionId/attachments/:attachmentId/unlock',
+      'GET /v1/sessions/:sessionId/agenda',
+      'POST /v1/sessions/:sessionId/agenda',
+      'POST /v1/sessions/:sessionId/agenda/replies',
       'GET /v1/sessions/:sessionId/attention',
       'POST /v1/sessions/:sessionId/attention',
       'POST /v1/sessions/:sessionId/attention/replies',
@@ -1124,6 +1140,7 @@ describe('the mounted daemon surface', () => {
       'GET /v1/warden/verdicts',
       'GET /v1/warden/report',
       'POST /v1/warden/run',
+      'GET /v1/warden/agenda',
       'GET /v1/warden/attention',
       'POST /v1/warden/investigate',
       'POST /v1/warden/leave',

@@ -23,7 +23,9 @@ import type {
   TerminalRuntimePort,
 } from '../../../src/lib/index.ts';
 import { AGENT_SESSION_CAPABILITY_HEADER } from '../../../src/lib/runtime/mounts/agent-tools.ts';
+import { OS_CHOSEN_PORT, recordedPort } from '../support/os-port.ts';
 import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
+import { waitFor, waitForValue } from '../support/wait-for.ts';
 
 /**
  * The agent tools, driven end to end through the production composition root.
@@ -42,18 +44,6 @@ import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../supp
 const WRAPPER = 'claude-auto-tools';
 const ACCOUNT = '00000000-0000-4000-8000-000000000a71';
 const SECRET = 'correct-horse-battery-staple';
-
-function boundPort(server: { readonly port?: number }): number {
-  if (server.port === undefined) throw new Error('the fixture server reported no port');
-  return server.port;
-}
-
-async function freeLoopbackPort(): Promise<number> {
-  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('probe') });
-  const port = boundPort(server);
-  await server.stop(true);
-  return port;
-}
 
 /** Records a launch instead of spawning an agent pane; the session documents stay real. */
 class RecordingSessionLauncher implements SessionLifecycleLauncher {
@@ -238,23 +228,20 @@ async function seedFleet(home: string): Promise<void> {
   );
 }
 
-async function untilListening(port: number): Promise<void> {
-  for (let attempt = 0; attempt < 600; attempt += 1) {
-    if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) return;
-    await Bun.sleep(50);
-  }
-  throw new Error('the daemon never started listening');
-}
+const untilListening = (port: number): Promise<void> =>
+  waitFor(
+    async () => (await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true,
+    'the daemon to start listening',
+  );
 
 /** The world under test, with the session credentials each session was delivered. */
 async function bootAgentToolsDaemon(home: string) {
-  const port = await freeLoopbackPort();
   const cleanups: Array<() => void | Promise<void>> = [];
   const terminals = new RecordingTerminals();
   const browser = new FakeBrowser();
   const launcher: BrowserSessionLauncher = { launch: async () => browser.automation };
   let release = (): void => {};
-  await seedHome(home, port);
+  await seedHome(home, OS_CHOSEN_PORT);
   const shutdown = new Promise<void>(resolve => {
     release = resolve;
   });
@@ -267,6 +254,7 @@ async function bootAgentToolsDaemon(home: string) {
   };
   await seedFleet(home);
   const exit = start(world, cleanups);
+  const port = await recordedPort(home);
   await untilListening(port);
   const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
   const base = `http://127.0.0.1:${port}`;
@@ -503,8 +491,11 @@ describe('the agent tools, through the production composition root', () => {
       headers: daemon.human,
       body: JSON.stringify({}),
     });
-    await Bun.sleep(100);
-    const stoppedCredential = await tool(marinCapability, { tool: 'terminal.list' });
+    await waitFor(() => !daemon.browser.has('page-5'), "the stopped session's pages to close");
+    const stoppedCredential = await waitForValue(async () => {
+      const refused = await tool(marinCapability, { tool: 'terminal.list' });
+      return refused.status === 403 ? refused : undefined;
+    }, "the stopped session's credential to be refused");
 
     const audit = AuditViewSchema.parse(
       await (await fetch(`${daemon.base}/v1/audit?limit=200`, { headers: daemon.human })).json(),

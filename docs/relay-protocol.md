@@ -1822,15 +1822,31 @@ truncated body, because a client that rendered half a session list would show a 
 exist. The daemon reassembles at most four request bodies per session at once. There is no
 `oversize` record any more.
 
-**A client bounds its WHOLE records, not its parts.** The reference client ends a session when more
-than one credit window of records is waiting to leave it, because a deeper queue means the daemon has
-stopped returning credit. Only whole records count: a body's later parts were bounded when their
-request was, and a phone photo alone is some eighty of them. Counting them ended the session the
-moment a second upload — or any poll — queued behind one photo, and failed every request on it at
-once (the owner's batch of 21 photos, 2026-10-29). And because one session is one queue, the reference
-client sends a body large enough to need parts on a **second request session** of its own, so the reads
-every panel polls never wait behind an upload: a poll that missed its deadline there would retire the
-session carrying the uploads. Nothing on the wire changed; it is one more session per device.
+**A client's own queue never ends its session.** Everything waiting to leave a client is that
+client's own: a surface that fires its reads in one tick queues them all before the first is even
+sealed, so a queue deeper than one credit window says nothing about the daemon — the window has not
+had a round trip to refill. The reference client used to end the session there, and every request on
+it failed at once: first for a phone photo's eighty parts queued behind one another (the owner's batch
+of 21 photos, 2026-10-29), then for a burst of whole reads — the inbox reading one attention board per
+session — reported to the owner as `4400` "too many records waiting on credit" and as a Cloudflare
+tunnel that "was not reachable" (2026-10-30). So the reference client queues requests in order and
+sends each as credit allows. What bounds the queue is admission: at most 256 whole requests wait
+(`MAX_QUEUED_REQUESTS` in `packages/pwa/src/lib/relay-session.ts`), and the one past that is refused
+**unsent** with a retryable error while every queued one keeps its place. A request whose caller gives
+up before it leaves is withdrawn — parts and all — and is never sent; one that waits 30 s for credit is
+withdrawn the same way. A daemon that has genuinely stopped returning credit is found by those
+deadlines and by the callers' own, which retire the session; it is never inferred from depth. And
+because one session is one queue, the reference client sends a body large enough to need parts on a
+**second request session** of its own, so the reads every panel polls never wait behind an upload: a
+poll that missed its deadline there would retire the session carrying the uploads. Nothing on the wire
+changed; it is one more session per device.
+
+**A daemon bounds its WHOLE answers, not their parts.** The reference daemon ends a session when more
+than one credit window of whole answers is waiting for the browser's credit, because answers pile up
+only behind a peer that has stopped reading. A large answer's later parts do not count: they were
+bounded when the answer was cut, and counting them ended the session whenever any request finished
+behind one answer of more parts than the window. A stream's payload is bounded by the stream's own
+overflow policy (below), not by this rule.
 
 Answers carry an `id` because the daemon replies in whatever order its own handlers finish. Sequence
 numbers order the wire; they do not order the work.

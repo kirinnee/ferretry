@@ -47,6 +47,7 @@ import type { ApiRequest } from '../../../src/lib/api/http.ts';
 import { LiveDeviceConnections } from '../../../src/lib/pairing/index.ts';
 import { DirectSession } from '../../../src/lib/relay/direct-carrier.ts';
 import { WebRtcCarrier } from '../../../src/lib/webrtc/index.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 const crypto_ = new WebCryptoRelayCrypto();
 const DEVICE_ID = `fy_device_id_${'w'.repeat(22)}`;
@@ -179,11 +180,7 @@ function listen(peer: PeerConnection, channel: DataChannel): Client {
 }
 
 async function until(what: string, condition: () => boolean): Promise<void> {
-  for (let waited = 0; waited < 5_000; waited += 5) {
-    if (condition()) return;
-    await new Promise(resolve => setTimeout(resolve, 5));
-  }
-  throw new Error(`timed out waiting for ${what}`);
+  await waitFor(condition, what);
 }
 
 /** The client half of §6 over the channel, after the daemon's `ready`. */

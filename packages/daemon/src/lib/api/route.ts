@@ -348,5 +348,12 @@ export interface ApiRoute extends ScopedRoute {
   /** Set when the response may carry credentials, working-tree bytes, or a live machine feed whose
    *  entire value is freshness. */
   readonly noStore?: boolean;
+  /**
+   * An older spelling of a route, kept for older clients until the agenda removal release
+   * (docs/agenda.md § Compatibility). The dispatcher records every hit on one (the legacy-use counter), so
+   * the release that removes it can wait for a quiet fortnight. It changes nothing about who may reach the
+   * route: the twin declares the same grants.
+   */
+  readonly legacy?: true;
   handle(context: RouteContext): Promise<ApiResponse>;
 }

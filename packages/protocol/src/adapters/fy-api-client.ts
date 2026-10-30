@@ -15,10 +15,9 @@ import { ApiErrorResponseSchema, NonNegativeIntegerSchema, PositiveIntegerSchema
 import { CONFIG_CHANGE_TOPIC, type ConfigChangeFrame, ConfigChangeFrameSchema } from '../lib/config-changes.ts';
 import {
   classifyDaemonUnreachable,
-  DAEMON_STARTING_CODE,
   type DaemonAttempt,
   type DaemonRestartPatience,
-  DaemonStartingError,
+  daemonStartingOf,
   waitOutDaemonRestart,
 } from '../lib/daemon-restart.ts';
 import {
@@ -129,8 +128,17 @@ import {
   type SessionLiveActivity,
   type SessionTranscriptMoved,
 } from '../lib/session-live.ts';
+import {
+  type RestartCancelResult,
+  RestartCancelResultSchema,
+  type RestartRequest,
+  RestartRequestSchema,
+  type RestartResult,
+  RestartResultSchema,
+  type RestartStatus,
+  RestartStatusSchema,
+} from '../lib/session-restart.ts';
 import { type SessionTranscriptPage, SessionTranscriptPageSchema } from '../lib/session-transcript.ts';
-import { type TranscriptImageDownload, TranscriptImageDownloadSchema } from '../lib/transcript-images.ts';
 import {
   type MachineSkillsInventory,
   MachineSkillsInventorySchema,
@@ -140,6 +148,7 @@ import {
   SkillFileSchema,
 } from '../lib/skills-inventory.ts';
 import { TaskBoardChildGrantRequestSchema, TaskBoardGrantRequestViewSchema } from '../lib/task-boards.ts';
+import { type TranscriptImageDownload, TranscriptImageDownloadSchema } from '../lib/transcript-images.ts';
 import { type SessionHandoff, SessionHandoffNameSchema, SessionHandoffSchema } from '../lib/turn-handoff.ts';
 import {
   detectVersionSkew,
@@ -589,14 +598,8 @@ export class FyApiClient implements IFyApiClient {
     const deadline = AbortSignal.timeout(timeoutMs);
     const signal = init.signal == null ? deadline : AbortSignal.any([init.signal, deadline]);
     const response = await this.#transport.send(`${this.#baseUrl}${path}`, { ...init, headers, signal });
-    if (response.status !== 503) return response;
-    const body = ApiErrorResponseSchema.safeParse(
-      await response
-        .clone()
-        .json()
-        .catch(() => undefined),
-    );
-    if (body.success && body.data.code === DAEMON_STARTING_CODE) throw new DaemonStartingError(body.data.error);
+    const starting = await daemonStartingOf(response);
+    if (starting !== undefined) throw starting;
     return response;
   }
 
@@ -991,6 +994,24 @@ export class FyApiClient implements IFyApiClient {
       { agent, ...(model === undefined ? {} : { model }) },
       ConversionPreviewSchema,
     );
+  }
+
+  /** Restarts the ferrets `request` names now, and queues the busy ones; at most once per request id. */
+  restart(request: RestartRequest, requestId?: string): Promise<RestartResult> {
+    const init = jsonRequest('POST', RestartRequestSchema, request);
+    const headers = new Headers(init.headers);
+    headers.set(FY_REQUEST_ID_HEADER, NonEmptyValueSchema.parse(requestId ?? this.#requestId()));
+    return this.request('/v1/restarts', RestartResultSchema, { ...init, headers });
+  }
+
+  /** The outdated ferrets and the restarts waiting for an idle moment. */
+  restartStatus(): Promise<RestartStatus> {
+    return this.request('/v1/restarts', RestartStatusSchema);
+  }
+
+  /** Clears every waiting restart. */
+  cancelRestarts(): Promise<RestartCancelResult> {
+    return this.request('/v1/restarts', RestartCancelResultSchema, { method: 'DELETE' });
   }
 
   handover(id: string, request: SessionHandoverRequestInput, requestId?: string): Promise<SessionHandoverReceipt> {

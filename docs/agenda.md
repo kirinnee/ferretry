@@ -93,6 +93,50 @@ A notice is a plain notification: `notice: true` on the raise request. No ask, n
 reference it. `ping: true` asks for the phone to buzz and is only valid on a notice. `fy notify` raises one
 (the older `fy attention notify` still works, deprecated).
 
+## Confirming a configuration change
+
+An edit that loosens what the machine may spend or do is **held** until the owner confirms it
+([config-files.md](config-files.md#how-a-file-is-read)). A ferret must not confirm, so it raises a card whose
+**Allow is the confirmation** — the owner answers it and nothing else has to be run:
+
+```
+fy agenda add "Allow the Jev price correction?" --title "Jev price correction" --confirms warden.yaml
+```
+
+- **Raising.** `--confirms <file>` names the file; the daemon looks up its held edit and records on the item
+  (`confirms`) the edit's digest — its etag, the same one `fy config confirm` confirms by — and each loosening
+  in the daemon's words. The caller never supplies either. A file with no held change is refused and nothing
+  is raised. The daemon writes the card: a choice of **Allow** (swipe right), **Deny** (left) and **Discard
+  change** (up), and a premise that is the change itself followed by "Allow applies this change to
+  warden.yaml." (the raiser's own `--premise` follows, when it fits). `--kind`, `--option`, `--question` and
+  `--up` are refused beside `--confirms`.
+- **Allow** puts the held edit into effect **only if it still has the recorded digest**. If the file was edited
+  after the card was raised, nothing is confirmed: the card is restated with the change as it is now
+  (`confirms.restated`, the new premise kept as a daemon revision, the owner's turn again) and the answer is
+  refused `409 config_changed` so the owner reads it again. If no change waits any more (confirmed elsewhere,
+  reverted), the card is closed and the answer refused `409` saying so.
+- **Deny** closes the card and touches nothing: the held edit stays held, the tighter version in effect.
+- **Discard change** drops the held edit — the file goes back to the version in effect (a new file that was
+  never in effect is removed) — under the same digest rule.
+- The ferret reads the outcome with the owner's answer: `confirmed warden.yaml: the change is in effect`,
+  `denied: …`, `discarded …`, then the owner's own note.
+
+**Who may answer.** Only the owner, enforced in the daemon, never in the app:
+
+| Caller                                                       | Allow / Discard change                                                                                                         |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| `fy` at the machine (admin token, ungoverned)                | yes, as `fy config confirm` is                                                                                                 |
+| a paired device (the app), relayed or not                    | the file's grant on `configure`; Allow also a passkey proved for the act (`loosen-config`), which the app asks for and resends |
+| a ferret's own `fy agenda done --choice Allow` (its session) | refused `403`, before the file or the card is touched                                                                          |
+| an agent token (a warden, any `peer:`/`warden:` caller)      | refused `403`                                                                                                                  |
+| a caller nothing can say the grants of                       | refused `403`                                                                                                                  |
+
+The rule is the config files' own (`heldEditRefusal`, shared with `POST /v1/config/confirm`), and the state
+machine refuses any non-owner answer to such an item a second time. A ferret may still close its own card
+unanswered (`fy agenda dismiss`). As for every admin-token caller, telling the owner's shell from a ferret's
+rests on the session header the CLI sends ([grants.md](grants.md)): an honest-client boundary, not a
+cryptographic one — the same boundary `fy config confirm` has.
+
 ## Verbs
 
 `fy agenda add | edit | step | show | ls | history | surface | done | dismiss | needs-info | discuss | send-now`
@@ -124,17 +168,17 @@ cleared is a bug.
 ## Delivery
 
 How the owner's card actions — an answer, a done, a dismiss, a Discuss or a request for more information —
-reach the ferret (`AttentionReplyBatcher`, `packages/daemon/src/lib/attention/reply-batch.ts`; the class and
-the files below keep their old names until a later release renames them). The owner's words that drove it:
+reach the ferret (`AttentionReplyBatcher`, `packages/daemon/src/lib/attention/reply-batch.ts`; the class keeps
+its old name until a later release renames it; its files are [on disk](#on-disk) under the agenda names). The owner's words that drove it:
 "only on receipt (the harness receive the 'card reply'), then it can be considered 'DONE', else it surfaces
 back as a card again".
 
-1. **Held.** The action goes to the ferret's outbox (`attention-replies.json`, beside the agenda's own
+1. **Held.** The action goes to the ferret's outbox (`agenda-replies.json`, beside the agenda's own
    file). It is due **10 seconds after the last card action**: every further action on that ferret's cards
    restarts the countdown, and the first one never waits more than **2 minutes**. The agenda says so:
    `replies: {pending, dueAt, heldForTurn?}` on every `GET` and `POST` of the agenda route
-   (`/v1/sessions/:id/attention`, renamed in a later release). "Send now"
-   (`POST /v1/sessions/:id/attention/replies`, `fy agenda send-now`) skips the countdown.
+   (`/v1/sessions/:id/agenda`; older clients use `/attention`, see [Compatibility](#compatibility)). "Send now"
+   (`POST /v1/sessions/:id/agenda/replies`, `fy agenda send-now`) skips the countdown.
 2. **Waiting for the turn.** A due batch waits while the ferret's `turnState` is `working`, and later
    answers join it. It is looked at again every 5 seconds and goes once the turn ends. Past 15 minutes it
    goes through the ordinary send path anyway, which queues natively. A state that cannot be read
@@ -156,14 +200,14 @@ back as a card again".
    or Retry", and Retry posts `{...reply, id}`, the same action again. The owner's next action on the
    item clears the mark. An agenda already full of open items keeps the answer closed.
 
-| Key in `config/daemon.json`          | Default | Range (whole seconds) | What it bounds                                   |
-| ------------------------------------ | ------- | --------------------- | ------------------------------------------------ |
-| `attention.replySettleSeconds`       | 10      | 1–3600                | the quiet time after the last card action        |
-| `attention.replyMaxWaitSeconds`      | 120     | 1–3600                | the longest the first action waits               |
-| `attention.replyComposerWaitSeconds` | 600     | 10–86400              | waiting for an empty composer, past the cap      |
-| `attention.replyReceiptSeconds`      | 900     | 30–86400              | waiting for the transcript's proof after sending |
+| Key in `config/daemon.json`       | Default | Range (whole seconds) | What it bounds                                   |
+| --------------------------------- | ------- | --------------------- | ------------------------------------------------ |
+| `agenda.replySettleSeconds`       | 10      | 1–3600                | the quiet time after the last card action        |
+| `agenda.replyMaxWaitSeconds`      | 120     | 1–3600                | the longest the first action waits               |
+| `agenda.replyComposerWaitSeconds` | 600     | 10–86400              | waiting for an empty composer, past the cap      |
+| `agenda.replyReceiptSeconds`      | 900     | 30–86400              | waiting for the transcript's proof after sending |
 
-The keys keep their old `attention.` prefix until a later release renames them. A settle longer than the
+The older `attention.` spellings of these keys are still read ([Compatibility](#compatibility)). A settle longer than the
 max wait is **refused** by the config check, not clamped. All four are read at start.
 
 - **Exactly once per item.** An item held, sending or delivered is never queued again. A batch is sent
@@ -174,8 +218,75 @@ max wait is **refused** by the config check, not clamped. All four are read at s
   `instructions~<digest>`, and belongs to no item.
 - **Durable.** A daemon restarted before a batch was accepted re-sends it under the same id; one
   restarted after looks for its proof. Answers held across a restart are delivered once it is back.
-- **A damaged outbox** is set aside as `attention-replies.json.damaged-<id>` and a fresh one starts, so it
+- **A damaged outbox** is set aside as `agenda-replies.json.damaged-<id>` and a fresh one starts, so it
   never stops later answers.
 - **Why this replaced the old outbox.** The old one recorded a batch as delivered the moment it was handed
   over, and swallowed a refusal. A ferret whose composer held text (a person mid-message, or a stranded
   draft) refused the send, and the owner's Discuss or answer was lost while the agenda said it had gone.
+
+## Compatibility
+
+The agenda was called Attention, and its wire still carries that name for older apps and CLIs. The app ships from
+`main` the moment a change merges while a daemon changes only after a release and `fy daemon update`, so for a while
+every combination of old and new meets.
+
+### Both spellings, one window
+
+| Older name (still answered)               | Agenda name                       | Today                                                                      |
+| ----------------------------------------- | --------------------------------- | -------------------------------------------------------------------------- |
+| `GET/POST /v1/sessions/:id/attention`     | `/v1/sessions/:id/agenda`         | both served, same handler and grants                                       |
+| `POST /v1/sessions/:id/attention/replies` | `/v1/sessions/:id/agenda/replies` | both served                                                                |
+| `GET /v1/warden/attention`                | `/v1/warden/agenda`               | both served                                                                |
+| `SessionState.attention`                  | `SessionState.agenda`             | both written, same value                                                   |
+| journal `attention.*` events              | `agenda.*`                        | new names written; readers accept both                                     |
+| `machine.yaml` `attentionNudge`           | `agendaNudge`                     | both read, the new one wins; config check warns                            |
+| `config/daemon.json` `attention.{…}`      | `agenda.{…}`                      | both read, key by key the new one wins; a start notice names the old block |
+| push kind `attention`, tag, `?attention=` | `agenda`, `?agenda=`              | old still SENT; apps read both                                             |
+| handover `references.attention` count     | `references.agenda`               | old still written; new accepted                                            |
+
+The last two rows are still sent the old way on purpose: an older app's service worker drops a push kind it does not
+know, and the handover counts are a strict object an older reader refuses an unknown key in.
+
+### On disk
+
+A ferret's session directory holds the agenda as `agenda.json` and its held answers as `agenda-replies.json`; releases
+before the rename called them `attention.json` and `attention-replies.json`. The daemon **reads the new name, else the
+old one, and always writes the new one**, so a daemon upgraded or downgraded in between never loses an item.
+
+- **Once, at start**, the daemon moves each session's old file to the new name: it writes the new file whole, reads it
+  back and requires it equal, and only then renames the old file to `*.migrated`. A crash at any step leaves a file the
+  reader still understands; the next start finishes it.
+- **Both files present** (a crash between the two steps, or a downgrade and an upgrade): the newer document stays and the
+  other becomes `*.migrated`. A ledger is newer by its `updatedAt`, then its `nextId`; an outbox has no clock, so it is
+  dated by the latest instant of any answer in it. A tie keeps the new name.
+- **A damaged old file is left exactly where it is** and the session counts as failed: the reader still reads or sets it
+  aside as before, and the next start tries again. The marker `agenda-files-migration.json` in the daemon's home is
+  written only when every session succeeded, and the migration never stops the daemon starting.
+- **`*.migrated` files are kept for one release.** The release after the one that migrated may delete them.
+- Records already in `notifications.jsonl` keep their `attention:` keys and their `attention` origin; new ones are
+  written `agenda:`, and a repeat check treats the two spellings as one key. A daemon-written send id is read the same
+  way: `attention-…` and `agenda-…` name one send.
+
+### How each end finds out
+
+A daemon that speaks the agenda names lists `agenda.wire.1` in `features` on `GET /v1/health`. The app reads that per
+machine and dials the agenda routes only where it is listed; until it knows, it uses the older routes, which every
+daemon answers. The CLI dials the agenda route and, on a `404` with `code: "unknown_route"`, retries the older one once
+and keeps using it for that daemon.
+
+### Watching for older clients
+
+Each older route is marked legacy. The daemon records every use of one — route, first and last time, count and the
+caller's `x-fy-version` — in `legacy-wire-use.json` in its home, reports it on `GET /v1/health` as `legacyWire`, and
+`fy doctor` prints it ("older clients still use …" or "no older clients seen for 14 days"). It counts only requests that
+passed authorization and writes the file at most once a minute (and on shutdown). `GET /v1/health` needs no
+credential, so the report — route patterns, times and client versions, never a session or a body — is public to
+anyone who can reach the daemon, like the rest of health. A server cannot see which
+field a client reads; an app that reads `state.attention` also dials the older routes, so the routes stand in for it.
+
+### The removal release
+
+One release removes the older names and switches the rows still sent the old way (push kind, tag and link, the
+handover count). It ships no earlier than **the second minor release after the one that added `agenda.wire.1`**, and
+only once **every daemon you run shows no older-client use for 14 days** in `fy doctor`. Until then nothing here may
+be removed.

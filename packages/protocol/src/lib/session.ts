@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { SessionAttentionSummarySchema } from './attention.ts';
+import { BoardProjectIdSchema, TaskRefSchema } from './board-refs.ts';
 import {
   ApiErrorResponseSchema,
   InstantSchema,
@@ -481,6 +482,17 @@ export const SessionConfigSchema = z.object({
   label: z.string().optional(),
   parent: z.string().optional(),
   /**
+   * The board this session works on (`board-design.md` §2.2): resolved once at start — inherited from the
+   * parent, else the project its cwd is in, else `unfiled` — and kept. Absent for a session started before
+   * boards existed.
+   */
+  projectId: BoardProjectIdSchema.optional(),
+  /**
+   * The one card this session's activity is attributed to ("last touched"). Set when the session's card is
+   * created, by `fy task focus`, and by any write the session makes to a card. Absent: no card yet.
+   */
+  focusTask: TaskRefSchema.optional(),
+  /**
    * The spawn-side warden stamp: who caused this session to exist, and whether it descends from a
    * warden.
    *
@@ -667,9 +679,9 @@ export const LaunchInstructionSectionIdSchema = z.enum([
 export type LaunchInstructionSectionId = z.infer<typeof LaunchInstructionSectionIdSchema>;
 
 /**
- * One appended section, by name and size. The text itself is never carried — only, for the sections every
- * agent gets, a short fingerprint of it (`@ferretry/fleet` `instructionDigest`), so the daemon can tell
- * which of them changed since the launch. Absent on a record made before fingerprints were kept.
+ * One appended section, by name and size. The text itself is never carried — only a short fingerprint of it
+ * (`@ferretry/fleet` `instructionDigest`), so the daemon can tell which sections changed since the launch
+ * (live-patched, or outdated until a restart). Absent on a record made before fingerprints were kept.
  */
 export const LaunchInstructionSectionSchema = z.object({
   id: LaunchInstructionSectionIdSchema,
@@ -724,8 +736,13 @@ export const SessionStateSchema = z.object({
   nudgedAt: InstantSchema.optional(),
   needsHuman: z.string().optional(),
   needsHumanKind: z.string().optional(),
-  /** The open Attention items waiting on the owner; absent when none is open. */
+  /** The older spelling of `agenda` (same value), read by apps from before `agenda.wire.1`. */
   attention: SessionAttentionSummarySchema.optional(),
+  /**
+   * The open agenda items waiting on the owner; absent when none is open. The daemon writes it beside the
+   * older `attention` (same value) until the agenda removal release; a client reads `agenda ?? attention`.
+   */
+  agenda: SessionAttentionSummarySchema.optional(),
   contextPercent: z.number().finite().min(0).max(100).optional(),
   contextTokens: NonNegativeIntegerSchema.optional(),
   contextWindow: PositiveIntegerSchema.optional(),
@@ -774,9 +791,21 @@ export const SessionStateSchema = z.object({
 });
 export type SessionState = z.infer<typeof SessionStateSchema>;
 
+/**
+ * A running ferret whose appended system prompt is not what a launch now would give it: the sections that
+ * differ (changed words, or a section switched on or off), minus any the daemon already told it in a
+ * live `[instructions updated]` turn. Derived when the view is read, never stored.
+ */
+export const SessionOutdatedSchema = z.strictObject({
+  sections: z.array(LaunchInstructionSectionIdSchema).min(1),
+});
+export type SessionOutdated = z.infer<typeof SessionOutdatedSchema>;
+
 export const SessionViewSchema = z.object({
   config: SessionConfigSchema,
   state: SessionStateSchema,
+  /** Present only while the running ferret carries out-of-date instructions (`fy restart --outdated`). */
+  outdated: SessionOutdatedSchema.optional(),
   directory: z.string().min(1),
   /**
    * The highest event sequence this session's journal held when the view was read: where a reader

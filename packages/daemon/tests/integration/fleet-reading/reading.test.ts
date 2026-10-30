@@ -20,6 +20,7 @@ import { FileEventHub } from '../../../src/lib/file-events/hub.ts';
 import { FleetReading } from '../../../src/lib/fleet-reading/service.ts';
 import type { HousekeepingJob } from '../../../src/lib/housekeeping/protocol.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 const HOUR = 3_600_000;
 const segment = (value: unknown): string => Buffer.from(JSON.stringify(value)).toString('base64url');
@@ -47,14 +48,27 @@ interface Rig {
 
 let rig: Rig;
 
-/** Waits until `done` holds, or fails after `ms`. */
-async function until(done: () => boolean | Promise<boolean>, ms = 2_000): Promise<number> {
-  const started = Date.now();
-  while (!(await done())) {
-    if (Date.now() - started > ms) throw new Error(`not within ${String(ms)} ms`);
-    await Bun.sleep(10);
-  }
-  return Date.now() - started;
+/** Waits until `done` holds. */
+async function until(done: () => boolean | Promise<boolean>, what: string): Promise<void> {
+  await waitFor(done, what);
+}
+
+let sentinelPercent = 50;
+
+/**
+ * Prove the watcher has delivered everything written before this call: change the passive file once
+ * more and wait until the reading answers with that change. Events of one directory arrive in order, so
+ * an unwanted event written earlier has had its chance to show before this one does.
+ */
+async function drained(): Promise<void> {
+  sentinelPercent += 1;
+  const expected = sentinelPercent;
+  await statusLine(rig.root, expected);
+  await until(
+    async () =>
+      (await rig.reading.passiveUsage({ id: 'work', resolution: rig.work }))?.fiveHour?.usedPercent === expected,
+    `the reading to answer the sentinel statusLine write (${expected} %)`,
+  );
 }
 
 /** `fy statusline`'s write: a temporary file in the same directory, then a rename over the real name. */
@@ -142,13 +156,19 @@ beforeEach(async () => {
   await reading.start(() => undefined);
   rig = { root, work, cx, rollout, reading, ports, jobs, stats, hub };
   // The first reads: each passive file once, and the stores' facts once.
-  await until(() => jobs.filter(job => job.kind.startsWith('usage.passive')).length >= 2);
+  await until(
+    () => jobs.filter(job => job.kind.startsWith('usage.passive')).length >= 2,
+    'the first read of each passive file',
+  );
   await ports.local(work);
   await ports.local(cx);
   // A directory's first check reports every file in it once; let that pass before measuring.
   await statusLine(root, 1);
-  await until(() => jobs.filter(job => job.kind === 'usage.passive.claude').length >= 2);
-  await Bun.sleep(100);
+  await until(
+    () => jobs.filter(job => job.kind === 'usage.passive.claude').length >= 2,
+    'the statusLine rename to be read',
+  );
+  await drained();
   jobs.length = 0;
   stats.length = 0;
 });
@@ -171,11 +191,12 @@ describe('the fleet reading on a real file system', () => {
       await rig.ports.local(rig.work);
       await rig.ports.local(rig.cx);
     }
-    await Bun.sleep(200);
+    await drained();
 
-    // Assert
-    should(rig.jobs).deepEqual([]);
-    should(rig.stats).deepEqual([]);
+    // Assert — the only thing read is the sentinel statusLine `drained` wrote to prove the quiet.
+    const passiveFile = new FilePassiveUsageStore(rig.root).path('work');
+    should(rig.jobs.every(job => job.kind === 'usage.passive.claude')).be.true();
+    should(rig.stats.filter(path => path !== passiveFile)).deepEqual([]);
   });
 
   it('should answer a statusLine rename with one passive job and nothing else', async () => {
@@ -185,6 +206,7 @@ describe('the fleet reading on a real file system', () => {
     await statusLine(rig.root, 22);
     await until(
       async () => (await rig.reading.passiveUsage({ id: 'work', resolution: rig.work }))?.fiveHour?.usedPercent === 22,
+      'the reading to answer the last statusLine write',
     );
     const seen = await rig.reading.passiveUsage({ id: 'work', resolution: rig.work });
 
@@ -201,8 +223,11 @@ describe('the fleet reading on a real file system', () => {
 
     // Act
     await writeFile(rig.work.credentialFile, claudeBlob('rotated-TESTONLY'));
-    await until(() => rig.jobs.some(job => job.kind === 'credential.local'), 10_000);
-    await Bun.sleep(50);
+    await until(() => rig.jobs.some(job => job.kind === 'credential.local'), 'the rewritten login to be re-read');
+    await until(
+      async () => (await rig.ports.local(rig.work)).fingerprint !== before.fingerprint,
+      'the re-read login to be answered',
+    );
     const reads = rig.jobs.length;
     const after = await rig.ports.local(rig.work);
 
@@ -216,6 +241,7 @@ describe('the fleet reading on a real file system', () => {
     await appendFile(rig.rollout, tokenCount(44));
     await until(
       async () => (await rig.reading.passiveUsage({ id: 'cx', resolution: rig.cx }))?.fiveHour?.usedPercent === 44,
+      'the reading to answer the appended rollout',
     );
 
     // Assert

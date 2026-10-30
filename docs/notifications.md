@@ -149,7 +149,8 @@ went idle), which are what the list shows beside the badge.
   change. It re-reads the board under one lock per session, so an out-of-order notice can never show an
   answered item as open.
 - Notices are not counted: a notice moves the Inbox, not the "needs you" mark.
-- Every board change also journals `attention.changed`. The fleet feed watches that, so lists update
+- Every board change also journals `agenda.changed` (`attention.changed` before `agenda.wire.1`). The fleet feed
+  refetches on any event that is not `surface.*`, so lists update
   without polling.
 - On start, the daemon reconciles every session once, in the background.
 - It clears only when items resolve. Viewing a conversation does not clear it.
@@ -206,6 +207,13 @@ It is **idempotent and once**. The marker is written only when every session was
 finds it does nothing, so an owner who later turns a ferret's mode off is never overruled by a restart.
 A start that could not switch some session writes no marker and tries again next time (switching a
 ferret already on is a no-op). It never stops the daemon starting.
+
+A second, separate marker, `agenda-files-migration.json`, records the move of each session's `attention.json` and
+`attention-replies.json` to `agenda.json` and `agenda-replies.json` (one line of counts in the log). It follows the same
+rules: written only when every session succeeded, a failed session keeps its old file and is retried next start, and it
+never stops the daemon starting. [agenda.md § On disk](agenda.md#on-disk) has the rest. Records in
+`notifications.jsonl` are not rewritten: both key spellings (`attention:`, `agenda:`) are read as one, so an item
+notified before the upgrade is never notified again.
 
 ## Every automatic push, and why it stays or goes
 

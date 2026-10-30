@@ -50,6 +50,7 @@ import type { NotificationFilterMirrorWriter } from './notification-filter-mirro
  */
 const NOTIFICATION_KIND_FIELDS = {
   attention: true,
+  agenda: true,
   question: true,
   completed: true,
   failed: true,
@@ -84,6 +85,7 @@ export const NOTIFICATION_CATEGORY_COPY: Record<
 export function notificationCategoryFor(kind: PushNotificationKind): NotificationCategory {
   switch (kind) {
     case 'attention':
+    case 'agenda':
     case 'question':
       return 'needs-you';
     case 'completed':

@@ -405,3 +405,42 @@ describe('schemaIssues', () => {
     should(actual.every(issue => issue.severity === 'error')).be.true();
   });
 });
+
+describe('checkConfigFile: the agenda check switch renamed for the agenda wire', () => {
+  it('should load the older attentionNudge key alone, with a warning naming where it went', () => {
+    // Act
+    const actual = checkConfigFile('machine.yaml', 'agentPermissions: auto\nattentionNudge: false\n');
+
+    // Assert
+    should(actual.ok).be.true();
+    should(actual.issues).have.length(1);
+    should(actual.issues[0]?.severity).equal('warning');
+    should(actual.issues[0]?.message).equal(
+      'attentionNudge is renamed to agendaNudge; still read until the agenda removal release',
+    );
+    should(actual.issues[0]?.fix).equal('rename attentionNudge to agendaNudge');
+    should(actual.issues[0]?.line).equal(2);
+  });
+
+  it('should warn that the new key wins when both are written', () => {
+    // Act
+    const actual = checkConfigFile('machine.yaml', 'attentionNudge: true\nagendaNudge: false\n');
+
+    // Assert
+    should(actual.ok).be.true();
+    should(actual.issues).have.length(1);
+    should(actual.issues[0]?.message).equal(
+      'attentionNudge is renamed to agendaNudge, and both are written: agendaNudge wins and attentionNudge is ignored',
+    );
+    should(actual.issues[0]?.fix).equal('delete attentionNudge');
+  });
+
+  it('should say nothing about the new key alone, or about a file that sets neither', () => {
+    should(checkConfigFile('machine.yaml', 'agendaNudge: false\n').issues).deepEqual([]);
+    should(checkConfigFile('machine.yaml', 'agentPermissions: auto\n').issues).deepEqual([]);
+  });
+
+  it('should not warn on a file kind that has no renamed key', () => {
+    should(checkConfigFile('profiles/base.yaml', 'contents: []\n').issues).deepEqual([]);
+  });
+});

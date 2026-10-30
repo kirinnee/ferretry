@@ -91,6 +91,7 @@ jobs:
           if-no-files-found: warn
 
   summary:
+    timeout-minutes: 5
     name: E2E Slow Journeys
     needs: journeys
     if: ${{ !cancelled() }}

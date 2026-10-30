@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { ReactTestRenderer } from 'react-test-renderer';
 import type { z } from 'zod';
+import type { AgendaWire } from '../../src/lib/agenda-wire.ts';
 import {
   type ComposerReferenceCatalogReader,
   type ComposerReferenceCatalogSources,
@@ -136,13 +137,15 @@ function CatalogProbe({
   sessionId,
   sources,
   onCatalogs,
+  wire,
 }: {
   readonly client: Partial<ComposerReferenceCatalogReader>;
   readonly sessionId: string;
   readonly sources?: ComposerReferenceCatalogSources;
   readonly onCatalogs?: (catalogs: ReturnType<typeof useComposerReferenceCatalogs>) => void;
+  readonly wire?: AgendaWire;
 }) {
-  const catalogs = useComposerReferenceCatalogs(client, sessionId, sources);
+  const catalogs = useComposerReferenceCatalogs(client, sessionId, sources, wire);
   onCatalogs?.(catalogs);
   return (
     <output>{`${catalogs.tasks?.length ?? '-'}:${catalogs.attention?.length ?? '-'}:${catalogs.skills?.skills.length ?? '-'}`}</output>
@@ -349,6 +352,65 @@ describe('useComposerReferenceCatalogs', () => {
 
     await flushCatalogs();
     expect(output(view)).toBe('-:-:-');
+    run(() => view.unmount());
+  });
+});
+
+describe('the composer reference catalogs on the agenda wire', () => {
+  const answer = (path: string) => {
+    if (path.endsWith('/tasks')) return taskListing();
+    if (path.endsWith('/skills')) return skillsListing;
+    return attentionListing();
+  };
+
+  test('reads the agenda route when told the daemon speaks it, and the older one otherwise', async () => {
+    const newer: string[] = [];
+    const older: string[] = [];
+
+    await readComposerReferenceCatalogs(reader(answer, newer), 'session-a', new AbortController().signal, 'agenda');
+    await readComposerReferenceCatalogs(reader(answer, older), 'session-a', new AbortController().signal);
+
+    expect(newer.sort()).toEqual([
+      '/v1/sessions/session-a/agenda',
+      '/v1/sessions/session-a/skills',
+      '/v1/sessions/session-a/tasks',
+    ]);
+    expect(older).toContain('/v1/sessions/session-a/attention');
+    expect(older).not.toContain('/v1/sessions/session-a/agenda');
+  });
+
+  test('the hook reads its own agenda family from the route the wire names and re-reads when the wire changes', async () => {
+    const calls: string[] = [];
+    const client = reader(answer, calls);
+    const view = render(<CatalogProbe client={client} sessionId="session-a" wire="attention" />);
+    await flushCatalogs();
+    expect(calls).toContain('/v1/sessions/session-a/attention');
+
+    calls.length = 0;
+    run(() => view.update(<CatalogProbe client={client} sessionId="session-a" wire="agenda" />));
+    await flushCatalogs();
+    expect(calls).toContain('/v1/sessions/session-a/agenda');
+    expect(output(view)).toBe('1:1:1');
+    run(() => view.unmount());
+  });
+
+  test('a host that shares tasks and skills still reads the agenda family from the agenda route', async () => {
+    const calls: string[] = [];
+    const view = render(
+      <CatalogProbe
+        client={reader(answer, calls)}
+        sessionId="session-a"
+        sources={{
+          tasks: taskListing().tasks,
+          skills: skillsListing,
+          waitForTasks: () => undefined,
+          waitForSkills: () => undefined,
+        }}
+        wire="agenda"
+      />,
+    );
+    await flushCatalogs();
+    expect(calls).toEqual(['/v1/sessions/session-a/agenda']);
     run(() => view.unmount());
   });
 });

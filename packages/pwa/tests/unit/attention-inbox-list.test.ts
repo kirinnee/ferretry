@@ -278,3 +278,14 @@ describe('readRecentMessages', () => {
     expect(asked).toEqual([undefined, 'p2', 'p2']);
   });
 });
+
+describe('inboxSections reading a stopped ferret under the agenda name', () => {
+  it('puts a ferret whose daemon wrote only the agenda summary among the stopped', () => {
+    const view = sessionView('halt', {
+      config: { teammate: 'moe', name: undefined },
+      state: { agenda: { open: 1, first: 'A1', ask: 'Go?', latestAt: '2026-08-01T11:00:00.000Z', stopped: true } },
+    } as never);
+    const sections = inboxSections([inboxCard(attentionItem('A1'), view)], []);
+    expect(sections.stopped.map(group => group.ferret)).toEqual(['Moe']);
+  });
+});

@@ -74,15 +74,6 @@ describe('the agent’s way to the daemon', () => {
 });
 
 describe('the agent’s way to the daemon, through a restart', () => {
-  /** A free loopback port: bound once, then released, so nothing listens on it until a test says. */
-  async function freePort(): Promise<number> {
-    const probe = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('probe') });
-    const port = probe.port;
-    await probe.stop(true);
-    if (port === undefined) throw new Error('no port');
-    return port;
-  }
-
   /** `onWaiting` runs when the gateway says it is waiting for the daemon: the moment a restarted daemon may come up. */
   const restart = (told: { count: number }, onWaiting: () => void = () => undefined) => ({
     patience: {
@@ -99,7 +90,11 @@ describe('the agent’s way to the daemon, through a restart', () => {
 
   it('should wait for a daemon that is down and answer once it serves again, saying so once', async () => {
     // Arrange
-    const port = await freePort();
+    // The daemon is up and then goes down: the address it held is the one the restart comes back on.
+    const before = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => Response.json({ summary: 'before' }) });
+    const port = before.port;
+    if (port === undefined) throw new Error('the stand-in daemon bound no TCP port');
+    await before.stop(true);
     const base = `http://127.0.0.1:${String(port)}`;
     const told = { count: 0 };
     const gateway = new SessionCredentialGateway(
@@ -121,6 +116,46 @@ describe('the agent’s way to the daemon, through a restart', () => {
     // Assert
     should(answer).deepEqual({ summary: 'back after the restart' });
     should(told.count).equal(1);
+  });
+
+  it('should wait out a daemon that answers it is still starting, and land the call once it serves', async () => {
+    // Arrange — the restarted daemon has bound its address but is still on a boot step, then serves.
+    const starting = {
+      error: 'the daemon is starting (reading capability grants); ask again shortly',
+      code: 'daemon_starting',
+    };
+    const answers = [
+      () => Promise.reject(Object.assign(new Error('refused'), { code: 'ConnectionRefused' })),
+      () => Promise.resolve(Response.json(starting, { status: 503 })),
+      () => Promise.resolve(Response.json(starting, { status: 503 })),
+      () => Promise.resolve(Response.json({ summary: 'listed' })),
+    ];
+    let calls = 0;
+    const fetcher = (): Promise<Response> => {
+      calls += 1;
+      return (answers.shift() ?? (() => Promise.reject(new Error('asked too often'))))();
+    };
+    const told = { count: 0 };
+    const patient = new SessionCredentialGateway(async () => 'http://127.0.0.1:9', fetcher, {
+      ...restart(told),
+      sleep: async () => undefined,
+    });
+    const impatient = new SessionCredentialGateway(
+      async () => 'http://127.0.0.1:9',
+      async () => Response.json(starting, { status: 503 }),
+    );
+    const call = { method: 'POST', body: JSON.stringify({ tool: 'terminal.list' }) };
+
+    // Act
+    const answer = await patient.request('/v1/agent/tools', Answer, call);
+    const refused = await impatient.request('/v1/agent/tools', Answer, call).catch((error: unknown) => error);
+
+    // Assert — the starting answers were waited through, not handed back as the tool's failure.
+    should(answer).deepEqual({ summary: 'listed' });
+    should(calls).equal(4);
+    should(told.count).equal(1);
+    should(refused).be.instanceOf(Error);
+    should((refused as Error).message).equal(starting.error);
   });
 
   it('should repeat a read the daemon dropped mid-request, and never a send that may already have typed', async () => {

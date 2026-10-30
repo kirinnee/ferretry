@@ -83,7 +83,9 @@ describe('the session attention state adapter', () => {
 
     // Assert
     should(SessionStateSchema.parse(raised).attention).deepEqual(SUMMARY);
+    should(SessionStateSchema.parse(raised).agenda).deepEqual(SUMMARY);
     should(cleared).not.have.property('attention');
+    should(cleared).not.have.property('agenda');
     should(SessionStateSchema.safeParse(cleared).success).be.true();
     should(journal.map(event => event.data)).deepEqual([
       { change: 'created', id: 'A2', open: 2 },
