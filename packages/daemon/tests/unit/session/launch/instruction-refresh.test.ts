@@ -195,3 +195,66 @@ describe('InstructionRefresh', () => {
     should(vanished.stored()).be.undefined();
   });
 });
+
+describe('InstructionRefresh for a sub-ferret', () => {
+  const SUB: readonly AlwaysOnSection[] = [
+    { id: 'tools', text: 'Tools: drive terminals.' },
+    { id: 'settings', text: 'Settings: read the guide.' },
+    { id: 'sub-ferret', text: 'Sub-ferret: report to your lead.' },
+  ];
+
+  const recordedSub = (text: string): SessionLaunchInstructions => ({
+    sections: [
+      told('tools', 'Tools: drive terminals.'),
+      told('settings', 'Settings: read the guide.'),
+      told('sub-ferret', text),
+    ],
+    mode: 'auto',
+    questions: false,
+  });
+
+  it('should compare a sub-ferret record against the sub-ferret sections, not the lead ones', async () => {
+    // Arrange
+    const asked: boolean[] = [];
+    const queued: string[] = [];
+    const refresh = new InstructionRefresh({
+      sections: subFerret => {
+        asked.push(subFerret);
+        return subFerret ? SUB : NOW;
+      },
+      recorded: async () => recordedSub('Sub-ferret: report to your lead.'),
+      record: async () => undefined,
+      queue: async (_id, _digest, note) => {
+        queued.push(note);
+      },
+    });
+
+    // Act
+    await refresh.queueIfStale('s-1');
+
+    // Assert — current words, so nothing is queued, and the sub-ferret layer was the one asked for.
+    should(asked).deepEqual([true]);
+    should(queued).be.empty();
+  });
+
+  it('should tell a sub-ferret only its own changed section, never the lead notify and board rules', async () => {
+    // Arrange
+    const queued: string[] = [];
+    const refresh = new InstructionRefresh({
+      sections: subFerret => (subFerret ? SUB : NOW),
+      recorded: async () => recordedSub('Sub-ferret: an older rule.'),
+      record: async () => undefined,
+      queue: async (_id, _digest, note) => {
+        queued.push(note);
+      },
+    });
+
+    // Act
+    await refresh.queueIfStale('s-1');
+
+    // Assert
+    should(queued).have.length(1);
+    should(queued[0]).endWith('Sub-ferret: report to your lead.');
+    should(queued[0]).not.containEql('Notify:');
+  });
+});

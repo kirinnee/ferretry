@@ -14,6 +14,7 @@ import { hostname, tmpdir, userInfo } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import {
   AGENDA_ENV,
+  SUB_FERRET_ENV,
   ALWAYS_ON_SECTIONS,
   agendaNudgeEnabled,
   CredentialStatusService,
@@ -149,6 +150,7 @@ import {
   JournalBoardChecks,
   StorageSessionFocus,
   StorageSessionParents,
+  StorageSubFerretDirectory,
 } from '../src/adapters/board/session-board-adapters.ts';
 import { type LivenessLedgerReader, StorageSessionRoster } from '../src/adapters/board/session-roster.ts';
 import { GhCliRunner, GitWorkingCopies } from '../src/adapters/board-github/index.ts';
@@ -553,6 +555,7 @@ import {
   SessionCards,
   type SessionLivenessSource,
 } from '../src/lib/board/index.ts';
+import { isSubFerret, nudgeTarget } from '../src/lib/sub-ferret/index.ts';
 import { GitHubWatcher } from '../src/lib/board-github/index.ts';
 import { BoardImporter, LaneSetImportProjects, type TaskAssigneeCandidate } from '../src/lib/board-import/index.ts';
 import {
@@ -1961,7 +1964,11 @@ function createBoardWorld(
     lanes,
     parents,
     focus,
-    reopen: new ReopenDeliveryLadder(new SendReopenMessenger(sends), diagnostics, new SendReopenMessenger(ownerSends)),
+    reopen: new ReopenDeliveryLadder(
+      new SendReopenMessenger(sends, new StorageSubFerretDirectory(storage)),
+      diagnostics,
+      new SendReopenMessenger(ownerSends),
+    ),
     done: new DoneDeliveryLadder(new SendReopenMessenger(ownerSends), diagnostics),
     activity: new LivenessActivityDeriver({ sessions, clock }),
     agenda: new AgendaCardLinks({ open: agendaItems }, machineId, diagnostics),
@@ -1972,6 +1979,7 @@ function createBoardWorld(
     runningVersion: () => (ProtocolVersionSchema.safeParse(daemonVersion).success ? daemonVersion : null),
     serial: new KeyedSerialExecutor(),
     adoption,
+    subFerrets: new StorageSubFerretDirectory(storage),
   });
   const cards = new SessionCards({
     board,
@@ -3953,7 +3961,12 @@ async function agendaLaunchDefault(
   id: SessionId,
 ): Promise<Readonly<Record<string, string>>> {
   const view = await sessions.get(id).catch(() => undefined);
-  return view === undefined ? {} : { [AGENDA_ENV]: sessionAgendaEnabled(view.config) ? '1' : '0' };
+  return view === undefined
+    ? {}
+    : {
+        [AGENDA_ENV]: sessionAgendaEnabled(view.config) ? '1' : '0',
+        [SUB_FERRET_ENV]: view.config.parent === undefined || view.config.parent === '' ? '0' : '1',
+      };
 }
 
 /** One ferret's own Pack switch: the document and the launch variable, under the session's lock. */
@@ -9036,6 +9049,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // own `gh`, links the PRs a card's work opened, and nudges through the board's nudge path. Armed after
       // the bind with the other loops, and stopped with the daemon.
       const boardSessionFacts = new StorageSessionFacts(storage);
+      const boardSubFerrets = new StorageSubFerretDirectory(storage);
       const boardGitHub = new GitHubWatcher({
         board: boardWorld.board,
         gh: new GhCliRunner(),
@@ -9045,7 +9059,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         transcripts: createSessionTranscriptTail(storage),
         // The board's nudge path (U5): the message as it is, from "Ferretry · Board" as metadata.
         nudges: {
-          send: async (sessionId, message) => {
+          send: async (card, message) => {
+            const sessionId = await nudgeTarget(boardSubFerrets, card);
             await boardSends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message });
           },
         },
@@ -9460,6 +9475,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // An add that names no card belongs to the raising session's focus card (board-design.md §2.6) —
         // the CLI's, a harness question's and a Warden escalation's alike.
         new StorageSessionFocus(storage),
+        new StorageSubFerretDirectory(storage),
       );
       // Off unless `attention.resurfaceAfterMinutes` is set: asks left in discussion that long surface themselves.
       if (agendaConfig.resurfaceAfterMinutes !== undefined) {
@@ -9493,8 +9509,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sessions: boardSessions,
         memory: new FileSweepMemory(join(paths.state, 'board'), stateFiles, boardDiagnostics),
         nudges: {
-          send: async (sessionId, message) => {
-            await boardSends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message });
+          send: async (card, message) => {
+            await boardSends.send({
+              id: parseSessionId(await nudgeTarget(boardSubFerrets, card)),
+              sendId: crypto.randomUUID(),
+              message,
+            });
           },
         },
         clock,
@@ -9616,7 +9636,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const boardChecks = new JournalBoardChecks(storage);
       const boardTurnCheck = new BoardTurnCheck(
         {
-          readable: async sessionId => (await nudgeSessions.subject(sessionId)) !== undefined,
+          // A sub-ferret's card is made for it and its lead moves it: it has no card to be nudged about.
+          readable: async sessionId =>
+            (await nudgeSessions.subject(sessionId)) !== undefined && !(await isSubFerret(boardSubFerrets, sessionId)),
           tail: async (sessionId, limit) => {
             const subject = await nudgeSessions.subject(sessionId);
             return subject === undefined
@@ -10827,7 +10849,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
           new AgendaConversation(agenda),
           new InstructionRefresh({
-            sections: () => ALWAYS_ON_SECTIONS(CLIENT_NAME),
+            sections: subFerret => ALWAYS_ON_SECTIONS(CLIENT_NAME, subFerret),
             queue: async (sessionId, digest, note) =>
               await agendaReplies.add(sessionId, instructionsReplyKey(digest), note),
             recorded: async sessionId => {

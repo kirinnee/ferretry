@@ -38,6 +38,37 @@ Board: all work is a card (&F412) on its project's board (new repo: `fy project 
 Tasks are `&F412` and agenda items are `!A48`; nothing prints the retired `#F412`
 ([reference-standard.md](reference-standard.md)).
 
+## Sub-ferrets: no moves, only reports
+
+A **sub-ferret** is a session another ferret started (`config.parent`, e.g. `fy new` from a ferret); a **lead** has none.
+The owner's decision (2026-10-30): only leads move cards. Weaker models writing to the board is a coordination
+problem, and what a sub-ferret does is mostly report back to its lead. The daemon enforces it by the caller's
+session identity — in `BoardService` (`create`, `act`) and on the lane route — so a prompt cannot talk past it
+([pack-mode.md](pack-mode.md#sub-ferret-limits)).
+
+| A sub-ferret may                                          | A sub-ferret is refused                                                                           |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| read the board, `fy task note` on a card                  | `fy task create`, `move`, `drop`, `reopen`, `assign`, `depend` / `undepend`, `block` / `unblock`, |
+| `fy task link --pr <url>` / `--branch <branch>` on a card | `reparent`, `focus`, `edit`, `file`, `order`, `refile`, `clarify`, `link --commit` / `--doc`      |
+| `fy send` its lead (and peers the lead names)             | editing a project's lanes (`PATCH` of the lane list: `403 sub-ferret`)                            |
+
+The refusal is `forbidden` and names the way out, e.g. `Sub-ferrets don't move cards; tell your lead: fy send <lead-callsign> "…"`.
+The daemon still makes the sub-ferret's card when `fy new` starts it (that is the lead's act), and a PR or release
+still moves it. A directory that cannot place a caller refuses nothing: the limit narrows a ferret known to be a
+sub-ferret, it never locks one out it cannot find.
+
+A sub-ferret's system prompt drops the Board rules above and the Notify rule and the Agenda mode section, and
+carries these two lines instead (`SUB_FERRET_INSTRUCTION`, the `sub-ferret` launch section; the daemon writes
+`FY_SUB_FERRET=1` from the session's `parent` at every launch, so a stored value cannot switch it off):
+
+```text
+Sub-ferret: you were started by a lead ferret. Report to it with `fy send <lead-callsign> "<message>"`; you cannot raise agenda items, notify the owner or move cards.
+Link your PR to your card: `fy task link <id> --pr <url>` (or `--branch`); add progress with `fy task note`.
+```
+
+Nudges about a sub-ferret's card — the turn that closes without a PR, a reopen — go to its **lead** instead
+(`nudgeTarget`, `packages/daemon/src/lib/sub-ferret/index.ts`).
+
 ## Which board a card is on, and how a project gets one
 
 A board is a registered project (`<state home>/projects.json`). A session's board is decided when it starts

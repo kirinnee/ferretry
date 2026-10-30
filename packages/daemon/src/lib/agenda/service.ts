@@ -22,6 +22,7 @@ import {
   emptyAgendaLedger,
   type RaiseAgendaRequest,
 } from './state-machine.ts';
+import { NO_SUB_FERRETS, type SubFerretDirectory, subFerretRefusal } from '../sub-ferret/index.ts';
 
 /** The heading of an item the daemon raised without wording one: plain words, never an id. */
 const DAEMON_TITLES: Readonly<Record<DaemonAgendaCause, string>> = {
@@ -98,6 +99,15 @@ export type AgendaQueryResult<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly error: AgendaFailure };
 
+const SUB_FERRET_DOING: Readonly<Record<string, string>> = {
+  raise: 'raise agenda items or notify the owner',
+  edit: 'edit agenda items',
+  surface: 'surface agenda items',
+  resolve: 'close agenda items',
+  dismiss: 'dismiss agenda items',
+  progress: 'tick agenda items',
+};
+
 export function isAgendaSessionId(value: string): boolean {
   return SESSION_ID.test(value);
 }
@@ -110,6 +120,8 @@ export class AgendaService {
     private readonly observer: AgendaRaisedObserver,
     private readonly changes: AgendaChangeObserver = { changed: async () => undefined },
     private readonly focus: AgendaFocusSource = NO_AGENDA_FOCUS,
+    /** Who started whom: a sub-ferret raises and changes nothing here. Absent, every agent is a lead. */
+    private readonly subFerrets: SubFerretDirectory = NO_SUB_FERRETS,
   ) {}
 
   async list(sessionId: string): Promise<AgendaQueryResult<AgendaSnapshot>> {
@@ -267,6 +279,8 @@ export class AgendaService {
   ): Promise<AgendaMutation> {
     const unauthorized = await this.authorize(sessionId, command.actor);
     if (unauthorized !== null) return { ok: false, error: unauthorized };
+    const limited = await this.limitSubFerret(command.actor, command.action);
+    if (limited !== null) return { ok: false, error: limited };
     const mutation = await this.repository.transact(sessionId, current =>
       applyAgendaCommandToSession(current, sessionId, command),
     );
@@ -292,6 +306,17 @@ export class AgendaService {
       }
     }
     return mutation;
+  }
+
+  /** Only a lead speaks for the owner's agenda: a sub-ferret that tries is told whom to tell instead. */
+  private async limitSubFerret(actor: AgendaActor, action: string): Promise<AgendaFailure | null> {
+    if (actor.kind !== 'agent') return null;
+    const refusal = await subFerretRefusal(
+      this.subFerrets,
+      actor.sessionId,
+      SUB_FERRET_DOING[action] ?? 'change the agenda',
+    );
+    return refusal === null ? null : { code: 'forbidden', message: refusal };
   }
 
   private async authorize(sessionId: string, actor?: AgendaActor): Promise<AgendaFailure | null> {

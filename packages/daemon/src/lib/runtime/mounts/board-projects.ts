@@ -17,6 +17,7 @@ import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import { describeLaneSetFailure, type LaneActor, type LaneSetFailure } from '../../board-projects/index.ts';
 import { LaneSetUnavailableError } from '../../board-projects/errors.ts';
+import { sessionSubFerretDirectory, subFerretRefusal } from '../../sub-ferret/index.ts';
 import type { SessionDirectorySubsystem } from './sessions.ts';
 
 /** The board's projects and their lanes, as the routes need them. */
@@ -82,6 +83,11 @@ async function change(
 ): Promise<ApiResponse> {
   const id = projectId(context);
   const request = await parseBody(context.request, LaneSetActionRequestSchema);
+  const { kind, id: caller } = parseActor(context.actor ?? '');
+  if (kind === 'peer' && caller !== undefined && caller !== '') {
+    const refusal = await subFerretRefusal(sessionSubFerretDirectory(sessions), caller, 'edit the board lanes');
+    if (refusal !== null) throw new ApiError(403, refusal, 'sub-ferret');
+  }
   const result = await boards.apply(id, request, await laneActor(context.actor, sessions));
   if (result.ok) return jsonResponse(result.value);
   throw new ApiError(FAILURE_STATUS[result.error.code], describeLaneSetFailure(result.error), result.error.code);
