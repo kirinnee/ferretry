@@ -11,8 +11,13 @@
  * - IT COMMITS ONLY PAST THE THRESHOLD (`swipeIntent(...).committed`). Short of it the card springs back
  *   and nothing is sent; past it the card flies off and the answer is handed to `onAct` — which, in the
  *   inbox, holds it for the undo window (`DeferredAgendaActions`) rather than posting it.
- * - DOWN IS NOTHING: a drag down answers nothing and the card does not follow it; the browser keeps it as a scroll.
- * - A SWIPE STARTS ONLY FROM THE CARD'S HEAD ({@link startsInHandle}): its header and title. The detail
+ * - DOWN IS NOTHING — unless the host can SKIP (`onSkip`, the Inbox): then a drag down past the threshold moves on
+ *   to the next card without answering (stamped "↓ Skip"), and the card follows it down. Without `onSkip` the card
+ *   does not follow a downward drag and the browser keeps it as a scroll.
+ * - THE HOST MAY REMAP THE DIRECTIONS (`targetsFor`): the Inbox puts the primary answer on ↑. The stamp, the fly-off,
+ *   the keys and the hint all read the same remapped targets.
+ * - A SWIPE STARTS ONLY FROM THE CARD'S HEAD ({@link startsInHandle}): its header and title (on a full item view:
+ *   its sticky top, the Inbox's who-and-what line and the quick-reply bar). The detail
  *   below is its own scroller and the answer bar is for pressing, so a drag there is the reader scrolling
  *   or tapping, never an answer — the card is the full height of the screen, and most of it scrolls.
  * - A SCROLL IS NEVER A SWIPE. `touch-action` on the card hands the browser every direction the card does
@@ -27,7 +32,7 @@
  */
 
 import { agendaTitle } from '@ferretry/protocol';
-import { ArrowLeft, ArrowRight, ArrowUp } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp } from 'lucide-react';
 import {
   type CSSProperties,
   type KeyboardEvent,
@@ -40,13 +45,13 @@ import {
 } from 'react';
 import { type SwipeTarget, type SwipeTargets, swipeTargets } from '../../lib/agenda-answers.ts';
 import {
-  directionOfAction,
   type InboxAction,
   type InboxCard,
   SWIPE_SLOP_PX,
   type SwipeDirection,
+  type SwipeIntent,
   swipeIntent,
-  swipeMap,
+  swipeThreshold,
 } from '../../lib/agenda-inbox.ts';
 import { usePrefersReducedMotion } from '../../shell/bottom-sheet.tsx';
 
@@ -84,8 +89,8 @@ const roomOf = (element: HTMLElement): number => {
 
 /**
  * The room the deck has, measured, as the `--deck-room` its top card is capped by — so the card's
- * detail grows into the screen it has rather than a guess at it. Re-measured when the window resizes
- * and when a new card comes on top.
+ * detail grows into the screen it has rather than a guess at it. Re-measured when the window resizes,
+ * when a new card comes on top and when what is drawn under the deck changes size.
  */
 const useDeckRoom = (deck: { readonly current: HTMLDivElement | null }, topKey: string | undefined): number | null => {
   const [room, setRoom] = useState<number | null>(null);
@@ -97,7 +102,16 @@ const useDeckRoom = (deck: { readonly current: HTMLDivElement | null }, topKey: 
     };
     measure();
     window.addEventListener('resize', measure);
-    return () => window.removeEventListener('resize', measure);
+    // What the host draws under the deck can grow after it (the Inbox's composer arrives once its client is ready,
+    // and grows as it is typed in): the card gives up that room rather than pushing it off the screen.
+    const below = deck.current?.nextElementSibling;
+    const observer =
+      below == null || typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => measure());
+    if (observer !== null && below != null) observer.observe(below);
+    return () => {
+      window.removeEventListener('resize', measure);
+      observer?.disconnect();
+    };
   }, [topKey]);
   return room;
 };
@@ -136,10 +150,42 @@ const useReducedMotion = (override?: boolean): boolean => {
   return prefers || (typeof document !== 'undefined' && document.documentElement.dataset.motion === 'reduced');
 };
 
+/** A way a card can leave the deck: one of its answers' directions, or down — skipped, unanswered. */
+export type DeckDirection = SwipeDirection | 'down';
+
+/**
+ * Reads a drag on a deck that may skip: a mostly-downward drag is a skip (`down`), committed past the same threshold
+ * an answer needs; every other drag reads as `swipeIntent` does. A deck that cannot skip reads down as nothing.
+ */
+export const deckIntent = (
+  dx: number,
+  dy: number,
+  width: number,
+  targets: SwipeTargets,
+  canSkip: boolean,
+): Omit<SwipeIntent, 'direction'> & { readonly direction: DeckDirection | null } => {
+  if (canSkip && dy > Math.abs(dx) && dy >= SWIPE_SLOP_PX) {
+    const progress = Math.min(1, dy / swipeThreshold(width));
+    return { direction: 'down', progress, committed: progress >= 1 };
+  }
+  return swipeIntent(dx, dy, width, targets);
+};
+
+/** The direction an action leaves in: the one of `targets` that sends it (matched by meaning), else none. */
+const directionOf = (targets: SwipeTargets, action: InboxAction): SwipeDirection | null => {
+  for (const direction of ['up', 'right', 'left'] as const) {
+    const mapped = targets[direction]?.action;
+    if (mapped != null && mapped.kind === action.kind && mapped.label === action.label) return direction;
+  }
+  return null;
+};
+
 interface AgendaCardFrameProps {
   readonly card: InboxCard;
   readonly targets: SwipeTargets;
   readonly onArrow: (direction: SwipeDirection) => void;
+  /** ↓ on the focused card: skip it. Absent: ↓ is the page's. */
+  readonly onSkip?: (() => void) | undefined;
   readonly children: ReactNode;
 }
 
@@ -148,10 +194,15 @@ interface AgendaCardFrameProps {
  * ←/→/↑ for the answer in that direction — only when the CARD is focused, never while focus is in a
  * field or on one of its buttons, where the arrows already mean something.
  */
-function AgendaCardFrame({ card, targets, onArrow, children }: AgendaCardFrameProps) {
+function AgendaCardFrame({ card, targets, onArrow, onSkip, children }: AgendaCardFrameProps) {
   const hintId = useId();
   const onKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
     if (event.target !== event.currentTarget) return;
+    if (event.key === 'ArrowDown' && onSkip !== undefined) {
+      event.preventDefault();
+      onSkip();
+      return;
+    }
     const direction = agendaKeyDirection(event.key);
     if (direction === null || targets[direction] === undefined) return;
     event.preventDefault();
@@ -170,12 +221,14 @@ function AgendaCardFrame({ card, targets, onArrow, children }: AgendaCardFramePr
       {children}
       <span className="sr-only" id={hintId}>
         {swipeKeyHint(targets)}
+        {onSkip === undefined ? '' : ' Arrow down: skip.'}
       </span>
     </section>
   );
 }
 
-const STAMP_ARROW: Readonly<Record<SwipeDirection, ReactNode>> = {
+const STAMP_ARROW: Readonly<Record<DeckDirection, ReactNode>> = {
+  down: <ArrowDown size={20} aria-hidden="true" />,
   right: <ArrowRight size={20} aria-hidden="true" />,
   left: <ArrowLeft size={20} aria-hidden="true" />,
   up: <ArrowUp size={20} aria-hidden="true" />,
@@ -206,14 +259,14 @@ interface Gesture {
 
 interface Leaving {
   readonly card: InboxCard;
-  readonly direction: SwipeDirection;
+  readonly direction: DeckDirection;
   readonly from: Drag;
 }
 
 /** Where a drag of `(dx, dy)` draws the card: it follows sideways, and up or down only when that means something. */
-export const dragOffset = (dx: number, dy: number, targets: SwipeTargets): Drag => ({
+export const dragOffset = (dx: number, dy: number, targets: SwipeTargets, canSkip = false): Drag => ({
   dx,
-  dy: dy >= 0 ? 0 : targets.up === undefined ? dy * 0.2 : dy,
+  dy: dy >= 0 ? (canSkip ? dy : 0) : targets.up === undefined ? dy * 0.2 : dy,
 });
 
 /** A drag that began inside the card's detail while it overflowed: whether the detail sat at its top, or its bottom. */
@@ -255,22 +308,41 @@ const startsInField = (target: EventTarget | null): boolean =>
  * place. The detail is for scrolling and the answer bar for pressing, so neither ever turns into a swipe.
  */
 const startsInHandle = (target: EventTarget | null): boolean =>
-  target instanceof Element && target.closest('.fy-attn-card__meta, [data-agenda-title]') !== null;
+  target instanceof Element &&
+  target.closest(
+    '.fy-attn-card__meta, [data-agenda-title], [data-agenda-top], [data-inbox-who], [data-agenda-quick-replies]',
+  ) !== null;
 
 export interface AgendaSwipeDeckProps {
   /** The deck, newest first: the first card is on top. */
   readonly cards: readonly InboxCard[];
-  /** Draws one card; `act` is how its own buttons answer it (and fly it off, like a swipe). */
-  readonly renderCard: (card: InboxCard, act: (action: InboxAction) => void) => ReactNode;
+  /**
+   * Draws one card; `act` is how its own buttons answer it (and fly it off, like a swipe), `skip` how its own ↓
+   * skips it (and flies it down) when the deck can skip.
+   */
+  readonly renderCard: (card: InboxCard, act: (action: InboxAction) => void, skip: () => void) => ReactNode;
   /** An answer the reader gave, by swipe, arrow key or button. */
   readonly onAct: (card: InboxCard, action: InboxAction) => void;
+  /** The reader moved on from the card on top without answering it (↓). Absent: the deck cannot skip. */
+  readonly onSkip?: (card: InboxCard) => void;
+  /** Which answer each direction gives on a card; the card's own (`swipeTargets`) otherwise. */
+  readonly targetsFor?: (card: InboxCard) => SwipeTargets;
   /** Forces reduced motion on or off; the reader's preference otherwise. */
   readonly reducedMotion?: boolean;
 }
 
 const NO_ACT = (): void => undefined;
 
-export function AgendaSwipeDeck({ cards, renderCard, onAct, reducedMotion }: AgendaSwipeDeckProps) {
+const ownTargets = (card: InboxCard): SwipeTargets => swipeTargets(card.item);
+
+export function AgendaSwipeDeck({
+  cards,
+  renderCard,
+  onAct,
+  onSkip,
+  targetsFor = ownTargets,
+  reducedMotion,
+}: AgendaSwipeDeckProps) {
   const reduced = useReducedMotion(reducedMotion);
   const [drag, setDrag] = useState<RawDrag | null>(null);
   const [leaving, setLeaving] = useState<Leaving | null>(null);
@@ -280,7 +352,8 @@ export function AgendaSwipeDeck({ cards, renderCard, onAct, reducedMotion }: Age
   const refocus = useRef(false);
   const swallowClick = useRef(false);
   const top = cards[0];
-  const targets: SwipeTargets = top === undefined ? {} : swipeTargets(top.item);
+  const targets: SwipeTargets = top === undefined ? {} : targetsFor(top);
+  const canSkip = onSkip !== undefined;
 
   const topKey = top?.key;
   const room = useDeckRoom(deck, topKey);
@@ -304,12 +377,22 @@ export function AgendaSwipeDeck({ cards, renderCard, onAct, reducedMotion }: Age
   }, [leaving]);
 
   const answer = (card: InboxCard, action: InboxAction, from: Drag): void => {
-    const direction = directionOfAction(swipeMap(card.item), action);
+    const direction = directionOf(targetsFor(card), action);
     refocus.current = deck.current?.contains(document.activeElement) === true;
     gesture.current = null;
     setDrag(null);
     if (!reduced && direction !== null) setLeaving({ card, direction, from });
     onAct(card, action);
+  };
+
+  /** ↓: the card goes down and the next one comes on top; nothing is answered. */
+  const skip = (card: InboxCard, from: Drag): void => {
+    if (onSkip === undefined) return;
+    refocus.current = deck.current?.contains(document.activeElement) === true;
+    gesture.current = null;
+    setDrag(null);
+    if (!reduced) setLeaving({ card, direction: 'down', from });
+    onSkip(card);
   };
 
   /** A swipe or arrow toward `direction`: its answer goes; a "Needs changes" has none, so the card springs back. */
@@ -369,9 +452,11 @@ export function AgendaSwipeDeck({ cards, renderCard, onAct, reducedMotion }: Age
     if (!current.moved) return;
     swallowClick.current = true;
     const live = verticalTargets(targets, current.scroll);
-    const intent = swipeIntent(current.dx, current.dy, current.width, live);
-    if (intent.committed && intent.direction !== null)
-      give(top, intent.direction, dragOffset(current.dx, current.dy, live));
+    const intent = deckIntent(current.dx, current.dy, current.width, live, canSkip);
+    const from = dragOffset(current.dx, current.dy, live, canSkip);
+    const direction = intent.committed ? intent.direction : null;
+    if (direction === 'down') skip(top, from);
+    else if (direction !== null) give(top, direction, from);
     else setDrag(null);
   };
 
@@ -384,9 +469,14 @@ export function AgendaSwipeDeck({ cards, renderCard, onAct, reducedMotion }: Age
   if (top === undefined && leaving === null) return null;
 
   const live = drag === null ? targets : verticalTargets(targets, drag.scroll);
-  const intent = drag === null ? null : swipeIntent(drag.dx, drag.dy, drag.width, live);
-  const offset = drag === null ? null : dragOffset(drag.dx, drag.dy, live);
-  const stamp: SwipeTarget | undefined = intent?.direction == null ? undefined : live[intent.direction];
+  const intent = drag === null ? null : deckIntent(drag.dx, drag.dy, drag.width, live, canSkip);
+  const offset = drag === null ? null : dragOffset(drag.dx, drag.dy, live, canSkip);
+  const stamp: SwipeTarget | undefined =
+    intent?.direction == null
+      ? undefined
+      : intent.direction === 'down'
+        ? { label: 'Skip', action: null }
+        : live[intent.direction];
   const peeks = cards.slice(1, 1 + PEEKS);
 
   return (
@@ -400,7 +490,7 @@ export function AgendaSwipeDeck({ cards, renderCard, onAct, reducedMotion }: Age
       {peeks
         .map((card, index) => (
           <div aria-hidden="true" className="fy-attn-deck__peek" data-depth={index + 1} inert key={card.key}>
-            {renderCard(card, NO_ACT)}
+            {renderCard(card, NO_ACT, NO_ACT)}
           </div>
         ))
         .reverse()}
@@ -422,7 +512,8 @@ export function AgendaSwipeDeck({ cards, renderCard, onAct, reducedMotion }: Age
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           style={{
-            touchAction: targets.up === undefined ? 'pan-y' : 'pan-down',
+            // A deck that skips reads every vertical drag that starts on a handle; the detail scrolls on its own rule.
+            touchAction: canSkip ? 'none' : targets.up === undefined ? 'pan-y' : 'pan-down',
             ...(offset === null
               ? {}
               : {
@@ -430,8 +521,17 @@ export function AgendaSwipeDeck({ cards, renderCard, onAct, reducedMotion }: Age
                 }),
           }}
         >
-          <AgendaCardFrame card={top} onArrow={direction => give(top, direction, { dx: 0, dy: 0 })} targets={targets}>
-            {renderCard(top, action => answer(top, action, { dx: 0, dy: 0 }))}
+          <AgendaCardFrame
+            card={top}
+            onArrow={direction => give(top, direction, { dx: 0, dy: 0 })}
+            onSkip={canSkip ? () => skip(top, { dx: 0, dy: 0 }) : undefined}
+            targets={targets}
+          >
+            {renderCard(
+              top,
+              action => answer(top, action, { dx: 0, dy: 0 }),
+              () => skip(top, { dx: 0, dy: 0 }),
+            )}
           </AgendaCardFrame>
           {intent === null || intent.direction === null ? null : (
             <div
@@ -457,7 +557,7 @@ export function AgendaSwipeDeck({ cards, renderCard, onAct, reducedMotion }: Age
           key={`leaving-${leaving.card.key}`}
           style={{ '--fly-x': `${leaving.from.dx}px`, '--fly-y': `${leaving.from.dy}px` } as CSSProperties}
         >
-          {renderCard(leaving.card, NO_ACT)}
+          {renderCard(leaving.card, NO_ACT, NO_ACT)}
         </div>
       )}
     </div>

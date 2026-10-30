@@ -38,6 +38,8 @@ import { SessionsPage } from './components/sessions-page.tsx';
 import type { SendDismiss, SendExpand } from './components/settled-send-note.tsx';
 import { useAgendaSessionActions } from './features/agenda/agenda-session-actions.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
+import { TERMINAL_STATUSES } from './shell/status-mark.tsx';
+import { AgendaInboxComposer } from './features/agenda/agenda-inbox-composer.tsx';
 import { AgendaInboxPage } from './features/agenda/agenda-inbox-page.tsx';
 import { BoardOriginProvider, useBoardOrigin } from './features/board/board-origin.tsx';
 import { BoardPage } from './features/board/board-page.tsx';
@@ -1953,6 +1955,8 @@ function AgendaRoute({ connection }: DaemonPageProps) {
   const recentWalks = useRef<RecentMessagesMemory>(new Map()).current;
   const phone = useLayoutMode() === 'drawer';
   const machineNotifications = usePairedMachineNotifications();
+  const daemonFetch = useDaemonFetch();
+  const clientFor = useCallback((target: DaemonConnection) => store.clients.client(target), [store.clients]);
   return inbox === null ? null : (
     <AgendaInboxPage
       banner={
@@ -1968,6 +1972,27 @@ function AgendaRoute({ connection }: DaemonPageProps) {
       onClearFrom={() => navigate(daemonAgendaPath(connection.daemonId))}
       onNavigate={navigate}
       phone={phone}
+      // The open item's ferret's own composer: a reply goes to its chat, about the item.
+      renderComposer={card => {
+        const target = inbox.connectionFor(card.daemonId);
+        if (target === undefined) return null;
+        const controls = store.controls.controls(card.daemonId);
+        return (
+          <AgendaInboxComposer
+            autocompleteFetcher={daemonFetch}
+            clientFor={clientFor}
+            compact={phone}
+            connection={target}
+            disabled={TERMINAL_STATUSES.has(card.view.state.status)}
+            enterKeyPreference={controls.composerEnterKey}
+            itemId={card.item.id}
+            key={card.key}
+            phoneEnterKeyPreference={controls.composerPhoneEnterKey}
+            usage={store.usage}
+            view={card.view}
+          />
+        );
+      }}
       readRecent={async card => {
         const target = inbox.connectionFor(card.daemonId);
         if (target === undefined) throw new Error('That machine is no longer paired with this browser.');

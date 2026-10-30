@@ -7,7 +7,6 @@ import {
   type AgendaInboxPageProps,
   AgendaNeedsYou,
   inboxCardOrigin,
-  swipeHintFor,
   waitingWords,
 } from '../../../src/features/agenda/agenda-inbox-page.tsx';
 import { secondsLeft } from '../../../src/features/agenda/agenda-undo-toast.tsx';
@@ -269,7 +268,7 @@ describe('AgendaInboxPage sections', () => {
 });
 
 describe('AgendaInboxPage rows', () => {
-  it('links every item to its ferret’s chat at the item, and navigates there on a tap', async () => {
+  it('links every item to its ferret’s chat at the item, and opens it HERE on a plain tap', async () => {
     const navigated: string[] = [];
     const mounted = await mount(page(fakeInbox(), [twoWay], {}, navigated));
     const link = must(mounted.container.querySelector<HTMLAnchorElement>('[data-agenda-row]'), 'the item row');
@@ -277,7 +276,11 @@ describe('AgendaInboxPage rows', () => {
     expect(link.textContent).toContain('Ship it?');
     expect(link.textContent).toContain('!A2');
     await interact(() => link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })));
-    expect(navigated).toEqual(['/d/laptop/session/sess-2?agenda=A2']);
+    expect(navigated).toEqual([]);
+    expect(mounted.container.querySelector('[data-agenda-inbox]')?.getAttribute('data-agenda-inbox')).toBe('card');
+    expect(
+      mounted.container.querySelector('.fy-attn-deck__top [data-agenda-view]')?.getAttribute('data-agenda-view'),
+    ).toBe('A2');
     await mounted.unmount();
   });
 
@@ -463,7 +466,7 @@ describe('AgendaInboxPage Warden filter', () => {
 describe('AgendaInboxPage on a phone', () => {
   const quick = (mounted: Mounted) =>
     must(mounted.container.querySelector<HTMLButtonElement>('[data-agenda-quick]'), 'Answer quickly');
-  const top = (mounted: Mounted) => mounted.container.querySelector('.fy-attn-deck__top [data-agenda-card]');
+  const top = (mounted: Mounted) => mounted.container.querySelector('.fy-attn-deck__top [data-agenda-view]');
 
   it('lists the items and offers "Answer quickly" only where something is on the reader’s turn', async () => {
     const mounted = await mount(page(fakeInbox(), [threeWay, twoWay], { phone: true }));
@@ -480,8 +483,8 @@ describe('AgendaInboxPage on a phone', () => {
     const mounted = await mount(page(fakeInbox(), [threeWay, stopped], { phone: true }));
     await interact(() => quick(mounted).click());
     expect(mounted.container.querySelector('[data-agenda-inbox]')?.getAttribute('data-agenda-inbox')).toBe('card');
-    expect(top(mounted)?.getAttribute('data-agenda-card')).toBe('S1');
-    expect(mounted.container.querySelector('.fy-attn-inbox__hint')?.textContent).toContain('1 more after this one');
+    expect(top(mounted)?.getAttribute('data-agenda-view')).toBe('S1');
+    expect(mounted.container.querySelector('[data-inbox-swipe-hint]')?.textContent).toContain('1 more after this one');
     await interact(() =>
       must(mounted.container.querySelector<HTMLButtonElement>('[data-agenda-back]'), 'Back').click(),
     );
@@ -491,11 +494,11 @@ describe('AgendaInboxPage on a phone', () => {
 
   it('starts at the tapped card, skips forward, and ends with "You skipped N"', async () => {
     const mounted = await mount(page(fakeInbox(), [threeWay, twoWay, bare], { phone: true, initialOpen: twoWay.key }));
-    expect(top(mounted)?.getAttribute('data-agenda-card')).toBe('A2');
+    expect(top(mounted)?.getAttribute('data-agenda-view')).toBe('A2');
     const skip = () =>
-      must(mounted.container.querySelector<HTMLButtonElement>('.fy-attn-deck__top [data-agenda-skip]'), 'Skip');
+      must(mounted.container.querySelector<HTMLButtonElement>('.fy-attn-deck__top [aria-label="Next item"]'), 'Skip');
     await interact(() => skip().click());
-    expect(top(mounted)?.getAttribute('data-agenda-card')).toBe('A3');
+    expect(top(mounted)?.getAttribute('data-agenda-view')).toBe('A3');
     await interact(() => skip().click());
     expect(top(mounted)).toBeNull();
     expect(mounted.container.querySelector('[data-agenda-queue-end]')?.textContent).toContain(
@@ -504,28 +507,19 @@ describe('AgendaInboxPage on a phone', () => {
     await interact(() =>
       must(mounted.container.querySelector<HTMLButtonElement>('[data-agenda-review]'), 'Review').click(),
     );
-    expect(top(mounted)?.getAttribute('data-agenda-card')).toBe('A1');
+    expect(top(mounted)?.getAttribute('data-agenda-view')).toBe('A1');
     await mounted.unmount();
   });
 
-  it('deals the three-way card’s answers left · up · right', async () => {
+  it('puts the primary answer on ↑ and ↓ on skip, and says so under the item', async () => {
     const mounted = await mount(page(fakeInbox(), [threeWay, twoWay], { phone: true, initialOpen: threeWay.key }));
-    const answers = [...mounted.container.querySelectorAll('.fy-attn-deck__top [data-agenda-answer]')].map(button =>
-      button.getAttribute('data-agenda-option'),
-    );
-    expect(answers).toEqual(['Wait', 'Rebase now', 'Skip']);
-    expect(mounted.container.querySelector('.fy-attn-inbox__hint')?.textContent).toBe(
-      'Swipe ← Wait · ↑ Rebase now · → Skip · ↓ Discuss',
+    expect(mounted.container.querySelector('[data-inbox-swipe-hint]')?.textContent).toBe(
+      '↑ Rebase now · ← Skip · → Wait · ↓ Skip',
     );
     await mounted.unmount();
-  });
-
-  it('names the swipes of the card on top, and names a plain card’s swipes', () => {
-    expect(swipeHintFor(undefined)).toBe('');
-    expect(swipeHintFor(twoWay)).toBe('Swipe ← Hold · ↑ Ship · ↓ Discuss');
-    expect(swipeHintFor(bare)).toBe('Swipe → Got it · ↓ Discuss');
-    const task = inboxCard(agendaItem('A9', { subject: 'Do the list', answers: [] } as never));
-    expect(swipeHintFor(task)).toBe('Reply in words, or open the chat · ↓ Discuss');
+    const yesNo = await mount(page(fakeInbox(), [twoWay], { phone: true, initialOpen: twoWay.key }));
+    expect(yesNo.container.querySelector('[data-inbox-swipe-hint]')?.textContent).toBe('↑ Ship · ← Hold · ↓ Skip');
+    await yesNo.unmount();
   });
 
   it('reads the ferret’s last messages only when the fold is opened, and shows them', async () => {
@@ -555,7 +549,7 @@ describe('AgendaInboxPage on a phone', () => {
   it('says "Later" once the skipped cards are left waiting, and counts them', async () => {
     const mounted = await mount(page(fakeInbox(), [threeWay, twoWay], { phone: true, initialOpen: twoWay.key }));
     const skip = () =>
-      must(mounted.container.querySelector<HTMLButtonElement>('.fy-attn-deck__top [data-agenda-skip]'), 'Skip');
+      must(mounted.container.querySelector<HTMLButtonElement>('.fy-attn-deck__top [aria-label="Next item"]'), 'Skip');
     await interact(() => skip().click());
     await interact(() => skip().click());
     await interact(() =>

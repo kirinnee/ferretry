@@ -4,17 +4,20 @@
  *   ?view=sections        all three sections: Stopped on you, Needs you, With ferrets (folded), plus a notice
  *   ?view=sections-open   the same with "With ferrets" unfolded
  *   ?view=warden          `/inbox?from=warden`: the "From Warden" chip and only what the Warden raised
+ *   ?view=open            an item OPEN: who and what, the chat's full item view, the swipe hint and the ferret's
+ *                         REAL composer under it (`inbox-v2-screenshot.ts` drags it mid-swipe up and down)
  *
- * The REAL `AgendaInboxPage`; only the data is invented and nothing is sent anywhere.
+ * The REAL `AgendaInboxPage` and `Composer`; only the data is invented and nothing is sent anywhere.
  */
 
 import type { AgendaItem, SessionView } from '@ferretry/protocol';
 import { type ReactElement, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
+import { AgendaInboxComposer } from '../src/features/agenda/agenda-inbox-composer.tsx';
 import { AgendaInboxPage } from '../src/features/agenda/agenda-inbox-page.tsx';
 import type { AgendaInbox } from '../src/hooks/use-agenda-inbox.ts';
 import { DeferredAgendaActions, type InboxCard, inboxCardKey } from '../src/lib/agenda-inbox.ts';
-import { daemonId } from '../src/lib/daemon-connection.ts';
+import { type DaemonConnection, daemonConnection, daemonId } from '../src/lib/daemon-connection.ts';
 import { ScrollMemory } from '../src/lib/scroll-memory.ts';
 import { AppTabBar } from '../src/shell/app-bar.tsx';
 import { PageScrollRegion } from '../src/shell/page-scroll-region.tsx';
@@ -42,6 +45,9 @@ const item = (id: string, minutes: number, by: string, patch: Partial<AgendaItem
     ...patch,
   }) as AgendaItem;
 
+/** The board card each conversation works on. */
+const CARDS: Readonly<Record<string, string>> = { rc: 'F41', ra: 'F38', fr: 'F52', mg: 'F47' };
+
 const ferret = (
   id: string,
   teammate: string,
@@ -49,7 +55,13 @@ const ferret = (
   agenda?: { readonly open: number; readonly first: string; readonly ask: string; readonly stopped?: boolean },
 ): SessionView =>
   sessionView(id, {
-    config: { teammate: teammate as never, label, cwd: `/home/kirin/Workspace/${id}` },
+    config: {
+      teammate: teammate as never,
+      label,
+      name: label,
+      cwd: `/home/kirin/Workspace/${id}`,
+      ...(CARDS[id] === undefined ? {} : { focusTask: { id: CARDS[id] } }),
+    } as never,
     state: {
       lastActivityAt: ago(1),
       ...(agenda === undefined ? {} : { attention: { ...agenda, latestAt: ago(2) } }),
@@ -75,6 +87,11 @@ const A5 = item('A5', 12, 'ottilie', {
   title: 'Which storage engine for the ledger?',
   subject: 'Which storage engine should keep the ledger: SQLite or Postgres?',
   blockingNow: true,
+  premise: '- The ledger keeps every finished task, forever\n- It is read when the board opens, and rarely after',
+  context:
+    '- The storage layer lands this week, so the choice is **now**\n- Postgres is one more service to run and patch',
+  recommendation: { decision: 'SQLite', why: 'One file next to the daemon, nothing new to run.' },
+  terms: [{ term: 'WAL', meaning: 'write-ahead log: how SQLite keeps a write safe if the machine stops' }],
   ask: {
     kind: 'multiple-choice',
     options: [
@@ -148,16 +165,26 @@ const FERRET: readonly InboxCard[] = [
 ];
 
 const memory = new ScrollMemory(null);
+
+/** The open item's composer talks to this machine: a fake one, whose sends go nowhere. */
+const MACHINE: DaemonConnection = daemonConnection({
+  daemonId: 'studio',
+  baseUrl: 'https://studio.example.test',
+  deviceId: 'harness',
+});
+const FAKE_CLIENT = { send: async () => ({}) as never };
 const deferred = new DeferredAgendaActions(async () => undefined);
 
 function Inbox({
   phone,
   from,
   withFerretsOpen,
+  openAt,
 }: {
   readonly phone: boolean;
   readonly from: 'warden' | null;
   readonly withFerretsOpen: boolean;
+  readonly openAt?: string | undefined;
 }): ReactElement {
   const state = useSyncExternalStore(deferred.subscribe, deferred.getSnapshot);
   const [source, setSource] = useState(from);
@@ -172,7 +199,7 @@ function Inbox({
     loadResolved: () => undefined,
     deferred,
     deferredState: state,
-    connectionFor: () => undefined,
+    connectionFor: () => MACHINE,
   };
   return (
     <div className={`kt-shell flex overflow-hidden ${phone ? 'flex-col' : 'flex-row'}`} data-fixture="">
@@ -191,6 +218,18 @@ function Inbox({
               onNavigate={() => undefined}
               phone={phone}
               withFerretsOpen={withFerretsOpen}
+              reducedMotion
+              {...(openAt === undefined ? {} : { initialOpen: openAt })}
+              renderComposer={open => (
+                <AgendaInboxComposer
+                  clientFor={async () => FAKE_CLIENT}
+                  compact={phone}
+                  connection={MACHINE}
+                  itemId={open.item.id}
+                  key={open.key}
+                  view={open.view}
+                />
+              )}
             />
           </PageScrollRegion>
         </PullToPaletteRegion>
@@ -216,5 +255,6 @@ createRoot(root).render(
     from={view === 'warden' ? 'warden' : null}
     phone={window.innerWidth < 768}
     withFerretsOpen={view === 'sections-open'}
+    openAt={view === 'open' ? OWNER[0]?.key : undefined}
   />,
 );

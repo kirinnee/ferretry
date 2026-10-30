@@ -235,6 +235,27 @@ why it matters now — so every NEW item a ferret raises must carry both:
 - **Only new items.** It is checked when an item is raised, never when one is read or edited: an item already
   on a board keeps working without them, and `agenda edit` may still reword either.
 
+## In the Inbox
+
+The Inbox lists every item waiting on the owner, from every paired machine, grouped by ferret. Each group — and
+each open item — says **who and what**, never the callsign alone: the ferret, what it works on (its task's name and
+its card, `&F12`), and the machine. A row whose item is about a different card than its ferret's says that card too.
+
+- **Opening an item shows the chat's own item view** — the same component (`AgendaItemView`), so Markdown, the
+  options, the quick replies, the terms and the history read exactly as in the chat — with that ferret's **real
+  composer** under it. A message typed there goes to the ferret's chat about the item (`!A5 …`, delivered as
+  `[re !A5 …]`), the chat's own path; a quick reply carries what is typed as its note. "Open chat" goes to the
+  conversation at the item, and so does a modified click on a row.
+- **The open items are a deck**, on a phone and a wide screen alike. Swipe — from the item's head, its
+  who-and-what line or its quick replies; the body scrolls — or press the arrow keys:
+  - **↑** sends the **primary** answer (the recommended one, the right-hand answer on the card);
+  - **←** and **→** send the others (→ takes what ↑ gave on the card, else it is the primary again);
+  - **↓ skips** to the next item: nothing is sent and the item stays open.
+
+  A held drag is stamped with what letting go would do; a quiet line under the item names every swipe. Every answer
+  goes into the same undo window as a tap. Reduced motion (the OS preference or Settings › Appearance › Motion) drops
+  the fly-off and the spring.
+
 ## Delivery
 
 How the owner's card actions — an answer, a done, a dismiss, a Discuss or a request for more information —

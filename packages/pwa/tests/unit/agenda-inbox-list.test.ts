@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import type { SessionTranscriptMessage, SessionTranscriptPage } from '@ferretry/protocol';
+import { swipeTargets } from '../../src/lib/agenda-answers.ts';
 import type { InboxResolved } from '../../src/lib/agenda-inbox.ts';
 import {
   filterInboxCards,
@@ -10,6 +11,9 @@ import {
   inboxRowTitle,
   inboxSections,
   inboxSourceFromSearch,
+  inboxSwipeHint,
+  inboxSwipeTargets,
+  inboxWho,
   isFromWarden,
   NO_FILTER,
   nextSelection,
@@ -19,7 +23,7 @@ import {
 } from '../../src/lib/agenda-inbox-list.ts';
 import { daemonId } from '../../src/lib/daemon-connection.ts';
 import { type MessagesClient, readRecentMessages } from '../../src/lib/recent-messages.ts';
-import { agendaItem, inboxCard } from '../support/agenda-inbox.tsx';
+import { agendaItem, choices, inboxCard } from '../support/agenda-inbox.tsx';
 import { sessionView } from '../support/sessions.ts';
 
 const MIGRATE = sessionView('dm', { config: { teammate: 'johnnie', name: 'diene-migrate' } });
@@ -287,5 +291,57 @@ describe('inboxSections reading a stopped ferret under the agenda name', () => {
     } as never);
     const sections = inboxSections([inboxCard(agendaItem('A1'), view)], []);
     expect(sections.stopped.map(group => group.ferret)).toEqual(['Moe']);
+  });
+});
+
+describe('the open item’s swipes', () => {
+  const labels = (targets: ReturnType<typeof swipeTargets>) =>
+    Object.fromEntries(Object.entries(targets).map(([direction, target]) => [direction, target?.label]));
+
+  it('puts the primary answer on ↑, keeps ←, and gives → what ↑ gave', () => {
+    const three = swipeTargets(agendaItem('A1', { ask: choices('Rebase now', 'Wait', 'Later') }));
+    expect(labels(inboxSwipeTargets(three))).toEqual({ left: 'Later', up: 'Rebase now', right: 'Wait' });
+  });
+
+  it('keeps → on the primary when nothing was on ↑, and leaves a card with no primary alone', () => {
+    const two = swipeTargets(agendaItem('A2', { ask: choices('Ship', 'Hold') }));
+    expect(labels(inboxSwipeTargets(two))).toEqual({ left: 'Hold', up: 'Ship', right: 'Ship' });
+    const none = swipeTargets(agendaItem('A3', { answers: [] } as never));
+    expect(inboxSwipeTargets(none)).toBe(none);
+  });
+
+  it('says each swipe once, ↑ first, and ↓ Skip when the deck can skip', () => {
+    const two = inboxSwipeTargets(swipeTargets(agendaItem('A2', { ask: choices('Ship', 'Hold') })));
+    expect(inboxSwipeHint(two, true)).toBe('↑ Ship · ← Hold · ↓ Skip');
+    expect(inboxSwipeHint(two, false)).toBe('↑ Ship · ← Hold');
+    expect(inboxSwipeHint({}, true)).toBe('↓ Skip');
+    const review = swipeTargets(agendaItem('A4', { ask: { kind: 'answer-review' } } as never));
+    // "Needs changes" is written, not swiped: a target with no action is not offered.
+    expect(inboxSwipeHint(inboxSwipeTargets(review), false)).not.toContain('Needs changes');
+  });
+});
+
+describe('who an item is from', () => {
+  it('says the ferret, its task, its card and its machine — the item’s own card first', () => {
+    const view = sessionView('s1', {
+      config: { teammate: 'kai', name: 'Release train', focusTask: { id: 'F9' } } as never,
+    });
+    expect(inboxWho(inboxCard(agendaItem('A1', { task: { id: 'F12' } } as never), view, 'Laptop'))).toEqual({
+      ferret: 'Kai',
+      task: 'Release train',
+      card: '&F12',
+      machine: 'Laptop',
+    });
+    expect(inboxWho(inboxCard(agendaItem('A1'), view, 'Laptop')).card).toBe('&F9');
+  });
+
+  it('has no task when the conversation is only the ferret’s name, and no card when it has none', () => {
+    const view = sessionView('s2', { config: { teammate: 'moe', name: 'Moe' } });
+    expect(inboxWho(inboxCard(agendaItem('A1'), view))).toEqual({
+      ferret: 'Moe',
+      task: null,
+      card: null,
+      machine: 'Workshop',
+    });
   });
 });

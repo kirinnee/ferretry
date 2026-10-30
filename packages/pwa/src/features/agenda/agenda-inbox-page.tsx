@@ -6,12 +6,19 @@
  *   COLLAPSED until asked for). A ferret's group says who it is and where once, then lists its items and,
  *   below them, its plain notifications (a line, a time, Clear). The badge counts items on your turn and the
  *   notifications you have not cleared.
- * - A TAP OPENS THE CHAT AT THE ITEM: every row is a real link to that ferret's conversation with the item's
- *   full card (`?attention=<id>`), so there is no second card pane to keep in step with the chat. A tapped
- *   notification opens the chat and clears itself. There is no right-hand pane and no list rail: the list is
- *   the page, one calm column.
- * - A PHONE ALSO GETS "Answer quickly": the items on your turn as the swipe deck, one answer per card, into
- *   the same undo window. A wide screen walks the rows with j/k (or ↑/↓); Enter opens the one focused.
+ * - WHO AND WHAT: a ferret's group says its callsign, what it works on (the task's name and its card, `&F12`) and
+ *   its machine — never the callsign alone — and so does the open item.
+ * - A TAP OPENS THE ITEM HERE, as the SAME full item view the chat shows (`AgendaItemView`: Markdown, options,
+ *   quick replies, terms, history), with that ferret's REAL composer under it ({@link AgendaInboxPageProps.renderComposer}):
+ *   what is typed goes to the ferret's chat about the item (`!A5 …`, the chat's own path) and a quick reply carries
+ *   it as its note. Every row is still a real link to the conversation at the item (`?attention=<id>`), so a
+ *   modified click opens the chat, and the open item has "Open chat". A tapped notification opens the chat and
+ *   clears itself.
+ * - THE OPEN ITEMS ARE A DECK, on a phone and a wide screen alike: SWIPE (or press) ↑ for the primary answer — "to
+ *   the top" — ← and → for the others, and ↓ to SKIP to the next without answering; the item stays open. A swipe
+ *   starts on the item's head, its who-and-what line or its quick replies (the body scrolls), is stamped with what
+ *   it would do, and goes into the same undo window as a tap. Reduced motion drops the fly-off. A phone also gets
+ *   "Answer quickly", the deck from the top; a wide screen walks the rows with j/k (or ↑/↓) and Enter opens one.
  * - FILTERS: Open / Resolved, a machine filter (once there is more than one machine), Find, and — from
  *   `/inbox?from=warden` — a "From Warden" chip that keeps only what the Warden raised, with a way to clear it.
  *
@@ -19,13 +26,14 @@
  * ferret's last messages are the host's (`readRecent`).
  */
 
-import { agendaCardAnswers, DISCUSS_LABEL } from '@ferretry/protocol';
 import { ArrowLeft, ArrowRight, CheckCheck, ChevronRight, Search, SkipForward, X, Zap } from 'lucide-react';
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { ChatProse } from '../../components/chat-prose.tsx';
 import { Spinner } from '../../components/spinner.tsx';
 
 import type { AgendaInbox } from '../../hooks/use-agenda-inbox.ts';
-import { CLEAR_ACTION, canDiscussNow, kindWord } from '../../lib/agenda-answers.ts';
+import { CLEAR_ACTION, kindWord, type SwipeTargets, swipeTargets } from '../../lib/agenda-answers.ts';
+import { itemHistory } from '../../lib/agenda-history.ts';
 import {
   actionSentence,
   agendaConversationPath,
@@ -34,6 +42,7 @@ import {
   type InboxCard,
   type InboxResolved,
   RESOLVED_READ_LIMIT,
+  type SwipeMap,
 } from '../../lib/agenda-inbox.ts';
 import {
   type FerretGroup,
@@ -46,13 +55,19 @@ import {
   inboxRowAsk,
   inboxRowTitle,
   inboxSections,
+  inboxSwipeHint,
+  inboxSwipeTargets,
+  inboxWho,
   nextSelection,
   QUEUE_END,
   skipSelection,
   stepSelection,
 } from '../../lib/agenda-inbox-list.ts';
 import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
+import { withComposerNote } from '../../lib/agenda-reply.ts';
 import { laneEditDestination } from '../../lib/lane-proposal-link.ts';
+import { daemonSessionScope } from '../../lib/daemon-scope.ts';
+import { composerQuoteTarget } from '../../lib/quote.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { daemonAgendaPath, daemonSessionPath } from '../../lib/pages/routes.ts';
 import type { RecentMessage } from '../../lib/recent-messages.ts';
@@ -62,11 +77,13 @@ import { sessionsBarNames } from '../../shell/sessions-bar-model.ts';
 import { PageThemeSwitch } from '../../shell/theme-toggle.tsx';
 import { agendaAge, agendaReference } from './agenda-board.tsx';
 import { AgendaCard, type AgendaCardOrigin } from './agenda-card.tsx';
+import { AgendaItemView } from './agenda-item-view.tsx';
 import { AgendaRecentMessages } from './agenda-recent-messages.tsx';
 import { ResolvedRow } from './agenda-resolved.tsx';
 import { AgendaStatusPill } from './agenda-status-pill.tsx';
 import { AgendaSwipeDeck } from './agenda-swipe-deck.tsx';
 import { AgendaUndoToast } from './agenda-undo-toast.tsx';
+import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
 
 /**
  * Where a card came from: the FERRET that asked (its callsign, else the row's title), what it is working
@@ -116,41 +133,135 @@ const answerCard = (
   if (editor !== undefined) onNavigate(editor);
 };
 
-/** One card, answering into the undo window. */
+/** One compact card (the Sessions page's Needs-you deck), answered with its buttons into the undo window. */
 const renderInboxCard = (
-  { inbox, onNavigate, now, readRecent, recentOpen }: CardHostProps,
+  { inbox, onNavigate, now }: CardHostProps,
   card: InboxCard,
   act: (action: InboxAction) => void,
-  swipeHints: boolean,
-  onSkip?: () => void,
-) => {
-  const origin = inboxCardOrigin(card, onNavigate);
-  return (
-    <AgendaCard
-      error={failureFor(inbox.deferredState.failed, card.key)}
-      item={card.item}
-      key={card.key}
-      {...(onSkip === undefined ? {} : { onSkip })}
-      onAct={act}
-      origin={origin}
-      swipeHints={swipeHints}
-      {...(now === undefined ? {} : { now })}
-      {...(readRecent === undefined
-        ? {}
-        : {
-            detailEnd: (
-              <AgendaRecentMessages
-                ferret={origin.ferret}
-                initiallyOpen={recentOpen ?? false}
-                key={card.key}
-                read={() => readRecent(card)}
-                {...(now === undefined ? {} : { now })}
-              />
-            ),
-          })}
-    />
+) => (
+  <AgendaCard
+    error={failureFor(inbox.deferredState.failed, card.key)}
+    item={card.item}
+    key={card.key}
+    onAct={act}
+    origin={inboxCardOrigin(card, onNavigate)}
+    swipeHints={false}
+    {...(now === undefined ? {} : { now })}
+  />
+);
+
+/** The open item's swipes: the card's own answers, the primary on ↑ ({@link inboxSwipeTargets}). */
+const openItemTargets = (card: InboxCard): SwipeTargets => inboxSwipeTargets(swipeTargets(card.item));
+
+/** The same swipes as the item view's keys take them: each direction's action, where it has one. */
+const swipeMapOf = (targets: SwipeTargets): SwipeMap =>
+  Object.fromEntries(
+    Object.entries(targets).flatMap(([direction, target]) =>
+      target?.action == null ? [] : [[direction, target.action]],
+    ),
   );
+
+/** The conversation an item belongs to, as the composer registers itself under it. */
+const scopeOf = (card: InboxCard) => daemonSessionScope({ daemonId: card.daemonId }, card.view.config.id);
+
+/**
+ * Answers the open item: what is typed in its ferret's composer rides as the answer's note (the chat's own rule,
+ * `withComposerNote`), and the composer is emptied once it is spent.
+ */
+const answerWithDraft = (host: Pick<CardHostProps, 'inbox' | 'onNavigate'>, card: InboxCard, action: InboxAction) => {
+  const composer = composerQuoteTarget(scopeOf(card));
+  const sent = withComposerNote(action, composer?.draft() ?? '');
+  answerCard(host, card, sent);
+  if (sent !== action) composer?.replaceDraft('');
 };
+
+const copyWriter = browserClipboardWriter();
+
+/**
+ * Who asked and about what, over the open item — the ferret, what it works on, its card and its machine, never the
+ * callsign alone — and the way to its chat. It is also a place a swipe can start.
+ */
+function InboxWhoLine({ card, onNavigate }: { readonly card: InboxCard; readonly onNavigate: (to: string) => void }) {
+  const who = inboxWho(card);
+  const dot = (
+    <span aria-hidden="true" className="fy-inbox-who__dot">
+      ·
+    </span>
+  );
+  return (
+    <div className="fy-inbox-who" data-inbox-who="">
+      <span className="fy-inbox-who__ferret" data-inbox-who-ferret="">
+        {who.ferret}
+      </span>
+      {who.task === null ? null : (
+        <>
+          {dot}
+          <span className="fy-inbox-who__task" data-inbox-who-task="">
+            {who.task}
+          </span>
+        </>
+      )}
+      {who.card === null ? null : (
+        <>
+          {dot}
+          <span className="fy-inbox-who__card" data-inbox-who-card="">
+            {who.card}
+          </span>
+        </>
+      )}
+      {dot}
+      <span className="fy-inbox-who__machine">{who.machine}</span>
+      <RouteLink
+        className="fy-inbox-who__chat"
+        data-inbox-open-chat=""
+        onNavigate={onNavigate}
+        to={agendaConversationPath(card.daemonId, card.view.config.id, card.item.id)}
+      >
+        Open chat
+        <ChevronRight aria-hidden="true" size={13} />
+      </RouteLink>
+    </div>
+  );
+}
+
+interface OpenItemPlace {
+  readonly index: number;
+  readonly total: number;
+  readonly onPrevious?: (() => void) | undefined;
+  readonly onClose: () => void;
+}
+
+/** The open item: who and what, then the SAME full view the chat shows, answering into the undo window. */
+const renderOpenItem = (
+  { inbox, onNavigate, now }: CardHostProps,
+  card: InboxCard,
+  act: (action: InboxAction) => void,
+  skip: () => void,
+  place: OpenItemPlace,
+) => (
+  <div className="fy-inbox-open" data-inbox-open={card.key} key={card.key}>
+    <InboxWhoLine card={card} onNavigate={onNavigate} />
+    <AgendaItemView
+      busy={false}
+      closeLabel="Back to the Inbox"
+      error={failureFor(inbox.deferredState.failed, card.key)}
+      ferret={inboxWho(card).ferret}
+      history={itemHistory(card.item, [])}
+      item={card.item}
+      onAct={act}
+      onClose={place.onClose}
+      onNext={skip}
+      onSkip={skip}
+      position={{ index: place.index, total: place.total }}
+      renderProse={text => <ChatProse copyable={copyWriter} text={text} />}
+      // The deck owns the gestures (the stamp, the fly-off, ↓ to skip); the view takes the keys.
+      swipeable={false}
+      swipes={swipeMapOf(openItemTargets(card))}
+      {...(now === undefined ? {} : { now })}
+      {...(place.onPrevious === undefined ? {} : { onPrevious: place.onPrevious })}
+    />
+  </div>
+);
 
 /**
  * Past the last item: the ones the reader skipped are still open. Said once, with the way back to them —
@@ -375,6 +486,11 @@ export interface AgendaInboxPageProps {
   readonly onClearFrom?: () => void;
   /** Starts the "With ferrets" section open (a harness). */
   readonly withFerretsOpen?: boolean;
+  /**
+   * The open item's ferret's REAL composer, bound to that conversation: what is typed goes to its chat about the
+   * item. The host draws it (it holds the clients); absent, the open item has no composer.
+   */
+  readonly renderComposer?: (card: InboxCard) => ReactNode;
 }
 
 /** Everything a row needs besides the card itself. */
@@ -384,6 +500,8 @@ interface RowEnv {
   readonly onNavigate: (to: string) => void;
   readonly selectedKey: string | null;
   readonly rowRef: (key: string) => (element: HTMLAnchorElement | null) => void;
+  /** Opens an item here, as the deck's top card. */
+  readonly onOpen: (key: string) => void;
 }
 
 /** One item: its title and age, its ask on one line, and under it where it stands, its kind and its reference. */
@@ -396,8 +514,10 @@ function ItemRow({
   readonly group: FerretGroup;
   readonly env: RowEnv;
 }) {
-  const { now, onNavigate, selectedKey, rowRef } = env;
+  const { now, onOpen, selectedKey, rowRef } = env;
   const ask = inboxRowAsk(card.item);
+  // The card this item is about, when it is not the one its ferret is on (the group's head says that one).
+  const itemCard = inboxWho(card).card;
   const status = agendaStatus(card.item, group.ferret, now);
   const author = agendaAuthor(card.item, group.ferret);
   return (
@@ -408,7 +528,8 @@ function ItemRow({
         data-agenda-row={card.key}
         data-dimmed={status?.dimmed || undefined}
         data-selected={selectedKey === card.key || undefined}
-        onNavigate={onNavigate}
+        // A plain click opens the item here; a modified one opens the chat at it (the link's own address).
+        onNavigate={() => onOpen(card.key)}
         ref={rowRef(card.key)}
         to={agendaConversationPath(card.daemonId, card.view.config.id, card.item.id)}
       >
@@ -424,6 +545,12 @@ function ItemRow({
           <span>{kindWord(card.item)}</span>
           <span aria-hidden="true">·</span>
           <span>{agendaReference(card.item.id)}</span>
+          {itemCard === null || itemCard === group.card ? null : (
+            <>
+              <span aria-hidden="true">·</span>
+              <span data-agenda-row-card="">{itemCard}</span>
+            </>
+          )}
           {author === group.ferret ? null : (
             <>
               <span aria-hidden="true">·</span>
@@ -490,6 +617,16 @@ function GroupView({ group, env }: { readonly group: FerretGroup; readonly env: 
               ·
             </span>
             <span className="fy-inbox-group__task">{group.task}</span>
+          </>
+        )}
+        {group.card === null ? null : (
+          <>
+            <span aria-hidden="true" className="fy-inbox-group__dot">
+              ·
+            </span>
+            <span className="fy-inbox-group__card" data-agenda-group-card="">
+              {group.card}
+            </span>
           </>
         )}
         <span aria-hidden="true" className="fy-inbox-group__dot">
@@ -570,26 +707,6 @@ function Section({
   );
 }
 
-const ARROW = { left: '←', up: '↑', right: '→' } as const;
-
-/**
- * What each swipe does on the card on top, in the order the answer bar lays them out — "Swipe ← No · →
- * Yes · ↓ Discuss". Read off that card's own answers, so the hint can never promise a swipe the card does
- * not take; ↓ Discuss closes it wherever a ferret can be talked to, even on a card with no answers.
- */
-export const swipeHintFor = (card: InboxCard | undefined): string => {
-  if (card === undefined) return '';
-  const swipes = [
-    ...agendaCardAnswers(card.item).map(answer => `${ARROW[answer.direction]} ${answer.label}`),
-    ...(canDiscussNow(card.item) ? [`↓ ${DISCUSS_LABEL}`] : []),
-  ];
-  const [only] = swipes;
-  if (only === undefined) return 'Reply in words, or open the chat';
-  return agendaCardAnswers(card.item).length === 0
-    ? `Reply in words, or open the chat · ${only}`
-    : `Swipe ${swipes.join(' · ')}`;
-};
-
 /** Whether a key press belongs to something the reader is typing into or operating, not to the list. */
 const ownedElsewhere = (target: EventTarget | null): boolean => {
   if (!(target instanceof HTMLElement)) return false;
@@ -635,6 +752,7 @@ export function AgendaInboxPage({
   from = null,
   onClearFrom,
   withFerretsOpen = false,
+  renderComposer,
 }: AgendaInboxPageProps) {
   const headingId = useId();
   const [cursor, setCursor] = useState<string | null>(null);
@@ -689,7 +807,7 @@ export function AgendaInboxPage({
   // j/k and ↑/↓ walk the rows on a wider screen, unless the reader is typing.
   const keyState = useRef({ navigable, selectedKey });
   keyState.current = { navigable, selectedKey };
-  const keysLive = !phone && filter === 'open';
+  const keysLive = !phone && filter === 'open' && !deckOpen;
   useEffect(() => {
     if (!keysLive || typeof window === 'undefined') return;
     const onKey = (event: KeyboardEvent): void => {
@@ -720,19 +838,24 @@ export function AgendaInboxPage({
   const updating = filter === 'open' ? inbox.reading && !empty : inbox.resolvedReading && inbox.resolved.length > 0;
   const host: CardHostProps = { inbox, onNavigate, now, readRecent, recentOpen };
   const atEnd = deckPlace === QUEUE_END;
-  const skip = (): void => setDeckAt(skipSelection(order, deckPlace));
+  const openAt = (key: string): void => {
+    setDeckAt(key);
+    setDeckOpen(true);
+  };
   const review = (): void => setDeckAt(order[0] ?? null);
   const startDeck = (): void => {
     setDeckAt(order[0] ?? null);
     setDeckOpen(true);
   };
-  const cardOpen = phone && deckOpen && filter === 'open' && (deckSelected !== undefined || atEnd);
+  // An open item is the deck's top card, on a phone and a wide screen alike.
+  const cardOpen = deckOpen && filter === 'open' && (deckSelected !== undefined || atEnd);
 
   const env: RowEnv = {
     inbox,
     now,
     onNavigate,
     selectedKey,
+    onOpen: openAt,
     rowRef: key => element => {
       if (element === null) rowRefs.delete(key);
       else rowRefs.set(key, element);
@@ -818,7 +941,7 @@ export function AgendaInboxPage({
         )}
         {phone ? null : (
           <p className="fy-attn-inbox__hint" data-agenda-keys="">
-            j / k to move · Enter to open
+            j / k to move · Enter to open here
           </p>
         )}
       </div>
@@ -829,7 +952,12 @@ export function AgendaInboxPage({
     // never the ones before it, so the queue only moves forward; past the last, the skipped ones are offered.
     const deck = deckSelected === undefined ? [] : deckCards.slice(Math.max(0, deckCards.indexOf(deckSelected)));
     return (
-      <main aria-labelledby={headingId} className="fy-attn-inbox" data-agenda-inbox="card">
+      <main
+        aria-labelledby={headingId}
+        className="fy-attn-inbox"
+        data-agenda-inbox="card"
+        data-phone={phone || undefined}
+      >
         <header className="fy-attn-inbox__cardbar">
           <button className="fy-attn-inbox__back" data-agenda-back="" onClick={() => setDeckOpen(false)} type="button">
             <ArrowLeft aria-hidden="true" size={16} />
@@ -851,19 +979,45 @@ export function AgendaInboxPage({
             <p aria-hidden="true" className="fy-attn-inbox__hint" />
           </div>
         ) : (
-          <div className="fy-attn-inbox__deck" data-agenda-deck-host="">
+          <div className="fy-attn-inbox__deck fy-attn-inbox__deck--open" data-agenda-deck-host="">
             <AgendaSwipeDeck
               cards={deck}
-              onAct={(card, action) => answerCard(host, card, action)}
+              onAct={(card, action) => answerWithDraft(host, card, action)}
+              onSkip={card => setDeckAt(skipSelection(order, card.key))}
+              targetsFor={openItemTargets}
               {...(reducedMotion === undefined ? {} : { reducedMotion })}
-              renderCard={(card, act) =>
-                renderInboxCard(host, card, act, true, card.key === deckPlace ? skip : undefined)
-              }
+              renderCard={(card, act, skipCard) => {
+                const index = order.indexOf(card.key);
+                const previous = index > 0 ? order[index - 1] : undefined;
+                return renderOpenItem(host, card, act, skipCard, {
+                  index: Math.max(0, index),
+                  total: order.length,
+                  onClose: () => setDeckOpen(false),
+                  ...(previous === undefined ? {} : { onPrevious: () => setDeckAt(previous) }),
+                });
+              }}
             />
-            <p className="fy-attn-inbox__hint">
-              {deck.length > 1 ? `${deck.length - 1} more after this one · ` : ''}
-              {swipeHintFor(deck[0])}
-            </p>
+            <div className="fy-inbox-deck-foot" data-inbox-deck-foot="">
+              <p className="fy-attn-inbox__hint fy-inbox-swipe-hint" data-inbox-swipe-hint="">
+                {deck.length > 1 ? `${deck.length - 1} more after this one · ` : ''}
+                {deck[0] === undefined ? '' : inboxSwipeHint(openItemTargets(deck[0]), true)}
+              </p>
+              {deck[0] === undefined || readRecent === undefined ? null : (
+                // What led up to it, a fold away, beside where the reply is written.
+                <AgendaRecentMessages
+                  ferret={inboxWho(deck[0]).ferret}
+                  initiallyOpen={recentOpen ?? false}
+                  key={deck[0].key}
+                  read={() => readRecent(deck[0] as InboxCard)}
+                  {...(now === undefined ? {} : { now })}
+                />
+              )}
+              {deck[0] === undefined || renderComposer === undefined ? null : (
+                <div className="fy-inbox-composer" data-inbox-composer={deck[0].key}>
+                  {renderComposer(deck[0])}
+                </div>
+              )}
+            </div>
           </div>
         )}
         <AgendaUndoToast inbox={inbox} {...(clock === undefined ? {} : { clock })} />
@@ -933,7 +1087,7 @@ export function AgendaNeedsYou({ inbox, daemonId, onNavigate, now, clock }: Agen
       </header>
       <ul className="fy-attn-needs__cards" data-count={shown.length}>
         {shown.map(card => (
-          <li key={card.key}>{renderInboxCard(host, card, action => answerCard(host, card, action), false)}</li>
+          <li key={card.key}>{renderInboxCard(host, card, action => answerCard(host, card, action))}</li>
         ))}
       </ul>
       {toast}
