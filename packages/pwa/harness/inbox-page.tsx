@@ -20,6 +20,7 @@ import { AgendaInboxPage } from '../src/features/agenda/agenda-inbox-page.tsx';
 import type { AgendaInbox } from '../src/hooks/use-agenda-inbox.ts';
 import { DeferredAgendaActions, type InboxCard, inboxCardKey } from '../src/lib/agenda-inbox.ts';
 import { type DaemonConnection, daemonConnection, daemonId } from '../src/lib/daemon-connection.ts';
+import type { TranscriptEntry } from '../src/lib/session-screens.ts';
 import { ScrollMemory } from '../src/lib/scroll-memory.ts';
 import { AppTabBar } from '../src/shell/app-bar.tsx';
 import { PageScrollRegion } from '../src/shell/page-scroll-region.tsx';
@@ -226,6 +227,27 @@ const MACHINE: DaemonConnection = daemonConnection({
   baseUrl: 'https://studio.example.test',
   deviceId: 'harness',
 });
+/** What the conversation holds about the open item: the ferret's question, the owner's reply, the ferret's answer. */
+const conversationAbout = async (open: InboxCard): Promise<readonly TranscriptEntry[]> => [
+  {
+    id: 'c1',
+    kind: 'assistant',
+    text: `I need a call on !${open.item.id}: **SQLite** is quick to ship, Postgres is safer long term.`,
+    at: NOW - 50 * 60_000,
+  },
+  {
+    id: 'c2',
+    kind: 'user',
+    text: `Is Postgres overkill for !${open.item.id}? Lean toward SQLite.`,
+    at: NOW - 30 * 60_000,
+  },
+  {
+    id: 'c3',
+    kind: 'assistant',
+    text: `Not overkill, but the ledger is read in full once a day, so SQLite fits !${open.item.id}. I will wait for your answer.`,
+    at: NOW - 20 * 60_000,
+  },
+];
 const FAKE_CLIENT = { send: async () => ({}) as never };
 const deferred = new DeferredAgendaActions(async () => undefined);
 
@@ -275,6 +297,7 @@ function Inbox({
               phone={phone}
               withFerretsOpen={withFerretsOpen}
               reducedMotion
+              readConversation={conversationAbout}
               {...(openAt === undefined ? {} : { initialOpen: openAt })}
               renderComposer={open => (
                 <AgendaInboxComposer

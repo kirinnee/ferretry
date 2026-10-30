@@ -287,3 +287,4 @@ packages/pwa/src/lib/board-phone.ts # the phone Board's lane switching and tab b
 packages/pwa/src/lib/board-ports.ts # the Board's send-and-start ports (U12), reached from App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/hooks/use-board-asks.ts # the card detail's ask reader (U12), reached from board-detail.tsx ← board-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/lib/board-detail.ts # the card detail's pure helpers (U12), reached from board-detail.tsx ← board-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
+packages/pwa/src/lib/item-conversation.ts # the Inbox item's History read, used by App.tsx ← main.tsx; the gate ignores .tsx roots

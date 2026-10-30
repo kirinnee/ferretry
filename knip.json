@@ -106,6 +106,7 @@
         "harness/chat-images-screenshot.tsx",
         "harness/agenda-message-screenshot.tsx",
         "harness/agenda-card-quote-screenshot.tsx",
+        "harness/inbox-item-history-screenshot.ts",
         "harness/migrate-notice-screenshot.tsx",
         "harness/pack-cards-screenshot.tsx",
         "harness/theme-gallery-screenshot.tsx",
