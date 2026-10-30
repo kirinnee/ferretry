@@ -59,9 +59,9 @@ describe('inboxSections', () => {
     expect(inboxSections([a10, elsewhere], []).needsYou).toHaveLength(2);
   });
 
-  it('names a conversation with no name by its ferret alone', () => {
+  it('names a conversation with no name by its folder, the ferret beside it', () => {
     const bare = inboxCard(agendaItem('A1'), sessionView('x', { config: { teammate: 'moe', name: undefined } }));
-    expect(inboxSections([bare], []).needsYou[0]).toMatchObject({ ferret: 'Moe', task: null });
+    expect(inboxSections([bare], []).needsYou[0]).toMatchObject({ ferret: 'Moe', task: 'x' });
   });
 
   it('puts a stopped ferret first, a ferret on its turn last, and a notice beside its items', () => {

@@ -8,6 +8,7 @@ import {
 } from '@ferretry/protocol';
 import type { BoardChangeSink, SessionFocus, SessionParents } from '../../lib/board/index.ts';
 import { jsonObject } from '../../lib/json.ts';
+import { withAutoTitle } from '../../lib/names/auto-title.ts';
 import { tryParseSessionId } from '../../lib/session-id.ts';
 import type { DaemonStorage } from '../storage/session-storage.ts';
 
@@ -39,13 +40,13 @@ export class StorageSessionParents implements SessionParents {
 export class StorageSessionFocus implements SessionFocus {
   constructor(private readonly storage: SessionDocuments) {}
 
-  async setFocus(sessionId: string, task: TaskRef): Promise<boolean> {
+  async setFocus(sessionId: string, task: TaskRef, title?: string): Promise<boolean> {
     const id = known(this.storage, sessionId);
     if (id === undefined) return false;
     const focusTask = TaskRefSchema.parse(task);
     await this.storage.updateConfig(id, current => {
       const { boardSkip: _cleared, ...rest } = jsonObject(current) ?? {};
-      return { ...rest, focusTask };
+      return { ...(title === undefined ? rest : withAutoTitle(rest, 'card', title)), focusTask };
     });
     return true;
   }

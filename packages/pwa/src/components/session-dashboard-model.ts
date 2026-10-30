@@ -6,7 +6,7 @@
  * share one status vocabulary and one stable project-colour assignment.
  */
 
-import type { SessionView } from '@ferretry/protocol';
+import { isPlaceholderSessionName, type SessionView } from '@ferretry/protocol';
 import type { DashboardView, Density } from '../lib/controls.ts';
 import type { SessionGroup } from '../lib/fleet-grouping.ts';
 import type { BadgeTone } from '../shell/primitives.tsx';
@@ -205,8 +205,8 @@ export function pullDashboardNeedsYou(
  * THE NAME A SESSION WAS GIVEN, or `''` when it was given none. The daemon titles an unnamed interactive
  * session "interactive" (`session/lifecycle/policy.ts`), so a list that printed the title said the mode
  * again after every agent: the "interactive" #551 removed as a badge came back as the task. Only that
- * exact placeholder on an interactive session is dropped; an auto session always has a real task.
+ * exact placeholder is dropped (`isPlaceholderSessionName`); the daemon titles the session from its card or first message.
  */
-export function sessionTaskName(config: Pick<SessionView['config'], 'mode' | 'name'>): string {
-  return config.mode === 'interactive' && config.name.trim().toLowerCase() === 'interactive' ? '' : config.name;
+export function sessionTaskName(config: Pick<SessionView['config'], 'name'>): string {
+  return isPlaceholderSessionName(config.name) ? '' : config.name;
 }

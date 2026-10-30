@@ -31,15 +31,15 @@
 import { displaySystemCallsign, type SessionView } from '@ferretry/protocol';
 import { Info, Menu } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { agendaOn, hypermediaOn, packOn } from '../features/session-info/info-model.ts';
 import { OutdatedMark } from '../features/restart-outdated/outdated-mark.tsx';
+import { agendaOn, hypermediaOn, packOn } from '../features/session-info/info-model.ts';
 import { SwitchMarks, type SwitchMarksProps } from '../features/session-info/switch-marks.tsx';
 import { displayCallsign } from '../lib/callsign.ts';
-import { parseTaskName } from '../shell/task-name.ts';
 import { harnessWord } from '../lib/harness-dialogs.ts';
 import { permissionPhrase } from '../lib/permission-requests.ts';
 import type { SessionTurn } from '../lib/session-activity.ts';
 import { sessionStatusLabel } from '../lib/session-screens.ts';
+import { sessionTask } from '../shell/session-title.ts';
 import { StatusMark } from '../shell/status-mark.tsx';
 import { UnreadBadge } from '../shell/unread-badge.tsx';
 
@@ -56,10 +56,10 @@ export const sessionDisplayName = (session: SessionView): string => {
 /**
  * WHAT this session is for: the task it was named, never the callsign. A name with a leading `[Teammate]`
  * prefix is shown without it — the callsign is already said beside the title. Falls back to the callsign
- * only when the session has no name at all.
+ * only when the session has no task (the daemon's `interactive` placeholder is none).
  */
 export const sessionTitle = (session: SessionView): string =>
-  parseTaskName(session.config.name).task || sessionDisplayName(session);
+  sessionTask(session.config.name) || sessionDisplayName(session);
 
 /** The status word for each turn: the person's words, not the daemon's. */
 const TURN_WORD: Readonly<Record<SessionTurn, string>> = {

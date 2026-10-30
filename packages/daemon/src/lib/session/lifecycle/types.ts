@@ -71,6 +71,8 @@ const AbsolutePathSchema = z
 export const SessionLifecycleConfigSchema = z.object({
   id: SessionIdSchema,
   name: z.string().min(1).max(MAX_SESSION_TITLE_LENGTH),
+  /** Who chose `name`: the daemon (`auto`, retitlable) or a person (`owner`, final). */
+  nameSource: z.enum(['auto', 'owner']).optional(),
   agent: AbsolutePathSchema,
   command: z.array(z.string().min(1)).min(1),
   cwd: AbsolutePathSchema,

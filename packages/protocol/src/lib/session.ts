@@ -475,6 +475,12 @@ export const SessionConfigSchema = z.object({
   incarnation: z.string().min(1),
   runtimeGeneration: PositiveIntegerSchema,
   name: z.string().min(1),
+  /**
+   * Who chose `name`. `auto`: the daemon titled the session itself (from its focus card or its first owner
+   * message) and may retitle it; `owner`: a person or `--name` chose it and nothing overrides it. Absent on a
+   * session older than the field: its name is the owner's, except the bare `interactive` placeholder.
+   */
+  nameSource: z.enum(['auto', 'owner']).optional(),
   teammate: z.string().optional(),
   label: z.string().optional(),
   parent: z.string().optional(),
@@ -1382,3 +1388,10 @@ export const SignalSessionRequestSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('working'), message: z.string().min(1).optional() }),
 ]);
 export type SignalSessionRequest = z.infer<typeof SignalSessionRequestSchema>;
+
+/** The name an interactive session carries until it has a card or a first message to be titled from. */
+export const INTERACTIVE_PLACEHOLDER_NAME = 'interactive';
+
+/** Whether a session name is only the placeholder — it says the mode, not the work, so no surface may print it. */
+export const isPlaceholderSessionName = (name: string): boolean =>
+  name.trim().toLowerCase() === INTERACTIVE_PLACEHOLDER_NAME;
