@@ -81,7 +81,7 @@ export interface SessionTopBarProps {
   readonly onToggleInfo?: () => void;
   /** Actions ▾, rendered by the page that owns every action. */
   readonly menu?: ReactNode;
-  /** The far-right control after Actions ▾: the phone's theme quick switch. */
+  /** The far-right control after Actions ▾: the theme quick switch, at every width. */
   readonly trailing?: ReactNode;
   /** Phone only: opens the sessions drawer. */
   readonly onOpenSessions?: () => void;

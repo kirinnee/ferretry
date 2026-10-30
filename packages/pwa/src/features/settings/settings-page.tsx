@@ -27,7 +27,7 @@ import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { daemonMachineSetupPath, daemonSettingsPath } from '../../lib/pages/routes.ts';
 import { CHAT_WIDTH_OPTIONS, ChatWidthControl } from '../../shell/chat-width-control.tsx';
 import { Badge, Button } from '../../shell/primitives.tsx';
-import { ThemeSettings } from '../../shell/theme-toggle.tsx';
+import { PageThemeSwitch, ThemeSettings } from '../../shell/theme-toggle.tsx';
 import { useLocalComputer } from '../browser/use-local-computer.ts';
 import type { CarrierPreferenceControl } from '../carrier/active-carrier-card.tsx';
 import type { FleetClientFactory } from '../fleet/fleet-client.ts';
@@ -714,7 +714,10 @@ export function SettingsPage({
           is still readable — the prose inside every panel is capped by its own card. */}
       <div className="mx-auto grid w-full max-w-[1320px] min-w-0 grid-cols-1 items-start gap-3 py-2 md:grid-cols-[15rem_minmax(0,1fr)] md:gap-6 md:py-4">
         <div className="sticky top-2 hidden min-w-0 md:block">
-          <h1 className="m-0 mb-3 px-control-x font-display text-display font-bold tracking-display">Settings</h1>
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h1 className="m-0 px-control-x font-display text-display font-bold tracking-display">Settings</h1>
+            <PageThemeSwitch />
+          </div>
           <SettingsSidebar {...navigation} active={activeSection} activeMachine={daemonId} />
         </div>
 

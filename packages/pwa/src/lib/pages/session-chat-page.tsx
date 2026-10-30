@@ -1327,7 +1327,7 @@ export function SessionChatPage({
         compact={compact}
         infoOpen={info.open}
         menu={actionsMenu}
-        {...(compact ? { trailing: <ThemeToggle touch /> } : {})}
+        trailing={<ThemeToggle iconOnly touch={compact} />}
         project={project}
         session={session}
         status={

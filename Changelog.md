@@ -1,3 +1,10 @@
+## [4.113.0](https://github.com/kirinnee/ferretry/compare/v4.112.0...v4.113.0) (2026-10-30)
+
+### Features
+
+* **protocol:** board v2 — project boards, lanes, cards and the agenda task link ([#930](https://github.com/kirinnee/ferretry/issues/930)) ([16c0185](https://github.com/kirinnee/ferretry/commit/16c01852e7039fbc2947e23b5fe83fda19579299))
+* **pwa:** put the theme switch in the header row that is already there ([#924](https://github.com/kirinnee/ferretry/issues/924)) ([1843ee6](https://github.com/kirinnee/ferretry/commit/1843ee6009661bbc9b3acd739e020e0e1e9ceda5))
+
 ## [4.112.0](https://github.com/kirinnee/ferretry/compare/v4.111.0...v4.112.0) (2026-10-30)
 
 ### Features

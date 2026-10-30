@@ -6,6 +6,7 @@ import { ThemePreferenceStore, type ThemePreferenceStorage } from '../../src/lib
 import {
   THEME_FAMILY_CARD_CLASS,
   ThemeSettings,
+  PageThemeSwitch,
   ThemeToggle,
   closeThemePopoverForKeyboard,
   scrollThemeFamilyIntoView,
@@ -35,6 +36,11 @@ const installMatchMedia = (): void => {
       removeEventListener: (_: string, __: MediaListener) => {},
     }),
   });
+};
+
+const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+const setWidth = (width: number): void => {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: width });
 };
 
 const trigger = (container: HTMLElement): HTMLButtonElement => {
@@ -322,6 +328,20 @@ describe('ThemeToggle', () => {
     await view.unmount();
   });
 
+  it('is an icon-only trigger in a desktop header, named by its tooltip and not widened to a touch target', async () => {
+    // Arrange
+    installMatchMedia();
+    const view = await mount(<ThemeToggle iconOnly store={new ThemePreferenceStore(memoryStorage())} />);
+    const button = trigger(view.container);
+
+    // Assert — no label beside the icon; the theme's name is the tooltip and the accessible name.
+    expect(button.textContent).toBe('');
+    expect(button.title).toStartWith('Theme: ');
+    expect(button.getAttribute('aria-label')).toBe(button.title);
+    expect(button.className).not.toContain('min-h-[44px]');
+    await view.unmount();
+  });
+
   it('writes the same stored value the Settings page reads, so there is one source of truth', async () => {
     // Arrange
     installMatchMedia();
@@ -530,6 +550,40 @@ describe('ThemeToggle', () => {
 
     // Assert
     expect(event.defaultPrevented).toBe(false);
+    await view.unmount();
+  });
+});
+
+describe('PageThemeSwitch', () => {
+  afterEach(() => {
+    if (originalInnerWidth) Object.defineProperty(window, 'innerWidth', originalInnerWidth);
+  });
+
+  it('puts the icon-only switch in a page header above a phone width', async () => {
+    // Arrange
+    installMatchMedia();
+    setWidth(1280);
+
+    // Act
+    const view = await mount(<PageThemeSwitch />);
+
+    // Assert
+    expect(view.container.querySelector('[data-page-theme-switch]')).not.toBeNull();
+    expect(trigger(view.container).textContent).toBe('');
+    await view.unmount();
+  });
+
+  it('renders nothing on a phone, whose app bar already carries the switch', async () => {
+    // Arrange
+    installMatchMedia();
+    setWidth(390);
+
+    // Act
+    const view = await mount(<PageThemeSwitch />);
+
+    // Assert
+    expect(view.container.querySelector('[data-page-theme-switch]')).toBeNull();
+    expect(view.container.querySelector('button[aria-haspopup="dialog"]')).toBeNull();
     await view.unmount();
   });
 });

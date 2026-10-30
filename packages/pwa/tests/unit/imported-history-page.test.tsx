@@ -62,9 +62,14 @@ describe('ImportedHistoryPage', () => {
       expect(view.container.textContent).toContain('cannot be resumed or sent messages');
       expect(view.container.textContent).toContain('Keep this transcript read-only');
       expect(view.container.textContent).toContain('2 Codex: invalid-json');
-      expect(view.container.querySelectorAll('button')).toHaveLength(1);
+      expect(view.container.querySelectorAll('button:not([data-theme-trigger])')).toHaveLength(1);
 
-      await interact(() => must(view.container.querySelector<HTMLButtonElement>('button'), 'read button').click());
+      await interact(() =>
+        must(
+          view.container.querySelector<HTMLButtonElement>('button:not([data-theme-trigger])'),
+          'read button',
+        ).click(),
+      );
       await settle();
 
       expect(conversationReads).toEqual(['archive-daemon:import-one']);
@@ -119,7 +124,10 @@ describe('ImportedHistoryPage', () => {
     try {
       await settle();
       await interact(() =>
-        must(failedConversation.container.querySelector<HTMLButtonElement>('button'), 'read button').click(),
+        must(
+          failedConversation.container.querySelector<HTMLButtonElement>('button:not([data-theme-trigger])'),
+          'read button',
+        ).click(),
       );
       await settle();
       expect(failedConversation.container.querySelector('[role="alert"]')?.textContent).toContain(
