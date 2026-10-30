@@ -14,8 +14,8 @@ import { hostname, tmpdir, userInfo } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import {
   AGENDA_ENV,
-  agendaNudgeEnabled,
   ALWAYS_ON_SECTIONS,
+  agendaNudgeEnabled,
   CredentialStatusService,
   configJsonSchemaFiles,
   FleetIdentityService,
@@ -52,7 +52,7 @@ import {
 } from '@ferretry/fleet/adapters';
 import {
   type Advertisement,
-  DORMANT_AGENT_STATUSES,
+  type AgendaItem,
   type AnalyticsPricingRate,
   type AutoResumeSummary,
   CONFIG_ACCEPTED_FILE,
@@ -60,6 +60,7 @@ import {
   type ConversionSummary as ConversionSummaryView,
   commandLabel,
   configFilePath,
+  DORMANT_AGENT_STATUSES,
   type FleetCredentialList,
   FY_DEFAULT_DAEMON_PORT,
   type Harness,
@@ -81,7 +82,6 @@ import {
   SessionStateSchema,
   type SessionView,
   type SessionWorkerPool,
-  type AgendaItem,
   type SignalSessionRequest,
   type StartSessionRequest,
   StartSessionRequestSchema,
@@ -104,25 +104,10 @@ import type { z } from 'zod';
 // model catalog the list vouches for (docs/model-catalog.md). Compiled in as text, from its one file.
 import HOSTED_APP_RELEASE_KEY from '../../pwa/release-signing-key.pub' with { type: 'text' };
 import pkg from '../package.json' with { type: 'json' };
-import {
-  BunSqliteAnalyticsStoreFactory,
-  HttpAnalyticsPricingFeed,
-  InlineAnalyticsPersister,
-  readAnalyticsTranscriptEvidence,
-  WorkerAnalyticsPersister,
-  WorkerTranscriptFolds,
-} from '../src/adapters/analytics/index.ts';
-import {
-  decryptPdfInMemory,
-  FileAttachmentOriginals,
-  FileSessionAttachmentStore,
-  NodeRawDeflate,
-  probePdfDecryptWorker,
-} from '../src/adapters/attachments/index.ts';
 import { FileAgendaFileStore } from '../src/adapters/agenda/file-agenda-file-store.ts';
 import { FileAgendaFilesMigrationMarker } from '../src/adapters/agenda/file-agenda-files-migration-marker.ts';
-import { FileAgendaMigrationMarker } from '../src/adapters/agenda/file-agenda-migration-marker.ts';
 import { FileAgendaLedgerRepository } from '../src/adapters/agenda/file-agenda-ledger-repository.ts';
+import { FileAgendaMigrationMarker } from '../src/adapters/agenda/file-agenda-migration-marker.ts';
 import { FileAgendaOutboxRepository } from '../src/adapters/agenda/file-agenda-outbox-repository.ts';
 import { KeyedAgendaReplyTimers } from '../src/adapters/agenda/keyed-agenda-reply-timers.ts';
 import {
@@ -139,23 +124,29 @@ import {
   StorageHarnessQuestionAnswerer,
 } from '../src/adapters/agenda/storage-harness-prompt.ts';
 import { StorageSessionAgendaState } from '../src/adapters/agenda/storage-session-agenda-state.ts';
+import {
+  BunSqliteAnalyticsStoreFactory,
+  HttpAnalyticsPricingFeed,
+  InlineAnalyticsPersister,
+  readAnalyticsTranscriptEvidence,
+  WorkerAnalyticsPersister,
+  WorkerTranscriptFolds,
+} from '../src/adapters/analytics/index.ts';
+import {
+  decryptPdfInMemory,
+  FileAttachmentOriginals,
+  FileSessionAttachmentStore,
+  NodeRawDeflate,
+  probePdfDecryptWorker,
+} from '../src/adapters/attachments/index.ts';
 import { FileBoardStore } from '../src/adapters/board/file-board-store.ts';
+import { SendReopenMessenger } from '../src/adapters/board/send-reopen-messenger.ts';
 import {
   JournalBoardChanges,
   StorageSessionFocus,
   StorageSessionParents,
 } from '../src/adapters/board/session-board-adapters.ts';
-import { SendReopenMessenger } from '../src/adapters/board/send-reopen-messenger.ts';
 import { StorageSessionCardFacts } from '../src/adapters/board/storage-session-card-facts.ts';
-import {
-  AgendaCardLinks,
-  BoardService,
-  HistoryActivityDeriver,
-  NoLaneProposals,
-  NoPendingContext,
-  ReopenDeliveryLadder,
-  SessionCards,
-} from '../src/lib/board/index.ts';
 import { FileAcceptedConfigStore, FileConfigDirectory } from '../src/adapters/config-files/files.ts';
 import { unrefFileEventTimers } from '../src/adapters/file-events/bun-file-event-source.ts';
 import { platformFileEventSource } from '../src/adapters/file-events/platform.ts';
@@ -191,6 +182,7 @@ import {
   WorkerHousekeepingJobs,
 } from '../src/adapters/housekeeping/index.ts';
 import {
+  AgendaLaneAgenda,
   AnalyticsTranscriptSpend,
   AsyncActivityScope,
   AuthorizedProviderProbe,
@@ -199,8 +191,6 @@ import {
   BrowserProfileStore,
   BrowserWorkerClient,
   BunApiServer,
-  FileLegacyWireUseStore,
-  systemLegacyWireTimers,
   BunConnectorProcesses,
   BunProcessProbe,
   BunRelayCarrier,
@@ -225,15 +215,13 @@ import {
   FileCgroupApplyStatusStore,
   FileCgroupConfigStore,
   FileDaemonConfig,
-  FileModelCatalogCache,
-  AgendaLaneAgenda,
   FileLaneSetStore,
-  GitRepositoryProbe,
-  StorageSessionFacts,
+  FileLegacyWireUseStore,
+  FileModelCatalogCache,
   FileProjectCatalog,
   FileQuotaFailoverConfigStore,
-  FileRestartQueue,
   FileQuotaFailoverStateStore,
+  FileRestartQueue,
   FileRoutingCatalog,
   FileScratchCollector,
   FileSecretDocumentStore,
@@ -244,6 +232,7 @@ import {
   FileUpdateDocuments,
   foreignHistoryRoots,
   GitHubLatestRelease,
+  GitRepositoryProbe,
   HostedModelCatalog,
   HostedRelayDirectory,
   HostedTunnelProvisioner,
@@ -295,10 +284,12 @@ import {
   StateUnlockLedger,
   StateVapidKeys,
   StorageConversationOwners,
+  StorageSessionFacts,
   SystemClock,
   SystemFrameClock,
   SystemGrantClock,
   stackSamplerEnabled,
+  systemLegacyWireTimers,
   TmuxPaneSnapshot,
   type ViewerSocket,
   WebCryptoPasskeyCrypto,
@@ -335,7 +326,6 @@ import {
 } from '../src/adapters/mcp-oauth/index.ts';
 import { FileConversationFiles } from '../src/adapters/migrate/file-conversation-files.ts';
 import { FileMigrationReportStore } from '../src/adapters/migrate/file-migration-report.ts';
-import { withSystemCallsign } from '../src/lib/runtime/mounts/system-session-control.ts';
 import { FileNameClaimStore, FileSystemCallsignCounters } from '../src/adapters/names/index.ts';
 import { FileNotificationDeliveryLedger } from '../src/adapters/notifications/index.ts';
 import {
@@ -542,6 +532,15 @@ import {
   AnalyticsPricingService,
 } from '../src/lib/analytics/pricing-service.ts';
 import {
+  AgendaCardLinks,
+  BoardService,
+  HistoryActivityDeriver,
+  NoLaneProposals,
+  NoPendingContext,
+  ReopenDeliveryLadder,
+  SessionCards,
+} from '../src/lib/board/index.ts';
+import {
   ConfigChangeLedger,
   ConfigChangeStreamService,
   ConfigFilesService,
@@ -556,6 +555,7 @@ import { createFleetCredentialsSubsystem, FleetCredentialCatalog } from '../src/
 import { createFleetSetupSubsystem } from '../src/lib/fleet/setup-service.ts';
 import { type RuntimeNamesPort, resolveStartAccount } from '../src/lib/fleet/start-resolution.ts';
 import { polledDirectoryLimitations } from '../src/lib/performance/fallbacks.ts';
+import { withSystemCallsign } from '../src/lib/runtime/mounts/system-session-control.ts';
 import { ProcessHistory, SessionProcessService } from '../src/lib/session/processes/index.ts';
 import { OpenUrlService } from '../src/lib/system/open-url.ts';
 
@@ -591,6 +591,16 @@ import {
   type AccountInventoryPort,
   AccountModelConversationListPolicy,
   ActivityLedger,
+  type AgendaActor,
+  AgendaBoardUndelivered,
+  AgendaBuzz,
+  AgendaChangeFanout,
+  AgendaConversation,
+  AgendaReplyBatcher,
+  AgendaReplyDelivery,
+  AgendaResurfacer,
+  AgendaService,
+  AgendaTurnNudge,
   AgentSendFailureNotifier,
   AgentToolService,
   ANALYTICS_BACKSTOP_MS,
@@ -614,25 +624,14 @@ import {
   type ApiServerPort,
   type ArgumentAnswer,
   type AssigneeObservation,
-  type AgendaActor,
-  AgendaBoardUndelivered,
-  AgendaBuzz,
-  AgendaChangeFanout,
-  LaneProposalAcceptance,
-  LaneSetService,
-  SessionProjects,
-  AgendaConversation,
-  AgendaReplyBatcher,
-  AgendaReplyDelivery,
-  AgendaResurfacer,
-  AgendaService,
-  AgendaTurnNudge,
   AUDIT_FOLD_WINDOW_MS,
   AuditedPairingService,
   AuditLog,
   AutoResumeService,
+  adoptAgendaDefault,
   adoptedTranscriptProvenance,
   advertisesForeignAddress,
+  agendaBlockNotice,
   agentSpokenName,
   answerArguments,
   answerPaused,
@@ -677,8 +676,8 @@ import {
   CredentialUsageSource,
   canServeModel,
   childGrantRequester,
-  choosesPortAtBind,
   chooseRelayCarrierSources,
+  choosesPortAtBind,
   claimStartName,
   classifyPaneProcesses,
   codexModelProvider,
@@ -692,8 +691,8 @@ import {
   createFoundationPaths,
   createMountedDispatcher,
   createMountedSocketDispatcher,
-  createSessionPaths,
   createSessionDirectory,
+  createSessionPaths,
   createWardenPaths,
   currentLaunchEffort,
   currentLaunchModel,
@@ -736,7 +735,11 @@ import {
   type ExecutableResolverPort,
   effectiveAnalyticsPricing,
   exactWorkerAssignee,
+  FileConversationDescriber,
+  FileForeignTranscriptReader,
+  type FileSystemPort,
   FixedSettingsUnreadableError,
+  type FleetEventSource,
   FleetEventStreamService,
   FleetLaunchEnvironment,
   FleetLaunchRenewal,
@@ -745,10 +748,7 @@ import {
   FleetRefreshService,
   FleetSecretReferences,
   FleetWardenAgents,
-  FileConversationDescriber,
-  FileForeignTranscriptReader,
   ForeignHistoryImporter,
-  type FileSystemPort,
   type FoundationPaths,
   fastStartRefusal,
   findAccountByAgent,
@@ -763,8 +763,8 @@ import {
   HandoverReconcileLoop,
   type HarnessDiscoveryPolicy,
   type HarnessPreflight,
-  HarnessPromptAnswerDelivery,
   HarnessPromptAgenda,
+  HarnessPromptAnswerDelivery,
   HarnessQuirkService,
   HarnessUpdateService,
   type HarnessVersionPort,
@@ -785,12 +785,6 @@ import {
   InitialAttachmentError,
   InstructionRefresh,
   InvalidDeadlineRefused,
-  outdatedSections,
-  RestartBusy,
-  RestartService,
-  type RestartSubject,
-  withContext,
-  withOutdated,
   type IoPressurePort,
   type IoPressureSourcePort,
   instructionsReplyKey,
@@ -798,10 +792,15 @@ import {
   isQuestionScopedRequestId,
   isReapTerminalStatus,
   isTaskBoardError,
+  isTmuxServerAbsent,
   JevTriageGuard,
+  type JsonValue,
   jsonObject,
   KnownAndFerretFolders,
+  LaneProposalAcceptance,
+  LaneSetService,
   type LearningSubsystem,
+  LegacyWireUseCounter,
   LessonsService,
   LiveDeviceConnections,
   type LivenessSample,
@@ -839,7 +838,6 @@ import {
   type NameAllocationRequest,
   type NameAllocationResult,
   NameAllocator,
-  SystemCallsignIssuer,
   type NameClaim,
   type NameSubsystem,
   NO_IO_PRESSURE,
@@ -852,6 +850,7 @@ import {
   type OperatorMessageSource,
   OperatorReadService,
   OutboundProviderAuthorizer,
+  outdatedSections,
   overriddenBy,
   PacedTranscriptParser,
   PairedPushDevices,
@@ -893,7 +892,6 @@ import {
   RELAY_DIRECTORY_NOT_ASKED,
   RELOAD_THE_APP,
   RETIRED_ACCOUNT_MODEL_NOTICE,
-  agendaBlockNotice,
   RETIRED_FLEET_BLOCK_NOTICE,
   RETIRED_SESSION_WORKERS_SWITCH_NOTICE,
   RecommendError,
@@ -905,6 +903,9 @@ import {
   type RelayPairingRedeemer,
   type RelayStreamDispatch,
   RememberedHandoverReceipts,
+  RestartBusy,
+  RestartService,
+  type RestartSubject,
   type ResumeAnswerAgenda,
   ResumeCancelled,
   type ResumeLauncher,
@@ -952,15 +953,14 @@ import {
   SendTracker,
   SendUnconfirmed,
   type SerialExecutor,
-  adoptAgendaDefault,
   SessionAgendaModeService,
   type SessionAgendaModeSubsystem,
+  SessionAgendaProjection,
   type SessionAncestor,
   SessionAnswerError,
   type SessionAnswerSubsystem,
   SessionAttachmentStore,
   SessionAttachService,
-  SessionAgendaProjection,
   SessionConsoleService,
   SessionControlError,
   type SessionControlFailure,
@@ -987,6 +987,7 @@ import {
   SessionObserver,
   SessionPermissionService,
   SessionPlanner,
+  SessionProjects,
   SessionProvenanceRecorder,
   SessionProvenanceStamper,
   SessionRenameError,
@@ -1008,6 +1009,7 @@ import {
   SessionTranscriptReader,
   SessionTranscriptResolver,
   type SessionTranscriptTail,
+  SharedFleetBacklog,
   SignalRefused,
   type SkillRuntimeHome,
   SkillsInventoryService,
@@ -1026,6 +1028,7 @@ import {
   SttEnhancementService,
   type SttEnhancementSubsystem,
   SurfaceControl,
+  SystemCallsignIssuer,
   searchTranscript,
   secretsMatch,
   selectBrowserWorker,
@@ -1050,19 +1053,17 @@ import {
   type TerminalSessionResolver,
   type TerminalSubsystem,
   TmuxController,
-  isTmuxServerAbsent,
-  type JsonValue,
   type TmuxLaunchGuard,
   type TranscriptEvent,
   type TranscriptFileResolver,
+  type TranscriptImageLocator,
+  TranscriptImageReader,
+  type TranscriptImages,
   TranscriptProvenanceCapture,
   type TranscriptSearchMatch,
   type TranscriptSearchOptions,
   TranscriptSendEvidence,
   type TranscriptSource,
-  type TranscriptImageLocator,
-  TranscriptImageReader,
-  type TranscriptImages,
   TranscriptTailCache,
   type TriageGuardPort,
   TunnelCarrier,
@@ -1095,12 +1096,12 @@ import {
   WATCHDOG_VARIABLE,
   WardenCallsignTakenError,
   type WardenFleetSession,
+  type WardenJournal,
   WardenLivenessMonitor,
+  type WardenRevivePorts,
+  WardenReviveService,
   type WardenSubsystem,
   WardenSweepLoop,
-  WardenReviveService,
-  type WardenJournal,
-  type WardenRevivePorts,
   WardenSweepService,
   WatchedDocument,
   WatchedPanes,
@@ -1112,11 +1113,12 @@ import {
   type WebRtcPeerEngine,
   type WebRtcSessionFactory,
   type WebRtcSignallingSubsystem,
-  LegacyWireUseCounter,
   type WorkingDirectoryResolver,
   wardenEventTrigger,
   wardenTriggerEnabled,
+  withContext,
   withLivenessLedger,
+  withOutdated,
   xvfbMissingMessage,
 } from '../src/lib/index.ts';
 import {
@@ -10917,25 +10919,22 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         // ONE feed over ONE opened storage: live listeners cannot see another daemon's appends, and
         // the fleet backfill refuses if any indexed session has lost the journal its marker owes.
+        // Feeds opening together share ONE queued backlog pass, a feed that closes stops waiting, and
+        // the pass yields to session writes until it runs (`SharedFleetBacklog`, `fleetBacklog`).
         fleetEvents: new FleetEventStreamService(
-          {
-            replay: async (sessionId, afterSequence, limit, signal) => {
-              signal.throwIfAborted();
-              const page = await storage.replay(parseSessionId(sessionId), afterSequence, limit);
-              signal.throwIfAborted();
-              return page.events;
-            },
-            fleetBacklog: async (limit, signal) => {
-              signal.throwIfAborted();
-              const sessionIds = await storage.fleetSessionIds();
-              signal.throwIfAborted();
-              // `?tail=0` replays nothing, so it skips the tail's index proof as well as its read.
-              const events = limit === 0 ? [] : await storage.tailEvents(limit);
-              signal.throwIfAborted();
-              return { sessionIds, events };
-            },
-            subscribe: listener => storage.subscribeEvents(listener),
-          },
+          ((): FleetEventSource => {
+            const backlogs = new SharedFleetBacklog(storage);
+            return {
+              replay: async (sessionId, afterSequence, limit, signal) => {
+                signal.throwIfAborted();
+                const page = await storage.replay(parseSessionId(sessionId), afterSequence, limit);
+                signal.throwIfAborted();
+                return page.events;
+              },
+              fleetBacklog: async (limit, signal) => await backlogs.backlog(limit, signal),
+              subscribe: listener => storage.subscribeEvents(listener),
+            };
+          })(),
           {
             after: (milliseconds, action) => {
               const timer = setTimeout(action, milliseconds);
