@@ -24,6 +24,7 @@ import {
   type SessionLifecycleRepository,
   SessionLifecycleService,
   type SessionLifecycleSettings,
+  SessionStopPending,
   type SessionTaskStore,
   type WorkingDirectoryResolver,
 } from '../../../../src/lib/session/lifecycle/index.ts';
@@ -1201,6 +1202,94 @@ describe('SessionLifecycleService conversation leases', () => {
 
     // Assert
     should(stopped.state.status).equal('stopped');
+  });
+});
+
+/** A launch gate as the stop reads it: what is in flight, and whether it settles inside the budget. */
+class ScriptedLaunches {
+  readonly waits: Array<{ id: string; timeoutMs: number }> = [];
+
+  constructor(
+    private readonly inFlight: ReadonlySet<string>,
+    private readonly settles: boolean,
+  ) {}
+
+  launching(id: SessionId): boolean {
+    return this.inFlight.has(id);
+  }
+
+  async awaitSettled(id: SessionId, timeoutMs: number): Promise<boolean> {
+    this.waits.push({ id, timeoutMs });
+    return this.settles;
+  }
+}
+
+describe('SessionLifecycleService stop and launches in flight', () => {
+  /** A record a dead daemon left mid-launch: `starting`, and no pane anywhere. */
+  function stranded(built: Harness): void {
+    const running = built.repository.current();
+    built.repository.documents.set(ID, JSON.stringify({ ...running, state: { ...running.state, status: 'starting' } }));
+    built.launcher.live = false;
+  }
+
+  it('should stop a record left starting by a restart at once, waiting on no launch', async () => {
+    // Arrange
+    const launches = new ScriptedLaunches(new Set(), false);
+    const built = harness({ launches });
+    built.launcher.livenessFromLaunch = true;
+    await built.subject.createAndStart(input());
+    stranded(built);
+
+    // Act
+    const stopped = await built.subject.stop(ID, 'owner pressed stop');
+
+    // Assert
+    should(stopped.state).containDeep({ status: 'stopped', reason: 'owner pressed stop' });
+    should(launches.waits).be.empty();
+  });
+
+  it('should answer pending rather than queue forever behind a relaunch that never settles', async () => {
+    // Arrange
+    const launches = new ScriptedLaunches(new Set([ID]), false);
+    const built = harness({ launches }, { stopLaunchWaitMs: 45_000 });
+    built.launcher.livenessFromLaunch = true;
+    await built.subject.createAndStart(input());
+    stranded(built);
+    // The hung relaunch: it holds the session's queue and will never let go of it.
+    void built.serial.run(ID, async () => await new Promise<never>(() => {}));
+    const stopsBefore = built.launcher.calls.filter(call => call === 'stop').length;
+
+    // Act
+    const refusal = await built.subject.stop(ID).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    // Assert
+    should(refusal).be.instanceOf(SessionStopPending);
+    should(refusal).containDeep({
+      name: 'SessionStopPending',
+      message: `session ${ID} is still launching after 45s; nothing was stopped — stop it again once the launch settles`,
+      sessionId: ID,
+    });
+    should(launches.waits).deepEqual([{ id: ID, timeoutMs: 45_000 }]);
+    should(built.launcher.calls.filter(call => call === 'stop').length).equal(stopsBefore);
+    should(built.repository.current().state.status).equal('starting');
+  });
+
+  it('should wait for a launch that settles in time and then stop the session', async () => {
+    // Arrange
+    const launches = new ScriptedLaunches(new Set([ID]), true);
+    const built = harness({ launches });
+    built.launcher.livenessFromLaunch = true;
+    await built.subject.createAndStart(input());
+
+    // Act
+    const stopped = await built.subject.stop(ID);
+
+    // Assert
+    should(stopped.state.status).equal('stopped');
+    should(launches.waits).deepEqual([{ id: ID, timeoutMs: defaultSessionLifecycleSettings.stopLaunchWaitMs }]);
   });
 });
 

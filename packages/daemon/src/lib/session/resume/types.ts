@@ -214,6 +214,8 @@ export interface ResumeTransition {
   readonly turn?: number | undefined;
   readonly retryAttempt?: number | undefined;
   readonly reason?: string | undefined;
+  /** When a terminal verdict was reached; a transition that ends nothing leaves the old stamp. */
+  readonly finishedAt?: string | undefined;
   readonly clearPendingQuestion?: boolean | undefined;
   readonly clearNeedsHuman?: boolean | undefined;
   readonly data?: Readonly<Record<string, string | number | boolean>> | undefined;
