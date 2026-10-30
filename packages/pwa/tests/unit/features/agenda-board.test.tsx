@@ -60,6 +60,7 @@ describe('AgendaBoard', () => {
     expect(resolutionBadge({ ...person, disposition: 'done' }).label).toBe('done by you');
     expect(resolutionBadge({ ...daemon, disposition: 'dismissed' }).label).toBe('dismissed by the daemon');
     expect(resolutionBadge({ ...daemon, disposition: 'done' }).label).toBe('cleared by the daemon');
+    expect(resolutionBadge({ ...person, disposition: 'replied' }).label).toBe('replied by you');
   });
 
   it('names the acting agent by its session when the ledger records no display name', () => {

@@ -380,7 +380,7 @@ export function closeOwnerReplies(ledger: AgendaLedger): AgendaLedger {
       continue;
     }
     const { waitingOn: _w, askedAt, waitingFor: _f, undelivered: _u, ...open } = entry.item;
-    const parsed = ResolvedAgendaItemSchema.safeParse({
+    const item: ResolvedAgendaItem = {
       ...open,
       history: withHistory(open.history, { at: askedAt, kind: 'replied' }),
       resolvedAt: askedAt,
@@ -389,9 +389,8 @@ export function closeOwnerReplies(ledger: AgendaLedger): AgendaLedger {
       resolvedBy: 'human',
       resolvedBySession: null,
       resolvedByName: null,
-    });
-    if (parsed.success) closed.push({ lifecycle: 'addressed', origin: entry.origin, item: parsed.data });
-    else kept.push(entry);
+    };
+    closed.push({ lifecycle: 'addressed', origin: entry.origin, item });
   }
   const addressedBefore = kept.filter(entry => entry.lifecycle === 'addressed');
   const addressedAll = [...addressedBefore, ...closed]

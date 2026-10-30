@@ -1958,6 +1958,21 @@ describe('Agenda ledger migration: an owner reply an earlier daemon left on the 
     should(snapshot.resolved[0]?.waitingOn).be.undefined();
   });
 
+  it('should close only the replied item on a board that also holds an ordinary open one', () => {
+    // Arrange
+    const withSecond = succeeded(
+      applyAgendaCommand(legacyReply(), raiseCommand(AGENT, { subject: 'Rotate the signing key?' }, SECOND)),
+    );
+
+    // Act
+    const parsed = parseAgendaLedger(JSON.parse(JSON.stringify(withSecond.ledger)), SESSION_ID);
+
+    // Assert
+    const snapshot = agendaSnapshot(parsed as AgendaLedger);
+    should(snapshot.items.map(item => item.id)).deepEqual(['A2']);
+    should(snapshot.resolved.map(item => item.id)).deepEqual(['A1']);
+  });
+
   it('should be idempotent: reading it again changes nothing', () => {
     // Arrange
     const once = parseAgendaLedger(JSON.parse(JSON.stringify(legacyReply())), SESSION_ID) as AgendaLedger;
