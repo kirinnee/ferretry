@@ -3,7 +3,6 @@
  * does not know, and each is replaced, not extended:
  *
  * - {@link StubLaneSetSource} → U3 (projects and lanes)
- * - {@link HistoryActivityDeriver} → U5 (activity and staleness)
  * - {@link NoopReopenNotifier} and {@link NoAgendaLinks} → U7 (spawn, signal and agenda links)
  *
  * They do no IO, which is why they live in the domain tier and are unit tested.
@@ -16,14 +15,7 @@ import {
   type LaneSet,
   UNFILED_PROJECT_ID,
 } from '@ferretry/protocol';
-import type {
-  ActivityDeriver,
-  AgendaLinkSource,
-  CardActivity,
-  CardAsks,
-  LaneSetSource,
-  ReopenNotifier,
-} from './ports.ts';
+import type { AgendaLinkSource, CardAsks, LaneSetSource, ReopenNotifier } from './ports.ts';
 
 /** Who a stub lane set says proposed it. Not a session id: nothing proposed it. */
 export const STUB_LANE_SET_PROPOSER = 'stub';
@@ -47,30 +39,6 @@ export class StubLaneSetSource implements LaneSetSource {
       lanes: [...template.lanes],
       variants: template.variants,
     };
-  }
-}
-
-/**
- * STUB, REPLACED BY U5. Knows nothing about session liveness, so it reads only the card itself: last
- * touched is its latest history event, by that event's session; `waiting` while an external block is
- * set, else `idle`. It never says `active`, `stale` or `orphaned`, because those need the Warden's
- * liveness ledger and a guess would put a verdict on the board that nothing measured.
- */
-export class HistoryActivityDeriver implements ActivityDeriver {
-  async derive(cards: readonly BoardTask[]): Promise<ReadonlyMap<BoardTaskId, CardActivity>> {
-    return new Map(
-      cards.map(card => {
-        const last = card.history.at(-1);
-        return [
-          card.id,
-          {
-            lastTouchedAt: last?.at ?? null,
-            touchedBy: last?.actor.sessionId ?? null,
-            activity: card.blocked === null ? 'idle' : 'waiting',
-          },
-        ] as const;
-      }),
-    );
   }
 }
 

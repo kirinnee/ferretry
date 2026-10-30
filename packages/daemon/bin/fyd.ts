@@ -137,17 +137,23 @@ import {
   StorageHarnessQuestionAnswerer,
 } from '../src/adapters/attention/storage-harness-prompt.ts';
 import { StorageSessionAttentionState } from '../src/adapters/attention/storage-session-attention-state.ts';
+import { FilePendingContext, FileSweepMemory } from '../src/adapters/board/file-board-sweep-state.ts';
 import { FileBoardStore } from '../src/adapters/board/file-board-store.ts';
 import {
   JournalBoardChanges,
   StorageSessionFocus,
   StorageSessionParents,
 } from '../src/adapters/board/session-board-adapters.ts';
+import { type LivenessLedgerReader, StorageSessionRoster } from '../src/adapters/board/session-roster.ts';
 import {
+  BOARD_SWEEP_INTERVAL_MS,
   BoardService,
-  HistoryActivityDeriver,
+  BoardSweep,
+  LivenessActivityDeriver,
   NoAgendaLinks,
   NoopReopenNotifier,
+  PendingContextDelivery,
+  type SessionLivenessSource,
   StubLaneSetSource,
 } from '../src/lib/board/index.ts';
 import { FileAcceptedConfigStore, FileConfigDirectory } from '../src/adapters/config-files/files.ts';
@@ -1825,10 +1831,11 @@ export interface BrowserTransportWorld {
 /**
  * The project boards (v2): one file per card under `<state>/board`, written under ownership and lineage.
  *
- * Three of its ports are STUBS until their units land, and each is named so: lanes and projects
- * (`StubLaneSetSource`, U3), activity (`HistoryActivityDeriver`, U5), and the agenda link and reopen
- * delivery (`NoAgendaLinks`, `NoopReopenNotifier`, U7). The machine id is the pairing identity's daemon
- * id, which a write waits for rather than inventing one.
+ * Two of its ports are STUBS until their units land, and each is named so: lanes and projects
+ * (`StubLaneSetSource`, U3), and the agenda link and reopen delivery (`NoAgendaLinks`,
+ * `NoopReopenNotifier`, U7). Activity is derived from the session roster, the Warden's liveness ledger
+ * laid over it. The machine id is the pairing identity's daemon id, which a write waits for rather than
+ * inventing one.
  */
 function createBoardService(
   paths: FoundationPaths,
@@ -1836,23 +1843,25 @@ function createBoardService(
   storage: DaemonStorage,
   clock: SystemClock,
   machineId: () => string | undefined,
+  sessions: SessionLivenessSource,
 ): BoardService {
-  const diagnostics = { warn: (message: string) => void process.stderr.write(`board: ${message}\n`) };
   return new BoardService({
-    store: new FileBoardStore(join(paths.state, 'board'), stateFiles, new KeyedSerialExecutor(), diagnostics),
+    store: new FileBoardStore(join(paths.state, 'board'), stateFiles, new KeyedSerialExecutor(), boardDiagnostics),
     lanes: new StubLaneSetSource(),
     parents: new StorageSessionParents(storage),
     focus: new StorageSessionFocus(storage),
     reopen: new NoopReopenNotifier(),
-    activity: new HistoryActivityDeriver(),
+    activity: new LivenessActivityDeriver({ sessions, clock }),
     agenda: new NoAgendaLinks(),
     changes: new JournalBoardChanges(storage),
     clock,
-    diagnostics,
+    diagnostics: boardDiagnostics,
     machineId,
     serial: new KeyedSerialExecutor(),
   });
 }
+
+const boardDiagnostics = { warn: (message: string) => void process.stderr.write(`board: ${message}\n`) };
 
 /**
  * The task record boards, over the state home and the opened session index.
@@ -3145,6 +3154,12 @@ function createSessionSendSubsystem(
    * triggers it, and the person's words are never changed.
    */
   instructions: Pick<InstructionRefresh, 'queueIfStale'>,
+  /**
+   * The quiet board events held for the ferret (`lib/board/pending-context.ts`), put on top of the next
+   * message it receives here — the owner's or a teammate's — so they reach it with a turn it was going
+   * to take anyway and never start one.
+   */
+  pending: PendingContextDelivery,
 ): SessionSendSubsystem {
   const require = (reference: string): SessionId => {
     const id = tryParseSessionId(reference);
@@ -3177,16 +3192,22 @@ function createSessionSendSubsystem(
       const turn = person
         ? await conversation.prepare(id, request.message)
         : { message: request.message, referenced: [] };
-      const outcome = await service
-        .send({
+      const outcome = await pending
+        .send(
           id,
-          sendId: request.sendId,
-          message: messageWithAttachments(turn.message, delivered),
-          ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
-          ...(request.now === undefined ? {} : { now: request.now }),
-          ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
-          ...(request.senderSessionId === undefined ? {} : { senderReference: request.senderSessionId }),
-        })
+          turn.message,
+          async message =>
+            await service.send({
+              id,
+              sendId: request.sendId,
+              message: messageWithAttachments(message, delivered),
+              ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
+              ...(request.now === undefined ? {} : { now: request.now }),
+              ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
+              ...(request.senderSessionId === undefined ? {} : { senderReference: request.senderSessionId }),
+            }),
+          (sent, line) => sent.record.message.includes(line),
+        )
         .catch((error: unknown) => sendRefusal(error));
       // Only once the words were accepted: an item must never read as the ferret's turn for a message the
       // ferret was not given.
@@ -4033,6 +4054,11 @@ interface WardenParts {
   readonly closeLeftoverBrowsers: (sessionId: string) => Promise<number>;
   /** This machine's name, as pairing gave it: every Warden notification says which machine it is about. */
   readonly machineName: () => string | undefined;
+  /**
+   * Where the liveness monitor's ledger is published for the board, which judges "last touched" from the
+   * same evidence. Filled in here because the monitor is built here; until then it reads nothing.
+   */
+  readonly ledgers: { read: LivenessLedgerReader };
 }
 
 /**
@@ -4082,6 +4108,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
     },
     WARDEN_LIVENESS_TICK_SECONDS,
   );
+  parts.ledgers.read = sessionId => liveness.ledger(sessionId);
   const artifacts = new FileWardenArtifacts(parts.files, parts.reportsReader, parts.reportsDirectory);
   const service = new WardenSweepService(
     {
@@ -9209,6 +9236,37 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       });
       setInterval(sweepDeadlines, ATTENTION_DEADLINE_SWEEP_MS).unref();
       setTimeout(sweepDeadlines, 30_000).unref();
+      // The project boards, and their own sweep (`lib/board/sweep.ts`): "last touched" is judged from the
+      // session roster with the Warden's liveness ledger laid over it — the ledger is published when the
+      // Warden builds its monitor, below — and each minute a stale card's ferret is nudged through the
+      // ordinary send path, and a lead's quiet events wait in its pending context for its next turn.
+      const wardenLedgers: { read: LivenessLedgerReader } = { read: () => undefined };
+      const boardSessions = new StorageSessionRoster(storage, sessionId => wardenLedgers.read(sessionId));
+      const boardPending = new FilePendingContext(
+        join(paths.state, 'board'),
+        stateFiles,
+        new KeyedSerialExecutor(),
+        boardDiagnostics,
+      );
+      const board = createBoardService(paths, stateFiles, storage, clock, () => attachmentDaemonId, boardSessions);
+      const boardSweep = new BoardSweep({
+        board,
+        sessions: boardSessions,
+        memory: new FileSweepMemory(join(paths.state, 'board'), stateFiles, boardDiagnostics),
+        quiet: boardPending,
+        context: boardPending,
+        nudges: {
+          send: async (sessionId, message) => {
+            await sends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message });
+          },
+        },
+        clock,
+        diagnostics: boardDiagnostics,
+      });
+      setInterval(
+        asActivity(activities, 'board sweep', async () => await boardSweep.tick()),
+        BOARD_SWEEP_INTERVAL_MS,
+      ).unref();
       // Agenda mode: the switch (the session document and its launch variable, written together like Pack's and
       // hypermedia's) and the one-time migration that turns it on for every ferret that already had open items —
       // they ARE its agenda.
@@ -10440,6 +10498,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               });
             },
           }),
+          new PendingContextDelivery(boardPending),
         ),
         sessionAnswer,
         sessionAttachments,
@@ -10483,7 +10542,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
         }),
         tasks: createTaskSubsystem(paths, storage, clock, taskBoards, taskBoardTaskActionAuthorizer(boards)),
-        board: createBoardService(paths, stateFiles, storage, clock, () => attachmentDaemonId),
+        board,
         taskBoards: boards,
         analytics: createAnalyticsSubsystem(analyticsIngestion, () => analyticsMachineName ?? hostname()),
         analyticsPricing,
@@ -10630,6 +10689,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         secrets,
         warden: createWardenSubsystem({
           machineName: () => analyticsMachineName ?? hostname(),
+          ledgers: wardenLedgers,
           activities,
           sessions,
           documents: createSessionDirectorySubsystem(paths, storage),

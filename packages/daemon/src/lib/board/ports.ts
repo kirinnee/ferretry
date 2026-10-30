@@ -6,7 +6,6 @@
  * that is honest about what it does not know, and the unit named on it replaces the stub:
  *
  * - {@link LaneSetSource} — U3 (projects and lanes)
- * - {@link ActivityDeriver} — U5 (activity and staleness)
  * - {@link ReopenNotifier} and {@link AgendaLinkSource} — U7 (spawn, signal and agenda links)
  */
 import type {
@@ -22,6 +21,7 @@ import type {
   TaskKind,
   TaskRef,
 } from '@ferretry/protocol';
+import type { BoardIndex, LaneSets } from './graph.ts';
 
 // ---------------------------------------------------------------------------------------------------
 // Storage
@@ -96,9 +96,20 @@ export interface CardActivity {
   readonly activity: BoardTaskActivity;
 }
 
-/** Liveness, from session state. U5 implements it; until then a stub reads only the card's own history. */
+/**
+ * What the activity deriver judges a board by: every card (a parent's roll-up needs its children), the
+ * lanes (staleness is per lane) and the agenda's answer (a blocking ask makes a card `waiting`).
+ */
+export interface ActivityInputs {
+  readonly cards: readonly BoardTask[];
+  readonly index: BoardIndex;
+  readonly laneSets: LaneSets;
+  readonly asks: ReadonlyMap<BoardTaskId, CardAsks>;
+}
+
+/** Liveness, from session state (`LivenessActivityDeriver`). */
 export interface ActivityDeriver {
-  derive(cards: readonly BoardTask[]): Promise<ReadonlyMap<BoardTaskId, CardActivity>>;
+  derive(inputs: ActivityInputs): Promise<ReadonlyMap<BoardTaskId, CardActivity>>;
 }
 
 /** The agenda items raised against a card. */
