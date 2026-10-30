@@ -150,7 +150,12 @@ describe("a board's name", () => {
     // Arrange
     const root = await home();
     const file = join(root, 'projects.json');
-    await writeFile(file, JSON.stringify([{ id: PROJECT, name: 'Ferretry', path: '/workspace/ferretry' }]));
+    await writeFile(
+      file,
+      JSON.stringify([
+        { id: PROJECT, name: 'Ferretry', path: '/workspace/ferretry', source: 'existing-folder', createdAt: NOW },
+      ]),
+    );
     const names = new CatalogProjectNames(new FileProjectCatalog(file));
     const unreadable = new CatalogProjectNames({ projects: async () => Promise.reject(new Error('EACCES')) });
 
