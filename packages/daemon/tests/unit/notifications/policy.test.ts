@@ -172,6 +172,21 @@ describe('woke push', () => {
     should(payload.body.length).be.belowOrEqual(AGENDA_PUSH_BODY_LENGTH);
   });
 
+  it('should badge only the items that wait on the owner: a parked one is in the board but not the number', () => {
+    // Arrange — a snoozed item stays in the items and the count (the wire's contract), never in a badge
+    const parked = AgendaSnapshotSchema.parse({
+      ...snapshot,
+      items: [{ ...item, parked: { reason: 'snoozed', at: AT, until: '2026-08-06T12:00:00.000Z' } }, titled],
+    });
+
+    // Act
+    const payload = wokeNotificationPayload('session-1', titled, parked);
+
+    // Assert
+    should(parked.count).equal(2);
+    should(payload.count).equal(1);
+  });
+
   it('should keep a long subject within the push body, on one line', () => {
     // Arrange
     const long = AgendaItemSchema.parse({ ...titled, subject: `Which window ${'should '.repeat(25)}the release use?` });
