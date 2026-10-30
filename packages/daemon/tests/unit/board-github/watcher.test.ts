@@ -78,7 +78,7 @@ interface Rig {
   readonly gh: FakeGh;
   readonly warnings: string[];
   readonly nudges: { sessionId: string; message: string }[];
-  readonly timers: { ms: number; run: () => void; cancelled: boolean }[];
+  readonly timers: { ms: number; run: () => Promise<void>; cancelled: boolean }[];
   readonly clock: { ms: number };
   readonly stored: (id?: string) => BoardTask;
 }
@@ -118,7 +118,7 @@ const rig = (options: RigOptions): Rig => {
   const gh = options.gh ?? new FakeGh();
   const warnings: string[] = [];
   const nudges: { sessionId: string; message: string }[] = [];
-  const timers: { ms: number; run: () => void; cancelled: boolean }[] = [];
+  const timers: { ms: number; run: () => Promise<void>; cancelled: boolean }[] = [];
   const clock = { ms: Date.parse(NOW) };
   const folders = options.folders ?? { '/p': { repo: REPO, branch: 'main' } };
   const watcher = new GitHubWatcher({
@@ -586,13 +586,12 @@ describe('GitHubWatcher: the loop', () => {
     const subject = rig({ cards: [] });
     const stop = subject.watcher.arm();
     should(subject.timers.map(timer => timer.ms)).deepEqual([WATCH_FIRST_TICK_MS]);
-    subject.timers[0]?.run();
-    await new Promise(resolve => setTimeout(resolve, 0));
+    await subject.timers[0]?.run();
     should(subject.timers.map(timer => timer.ms)).deepEqual([WATCH_FIRST_TICK_MS, WATCH_TICK_MS]);
     stop();
     should(subject.timers[1]?.cancelled).be.true();
-    subject.timers[1]?.run();
-    await new Promise(resolve => setTimeout(resolve, 0));
+    // A timer that fires anyway, after the stop, schedules nothing more.
+    await subject.timers[1]?.run();
     should(subject.timers).have.length(2);
   });
 

@@ -60,9 +60,9 @@ export interface PrNudgeSender {
   send(sessionId: string, message: string): Promise<void>;
 }
 
-/** One-shot timers. `after` returns the cancel. */
+/** One-shot timers. `after` returns the cancel; `run` settles when the work it started is done. */
 export interface WatcherTimers {
-  after(ms: number, run: () => void): () => void;
+  after(ms: number, run: () => Promise<void>): () => void;
 }
 
 export interface WatcherClock {

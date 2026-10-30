@@ -142,10 +142,9 @@ export class GitHubWatcher {
     this.stopped = false;
     let cancel: (() => void) | undefined;
     const schedule = (ms: number): void => {
-      cancel = this.ports.timers.after(ms, () => {
-        void this.run().finally(() => {
-          if (!this.stopped) schedule(jittered(WATCH_TICK_MS, this.ports.clock.random()));
-        });
+      cancel = this.ports.timers.after(ms, async () => {
+        await this.run();
+        if (!this.stopped) schedule(jittered(WATCH_TICK_MS, this.ports.clock.random()));
       });
     };
     schedule(jittered(WATCH_FIRST_TICK_MS, this.ports.clock.random()));
