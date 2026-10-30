@@ -39,6 +39,8 @@ interface Harness {
   readonly navigated: string[];
   readonly searches: string[];
   readonly reads: string[];
+  /** The ferret each board read asked the daemon for (the daemon does the filtering). */
+  readonly asked: (string | null)[];
   readonly root: HTMLElement;
 }
 
@@ -55,9 +57,11 @@ const open = async (
   const navigated: string[] = [];
   const searches: string[] = [];
   const reads: string[] = [];
+  const asked: (string | null)[] = [];
   const port = fakePort({
     board: async (daemon, query) => {
       reads.push(`${daemon.daemonId}:${query.state}`);
+      asked.push(query.ferret);
       if (extra.fail === true) throw new Error('down');
       const cards = query.state === 'closed' ? CLOSED : query.state === 'dropped' ? DROPPED : (extra.open ?? OPEN);
       return boardAnswer(cards, {
@@ -86,12 +90,14 @@ const open = async (
   };
   view = await mount(<BoardPage {...props} />);
   await interact(() => flush());
-  return { acts, navigated, searches, reads, root: view.container };
+  return { acts, navigated, searches, reads, asked, root: view.container };
 };
 
 const click = (root: HTMLElement, selector: string) =>
   interact(() => must(root.querySelector<HTMLElement>(selector), selector).click());
 const titles = (root: HTMLElement) => [...root.querySelectorAll('.fy-board-card__title')].map(node => node.textContent);
+/** The advanced filters start folded behind "Filters"; this opens them. */
+const unfold = (root: HTMLElement) => click(root, '.fy-board-filters__toggle');
 const typeInto = async (input: HTMLInputElement, value: string) => {
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, value);
   await interact(() => input.dispatchEvent(new Event('input', { bubbles: true })));
@@ -274,6 +280,7 @@ describe('BoardPage — views', () => {
 describe('BoardPage — filters and counts', () => {
   it('reads the filters from the URL and writes a change back, keeping the view', async () => {
     const { root, searches } = await open({ props: { search: 'view=list&kind=bug' } });
+    await unfold(root);
     expect(root.querySelector<HTMLSelectElement>('[data-filter="kind"]')?.value).toBe('bug');
     expect(root.querySelector('.fy-board-filters__n')?.textContent).toBe('1');
     const select = must(root.querySelector<HTMLSelectElement>('[data-filter="activity"]'), 'activity');
@@ -298,6 +305,7 @@ describe('BoardPage — filters and counts', () => {
 
   it('offers the ferrets and lanes of the board as choices', async () => {
     const { root } = await open();
+    await unfold(root);
     expect(
       [...root.querySelectorAll('[data-filter="ferret"] option')].map(option => option.textContent).slice(0, 2),
     ).toEqual(['All ferrets', 'Denisha']);
@@ -308,6 +316,58 @@ describe('BoardPage — filters and counts', () => {
     expect([...root.querySelectorAll('[data-filter="lane"] option')].map(option => option.textContent)).toContain(
       'Review/CI',
     );
+  });
+});
+
+describe('BoardPage — opening from a chat', () => {
+  const FROM = { daemonId: laptop.daemonId, sessionId: LEAD };
+
+  it('keeps the advanced filters folded until Filters is pressed', async () => {
+    const { root } = await open();
+    expect(root.querySelector('.fy-board-filters__row')).toBeNull();
+    await unfold(root);
+    expect(root.querySelector('.fy-board-filters__row')).not.toBeNull();
+  });
+
+  it('shows no scope toggle when the reader did not come from a chat', async () => {
+    const { root } = await open();
+    expect(root.querySelector('[data-board-scope]')).toBeNull();
+    expect(titles(root)).toContain('Review the thing');
+  });
+
+  it('opens on the chat ferret’s cards, with a one-tap All cards', async () => {
+    const { root, asked } = await open({ props: { origin: FROM } });
+    expect(root.querySelector('[data-board-scope]')?.getAttribute('data-board-scope')).toBe('ferret');
+    expect(root.querySelector('[data-scope="ferret"]')?.textContent).toBe('Denisha');
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked.every(ferret => ferret === LEAD)).toBe(true);
+    // The ferret scope is the page's own default, not an advanced filter to count.
+    expect(root.querySelector('.fy-board-filters__n')).toBeNull();
+  });
+
+  it('writes cards=all when All cards is pressed, and drops the ferret', async () => {
+    const { root, searches } = await open({ props: { origin: FROM, search: 'view=list' } });
+    await click(root, '[data-scope="all"]');
+    const written = new URLSearchParams(searches[0]);
+    expect(written.get('cards')).toBe('all');
+    expect(written.get('ferret')).toBeNull();
+    expect(written.get('view')).toBe('list');
+  });
+
+  it('shows every card once the URL asks for them, and can narrow back', async () => {
+    const { root, searches, asked } = await open({ props: { origin: FROM, search: 'cards=all' } });
+    expect(root.querySelector('[data-board-scope]')?.getAttribute('data-board-scope')).toBe('all');
+    expect(asked.every(ferret => ferret === null)).toBe(true);
+    await click(root, '[data-scope="ferret"]');
+    const written = new URLSearchParams(searches[0]);
+    expect(written.get('ferret')).toBe(LEAD);
+    expect(written.get('cards')).toBeNull();
+  });
+
+  it('lets a ferret named in the URL win over the chat', async () => {
+    const { root } = await open({ props: { origin: FROM, search: 'ferret=someone-else' } });
+    expect(root.querySelector('[data-board-scope]')?.getAttribute('data-board-scope')).toBe('all');
+    expect(root.querySelector('.fy-board-filters__n')?.textContent).toBe('1');
   });
 });
 

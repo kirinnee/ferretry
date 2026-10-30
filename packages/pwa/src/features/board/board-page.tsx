@@ -38,6 +38,7 @@ import {
   parseBoardView,
   parseListSort,
 } from '../../lib/board-view.ts';
+import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
 import { daemonBoardCardPath, daemonProjectLanesPath } from '../../lib/pages/routes.ts';
 import { PageThemeSwitch } from '../../shell/theme-toggle.tsx';
 import type { BoardCardMoves } from './board-card.tsx';
@@ -63,6 +64,11 @@ export interface BoardPageProps {
   readonly now?: number;
   /** A phone: one lane at a time under a chip strip, the filters in a bottom sheet, rows sized for a thumb. */
   readonly phone?: boolean;
+  /**
+   * The chat the reader came from. When there is one the page opens on THAT ferret's cards, with a one-tap
+   * "All cards" to widen it; a ferret or "All cards" choice in the URL always wins.
+   */
+  readonly origin?: DaemonSessionScope | null;
 }
 
 interface PendingMove {
@@ -84,6 +90,42 @@ const useNow = (fixed: number | undefined): number => {
 
 const NO_MACHINES: readonly BoardMachine[] = [];
 
+/** "This ferret | All cards": the one-tap widening of a board that opened on the chat the reader came from. */
+function ScopeToggle({
+  ferret,
+  scoped,
+  onChange,
+}: {
+  readonly ferret: string;
+  readonly scoped: boolean;
+  /** True to widen to every card, false to narrow back to the ferret. */
+  readonly onChange: (all: boolean) => void;
+}) {
+  return (
+    <fieldset aria-label="Which cards" className="fy-board__scope" data-board-scope={scoped ? 'ferret' : 'all'}>
+      <button
+        aria-pressed={scoped}
+        className="fy-board__scope-option"
+        data-scope="ferret"
+        onClick={() => onChange(false)}
+        title={`Only ${ferret}'s cards`}
+        type="button"
+      >
+        {ferret}
+      </button>
+      <button
+        aria-pressed={!scoped}
+        className="fy-board__scope-option"
+        data-scope="all"
+        onClick={() => onChange(true)}
+        type="button"
+      >
+        All cards
+      </button>
+    </fieldset>
+  );
+}
+
 export function BoardPage({
   store,
   agenda,
@@ -94,8 +136,18 @@ export function BoardPage({
   onNavigate,
   now: fixedNow,
   phone = false,
+  origin = null,
 }: BoardPageProps) {
   const params = useMemo(() => new URLSearchParams(search), [search]);
+  // The ferret the page opens on: the chat's, unless the URL names a ferret or asked for every card.
+  const scopeFerret = origin?.sessionId ?? null;
+  const defaultScoped = scopeFerret !== null && params.get('cards') !== 'all' && params.get('ferret') === null;
+  const filterSearch = useMemo(() => {
+    if (!defaultScoped) return search;
+    const next = new URLSearchParams(search);
+    next.set('ferret', scopeFerret);
+    return next.toString();
+  }, [defaultScoped, scopeFerret, search]);
   const view = parseBoardView(params.get('view'));
   const sort = parseListSort(params.get('sort'));
   const archive = view === 'archive';
@@ -113,11 +165,17 @@ export function BoardPage({
         const kept = params.get(key);
         if (kept !== null) next.set(key, kept);
       }
+      // Dropping the ferret is a choice that has to stick, or the default would bring it straight back.
+      if (scopeFerret !== null) {
+        if (next.get('ferret') === null) next.set('cards', 'all');
+        else next.delete('cards');
+      }
       writeParams(next);
     },
-    [params, writeParams],
+    [params, scopeFerret, writeParams],
   );
-  const [filters, setFilters] = useBoardFilters(search, writeFilters);
+  const [filters, setFilters] = useBoardFilters(filterSearch, writeFilters);
+  const scoped = scopeFerret !== null && filters.ferret === scopeFerret;
   const setView = (next: BoardViewId): void => {
     const nextParams = new URLSearchParams(params);
     if (next === 'kanban') nextParams.delete('view');
@@ -341,6 +399,13 @@ export function BoardPage({
           ))}
         </nav>
         <div className="fy-board__tools">
+          {scopeFerret === null ? null : (
+            <ScopeToggle
+              ferret={names(scopeFerret)}
+              onChange={all => setFilters({ ...filters, ferret: all ? null : scopeFerret })}
+              scoped={scoped}
+            />
+          )}
           {onlyGroup === undefined ? null : (
             <button
               className="fy-board__lanes"
@@ -356,7 +421,13 @@ export function BoardPage({
       </header>
       {phone ? (
         <div className="fy-board__phone-bar">
-          <BoardFilterSheet archive={archive} choices={choices} filters={filters} onChange={next => setFilters(next)} />
+          <BoardFilterSheet
+            archive={archive}
+            choices={choices}
+            filters={filters}
+            onChange={next => setFilters(next)}
+            quietFerret={scopeFerret}
+          />
           <BoardCountsBar
             activity={filters.activity}
             counts={model.counts}
@@ -372,7 +443,14 @@ export function BoardPage({
             onActivity={pressCount}
             onOpenArchive={() => setView('archive')}
           />
-          <BoardFilterBar archive={archive} choices={choices} filters={filters} onChange={next => setFilters(next)} />
+          <BoardFilterBar
+            archive={archive}
+            choices={choices}
+            defaultOpen={false}
+            filters={filters}
+            onChange={next => setFilters(next)}
+            quietFerret={scopeFerret}
+          />
         </>
       )}
       {notice === null ? null : (

@@ -56,6 +56,38 @@
   background: var(--accent-soft);
   color: var(--accent);
 }
+.fy-board__scope {
+  display: inline-flex;
+  min-width: 0;
+  margin: 0;
+  gap: 2px;
+  padding: 2px;
+  border: var(--stroke) solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+}
+.fy-board__scope-option {
+  min-height: 26px;
+  max-width: 12rem;
+  overflow: hidden;
+  padding: 0 var(--gap-md);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fy-board__scope-option:hover {
+  color: var(--fg);
+}
+.fy-board__scope-option[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
 .fy-board__lanes,
 .fy-board-project__lanes {
   min-height: 24px;
