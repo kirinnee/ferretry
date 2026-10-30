@@ -2234,6 +2234,10 @@ describe('current-session search control', () => {
             : null,
       },
     );
+    // The reader was somewhere else when the chord came: that control is remembered for the way back.
+    const outside = document.createElement('button');
+    document.body.append(outside);
+    outside.focus();
     try {
       await settle();
       run(() =>
@@ -2254,6 +2258,7 @@ describe('current-session search control', () => {
       expect(view.root.findAll(node => String(node.props.className).includes('z-[80]'))).toHaveLength(1);
       expect(JSON.stringify(view.toJSON())).toContain("Type to search this session's files and tasks.");
     } finally {
+      outside.remove();
       run(() => view.unmount());
     }
   });
