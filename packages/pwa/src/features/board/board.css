@@ -122,6 +122,48 @@
   align-items: center;
   gap: var(--gap-sm);
 }
+/* "Add card" in the header, beside Lanes ✎: a normal secondary button, the same height as its neighbours. */
+.fy-board__add {
+  height: var(--control-h-sm);
+  gap: var(--gap-xs);
+  padding-inline: var(--gap-md);
+  font-size: var(--text-sm);
+}
+/* On a phone it floats: bottom-right of the page's scroller, which ends where the tab bar begins, so it
+   sits above the bar and the home indicator. Sticky keeps it on screen while the board scrolls under it; a
+   short board pushes it to the foot of the page (`margin-top: auto`) instead of leaving it under the lanes. */
+.fy-board__fab {
+  position: sticky;
+  z-index: 5;
+  bottom: calc(var(--gap-md) + var(--safe-bottom, 0px));
+  display: flex;
+  height: var(--fab-size, 52px);
+  margin-top: auto;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+.fy-board__fab-button {
+  display: inline-flex;
+  width: var(--fab-size, 52px);
+  height: var(--fab-size, 52px);
+  align-items: center;
+  justify-content: center;
+  border: var(--stroke-control, 1px) solid var(--accent);
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  box-shadow: var(--shadow-popover);
+  color: var(--accent-fg);
+  cursor: pointer;
+  pointer-events: auto;
+}
+.fy-board__fab-button:hover,
+.fy-board__fab-button:focus-visible {
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
+}
+.fy-board__fab-button:active {
+  translate: var(--press-translate, 1px) var(--press-translate, 1px);
+}
 
 /* ---- Counts --------------------------------------------------------------------------------------- */
 .fy-board-counts {

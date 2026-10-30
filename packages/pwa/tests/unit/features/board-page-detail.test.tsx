@@ -16,7 +16,7 @@ import {
   laptop,
   PROJECT,
 } from '../board-support.ts';
-import { buttonNamed, clickNamed, fill, HELPER, NOW, submit } from './board-detail-support.tsx';
+import { clickNamed, fill, HELPER, NOW, submit } from './board-detail-support.tsx';
 
 let view: Mounted | null = null;
 const unmount = async (): Promise<void> => {
@@ -164,22 +164,64 @@ describe('BoardPage — the card detail', () => {
   });
 });
 
-describe('BoardPage — + Card', () => {
-  it('offers + Card only with ports to start and speak to ferrets, and only with a machine', async () => {
-    expect([...(await open()).root.querySelectorAll('button')].some(b => b.textContent === '+ Card')).toBe(true);
+const adds = (root: ParentNode): HTMLButtonElement[] => [
+  ...root.querySelectorAll<HTMLButtonElement>('button[data-board-add]'),
+];
+const add = (root: ParentNode, where: 'header' | 'fab'): HTMLButtonElement =>
+  must(root.querySelector<HTMLButtonElement>(`button[data-board-add="${where}"]`), `the ${where} add button`);
+
+describe('BoardPage — Add card', () => {
+  it('offers Add card only with ports to start and speak to ferrets, and only with a machine', async () => {
+    expect(adds((await open()).root)).toHaveLength(1);
     await unmount();
-    expect(
-      [...(await open({ withPorts: false })).root.querySelectorAll('button')].some(b => b.textContent === '+ Card'),
-    ).toBe(false);
+    expect(adds((await open({ withPorts: false })).root)).toHaveLength(0);
     await unmount();
-    expect(
-      [...(await open({ machines: [] })).root.querySelectorAll('button')].some(b => b.textContent === '+ Card'),
-    ).toBe(false);
+    expect(adds((await open({ machines: [] })).root)).toHaveLength(0);
+  });
+
+  it('puts the button in the header beside Lanes on a desktop, never in a chip row', async () => {
+    const { root } = await open();
+    const button = add(root, 'header');
+    expect(button.closest('.fy-board__tools')).not.toBeNull();
+    expect(button.closest('.fy-board__phone-bar')).toBeNull();
+    expect(root.querySelector('.fy-board__fab')).toBeNull();
+    expect(button.textContent).toBe('Add card');
+  });
+
+  it('floats one labelled button on a phone, outside the chip row', async () => {
+    const { root } = await open({ phone: true });
+    const button = add(root, 'fab');
+    expect(adds(root)).toHaveLength(1);
+    expect(button.getAttribute('aria-label')).toBe('Add card');
+    expect(button.closest('.fy-board__phone-bar')).toBeNull();
+    expect(root.querySelector('.fy-board__phone-bar')?.querySelector('[data-board-add]')).toBeNull();
+    expect(button.closest('.fy-board__fab')?.parentElement?.classList.contains('fy-board')).toBe(true);
+  });
+
+  it('opens the form from the phone button and writes a card end to end', async () => {
+    const { root, navigated, created, started } = await open({ phone: true });
+    await interact(() => add(root, 'fab').click());
+    const form = must(root.querySelector('form[role="dialog"]'), 'the form');
+    const labelled = (label: string) =>
+      must(
+        [...form.querySelectorAll('label')].find(entry => entry.textContent?.trim().startsWith(label)),
+        label,
+      );
+    await fill(must(labelled('Title').querySelector('input'), 'title'), 'Fresh card');
+    await fill(must(labelled('What you want done').querySelector('textarea'), 'ask'), 'make it');
+    await interact(() => must(labelled('Start a ferret').querySelector('input'), 'start').click());
+    await submit(form);
+    await interact(() => flush());
+    expect(started).toHaveLength(1);
+    expect(created).toHaveLength(1);
+    expect(navigated).toEqual([daemonBoardCardPath(laptop.daemonId, 'F7')]);
+    expect(root.querySelector('form[role="dialog"]')).toBeNull();
+    expect(adds(root)).toHaveLength(1);
   });
 
   it('opens the form on the first machine and closes it on Cancel', async () => {
     const { root } = await open();
-    await clickNamed(root, '+ Card');
+    await interact(() => add(root, 'header').click());
     expect(root.querySelector('.fy-board-reason__heading')?.textContent).toBe('New card on laptop');
     await clickNamed(root, 'Cancel');
     expect(root.querySelector('form[role="dialog"]')).toBeNull();
@@ -187,7 +229,7 @@ describe('BoardPage — + Card', () => {
 
   it('writes the card, closes the form and opens the new card', async () => {
     const { root, navigated, created, started, sent } = await open();
-    await clickNamed(root, '+ Card');
+    await interact(() => add(root, 'header').click());
     const form = must(root.querySelector('form[role="dialog"]'), 'the form');
     const labelled = (label: string) =>
       must(
@@ -204,6 +246,6 @@ describe('BoardPage — + Card', () => {
     expect(sent).toHaveLength(1);
     expect(navigated).toEqual([daemonBoardCardPath(laptop.daemonId, 'F7')]);
     expect(root.querySelector('form[role="dialog"]')).toBeNull();
-    expect(buttonNamed(root, '+ Card')).not.toBeNull();
+    expect(adds(root)).toHaveLength(1);
   });
 });

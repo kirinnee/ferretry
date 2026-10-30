@@ -10,7 +10,7 @@
  * to), and an upload is answered at once without leaving the page.
  */
 
-import { type BoardTaskView, boardErr } from '@ferretry/protocol';
+import { type BoardTaskView, boardErr, boardOk } from '@ferretry/protocol';
 import { createRoot } from 'react-dom/client';
 import { useState } from 'react';
 import { BoardPage } from '../src/features/board/board-page.tsx';
@@ -446,6 +446,10 @@ const store = new DaemonBoardStore(
             message: 'Only the owner closes a card; this device is not paired as the owner.',
             boardCode: 'owner-gate',
           }),
+    create: async (_daemon, request) => {
+      (window as unknown as { __created: unknown[] }).__created.push(request);
+      return boardOk({ task: card('F99', { title: 'Fresh card' }), laneSet: laneSetFor() }) as never;
+    },
   }),
   fakeEnvironment(),
 );
@@ -464,6 +468,7 @@ const PORTS = {
     createdAt: new Date(NOW).toISOString(),
   }),
 };
+(window as unknown as { __created: unknown[] }).__created = [];
 
 function Harness() {
   const params = new URLSearchParams(window.location.search);
@@ -477,21 +482,39 @@ function Harness() {
     return [...start, ...passed].join('&');
   });
   const phone = window.innerWidth < 640;
+  const shell = params.get('shell') !== null;
+  const page = (
+    <BoardPage
+      agenda={{ respond: async () => undefined }}
+      callsigns={CALLSIGNS}
+      origin={params.get('from') === null ? null : { daemonId: laptop.daemonId, sessionId: params.get('from') ?? '' }}
+      phone={phone}
+      machines={[{ connection: laptop, name: 'laptop' }]}
+      now={NOW}
+      onNavigate={() => undefined}
+      onSearch={setSearch}
+      ports={PORTS}
+      search={search}
+      store={store}
+    />
+  );
+  // `?shell=1`: the app's own frame, a page region that clips above the tab bar, as the real shell lays it out.
+  if (shell)
+    return (
+      <div
+        className="bg-bg text-fg"
+        data-fixture={params.get('view') ?? 'kanban'}
+        style={{ display: 'flex', flexDirection: 'column', height: '100dvh' }}
+      >
+        <main style={{ flex: '1 1 0', minHeight: 0, overflow: 'hidden' }}>{page}</main>
+        {phone ? (
+          <AppTabBar active="board" boardCount={3} daemon={laptop.daemonId} onOpenPalette={() => undefined} />
+        ) : null}
+      </div>
+    );
   return (
     <div className="bg-bg text-fg" data-fixture={params.get('view') ?? 'kanban'} style={{ minHeight: '100vh' }}>
-      <BoardPage
-        agenda={{ respond: async () => undefined }}
-        callsigns={CALLSIGNS}
-        origin={params.get('from') === null ? null : { daemonId: laptop.daemonId, sessionId: params.get('from') ?? '' }}
-        phone={phone}
-        machines={[{ connection: laptop, name: 'laptop' }]}
-        now={NOW}
-        onNavigate={() => undefined}
-        onSearch={setSearch}
-        ports={PORTS}
-        search={search}
-        store={store}
-      />
+      {page}
       {phone && params.get('bar') !== null ? (
         <div style={{ position: 'fixed', insetInline: 0, bottom: 0 }}>
           <AppTabBar active="board" boardCount={3} daemon={laptop.daemonId} onOpenPalette={() => undefined} />
