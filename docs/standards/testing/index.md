@@ -89,6 +89,15 @@ the quarantine below only keeps a known flake from holding a release hostage whi
 `tests/realworld/` with the same file name. A rig both need lives in `tests/integration/support/`, where
 the realworld test imports it.
 
+**A fixture never hands a daemon a port it guessed.** Probing a free port, closing it and passing the number
+on is a check-then-use race: a parallel test file or the kernel's outgoing-connection ports can take the
+number before the daemon binds it. A fixture writes `"port": 0` into `config/daemon.json` and the daemon
+asks the operating system for a port, then records the one it got over the 0 (the same write a first boot
+makes for the address it chose). The fixture reads it back with `recordedPort(home)`
+(`packages/daemon/tests/integration/support/os-port.ts`). A server the test starts itself binds port 0 and
+reads `.port`. `scripts/validate/test-tiers.sh` refuses a `freeLoopbackPort`/`freePort` helper under
+`packages/*/tests` and `scripts/local`.
+
 `task test` runs the three blocking tiers; `task test:realworld` runs the fourth on request. `task test:coverage` runs every coverage-capable suite and writes
 lcov + text reports under `coverage/<tier>/`.
 

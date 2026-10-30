@@ -18,7 +18,7 @@ import { Database } from 'bun:sqlite';
 import { join, resolve } from 'node:path';
 import should from 'should';
 import { OWNER_MAC_FLEET, scaledFleet } from '../../integration/support/scaled-fleet.ts';
-import { freeLoopbackPort } from '../../integration/support/booted-daemon.ts';
+import { OS_CHOSEN_PORT } from '../../integration/support/os-port.ts';
 import { cleanupTempDirectories, tempDirectory } from '../../integration/support/repository.ts';
 
 /** The budget: no single block of the event loop longer than this, from the first step to the last. */
@@ -41,7 +41,7 @@ interface BootMeasurement {
 }
 
 /** The child's whole program: the real `start`, a probe on its loop, and the stack sampler the probe drains. */
-const program = (home: string, userHome: string, port: number): string => `
+const program = (home: string, userHome: string): string => `
   import { mkdir, writeFile } from 'node:fs/promises';
   import { buildWorld, start } from ${modulePath('../../../bin/fyd.ts')};
   import { JscStackSampler } from ${modulePath('../../../src/adapters/runtime/stall-attribution.ts')};
@@ -50,7 +50,7 @@ const program = (home: string, userHome: string, port: number): string => `
   process.env.FY_HOME = ${JSON.stringify(home)};
   await mkdir(${JSON.stringify(join(home, 'config'))}, { recursive: true });
   await writeFile(${JSON.stringify(join(home, 'config', 'daemon.json'))}, JSON.stringify({
-    host: '127.0.0.1', port: ${String(port)}, relay: { url: 'ws://127.0.0.1:9', enabled: false },
+    host: '127.0.0.1', port: ${String(OS_CHOSEN_PORT)}, relay: { url: 'ws://127.0.0.1:9', enabled: false },
   }));
   const sampler = await JscStackSampler.start();
   const startedAt = performance.now();
@@ -93,8 +93,7 @@ describe('a boot over a fleet the size of the owner’s Mac', () => {
   it(`should never block the event loop for more than ${String(BLOCK_BUDGET_MS)} ms`, async () => {
     // Arrange
     const fleet = await scaledFleet(await tempDirectory('fyd-boot-stalls-'), OWNER_MAC_FLEET);
-    const port = await freeLoopbackPort();
-    const child = Bun.spawn([process.execPath, '-e', program(fleet.home, fleet.userHome, port)], {
+    const child = Bun.spawn([process.execPath, '-e', program(fleet.home, fleet.userHome)], {
       stdout: 'pipe',
       stderr: 'pipe',
       env: {

@@ -24,7 +24,7 @@ import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { dialWebRtc, type WebRtcPhone } from '../../packages/daemon/tests/integration/support/webrtc-phone.ts';
 import { buildWorld } from '../../packages/daemon/bin/fyd.ts';
-import { freeLoopbackPort } from '../../packages/daemon/tests/integration/support/booted-daemon.ts';
+import { OS_CHOSEN_PORT, recordedPort } from '../../packages/daemon/tests/integration/support/os-port.ts';
 import { startFakeUsageServer } from '../../packages/daemon/tests/integration/support/fake-usage-server.ts';
 import {
   OWNER_MAC_FLEET,
@@ -180,12 +180,11 @@ log(`${String(runs)} runs of ${fyd.join(' ')}${values.peer ? ' with a connected 
 for (let index = 0; index < runs; index += 1) {
   const run = join(scratch, `run-${String(index)}`);
   const { home, userHome } = await prepareHome(run);
-  const port = await freeLoopbackPort();
   await writeFile(
     join(home, 'config', 'daemon.json'),
     JSON.stringify({
       host: '127.0.0.1',
-      port,
+      port: OS_CHOSEN_PORT,
       relay: { url: 'ws://127.0.0.1:9', enabled: false },
       webrtc: { iceServers: [] },
     }),
@@ -203,7 +202,7 @@ for (let index = 0; index < runs; index += 1) {
     stdout: Bun.file(join(run, 'fyd.out')),
     stderr: Bun.file(join(run, 'fyd.err')),
   });
-  const base = `http://127.0.0.1:${String(port)}`;
+  const base = `http://127.0.0.1:${String(await recordedPort(home))}`;
   let peer: WebRtcPhone | undefined;
   try {
     // Boot is timed to `ready` — the last step of the boot trail — and not to `/healthz`, which answers

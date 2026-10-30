@@ -20,6 +20,7 @@ import {
   StateHomeLayout,
   SystemClock,
 } from '../../../../daemon/src/adapters/index.ts';
+import { OS_CHOSEN_PORT, recordedPort } from '../../../../daemon/tests/integration/support/os-port.ts';
 import { BunDaemonProcess } from '../../../src/adapters/daemon/process.ts';
 import { FileDaemonRestartMarker, restartMarkerPath } from '../../../src/adapters/daemon/restart-marker.ts';
 import { FileServiceStore } from '../../../src/adapters/daemon/service-files.ts';
@@ -56,14 +57,6 @@ afterEach(async () => {
   children.clear();
   await tearDownSupervisedDaemons({ daemons, sockets, roots }, { tmux: TMUX });
 }, TEARDOWN_TIMEOUT_MS);
-
-async function freeLoopbackPort(): Promise<number> {
-  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('probe') });
-  const port = server.port;
-  await server.stop(true);
-  if (port === undefined) throw new Error('the fixture server reported no port');
-  return port;
-}
 
 async function executable(path: string, lines: readonly string[]): Promise<void> {
   await writeFile(path, `${lines.join('\n')}\n`);
@@ -148,7 +141,8 @@ async function boot(): Promise<BootedDaemon> {
   if (TMUX === null || BASH === null) throw new Error('tmux and bash are required for this journey');
   const root = await mkdtemp(join(tmpdir(), 'fy-restart-'));
   roots.add(root);
-  const port = await freeLoopbackPort();
+  // The daemon asks the OS for a port at its first boot and records it; a restart then claims the recorded one.
+  let port = OS_CHOSEN_PORT;
   const bin = join(root, 'bin');
   const stateHome = join(root, 'state');
   const cwd = join(root, 'work');
@@ -171,7 +165,7 @@ async function boot(): Promise<BootedDaemon> {
   await opened.storage.close();
   await writeFile(
     join(stateHome, 'config', 'daemon.json'),
-    JSON.stringify({ host: '127.0.0.1', port, relay: { url: 'https://off.example', enabled: false } }),
+    JSON.stringify({ host: '127.0.0.1', port: OS_CHOSEN_PORT, relay: { url: 'https://off.example', enabled: false } }),
     { mode: 0o600 },
   );
   const claudeHome = await fakeClaude(root, bin, cwd);
@@ -226,6 +220,7 @@ async function boot(): Promise<BootedDaemon> {
     const handle = await supervisor.start(fyd);
     pid = handle.pid;
     if (pid !== undefined) daemons.add(pid);
+    port = await recordedPort(stateHome);
     await waitFor(() => healthy(port), 'fyd to answer its health probe', { evidence: () => logOf(layout.logFile) });
   };
   const stop = async (): Promise<void> => {

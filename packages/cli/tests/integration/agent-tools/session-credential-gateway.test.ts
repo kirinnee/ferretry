@@ -74,15 +74,6 @@ describe('the agent’s way to the daemon', () => {
 });
 
 describe('the agent’s way to the daemon, through a restart', () => {
-  /** A free loopback port: bound once, then released, so nothing listens on it until a test says. */
-  async function freePort(): Promise<number> {
-    const probe = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('probe') });
-    const port = probe.port;
-    await probe.stop(true);
-    if (port === undefined) throw new Error('no port');
-    return port;
-  }
-
   /** `onWaiting` runs when the gateway says it is waiting for the daemon: the moment a restarted daemon may come up. */
   const restart = (told: { count: number }, onWaiting: () => void = () => undefined) => ({
     patience: {
@@ -99,7 +90,11 @@ describe('the agent’s way to the daemon, through a restart', () => {
 
   it('should wait for a daemon that is down and answer once it serves again, saying so once', async () => {
     // Arrange
-    const port = await freePort();
+    // The daemon is up and then goes down: the address it held is the one the restart comes back on.
+    const before = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => Response.json({ summary: 'before' }) });
+    const port = before.port;
+    if (port === undefined) throw new Error('the stand-in daemon bound no TCP port');
+    await before.stop(true);
     const base = `http://127.0.0.1:${String(port)}`;
     const told = { count: 0 };
     const gateway = new SessionCredentialGateway(

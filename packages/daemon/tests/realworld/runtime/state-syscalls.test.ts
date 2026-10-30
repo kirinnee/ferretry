@@ -16,7 +16,7 @@ import { afterAll, describe, it } from 'bun:test';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import should from 'should';
-import { freeLoopbackPort } from '../../integration/support/booted-daemon.ts';
+import { OS_CHOSEN_PORT } from '../../integration/support/os-port.ts';
 import { cleanupTempDirectories, tempDirectory } from '../../integration/support/repository.ts';
 import { OWNER_MAC_FLEET, scaledFleet } from '../../integration/support/scaled-fleet.ts';
 
@@ -103,11 +103,10 @@ describe('a steady daemon over a fleet the size of the owner’s Mac', () => {
         transcriptBytes: 512 * 1024,
         rollouts: 200,
       });
-      const port = await freeLoopbackPort();
       await mkdir(join(fleet.home, 'config'), { recursive: true });
       await writeFile(
         join(fleet.home, 'config', 'daemon.json'),
-        JSON.stringify({ host: '127.0.0.1', port, relay: { url: 'ws://127.0.0.1:9', enabled: false } }),
+        JSON.stringify({ host: '127.0.0.1', port: OS_CHOSEN_PORT, relay: { url: 'ws://127.0.0.1:9', enabled: false } }),
       );
       const traceFile = join(root, 'trace.txt');
       const runMs = SETTLE_MS + WINDOW_MS + 5_000;

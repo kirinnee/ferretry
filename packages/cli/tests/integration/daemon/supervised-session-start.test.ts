@@ -13,6 +13,7 @@ import {
   StateHomeLayout,
   SystemClock,
 } from '../../../../daemon/src/adapters/index.ts';
+import { OS_CHOSEN_PORT, recordedPort } from '../../../../daemon/tests/integration/support/os-port.ts';
 import { BunDaemonProcess } from '../../../src/adapters/daemon/process.ts';
 import { FileServiceStore } from '../../../src/adapters/daemon/service-files.ts';
 import { FileStateHomeClaim } from '../../../src/adapters/state-home/claim-files.ts';
@@ -55,14 +56,6 @@ afterEach(async () => {
   await tearDownSupervisedDaemons({ daemons, sockets, roots }, { tmux: TMUX });
 }, TEARDOWN_TIMEOUT_MS);
 
-async function freeLoopbackPort(): Promise<number> {
-  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('probe') });
-  const port = server.port;
-  await server.stop(true);
-  if (port === undefined) throw new Error('the fixture server reported no port');
-  return port;
-}
-
 async function executable(path: string, lines: readonly string[]): Promise<void> {
   await writeFile(path, `${lines.join('\n')}\n`);
   await chmod(path, 0o755);
@@ -80,7 +73,6 @@ const STAYS_AT_PROMPT: Journey = { afterPrompt: [] };
 /** The daemon's whole world: a private bin directory, a launcher for `fyd`, and a fake account. */
 async function arrange(
   root: string,
-  port: number,
   journey: Journey = STAYS_AT_PROMPT,
 ): Promise<{ bin: string; stateHome: string; fyd: string }> {
   if (TMUX === null) throw new Error('tmux is required for this journey and was not found');
@@ -109,7 +101,7 @@ async function arrange(
     join(stateHome, 'config', 'daemon.json'),
     JSON.stringify({
       host: '127.0.0.1',
-      port,
+      port: OS_CHOSEN_PORT,
       relay: { url: 'https://off.example', enabled: false },
       ...(journey.healthIntervalSeconds === undefined ? {} : { healthIntervalSeconds: journey.healthIntervalSeconds }),
     }),
@@ -186,8 +178,7 @@ interface BootedDaemon {
 async function boot(journey?: Journey): Promise<BootedDaemon> {
   const root = await mkdtemp(join(tmpdir(), 'fy-sup-'));
   roots.add(root);
-  const port = await freeLoopbackPort();
-  const { bin, stateHome, fyd } = await arrange(root, port, journey);
+  const { bin, stateHome, fyd } = await arrange(root, journey);
   const searchPath = `${bin}:/usr/bin:/bin`;
   // Fail closed rather than let the daemon find a real harness and copy this machine's login.
   should(Bun.which('claude', { PATH: searchPath })).equal(null);
@@ -213,6 +204,7 @@ async function boot(journey?: Journey): Promise<BootedDaemon> {
   );
   const handle = await supervisor.start(fyd);
   if (handle.pid !== undefined) daemons.add(handle.pid);
+  const port = await recordedPort(stateHome);
   await waitForHealth(port, layout.logFile);
   const token = (await readFile(join(stateHome, 'api-token'), 'utf8')).trim();
   return { root, port, stateHome, token, logFile: layout.logFile };
