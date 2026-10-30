@@ -9,6 +9,7 @@
  * is never asked and the inline reader answers instead.
  */
 import { describe, it } from 'bun:test';
+import { join } from 'node:path';
 import {
   TranscriptImageError,
   type TranscriptImageLookup,
@@ -51,6 +52,8 @@ import type {
 } from '../../../../src/lib/transcript/types.ts';
 
 type Sent = TranscriptParseRequest | TranscriptParseGreeting;
+
+const FINALIZATION = join(import.meta.dir, '../../support/parse-window-finalization.ts');
 type Asked = Extract<Sent, { readonly id: number }>;
 
 /** A thread a test drives: it records what it was sent and answers however the script says. */
@@ -582,25 +585,23 @@ describe('WorkerTranscriptSource.window', () => {
   });
 
   it('should be released by the real finalization registry when the proxy is collected', async () => {
-    // Arrange
-    const { parse, threads } = worker(windowed(() => ({ more: false })));
-    const source = new WorkerTranscriptSource('claude', parse, inlineSource().source);
-    await (async () => {
-      await source.window('/t.jsonl', START).next();
-    })();
-
-    // Act
-    for (let attempt = 0; attempt < 50; attempt += 1) {
-      Bun.gc(true);
-      await Bun.sleep(5);
-      if (threads[0]?.sent.some(each => 'op' in each && each.op === 'window-close')) break;
-    }
-    parse.close();
+    // Act — in a process of its own, killed at its deadline: it calls `Bun.gc(true)`, which this
+    // shared process must never do (see `support/parse-window-finalization.ts`).
+    const child = Bun.spawn([process.execPath, FINALIZATION], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+      timeout: 30_000,
+      killSignal: 'SIGKILL',
+    });
+    const [out, err, code] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ]);
 
     // Assert
-    should(threads[0]?.sent.filter(each => 'op' in each && each.op === 'window-close')).deepEqual([
-      { op: 'window-close', window: 1 },
-    ]);
+    should(code).equal(0, `the finalization check failed or was killed at its deadline: ${err}`);
+    should(JSON.parse(out)).deepEqual([{ op: 'window-close', window: 1 }]);
   });
 
   it('should open a window inline when the worker is not available then, or turns unavailable before its first step', async () => {

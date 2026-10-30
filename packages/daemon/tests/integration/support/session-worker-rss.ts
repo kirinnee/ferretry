@@ -6,11 +6,12 @@
  * Resident memory never shrinks back, so a measurement in the test runner's process would be measuring
  * every test before it.
  *
- * And the test runner must never host these threads. `Bun.gc(true)` and a worker's start and end are
- * synchronous on the calling thread: on 2026-10-29 one of them wedged the shared `bun test` process on
- * CI three runs in a row, where no per-test timeout can fire — its timer runs on the very thread that
- * is stuck — and the job held its runner for two hours. Out here, a wedged measurement is a child the
- * test kills at its deadline, and the test fails saying so.
+ * And the test runner must never host these threads, nor force a collection. `Bun.gc(true)` is
+ * synchronous on the calling thread: on 2026-10-29 it wedged the shared `bun test` process on CI, here
+ * and in the parse worker's finalization test, each time just after earlier files had terminated real
+ * workers. No per-test timeout can fire there — its timer runs on the very thread that is stuck — and
+ * the job held its runner for hours. Out here, a wedged measurement is a child the test kills at its
+ * deadline, and the test fails saying so.
  */
 const [url, count] = [process.argv[2], Number(process.argv[3] ?? '5')];
 if (url === undefined || !Number.isInteger(count) || count < 1)
