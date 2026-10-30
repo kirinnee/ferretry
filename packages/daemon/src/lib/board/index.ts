@@ -6,6 +6,7 @@ export * from './derive.ts';
 export * from './errors.ts';
 export * from './graph.ts';
 export * from './lineage.ts';
+export * from './pr-cache.ts';
 export * from './pending-context.ts';
 export * from './ports.ts';
 export * from './query.ts';

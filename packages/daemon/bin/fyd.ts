@@ -141,6 +141,7 @@ import {
   probePdfDecryptWorker,
 } from '../src/adapters/attachments/index.ts';
 import { FileBoardStore } from '../src/adapters/board/file-board-store.ts';
+import { GhCliRunner, GitWorkingCopies } from '../src/adapters/board-github/index.ts';
 import {
   AgendaImportAgenda,
   FileBoardImportMarker,
@@ -156,6 +157,7 @@ import {
 } from '../src/adapters/board/session-board-adapters.ts';
 import { type LivenessLedgerReader, StorageSessionRoster } from '../src/adapters/board/session-roster.ts';
 import { StorageSessionCardFacts } from '../src/adapters/board/storage-session-card-facts.ts';
+import { GitHubWatcher } from '../src/lib/board-github/index.ts';
 import { FileAcceptedConfigStore, FileConfigDirectory } from '../src/adapters/config-files/files.ts';
 import { unrefFileEventTimers } from '../src/adapters/file-events/bun-file-event-source.ts';
 import { platformFileEventSource } from '../src/adapters/file-events/platform.ts';
@@ -1878,6 +1880,9 @@ export interface BrowserTransportWorld {
   openViewerStream(host: BrowserViewerHost, sessionId: string, socket: ViewerSocket): Promise<BrowserViewerStream>;
 }
 
+/** Where the project boards report what they could not do: the daemon's log. */
+const boardDiagnostics = { warn: (message: string) => void process.stderr.write(`board: ${message}\n`) };
+
 /** The board, and the cards a start makes on it. */
 interface BoardWorld {
   readonly store: FileBoardStore;
@@ -1948,8 +1953,6 @@ function createBoardWorld(
   });
   return { store, board, cards };
 }
-
-const boardDiagnostics = { warn: (message: string) => void process.stderr.write(`board: ${message}\n`) };
 
 /**
  * The task record boards, over the state home and the opened session index.
@@ -9026,6 +9029,36 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         boardSessions,
         boardPending,
       );
+      // The GitHub watcher that moves the board's cards on PR facts (board-design.md §3.1): it runs the host's
+      // own `gh`, links the PRs a card's work opened, and nudges through the board's nudge path. Armed after
+      // the bind with the other loops, and stopped with the daemon.
+      const boardSessionFacts = new StorageSessionFacts(storage);
+      const boardNudgeDelivery = new PendingContextDelivery(boardPending);
+      const boardGitHub = new GitHubWatcher({
+        board: boardWorld.board,
+        gh: new GhCliRunner(),
+        copies: new GitWorkingCopies(),
+        sessions: { cwdOf: async sessionId => (await boardSessionFacts.read(sessionId))?.cwd ?? null },
+        projects: { projects: async () => await catalogs.projects() },
+        transcripts: createSessionTranscriptTail(storage),
+        // The board's nudge path (U5): the recipient's pending board context rides on top of the nudge.
+        nudges: {
+          send: async (sessionId, message) => {
+            await boardNudgeDelivery.send(sessionId, message, async composed => {
+              await sends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message: composed });
+            });
+          },
+        },
+        timers: {
+          after: (ms, run) => {
+            const handle = setTimeout(asActivity(activities, 'board github watch', run), ms);
+            return () => clearTimeout(handle);
+          },
+        },
+        clock: { now: () => clock.now(), random: () => Math.random() },
+        diagnostics: boardDiagnostics,
+        version: daemonVersion,
+      });
       // The warden spawns wardens through the SAME start every other caller uses, so a warden is an
       // ordinary managed session that happens to carry the warden label — which is exactly what the
       // detector's lineage shield reads. A private launch path would produce a session the fleet
@@ -10791,6 +10824,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           act: async (id, request, caller) => await boardWorld.board.act(id, request, caller),
           importLegacy: async options => await boardImporter.run({ dryRun: options.dryRun, force: true }),
         },
+        boardGitHub,
         taskBoards: boards,
         analytics: createAnalyticsSubsystem(analyticsIngestion, () => analyticsMachineName ?? hostname()),
         analyticsPricing,
@@ -12193,6 +12227,9 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * reported as a receipt that did not advance.
    */
   cleanups.push(subsystems.handoverReconcile.arm());
+  // The board's GitHub watcher: its first look comes shortly after the bind, then about every half
+  // minute; a host without `gh`, or signed out of it, is told once and looked at again later.
+  cleanups.push(subsystems.boardGitHub.arm());
   /**
    * The update check, armed after the bind: it asks GitHub once now and then at most every six hours,
    * and moves an update waiting for idle (or an opted-in automatic one) on. A failed check never fails
