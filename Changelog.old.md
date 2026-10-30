@@ -1,3 +1,9 @@
+## [4.120.2](https://github.com/kirinnee/ferretry/compare/v4.120.1...v4.120.2) (2026-10-30)
+
+### Performance
+
+* **daemon:** stop the login status scan re-reading every session per login ([#973](https://github.com/kirinnee/ferretry/issues/973)) ([aeff479](https://github.com/kirinnee/ferretry/commit/aeff4799a769fe12b4d715f774e7c9107a928952))
+
 ## [4.120.1](https://github.com/kirinnee/ferretry/compare/v4.120.0...v4.120.1) (2026-10-30)
 
 ### Fixes

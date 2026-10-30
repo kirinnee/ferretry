@@ -2365,6 +2365,22 @@ describe('AppShell', () => {
     }
   });
 
+  it('draws the Board for a machine and keeps the view in the address, replacing the entry', async () => {
+    const { view } = await renderShell(`/d/${ALPHA}/board`, [alpha.daemonId], { sessions: ['shared'] });
+    try {
+      for (let turn = 0; turn < 6; turn += 1) await settle();
+      const list = must(view.container.querySelector<HTMLButtonElement>('[data-view-tab="list"]'), 'the List view tab');
+      const depth = window.history.length;
+      await interact(() => list.click());
+      for (let turn = 0; turn < 3; turn += 1) await settle();
+      expect(window.location.pathname).toBe(`/d/${ALPHA}/board`);
+      expect(window.location.search).toContain('view=list');
+      expect(window.history.length).toBe(depth);
+    } finally {
+      await view.unmount();
+    }
+  });
+
   it('reads the ferret’s last messages for the phone deck through the machine the item came from', async () => {
     const restore = patchGlobal(window, 'innerWidth', 390);
     const { view } = await renderShell(`/d/${ALPHA}/inbox`, [alpha.daemonId], {
@@ -2434,6 +2450,7 @@ describe('AppShell', () => {
       [`/d/${ALPHA}/analytics`, 'Sessions, Analytics'],
       [`/d/${ALPHA}/learning`, 'Sessions, Learning'],
       [`/d/${ALPHA}/inbox`, 'Sessions, Inbox'],
+      [`/d/${ALPHA}/board`, 'Sessions, Board'],
       [`/d/${ALPHA}/history`, 'Sessions, Imported history'],
       [`/d/${ALPHA}/session/one`, 'Sessions, one'],
     ] as const) {
