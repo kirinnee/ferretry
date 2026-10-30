@@ -300,7 +300,7 @@ describe('attention brief points and edits', () => {
       { question: 'Which login plan?', options: [{ label: 'A' }, { label: 'B' }], recommended: 'A', why: 'Cheaper.' },
     ]);
     should(() => composeEditRequest('A3', { question: ['a?', 'b?'] }, current)).throw(/has 1 question/u);
-    should(() => composeEditRequest('A3', { question: ['a?'] }, undefined)).throw(/no unresolved attention item A3/u);
+    should(() => composeEditRequest('A3', { question: ['a?'] }, undefined)).throw(/no open agenda item A3/u);
   });
 });
 

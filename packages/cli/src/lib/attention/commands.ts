@@ -43,7 +43,7 @@ Every field renders as markdown: short bullets, one idea each, no walls of text;
 (fy-render) draws a chart or diagram when a picture beats words. Never use ticket or PR numbers,
 internal codenames, file paths or unexplained capitals — say it in plain words, or define the term
 with --term. The daemon warns when an item breaks these; fix it with
-\`edit <id>\`. Agenda items never expire on a timer. Answering or dismissing on the board already
+\`edit <id>\`. Agenda items never expire on a timer. Answering or dismissing on the agenda already
 resolves it — but if the blocker clears some OTHER way (the human answers in chat, the work is no
 longer needed), the raising agent must run \`done\` or \`dismiss\` itself, immediately. An item
 whose reason is gone but is still open is a bug, not a safe default.
@@ -237,7 +237,7 @@ function mountVerbs(
     await controller.show(id, merged(command));
   });
 
-  scoped(attention.command('ls').alias('list').description('list unresolved items, oldest first')).action(
+  scoped(attention.command('ls').alias('list').description('list open items, oldest first')).action(
     async (_flags: unknown, command: Command) => {
       await controller.list(merged(command));
     },

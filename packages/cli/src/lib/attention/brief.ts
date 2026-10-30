@@ -17,9 +17,7 @@ import {
 } from '@ferretry/protocol';
 import { z } from 'zod';
 import { type AskFlags, type CardAsk, parseAsk, parseKind, TOO_MANY_ANSWERS } from './ask.ts';
-
-/** The default `howToResolve` when the raiser did not name a concrete action. */
-const DEFAULT_HOW_TO_RESOLVE = 'Answer this item on the agenda (it records who answered).';
+import { DEFAULT_HOW_TO_RESOLVE } from './how-to-resolve.ts';
 
 /** The flags that describe a new item, beside its one-line summary. */
 export interface BriefFlags extends AskFlags {
@@ -484,7 +482,7 @@ export function composeEditRequest(
     ...(flags.clearBy === true ? ['neededBy' as const] : []),
   ];
   const words = (flags.question ?? []).map(question => question.trim()).filter(question => question !== '');
-  if (words.length > 0 && current === undefined) throw new Error(`no unresolved attention item ${id} to reword`);
+  if (words.length > 0 && current === undefined) throw new Error(`no open agenda item ${id} to reword`);
   const before = current?.questions ?? [];
   if (words.length > 0 && words.length !== before.length) {
     throw new Error(`${id} has ${before.length} question(s); give exactly that many --question texts, in order`);
