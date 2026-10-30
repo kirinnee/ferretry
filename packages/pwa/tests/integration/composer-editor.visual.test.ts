@@ -360,41 +360,45 @@ describe('the composer in a real browser', () => {
   }, 60_000);
 
   test("the composer takes the theme's own input and button tokens, so Neo's frame is not Studio's", async () => {
+    const scene = await open({ editor: 'on', theme: 'studio-light', busy: '1' }, { phone: true });
     const read = async (theme: string) => {
-      const scene = await open({ editor: 'on', theme, busy: '1' }, { phone: true });
-      try {
-        return await scene.page.evaluate(() => {
-          // A token resolved by the engine itself: a probe styled with it, read back.
-          const resolve = (property: string, token: string) => {
-            const probe = document.createElement('div');
-            probe.style.setProperty('border-style', 'solid');
-            probe.style.setProperty(property, `var(${token})`);
-            document.body.append(probe);
-            const value = getComputedStyle(probe).getPropertyValue(property);
-            probe.remove();
-            return value;
-          };
-          const style = (selector: string) => getComputedStyle(document.querySelector(selector) as Element);
-          const row = style('.fy-composer-row');
-          const send = style('[data-composer-send]');
-          const interrupt = style('[data-composer-interrupt]');
-          return {
-            rowRadius: row.borderTopLeftRadius,
-            rowStroke: row.borderTopWidth,
-            sendRadius: send.borderTopLeftRadius,
-            sendShadow: send.boxShadow,
-            interruptStroke: interrupt.borderTopWidth,
-            radiusInput: resolve('border-top-left-radius', '--radius-input'),
-            radiusControl: resolve('border-top-left-radius', '--radius-control'),
-            strokeControl: resolve('border-top-width', '--stroke-control'),
-            shadowControl: resolve('box-shadow', '--shadow-control'),
-          };
-        });
-      } finally {
-        await scene.close();
-      }
+      await scene.page.evaluate(next => document.documentElement.setAttribute('data-theme', next), theme);
+      return await scene.page.evaluate(() => {
+        // A token resolved by the engine itself: a probe styled with it, read back.
+        const resolve = (property: string, token: string) => {
+          const probe = document.createElement('div');
+          probe.style.setProperty('border-style', 'solid');
+          probe.style.setProperty(property, `var(${token})`);
+          document.body.append(probe);
+          const value = getComputedStyle(probe).getPropertyValue(property);
+          probe.remove();
+          return value;
+        };
+        const style = (selector: string) => getComputedStyle(document.querySelector(selector) as Element);
+        const row = style('.fy-composer-row');
+        const send = style('[data-composer-send]');
+        const interrupt = style('[data-composer-interrupt]');
+        return {
+          rowRadius: row.borderTopLeftRadius,
+          rowStroke: row.borderTopWidth,
+          sendRadius: send.borderTopLeftRadius,
+          sendShadow: send.boxShadow,
+          interruptStroke: interrupt.borderTopWidth,
+          radiusInput: resolve('border-top-left-radius', '--radius-input'),
+          radiusControl: resolve('border-top-left-radius', '--radius-control'),
+          strokeControl: resolve('border-top-width', '--stroke-control'),
+          shadowControl: resolve('box-shadow', '--shadow-control'),
+        };
+      });
     };
-    const [studio, neo] = [await read('studio-light'), await read('neo-light')];
+    let studio: Awaited<ReturnType<typeof read>>;
+    let neo: Awaited<ReturnType<typeof read>>;
+    try {
+      studio = await read('studio-light');
+      neo = await read('neo-light');
+    } finally {
+      await scene.close();
+    }
     for (const [name, measured] of [
       ['studio', studio],
       ['neo', neo],
@@ -429,15 +433,15 @@ describe('the composer in a real browser', () => {
   test('every theme formats, keeps its margins and gives a phone 44px targets for both buttons', async () => {
     const draft = '# Heading\n- **bold** item';
     for (const phone of [false, true]) {
-      const context = await browser.newContext(phone ? PHONE : DESKTOP);
-      const page = await context.newPage();
+      // ONE page per viewport: `theme` is only the `data-theme` attribute the scene stamps at load, so
+      // stamping it again re-resolves every token without paying a reload per theme.
+      const scene = await open({ editor: 'on', theme: 'studio-light', busy: '1', draft }, { phone });
+      const { page } = scene;
+      await page.waitForSelector('[data-composer-interrupt]');
       try {
         for (const { id } of THEME_FAMILIES)
           for (const mode of ['light', 'dark']) {
-            const query = new URLSearchParams({ editor: 'on', theme: `${id}-${mode}`, busy: '1', draft });
-            if (phone) query.set('compact', '1');
-            await page.goto(`${server.url}?${query.toString()}`);
-            await page.waitForSelector('[data-composer-interrupt]');
+            await page.evaluate(theme => document.documentElement.setAttribute('data-theme', theme), `${id}-${mode}`);
             const measured = await page.evaluate(() => {
               const box = (selector: string) => (document.querySelector(selector) as Element).getBoundingClientRect();
               const size = (selector: string) =>
@@ -482,7 +486,7 @@ describe('the composer in a real browser', () => {
                 expect({ label, target: button.width >= 44 && button.height >= 44 }).toEqual({ label, target: true });
           }
       } finally {
-        await context.close();
+        await scene.close();
       }
     }
   }, 120_000);

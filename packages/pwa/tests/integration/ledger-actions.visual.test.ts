@@ -86,20 +86,23 @@ const newContext = async (
   viewport: (typeof VIEWPORTS)[number],
   mode: 'light' | 'dark',
   reducedMotion: 'reduce' | 'no-preference' = 'no-preference',
-): Promise<BrowserContext> =>
-  await browser.newContext({
+): Promise<BrowserContext> => {
+  const context = await browser.newContext({
     viewport: { width: viewport.width, height: viewport.height },
     colorScheme: mode,
     reducedMotion,
     deviceScaleFactor: viewport.phone ? 2 : 1,
     ...(viewport.phone ? { isMobile: true, hasTouch: true } : {}),
   });
-
-const open = async (context: BrowserContext, state: string, mode: 'light' | 'dark'): Promise<Page> => {
   const origin = server?.url.origin ?? '';
   await context.route('**/*', async route =>
     new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
   );
+  return context;
+};
+
+const open = async (context: BrowserContext, state: string, mode: 'light' | 'dark'): Promise<Page> => {
+  const origin = server?.url.origin ?? '';
   const tab = await context.newPage();
   await tab.goto(`${origin}/?state=${state}&theme=studio-${mode}`);
   await tab.waitForSelector('.fy-transcript-content');
@@ -109,9 +112,9 @@ const open = async (context: BrowserContext, state: string, mode: 'light' | 'dar
 describe('a send’s actions are one small button', () => {
   for (const viewport of VIEWPORTS) {
     it(`keeps every state's button small, tappable and its menu on screen at ${viewport.name}`, async () => {
-      for (const state of STATES) {
-        const context = await newContext(viewport, 'light');
-        try {
+      const context = await newContext(viewport, 'light');
+      try {
+        for (const state of STATES) {
           const tab = await open(context, state, 'light');
           const button = tab.getByRole('button', { name: 'Message actions' });
           expect(await button.count()).toBe(1);
@@ -138,9 +141,10 @@ describe('a send’s actions are one small button', () => {
           await tab.keyboard.press('Escape');
           await menu.waitFor({ state: 'detached' });
           expect(await tab.evaluate(() => document.activeElement?.getAttribute('aria-label'))).toBe('Message actions');
-        } finally {
-          await context.close();
+          await tab.close();
         }
+      } finally {
+        await context.close();
       }
     }, 120_000);
   }

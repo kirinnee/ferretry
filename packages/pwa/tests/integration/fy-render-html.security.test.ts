@@ -57,11 +57,27 @@ interface Drive {
 }
 
 /**
+ * WHEN A DRIVE ENDS. A fixed idle wait made every probe cost its whole budget even though the page
+ * says when it is done. A drive now ends `quietMs` after the event that means "the page has had
+ * its say": `report` (the probe page posted its report — its own in-page window already let every
+ * request it provoked leave), `rendered` (the shell confirmed the page, for authored markup that
+ * has no script to report), or `second-load` (the frame navigated itself). The quiet window is
+ * what remains of the negative proofs: a request the frame made would reach the ledger within it.
+ * `capMs` still bounds a page that never says anything, so a silent failure resolves rather than hangs.
+ */
+interface DriveOptions {
+  readonly capMs?: number;
+  readonly paint?: unknown;
+  readonly quietMs?: number;
+  readonly until?: 'report' | 'rendered' | 'second-load';
+}
+
+/**
  * Mounts the real shell exactly as `FyRenderHtmlFrame` does — `sandbox="allow-scripts"`,
  * listener before `src`, identity-checked handshake, the page sent as data over the
- * port — and returns what the parent observed after `settleMs`.
+ * port — and returns what the parent observed once the drive ends (see `DriveOptions`).
  */
-const drive = (source: string, settleMs = 2_500, paint: unknown = null): string => `(async () => {
+const drive = (source: string, options: DriveOptions = {}): string => `(async () => {
   return await new Promise(resolve => {
     const reports = [];
     const replies = [];
@@ -70,23 +86,28 @@ const drive = (source: string, settleMs = 2_500, paint: unknown = null): string 
     frame.setAttribute('sandbox', 'allow-scripts');
     frame.style.cssText = 'width:600px;height:400px;border:0';
     let port = null;
+    let ending = null;
+    const endSoon = (trigger, quiet) => {
+      if (trigger !== ${JSON.stringify(options.until ?? 'report')} || ending !== null) return;
+      ending = setTimeout(() => resolve({ reports, replies, loads }), quiet);
+    };
     addEventListener('message', event => {
       if (event.source !== frame.contentWindow) return;
-      if (event.data && event.data.kind === 'probe-report') { reports.push(event.data.report); return; }
+      if (event.data && event.data.kind === 'probe-report') { reports.push(event.data.report); endSoon('report', ${options.quietMs ?? 250}); return; }
       if (port !== null || !event.data || event.data.kind !== 'shell-ready') return;
       const channel = new MessageChannel();
       port = channel.port1;
-      port.onmessage = e => replies.push(e.data);
+      port.onmessage = e => { replies.push(e.data); if (e.data && e.data.kind === 'rendered') endSoon('rendered', ${options.quietMs ?? 250}); };
       frame.contentWindow.postMessage({ kind: 'init' }, '*', [channel.port2]);
-      port.postMessage({ kind: 'render-html', paint: ${JSON.stringify(paint)}, source: ${JSON.stringify(source)}, theme: 'dark' });
+      port.postMessage({ kind: 'render-html', paint: ${JSON.stringify(options.paint ?? null)}, source: ${JSON.stringify(source)}, theme: 'dark' });
     });
     document.body.appendChild(frame);
     // AFTER insertion, as FyRenderHtmlFrame does: inserting a src-less iframe fires a
     // synchronous 'load' for its initial about:blank, which is not a navigation.
-    frame.addEventListener('load', () => { loads += 1; });
+    frame.addEventListener('load', () => { loads += 1; if (loads === 2) endSoon('second-load', ${options.quietMs ?? 250}); });
     frame.src = '/fy-render-html.html';
     window.__replies = replies;
-    setTimeout(() => resolve({ reports, replies, loads }), ${settleMs});
+    setTimeout(() => resolve({ reports, replies, loads }), ${options.capMs ?? 5_000});
   });
 })()`;
 
@@ -212,14 +233,14 @@ describe('fy-render html — the page runs, interactively', () => {
   test('should forward Escape pressed inside the frame to the parent', async () => {
     const page = await newPage();
     try {
-      await page.evaluate(drive(probePage(`note('ready', () => 'yes');`), 1_000));
+      await page.evaluate(drive(probePage(`note('ready', () => 'yes');`)));
       await page.frameLocator('iframe').locator('#status').click();
       await page.keyboard.press('Escape');
-      await page.waitForTimeout(200);
-      const forwarded = await page.evaluate(() =>
+      // The forward is a message round trip, so wait for it rather than for a fixed time; a missing
+      // forward fails here on the timeout instead of passing on a lucky read.
+      await page.waitForFunction(() =>
         (window as unknown as { __replies: { kind?: string }[] }).__replies.some(reply => reply.kind === 'escape'),
       );
-      should(forwarded).be.true();
     } finally {
       await page.close();
     }
@@ -294,7 +315,6 @@ describe('fy-render html — the page cannot leave its box', () => {
           `),
         ),
       )) as Drive;
-      await page.waitForTimeout(400);
       const outside = await page.evaluate<{ hit: string; url: string }>(`({
         hit: document.elementFromPoint(740, 60)?.id ?? 'none',
         url: location.pathname,
@@ -366,7 +386,6 @@ describe('fy-render html — ordinary requests are refused', () => {
             note('popup', () => String(window.open('${base}/beacon?popup')));
             note('rtc', () => typeof RTCPeerConnection);
           `),
-          4_000,
         ),
       )) as Drive;
 
@@ -402,7 +421,7 @@ describe('fy-render html — ordinary requests are refused', () => {
             <base href="${base}/beacon/">
             <script type="speculationrules">{"prerender":[{"source":"list","urls":["${base}/beacon?rules"]}]}</script>
           </head><body><p>still here</p></body></html>`,
-          2_500,
+          { quietMs: 800, until: 'rendered' },
         ),
       )) as Drive;
       should(result.loads).equal(1);
@@ -428,7 +447,7 @@ describe('fy-render html — the column paint', () => {
       `);
       // The paint `FyRenderBlock` reads from the message column.
       const painted = (await page.evaluate(
-        drive(read, 2_500, { background: 'rgb(1, 2, 3)', color: 'rgb(4, 5, 6)', font: 'serif', scheme: 'light' }),
+        drive(read, { paint: { background: 'rgb(1, 2, 3)', color: 'rgb(4, 5, 6)', font: 'serif', scheme: 'light' } }),
       )) as Drive;
       should(painted.reports[0]?.background).equal('rgb(1, 2, 3)');
       should(painted.reports[0]?.color).equal('rgb(4, 5, 6)');
@@ -439,11 +458,13 @@ describe('fy-render html — the column paint', () => {
       // A paint value that tries to name a URL is not a colour or a font family,
       // so `setProperty` drops it and nothing is requested.
       const hostile = (await page.evaluate(
-        drive(read, 2_500, {
-          background: `url(${base}/beacon?paint-background)`,
-          color: `red; background-image: url(${base}/beacon?paint-color)`,
-          font: `x; background: url(${base}/beacon?paint-font)`,
-          scheme: 'dark',
+        drive(read, {
+          paint: {
+            background: `url(${base}/beacon?paint-background)`,
+            color: `red; background-image: url(${base}/beacon?paint-color)`,
+            font: `x; background: url(${base}/beacon?paint-font)`,
+            scheme: 'dark',
+          },
         }),
       )) as Drive;
       should(hostile.reports.length).equal(1);
@@ -451,8 +472,7 @@ describe('fy-render html — the column paint', () => {
     } finally {
       await page.close();
     }
-    // Two probes of 2.5 s each.
-  }, 15_000);
+  });
 });
 
 describe('fy-render html — the residual the parent detects', () => {
@@ -462,7 +482,9 @@ describe('fy-render html — the residual the parent detects', () => {
     try {
       const base = server.url.origin;
       const result = (await page.evaluate(
-        drive(`<!doctype html><body><script>location.href = '${base}/beacon?navigate';</script></body>`, 2_500),
+        drive(`<!doctype html><body><script>location.href = '${base}/beacon?navigate';</script></body>`, {
+          until: 'second-load',
+        }),
       )) as Drive;
       // The navigation reached the server — the measured residual, not a refusal.
       should(ledger.some(hit => hit.path === '/beacon?navigate')).be.true();
