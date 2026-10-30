@@ -81,8 +81,10 @@ import {
   SessionStateSchema,
   type SessionView,
   type SessionWorkerPool,
+  type AgendaItem,
   type SignalSessionRequest,
   type StartSessionRequest,
+  StartSessionRequestSchema,
   sessionAgendaEnabled,
   sessionHypermediaEnabled,
   type TaskBoardChildAccess,
@@ -143,12 +145,16 @@ import {
   StorageSessionFocus,
   StorageSessionParents,
 } from '../src/adapters/board/session-board-adapters.ts';
+import { SendReopenMessenger } from '../src/adapters/board/send-reopen-messenger.ts';
+import { StorageSessionCardFacts } from '../src/adapters/board/storage-session-card-facts.ts';
 import {
+  AgendaCardLinks,
   BoardService,
   HistoryActivityDeriver,
-  NoAgendaLinks,
-  NoopReopenNotifier,
-  StubLaneSetSource,
+  NoLaneProposals,
+  NoPendingContext,
+  ReopenDeliveryLadder,
+  SessionCards,
 } from '../src/lib/board/index.ts';
 import { FileAcceptedConfigStore, FileConfigDirectory } from '../src/adapters/config-files/files.ts';
 import { unrefFileEventTimers } from '../src/adapters/file-events/bun-file-event-source.ts';
@@ -412,7 +418,11 @@ import {
   SigtermProcessSignal,
 } from '../src/adapters/session/processes/index.ts';
 import { StorageSessionProvenanceStore } from '../src/adapters/session/provenance/index.ts';
-import { FileAnswerLedger, TmuxStructuredQuestionDriver } from '../src/adapters/session/question/index.ts';
+import {
+  FileAnswerLedger,
+  readAskedQuestion,
+  TmuxStructuredQuestionDriver,
+} from '../src/adapters/session/question/index.ts';
 import {
   FileResumeTurnStore,
   FileSelfRestartStampStore,
@@ -480,10 +490,12 @@ import {
   TmuxTerminalRuntime,
 } from '../src/adapters/terminal/index.ts';
 import {
+  BunTmuxProcess,
   ControlModeTmuxProcess,
   RealHarnessLaunchGuard,
   TmuxPaneDelivery,
   TmuxPaneQueue,
+  TmuxReleaseReader,
 } from '../src/adapters/tmux/index.ts';
 import { CliConversionCheck, CliHarnessVersion } from '../src/adapters/transcript/conversion-check.ts';
 import {
@@ -681,6 +693,7 @@ import {
   createMountedDispatcher,
   createMountedSocketDispatcher,
   createSessionPaths,
+  createSessionDirectory,
   createWardenPaths,
   currentLaunchEffort,
   currentLaunchModel,
@@ -775,6 +788,7 @@ import {
   outdatedSections,
   RestartBusy,
   RestartService,
+  type RestartSubject,
   withContext,
   withOutdated,
   type IoPressurePort,
@@ -975,7 +989,6 @@ import {
   SessionPlanner,
   SessionProvenanceRecorder,
   SessionProvenanceStamper,
-  SessionReadError,
   SessionRenameError,
   SessionRenameService,
   type SessionRenameSubsystem,
@@ -1037,6 +1050,8 @@ import {
   type TerminalSessionResolver,
   type TerminalSubsystem,
   TmuxController,
+  isTmuxServerAbsent,
+  type JsonValue,
   type TmuxLaunchGuard,
   type TranscriptEvent,
   type TranscriptFileResolver,
@@ -1083,6 +1098,9 @@ import {
   WardenLivenessMonitor,
   type WardenSubsystem,
   WardenSweepLoop,
+  WardenReviveService,
+  type WardenJournal,
+  type WardenRevivePorts,
   WardenSweepService,
   WatchedDocument,
   WatchedPanes,
@@ -1822,36 +1840,68 @@ export interface BrowserTransportWorld {
   openViewerStream(host: BrowserViewerHost, sessionId: string, socket: ViewerSocket): Promise<BrowserViewerStream>;
 }
 
+/** The board, and the cards a start makes on it. */
+interface BoardWorld {
+  readonly board: BoardService;
+  readonly cards: SessionCards;
+}
+
 /**
- * The project boards (v2): one file per card under `<state>/board`, written under ownership and lineage.
+ * The project boards (v2): one file per card under `<state>/board`, written under ownership and lineage,
+ * and the cards every start with a brief gets (`SessionCards`, board-design.md §3.1).
  *
- * Three of its ports are STUBS until their units land, and each is named so: lanes and projects
- * (`StubLaneSetSource`, U3), activity (`HistoryActivityDeriver`, U5), and the agenda link and reopen
- * delivery (`NoAgendaLinks`, `NoopReopenNotifier`, U7). The machine id is the pairing identity's daemon
- * id, which a write waits for rather than inventing one.
+ * Lanes and projects are U3's `LaneSetService`. Some ports are STUBS until their units land, and each is
+ * named so: lane proposals for a project with none (`NoLaneProposals`, until the template inference lands, so
+ * such a card is filed on Unfiled with a hint), and activity and the lead's pending context
+ * (`HistoryActivityDeriver` and `NoPendingContext`, U5). The agenda link reads each ferret's agenda through
+ * the agenda service, and a reopen is delivered through the ordinary send path. The machine id is the
+ * pairing identity's daemon id, which a write waits for rather than inventing one.
  */
-function createBoardService(
+function createBoardWorld(
   paths: FoundationPaths,
   stateFiles: FileSystemPort,
   storage: DaemonStorage,
   clock: SystemClock,
   machineId: () => string | undefined,
-): BoardService {
+  /** Which board a session works on, each board's lanes and its name (U3's `LaneSetService`). */
+  lanes: Pick<LaneSetService, 'projectOf' | 'laneSet' | 'project'>,
+  sends: Pick<SessionSendService, 'send'>,
+  /** One ferret's open agenda items; read lazily, because the agenda service is built after the board. */
+  agendaItems: (sessionId: string) => Promise<readonly AgendaItem[]>,
+  bin: string,
+): BoardWorld {
   const diagnostics = { warn: (message: string) => void process.stderr.write(`board: ${message}\n`) };
-  return new BoardService({
+  const parents = new StorageSessionParents(storage);
+  const focus = new StorageSessionFocus(storage);
+  const board = new BoardService({
     store: new FileBoardStore(join(paths.state, 'board'), stateFiles, new KeyedSerialExecutor(), diagnostics),
-    lanes: new StubLaneSetSource(),
-    parents: new StorageSessionParents(storage),
-    focus: new StorageSessionFocus(storage),
-    reopen: new NoopReopenNotifier(),
+    lanes,
+    parents,
+    focus,
+    reopen: new ReopenDeliveryLadder(new SendReopenMessenger(sends), diagnostics),
     activity: new HistoryActivityDeriver(),
-    agenda: new NoAgendaLinks(),
+    agenda: new AgendaCardLinks({ open: agendaItems }, machineId, diagnostics),
     changes: new JournalBoardChanges(storage),
     clock,
     diagnostics,
     machineId,
     serial: new KeyedSerialExecutor(),
   });
+  const cards = new SessionCards({
+    board,
+    lanes,
+    proposer: new NoLaneProposals(),
+    // The name the board list shows: a registered project's, `Unfiled`, or the id of one no longer listed.
+    projects: { nameOf: async projectId => (await lanes.project(projectId))?.name ?? projectId },
+    focus,
+    parents,
+    sessions: new StorageSessionCardFacts(storage, id => createSessionPaths(paths, id).directory),
+    pending: new NoPendingContext(),
+    clock,
+    diagnostics,
+    bin,
+  });
+  return { board, cards };
 }
 
 /**
@@ -1967,12 +2017,8 @@ async function assigneeCandidates(storage: DaemonStorage): Promise<readonly Task
 }
 
 /**
- * The session read, over the authoritative index and the documents in the state home.
- *
- * BOTH DOCUMENTS ARE PARSED, and a session whose pair does not parse is left out of the list rather
- * than reported with holes: a view assembled from a config the protocol schema rejected is a view
- * whose fields nobody can vouch for. The single read refuses that same session instead of omitting
- * it, so the gap in the list is answerable rather than silent.
+ * The session read, over the authoritative index and the documents in the state home — paced, and projecting
+ * only what can still change (see `createSessionDirectory`).
  *
  * The DIRECTORY is derived from the layout, never from the request: `createSessionPaths` takes a
  * parsed id, so a path-unsafe reference is refused in the reader's own taxonomy before it can become
@@ -1983,39 +2029,16 @@ function createSessionDirectorySubsystem(
   storage: DaemonStorage,
   project?: (id: SessionId, config: SessionConfig) => Promise<void>,
 ): SessionDirectorySubsystem {
-  /** The pair of documents for one indexed session, parsed, or `undefined` when either is unusable. */
-  const view = async (id: SessionId): Promise<SessionView | undefined> => {
-    // Read BEFORE the documents: a reader starting its live feed after this sequence is replayed every
-    // event the documents might not reflect yet, and misses none they do not.
-    const journalSequence = storage.findSession(id)?.lastSequence;
-    const rawConfig = await storage.readConfig(id);
-    const config = SessionConfigSchema.safeParse(rawConfig);
-    if (config.success) await project?.(id, config.data);
-    const state = SessionStateSchema.safeParse(await storage.readState(id));
-    if (!config.success || !state.success) return undefined;
-    return {
-      config: config.data,
-      state: state.data,
-      directory: createSessionPaths(paths, id).directory,
-      ...(journalSequence === undefined ? {} : { journalSequence }),
-    };
-  };
-  return {
-    list: async () => {
-      const views = await Promise.all(storage.listSessions().map(async session => await view(session.id)));
-      return views.filter((session): session is SessionView => session !== undefined);
-    },
-    get: async reference => {
-      const id = tryParseSessionId(reference);
-      if (id === undefined)
-        throw new SessionReadError('invalid', `${JSON.stringify(reference)} is not a usable session id`);
-      if (storage.findSession(id) === undefined) return undefined;
-      const found = await view(id);
-      if (found === undefined)
-        throw new SessionReadError('unusable', `the documents for session ${reference} do not satisfy the protocol`);
-      return found;
-    },
-  };
+  return createSessionDirectory({
+    sessions: () => storage.listSessions(),
+    find: id => storage.findSession(id),
+    readConfig: async id => await storage.readConfig(id),
+    readState: async id => await storage.readState(id),
+    directory: id => createSessionPaths(paths, id).directory,
+    project,
+    ended: session => session.status !== undefined && ENDED_SESSION_STATUSES.has(session.status),
+    yieldToLoop: () => new Promise(resolve => setImmediate(resolve)),
+  });
 }
 
 /**
@@ -2326,6 +2349,11 @@ function createSessionControlSubsystem(
   pack: SessionPackHooks,
   /** What a start that names fast mode reads: the fixed overlay to carry, and a Codex model's catalog. */
   fast: StartFastPorts,
+  /**
+   * The board card a start with a prompt gets (board-design.md §3.1), written after the record and before
+   * the launch. Total: a board failure is said on stderr and never fails the start.
+   */
+  cards: Pick<SessionCards, 'open'>,
 ): SessionControlSubsystem {
   /** Request id to the session it started, plus the exact body it started from, for this process's
    *  lifetime. The body is kept VERBATIM because the recovery read identifies it by digest. */
@@ -2343,7 +2371,7 @@ function createSessionControlSubsystem(
   };
 
   return {
-    start: async (request, requestId, payload, boardCapability) => {
+    start: async (request, requestId, payload, boardCapability, delegation) => {
       const already = spent.get(requestId);
       if (already !== undefined) {
         if (already.payload !== payload)
@@ -2620,6 +2648,17 @@ function createSessionControlSubsystem(
         // true: the board's session directory reads the session's own documents, so the target must
         // exist for the grant to name it, and a refusal must not have cost an agent.
         if (boardAsk !== undefined) await boardGrants(boardAsk.capability, id, boardAsk.role);
+        // THE CARD, after the record and before the launch (board-design.md §3.1): the agent's first turn
+        // already has its focus card, and a start refused before here leaves none. A miner, a guide builder
+        // or a warden is not work on a board. `open` never rejects: a board failure never fails a start.
+        if (request.prompt !== undefined && ordinaryFerret(stamped.label, stamped.provenance.wardenLineage))
+          await cards.open({
+            sessionId: id,
+            name: request.name,
+            brief: request.prompt,
+            parent: request.parent,
+            delegation,
+          });
         await lifecycle.start(
           id,
           startupRuntime === undefined
@@ -3650,6 +3689,8 @@ function createSessionSignalSubsystem(
   storage: DaemonStorage,
   sessions: SessionDirectorySubsystem,
   service: SessionSignalService,
+  /** A `done` on the ferret's focus card (board-design.md §3.1 item 5); never fails the signal. */
+  cards: Pick<SessionCards, 'signalled'>,
 ): SessionSignalSubsystem {
   return {
     signal: async (reference, request) => {
@@ -3665,6 +3706,9 @@ function createSessionSignalSubsystem(
           ...waitFields(request),
         })
         .catch((error: unknown) => signalRefusal(error));
+      // The card hears it AFTER the session recorded it: the done message becomes a note on its focus card,
+      // which moves on to review when nothing else owns its lane. A board failure is said, never answered.
+      if (request.kind === 'done') await cards.signalled(id, request.message);
       // Read back through the SAME reader the list and the single read serve, so a signal answers with
       // the view those surfaces will show rather than a projection of the signal's own outcome.
       const view = await sessions.get(id).catch(() => undefined);
@@ -4033,6 +4077,8 @@ interface WardenParts {
   readonly closeLeftoverBrowsers: (sessionId: string) => Promise<number>;
   /** This machine's name, as pairing gave it: every Warden notification says which machine it is about. */
   readonly machineName: () => string | undefined;
+  /** What auto-revive reaches the rest of the daemon through: the journal, the resume, the tmux probe, the clock. */
+  readonly revive: Pick<WardenRevivePorts, 'events' | 'resume' | 'tmuxReady' | 'sleep'>;
 }
 
 /**
@@ -4083,8 +4129,40 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
     WARDEN_LIVENESS_TICK_SECONDS,
   );
   const artifacts = new FileWardenArtifacts(parts.files, parts.reportsReader, parts.reportsDirectory);
+  const wardenJournal: WardenJournal = {
+    record: (type, data) => process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), type, data })}\n`),
+  };
+  const revive = new WardenReviveService({
+    ...parts.revive,
+    journal: wardenJournal,
+    // The breaker's one notice lands on the session that tripped it, as a plain notification that buzzes.
+    notifyOwner: async notice => {
+      await parts.attention
+        .raise(
+          notice.sessionId,
+          {
+            source: 'agent-raised',
+            sourceRef: 'warden-revive-breaker',
+            subject: notice.subject,
+            why: notice.why,
+            context: 'Auto-revive paused itself after revived sessions kept dying.',
+            waitingSince: new Date().toISOString(),
+            howToResolve:
+              'Nothing to answer. Look at why sessions keep dying; revives resume by themselves after the pause.',
+            notice: true,
+            ping: true,
+            title: notice.title,
+            kind: 'info',
+            premise: 'Ferretry restarts sessions that die abnormally, at most a few at a time.',
+          },
+          WARDEN_ESCALATION_ACTOR,
+        )
+        .catch(() => undefined);
+    },
+  });
   const service = new WardenSweepService(
     {
+      revive,
       guard: parts.guard,
       // The tail and the screen as an operator would read them — already masked by the vault redactor.
       // A ferret whose transcript or pane cannot be read is simply shown with less evidence.
@@ -4263,10 +4341,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
       // The journal is the daemon's own log for now: the fleet event tier these belong on is
       // `emitTransient`, which section I of the survey records as absent. A supervision decision an
       // operator cannot see is worse than a noisy one, so they are written rather than dropped.
-      journal: {
-        record: (type, data) =>
-          process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), type, data })}\n`),
-      },
+      journal: wardenJournal,
       nowMs: () => Date.now(),
       // Two UUIDs concatenated: the value authorizes stopping a session, so it is minted from the
       // same source as every other secret here and is longer than one.
@@ -7299,10 +7374,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   );
   // Where a session's agent puts media it made to show the person, created per launch so a pane is never
   // handed a folder that does not exist. Owner-only, like the rest of the session's state.
-  const sessionMedia = async (id: SessionId): Promise<string> => {
-    const directory = createSessionPaths(paths, id).media;
-    await mkdir(directory, { mode: 0o700, recursive: true });
-    return directory;
+  // Beside it, the file Claude's question hook records an asked question in (`FY_QUESTION_FILE`).
+  const sessionMedia = async (id: SessionId) => {
+    const session = createSessionPaths(paths, id);
+    await mkdir(session.media, { mode: 0o700, recursive: true });
+    return { media: session.media, questionAsked: session.questionAsked };
   };
   // ONE durable owner for every irreversible pane effect in this daemon. Lifecycle turn delivery
   // and runtime controls deliberately share it so neither can mint a second replay vocabulary.
@@ -8501,6 +8577,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // The ONE writer of everything the observer derives, on whichever host it runs.
       const observationApplier = new SessionObservationApplier(storage, answerLedger, new KeyedSerialExecutor());
       const observerFold = new SessionObserver(text => createHash('sha256').update(text, 'utf8').digest('hex'));
+      const observerTranscripts = createTranscriptFileResolver(storage);
       const inlineObserver = new InlineObserverHost(
         {
           storage,
@@ -8512,6 +8589,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           tail: createSessionTranscriptTail(storage),
           pane: async id => await turnPorts.pane(id),
           answers: answerLedger,
+          // Claude's hook record of the question it is asking, which its transcript holds back until the form
+          // is answered (lib/session/question/asked.ts). Bound to the transcript the resolver proves.
+          asked: async id =>
+            await readAskedQuestion(
+              createSessionPaths(paths, id).questionAsked,
+              await observerTranscripts.file(id).catch(() => undefined),
+            ),
           answerSerial,
           applier: observationApplier,
           liveness: {
@@ -8535,7 +8619,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // its own worker, through its own attached observe-only tmux client on the daemon's server, and only when
       // something happened; this thread still writes every patch. The inline host above observes a session
       // only while it has no worker — starting, backing off, or after its worker crashed five times.
-      const observerTranscripts = createTranscriptFileResolver(storage);
       const unrefTimer = (delayMs: number, run: () => void): (() => void) => {
         const timer = setTimeout(run, delayMs);
         timer.unref();
@@ -8588,11 +8671,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           const target = config?.tmuxSession;
           if (typeof target !== 'string' || !isControlAttachable(target)) return undefined;
           const file = await observerTranscripts.file(id).catch(() => undefined);
+          const harness = config?.harness === 'codex' ? 'codex' : 'claude';
           return {
             tmux: { executable: tmuxExecutable, socket: tmuxSocket, target },
-            ...(file === undefined
-              ? {}
-              : { transcript: { file, harness: config?.harness === 'codex' ? 'codex' : 'claude' } }),
+            ...(file === undefined ? {} : { transcript: { file, harness } }),
+            ...(harness === 'claude'
+              ? { questionAsked: createSessionPaths(paths, id as SessionId).questionAsked }
+              : {}),
           };
         },
         applier: observationApplier,
@@ -8809,6 +8894,43 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // its own repository handle over the same document, and the atomicity of `transaction` is what
       // the whole authorization model rests on.
       const boards = createTaskBoardSubsystem(paths, stateFiles, storage, clock, sessionEnvironments, sessionMutations);
+      // The board's projects and their lanes (U3), built before the board that reads them. A proposal is raised
+      // on the proposing ferret's agenda, and the owner's Accept confirms it (in the agenda's change fanout).
+      // The agenda and the board are read lazily: both are built after this.
+      const laneSets = new LaneSetService(
+        new FileLaneSetStore(join(paths.home, 'board', 'lanes')),
+        { projects: async () => await catalogs.projects() },
+        new SessionProjects(
+          new StorageSessionFacts(storage),
+          { projects: async () => await catalogs.projects() },
+          new GitRepositoryProbe(),
+          [...COMMON_SCRATCH_ROOTS, tmpdir()],
+        ),
+        new AgendaLaneAgenda({ raise: async (...parameters) => await agenda.raise(...parameters) }),
+        // A lane edit that removed lanes moves their cards to the lanes it named, in the board store.
+        {
+          relocate: async (projectId, moves) => {
+            await boardWorld.board.relocate(projectId, moves);
+          },
+        },
+      );
+      // BEFORE session control and Pack, which make a card with every start that has a brief. The agenda link
+      // reads the agenda service lazily: it is built further down, and a board is only read once requests flow.
+      const boardWorld = createBoardWorld(
+        paths,
+        stateFiles,
+        storage,
+        clock,
+        () => attachmentDaemonId,
+        laneSets,
+        sends,
+        async sessionId => {
+          const listed = await agenda.list(sessionId);
+          if (!listed.ok) throw new Error(listed.error.message);
+          return listed.value.items;
+        },
+        CLIENT_NAME,
+      );
       // The warden spawns wardens through the SAME start every other caller uses, so a warden is an
       // ordinary managed session that happens to carry the warden label — which is exactly what the
       // detector's lineage shield reads. A private launch path would produce a session the fleet
@@ -8960,6 +9082,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               fixedSettings: async (executable, harness) => await launchSettings.fixedSettings(executable, harness),
               codexChoices: async (executable, cwd) => await codexRuntimeModels.get(executable, cwd),
             },
+            boardWorld.cards,
           ),
           attachmentStore,
         ),
@@ -9140,21 +9263,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // Read lazily: the service is built just below, and this is only called after it commits.
         { raise: async (...parameters) => await agenda.raise(...parameters) },
       );
-      // The board's projects and their lanes. A proposal is raised on the proposing ferret's agenda, and the
-      // owner's Accept confirms it (below, in the change fanout). The agenda is read lazily: it is built next.
-      const laneSets = new LaneSetService(
-        new FileLaneSetStore(join(paths.home, 'board', 'lanes')),
-        { projects: async () => await catalogs.projects() },
-        new SessionProjects(
-          new StorageSessionFacts(storage),
-          { projects: async () => await catalogs.projects() },
-          new GitRepositoryProbe(),
-          [...COMMON_SCRATCH_ROOTS, tmpdir()],
-        ),
-        new AgendaLaneAgenda({ raise: async (...parameters) => await agenda.raise(...parameters) }),
-        // The board store (U2) takes over moving a deleted lane's cards; until it lands there are none to move.
-        { relocate: async () => undefined },
-      );
       const agenda = new AgendaService(
         agendaBoards,
         clock,
@@ -9183,6 +9291,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             },
           },
         ]),
+        // An add that names no card belongs to the raising session's focus card (board-design.md §2.6) —
+        // the CLI's, a harness question's and a Warden escalation's alike.
+        new StorageSessionFocus(storage),
       );
       // Off unless `attention.resurfaceAfterMinutes` is set: asks left in discussion that long surface themselves.
       if (agendaConfig.resurfaceAfterMinutes !== undefined) {
@@ -9404,14 +9515,29 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       };
       // A restart is the same-login migrate with the conversation resumed and NEVER forced: the in-flight gate
       // is the one a person's Restart meets, and a ferret it refuses is queued until it is idle.
+      // The revision is what the in-flight gate reads of the ferret's own record, so a refused restart is asked
+      // again as soon as any of it moves rather than on every tick of the drain.
+      const restartSubject = (view: SessionView): RestartSubject => ({
+        id: view.config.id,
+        name: view.config.name,
+        running: !DORMANT_AGENT_STATUSES.has(view.state.status),
+        idle: view.state.turnState === 'your-turn' || view.state.waiting !== undefined,
+        revision: JSON.stringify([
+          view.state.status,
+          view.state.turn,
+          view.state.turnState ?? null,
+          view.state.waiting ?? null,
+          view.state.openTools ?? [],
+          view.state.subprocessSince ?? null,
+        ]),
+      });
       const sessionRestartService = new RestartService({
-        subjects: async () =>
-          (await sessions.list()).map(view => ({
-            id: view.config.id,
-            name: view.config.name,
-            running: !DORMANT_AGENT_STATUSES.has(view.state.status),
-            idle: view.state.turnState === 'your-turn' || view.state.waiting !== undefined,
-          })),
+        subjects: async () => (await sessions.list()).map(restartSubject),
+        // ONE session, never the list: the drain runs on a 10 s tick, and the list projects every session.
+        subject: async id => {
+          const view = await sessions.get(id).catch(() => undefined);
+          return view === undefined ? undefined : restartSubject(view);
+        },
         outdated: outdatedFor,
         restart: async id => {
           const view = await sessions.get(id);
@@ -10002,9 +10128,19 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           return isScratchPath(real(cwd), [...roots, ...roots.map(real)]);
         },
         probe: packProbe,
-        start: async request => {
+        cards: boardWorld.cards,
+        // Parsed here, so a field Pack leaves out takes the start schema's own default (board access `none`)
+        // rather than Pack forcing one.
+        start: async (input, delegation) => {
+          const request = StartSessionRequestSchema.parse(input);
           try {
-            return await sessionControl.start(request, crypto.randomUUID(), JSON.stringify(request));
+            return await sessionControl.start(
+              request,
+              crypto.randomUUID(),
+              JSON.stringify(request),
+              undefined,
+              delegation,
+            );
           } catch (error) {
             if (
               error instanceof SessionControlError &&
@@ -10099,6 +10235,18 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             `pack: the routing prompt migration did not run: ${error instanceof Error ? error.message : String(error)}\n`,
           );
         });
+      const sessionResumeSubsystem = createSessionResumeSubsystem(
+        storage,
+        sessions,
+        resume,
+        // The SAME stamper the start uses, so a create and a revive can never disagree about how
+        // descent is decided; only the ancestry snapshot differs, and it is taken per relaunch.
+        new SessionProvenanceRecorder(spawnProvenance, new StorageSessionProvenanceStore(storage), {
+          snapshot: async () => await spawnAncestry(storage, sessions),
+        }),
+        // A message held while this session could not take input is delivered now that it is back.
+        sends,
+      );
       const mounted: Omit<MountedSubsystems, 'sessionMcp' | 'mcpInventory'> = {
         pack: {
           service: packService,
@@ -10197,6 +10345,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               executables,
               harnesses: await readHarnesses(accounts, executables, harnessDiscovery),
               directorySyscalls,
+              tmuxRelease: await new TmuxReleaseReader(tmuxExecutable, tmux).read(),
             });
           },
         },
@@ -10372,18 +10521,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           worktrees.managedRoot,
         ),
         sessionControl,
-        sessionResume: createSessionResumeSubsystem(
-          storage,
-          sessions,
-          resume,
-          // The SAME stamper the start uses, so a create and a revive can never disagree about how
-          // descent is decided; only the ancestry snapshot differs, and it is taken per relaunch.
-          new SessionProvenanceRecorder(spawnProvenance, new StorageSessionProvenanceStore(storage), {
-            snapshot: async () => await spawnAncestry(storage, sessions),
-          }),
-          // A message held while this session could not take input is delivered now that it is back.
-          sends,
-        ),
+        sessionResume: sessionResumeSubsystem,
         sendTracking: sendTracker,
         sessionSend: createSessionSendSubsystem(
           storage,
@@ -10443,7 +10581,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         ),
         sessionAnswer,
         sessionAttachments,
-        sessionSignal: createSessionSignalSubsystem(storage, sessions, signals),
+        sessionSignal: createSessionSignalSubsystem(storage, sessions, signals, boardWorld.cards),
         sessionRename: createSessionRenameSubsystem(storage, sessions, nameClaims, clock),
         sessionAgendaMode,
         sessionHypermedia: createSessionHypermediaSubsystem(
@@ -10483,7 +10621,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
         }),
         tasks: createTaskSubsystem(paths, storage, clock, taskBoards, taskBoardTaskActionAuthorizer(boards)),
-        board: createBoardService(paths, stateFiles, storage, clock, () => attachmentDaemonId),
+        board: boardWorld.board,
         taskBoards: boards,
         analytics: createAnalyticsSubsystem(analyticsIngestion, () => analyticsMachineName ?? hostname()),
         analyticsPricing,
@@ -10662,6 +10800,46 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             }),
           sends,
           resume,
+          revive: {
+            events: {
+              read: async sessionId => {
+                const id = parseSessionId(sessionId);
+                const last = storage.findSession(id)?.lastSequence ?? 0;
+                // The last page is enough: only the LAST terminal event decides.
+                const page = await storage.replay(id, Math.max(0, last - 200), 200).catch(() => undefined);
+                return page?.events ?? [];
+              },
+              emit: async (sessionId, type, data) => {
+                await storage.append(parseSessionId(sessionId), type, data as JsonValue).catch(() => undefined);
+              },
+            },
+            // The refusal word is the resume service's own failure name; anything else is just "error".
+            resume: async (sessionId, message) => {
+              try {
+                await sessionResumeSubsystem.resume(sessionId, 'warden', message, {
+                  automatic: true,
+                  dedupeSharedRecoveryScope: false,
+                  expectedStatus: 'failed',
+                  humanOperator: false,
+                });
+                return { ok: true };
+              } catch (error) {
+                return {
+                  ok: false,
+                  reason: error instanceof SessionResumeError ? error.failure : 'error',
+                };
+              }
+            },
+            // "Answers" means tmux ran and said something definite: a listing, or a clean "no server" (a
+            // revive starts one). A hang, a crash message or a thrown spawn is "not yet".
+            tmuxReady: async () => {
+              const result = await launchTmuxCommands
+                .execute(['list-sessions', '-F', '#{session_name}'])
+                .catch(() => undefined);
+              return result !== undefined && (result.code === 0 || isTmuxServerAbsent(result.stderr));
+            },
+            sleep: async milliseconds => await Bun.sleep(milliseconds),
+          },
           migrate: sessionMigrate,
           analytics: analyticsIngestion,
           events: listener => storage.subscribeEvents(listener),
@@ -12008,6 +12186,16 @@ export async function checkConfiguration(
     executables: world.harnesses.executables,
     harnesses,
     directorySyscalls,
+    // The same socket the boot serves (`paths.home/tmux.sock`); a check never starts a server on it.
+    tmuxRelease: await (async () => {
+      try {
+        const executable = Bun.which('tmux') ?? FALLBACK_TMUX;
+        const server = new BunTmuxProcess(executable, join(world.stateHome.path, 'tmux.sock'));
+        return await new TmuxReleaseReader(executable, server).read();
+      } catch {
+        return undefined;
+      }
+    })(),
   });
   for (const line of renderDoctorReport(doctor)) say(line);
   /**

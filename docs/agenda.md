@@ -22,6 +22,18 @@ nothing; a stored per-ferret value always wins and ferrets that already exist ar
 loosening, so it needs no `fy config confirm`. The whole contract is
 [notifications.md § Agenda mode](notifications.md#agenda-mode).
 
+## Every item belongs to a card
+
+An item names the board card it is about (`task`, board-design.md §2.6). `fy agenda add --task F18` names it;
+an add that names none takes the raising session's **focus card** (`config.focusTask`) — the CLI's, a harness
+question's and a Warden escalation's alike. A session with no focus card raises an item with no card. The card
+only derives from the agenda: its open items are its asks, and an open **blocking** one makes it "Waiting on
+you" until the item is answered — nothing is written to the card. A notice is context, never an ask.
+
+The CLI sends `task` only to a daemon that reports `agenda.task.1`; an older one refuses the whole add over the
+field, so the item is raised without it and the CLI says so. For one release a bare `--task` (or a value that
+is not a card reference) still means a to-do; `--todo` is its name now.
+
 ## Turns
 
 Every open item is somebody's turn. `agendaTurn(item)` (protocol) is the one definition:

@@ -22,8 +22,10 @@ import {
   type BoardTaskResponse,
   BoardTaskSchema,
   formatTaskRef,
+  type Lane,
   type LaneSet,
   type LaneTrigger,
+  type TaskKind,
   UNFILED_PROJECT_ID,
 } from '@ferretry/protocol';
 import type { SerialExecutor } from '../ports.ts';
@@ -39,7 +41,7 @@ import {
 } from './card-actions.ts';
 import { deriveView, gatherDerivation } from './derive.ts';
 import { BoardError, BoardUnavailableError } from './errors.ts';
-import { BoardIndex, cardCategory, type LaneSets } from './graph.ts';
+import { BoardIndex, blockedBy, cardCategory, type LaneSets } from './graph.ts';
 import { ancestorsOf } from './lineage.ts';
 import type {
   ActivityDeriver,
@@ -55,6 +57,7 @@ import type {
   SessionParents,
 } from './ports.ts';
 import { countsOf, inScope, pageOf, passesFilters } from './query.ts';
+import { doneLane, doneMove, doneNote } from './signal-done.ts';
 
 export interface BoardServiceDependencies {
   readonly store: BoardStore;
@@ -71,6 +74,16 @@ export interface BoardServiceDependencies {
   readonly machineId: () => string | undefined;
   /** The board-wide section dependency writes share. */
   readonly serial: Pick<SerialExecutor, 'run'>;
+}
+
+/** What `fy signal done` did to the ferret's focus card. */
+export interface SignalDoneOutcome {
+  /** The card as written: the note, and the move when there was one. */
+  readonly task: BoardTask;
+  /** The lane it moved to; `null` when it stayed. */
+  readonly moved: Lane | null;
+  /** Why a move the rule called for was refused (an owner gate, a blocker); the note was kept. */
+  readonly held?: string;
 }
 
 /** The serial key every dependency write shares. */
@@ -162,27 +175,86 @@ export class BoardService {
       requireStanding('adopt', await this.standing(caller, parent), parent);
     }
     const id = await this.ports.store.allocateId(request.kind);
-    const actor = actorOf(caller);
-    const card = requireValidCard(
-      newCard(request, {
-        id,
-        machineId,
-        now: this.ports.clock.now(),
-        actor,
-        standing: caller.kind === 'owner' ? 'owner-human' : 'owner',
-        owner,
-        projectId,
-        laneSet,
-        index,
-      }),
-    );
-    await this.ports.store.write(id, async current => {
-      if (current !== undefined)
-        throw new BoardUnavailableError(`the counter issued ${id}, which a card already holds`);
-      return { task: card, result: undefined };
+    const card = await this.insert(id, request, {
+      machineId,
+      caller,
+      owner,
+      projectId,
+      laneSet,
+      index,
     });
     await this.afterWrite(caller, card, [card.projectId]);
     return await this.view(await this.ports.store.read(), id);
+  }
+
+  /** The next id of a kind from the machine-wide counter, for a card a caller must name before it exists. */
+  async reserve(kind: TaskKind): Promise<BoardTaskId> {
+    this.requireMachine();
+    return await this.ports.store.allocateId(kind);
+  }
+
+  /**
+   * A card the daemon makes for a session it is starting (§3.1), under the id {@link reserve} gave the
+   * start to name in the brief. The daemon decided who owns it, so no caller's standing is asked; the
+   * parent must still be a card on this machine. `by` is the session the card is recorded as made from
+   * (the lead of a `fy new`, else the session itself), and `focus` is the session that will work on it.
+   */
+  async spawn(
+    id: BoardTaskId,
+    request: BoardTaskCreateRequest,
+    spawn: { readonly owner: string; readonly by: string; readonly focus: string; readonly projectId: BoardProjectId },
+  ): Promise<BoardTask> {
+    const machineId = this.requireMachine();
+    const laneSet = await this.requireLaneSet(spawn.projectId);
+    const index = new BoardIndex((await this.ports.store.read()).cards, machineId);
+    if (request.parent !== null) requireLocalCard(index, request.parent, 'parent');
+    const caller: BoardCaller = { kind: 'daemon', sessionId: spawn.by };
+    const card = await this.insert(id, request, {
+      machineId,
+      caller,
+      owner: spawn.owner,
+      projectId: spawn.projectId,
+      laneSet,
+      index,
+    });
+    await this.afterWrite(caller, card, [card.projectId]);
+    if (!(await this.ports.focus.setFocus(spawn.focus, { id: card.id }).catch(() => false))) {
+      this.ports.diagnostics.warn(`could not focus ${spawn.focus} on ${formatTaskRef(card)}`);
+    }
+    return card;
+  }
+
+  /**
+   * `fy signal done` on the ferret's focus card (§3.1 item 5): the message as the ferret's note, and — still
+   * in an `active` lane with no PR — the daemon's automatic `signal.done` move to where the work is checked,
+   * with the message as the reason ({@link doneLane}, {@link doneMove}). The note and the move are one
+   * write. An owner gate or an unfinished blocker holds the card, keeps the note, and says why in `held`. `null` when the session has no focus card here.
+   */
+  async signalDone(sessionId: string, message: string | undefined): Promise<SignalDoneOutcome | null> {
+    const machineId = this.requireMachine();
+    const focus = await this.ports.focus.focusOf(sessionId);
+    if (focus === null || (focus.machineId !== undefined && focus.machineId !== machineId)) return null;
+    const caller: BoardCaller = { kind: 'ferret', sessionId };
+    const outcome = await this.ports.store.write<SignalDoneOutcome | null>(focus.id, async current => {
+      if (current === undefined) return { task: null, result: null };
+      const context = await this.context(current, caller);
+      const noted = applyAction(current, { action: 'note', text: doneNote(message) }, context).task as BoardTask;
+      const target = doneLane(current, context.laneSet);
+      if (target === null) return { task: requireValidCard(noted), result: { task: noted, moved: null } };
+      const blockers = blockedBy(current, context.index, context.laneSets);
+      const move = doneMove(noted, target, context.laneSet, blockers, message, {
+        now: context.now,
+        actor: { kind: 'daemon', sessionId },
+      });
+      if ('held' in move) {
+        return { task: requireValidCard(noted), result: { task: noted, moved: null, held: move.held } };
+      }
+      const task = requireValidCard(move.task);
+      return { task, result: { task, moved: target } };
+    });
+    if (outcome === null) return null;
+    await this.afterWrite(caller, outcome.task, [outcome.task.projectId]);
+    return outcome;
   }
 
   /** One action on one card. */
@@ -271,6 +343,40 @@ export class BoardService {
   // -------------------------------------------------------------------------------------------------
   // Internals
   // -------------------------------------------------------------------------------------------------
+
+  /** Writes a brand-new card under a counter id; the id already holding a card is the counter's fault. */
+  private async insert(
+    id: BoardTaskId,
+    request: BoardTaskCreateRequest,
+    facts: {
+      readonly machineId: string;
+      readonly caller: BoardCaller;
+      readonly owner: string;
+      readonly projectId: BoardProjectId;
+      readonly laneSet: LaneSet;
+      readonly index: BoardIndex;
+    },
+  ): Promise<BoardTask> {
+    const card = requireValidCard(
+      newCard(request, {
+        id,
+        machineId: facts.machineId,
+        now: this.ports.clock.now(),
+        actor: actorOf(facts.caller),
+        standing: facts.caller.kind === 'owner' ? 'owner-human' : 'owner',
+        owner: facts.owner,
+        projectId: facts.projectId,
+        laneSet: facts.laneSet,
+        index: facts.index,
+      }),
+    );
+    await this.ports.store.write(id, async current => {
+      if (current !== undefined)
+        throw new BoardUnavailableError(`the counter issued ${id}, which a card already holds`);
+      return { task: card, result: undefined };
+    });
+    return card;
+  }
 
   private async decide(card: BoardTask, request: BoardTaskActionRequest, caller: BoardCaller): Promise<CardOutcome> {
     const context = await this.context(card, caller);

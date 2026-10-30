@@ -142,6 +142,11 @@ moment (its turn is the owner's, or it declared a wait), once the inventory agre
 - **The queue is durable** (`FileRestartQueue`, in the daemon state home), so a daemon restart does not
   lose it. A timer drains it every ten seconds. An entry made by `--outdated` is dropped, not restarted, if
   the ferret is current by the time it is idle.
+- **The drain is cheap.** The daemon holds the queue in memory after its first read, so an empty queue costs
+  nothing; a pass reads only the queued ferrets, never the fleet; and a ferret the inventory refused is
+  asked again after a backoff (10 s, doubling to at most 2 min) rather than on every tick — at once,
+  though, when its turn, wait, open tools or subprocess change. A queue that kept everything is not
+  rewritten.
 - **A repeat is harmless.** The request id is optional (a repeat restarts nothing that is already current),
   and the same id answers the same result.
 
@@ -218,6 +223,31 @@ switch, so its form box is disabled and its Info row says so.
 Declared gap: an org-policy lock on Remote Control outranks the overlay, and `--rc` is ignored by Claude Code
 for a login whose organisation it cannot determine; the contract test therefore pins the off switch against
 the user-settings control and the `--rc` argv in the unit tests.
+
+## Claude's questions reach the app through a hook
+
+An interactive ferret's `AskUserQuestion` is offered as a question card only when the daemon knows the
+question is open, and the daemon learns that from evidence, never from the screen alone. Claude Code 2.1.220
+wrote the call to its transcript as it asked it. Live ferrets on 2.1.281 do not: the call reaches the
+transcript only in the same write as its answer, so the transcript said nothing while the form waited, the
+session read `working`, and the only way to answer was raw keys in the Console.
+
+The **fixed layer** therefore also puts one `PreToolUse` hook for `AskUserQuestion` into the `--settings`
+overlay (fast mode's replacement overlay copies it along). It fires before the form is drawn and copies its
+payload — the real `tool_use_id` and the whole question — into the file the daemon names for that pane in
+`FY_QUESTION_FILE` (`state/sessions/<id>/question-asked.json`). Both observer hosts read it beside the
+transcript tail (`lib/session/question/asked.ts`): the recorded call counts as open only while the
+transcript has nothing newer — no record of the call, of its result, or of anything at all after it — so the
+moment the form is answered or cancelled the transcript takes over again, and a stale file cannot bring back
+a form that is gone. The hook is in the overlay only, never in a settings entry, so a person's own
+`PreToolUse` hooks keep running beside it; it prints nothing and always exits 0, so it never changes what
+Claude decides.
+
+Declared gaps: a ferret launched before this change has neither the hook nor the variable until its next
+launch; and the hold-back itself is live-only — against a loopback model both versions write the call early —
+so the contract test (`packages/daemon/tests/contract/question-hook.test.ts`) pins the hook mechanism on the
+real CLI, and the live bytes that showed the regression are the unit fixtures
+(`packages/daemon/tests/fixtures/question-asked/`).
 
 The model a relaunch asks for is the one the ferret is on: the CLI's own report when it is newer than the
 daemon's last decision (start, migration, or the previous relaunch) and names a model the login serves;

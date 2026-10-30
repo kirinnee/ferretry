@@ -368,6 +368,39 @@ of closing. No Jev, no investigation, nothing spent. It is `mayActAlone.closeLef
 with it off the Warden lists the recommendation once under Recent actions instead. Every close is listed
 there too, and journalled as `fleet.warden_leftover_closed`.
 
+### Auto-revive
+
+**A ferret that died abnormally is started again by rule.** No Jev, no investigation, nothing spent. A ferret is
+revived only when it is `failed` and its last ending was `session.exited` with status `failed`: its terminal
+disappeared, it was killed by a signal, or it exited non-zero. A non-zero exit is revived **once ever** per ferret.
+
+**Never revived:** one that was stopped (by anyone), one that completed, one that failed to start or failed a
+revive, one that exited 0, a Warden investigator, or a ferret whose lead was stopped.
+
+**How it is paced.**
+
+- Only deaths from the last `windowMinutes` (15); at most once per ferret per `cooldownMinutes` (30), kept across restarts.
+- 3 or more deaths within 10 s are a fleet-wide death ("the tmux server crashed"): the Warden waits until the
+  tmux server answers, then revives in waves of `waveSize` (max 3), at least `waveGapSeconds` (min 10) apart.
+  Interactive ferrets and leads go first; children of a revived lead go in a later wave.
+- **Circuit breaker:** if a revived ferret dies abnormally again within 2 minutes, or more than half of a wave
+  does, all auto-revives stop for `breakerMinutes` (30) and you get one notice. Open and close are journalled
+  (`fleet.warden_revive_breaker_opened` / `_closed`).
+
+**What the ferret is told.** An automatic ferret is told why in plain words and to re-read its last turn file and
+continue. An interactive one gets only a notice ("Your terminal ended because ... it was started again.") and
+its turn, with no instruction to act. Each ferret's own log gets `warden.revive_planned`, `warden.revived` or
+`warden.revive_refused` (`stopped`, `cooldown`, `breaker_open`, `too_old`, `parent_stopped`, `refused:<reason>`);
+each revive is a row under Recent actions and a `fleet.warden_revived` line.
+
+**GAP — no out-of-memory data.** Nothing records whether the kernel's OOM killer ended a process, so the Warden
+never says "out of memory"; an OOM kill shows as a signal (SIGKILL). Archived ferrets are not yet excluded by a
+flag of their own. A death refused by the breaker is not retried when it lapses.
+
+**Turn it off:** `revive: { enabled: false }` in `warden.yaml`. It is also off whenever `mayActAlone.resume` is
+`false`: a revive is a resume of a dead agent, so a Warden that may not resume alone may not revive alone. Other keys: `windowMinutes`, `cooldownMinutes`,
+`waveSize`, `waveGapSeconds`, `breakerMinutes`.
+
 **When it sweeps.** Every `intervalMinutes` (1, 2, 5, 10 or 15; default 2), and also soon after a turn ends,
 a question is waiting or a pane dies (`events.turnEnd`, `events.question`, `events.paneDied`), at most one
 extra sweep a minute.
