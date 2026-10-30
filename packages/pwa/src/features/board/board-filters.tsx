@@ -36,6 +36,8 @@ export interface BoardFiltersProps {
   readonly defaultOpen?: boolean;
   /** The Archive reads closed and dropped cards: its State choice is "both", "closed" or "dropped". */
   readonly archive?: boolean;
+  /** A ferret that is the page's own default scope: it is not an advanced filter, so it is not counted. */
+  readonly quietFerret?: string | null;
 }
 
 const ACTIVITY_LABEL: Readonly<Record<string, string>> = {
@@ -73,6 +75,9 @@ const KIND_LABEL: Readonly<Record<string, string>> = {
 };
 
 const label = (names: Readonly<Record<string, string>>, value: string): string => names[value] ?? value;
+
+const countedFilters = (filters: BoardFilters, quietFerret: string | null): number =>
+  activeFilterCount(filters.ferret !== null && filters.ferret === quietFerret ? { ...filters, ferret: null } : filters);
 
 interface SelectProps {
   readonly name: string;
@@ -281,9 +286,16 @@ function BoardFilterFields({ filters, onChange, choices, archive }: FieldsProps)
   );
 }
 
-export function BoardFilterBar({ filters, onChange, choices, defaultOpen = true, archive = false }: BoardFiltersProps) {
+export function BoardFilterBar({
+  filters,
+  onChange,
+  choices,
+  defaultOpen = true,
+  archive = false,
+  quietFerret = null,
+}: BoardFiltersProps) {
   const [open, setOpen] = useState(defaultOpen);
-  const count = activeFilterCount(filters);
+  const count = countedFilters(filters, quietFerret);
   return (
     <div className="fy-board-filters" data-open={open ? '' : undefined}>
       <div className="fy-board-filters__bar">
@@ -322,9 +334,10 @@ export function BoardFilterSheet({
   onChange,
   choices,
   archive = false,
+  quietFerret = null,
 }: Omit<BoardFiltersProps, 'defaultOpen'>) {
   const [open, setOpen] = useState(false);
-  const count = activeFilterCount(filters);
+  const count = countedFilters(filters, quietFerret);
   const titleId = useId();
   return (
     <div className="fy-board-filters" data-sheet="">
