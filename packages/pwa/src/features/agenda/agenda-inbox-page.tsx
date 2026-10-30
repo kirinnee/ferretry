@@ -21,7 +21,8 @@
  *   drops the fly-off. NO TEACHING TEXT: no hint line, no banner naming the answer mid-drag, no key caption. A phone
  *   also gets "Answer quickly", the deck from the top; a wide screen walks the rows with j/k (or ↑/↓) and Enter
  *   opens one.
- * - FILTERS: Open / Resolved, a machine filter (once there is more than one machine), Find, and — from
+ * - FILTERS: Open / Snoozed (n) / Replied (n) / Resolved — a snoozed or replied item is parked: off the open list and the
+ *   badge until it wakes, is unsnoozed, or the ferret re-opens it — a machine filter (once there is more than one machine), Find, and — from
  *   `/inbox?from=warden` — a "From Warden" chip that keeps only what the Warden raised, with a way to clear it.
  *
  * The page renders off the shell's `AgendaInbox` alone, so it render-tests with a fake one; reading a
@@ -29,7 +30,7 @@
  */
 
 import { ArrowLeft, ArrowRight, CheckCheck, ChevronRight, Search, SkipForward, X, Zap } from 'lucide-react';
-import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { Fragment, type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ChatProse } from '../../components/chat-prose.tsx';
 import { Spinner } from '../../components/spinner.tsx';
 
@@ -45,6 +46,8 @@ import {
   type InboxCard,
   type InboxResolved,
   RESOLVED_READ_LIMIT,
+  snoozeAction,
+  UNSNOOZE_ACTION,
 } from '../../lib/agenda-inbox.ts';
 import {
   type FerretGroup,
@@ -59,6 +62,8 @@ import {
   inboxSections,
   inboxWho,
   nextSelection,
+  type ParkedReason,
+  parkedBy,
   QUEUE_END,
   skipSelection,
   stepSelection,
@@ -146,6 +151,7 @@ const renderInboxCard = (
     item={card.item}
     key={card.key}
     onAct={act}
+    onSnooze={until => act(snoozeAction(until))}
     origin={inboxCardOrigin(card, onNavigate)}
     swipeHints={false}
     {...(now === undefined ? {} : { now })}
@@ -261,6 +267,7 @@ function OpenItem({
         onAct={act}
         onClose={place.onClose}
         onNext={skip}
+        onSnooze={until => act(snoozeAction(until))}
         position={{ index: place.index, total: place.total }}
         quoteScope={scopeOf(card)}
         renderProse={text => <ChatProse copyable={copyWriter} text={text} />}
@@ -406,20 +413,33 @@ function NothingMatches({ onClear }: { readonly onClear: () => void }) {
   );
 }
 
-export type InboxFilter = 'open' | 'resolved';
+export type InboxFilter = 'open' | 'snoozed' | 'replied' | 'resolved';
 
-/** Open / Resolved: two toggle buttons, the chosen one pressed. */
+const FILTER_WORDS: Readonly<Record<InboxFilter, string>> = {
+  open: 'Open',
+  snoozed: 'Snoozed',
+  replied: 'Replied',
+  resolved: 'Resolved',
+};
+
+/** The words on a filter button: the parked ones say how many they hold. */
+const filterWords = (entry: InboxFilter, counts: Readonly<Record<ParkedReason, number>>): string =>
+  entry === 'snoozed' || entry === 'replied' ? `${FILTER_WORDS[entry]} (${counts[entry]})` : FILTER_WORDS[entry];
+
+/** Open / Snoozed / Replied / Resolved: toggle buttons, the chosen one pressed. */
 function InboxFilterBar({
   filter,
+  counts,
   onChange,
 }: {
   readonly filter: InboxFilter;
+  readonly counts: Readonly<Record<ParkedReason, number>>;
   readonly onChange: (next: InboxFilter) => void;
 }) {
   return (
     // biome-ignore lint/a11y/useSemanticElements: a pair of toggle buttons, not a form fieldset
     <div aria-label="Show" className="fy-attn-inbox__filter" data-agenda-filter="" role="group">
-      {(['open', 'resolved'] as const).map(entry => (
+      {(['open', 'snoozed', 'replied', 'resolved'] as const).map(entry => (
         <button
           aria-pressed={filter === entry}
           className="fy-attn-inbox__filter-button"
@@ -428,7 +448,7 @@ function InboxFilterBar({
           onClick={() => onChange(entry)}
           type="button"
         >
-          {entry === 'open' ? 'Open' : 'Resolved'}
+          {filterWords(entry, counts)}
         </button>
       ))}
     </div>
@@ -483,6 +503,99 @@ function InboxResolvedList({
             origin={resolvedOrigin(row, onNavigate)}
             record={row.record}
           />
+        ))}
+      </ul>
+      <p className="fy-attn-inbox__hint">
+        From your {RESOLVED_READ_LIMIT} most recent conversations
+        {inbox.resolvedReading ? ' · reading more…' : ''}
+      </p>
+    </div>
+  );
+}
+
+/** One parked row: where it stands, and the one button that brings it back. */
+function ParkedRow({
+  card,
+  filter,
+  inbox,
+  now,
+  onNavigate,
+}: {
+  readonly card: InboxCard;
+  readonly filter: ParkedReason;
+  readonly inbox: AgendaInbox;
+  readonly now: number | undefined;
+  readonly onNavigate: (to: string) => void;
+}) {
+  const who = inboxWho(card);
+  const status = agendaStatus(card.item, who.ferret, now);
+  // A replied row's status already names the ferret it waits on.
+  const more = filter === 'snoozed' ? [who.ferret, agendaReference(card.item.id)] : [agendaReference(card.item.id)];
+  return (
+    <li className="fy-parked-row" data-agenda-parked={card.key}>
+      <RouteLink
+        className="fy-inbox-row fy-parked-row__link"
+        onNavigate={onNavigate}
+        to={agendaConversationPath(card.daemonId, card.view.config.id, card.item.id)}
+      >
+        <span className="fy-inbox-row__top">
+          <span className="fy-inbox-row__title" data-agenda-row-title="">
+            {inboxRowTitle(card.item)}
+          </span>
+        </span>
+        <span className="fy-inbox-row__meta">
+          {status === null ? null : <span data-agenda-parked-status="">{status.label}</span>}
+          {more.map(text => (
+            <Fragment key={text}>
+              <span aria-hidden="true">·</span>
+              <span>{text}</span>
+            </Fragment>
+          ))}
+        </span>
+      </RouteLink>
+      <button
+        className="kt-btn fy-parked-row__back"
+        data-agenda-unsnooze={filter}
+        onClick={() => inbox.deferred.schedule(card, UNSNOOZE_ACTION)}
+        type="button"
+      >
+        {filter === 'snoozed' ? 'Unsnooze' : 'Back to my list'}
+      </button>
+    </li>
+  );
+}
+
+/** The Snoozed and Replied filters: what is parked, each with the way back to the owner's list. */
+function InboxParkedList({
+  inbox,
+  filter,
+  rows,
+  now,
+  onNavigate,
+  onClear,
+}: {
+  readonly inbox: AgendaInbox;
+  readonly filter: ParkedReason;
+  readonly rows: readonly InboxCard[];
+  readonly now: number | undefined;
+  readonly onNavigate: (to: string) => void;
+  readonly onClear: () => void;
+}) {
+  if (rows.length === 0)
+    return inbox.parked.length > 0 ? (
+      <NothingMatches onClear={onClear} />
+    ) : inbox.resolvedReading ? (
+      <InboxReading words="Reading agenda items…" />
+    ) : (
+      <p className="fy-attn-inbox__none" data-agenda-parked-empty={filter}>
+        {filter === 'snoozed' ? 'Nothing is snoozed.' : 'Nothing is waiting on a ferret after your reply.'}
+      </p>
+    );
+  return (
+    <div className="fy-attn-inbox__resolved" data-agenda-parked-pane={filter}>
+      <ul aria-label={FILTER_WORDS[filter]} className="fy-parked-list">
+        {rows.map(card => (
+          <ParkedRow card={card} filter={filter} inbox={inbox} key={card.key} now={now} onNavigate={onNavigate} />
         ))}
       </ul>
       <p className="fy-attn-inbox__hint">
@@ -811,8 +924,8 @@ export function AgendaInboxPage({
   const focusRow = useRef(false);
 
   const machines = useMemo(
-    () => inboxMachines([...inbox.cards, ...inbox.withFerret], inbox.resolved),
-    [inbox.cards, inbox.withFerret, inbox.resolved],
+    () => inboxMachines([...inbox.cards, ...inbox.withFerret, ...inbox.parked], inbox.resolved),
+    [inbox.cards, inbox.withFerret, inbox.parked, inbox.resolved],
   );
   const machineFilter = machines.some(entry => entry.daemonId === machine) ? machine : null;
   const listFilter: InboxListFilter = { machine: machineFilter, query, from };
@@ -820,6 +933,9 @@ export function AgendaInboxPage({
   const withFerret = filterInboxCards(inbox.withFerret, listFilter);
   const sections = useMemo(() => inboxSections(visible, withFerret), [visible, withFerret]);
   const filtered = machineFilter !== null || query !== '' || from !== null;
+  const snoozed = parkedBy(inbox.parked, 'snoozed');
+  const replied = parkedBy(inbox.parked, 'replied');
+  const parkedCounts = { snoozed: snoozed.length, replied: replied.length };
 
   // The deck deals what waits on the owner, in the order the page lists it.
   const deckCards = groupCards([...sections.stopped, ...sections.needsYou]);
@@ -841,7 +957,7 @@ export function AgendaInboxPage({
 
   const choose = (next: InboxFilter): void => {
     setFilter(next);
-    if (next === 'resolved') inbox.loadResolved();
+    if (next !== 'open') inbox.loadResolved();
   };
   const clearFilters = (): void => {
     setQuery('');
@@ -880,7 +996,10 @@ export function AgendaInboxPage({
   const count = inbox.reading && inbox.cards.length === 0 ? inbox.total : inbox.cards.length;
   const empty = inbox.cards.length === 0 && inbox.withFerret.length === 0;
   const nothingForYou = inbox.cards.length === 0;
-  const updating = filter === 'open' ? inbox.reading && !empty : inbox.resolvedReading && inbox.resolved.length > 0;
+  const updating =
+    filter === 'open'
+      ? inbox.reading && !empty
+      : inbox.resolvedReading && (filter === 'resolved' ? inbox.resolved.length : inbox.parked.length) > 0;
   const host: CardHostProps = { inbox, onNavigate, now, readRecent, readConversation, recentOpen };
   const atEnd = deckPlace === QUEUE_END;
   const openAt = (key: string): void => {
@@ -919,7 +1038,7 @@ export function AgendaInboxPage({
           <span className="fy-attn-inbox__updating-text">Updating</span>
         </span>
       ) : null}
-      <InboxFilterBar filter={filter} onChange={choose} />
+      <InboxFilterBar counts={parkedCounts} filter={filter} onChange={choose} />
       <div className="fy-attn-inbox__tools">
         {from === 'warden' && onClearFrom !== undefined ? <SourceChip onClear={onClearFrom} /> : null}
         {machines.length > 1 ? (
@@ -1081,7 +1200,16 @@ export function AgendaInboxPage({
       {header}
       {banner}
       <OrphanedFailures inbox={inbox} />
-      {filter === 'resolved' ? (
+      {filter === 'snoozed' || filter === 'replied' ? (
+        <InboxParkedList
+          filter={filter}
+          inbox={inbox}
+          now={now}
+          onClear={clearFilters}
+          onNavigate={onNavigate}
+          rows={filterInboxCards(filter === 'snoozed' ? snoozed : replied, listFilter)}
+        />
+      ) : filter === 'resolved' ? (
         <InboxResolvedList
           inbox={inbox}
           onClear={clearFilters}

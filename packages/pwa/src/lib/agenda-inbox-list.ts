@@ -16,7 +16,7 @@
  * task's name and its card, `&F12`) and the machine ({@link inboxWho}).
  */
 
-import { type AgendaItem, agendaTitle, formatTaskRef, type SessionView } from '@ferretry/protocol';
+import { type AgendaItem, agendaTitle, agendaWakeAt, formatTaskRef, type SessionView } from '@ferretry/protocol';
 import { sessionsBarNames } from '../shell/sessions-bar-model.ts';
 import { sortAgenda } from './agenda-status.ts';
 import { sessionAgendaSummary } from './agenda-wire.ts';
@@ -277,4 +277,23 @@ export const stepSelection = (order: readonly string[], current: string | null, 
   const at = current === null ? -1 : order.indexOf(current);
   if (at < 0) return order[0] ?? null;
   return order[Math.min(order.length - 1, Math.max(0, at + by))] ?? null;
+};
+
+/** Why an item is parked: the Inbox's "Snoozed" and "Replied" filters. */
+export type ParkedReason = 'snoozed' | 'replied';
+
+const wakeTime = (card: InboxCard): number => {
+  const at = Date.parse(agendaWakeAt(card.item) ?? '');
+  return Number.isNaN(at) ? Number.POSITIVE_INFINITY : at;
+};
+
+/**
+ * The parked cards of one reason, in the order to read them: what wakes soonest first for a snooze, what was
+ * replied to most recently first for a reply (`cards` arrive newest parked first).
+ */
+export const parkedBy = (cards: readonly InboxCard[], reason: ParkedReason): readonly InboxCard[] => {
+  const mine = cards.filter(card => card.item.parked?.reason === reason);
+  return reason === 'replied'
+    ? mine
+    : [...mine].sort((a, b) => wakeTime(a) - wakeTime(b) || a.key.localeCompare(b.key));
 };

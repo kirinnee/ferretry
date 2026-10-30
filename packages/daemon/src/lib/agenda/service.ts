@@ -22,6 +22,7 @@ import {
   emptyAgendaLedger,
   type RaiseAgendaRequest,
 } from './state-machine.ts';
+import { NO_SUB_FERRETS, type SubFerretDirectory, subFerretRefusal } from '../sub-ferret/index.ts';
 
 /** The heading of an item the daemon raised without wording one: plain words, never an id. */
 const DAEMON_TITLES: Readonly<Record<DaemonAgendaCause, string>> = {
@@ -98,6 +99,15 @@ export type AgendaQueryResult<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly error: AgendaFailure };
 
+const SUB_FERRET_DOING: Readonly<Record<string, string>> = {
+  raise: 'raise agenda items or notify the owner',
+  edit: 'edit agenda items',
+  surface: 'surface agenda items',
+  resolve: 'close agenda items',
+  dismiss: 'dismiss agenda items',
+  progress: 'tick agenda items',
+};
+
 export function isAgendaSessionId(value: string): boolean {
   return SESSION_ID.test(value);
 }
@@ -110,6 +120,8 @@ export class AgendaService {
     private readonly observer: AgendaRaisedObserver,
     private readonly changes: AgendaChangeObserver = { changed: async () => undefined },
     private readonly focus: AgendaFocusSource = NO_AGENDA_FOCUS,
+    /** Who started whom: a sub-ferret raises and changes nothing here. Absent, every agent is a lead. */
+    private readonly subFerrets: SubFerretDirectory = NO_SUB_FERRETS,
   ) {}
 
   async list(sessionId: string): Promise<AgendaQueryResult<AgendaSnapshot>> {
@@ -154,8 +166,15 @@ export class AgendaService {
     return this.apply(sessionId, { action: 'answer', actor, id, response, note, at: this.clock.now() }, via);
   }
 
-  async edit(sessionId: string, id: AgendaId, patch: EditAgendaPatch, actor: AgendaActor): Promise<AgendaMutation> {
-    return this.apply(sessionId, { action: 'edit', actor, id, patch, at: this.clock.now() });
+  /** `now`: the ferret says it is urgent, so an item the owner snoozed wakes too (at most once an hour). */
+  async edit(
+    sessionId: string,
+    id: AgendaId,
+    patch: EditAgendaPatch,
+    actor: AgendaActor,
+    now = false,
+  ): Promise<AgendaMutation> {
+    return this.apply(sessionId, { action: 'edit', actor, id, patch, ...(now ? { now } : {}), at: this.clock.now() });
   }
 
   /** Tick (or untick) one step of an open item; never resolves it, pushes or tells the ferret. */
@@ -188,8 +207,34 @@ export class AgendaService {
    * An item leaves discussion for the owner's queue. The raising ferret, the owner or the daemon's timer may
    * say so; surfacing an item already in the queue is no change.
    */
-  async surface(sessionId: string, id: AgendaId, actor: AgendaActor, why?: string | null): Promise<AgendaMutation> {
-    return this.apply(sessionId, { action: 'surface', actor, id, why, at: this.clock.now() });
+  async surface(
+    sessionId: string,
+    id: AgendaId,
+    actor: AgendaActor,
+    why?: string | null,
+    now = false,
+  ): Promise<AgendaMutation> {
+    return this.apply(sessionId, { action: 'surface', actor, id, why, ...(now ? { now } : {}), at: this.clock.now() });
+  }
+
+  /** The owner puts an open item away until a time still ahead (docs/agenda.md § Parked items). */
+  async snooze(sessionId: string, id: AgendaId, until: string, actor: AgendaActor): Promise<AgendaMutation> {
+    return this.apply(sessionId, { action: 'snooze', actor, id, until, at: this.clock.now() });
+  }
+
+  /** The owner brings a parked item (snoozed, or replied to) back to their queue now. */
+  async unsnooze(sessionId: string, id: AgendaId, actor: AgendaActor): Promise<AgendaMutation> {
+    return this.apply(sessionId, { action: 'unsnooze', actor, id, at: this.clock.now() });
+  }
+
+  /** The daemon's timer: a snoozed item whose time has come is back on the owner's queue, fresh. */
+  async wake(sessionId: string, id: AgendaId): Promise<AgendaMutation> {
+    return this.apply(sessionId, {
+      action: 'wake',
+      actor: { kind: 'daemon', cause: 'system' },
+      id,
+      at: this.clock.now(),
+    });
   }
 
   async resolve(
@@ -267,6 +312,8 @@ export class AgendaService {
   ): Promise<AgendaMutation> {
     const unauthorized = await this.authorize(sessionId, command.actor);
     if (unauthorized !== null) return { ok: false, error: unauthorized };
+    const limited = await this.limitSubFerret(command.actor, command.action);
+    if (limited !== null) return { ok: false, error: limited };
     const mutation = await this.repository.transact(sessionId, current =>
       applyAgendaCommandToSession(current, sessionId, command),
     );
@@ -292,6 +339,17 @@ export class AgendaService {
       }
     }
     return mutation;
+  }
+
+  /** Only a lead speaks for the owner's agenda: a sub-ferret that tries is told whom to tell instead. */
+  private async limitSubFerret(actor: AgendaActor, action: string): Promise<AgendaFailure | null> {
+    if (actor.kind !== 'agent') return null;
+    const refusal = await subFerretRefusal(
+      this.subFerrets,
+      actor.sessionId,
+      SUB_FERRET_DOING[action] ?? 'change the agenda',
+    );
+    return refusal === null ? null : { code: 'forbidden', message: refusal };
   }
 
   private async authorize(sessionId: string, actor?: AgendaActor): Promise<AgendaFailure | null> {

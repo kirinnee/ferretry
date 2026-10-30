@@ -30,7 +30,13 @@
 
 import type { LucideIcon } from 'lucide-react';
 import type { DaemonId } from '../lib/daemon-connection.ts';
-import { daemonNewSessionPath, daemonSessionsPath, parseRoute, routePath } from '../lib/pages/routes.ts';
+import {
+  daemonNewSessionPath,
+  daemonQueuePath,
+  daemonSessionsPath,
+  parseRoute,
+  routePath,
+} from '../lib/pages/routes.ts';
 import type { PaletteCommand } from './palette-model.ts';
 
 /**
@@ -77,6 +83,12 @@ export const SHELL_DESTINATIONS = [
     title: 'Start an agent in a working directory',
     path: daemonNewSessionPath,
   },
+  {
+    id: 'queue',
+    label: 'All queues',
+    title: 'Every message still waiting, across ferrets and machines',
+    path: daemonQueuePath,
+  },
 ] as const satisfies readonly AppBarDestinationLike[];
 
 /**
@@ -89,6 +101,7 @@ export const SHELL_DESTINATIONS = [
 const DESTINATION_KEYWORDS: Readonly<Record<string, readonly string[]>> = {
   sessions: ['sessions', 'fleet', 'dashboard', 'home', 'teammates', 'list'],
   'new-session': ['new', 'start', 'spawn', 'launch', 'create', 'teammate', 'agent'],
+  queue: ['queue', 'queues', 'outbox', 'waiting', 'pending', 'unsent', 'offline', 'messages'],
   board: ['board', 'kanban', 'tasks', 'cards', 'lanes', 'backlog', 'stale', 'to test', 'tree'],
   projects: ['projects', 'project', 'workspace', 'folder', 'repository', 'repo'],
   // No `accounts` entry: Accounts is no longer a destination. Logins and runtimes are Settings ›

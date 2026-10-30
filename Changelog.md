@@ -1,3 +1,10 @@
+## [4.137.0](https://github.com/kirinnee/ferretry/compare/v4.136.0...v4.137.0) (2026-10-30)
+
+### Features
+
+* **daemon:** interrupt is a flag on a queued message, not a separate path (F155) ([#1039](https://github.com/kirinnee/ferretry/issues/1039)) ([4d8411f](https://github.com/kirinnee/ferretry/commit/4d8411f5879279364ce5b77fd889aa4dfc3556b2))
+* **pwa:** Board Table view with an owner Done and Reopen ([#1035](https://github.com/kirinnee/ferretry/issues/1035)) ([1b8659d](https://github.com/kirinnee/ferretry/commit/1b8659db5e75cde9b6ba724f541b012e42d856aa))
+
 ## [4.136.0](https://github.com/kirinnee/ferretry/compare/v4.135.0...v4.136.0) (2026-10-30)
 
 ### Features

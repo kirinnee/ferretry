@@ -514,3 +514,25 @@ describe('an account whose profile takes a variable from the secret store', () =
     should(actual).not.containEql('secret store');
   });
 });
+
+describe('the sub-ferret limits in a runtime wrapper', () => {
+  it('should carry the lead rules by default and swap them for the two sub-ferret lines on FY_SUB_FERRET', () => {
+    // Act
+    const script = render(account());
+
+    // Assert
+    should(script).containEql('if [ "${FY_SUB_FERRET:-0}" = 1 ]; then _fy_sections=');
+    should(script).containEql('Sub-ferret: you were started by a lead ferret.');
+    should(script).containEql('Board: all work is a card');
+    should(script).containEql('; else _fy_sections=');
+  });
+
+  it('should keep the agenda section out whenever FY_SUB_FERRET is 1, even with FY_AGENDA on', () => {
+    // Act
+    const script = render(account());
+
+    // Assert
+    should(script).containEql('if [ "${FY_AGENDA:-0}" = 1 ] && [ "${FY_SUB_FERRET:-0}" != 1 ]; then');
+    should(script).containEql('if [ "${FY_LEARNING_PASSIVE:-0}" = 1 ]; then');
+  });
+});

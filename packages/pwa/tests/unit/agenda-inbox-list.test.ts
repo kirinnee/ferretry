@@ -13,6 +13,7 @@ import {
   inboxWho,
   isFromWarden,
   NO_FILTER,
+  parkedBy,
   nextSelection,
   QUEUE_END,
   skipSelection,
@@ -318,5 +319,35 @@ describe('who an item is from', () => {
   it('has no task when there is neither a task nor a folder: the callsign alone', () => {
     const view = sessionView('s3', { config: { teammate: 'moe', name: 'Moe', cwd: '' } });
     expect(inboxWho(inboxCard(agendaItem('A1'), view)).task).toBeNull();
+  });
+});
+
+describe('parkedBy', () => {
+  const parkedCard = (id: string, parked: Record<string, string>) =>
+    inboxCard(agendaItem(id, { parked } as never), MIGRATE);
+  const snoozed = (id: string, until: string) =>
+    parkedCard(id, { reason: 'snoozed', at: '2026-08-01T11:00:00.000Z', until });
+  const replied = (id: string) => parkedCard(id, { reason: 'replied', at: '2026-08-01T11:00:00.000Z' });
+
+  it('lists a snooze that wakes soonest first, and the key breaks a tie', () => {
+    const later = snoozed('A1', '2026-08-02T09:00:00.000Z');
+    const sooner = snoozed('A2', '2026-08-01T15:00:00.000Z');
+    const same = snoozed('A3', '2026-08-01T15:00:00.000Z');
+    expect(parkedBy([later, same, sooner, replied('A4')], 'snoozed').map(card => card.item.id)).toEqual([
+      'A2',
+      'A3',
+      'A1',
+    ]);
+  });
+
+  it('puts a snooze with no readable wake time last', () => {
+    const broken = snoozed('A1', 'nonsense');
+    const fine = snoozed('A2', '2026-08-01T15:00:00.000Z');
+    expect(parkedBy([broken, fine], 'snoozed').map(card => card.item.id)).toEqual(['A2', 'A1']);
+  });
+
+  it('keeps the order replied items arrive in, and leaves the snoozed out', () => {
+    const cards = [replied('A2'), snoozed('A1', '2026-08-02T09:00:00.000Z'), replied('A1')];
+    expect(parkedBy(cards, 'replied').map(card => card.item.id)).toEqual(['A2', 'A1']);
   });
 });

@@ -70,7 +70,7 @@ and the longest routing prompt:
 | Ferretry settings (short "Set up" skill) | 478        | 120      | every agent runtime         |
 | Notify (`fy notify`, the Inbox)          | 303        | 76       | every agent runtime         |
 | Board (`fy task`, cards)                 | 640        | 160      | every agent runtime         |
-| Agenda (`fy agenda`, with steps)         | 1,042      | 261      | `FY_AGENDA=1`               |
+| Agenda (`fy agenda`, with steps)         | 1,040      | 260      | `FY_AGENDA=1`               |
 | Hypermedia                               | 1,503      | 376      | `FY_HYPERMEDIA=1`           |
 | Pack mode                                | 1,003      | 251      | `FY_PACK=1`                 |
 | Its routing line                         | ≤ 1,210    | ≤ 303    | `FY_PACK=1`                 |
@@ -82,7 +82,7 @@ The full "Set up Ferretry" skill (4.2 KB) is no longer in any prompt; the settin
 7.4 KB (the old always-on Agenda section became the short Notify rule, and its words moved into the Agenda section, which only a ferret in agenda mode carries — [notifications.md](notifications.md#agenda-mode); Hypermedia grew by 335 to teach `chart`) and the Pack section itself under 1,050 characters. The always-on Board
 section (640) was paid for, not added on top: the tools are named by prefix (`terminal_*`, `browser_*`), map, media
 and chart's full spec moved behind `fy render guide <type>`, and the lessons rule was compressed. The measured total
-is 7,244 (the Agenda section carries the required `--premise` and `--context` and the self-contained, full-Markdown, hypermedia rule, paid for in its own words), and the test keeps at least 150 characters of headroom under the 7.4 KB cap. The routing line grew from a 150-character
+is 7,242 (the Agenda section carries the required `--premise` and `--context`, the self-contained, full-Markdown, hypermedia rule and the reply-parks-the-item rule, paid for in its own words), and the test keeps at least 150 characters of headroom under the 7.4 KB cap. The routing line grew from a 150-character
 summary to the whole prompt when the use-case guide became one routing prompt, so the agent decides with
 exactly what Jev is told.
 
@@ -286,6 +286,29 @@ failed, stalled or stopped. A plain `fy start` refused here answers `409 limit_r
   `GET /v1/sessions/:sessionId/result` (`--json` adds it as `result`).
 - A sub-ferret that signals done is stopped by that signal. One a wait settles on that is still running
   (a `--until-marker` wait) is stopped once its result is collected, unless the caller passes `--keep`.
+
+## Sub-ferret limits
+
+The owner's decision (2026-10-30): **only lead ferrets raise agenda items and move cards; sub-ferrets report to
+their lead.** A _sub-ferret_ is a session another session started (`config.parent`); a _lead_ has none. Many sub-ferrets
+are weaker models, writing to the board and agenda becomes a coordination problem, and what they need is mostly
+to report back. Enforced by the daemon from the caller's session identity, not by the prompt:
+
+- **Refused** (`forbidden`, saying what to do instead): every agenda write (`add`, `edit`, `surface`, `done`, `dismiss`),
+  `fy notify`, every card verb except the two below, and editing a project's lanes. The message reads
+  `Sub-ferrets don't <this>; tell your lead: fy send <lead-callsign> "…"`.
+- **Allowed:** `fy send` to the lead (and peers it names); `fy task note`, and `fy task link --pr` / `--branch`, on a card;
+  reading the board and the agenda. `fy new` still makes the sub-ferret's card.
+- **Prompt:** a sub-ferret's fixed layer is the tools and settings rules plus two lines (`SUB_FERRET_INSTRUCTION`):
+  report to your lead with `fy send`; link your PR to your card. The Notify, Board and Agenda mode paragraphs are left
+  out. Sizes with the default binary name: **lead 2230 characters** (3274 with Agenda mode on), **sub-ferret 1560**.
+  `FY_SUB_FERRET=1` is derived from `parent` at each launch; a running ferret is told the changed always-on section on the
+  owner's next message like any other ([launch-settings.md](launch-settings.md#instructions-that-changed-since-the-launch)).
+- **Nudges** about a sub-ferret's card (the turn-check, a reopen, the GitHub watcher's and sweep's) go to its lead.
+  The Warden's liveness checks on the sub-ferret itself are unchanged.
+
+Code: `packages/daemon/src/lib/sub-ferret/index.ts` (one directory for the board, the agenda and the lane route),
+guarded in `BoardService`, `AgendaService.apply` and `board-projects.ts`.
 
 ## Clean up
 

@@ -40,6 +40,7 @@ import { agendaAge, agendaKindMeta } from './agenda-board.tsx';
 import { AgendaBriefSections, cardLede } from './agenda-brief.tsx';
 import { AgendaDelivery } from './agenda-delivery.tsx';
 import { agendaHasDetail } from './agenda-detail.tsx';
+import { AgendaSnoozeMenu } from './agenda-snooze-menu.tsx';
 import { AgendaBody } from './agenda-steps.tsx';
 import { AgendaDecidedSummary, AgendaUpdated } from './agenda-updated.tsx';
 
@@ -91,6 +92,8 @@ export interface AgendaCardProps {
    * where nothing swipes, draws the item this way; the phone, the deck and the pinned card keep the card.
    */
   readonly flat?: boolean;
+  /** Snooze the item until this instant; absent: the clock button is not drawn. */
+  readonly onSnooze?: (until: string) => void;
   /** Opens what the item knows beyond its question (`AgendaDetail`): the side panel, or the phone's full view. */
   readonly onOpenDetail?: () => void;
 }
@@ -114,6 +117,7 @@ export function AgendaCard({
   onSkip,
   flat = false,
   onOpenDetail,
+  onSnooze,
 }: AgendaCardProps) {
   const titleId = useId();
   const [picks, setPicks] = useState<readonly string[]>([]);
@@ -184,6 +188,9 @@ export function AgendaCard({
         <span className="ml-auto shrink-0 whitespace-nowrap text-meta text-faint">
           {pinned ? agendaAge(item.waitingSince, now).replace(/^waiting /, '') : agendaAge(item.waitingSince, now)}
         </span>
+        {onSnooze === undefined ? null : (
+          <AgendaSnoozeMenu disabled={busy} now={now} onSnooze={onSnooze} triggerClass="fy-attn-card__snooze" />
+        )}
         {headerSlot}
       </header>
       <AgendaDelivery busy={busy} ferret={origin?.ferret} item={item} onAct={onAct} />

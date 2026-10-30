@@ -89,6 +89,9 @@ import { browserScrollMemoryStorage, ScrollMemory, type ScrollMemoryStorage } fr
 import { fetchSecuritySettings, UNLOCK_STAYS_FALLBACK, unlockStaysSentence } from './security-settings-client.ts';
 import { SessionCache, type SessionCacheBackend, seedFleetFromCache } from './session-cache.ts';
 import { browserSessionCacheBackend } from './session-cache-storage.ts';
+import { MemoryOutboxBackend, type OutboxBackend, SendOutbox } from './send-outbox.ts';
+import { browserOutboxBackend } from './send-outbox-storage.ts';
+import { type OutboxWatchEnvironment, outboxSender, watchOutbox } from './send-outbox-wiring.ts';
 import { sharingIdenticalReads } from './shared-reads.ts';
 import {
   browserCredentials,
@@ -487,6 +490,8 @@ export interface AppStore {
   readonly readDefaultRelay: () => Promise<HostedRelayFallback>;
   /** What this device last saw of each machine's sessions, drawn before the network answers. */
   readonly sessionCache: SessionCache;
+  /** Messages typed on this device and not yet on a machine's queue: tick one (`lib/send-outbox.ts`). */
+  readonly outbox: SendOutbox;
   /** Keeps the interactive and recently opened chats fresh in the background (`lib/background-fresh.ts`). */
   readonly backgroundFresh: BackgroundChatFreshener;
   /** Where each page and chat was scrolled, for Back, Forward and a reload of this tab. */
@@ -496,6 +501,10 @@ export interface AppStore {
 export interface CreateAppStoreOptions {
   /** IndexedDB by default; `null` keeps the session cache in memory only. Injected by suites. */
   readonly sessionCacheBackend?: SessionCacheBackend | null;
+  /** IndexedDB by default; `null` keeps the outbox in memory only. Injected by suites. */
+  readonly outboxBackend?: OutboxBackend | null;
+  /** What makes the outbox try again; the browser's own (online, a machine recovering) by default. Injected by suites. */
+  readonly outboxEnvironment?: OutboxWatchEnvironment;
   /** The page and link facts the background chat refresh obeys; the browser's own by default. Injected by suites. */
   readonly backgroundFreshEnvironment?: BackgroundFreshEnvironment;
   /** This tab's `sessionStorage` by default; `null` remembers no scroll position. Injected by suites. */
@@ -759,6 +768,29 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   const sessionCache = new SessionCache(
     options.sessionCacheBackend === undefined ? browserSessionCacheBackend() : options.sessionCacheBackend,
   );
+  const outbox = new SendOutbox({
+    backend:
+      options.outboxBackend === undefined
+        ? (browserOutboxBackend() ?? new MemoryOutboxBackend())
+        : (options.outboxBackend ?? new MemoryOutboxBackend()),
+    mintId: () => crypto.randomUUID(),
+    resolve: async daemonId => {
+      const daemon = connections.list().find(record => record.daemonId === daemonId);
+      if (daemon === undefined) return null;
+      return outboxSender(daemon, await clients.client(daemon), carried);
+    },
+  });
+  void outbox.load().then(() => outbox.drainAll());
+  watchOutbox(
+    outbox,
+    options.outboxEnvironment ?? {
+      onRecovered: (daemonId, listener) => connectionHealth.onRecovered(daemonId as DaemonId, listener),
+      onOnline: listener => {
+        globalThis.addEventListener?.('online', listener);
+        return () => globalThis.removeEventListener?.('online', listener);
+      },
+    },
+  );
   const scrollMemory = new ScrollMemory(
     options.scrollMemoryStorage === undefined ? browserScrollMemoryStorage() : options.scrollMemoryStorage,
   );
@@ -967,6 +999,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     pushService,
     readDefaultRelay,
     sessionCache,
+    outbox,
     backgroundFresh,
     scrollMemory,
     pair: async (seed, deviceName) => {
@@ -1379,4 +1412,9 @@ export function useConnectionSnapshot(): DaemonConnectionsSnapshot {
   const subscribe = useCallback((listener: () => void) => connections.subscribe(listener), [connections]);
   const getSnapshot = useCallback(() => connections.getSnapshot(), [connections]);
   return useSyncExternalStore(subscribe, getSnapshot);
+}
+
+/** The device's outbox, or `null` outside a store — a composer without one sends straight away, as it always did. */
+export function useSendOutbox(): SendOutbox | null {
+  return useContext(StoreContext)?.outbox ?? null;
 }

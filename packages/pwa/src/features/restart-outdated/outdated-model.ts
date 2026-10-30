@@ -19,6 +19,7 @@ const SECTION_WORDS: Readonly<Record<LaunchInstructionSectionId, string>> = {
   settings: 'settings',
   notify: 'notifications',
   board: 'board rules',
+  'sub-ferret': 'sub-ferret rules',
   hypermedia: 'hypermedia',
   pack: 'Pack mode',
   attention: 'attention',

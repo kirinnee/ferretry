@@ -3,6 +3,7 @@ import {
   agendaAuthor,
   agendaStatus,
   clockWords,
+  parkedWords,
   neededByWords,
   nextOwnerItem,
   sortAgenda,
@@ -104,5 +105,53 @@ describe('agendaAuthor', () => {
     expect(agendaAuthor({ raisedBy: 'daemon', sourceRef: 'warden:verdict-1' }, 'Johnnie')).toBe('Warden');
     expect(agendaAuthor({ raisedBy: 'daemon', sourceRef: 'push:x' }, 'Johnnie')).toBe('Johnnie');
     expect(agendaAuthor({ raisedBy: 'agent', sourceRef: 'warden:x' }, 'Johnnie')).toBe('Johnnie');
+  });
+});
+
+describe('parked items', () => {
+  const snoozed = (until: string, extra: Record<string, unknown> = {}) =>
+    agendaItem('A1', { parked: { reason: 'snoozed', at: at(29, 11), until }, ...extra } as never);
+  const replied = (when: string) => agendaItem('A1', { parked: { reason: 'replied', at: when } } as never);
+
+  it('says when a snoozed item comes back', () => {
+    expect(agendaStatus(snoozed(at(30, 15)), 'Johnnie', NOW)).toEqual({
+      turn: 'parked',
+      tone: 'parked',
+      label: 'Snoozed until tomorrow 15:00',
+      deadline: null,
+      overdue: false,
+      dimmed: true,
+    });
+  });
+
+  it('says the sooner of the wake time and the deadline', () => {
+    expect(parkedWords(snoozed(at(30, 15), { neededBy: at(29, 17) }), 'J', NOW)).toBe('Snoozed until 17:00');
+  });
+
+  it('says only "Snoozed" when the instant cannot be read', () => {
+    expect(parkedWords(snoozed('nonsense'), 'J', NOW)).toBe('Snoozed');
+  });
+
+  it('says who a replied item waits on, and when it was replied to', () => {
+    expect(agendaStatus(replied(at(29, 14, 2)), 'Johnnie', NOW)).toMatchObject({
+      turn: 'parked',
+      tone: 'parked',
+      label: 'Replied 14:02 — waiting on Johnnie',
+    });
+    expect(parkedWords(replied('nonsense'), 'Johnnie', NOW)).toBe('Replied — waiting on Johnnie');
+  });
+
+  it('says nothing for an item that is not parked', () => {
+    expect(parkedWords(agendaItem('A1'), 'J', NOW)).toBe('');
+  });
+
+  it('sorts parked items after the ferret’s and before the done ones', () => {
+    const items = [
+      { ...agendaItem('A1'), resolvedAt: at(29, 11) },
+      snoozed(at(30, 15)),
+      agendaItem('A3', { waitingOn: 'ferret' }),
+      agendaItem('A4'),
+    ].map((entry, index) => ({ ...entry, id: `A${index + 1}` }) as typeof entry);
+    expect(sortAgenda(items).map(entry => entry.id)).toEqual(['A4', 'A3', 'A2', 'A1']);
   });
 });

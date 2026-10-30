@@ -9,6 +9,7 @@ import {
   pingNotificationPayload,
   type SessionNotificationPayload,
   stoppedNotificationPayload,
+  wokeNotificationPayload,
 } from './policy.ts';
 import {
   type NotificationClock,
@@ -85,6 +86,13 @@ export class NotificationService implements AgendaRaisedObserver {
     );
   }
 
+  /** A snoozed item woke and it blocks or has a deadline: its one push for this wake. Total. */
+  async woke(sessionId: string, item: AgendaItem, snapshot: AgendaSnapshot): Promise<void> {
+    await this.announce({ sessionId, agendaId: item.id, woke: item.waitingSince }, item, () =>
+      wokeNotificationPayload(sessionId, item, snapshot),
+    );
+  }
+
   /**
    * What the ledger knows of one identity under EITHER spelling of its key. A push made before the agenda
    * rename is recorded as `attention:…`; looking only for `agenda:…` would announce it a second time.
@@ -119,6 +127,7 @@ export class NotificationService implements AgendaRaisedObserver {
             agendaId: item.id,
             ...(identity.ping === true ? { ping: true } : {}),
             ...(identity.deadline === true ? { deadline: true } : {}),
+            ...(identity.woke === undefined ? {} : { woke: identity.woke }),
             ...(identity.stoppedAt === undefined ? {} : { stoppedAt: identity.stoppedAt }),
             sent: {
               kind: payload.kind,

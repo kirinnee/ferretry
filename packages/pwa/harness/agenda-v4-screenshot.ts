@@ -42,19 +42,20 @@ const run = (command: string, args: readonly string[]): void => {
   if (result.status !== 0) fail(`${command} exited ${result.status}`);
 };
 
-const html = (theme: string) => `<!doctype html>
+const html = (theme: string, entry = 'agenda-page') => `<!doctype html>
 <html lang="en" data-theme="${theme}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <link rel="stylesheet" href="/app.css" />
   </head>
-  <body class="bg-bg text-fg"><div id="root"></div><script type="module" src="/agenda-page.js"></script></body>
+  <body class="bg-bg text-fg"><div id="root"></div><script type="module" src="/${entry}.js"></script></body>
 </html>`;
 
 mkdirSync(buildDir, { recursive: true });
 mkdirSync(outDir, { recursive: true });
 run('bun', ['build', join(harnessDir, 'agenda-page.tsx'), '--outdir', buildDir, '--target', 'browser']);
+run('bun', ['build', join(harnessDir, 'inbox-page.tsx'), '--outdir', buildDir, '--target', 'browser']);
 run('./node_modules/.bin/tailwindcss', [
   '--config',
   'tailwind.config.ts',
@@ -70,9 +71,15 @@ const server = Bun.serve({
   async fetch(request) {
     const url = new URL(request.url);
     if (url.pathname === '/')
-      return new Response(html(url.searchParams.get('theme') ?? 'studio-dark'), {
-        headers: { 'content-type': 'text/html' },
-      });
+      return new Response(
+        html(
+          url.searchParams.get('theme') ?? 'studio-dark',
+          url.searchParams.get('entry') === 'inbox' ? 'inbox-page' : 'agenda-page',
+        ),
+        {
+          headers: { 'content-type': 'text/html' },
+        },
+      );
     const built = Bun.file(join(buildDir, url.pathname));
     return new Response((await built.exists()) ? built : Bun.file(join(packageDir, 'public', url.pathname)));
   },
@@ -142,6 +149,10 @@ const shot = async (page: Page, name: string, form: Form, theme: string, series 
   await page.mouse.move(1, 1);
   await page.waitForTimeout(120);
   const path = join(outDir, `${series}-${name}-${form}-${theme}.png`);
+  // A page that mounts the theme picker publishes the theme it resolves itself (`useTheme`): a "-dark" shot that
+  // is really light is a lie, so every picture is checked against the theme it is named for.
+  const shown = await page.evaluate(() => document.documentElement.dataset.theme ?? '');
+  check(shown === theme, `${series}-${name} ${form}: drawn in ${shown}, named ${theme}`);
   await page.screenshot({ path });
   process.stdout.write(`📸 ${path}\n`);
 };
@@ -213,8 +224,9 @@ const checkNoFolds = async (page: Page, label: string): Promise<void> => {
     const found = [...view.querySelectorAll('details, summary, [data-agenda-history-toggle]')];
     const body = view.querySelector('.fy-item-view__body');
     // A diagram's own source toggle (fy-render) is a tool on the picture, not a fold of the item.
-    const expandable = body === null ? [] : [...body.querySelectorAll('[aria-expanded]:not(.fy-render-tool)')];
-    return [...found, ...expandable].map(node => node.tagName.toLowerCase());
+    const expandable =
+      body === null ? [] : [...body.querySelectorAll('[aria-expanded]:not(.fy-render-tool):not(.fy-receipt)')];
+    return [...found, ...expandable].map(node => `${node.tagName.toLowerCase()}.${node.className}`);
   });
   check(folds.length === 0, `${label}: the item view folds something: ${folds.join(', ')}`);
 };
@@ -302,13 +314,18 @@ const checkOverlay = async (page: Page, form: Form, label: string, composerRest:
 
 const openItem = async (page: Page, id: string): Promise<void> => {
   await openDrawer(page);
-  await page.locator(`[data-agenda-row="${id}"]`).click();
+  await page.locator(`[data-agenda-drawer] [data-agenda-row="${id}"]`).click();
   await overlay(page).waitFor({ state: 'visible' });
   await page.waitForTimeout(200);
 };
 
 const scenes = async (form: Form, theme: string): Promise<void> => {
-  const browserContext = await browser.newContext({ ...(form === 'phone' ? PHONE : DESKTOP), ...LOCALE });
+  // The OS colour scheme matches the theme: with no stored choice, the app's theme follows it (`useTheme`).
+  const browserContext = await browser.newContext({
+    ...(form === 'phone' ? PHONE : DESKTOP),
+    ...LOCALE,
+    colorScheme: theme.endsWith('-dark') ? 'dark' : 'light',
+  });
   const phone = form === 'phone';
 
   // the pill alone, the drawer, and the composer not moving for either
@@ -495,7 +512,10 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
       .locator('.fy-qr__row[data-slots] button[data-agenda-option]:not([data-agenda-answer])')
       .count();
     check(plainChips === 0, `${label}: ${plainChips} option buttons sit outside the three slots`);
-    check((await page.locator('[aria-haspopup="menu"]').count()) === 0, `${label}: a "…" menu is still drawn`);
+    check(
+      (await page.locator('[aria-haspopup="menu"]:not([data-agenda-snooze])').count()) === 0,
+      `${label}: a "…" menu is still drawn`,
+    );
     // Options past the three: the rows under the swipe row, tap only, each row filling the width.
     const more = page.locator('[data-agenda-more-row]');
     const wanted = 'extras' in entry ? entry.extras : 0;
@@ -656,6 +676,111 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   await overlay(old).waitFor({ state: 'visible' });
   check((await overlay(old).getAttribute('data-agenda-view')) === 'A3', '?attention=A3 did not open A3');
   await old.close();
+
+  // SNOOZE: the clock in the item view's pager opens a menu that is whole, on top, and reachable by touch
+  const withParked = await open(browserContext, theme, 'view=board&parked=1');
+  const withoutParked = await open(browserContext, theme, 'view=board');
+  const lineText = (await withParked.locator('[data-agenda-line]').textContent()) ?? '';
+  check(
+    lineText === ((await withoutParked.locator('[data-agenda-line]').textContent()) ?? ''),
+    `parked items changed the agenda line: "${lineText}"`,
+  );
+  await withoutParked.close();
+  await openDrawer(withParked);
+  check(
+    (await withParked.locator('[data-agenda-row="A70"], [data-agenda-row="A71"]').count()) === 0,
+    'a parked item is listed in the drawer',
+  );
+  await withParked.close();
+  const parkedBoard = await open(browserContext, theme, 'view=board&parked=1&agenda=A3');
+  await overlay(parkedBoard).waitFor({ state: 'visible' });
+  const clock = parkedBoard.locator('[data-agenda-view="A3"] [data-agenda-snooze]');
+  check((await clock.count()) === 1, 'the item view has no snooze clock');
+  const clockBox = await boxOf(clock, 'the snooze clock');
+  if (phone)
+    check(
+      clockBox.width >= 43.5 || clockBox.height >= 43.5,
+      `the clock is ${Math.round(clockBox.width)}x${Math.round(clockBox.height)}`,
+    );
+  await clock.click();
+  const menu = parkedBoard.locator('[role="menu"]');
+  await menu.waitFor({ state: 'visible' });
+  await parkedBoard.waitForTimeout(150);
+  const items = await menu.locator('[role="menuitem"]').allTextContents();
+  check(
+    JSON.stringify(items.map(text => text.trim())) ===
+      JSON.stringify(['1 hour', '4 hours', 'Tomorrow 9:00', 'Custom…']),
+    `the snooze menu says: ${items.join(' | ')}`,
+  );
+  const menuBox = await boxOf(menu, 'the snooze menu');
+  const screen = parkedBoard.viewportSize();
+  check(
+    menuBox.x >= -1 &&
+      menuBox.y >= -1 &&
+      menuBox.x + menuBox.width <= (screen?.width ?? 0) + 1 &&
+      menuBox.y + menuBox.height <= (screen?.height ?? 0) + 1,
+    `the snooze menu leaves the screen: ${JSON.stringify(menuBox)}`,
+  );
+  const onTop = await menu.locator('[role="menuitem"]').evaluateAll(nodes =>
+    nodes.every(node => {
+      const at = node.getBoundingClientRect();
+      const hit = document.elementFromPoint(at.x + at.width / 2, at.y + at.height / 2);
+      return hit !== null && node.contains(hit);
+    }),
+  );
+  check(onTop, 'something sits over the snooze menu');
+  if (phone)
+    for (const entry of await menu.locator('[role="menuitem"]').all())
+      check(((await entry.boundingBox())?.height ?? 0) >= 43.5, 'a snooze menu item is under 44px');
+  await shot(parkedBoard, 'snooze-menu', form, theme, 'agenda-snooze');
+  await menu.locator('[role="menuitem"]').last().click();
+  const custom = parkedBoard.locator('input[type="datetime-local"]');
+  await custom.waitFor({ state: 'visible' });
+  await custom.fill('2026-10-01T09:00');
+  await parkedBoard.locator('[data-snooze-custom] button[type="submit"]').click();
+  check((await parkedBoard.locator('[role="alert"]').count()) >= 1, 'a past custom time was not refused');
+  await shot(parkedBoard, 'snooze-custom-refused', form, theme, 'agenda-snooze');
+  await parkedBoard.keyboard.press('Escape');
+  await parkedBoard.waitForTimeout(100);
+  check((await parkedBoard.locator('[role="menu"]').count()) === 0, 'Esc did not close the snooze menu');
+  await parkedBoard.locator('[data-agenda-view="A3"] [data-agenda-snooze]').click();
+  await parkedBoard.locator('[role="menuitem"]').first().click();
+  await parkedBoard.waitForTimeout(250);
+  check((await parkedBoard.locator('[data-agenda-view="A3"]').count()) === 0, 'snoozing did not leave the item');
+  await parkedBoard.close();
+
+  // SNOOZED and REPLIED: the Inbox lists each, says where it stands, and the open list never shows them
+  const inbox = await open(browserContext, theme, 'entry=inbox&view=sections');
+  const openRows = await inbox.locator('[data-agenda-row]').count();
+  check(openRows > 0, 'the inbox has no open rows');
+  check((await inbox.locator('[data-agenda-parked]').count()) === 0, 'a parked item is on the open list');
+  check(
+    (await inbox.locator('[data-agenda-filter-option="snoozed"]').textContent()) === 'Snoozed (2)',
+    'the Snoozed filter does not say 2',
+  );
+  check(
+    (await inbox.locator('[data-agenda-filter-option="replied"]').textContent()) === 'Replied (1)',
+    'the Replied filter does not say 1',
+  );
+  for (const [which, rowsWanted, words, button] of [
+    ['snoozed', 2, /^Snoozed until /u, 'Unsnooze'],
+    ['replied', 1, /^Replied .* — waiting on /u, 'Back to my list'],
+  ] as const) {
+    await inbox.locator(`[data-agenda-filter-option="${which}"]`).click();
+    await inbox.waitForTimeout(200);
+    const rows = inbox.locator('[data-agenda-parked]');
+    check((await rows.count()) === rowsWanted, `${which}: ${await rows.count()} rows, wanted ${rowsWanted}`);
+    for (const status of await inbox.locator('[data-agenda-parked-status]').allTextContents())
+      check(words.test(status.trim()), `${which}: a row says "${status}"`);
+    const act = inbox.locator(`[data-agenda-unsnooze="${which}"]`);
+    check((await act.count()) === rowsWanted, `${which}: no "${button}" button on a row`);
+    check(((await act.first().textContent()) ?? '').trim() === button, `${which}: the button is not "${button}"`);
+    const wide = await inbox.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    check(wide <= 0, `${which}: the page scrolls sideways by ${wide}px`);
+    if (phone) check(((await act.first().boundingBox())?.height ?? 0) >= 35.5, `${which}: the button is under 36px`);
+    await shot(inbox, `${which}-filter`, form, theme, 'agenda-snooze');
+  }
+  await inbox.close();
   await browserContext.close();
 };
 

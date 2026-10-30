@@ -19,10 +19,10 @@ const BY_FORMS = 'an ISO time (2026-10-29T17:00:00Z), a wait ("in 3h", "in 90m",
  * an offset is local. Anything else is refused with the forms on offer — a guess would pin a deadline the
  * owner never meant.
  */
-export function parseNeededBy(raw: string, nowMs: number): string {
+export function parseNeededBy(raw: string, nowMs: number, flag = '--by'): string {
   const value = raw.trim();
   const fail = (): never => {
-    throw new Error(`--by "${value}" is not a time: use ${BY_FORMS}`);
+    throw new Error(`${flag} "${value}" is not a time: use ${BY_FORMS}`);
   };
 
   const relative = RELATIVE.exec(value);

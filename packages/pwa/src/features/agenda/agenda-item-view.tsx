@@ -33,6 +33,7 @@ import { AgendaDetail } from './agenda-detail.tsx';
 import { AgendaItemHistory } from './agenda-item-history.tsx';
 import { AgendaQuickReplies } from './agenda-quick-replies.tsx';
 import { agendaAsk } from './agenda-row.tsx';
+import { AgendaSnoozeMenu } from './agenda-snooze-menu.tsx';
 import { AgendaStatusPill } from './agenda-status-pill.tsx';
 import { useDownSwipe } from './use-down-swipe.ts';
 
@@ -53,6 +54,8 @@ export interface AgendaItemViewProps {
   /** An answer; the host adds the composer's text as its note and closes the view once it is sent. */
   readonly onAct: (action: InboxAction) => void;
   readonly onProgress?: (step: number, done: boolean) => Promise<void>;
+  /** Snooze the item until this instant; absent: the clock button is not drawn. */
+  readonly onSnooze?: (until: string) => void;
   readonly renderProse: (text: string) => ReactNode;
   /**
    * The conversation whose composer takes a quote: select any text in the item and "Quote in composer" puts it
@@ -93,6 +96,7 @@ export function AgendaItemView({
   swipeable,
   onAct,
   onProgress,
+  onSnooze,
   renderProse,
   closeLabel = 'Back to the chat',
   quoteScope = null,
@@ -209,6 +213,9 @@ export function AgendaItemView({
               >
                 <Info aria-hidden="true" size={18} />
               </button>
+            )}
+            {onSnooze === undefined ? null : (
+              <AgendaSnoozeMenu disabled={busy} now={now} onSnooze={onSnooze} triggerClass="fy-item-view__step" />
             )}
             <button
               aria-label={closeLabel}

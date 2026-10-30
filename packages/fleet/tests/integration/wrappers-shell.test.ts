@@ -18,10 +18,12 @@ import {
   CODEX_QUESTIONS_FEATURE,
   fixedLayerFor,
   HYPERMEDIA_INSTRUCTION,
+  LEAD_RULES_INSTRUCTION,
   LESSONS_INSTRUCTION,
   NOTIFY_INSTRUCTION,
   PACK_INSTRUCTION,
   SET_UP_FERRETRY_INSTRUCTION,
+  SUB_FERRET_INSTRUCTION,
   TOOLS_SERVER_INSTRUCTIONS,
 } from '../../src/lib/account/fixed-layer.ts';
 import type { HarnessKind } from '../../src/lib/manifest.ts';
@@ -203,6 +205,7 @@ describe("a resumed conversation hears this launch's sections", () => {
 
 describe("each ferret's sections of the appended system prompt", () => {
   const BASE = 'Ferretry tools: the base instruction.';
+  const LEAD = `${BASE}\n\n${LEAD_RULES_INSTRUCTION('fy')}`;
 
   it('should append exactly the sections this ferret switched on, after a blank line, in the fixed order', () => {
     // Arrange
@@ -218,15 +221,15 @@ describe("each ferret's sections of the appended system prompt", () => {
     const all = prompt({ FY_HYPERMEDIA: '1', FY_PACK: '1', FY_AGENDA: '1', FY_LEARNING_PASSIVE: '1' });
 
     // Assert
-    should(none).equal(`--append-system-prompt=${BASE}`);
+    should(none).equal(`--append-system-prompt=${LEAD}`);
     should(off).equal(none);
-    should(pack).startWith(`--append-system-prompt=${BASE}\n\nPack mode: `);
+    should(pack).startWith(`--append-system-prompt=${LEAD}\n\nPack mode: `);
     should(pack).not.containEql('Hypermedia:');
     should(all?.indexOf('\n\nHypermedia:')).be.above(0);
     should(all?.indexOf('\n\nPack mode:')).be.above(all?.indexOf('\n\nHypermedia:') ?? 0);
     should(all?.indexOf('\n\nAgenda mode:')).be.above(all?.indexOf('\n\nPack mode:') ?? 0);
     should(all?.indexOf('\n\nLessons:')).be.above(all?.indexOf('\n\nAgenda mode:') ?? 0);
-    should(agenda).startWith(`--append-system-prompt=${BASE}\n\nAgenda mode: `);
+    should(agenda).startWith(`--append-system-prompt=${LEAD}\n\nAgenda mode: `);
     should(none).not.containEql('Agenda mode:');
     should(off).not.containEql('Agenda mode:');
     should(all).containEql('`fy lesson suggest');
@@ -241,10 +244,27 @@ describe("each ferret's sections of the appended system prompt", () => {
     const value = args.find(arg => arg.startsWith('developer_instructions='));
 
     // Assert
-    should(value).startWith(`developer_instructions="${BASE}\\u000a\\u000aPack mode: `);
+    should(value).startWith('developer_instructions="');
     should(value).endWith('"');
     should(value?.slice('developer_instructions='.length)).match(/^"(?:[^"\\]|\\.)*"$/u);
-    should(JSON.parse(value?.slice('developer_instructions='.length) ?? '')).containEql('\n\nPack mode: ');
+    should(JSON.parse(value?.slice('developer_instructions='.length) ?? '')).startWith(`${LEAD}\n\nPack mode: `);
+  });
+
+  it('should give a sub-ferret its two lines in place of the lead rules and the agenda section', () => {
+    // Arrange
+    const wrapper = render(account({ flags: [`--append-system-prompt=${BASE}`] }));
+    const prompt = (env: Readonly<Record<string, string>>): string | undefined =>
+      launchArguments(wrapper, env).find(arg => arg.startsWith('--append-system-prompt='));
+
+    // Act
+    const sub = prompt({ FY_SUB_FERRET: '1', FY_AGENDA: '1', FY_PACK: '1' });
+
+    // Assert
+    should(sub).startWith(`--append-system-prompt=${BASE}\n\n${SUB_FERRET_INSTRUCTION('fy')}\n\nPack mode: `);
+    should(sub).not.containEql('Agenda mode:');
+    should(sub).not.containEql('Board: all work');
+    should(sub).not.containEql('Notify: the owner');
+    should(prompt({ FY_SUB_FERRET: '0', FY_AGENDA: '1' })).containEql('Agenda mode:');
   });
 
   it("should end the Pack section with the routing prompt's line, for Claude and inside Codex's TOML string", () => {
@@ -401,7 +421,7 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     // stays under 7.4 KB (docs/pack-mode.md records the sizes: raised from 6.7 KB for Attention's steps and
     // hypermedia's `chart`; the notify rule replaced Attention's 1 KB, Agenda mode adds its own section). The
     // Board section (640) was paid for by naming the tools by prefix, moving map, media and chart's full spec
-    // behind `fy render guide`, and compressing the lessons rule: 7,247 measured (the reply-closes-the-item wording), so keep 150 of headroom.
+    // behind `fy render guide`, and compressing the lessons rule: 7,242 measured (the reply-parks-the-item wording), so keep 150 of headroom.
     const longestRouting = 1 + 'Routing: '.length + MAX_ROUTING_PROMPT_CHARS;
     should(Object.values(sizes).reduce((sum, size) => sum + size, 0) + longestRouting).be.below(7_400 - 150);
     should(sizes.pack).be.below(1_050);

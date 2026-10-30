@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { DISMISS_ACTION, type InboxAction } from '../../src/lib/agenda-inbox.ts';
 import { withComposerNote } from '../../src/lib/agenda-reply.ts';
 
-const pick: InboxAction = {
+const pick: Extract<InboxAction, { kind: 'respond' }> = {
   kind: 'respond',
   label: 'Postgres',
   response: { kind: 'multiple-choice', choice: 'Postgres' },
@@ -14,7 +14,11 @@ describe('withComposerNote', () => {
   });
 
   it('attaches it as a dismissal’s reason', () => {
-    expect(withComposerNote(DISMISS_ACTION, 'already shipped')).toEqual({ ...DISMISS_ACTION, note: 'already shipped' });
+    expect(withComposerNote(DISMISS_ACTION, 'already shipped')).toEqual({
+      kind: 'dismiss',
+      label: DISMISS_ACTION.label,
+      note: 'already shipped',
+    });
   });
 
   it('leaves the action as it was for a blank composer', () => {
@@ -23,6 +27,13 @@ describe('withComposerNote', () => {
 
   it('joins a note the action already has', () => {
     expect(withComposerNote({ ...pick, note: 'first' }, 'second')).toEqual({ ...pick, note: 'first — second' });
+  });
+
+  it('never attaches the composer to a snooze or an unsnooze', () => {
+    const snooze: InboxAction = { kind: 'snooze', label: 'Snooze', until: '2026-10-30T15:00:00.000Z' };
+    const unsnooze: InboxAction = { kind: 'unsnooze', label: 'Back to my list' };
+    expect(withComposerNote(snooze, 'extra')).toBe(snooze);
+    expect(withComposerNote(unsnooze, 'extra')).toBe(unsnooze);
   });
 
   it('leaves an answer that carries its own words, and a discuss, alone', () => {

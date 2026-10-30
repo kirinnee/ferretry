@@ -15,7 +15,8 @@ import type { InboxAction } from './agenda-answers.ts';
  */
 export const withComposerNote = (action: InboxAction, text: string): InboxAction => {
   const typed = text.trim();
-  if (typed === '' || action.kind === 'discuss') return action;
+  if (typed === '' || action.kind === 'discuss' || action.kind === 'snooze' || action.kind === 'unsnooze')
+    return action;
   if (action.kind === 'respond' && action.response.kind !== 'multiple-choice' && action.response.kind !== 'permission')
     return action;
   const note = action.note === undefined || action.note.trim() === '' ? typed : `${action.note} — ${typed}`;

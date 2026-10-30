@@ -26,6 +26,9 @@ import {
   CLAUDE_PROMPTS_SEEN,
   CODEX_QUESTIONS_FEATURE,
   FERRET_SECTIONS,
+  LEAD_RULES_INSTRUCTION,
+  SUB_FERRET_ENV,
+  SUB_FERRET_INSTRUCTION,
   PACK_ENV,
   PACK_ROUTING_ENV,
   SESSION_MODE_ENV,
@@ -496,9 +499,10 @@ const SECTIONS_VARIABLE = '_fy_sections';
 
 /**
  * The per-ferret sections of the appended system prompt (`FERRET_SECTIONS`, `./account/fixed-layer.ts`),
- * gathered at exec time from the switches the daemon wrote into this ferret's environment. Each is
+ * gathered at exec time from the switches the daemon wrote into this ferret's environment. The first is
+ * the lead's notify and board rules, or a sub-ferret's two lines instead (`SUB_FERRET_ENV`). Each other is
  * appended after a blank line only when its variable is exactly `1`, so a wrapper run by hand — where
- * nothing set them — carries none.
+ * nothing set them — carries the lead rules and none of the rest.
  *
  * Codex's value is a TOML basic string, so each section is stored already escaped for one: escaping is
  * per character, so escaped pieces join into the escaped whole.
@@ -509,9 +513,9 @@ function ferretSectionLines(harness: HarnessKind, fyCommand: string): string[] {
   return [
     '',
     "# This ferret's own sections of the appended system prompt: each switch the daemon set to 1.",
-    `${SECTIONS_VARIABLE}=''`,
+    `if [ "\${${SUB_FERRET_ENV}:-0}" = 1 ]; then ${SECTIONS_VARIABLE}=${quoted(`\n\n${SUB_FERRET_INSTRUCTION(fy)}`)}; else ${SECTIONS_VARIABLE}=${quoted(`\n\n${LEAD_RULES_INSTRUCTION(fy)}`)}; fi`,
     ...FERRET_SECTIONS(fy).flatMap(section => [
-      `if [ "\${${section.env}:-0}" = 1 ]; then ${SECTIONS_VARIABLE}="$${SECTIONS_VARIABLE}"${quoted(`\n\n${section.text}`)}; fi`,
+      `if [ "\${${section.env}:-0}" = 1 ]${section.unlessEnv === undefined ? '' : ` && [ "\${${section.unlessEnv}:-0}" != 1 ]`}; then ${SECTIONS_VARIABLE}="$${SECTIONS_VARIABLE}"${quoted(`\n\n${section.text}`)}; fi`,
       ...(section.env === PACK_ENV ? packRoutingLines(quoted) : []),
     ]),
   ];

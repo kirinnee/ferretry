@@ -122,6 +122,7 @@ export function InboxHarness({
   reading = false,
   resolved = [],
   resolvedReading = false,
+  parked = [],
   loadResolved = () => undefined,
   render,
 }: {
@@ -130,6 +131,7 @@ export function InboxHarness({
   readonly reading?: boolean;
   readonly resolved?: AgendaInbox['resolved'];
   readonly resolvedReading?: boolean;
+  readonly parked?: AgendaInbox['parked'];
   readonly loadResolved?: () => void;
   readonly render: (inbox: AgendaInbox) => ReactElement;
 }) {
@@ -145,6 +147,7 @@ export function InboxHarness({
     reading,
     resolved,
     resolvedReading,
+    parked: parked.filter(card => !hidden.has(card.key)),
     loadResolved,
     deferred: fake.deferred,
     deferredState: state,

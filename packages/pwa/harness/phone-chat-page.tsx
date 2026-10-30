@@ -189,7 +189,16 @@ const board = new DaemonBoardStore(
 );
 
 const noop = async (): Promise<void> => undefined;
-const AGENDA_CLIENT = { respond: noop, resolve: noop, dismiss: noop, needsInfo: noop, discuss: noop, progress: noop };
+const AGENDA_CLIENT = {
+  respond: noop,
+  resolve: noop,
+  dismiss: noop,
+  needsInfo: noop,
+  discuss: noop,
+  snooze: noop,
+  unsnooze: noop,
+  progress: noop,
+};
 const CLIENT: SessionChatClient = {
   answer: async () => SESSION,
   interrupt: async () => SESSION,

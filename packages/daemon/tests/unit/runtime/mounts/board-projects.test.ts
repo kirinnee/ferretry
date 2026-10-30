@@ -54,7 +54,11 @@ function boards(overrides: Partial<BoardProjectsSubsystem> = {}): BoardProjectsS
 async function dispatcher(subsystem: BoardProjectsSubsystem): Promise<ApiDispatcher> {
   const grants = grantSubsystem();
   await grants.refresh();
-  const sessions = sessionDirectory([sessionView('ms8-abcd1234', { label: 'Koen' }), sessionView('ms8-plain001', {})]);
+  const sessions = sessionDirectory([
+    sessionView('ms8-abcd1234', { label: 'Koen', teammate: 'koen' }),
+    sessionView('ms8-plain001', {}),
+    sessionView('ms8-sub00001', { parent: 'ms8-abcd1234' }),
+  ]);
   return new ApiDispatcher(new ApiRouter(boardProjectRoutes(subsystem, sessions)), CREDENTIALS, grants);
 }
 
@@ -144,6 +148,23 @@ describe('the board projects mount', () => {
       { kind: 'ferret', name: 'Koen', sessionId: 'ms8-abcd1234' },
       { kind: 'ferret', name: 'ms8-plain001', sessionId: 'ms8-plain001' },
       { kind: 'ferret', name: 'ms8-unknown1', sessionId: 'ms8-unknown1' },
+    ]);
+  });
+
+  it('should refuse a sub-ferret a lane change and name its lead, but let the lead change them', async () => {
+    const subsystem = boards();
+    const surface = await dispatcher(subsystem);
+
+    const refused = await surface.dispatch(post(FERRETRY_ID, PROPOSE, agentIn('ms8-sub00001')));
+    const allowed = await surface.dispatch(post(FERRETRY_ID, PROPOSE, agentIn('ms8-abcd1234')));
+
+    should(refused.status).equal(403);
+    should(JSON.stringify(jsonBody(refused))).containEql(
+      "Sub-ferrets don't edit the board lanes; tell your lead: fy send koen",
+    );
+    should(allowed.status).equal(200);
+    should(subsystem.applied.map(call => call.actor)).deepEqual([
+      { kind: 'ferret', name: 'Koen', sessionId: 'ms8-abcd1234' },
     ]);
   });
 

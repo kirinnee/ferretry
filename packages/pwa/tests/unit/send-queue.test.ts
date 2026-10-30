@@ -2,8 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import type { QueuedMessage } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import type { LedgerSendRecord } from '../../src/lib/send-ledger.ts';
+import type { OutboxEntry } from '../../src/lib/send-outbox.ts';
 import {
   effectiveQueueState,
+  joinOutbox,
   joinQueue,
   QueueActionError,
   queueActions,
@@ -257,5 +259,92 @@ describe('queueActions', () => {
     const none = queueActions(null, 's', () => undefined);
     expect(await none.edit({ sendId: 'm1' }, 'x')).toBe(false);
     expect(await none.cancel({ sendId: 'm1' })).toBe(false);
+  });
+});
+
+describe('joinOutbox', () => {
+  const entry = (overrides: Partial<OutboxEntry> = {}): OutboxEntry => ({
+    id: 'o1',
+    daemonId: 'd1',
+    sessionId: 's1',
+    message: 'thank you',
+    attachmentIds: ['a'],
+    files: [],
+    now: false,
+    createdAt: '2026-10-30T10:00:05.000Z',
+    seq: 1,
+    ...overrides,
+  });
+
+  test('nothing waiting leaves the rows as they were', () => {
+    const rows = [row()];
+    expect(joinOutbox(rows, [])).toBe(rows);
+  });
+
+  test('a message the machine already knows is shown once, as the machine says it', () => {
+    const rows = [row({ sendId: 'o1' })];
+    expect(joinOutbox(rows, [entry()])).toBe(rows);
+  });
+
+  test('a message only on this device becomes a queued bubble marked as the first tick, with its place', () => {
+    const joined = joinOutbox([row()], [entry(), entry({ id: 'o2', reason: 'x', refused: true })]);
+    expect(joined.map(item => item.sendId)).toEqual(['m1', 'o1', 'o2']);
+    expect(joined[1]).toMatchObject({
+      fate: 'accepted',
+      senderKind: 'human',
+      attachmentIds: ['a'],
+      queue: { state: 'queued', revision: 0 },
+      outbox: { reason: 'waiting for connection', position: 1, of: 2 },
+    });
+    expect(joined[2]?.outbox).toEqual({ reason: 'x', refused: true, position: 2, of: 2 });
+  });
+});
+
+describe('queueActions with an outbox', () => {
+  const record = { sendId: 'o1' };
+  test('edit and cancel change a message still on this device and never ask the machine', async () => {
+    const calls: string[] = [];
+    const refreshed: number[] = [];
+    const outbox = {
+      edit: async (id: string, text: string) => {
+        calls.push(`edit ${id} ${text}`);
+        return 'edited' as const;
+      },
+      cancel: async (id: string) => {
+        calls.push(`cancel ${id}`);
+        return 'cancelled' as const;
+      },
+    };
+    const client = {
+      request: async () => {
+        throw new Error('the machine must not be asked');
+      },
+    };
+    const actions = queueActions(client as never, 's', () => refreshed.push(1), outbox);
+    expect(await actions.edit(record, 'thank you!')).toBe(true);
+    expect(await actions.cancel(record)).toBe(true);
+    expect(calls).toEqual(['edit o1 thank you!', 'cancel o1']);
+    expect(refreshed).toHaveLength(2);
+  });
+
+  test('a message that has left goes to the machine’s queue, and with no client it is not changed', async () => {
+    const outbox = {
+      edit: async () => 'elsewhere' as const,
+      cancel: async () => 'elsewhere' as const,
+    };
+    const seen: string[] = [];
+    const client = {
+      request: async (path: string, _schema: unknown, init: RequestInit) => {
+        seen.push(`${init.method} ${path}`);
+        return {};
+      },
+    };
+    const actions = queueActions(client as never, 's', () => undefined, outbox);
+    expect(await actions.edit(record, 'x')).toBe(true);
+    expect(await actions.cancel(record)).toBe(true);
+    expect(seen).toEqual(['PATCH /v1/sessions/s/queue/o1', 'DELETE /v1/sessions/s/queue/o1']);
+    const offline = queueActions(null, 's', () => undefined, outbox);
+    expect(await offline.edit(record, 'x')).toBe(false);
+    expect(await offline.cancel(record)).toBe(false);
   });
 });

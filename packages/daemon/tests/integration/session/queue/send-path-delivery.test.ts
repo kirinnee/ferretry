@@ -76,6 +76,16 @@ describe('SendPathQueueTransport', () => {
     should(peer.requests[0]).not.have.property('origin');
   });
 
+  it('should hand an interrupt over as the send path’s own stop-then-type', async () => {
+    const { subject, requests } = transport('delivered');
+
+    await subject.handOver(ID, message({ interrupt: true }));
+    await subject.handOver(ID, message({ id: 'q-2' }));
+
+    should(requests[0]).containEql({ now: true });
+    should(requests[1]).not.have.property('now');
+  });
+
   it('should leave a ferret’s message with no sender session unattributed', async () => {
     const { subject, requests } = transport('delivered');
 

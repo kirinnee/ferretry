@@ -131,7 +131,13 @@ class FakeAgendaDaemon {
       return;
     }
 
-    if (request.action === 'edit' || request.action === 'progress' || request.action === 'surface') {
+    if (
+      request.action === 'edit' ||
+      request.action === 'progress' ||
+      request.action === 'surface' ||
+      request.action === 'snooze' ||
+      request.action === 'unsnooze'
+    ) {
       throw new Error(`the fake daemon does not ${request.action} items`);
     }
     const index = this.#items.findIndex(item => item.id === request.id);

@@ -129,6 +129,7 @@ describe('the legend', () => {
   test('names every mark once, in the words the tooltips use, and omits none a reader can meet but held', () => {
     expect(RECEIPT_LEGEND.map(row => row.kind)).toEqual([
       'sending',
+      'saved',
       'queued',
       'typed',
       'delivered',
@@ -140,6 +141,7 @@ describe('the legend', () => {
     ]);
     const records: readonly [LedgerSendRecord, boolean][] = [
       [record(), false],
+      [record({ outbox: { reason: 'waiting for connection', position: 1, of: 1 } }), false],
       [record({ fate: 'queued' }), false],
       [record({ typedNotSent: true }), false],
       [record({ fate: 'delivered' }), false],
@@ -155,6 +157,37 @@ describe('the legend', () => {
       expect(sendReceipt(sent, answered).name).toBe(row.name);
       expect(row.meaning.length).toBeGreaterThan(10);
     });
+  });
+});
+
+describe('the four ticks', () => {
+  const queued = { state: 'queued', stateAt: STATE_AT, revision: 1 } as const;
+  test('saved, queued, delivered, read: one more tick at each step', () => {
+    const outbox = { reason: 'waiting for connection', position: 1, of: 1 };
+    expect(sendReceipt(record({ queue: queued, outbox }), false).kind).toBe('saved');
+    expect(sendReceipt(record({ fate: 'queued', queue: queued }), false).kind).toBe('queued');
+    expect(sendReceipt(record({ fate: 'delivered' }), false).kind).toBe('delivered');
+    expect(
+      sendReceipt(record({ fate: 'delivered', queue: { state: 'read', stateAt: STATE_AT, revision: 1 } }), false).kind,
+    ).toBe('read');
+  });
+
+  test('a waiting message says so, with its place when several wait', () => {
+    expect(sendReceipt(record({ outbox: { reason: 'waiting for connection', position: 1, of: 1 } }), false).chip).toBe(
+      'waiting for connection',
+    );
+    expect(sendReceipt(record({ outbox: { reason: 'waiting for connection', position: 2, of: 3 } }), false).chip).toBe(
+      'waiting for connection · 2 of 3',
+    );
+  });
+
+  test('a message the machine refused is not sent, whatever else it says', () => {
+    const receipt = sendReceipt(
+      record({ outbox: { reason: 'the machine said no', refused: true, position: 1, of: 1 } }),
+      false,
+    );
+    expect(receipt.kind).toBe('failed');
+    expect(receipt.name).toBe('Not sent');
   });
 });
 

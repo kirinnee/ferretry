@@ -325,6 +325,7 @@ describe('launchInstructionFacts', () => {
       'attention',
       'notify',
       'board',
+      'sub-ferret',
       'hypermedia',
       'pack',
       'agenda',

@@ -193,6 +193,7 @@ import type {
 import { installPortraitLock } from './lib/orientation-lock.ts';
 import {
   type BoardPageProps,
+  type QueuePageProps,
   type DaemonPageProps,
   PageHost,
   type PageHostSlots,
@@ -202,6 +203,7 @@ import {
 import {
   connectionPickerPath,
   daemonAgendaPath,
+  daemonQueuePath,
   daemonLearningPath,
   daemonProjectPath,
   daemonSessionsPath,
@@ -215,6 +217,8 @@ import {
 } from './lib/pages/routes.ts';
 import { SessionChatPage } from './lib/pages/session-chat-page.tsx';
 import { WardenPage } from './lib/pages/warden-page.tsx';
+import { QueuePage } from './components/queue-page.tsx';
+import { queueContribution } from './features/queue-view/queue-action.ts';
 import { browserQrScanHost, type QrDetectorLike, type QrScanHost } from './lib/pair-scan.ts';
 import { type PairingArrival, pairingArrival } from './lib/pairing.ts';
 import { useRenderTiming } from './lib/performance/main-thread.ts';
@@ -236,7 +240,7 @@ import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
 import { RouterProvider, useRouter } from './lib/router.tsx';
 import { chatScrollSlot } from './lib/scroll-memory.ts';
 import { type LedgerSendRecord, ledgerFeed, parseLedgerSendsResponse, readLedgerSends } from './lib/send-ledger.ts';
-import { joinQueue, queueActions, readSessionQueue } from './lib/send-queue.ts';
+import { joinOutbox, joinQueue, queueActions, readSessionQueue } from './lib/send-queue.ts';
 import { QueueActionsContext } from './components/queue-actions-context.tsx';
 import type { CachedTranscript } from './lib/session-cache.ts';
 import {
@@ -478,6 +482,8 @@ const pageCrumbs = (route: PageRoute): readonly Crumb[] => {
       return [{ href: sessions, label: 'Sessions' }, { label: 'Inbox' }];
     case 'board':
       return [{ href: sessions, label: 'Sessions' }, { label: 'Board' }];
+    case 'queue':
+      return [{ href: sessions, label: 'Sessions' }, { label: 'Queue' }];
     case 'settings':
       return [{ href: sessions, label: 'Sessions' }, { label: 'Settings' }];
     case 'warden':
@@ -1427,7 +1433,12 @@ function SessionRoute({
    * The transcript with the send ledger IN it: delivered sends chip the message they became, and every
    * send not yet in the conversation sits after it with a chip saying where it is.
    */
-  const joinedSends = useMemo(() => joinQueue(sends, queue), [sends, queue]);
+  const outboxAll = useSyncExternalStore(store.outbox.subscribe, store.outbox.snapshot);
+  const outboxEntries = useMemo(
+    () => outboxAll.filter(entry => entry.daemonId === daemonId && entry.sessionId === sessionId),
+    [outboxAll, daemonId, sessionId],
+  );
+  const joinedSends = useMemo(() => joinOutbox(joinQueue(sends, queue), outboxEntries), [sends, queue, outboxEntries]);
   const sendView = useSendView(joinedSends);
   const { view: sendViewState, tick: settledTick, dismiss: dismissSends, setExpanded: expandSend } = sendView;
   // biome-ignore lint/correctness/useExhaustiveDependencies: `settledTick` re-places the rows when one folds or retires on its own.
@@ -1457,8 +1468,8 @@ function SessionRoute({
   );
   /** Edit and Cancel for a message still in the queue; the bubble reaches them through a context, not props. */
   const queueActionsValue = useMemo(
-    () => (client === null ? null : queueActions(client, sessionId, refreshSends)),
-    [client, sessionId, refreshSends],
+    () => queueActions(client, sessionId, refreshSends, store.outbox),
+    [client, sessionId, refreshSends, store.outbox],
   );
   // "Clear stuck messages" — Actions-menu entry that takes back every message nothing proved arrived.
   const stuckActions = useStuckMessageActions({
@@ -1469,6 +1480,10 @@ function SessionRoute({
     view: sendViewState,
     dismiss: dismissSends,
   });
+  const queueLink = useMemo(
+    () => queueContribution(outboxEntries.length, () => navigate(daemonQueuePath(daemonId, sessionId))),
+    [outboxEntries.length, navigate, daemonId, sessionId],
+  );
   // Every feature's Actions-menu entries for this ferret: Warden, Learning, Hypermedia, Pack mode, then stuck messages.
   const sessionActions = useMemo(
     () => [
@@ -1478,6 +1493,7 @@ function SessionRoute({
       ...packActions.contributions,
       ...agendaActions.contributions,
       ...stuckActions.contributions,
+      queueLink,
     ],
     [
       wardenActions,
@@ -1486,6 +1502,7 @@ function SessionRoute({
       packActions.contributions,
       agendaActions.contributions,
       stuckActions.contributions,
+      queueLink,
     ],
   );
   /**
@@ -2083,6 +2100,10 @@ function PhoneTabBar(props: Omit<AppTabBarProps, 'boardCount'>) {
   return <AppTabBar {...props} boardCount={boardBadgeCount(model.counts)} />;
 }
 
+function QueueRoute({ connection, sessionId }: QueuePageProps) {
+  return <QueuePage daemonId={connection.daemonId} {...(sessionId === undefined ? {} : { sessionId })} />;
+}
+
 function BoardRoute({ connection, taskId }: BoardPageProps) {
   const store = useAppStore();
   const { navigate } = useRouter();
@@ -2182,6 +2203,7 @@ const PAGE_SLOTS: PageHostSlots = {
   Learning: LearningRoute,
   Attention: AgendaRoute,
   Board: BoardRoute,
+  Queue: QueueRoute,
   ImportedHistory: ImportedHistoryRoute,
   MachineSetup: MachineSetupRoute,
 };
