@@ -133,8 +133,8 @@ back as a card again".
    file). It is due **10 seconds after the last card action**: every further action on that ferret's cards
    restarts the countdown, and the first one never waits more than **2 minutes**. The agenda says so:
    `replies: {pending, dueAt, heldForTurn?}` on every `GET` and `POST` of the agenda route
-   (`/v1/sessions/:id/attention`, renamed in a later release). "Send now"
-   (`POST /v1/sessions/:id/attention/replies`, `fy agenda send-now`) skips the countdown.
+   (`/v1/sessions/:id/agenda`; older clients use `/attention`, see [Compatibility](#compatibility)). "Send now"
+   (`POST /v1/sessions/:id/agenda/replies`, `fy agenda send-now`) skips the countdown.
 2. **Waiting for the turn.** A due batch waits while the ferret's `turnState` is `working`, and later
    answers join it. It is looked at again every 5 seconds and goes once the turn ends. Past 15 minutes it
    goes through the ordinary send path anyway, which queues natively. A state that cannot be read
@@ -156,14 +156,14 @@ back as a card again".
    or Retry", and Retry posts `{...reply, id}`, the same action again. The owner's next action on the
    item clears the mark. An agenda already full of open items keeps the answer closed.
 
-| Key in `config/daemon.json`          | Default | Range (whole seconds) | What it bounds                                   |
-| ------------------------------------ | ------- | --------------------- | ------------------------------------------------ |
-| `attention.replySettleSeconds`       | 10      | 1–3600                | the quiet time after the last card action        |
-| `attention.replyMaxWaitSeconds`      | 120     | 1–3600                | the longest the first action waits               |
-| `attention.replyComposerWaitSeconds` | 600     | 10–86400              | waiting for an empty composer, past the cap      |
-| `attention.replyReceiptSeconds`      | 900     | 30–86400              | waiting for the transcript's proof after sending |
+| Key in `config/daemon.json`       | Default | Range (whole seconds) | What it bounds                                   |
+| --------------------------------- | ------- | --------------------- | ------------------------------------------------ |
+| `agenda.replySettleSeconds`       | 10      | 1–3600                | the quiet time after the last card action        |
+| `agenda.replyMaxWaitSeconds`      | 120     | 1–3600                | the longest the first action waits               |
+| `agenda.replyComposerWaitSeconds` | 600     | 10–86400              | waiting for an empty composer, past the cap      |
+| `agenda.replyReceiptSeconds`      | 900     | 30–86400              | waiting for the transcript's proof after sending |
 
-The keys keep their old `attention.` prefix until a later release renames them. A settle longer than the
+The older `attention.` spellings of these keys are still read ([Compatibility](#compatibility)). A settle longer than the
 max wait is **refused** by the config check, not clamped. All four are read at start.
 
 - **Exactly once per item.** An item held, sending or delivered is never queued again. A batch is sent
@@ -179,3 +179,47 @@ max wait is **refused** by the config check, not clamped. All four are read at s
 - **Why this replaced the old outbox.** The old one recorded a batch as delivered the moment it was handed
   over, and swallowed a refusal. A ferret whose composer held text (a person mid-message, or a stranded
   draft) refused the send, and the owner's Discuss or answer was lost while the agenda said it had gone.
+
+## Compatibility
+
+The agenda was called Attention, and its wire still carries that name for older apps and CLIs. The app ships from
+`main` the moment a change merges while a daemon changes only after a release and `fy daemon update`, so for a while
+every combination of old and new meets.
+
+### Both spellings, one window
+
+| Older name (still answered)               | Agenda name                       | Today                                           |
+| ----------------------------------------- | --------------------------------- | ----------------------------------------------- |
+| `GET/POST /v1/sessions/:id/attention`     | `/v1/sessions/:id/agenda`         | both served, same handler and grants            |
+| `POST /v1/sessions/:id/attention/replies` | `/v1/sessions/:id/agenda/replies` | both served                                     |
+| `GET /v1/warden/attention`                | `/v1/warden/agenda`               | both served                                     |
+| `SessionState.attention`                  | `SessionState.agenda`             | both written, same value                        |
+| journal `attention.*` events              | `agenda.*`                        | new names written; readers accept both          |
+| `machine.yaml` `attentionNudge`           | `agendaNudge`                     | both read, the new one wins; config check warns |
+| `config/daemon.json` `attention.{…}`      | `agenda.{…}`                      | both read, the new one wins; config check warns |
+| push kind `attention`, tag, `?attention=` | `agenda`, `?agenda=`              | old still SENT; apps read both                  |
+| handover `references.attention` count     | `references.agenda`               | old still written; new accepted                 |
+
+The last two rows are still sent the old way on purpose: an older app's service worker drops a push kind it does not
+know, and the handover counts are a strict object an older reader refuses an unknown key in.
+
+### How each end finds out
+
+A daemon that speaks the agenda names lists `agenda.wire.1` in `features` on `GET /v1/health`. The app reads that per
+machine and dials the agenda routes only where it is listed; until it knows, it uses the older routes, which every
+daemon answers. The CLI dials the agenda route and, on a `404` with `code: "unknown_route"`, retries the older one once
+and keeps using it for that daemon.
+
+### Watching for older clients
+
+Each older route is marked legacy. The daemon records every use of one — route, first and last time, count and the
+caller's `x-fy-version` — in `legacy-wire-use.json` in its home, reports it on `GET /v1/health` as `legacyWire`, and
+`fy doctor` prints it ("older clients still use …" or "no older clients seen for 14 days"). A server cannot see which
+field a client reads; an app that reads `state.attention` also dials the older routes, so the routes stand in for it.
+
+### The removal release
+
+One release removes the older names and switches the rows still sent the old way (push kind, tag and link, the
+handover count). It ships no earlier than **the second minor release after the one that added `agenda.wire.1`**, and
+only once **every daemon you run shows no older-client use for 14 days** in `fy doctor`. Until then nothing here may
+be removed.
