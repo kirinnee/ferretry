@@ -17,7 +17,7 @@ export function requireTaskId(value: string, label = 'task id'): TaskId {
   return id ?? refuse(`expected a ${label} like F21, got "${value}"`);
 }
 
-/** How a task is cited in prose, terminal output and markdown. */
+/** How a task is cited in prose, terminal output and markdown: `&F12`. `#F12` is retired as output. */
 export function taskReference(id: string): string {
-  return `#${id}`;
+  return `&${id}`;
 }

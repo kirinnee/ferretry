@@ -47,6 +47,7 @@
         "harness/allow-confirm-screenshot.tsx",
         "harness/agenda-page.tsx",
         "harness/inbox-page.tsx",
+        "harness/mobile-inbox-nav-geometry.ts",
         "harness/processes-tab-screenshot.tsx",
         "harness/notifications-screenshot.ts",
         "harness/notifications-page.tsx",

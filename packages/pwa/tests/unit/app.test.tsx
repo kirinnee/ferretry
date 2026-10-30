@@ -4673,6 +4673,53 @@ describe('the phone tab bar', () => {
     }
   });
 
+  it('clips the page area at the bar, so no page can be drawn under it, and only where the bar is', async () => {
+    const restore = patchGlobal(window, 'innerWidth', PHONE_WIDTH);
+    try {
+      const inbox = await renderShell(`/d/${ALPHA}/inbox`, [alpha.daemonId]);
+      try {
+        await settle();
+        expect(inbox.view.container.querySelector('[data-app-tab-bar]')).not.toBeNull();
+        const region = must(
+          inbox.view.container.querySelector<HTMLElement>('[data-pull-to-palette-region]'),
+          'the page area',
+        );
+        expect(region.classList.contains('overflow-clip')).toBe(true);
+        // The bar is the page area's next sibling in the one column, so the area ends where the bar begins.
+        expect(region.nextElementSibling?.matches('[data-app-tab-bar]')).toBe(true);
+      } finally {
+        await inbox.view.unmount();
+      }
+
+      const session = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId]);
+      try {
+        await settle();
+        expect(
+          must(
+            session.view.container.querySelector<HTMLElement>('[data-pull-to-palette-region]'),
+            'the page area',
+          ).classList.contains('overflow-clip'),
+        ).toBe(false);
+      } finally {
+        await session.view.unmount();
+      }
+    } finally {
+      restore();
+    }
+    const desktop = await renderShell(`/d/${ALPHA}/inbox`, [alpha.daemonId]);
+    try {
+      await settle();
+      expect(
+        must(
+          desktop.view.container.querySelector<HTMLElement>('[data-pull-to-palette-region]'),
+          'the page area',
+        ).classList.contains('overflow-clip'),
+      ).toBe(false);
+    } finally {
+      await desktop.view.unmount();
+    }
+  });
+
   it('is not drawn at desktop width, where the app bar carries the destinations', async () => {
     const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId]);
     try {
