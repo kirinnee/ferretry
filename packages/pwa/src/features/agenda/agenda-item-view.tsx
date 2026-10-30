@@ -19,8 +19,8 @@
 import type { AgendaItem, AgendaQuestion } from '@ferretry/protocol';
 import { ChevronLeft, ChevronRight, Info, X } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 'react';
-import { readAskPinned, writeAskPinned } from '../../lib/agenda-ask-pin.ts';
 import { useQuoteMenu } from '../../components/quote-menu.tsx';
+import { readAskPinned, writeAskPinned } from '../../lib/agenda-ask-pin.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import type { HistoryEvent } from '../../lib/agenda-history.ts';
 import { type InboxAction, questionAnswersAction, swipeMap } from '../../lib/agenda-inbox.ts';

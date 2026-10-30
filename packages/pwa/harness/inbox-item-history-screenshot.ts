@@ -137,6 +137,10 @@ try {
         await page.getByRole('menuitem', { name: 'Quote in composer' }).click();
         const value = await page.locator('[data-inbox-composer] [data-live-editor]').innerText();
         if (!value.includes(QUOTED)) fail(`${scheme} ${viewport.name}: the composer holds ${JSON.stringify(value)}`);
+        await page.evaluate(() => {
+          const body = document.querySelector<HTMLElement>('.fy-attn-deck__top [data-agenda-body]');
+          body?.scrollTo(0, body.scrollHeight);
+        });
         await page.waitForTimeout(150);
         const quotedShot = join(outDir, `inbox-item-quoted-${viewport.name}-${scheme}.png`);
         await page.screenshot({ path: quotedShot });
