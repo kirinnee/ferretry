@@ -1,3 +1,4 @@
+import type { SessionState } from '@ferretry/protocol';
 import { FyTransportError } from '@ferretry/protocol/client';
 import { SessionCommandError } from '../session/errors.ts';
 import type { IMarkerProbe, IReadsClock, IReadsGateway, IReadsIo, ITerminalAttacher, IWaitResults } from './ports.ts';
@@ -57,8 +58,21 @@ export interface WaitOptions {
   readonly keep?: boolean;
 }
 
-/** How often a wait asks the daemon again, when the caller names nothing. */
-const DEFAULT_POLL_SECONDS = 1;
+/**
+ * How long a wait sleeps between asks when the caller names no `--interval`: soon at first, then less often for
+ * as long as nothing about the session moves, and soon again once something does. A Pack ferret waits on its
+ * sub-ferrets for minutes at a time, and a dozen of them each asking every second kept the daemon building
+ * session views nobody was going to act on for seconds yet.
+ */
+const WAIT_POLL_LADDER_MS: readonly number[] = [1_000, 2_000, 3_000, 5_000];
+
+/** The sleep before the next ask: the rung reached, or the last rung once the ladder runs out. */
+const waitPollDelayMs = (rung: number): number =>
+  WAIT_POLL_LADDER_MS[Math.min(rung, WAIT_POLL_LADDER_MS.length - 1)] as number;
+
+/** Whether a session's state moved between two asks in a way that makes its end nearer: its status or its turn. */
+const sessionMoved = (before: SessionState, after: SessionState): boolean =>
+  before.status !== after.status || before.turn !== after.turn || before.turnState !== after.turnState;
 
 /** A caller-supplied number that must be a whole positive one. */
 function positive(value: number | undefined, flag: string): number | undefined {
@@ -219,7 +233,10 @@ export class ReadsController {
    */
   async wait(sessionId: string, options: WaitOptions): Promise<void> {
     const timeout = positive(options.timeout, '--timeout');
-    const intervalMs = (positive(options.interval, '--interval') ?? DEFAULT_POLL_SECONDS) * 1_000;
+    const fixedSeconds = positive(options.interval, '--interval');
+    const fixedMs = fixedSeconds === undefined ? undefined : fixedSeconds * 1_000;
+    // Which rung of the ladder the next sleep is on; back to the first whenever the session moved.
+    let rung = 0;
     const markerPath = options.untilMarker === undefined ? undefined : this.marker.resolve(options.untilMarker);
     const deadlineMs = timeout === undefined ? undefined : this.clock.nowMs() + timeout * 1_000;
     const deadline = timeout === undefined ? undefined : this.clock.startDeadline(timeout * 1_000);
@@ -259,6 +276,7 @@ export class ReadsController {
           }
           throw error;
         }
+        if (lastView !== undefined && sessionMoved(lastView.state, view.state)) rung = 0;
         lastView = view;
         const decision = decideWait(
           {
@@ -273,6 +291,8 @@ export class ReadsController {
         notices = decision.notices;
         if (decision.outcome.kind === 'keep-waiting') {
           if (decision.outcome.note !== undefined) this.out.error(`${this.binaryName} wait: ${decision.outcome.note}`);
+          const intervalMs = fixedMs ?? waitPollDelayMs(rung);
+          rung += 1;
           const remainingMs = deadlineMs === undefined ? intervalMs : Math.max(0, deadlineMs - this.clock.nowMs());
           await this.clock.sleep(Math.min(intervalMs, remainingMs), deadline?.signal);
           continue;
