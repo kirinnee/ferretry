@@ -87,7 +87,16 @@ const open = async (
 /** "Show stopped" lives in the bar's ⋯ menu: its row text (with the hidden count), read without choosing it. */
 const stoppedRow = async (tab: Page): Promise<string> => {
   await tab.click('[data-sbar-options]');
-  const text = ((await tab.textContent('[data-menu-key="show-stopped"]')) ?? '').replace(/\s+/g, ' ').trim();
+  const text = (
+    await tab.$eval('[data-menu-key="show-stopped"]', row => {
+      const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+      const parts: string[] = [];
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) parts.push(node.textContent ?? '');
+      return parts.join(' ');
+    })
+  )
+    .replace(/\s+/g, ' ')
+    .trim();
   await tab.keyboard.press('Escape');
   return text;
 };
