@@ -283,7 +283,7 @@ function Harness() {
       {expanded ? (
         <div style={{ display: 'flex', height: 'calc(100vh - 56px)' }}>
           <div className="relative flex min-h-0 min-w-0 flex-1 flex-col" data-chat-tasks-full="">
-            <div className="flex-1 p-4 text-fg-muted" inert>
+            <div className="flex-1 p-4 text-muted" inert>
               The conversation sits under the board.
             </div>
             <section aria-label="Tasks" className="fy-board-full" data-board-full="">
