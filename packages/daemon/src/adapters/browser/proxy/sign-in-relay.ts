@@ -1,4 +1,4 @@
-import { type AddressInfo, createServer, type Server, type Socket, connect as tcpConnect } from 'node:net';
+import { type AddressInfo, createServer, isIP, type Server, type Socket, connect as tcpConnect } from 'node:net';
 import { connect as tlsConnect } from 'node:tls';
 import {
   badRequest,
@@ -87,7 +87,12 @@ function dial(upstream: ProxyEndpoint, timeoutMs: number): Promise<Socket> {
   return new Promise((resolve, reject) => {
     const socket =
       upstream.scheme === 'https'
-        ? tlsConnect({ host: upstream.host, port: upstream.port, servername: upstream.host })
+        ? tlsConnect({
+            host: upstream.host,
+            port: upstream.port,
+            // Node refuses an IP address as a TLS server name, so an address proxy is verified by that address alone.
+            ...(isIP(upstream.host) === 0 ? { servername: upstream.host } : {}),
+          })
         : tcpConnect({ host: upstream.host, port: upstream.port });
     const timer = setTimeout(() => {
       socket.destroy();
