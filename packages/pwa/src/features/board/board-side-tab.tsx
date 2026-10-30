@@ -8,23 +8,30 @@
  *  - **List**: the focus card, the cards it owns (one collapsible lane each), then the cards its sub-ferrets
  *    hold as a mini tree.
  *
+ * The tab has two sizes, one renderer: `side` in the Info panel, and `page` when the host lets it fill the chat
+ * (`onExpand`), where the same cards and lanes are drawn at the Board page's density. "Show agent tasks" is the
+ * Board page's own toggle and filter: off, only the owner's cards are drawn; on, an agent card sits under the
+ * human card it serves.
+ *
  * A card opens in the host's drawer (`onOpenCard`), never by leaving the chat. "Add to chat" is a card action:
  * it puts the card's `&F18` into THIS session's draft. The owner's Done and Not good ride on the card where
  * the host supplies them (`movesFor`, `doneFor`); a host that does not leaves the cards read-only.
  */
 
 import { formatTaskRef } from '@ferretry/protocol';
-import { Columns3, List } from 'lucide-react';
+import { Columns3, List, Maximize2, Minimize2 } from 'lucide-react';
 import { type ReactElement, useCallback, useState } from 'react';
 import { Spinner } from '../../components/spinner.tsx';
-import type { BoardChat } from '../../lib/board-chat.ts';
+import type { BoardChat, ChatKanbanLane } from '../../lib/board-chat.ts';
+import { NO_BOARD_FILTERS } from '../../lib/board-model.ts';
 import { ferretNamer } from '../../lib/board-present.ts';
 import type { BoardSideView } from '../../lib/board-side-view.ts';
 import type { BoardCardOf, BoardCardPlace } from '../../lib/board-view.ts';
 import { addReferenceMessage, addReferenceToComposer } from '../../lib/composer-references.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
 import { daemonBoardCardPath } from '../../lib/pages/routes.ts';
-import { BoardCard, type BoardCardMoves } from './board-card.tsx';
+import { AgentsToggle } from './board-filters.tsx';
+import { BoardCard, type BoardCardMoves, type BoardDensity } from './board-card.tsx';
 import { BoardLane } from './board-lane.tsx';
 import type { BoardDoneControl } from './board-views.tsx';
 
@@ -43,6 +50,16 @@ export interface BoardSideTabProps {
   readonly movesFor?: (card: BoardCardOf, place: BoardCardPlace) => BoardCardMoves | undefined;
   /** The owner's Done ✓; absent: the cards cannot be closed from here. */
   readonly doneFor?: (card: BoardCardOf, place: BoardCardPlace) => BoardDoneControl | undefined;
+  /** `side` in the Info panel; `page` when the tab fills the chat. */
+  readonly density?: BoardDensity;
+  /** "Show agent tasks" on or off. */
+  readonly onAgents: (agents: boolean) => void;
+  /** Expands the tab to the whole chat (at `side`) or collapses it back to the panel (at `page`); absent: no button. */
+  readonly onExpand?: () => void;
+  /** The card in the air, while one is being dragged at page density. */
+  readonly dragging?: BoardCardOf | null;
+  /** A card was dropped on a lane (only lanes of the dragged card's own board take drops). */
+  readonly onDropCard?: (card: BoardCardOf, lane: ChatKanbanLane) => void;
 }
 
 const VIEWS: readonly { readonly id: BoardSideView; readonly label: string; readonly Icon: typeof List }[] = [
@@ -76,6 +93,44 @@ function ViewToggle({
   );
 }
 
+function Toolbar({
+  chat,
+  density,
+  view,
+  onView,
+  onAgents,
+  onExpand,
+}: Pick<BoardSideTabProps, 'chat' | 'view' | 'onView' | 'onAgents' | 'onExpand'> & {
+  readonly density: BoardDensity;
+}): ReactElement {
+  const expanded = density === 'page';
+  const Icon = expanded ? Minimize2 : Maximize2;
+  return (
+    <div className="fy-board-side__bar" data-board-side-bar="">
+      <ViewToggle onView={onView} view={view} />
+      {chat.splitsAgents ? (
+        <AgentsToggle
+          filters={{ ...NO_BOARD_FILTERS, agents: chat.agents }}
+          onChange={next => onAgents(next.agents)}
+          short
+        />
+      ) : null}
+      {onExpand === undefined ? null : (
+        <button
+          aria-label={expanded ? 'Collapse the tasks back to the panel' : 'Expand the tasks to the whole chat'}
+          className="fy-board-side__expand"
+          data-board-side-expand={expanded ? 'collapse' : 'expand'}
+          onClick={onExpand}
+          type="button"
+        >
+          <Icon aria-hidden="true" size={12} />
+          {expanded ? 'Collapse' : 'Expand'}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function BoardSideTab({
   chat,
   scope,
@@ -86,8 +141,14 @@ export function BoardSideTab({
   onOpenCard,
   movesFor,
   doneFor,
+  density = 'side',
+  onAgents,
+  onExpand,
+  dragging = null,
+  onDropCard,
 }: BoardSideTabProps): ReactElement {
   const { cards, status } = chat;
+  const draggedGroup = dragging === null ? null : (cards.places.get(dragging.key)?.group.key ?? null);
   const names = ferretNamer(callsigns);
   const [message, setMessage] = useState('');
   const addToChat = useCallback(
@@ -105,8 +166,10 @@ export function BoardSideTab({
       <BoardCard
         card={card}
         category={place?.category ?? null}
-        density="side"
+        density={density}
         href={daemonBoardCardPath(card.daemonId, card.task.id)}
+        {...(dragging?.key === card.key ? { dragging: true } : {})}
+        depth={extra.depth ?? (cards.under.has(card.key) ? 1 : undefined)}
         key={card.key}
         names={names}
         now={now}
@@ -115,16 +178,30 @@ export function BoardSideTab({
         showMachine={false}
         {...(moves === undefined ? {} : { moves })}
         {...(done === undefined ? {} : { done })}
-        {...extra}
+        {...(extra.lane === undefined ? {} : { lane: extra.lane })}
       />
     );
   };
 
   return (
-    <section aria-label="This ferret's cards" className="fy-board-side" data-board-side="" data-view={view}>
+    <section
+      aria-label="This ferret's cards"
+      className="fy-board-side"
+      data-board-side=""
+      data-density={density}
+      data-view={view}
+    >
       <p className={message === '' ? 'sr-only' : 'fy-board-side__status'} data-board-side-status="" role="status">
         {message}
       </p>
+      {density === 'page' ? (
+        <h2 className="fy-board-side__title">
+          This ferret's tasks <span className="fy-board-side__total">{cards.total}</span>
+        </h2>
+      ) : null}
+      {cards.total > 0 || chat.splitsAgents || density === 'page' ? (
+        <Toolbar chat={chat} density={density} onAgents={onAgents} onExpand={onExpand} onView={onView} view={view} />
+      ) : null}
       {cards.total === 0 ? (
         status === 'error' ? (
           <p className="fy-board-empty" role="alert">
@@ -134,7 +211,11 @@ export function BoardSideTab({
             </button>
           </p>
         ) : status === 'ready' ? (
-          <p className="fy-board-empty">This ferret has no cards.</p>
+          <p className="fy-board-empty" data-board-side-empty="">
+            {cards.hiddenAgents === 0
+              ? 'This ferret has no cards.'
+              : `No tasks of your own yet. ${cards.hiddenAgents} agent ${cards.hiddenAgents === 1 ? 'task is' : 'tasks are'} hidden.`}
+          </p>
         ) : (
           <p className="fy-board__reading" role="status">
             <Spinner size={14} />
@@ -143,16 +224,24 @@ export function BoardSideTab({
         )
       ) : (
         <>
-          <ViewToggle onView={onView} view={view} />
           {view === 'kanban' ? (
-            <div className="fy-board-side__kanban" data-board-side-kanban="">
+            <div className={density === 'page' ? 'fy-board-kanban' : 'fy-board-side__kanban'} data-board-side-kanban="">
               {cards.lanes.map(lane => (
                 <BoardLane
+                  accepts={
+                    dragging !== null &&
+                    lane.laneId !== null &&
+                    lane.groupKey === draggedGroup &&
+                    lane.laneId !== dragging.task.laneId
+                  }
                   category={lane.category}
                   count={lane.cards.length}
-                  density="side"
+                  density={density}
                   key={lane.key}
                   name={lane.name}
+                  {...(dragging === null || onDropCard === undefined
+                    ? {}
+                    : { onDropCard: () => onDropCard(dragging, lane) })}
                 >
                   {lane.cards.map(card => draw(card))}
                 </BoardLane>
@@ -160,21 +249,21 @@ export function BoardSideTab({
             </div>
           ) : (
             <>
-              {cards.focus === null ? null : (
+              {cards.shownFocus === null ? null : (
                 <BoardLane
-                  category={cards.places.get(cards.focus.key)?.category ?? null}
+                  category={cards.places.get(cards.shownFocus.key)?.category ?? null}
                   count={1}
-                  density="side"
+                  density={density}
                   name="Focus"
                 >
-                  {draw(cards.focus)}
+                  {draw(cards.shownFocus)}
                 </BoardLane>
               )}
               {cards.owned.map(group => (
                 <BoardLane
                   category={cards.places.get(group.cards[0]?.key ?? '')?.category ?? null}
                   count={group.cards.length}
-                  density="side"
+                  density={density}
                   key={group.key}
                   name={`Owned · ${group.laneName}`}
                 >
@@ -182,7 +271,7 @@ export function BoardSideTab({
                 </BoardLane>
               ))}
               {cards.children.length === 0 ? null : (
-                <BoardLane category={null} count={cards.children.length} density="side" name="Sub-ferrets">
+                <BoardLane category={null} count={cards.children.length} density={density} name="Sub-ferrets">
                   {cards.children.map(row =>
                     draw(row.card, {
                       depth: row.depth,

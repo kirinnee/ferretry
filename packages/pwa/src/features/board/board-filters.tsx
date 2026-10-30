@@ -49,7 +49,7 @@ const cleared = (filters: BoardFilters): BoardFilters => ({ ...NO_BOARD_FILTERS,
  * "Show agent tasks": cards ferrets made for other ferrets, off by default. It is on whenever a ferret or an
  * activity is chosen (those show agent cards by themselves), so it is drawn pressed and locked then.
  */
-function AgentsToggle({
+export function AgentsToggle({
   filters,
   onChange,
   short = false,

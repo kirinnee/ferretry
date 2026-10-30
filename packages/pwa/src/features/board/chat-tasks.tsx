@@ -5,13 +5,15 @@
  * ferret's: the view the reader picked (kept on this device), the card detail drawer that opens OVER the chat
  * (portalled to the body, so the Info panel's own scrolling and stacking cannot clip it), and the move flow
  * behind Done ✓, Not good and the ⋯ menu — a move back asks for its reason first, exactly as on the Board.
+ * Drawn small in the Info panel, or at page density when `expanded` (the chat page lays that over the chat);
+ * either way it is this one host, so a move, the drawer and the reason box behave the same in both.
  * Nothing here navigates: a card link inside the drawer reopens the drawer on that card.
  */
 
 import { type ReactElement, useCallback, useMemo, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { type BoardMachine, useBoardActions, useBoardProjects } from '../../hooks/use-board.ts';
-import type { BoardChat } from '../../lib/board-chat.ts';
+import type { BoardChat, ChatKanbanLane } from '../../lib/board-chat.ts';
 import { chatSiblings } from '../../lib/board-chat.ts';
 import { boardDone, isReleaseLane } from '../../lib/board-done.ts';
 import { moveChoices, planMove } from '../../lib/board-move.ts';
@@ -42,6 +44,12 @@ export interface ChatTasksProps {
   readonly now: number;
   /** Where a link inside the drawer that is not a card of this ferret goes. */
   readonly onNavigate?: (to: string) => void;
+  /** "Show agent tasks" on or off (`chat.agents` is its current value). */
+  readonly onAgents: (agents: boolean) => void;
+  /** The tab fills the chat, at page density; the button then collapses it. */
+  readonly expanded?: boolean;
+  /** Expands the tab to the chat, or collapses it back; absent: the tab has no such button. */
+  readonly onExpand?: () => void;
 }
 
 interface PendingMove {
@@ -77,6 +85,9 @@ export function ChatTasks({
   phone,
   now,
   onNavigate,
+  onAgents,
+  expanded = false,
+  onExpand,
 }: ChatTasksProps): ReactElement {
   const view = useSyncExternalStore(subscribeView, readView, readView);
   const names = useMemo(() => ferretNamer(callsigns), [callsigns]);
@@ -87,6 +98,7 @@ export function ChatTasks({
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [dragging, setDragging] = useState<BoardCardOf | null>(null);
 
   const send = useCallback(
     async (card: BoardCardOf, place: BoardCardPlace, to: string, reason?: string): Promise<boolean> => {
@@ -139,11 +151,20 @@ export function ChatTasks({
         onMove: (target, laneId) => requestMove(target, place, laneId),
         closeLaneId: closed ? null : laneOfCategory(group, 'closed'),
         reworkLaneId: closed ? null : laneOfCategory(group, 'active', 'last'),
-        onDragStart: () => undefined,
-        onDragEnd: () => undefined,
+        onDragStart: setDragging,
+        onDragEnd: () => setDragging(null),
       };
     },
     [requestMove],
+  );
+
+  const dropOn = useCallback(
+    (card: BoardCardOf, lane: ChatKanbanLane): void => {
+      setDragging(null);
+      const place = chat.cards.places.get(card.key);
+      if (place !== undefined && lane.laneId !== null) requestMove(card, place, lane.laneId);
+    },
+    [chat.cards.places, requestMove],
   );
 
   const doneFor = useCallback(
@@ -222,9 +243,14 @@ export function ChatTasks({
       <BoardSideTab
         callsigns={callsigns}
         chat={chat}
+        density={expanded ? 'page' : 'side'}
         doneFor={doneFor}
+        dragging={dragging}
         movesFor={movesFor}
         now={now}
+        onAgents={onAgents}
+        onDropCard={dropOn}
+        onExpand={onExpand}
         onOpenCard={openCard}
         onView={next => boardSideView.set(next)}
         scope={scope}
@@ -268,5 +294,17 @@ export function ChatTasks({
             document.body,
           )}
     </>
+  );
+}
+
+/** What the Info panel shows in place of the tab while the board fills the chat. */
+export function ChatTasksStub({ onCollapse }: { readonly onCollapse: () => void }): ReactElement {
+  return (
+    <p className="fy-board-empty fy-board-side" data-board-side-stub="">
+      The tasks are open in the chat.{' '}
+      <button className="fy-board__retry" onClick={onCollapse} type="button">
+        Collapse
+      </button>
+    </p>
   );
 }

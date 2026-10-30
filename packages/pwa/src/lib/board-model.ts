@@ -168,6 +168,9 @@ const parseDateRange = (params: URLSearchParams, name: string): BoardDateRange =
   return from === null && to === null ? NO_DATE_RANGE : { preset: null, from, to };
 };
 
+/** The URL parameter "Show agent tasks" lives in, on the Board and on a ferret's Tasks tab alike. */
+export const AGENTS_PARAM = 'agents';
+
 const writeDateRange = (params: URLSearchParams, name: string, range: BoardDateRange): void => {
   if (range.preset !== null) {
     params.set(name, range.preset);
@@ -198,7 +201,7 @@ export const parseBoardFilters = (search: string | URLSearchParams): BoardFilter
     state: state.success ? state.data : NO_BOARD_FILTERS.state,
     activity: activity.success ? activity.data : null,
     mine: mine === '1' || mine === 'true',
-    agents: params.get('agents') === '1',
+    agents: params.get(AGENTS_PARAM) === '1',
     lane: nonEmpty(params.get('lane')),
     created: parseDateRange(params, 'created'),
     touched: parseDateRange(params, 'touched'),
@@ -219,7 +222,7 @@ export const boardFiltersToSearch = (filters: BoardFilters): URLSearchParams => 
   if (filters.state !== NO_BOARD_FILTERS.state) params.set('state', filters.state);
   if (filters.activity !== null) params.set('activity', filters.activity);
   if (filters.mine) params.set('mine', '1');
-  if (filters.agents) params.set('agents', '1');
+  if (filters.agents) params.set(AGENTS_PARAM, '1');
   if (filters.lane !== null) params.set('lane', filters.lane);
   writeDateRange(params, 'created', filters.created);
   writeDateRange(params, 'touched', filters.touched);

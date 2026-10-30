@@ -1529,3 +1529,77 @@
     inset: -10px -4px;
   }
 }
+
+/* ---- The Tasks tab, expanded over the chat ---------------------------------------------------------- */
+.fy-board-side__bar {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-sm);
+}
+.fy-board-side__expand {
+  display: inline-flex;
+  min-height: 26px;
+  margin-left: auto;
+  align-items: center;
+  gap: var(--gap-xs);
+  padding: 0 var(--gap-md);
+  border: var(--stroke) solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fy-board-side__expand:hover {
+  color: var(--fg);
+}
+@media (pointer: coarse) {
+  .fy-board-side__expand,
+  .fy-board-side__view {
+    min-height: 36px;
+  }
+}
+.fy-board-side__title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-sm);
+  margin: 0;
+  color: var(--fg);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+.fy-board-side__total {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: normal;
+  font-variant-numeric: tabular-nums;
+}
+/* The board over the chat column: it covers the transcript and the composer, and nothing above them. */
+.fy-board-full {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--bg);
+}
+.fy-board-side[data-density='page'] {
+  min-height: 100%;
+  padding: var(--gap-md);
+}
+.fy-board-side[data-density='page'] .fy-board-kanban {
+  margin: 0;
+  padding: 0 0 var(--gap-xs);
+}
+.fy-board-side[data-density='page'] .fy-board-lane {
+  max-width: 22rem;
+}
+@media (max-width: 720px) {
+  .fy-board-side[data-density='page'] .fy-board-lane {
+    max-width: none;
+  }
+}

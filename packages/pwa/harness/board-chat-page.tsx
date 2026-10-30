@@ -3,17 +3,21 @@
  * and `BoardSideTab` over a fake daemon (`board-chat-screenshot.ts` bundles this).
  *
  * `?state=card|none` picks a session with or without a focus card, `?view=kanban|list` the Tasks view, `?cards=few`
- * the six-card fixture (the default is 70 cards).
+ * the six-card fixture (the default is 70 cards), `?agents=1` turns "Show agent tasks" on, `?expanded=1` opens the
+ * Tasks tab over the whole chat area (the desktop Info panel then holds only its stub). `?origin=0` serves cards
+ * the way an older daemon does, with no `origin`.
  */
 
-import type { SessionView } from '@ferretry/protocol';
+import type { BoardTaskView, SessionView } from '@ferretry/protocol';
+import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { SessionTopBar } from '../src/components/session-top-bar.tsx';
-import { ChatTasks } from '../src/features/board/chat-tasks.tsx';
+import { ChatTasks, ChatTasksStub } from '../src/features/board/chat-tasks.tsx';
 import { InfoPanel } from '../src/features/session-info/info-panel.tsx';
 import { INFO_TABS } from '../src/features/session-info/info-model.ts';
 import { useChatCard } from '../src/hooks/use-chat-card.ts';
 import { DaemonAgendaStore } from '../src/lib/agenda-store.ts';
+import type { ChatTasksView } from '../src/lib/board-chat-url.ts';
 import { boardSideView } from '../src/lib/board-side-view.ts';
 import { DaemonBoardStore } from '../src/lib/board-store.ts';
 import {
@@ -24,6 +28,7 @@ import {
   fakePort,
   laneSetFor,
   laptop,
+  originCard,
   PROJECT,
 } from '../tests/unit/board-support.ts';
 
@@ -167,7 +172,18 @@ const MANY = Array.from({ length: 64 }, (_, index) =>
   }),
 );
 const FEW = params.get('cards') === 'few';
-const CARDS = FEW ? OPEN : [...OPEN, ...MANY];
+const ORIGIN = params.get('origin') !== '0';
+const originOf = (task: BoardTaskView, index: number): BoardTaskView => {
+  if (!ORIGIN) return task;
+  const human = task.owner === LEAD && task.id !== 'F22' && index % 3 !== 2;
+  return originCard(
+    task.id,
+    human ? 'human' : 'agent',
+    human ? undefined : task.owner === LEAD ? { id: 'F18' } : null,
+    task,
+  );
+};
+const CARDS = (FEW ? OPEN : [...OPEN, ...MANY]).map(originOf);
 
 const store = new DaemonBoardStore(
   fakePort({
@@ -201,6 +217,9 @@ const agenda = {
 boardSideView.set(params.get('view') === 'list' ? 'list' : 'kanban');
 
 function Harness() {
+  const [expanded, setExpanded] = useState(params.get('expanded') === '1');
+  const [agents, setAgents] = useState(params.get('agents') === '1');
+  const tasks: ChatTasksView = { expanded, agents, setExpanded, setAgents };
   const chat = useChatCard({
     store,
     connection: laptop,
@@ -208,9 +227,47 @@ function Harness() {
     session: lead,
     sessions: fleet,
     reading: true,
+    agents,
   });
   const compact = window.innerWidth < 640;
   const scope = { daemonId: laptop.daemonId, sessionId: LEAD };
+  const tab = params.get('tab') === 'surfaces' ? 'surfaces' : 'tasks';
+  const board = (isExpanded: boolean) =>
+    chat === null ? null : (
+      <ChatTasks
+        agenda={agenda as never}
+        callsigns={CALLSIGNS}
+        chat={chat}
+        expanded={isExpanded}
+        machine={{ connection: laptop, name: 'laptop' }}
+        now={NOW}
+        onAgents={tasks.setAgents}
+        onExpand={() => tasks.setExpanded(!isExpanded)}
+        phone={compact}
+        ports={{ sendMessage: async () => undefined }}
+        scope={scope}
+        store={store}
+      />
+    );
+  const info = (
+    <InfoPanel
+      name="Denisha"
+      onClose={() => undefined}
+      onTabChange={() => undefined}
+      render={{
+        overview: () => null,
+        tasks: () =>
+          expanded && !compact ? <ChatTasksStub onCollapse={() => tasks.setExpanded(false)} /> : board(false),
+        runtime: () => null,
+        usage: () => null,
+        folder: () => null,
+        signals: () => null,
+        surfaces: () => null,
+      }}
+      tab={tab}
+      tabs={INFO_TABS}
+    />
+  );
   return (
     <div className="bg-bg text-fg" data-fixture={withCard ? 'card' : 'none'} style={{ minHeight: '100vh' }}>
       <SessionTopBar
@@ -225,37 +282,21 @@ function Harness() {
         session={lead}
         turn="working"
       />
-      <div style={{ margin: compact ? '0' : '0 0 0 auto', maxWidth: compact ? 'none' : 460 }}>
-        <InfoPanel
-          name="Denisha"
-          onClose={() => undefined}
-          onTabChange={() => undefined}
-          render={{
-            overview: () => null,
-            tasks: () =>
-              chat === null ? null : (
-                <ChatTasks
-                  agenda={agenda as never}
-                  callsigns={CALLSIGNS}
-                  chat={chat}
-                  machine={{ connection: laptop, name: 'laptop' }}
-                  now={NOW}
-                  phone={compact}
-                  ports={{ sendMessage: async () => undefined }}
-                  scope={scope}
-                  store={store}
-                />
-              ),
-            runtime: () => null,
-            usage: () => null,
-            folder: () => null,
-            signals: () => null,
-            surfaces: () => null,
-          }}
-          tab={params.get('tab') === 'surfaces' ? 'surfaces' : 'tasks'}
-          tabs={INFO_TABS}
-        />
-      </div>
+      {expanded ? (
+        <div style={{ display: 'flex', height: 'calc(100vh - 56px)' }}>
+          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col" data-chat-tasks-full="">
+            <div className="flex-1 p-4 text-fg-muted" inert>
+              The conversation sits under the board.
+            </div>
+            <section aria-label="Tasks" className="fy-board-full" data-board-full="">
+              {board(true)}
+            </section>
+          </div>
+          {compact ? null : <aside style={{ width: 460, overflowY: 'auto' }}>{info}</aside>}
+        </div>
+      ) : (
+        <div style={{ margin: compact ? '0' : '0 0 0 auto', maxWidth: compact ? 'none' : 460 }}>{info}</div>
+      )}
     </div>
   );
 }

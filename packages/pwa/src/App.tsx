@@ -128,6 +128,7 @@ import { useAccountPickerSlice } from './hooks/use-account-picker.ts';
 import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
 import { type BoardMachine, useBoard } from './hooks/use-board.ts';
+import { useChatTasksUrl } from './hooks/use-chat-tasks-url.ts';
 import { useAgendaSession, useAgendaSnapshot } from './hooks/use-agenda.ts';
 import { AgendaInboxContext, useAgendaInbox, useAgendaInboxModel, useInboxMachines } from './hooks/use-agenda-inbox.ts';
 import { useAgendaReplies } from './hooks/use-agenda-replies.ts';
@@ -1063,6 +1064,7 @@ function SessionRoute({
     [daemonFetch, store.carrier, store.connectionHealth],
   );
   const { navigate, back, entryKey } = useRouter();
+  const tasksView = useChatTasksUrl({ navigate, back }, window.location);
   const layout = useLayoutMode();
   const dictation = useSttSettings(store.stt);
   // Actions › Warden: offered only where this caller's grants open the Warden (read once per machine).
@@ -1596,6 +1598,7 @@ function SessionRoute({
             accountPicker={store.accountPicker}
             board={store.board}
             boardTasks={boardTasks}
+            tasksView={tasksView}
             actionContributions={sessionActions}
             infoLearning={learningActions.passiveFor(scope.sessionId)}
             switches={{
