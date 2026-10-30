@@ -1,3 +1,17 @@
+## [4.130.0](https://github.com/kirinnee/ferretry/compare/v4.129.0...v4.130.0) (2026-10-30)
+
+### Features
+
+* **board:** ferrets register projects, and fy board --project binds to its verb ([#1009](https://github.com/kirinnee/ferretry/issues/1009)) ([a8fb6f2](https://github.com/kirinnee/ferretry/commit/a8fb6f2ada7e99d8894bd4609b49c6dcd14f3ab7))
+* **daemon:** every producer sends through the durable queue, on by default; agenda answers unbatched (S4) ([#1007](https://github.com/kirinnee/ferretry/issues/1007)) ([8d23af4](https://github.com/kirinnee/ferretry/commit/8d23af48cfe02d09041b2a70d1311f1ab2a0c1bc))
+* **protocol:** add the secure input request contract (P0) ([#1008](https://github.com/kirinnee/ferretry/issues/1008)) ([b88b1be](https://github.com/kirinnee/ferretry/commit/b88b1be87aaba2bce4441faa56d889304a3bc2c7))
+* **pwa:** card detail drawer and page for the Board ([#982](https://github.com/kirinnee/ferretry/issues/982)) ([94ee313](https://github.com/kirinnee/ferretry/commit/94ee31370e3847aa83892e17dad3c2d0e7869194))
+* send through the durable queue behind delivery.queue, and edit or cancel a waiting message (S3) ([#1005](https://github.com/kirinnee/ferretry/issues/1005)) ([d09f0ff](https://github.com/kirinnee/ferretry/commit/d09f0ff0f537ad9b9c116cd8818362c4f6e9f3e6))
+
+### Fixes
+
+* **daemon:** prove a queued prompt Claude drained as content blocks; never call a received message not delivered ([#1010](https://github.com/kirinnee/ferretry/issues/1010)) ([463f0a6](https://github.com/kirinnee/ferretry/commit/463f0a62ac5573f4784423ffdbfffa0d2e3df3bc))
+
 ## [4.129.0](https://github.com/kirinnee/ferretry/compare/v4.128.1...v4.129.0) (2026-10-30)
 
 ### Features
