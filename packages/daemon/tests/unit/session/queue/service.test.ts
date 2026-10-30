@@ -112,6 +112,18 @@ describe('who a message is from', () => {
   });
 });
 
+describe('a message that stops the running turn first', () => {
+  it('should keep the interrupt flag on the queued message, and none on an ordinary one', async () => {
+    const { service } = subject();
+
+    const urgent = await service.enqueue(ID, { id: 'i1', sender: 'human', text: 'stop', interrupt: true });
+    const plain = await service.enqueue(ID, { id: 'i2', sender: 'human', text: 'later' });
+
+    should(urgent.message.interrupt).be.true();
+    should(plain.message).not.have.property('interrupt');
+  });
+});
+
 describe('changing a message that still waits', () => {
   it('should edit it as the next revision, and cancel it', async () => {
     const { service } = subject();

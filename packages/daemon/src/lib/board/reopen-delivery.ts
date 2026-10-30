@@ -11,6 +11,7 @@
  * same ferret can never disagree about it. A send the relaunch refused is HELD for an explicit revive: the
  * ferret still gets it then, but nobody is working the card now, so the next rung is told as well.
  */
+import type { BoardTask } from '@ferretry/protocol';
 import { effectiveAssignee } from './authority.ts';
 import type { ReopenNotice, ReopenNotifier } from './ports.ts';
 import { reopenMessage } from './service.ts';
@@ -47,9 +48,11 @@ export interface ReopenDelivered {
 const reached = (how: ReopenDelivery): boolean => how === 'delivered' || how === 'resumed';
 
 export class ReopenDeliveryLadder implements ReopenNotifier {
+  /** `ownerMessenger` carries what the owner did (stamped as the owner's); it defaults to `messenger`. */
   constructor(
     private readonly messenger: ReopenMessenger,
     private readonly diagnostics: { warn(message: string): void },
+    private readonly ownerMessenger: ReopenMessenger = messenger,
   ) {}
 
   async reopened(notice: ReopenNotice): Promise<void> {
@@ -59,19 +62,34 @@ export class ReopenDeliveryLadder implements ReopenNotifier {
   /** Walks the ladder and says where the line landed. */
   async deliver(notice: ReopenNotice): Promise<ReopenDelivered> {
     const message = reopenMessage(notice.task, notice.by, notice.reason);
-    const assignee = effectiveAssignee(notice.task);
-    const rungs = [...new Set([assignee, notice.task.owner])];
-    let last: ReopenDelivered = { to: null, how: 'orphaned' };
-    for (const sessionId of rungs) {
-      const how = await this.messenger.deliver(sessionId, message, reopenKey(notice));
-      if (reached(how)) return { to: sessionId, how };
-      if (how === 'held' && last.to === null) last = { to: sessionId, how };
-    }
-    this.diagnostics.warn(
-      last.to === null
-        ? `${message} reached no ferret: the card's assignee and owner are gone, so it is orphaned`
-        : `${message} is held for ${last.to}'s next revive: no ferret on the card could be resumed now`,
-    );
-    return last;
+    const messenger = notice.by.kind === 'owner' ? this.ownerMessenger : this.messenger;
+    return await walkLadder(messenger, this.diagnostics, rungsOf(notice.task), message, reopenKey(notice));
   }
 }
+
+/** The ferrets a card's news goes to, in order: its assignee, then its owner ferret. */
+export const rungsOf = (task: Pick<BoardTask, 'assignee' | 'owner'>): readonly string[] => [
+  ...new Set([effectiveAssignee(task), task.owner]),
+];
+
+/** Offers `message` to each rung in turn and stops at the first that takes it. */
+export const walkLadder = async (
+  messenger: ReopenMessenger,
+  diagnostics: { warn(message: string): void },
+  rungs: readonly string[],
+  message: string,
+  key: string,
+): Promise<ReopenDelivered> => {
+  let last: ReopenDelivered = { to: null, how: 'orphaned' };
+  for (const sessionId of rungs) {
+    const how = await messenger.deliver(sessionId, message, key);
+    if (reached(how)) return { to: sessionId, how };
+    if (how === 'held' && last.to === null) last = { to: sessionId, how };
+  }
+  diagnostics.warn(
+    last.to === null
+      ? `${message} reached no ferret: the card's assignee and owner are gone, so it is orphaned`
+      : `${message} is held for ${last.to}'s next revive: no ferret on the card could be resumed now`,
+  );
+  return last;
+};

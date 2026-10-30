@@ -20,6 +20,8 @@ import {
   type BoardSnapshot,
   type BoardStore,
   type BoardWrite,
+  type DoneNotice,
+  type DoneNotifier,
   type LaneSetSource,
   LivenessActivityDeriver,
   type ReopenNotice,
@@ -243,6 +245,17 @@ export class FakeReopen implements ReopenNotifier {
   }
 }
 
+export class FakeDone implements DoneNotifier {
+  readonly notices: DoneNotice[] = [];
+
+  constructor(private readonly failing = false) {}
+
+  async done(notices: readonly DoneNotice[]): Promise<void> {
+    if (this.failing) throw new Error('nobody to tell');
+    this.notices.push(...notices);
+  }
+}
+
 export class FakeChanges implements BoardChangeSink {
   readonly events: { readonly sessionId: string; readonly event: BoardChangedEvent }[] = [];
 
@@ -258,6 +271,7 @@ export interface ServiceWorld extends BoardServiceDependencies {
   readonly store: MemoryBoardStore;
   readonly focus: FakeFocus;
   readonly reopen: FakeReopen;
+  readonly done: FakeDone;
   readonly changes: FakeChanges;
   readonly warnings: string[];
   readonly sections: string[];
@@ -273,6 +287,7 @@ export const world = (overrides: Partial<ServiceWorld> = {}): ServiceWorld => {
     parents: new FakeParents({ child: 'lead', grandchild: 'child' }),
     focus: new FakeFocus(),
     reopen: new FakeReopen(),
+    done: new FakeDone(),
     activity: new LivenessActivityDeriver({ sessions: new FakeSessions(), clock: { now: () => NOW } }),
     agenda: NO_ASKS,
     changes: new FakeChanges(),

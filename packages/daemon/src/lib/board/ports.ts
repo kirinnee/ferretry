@@ -164,6 +164,19 @@ export interface ReopenNotifier {
   reopened(notice: ReopenNotice): Promise<void>;
 }
 
+/** A card the owner marked done: the card as it is after the move. */
+export interface DoneNotice {
+  readonly task: BoardTask;
+}
+
+/**
+ * Tells each card's ferret the owner marked it done: ONE plain message per ferret, however many of its
+ * cards are in `notices` (a bulk close is batched). Called after the close is committed.
+ */
+export interface DoneNotifier {
+  done(notices: readonly DoneNotice[]): Promise<void>;
+}
+
 /**
  * Puts lanes on a project that has none (`board-design.md` §5 step 4), so a card a start makes there lands
  * on the project's real board: the template inferred from the project (a repository with `v*` tags →

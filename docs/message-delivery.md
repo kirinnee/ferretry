@@ -49,7 +49,7 @@ this page, which is still how a message reaches the pane.
   `QUEUE_ANSWER_WAIT_MS` (20 s), for the deliverer's first look and answers what the send ledger says the
   hand-over did (`answerOf`), so a message into an empty box is answered exactly as the direct path
   answered it; one held for a draft or a question is answered `queued` at once, with the message id as
-  `sendId`. `--now` (stop the running turn first) still goes straight down the send path.
+  `sendId`. `--now` (stop the running turn first) is a flag on the queued message (`interrupt`), not a separate path: it keeps its place, and when its turn comes AND the input box is empty the deliverer hands it over with the send path's own stop-then-type.
 - **No daemon notice is typed into the owner's own chat** (an interactive session): there is no exception
   for board news, which is not sent at all ([ferret-messages.md](ferret-messages.md#what-the-board-types-into-a-chat)).
 - **Every producer** — the Warden, the board's nudges and checks, the declared-wait watcher, the learning

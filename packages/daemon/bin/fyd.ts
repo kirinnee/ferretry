@@ -548,6 +548,7 @@ import {
   BoardSweep,
   BoardTurnCheck,
   LivenessActivityDeriver,
+  DoneDeliveryLadder,
   ReopenDeliveryLadder,
   SessionCards,
   type SessionLivenessSource,
@@ -1921,6 +1922,8 @@ function createBoardWorld(
   /** Which board a session works on, each board's lanes and its name (U3's `LaneSetService`). */
   lanes: Pick<LaneSetService, 'projectOf' | 'laneSet' | 'project' | 'apply'>,
   sends: Pick<SessionSendService, 'send'>,
+  /** The same send path as the owner's front: what the owner did to a card (done, reopen) is stamped as theirs. */
+  ownerSends: Pick<SessionSendService, 'send'>,
   /** One ferret's open agenda items; read lazily, because the agenda service is built after the board. */
   agendaItems: (sessionId: string) => Promise<readonly AgendaItem[]>,
   bin: string,
@@ -1959,7 +1962,8 @@ function createBoardWorld(
     lanes,
     parents,
     focus,
-    reopen: new ReopenDeliveryLadder(new SendReopenMessenger(sends), diagnostics),
+    reopen: new ReopenDeliveryLadder(new SendReopenMessenger(sends), diagnostics, new SendReopenMessenger(ownerSends)),
+    done: new DoneDeliveryLadder(new SendReopenMessenger(ownerSends), diagnostics),
     activity: new LivenessActivityDeriver({ sessions, clock }),
     agenda: new AgendaCardLinks({ open: agendaItems }, machineId, diagnostics),
     changes: new JournalBoardChanges(storage),
@@ -3202,7 +3206,9 @@ function createSessionSendSubsystem(
         ? await conversation.prepare(id, request.message)
         : { message: request.message, referenced: [] };
       // `now` stops the running turn first: that is the send path's to do, not a queue's to wait for.
-      if (queueing && request.now !== true) {
+      // `now` rides the queue as an interrupt flag: it keeps its order, and the deliverer stops the running
+      // turn when its turn comes and the input box is empty.
+      if (queueing) {
         // The refusals only a person can lift are said now, exactly as the direct path says them.
         await service.authorize(id, request.attachmentIds ?? []).catch((error: unknown) => sendRefusal(error));
         const enqueued = await queue
@@ -3214,6 +3220,7 @@ function createSessionSendSubsystem(
             text: messageWithAttachments(turn.message, delivered),
             ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
             ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
+            ...(request.now === true ? { interrupt: true } : {}),
           })
           .catch((error: unknown) => sendRefusal(error));
         // On disk now — the first tick. The deliverer's first look types it into an empty box, and the
@@ -8927,6 +8934,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         delivery.queue ? new QueueingSends(queueingPorts, 'daemon', feature) : sends;
       const boardSends = producerSends('Board');
       const agendaNudgeSends = producerSends('Agenda');
+      const boardOwnerSends = delivery.queue ? new QueueingSends(queueingPorts, 'human', 'Board') : sends;
       const answerSends = delivery.queue ? new QueueingSends(queueingPorts, 'human', 'Agenda') : sends;
       /**
        * The declared-wait watcher, built LAST among the session slices because it drives two of them.
@@ -9013,6 +9021,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         () => attachmentDaemonId,
         laneSets,
         boardSends,
+        boardOwnerSends,
         async sessionId => {
           const listed = await agenda.list(sessionId);
           if (!listed.ok) throw new Error(listed.error.message);
