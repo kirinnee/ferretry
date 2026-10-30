@@ -253,6 +253,39 @@ describe('FileTranscriptChanges', () => {
     should(heard).be.empty();
   });
 
+  it('should look again, once, when a look is asked for while another is still running', async () => {
+    // Arrange — the first look for the transcript is held open, so the next ask arrives while it runs.
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const asked: number[] = [];
+    const watch = new FileTranscriptChanges({
+      file: async () => {
+        asked.push(asked.length + 1);
+        if (asked.length === 1) await gate;
+        return undefined;
+      },
+      stat: async () => undefined,
+      files: { subscribe: () => ({ close: () => {} }) },
+      clock: { now: () => NOW },
+    }).watch('s1', () => {});
+    cleanups.add(() => watch.close());
+    await waitFor(() => asked.length === 1, 'the first look for the transcript to start');
+
+    // Act — two more asks while the first look is open fold into one repeat, which runs after it ends.
+    watch.refresh();
+    watch.refresh();
+    release?.();
+    await waitFor(() => asked.length >= 2, 'the repeated look for the transcript to start');
+    // The repeat is a look like any other: a sentinel ask after it runs exactly once more, proving none was queued twice.
+    watch.refresh();
+    await waitFor(() => asked.length >= 3, 'the sentinel look for the transcript to start');
+
+    // Assert
+    should(asked).deepEqual([1, 2, 3]);
+  });
+
   it('should say nothing about a file whose stamp cannot be read, rather than guess it changed', async () => {
     // Arrange — a stamp read that fails before and after the notice reads as "no stamp" both times.
     const root = await workspace();
