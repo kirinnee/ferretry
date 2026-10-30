@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import type { ResolvedAgendaItem } from '@ferretry/protocol';
 import { byNewestResolution, ResolvedRow, resolvedWhen } from '../../../src/features/agenda/agenda-resolved.tsx';
 import '../../support/dom.ts';
-import { type Mounted, mount, must } from '../../support/dom.ts';
+import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 
 const record = (
   id: string,
@@ -86,5 +86,78 @@ describe('the resolved records', () => {
     expect(row.textContent).toContain('dismissed by you');
     expect(row.textContent).toContain('Superseded by A3.');
     expect(row.getAttribute('data-highlighted')).toBe('true');
+  });
+});
+
+describe('a long answer in a resolved row', () => {
+  const longAnswer = record('A1', '2026-07-31T10:00:00.000Z', {
+    response: { kind: 'open-question', answer: 'a long answer '.repeat(60) },
+  });
+  /** happy-dom lays nothing out: say how tall the text is against a two-line box. */
+  const overflowing = (on: boolean) => {
+    const proto = HTMLElement.prototype;
+    const saved = ['scrollHeight', 'clientHeight'].map(
+      key => [key, Object.getOwnPropertyDescriptor(proto, key)] as const,
+    );
+    Object.defineProperty(proto, 'scrollHeight', { configurable: true, get: () => (on ? 120 : 20) });
+    Object.defineProperty(proto, 'clientHeight', { configurable: true, get: () => 40 });
+    return () => {
+      for (const [key, descriptor] of saved) {
+        if (descriptor === undefined) Reflect.deleteProperty(proto, key);
+        else Object.defineProperty(proto, key, descriptor);
+      }
+    };
+  };
+
+  test('is held to two lines with a "Show more" that opens it and "Show less" that folds it back', async () => {
+    const restore = overflowing(true);
+    try {
+      view = await mount(
+        <ul>
+          <ResolvedRow id="attn-A1" record={longAnswer} />
+        </ul>,
+      );
+      const c = must(view.container, 'view');
+      const answer = must(c.querySelector('.fy-attn-panel__record-answer'), 'answer');
+      const more = must(c.querySelector<HTMLElement>('[data-agenda-record-more]'), 'show more');
+      expect(answer.hasAttribute('data-clamped')).toBe(true);
+      expect(more.textContent).toBe('Show more');
+      expect(more.getAttribute('aria-expanded')).toBe('false');
+      expect(more.getAttribute('aria-controls')).toBe(answer.id);
+      await interact(() => more.click());
+      expect(answer.hasAttribute('data-clamped')).toBe(false);
+      expect(more.textContent).toBe('Show less');
+      expect(more.getAttribute('aria-expanded')).toBe('true');
+      await interact(() => more.click());
+      expect(answer.hasAttribute('data-clamped')).toBe(true);
+    } finally {
+      restore();
+    }
+  });
+
+  test('offers no "Show more" when it already fits in two lines', async () => {
+    const restore = overflowing(false);
+    try {
+      view = await mount(
+        <ul>
+          <ResolvedRow id="attn-A1" record={longAnswer} />
+        </ul>,
+      );
+      expect(must(view.container, 'view').querySelector('[data-agenda-record-more]')).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  test('keeps the title, the outcome chip and the date on every row', async () => {
+    view = await mount(
+      <ul>
+        <ResolvedRow id="attn-A1" record={longAnswer} />
+      </ul>,
+    );
+    const row = must(must(view.container, 'view').querySelector('[data-agenda-record]'), 'row');
+    expect(row.querySelector('.fy-attn-panel__record-subject')?.textContent).toBe('Ask A1');
+    expect(row.querySelector('.fy-attn-panel__record-meta')?.textContent).toContain('done by you');
+    expect(row.querySelector('.fy-attn-panel__record-meta')?.textContent).toMatch(/Jul|Aug/);
   });
 });
