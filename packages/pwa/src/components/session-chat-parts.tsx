@@ -103,15 +103,15 @@ export function PendingAttachmentStrip({
               </span>
               {entry.status === 'failed' ? (
                 <span className="block text-err">{entry.error}</span>
+              ) : entry.status === 'deferred' ? (
+                <span className="block text-muted">{entry.note}</span>
               ) : (
                 <span className="flex min-w-0 items-center gap-1">
                   <span className="shrink-0 text-faint">{formatAttachmentSize(entry.file.size)}</span>
                   <span aria-hidden="true" className="shrink-0 text-faint">
                     ·
                   </span>
-                  {entry.status === 'deferred' ? (
-                    <span className="truncate text-muted">{entry.note}</span>
-                  ) : entry.status === 'uploading' ? (
+                  {entry.status === 'uploading' ? (
                     <span className="inline-flex min-w-0 items-center gap-1 text-muted">
                       <Loader2
                         aria-hidden="true"

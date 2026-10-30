@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import { LedgerMessage } from '../../src/components/ledger-message.tsx';
+import { TranscriptRow } from '../../src/components/transcript-row.tsx';
 import { QueueActionsContext } from '../../src/components/queue-actions-context.tsx';
 import { QueueActionError, type QueueActions } from '../../src/lib/send-queue.ts';
 import type { LedgerSendRecord } from '../../src/lib/send-ledger.ts';
@@ -34,6 +35,39 @@ const mount = (record: LedgerSendRecord, actions: QueueActions | null): ReactTes
       <LedgerMessage {...handlers} record={record} />
     </QueueActionsContext.Provider>,
   );
+
+describe('a message still on this device with files to upload', () => {
+  const waiting = (files?: readonly string[]): LedgerSendRecord =>
+    queued('queued', {
+      outbox: { reason: 'waiting for connection', position: 1, of: 1, ...(files === undefined ? {} : { files }) },
+    });
+  const filesOf = (r: ReactTestRenderer): string[] =>
+    r.root
+      .findAll(node => node.props['data-outbox-files'] !== undefined && typeof node.type === 'string')
+      .map(textOfNode);
+
+  test('names each file and says it uploads when the connection is back', () => {
+    const r = mount(waiting(['site-photo.png']), null);
+    expect(filesOf(r)).toEqual(['site-photo.pnguploads when the connection is back']);
+  });
+
+  test('says nothing about files when it has none', () => {
+    expect(filesOf(mount(waiting(), null))).toEqual([]);
+  });
+
+  test("the reader's own bubble names them too", () => {
+    const record = { ...waiting(['site-photo.png']), senderKind: 'human' as const };
+    const r = render(
+      <TranscriptRow
+        answered={false}
+        entry={
+          { id: 'send:q-1', kind: 'ledger', text: record.message, ledger: record, placement: 'chronological' } as never
+        }
+      />,
+    );
+    expect(filesOf(r)).toEqual(['site-photo.pnguploads when the connection is back']);
+  });
+});
 
 const find = (r: ReactTestRenderer, attr: string): ReactTestInstance =>
   r.root.find(node => node.props[attr] !== undefined && typeof node.type === 'string');
