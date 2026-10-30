@@ -196,8 +196,11 @@ describe('the item view', () => {
     expect([...table.querySelectorAll('tbody th')].map(term => term.textContent)).toEqual(['WAL', 'ACID']);
     const history = must(body.querySelector('[data-agenda-history]'), 'the history');
     expect(history.textContent).toContain('SQLite');
-    expect(history.textContent).toContain('changed');
-    expect(body.lastElementChild?.contains(history)).toBe(true);
+    expect(history.textContent).toContain('edited');
+    const revisions = must(body.querySelector('[data-agenda-revisions]'), 'the revisions');
+    expect(revisions.textContent).toContain('v2');
+    expect(body.lastElementChild?.contains(revisions)).toBe(true);
+    expect(history.compareDocumentPosition(revisions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   test('folds nothing: no disclosure, no toggle, History and every section open as plain text', async () => {
