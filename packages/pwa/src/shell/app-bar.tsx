@@ -41,6 +41,7 @@ import {
   Search,
   Settings,
   ShieldCheck,
+  SquareKanban,
   Users,
 } from 'lucide-react';
 import { type ReactNode, useEffect, useId, useState } from 'react';
@@ -50,6 +51,7 @@ import type { DaemonId } from '../lib/daemon-connection.ts';
 import {
   daemonAnalyticsPath,
   daemonAgendaPath,
+  daemonBoardPath,
   daemonLearningPath,
   daemonProjectsPath,
   daemonSessionsPath,
@@ -109,6 +111,10 @@ export const SETTINGS_ENTRY = { label: 'Settings', title: 'Open appearance and d
 export const WARDEN_ENTRY = { label: 'Warden', title: 'Open fleet supervision and verdicts' } as const;
 export const LEARNING_ENTRY = { label: 'Learning', title: 'Open fleet learning proposals' } as const;
 export const ANALYTICS_ENTRY = { label: 'Analytics', title: 'Query all sessions and graph daily usage' } as const;
+export const BOARD_ENTRY = {
+  label: 'Board',
+  title: 'Every task on every machine as lanes: what is moving, stuck or waiting on you',
+} as const;
 export const PROJECTS_ENTRY = { label: 'Projects', title: 'Open registered workspaces and folders' } as const;
 export const AGENDA_ENTRY = {
   label: 'Inbox',
@@ -124,6 +130,7 @@ export const AGENDA_ENTRY = {
  */
 export const APP_BAR_DESTINATIONS = [
   { id: 'attention', ...AGENDA_ENTRY, path: daemonAgendaPath, Icon: Inbox },
+  { id: 'board', ...BOARD_ENTRY, path: daemonBoardPath, Icon: SquareKanban },
   { id: 'projects', ...PROJECTS_ENTRY, path: daemonProjectsPath, Icon: FolderKanban },
   { id: 'analytics', ...ANALYTICS_ENTRY, path: daemonAnalyticsPath, Icon: ChartNoAxesCombined },
   { id: 'warden', ...WARDEN_ENTRY, path: daemonWardenPath, Icon: ShieldCheck },
@@ -175,6 +182,8 @@ export const appBarDestinationForRoute = (route: Route): AppBarDestinationId | n
       return 'sessions';
     case 'attention':
       return 'attention';
+    case 'board':
+      return 'board';
     case 'projects':
     case 'project-detail':
     case 'project-lanes':
@@ -554,6 +563,7 @@ export interface AppTabBarProps {
 const TAB_ICONS: Readonly<Record<AppBarDestinationId, ReactNode>> = {
   sessions: <LayoutList size={20} aria-hidden="true" />,
   attention: <Inbox size={20} aria-hidden="true" />,
+  board: <SquareKanban size={20} aria-hidden="true" />,
   projects: <FolderKanban size={20} aria-hidden="true" />,
   analytics: <ChartNoAxesCombined size={20} aria-hidden="true" />,
   warden: <ShieldCheck size={20} aria-hidden="true" />,

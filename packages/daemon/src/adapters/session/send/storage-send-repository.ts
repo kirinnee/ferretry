@@ -143,6 +143,8 @@ export class StorageSendRepository implements SendRepository {
       turn: count(state.turn) ?? count(config.turn) ?? 0,
       ...(text(config.teammate) === undefined ? {} : { teammate: text(config.teammate) }),
       ...(typeof state.promptReady === 'boolean' ? { promptReady: state.promptReady } : {}),
+      ...(text(state.turnState) === undefined ? {} : { turnState: text(state.turnState) }),
+      ...(text(state.turnStateAt) === undefined ? {} : { turnStateAt: text(state.turnStateAt) }),
       ...(text(state.needsHumanKind) === undefined ? {} : { needsHumanKind: text(state.needsHumanKind) }),
       ...(toolUseId === undefined ? {} : { pendingQuestion: { toolUseId } }),
       ...(count(config.directSendMaxChars) === undefined

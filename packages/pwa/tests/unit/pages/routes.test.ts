@@ -4,6 +4,8 @@ import { daemonId } from '../../../src/lib/daemon-connection.ts';
 import {
   connectionPickerPath,
   daemonAnalyticsPath,
+  daemonBoardCardPath,
+  daemonBoardPath,
   daemonAnalyticsQueryPath,
   daemonAgendaPath,
   daemonImportedHistoryPath,
@@ -18,6 +20,7 @@ import {
   daemonWardenPath,
   decodeRouteSegment,
   parseRoute,
+  type Route,
   routePageKey,
   routePath,
   setupPath,
@@ -192,7 +195,7 @@ describe('route parsing', () => {
     });
   });
 
-  it('should redirect the legacy daemon tasks route to canonical sessions', () => {
+  it('should redirect the legacy daemon tasks route to the board', () => {
     // Arrange
     const route = parseRoute('/d/daemon-b/tasks');
 
@@ -201,10 +204,33 @@ describe('route parsing', () => {
 
     // Assert
     should(actual).deepEqual([
-      { kind: 'legacy-tasks-redirect', to: { kind: 'sessions', daemonId: daemonB } },
-      '/d/daemon-b',
-      'sessions:"daemon-b"',
+      { kind: 'legacy-tasks-redirect', to: { kind: 'board', daemonId: daemonB } },
+      '/d/daemon-b/board',
+      'board:"daemon-b"',
     ]);
+  });
+
+  it('should parse the board and a card opened on it, and write them back', () => {
+    // Act
+    const routes = [
+      parseRoute('/d/daemon-b/board'),
+      parseRoute('/d/daemon-b/board/F12'),
+      parseRoute('/d/daemon-b/board/a%20b'),
+    ];
+
+    // Assert
+    should(routes).deepEqual([
+      { kind: 'board', daemonId: daemonB },
+      { kind: 'board', daemonId: daemonB, taskId: 'F12' },
+      { kind: 'board', daemonId: daemonB, taskId: 'a b' },
+    ]);
+    should([daemonBoardPath(daemonB), daemonBoardCardPath(daemonB, 'F12'), routePath(routes[1] as Route)]).deepEqual([
+      '/d/daemon-b/board',
+      '/d/daemon-b/board/F12',
+      '/d/daemon-b/board/F12',
+    ]);
+    should(routePath(routes[0] as Route)).equal('/d/daemon-b/board');
+    should(routePageKey(routes[1] as Route)).equal(routePageKey(routes[0] as Route));
   });
 
   it('should send unscoped and invalid daemon paths to the connection picker', () => {

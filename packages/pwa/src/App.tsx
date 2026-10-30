@@ -39,6 +39,7 @@ import type { SendDismiss, SendExpand } from './components/settled-send-note.tsx
 import { useAgendaSessionActions } from './features/agenda/agenda-session-actions.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { AgendaInboxPage } from './features/agenda/agenda-inbox-page.tsx';
+import { BoardPage } from './features/board/board-page.tsx';
 import { LinkBehaviourProvider } from './features/browser/external-link.tsx';
 import { useLocalComputer } from './features/browser/use-local-computer.ts';
 import { tunnelSwitchOffer } from './features/carrier/carrier-preference-selector.tsx';
@@ -185,6 +186,7 @@ import type {
 } from './lib/notify.ts';
 import { installPortraitLock } from './lib/orientation-lock.ts';
 import {
+  type BoardPageProps,
   type DaemonPageProps,
   PageHost,
   type PageHostSlots,
@@ -473,6 +475,8 @@ const pageCrumbs = (route: PageRoute): readonly Crumb[] => {
       return [{ href: sessions, label: 'Sessions' }, { label: route.sessionId }];
     case 'attention':
       return [{ href: sessions, label: 'Sessions' }, { label: 'Inbox' }];
+    case 'board':
+      return [{ href: sessions, label: 'Sessions' }, { label: 'Board' }];
     case 'settings':
       return [{ href: sessions, label: 'Sessions' }, { label: 'Settings' }];
     case 'warden':
@@ -1988,6 +1992,55 @@ function AgendaRoute({ connection }: DaemonPageProps) {
   );
 }
 
+/**
+ * The Board across every paired machine. The query string carries the filters and the view, so a view is a
+ * link; a change replaces the entry (the back button leaves the board, it does not walk every filter).
+ */
+function BoardRoute(_props: BoardPageProps) {
+  const store = useAppStore();
+  const { navigate } = useRouter();
+  const { connections } = useConnectionSnapshot();
+  const savedOrder = useMachineOrder(store.controls).saved;
+  const machines = useMemo(
+    () =>
+      machineDisplayOrder(connections, savedOrder).map(record => ({
+        connection: record,
+        name: distinctDaemonName(record, connections),
+      })),
+    [connections, savedOrder],
+  );
+  const fleet = useSyncExternalStore(
+    listener => store.fleet.subscribe(listener),
+    () => store.fleet.getSnapshot(),
+  );
+  const callsigns = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const slice of fleet.daemons.values()) {
+      for (const session of slice.sessions ?? []) {
+        if (session.config.teammate !== undefined) names.set(session.config.id, session.config.teammate);
+      }
+    }
+    return names;
+  }, [fleet]);
+  const phone = useLayoutMode() === 'drawer';
+  const onSearch = useCallback(
+    (search: string) => navigate(`${window.location.pathname}${search === '' ? '' : `?${search}`}`, { replace: true }),
+    [navigate],
+  );
+  return (
+    <BoardPage
+      agenda={store.attention}
+      callsigns={callsigns}
+      compact={phone}
+      machines={machines}
+      onNavigate={navigate}
+      onSearch={onSearch}
+      search={window.location.search}
+      store={store.board}
+    />
+  );
+}
+
 function ImportedHistoryRoute({ connection }: DaemonPageProps) {
   const store = useAppStore();
   return (
@@ -2056,6 +2109,7 @@ const PAGE_SLOTS: PageHostSlots = {
   Analytics: AnalyticsRoute,
   Learning: LearningRoute,
   Attention: AgendaRoute,
+  Board: BoardRoute,
   ImportedHistory: ImportedHistoryRoute,
   MachineSetup: MachineSetupRoute,
 };

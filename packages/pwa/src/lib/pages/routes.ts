@@ -79,6 +79,16 @@ export interface DaemonAgendaRoute {
   readonly daemonId: DaemonId;
 }
 
+/**
+ * The Board: every card on every paired machine, as lanes. `taskId` is the card the address names; the Board
+ * page stays the same page when it changes (the card detail opens over it), so it is not part of the page key.
+ */
+export interface DaemonBoardRoute {
+  readonly kind: 'board';
+  readonly daemonId: DaemonId;
+  readonly taskId?: string;
+}
+
 export interface DaemonSettingsRoute {
   readonly kind: 'settings';
   readonly daemonId: DaemonId;
@@ -126,6 +136,7 @@ export type DaemonPageRoute =
   | DaemonProjectLanesRoute
   | DaemonSessionRoute
   | DaemonAgendaRoute
+  | DaemonBoardRoute
   | DaemonSettingsRoute
   | DaemonWardenRoute
   | DaemonAnalyticsRoute
@@ -138,7 +149,7 @@ export type PageRoute = ConnectionPickerRoute | SetupRoute | DaemonPageRoute;
 /** A compatibility result that callers can replace with its canonical target. */
 export interface LegacyTasksRedirectRoute {
   readonly kind: 'legacy-tasks-redirect';
-  readonly to: DaemonSessionsRoute;
+  readonly to: DaemonBoardRoute;
 }
 
 /** The Inbox's old `/attention` address, which now redirects to `/inbox` keeping its query. */
@@ -219,6 +230,13 @@ export const daemonSessionPath = (id: DaemonId, sessionId: string): string => {
 /** Builds the Inbox pathname, under the machine on screen. `/attention` is the old spelling and redirects here. */
 export const daemonAgendaPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/inbox`;
 
+/** Builds the Board pathname, under the machine on screen. */
+export const daemonBoardPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/board`;
+
+/** Builds one card's address on the Board: `/d/<id>/board/<taskId>`. */
+export const daemonBoardCardPath = (id: DaemonId, taskId: string): string =>
+  `${daemonBoardPath(id)}/${encodeURIComponent(taskId)}`;
+
 /** Builds the canonical settings pathname for one daemon. */
 export const daemonSettingsPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/settings`;
 
@@ -265,7 +283,13 @@ export const parseRoute = (pathname: string): Route => {
     if (destination === 'learning') return { kind: 'learning', daemonId: id };
     if (destination === 'history') return { kind: 'imported-history', daemonId: id };
     if (destination === 'setup') return { kind: 'machine-setup', daemonId: id };
-    if (destination === 'tasks') return { kind: 'legacy-tasks-redirect', to: { kind: 'sessions', daemonId: id } };
+    if (destination === 'board') return { kind: 'board', daemonId: id };
+    if (destination === 'tasks') return { kind: 'legacy-tasks-redirect', to: { kind: 'board', daemonId: id } };
+  }
+
+  if (destination === 'board' && sessionSegment !== undefined && remainder.length === 0) {
+    const taskId = decodeRouteSegment(sessionSegment);
+    return { kind: 'board', daemonId: id, taskId };
   }
 
   if (destination === 'analytics' && sessionSegment === 'query' && remainder.length === 0)
@@ -322,6 +346,10 @@ export const routePath = (route: Route): string => {
       return daemonSessionPath(route.daemonId, route.sessionId);
     case 'attention':
       return daemonAgendaPath(route.daemonId);
+    case 'board':
+      return route.taskId === undefined
+        ? daemonBoardPath(route.daemonId)
+        : daemonBoardCardPath(route.daemonId, route.taskId);
     case 'settings':
       return daemonSettingsPath(route.daemonId);
     case 'warden':

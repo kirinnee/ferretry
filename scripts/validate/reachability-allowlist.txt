@@ -413,3 +413,7 @@ packages/pwa/src/lib/board-actions.ts # the board write verbs, reached through u
 
 # The lane editor (board U15), imported only from the .tsx app tree that the gate does not root.
 packages/pwa/src/lib/lane-editor-model.ts # the lane editor draft model, used by features/projects/lane-editor.tsx ← App.tsx ← main.tsx
+
+packages/pwa/src/lib/board-move.ts # the Board page's move rules (U11), reached from board-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
+packages/pwa/src/lib/board-present.ts # the Board card's meta line (U11), reached from board-card.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
+packages/pwa/src/lib/board-view.ts # the Board's List, Tree and Archive shapes (U11), reached from board-views.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots

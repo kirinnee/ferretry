@@ -107,6 +107,11 @@ describe('appBarDestinationForRoute', () => {
     expect(showsTabBar({ kind: 'attention', daemonId: DAEMON })).toBe(true);
   });
 
+  it('files the Board, and a card opened on it, under Board', () => {
+    expect(appBarDestinationForRoute({ kind: 'board', daemonId: DAEMON })).toBe('board');
+    expect(appBarDestinationForRoute({ kind: 'board', daemonId: DAEMON, taskId: 'F12' })).toBe('board');
+  });
+
   it('files a session, and starting one, under Sessions, and a project under Projects', () => {
     expect(appBarDestinationForRoute({ kind: 'sessions', daemonId: DAEMON })).toBe('sessions');
     expect(appBarDestinationForRoute({ kind: 'session', daemonId: DAEMON, sessionId: 'abc' })).toBe('sessions');
@@ -136,6 +141,7 @@ describe('APP_NAVIGATION', () => {
     expect(APP_NAVIGATION.map(place => place.id)).toEqual([
       'sessions',
       'attention',
+      'board',
       'projects',
       'analytics',
       'warden',
@@ -159,6 +165,7 @@ describe('AppBar destinations', () => {
     expect(hrefs).toEqual([
       '/d/workshop',
       '/d/workshop/inbox',
+      '/d/workshop/board',
       '/d/workshop/projects',
       '/d/workshop/analytics',
       '/d/workshop/warden',
@@ -179,6 +186,7 @@ describe('AppBar destinations', () => {
     expect(linksOf(mounted.container, 'Destinations').map(link => link.getAttribute('href'))).toEqual([
       '/d/laptop',
       '/d/laptop/inbox',
+      '/d/laptop/board',
       '/d/laptop/projects',
       '/d/laptop/analytics',
       '/d/laptop/warden',
@@ -194,7 +202,16 @@ describe('AppBar destinations', () => {
     const mounted = await mount(bar({ active: 'warden' }));
     const links = linksOf(mounted.container, 'Destinations');
 
-    expect(links.map(link => link.getAttribute('aria-current'))).toEqual([null, null, null, null, 'page', null, null]);
+    expect(links.map(link => link.getAttribute('aria-current'))).toEqual([
+      null,
+      null,
+      null,
+      null,
+      null,
+      'page',
+      null,
+      null,
+    ]);
     expect(links.map(link => link.textContent)).toEqual(APP_NAVIGATION.map(destination => destination.label));
     expect(links.map(link => link.getAttribute('data-app-nav'))).toEqual(APP_NAVIGATION.map(place => place.id));
     expect(links.map(link => link.getAttribute('title'))).toEqual(APP_NAVIGATION.map(place => place.title));
@@ -203,7 +220,7 @@ describe('AppBar destinations', () => {
     await mounted.render(bar({ active: 'sessions' }));
     expect(
       linksOf(mounted.container, 'Destinations').map(link => link.getAttribute('aria-current') === 'page'),
-    ).toEqual([true, false, false, false, false, false, false]);
+    ).toEqual([true, false, false, false, false, false, false, false]);
 
     await mounted.unmount();
   });

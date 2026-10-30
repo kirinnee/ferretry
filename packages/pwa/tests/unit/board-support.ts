@@ -184,3 +184,28 @@ export const deferred = <T>(): {
 export const flush = async (): Promise<void> => {
   for (let turn = 0; turn < 5; turn += 1) await new Promise(done => setTimeout(done, 0));
 };
+
+/** The merged board of one machine, for tests that draw cards and need real `BoardModel` cards. */
+export const boardModelOf = async (
+  cards: readonly BoardTaskView[],
+  filters?: import('../../src/lib/board-model.ts').BoardFilters,
+) => {
+  const { mergeBoard, NO_BOARD_FILTERS } = await import('../../src/lib/board-model.ts');
+  return mergeBoard(
+    [
+      {
+        daemonId: laptop.daemonId,
+        machine: 'laptop',
+        version: '4.110.0',
+        cards,
+        laneSets: new Map([
+          [PROJECT, laneSetFor()],
+          [OTHER_PROJECT, laneSetFor(OTHER_PROJECT)],
+        ]),
+        counts: COUNTS,
+        quarantined: [],
+      },
+    ],
+    filters ?? NO_BOARD_FILTERS,
+  );
+};
