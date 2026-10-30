@@ -590,11 +590,38 @@ describe('tmux session exit observer', () => {
     await subject.files.writeTextAtomic(path, `${JSON.stringify(legacy)}\n`);
     const unrecorded = await as38.observe();
 
-    // Assert — tmux printed no pid, the stamp proved the pane, and a stampless registration proves nothing.
+    // Assert — tmux printed no pid and the stamp proved the pane; a stampless registration is settled on
+    // its pane id alone, and the observation says so rather than leaving the session running.
     should(proof.stdout).match(/^%[0-9]+\|\|1\|[0-9]+\n$/u);
     should(registration?.sessionCreated).be.a.Number();
     should(recorded.map(item => item.exit)).deepEqual([{ kind: 'exited', exitStatus: 3, signal: undefined }]);
-    should(unrecorded).deepEqual([]);
+    should(unrecorded.map(item => item.exit)).deepEqual([
+      { kind: 'exited', exitStatus: 3, signal: undefined, byPaneIdOnly: true },
+    ]);
+  }, 20_000);
+
+  it('should stamp a registration written before the creation second was recorded, while its pane lives', async () => {
+    // Arrange — a live agent whose registration predates the stamp, as one launched before the upgrade.
+    const subject = await fixture(0);
+    const registration = await subject.store.registration(DAEMON, subject.id);
+    if (registration === undefined) throw new Error('the pane registration is missing');
+    const { sessionCreated, ...legacy } = registration;
+    const path = createSessionPaths(subject.storage.paths, subject.id).terminalPane;
+    await subject.files.writeTextAtomic(path, `${JSON.stringify(legacy)}\n`);
+
+    // Act — one look while it runs; then it dies on a tmux that prints no pid for it.
+    const whileAlive = await observer(subject).observe();
+    const stamped = await subject.store.registration(DAEMON, subject.id);
+    await exitHarness(subject);
+    const afterDeath = await observer(
+      subject,
+      asTmux38(metadataAnswers(subject, () => ({ code: 0, stdout: '1|0|' }))),
+    ).observe();
+
+    // Assert — stamped with tmux's own second once, and so proven outright after the pid was gone.
+    should(whileAlive).deepEqual([]);
+    should(stamped?.sessionCreated).be.a.Number().and.equal(sessionCreated);
+    should(afterDeath.map(item => item.exit)).deepEqual([{ kind: 'exited', exitStatus: 0, signal: undefined }]);
   }, 20_000);
 
   it('should settle a pane a signal ended at once, naming the signal', async () => {

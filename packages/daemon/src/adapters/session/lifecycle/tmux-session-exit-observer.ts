@@ -12,11 +12,12 @@ import type { RegisteredTerminalPane } from '../../../lib/session/reap.ts';
 import { parseSessionId, type SessionId } from '../../../lib/session-id.ts';
 import {
   hasSessionArguments,
-  isRegisteredPane,
   isTmuxServerAbsent,
   paneProofArguments,
   parsePaneSighting,
+  provePane,
   sessionTarget,
+  stampToRecord,
   type TmuxCommandPort,
 } from '../../../lib/tmux/index.ts';
 import type { DaemonStorage } from '../../storage/session-storage.ts';
@@ -102,16 +103,19 @@ function samePane(left: RegisteredTerminalPane, right: RegisteredTerminalPane): 
  *
  * A DEAD PANE MUST BE THE REGISTERED PANE. Every launch sets `remain-on-exit`, so an agent that ends
  * leaves its pane behind marked dead, still carrying its id — and, before tmux 3.8, the pid it ran.
- * The pane must be the registration's by the one shared proof (`isRegisteredPane`): its id, the second
- * its session was created, and its pid wherever tmux still prints one; otherwise the observation says
- * nothing — a pane id tmux handed to a newer pane is not ours.
+ * The pane must be the registration's by the one shared proof (`provePane`): its id, the second its
+ * session was created, and its pid wherever tmux still prints one; otherwise the observation says
+ * nothing — a pane id tmux handed to a newer pane is not ours. A registration written before the
+ * creation second was recorded is given it while its pane is alive and proven by pid; one whose pane
+ * died first, on a tmux 3.8 that shows no pid, is settled on its pane id alone and its reason says so —
+ * never left reading `running`.
  * The process-start incarnation is deliberately NOT consulted: it is how a LIVE pid is told apart
  * from a reused one, and a dead pane has no live process to ask; tmux's own `pane_dead` is the proof.
  *
  * NOTHING IS KILLED AND NO HARNESS IS LAUNCHED. The observation is three read-only tmux queries per
  * running session, plus one `run-shell -b true` for a dead pane still missing its status, so tmux
- * collects a child whose SIGCHLD it lost (see `REAP_NUDGE`); the settle is one state write plus one
- * journal event.
+ * collects a child whose SIGCHLD it lost (see `REAP_NUDGE`), and once per older registration the write
+ * that stamps it; the settle is one state write plus one journal event.
  *
  * THE ONE PIECE OF STATE is how many consecutive ticks each dead pane has gone without an exit
  * status. It is memory only and keyed by the whole pane identity, so a restarted daemon simply
@@ -216,7 +220,14 @@ export class TmuxSessionExitObserver implements SessionExitPort {
     const proof = await this.tmux.execute(paneProofArguments(registration.tmuxSession));
     if (proof.code !== 0) return undefined;
     const sighting = parsePaneSighting(proof.stdout);
-    if (sighting === undefined || !isRegisteredPane(sighting, registration)) return undefined;
+    if (sighting === undefined) return undefined;
+    const proven = provePane(sighting, registration);
+    if (proven === 'refuted') return undefined;
+    // A registration from before the creation second was recorded earns it while its pane is alive and
+    // still proven by pid — so it is still proven once it dies on tmux 3.8. Best effort: one write.
+    const stamp = stampToRecord(sighting, registration);
+    if (stamp !== undefined)
+      await this.panes.recordSessionCreated(this.daemonId, registration, stamp).catch(() => undefined);
     const exitResult = await this.tmux.execute([
       'display-message',
       '-p',
@@ -231,6 +242,11 @@ export class TmuxSessionExitObserver implements SessionExitPort {
     const signal = paneNumber(signalField);
     // Best effort: a refused nudge changes nothing, and the missing-status bound still settles.
     if (exitStatus === undefined && signal === undefined) await this.tmux.execute(REAP_NUDGE).catch(() => undefined);
-    return { kind: 'exited', exitStatus, signal };
+    return {
+      kind: 'exited',
+      exitStatus,
+      signal,
+      ...(proven === 'pane-id-only' ? { byPaneIdOnly: true as const } : {}),
+    };
   }
 }

@@ -516,6 +516,28 @@ describe('a registration ledger with one damaged document', () => {
     should((await subject.store.sessions(DAEMON)).map(value => value.sessionId)).deepEqual(['reap-session']);
   });
 
+  it('should stamp an older registration once, and never one that was replaced or already stamped', async () => {
+    // Arrange — the registration as the launch wrote it, rewritten as one from before the stamp.
+    const subject = await fixture();
+    await subject.registrar.register(subject.record);
+    const id = subject.record.config.id;
+    const written = await subject.store.registration(DAEMON, id);
+    if (written?.sessionCreated === undefined) throw new Error('the launch did not record the creation second');
+    const { sessionCreated, ...legacy } = written;
+    const path = createSessionPaths(subject.storage.paths, id).terminalPane;
+    await subject.files.writeTextAtomic(path, `${JSON.stringify(legacy)}\n`);
+
+    // Act
+    const replaced = await subject.store.recordSessionCreated(DAEMON, { ...legacy, pid: legacy.pid + 1 }, 7);
+    const first = await subject.store.recordSessionCreated(DAEMON, legacy, sessionCreated);
+    const again = await subject.store.recordSessionCreated(DAEMON, { ...legacy, sessionCreated }, 8);
+    const missing = await subject.store.recordSessionCreated(DAEMON, { ...legacy, sessionId: 'never-registered' }, 9);
+
+    // Assert
+    should([replaced, first, again, missing]).deepEqual([false, true, false, false]);
+    should(await subject.store.registration(DAEMON, id)).deepEqual({ ...legacy, sessionCreated });
+  });
+
   it('should refuse every shape that is not a complete, safe registration', async () => {
     // Arrange -- each of these is a distinct way a document stops being authority for a pane.
     const shapes: readonly { readonly text: string; readonly reported: RegExp }[] = [

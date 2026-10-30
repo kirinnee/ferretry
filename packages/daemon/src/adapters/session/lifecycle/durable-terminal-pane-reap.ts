@@ -232,6 +232,27 @@ export class DurableTerminalPaneStore {
     return text === undefined ? undefined : durableRegistration(text, daemonId, sessionId);
   }
 
+  /**
+   * Adds the second the pane's session was created to a registration written before it was recorded —
+   * once, and only while the file on disk is still exactly `registration`. A registration replaced
+   * meanwhile (a resume re-registered) or already stamped is left alone. Answers whether it wrote.
+   */
+  async recordSessionCreated(
+    daemonId: string,
+    registration: RegisteredTerminalPane,
+    sessionCreated: number,
+  ): Promise<boolean> {
+    const id = parseSessionId(registration.sessionId);
+    const current = await this.registration(daemonId, id);
+    if (current === undefined || JSON.stringify(current) !== JSON.stringify(registration)) return false;
+    if (current.sessionCreated !== undefined) return false;
+    await this.files.writeTextAtomic(
+      createSessionPaths(this.paths, id).terminalPane,
+      `${JSON.stringify({ ...current, sessionCreated })}\n`,
+    );
+    return true;
+  }
+
   /** The reap's view: a ledger with any damage in it is not a ledger a sweep may act on. */
   async registrations(daemonId: string): Promise<readonly RegisteredTerminalPane[]> {
     const scanned = await this.scan(daemonId);

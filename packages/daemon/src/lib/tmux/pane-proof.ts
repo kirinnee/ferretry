@@ -67,14 +67,33 @@ export function parsePaneSighting(output: string): PaneSighting | undefined {
 }
 
 /**
- * Whether `sighting` is the pane `stamp` registered: the same id, the same session creation second
- * when the stamp has one, and the same pid whenever tmux printed one. A pane with no pid is proven only
- * when it is dead AND the stamp's creation second matches — a registration written before the second
- * was recorded cannot prove a dead pane on tmux 3.8, and says nothing rather than guess.
+ * Whether `sighting` is the pane `stamp` registered:
+ *
+ * - `proven`: the same id, the same session creation second when the stamp has one, and the same pid
+ *   whenever tmux printed one. A pane with no pid is proven only when it is dead AND the creation
+ *   second matches.
+ * - `pane-id-only`: a DEAD pane with no pid against a stamp written before the creation second was
+ *   recorded — the same id in the session the registration names, and nothing more to check it by.
+ *   The caller must say that this is all it rests on, never pass it off as `proven`.
+ * - `refuted`: anything else, which says nothing about the registered pane.
  */
-export function isRegisteredPane(sighting: PaneSighting, stamp: PaneStamp): boolean {
-  if (sighting.paneId !== stamp.paneId) return false;
-  if (stamp.sessionCreated !== undefined && sighting.sessionCreated !== stamp.sessionCreated) return false;
-  if (sighting.pid !== undefined) return sighting.pid === stamp.pid;
-  return sighting.dead && stamp.sessionCreated !== undefined;
+export function provePane(sighting: PaneSighting, stamp: PaneStamp): 'proven' | 'pane-id-only' | 'refuted' {
+  if (sighting.paneId !== stamp.paneId) return 'refuted';
+  if (stamp.sessionCreated !== undefined && sighting.sessionCreated !== stamp.sessionCreated) return 'refuted';
+  if (sighting.pid !== undefined) return sighting.pid === stamp.pid ? 'proven' : 'refuted';
+  if (!sighting.dead) return 'refuted';
+  return stamp.sessionCreated === undefined ? 'pane-id-only' : 'proven';
+}
+
+/**
+ * The creation second to add to a stamp written before it was recorded, or `undefined` when there is
+ * nothing to add or nothing to prove it by. Only a LIVE pane whose id and pid both match the stamp
+ * earns it: that is the registered pane by the old proof, so its session's second is the one the
+ * registration would have recorded — and once recorded, it still proves the pane after it dies on
+ * tmux 3.8, where the pid is gone.
+ */
+export function stampToRecord(sighting: PaneSighting, stamp: PaneStamp): number | undefined {
+  if (stamp.sessionCreated !== undefined || sighting.dead) return undefined;
+  if (sighting.paneId !== stamp.paneId || sighting.pid !== stamp.pid) return undefined;
+  return sighting.sessionCreated;
 }

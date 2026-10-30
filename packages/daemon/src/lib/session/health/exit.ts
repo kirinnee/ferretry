@@ -20,7 +20,16 @@ export type SessionPaneExit =
    * tmux kept the pane after its program ended. `exitStatus` is `pane_dead_status`, set when the
    * program exited; `signal` is `pane_dead_signal`, set INSTEAD when a signal ended it.
    */
-  | { readonly kind: 'exited'; readonly exitStatus?: number | undefined; readonly signal?: number | undefined }
+  | {
+      readonly kind: 'exited';
+      readonly exitStatus?: number | undefined;
+      readonly signal?: number | undefined;
+      /**
+       * Proven by pane id alone (`provePane`'s `pane-id-only`): tmux 3.8 prints no pid for the dead pane,
+       * and the registration predates the session-creation stamp that would prove it. Said in the reason.
+       */
+      readonly byPaneIdOnly?: true;
+    }
   /** tmux no longer has the pane's session at all, so how the program ended was never recorded. */
   | { readonly kind: 'gone' };
 
@@ -66,13 +75,18 @@ export function claimsRunningAgent(status: string | undefined): boolean {
   return status !== undefined && RUNNING_STATUSES.has(status);
 }
 
+/** What a reason adds when the dead pane was matched on its id alone. */
+const BY_PANE_ID_ONLY =
+  " (matched on its pane id alone: tmux 3.8 shows no pid for a dead pane, and this session's pane was registered before Ferretry recorded the stamp that proves it)";
+
 function exitReason(exit: SessionPaneExit): string {
   if (exit.kind === 'gone')
     return 'the agent is no longer running: its terminal is gone, so how it exited was not recorded';
-  if (exit.exitStatus !== undefined) return `the agent exited on its own (exit status ${exit.exitStatus})`;
+  const how = exit.byPaneIdOnly === true ? BY_PANE_ID_ONLY : '';
+  if (exit.exitStatus !== undefined) return `the agent exited on its own (exit status ${exit.exitStatus})${how}`;
   return exit.signal === undefined
-    ? 'the agent exited on its own; how it exited was not recorded'
-    : `the agent was ended by signal ${exit.signal}`;
+    ? `the agent exited on its own; how it exited was not recorded${how}`
+    : `the agent was ended by signal ${exit.signal}${how}`;
 }
 
 /**
