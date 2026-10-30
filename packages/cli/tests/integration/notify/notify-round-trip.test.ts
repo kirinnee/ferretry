@@ -67,7 +67,7 @@ describe('fy notify against a daemon', () => {
 
     // Assert
     should(seen[0]?.method).equal('POST');
-    should(seen[0]?.path).equal(`/v1/sessions/${SESSION}/attention`);
+    should(seen[0]?.path).equal(`/v1/sessions/${SESSION}/agenda`);
     should(seen[0]?.headers['x-ferretry-session-id']).equal(SESSION);
     should(seen[0]?.body).have.properties({ action: 'add', notice: true, ping: true, subject: 'Disk is full' });
     should(out.messages[0]).containEql('their phone buzzes');

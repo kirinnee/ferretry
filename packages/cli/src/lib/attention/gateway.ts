@@ -4,17 +4,33 @@ import {
   type AttentionSnapshot,
   AttentionSnapshotSchema,
 } from '@ferretry/protocol';
+import { requestWithRouteFallback } from '../agenda-wire/route-fallback.ts';
 import { FY_CLIENT_HEADER, FY_CLIENT_NAME, FY_SESSION_ID_HEADER } from '../session/connection.ts';
 import type { AttentionApiClient, IAttentionGateway } from './ports.ts';
 
-/** The daemon route that owns one session's attention board. */
+/** The daemon route that owns one session's agenda. */
+export function agendaBoardPath(sessionId: string): string {
+  return `/v1/sessions/${encodeURIComponent(sessionId)}/agenda`;
+}
+
+/** The daemon route that delivers a ferret's held answers now ("Send now"). */
+export function agendaRepliesPath(sessionId: string): string {
+  return `${agendaBoardPath(sessionId)}/replies`;
+}
+
+/** The older spelling of the agenda route, which a daemon that predates `agenda.wire.1` still answers. */
 export function attentionBoardPath(sessionId: string): string {
   return `/v1/sessions/${encodeURIComponent(sessionId)}/attention`;
 }
 
-/** The daemon route that delivers a ferret's held answers now ("Send now"). */
+/** The older spelling of the replies route. */
 export function repliesPath(sessionId: string): string {
   return `${attentionBoardPath(sessionId)}/replies`;
+}
+
+/** The agenda route and the older one an older daemon answers instead. */
+export function boardRoutes(sessionId: string): { readonly current: string; readonly legacy: string } {
+  return { current: agendaBoardPath(sessionId), legacy: attentionBoardPath(sessionId) };
 }
 
 const jsonPost = (body: unknown, headers: Record<string, string>): RequestInit => ({
@@ -37,7 +53,7 @@ function attributionHeaders(ownSessionId: string | undefined): Record<string, st
 }
 
 /**
- * Speaks the attention routes through the protocol client.
+ * Speaks the agenda routes (older daemons: the attention routes) through the protocol client.
  *
  * Requests and responses are both parsed against the protocol schemas. kteam cast the response
  * (`response as AttentionSnapshot`), so a daemon answering with an error envelope produced a crash
@@ -55,21 +71,27 @@ export class ProtocolAttentionGateway implements IAttentionGateway {
   }
 
   async snapshot(sessionId: string): Promise<AttentionSnapshot> {
-    return await this.client.request(attentionBoardPath(sessionId), AttentionSnapshotSchema, {
+    return await requestWithRouteFallback(this.client, boardRoutes(sessionId), AttentionSnapshotSchema, {
       headers: this.#headers,
     });
   }
 
   async apply(sessionId: string, request: AttentionActionRequest): Promise<AttentionSnapshot> {
     const body = AttentionActionRequestSchema.parse(request);
-    return await this.client.request(
-      attentionBoardPath(sessionId),
+    return await requestWithRouteFallback(
+      this.client,
+      boardRoutes(sessionId),
       AttentionSnapshotSchema,
       jsonPost(body, this.#headers),
     );
   }
 
   async sendReplies(sessionId: string): Promise<AttentionSnapshot> {
-    return await this.client.request(repliesPath(sessionId), AttentionSnapshotSchema, jsonPost({}, this.#headers));
+    return await requestWithRouteFallback(
+      this.client,
+      { current: agendaRepliesPath(sessionId), legacy: repliesPath(sessionId) },
+      AttentionSnapshotSchema,
+      jsonPost({}, this.#headers),
+    );
   }
 }
