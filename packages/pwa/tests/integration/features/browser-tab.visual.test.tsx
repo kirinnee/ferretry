@@ -1,6 +1,7 @@
 /**
  * The Browser tab and its "Test proxy" results, as a person sees them (docs/browser-proxy.md): the tab
- * with a saved proxy, then every state the test can show — busy, reachable (saved and unsaved), each
+ * with a saved proxy and its status line LOADED (the real tab, mounted against a scripted daemon: running via the
+ * proxy, stopped, running direct), then every state the test can show — busy, reachable (saved and unsaved), each
  * failure class, a refusal — at a phone and a desktop width, light and dark, with no horizontal overflow
  * at either. Set `FY_BROWSER_PROXY_SHOTS_DIR` to keep the captures (they are not committed); every name,
  * address and secret name in them is fake.
@@ -14,7 +15,6 @@ import {
   BROWSER_PROXY_ERROR_CLASSES,
   type BrowserProxyErrorClass,
   type BrowserProxyTestResult,
-  type FleetMachineView,
 } from '@ferretry/protocol';
 import type { Browser } from 'playwright-core';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -22,54 +22,47 @@ import should from 'should';
 
 import { BrowserProxyTestBlock } from '../../../src/features/fleet/machine/browser-proxy-test-block.tsx';
 import type { ProxyTestShown } from '../../../src/features/fleet/machine/browser-proxy-test-result.tsx';
-import { BrowserTab } from '../../../src/features/fleet/machine/browser-tab.tsx';
 import { SetupSection } from '../../../src/features/fleet/setup/setup-ui.tsx';
-import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { sharedChromium } from '../support/chromium.ts';
 
 const packageDir = resolve(import.meta.dir, '../../..');
 const shotsDir = process.env.FY_BROWSER_PROXY_SHOTS_DIR ?? '';
 
-const machine: FleetMachineView = {
-  name: 'studio',
-  format: 'version-2',
-  setUp: true,
-  agentPermissions: 'auto',
-  defaultRuntime: 'claude-default',
-  agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
-  browserMode: 'headless',
-  browserProxy: {
-    url: 'http://proxy.example.test:8080',
-    bypass: ['*.internal.example.test', '10.0.0.0/8'],
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference, exactly as a file holds one
-    username: '${secret:PROXY_USER}',
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference, exactly as a file holds one
-    password: '${secret:PROXY_PASSWORD}',
-  },
-  tools: [],
-  runtimeCount: 1,
-  runningSessions: 0,
-  authority: { mayApply: true, applyRefusal: 'granted' },
+interface Resolved {
+  readonly tab: string;
+  readonly status: string;
+}
+
+/** The real tab, mounted in a child process against a scripted daemon, once its status line has loaded. */
+const resolvedTabs = async (): Promise<Readonly<Record<string, Resolved>>> => {
+  const child = Bun.spawn(
+    [process.execPath, join(import.meta.dir, '..', 'support', 'browser-tab-resolved-probe.tsx')],
+    {
+      cwd: packageDir,
+      stdout: 'pipe',
+      stderr: 'inherit',
+    },
+  );
+  const deadline = setTimeout(() => child.kill('SIGKILL'), 60_000);
+  const [exitCode, output] = await Promise.all([child.exited, new Response(child.stdout).text()]);
+  clearTimeout(deadline);
+  if (exitCode !== 0) throw new Error(`the resolved-status probe exited ${exitCode}`);
+  return JSON.parse(output.trim().split('\n').at(-1) ?? '{}') as Record<string, Resolved>;
 };
 
-const connection = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceId: 't' });
+let resolved: Readonly<Record<string, Resolved>> = {};
 
-const tab = (): string =>
-  renderToStaticMarkup(
-    <div className="flex min-w-0 flex-col gap-5 bg-bg p-panel">
-      <BrowserTab
-        connection={connection}
-        machineName="studio"
-        machine={machine}
-        online
-        checking={false}
-        onRetry={() => undefined}
-        createClient={async () => {
-          throw new Error('the picture asks nothing');
-        }}
-      />
-    </div>,
-  );
+const wrap = (body: string): string => `<div class="flex min-w-0 flex-col gap-5 bg-bg p-panel">${body}</div>`;
+
+const tab = (): string => wrap(resolved['running-via-proxy']?.tab ?? '');
+
+const STATUS_SCENES = [
+  { key: 'running-via-proxy', words: 'Running · via proxy http://proxy.example.test:8080 · signs in.' },
+  { key: 'stopped', words: 'Stopped · the next start goes via the saved proxy.' },
+  { key: 'running-direct', words: 'Running · direct, no proxy.' },
+] as const;
+
+const statusGallery = (): string => wrap(STATUS_SCENES.map(scene => resolved[scene.key]?.status ?? '').join(''));
 
 const SAVED_HINT = 'Tries one request through the proxy from studio, using the stored secrets. Nothing is saved.';
 const EDITED_HINT =
@@ -149,7 +142,8 @@ const viewports = [
 ] as const;
 const themes = ['light', 'dark'] as const;
 const scenes = [
-  { name: 'browser-tab', html: tab, mustSee: '[data-browser-tab]' },
+  { name: 'browser-tab', html: tab, mustSee: '[data-browser-state="running"]' },
+  { name: 'browser-status', html: statusGallery, mustSee: '[data-browser-state="stopped"]' },
   { name: 'browser-proxy-test', html: gallery, mustSee: '[data-setup-note="browser-proxy-test"]' },
 ] as const;
 
@@ -178,6 +172,7 @@ describe('Browser tab visual contract', () => {
     );
     if (result.status !== 0) throw new Error(`tailwind build failed: ${result.stderr?.toString() ?? ''}`);
     css = await readFile(stylesheet, 'utf8');
+    resolved = await resolvedTabs();
     if (shotsDir !== '') await mkdir(shotsDir, { recursive: true });
   }, 120_000);
 
@@ -215,6 +210,13 @@ describe('Browser tab visual contract', () => {
               );
               should(metrics.scroll).be.belowOrEqual(metrics.inner);
               should(await page.locator(scene.mustSee).first().isVisible()).be.true();
+              if (scene.name === 'browser-status') {
+                const said = await page.locator('[data-browser-state]').allTextContents();
+                should(said).eql(STATUS_SCENES.map(status => status.words));
+              }
+              if (scene.name === 'browser-tab') {
+                should(await page.locator('[data-browser-state]').first().textContent()).equal(STATUS_SCENES[0].words);
+              }
               // The app stylesheet clips the document to the viewport, so the viewport grows to the content.
               const height = await page.evaluate<number>("document.getElementById('root').scrollHeight");
               await page.setViewportSize({ width: viewport.width, height: Math.max(viewport.height, height) });
