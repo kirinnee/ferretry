@@ -6123,44 +6123,50 @@ describe('daemon boot lifecycle', () => {
   it('should trace every boot milestone so a stall names the step it stalled on', async () => {
     // Arrange
     const home = await tempDirectory('fyd-journal');
-    const cleanups: Array<() => void | Promise<void>> = [];
-    const said = recordingNotices();
-    let release = (): void => {};
-    const stopped = new Promise<void>(resolve => {
-      release = resolve;
-    });
-    const world = { ...(await worldAt(home, OS_CHOSEN_PORT, async () => await stopped)), notices: said.port };
+    const bootOnce = async (
+      address: number,
+    ): Promise<{ readonly code: number; readonly trail: string[]; readonly said: string; readonly port: number }> => {
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+      let release = (): void => {};
+      const stopped = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const world = { ...(await worldAt(home, address, async () => await stopped)), notices: said.port };
+
+      // Act
+      const booting = start(world, cleanups);
+      const port = await recordedPort(home);
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined))?.ok === true) break;
+        await Bun.sleep(25);
+      }
+      release();
+      const code = await booting;
+      await runCleanups(cleanups);
+      return { code, trail: said.steps.map(step => step.split(' — ')[0] ?? ''), said: said.steps.join('\n'), port };
+    };
+    const shared = ['starting', 'state home opened', 'configuration loaded'];
+    const served = ['listening', 'harnesses checked', 'subsystems mounted', 'serving', 'ready'];
 
     // Act
-    const booting = start(world, cleanups);
-    const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 200; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(25);
-    }
-    release();
-    const code = await booting;
-    await runCleanups(cleanups);
+    const first = await bootOnce(OS_CHOSEN_PORT);
+    const again = await bootOnce(first.port);
 
     // Assert — before this trail existed, a daemon that failed and a daemon that spent ninety
-    // seconds initializing successfully produced the same zero bytes.
-    should(code).equal(0);
-    const trail = said.steps.map(step => step.split(' — ')[0]);
-    should(trail).containDeepOrdered([
-      'starting',
-      'state home opened',
-      'configuration loaded',
-      'address is free',
-      // The address is bound as soon as it is decided, so liveness answers while the rest boots.
-      'listening',
-      'harnesses checked',
-      'subsystems mounted',
-      'serving',
-      'ready',
-    ]);
+    // seconds initializing successfully produced the same zero bytes. A first boot has the OS choose
+    // the address and records it; the next one claims what was recorded and finds it free.
+    should(first.code).equal(0);
+    should(first.trail).containDeepOrdered([...shared, 'address chosen', 'address recorded', ...served]);
+    should(again.code).equal(0);
+    should(again.port).equal(first.port);
+    // The address is bound as soon as it is decided, so liveness answers while the rest boots.
+    should(again.trail).containDeepOrdered([...shared, 'address is free', ...served]);
     // The state home and the address it serves are named, not merely implied.
-    should(said.steps.join('\n')).match(new RegExp(home.replaceAll('/', '\\/'), 'u'));
-    should(said.steps.join('\n')).match(new RegExp(`ready.*127\\.0\\.0\\.1:${String(port)}`, 'u'));
+    for (const booted of [first, again]) {
+      should(booted.said).match(new RegExp(home.replaceAll('/', '\\/'), 'u'));
+      should(booted.said).match(new RegExp(`ready.*127\\.0\\.0\\.1:${String(first.port)}`, 'u'));
+    }
   });
 
   /**
