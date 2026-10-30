@@ -44,8 +44,26 @@ function RecommendedTag() {
   );
 }
 
-/** A ⋯ button and the menu it opens: arrows move, Esc closes and returns focus, outside taps close. */
-export function ActionMenu({ busy, onDismiss }: { readonly busy: boolean; readonly onDismiss: () => void }) {
+/** An option the answer row has no button for: it lives in the menu as "D — label". */
+export interface MenuChoice {
+  readonly label: string;
+  readonly letter: string | undefined;
+  readonly onPick: () => void;
+}
+
+/**
+ * A ⋯ button and the menu it opens: arrows move, Esc closes and returns focus, outside taps close. It holds the
+ * options past the row's three (`extras`) and, unless `onDismiss` is absent, "Not needed…".
+ */
+export function ActionMenu({
+  busy,
+  onDismiss,
+  extras = [],
+}: {
+  readonly busy: boolean;
+  readonly onDismiss?: () => void;
+  readonly extras?: readonly MenuChoice[];
+}) {
   const menuId = useId();
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -67,7 +85,14 @@ export function ActionMenu({ busy, onDismiss }: { readonly busy: boolean; readon
       event.stopPropagation();
       setOpen(false);
       trigger.current?.focus();
+      return;
     }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    const items = [...(root.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
+    const at = items.indexOf(document.activeElement as HTMLElement);
+    event.preventDefault();
+    event.stopPropagation();
+    items[(at + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
   };
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: the keydown handler only routes Esc to the menu inside it
@@ -89,20 +114,38 @@ export function ActionMenu({ busy, onDismiss }: { readonly busy: boolean; readon
       </button>
       {open ? (
         <div aria-label="More actions" className="fy-attn-menu__list" id={menuId} role="menu">
-          <button
-            className="fy-attn-menu__item"
-            data-agenda-dismiss=""
-            onClick={() => {
-              setOpen(false);
-              onDismiss();
-            }}
-            role="menuitem"
-            tabIndex={-1}
-            type="button"
-          >
-            <X aria-hidden="true" size={14} />
-            Not needed…
-          </button>
+          {extras.map(extra => (
+            <button
+              className="fy-attn-menu__item"
+              data-agenda-extra={extra.label}
+              key={extra.label}
+              onClick={() => {
+                setOpen(false);
+                extra.onPick();
+              }}
+              role="menuitem"
+              tabIndex={-1}
+              type="button"
+            >
+              {extra.letter === undefined ? extra.label : `${extra.letter} — ${extra.label}`}
+            </button>
+          ))}
+          {onDismiss === undefined ? null : (
+            <button
+              className="fy-attn-menu__item"
+              data-agenda-dismiss=""
+              onClick={() => {
+                setOpen(false);
+                onDismiss();
+              }}
+              role="menuitem"
+              tabIndex={-1}
+              type="button"
+            >
+              <X aria-hidden="true" size={14} />
+              Not needed…
+            </button>
+          )}
         </div>
       ) : null}
     </div>

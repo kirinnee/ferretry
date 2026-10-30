@@ -9,9 +9,10 @@
  *                    mock-ups, then the history — what the owner said and what changed
  *   bottom  STICKY   the QUICK REPLIES (`agenda-quick-replies.tsx`), directly above the composer
  *
- * Top and bottom are flex items outside the scroller, so scrolling the body moves neither. ✕, Esc and ↓ go back
- * to the chat; ← ↑ → answer on a keyboard (a field or a button keeps its own keys). Everything typed goes through
- * the composer: this view has no text field of its own.
+ * Top and bottom are flex items outside the scroller, so scrolling the body moves neither. Every section is drawn
+ * open, in order, as plain Markdown: nothing in the body folds. ✕ and Esc go back to the chat; ↓ SKIPS — on to
+ * the next item, or back to the chat when there is none; ← ↑ → answer on a keyboard (a field or a button keeps
+ * its own keys). Everything typed goes through the composer: this view has no text field of its own.
  */
 
 import type { AgendaItem, AgendaQuestion } from '@ferretry/protocol';
@@ -95,7 +96,8 @@ export function AgendaItemView({
   const sendable = model.perQuestion && ready ? questionAnswersAction(questions, picks) : null;
   const status = agendaStatus(item, agendaAuthor(item, ferret), now);
   const ask = agendaAsk(item);
-  const pull = useDownSwipe(onClose, swipeable);
+  const skip = onNext ?? onClose;
+  const pull = useDownSwipe(skip, swipeable);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: focus the dialog again whenever another item opens
   useEffect(() => {
@@ -119,7 +121,7 @@ export function AgendaItemView({
     if (ownsKeys(event.target) || event.metaKey || event.ctrlKey || event.altKey) return;
     if (event.key === 'Escape' || event.key === 'ArrowDown') {
       event.preventDefault();
-      onClose();
+      (event.key === 'Escape' ? onClose : skip)();
       return;
     }
     const direction = { ArrowLeft: 'left', ArrowUp: 'up', ArrowRight: 'right' }[event.key] as
@@ -215,8 +217,9 @@ export function AgendaItemView({
         map={map}
         model={model}
         onAct={onAct}
-        onClose={onClose}
+        onSkip={skip}
         options={itemOptions(item)}
+        skipLabel={onNext === undefined ? 'Back to the chat' : 'Skip'}
         swipeable={swipeable}
         {...(item.waitingOn === 'ferret' && !model.notice ? { waitingOn: ferret } : {})}
         {...(model.perQuestion && asked.length > 0

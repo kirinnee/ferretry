@@ -49,6 +49,8 @@ export const letterOf = (options: readonly AgendaAskOption[], label: string): st
 
 /** A label this short is its own button text; a longer one is drawn as its letter. */
 const SHORT_LABEL_WORDS = 2;
+/** A single word longer than this would break mid-word in a third of a phone's width, so it is drawn as its letter. */
+const SHORT_WORD_CHARS = 8;
 
 /**
  * What a quick-reply button says: the label when it is one or two words ("Looks good"), else its letter. A label
@@ -56,10 +58,16 @@ const SHORT_LABEL_WORDS = 2;
  */
 export const shortLabel = (label: string, letter: string | undefined, lettered = false): string => {
   if (letter === undefined) return label;
-  return lettered || wordCount(label) > SHORT_LABEL_WORDS ? letter : label;
+  return lettered || tooLong(label) ? letter : label;
 };
 
-const wordCount = (label: string): number => label.trim().split(/\s+/u).length;
+const wordsOf = (label: string): string[] => label.trim().split(/\s+/u);
+
+/** Too long to stand as a button: more than two words, or one word that would break mid-word. */
+const tooLong = (label: string): boolean => {
+  const words = wordsOf(label);
+  return words.length > SHORT_LABEL_WORDS || words.some(word => word.length > SHORT_WORD_CHARS);
+};
 
 /**
  * Whether a ROW of quick replies is drawn as letters: one lettered label too long to stand as a button letters the
@@ -67,7 +75,7 @@ const wordCount = (label: string): number => label.trim().split(/\s+/u).length;
  */
 export const rowLettered = (
   replies: readonly { readonly label: string; readonly letter: string | undefined }[],
-): boolean => replies.some(reply => reply.letter !== undefined && wordCount(reply.label) > SHORT_LABEL_WORDS);
+): boolean => replies.some(reply => reply.letter !== undefined && tooLong(reply.label));
 
 /**
  * Whether the Options section earns its place: some option says more than its label, or some quick reply is

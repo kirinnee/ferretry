@@ -1,6 +1,7 @@
 /**
- * THE ↓ SWIPE THAT GOES BACK TO THE CHAT, on touch: drag down from the item view's head or its answer area, past
- * the distance an answer swipe needs (`swipeThreshold`), mostly straight. Esc, ↓ and ✕ do the same elsewhere.
+ * THE ↓ SWIPE THAT SKIPS THE ITEM, on touch: drag down from the item view's head or its answer area, past the
+ * distance an answer swipe needs (`swipeThreshold`), mostly straight. The host decides what skipping is (the next
+ * item, or back to the chat on the last); the ↓ key does the same.
  */
 
 import { type PointerEvent, useRef } from 'react';
@@ -16,8 +17,8 @@ interface Start {
   readonly y: number;
 }
 
-/** Pointer handlers for a region that closes the view when it is pulled down. Mouse never swipes. */
-export function useDownSwipe(onClose: () => void, enabled: boolean) {
+/** Pointer handlers for a region that skips the item when it is pulled down. Mouse never swipes. */
+export function useDownSwipe(onSkip: () => void, enabled: boolean) {
   const start = useRef<Start | null>(null);
   return {
     onPointerDown: (event: PointerEvent<HTMLElement>): void => {
@@ -31,7 +32,7 @@ export function useDownSwipe(onClose: () => void, enabled: boolean) {
       if (
         isDownSwipe(event.clientX - began.x, event.clientY - began.y, event.currentTarget.getBoundingClientRect().width)
       ) {
-        onClose();
+        onSkip();
       }
     },
     onPointerCancel: (): void => {

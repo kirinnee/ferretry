@@ -86,4 +86,14 @@ describe('a row of quick replies', () => {
     expect(rowLettered([{ label: 'Send more comments now', letter: undefined }])).toBe(false);
     expect(shortLabel('Looks good', 'A', false)).toBe('Looks good');
   });
+
+  test('letters a row when one word is too long to stand in a third of a phone without breaking mid-word', () => {
+    const row = [
+      { label: 'Frankfurt', letter: 'A' },
+      { label: 'Virginia', letter: 'B' },
+    ];
+    expect(rowLettered(row)).toBe(true);
+    expect(shortLabel('Frankfurt', 'A')).toBe('A');
+    expect(shortLabel('Virginia', 'B')).toBe('Virginia');
+  });
 });

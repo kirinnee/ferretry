@@ -204,12 +204,9 @@ describe('swipes', () => {
   test('an old choice swipes only its first three options; the rest are plain buttons', () => {
     const map = swipeMap(card({ ask: choice('A', 'B', 'C', 'D') }));
     expect(Object.values(map)).toHaveLength(3);
-    expect(inboxOptions(card({ ask: choice('A', 'B', 'C', 'D') })).map(option => option.label)).toEqual([
-      'A',
-      'B',
-      'C',
-      'D',
-    ]);
+    const labels = inboxOptions(card({ ask: choice('A', 'B', 'C', 'D') })).map(option => option.label);
+    expect([...labels].sort()).toEqual(['A', 'B', 'C', 'D']);
+    expect(labels.at(-1)).toBe('D');
   });
 
   test('only a clear distance commits, and only toward a mapped direction', () => {

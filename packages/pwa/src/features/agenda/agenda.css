@@ -281,6 +281,24 @@
   border: 0;
   padding: 0;
 }
+/* THE SWIPE ROW: three equal slots, left · middle · right = ← ↑ →. A direction with no answer leaves its slot blank;
+   the "…" menu is the fourth, narrow column. */
+.fy-qr__row[data-slots] {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+}
+.fy-qr__row[data-slots] > [data-agenda-answer='left'] {
+  grid-column: 1;
+}
+.fy-qr__row[data-slots] > [data-agenda-answer='up'] {
+  grid-column: 2;
+}
+.fy-qr__row[data-slots] > [data-agenda-answer='right'] {
+  grid-column: 3;
+}
+.fy-qr__row[data-slots] > .fy-attn-menu {
+  grid-column: 4;
+}
 .fy-qr__chip {
   display: inline-flex;
   flex: 1 1 0;
@@ -401,26 +419,6 @@
   color: var(--muted);
   font-size: var(--text-sm);
   font-weight: var(--weight-strong);
-}
-.fy-item-history__toggle {
-  display: inline-flex;
-  min-height: 36px;
-  align-items: center;
-  gap: var(--gap-xs);
-  border: 0;
-  background: transparent;
-  padding: 0;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-.fy-item-history__toggle:focus-visible {
-  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
-  outline-offset: 2px;
-}
-.fy-item-history__count {
-  color: var(--faint);
-  font-variant-numeric: tabular-nums;
 }
 .fy-item-history__list {
   display: flex;

@@ -1,11 +1,15 @@
 /**
- * THE QUICK REPLIES OF AN OPEN AGENDA ITEM — ONE row of equal-width buttons across the whole width, directly above
- * the REAL composer (never covering it). The item's options are the buttons, each SHORT: its letter ("A", "B"), or
- * its label when that is one or two words ("Looks good"); the full label is its accessible name and its title. The
- * recommended one is in the accent. A tap answers at once. Answering is replying, so there is no text field here: the composer below is the one box, and what is
- * typed in it rides an answer as its note.
+ * THE QUICK REPLIES OF AN OPEN AGENDA ITEM — THE SWIPE ROW, directly above the REAL composer (never covering it):
+ * at most THREE buttons, laid out by DIRECTION in three equal slots — the LEFT slot is the ← answer, the MIDDLE
+ * slot ↑, the RIGHT slot →, always. A direction with no answer leaves its slot BLANK, so a button never shifts
+ * position and the others keep their widths. Each is SHORT: its letter ("A", "B"), or its label when that is one
+ * or two words ("Looks good"), one way per row; the full label is its accessible name and its title. The
+ * recommended one is in the accent. A tap answers at once. Options past the three swiped ones are not buttons:
+ * they are in the "…" menu ("D — label"). Answering is replying, so there is no text field here: the composer
+ * below is the one box, and what is typed in it rides an answer as its note.
  *
- * On touch the chips swipe (← ↑ →) exactly as the Inbox deck does (`swipeIntent`), and ↓ goes back to the chat.
+ * On touch the row swipes (← ↑ →) exactly as the Inbox deck does (`swipeIntent`), and ↓ SKIPS: on to the next
+ * item, or back to the chat when there is none.
  * An item answered one answer per question draws its chips beside each question; this row then holds the one
  * compact "Send answers" (and "All recommended" when every question has a pick to agree with).
  */
@@ -24,7 +28,7 @@ import {
   swipeIntent,
 } from '../../lib/agenda-inbox.ts';
 import { letterOf, rowLettered, shortLabel } from '../../lib/agenda-options.ts';
-import { ActionMenu } from './agenda-actions.tsx';
+import { ActionMenu, type MenuChoice } from './agenda-actions.tsx';
 import { isDownSwipe } from './use-down-swipe.ts';
 
 const ARROWS: Readonly<Record<AnswerDirection, ReactNode>> = {
@@ -69,8 +73,10 @@ export interface AgendaQuickRepliesProps {
   readonly sending?: QuestionSending;
   /** One answer; the host adds the composer's text as its note. */
   readonly onAct: (action: InboxAction) => void;
-  /** Back to the chat (the ↓ swipe). */
-  readonly onClose: () => void;
+  /** The ↓ swipe: skip to the next item, or back to the chat when there is none. */
+  readonly onSkip: () => void;
+  /** What ↓ does, said on the stamp: "Skip" or "Back to the chat". */
+  readonly skipLabel: string;
 }
 
 interface Drag {
@@ -157,9 +163,11 @@ function QuestionChips({ sending, busy }: { readonly sending: QuestionSending; r
 function Stamp({
   drag,
   map,
+  skipLabel,
 }: {
   readonly drag: { readonly dx: number; readonly dy: number; readonly width: number };
   readonly map: SwipeMap;
+  readonly skipLabel: string;
 }) {
   if (drag.dy > Math.abs(drag.dx)) {
     return (
@@ -169,7 +177,7 @@ function Stamp({
         data-committed={isDownSwipe(drag.dx, drag.dy, drag.width) || undefined}
         data-swipe="down"
       >
-        ↓ Back to the chat
+        {`↓ ${skipLabel}`}
       </p>
     );
   }
@@ -188,23 +196,16 @@ function Stamp({
   );
 }
 
-/** One button of the row: an answer the card gives (it swipes), or one of an old choice's options past the third. */
-type Reply =
-  | { readonly label: string; readonly letter: string | undefined; readonly answer: AgendaCardAnswer }
-  | { readonly label: string; readonly letter: string | undefined; readonly option: AgendaAskOption };
+/** One button of the row: an answer the card gives, in the slot of its swipe direction. */
+interface Reply {
+  readonly label: string;
+  readonly letter: string | undefined;
+  readonly answer: AgendaCardAnswer;
+}
 
-/**
- * The row's buttons: when every one is an option of the ask they read A, B, C… left to right whichever way each
- * swipes; otherwise the answers in swipe order, then the extras.
- */
-const repliesOf = (model: CardModel, options: readonly AgendaAskOption[]): readonly Reply[] => {
-  const all: readonly Reply[] = [
-    ...model.answers.map(answer => ({ label: answer.label, letter: letterOf(options, answer.label), answer })),
-    ...model.extras.map(option => ({ label: option.label, letter: letterOf(options, option.label), option })),
-  ];
-  if (!all.every(reply => reply.letter !== undefined)) return all;
-  return [...all].sort((a, b) => ((a.letter ?? '') < (b.letter ?? '') ? -1 : 1));
-};
+/** The row's buttons: the card's answers (three at most), each with its letter among the item's options. */
+const repliesOf = (model: CardModel, options: readonly AgendaAskOption[]): readonly Reply[] =>
+  model.answers.map(answer => ({ label: answer.label, letter: letterOf(options, answer.label), answer }));
 
 /** Whether the row has anything to draw: chips, a clear, a send, a waiting line or an error. */
 const hasReplies = (model: CardModel, sending: QuestionSending | undefined): boolean =>
@@ -220,7 +221,8 @@ export function AgendaQuickReplies({
   swipeable,
   sending,
   onAct,
-  onClose,
+  onSkip,
+  skipLabel,
 }: AgendaQuickRepliesProps) {
   const [drag, setDrag] = useState<{ readonly dx: number; readonly dy: number; readonly width: number } | null>(null);
   const gesture = useRef<Drag | null>(null);
@@ -261,7 +263,7 @@ export function AgendaQuickReplies({
     if (!current.moved) return;
     swallow.current = true;
     if (isDownSwipe(current.dx, current.dy, current.width)) {
-      onClose();
+      onSkip();
       return;
     }
     const intent = swipeIntent(current.dx, current.dy, current.width, map);
@@ -274,8 +276,14 @@ export function AgendaQuickReplies({
   };
 
   const recommended = model.recommended;
-  const showMenu = model.dismissInMenu && !model.notice;
+  const extras: readonly MenuChoice[] = model.extras.map(option => ({
+    label: option.label,
+    letter: letterOf(options, option.label),
+    onPick: () => give(optionAction(option, '')),
+  }));
+  const showMenu = (model.dismissInMenu && !model.notice) || extras.length > 0;
   const replies = repliesOf(model, options);
+  const slotted = replies.length > 0 && sending === undefined && !model.notice;
   const lettered = rowLettered(replies);
   if (!hasReplies(model, sending) && error === null && waitingOn === undefined) return null;
   return (
@@ -294,7 +302,7 @@ export function AgendaQuickReplies({
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
     >
-      {drag === null ? null : <Stamp drag={drag} map={map} />}
+      {drag === null ? null : <Stamp drag={drag} map={map} skipLabel={skipLabel} />}
       {error === null ? null : (
         <p className="fy-qr__error m-0" role="alert">
           Not sent: {error}
@@ -305,7 +313,7 @@ export function AgendaQuickReplies({
           With {waitingOn} — it will update this.
         </p>
       )}
-      <fieldset aria-label="Quick replies" className="fy-qr__row">
+      <fieldset aria-label="Quick replies" className="fy-qr__row" data-slots={slotted || undefined}>
         {model.notice ? (
           <button
             className="kt-btn fy-qr__chip"
@@ -319,33 +327,26 @@ export function AgendaQuickReplies({
             Clear
           </button>
         ) : null}
-        {replies.map(reply =>
-          'answer' in reply ? (
-            <AnswerChip
-              answer={reply.answer}
-              busy={busy}
-              give={give}
-              key={reply.label}
-              letter={reply.letter}
-              lettered={lettered}
-              recommended={recommended}
-              swipeable={swipeable}
-            />
-          ) : (
-            <Chip
-              busy={busy}
-              key={reply.label}
-              label={reply.label}
-              letter={reply.letter}
-              lettered={lettered}
-              onTap={() => give(optionAction(reply.option, ''))}
-              recommended={sameLabel(reply.label, recommended)}
-              swipeable={swipeable}
-            />
-          ),
-        )}
+        {replies.map(reply => (
+          <AnswerChip
+            answer={reply.answer}
+            busy={busy}
+            give={give}
+            key={reply.label}
+            letter={reply.letter}
+            lettered={lettered}
+            recommended={recommended}
+            swipeable={swipeable}
+          />
+        ))}
         {sending === undefined ? null : <QuestionChips busy={busy} sending={sending} />}
-        {showMenu ? <ActionMenu busy={busy} onDismiss={() => give(DISMISS_ACTION)} /> : null}
+        {showMenu ? (
+          <ActionMenu
+            busy={busy}
+            extras={extras}
+            {...(model.dismissInMenu && !model.notice ? { onDismiss: () => give(DISMISS_ACTION) } : {})}
+          />
+        ) : null}
       </fieldset>
     </div>
   );
@@ -379,7 +380,7 @@ function AnswerChip({
         const action = answerAction(answer, '');
         if (action !== null) give(action);
       }}
-      primary={answer.direction === 'right'}
+      primary={sameLabel(answer.label, recommended)}
       recommended={sameLabel(answer.label, recommended)}
       swipeable={swipeable}
     />

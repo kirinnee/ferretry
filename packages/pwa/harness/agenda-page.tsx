@@ -351,6 +351,40 @@ const A61 = item('A61', 3, {
   recommendation: { decision: 'Use SQLite', why: 'Needs nothing installed on the machine' },
 } as Partial<AgendaItem>);
 
+// V4b: the swipe row by direction — two options, three options, and five (three buttons, D and E under "…").
+const A62 = item('A62', 9, {
+  title: 'Ship the relay fix today?',
+  subject: 'Should the relay fix ship **today**, or wait for the Monday cut?',
+  ask: { kind: 'multiple-choice', options: [{ label: 'Ship today' }, { label: 'Wait for Monday' }] },
+  recommendation: { decision: 'Ship today', why: 'The fix is small and tested' },
+} as Partial<AgendaItem>);
+
+const A63 = item('A63', 8, {
+  title: 'Which fix for the login race?',
+  subject: 'Which fix should land for the login race?',
+  ask: {
+    kind: 'multiple-choice',
+    options: [{ label: 'Lock the session row' }, { label: 'Retry with backoff' }, { label: 'Do nothing at all' }],
+  },
+  recommendation: { decision: 'Lock the session row', why: 'It fixes the cause, not the symptom' },
+} as Partial<AgendaItem>);
+
+const A64 = item('A64', 6, {
+  title: 'Which region first?',
+  subject: 'Which region should the relay open in first?',
+  ask: {
+    kind: 'multiple-choice',
+    options: [
+      { label: 'Frankfurt' },
+      { label: 'Virginia' },
+      { label: 'Singapore' },
+      { label: 'Sydney' },
+      { label: 'São Paulo' },
+    ],
+  },
+  recommendation: { decision: 'Virginia', why: 'Most of the owners are on the east coast' },
+} as Partial<AgendaItem>);
+
 const owner = (id: string, at: number, text: string) => ({ id, kind: 'user', text, at: NOW - at * 60_000 });
 const ferretSays = (id: string, at: number, text: string) => ({ id, kind: 'assistant', text, at: NOW - at * 60_000 });
 const HISTORY_ENTRIES = [
@@ -370,7 +404,7 @@ const configChange = params.get('config') === '1';
 const jaeda = params.get('jaeda') === '1';
 const v4 = params.get('v4') === '1';
 
-const items = [...AGENDA, ...(jaeda ? [A47, A48] : []), ...(v4 ? [A60, A61] : [])].map(entry =>
+const items = [...AGENDA, ...(jaeda ? [A47, A48] : []), ...(v4 ? [A60, A61, A62, A63, A64] : [])].map(entry =>
   entry.id === 'A5'
     ? long
       ? A5_LONG

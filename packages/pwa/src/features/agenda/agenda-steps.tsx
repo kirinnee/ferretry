@@ -13,9 +13,18 @@ import { collapsesByDefault } from './agenda-board.tsx';
 
 type Prose = (text: string) => ReactNode;
 
-export function AgendaBody({ text, renderProse }: { readonly text: string; readonly renderProse: Prose }) {
+export function AgendaBody({
+  text,
+  renderProse,
+  folded = true,
+}: {
+  readonly text: string;
+  readonly renderProse: Prose;
+  /** A long body shows a short preview with "Show more". `false` draws it whole (the item view never folds). */
+  readonly folded?: boolean;
+}) {
   const [all, setAll] = useState(false);
-  const folds = collapsesByDefault(text);
+  const folds = folded && collapsesByDefault(text);
   const regionId = useId();
   return (
     <div className="fy-attn-body" data-agenda-body="" data-folded={(folds && !all) || undefined} id={regionId}>

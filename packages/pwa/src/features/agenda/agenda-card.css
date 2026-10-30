@@ -634,6 +634,7 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
   z-index: 5;
   display: flex;
   min-width: 10rem;
+  max-width: min(22rem, calc(100vw - 2 * var(--gap-md)));
   flex-direction: column;
   border: var(--stroke-panel) solid var(--border);
   border-radius: var(--radius-control);

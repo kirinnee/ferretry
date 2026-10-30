@@ -3,10 +3,12 @@
  * list (only the composer stays below it, its placeholder saying "Reply about !A57…"), a multi-question item, a
  * permission item, a config change, a long item scrolled mid-way, the thinking line beside the pill and, on a
  * phone, the quick replies above a faked keyboard — plus the two v4 items: a Jaeda-style item with five lettered
- * options, and a single choice whose options explain themselves in Markdown. Desktop 1440 and phone 390, in the
- * Studio theme, light and dark.
+ * options, and a single choice whose options explain themselves in Markdown — and the v4b swipe row: items with
+ * two, three and five options, the "…" menu open, a swipe up and a swipe down (skip) caught mid-drag. Desktop 1440
+ * and phone 390, in the Studio theme, light and dark.
  *
  *   bun harness/agenda-v4-screenshot.ts [outDir]   # writes <outDir>/agenda-v4-<name>-<phone|desktop>-<theme>.png
+ *                                                  # and <outDir>/agenda-v4b-<name>-<phone|desktop>-<theme>.png
  *
  * It bundles `agenda-page.tsx` (the real `useAgenda`, invented data), serves it on an ephemeral loopback
  * port, drives it with real clicks, and FAILS (after writing every picture) when: a page scrolls sideways; the
@@ -14,7 +16,8 @@
  * opens or closes; the top or the quick replies move when the body scrolls; the transcript loses its scroll
  * position; anything but the one body scrolls; the agenda pill or an "about" chip is on screen while an item is
  * open, or the composer does not say "Reply about …", or it is not directly under the card; the quick-reply row
- * does not span the card or its buttons are not equal; a send does not carry the item's reference, or × does not
+ * holds more than three answer buttons, or a button is not in the slot of its swipe direction (← left, ↑ middle,
+ * → right), or its buttons are not equal; the item view holds a <details>, a summary or a toggle; a send does not carry the item's reference, or × does not
  * return plain chat, or a send leaves the view open; a question's text is drawn twice; an option's Markdown is
  * drawn as plain text; a drawer row holds more than the row button; or a phone touch target is under 44px.
  */
@@ -135,10 +138,10 @@ const open = async (browserContext: { newPage: () => Promise<Page> }, theme: str
   return page;
 };
 
-const shot = async (page: Page, name: string, form: Form, theme: string): Promise<void> => {
+const shot = async (page: Page, name: string, form: Form, theme: string, series = 'agenda-v4'): Promise<void> => {
   await page.mouse.move(1, 1);
   await page.waitForTimeout(120);
-  const path = join(outDir, `agenda-v4-${name}-${form}-${theme}.png`);
+  const path = join(outDir, `${series}-${name}-${form}-${theme}.png`);
   await page.screenshot({ path });
   process.stdout.write(`📸 ${path}\n`);
 };
@@ -153,6 +156,53 @@ const openDrawer = async (page: Page): Promise<void> => {
 
 /** The sizes the overlay's own checks read. */
 const overlay = (page: Page) => page.locator('[data-agenda-view]');
+
+/** The row is the swipe row: at most three answer buttons, each at the start of the slot of its direction. */
+const SLOT = { left: 0, up: 1, right: 2 } as const;
+const checkSlots = async (page: Page, label: string): Promise<void> => {
+  const found = await page.evaluate(() => {
+    const row = document.querySelector<HTMLElement>('[data-agenda-quick-replies] .fy-qr__row');
+    if (row === null) return null;
+    const style = getComputedStyle(row);
+    const gap = Number.parseFloat(style.columnGap) || 0;
+    const at = row.getBoundingClientRect();
+    const menu = row.querySelector('.fy-attn-menu')?.getBoundingClientRect().width ?? 0;
+    const column = (at.width - menu - 3 * gap) / 3;
+    const starts = [0, 1, 2].map(index => at.left + index * (column + gap));
+    return {
+      slotted: row.hasAttribute('data-slots'),
+      starts,
+      buttons: [...row.querySelectorAll<HTMLElement>('[data-agenda-answer]')].map(button => ({
+        direction: button.dataset.agendaAnswer ?? '',
+        x: button.getBoundingClientRect().left,
+        letter: button.textContent?.trim() ?? '',
+      })),
+    };
+  });
+  if (found === null || !found.slotted) return;
+  check(found.buttons.length <= 3, `${label}: the row holds ${found.buttons.length} answer buttons`);
+  for (const button of found.buttons) {
+    const slot = SLOT[button.direction as keyof typeof SLOT];
+    const start = found.starts[slot];
+    check(
+      slot !== undefined && start !== undefined && Math.abs(button.x - start) < 2,
+      `${label}: "${button.letter}" (${button.direction}) is at x=${Math.round(button.x)}, its slot starts at ${Math.round(found.starts[slot ?? 0] ?? -1)}`,
+    );
+  }
+};
+
+/** Nothing in an item view folds: no disclosure, no summary, no toggle, nothing expandable in the body. */
+const checkNoFolds = async (page: Page, label: string): Promise<void> => {
+  const folds = await page.evaluate(() => {
+    const view = document.querySelector('[data-agenda-view]');
+    if (view === null) return ['no item view'];
+    const found = [...view.querySelectorAll('details, summary, [data-agenda-history-toggle]')];
+    const body = view.querySelector('.fy-item-view__body');
+    const expandable = body === null ? [] : [...body.querySelectorAll('[aria-expanded]')];
+    return [...found, ...expandable].map(node => node.tagName.toLowerCase());
+  });
+  check(folds.length === 0, `${label}: the item view folds something: ${folds.join(', ')}`);
+};
 
 const checkOverlay = async (page: Page, form: Form, label: string, composerRest: Box): Promise<void> => {
   await overlay(page).waitFor({ state: 'visible' });
@@ -199,21 +249,11 @@ const checkOverlay = async (page: Page, form: Form, label: string, composerRest:
   check(gap >= -1 && gap <= 24, `${label}: the composer is ${Math.round(gap)}px from the card`);
   const row = page.locator('[data-agenda-quick-replies] .fy-qr__row');
   if ((await row.count()) > 0) {
-    const bar = await boxOf(page.locator('[data-agenda-quick-replies]'), 'quick replies');
     const buttons = await row.locator('button:not([data-agenda-more])').all();
     const boxes = (await Promise.all(buttons.map(button => button.boundingBox()))).filter(
       (found): found is Box => found !== null,
     );
-    const every = (await Promise.all((await row.locator('button').all()).map(button => button.boundingBox()))).filter(
-      (found): found is Box => found !== null,
-    );
-    const left = Math.min(...every.map(box => box.x));
-    const right = Math.max(...every.map(box => box.x + box.width));
-    const wanted = Math.min(bar.width - 24, 720);
-    check(
-      right - left >= wanted - 2,
-      `${label}: the quick replies span ${Math.round(right - left)}px, the card wants ${Math.round(wanted)}px`,
-    );
+    await checkSlots(page, label);
     const widths = boxes.filter(box => box.width > 0).map(box => box.width);
     check(
       Math.max(...widths) - Math.min(...widths) < 2,
@@ -221,6 +261,7 @@ const checkOverlay = async (page: Page, form: Form, label: string, composerRest:
     );
     check(new Set(boxes.map(box => Math.round(box.y))).size === 1, `${label}: the quick replies are not one row`);
   }
+  await checkNoFolds(page, label);
   check(
     !((await overlay(page).textContent()) ?? '').includes('message box below'),
     `${label}: the "message box below" boilerplate is back`,
@@ -303,26 +344,17 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   await openItem(choice, 'A5');
   await checkOverlay(choice, form, 'choice item', composerRest);
   check((await choice.locator('table[data-agenda-terms]').count()) === 1, 'the terms are not a table');
-  check(
-    (await choice.locator('[data-agenda-history-latest] li').count()) === 1,
-    'the latest owner message is not kept',
-  );
-  check(
-    (await choice.locator('[data-agenda-history] li').count()) === 1,
-    'the collapsed history shows more than one row',
-  );
-  await shot(choice, 'item-choice', form, theme);
   const toEnd = (): Promise<void> =>
     choice.locator('.fy-item-view__body').evaluate(node => {
       node.scrollTop = node.scrollHeight;
     });
   await toEnd();
-  await shot(choice, 'item-history-collapsed', form, theme);
-  await choice.locator('[data-agenda-history-toggle]').click();
-  await toEnd();
-  check((await choice.locator('[data-agenda-history] li').count()) >= 4, 'the opened history has fewer than 4 rows');
-  await shot(choice, 'item-history-open', form, theme);
-  await choice.locator('[data-agenda-history-toggle]').click();
+  check((await choice.locator('[data-agenda-history] li').count()) >= 4, 'the history shows fewer than 4 rows, open');
+  const hidden = await choice
+    .locator('[data-agenda-history] li')
+    .evaluateAll(nodes => nodes.filter(node => node.getBoundingClientRect().height === 0).length);
+  check(hidden === 0, `the history hides ${hidden} rows`);
+  await shot(choice, 'item-history', form, theme);
   await choice.locator('[data-agenda-harness-input]').fill('Leaning SQLite, but keep the nightly export.');
   await choice.locator('.fy-item-view__body').evaluate(node => {
     node.scrollTop = 0;
@@ -418,6 +450,99 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
       check(((await button.getAttribute('title')) ?? '').length > 0, `${id}: a quick reply has no title`);
     await shot(v4, name, form, theme);
     await v4.close();
+  }
+
+  // v4b: the swipe row by direction — 2, 3 and 5 options, the menu open on five, and the jaeda options item
+  const V4B = [
+    { id: 'A62', name: 'options-2', answers: ['left', 'up'] },
+    { id: 'A63', name: 'options-3', answers: ['left', 'up', 'right'] },
+    { id: 'A64', name: 'options-5', answers: ['left', 'up', 'right'], extras: ['D — Sydney', 'E — São Paulo'] },
+    {
+      id: 'A60',
+      name: 'jaeda-options',
+      answers: ['left', 'up', 'right'],
+      extras: ['D — Warn when one is dropped', 'E — Do nothing for now'],
+    },
+  ] as const;
+  for (const entry of V4B) {
+    const page = await open(browserContext, theme, `view=board&v4=1&agenda=${entry.id}`);
+    await overlay(page).waitFor({ state: 'visible' });
+    await page.waitForTimeout(150);
+    const label = `v4b ${entry.id}`;
+    await checkOverlay(page, form, label, composerRest);
+    const directions = await page
+      .locator('[data-agenda-quick-replies] .fy-qr__row [data-agenda-answer]')
+      .evaluateAll(nodes => nodes.map(node => (node as HTMLElement).dataset.agendaAnswer));
+    check(
+      JSON.stringify(directions) === JSON.stringify(entry.answers),
+      `${label}: the row answers are ${directions.join(',')}, wanted ${entry.answers.join(',')}`,
+    );
+    const plainChips = await page.locator('.fy-qr__row button[data-agenda-option]:not([data-agenda-answer])').count();
+    check(plainChips === 0, `${label}: ${plainChips} option buttons sit outside the three slots`);
+    check(
+      (await page.locator('.fy-qr__row [data-agenda-answer="up"][data-recommended]').count()) === 1,
+      `${label}: the recommended answer is not in the middle slot`,
+    );
+    await shot(page, entry.name, form, theme, 'agenda-v4b');
+    if ('extras' in entry) {
+      await page.locator('[data-agenda-more]').click();
+      await page.locator('[role="menu"]').waitFor({ state: 'visible' });
+      const extras = await page.locator('[data-agenda-extra]').allTextContents();
+      check(
+        JSON.stringify(extras) === JSON.stringify(entry.extras),
+        `${label}: the "…" menu holds ${JSON.stringify(extras)}, wanted ${JSON.stringify(entry.extras)}`,
+      );
+      await shot(page, `${entry.name}-menu`, form, theme, 'agenda-v4b');
+    }
+    // a touch swipe, caught mid-drag: ↑ answers the middle one, ↓ skips to the next item (phone only: a mouse does not swipe)
+    if (phone && entry.id === 'A63') {
+      const drag = async (dy: number): Promise<void> => {
+        await page.evaluate(offset => {
+          const lane = document.querySelector<HTMLElement>('.fy-qr');
+          if (lane === null) return;
+          const at = lane.getBoundingClientRect();
+          const x = at.left + at.width / 2;
+          const y = at.top + at.height / 2;
+          const event = (type: string, to: number) =>
+            new PointerEvent(type, { bubbles: true, clientX: x, clientY: to, pointerId: 11, pointerType: 'touch' });
+          lane.dispatchEvent(event('pointerdown', y));
+          lane.dispatchEvent(event('pointermove', y + offset));
+        }, dy);
+        await page.waitForTimeout(150);
+      };
+      await drag(-70);
+      const up = (await page.locator('.fy-qr__stamp').textContent()) ?? '';
+      check(/^↑ Lock the session row$/u.test(up), `${label}: the swipe-up stamp says "${up}"`);
+      await shot(page, 'swipe-up', form, theme, 'agenda-v4b');
+      await page.evaluate(() => {
+        document
+          .querySelector('.fy-qr')
+          ?.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true, pointerId: 11, pointerType: 'touch' }));
+      });
+      await drag(80);
+      const down = (await page.locator('.fy-qr__stamp').textContent()) ?? '';
+      check(/^↓ Skip$/u.test(down), `${label}: the swipe-down stamp says "${down}"`);
+      await shot(page, 'swipe-down', form, theme, 'agenda-v4b');
+      await page.evaluate(() => {
+        const lane = document.querySelector('.fy-qr');
+        if (lane === null) return;
+        const at = lane.getBoundingClientRect();
+        const to = (type: string) =>
+          new PointerEvent(type, {
+            bubbles: true,
+            clientX: at.left + at.width / 2,
+            clientY: at.top + at.height / 2 + 300,
+            pointerId: 11,
+            pointerType: 'touch',
+          });
+        lane.dispatchEvent(to('pointermove'));
+        lane.dispatchEvent(to('pointerup'));
+      });
+      await page.waitForTimeout(250);
+      const now = await overlay(page).getAttribute('data-agenda-view');
+      check(now !== 'A63', `${label}: the pull down did not skip to the next item (still ${now})`);
+    }
+    await page.close();
   }
 
   // a permission item
