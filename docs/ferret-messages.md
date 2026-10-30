@@ -102,3 +102,35 @@ destructive or unknown, or a blind spot). Otherwise it sends nothing. An auto se
 not the owner, and where `migration-inflight.md` is (`packages/daemon/src/lib/migrate/restart-notice.ts`).
 A notice that travelled as a turn file is recognised by the document it holds, so it is a system row once
 that file has been read.
+
+## Board events that ride the next message
+
+A lead hears about its sub-ferrets' cards without being woken for it (`board-design.md` §2.8). When a
+child card moves, blocks, unblocks, is dropped or starts waiting on the owner, and when a card's last
+blocker ships, the board sweep (`packages/daemon/src/lib/board/sweep.ts`, once a minute) queues one
+item in that ferret's **pending context** (`<state>/board/pending/<session>.json`). Nothing is typed.
+The items go out on top of the next message the ferret receives through the send route — its owner's
+or a teammate's — as one line, then a blank line, then the message unchanged:
+
+```text
+[board] &F413 → Review/CI (PR #930) · &F414 waiting on owner (!A9)
+
+The owner's words, as typed.
+```
+
+A teammate's banner still comes first, above the line. Items are coalesced per card and kind (a card
+that moved twice says only where it is now), at most 32 are held, and a send that fails puts them back.
+The dependent card's assignee gets the unblock line the same way: `[board] &F20 unblocked: &F18 merged`.
+
+The sweep's own **nudge** is the one board message that does start a turn, because a stale card is the
+ferret's to act on: `[board] &F412 untouched 3h in Implement — move it, note why, block it, or drop it`.
+It goes to the card's assignee when it is alive and idle, else to the card's owner ferret; at most once
+per card per its lane's stale threshold; never to a ferret that declared `fy signal waiting`. It carries
+the recipient's pending context on top too.
+
+Declared gaps:
+
+- **Below the send route nothing carries it.** The agenda's batched answers and the Warden's nudges are
+  sent beneath it, so the lead hears the line with the message after those.
+- **The owner's Chat shows the line** above their own words, because it is part of the message the
+  ferret was given.

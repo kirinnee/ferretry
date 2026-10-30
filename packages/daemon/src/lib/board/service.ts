@@ -21,6 +21,7 @@ import {
   type BoardTaskId,
   type BoardTaskResponse,
   BoardTaskSchema,
+  type BoardTaskView,
   formatTaskRef,
   type Lane,
   type LaneSet,
@@ -145,6 +146,15 @@ export class BoardService {
       nextCursor: page.nextCursor,
       quarantined: [...snapshot.quarantined],
     };
+  }
+
+  /** Every card's view, closed and dropped included, with every board's lanes: the board sweep's one read. */
+  async sweepBoard(): Promise<{ readonly views: readonly BoardTaskView[]; readonly laneSets: LaneSets }> {
+    const snapshot = await this.ports.store.read();
+    const laneSets = await this.laneSetsOf(snapshot.cards.map(card => card.projectId));
+    const index = new BoardIndex(snapshot.cards, this.ports.machineId() ?? '');
+    const derivation = await gatherDerivation(snapshot.cards, index, laneSets, this.ports);
+    return { views: snapshot.cards.map(card => deriveView(card, derivation)), laneSets };
   }
 
   /** One card, in full, with its board's lanes. */
