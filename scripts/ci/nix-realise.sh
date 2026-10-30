@@ -25,10 +25,17 @@ attempts="${FY_NIX_REALISE_ATTEMPTS:-3}"
 [ -z "${shell}" ] && echo "❌ usage: nix-realise.sh <flake dev shell, e.g. .#ci>" >&2 && exit 1
 
 attempt=1
-until nix print-dev-env "${shell}" >/dev/null; do
+# The printed environment is kept for scripts/ci/in-devshell.sh, which sources it instead of paying for
+# `nix develop` again in every later step of the job.
+env_file="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/fy-devshell-${shell//[^A-Za-z0-9]/_}.sh"
+until nix print-dev-env "${shell}" >"${env_file}"; do
   [ "${attempt}" -ge "${attempts}" ] && echo "❌ could not realise ${shell} in ${attempts} attempts" >&2 && exit 1
   echo "::warning::realising ${shell} failed (attempt ${attempt} of ${attempts}); retrying in $((attempt * 20))s — a network failure, if Nix's error above names a download"
   sleep "$((attempt * 20))"
   attempt="$((attempt + 1))"
 done
+if [[ -n ${GITHUB_ENV:-} ]]; then
+  echo "FY_DEVSHELL_ENV=${env_file}" >>"${GITHUB_ENV}"
+  echo "FY_DEVSHELL=${shell}" >>"${GITHUB_ENV}"
+fi
 echo "✅ ${shell} realised (attempt ${attempt} of ${attempts})"
