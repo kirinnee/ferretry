@@ -772,15 +772,14 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql('`--will-block`');
     should(text).containEql('`--by <time>`');
     // The answer and discussion loops, then resolving and reading.
-    should(text).containEql('"[answer to !A3 …]" is the answer');
-    should(text).containEql('"[re !A3 …]" is chat.');
-    // Every item stays current, in the turn the facts changed: edited, closed or handed back, never left stale.
+    should(text).containEql('"[answer to !A3 …]" is the answer;');
+    should(text).containEql('"[re !A3 …]" is chat that closes it');
+    should(text).containEql('re-raise (`zz agenda surface <id>`) only if the owner must still decide or act');
+    // Every item stays current, in the turn the facts changed: edited or closed, never left stale.
     should(text).containEql('KEEP ITEMS CURRENT this turn');
-    should(text).containEql('changed or discussed → `zz agenda edit <id>`');
-    should(text).containEql('settled → `zz agenda done <id>`');
-    should(text).containEql('still theirs → `zz agenda surface <id>`');
-    should(text).containEql('Never stale.');
-    should(text).containEql('`zz agenda ls`');
+    should(text).containEql('agenda `edit <id>` if changed');
+    should(text).containEql('`done <id>` if settled');
+    should(text).containEql('`ls` = open');
     should(text).not.containEql('Attention');
     should(text).not.containEql('`fy ');
   });

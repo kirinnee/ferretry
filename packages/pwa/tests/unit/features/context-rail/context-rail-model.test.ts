@@ -74,6 +74,7 @@ describe('signals', () => {
     expect(signalOutcome(answeredItem())).toBe('Chose “Start over”');
     expect(signalOutcome(answeredItem({ response: undefined, disposition: 'dismissed' }))).toBe('Dismissed');
     expect(signalOutcome(answeredItem({ response: undefined }))).toBe('Done');
+    expect(signalOutcome(answeredItem({ response: undefined, disposition: 'replied' }))).toBe('Replied');
   });
 });
 
