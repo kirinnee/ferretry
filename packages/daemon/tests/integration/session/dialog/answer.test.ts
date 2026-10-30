@@ -131,7 +131,7 @@ async function pane(fixture: string, mode: Mode = 'normal', other = 'codex-0.156
   const service = new SessionDialogService(
     { capture: async id => await capture.capture(id), write: async (id, bytes) => await typing.write(id, bytes) },
     milliseconds => Bun.sleep(milliseconds),
-    { settleReads: 15, settleMs: 100 },
+    { settleReads: 20, settleMs: 20 },
   );
   // Until the harness has drawn the dialog, there is nothing to read.
   const drawn = async (): Promise<string> => {
@@ -141,7 +141,7 @@ async function pane(fixture: string, mode: Mode = 'normal', other = 'codex-0.156
         return parseHarnessDialog(frame) !== undefined ? frame : undefined;
       },
       `${fixture} to be drawn`,
-      { every: 100 },
+      { every: 10 },
     );
   };
   return { session, service, drawn, capture, keys: async () => (await readFile(keys, 'utf8')).replaceAll(' ', '') };

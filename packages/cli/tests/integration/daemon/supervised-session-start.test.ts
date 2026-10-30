@@ -162,7 +162,7 @@ async function waitForHealth(port: number, logFile: string): Promise<void> {
   await waitFor(
     async () => (await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true,
     'the daemon to answer its health probe',
-    { pollMs: 50, evidence: async () => await readFile(logFile, 'utf8').catch(() => '(no log)') },
+    { pollMs: 20, evidence: async () => await readFile(logFile, 'utf8').catch(() => '(no log)') },
   );
 }
 
@@ -280,7 +280,7 @@ describe('a session on a daemon `fy daemon start` launched', () => {
         return settled.view.state.status !== 'running';
       },
       'the session to leave running after its agent exited',
-      { pollMs: 100, evidence: async () => `${JSON.stringify(settled.view?.state)}\n${await logOf(daemon)}` },
+      { pollMs: 25, evidence: async () => `${JSON.stringify(settled.view?.state)}\n${await logOf(daemon)}` },
     );
     const actual = settled.view ?? (await read());
 

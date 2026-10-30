@@ -1,4 +1,4 @@
-import { afterEach, describe, it } from 'bun:test';
+import { afterAll, beforeAll, describe, it } from 'bun:test';
 import { chmod, mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -44,7 +44,7 @@ const roots = new Set<string>();
 const daemons = new Set<number>();
 const sockets = new Set<string>();
 
-afterEach(async () => {
+afterAll(async () => {
   await tearDownSupervisedDaemons({ daemons, sockets, roots }, { tmux: TMUX });
 }, TEARDOWN_TIMEOUT_MS);
 
@@ -179,7 +179,7 @@ async function boot(): Promise<BootedDaemon> {
   await waitFor(
     async () => (await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true,
     'the daemon to answer its health probe',
-    { pollMs: 50, evidence: async () => await readFile(layout.logFile, 'utf8').catch(() => '(no log)') },
+    { pollMs: 20, evidence: async () => await readFile(layout.logFile, 'utf8').catch(() => '(no log)') },
   );
   const token = (await readFile(join(stateHome, 'api-token'), 'utf8')).trim();
   return { port, token, logFile: layout.logFile, root };
@@ -225,7 +225,7 @@ async function until(daemon: BootedDaemon, id: string, expected: string | undefi
     },
     `turnState to read ${String(expected)}`,
     {
-      pollMs: 150,
+      pollMs: 25,
       evidence: async () =>
         `it read ${String(last.state?.turnState)}: ${JSON.stringify(last.state)}\n${await logOf(daemon)}`,
     },
@@ -236,13 +236,18 @@ const frameOf = (daemon: BootedDaemon, harness: 'claude' | 'codex') => async (te
   await writeFile(join(daemon.root, `${harness}-frame.txt`), text);
 
 describe('whose turn it is, through a real daemon', () => {
+  // One daemon for both harnesses: each test starts its own session, so each has its own world.
+  let daemon: BootedDaemon;
+  beforeAll(async () => {
+    daemon = await boot();
+  }, 120_000);
+
   for (const [harness, wrapper, idle, working, permission] of [
     ['claude', CLAUDE.wrapper, CLAUDE_IDLE, CLAUDE_WORKING, CLAUDE_PERMISSION],
     ['codex', CODEX.wrapper, CODEX_IDLE, CODEX_WORKING, CODEX_PERMISSION],
   ] as const) {
     it(`${harness}: your turn at the prompt, working mid-turn, needs input on a permission prompt, your turn again within seconds of the turn ending, and nothing once it crashes`, async () => {
       // Arrange
-      const daemon = await boot();
       const frame = frameOf(daemon, harness);
       const view = await startIdle(daemon, wrapper);
       const id = view.config.id;
