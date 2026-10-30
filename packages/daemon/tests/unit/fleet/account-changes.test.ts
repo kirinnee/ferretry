@@ -1613,6 +1613,46 @@ describe('deriveAccountChange: machine.settings', () => {
     ]);
   });
 
+  it('should set the browser proxy, saying it waits for the next browser start', () => {
+    // Act
+    const edit = derive({
+      kind: 'machine.settings',
+      agentPermissions: 'auto',
+      defaultRuntime: null,
+      agentControl: { terminals: true, browsers: true, files: true },
+      browserProxy: { url: 'socks5://proxy.example:1080', bypass: ['*.internal.example'] },
+    });
+
+    // Assert
+    should(edit.summary).equal('Set the browser proxy to socks5://proxy.example:1080');
+    should(edit.model.machine.browserProxy).eql({ url: 'socks5://proxy.example:1080', bypass: ['*.internal.example'] });
+    should(edit.consequences).deepEqual([
+      'Applies the next time the browser starts; a browser already running keeps its network route until it stops.',
+    ]);
+  });
+
+  it('should turn the browser proxy off with null, and keep it when an older client leaves it out', () => {
+    // Arrange
+    const model = modelOf({ machine: { browserProxy: { url: 'http://proxy.example:8080', bypass: [] } } });
+    const settings = {
+      kind: 'machine.settings' as const,
+      agentPermissions: 'auto' as const,
+      defaultRuntime: null,
+      agentControl: { terminals: true, browsers: true, files: true },
+    };
+
+    // Act
+    const off = derive({ ...settings, browserProxy: null }, model);
+    const kept = derive(settings, model);
+    const same = derive({ ...settings, browserProxy: { url: 'http://proxy.example:8080', bypass: [] } }, model);
+
+    // Assert
+    should(off.summary).equal('Set the browser proxy off');
+    should(off.model.machine.browserProxy).be.undefined();
+    should(kept.model.machine.browserProxy).eql({ url: 'http://proxy.example:8080', bypass: [] });
+    should(same.summary).equal('Keep machine settings the same');
+  });
+
   it('should leave the browser mode as it is when an older client leaves it out', () => {
     // Arrange
     const model = modelOf({ machine: { browserMode: 'window' } });

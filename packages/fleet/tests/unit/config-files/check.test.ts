@@ -271,6 +271,28 @@ describe('checkConfigFile: a file that breaks its schema', () => {
     should(actual.issues[0]?.line).equal(1);
   });
 
+  it('should accept a browser proxy with secret references and refuse one with a credential in it', () => {
+    // Act
+    const good = checkConfigFile(
+      'machine.yaml',
+      'browserProxy:\n  url: socks5://proxy.example:1080\n  bypass: ["*.internal.example"]\n  username: ${secret:PROXY_USER}\n  password: ${secret:PROXY_PASSWORD}\n',
+    );
+    const inline = checkConfigFile('machine.yaml', 'browserProxy:\n  url: http://alice:s3cret@proxy.example:8080\n');
+    const plain = checkConfigFile(
+      'machine.yaml',
+      'browserProxy:\n  url: http://proxy.example:8080\n  username: alice\n  password: hunter2\n',
+    );
+
+    // Assert
+    should(good.issues).deepEqual([]);
+    should(inline.issues).not.deepEqual([]);
+    should(inline.issues[0]?.message).containEql('never carries a user name or password');
+    should(inline.issues[0]?.fix).containEql('browserProxy.url');
+    should(JSON.stringify(inline.issues)).not.containEql('s3cret');
+    should(plain.issues[0]?.fix).containEql('browserProxy.username');
+    should(JSON.stringify(plain.issues)).not.containEql('hunter2');
+  });
+
   it('should locate a bad item in a list at the item', () => {
     // Act
     const actual = checkConfigFile('profiles/p.yaml', 'contents:\n  - instructions/main\n  - not a layer\n');

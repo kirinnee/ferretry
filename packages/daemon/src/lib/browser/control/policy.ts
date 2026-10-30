@@ -178,6 +178,10 @@ export interface ChromeLaunchOptions {
    * window of its own — every one of which an agent may be driving, and a person watching, at once.
    */
   readonly keepPainting?: boolean;
+  /** The user agent to send in place of the one a HEADLESS Chrome reports (`honestChromeUserAgent`). */
+  readonly userAgent?: string;
+  /** Send the browser's traffic through this proxy (docs/browser-proxy.md). */
+  readonly proxy?: { readonly server: string; readonly bypass: readonly string[] };
 }
 
 /**
@@ -209,6 +213,8 @@ export function chromeLaunchArguments(
     '--disable-background-mode',
     '--disable-component-update',
     '--disable-features=Translate,MediaRouter',
+    ...(options.userAgent === undefined ? [] : [`--user-agent=${options.userAgent}`]),
+    ...(options.proxy === undefined ? [] : chromeProxyArguments(options.proxy.server, options.proxy.bypass)),
     '--disable-dev-shm-usage',
     ...(options.keepPainting === true
       ? [
@@ -328,6 +334,53 @@ export function normalizeViewport(width: number, height: number): BrowserViewpor
 }
 
 /**
+ * The platform token Chrome puts in its own user agent on this OS — the form Chrome has frozen since user-agent
+ * reduction, which does not change with the OS release. `undefined` for an OS or CPU this daemon does not run
+ * Chrome on, where the browser is left to say what it says rather than be given a guess.
+ */
+export function chromePlatformToken(platform: NodeJS.Platform, arch: string): string | undefined {
+  if (platform === 'darwin') return 'Macintosh; Intel Mac OS X 10_15_7';
+  if (platform === 'win32') return arch === 'x64' ? 'Windows NT 10.0; Win64; x64' : undefined;
+  if (platform !== 'linux') return undefined;
+  const machine = arch === 'x64' ? 'x86_64' : arch === 'arm64' ? 'aarch64' : undefined;
+  return machine === undefined ? undefined : `X11; Linux ${machine}`;
+}
+
+/**
+ * The user agent THIS Chrome sends when it is not headless: the browser's own major version (what
+ * `chrome --version` prints) in the platform token of the OS it is running on. A headless Chrome sends the same
+ * string with `HeadlessChrome` in place of `Chrome`, and that token is the only difference — its client hints
+ * (`Sec-CH-UA`) already name Google Chrome — so removing the token is all this does. It never names another
+ * browser, device or operating system. `undefined` when the version or OS is not recognised.
+ */
+export function honestChromeUserAgent(
+  versionOutput: string,
+  platform: NodeJS.Platform,
+  arch: string,
+): string | undefined {
+  const major = /(\d+)\.\d+\.\d+\.\d+/u.exec(versionOutput)?.[1];
+  const token = chromePlatformToken(platform, arch);
+  if (major === undefined || token === undefined) return undefined;
+  return `Mozilla/5.0 (${token}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`;
+}
+
+/** The switches that send Chrome's traffic to `server` and keep WebRTC from reaching around it. */
+export function chromeProxyArguments(server: string, bypass: readonly string[]): readonly string[] {
+  return [
+    `--proxy-server=${server}`,
+    ...(bypass.length === 0 ? [] : [`--proxy-bypass-list=${bypass.join(';')}`]),
+    '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
+  ];
+}
+
+/** What a launch adds to the agent browser beyond its mode. */
+export interface AgentBrowserExtras {
+  /** The honest user agent for a headless Chrome ({@link honestChromeUserAgent}); a real window ignores it. */
+  readonly userAgent?: string;
+  readonly proxy?: { readonly server: string; readonly bypass: readonly string[] };
+}
+
+/**
  * The machine's one agent browser, launched in the mode `machine.yaml` names (docs/browser-mode.md).
  *
  * - `headless` — no window anywhere: what agents get by default, and the only thing a server with no
@@ -338,6 +391,9 @@ export function normalizeViewport(width: number, height: number): BrowserViewpor
  *
  * Both keep the loopback debugging port: it is what the view streams and the agent tools drive through.
  * Neither passes an automation switch ({@link AUTOMATION_SWITCH_PATTERN}).
+ *
+ * `extras` (docs/browser-proxy.md): a headless browser gets the honest user agent, which is the one it would send
+ * with a window — `HeadlessChrome` removed and nothing else changed; and a configured proxy adds its switches.
  */
 export function agentBrowserArguments(
   executable: string,
@@ -346,10 +402,14 @@ export function agentBrowserArguments(
   viewport: BrowserViewport,
   platform: NodeJS.Platform,
   mode: BrowserMode,
+  extras: AgentBrowserExtras = {},
 ): readonly string[] {
   return chromeLaunchArguments(executable, profile, cdpPort, viewport, platform, {
     headless: mode === 'headless',
     keepPainting: mode === 'window',
+    // Only a headless Chrome says "Headless" about itself; a real window already sends the ordinary token.
+    ...(mode === 'headless' && extras.userAgent !== undefined ? { userAgent: extras.userAgent } : {}),
+    ...(extras.proxy === undefined ? {} : { proxy: extras.proxy }),
   });
 }
 

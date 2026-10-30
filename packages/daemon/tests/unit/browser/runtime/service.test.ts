@@ -199,6 +199,25 @@ describe('the machine agent browser — one Chrome, pages by session', () => {
     should(foreign).match({ code: 'not_found' });
   });
 
+  it('should show the proxy the browser started with, and nothing about one it did not', async () => {
+    // Arrange
+    const direct = harness();
+    const tabs = new Tabs();
+    const proxy = { url: 'http://proxy.example:8080', authenticated: true, bypassCount: 1 };
+    Object.assign(tabs.automation, { proxy });
+    const proxied = harness(tabs);
+    await direct.service.openPage('s1', 'app');
+    await proxied.service.openPage('s1', 'app');
+
+    // Act
+    const through = await proxied.service.status('s1');
+    const goes = await direct.service.status('s1');
+
+    // Assert
+    should(through).have.property('proxy').eql(proxy);
+    should(goes).not.have.property('proxy');
+  });
+
   it('should let a guard refuse an act from inside the page’s own queue', async () => {
     const { tabs, service } = harness();
     await service.openPage('s1', 'app');

@@ -413,6 +413,7 @@ describe('machineView', () => {
       defaultRuntime: null,
       agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
       browserMode: 'headless',
+      browserProxy: null,
       autoResume: true,
       agendaMode: true,
       lastAutoResume: null,

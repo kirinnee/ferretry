@@ -535,6 +535,7 @@ export class BrowserSessionService implements BrowserSubsystem {
       idleTimeoutSeconds: Math.round((this.idle?.timeoutMs ?? 0) / 1_000),
       startedAt: run.startedAt,
       capacity: { running: this.sessionPages(run), maximum: BROWSER_MAX_MACHINE_PAGES },
+      ...(run.driver.proxy === undefined ? {} : { proxy: run.driver.proxy }),
     };
     const viewed = this.viewedPage(run, sessionId);
     const active = pages.find(page => page.id === viewed);

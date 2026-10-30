@@ -1,5 +1,6 @@
 import type {
   BrowserInputEvent,
+  BrowserProxyStatus,
   BrowserPageActionSnapshot,
   BrowserPageSnapshot,
   BrowserScreencastFrame,
@@ -18,6 +19,8 @@ import type {
 export interface BrowserAutomation {
   /** Resolves with an exit code when the driver dies on its own. Never rejects. */
   readonly unexpectedExit: Promise<number>;
+  /** Where this browser sends its traffic, when the owner chose a proxy: the address, never a credential. */
+  readonly proxy?: BrowserProxyStatus;
   navigate(pageId: string, url: string): Promise<BrowserPageActionSnapshot>;
   click(pageId: string, selector: string): Promise<BrowserPageActionSnapshot>;
   type(pageId: string, selector: string, text: string): Promise<BrowserPageActionSnapshot>;

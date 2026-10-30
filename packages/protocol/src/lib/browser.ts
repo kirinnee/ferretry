@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { SurfaceNameSchema } from './agent-tools.ts';
 import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
+import { SECRET_REFERENCE_SOURCE } from './secrets.ts';
 import { SurfaceOpenerSchema } from './surface.ts';
 
 export const BROWSER_MAX_INSTANCES = 3;
@@ -39,6 +40,109 @@ export type BrowserPageState = z.infer<typeof BrowserPageStateSchema>;
  */
 export const BrowserModeSchema = z.enum(['headless', 'window']);
 export type BrowserMode = z.infer<typeof BrowserModeSchema>;
+
+export const BROWSER_PROXY_SCHEMES = ['http', 'https', 'socks5'] as const;
+export type BrowserProxyScheme = (typeof BROWSER_PROXY_SCHEMES)[number];
+
+/** The most bypass entries one proxy setting carries. */
+export const BROWSER_PROXY_MAX_BYPASS = 64;
+
+/**
+ * Why a proxy address is refused, or `undefined` when it is a usable one: an `http://`, `https://` or
+ * `socks5://` address with a host, no credentials in it and nothing after the port. Credentials never
+ * travel in the address — the address is shown in the app and in the status — they are the
+ * `username` / `password` references of {@link BrowserProxySettingSchema}.
+ */
+export function browserProxyUrlProblem(value: string): string | undefined {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return 'a proxy address looks like http://host:8080, https://host:8443 or socks5://host:1080';
+  }
+  const scheme = url.protocol.slice(0, -1);
+  if (!(BROWSER_PROXY_SCHEMES as readonly string[]).includes(scheme)) {
+    return 'a proxy address starts with http://, https:// or socks5://';
+  }
+  if (url.hostname === '') return 'a proxy address needs a host';
+  if (url.username !== '' || url.password !== '') {
+    return 'a proxy address never carries a user name or password: set username and password to ${secret:NAME} references instead';
+  }
+  if ((url.pathname !== '' && url.pathname !== '/') || url.search !== '' || url.hash !== '') {
+    return 'a proxy address is only a scheme, a host and a port';
+  }
+  return undefined;
+}
+
+const BROWSER_PROXY_BYPASS_ENTRY = /^[A-Za-z0-9*._:/<>\[\]-]{1,253}$/u;
+const BROWSER_PROXY_SECRET_REFERENCE = new RegExp(`^${SECRET_REFERENCE_SOURCE}$`, 'u');
+
+const BrowserProxySecretReferenceSchema = z
+  .string()
+  .regex(
+    BROWSER_PROXY_SECRET_REFERENCE,
+    'proxy credentials are written as a ${secret:NAME} reference to the secret store, never as the value',
+  );
+
+/**
+ * Where the machine's one agent browser sends its traffic (`machine.yaml` `browserProxy`,
+ * docs/browser-proxy.md). Absent means direct — what every browser did before this setting.
+ *
+ * - `url` — `http://`, `https://` or `socks5://` address of the proxy, without credentials.
+ * - `bypass` — hosts that skip the proxy, in Chrome's own syntax (`*.internal.example`, `10.0.0.0/8`,
+ *   `<local>`). Loopback is bypassed by Chrome itself.
+ * - `username` / `password` — `${secret:NAME}` references and nothing else: a value here would sit in a
+ *   file every editor of the directory can read. Both or neither.
+ */
+export const BrowserProxySettingSchema = z
+  .strictObject({
+    url: z
+      .string()
+      .trim()
+      .min(1)
+      .max(512)
+      .superRefine((value, context) => {
+        const problem = browserProxyUrlProblem(value);
+        if (problem !== undefined) context.addIssue({ code: 'custom', message: problem });
+      }),
+    bypass: z
+      .array(
+        z
+          .string()
+          .trim()
+          .regex(
+            BROWSER_PROXY_BYPASS_ENTRY,
+            'a bypass entry is a host, a *.domain pattern, an address range such as 10.0.0.0/8, or <local>',
+          ),
+      )
+      .max(BROWSER_PROXY_MAX_BYPASS)
+      .default([]),
+    username: BrowserProxySecretReferenceSchema.optional(),
+    password: BrowserProxySecretReferenceSchema.optional(),
+  })
+  .superRefine((value, context) => {
+    if ((value.username === undefined) !== (value.password === undefined)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'a proxy with credentials needs both username and password, each a ${secret:NAME} reference',
+        path: [value.username === undefined ? 'username' : 'password'],
+      });
+    }
+  });
+export type BrowserProxySetting = z.infer<typeof BrowserProxySettingSchema>;
+export type BrowserProxySettingInput = z.input<typeof BrowserProxySettingSchema>;
+
+/**
+ * The proxy a RUNNING browser was started with, as the browser pane shows it. The address is the
+ * proxy's, never a credential; the browser keeps the proxy it started with until it stops, whatever the
+ * setting says since.
+ */
+export const BrowserProxyStatusSchema = z.strictObject({
+  url: z.string().min(1).max(512),
+  authenticated: z.boolean(),
+  bypassCount: NonNegativeIntegerSchema,
+});
+export type BrowserProxyStatus = z.infer<typeof BrowserProxyStatusSchema>;
 
 /** Who is asking the person on a page to prove they are human, as far as the page shows it. */
 export const BrowserChallengeProviderSchema = z.enum([
@@ -220,6 +324,8 @@ const BrowserStatusBaseShape = {
   agentPage: BrowserAgentPageSchema.optional(),
   lastActor: BrowserLastActorSchema.optional(),
   capacity: BrowserCapacitySchema,
+  /** The proxy this running browser was started with. Absent: it goes direct. */
+  proxy: BrowserProxyStatusSchema.optional(),
 };
 
 const RunningBrowserStatusSchema = BrowserPageSnapshotSchema.safeExtend({

@@ -663,6 +663,7 @@ import {
   type BrowserLoginLifecycle,
   type BrowserSessionLauncher,
   BrowserSessionService,
+  resolveBrowserProxy,
   type BrowserViewerHost,
   BrowserViewerStream,
   type BrowserWorkerProgram,
@@ -8431,6 +8432,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // Read at every launch, so a switch applies the next time the browser starts. An unreadable
         // configuration launches headless rather than not at all.
         mode: async () => (await declaredAccountModel())?.machine.browserMode ?? 'headless',
+        // Read at every launch too, but a proxy the owner asked for is never dropped quietly: a secret the vault
+        // does not hold refuses the launch (resolveBrowserProxy) rather than sending traffic around the proxy.
+        proxy: async () => {
+          const setting = (await declaredAccountModel())?.machine.browserProxy;
+          return setting === undefined ? undefined : resolveBrowserProxy(setting, await secretVault.values());
+        },
         display: agentBrowserDisplay,
       },
     ),

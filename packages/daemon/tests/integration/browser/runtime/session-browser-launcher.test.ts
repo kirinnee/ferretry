@@ -7,8 +7,9 @@ import should from 'should';
 import { BrowserProfileStore } from '../../../../src/adapters/browser/control/profile-store.ts';
 import { NodeSessionBrowserLauncher } from '../../../../src/adapters/browser/runtime/session-browser-launcher.ts';
 import { BrowserWorkerClient } from '../../../../src/adapters/browser/transport/worker-client.ts';
-import { type BrowserAutomation, BrowserTransportError } from '../../../../src/lib/browser/transport/index.ts';
+import type { ResolvedBrowserProxy } from '../../../../src/lib/browser/proxy/index.ts';
 import type { BrowserWorkerProgram } from '../../../../src/lib/browser/runtime/index.ts';
+import { type BrowserAutomation, BrowserTransportError } from '../../../../src/lib/browser/transport/index.ts';
 
 /** The same scriptable worker the transport tier drives, reached here through the launcher's OWN
  *  default wiring rather than an injected one. */
@@ -45,7 +46,7 @@ afterEach(async () => {
  * the polite request.
  */
 async function fakeChrome(
-  options: { readonly ignoreTerm?: boolean; readonly recordArguments?: boolean } = {},
+  options: { readonly ignoreTerm?: boolean; readonly recordArguments?: boolean; readonly version?: string } = {},
 ): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'ferretry-session-browser-'));
   roots.push(root);
@@ -54,7 +55,7 @@ async function fakeChrome(
   await writeFile(
     file,
     `#!/bin/sh
-if [ "$1" = "--version" ]; then echo 'Google Chrome 150.0'; exit 0; fi
+if [ "$1" = "--version" ]; then echo 'Google Chrome ${options.version ?? '150.0'}'; exit 0; fi
 ${options.recordArguments ? `printf '%s\\n' "$@" > "${file}.args"\n` : ''}${options.recordArguments ? `printf '%s\\n' "\${DISPLAY-unset}" > "${file}.display"\n` : ''}port=$(printf '%s\\n' "$@" | sed -n 's/--remote-debugging-port=//p')
 exec node -e "${trap}require('http').createServer((q,s)=>{s.writeHead(200,{'content-type':'application/json'});s.end('{}')}).listen(process.argv[1],'127.0.0.1')" "$port"
 `,
@@ -202,6 +203,64 @@ describe('NodeSessionBrowserLauncher', () => {
     should(started).not.containEql('--ozone-platform=x11');
     // The debugging port takes no cross-origin WebSocket: only the worker, which sends no Origin.
     should(started).not.containEql('--remote-allow-origins');
+  });
+
+  describe('Browser proxy and user agent', () => {
+    async function launchWith(
+      proxy: ResolvedBrowserProxy | undefined,
+    ): Promise<{ readonly browser: BrowserAutomation; readonly started: string }> {
+      const chrome = await fakeChrome({ recordArguments: true, version: '150.0.7000.1' });
+      const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
+      roots.push(root);
+      const worker = { unexpectedExit: new Promise<number>(() => undefined), close: async () => undefined };
+      const launcher = new NodeSessionBrowserLauncher(
+        new BrowserProfileStore(root),
+        INJECTED_WORKER,
+        process.execPath,
+        environment(chrome),
+        async () => worker as never,
+        { platform: 'linux', proxy: async () => proxy },
+      );
+      const browser = await launcher.launch({ width: 800, height: 600 });
+      opened.push(browser);
+      return { browser, started: await readFile(`${chrome}.args`, 'utf8') };
+    }
+
+    it('should send the honest user agent and no proxy switches when no proxy is set', async () => {
+      const { browser, started } = await launchWith(undefined);
+      should(started).containEql('--user-agent=Mozilla/5.0 (');
+      should(started).containEql('Chrome/150.0.0.0 Safari/537.36');
+      should(started).not.containEql('HeadlessChrome');
+      should(started).not.containEql('--proxy-server');
+      should(browser.proxy).be.undefined();
+    });
+
+    it('should point Chrome straight at a proxy that needs no sign-in', async () => {
+      const { browser, started } = await launchWith({
+        setting: { url: 'socks5://proxy.example.test:1080', bypass: ['*.internal.example.test', '<local>'] },
+      });
+      should(started).containEql('--proxy-server=socks5://proxy.example.test:1080');
+      should(started).containEql('--proxy-bypass-list=*.internal.example.test;<local>');
+      should(started).containEql('--force-webrtc-ip-handling-policy=disable_non_proxied_udp');
+      should(browser.proxy).eql({ url: 'socks5://proxy.example.test:1080', authenticated: false, bypassCount: 2 });
+    });
+
+    it('should point Chrome at the loopback sign-in relay, never at the proxy or its credentials', async () => {
+      const { browser, started } = await launchWith({
+        setting: {
+          url: 'http://proxy.example.test:8080',
+          bypass: [],
+          username: '${secret:PROXY_USER}',
+          password: '${secret:PROXY_PASSWORD}',
+        },
+        credentials: { username: 'a-user', password: 'a-password' },
+      });
+      should(started).match(/--proxy-server=http:\/\/127\.0\.0\.1:\d+\n/u);
+      should(started).not.containEql('proxy.example.test');
+      should(started).not.containEql('a-user');
+      should(started).not.containEql('a-password');
+      should(browser.proxy).eql({ url: 'http://proxy.example.test:8080', authenticated: true, bypassCount: 0 });
+    });
   });
 
   describe('Browser mode', () => {
