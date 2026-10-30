@@ -4,7 +4,7 @@ import { describe, expect, it } from 'bun:test';
 import type { ReactTestInstance } from 'react-test-renderer';
 import {
   ActivityLine,
-  AttentionFlags,
+  AgendaFlags,
   ContextMeter,
   LeanSessionCard,
   LeanSessionRow,
@@ -92,7 +92,7 @@ describe('session dashboard row leaves', () => {
 
   it('keeps declared parks and human escalation distinct, with the escalation reason on title', () => {
     const flags = render(
-      <AttentionFlags
+      <AgendaFlags
         view={view('attention', {
           state: { waiting: { since: '2026-08-01T11:00:00.000Z' }, needsHuman: 'Approve production deploy' },
         })}
@@ -100,7 +100,7 @@ describe('session dashboard row leaves', () => {
     ).root;
     expect(text(flags)).toContain('parkedneeds human');
     expect(flags.findByProps({ title: 'Approve production deploy' })).toBeDefined();
-    expect(render(<AttentionFlags view={view()} />).toJSON()).toBeNull();
+    expect(render(<AgendaFlags view={view()} />).toJSON()).toBeNull();
   });
 
   it('renders every full-table conditional and navigates through the daemon-aware route', () => {

@@ -253,7 +253,7 @@ export interface ResumeLauncher {
  * mechanism, see `SessionResumePorts.serial` — and the queue is not reentrant, so a nested
  * acquisition here would deadlock the dismissal against itself.
  */
-export interface ResumeAnswerAttention {
+export interface ResumeAnswerAgenda {
   /**
    * `actor` is ATTRIBUTION, never authorization. The policy already decided whether this dismissal
    * may happen; passing the actor through means the audit line names the operator who asked, and it

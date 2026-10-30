@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { useState } from 'react';
+import { renderToString } from 'react-dom/server';
 
 import {
   type BoardMachine,
@@ -150,5 +151,12 @@ describe('the board hooks', () => {
     expect(seen.filters?.mine).toBe(true);
     await interact(() => seen.setFilters?.({ ...NO_BOARD_FILTERS, kind: 'bug' }));
     expect(seen.filters).toEqual({ ...NO_BOARD_FILTERS, kind: 'bug' });
+  });
+
+  test('a server render reads the empty snapshots, before any machine has answered', () => {
+    const seen: Seen = {};
+    renderToString(<Probe seen={seen} store={store()} />);
+    expect(seen.board?.status).toBe('loading');
+    expect(seen.task?.status).toBe('idle');
   });
 });

@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import { FyApiClient } from '@ferretry/protocol/client';
 import should from 'should';
-import { ProtocolAttentionGateway } from '../../../src/lib/attention/gateway';
-import { snapshot } from '../attention/fixtures';
+import { ProtocolAgendaGateway } from '../../../src/lib/agenda/gateway';
+import { snapshot } from '../agenda/fixtures';
 
 /**
  * WHAT A RELEASED DAEMON SAYS FOR A ROUTE IT DOES NOT HAVE, byte for byte — pinned here rather than built
@@ -23,12 +23,12 @@ const releasedUnknownRoute = (method: string, path: string): Response =>
 
 const SESSION = 's-1';
 const AGENDA = `/v1/sessions/${SESSION}/agenda`;
-const ATTENTION = `/v1/sessions/${SESSION}/attention`;
+const LEGACY_ATTENTION = `/v1/sessions/${SESSION}/attention`;
 
-/** A v4.109.0 daemon on the wire: the attention route answers, the agenda route is the released 404. */
+/** A v4.109.0 daemon on the wire: the agenda route answers, the agenda route is the released 404. */
 async function releasedDaemon(
   agendaAnswer: (method: string, path: string) => Response = releasedUnknownRoute,
-): Promise<{ gateway: ProtocolAttentionGateway; dialed: string[] }> {
+): Promise<{ gateway: ProtocolAgendaGateway; dialed: string[] }> {
   const dialed: string[] = [];
   const client = await FyApiClient.connect({
     baseUrl: 'http://127.0.0.1:7777',
@@ -39,7 +39,7 @@ async function releasedDaemon(
         const path = new URL(url).pathname;
         const method = init.method ?? 'GET';
         dialed.push(`${method} ${path}`);
-        if (path === ATTENTION) {
+        if (path === LEGACY_ATTENTION) {
           return Promise.resolve(
             new Response(JSON.stringify(snapshot([])), {
               status: 200,
@@ -51,11 +51,11 @@ async function releasedDaemon(
       },
     },
   });
-  return { gateway: new ProtocolAttentionGateway(client, SESSION), dialed };
+  return { gateway: new ProtocolAgendaGateway(client, SESSION), dialed };
 }
 
 describe('the agenda routes against a released daemon (contract)', () => {
-  it('should fall back to the attention route on the exact 404 v0.14.0 through v4.109.0 send', async () => {
+  it('should fall back to the agenda route on the exact 404 v0.14.0 through v4.109.0 send', async () => {
     // Arrange
     const { gateway, dialed } = await releasedDaemon();
 
@@ -66,7 +66,7 @@ describe('the agenda routes against a released daemon (contract)', () => {
     // Assert
     should(first.items).deepEqual([]);
     should(second.items).deepEqual([]);
-    should(dialed).deepEqual([`GET ${AGENDA}`, `GET ${ATTENTION}`, `GET ${ATTENTION}`]);
+    should(dialed).deepEqual([`GET ${AGENDA}`, `GET ${LEGACY_ATTENTION}`, `GET ${LEGACY_ATTENTION}`]);
   });
 
   it('should NOT fall back on a 404 that is not an unknown route, and surface it', async () => {

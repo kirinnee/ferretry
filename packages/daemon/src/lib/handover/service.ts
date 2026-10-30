@@ -237,7 +237,7 @@ export class SessionHandoverService {
    *
    * `null` from `apply` means "no further progress", NOT "nothing was written". Several of those paths
    * write first and stop second: a gate refusal records a changed reason, a transient step error
-   * records why, a named error records its settlement intent, and a failed Attention records that the
+   * records why, a named error records its settlement intent, and a failed Agenda records that the
    * ledger could not be reached. Returning the receipt this pass STARTED with would hand a caller a
    * document that disagrees with the one on disk — worst case the durable refusal already reads
    * `source_lost` while the answer still says `cancelled`. Both the route and this method promise the
@@ -858,7 +858,7 @@ export class SessionHandoverService {
    * the ledger's own source-reference deduplication turns the eventual retry into one item, not two.
    */
   private async raiseStranded(receipt: HandoverReceipt, reason: string): Promise<boolean> {
-    return await this.raiseAttention(
+    return await this.raiseAgenda(
       receipt,
       `the handover of ${receipt.sourceSessionId} is stranded`,
       reason,
@@ -878,7 +878,7 @@ export class SessionHandoverService {
    * has no predecessor left at all. Telling a human to go and decide about a session that is already
    * gone is worse than telling them nothing.
    */
-  private async raiseAttention(
+  private async raiseAgenda(
     receipt: HandoverReceipt,
     subject: string,
     reason: string,
@@ -958,7 +958,7 @@ export class SessionHandoverService {
       const now = await this.observe(intended);
       if (now.replacement !== null) await this.ports.sessions.stop(now.replacement.sessionId, reason);
     } else if (
-      !(await this.raiseAttention(
+      !(await this.raiseAgenda(
         intended,
         `the handover of ${receipt.sourceSessionId} lost its subject`,
         reason,

@@ -170,7 +170,7 @@ describe('SidebarRow', () => {
 
   test('badges unresolved attention from the host’s daemon-scoped ledger only', async () => {
     const sessions = [sessionView('s-1')];
-    const screen = await render(sessions, { attentionCountFor: (id: string) => (id === 's-1' ? 3 : 0) });
+    const screen = await render(sessions, { agendaCountFor: (id: string) => (id === 's-1' ? 3 : 0) });
     const badge = must(screen.container.querySelector('[role="status"]'), 'the attention badge');
     expect(badge.getAttribute('aria-label')).toBe('3 unresolved Inbox items');
     expect(badge.textContent).toContain('3');
@@ -179,13 +179,13 @@ describe('SidebarRow', () => {
 
   test('says "item" for one and caps the glyph at 99+', async () => {
     const sessions = [sessionView('s-1')];
-    const one = await render(sessions, { attentionCountFor: () => 1 });
+    const one = await render(sessions, { agendaCountFor: () => 1 });
     expect(must(one.container.querySelector('[role="status"]'), 'the badge').getAttribute('aria-label')).toBe(
       '1 unresolved Inbox item',
     );
     await one.unmount();
 
-    const many = await render(sessions, { attentionCountFor: () => 250 });
+    const many = await render(sessions, { agendaCountFor: () => 250 });
     expect(must(many.container.querySelector('[role="status"]'), 'the badge').textContent).toContain('99+');
     await many.unmount();
   });

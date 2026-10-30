@@ -38,7 +38,7 @@ import { SessionsPage } from './components/sessions-page.tsx';
 import type { SendDismiss, SendExpand } from './components/settled-send-note.tsx';
 import { useAgendaSessionActions } from './features/agenda/agenda-session-actions.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
-import { AttentionInboxPage } from './features/attention/attention-inbox-page.tsx';
+import { AgendaInboxPage } from './features/agenda/agenda-inbox-page.tsx';
 import { LinkBehaviourProvider } from './features/browser/external-link.tsx';
 import { useLocalComputer } from './features/browser/use-local-computer.ts';
 import { tunnelSwitchOffer } from './features/carrier/carrier-preference-selector.tsx';
@@ -122,14 +122,9 @@ import { WhatsNewSheet } from './features/whats-new/whats-new-sheet.tsx';
 import { useAccountPickerSlice } from './hooks/use-account-picker.ts';
 import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
-import { useAttentionSession, useAttentionSnapshot } from './hooks/use-attention.ts';
-import {
-  AttentionInboxContext,
-  useAttentionInbox,
-  useAttentionInboxModel,
-  useInboxMachines,
-} from './hooks/use-attention-inbox.ts';
-import { useAttentionReplies } from './hooks/use-attention-replies.ts';
+import { useAgendaSession, useAgendaSnapshot } from './hooks/use-agenda.ts';
+import { AgendaInboxContext, useAgendaInbox, useAgendaInboxModel, useInboxMachines } from './hooks/use-agenda-inbox.ts';
+import { useAgendaReplies } from './hooks/use-agenda-replies.ts';
 import { useCarrierPreferences, useTunnelService, useTunnelSwitches } from './hooks/use-carrier-preferences.ts';
 import { useConfigChangeFeed } from './hooks/use-config-change-feed.ts';
 import { useConnectionHealth } from './hooks/use-connection-health.ts';
@@ -164,10 +159,10 @@ import {
 } from './hooks/use-service-worker-update.ts';
 import { useSttSettings } from './hooks/use-stt-settings.ts';
 import { useTheme } from './hooks/use-theme.ts';
-import { AgendaWireProbes } from './lib/agenda-wire-react.tsx';
 import { type MachineSource, machineDisplayOrder } from './lib/all-machines.ts';
-import { attentionTargetFromSearch } from './lib/attention-inbox.ts';
-import { inboxSourceFromSearch } from './lib/attention-inbox-list.ts';
+import { AgendaWireProbes } from './lib/agenda-wire-react.tsx';
+import { agendaTargetFromSearch } from './lib/agenda-inbox.ts';
+import { inboxSourceFromSearch } from './lib/agenda-inbox-list.ts';
 import { transcriptIsCurrent } from './lib/background-fresh.ts';
 import { DEFAULT_CARRIER_PREFERENCE } from './lib/carrier-preference.ts';
 import type { DaemonConnectionRecord } from './lib/connections.ts';
@@ -197,7 +192,7 @@ import {
 } from './lib/pages/page-host.tsx';
 import {
   connectionPickerPath,
-  daemonAttentionPath,
+  daemonAgendaPath,
   daemonLearningPath,
   daemonSessionsPath,
   daemonSettingsPath,
@@ -897,7 +892,7 @@ function ShellSessionsBar({
   const rowMenuRenderer = useMemo(() => sessionRowMenuRenderer(navigate), [navigate]);
   const { connections } = useConnectionSnapshot();
   const allMachines = useContext(AllMachinesContext);
-  const attentionInbox = useAttentionInbox();
+  const agendaInbox = useAgendaInbox();
   const now = useLiveClock({ intervalMs: MACHINE_CLOCK_MS });
   const fleet = useSyncExternalStore(
     listener => store.fleet.subscribe(listener),
@@ -933,8 +928,8 @@ function ShellSessionsBar({
     <SessionsBar
       active={sessionsBarPlace(route)}
       // The inbox counts every paired machine, whichever list the bar shows.
-      attentionHref={daemonAttentionPath(connection.daemonId)}
-      attentionTotal={attentionInbox?.total ?? 0}
+      agendaHref={daemonAgendaPath(connection.daemonId)}
+      agendaTotal={agendaInbox?.total ?? 0}
       activeSessionId={route.kind === 'session' ? route.sessionId : null}
       daemonId={connection.daemonId}
       machineName={machineName}
@@ -1022,8 +1017,8 @@ const browserEventStreamEnvironment: SessionEventStreamEnvironment = {
 function SessionRoute({
   connection,
   scope,
-  attentionOverride,
-}: SessionChatPageProps & { readonly attentionOverride?: string | null }) {
+  agendaOverride,
+}: SessionChatPageProps & { readonly agendaOverride?: string | null }) {
   const store = useAppStore();
   // The router's fetch, recorded for the Performance report like every other daemon read.
   const daemonFetch = useDaemonFetch();
@@ -1046,7 +1041,7 @@ function SessionRoute({
   const dictation = useSttSettings(store.stt);
   // Actions › Warden: offered only where this caller's grants open the Warden (read once per machine).
   const wardenActions = useAskWardenActions(connection);
-  // The "This folder" rail reads through the app's own clients: the ONE attention client, a fleet
+  // The "This folder" rail reads through the app's own clients: the ONE agenda client, a fleet
   // client per machine, and the machine's display name for the MCP sign-in sheet.
   const sessionContext = useMemo(
     () => ({
@@ -1060,12 +1055,12 @@ function SessionRoute({
   // The session's Attention, read through the ONE daemon-scoped client the app
   // store owns — same carrier as every generated call, and invalidated with the
   // pairing rather than outliving it.
-  const attentionStatus = useAttentionSession(store.attention, connection, scope);
-  const attentionSnapshot = useAttentionSnapshot(store.attention, scope);
-  const attentionReplies = useAttentionReplies(store.attention, connection, scope);
-  const attention = useMemo(
-    () => ({ client: store.attention, snapshot: attentionSnapshot, status: attentionStatus }),
-    [store.attention, attentionSnapshot, attentionStatus],
+  const agendaStatus = useAgendaSession(store.attention, connection, scope);
+  const agendaSnapshot = useAgendaSnapshot(store.attention, scope);
+  const agendaReplies = useAgendaReplies(store.attention, connection, scope);
+  const agenda = useMemo(
+    () => ({ client: store.attention, snapshot: agendaSnapshot, status: agendaStatus }),
+    [store.attention, agendaSnapshot, agendaStatus],
   );
   const subscribe = useCallback((listener: () => void) => store.fleet.subscribe(listener), [store.fleet]);
   const snapshot = useCallback(() => store.fleet.getSnapshot(), [store.fleet]);
@@ -1277,7 +1272,7 @@ function SessionRoute({
       .then(api => {
         if (!current) return;
         setClient(api);
-        const attentionScope = daemonSessionScope(connection, sessionId);
+        const agendaScope = daemonSessionScope(connection, sessionId);
         const ledger = ledgerFeed(setSends);
         control = startSessionWorkspaceRefresh({
           api: {
@@ -1285,7 +1280,7 @@ function SessionRoute({
             // owner. Its own status reports a failed board read, so a failure
             // here must not relabel a successful transcript as unreadable.
             logs: async id => {
-              void store.attention.revalidate(connection, attentionScope).catch(() => undefined);
+              void store.attention.revalidate(connection, agendaScope).catch(() => undefined);
               return await api.logs(id);
             },
             get: async id => await store.fleet.fetchSession(connection, { daemonId, sessionId: id }),
@@ -1561,14 +1556,12 @@ function SessionRoute({
             ),
           }}
           browserLogin={store.browserLogin}
-          attention={attention}
-          attentionReplies={attentionReplies}
+          attention={agenda}
+          agendaReplies={agendaReplies}
           // A notification tap or an unread row names the item it opens at (`?attention=A3`).
-          attentionTarget={
-            attentionOverride !== undefined ? attentionOverride : attentionTargetFromSearch(window.location.search)
-          }
+          agendaTarget={agendaOverride !== undefined ? agendaOverride : agendaTargetFromSearch(window.location.search)}
           // Each navigation that names one re-targets it, so tapping the same item's notification again rings it again.
-          attentionTargetKey={entryKey}
+          agendaTargetKey={entryKey}
           chatWidth={controls.chatWidth}
           composerEnterKey={controls.composerEnterKey}
           composerPhoneEnterKey={controls.composerPhoneEnterKey}
@@ -1946,16 +1939,16 @@ function LearningSettingsTabSurface({ connection }: { readonly connection: Daemo
  * The Inbox. Its cards come from EVERY paired machine (the shell's one inbox), so the
  * machine in the address only decides which machine's chrome surrounds it.
  */
-function AttentionRoute({ connection }: DaemonPageProps) {
+function AgendaRoute({ connection }: DaemonPageProps) {
   const { navigate } = useRouter();
   const store = useAppStore();
-  const inbox = useAttentionInbox();
+  const inbox = useAgendaInbox();
   // Each conversation's walk to its last messages, kept while the page is open so a re-read is one page.
   const recentWalks = useRef<RecentMessagesMemory>(new Map()).current;
   const phone = useLayoutMode() === 'drawer';
   const machineNotifications = usePairedMachineNotifications();
   return inbox === null ? null : (
-    <AttentionInboxPage
+    <AgendaInboxPage
       banner={
         <NotificationsOffBanner
           rows={machineNotifications.rows}
@@ -1966,7 +1959,7 @@ function AttentionRoute({ connection }: DaemonPageProps) {
       }
       inbox={inbox}
       from={inboxSourceFromSearch(window.location.search)}
-      onClearFrom={() => navigate(daemonAttentionPath(connection.daemonId))}
+      onClearFrom={() => navigate(daemonAgendaPath(connection.daemonId))}
       onNavigate={navigate}
       phone={phone}
       readRecent={async card => {
@@ -2047,7 +2040,7 @@ const PAGE_SLOTS: PageHostSlots = {
   Warden: WardenRoute,
   Analytics: AnalyticsRoute,
   Learning: LearningRoute,
-  Attention: AttentionRoute,
+  Attention: AgendaRoute,
   ImportedHistory: ImportedHistoryRoute,
   MachineSetup: MachineSetupRoute,
 };
@@ -2114,7 +2107,7 @@ export function AppShell() {
   const everyMachine = sessionsList === 'all' && connectionSnapshot.connections.length > 1 && connection !== undefined;
   /*
    * EVERY PAIRED MACHINE IS READ, whichever list the reader chose: Attention is counted across all of
-   * them (the Attention tab, the sidebar's entry, the inbox), and an ask on a machine that is not on
+   * them (the Agenda tab, the sidebar's entry, the inbox), and an ask on a machine that is not on
    * screen must still reach the badge. Each list is one cheap read on its own feed or slow beat — the
    * Sessions list setting decides what the LIST shows, not what this browser is willing to hear about.
    */
@@ -2158,7 +2151,7 @@ export function AppShell() {
     useCallback((daemonId, event) => store.board.noteEvent(daemonId, event), [store.board]),
   );
   const lockedMachines = useLockedMachines(store.unlockGate);
-  const attentionInbox = useAttentionInboxModel(store.attention, useInboxMachines(store.fleet, everyPairedMachine));
+  const agendaInbox = useAgendaInboxModel(store.attention, useInboxMachines(store.fleet, everyPairedMachine));
   const machineSources = useMachineSources(store, listedMachines, lockedMachines);
   const allMachines = useMemo<AllMachinesList | undefined>(
     () =>
@@ -2575,7 +2568,7 @@ export function AppShell() {
                       active={appBarDestinationForRoute(pageRoute)}
                       onNavigate={navigate}
                       tabBarShown={showsTabBar(pageRoute)}
-                      attentionCount={attentionInbox.total}
+                      agendaCount={agendaInbox.total}
                       themeToggle={<ThemeToggle touch />}
                     />
                   ) : null}
@@ -2612,7 +2605,7 @@ export function AppShell() {
                   {phone && showsTabBar(pageRoute) ? (
                     <AppTabBar
                       daemon={connection.daemonId}
-                      attentionCount={attentionInbox.total}
+                      agendaCount={agendaInbox.total}
                       active={appBarDestinationForRoute(pageRoute)}
                       onNavigate={navigate}
                       onOpenPalette={openPalette}
@@ -2674,7 +2667,7 @@ export function AppShell() {
   };
 
   return (
-    <AttentionInboxContext.Provider value={attentionInbox}>
+    <AgendaInboxContext.Provider value={agendaInbox}>
       <AllMachinesContext.Provider value={allMachines}>
         <NotificationControlsContext.Provider value={notificationControlsHost}>
           <AgendaWireProbes machines={connectionSnapshot.connections} />
@@ -2718,7 +2711,7 @@ export function AppShell() {
           <StepUpDialog gate={store.unlockGate} copy={UNLOCK_COPY} machineName={promptMachineName} />
         </NotificationControlsContext.Provider>
       </AllMachinesContext.Provider>
-    </AttentionInboxContext.Provider>
+    </AgendaInboxContext.Provider>
   );
 }
 

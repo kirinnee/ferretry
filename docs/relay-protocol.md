@@ -1827,7 +1827,7 @@ client's own: a surface that fires its reads in one tick queues them all before 
 sealed, so a queue deeper than one credit window says nothing about the daemon — the window has not
 had a round trip to refill. The reference client used to end the session there, and every request on
 it failed at once: first for a phone photo's eighty parts queued behind one another (the owner's batch
-of 21 photos, 2026-10-29), then for a burst of whole reads — the inbox reading one attention board per
+of 21 photos, 2026-10-29), then for a burst of whole reads — the inbox reading one agenda board per
 session — reported to the owner as `4400` "too many records waiting on credit" and as a Cloudflare
 tunnel that "was not reachable" (2026-10-30). So the reference client queues requests in order and
 sends each as credit allows. What bounds the queue is admission: at most 256 whole requests wait

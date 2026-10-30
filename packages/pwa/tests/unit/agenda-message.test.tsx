@@ -5,7 +5,7 @@ import {
   agendaDiscussMessage,
   agendaDoneMessage,
   agendaReMessage,
-  type AttentionSnapshot,
+  type AgendaSnapshot,
   parseAgendaMessage,
 } from '@ferretry/protocol';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
@@ -52,15 +52,15 @@ const snapshot = {
     { id: 'A9', subject: 'Run the migration?', response: { kind: 'permission', decision: 'approve' } },
     { id: 'A11', subject: 'Which?', response: { kind: 'multiple-choice', choice: 'Left' } },
   ],
-} as unknown as AttentionSnapshot;
+} as unknown as AgendaSnapshot;
 
 const opened: string[] = [];
 const surface = {
-  attentionReferenceResolver: (id: string) => ['A45', 'A7', 'A9'].includes(id),
-  onAttentionOpen: (id: string) => void opened.push(id),
+  agendaReferenceResolver: (id: string) => ['A45', 'A7', 'A9'].includes(id),
+  onAgendaOpen: (id: string) => void opened.push(id),
 };
 
-const draw = (text: string, board: AttentionSnapshot | null = snapshot, write?: (text: string) => Promise<void>) =>
+const draw = (text: string, board: AgendaSnapshot | null = snapshot, write?: (text: string) => Promise<void>) =>
   render(
     <ReferenceSurfaceProvider surface={surface}>
       <AgendaItemsProvider snapshot={board}>

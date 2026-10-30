@@ -15,7 +15,7 @@
 
 import type { BoardTaskId } from '@ferretry/protocol';
 import { useCallback, useEffect, useMemo, useReducer, useSyncExternalStore } from 'react';
-import type { DaemonAttentionClient } from '../lib/attention-client.ts';
+import type { DaemonAgendaClient } from '../lib/agenda-client.ts';
 import { type BoardActions, createBoardActions } from '../lib/board-actions.ts';
 import {
   type BoardFilters,
@@ -171,7 +171,7 @@ export const useBoardProjects = (
 /** The write verbs, bound to the machines currently paired. */
 export const useBoardActions = (
   store: DaemonBoardStore,
-  agenda: Pick<DaemonAttentionClient, 'respond'>,
+  agenda: Pick<DaemonAgendaClient, 'respond'>,
   machines: readonly DaemonConnection[],
 ): BoardActions => {
   const key = pairingKey(machines);

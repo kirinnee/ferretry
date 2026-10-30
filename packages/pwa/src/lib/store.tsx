@@ -24,9 +24,9 @@ import {
   readAccountPickerHealth,
 } from './account-picker-catalog.ts';
 import { DaemonAccountPickerStore } from './account-picker-store.ts';
-import { AgendaWireDirectory } from './agenda-wire.ts';
 import { DaemonHttpTransport, daemonApiClient } from './api-client.ts';
-import { DaemonAttentionClient } from './attention-client.ts';
+import { AgendaWireDirectory } from './agenda-wire.ts';
+import { DaemonAgendaClient } from './agenda-client.ts';
 import { BackgroundChatFreshener, type BackgroundFreshEnvironment } from './background-fresh.ts';
 import { daemonBoardPort } from './board-client.ts';
 import { DaemonBoardStore } from './board-store.ts';
@@ -389,7 +389,7 @@ export interface AppStore {
   /** Which kinds of each machine's configuration have moved, so a screen reads them again. */
   readonly configChanges: DaemonConfigChangeStore;
   /** The one daemon/session-scoped Attention cache and mutation client. */
-  readonly attention: DaemonAttentionClient;
+  readonly attention: DaemonAgendaClient;
   /** Which spelling of the agenda wire each paired machine speaks, from the health the app reads. */
   readonly agendaWire: AgendaWireDirectory;
   readonly usage: DaemonUsageStore;
@@ -787,7 +787,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   // the SAME carrier as every generated call. A direct-only second client would
   // make the action modal fail on precisely the remote phone it is for.
   const agendaWire = new AgendaWireDirectory();
-  const attention = new DaemonAttentionClient(undefined, sharedReads, agendaWire);
+  const agenda = new DaemonAgendaClient(undefined, sharedReads, agendaWire);
   const usage = new DaemonUsageStore(daemonUsagePort(sharedReads));
   const pins = new DaemonPinClient(undefined, carried);
   const browserLogin = new DaemonBrowserLoginStore(daemon => ({
@@ -833,7 +833,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
       projects,
       board,
       accountPicker,
-      attention,
+      agenda,
       agendaWire,
       usage,
       pins,
@@ -949,7 +949,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     board,
     accountPicker,
     configChanges,
-    attention,
+    attention: agenda,
     agendaWire,
     usage,
     pins,

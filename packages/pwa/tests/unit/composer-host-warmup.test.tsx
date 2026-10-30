@@ -29,7 +29,7 @@ import { Profiler, useCallback, useRef, useState } from 'react';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import { Composer } from '../../src/components/composer.tsx';
 import type {
-  ComposerAttentionItem,
+  ComposerAgendaItem,
   ComposerSkillsCatalog,
 } from '../../src/components/composer-autocomplete-providers.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
@@ -62,7 +62,7 @@ const CATALOG: ComposerSkillsCatalog = {
   harness: 'claude',
   skills: [{ name: 'summary', description: 'Give a fast recap' }],
 };
-const ATTENTION: readonly ComposerAttentionItem[] = [{ id: 'A3', subject: 'Pick a window', source: 'question' }];
+const AGENDA: readonly ComposerAgendaItem[] = [{ id: 'A3', subject: 'Pick a window', source: 'question' }];
 
 const mounted = (element: Parameters<typeof render>[0]): ReactTestRenderer => {
   const renderer = render(element);
@@ -195,8 +195,8 @@ describe('composer host warm-up handshake', () => {
   });
 
   test('never publishes a ready attention menu that invents an empty family', async () => {
-    let deliver: (items: readonly ComposerAttentionItem[]) => void = () => undefined;
-    const read = new Promise<readonly ComposerAttentionItem[]>(resolve => {
+    let deliver: (items: readonly ComposerAgendaItem[]) => void = () => undefined;
+    const read = new Promise<readonly ComposerAgendaItem[]>(resolve => {
       deliver = resolve;
     });
     const frames: MenuFrame[] = [];
@@ -206,7 +206,7 @@ describe('composer host warm-up handshake', () => {
         onCommit={() => {
           if (holder.view !== undefined) frames.push(sampleMenu(holder.view, 'References'));
         }}
-        prop={value => (value === undefined ? {} : { autocompleteAttention: value })}
+        prop={value => (value === undefined ? {} : { autocompleteAgenda: value })}
         read={read}
       />,
     );
@@ -215,7 +215,7 @@ describe('composer host warm-up handshake', () => {
     type(view, '@@@A3');
     frames.length = 0;
     await runAsync(async () => {
-      deliver(ATTENTION);
+      deliver(AGENDA);
       await drain();
     });
 

@@ -48,7 +48,7 @@ import {
 } from './composer-autocomplete.ts';
 import { ComposerAutocompletePopover } from './composer-autocomplete-popover.tsx';
 import {
-  type ComposerAttentionItem,
+  type ComposerAgendaItem,
   type ComposerSkillsCatalog,
   createComposerAutocompleteProviders,
 } from './composer-autocomplete-providers.ts';
@@ -140,8 +140,8 @@ export interface ComposerProps {
   readonly dictationConversation?: () => readonly string[];
   /** One already-read daemon fleet slice, shared with transcript references. */
   readonly autocompleteSessions?: readonly SessionView[];
-  /** The session's unresolved Attention items, shared with reference proof. */
-  readonly autocompleteAttention?: readonly ComposerAttentionItem[];
+  /** The session's unresolved Agenda items, shared with reference proof. */
+  readonly autocompleteAgenda?: readonly ComposerAgendaItem[];
   /** The session's already-read skills catalog, shared with reference proof. */
   readonly autocompleteSkills?: ComposerSkillsCatalog;
   /**
@@ -301,7 +301,7 @@ const hasFiles = (transfer: Pick<DataTransfer, 'types'> | null): boolean =>
 /** Stable empties, so an unsettled family is a getter that answers rather than a
  *  getter that is missing — and never a new array identity per render. */
 const EMPTY_SESSIONS: readonly SessionView[] = [];
-const EMPTY_ATTENTION: readonly ComposerAttentionItem[] = [];
+const EMPTY_AGENDA: readonly ComposerAgendaItem[] = [];
 
 /** The selection half of the field: a textarea has it, and so does the live editor's handle. */
 interface ComposerFieldSelection {
@@ -370,7 +370,7 @@ export function Composer({
   dictationRecognition,
   dictationConversation,
   autocompleteSessions,
-  autocompleteAttention,
+  autocompleteAgenda,
   autocompleteSkills,
   autocompleteReady,
   autocompleteFetcher,
@@ -463,18 +463,18 @@ export function Composer({
   // supplies none is a standalone composer and keeps the daemon-backed defaults.
   const hosted =
     autocompleteSessions !== undefined ||
-    autocompleteAttention !== undefined ||
+    autocompleteAgenda !== undefined ||
     autocompleteSkills !== undefined ||
     autocompleteReady !== undefined;
   const hostRef = useRef({
     sessions: autocompleteSessions,
-    attention: autocompleteAttention,
+    attention: autocompleteAgenda,
     skills: autocompleteSkills,
     ready: autocompleteReady,
   });
   hostRef.current = {
     sessions: autocompleteSessions,
-    attention: autocompleteAttention,
+    attention: autocompleteAgenda,
     skills: autocompleteSkills,
     ready: autocompleteReady,
   };
@@ -504,9 +504,9 @@ export function Composer({
         ...(hosted
           ? {
               getSessions: () => hostRef.current.sessions ?? EMPTY_SESSIONS,
-              getAttentionItems: () => hostRef.current.attention ?? EMPTY_ATTENTION,
+              getAgendaItems: () => hostRef.current.attention ?? EMPTY_AGENDA,
               getSkills: () => hostRef.current.skills,
-              waitForAttentionItems: hostWarmup,
+              waitForAgendaItems: hostWarmup,
               waitForSkills: hostWarmup,
             }
           : {}),

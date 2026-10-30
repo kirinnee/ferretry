@@ -5,15 +5,15 @@
  *   ?view=sections-open   the same with "With ferrets" unfolded
  *   ?view=warden          `/inbox?from=warden`: the "From Warden" chip and only what the Warden raised
  *
- * The REAL `AttentionInboxPage`; only the data is invented and nothing is sent anywhere.
+ * The REAL `AgendaInboxPage`; only the data is invented and nothing is sent anywhere.
  */
 
-import type { AttentionItem, SessionView } from '@ferretry/protocol';
+import type { AgendaItem, SessionView } from '@ferretry/protocol';
 import { type ReactElement, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
-import { AttentionInboxPage } from '../src/features/attention/attention-inbox-page.tsx';
-import type { AttentionInbox } from '../src/hooks/use-attention-inbox.ts';
-import { DeferredAttentionActions, type InboxCard, inboxCardKey } from '../src/lib/attention-inbox.ts';
+import { AgendaInboxPage } from '../src/features/agenda/agenda-inbox-page.tsx';
+import type { AgendaInbox } from '../src/hooks/use-agenda-inbox.ts';
+import { DeferredAgendaActions, type InboxCard, inboxCardKey } from '../src/lib/agenda-inbox.ts';
 import { daemonId } from '../src/lib/daemon-connection.ts';
 import { AppTabBar } from '../src/shell/app-bar.tsx';
 import { sessionView } from '../tests/support/sessions.ts';
@@ -24,7 +24,7 @@ const ahead = (minutes: number): string => new Date(NOW + minutes * 60_000).toIS
 const STUDIO = daemonId('studio');
 const LAPTOP = daemonId('laptop');
 
-const item = (id: string, minutes: number, by: string, patch: Partial<AttentionItem>): AttentionItem =>
+const item = (id: string, minutes: number, by: string, patch: Partial<AgendaItem>): AgendaItem =>
   ({
     id,
     source: 'agent-raised',
@@ -37,23 +37,23 @@ const item = (id: string, minutes: number, by: string, patch: Partial<AttentionI
     raisedBySession: 'fr',
     raisedByName: by,
     ...patch,
-  }) as AttentionItem;
+  }) as AgendaItem;
 
 const ferret = (
   id: string,
   teammate: string,
   label: string,
-  attention?: { readonly open: number; readonly first: string; readonly ask: string; readonly stopped?: boolean },
+  agenda?: { readonly open: number; readonly first: string; readonly ask: string; readonly stopped?: boolean },
 ): SessionView =>
   sessionView(id, {
     config: { teammate: teammate as never, label, cwd: `/home/kirin/Workspace/${id}` },
     state: {
       lastActivityAt: ago(1),
-      ...(attention === undefined ? {} : { attention: { ...attention, latestAt: ago(2) } }),
+      ...(agenda === undefined ? {} : { attention: { ...agenda, latestAt: ago(2) } }),
     } as never,
   });
 
-const card = (it: AttentionItem, view: SessionView, machine: string, daemon = STUDIO): InboxCard => ({
+const card = (it: AgendaItem, view: SessionView, machine: string, daemon = STUDIO): InboxCard => ({
   key: inboxCardKey(daemon, view.config.id, it.id),
   daemonId: daemon,
   machineName: machine,
@@ -79,19 +79,19 @@ const A5 = item('A5', 12, 'ottilie', {
       { label: 'Postgres', description: 'A server to run and patch' },
     ],
   },
-} as Partial<AttentionItem>);
+} as Partial<AgendaItem>);
 const A2 = item('A2', 9, 'hadi', {
   title: 'Restart the staging relay?',
   subject: 'Can I restart the staging relay? It drops live sessions for about ten seconds.',
   neededBy: ahead(480),
   ask: { kind: 'permission' },
-} as Partial<AttentionItem>);
+} as Partial<AgendaItem>);
 const A3 = item('A3', 2, 'johnnie', {
   title: 'Rebase onto main now?',
   subject: 'Rebase onto main now, or wait for #768 to merge?',
   willBlock: 'the release cut',
   ask: { kind: 'multiple-choice', options: [{ label: 'Rebase now' }, { label: 'Wait' }] },
-} as Partial<AttentionItem>);
+} as Partial<AgendaItem>);
 const A6 = item('A6', 25, 'maryah', {
   title: 'Which login should the runtime use?',
   subject: 'Which login should the new runtime use, the personal one or the team one?',
@@ -102,8 +102,8 @@ const N1 = item('A22', 4, 'hadi', {
   why: 'The relay latency benchmark is back under 40 ms after the cache fix.',
   notice: true,
   kind: 'info',
-} as Partial<AttentionItem>);
-const WITH = (id: string, minutes: number, title: string): AttentionItem =>
+} as Partial<AgendaItem>);
+const WITH = (id: string, minutes: number, title: string): AgendaItem =>
   item(id, minutes + 20, 'zelda', {
     title,
     subject: title,
@@ -111,8 +111,8 @@ const WITH = (id: string, minutes: number, title: string): AttentionItem =>
     waitingOn: 'ferret',
     waitingFor: 'discussion',
     askedAt: ago(minutes),
-  } as Partial<AttentionItem>);
-const warden = (id: string, minutes: number, title: string, subject: string, key: string): AttentionItem =>
+  } as Partial<AgendaItem>);
+const warden = (id: string, minutes: number, title: string, subject: string, key: string): AgendaItem =>
   item(id, minutes, 'warden', {
     title,
     subject,
@@ -120,7 +120,7 @@ const warden = (id: string, minutes: number, title: string, subject: string, key
     raisedBy: 'daemon',
     sourceRef: `warden:ask:fleet:cleanup:${key}`,
     ask: { kind: 'permission' },
-  } as Partial<AttentionItem>);
+  } as Partial<AgendaItem>);
 const W1 = warden(
   'A30',
   40,
@@ -144,7 +144,7 @@ const FERRET: readonly InboxCard[] = [
   card(WITH('A10', 4, 'Which cache to drop?'), NIGHTLY, 'studio'),
 ];
 
-const deferred = new DeferredAttentionActions(async () => undefined);
+const deferred = new DeferredAgendaActions(async () => undefined);
 
 function Inbox({
   phone,
@@ -157,7 +157,7 @@ function Inbox({
 }): ReactElement {
   const state = useSyncExternalStore(deferred.subscribe, deferred.getSnapshot);
   const [source, setSource] = useState(from);
-  const inbox: AttentionInbox = {
+  const inbox: AgendaInbox = {
     unread: [],
     total: OWNER.length,
     cards: OWNER,
@@ -173,7 +173,7 @@ function Inbox({
   return (
     <div className="flex h-dvh flex-col bg-bg" data-fixture="">
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <AttentionInboxPage
+        <AgendaInboxPage
           from={source}
           inbox={inbox}
           now={NOW}
@@ -186,7 +186,7 @@ function Inbox({
       {phone ? (
         <AppTabBar
           active="attention"
-          attentionCount={inbox.total}
+          agendaCount={inbox.total}
           daemon={STUDIO}
           onNavigate={() => undefined}
           onOpenPalette={() => undefined}

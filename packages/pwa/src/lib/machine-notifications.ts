@@ -4,7 +4,7 @@
  *
  * A Web Push subscription is enrolled WITH one daemon, so "are notifications on?" has a separate answer for
  * every machine. That answer is read from the machine itself (its own device list), never guessed from a
- * local switch: a machine whose list is empty has nobody to push to, and an Attention push there goes
+ * local switch: a machine whose list is empty has nobody to push to, and an Agenda push there goes
  * nowhere — which is the silent failure this model exists to name.
  *
  * Pure and total: facts in, rows out. The hook that reads the machines is `use-machine-notifications.ts`.

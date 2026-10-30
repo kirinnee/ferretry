@@ -17,7 +17,7 @@
 
 import {
   type AgendaRef,
-  type AttentionResponse,
+  type AgendaResponse,
   type BoardErrorCode,
   type BoardResult,
   type BoardTaskActionRequestInput,
@@ -28,7 +28,7 @@ import {
   type LaneSet,
   type TaskMessage,
 } from '@ferretry/protocol';
-import type { DaemonAttentionClient } from './attention-client.ts';
+import type { DaemonAgendaClient } from './agenda-client.ts';
 import { checkMove } from './board-model.ts';
 import type { DaemonBoardStore } from './board-store.ts';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
@@ -79,14 +79,14 @@ export interface BoardActions {
   answer(
     daemonId: DaemonId,
     ref: AgendaRef,
-    response: AttentionResponse,
+    response: AgendaResponse,
     note?: string,
   ): Promise<BoardResult<undefined, BoardMutationError>>;
 }
 
 export interface BoardActionsDeps {
   readonly store: Pick<DaemonBoardStore, 'act'>;
-  readonly agenda: Pick<DaemonAttentionClient, 'respond'>;
+  readonly agenda: Pick<DaemonAgendaClient, 'respond'>;
   /** The current pairing of a machine, or `undefined` once it is unpaired. */
   readonly connection: (daemonId: DaemonId) => DaemonConnection | undefined;
 }

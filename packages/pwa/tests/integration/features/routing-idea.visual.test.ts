@@ -5,12 +5,13 @@
  * Ctrl+Enter presses Write it for me. Captured at a phone and a desktop, light and dark. Set
  * `FY_IDEA_SHOTS_DIR` to keep the pictures.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { afterAll, beforeAll, describe, expect } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { sharedChromium } from '../support/chromium.ts';
+import { boundedContext, overlapped } from '../support/overlap.ts';
 
 const packageRoot = resolve(import.meta.dir, '../../..');
 const shotsDir = process.env.FY_IDEA_SHOTS_DIR ?? '';
@@ -22,6 +23,8 @@ const IDEA = '[data-routing-idea]';
 const COUNTER = '[data-idea-counter]';
 
 let browser: Browser;
+const overlap = overlapped();
+const bounded = boundedContext(() => browser, 4);
 let directory = '';
 let server: ReturnType<typeof Bun.serve> | undefined;
 
@@ -65,13 +68,15 @@ beforeAll(async () => {
   if (shotsDir !== '') await mkdir(shotsDir, { recursive: true });
 }, 180_000);
 
+beforeAll(overlap.start);
+
 afterAll(async () => {
   server?.stop(true);
   if (directory !== '') await rm(directory, { force: true, recursive: true });
 });
 
 const newContext = async (phone: boolean, mode: 'light' | 'dark'): Promise<BrowserContext> =>
-  await browser.newContext({
+  await bounded({
     viewport: phone ? { width: 390, height: 844 } : { width: 1_440, height: 900 },
     colorScheme: mode,
     reducedMotion: 'reduce',
@@ -111,75 +116,83 @@ describe('the "Your idea" text area, in a real browser', () => {
   for (const phone of [true, false]) {
     for (const mode of ['light', 'dark'] as const) {
       const where = `${phone ? 'phone-390' : 'desktop-1440'}-${mode}`;
-      it(`is a text area that grows to twelve rows and then scrolls, and warns near the limit (${where})`, async () => {
-        const context = await newContext(phone, mode);
-        try {
-          const tab = await open(context, mode, 'nudge');
-          const tag = await tab.locator(IDEA).evaluate(node => node.tagName);
-          expect(tag).toBe('TEXTAREA');
-          const line = await lineHeightOf(tab);
-          const empty = await heightOf(tab);
-          expect(empty).toBeGreaterThanOrEqual(line * 4);
-          expect(await tab.locator(COUNTER).textContent()).toContain('0 / 4,000');
-          await shot(tab, `idea-${where}-empty`);
+      overlap.it(
+        `is a text area that grows to twelve rows and then scrolls, and warns near the limit (${where})`,
+        async () => {
+          const context = await newContext(phone, mode);
+          try {
+            const tab = await open(context, mode, 'nudge');
+            const tag = await tab.locator(IDEA).evaluate(node => node.tagName);
+            expect(tag).toBe('TEXTAREA');
+            const line = await lineHeightOf(tab);
+            const empty = await heightOf(tab);
+            expect(empty).toBeGreaterThanOrEqual(line * 4);
+            expect(await tab.locator(COUNTER).textContent()).toContain('0 / 4,000');
+            await shot(tab, `idea-${where}-empty`);
 
-          await tab.locator(IDEA).fill(paragraphs(8));
-          const grown = await heightOf(tab);
-          expect(grown).toBeGreaterThan(empty);
-          expect(await tab.locator(IDEA).inputValue()).toBe(paragraphs(8));
+            await tab.locator(IDEA).fill(paragraphs(8));
+            const grown = await heightOf(tab);
+            expect(grown).toBeGreaterThan(empty);
+            expect(await tab.locator(IDEA).inputValue()).toBe(paragraphs(8));
 
-          await tab.locator(IDEA).fill(paragraphs(40));
-          const capped = await heightOf(tab);
-          expect(capped).toBeLessThanOrEqual(line * 12 + 40);
-          expect(capped).toBeGreaterThanOrEqual(line * 11);
-          expect(await tab.locator(IDEA).evaluate(node => node.scrollHeight > node.clientHeight)).toBe(true);
-          await shot(tab, `idea-${where}-long-scrolling`);
+            await tab.locator(IDEA).fill(paragraphs(40));
+            const capped = await heightOf(tab);
+            expect(capped).toBeLessThanOrEqual(line * 12 + 40);
+            expect(capped).toBeGreaterThanOrEqual(line * 11);
+            expect(await tab.locator(IDEA).evaluate(node => node.scrollHeight > node.clientHeight)).toBe(true);
+            await shot(tab, `idea-${where}-long-scrolling`);
 
-          const calm = await counterColour(tab);
-          await tab.locator(IDEA).fill('x'.repeat(3_700));
-          expect(await tab.locator(COUNTER).getAttribute('data-idea-counter')).toBe('near');
-          // The colour eases in, so wait for it to settle off the calm one.
-          await tab.waitForFunction(
-            ([selector, was]) => {
-              const node = document.querySelector(selector as string);
-              return node !== null && getComputedStyle(node).color !== was;
-            },
-            [COUNTER, calm],
-          );
-          await shot(tab, `idea-${where}-near-limit`);
+            const calm = await counterColour(tab);
+            await tab.locator(IDEA).fill('x'.repeat(3_700));
+            expect(await tab.locator(COUNTER).getAttribute('data-idea-counter')).toBe('near');
+            // The colour eases in, so wait for it to settle off the calm one.
+            await tab.waitForFunction(
+              ([selector, was]) => {
+                const node = document.querySelector(selector as string);
+                return node !== null && getComputedStyle(node).color !== was;
+              },
+              [COUNTER, calm],
+            );
+            await shot(tab, `idea-${where}-near-limit`);
 
-          await tab.locator(IDEA).fill('x'.repeat(4_100));
-          expect((await tab.locator(IDEA).inputValue()).length).toBe(4_000);
-          expect(await tab.locator(COUNTER).getAttribute('data-idea-counter')).toBe('full');
+            await tab.locator(IDEA).fill('x'.repeat(4_100));
+            expect((await tab.locator(IDEA).inputValue()).length).toBe(4_000);
+            expect(await tab.locator(COUNTER).getAttribute('data-idea-counter')).toBe('full');
 
-          expect(await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-        } finally {
-          await context.close();
-        }
-      }, 60_000);
+            expect(await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+          } finally {
+            await context.close();
+          }
+        },
+        60_000,
+      );
     }
   }
 
-  it('keeps Enter as a new line and writes the prompt on Ctrl+Enter, line breaks kept', async () => {
-    const context = await newContext(false, 'light');
-    try {
-      const tab = await open(context, 'light', 'owner');
-      const asked = async (): Promise<unknown[]> =>
-        await tab.evaluate(() => (window as unknown as { __routingIdea: { asked: unknown[] } }).__routingIdea.asked);
-      await tab.locator(IDEA).click();
-      await tab.keyboard.type('Chores cheap.');
-      await tab.keyboard.press('Enter');
-      await tab.keyboard.press('Enter');
-      await tab.keyboard.type('Opus plans.');
-      expect(await tab.locator(IDEA).inputValue()).toBe('Chores cheap.\n\nOpus plans.');
-      expect(await asked()).toEqual([]);
-      await tab.keyboard.press('Control+Enter');
-      await tab.waitForSelector('[data-clean-up-job]');
-      expect(await asked()).toEqual([
-        expect.objectContaining({ mode: 'generate', idea: 'Chores cheap.\n\nOpus plans.' }),
-      ]);
-    } finally {
-      await context.close();
-    }
-  }, 60_000);
+  overlap.it(
+    'keeps Enter as a new line and writes the prompt on Ctrl+Enter, line breaks kept',
+    async () => {
+      const context = await newContext(false, 'light');
+      try {
+        const tab = await open(context, 'light', 'owner');
+        const asked = async (): Promise<unknown[]> =>
+          await tab.evaluate(() => (window as unknown as { __routingIdea: { asked: unknown[] } }).__routingIdea.asked);
+        await tab.locator(IDEA).click();
+        await tab.keyboard.type('Chores cheap.');
+        await tab.keyboard.press('Enter');
+        await tab.keyboard.press('Enter');
+        await tab.keyboard.type('Opus plans.');
+        expect(await tab.locator(IDEA).inputValue()).toBe('Chores cheap.\n\nOpus plans.');
+        expect(await asked()).toEqual([]);
+        await tab.keyboard.press('Control+Enter');
+        await tab.waitForSelector('[data-clean-up-job]');
+        expect(await asked()).toEqual([
+          expect.objectContaining({ mode: 'generate', idea: 'Chores cheap.\n\nOpus plans.' }),
+        ]);
+      } finally {
+        await context.close();
+      }
+    },
+    60_000,
+  );
 });

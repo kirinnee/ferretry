@@ -12,7 +12,7 @@ import { Activity, Bot, FolderGit2, Sparkles } from 'lucide-react';
 import { memo, type ReactNode } from 'react';
 import { TaskName } from '../features/tasks/task-name.tsx';
 import type { PickerAccount } from '../lib/account-picker-catalog.ts';
-import { unreadCount } from '../lib/attention-inbox.ts';
+import { unreadCount } from '../lib/agenda-inbox.ts';
 import { displayCallsign } from '../lib/callsign.ts';
 import { cn } from '../lib/class-names.ts';
 import type { Density } from '../lib/controls.ts';
@@ -26,7 +26,7 @@ import { Badge } from '../shell/primitives.tsx';
 import { QuotaReadout } from '../shell/quota-readout.tsx';
 import { RcBadge } from '../shell/rc-badge.tsx';
 import { RouteLink } from '../shell/route-link.tsx';
-import { hasAttention, rowPreview, sessionRowPath } from '../shell/sessions-bar-model.ts';
+import { hasAgenda, rowPreview, sessionRowPath } from '../shell/sessions-bar-model.ts';
 import { nameToneClass, StatusMark } from '../shell/status-mark.tsx';
 import { UnreadBadge } from '../shell/unread-badge.tsx';
 import { sessionAccountLabel } from './daemon-picker-model.ts';
@@ -115,19 +115,19 @@ export function Th({ children, className = '' }: { readonly children: ReactNode;
  * source order and a utility on the pill silently does nothing — it shrinks the
  * box and lets the text keep spilling.
  */
-const ATTENTION_LABEL = 'whitespace-normal sm:whitespace-nowrap';
+const AGENDA_LABEL = 'whitespace-normal sm:whitespace-nowrap';
 
-export function AttentionFlags({ view }: { readonly view: SessionView }) {
+export function AgendaFlags({ view }: { readonly view: SessionView }) {
   return (
     <>
       {view.state.waiting && (
         <Badge tone="warn" className="max-w-full">
-          <span className={ATTENTION_LABEL}>parked</span>
+          <span className={AGENDA_LABEL}>parked</span>
         </Badge>
       )}
       {view.state.needsHuman && (
         <Badge tone="err" title={view.state.needsHuman} className="max-w-full">
-          <span className={ATTENTION_LABEL}>needs human</span>
+          <span className={AGENDA_LABEL}>needs human</span>
         </Badge>
       )}
     </>
@@ -162,18 +162,18 @@ export function ContextMeter({ value }: { readonly value: number }) {
 }
 
 /**
- * Where a row opens: the conversation, AT the first open Attention item when the session has some. The
+ * Where a row opens: the conversation, AT the first open Agenda item when the session has some. The
  * whole row (card) or the name cell (table) is the one link; an anchor cannot hold a button, so there is
  * no second target to answer from — the answer lives on the page this opens.
  */
 const sessionHref = sessionRowPath;
 
 /** The font weight of a session's name: bolder while it has open Attention, the way an unread chat is. */
-const nameWeight = (view: SessionView): string => (hasAttention(view) ? 'font-bold' : 'font-semibold');
+const nameWeight = (view: SessionView): string => (hasAgenda(view) ? 'font-bold' : 'font-semibold');
 
-/** The accent count pill, or nothing: its sr-only words are the row link's "N open Attention items". */
+/** The accent count pill, or nothing: its sr-only words are the row link's "N open Agenda items". */
 function Unread({ view, className }: { readonly view: SessionView; readonly className?: string }) {
-  return hasAttention(view) ? <UnreadBadge className={className} count={unreadCount(view)} /> : null;
+  return hasAgenda(view) ? <UnreadBadge className={className} count={unreadCount(view)} /> : null;
 }
 
 /** Full-density fixed-table leaf. The parent supplies the six-column table only. */
@@ -190,7 +190,7 @@ export const SessionRow = memo(function SessionRow({
   const quota = usage?.quotaFor(daemonId, view) ?? null;
   const href = sessionHref(daemonId, view);
   return (
-    <tr className="kt-row group" {...(hasAttention(view) ? { 'data-session-unread': '' } : {})}>
+    <tr className="kt-row group" {...(hasAgenda(view) ? { 'data-session-unread': '' } : {})}>
       <td>
         <RouteLink to={href} onNavigate={onNavigate} className="block min-w-0" title={cfg.id}>
           <div className="flex min-w-0 items-center gap-sm">
@@ -263,7 +263,7 @@ export const SessionRow = memo(function SessionRow({
 export const LeanSessionRow = memo(function LeanSessionRow({ view, density, daemonId, onNavigate }: LeanSessionProps) {
   const cfg = view.config;
   return (
-    <tr className="kt-row group" {...(hasAttention(view) ? { 'data-session-unread': '' } : {})}>
+    <tr className="kt-row group" {...(hasAgenda(view) ? { 'data-session-unread': '' } : {})}>
       <td>
         <RouteLink
           to={sessionHref(daemonId, view)}
@@ -290,7 +290,7 @@ export const LeanSessionRow = memo(function LeanSessionRow({ view, density, daem
                 {statusWord(view.state.status)}
               </Badge>
             )}
-            <AttentionFlags view={view} />
+            <AgendaFlags view={view} />
           </div>
         </td>
       )}
@@ -315,7 +315,7 @@ export const SessionCard = memo(function SessionCard({
       to={sessionHref(daemonId, view)}
       onNavigate={onNavigate}
       className="kt-panel group block min-w-0 max-w-full p-panel transition-colors hover:border-accent active:bg-surface-2"
-      {...(hasAttention(view) ? { 'data-session-unread': '' } : {})}
+      {...(hasAgenda(view) ? { 'data-session-unread': '' } : {})}
     >
       <div className="flex items-center gap-sm">
         <StatusMark view={view} />
@@ -422,14 +422,14 @@ export const LeanSessionCard = memo(function LeanSessionCard({
   const preview = task === '' ? view.state.activity?.trim() : undefined;
   const ask = rowPreview(view);
   // A request for a human already says "you" louder than the word would. So does an unread count.
-  const word = !statusHoisted && !view.state.waiting && !view.state.needsHuman && !hasAttention(view);
+  const word = !statusHoisted && !view.state.waiting && !view.state.needsHuman && !hasAgenda(view);
   return (
     <RouteLink
       to={sessionHref(daemonId, view)}
       onNavigate={onNavigate}
       className="fy-dashboard-row group"
       data-session-row={cfg.id}
-      {...(hasAttention(view) ? { 'data-session-unread': '' } : {})}
+      {...(hasAgenda(view) ? { 'data-session-unread': '' } : {})}
     >
       <span className="flex min-w-0 items-center gap-sm">
         <StatusMark view={view} />
@@ -442,7 +442,7 @@ export const LeanSessionCard = memo(function LeanSessionCard({
         {density === 'compact' && (
           <span className="flex min-w-0 shrink-0 items-center gap-xs">
             {word && <StatusWord status={view.state.status} />}
-            <AttentionFlags view={view} />
+            <AgendaFlags view={view} />
           </span>
         )}
         {machine === undefined ? null : <MachineChip className="ml-auto shrink-0" name={machine} />}

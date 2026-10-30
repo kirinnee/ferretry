@@ -1,5 +1,5 @@
 import {
-  AttentionIdSchema,
+  AgendaIdSchema,
   DirectNotificationRequestSchema,
   InstantSchema,
   NonNegativeIntegerSchema,
@@ -43,7 +43,7 @@ export const DirectNotificationRequestedRecordSchema = z.strictObject({
   enrolled: NonNegativeIntegerSchema,
 });
 
-export const AttentionNotificationRequestedRecordSchema = z
+export const AgendaNotificationRequestedRecordSchema = z
   .strictObject({
     v: z.literal(1),
     phase: z.literal('requested'),
@@ -53,7 +53,7 @@ export const AttentionNotificationRequestedRecordSchema = z
     origin: z.enum(['agenda', 'attention']),
     attribution: z.string().min(1),
     sessionId: z.string().min(1),
-    attentionId: AttentionIdSchema,
+    agendaId: AgendaIdSchema,
     /** Legacy: the push that announced the information a ferret added (this daemon no longer makes it). */
     infoRequest: PositiveIntegerSchema.optional(),
     /** Legacy: the push that announced an item moved out of discussion (this daemon no longer makes it). */
@@ -74,7 +74,7 @@ export const AttentionNotificationRequestedRecordSchema = z
 
 export const NotificationRequestedRecordSchema = z.union([
   DirectNotificationRequestedRecordSchema,
-  AttentionNotificationRequestedRecordSchema,
+  AgendaNotificationRequestedRecordSchema,
 ]);
 
 export const NotificationOutcomeRecordSchema = z.strictObject({
@@ -89,12 +89,12 @@ export const NotificationOutcomeRecordSchema = z.strictObject({
 
 export const NotificationRecordSchema = z.union([
   DirectNotificationRequestedRecordSchema,
-  AttentionNotificationRequestedRecordSchema,
+  AgendaNotificationRequestedRecordSchema,
   NotificationOutcomeRecordSchema,
 ]);
 
 export type DirectNotificationRequestedRecord = z.infer<typeof DirectNotificationRequestedRecordSchema>;
-export type AttentionNotificationRequestedRecord = z.infer<typeof AttentionNotificationRequestedRecordSchema>;
+export type AgendaNotificationRequestedRecord = z.infer<typeof AgendaNotificationRequestedRecordSchema>;
 export type NotificationRequestedRecord = z.infer<typeof NotificationRequestedRecordSchema>;
 export type NotificationOutcomeRecord = z.infer<typeof NotificationOutcomeRecordSchema>;
 export type NotificationRecord = z.infer<typeof NotificationRecordSchema>;
@@ -121,7 +121,7 @@ export interface NotificationSessionDirectory {
 export interface NotificationSessionFacts {
   /** The ferret's spoken name. */
   readonly name: string;
-  /** The conversation's name (the session's task title), which titles an Attention push. */
+  /** The conversation's name (the session's task title), which titles an Agenda push. */
   readonly title?: string;
   readonly interactive: boolean;
 }

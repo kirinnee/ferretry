@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { AttentionActionRequestSchema, AttentionItemSchema } from '../../src/lib/attention.ts';
+import { AgendaActionRequestSchema, AgendaItemSchema } from '../../src/lib/agenda.ts';
 import * as boardModule from '../../src/lib/board.ts';
 import {
   AgendaRefSchema,
@@ -715,16 +715,16 @@ describe('agenda seam', () => {
   const add = { action: 'add', subject: item.subject, why: item.why, howToResolve: item.howToResolve } as const;
 
   it('should store the card an agenda item belongs to, and read an older item as having none', () => {
-    should(AttentionItemSchema.parse({ ...item, task: { id: 'F18' } }).task).deepEqual({ id: 'F18' });
-    should(AttentionItemSchema.parse({ ...item, task: null }).task).be.null();
-    should(AttentionItemSchema.parse(item).task).be.undefined();
-    should(AttentionItemSchema.safeParse({ ...item, task: { id: 'A1' } }).success).be.false();
+    should(AgendaItemSchema.parse({ ...item, task: { id: 'F18' } }).task).deepEqual({ id: 'F18' });
+    should(AgendaItemSchema.parse({ ...item, task: null }).task).be.null();
+    should(AgendaItemSchema.parse(item).task).be.undefined();
+    should(AgendaItemSchema.safeParse({ ...item, task: { id: 'A1' } }).success).be.false();
   });
 
   it('should let an add name its card, and refuse a malformed one', () => {
-    should(AttentionActionRequestSchema.parse({ ...add, task: { id: 'F18' } })).containDeep({ task: { id: 'F18' } });
-    should(AttentionActionRequestSchema.parse(add)).not.have.property('task');
-    should(AttentionActionRequestSchema.safeParse({ ...add, task: 'F18' }).success).be.false();
+    should(AgendaActionRequestSchema.parse({ ...add, task: { id: 'F18' } })).containDeep({ task: { id: 'F18' } });
+    should(AgendaActionRequestSchema.parse(add)).not.have.property('task');
+    should(AgendaActionRequestSchema.safeParse({ ...add, task: 'F18' }).success).be.false();
   });
 
   it('should gate an add that names a card on a daemon feature', () => {

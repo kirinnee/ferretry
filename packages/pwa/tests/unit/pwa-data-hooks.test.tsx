@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import {
-  useAttentionCount,
-  useAttentionItems,
-  useAttentionResolutions,
-  useAttentionSession,
-  useAttentionSnapshot,
-} from '../../src/hooks/use-attention.ts';
+  useAgendaCount,
+  useAgendaItems,
+  useAgendaResolutions,
+  useAgendaSession,
+  useAgendaSnapshot,
+} from '../../src/hooks/use-agenda.ts';
 import {
   useDeclareForegroundPinScope,
   useForegroundPinScope,
@@ -14,7 +14,7 @@ import {
   usePinsSession,
   useSessionPins,
 } from '../../src/hooks/use-pins.ts';
-import { DaemonAttentionClient } from '../../src/lib/attention-client.ts';
+import { DaemonAgendaClient } from '../../src/lib/agenda-client.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { getForegroundPinScope } from '../../src/lib/pin-bridge.ts';
@@ -43,7 +43,7 @@ const pins = {
   ],
 };
 
-const attention = {
+const agenda = {
   v: 1 as const,
   sessionId: 'session-a',
   items: [
@@ -86,18 +86,12 @@ function PinsProbe({
   );
 }
 
-function AttentionProbe({
-  client,
-  currentScope,
-}: {
-  client: DaemonAttentionClient;
-  currentScope: typeof scope | null;
-}) {
-  const status = useAttentionSession(client, daemon, currentScope);
-  const board = useAttentionSnapshot(client, currentScope);
-  const items = useAttentionItems(client, currentScope);
-  const resolved = useAttentionResolutions(client, currentScope);
-  const count = useAttentionCount(client, daemon, currentScope);
+function AgendaProbe({ client, currentScope }: { client: DaemonAgendaClient; currentScope: typeof scope | null }) {
+  const status = useAgendaSession(client, daemon, currentScope);
+  const board = useAgendaSnapshot(client, currentScope);
+  const items = useAgendaItems(client, currentScope);
+  const resolved = useAgendaResolutions(client, currentScope);
+  const count = useAgendaCount(client, daemon, currentScope);
   return <output>{`${status}:${board?.count ?? 0}:${items.length}:${resolved.length}:${count}`}</output>;
 }
 
@@ -116,13 +110,13 @@ describe('daemon-scoped PWA data hooks', () => {
     expect(getForegroundPinScope()).toBeNull();
   });
 
-  it('renders full and badge attention state from one exact scope, including the null-scope fallback', () => {
-    const client = new DaemonAttentionClient();
-    client.store.applySnapshot(scope, attention);
-    const probe = render(<AttentionProbe client={client} currentScope={scope} />);
+  it('renders full and badge agenda state from one exact scope, including the null-scope fallback', () => {
+    const client = new DaemonAgendaClient();
+    client.store.applySnapshot(scope, agenda);
+    const probe = render(<AgendaProbe client={client} currentScope={scope} />);
     expect(output(probe)).toBe('ready:1:1:0:1');
 
-    run(() => probe.update(<AttentionProbe client={client} currentScope={null} />));
+    run(() => probe.update(<AgendaProbe client={client} currentScope={null} />));
     expect(output(probe)).toBe('idle:0:0:0:0');
   });
 });
