@@ -45,7 +45,7 @@ describe('the lane commands', () => {
 
   it('should edit by renaming and removing lanes', async () => {
     const { changes, program } = harness();
-    await run(program, 'edit', '--rename', 'review=look', '--remove', 'plan', '--into', 'todo');
+    await run(program, 'edit', '--rename', 'implement=look', '--remove', 'plan', '--into', 'todo');
     should(changes[0]?.request).have.property('action', 'edit');
   });
 
