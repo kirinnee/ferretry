@@ -1,3 +1,23 @@
+## [4.128.0](https://github.com/kirinnee/ferretry/compare/v4.127.0...v4.128.0) (2026-10-30)
+
+### Features
+
+* **daemon:** durable per-session message queue — model, owner-first order, log store, and a read route (S1) ([#997](https://github.com/kirinnee/ferretry/issues/997)) ([8f5973c](https://github.com/kirinnee/ferretry/commit/8f5973c29cca15bbdf4e9ade420c4225fb26b719))
+* **fleet:** switch a login or runtime off without deleting it ([#995](https://github.com/kirinnee/ferretry/issues/995)) ([32948b5](https://github.com/kirinnee/ferretry/commit/32948b52439310b572a68478634d5c1954065a2d))
+* **pwa:** add a tasks tier to the composer reference menus ([#965](https://github.com/kirinnee/ferretry/issues/965)) ([04a35bd](https://github.com/kirinnee/ferretry/commit/04a35bd4ead6ee11514112e6432b6c6c060fe24a))
+* **pwa:** add full screen and a slim control row to shared surfaces ([#968](https://github.com/kirinnee/ferretry/issues/968)) ([b2f8116](https://github.com/kirinnee/ferretry/commit/b2f8116f897709bcf1c8a67237757fd429c01440))
+* **pwa:** open the Board on the chat's ferret with an All cards toggle ([#996](https://github.com/kirinnee/ferretry/issues/996)) ([912f172](https://github.com/kirinnee/ferretry/commit/912f1726928fb04b1538269ae040338ca3260e93))
+* **pwa:** sidebar ⋯ menu holds Show stopped and Restart outdated ([#989](https://github.com/kirinnee/ferretry/issues/989)) ([169ceea](https://github.com/kirinnee/ferretry/commit/169ceeafc25617f775be0b300538a17f42ea3ab6))
+
+### Fixes
+
+* **daemon:** keep a person's refused send open and type it first; never type Warden notices into an owner's chat ([#992](https://github.com/kirinnee/ferretry/issues/992)) ([5e2b15c](https://github.com/kirinnee/ferretry/commit/5e2b15c69b4fb0ca991218b16eba644e1183f09f))
+* **daemon:** treat the Claude usage-limit dialog as a spent login ([#990](https://github.com/kirinnee/ferretry/issues/990)) ([309da16](https://github.com/kirinnee/ferretry/commit/309da16f083cc2ad67cc6b2551cd1c98bb81933e))
+* **pwa:** Cmd/Ctrl+K always opens the global finder ([#993](https://github.com/kirinnee/ferretry/issues/993)) ([a52e269](https://github.com/kirinnee/ferretry/commit/a52e26955288c553fbad9e4f934c498780fa60b3))
+* **pwa:** phone chat header is name · card · one status dot · menu ([#994](https://github.com/kirinnee/ferretry/issues/994)) ([84e26a9](https://github.com/kirinnee/ferretry/commit/84e26a9f2db18aa85926246515740b487db61a67))
+* **pwa:** self-host each theme's fonts so themes stop sharing one typeface ([#970](https://github.com/kirinnee/ferretry/issues/970)) ([0317ca9](https://github.com/kirinnee/ferretry/commit/0317ca90c627365bc6bdecb34b9d115b3c351f15))
+* **pwa:** stop re-opening resolved agenda items on chat entry ([#966](https://github.com/kirinnee/ferretry/issues/966)) ([6bfc3cc](https://github.com/kirinnee/ferretry/commit/6bfc3cce82d55cc87fefbbb10b4e096c298fa4a6))
+
 ## [4.127.0](https://github.com/kirinnee/ferretry/compare/v4.126.0...v4.127.0) (2026-10-30)
 
 ### Features
