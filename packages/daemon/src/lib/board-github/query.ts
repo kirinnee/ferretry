@@ -30,7 +30,7 @@ export interface RepositoryPoll {
 }
 
 const PR_FIELDS =
-  'number url state isDraft mergedAt mergeCommit { oid } headRefName ' +
+  'number url state isDraft createdAt mergedAt mergeCommit { oid } headRefName ' +
   'commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }';
 
 /** The `gh` arguments of one repository's poll, or `null` for a repository name that is not `owner/name`. */
@@ -103,6 +103,7 @@ const PrNodeSchema = z.object({
   url: z.string(),
   state: z.enum(['OPEN', 'CLOSED', 'MERGED']),
   isDraft: z.boolean(),
+  createdAt: InstantString.nullable().optional(),
   mergedAt: InstantString.nullable(),
   mergeCommit: z.object({ oid: z.string().regex(/^[0-9a-f]{40}$/u) }).nullable(),
   headRefName: z.string(),
@@ -157,6 +158,7 @@ const polledPr = (node: unknown, repo: string): PolledPr | null => {
       state: merged ? 'merged' : pr.state === 'OPEN' ? 'open' : 'closed',
       draft: pr.isDraft,
       checks: checksOf(rollup),
+      createdAt: pr.createdAt ?? null,
       mergedAt: merged ? pr.mergedAt : null,
       mergeSha: merged ? (pr.mergeCommit?.oid ?? null) : null,
     },

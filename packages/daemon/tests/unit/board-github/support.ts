@@ -10,6 +10,7 @@ export interface NodeOptions {
   readonly draft?: boolean;
   readonly rollup?: string | null;
   readonly head?: string;
+  readonly createdAt?: string | null;
   readonly mergedAt?: string | null;
   readonly sha?: string | null;
 }
@@ -24,6 +25,7 @@ export const prNode = (number: number, options: NodeOptions = {}) => {
     url: prUrl(number, options.repo),
     state,
     isDraft: options.draft ?? false,
+    createdAt: options.createdAt === undefined ? '2026-10-30T08:00:00Z' : options.createdAt,
     mergedAt: options.mergedAt === undefined ? (merged ? '2026-10-30T09:00:00Z' : null) : options.mergedAt,
     mergeCommit:
       options.sha === undefined ? (merged ? { oid: SHA } : null) : options.sha === null ? null : { oid: options.sha },

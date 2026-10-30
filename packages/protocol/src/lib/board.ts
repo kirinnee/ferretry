@@ -200,6 +200,8 @@ export const PrLinkSchema = z
       .nullable(),
     releasedIn: ReleasedInSchema.nullable(),
     polledAt: InstantSchema.nullable(),
+    /** When the PR was opened on GitHub; absent on a link cached before the watcher read it. */
+    createdAt: InstantSchema.nullable().optional(),
   })
   .superRefine((value, context) => {
     const parts = prUrlParts(value.url);

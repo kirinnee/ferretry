@@ -35,7 +35,9 @@ describe('pollArguments', () => {
     should(query.match(/p940:/gu)).have.length(1);
     should(query).containEql('b1: pullRequests(headRefName: $b1, first: 5');
     should(query).containEql('releases(first: 50');
-    should(query).containEql('fragment pr on PullRequest { number url state isDraft mergedAt mergeCommit { oid }');
+    should(query).containEql(
+      'fragment pr on PullRequest { number url state isDraft createdAt mergedAt mergeCommit { oid }',
+    );
     // A caller's string is a variable, never a piece of the query.
     should(query).not.containEql('evil');
     should(field(args ?? [], 'owner')).equal('kirinnee');
@@ -103,9 +105,14 @@ describe('parseRepositoryAnswer', () => {
       state: 'open',
       draft: false,
       checks: 'passing',
+      createdAt: '2026-10-30T08:00:00Z',
       mergedAt: null,
       mergeSha: null,
     });
+    should(
+      parseRepositoryAnswer(answer({ prs: { 1: prNode(1, { createdAt: null }) } }), poll({ numbers: [1] }))?.prs.get(1)
+        ?.observation.createdAt,
+    ).be.null();
     should(parsed?.prs.get(2)?.observation).match({
       state: 'merged',
       checks: 'none',
