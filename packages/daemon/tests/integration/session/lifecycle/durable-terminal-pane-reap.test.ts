@@ -23,6 +23,7 @@ import {
   createSessionPaths,
   createSessionRecord,
   defaultSessionLifecycleSettings,
+  PANE_PROOF_FORMAT,
   parseSessionId,
   type RegisteredTerminalPane,
   SessionAttachService,
@@ -215,6 +216,12 @@ describe('durable terminal pane reap adapters', () => {
     // Assert -- `fy attach` re-reads this value through `@ferretry/protocol/process-incarnation`;
     // if the daemon wrote it any other way, every attach on that platform would be refused.
     should(target.processStartTicks).equal(await processIncarnationFor().startOf(target.pid));
+    // And the second the pane's session was created: what proves it once it is dead on tmux 3.8.
+    const registered = await subject.store.registration(DAEMON, subject.record.config.id);
+    const created = await new BunTmuxProcess(subject.tmuxExecutable, join(subject.home, 'throwaway-tmux.sock')).execute(
+      ['display-message', '-p', '-t', subject.record.config.tmuxSession, '#{session_created}'],
+    );
+    should(registered?.sessionCreated).equal(Number(created.stdout.trim()));
   });
 
   it('should reap an exact terminal pane after its durable terminal state is recorded', async () => {
@@ -382,13 +389,13 @@ describe('registering a pane whose harness has already exited', () => {
   });
 
   it('should report the exit even when tmux answers the dead pane with no pid at all', async () => {
-    // Arrange -- tmux 3.8 prints an empty `#{pane_pid}` for a pane it has reaped: `%0 ` and nothing else.
+    // Arrange -- tmux 3.8 prints an empty `#{pane_pid}` for a pane it has reaped: `%0||1|<created>`.
     const subject = await fixture(`echo 'ferretry: DEEPSEEK_TOKEN is not set' >&2; exit 2`);
     const real = new BunTmuxProcess(subject.tmuxExecutable, join(subject.home, 'throwaway-tmux.sock'));
     const blank = new TmuxController({
       execute: async (arguments_, stdin) =>
-        arguments_.at(-1) === '#{pane_id} #{pane_pid}'
-          ? { code: 0, stdout: '%0 \n', stderr: '' }
+        arguments_.at(-1) === PANE_PROOF_FORMAT
+          ? { code: 0, stdout: '%0||1|1792626406\n', stderr: '' }
           : await real.execute(arguments_, stdin),
     });
     const registrar = new DurableTerminalPaneRegistrar(DAEMON, blank, subject.files, subject.storage.paths);
@@ -405,8 +412,8 @@ describe('registering a pane whose harness has already exited', () => {
     const real = new BunTmuxProcess(subject.tmuxExecutable, join(subject.home, 'throwaway-tmux.sock'));
     const blank = new TmuxController({
       execute: async (arguments_, stdin) =>
-        arguments_.at(-1) === '#{pane_id} #{pane_pid}'
-          ? { code: 0, stdout: '%0 \n', stderr: '' }
+        arguments_.at(-1) === PANE_PROOF_FORMAT
+          ? { code: 0, stdout: '%0||0|1792626406\n', stderr: '' }
           : await real.execute(arguments_, stdin),
     });
     const registrar = new DurableTerminalPaneRegistrar(DAEMON, blank, subject.files, subject.storage.paths);
@@ -525,6 +532,18 @@ describe('a registration ledger with one damaged document', () => {
           paneId: 'not-a-pane-id',
           pid: 4242,
           processStartTicks: 99,
+        }),
+        reported: /invalid/u,
+      },
+      {
+        text: JSON.stringify({
+          daemonId: DAEMON,
+          sessionId: DAMAGED,
+          tmuxSession: 'fy-damaged',
+          paneId: '%4',
+          pid: 4242,
+          processStartTicks: 99,
+          sessionCreated: 'yesterday',
         }),
         reported: /invalid/u,
       },

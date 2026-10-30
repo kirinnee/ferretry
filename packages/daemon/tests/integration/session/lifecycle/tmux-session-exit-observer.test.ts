@@ -24,6 +24,7 @@ import {
   createSessionRecord,
   defaultSessionHealthSettings,
   defaultSessionLifecycleSettings,
+  PANE_PROOF_FORMAT,
   parseSessionId,
   SelfRestartCoordinator,
   type SessionExitObservation,
@@ -39,7 +40,7 @@ import {
  *
  * Real tmux and the repository's fake harness, because the facts that matter are tmux's: that a
  * launch's `remain-on-exit` keeps the dead pane, that `pane_dead_status` carries the harness's exit
- * status, and that the dead pane still names the pane id and pid the registration recorded. It
+ * status, and that the dead pane is still the registered one by the shared pane proof. It
  * spends nothing — the harness is `scripts/test/fake-harness.ts` reading a scripted scenario.
  */
 
@@ -146,9 +147,24 @@ function observer(subject: ExitFixture, commands: TmuxCommandPort = subject.comm
 function metadataAnswers(subject: ExitFixture, answer: () => { code: number; stdout: string }): TmuxCommandPort {
   return {
     execute: async (arguments_, stdin) =>
-      arguments_[0] === 'display-message' && arguments_.at(-1)?.includes('pane_dead') === true
+      arguments_[0] === 'display-message' && arguments_.at(-1)?.startsWith('#{pane_dead}') === true
         ? { stderr: '', ...answer() }
         : await subject.commands.execute(arguments_, stdin),
+  };
+}
+
+/**
+ * tmux 3.8 on any tmux: the pane proof read with a dead pane's pid blanked, as 3.8 prints it once the
+ * pane's process is gone, so every runner proves the 3.8 path whatever tmux it has.
+ */
+function asTmux38(commands: TmuxCommandPort): TmuxCommandPort {
+  return {
+    execute: async (arguments_, stdin) => {
+      const result = await commands.execute(arguments_, stdin);
+      return arguments_.at(-1) === PANE_PROOF_FORMAT && result.code === 0
+        ? { ...result, stdout: result.stdout.replace(/^(%[0-9]+)\|[0-9]*\|1\|/u, '$1||1|') }
+        : result;
+    },
   };
 }
 
@@ -551,6 +567,34 @@ describe('tmux session exit observer', () => {
 
     // Assert — two misses, a live read that forgets them, then two more misses: still not settled.
     should(afterReset).deepEqual([[], []]);
+  }, 20_000);
+
+  it('should prove a dead pane tmux 3.8 prints no pid for by the second its session was created', async () => {
+    // Arrange — the registration as the launch wrote it, and tmux answering as 3.8 does for a dead pane.
+    const subject = await fixture(3);
+    await exitHarness(subject);
+    const registration = await subject.store.registration(DAEMON, subject.id);
+    const as38 = observer(subject, asTmux38(metadataAnswers(subject, () => ({ code: 0, stdout: '1|3|' }))));
+    const proof = await asTmux38(subject.commands).execute([
+      'display-message',
+      '-p',
+      '-t',
+      subject.tmuxSession,
+      PANE_PROOF_FORMAT,
+    ]);
+
+    // Act — once with the registration as written, once as one written before the second was recorded.
+    const recorded = await as38.observe();
+    const path = createSessionPaths(subject.storage.paths, subject.id).terminalPane;
+    const { sessionCreated: _created, ...legacy } = registration ?? {};
+    await subject.files.writeTextAtomic(path, `${JSON.stringify(legacy)}\n`);
+    const unrecorded = await as38.observe();
+
+    // Assert — tmux printed no pid, the stamp proved the pane, and a stampless registration proves nothing.
+    should(proof.stdout).match(/^%[0-9]+\|\|1\|[0-9]+\n$/u);
+    should(registration?.sessionCreated).be.a.Number();
+    should(recorded.map(item => item.exit)).deepEqual([{ kind: 'exited', exitStatus: 3, signal: undefined }]);
+    should(unrecorded).deepEqual([]);
   }, 20_000);
 
   it('should settle a pane a signal ended at once, naming the signal', async () => {

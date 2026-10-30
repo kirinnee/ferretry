@@ -12,9 +12,10 @@ import type { RegisteredTerminalPane } from '../../../lib/session/reap.ts';
 import { parseSessionId, type SessionId } from '../../../lib/session-id.ts';
 import {
   hasSessionArguments,
+  isRegisteredPane,
   isTmuxServerAbsent,
-  paneIdentityArguments,
-  parsePaneIdentity,
+  paneProofArguments,
+  parsePaneSighting,
   sessionTarget,
   type TmuxCommandPort,
 } from '../../../lib/tmux/index.ts';
@@ -80,7 +81,7 @@ function paneNumber(field: string | undefined): number | undefined {
 
 /** A dead pane's identity for the missing-status count: a relaunched pane starts from zero. */
 function paneKey(pane: RegisteredTerminalPane): string {
-  return `${pane.sessionId}\n${pane.tmuxSession}\n${pane.paneId}\n${pane.pid}\n${pane.processStartTicks}`;
+  return `${pane.sessionId}\n${pane.tmuxSession}\n${pane.paneId}\n${pane.pid}\n${pane.processStartTicks}\n${pane.sessionCreated ?? ''}`;
 }
 
 function samePane(left: RegisteredTerminalPane, right: RegisteredTerminalPane): boolean {
@@ -88,7 +89,8 @@ function samePane(left: RegisteredTerminalPane, right: RegisteredTerminalPane): 
     left.tmuxSession === right.tmuxSession &&
     left.paneId === right.paneId &&
     left.pid === right.pid &&
-    left.processStartTicks === right.processStartTicks
+    left.processStartTicks === right.processStartTicks &&
+    left.sessionCreated === right.sessionCreated
   );
 }
 
@@ -99,8 +101,10 @@ function samePane(left: RegisteredTerminalPane, right: RegisteredTerminalPane): 
  * durable registrations, never from a tmux listing, so a human's own shell cannot become one.
  *
  * A DEAD PANE MUST BE THE REGISTERED PANE. Every launch sets `remain-on-exit`, so an agent that ends
- * leaves its pane behind marked dead, still carrying its id and the pid it ran. Both must equal the
- * registration or the observation says nothing — a pane id tmux handed to a newer pane is not ours.
+ * leaves its pane behind marked dead, still carrying its id — and, before tmux 3.8, the pid it ran.
+ * The pane must be the registration's by the one shared proof (`isRegisteredPane`): its id, the second
+ * its session was created, and its pid wherever tmux still prints one; otherwise the observation says
+ * nothing — a pane id tmux handed to a newer pane is not ours.
  * The process-start incarnation is deliberately NOT consulted: it is how a LIVE pid is told apart
  * from a reused one, and a dead pane has no live process to ask; tmux's own `pane_dead` is the proof.
  *
@@ -209,11 +213,10 @@ export class TmuxSessionExitObserver implements SessionExitPort {
   private async exitOf(registration: RegisteredTerminalPane): Promise<SessionPaneExit | undefined> {
     const present = await this.tmux.execute(hasSessionArguments(registration.tmuxSession));
     if (present.code !== 0) return isAbsentSession(present.stderr) ? { kind: 'gone' } : undefined;
-    const identityResult = await this.tmux.execute(paneIdentityArguments(registration.tmuxSession));
-    if (identityResult.code !== 0) return undefined;
-    const identity = parsePaneIdentity(identityResult.stdout);
-    if (identity === undefined || identity.paneId !== registration.paneId || identity.pid !== registration.pid)
-      return undefined;
+    const proof = await this.tmux.execute(paneProofArguments(registration.tmuxSession));
+    if (proof.code !== 0) return undefined;
+    const sighting = parsePaneSighting(proof.stdout);
+    if (sighting === undefined || !isRegisteredPane(sighting, registration)) return undefined;
     const exitResult = await this.tmux.execute([
       'display-message',
       '-p',

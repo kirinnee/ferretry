@@ -55,7 +55,13 @@ function durableRegistration(text: string, daemonId: string, sessionId: string):
     paneId: value.paneId,
     pid: value.pid,
     processStartTicks: value.processStartTicks,
+    ...(value.sessionCreated === undefined ? {} : { sessionCreated: value.sessionCreated as number }),
   };
+  if (
+    value.sessionCreated !== undefined &&
+    !(Number.isSafeInteger(value.sessionCreated) && (value.sessionCreated as number) > 0)
+  )
+    throw new Error(`session ${sessionId} has an invalid terminal pane registration`);
   if (!hasSafeTerminalPaneIdentity(registration))
     throw new Error(`session ${sessionId} has an invalid terminal pane registration`);
   return registration;
@@ -77,8 +83,11 @@ export class DurableTerminalPaneRegistrar {
 
   /** Replaces the durable identity after a resume launches a new incarnation of the same pane. */
   async registerSession(sessionId: SessionId, tmuxSession: string): Promise<void> {
-    const identity = await this.tmux.paneIdentity(tmuxSession);
-    if (identity === undefined) throw await this.refusal(tmuxSession, 'tmux did not prove the launched pane identity');
+    const sighting = await this.tmux.paneSighting(tmuxSession);
+    // A dead pane is no identity to register — on tmux 3.8 it has no pid at all — so its exit is the answer.
+    const identity = sighting?.dead === false && sighting.pid !== undefined ? sighting : undefined;
+    if (identity?.pid === undefined)
+      throw await this.refusal(tmuxSession, 'tmux did not prove the launched pane identity');
     const ticks = await this.incarnation.startOf(identity.pid);
     if (ticks === undefined)
       throw await this.refusal(tmuxSession, 'the launched pane process has no stable incarnation identity');
@@ -89,6 +98,7 @@ export class DurableTerminalPaneRegistrar {
       paneId: identity.paneId,
       pid: identity.pid,
       processStartTicks: ticks,
+      ...(identity.sessionCreated === undefined ? {} : { sessionCreated: identity.sessionCreated }),
     };
     await this.files.writeTextAtomic(
       createSessionPaths(this.paths, sessionId).terminalPane,
