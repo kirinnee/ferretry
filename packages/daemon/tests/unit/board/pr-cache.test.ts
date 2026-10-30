@@ -174,10 +174,67 @@ describe('applyPrUpdate', () => {
       links: { prs: [link({ url: second, number: 941 }), link()], branch: null, commits: [], docs: [] },
     });
     const { task } = apply(subject, { observed: [merged(), observed({ url: second })] });
+    // #941 is still open and newer than the merged #940, so the facts end with the card back in review.
     should(moves(task)).deepEqual([
       ['review', 'pr.opened', 'PR #941 opened'],
       ['merged', 'pr.merged', 'PR #940 merged'],
+      ['review', 'pr.ready', 'moved back to Review/CI: PR #941 opened after #940 shipped'],
     ]);
+  });
+
+  it('should pull a shipped card back to review for a PR that opens after it, and write it down as the facts', () => {
+    const shipped = link({ state: 'merged', mergedAt: MERGED_AT, mergeSha: SHA, releasedIn: RELEASE, polledAt: NOW });
+    const second = 'https://github.com/kirinnee/ferretry/pull/941';
+    const subject = card({
+      laneId: 'tested',
+      workflow: 'quick',
+      links: { prs: [shipped, link({ url: second, number: 941 })], branch: null, commits: [], docs: [] },
+    });
+    const { task } = apply(subject, {
+      observed: [observed({ url: second, createdAt: '2026-10-30T10:00:00Z', checks: 'failing' })],
+    });
+    should(task?.laneId).equal('review');
+    should(task?.links.prs[1]).match({ state: 'open', createdAt: '2026-10-30T10:00:00Z' });
+    const [back] = (task?.history ?? []).filter(event => event.type === 'moved');
+    should(back).match({
+      from: 'tested',
+      to: 'review',
+      backward: true,
+      auto: true,
+      trigger: 'pr.ready',
+      actor: { kind: 'daemon' },
+      reason: 'moved back to Review/CI: PR #941 opened after #940 shipped',
+    });
+    // The next poll agrees with the card: nothing more to write.
+    should(
+      applyPrUpdate(
+        task as BoardTask,
+        update({ observed: [observed({ url: second, createdAt: '2026-10-30T10:00:00Z', checks: 'failing' })] }),
+        context(task as BoardTask),
+      ).task,
+    ).be.null();
+  });
+
+  it('should keep a shipped card where it is for an older PR, and cache when that PR was opened', () => {
+    const shipped = link({ state: 'merged', mergedAt: MERGED_AT, mergeSha: SHA, releasedIn: RELEASE, polledAt: NOW });
+    const second = 'https://github.com/kirinnee/ferretry/pull/939';
+    const subject = card({
+      laneId: 'tested',
+      workflow: 'quick',
+      links: { prs: [shipped, link({ url: second, number: 939 })], branch: null, commits: [], docs: [] },
+    });
+    const { task } = apply(subject, { observed: [observed({ url: second, createdAt: '2026-10-30T08:00:00Z' })] });
+    should(task?.laneId).equal('tested');
+    should(task?.links.prs[1]?.createdAt).equal('2026-10-30T08:00:00Z');
+  });
+
+  it('should learn when a cached PR was opened without changing anything else, and keep it when GitHub says nothing', () => {
+    const subject = withPr({ state: 'open', checks: 'pending', polledAt: NOW }, { laneId: 'review' });
+    const learned = apply(subject, { observed: [observed({ createdAt: '2026-10-30T08:00:00Z' })] }).task;
+    should(learned?.links.prs[0]?.createdAt).equal('2026-10-30T08:00:00Z');
+    should(moves(learned)).be.empty();
+    const kept = apply(learned as BoardTask, { observed: [observed()] }).task;
+    should(kept).be.null();
   });
 
   it('should fill a cached merge with its release later, and never rewrite a release once found', () => {
