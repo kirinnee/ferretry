@@ -2,7 +2,8 @@
  * THE BOARD'S HEADER NUMBERS: two one-tap pills for what needs the reader (To test, Waiting on
  * you), the health chips (stale, orphaned, active) and "N closed hidden", which opens the Archive.
  *
- * Every number is the daemon's own count (`BoardCounts`), summed over the machines read; a pill is also a
+ * Every number is the daemon's own count (`BoardCounts`), summed over the machines read, less the agent cards the
+ * board is not showing (so a pill and its cards agree); a pill is also a
  * filter, so pressing it narrows the board to those cards and pressing it again lifts the filter.
  */
 

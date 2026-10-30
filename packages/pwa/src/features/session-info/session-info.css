@@ -267,7 +267,7 @@
   font-size: var(--text-xs);
 }
 
-/* Signals: the Warden's verdicts */
+/* Overview › Warden: the verdicts */
 .fy-info-verdicts,
 .fy-info-surface-list {
   margin: 0;

@@ -170,18 +170,22 @@ describe("a resumed conversation hears this launch's sections", () => {
   });
 
   it('should give up on a harness that answers --help by starting a session, and still launch', () => {
-    // Arrange — a stand-in that, like a harness taking `--help` for a prompt, never exits. It outlives
-    // this tier's per-test timeout, so a wrapper that waited for it fails here by timing out; no clock
-    // reading is needed to tell the two apart.
+    // Arrange — a stand-in that, like a harness taking `--help` for a prompt, never exits (it sleeps an hour),
+    // so a wrapper that waited for it never launches and the test times out; no clock reading is needed to tell
+    // the two apart. The wrapper's own three-second patience is pinned below, then run at a tenth of it: the
+    // kill the patience ends in is the same, and the case no longer waits out three seconds of nothing.
     const directory = mkdtempSync(join(tmpdir(), 'fy-wrapper-hang-'));
     const file = join(directory, 'claude');
     writeFileSync(file, '#!/bin/sh\nprintf "> "\nwhile IFS= read -r _turn; do :; done\nexec sleep 3600\n');
     chmodSync(file, 0o755);
 
     // Act
-    const args = launchArguments(render(account({ flags: [`--append-system-prompt=${BASE}`] })), {}, directory);
+    const wrapper = render(account({ flags: [`--append-system-prompt=${BASE}`] }));
+    const args = launchArguments(wrapper.replace('{ sleep 3; kill', '{ sleep 0.3; kill'), {}, directory);
 
     // Assert
+    should(wrapper).containEql('{ sleep 3; kill "$_fy_p"; }');
+    should(wrapper.replace('{ sleep 3; kill', '{ sleep 0.3; kill')).not.equal(wrapper);
     should(args.filter(arg => arg.includes('system-prompt-snapshot'))).be.empty();
     should(args.at(-1)).equal('the task');
   });
@@ -421,7 +425,7 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     // stays under 7.9 KB (docs/pack-mode.md records the sizes: raised from 7.4 KB for the input bridge's login rule in the tools section, from 6.7 KB for Attention's steps and
     // hypermedia's `chart`; the notify rule replaced Attention's 1 KB, Agenda mode adds its own section). The
     // Board section (640) was paid for by naming the tools by prefix, moving map, media and chart's full spec
-    // behind `fy render guide`, and compressing the lessons rule: 7,242 measured (the reply-parks-the-item wording), so keep 150 of headroom.
+    // behind `fy render guide`, and compressing the lessons rule: 7,245 measured (the reply-parks-the-item wording, which now says to refresh the whole card), so keep 150 of headroom.
     const longestRouting = 1 + 'Routing: '.length + MAX_ROUTING_PROMPT_CHARS;
     should(Object.values(sizes).reduce((sum, size) => sum + size, 0) + longestRouting).be.below(7_900 - 150);
     should(sizes.pack).be.below(1_050);

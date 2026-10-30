@@ -14,7 +14,7 @@ import {
   type BoardProjectId,
   TaskKindSchema,
 } from '@ferretry/protocol';
-import { ListFilter, X } from 'lucide-react';
+import { Bot, ListFilter, X } from 'lucide-react';
 import { useId, useState } from 'react';
 import { type BoardDateRange, type BoardFilters, NO_BOARD_FILTERS, NO_DATE_RANGE } from '../../lib/board-model.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
@@ -38,6 +38,40 @@ export interface BoardFiltersProps {
   readonly archive?: boolean;
   /** A ferret that is the page's own default scope: it is not an advanced filter, so it is not counted. */
   readonly quietFerret?: string | null;
+  /** Whether the daemons tell human cards from agent cards: the "Show agent tasks" toggle is offered only then. */
+  readonly splitsAgents?: boolean;
+}
+
+/** What "Clear" resets: every filter, but not the choice of seeing agent tasks (that is a view, not a filter). */
+const cleared = (filters: BoardFilters): BoardFilters => ({ ...NO_BOARD_FILTERS, agents: filters.agents });
+
+/**
+ * "Show agent tasks": cards ferrets made for other ferrets, off by default. It is on whenever a ferret or an
+ * activity is chosen (those show agent cards by themselves), so it is drawn pressed and locked then.
+ */
+function AgentsToggle({
+  filters,
+  onChange,
+  short = false,
+}: Pick<BoardFiltersProps, 'filters' | 'onChange'> & { readonly short?: boolean }) {
+  const forced = !filters.agents && (filters.ferret !== null || filters.activity !== null);
+  return (
+    <label
+      className="fy-board-filters__agents"
+      data-forced={forced ? '' : undefined}
+      title={forced ? 'Agent tasks show while a ferret or an activity is chosen' : undefined}
+    >
+      <input
+        checked={filters.agents || forced}
+        data-filter="agents"
+        disabled={forced}
+        onChange={event => onChange({ ...filters, agents: event.target.checked })}
+        type="checkbox"
+      />
+      <Bot aria-hidden="true" size={12} />
+      {short ? 'Agent tasks' : 'Show agent tasks'}
+    </label>
+  );
 }
 
 const ACTIVITY_LABEL: Readonly<Record<string, string>> = {
@@ -293,6 +327,7 @@ export function BoardFilterBar({
   defaultOpen = true,
   archive = false,
   quietFerret = null,
+  splitsAgents = false,
 }: BoardFiltersProps) {
   const [open, setOpen] = useState(defaultOpen);
   const count = countedFilters(filters, quietFerret);
@@ -309,8 +344,9 @@ export function BoardFilterBar({
           Filters
           {count > 0 ? <span className="fy-board-filters__n">{count}</span> : null}
         </button>
+        {splitsAgents ? <AgentsToggle filters={filters} onChange={onChange} /> : null}
         {count > 0 ? (
-          <button className="fy-board-filters__clear" onClick={() => onChange({ ...NO_BOARD_FILTERS })} type="button">
+          <button className="fy-board-filters__clear" onClick={() => onChange(cleared(filters))} type="button">
             <X aria-hidden="true" size={11} />
             Clear
           </button>
@@ -335,6 +371,7 @@ export function BoardFilterSheet({
   choices,
   archive = false,
   quietFerret = null,
+  splitsAgents = false,
 }: Omit<BoardFiltersProps, 'defaultOpen'>) {
   const [open, setOpen] = useState(false);
   const count = countedFilters(filters, quietFerret);
@@ -354,8 +391,9 @@ export function BoardFilterSheet({
           <span className="fy-board-filters__label">Filters</span>
           {count > 0 ? <span className="fy-board-filters__n">{count}</span> : null}
         </button>
+        {splitsAgents ? <AgentsToggle filters={filters} onChange={onChange} short /> : null}
         {count > 0 ? (
-          <button className="fy-board-filters__clear" onClick={() => onChange({ ...NO_BOARD_FILTERS })} type="button">
+          <button className="fy-board-filters__clear" onClick={() => onChange(cleared(filters))} type="button">
             <X aria-hidden="true" size={12} />
             Clear
           </button>
@@ -377,12 +415,7 @@ export function BoardFilterSheet({
         </div>
         <div className="fy-board-filter-sheet__actions">
           {count > 0 ? (
-            <button
-              className="kt-btn"
-              data-variant="ghost"
-              onClick={() => onChange({ ...NO_BOARD_FILTERS })}
-              type="button"
-            >
+            <button className="kt-btn" data-variant="ghost" onClick={() => onChange(cleared(filters))} type="button">
               Clear all
             </button>
           ) : null}

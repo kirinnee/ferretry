@@ -60,6 +60,8 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
     'an agent raising an agenda item (the agenda spelling of the agenda route above); the agenda list is that history',
   'POST /v1/sessions/:sessionId/agenda/replies':
     'the owner skipping the settle window for answers already recorded (the agenda spelling of the agenda route above); the send ledger is that history',
+  'POST /v1/agenda/clear-agents':
+    "the owner dismissing every open agenda item of the agent ferrets; each item's own history records the dismissal and its note, and it widens nobody's access",
   'POST /v1/sessions/:sessionId/notify': 'an agent notifying; its payload is labelled with the agent (see L5)',
   'POST /v1/sessions/:sessionId/pins': 'a bookmark in a transcript',
   'POST /v1/board/tasks': 'a work card on a project board; its own append-only history records who did what',

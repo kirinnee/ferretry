@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { LANE_TEMPLATES } from '@ferretry/protocol';
 import { boardDone, doneLabel, doneTitle, isReleaseLane } from '../../src/lib/board-done.ts';
 import { laneSetFor } from './board-support.ts';
 import { must } from '../support/dom.ts';
@@ -64,5 +65,12 @@ describe('isReleaseLane', () => {
     expect(isReleaseLane(lanes, must(shipped[0], 'the merged lane').id)).toBe(false);
     expect(isReleaseLane(lanes, 'todo')).toBe(false);
     expect(isReleaseLane(null, 'released')).toBe(false);
+  });
+
+  it('is the lane a release enters when that is the owner’s test lane, so Merged never reads as released', () => {
+    const merged = { ...lanes, ...LANE_TEMPLATES['pr-release-verify'] };
+    expect(isReleaseLane(merged, 'released')).toBe(true);
+    expect(isReleaseLane(merged, 'merged')).toBe(false);
+    expect(isReleaseLane({ lanes: [{ id: 'todo', name: 'Todo', category: 'backlog' }] }, 'todo')).toBe(false);
   });
 });

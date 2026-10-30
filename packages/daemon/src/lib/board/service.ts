@@ -478,9 +478,14 @@ export class BoardService {
    * Moves the cards of the lanes a lane edit removed to the lanes it named (`moves`: removed → kept),
    * after the edited set is stored (U3's `CardRelocator`). Safe to repeat: a card no longer in a removed
    * lane of this project is left alone. The direction of such a move is not defined — its lane is gone —
-   * so it is recorded as a daemon move that says why. Returns the cards it moved.
+   * so it is recorded as a daemon move that says why: `reason`, else that the lane was removed. Returns the
+   * cards it moved.
    */
-  async relocate(projectId: BoardProjectId, moves: Readonly<Record<string, string>>): Promise<readonly BoardTaskId[]> {
+  async relocate(
+    projectId: BoardProjectId,
+    moves: Readonly<Record<string, string>>,
+    reason?: string,
+  ): Promise<readonly BoardTaskId[]> {
     const pending = (await this.ports.store.read()).cards.filter(
       card => card.projectId === projectId && moves[card.laneId] !== undefined,
     );
@@ -496,7 +501,7 @@ export class BoardService {
             from: current.laneId,
             to,
             backward: false,
-            reason: `lane ${current.laneId} was removed from the board`,
+            reason: reason ?? `lane ${current.laneId} was removed from the board`,
           },
           { now: this.ports.clock.now(), actor: { kind: 'daemon' } },
         );

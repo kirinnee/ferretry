@@ -349,6 +349,10 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   },
   attention: agendaService(),
   agendaReplies: NO_HELD_REPLIES,
+  agendaClearer: {
+    preview: async () => ({ cleared: 0, sessions: 0 }),
+    clear: async () => ({ cleared: 0, sessions: 0 }),
+  } as never,
   notifications: {
     agendaDelivered: async () => 0,
     enrolledDevices: async () => 0,
@@ -795,6 +799,7 @@ describe('the mounted daemon surface', () => {
       1 + // the security log read
       5 + // the passkey step-up: this device's passkeys, registration and step-up, each with its options (the owner's re-opened window is admin-token)
       1 + // "Send now" for the answers a ferret's outbox holds (docs/agenda.md § The loop)
+      1 + // the owner's "Clear all from agent ferrets": every open item on the agent ferrets' boards, dismissed (docs/agenda.md)
       1 + // one device's own grants, changed (B5)
       2 + // the machine's security settings: the read and the change (zero-trust B6)
       1 + // switching the tunnel on or off (pairing.configure); its read is `authenticated`, like the carrier refresh
@@ -1062,6 +1067,7 @@ describe('the mounted daemon surface', () => {
       'POST /v1/sessions/:sessionId/attention',
       'POST /v1/sessions/:sessionId/attention/replies',
       'POST /v1/sessions/:sessionId/notify',
+      'POST /v1/agenda/clear-agents',
       'GET /v1/sessions/:sessionId/pins',
       'POST /v1/sessions/:sessionId/pins',
       'GET /v1/tasks',

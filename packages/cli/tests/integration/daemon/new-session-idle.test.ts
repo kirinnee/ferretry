@@ -1,4 +1,4 @@
-import { afterEach, describe, it } from 'bun:test';
+import { afterAll, beforeAll, describe, it } from 'bun:test';
 import { chmod, mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -60,13 +60,31 @@ const roots = new Set<string>();
 const daemons = new Set<number>();
 const sockets = new Set<string>();
 
-afterEach(async () => {
+afterAll(async () => {
   await tearDownSupervisedDaemons({ daemons, sockets, roots }, { tmux: TMUX });
 }, TEARDOWN_TIMEOUT_MS);
 
 async function executable(path: string, lines: readonly string[]): Promise<void> {
   await writeFile(path, `${lines.join('\n')}\n`);
   await chmod(path, 0o755);
+}
+
+/** What the fake harness paints at its next launch (it reads the file once, as it starts), and where that file is. */
+async function writeScenario(root: string, harness: 'claude' | 'codex', screen: readonly string[]): Promise<string> {
+  const scenario = join(root, `${harness}-scenario.json`);
+  const last = screen.length - 1;
+  await writeFile(
+    scenario,
+    JSON.stringify({
+      version: 1,
+      steps: [
+        ...screen.slice(0, last).map(text => ({ type: 'say', text })),
+        // The last line is the prompt itself, with the cursor left on it: a ready harness.
+        { type: 'ask', text: `${screen[last]}\u001b[1A`, expect: '__never__' },
+      ],
+    }),
+  );
+  return scenario;
 }
 
 /** One fake runtime: its own home with the settings file its harness persists a level in. */
@@ -81,19 +99,7 @@ async function runtime(
   await mkdir(home, { recursive: true });
   if (harness === 'claude') await writeFile(join(home, 'settings.json'), '{"effortLevel":"high"}');
   else await writeFile(join(home, 'config.toml'), 'model = "gpt-5.6-codex"\nmodel_reasoning_effort = "medium"\n');
-  const scenario = join(root, `${harness}-scenario.json`);
-  const last = screen.length - 1;
-  await writeFile(
-    scenario,
-    JSON.stringify({
-      version: 1,
-      steps: [
-        ...screen.slice(0, last).map(text => ({ type: 'say', text })),
-        // The last line is the prompt itself, with the cursor left on it: a ready harness.
-        { type: 'ask', text: `${screen[last]}\u001b[1A`, expect: '__never__' },
-      ],
-    }),
-  );
+  const scenario = await writeScenario(root, harness, screen);
   await executable(join(bin, wrapper), [
     '#!/bin/sh',
     `export ${harness === 'claude' ? 'CLAUDE_CONFIG_DIR' : 'CODEX_HOME'}="${home}"`,
@@ -105,6 +111,7 @@ async function runtime(
 }
 
 interface BootedDaemon {
+  readonly root: string;
   readonly port: number;
   readonly token: string;
   readonly logFile: string;
@@ -199,7 +206,7 @@ async function boot(claudeScreen: readonly string[]): Promise<BootedDaemon> {
     { pollMs: 50, evidence: async () => await readFile(layout.logFile, 'utf8').catch(() => '(no log)') },
   );
   const token = (await readFile(join(stateHome, 'api-token'), 'utf8')).trim();
-  return { port, token, logFile: layout.logFile };
+  return { root, port, token, logFile: layout.logFile };
 }
 
 const headers = (daemon: BootedDaemon, requestId: string): Record<string, string> => ({
@@ -212,11 +219,17 @@ const headers = (daemon: BootedDaemon, requestId: string): Record<string, string
 const logOf = async (daemon: BootedDaemon): Promise<string> =>
   `--- fyd.log ---\n${await readFile(daemon.logFile, 'utf8').catch(() => '(no log)')}`;
 
+let started = 0;
+const nextRequest = (): number => {
+  started += 1;
+  return started;
+};
+
 /** Starts a session with NOTHING to do — no prompt — exactly as the owner did. */
 async function startIdle(daemon: BootedDaemon, wrapper: string): Promise<SessionView> {
   const response = await fetch(`http://127.0.0.1:${daemon.port}/v1/sessions`, {
     method: 'POST',
-    headers: headers(daemon, `req-${wrapper}`),
+    headers: headers(daemon, `req-${wrapper}-${String(nextRequest())}`),
     body: JSON.stringify({ agent: wrapper, mode: 'interactive', name: 'Gabriela', cwd: tmpdir() }),
   });
   const body = await response.text();
@@ -248,10 +261,14 @@ async function liveFrame(daemon: BootedDaemon, view: SessionView, marker: string
 }
 
 describe('a brand-new session nobody has asked anything yet', () => {
-  it('should read ready, with its launch model and level, for both a Claude and a Codex runtime', async () => {
-    // Arrange
-    const daemon = await boot(CLAUDE_IDLE);
+  // One daemon for both journeys: each starts its own session, and the second only changes what the Claude
+  // stand-in paints at its next launch.
+  let daemon: BootedDaemon;
+  beforeAll(async () => {
+    daemon = await boot(CLAUDE_IDLE);
+  }, 120_000);
 
+  it('should read ready, with its launch model and level, for both a Claude and a Codex runtime', async () => {
     for (const [wrapper, model, effort, marker] of [
       [CLAUDE.wrapper, 'claude-opus-5[1m]', 'high', '? for shortcuts'],
       [CODEX.wrapper, 'gpt-5.6-codex', 'medium', '100% context left'],
@@ -272,7 +289,7 @@ describe('a brand-new session nobody has asked anything yet', () => {
 
   it('should still read working while the harness paints its own status line', async () => {
     // Arrange — a Claude harness that is mid-turn on screen.
-    const daemon = await boot(CLAUDE_WORKING);
+    await writeScenario(daemon.root, 'claude', CLAUDE_WORKING);
 
     // Act
     const view = await startIdle(daemon, CLAUDE.wrapper);

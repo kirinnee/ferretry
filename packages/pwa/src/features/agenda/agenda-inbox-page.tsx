@@ -36,8 +36,8 @@ import { Spinner } from '../../components/spinner.tsx';
 
 import type { AgendaInbox } from '../../hooks/use-agenda-inbox.ts';
 import { CLEAR_ACTION, kindWord } from '../../lib/agenda-answers.ts';
+import type { ClearPort } from '../../lib/agenda-clear-agents.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
-import type { TranscriptEntry } from '../../lib/session-screens.ts';
 import {
   actionSentence,
   agendaConversationPath,
@@ -68,19 +68,22 @@ import {
   skipSelection,
   stepSelection,
 } from '../../lib/agenda-inbox-list.ts';
-import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
 import { composerNoteFor, inputDraftDiscarded, withComposerNote } from '../../lib/agenda-reply.ts';
-import { laneEditDestination } from '../../lib/lane-proposal-link.ts';
+import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
+import type { ModeFilter } from '../../lib/controls.ts';
+import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../lib/daemon-scope.ts';
 import { escapeCloses } from '../../lib/escape-closes.ts';
-import { composerQuoteTarget } from '../../lib/quote.ts';
-import type { DaemonId } from '../../lib/daemon-connection.ts';
+import { laneEditDestination } from '../../lib/lane-proposal-link.ts';
 import { daemonAgendaPath, daemonSessionPath } from '../../lib/pages/routes.ts';
+import { composerQuoteTarget } from '../../lib/quote.ts';
 import type { RecentMessage } from '../../lib/recent-messages.ts';
+import type { TranscriptEntry } from '../../lib/session-screens.ts';
 import { AgendaCountBadge } from '../../shell/app-bar.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { sessionsBarNames } from '../../shell/sessions-bar-model.ts';
 import { PageThemeSwitch } from '../../shell/theme-toggle.tsx';
+import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
 import { agendaAge, agendaReference } from './agenda-board.tsx';
 import { AgendaCard, type AgendaCardOrigin } from './agenda-card.tsx';
 import { AgendaItemView } from './agenda-item-view.tsx';
@@ -89,7 +92,7 @@ import { ResolvedRow } from './agenda-resolved.tsx';
 import { AgendaStatusPill } from './agenda-status-pill.tsx';
 import { AgendaSwipeDeck } from './agenda-swipe-deck.tsx';
 import { AgendaUndoToast } from './agenda-undo-toast.tsx';
-import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
+import { ClearAgentsControl } from './clear-agents.tsx';
 
 /**
  * Where a card came from: the FERRET that asked (its callsign, else the row's title), what it is working
@@ -456,6 +459,55 @@ function InboxFilterBar({
   );
 }
 
+const KIND_WORDS: Readonly<Record<ModeFilter, string>> = { all: 'All', interactive: 'Interactive', auto: 'Agents' };
+
+/** All / Interactive / Agents: which kind of ferret raised the items — the sessions bar's own split. */
+function KindFilterBar({
+  kind,
+  onChange,
+}: {
+  readonly kind: ModeFilter;
+  readonly onChange: (next: ModeFilter) => void;
+}) {
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: a group of toggle buttons, not a form fieldset
+    <div aria-label="Ferrets" className="fy-attn-inbox__filter" data-agenda-kind="" role="group">
+      {(['all', 'interactive', 'auto'] as const).map(entry => (
+        <button
+          aria-pressed={kind === entry}
+          className="fy-attn-inbox__filter-button"
+          data-agenda-kind-option={entry}
+          key={entry}
+          onClick={() => onChange(entry)}
+          type="button"
+        >
+          {KIND_WORDS[entry]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** The bulk dismiss under the Agents filter; nothing under any other, or where the host gave it no way to reach machines. */
+function AgentsBulk({
+  kind,
+  port,
+  inbox,
+  machines,
+}: {
+  readonly kind: ModeFilter;
+  readonly port: ClearPort | undefined;
+  readonly inbox: AgendaInbox;
+  readonly machines: readonly { readonly daemonId: DaemonId; readonly name: string }[];
+}) {
+  if (kind !== 'auto' || port === undefined) return null;
+  const targets = machines.flatMap(machine => {
+    const connection = inbox.connectionFor(machine.daemonId);
+    return connection === undefined ? [] : [{ daemonId: machine.daemonId, name: machine.name, connection }];
+  });
+  return <ClearAgentsControl port={port} targets={targets} />;
+}
+
 /** "From Warden ✕": the filter `/inbox?from=warden` set, and the one press that lifts it. */
 function SourceChip({ onClear }: { readonly onClear: () => void }) {
   return (
@@ -649,6 +701,8 @@ export interface AgendaInboxPageProps {
    * item. The host draws it (it holds the clients); absent, the open item has no composer.
    */
   readonly renderComposer?: (card: InboxCard) => ReactNode;
+  /** How "Clear all from agent ferrets" reaches the machines. Absent: the Agents filter has no such button. */
+  readonly clearPort?: ClearPort;
 }
 
 /** Everything a row needs besides the card itself. */
@@ -912,6 +966,7 @@ export function AgendaInboxPage({
   onClearFrom,
   withFerretsOpen = false,
   renderComposer,
+  clearPort,
 }: AgendaInboxPageProps) {
   const headingId = useId();
   const [cursor, setCursor] = useState<string | null>(null);
@@ -919,6 +974,7 @@ export function AgendaInboxPage({
   const [deckOpen, setDeckOpen] = useState<boolean>(initialOpen !== undefined);
   const [filter, setFilter] = useState<InboxFilter>('open');
   const [machine, setMachine] = useState<DaemonId | null>(null);
+  const [kind, setKind] = useState<ModeFilter>('all');
   const [query, setQuery] = useState('');
   const [withFerretsShown, setWithFerretsShown] = useState(withFerretsOpen);
   const rowRefs = useRef(new Map<string, HTMLAnchorElement>()).current;
@@ -929,11 +985,11 @@ export function AgendaInboxPage({
     [inbox.cards, inbox.withFerret, inbox.parked, inbox.resolved],
   );
   const machineFilter = machines.some(entry => entry.daemonId === machine) ? machine : null;
-  const listFilter: InboxListFilter = { machine: machineFilter, query, from };
+  const listFilter: InboxListFilter = { machine: machineFilter, query, from, mode: kind };
   const visible = filterInboxCards(inbox.cards, listFilter);
   const withFerret = filterInboxCards(inbox.withFerret, listFilter);
   const sections = useMemo(() => inboxSections(visible, withFerret), [visible, withFerret]);
-  const filtered = machineFilter !== null || query !== '' || from !== null;
+  const filtered = machineFilter !== null || query !== '' || from !== null || kind !== 'all';
   const snoozed = parkedBy(inbox.parked, 'snoozed');
   const replied = parkedBy(inbox.parked, 'replied');
   const parkedCounts = { snoozed: snoozed.length, replied: replied.length };
@@ -963,6 +1019,7 @@ export function AgendaInboxPage({
   const clearFilters = (): void => {
     setQuery('');
     setMachine(null);
+    setKind('all');
     if (from !== null) onClearFrom?.();
   };
 
@@ -1042,6 +1099,7 @@ export function AgendaInboxPage({
       <InboxFilterBar counts={parkedCounts} filter={filter} onChange={choose} />
       <div className="fy-attn-inbox__tools">
         {from === 'warden' && onClearFrom !== undefined ? <SourceChip onClear={onClearFrom} /> : null}
+        <KindFilterBar kind={kind} onChange={setKind} />
         {machines.length > 1 ? (
           <select
             aria-label="Machine"
@@ -1200,6 +1258,7 @@ export function AgendaInboxPage({
     <main aria-labelledby={headingId} className="fy-attn-inbox" data-agenda-inbox={phone ? 'list' : 'panes'}>
       {header}
       {banner}
+      <AgentsBulk inbox={inbox} kind={kind} machines={machines} port={clearPort} />
       <OrphanedFailures inbox={inbox} />
       {filter === 'snoozed' || filter === 'replied' ? (
         <InboxParkedList

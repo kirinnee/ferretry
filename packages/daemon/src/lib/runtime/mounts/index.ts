@@ -1,4 +1,4 @@
-import type { AgendaRepliesSubsystem, AgendaService } from '../../agenda/index.ts';
+import type { AgendaAgentClearer, AgendaRepliesSubsystem, AgendaService } from '../../agenda/index.ts';
 import type { AgentToolService } from '../../agent-tools/service.ts';
 import type { AgentIdentityResolver } from '../../agent-tools/types.ts';
 import type { AnalyticsIngestionLoop } from '../../analytics/ingestion.ts';
@@ -38,6 +38,7 @@ import type { DaemonUpdateSubsystem } from '../../update/index.ts';
 import type { MillisecondClockPort } from '../boot.ts';
 import type { PublishedCarrierView } from '../published-carriers.ts';
 import { agendaRoutes, type DirectNotificationSubsystem } from './agenda.ts';
+import { agendaClearRoutes } from './agenda-clear.ts';
 import { configFilesConfirmations } from './agenda-confirms.ts';
 import { agentControlledRoutes, agentControlledSockets } from './agent-control.ts';
 import { agentToolRoutes } from './agent-tools.ts';
@@ -242,6 +243,8 @@ export interface MountedSubsystems {
   readonly notifications: DirectNotificationSubsystem;
   /** The owner's answers each ferret's outbox holds before delivering them as one message. */
   readonly agendaReplies: AgendaRepliesSubsystem;
+  /** The owner's bulk "clear all from agent ferrets". */
+  readonly agendaClearer: AgendaAgentClearer;
   readonly pins: PinService;
   /** The session read: what the fleet holds, and one session in full. */
   readonly sessions: SessionDirectorySubsystem;
@@ -631,6 +634,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
           subsystems.agendaReplies,
           configFilesConfirmations(subsystems.configFiles.service),
         ),
+        ...agendaClearRoutes(subsystems.agendaClearer),
         ...pinRoutes(subsystems.pins),
         ...legacyTaskRoutes(subsystems.legacyTasks),
         // The project boards live under `/v1/board`, which no other subsystem uses, and their fixed

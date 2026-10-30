@@ -308,10 +308,16 @@ export interface OpenAskRow {
   readonly blocking: boolean;
 }
 
+/** An answered or dismissed ask, with the ferret whose ledger keeps it — the card a click opens is its. */
+interface ResolvedAskRow {
+  readonly sessionId: string;
+  readonly item: ResolvedAgendaItem;
+}
+
 export interface CardAsks {
   readonly open: readonly OpenAskRow[];
   /** Asks about this card that are answered or dismissed, newest first. */
-  readonly resolved: readonly ResolvedAgendaItem[];
+  readonly resolved: readonly ResolvedAskRow[];
   /** The agendas are still being read: an empty list is not yet "no asks". */
   readonly reading: boolean;
 }
@@ -325,9 +331,9 @@ export const collectAsks = (task: BoardTaskView, agendas: readonly SessionAgenda
   const itemOf = (ref: AgendaRef): AgendaItem | null =>
     agendas.find(entry => entry.sessionId === ref.sessionId)?.snapshot?.items.find(item => item.id === ref.id) ?? null;
   const resolved = agendas
-    .flatMap(entry => entry.snapshot?.resolved ?? [])
-    .filter(item => item.task?.id === task.id && (item.task.machineId ?? task.machineId) === task.machineId)
-    .sort((a, b) => b.resolvedAt.localeCompare(a.resolvedAt));
+    .flatMap(entry => (entry.snapshot?.resolved ?? []).map(item => ({ sessionId: entry.sessionId, item })))
+    .filter(({ item }) => item.task?.id === task.id && (item.task.machineId ?? task.machineId) === task.machineId)
+    .sort((a, b) => b.item.resolvedAt.localeCompare(a.item.resolvedAt));
   return {
     open: task.openAsks.map(ref => ({
       ref,

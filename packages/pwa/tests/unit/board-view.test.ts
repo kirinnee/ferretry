@@ -8,13 +8,10 @@ import {
   buildTree,
   cardPlaces,
   flattenTree,
-  groupRowsByLane,
   laneNames,
   laneOfCategory,
   listRows,
   parseBoardView,
-  parseListSort,
-  sortRows,
 } from '../../src/lib/board-view.ts';
 import { COUNTS, card, laneSetFor, laptop, OTHER_PROJECT, PROJECT } from './board-support.ts';
 
@@ -34,13 +31,10 @@ const data = (cards: ReturnType<typeof card>[]): BoardMachineData => ({
 const model = (cards: ReturnType<typeof card>[]) => mergeBoard([data(cards)], NO_BOARD_FILTERS);
 
 describe('parsing', () => {
-  it('falls back to Kanban and to status order', () => {
+  it('falls back to Kanban', () => {
     expect(parseBoardView('list')).toBe('list');
     expect(parseBoardView('nope')).toBe('kanban');
     expect(parseBoardView(null)).toBe('kanban');
-    expect(parseListSort('stale')).toBe('stale');
-    expect(parseListSort('lane')).toBe('status');
-    expect(parseListSort(null)).toBe('status');
   });
 });
 
@@ -60,49 +54,6 @@ describe('the Table', () => {
     const unplaced = rows[4];
     expect(unplaced?.laneName).toBe('ghost-lane');
     expect(unplaced?.category).toBeNull();
-  });
-
-  it('puts what needs a look first, longest untouched first', () => {
-    const order = sortRows(listRows(model(cards)), 'stale').map(row => row.card.task.id);
-    expect(order).toEqual(['F3', 'F2', 'F4', 'F5', 'F1']);
-  });
-
-  it('sorts by last touched and by status then recency, with the id breaking a tie', () => {
-    expect(sortRows(listRows(model(cards)), 'touched').map(row => row.card.task.id)).toEqual([
-      'F1',
-      'F4',
-      'F5',
-      'F2',
-      'F3',
-    ]);
-    expect(sortRows(listRows(model(cards)), 'status').map(row => row.card.task.id)).toEqual([
-      'F4',
-      'F2',
-      'F3',
-      'F1',
-      'F5',
-    ]);
-  });
-});
-
-describe('grouping the Table by lane', () => {
-  it('makes one group per lane in board order, rows keeping their order', () => {
-    const rows = sortRows(
-      listRows(
-        model([
-          card('F1', { laneId: 'review', lastTouchedAt: '2026-08-01T10:00:00.000Z' }),
-          card('F2', { laneId: 'implement', lastTouchedAt: '2026-08-01T05:00:00.000Z' }),
-          card('F3', { laneId: 'implement', lastTouchedAt: '2026-08-01T09:00:00.000Z' }),
-        ]),
-      ),
-      'touched',
-    );
-    const groups = groupRowsByLane(rows);
-    expect(groups.map(group => [group.laneName, group.rows.map(row => row.card.task.id)])).toEqual([
-      ['Implement', ['F3', 'F2']],
-      ['Review/CI', ['F1']],
-    ]);
-    expect(groups[0]?.category).toBe('active');
   });
 });
 

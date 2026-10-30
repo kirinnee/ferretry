@@ -859,6 +859,8 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         world.io,
         ownSessionId,
         new AgendaBriefInput(world.cwd),
+        undefined,
+        { interactive: () => world.io.interactive(), ask: async message => await world.prompt.ask(message) },
       ),
       async (words, options) => await runNotify(notifyPorts, words, options),
     );

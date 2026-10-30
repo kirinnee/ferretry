@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import { LANE_TEMPLATES, type LaneSet, type LaneTemplateName, type TaskStatus } from '@ferretry/protocol';
 import should from 'should';
 import { laneForStatus, statusOfPhase } from '../../../src/lib/board-import/index.ts';
-import { lanes } from '../board/support.ts';
+import { lanes, templateLanes } from '../board/support.ts';
 
 type Status = Exclude<TaskStatus, 'blocked'>;
 
@@ -34,6 +34,25 @@ describe('laneForStatus', () => {
       should(lane).equal(expected);
     });
   }
+
+  it('should map every status onto the action-first lanes Ferretry proposes now', () => {
+    const live = (status: Status, hasPullRequest = false) =>
+      laneForStatus(templateLanes(undefined, 'pr-release-verify'), { status, workflow: 'design-first', hasPullRequest })
+        .id;
+    should(live('built', true)).equal('implement');
+    should(live('live')).equal('released');
+    should(live('done')).equal('closed');
+  });
+
+  it('should send live work to the last shipped lane when the release lane closes', () => {
+    should(
+      laneForStatus(templateLanes(undefined, 'pr-release'), {
+        status: 'live',
+        workflow: 'quick',
+        hasPullRequest: false,
+      }).id,
+    ).equal('merged');
+  });
 
   it('should send a quick task past the Plan lane its variant skips', () => {
     // Act

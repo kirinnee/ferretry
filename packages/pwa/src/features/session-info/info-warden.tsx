@@ -1,22 +1,14 @@
 /**
- * Info › Signals: what this ferret is waiting on you for, and what the Warden has said and done about
- * it, newest first.
+ * Info › Overview › Warden: what the Warden has said and done about this ferret, newest first.
  *
- * Attention is the context rail's signals panel, unchanged — the same live port, the same answer
- * controls — so answering here and answering anywhere else is one act. The Warden's verdicts are the
- * daemon's verdict list narrowed to this session (the route has no per-session filter, so the narrowing
- * is here), each with what the Warden did and why.
+ * The daemon's verdict list narrowed to this session (the route has no per-session filter, so the narrowing is here),
+ * each with what the Warden did and why. It sits beside the agenda in Overview: Info has no Signals tab.
  */
 
 import type { WardenVerdict } from '@ferretry/protocol';
 import { Shield } from 'lucide-react';
-import { useState } from 'react';
 import { relativeTime } from '../../lib/session-screens.ts';
-import type { SignalChip } from '../context-rail/context-rail-model.ts';
-import type { ContextSignalsPort } from '../context-rail/context-rail-ports.ts';
-import { ContextSignalsPanel, useContextSignals } from '../context-rail/context-rail-signals.tsx';
 import { InfoNote } from './info-parts.tsx';
-
 export type InfoVerdictsRead =
   | { readonly kind: 'loading' }
   | { readonly kind: 'ready'; readonly verdicts: readonly WardenVerdict[] }
@@ -38,37 +30,21 @@ export const sessionVerdicts = (verdicts: readonly WardenVerdict[], sessionId: s
     .filter(verdict => verdict.targetSession === sessionId)
     .sort((left, right) => Date.parse(right.at) - Date.parse(left.at));
 
-export function InfoSignals({
-  port,
+export function InfoWarden({
   agentName,
   sessionId,
   verdicts,
   now,
 }: {
-  readonly port: ContextSignalsPort;
   readonly agentName: string;
   readonly sessionId: string;
   readonly verdicts: InfoVerdictsRead;
   readonly now: () => number;
 }) {
-  const read = useContextSignals(port);
-  const [query, setQuery] = useState('');
-  const [chip, setChip] = useState<SignalChip>('open');
   const mine = verdicts.kind === 'ready' ? sessionVerdicts(verdicts.verdicts, sessionId) : [];
   const nowMs = now();
   return (
-    <div className="fy-info-signals">
-      <h3 className="fy-info-section__title">Waiting on you</h3>
-      <ContextSignalsPanel
-        agentName={agentName}
-        chip={chip}
-        now={now}
-        onChipChange={setChip}
-        onQueryChange={setQuery}
-        port={port}
-        query={query}
-        read={read}
-      />
+    <section className="fy-info-section" data-info-warden="">
       <h3 className="fy-info-section__title">Warden</h3>
       {verdicts.kind === 'loading' ? (
         <InfoNote>Reading the Warden’s verdicts…</InfoNote>
@@ -102,6 +78,6 @@ export function InfoSignals({
           ))}
         </ul>
       )}
-    </div>
+    </section>
   );
 }

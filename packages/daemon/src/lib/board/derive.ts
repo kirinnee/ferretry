@@ -5,6 +5,8 @@
  * - `blockedBy`, `blocks`, `rollup`, `suggestedLane` and `shippedIn` are computed here, from the cards.
  * - `lastTouchedAt`, `touchedBy` and `activity` come from the {@link ActivityDeriver} port.
  * - `waitingOnOwner` and `openAsks` come from the {@link AgendaLinkSource} port (U7).
+ * - `origin` and `humanParent` come from the card and its ancestors (`origin.ts`), with the lineage of the
+ *   sessions a card was recorded from read through the {@link SessionParents} port.
  */
 import {
   type BoardTask,
@@ -16,18 +18,22 @@ import {
   type Rollup,
 } from '@ferretry/protocol';
 import { type BoardIndex, blockedBy, cardCategory, type LaneSets, shippedIn } from './graph.ts';
-import type { ActivityDeriver, AgendaLinkSource, CardActivity, CardAsks } from './ports.ts';
+import { askSessionOf, cardOrigin, humanParentOf, type OriginFacts } from './origin.ts';
+import type { ActivityDeriver, AgendaLinkSource, CardActivity, CardAsks, SessionParents } from './ports.ts';
 
 export interface DerivationInputs {
   readonly index: BoardIndex;
   readonly laneSets: LaneSets;
   readonly activity: ReadonlyMap<BoardTaskId, CardActivity>;
   readonly asks: ReadonlyMap<BoardTaskId, CardAsks>;
+  /** Which sessions a ferret started; absent, every session reads as the owner's. */
+  readonly origins?: OriginFacts;
 }
 
 /** A card the deriver said nothing about has had no activity anyone measured. */
 export const UNOBSERVED: CardActivity = { lastTouchedAt: null, touchedBy: null, activity: 'idle' };
 const NO_ASKS: CardAsks = { open: [], blocking: [] };
+const OWNER_STARTED: OriginFacts = { startedByFerret: () => false };
 
 const rank = (category: LaneCategory): number => LANE_CATEGORIES.indexOf(category);
 
@@ -101,6 +107,7 @@ export const suggestedLaneOf = (card: BoardTask, inputs: DerivationInputs): stri
 export const deriveView = (card: BoardTask, inputs: DerivationInputs): BoardTaskView => {
   const activity = inputs.activity.get(card.id) ?? UNOBSERVED;
   const asks = inputs.asks.get(card.id) ?? NO_ASKS;
+  const origins = inputs.origins ?? OWNER_STARTED;
   return {
     ...card,
     lastTouchedAt: activity.lastTouchedAt,
@@ -116,6 +123,8 @@ export const deriveView = (card: BoardTask, inputs: DerivationInputs): BoardTask
       .filter(dependent => dependent.dropped === null)
       .map(dependent => ({ id: dependent.id })),
     shippedIn: shippedIn(card),
+    origin: cardOrigin(card, origins),
+    humanParent: humanParentOf(card, inputs.index, ancestor => cardOrigin(ancestor, origins)),
   };
 };
 
@@ -127,9 +136,27 @@ export const gatherDerivation = async (
   cards: readonly BoardTask[],
   index: BoardIndex,
   laneSets: LaneSets,
-  ports: { readonly activity: ActivityDeriver; readonly agenda: AgendaLinkSource },
+  ports: {
+    readonly activity: ActivityDeriver;
+    readonly agenda: AgendaLinkSource;
+    readonly parents?: SessionParents;
+  },
 ): Promise<DerivationInputs> => {
   const asks = await ports.agenda.asksFor(cards);
   const activity = await ports.activity.derive({ cards, index, laneSets, asks });
-  return { index, laneSets, activity, asks };
+  if (ports.parents === undefined) return { index, laneSets, activity, asks };
+  return { index, laneSets, activity, asks, origins: await originFacts(cards, ports.parents) };
+};
+
+/**
+ * Which of the sessions the cards were recorded from a ferret started, asked once per session. A session
+ * whose lineage cannot be read reads as the owner's, so a card is never hidden on a failed read.
+ */
+const originFacts = async (cards: readonly BoardTask[], parents: SessionParents): Promise<OriginFacts> => {
+  const sessions = new Set(cards.flatMap(card => askSessionOf(card) ?? []));
+  const started = new Set<string>();
+  for (const session of sessions) {
+    if ((await parents.parentOf(session).catch(() => undefined)) !== undefined) started.add(session);
+  }
+  return { startedByFerret: session => started.has(session) };
 };

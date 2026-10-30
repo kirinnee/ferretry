@@ -1,0 +1,108 @@
+/**
+ * HUMAN CARDS AND AGENT CARDS: who a card was asked for.
+ *
+ * The Board shows what the owner asked for. A card a ferret made for other ferrets (a sub-ferret's card, a
+ * Warden remedy) is an AGENT card: hidden unless "Show agent tasks" is on, and then drawn under the human
+ * card it serves.
+ *
+ * THE DAEMON OWNS THE FACT: it sends `origin` and `humanParent` on a card, both optional on the wire. A
+ * daemon that sends neither is an older one, and the app does not guess: it shows every card and hides the
+ * toggle ({@link splitAvailable}). Nothing else in the app reads those two fields.
+ */
+
+import type { TaskRef } from '@ferretry/protocol';
+
+type TaskOrigin = 'human' | 'agent';
+
+/** A field a newer daemon sends on a card; an older one sends nothing. */
+const declared = (task: object, name: string): unknown => (name in task ? Reflect.get(task, name) : undefined);
+
+/** Who this card was asked for, as the daemon said; `null` when it said nothing. */
+export const taskOrigin = (task: object): TaskOrigin | null => {
+  const value = declared(task, 'origin');
+  return value === 'human' || value === 'agent' ? value : null;
+};
+
+export const isAgentTask = (task: object): boolean => taskOrigin(task) === 'agent';
+
+/** Whether the daemons behind these cards say who asked for a card: without it there is nothing to split. */
+export const splitAvailable = (tasks: readonly object[]): boolean => tasks.some(task => taskOrigin(task) !== null);
+
+/** The card an agent card serves, as the daemon declared it: `undefined` when the daemon said nothing, `null` for none. */
+const declaredHumanParent = (task: object): TaskRef | null | undefined => {
+  const value = declared(task, 'humanParent');
+  if (value === null) return null;
+  if (typeof value === 'object' && value !== null && typeof Reflect.get(value, 'id') === 'string') {
+    return value as TaskRef;
+  }
+  return undefined;
+};
+
+interface ParentFacts {
+  readonly id: string;
+  readonly parent: TaskRef | null;
+}
+
+/** A card on the board: the machine it lives on and its task (a task id is unique on its machine only). */
+export interface HumanCard {
+  readonly daemonId: string;
+  readonly task: ParentFacts;
+}
+
+const keyOf = (daemonId: string, taskId: string): string => `${daemonId}\u0000${taskId}`;
+
+/** The cards of the board by machine and task id: what {@link humanParentKey} looks a lead up in. */
+export const humanScope = (cards: readonly HumanCard[]): ReadonlyMap<string, HumanCard> =>
+  new Map(cards.map(card => [keyOf(card.daemonId, card.task.id), card] as const));
+
+/**
+ * The key of the human card an agent card serves, or `null` (a human card has none). The daemon's
+ * `humanParent` is believed; without it the nearest human ancestor along `parent` is used, and an ancestor
+ * that is not in `scope` means there is nothing to group under.
+ */
+export const humanParentKey = (card: HumanCard, scope: ReadonlyMap<string, HumanCard>): string | null => {
+  const { daemonId, task } = card;
+  if (!isAgentTask(task)) return null;
+  const told = declaredHumanParent(task);
+  if (told === null) return null;
+  if (told !== undefined) return scope.has(keyOf(daemonId, told.id)) ? keyOf(daemonId, told.id) : null;
+  const seen = new Set<string>([task.id]);
+  let cursor = task.parent;
+  while (cursor !== null && !seen.has(cursor.id)) {
+    seen.add(cursor.id);
+    const above = scope.get(keyOf(daemonId, cursor.id));
+    if (above === undefined) return null;
+    if (!isAgentTask(above.task)) return keyOf(daemonId, above.task.id);
+    cursor = above.task.parent;
+  }
+  return null;
+};
+
+export const humanCardKey = (card: HumanCard): string => keyOf(card.daemonId, card.task.id);
+
+/**
+ * `items` with every agent item moved to sit right after the human item it serves (their order kept), and
+ * the key of that human item. An agent item whose human parent is not among `items` keeps its own place, so
+ * a section or a window never loses a card.
+ */
+export const groupUnderHuman = <T extends HumanCard>(
+  items: readonly T[],
+  scope: ReadonlyMap<string, HumanCard>,
+): readonly { readonly item: T; readonly under: string | null }[] => {
+  const present = new Set(items.map(humanCardKey));
+  const parentOf = (item: T): string | null => {
+    const found = humanParentKey(item, scope);
+    return found !== null && present.has(found) ? found : null;
+  };
+  const children = new Map<string, T[]>();
+  const roots: T[] = [];
+  for (const item of items) {
+    const parent = parentOf(item);
+    if (parent === null) roots.push(item);
+    else children.set(parent, [...(children.get(parent) ?? []), item]);
+  }
+  return roots.flatMap(root => [
+    { item: root, under: null },
+    ...(children.get(humanCardKey(root)) ?? []).map(child => ({ item: child, under: humanCardKey(root) })),
+  ]);
+};

@@ -1260,3 +1260,9 @@
     flex: 1 1 100%;
   }
 }
+/* Under the Agents filter: one bulk action, left-aligned with the list below it. */
+.fy-attn-inbox__bulk {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+}

@@ -458,6 +458,10 @@ export type BoardTask = z.infer<typeof BoardTaskSchema>;
 export const BoardTaskActivitySchema = z.enum(['active', 'idle', 'stale', 'waiting', 'orphaned']);
 export type BoardTaskActivity = z.infer<typeof BoardTaskActivitySchema>;
 
+/** Whether the owner asked for a card or an agent made it (`docs/board.md` § Human and agent cards). */
+export const BoardTaskOriginSchema = z.enum(['human', 'agent']);
+export type BoardTaskOrigin = z.infer<typeof BoardTaskOriginSchema>;
+
 const categoryCounts = z.strictObject({
   backlog: NonNegativeIntegerSchema,
   active: NonNegativeIntegerSchema,
@@ -505,6 +509,14 @@ const BoardTaskViewShape = {
   blocks: z.array(TaskRefSchema),
   /** The earliest release any merged PR of the card shipped in. */
   shippedIn: ReleasedInSchema.nullable(),
+  /**
+   * Who the work is for: `human` when the owner asked for it, `agent` when a ferret or the daemon made it on
+   * its own (a sub-ferret's card, a Warden finding). Absent from a daemon older than the split, which a
+   * reader takes as "show it".
+   */
+  origin: BoardTaskOriginSchema.optional(),
+  /** The nearest ANCESTOR card (never the card itself) whose origin is `human`; `null` when there is none. */
+  humanParent: TaskRefSchema.nullable().optional(),
 };
 
 const agendaKey = (ref: AgendaRef): string => `${ref.sessionId}/${ref.id}`;

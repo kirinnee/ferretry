@@ -96,7 +96,7 @@ export const renameLane = (draft: LaneDraft, id: string, name: string): LaneDraf
   replaceLane(draft, id, lane => ({ ...lane, name }));
 
 export const setLaneCategory = (draft: LaneDraft, id: string, category: LaneCategory): LaneDraft =>
-  replaceLane(draft, id, lane => ({ ...lane, category }));
+  replaceLane(draft, id, ({ emphasis: _emphasis, ...lane }) => ({ ...lane, category }));
 
 /** The triggers that move a card into the lane; none removes the field, which the protocol wants. */
 export const setLaneTriggers = (draft: LaneDraft, id: string, triggers: readonly LaneTrigger[]): LaneDraft =>

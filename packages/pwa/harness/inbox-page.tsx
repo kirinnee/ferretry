@@ -18,6 +18,7 @@ import { createRoot } from 'react-dom/client';
 import { AgendaInboxComposer } from '../src/features/agenda/agenda-inbox-composer.tsx';
 import { AgendaInboxPage } from '../src/features/agenda/agenda-inbox-page.tsx';
 import type { AgendaInbox } from '../src/hooks/use-agenda-inbox.ts';
+import type { ClearPort } from '../src/lib/agenda-clear-agents.ts';
 import { DeferredAgendaActions, type InboxCard, inboxCardKey } from '../src/lib/agenda-inbox.ts';
 import { type DaemonConnection, daemonConnection, daemonId } from '../src/lib/daemon-connection.ts';
 import type { TranscriptEntry } from '../src/lib/session-screens.ts';
@@ -25,6 +26,7 @@ import { ScrollMemory } from '../src/lib/scroll-memory.ts';
 import { AppTabBar } from '../src/shell/app-bar.tsx';
 import { PageScrollRegion } from '../src/shell/page-scroll-region.tsx';
 import { PullToPaletteRegion } from '../src/shell/pull-to-palette-region.tsx';
+import { healthOf } from '../tests/support/health.ts';
 import { sessionView } from '../tests/support/sessions.ts';
 
 const NOW = Date.parse('2026-10-29T09:00:00.000Z');
@@ -79,9 +81,12 @@ const card = (it: AgendaItem, view: SessionView, machine: string, daemon = STUDI
   item: it,
 });
 
-const LEDGER = ferret('rc', 'ottilie', 'Ledger storage', { open: 1, first: 'A5', ask: 'storage', stopped: true });
+/** The owner's own chats; every other ferret here is an agent (`mode: 'auto'`), what the Agents filter keeps. */
+const chat = (view: SessionView): SessionView => ({ ...view, config: { ...view.config, mode: 'interactive' } });
+
+const LEDGER = chat(ferret('rc', 'ottilie', 'Ledger storage', { open: 1, first: 'A5', ask: 'storage', stopped: true }));
 const RELAY = ferret('ra', 'hadi', 'Relay advertisement', { open: 2, first: 'A2', ask: 'relay' });
-const RELEASE = ferret('fr', 'johnnie', 'Release cut', { open: 1, first: 'A3', ask: 'rebase' });
+const RELEASE = chat(ferret('fr', 'johnnie', 'Release cut', { open: 1, first: 'A3', ask: 'rebase' }));
 const RUNTIME = ferret('mg', 'maryah', 'Runtime migration', { open: 1, first: 'A6', ask: 'login' });
 const NIGHTLY = ferret('nl', 'zelda', 'Nightly benchmarks');
 const CARE = ferret('wd', 'warden', 'Machine care');
@@ -271,6 +276,18 @@ const conversationAbout = async (open: InboxCard): Promise<readonly TranscriptEn
     at: NOW - 20 * 60_000,
   },
 ];
+/** Studio offers clearing; the laptop's daemon is older and does not — so the dialog shows both cases. */
+const CLEAR_PORT: ClearPort = {
+  readHealth: async connection => ({
+    kind: 'read',
+    health: healthOf('5.0.0', connection.daemonId === STUDIO ? ['agenda.clear-agents.1'] : []),
+  }),
+  fetcher: async () =>
+    new Response(JSON.stringify({ cleared: 5, sessions: 3 }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }),
+};
 const FAKE_CLIENT = { send: async () => ({}) as never };
 const deferred = new DeferredAgendaActions(async () => undefined);
 
@@ -301,7 +318,7 @@ function Inbox({
     loadResolved: () => undefined,
     deferred,
     deferredState: state,
-    connectionFor: () => MACHINE,
+    connectionFor: id => (id === LAPTOP ? { ...MACHINE, daemonId: LAPTOP } : MACHINE),
   };
   return (
     <div className={`kt-shell flex overflow-hidden ${phone ? 'flex-col' : 'flex-row'}`} data-fixture="">
@@ -313,6 +330,7 @@ function Inbox({
         >
           <PageScrollRegion entryKey="inbox" memory={memory}>
             <AgendaInboxPage
+              clearPort={CLEAR_PORT}
               from={source}
               inbox={inbox}
               now={NOW}

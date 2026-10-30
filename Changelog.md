@@ -1,3 +1,21 @@
+## [4.144.0](https://github.com/kirinnee/ferretry/compare/v4.143.0...v4.144.0) (2026-10-30)
+
+### Features
+
+* **agenda:** refresh the whole card on every ferret reply; clear agent-ferret backlog ([#1068](https://github.com/kirinnee/ferretry/issues/1068)) ([4dd6d11](https://github.com/kirinnee/ferretry/commit/4dd6d11a941b24d759ab57a88dfc8762d65b4bc3))
+
+### Fixes
+
+* **pwa:** every !A opens the same item card; Info has one agenda list ([#1071](https://github.com/kirinnee/ferretry/issues/1071)) ([014330c](https://github.com/kirinnee/ferretry/commit/014330c6d0749ebff74f5b891b48908ed7e31178)), closes [#1043](https://github.com/kirinnee/ferretry/issues/1043)
+* **pwa:** hold the browser pane still while it works ([#1074](https://github.com/kirinnee/ferretry/issues/1074)) ([8c73f49](https://github.com/kirinnee/ferretry/commit/8c73f497866695c7264a1014ee0b81f6ebdc0b24))
+
+## [4.143.0](https://github.com/kirinnee/ferretry/compare/v4.142.0...v4.143.0) (2026-10-30)
+
+### Features
+
+* **board:** action-first lanes, declared Done/Not good lanes, human vs agent cards ([#1064](https://github.com/kirinnee/ferretry/issues/1064)) ([13bc0f7](https://github.com/kirinnee/ferretry/commit/13bc0f70039705a0ba2ad1eed9c5df5e630ee21a))
+* **pwa:** Board table as the current summary, agent tasks hidden by default ([#1060](https://github.com/kirinnee/ferretry/issues/1060)) ([6e4fbff](https://github.com/kirinnee/ferretry/commit/6e4fbffa26d38895182e47f6403ad1e036bd78fe))
+
 ## [4.142.0](https://github.com/kirinnee/ferretry/compare/v4.141.5...v4.142.0) (2026-10-30)
 
 ### Features

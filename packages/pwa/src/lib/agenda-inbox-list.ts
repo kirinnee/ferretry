@@ -17,11 +17,12 @@
  */
 
 import { type AgendaItem, agendaTitle, agendaWakeAt, formatTaskRef, type SessionView } from '@ferretry/protocol';
-import { sessionsBarNames } from '../shell/sessions-bar-model.ts';
+import { matchesMode, sessionsBarNames } from '../shell/sessions-bar-model.ts';
 import { sortAgenda } from './agenda-status.ts';
 import { sessionAgendaSummary } from './agenda-wire.ts';
 import type { InboxCard, InboxResolved } from './agenda-inbox.ts';
 import { visibleWhy } from './agenda-inbox.ts';
+import type { ModeFilter } from './controls.ts';
 import type { DaemonId } from './daemon-connection.ts';
 
 /** One ferret's open items on one machine, under one header. */
@@ -173,6 +174,8 @@ export interface InboxListFilter {
   readonly query: string;
   /** `/inbox?from=warden`: only what the Warden raised. */
   readonly from?: InboxSource | null;
+  /** Which kind of ferret raised it: the sessions bar's own Interactive / All / Agents choice; all when absent. */
+  readonly mode?: ModeFilter;
 }
 
 export const NO_FILTER: InboxListFilter = { machine: null, query: '' };
@@ -226,6 +229,7 @@ export const filterInboxCards = (cards: readonly InboxCard[], filter: InboxListF
     card =>
       (filter.machine === null || card.daemonId === filter.machine) &&
       fromKept(filter, card.item) &&
+      matchesMode(card.view, filter.mode ?? 'all') &&
       matchesWords(searchable(card.view, card.machineName, card.item), filter.query),
   );
 
@@ -238,6 +242,7 @@ export const filterInboxResolved = (
     row =>
       (filter.machine === null || row.daemonId === filter.machine) &&
       fromKept(filter, row.record) &&
+      matchesMode(row.view, filter.mode ?? 'all') &&
       matchesWords(searchable(row.view, row.machineName, row.record), filter.query),
   );
 

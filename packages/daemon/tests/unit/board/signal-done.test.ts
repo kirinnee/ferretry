@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import { MAX_BOARD_NOTE_LENGTH, MAX_BOARD_REASON_LENGTH, type PrLink } from '@ferretry/protocol';
 import should from 'should';
 import { clip, DONE_WITHOUT_MESSAGE, doneLane, doneMove, doneNote, doneReason } from '../../../src/lib/board/index.ts';
-import { card, lanes, NOW, PROJECT } from './support.ts';
+import { card, lanes, NOW, PROJECT, templateLanes } from './support.ts';
 
 const PR: PrLink = {
   url: 'https://github.com/kirinnee/ferretry/pull/930',
@@ -49,6 +49,10 @@ describe('where a done card goes', () => {
     should(doneLane(card({ laneId: 'plan' }), lanes())?.id).equal('review');
     should(doneLane(card({ laneId: 'fix', workflow: 'quick' }), lanes(PROJECT, 'ops'))?.id).equal('verify');
     should(doneLane(card({ laneId: 'draft' }), lanes(PROJECT, 'writing'))?.id).equal('review');
+  });
+
+  it('should send a done card with no PR to Released · to test on the action-first lanes, for the owner to check', () => {
+    should(doneLane(card({ laneId: 'implement', workflow: 'quick' }), templateLanes())?.id).equal('released');
   });
 
   it('should fall back to the first review or verify lane ahead, else the next lane', () => {

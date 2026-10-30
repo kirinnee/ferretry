@@ -1,5 +1,5 @@
 /**
- * The Info panel's chrome: the title line, the six tabs (with a Signals badge), the shown tab's body,
+ * The Info panel's chrome: the title line, the tabs, the shown tab's body,
  * and — on a phone — the half/full control. Presentational: every tab's body is the host's render prop.
  */
 
@@ -46,7 +46,6 @@ describe('InfoPanel — head and tabs', () => {
       'Runtime',
       'Usage',
       'Context',
-      'Signals',
       'Surfaces',
     ]);
     expect(root.querySelector('[data-info-body="overview"]')?.textContent).toBe('overview body');
@@ -62,16 +61,9 @@ describe('InfoPanel — head and tabs', () => {
     expect(tabs).toEqual(['runtime']);
   });
 
-  it('carries no Signals badge by default, and the open count once there is one', async () => {
+  it('has no Signals tab: the agenda is one list in Overview', async () => {
     const { root } = await show();
-    expect(root.querySelector('[data-info-signals-count]')).toBeNull();
-
-    await mounted?.unmount();
-    mounted = undefined;
-    const withBadge = await show({ openSignals: 2 });
-    const badge = must(withBadge.root.querySelector('[data-info-signals-count]'), 'the badge');
-    expect(badge.textContent).toBe('2');
-    expect(badge.getAttribute('aria-label')).toBe('2 open');
+    expect([...root.querySelectorAll('[role="tab"]')].map(tab => tab.textContent)).not.toContain('Signals');
   });
 });
 

@@ -181,6 +181,24 @@ describe('the header’s filters', () => {
       }) as never;
     expect(filterInboxResolved([row('A1'), row('A2', RELAY)], { machine: null, query: 'hadi' })).toHaveLength(1);
   });
+
+  it('keeps only the agents, or only the interactive ferrets, when a kind is chosen', () => {
+    const chat = sessionView('chat', { config: { mode: 'interactive', teammate: 'kai', name: 'Pairing' } });
+    const row = (id: string, view = MIGRATE): InboxResolved =>
+      ({
+        key: id,
+        daemonId: daemonId('workshop'),
+        machineName: 'Workshop',
+        view,
+        record: { ...agendaItem(id, { subject: `Resolved ${id}` }), resolvedAt: '2026-08-01T00:00:00.000Z' },
+      }) as never;
+    const rows = [row('A1'), row('A2', chat)];
+    const kept = (mode: 'all' | 'auto' | 'interactive') =>
+      filterInboxResolved(rows, { machine: null, query: '', mode }).map(entry => entry.record.id);
+    expect(kept('all')).toEqual(['A1', 'A2']);
+    expect(kept('auto')).toEqual(['A1']);
+    expect(kept('interactive')).toEqual(['A2']);
+  });
 });
 
 describe('the selection', () => {

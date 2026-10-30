@@ -2,11 +2,12 @@
 
 import type { ManagedWorktreeView, SessionView } from '@ferretry/protocol';
 import { GitBranch, Pencil } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { displayCallsign } from '../../lib/callsign.ts';
 import { relativeTime } from '../../lib/session-screens.ts';
 import type { ClipboardWriter } from '../onboarding/copy-button.tsx';
-import { INFO_HINT, lineage, worktreeFact } from './info-model.ts';
 import { InfoAbout, type InfoAboutProps } from './info-about.tsx';
+import { INFO_HINT, lineage, worktreeFact } from './info-model.ts';
 import { InfoChip, InfoRow, InfoSection } from './info-parts.tsx';
 
 export interface InfoOverviewProps {
@@ -26,6 +27,8 @@ export interface InfoOverviewProps {
   readonly card?: InfoAboutProps['card'];
   /** The "About this ferret" block's other parts: capabilities, Restart and the agenda. */
   readonly about?: Pick<InfoAboutProps, 'switches' | 'onRestart' | 'agenda'>;
+  /** What the Warden said about this ferret (`info-warden.tsx`), under the agenda. */
+  readonly warden?: ReactNode;
 }
 
 const sessionName = (view: SessionView): string => displayCallsign(view.config.teammate) || view.config.name;
@@ -42,6 +45,7 @@ export function InfoOverview({
   onOpenSession,
   card,
   about,
+  warden,
 }: InfoOverviewProps) {
   const tree = worktreeFact(view, worktrees);
   const family = lineage(view, sessions);
@@ -69,6 +73,7 @@ export function InfoOverview({
         {...(onOpenSession === undefined ? {} : { onOpenSession })}
         {...about}
       />
+      {warden}
       <InfoSection>
         <InfoRow label="Name">
           <strong>{name}</strong>

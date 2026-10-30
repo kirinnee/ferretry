@@ -43,11 +43,7 @@
  * nothing.
  */
 
-import { afterAll, beforeAll, describe, it } from 'bun:test';
-import { spawnSync } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { beforeAll, describe, it } from 'bun:test';
 import type { Browser } from 'playwright-core';
 import { renderToStaticMarkup } from 'react-dom/server';
 import should from 'should';
@@ -60,8 +56,7 @@ import {
 } from '../../../src/lib/theme-preferences.ts';
 import { ThemeSettings } from '../../../src/shell/theme-toggle.tsx';
 import { sharedChromium } from '../support/chromium.ts';
-
-const packageDir = resolve(import.meta.dir, '../../..');
+import { shellCss } from '../support/shell-css.ts';
 
 const FAMILY: ThemeFamilyId = 'studio';
 const MODE: ThemeMode = 'dark';
@@ -197,40 +192,14 @@ const VIEWPORTS = [
   { name: 'a short window', width: 390, height: 500 },
 ] as const;
 
-let workspace = '';
 let browser: Browser;
 let css = '';
-
-const buildCss = (outFile: string): void => {
-  const result = spawnSync(
-    './node_modules/.bin/tailwindcss',
-    [
-      '--config',
-      'tailwind.config.ts',
-      '--input',
-      'src/styles/index.css',
-      '--output',
-      outFile,
-      '--content',
-      './src/**/*.{ts,tsx},./tests/integration/shell/*.tsx',
-    ],
-    { cwd: packageDir, stdio: 'pipe' },
-  );
-  if (result.status !== 0) throw new Error(`tailwind build failed: ${result.stderr?.toString() ?? ''}`);
-};
 
 describe('the theme picker inside the fixed shell', () => {
   beforeAll(async () => {
     browser = await sharedChromium();
-    workspace = await mkdtemp(join(tmpdir(), 'fy-shell-scroll-'));
-    const outFile = join(workspace, 'app.css');
-    buildCss(outFile);
-    css = await readFile(outFile, 'utf8');
+    css = await shellCss();
   }, 120_000);
-
-  afterAll(async () => {
-    if (workspace !== '') await rm(workspace, { recursive: true, force: true });
-  });
 
   for (const shape of SHAPES) {
     for (const viewport of VIEWPORTS) {

@@ -1,10 +1,11 @@
 import {
   AGENDA_SCHEMA_VERSION,
+  AGENDA_URGENT_WAKE_MS,
   type AgendaAsk,
   type AgendaBrief,
+  type AgendaCardAnswer,
   type AgendaClearableField,
   type AgendaConfirms,
-  type AgendaCardAnswer,
   type AgendaDisposition,
   type AgendaErrorCode,
   type AgendaHistoryEntry,
@@ -13,23 +14,22 @@ import {
   type AgendaItem,
   AgendaItemSchema,
   type AgendaKind,
+  type AgendaResponse,
   type AgendaRevisableField,
   type AgendaRevision,
-  type AgendaResponse,
   type AgendaSnapshot,
   type AgendaSource,
   type AgendaUndelivered,
   agendaBriefOf,
   agendaBriefRequiredProblems,
   agendaNoticeProblems,
-  AGENDA_URGENT_WAKE_MS,
   agendaOptionDetailProblems,
   agendaWakeAt,
   MAX_AGENDA_DETAIL_LENGTH,
   MAX_AGENDA_HISTORY,
   MAX_AGENDA_PER_SESSION,
-  MAX_AGENDA_REVISIONS,
   MAX_AGENDA_RESOLUTIONS,
+  MAX_AGENDA_REVISIONS,
   type ResolvedAgendaItem,
   ResolvedAgendaItemSchema,
   type TaskRef,
@@ -1011,7 +1011,14 @@ function edit(ledger: AgendaLedger, command: EditCommand): AgendaMutation {
   const target = ledger.entries.filter(isActiveAgenda).find(entry => entry.item.id === command.id);
   if (target === undefined) {
     // An edit of an item the owner replied to is the ferret asking again, in new words: it reopens, then edits.
-    const reopened = reopenReplied(ledger, command.id, command.actor, command.at, { at: command.at, kind: 'updated' });
+    const reopened = reopenReplied(
+      ledger,
+      command.id,
+      command.actor,
+      command.at,
+      { at: command.at, kind: 'updated' },
+      command.patch,
+    );
     if (reopened === undefined) return failure('not-found', `no unresolved agenda item ${command.id} in this session`);
     if (!reopened.ok) return reopened;
     const edited = edit(reopened.ledger, command);
@@ -1019,6 +1026,10 @@ function edit(ledger: AgendaLedger, command: EditCommand): AgendaMutation {
   }
   if (!canAddressAgenda(command.actor, target)) {
     return failure('forbidden', 'an agent or daemon may edit only an agenda item it raised');
+  }
+  if (target.item.parked?.reason === 'replied') {
+    const stale = repliedRefreshProblem(command.actor, command.id, command.patch);
+    if (stale !== null) return failure('invalid', stale);
   }
   const back = backFromParked(target.item, command.actor, command.at, command.now === true);
   if ('code' in back) return failure(back.code, back.message);
@@ -1276,6 +1287,28 @@ function wake(ledger: AgendaLedger, command: WakeCommand): AgendaMutation {
 }
 
 /**
+ * Why a ferret may not bring back an item the owner replied to as it stands, or `null` when it may: the owner's
+ * reply changed what the ask is, so the card must be written again whole — the ask (`subject`), the `premise`
+ * and the `context` — to stay an isolated, self-contained statement of what is going on. Restating a field
+ * unchanged counts; leaving one out does not. `patch` is `null` for a bare `surface`. Owner and daemon are exempt.
+ */
+function repliedRefreshProblem(actor: AgendaActor, id: AgendaId, patch: EditAgendaPatch | null): string | null {
+  if (actor.kind !== 'agent') return null;
+  if (patch === null) {
+    return `${id} was replied to: bring it back with the whole card refreshed — \`fy agenda edit ${id} --summary … --premise … --context …\`, not surface`;
+  }
+  const blank = (field: string | null | undefined): boolean => (field ?? '').trim() === '';
+  const missing = [
+    ...(blank(patch.subject) ? ['--summary'] : []),
+    ...(blank(patch.premise) ? ['--premise'] : []),
+    ...(blank(patch.context) ? ['--context'] : []),
+  ];
+  return missing.length === 0
+    ? null
+    : `bring ${id} back with the whole card refreshed: --summary, --premise and --context are required after the owner replied (missing ${missing.join(', ')})`;
+}
+
+/**
  * The ferret needs more from the owner after a reply closed the item: it is open again, on the OWNER's turn,
  * with its id, history and edits kept. Called by `surface` (as it stands) and by the ferret's `edit` (with the
  * new wording). Only whoever may close the item may reopen it, and a full board cannot take it back.
@@ -1287,6 +1320,7 @@ function reopenReplied(
   actor: AgendaActor,
   at: string,
   entry: AgendaHistoryEntry,
+  patch: EditAgendaPatch | null,
 ): AgendaMutation | undefined {
   const closed = ledger.entries.find(
     (candidate): candidate is Extract<AgendaEntry, { lifecycle: 'addressed' }> =>
@@ -1295,6 +1329,8 @@ function reopenReplied(
   if (closed === undefined) return undefined;
   const allowed = actor.kind === 'daemon' && actor.cause === 'system' ? true : canAddressAgenda(actor, closed);
   if (!allowed) return failure('forbidden', 'only the owner or the ferret that raised an item may bring it back');
+  const stale = repliedRefreshProblem(actor, id, patch);
+  if (stale !== null) return failure('invalid', stale);
   const active = ledger.entries.filter(isActiveAgenda);
   if (active.length >= MAX_AGENDA_PER_SESSION) {
     return failure('full', `${id} cannot reopen: this board already holds ${MAX_AGENDA_PER_SESSION} open items`);
@@ -1333,11 +1369,14 @@ function surface(ledger: AgendaLedger, command: SurfaceCommand): AgendaMutation 
   const target = ledger.entries.filter(isActiveAgenda).find(entry => entry.item.id === command.id);
   if (target === undefined) {
     const why = command.why?.trim() ?? '';
-    const reopened = reopenReplied(ledger, command.id, command.actor, command.at, {
-      at: command.at,
-      kind: 'surfaced',
-      ...(why === '' ? {} : { note: why }),
-    });
+    const reopened = reopenReplied(
+      ledger,
+      command.id,
+      command.actor,
+      command.at,
+      { at: command.at, kind: 'surfaced', ...(why === '' ? {} : { note: why }) },
+      null,
+    );
     if (reopened !== undefined) return reopened;
     return ledger.entries.some(entry => entry.lifecycle === 'addressed' && entry.item.id === command.id)
       ? unchanged(ledger)
@@ -1352,6 +1391,10 @@ function surface(ledger: AgendaLedger, command: SurfaceCommand): AgendaMutation 
     return failure('forbidden', 'only the owner, the ferret that raised an item, or the daemon timer may surface it');
   }
   if (target.item.parked !== undefined) {
+    if (target.item.parked.reason === 'replied') {
+      const stale = repliedRefreshProblem(command.actor, command.id, null);
+      if (stale !== null) return failure('invalid', stale);
+    }
     const back = backFromParked(target.item, command.actor, command.at, command.now === true);
     if ('code' in back) return failure(back.code, back.message);
     if (back === target.item) return unchanged(ledger);

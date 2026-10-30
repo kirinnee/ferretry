@@ -12,6 +12,7 @@ import {
   flush,
   laneSetFor,
   laptop,
+  originCard,
   PROJECT,
   workstation,
 } from '../board-support.ts';
@@ -226,31 +227,32 @@ describe('BoardPage — views', () => {
     expect(searches).toEqual(['']);
   });
 
-  it('draws the Table in lane order, and keeps the sort and the grouping in the URL', async () => {
-    const { root, searches } = await open({ props: { search: 'view=list' } });
-    const rowTitles = () => titles(root);
-    expect(rowTitles()).toEqual(['Plan the thing', 'Build the thing', 'Review the thing', 'Try the thing']);
-    await click(root, '[data-sort="stale"]');
-    await click(root, '[data-group-by-lane]');
-    expect(searches).toEqual(['view=list&sort=stale', 'view=list&group=lane']);
+  it('draws the Table as a summary: to test first, then what is being worked on', async () => {
+    const { root, reads } = await open({ props: { search: 'view=list' } });
+    expect(titles(root)).toEqual(['Try the thing', 'Plan the thing', 'Build the thing', 'Review the thing']);
+    expect([...root.querySelectorAll('.fy-board-summary__head')].map(node => node.firstChild?.textContent)).toEqual([
+      'To test',
+      'Working now',
+    ]);
+    expect(reads).toContain('daemon/laptop:closed');
   });
 
-  it('drops the grouping from the URL when it is turned off', async () => {
-    const { root, searches } = await open({ props: { search: 'view=list&group=lane' } });
-    await click(root, '[data-group-by-lane]');
-    expect(searches).toEqual(['view=list']);
+  it('keeps the time window in the URL, and drops it when it goes back to 7 days', async () => {
+    const first = await open({ props: { search: 'view=list' } });
+    await click(first.root, '[data-window="today"]');
+    expect(first.searches).toEqual(['view=list&window=today']);
+    await view?.unmount();
+    const second = await open({ props: { search: 'view=list&window=today' } });
+    expect(second.root.querySelector('[data-window="today"]')?.getAttribute('aria-pressed')).toBe('true');
+    await click(second.root, '[data-window="7d"]');
+    expect(second.searches).toEqual(['view=list']);
   });
 
-  it('drops the sort from the URL when it goes back to status order', async () => {
-    const { root, searches } = await open({ props: { search: 'view=list&sort=stale' } });
-    await click(root, '[data-sort="status"]');
-    expect(searches).toEqual(['view=list']);
-  });
-
-  it('closes a card from its Table row with Done, without opening it', async () => {
+  it('closes a card from its To test row with Done, without opening it', async () => {
     const { root, acts, navigated } = await open({ props: { search: 'view=list' } });
-    await click(root, '[data-task="F2"] .fy-board-done');
-    expect(acts).toEqual([{ daemonId: 'daemon/laptop', id: 'F2', request: { action: 'move', to: 'closed' } }]);
+    expect(root.querySelector('[data-task="F2"] .fy-board-done')).toBeNull();
+    await click(root, '[data-task="F4"] .fy-board-done');
+    expect(acts).toEqual([{ daemonId: 'daemon/laptop', id: 'F4', request: { action: 'move', to: 'closed' } }]);
     expect(navigated).toEqual([]);
   });
 
@@ -319,6 +321,50 @@ describe('BoardPage — views', () => {
     const droppedOnly = await open({ props: { search: 'view=archive&state=dropped' } });
     expect(titles(droppedOnly.root)).toEqual(['Dropped idea']);
     expect(droppedOnly.reads.some(read => read.endsWith(':closed'))).toBe(false);
+  });
+});
+
+describe('BoardPage — human and agent tasks', () => {
+  const SPLIT = [
+    originCard('F1', 'human', null, { title: 'Ask from the owner', laneId: 'implement' }),
+    originCard('F2', 'agent', { id: 'F1' }, { title: 'Made by a ferret', laneId: 'implement' }),
+  ];
+  const toggle = (root: HTMLElement) => root.querySelector<HTMLInputElement>('[data-filter="agents"]');
+
+  it('shows only human tasks by default in every view, and the agent ones with the toggle on', async () => {
+    for (const query of ['', 'view=list', 'view=tree']) {
+      const hidden = await open({ open: SPLIT, props: { search: query } });
+      expect(titles(hidden.root)).toEqual(['Ask from the owner']);
+      await hidden.setSearch(`${query}&agents=1`);
+      expect(titles(hidden.root)).toEqual(['Ask from the owner', 'Made by a ferret']);
+      await view?.unmount();
+    }
+  });
+
+  it('offers the toggle and writes it to the URL', async () => {
+    const { root, searches } = await open({ open: SPLIT });
+    expect(toggle(root)?.checked).toBe(false);
+    await click(root, '[data-filter="agents"]');
+    expect(searches).toEqual(['agents=1']);
+  });
+
+  it('keeps the toggle when Clear resets the other filters', async () => {
+    const { root, searches } = await open({ open: SPLIT, props: { search: 'agents=1&mine=1' } });
+    await click(root, '.fy-board-filters__clear');
+    expect(searches).toEqual(['agents=1']);
+  });
+
+  it('shows agent tasks, with the toggle locked on, while a ferret is chosen', async () => {
+    const { root } = await open({ open: SPLIT, props: { search: `ferret=${LEAD}` } });
+    expect(titles(root)).toEqual(['Ask from the owner', 'Made by a ferret']);
+    expect(toggle(root)?.checked).toBe(true);
+    expect(toggle(root)?.disabled).toBe(true);
+  });
+
+  it('shows every card and hides the toggle when the daemon does not say who asked', async () => {
+    const { root } = await open();
+    expect(titles(root)).toHaveLength(4);
+    expect(toggle(root)).toBeNull();
   });
 });
 

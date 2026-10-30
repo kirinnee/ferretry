@@ -24,6 +24,7 @@ import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import { interact, mount, must, pressKey } from '../../support/dom.ts';
 import { render, run } from '../../support/react.ts';
+import { settleUntil } from '../../support/settle.ts';
 
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'a' });
 const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'b' });
@@ -90,6 +91,9 @@ const fakePreviewEngine = () => {
   };
   return { Frame, opened };
 };
+
+const progressText = (container: HTMLElement): string | null =>
+  container.querySelector('[role="status"]')?.textContent ?? null;
 
 interface FakeRemoteEngine {
   readonly Pane: ComponentType<RemoteBrowserPaneProps>;
@@ -530,14 +534,14 @@ describe('the unified browser surface', () => {
     await closeMenu(view.container);
 
     await remote.publish(runningStatus({ pageState: 'loading' }));
-    expect(must(view.container.querySelector('[role="status"]'), 'the progress row').textContent).toContain(
-      'Loading page…',
-    );
+    // The row is mounted already and says nothing until the work has lasted: a blip is not announced.
+    expect(must(view.container.querySelector('[role="status"]'), 'the progress row').textContent).toBe('');
+    await settleUntil(() => progressText(view.container) === 'Loading page…', 'the loading cue to settle in', interact);
     expect((await openMenu(view.container)).textContent).toContain('Loading page…');
     await closeMenu(view.container);
 
     await remote.publish(runningStatus({ title: 'Ferretry docs' }), true);
-    expect(must(view.container.querySelector('[role="status"]'), 'the progress row').textContent).toContain('Working…');
+    await settleUntil(() => progressText(view.container) === 'Working…', 'the working cue to settle in', interact);
     expect(labelled(view.container, 'Back in real browser').hasAttribute('disabled')).toBe(true);
     expect(named(view.container, 'Go').disabled).toBe(true);
     expect((await openMenu(view.container)).textContent).toContain('Working…');
@@ -972,14 +976,13 @@ describe('the unified browser surface', () => {
     // A REAL view change is still a render: the guard suppresses equivalence,
     // not updates.
     await churning.setBusy(true);
-    expect(must(view.container.querySelector('[role="status"]'), 'the working strip').textContent).toContain(
-      'Working…',
-    );
-    // The busy publish, the render it earns, and the equivalent publish after it.
-    expect(churning.publishes()).toBe(5);
+    await settleUntil(() => progressText(view.container) === 'Working…', 'the working cue to settle in', interact);
+    // The busy publish, the render it earns, the equivalent publish after it — and one more for the render
+    // that settles the working cue in, which is recognised as equivalent too.
+    expect(churning.publishes()).toBe(6);
 
     await churning.setBusy(false);
-    expect(view.container.querySelector('[role="status"]')).toBeNull();
+    await settleUntil(() => progressText(view.container) === '', 'the working cue to settle out', interact);
     const settled = churning.publishes();
 
     // And the toolbar drives the NEWEST dispatcher, not the one that happened to

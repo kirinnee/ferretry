@@ -249,7 +249,6 @@ function Harness() {
             runtime: () => null,
             usage: () => null,
             folder: () => null,
-            signals: () => null,
             surfaces: () => null,
           }}
           tab={params.get('tab') === 'surfaces' ? 'surfaces' : 'tasks'}

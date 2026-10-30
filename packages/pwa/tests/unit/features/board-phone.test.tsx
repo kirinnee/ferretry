@@ -17,6 +17,7 @@ import {
   flush,
   laneSetFor,
   laptop,
+  originCard,
   OTHER_PROJECT,
   PROJECT,
 } from '../board-support.ts';
@@ -43,12 +44,12 @@ interface Phone {
   readonly root: HTMLElement;
 }
 
-const open = async (search = '', props: Partial<BoardPageProps> = {}): Promise<Phone> => {
+const open = async (search = '', props: Partial<BoardPageProps> = {}, cards: typeof OPEN = OPEN): Promise<Phone> => {
   const acts: Phone['acts'] = [];
   const searches: string[] = [];
   const port = fakePort({
     board: async () =>
-      boardAnswer(OPEN, {
+      boardAnswer(cards, {
         projectId: PROJECT,
         laneSet: laneSetFor(),
         counts: { ...COUNTS, toTest: 1, stale: 2, orphaned: 3 },
@@ -255,12 +256,12 @@ describe('Board on a phone — counts and filters', () => {
       ['stale', 'stale'],
       ['orphaned', 'orphaned'],
     ] as const) {
-      const { root, searches } = await open('at=review&sort=age');
+      const { root, searches } = await open('at=review&window=today');
       await click(root, `[data-count="${count}"]`);
       const written = new URLSearchParams(searches[0]);
       expect(written.get('view')).toBe('list');
       expect(written.get('activity')).toBe(activity);
-      expect(written.get('sort')).toBe('age');
+      expect(written.get('window')).toBeNull();
       await view?.unmount();
     }
   });
@@ -271,6 +272,22 @@ describe('Board on a phone — counts and filters', () => {
     const written = new URLSearchParams(searches[0]);
     expect(written.get('activity')).toBeNull();
     expect(written.get('view')).toBe('list');
+  });
+
+  it('keeps "Agent tasks" in the bar beside Filters, where a thumb finds it', async () => {
+    const split = [
+      originCard('F1', 'human', null, { laneId: 'implement' }),
+      originCard('F2', 'agent', { id: 'F1' }, { laneId: 'implement' }),
+    ];
+    const { root, searches } = await open('', {}, split);
+    const toggle = must(
+      root.querySelector<HTMLInputElement>('.fy-board-filters__bar [data-filter="agents"]'),
+      'the agents toggle',
+    );
+    expect(toggle.closest('label')?.textContent).toBe('Agent tasks');
+    await click(root, '[data-filter="agents"]');
+    expect(searches).toEqual(['agents=1']);
+    expect((await open()).root.querySelector('[data-filter="agents"]')).toBeNull();
   });
 
   it('keeps the filters out of the page until the Filters button opens them in a sheet', async () => {

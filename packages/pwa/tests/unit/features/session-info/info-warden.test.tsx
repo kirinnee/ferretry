@@ -1,18 +1,14 @@
-/**
- * Info › Signals: the same agenda board as the Folder rail (unchanged), plus the Warden's verdicts
- * narrowed to this one ferret, newest first.
- */
+/** Info › Overview › Warden: the Warden's verdicts narrowed to this one ferret, newest first. */
 
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { WardenVerdict } from '@ferretry/protocol';
 import {
-  InfoSignals,
+  InfoWarden,
   type InfoVerdictsRead,
   sessionVerdicts,
   VERDICT_WORDS,
-} from '../../../../src/features/session-info/info-signals.tsx';
+} from '../../../../src/features/session-info/info-warden.tsx';
 import { type Mounted, mount, must } from '../../../support/dom.ts';
-import { fakeSignals, snapshot } from '../context-rail/context-rail-fixtures.ts';
 
 const NOW = Date.parse('2026-10-16T10:00:00.000Z');
 
@@ -31,10 +27,8 @@ const verdict = (overrides: Partial<WardenVerdict> = {}): WardenVerdict =>
     ...overrides,
   }) as WardenVerdict;
 
-const show = async (verdicts: InfoVerdictsRead, signals = fakeSignals(snapshot())) => {
-  mounted = await mount(
-    <InfoSignals agentName="Hadi" now={() => NOW} port={signals} sessionId="session-a" verdicts={verdicts} />,
-  );
+const show = async (verdicts: InfoVerdictsRead) => {
+  mounted = await mount(<InfoWarden agentName="Hadi" now={() => NOW} sessionId="session-a" verdicts={verdicts} />);
   return mounted.container;
 };
 
@@ -58,14 +52,7 @@ describe('VERDICT_WORDS', () => {
   });
 });
 
-describe('InfoSignals — attention', () => {
-  it('shares the same board the Folder rail reads, with the open count', async () => {
-    const root = await show({ kind: 'loading' });
-    expect(root.textContent).toContain('Use the seeded test account?');
-  });
-});
-
-describe('InfoSignals — Warden', () => {
+describe('InfoWarden', () => {
   it('says it is reading, and reports a failed read', async () => {
     const reading = await show({ kind: 'loading' });
     expect(reading.textContent).toContain('Reading the Warden’s verdicts…');

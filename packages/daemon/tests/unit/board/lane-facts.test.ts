@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import type { BoardTask, BoardTaskEvent, LaneSet, PrLink, ReleasedIn, TaskWorkflow } from '@ferretry/protocol';
 import should from 'should';
 import { FACT_TRIGGERS, laneFromFacts } from '../../../src/lib/board/index.ts';
-import { card, lanes, PROJECT } from './support.ts';
+import { card, lanes, PROJECT, templateLanes } from './support.ts';
 
 const MERGED_AT = '2026-10-30T09:00:00Z';
 const SHA = 'a'.repeat(40);
@@ -350,5 +350,44 @@ describe('FACT_TRIGGERS', () => {
     should([...FACT_TRIGGERS].sort()).deepEqual(
       ['ci.green', 'pr.merged', 'pr.opened', 'pr.ready', 'release.published', 'release.running'].sort(),
     );
+  });
+});
+
+describe('laneFromFacts: the action-first Ferretry lanes', () => {
+  const live = templateLanes(PROJECT);
+  const on = (subject: BoardTask, runningVersion: string | null = null) => verdict(subject, runningVersion, live);
+
+  it('should put open work in progress, review folded in, and merged work in Merged', () => {
+    should(on(at('todo', [open(1, true)]))).deepEqual(['implement', 'pr.opened']);
+    should(on(at('todo', [open(1)]))).deepEqual(['implement', 'pr.ready']);
+    should(on(at('implement', [open(1)]))).be.null();
+    should(on(at('implement', [merged(1)]))).deepEqual(['merged', 'pr.merged']);
+  });
+
+  it('should put a released card straight in Released · to test, whatever this machine runs', () => {
+    should(on(at('merged', [merged(1, release('4.110.0'))]))).deepEqual(['released', 'release.published']);
+    should(on(at('merged', [merged(1, release('4.110.0'))]), '4.109.0')).deepEqual(['released', 'release.published']);
+    should(on(at('merged', [merged(1, release('4.110.0'))]), '4.112.0')).deepEqual(['released', 'release.published']);
+    should(on(at('released', [merged(1, release('4.110.0'))]), '4.112.0')).be.null();
+  });
+
+  it('should pull a card waiting to be tested back in progress when an open PR sits beside the shipped one', () => {
+    // Act
+    const move = laneFromFacts(at('released', [merged(1, release('4.110.0')), open(2)]), live, 'quick', {
+      prs: [merged(1, release('4.110.0')), open(2)],
+      runningVersion: '4.110.0',
+    });
+
+    // Assert
+    should(move).match({
+      lane: { id: 'implement' },
+      trigger: 'pr.ready',
+      backward: true,
+      reason: 'moved back to In progress: PR #2 ready for review',
+    });
+  });
+
+  it('should never close a card on a fact: only the owner’s Done does', () => {
+    should(on(at('released', [merged(1, release('4.110.0'))]), '9.0.0')).be.null();
   });
 });

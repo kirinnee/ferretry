@@ -115,7 +115,7 @@ describe('the board command tree', () => {
   it('should propose and edit on the board --project names', async () => {
     const { changed, run } = tree();
     await run('board', 'lanes', 'propose', '--template', 'pr', '--project', 'dotfiles');
-    await run('board', 'lanes', 'edit', '--rename', 'review=look', '--project', FERRETRY_ID);
+    await run('board', 'lanes', 'edit', '--rename', 'implement=look', '--project', FERRETRY_ID);
     should(changed.map(change => [change.projectId, change.request.action])).eql([
       [OTHER_ID, 'propose'],
       [FERRETRY_ID, 'edit'],

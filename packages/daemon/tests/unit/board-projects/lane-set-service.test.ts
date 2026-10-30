@@ -16,8 +16,11 @@ import {
   type LaneSetMutation,
   LaneSetService,
   type LaneSetStore,
+  mergeReleaseLanes,
+  RELEASE_MERGE_REASON,
   UNFILED_PROJECT_NAME,
 } from '../../../src/lib/board-projects/index.ts';
+import { lanes, templateLanes } from '../board/support.ts';
 import { DOCS_ID, FERRETRY_ID, project } from './support.ts';
 
 const OWNER: LaneActor = { kind: 'owner' };
@@ -46,8 +49,10 @@ class Agenda implements LaneProposalAgenda {
 
 class Relocator implements CardRelocator {
   readonly moves: Array<readonly [string, Readonly<Record<string, string>>]> = [];
-  async relocate(projectId: BoardProjectId, moves: Readonly<Record<string, string>>): Promise<void> {
+  readonly reasons: Array<string | undefined> = [];
+  async relocate(projectId: BoardProjectId, moves: Readonly<Record<string, string>>, reason?: string): Promise<void> {
     this.moves.push([projectId, moves]);
+    this.reasons.push(reason);
   }
 }
 
@@ -232,5 +237,95 @@ describe('LaneSetService.acceptProposal', () => {
     should(await service.acceptProposal(FERRETRY_ID, 9)).be.false();
     should(await service.acceptProposal(DOCS_ID, 1)).be.false();
     should(store.sets.get(FERRETRY_ID)?.confirmedBy).be.null();
+  });
+});
+
+describe('LaneSetService merges Released and To test at boot', () => {
+  it('should merge each stored set that has both, move the cards before and after, and say why', async () => {
+    // Arrange
+    const { store, relocator, service } = world();
+    store.sets.set(FERRETRY_ID, { ...lanes(FERRETRY_ID), version: 3 });
+    store.sets.set(DOCS_ID, templateLanes(DOCS_ID));
+
+    // Act
+    const outcomes = await service.mergeReleaseLanes();
+
+    // Assert
+    should(outcomes).deepEqual([{ projectId: FERRETRY_ID, merged: true, version: 4 }]);
+    should(relocator.moves).deepEqual([
+      [FERRETRY_ID, { tested: 'released' }],
+      [FERRETRY_ID, { tested: 'released' }],
+    ]);
+    should(relocator.reasons).deepEqual([RELEASE_MERGE_REASON, RELEASE_MERGE_REASON]);
+    should(RELEASE_MERGE_REASON).equal('Released and To test are one lane now: Released · to test');
+    should(store.sets.get(FERRETRY_ID)?.lanes.some(lane => lane.id === 'tested')).be.false();
+    should(store.sets.get(FERRETRY_ID)?.confirmedBy).equal('owner');
+    should(store.sets.get(DOCS_ID)?.version).equal(1);
+  });
+
+  it('should do nothing the second time', async () => {
+    // Arrange
+    const { store, relocator, service } = world();
+    store.sets.set(FERRETRY_ID, lanes(FERRETRY_ID));
+    await service.mergeReleaseLanes();
+
+    // Act
+    const again = await service.mergeReleaseLanes();
+
+    // Assert
+    should(again).deepEqual([]);
+    should(relocator.moves).have.length(2);
+  });
+
+  it('should store nothing and move no card again when the set was merged in between', async () => {
+    // Arrange
+    const { store, relocator, service } = world();
+    store.sets.set(FERRETRY_ID, lanes(FERRETRY_ID));
+    const merged = mergeReleaseLanes(lanes(FERRETRY_ID))?.next;
+    const transact = store.transact.bind(store);
+    store.transact = async (projectId, decide) => {
+      if (merged !== undefined) store.sets.set(projectId, merged);
+      return await transact(projectId, decide);
+    };
+
+    // Act
+    const outcomes = await service.mergeReleaseLanes();
+
+    // Assert
+    should(outcomes).deepEqual([]);
+    should(relocator.moves).have.length(1);
+  });
+
+  it('should report a project it could not merge and go on with the rest', async () => {
+    // Arrange
+    const { store, service } = world();
+    store.sets.set(DOCS_ID, lanes(DOCS_ID));
+    const read = store.read.bind(store);
+    store.read = async projectId => {
+      if (projectId === FERRETRY_ID) throw new Error('damaged lane set');
+      return await read(projectId);
+    };
+
+    // Act
+    const outcomes = await service.mergeReleaseLanes();
+
+    // Assert
+    should(outcomes).deepEqual([
+      { projectId: FERRETRY_ID, merged: false, problem: 'damaged lane set' },
+      { projectId: DOCS_ID, merged: true, version: 2 },
+    ]);
+  });
+
+  it('should report a failure that is not an Error in its own words', async () => {
+    // Arrange
+    const { store, service } = world();
+    store.read = async () => Promise.reject('disk gone');
+
+    // Act + Assert
+    should((await service.mergeReleaseLanes())[0]).deepEqual({
+      projectId: UNFILED_PROJECT_ID,
+      merged: false,
+      problem: 'disk gone',
+    });
   });
 });

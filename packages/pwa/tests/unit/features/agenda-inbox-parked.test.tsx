@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
+import type { AgendaId } from '@ferretry/protocol';
 import { AgendaInboxPage } from '../../../src/features/agenda/agenda-inbox-page.tsx';
-import type { InboxCard } from '../../../src/lib/agenda-inbox.ts';
+import { agendaConversationPath, type InboxCard } from '../../../src/lib/agenda-inbox.ts';
+import type { DaemonId } from '../../../src/lib/daemon-connection.ts';
 import {
   agendaItem,
   choices,
@@ -150,6 +152,21 @@ describe('AgendaInboxPage Snoozed and Replied filters', () => {
     await interact(() => must(view.container.querySelector<HTMLElement>('.fy-parked-row__link'), 'row link').click());
     expect(navigated).toHaveLength(1);
     expect(navigated[0]).toContain('A4');
+    await view.unmount();
+  });
+
+  it('opens a parked item on ANOTHER machine through that machine — the chat that opens its card (#B76)', async () => {
+    const navigated: string[] = [];
+    const elsewhere = inboxCard(
+      agendaItem('A89', { subject: 'Update the MBP', parked: { reason: 'replied', at: '2026-08-01T11:02:00.000Z' } }),
+      sessionView('lead-1', { config: { teammate: 'liz', name: 'Lead' } }),
+      'Liftoff MBP',
+      'mbp' as DaemonId,
+    );
+    const { view, choose } = await mountPage({ parked: [elsewhere] }, navigated);
+    await choose('replied');
+    await interact(() => must(view.container.querySelector<HTMLElement>('.fy-parked-row__link'), 'row link').click());
+    expect(navigated).toEqual([agendaConversationPath('mbp' as DaemonId, 'lead-1', 'A89' as AgendaId)]);
     await view.unmount();
   });
 

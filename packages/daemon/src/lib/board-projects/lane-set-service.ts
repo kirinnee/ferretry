@@ -23,7 +23,9 @@ import {
   actorName,
   confirmLaneSet,
   editLaneSet,
+  mergeReleaseLanes,
   proposeLaneSet,
+  RELEASED_TO_TEST_NAME,
   unfiledLaneSet,
 } from './lane-set-policy.ts';
 import { laneProposalCard } from './lane-proposal-card.ts';
@@ -35,6 +37,14 @@ export const UNFILED_PROJECT_NAME = 'Unfiled';
 export type LaneSetFailure = LaneSetProblem | { readonly code: 'not-found'; readonly projectId: string };
 
 export type LaneSetChange = LaneSetChangeResponse;
+
+/** What the boot merge of the release lanes did to one project's set. */
+export type ReleaseLaneMergeOutcome =
+  | { readonly projectId: BoardProjectId; readonly merged: true; readonly version: number }
+  | { readonly projectId: BoardProjectId; readonly merged: false; readonly problem: string };
+
+/** What a card's history says when the merge moves it. */
+export const RELEASE_MERGE_REASON = `Released and To test are one lane now: ${RELEASED_TO_TEST_NAME}`;
 
 export class LaneSetService implements LaneSetSource {
   constructor(
@@ -109,6 +119,37 @@ export class LaneSetService implements LaneSetSource {
     } catch {
       return boardOk({ laneSet, agenda: 'failed' });
     }
+  }
+
+  /**
+   * The boot migration that folds every stored set's Released and To test lanes into one
+   * ({@link mergeReleaseLanes}). Cards move first, while the old set still has both lanes, so a card is never
+   * in a lane its set lacks; then the set is stored; then a second pass moves any card a release put in To
+   * test meanwhile. Idempotent (a merged set has nothing to merge) and total: a project that fails is
+   * reported and the rest go on. The owner is asked nothing.
+   */
+  async mergeReleaseLanes(): Promise<readonly ReleaseLaneMergeOutcome[]> {
+    const ids = [UNFILED_PROJECT_ID, ...(await this.registry.projects()).map(project => project.id)];
+    const outcomes: ReleaseLaneMergeOutcome[] = [];
+    for (const projectId of ids) {
+      try {
+        const stored = await this.store.read(projectId);
+        const plan = stored === null ? null : mergeReleaseLanes(stored);
+        if (plan === null) continue;
+        const moves = { [plan.from]: plan.into };
+        await this.relocator.relocate(projectId, moves, RELEASE_MERGE_REASON);
+        const version = await this.store.transact<number | null>(projectId, current => {
+          const again = current === null ? null : mergeReleaseLanes(current);
+          return again === null ? { result: null } : { next: again.next, result: again.next.version };
+        });
+        if (version === null) continue;
+        await this.relocator.relocate(projectId, moves, RELEASE_MERGE_REASON);
+        outcomes.push({ projectId, merged: true, version });
+      } catch (error) {
+        outcomes.push({ projectId, merged: false, problem: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    return outcomes;
   }
 
   /** The owner's Accept on a proposal card. A card for a version that has moved on confirms nothing. */

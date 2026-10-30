@@ -1,3 +1,18 @@
+## [4.143.0](https://github.com/kirinnee/ferretry/compare/v4.142.0...v4.143.0) (2026-10-30)
+
+### Features
+
+* **board:** action-first lanes, declared Done/Not good lanes, human vs agent cards ([#1064](https://github.com/kirinnee/ferretry/issues/1064)) ([13bc0f7](https://github.com/kirinnee/ferretry/commit/13bc0f70039705a0ba2ad1eed9c5df5e630ee21a))
+* **pwa:** Board table as the current summary, agent tasks hidden by default ([#1060](https://github.com/kirinnee/ferretry/issues/1060)) ([6e4fbff](https://github.com/kirinnee/ferretry/commit/6e4fbffa26d38895182e47f6403ad1e036bd78fe))
+
+## [4.142.0](https://github.com/kirinnee/ferretry/compare/v4.141.5...v4.142.0) (2026-10-30)
+
+### Features
+
+* **daemon:** send the instructions-updated note as its own Instructions message, no tag ([#1063](https://github.com/kirinnee/ferretry/issues/1063)) ([68758eb](https://github.com/kirinnee/ferretry/commit/68758eb727c3a77ae80a4b21e7dfff77a60b4f60))
+* **pwa:** chat polish — peer messages, image reads, task picker, instruction updates ([#1065](https://github.com/kirinnee/ferretry/issues/1065)) ([b161a6b](https://github.com/kirinnee/ferretry/commit/b161a6bf4b1b865df14809fb6df04ad3b98e1c21))
+* **pwa:** the board in the ferret — Kanban or List in Info › Tasks ([#1062](https://github.com/kirinnee/ferretry/issues/1062)) ([c193675](https://github.com/kirinnee/ferretry/commit/c1936752f84467f8aa6266bf67497afa7efc1cab))
+
 ## [4.141.5](https://github.com/kirinnee/ferretry/compare/v4.141.4...v4.141.5) (2026-10-30)
 
 ### Fixes

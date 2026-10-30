@@ -2,8 +2,8 @@ import {
   type BoardResponse,
   type BoardTaskView,
   BoardTaskViewSchema,
-  LANE_TEMPLATES,
   type LaneSet,
+  TaskWorkflowSchema,
 } from '@ferretry/protocol';
 import type { BoardPort } from '../../src/lib/board-client.ts';
 import type { BoardEnvironment } from '../../src/lib/board-store.ts';
@@ -32,12 +32,59 @@ export const workstation = daemonConnection({
   deviceId: 'token-workstation',
 });
 
+/**
+ * Ferretry's lanes before board v3 (Review/CI apart from Implement, Released apart from To test): boards
+ * stored then, and hand-made ones, still look like this, and the app draws any lane set.
+ */
+const CLASSIC_LANES: Pick<LaneSet, 'lanes' | 'variants' | 'doneLane' | 'notGoodLane'> = {
+  lanes: [
+    { id: 'todo', name: 'Todo', category: 'backlog', staleAfter: '3d' },
+    {
+      id: 'plan',
+      name: 'Plan/Design',
+      category: 'active',
+      enterOn: ['work.started'],
+      ownerGate: true,
+      staleAfter: '2h',
+    },
+    { id: 'implement', name: 'Implement', category: 'active', enterOn: ['work.started'], staleAfter: '2h' },
+    {
+      id: 'review',
+      name: 'Review/CI',
+      category: 'review',
+      enterOn: ['pr.opened', 'pr.ready', 'signal.done'],
+      staleAfter: '24h',
+    },
+    { id: 'merged', name: 'Merged', category: 'shipped', enterOn: ['pr.merged'], staleAfter: '3d' },
+    { id: 'released', name: 'Released', category: 'shipped', enterOn: ['release.published'] },
+    { id: 'tested', name: 'To test', category: 'verify', enterOn: ['release.running'], ownerGate: true },
+    { id: 'closed', name: 'Closed', category: 'closed', ownerGate: true },
+  ],
+  variants: Object.fromEntries(
+    TaskWorkflowSchema.options.map(workflow => [
+      workflow,
+      [
+        'todo',
+        ...(workflow === 'quick' ? [] : ['plan']),
+        'implement',
+        'review',
+        'merged',
+        'released',
+        'tested',
+        'closed',
+      ],
+    ]),
+  ),
+  doneLane: 'closed',
+  notGoodLane: 'implement',
+};
+
 export const laneSetFor = (projectId: string = PROJECT): LaneSet => ({
   projectId,
   version: 1,
   confirmedBy: 'owner',
   proposedBy: LEAD,
-  ...LANE_TEMPLATES['pr-release-verify'],
+  ...CLASSIC_LANES,
 });
 
 export const COUNTS = { closedHidden: 0, stale: 0, orphaned: 0, active: 0, toTest: 0, waitingOnYou: 0 };
@@ -89,6 +136,14 @@ export const card = (id: string, extra: Record<string, unknown> = {}): BoardTask
     shippedIn: null,
     ...extra,
   });
+
+/** A card as a newer daemon serves it: who it was asked for, and (when given) the human card it serves. */
+export const originCard = (
+  id: string,
+  origin: 'human' | 'agent',
+  humanParent?: { id: string } | null,
+  extra: Record<string, unknown> = {},
+): BoardTaskView => Object.assign(card(id, extra), humanParent === undefined ? { origin } : { origin, humanParent });
 
 export const boardAnswer = (cards: readonly BoardTaskView[], extra: Partial<BoardResponse> = {}): BoardResponse => ({
   projectId: null,

@@ -210,7 +210,7 @@ async function startIdle(daemon: BootedDaemon, wrapper: string): Promise<Session
 /** Reads the session's state through the API, the way every client does. */
 async function stateOf(daemon: BootedDaemon, id: string): Promise<SessionView['state']> {
   const response = await fetch(`http://127.0.0.1:${daemon.port}/v1/sessions/${encodeURIComponent(id)}`, {
-    headers: headers(daemon, `read-${Date.now()}`),
+    headers: headers(daemon, `read-${id}-${Date.now()}`),
   });
   return SessionViewSchema.parse(await response.json()).state;
 }
@@ -235,40 +235,55 @@ async function until(daemon: BootedDaemon, id: string, expected: string | undefi
 const frameOf = (daemon: BootedDaemon, harness: 'claude' | 'codex') => async (text: string) =>
   await writeFile(join(daemon.root, `${harness}-frame.txt`), text);
 
+const JOURNEYS = [
+  ['claude', CLAUDE.wrapper, CLAUDE_IDLE, CLAUDE_WORKING, CLAUDE_PERMISSION],
+  ['codex', CODEX.wrapper, CODEX_IDLE, CODEX_WORKING, CODEX_PERMISSION],
+] as const;
+
 describe('whose turn it is, through a real daemon', () => {
-  // One daemon for both harnesses: each test starts its own session, so each has its own world.
-  let daemon: BootedDaemon;
+  // One daemon for both harnesses, and both journeys run side by side on it: each has its own session, frame
+  // file and fake harness, so neither can see the other, and the health ticks they wait on are paid once.
+  // Each test reports its own journey's outcome, so a failure still names the harness.
+  const outcomes = new Map<string, Promise<unknown>>();
   beforeAll(async () => {
-    daemon = await boot();
+    const daemon = await boot();
+    for (const [harness, wrapper, idle, working, permission] of JOURNEYS)
+      outcomes.set(
+        harness,
+        (async () => {
+          // Arrange
+          const frame = frameOf(daemon, harness);
+          const view = await startIdle(daemon, wrapper);
+          const id = view.config.id;
+
+          // Idle at its prompt.
+          await until(daemon, id, 'your-turn');
+          // Mid-turn.
+          await frame(working);
+          await until(daemon, id, 'working');
+          // A permission prompt: blocked on a person.
+          await frame(permission);
+          await until(daemon, id, 'needs-input');
+          // Back to work, then the turn ends. REGRESSION: the spinner stops within a few seconds.
+          await frame(working);
+          await until(daemon, id, 'working');
+          await frame(idle);
+          await until(daemon, id, 'your-turn');
+          // The harness crashes: the session is over, so it has no turn at all.
+          await frame('EXIT');
+          await until(daemon, id, undefined);
+          should((await stateOf(daemon, id)).status).equal('failed');
+        })().then(
+          () => undefined,
+          (error: unknown) => ({ error }),
+        ),
+      );
   }, 120_000);
 
-  for (const [harness, wrapper, idle, working, permission] of [
-    ['claude', CLAUDE.wrapper, CLAUDE_IDLE, CLAUDE_WORKING, CLAUDE_PERMISSION],
-    ['codex', CODEX.wrapper, CODEX_IDLE, CODEX_WORKING, CODEX_PERMISSION],
-  ] as const) {
+  for (const [harness] of JOURNEYS) {
     it(`${harness}: your turn at the prompt, working mid-turn, needs input on a permission prompt, your turn again within seconds of the turn ending, and nothing once it crashes`, async () => {
-      // Arrange
-      const frame = frameOf(daemon, harness);
-      const view = await startIdle(daemon, wrapper);
-      const id = view.config.id;
-
-      // Idle at its prompt.
-      await until(daemon, id, 'your-turn');
-      // Mid-turn.
-      await frame(working);
-      await until(daemon, id, 'working');
-      // A permission prompt: blocked on a person.
-      await frame(permission);
-      await until(daemon, id, 'needs-input');
-      // Back to work, then the turn ends. REGRESSION: the spinner stops within a few seconds.
-      await frame(working);
-      await until(daemon, id, 'working');
-      await frame(idle);
-      await until(daemon, id, 'your-turn');
-      // The harness crashes: the session is over, so it has no turn at all.
-      await frame('EXIT');
-      await until(daemon, id, undefined);
-      should((await stateOf(daemon, id)).status).equal('failed');
+      const outcome = (await outcomes.get(harness)) as { error: unknown } | undefined;
+      if (outcome !== undefined) throw outcome.error;
     }, 120_000);
   }
 });
