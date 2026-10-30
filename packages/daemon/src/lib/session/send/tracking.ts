@@ -1,4 +1,4 @@
-import { ferretryNotice, parseHandoffPointer, type SendEvidence } from '@ferretry/protocol';
+import { parseHandoffPointer, type SendEvidence } from '@ferretry/protocol';
 import { PASTE_PLACEHOLDER_PATTERN } from '../../tmux/composer.ts';
 import type { ObservedHumanInput } from '../../transcript/types.ts';
 import type { SendRecord, SendSenderKind } from './types.ts';
@@ -380,32 +380,32 @@ export function sendFailureNotice(recipient: string, record: SendRecord, clientN
   // recipient's terminal, and "decide whether to send it again" invites the duplicate. What is
   // missing is the proof, and only a restart of the recipient can supply it.
   if (record.fate === 'unaccounted' && record.unaccountedReason === 'transcript_unbound')
-    return ferretryNotice(
-      `Your message to ${recipient} (send ${record.sendId}) was typed into ${recipient}’s terminal, but there is ` +
-        `no transcript Ferretry can prove is ${recipient}’s, so whether ${recipient} read it cannot be confirmed. ` +
-        `Do not send it again — it most likely arrived. Ask the owner to restart ${recipient}’s CLI, which gives ` +
-        'it a transcript Ferretry can read.',
+    return (
+      `Ferretry typed your message to ${recipient} (send ${record.sendId}) into ${recipient}’s terminal, but it ` +
+      `has no transcript it can prove is ${recipient}’s, so whether ${recipient} read it cannot be confirmed. ` +
+      `Do not send it again — it most likely arrived. Ask the owner to restart ${recipient}’s CLI, which gives ` +
+      'it a transcript Ferretry can read.'
     );
   // A revive handed the message over as the relaunched agent's next turn, so "may still have landed"
   // undersells it: the agent was started on it. What is missing is only the transcript's word.
   if (record.fate === 'unaccounted' && record.unaccountedReason === 'revive_unconfirmed')
-    return ferretryNotice(
-      `Your message to ${recipient} (send ${record.sendId}) was handed to ${recipient} as the first turn of ` +
-        `its relaunch, but its transcript never showed it arriving, so delivery cannot be confirmed. It most ` +
-        `likely landed — do not send it again unless ${recipient} stays silent.`,
+    return (
+      `Ferretry handed your message to ${recipient} (send ${record.sendId}) to ${recipient} as the first turn of ` +
+      `its relaunch, but its transcript never showed it arriving, so delivery cannot be confirmed. It most ` +
+      `likely landed — do not send it again unless ${recipient} stays silent.`
     );
   const resend = `Decide whether to send it again with \`${clientName} send ${recipient} …\`.`;
   // An unconfirmed message is not one that "did not reach it": it may be sitting in the recipient's
   // queue right now, and a sender told otherwise sends the copy the daemon itself refused to type.
   if (record.fate !== 'timed_out')
-    return ferretryNotice(
-      `Your message to ${recipient} (send ${record.sendId}) could not be confirmed ` +
-        `(${(record.unaccountedReason ?? 'timeout').replaceAll('_', ' ')}) — it may still have landed, ` +
-        `so sending it again may deliver it twice. ${resend}`,
+    return (
+      `Ferretry could not confirm your message to ${recipient} (send ${record.sendId}) ` +
+      `(${(record.unaccountedReason ?? 'timeout').replaceAll('_', ' ')}) — it may still have landed, ` +
+      `so sending it again may deliver it twice. ${resend}`
     );
-  return ferretryNotice(
-    `Your message to ${recipient} (send ${record.sendId}) did not reach it: it was not delivered ` +
-      `(${(record.unaccountedReason ?? 'not_delivered').replaceAll('_', ' ')}) after ${record.attempt ?? 1} attempt(s). ` +
-      resend,
+  return (
+    `Ferretry could not deliver your message to ${recipient} (send ${record.sendId}): it was not delivered ` +
+    `(${(record.unaccountedReason ?? 'not_delivered').replaceAll('_', ' ')}) after ${record.attempt ?? 1} attempt(s). ` +
+    resend
   );
 }

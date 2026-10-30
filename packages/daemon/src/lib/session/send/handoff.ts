@@ -1,6 +1,11 @@
 import { basename, dirname, join } from 'node:path';
 import type { HarnessKind } from '@ferretry/fleet';
-import { readHandoffDocument, type SessionHandoff, type SessionHandoffAttachment } from '@ferretry/protocol';
+import {
+  type QueueAuthor,
+  readHandoffDocument,
+  type SessionHandoff,
+  type SessionHandoffAttachment,
+} from '@ferretry/protocol';
 
 /**
  * What the person sent in one hand-off, read back out of the document the agent was pointed at.
@@ -17,6 +22,7 @@ export function handoffView(
   name: string,
   document: string,
   context: { readonly reminder: string; readonly attachmentRoot: string },
+  by?: QueueAuthor,
 ): SessionHandoff {
   const { message, files } = readHandoffDocument(document, context.reminder);
   const attachments = files.map((file): SessionHandoffAttachment => {
@@ -24,7 +30,7 @@ export function handoffView(
     const owned = dirname(folder) === context.attachmentRoot;
     return { ...(owned ? { attachmentId: basename(folder) } : {}), filename: basename(file.path), mime: file.mime };
   });
-  return { name, message, attachments };
+  return { name, message, attachments, ...(by === undefined ? {} : { by }) };
 }
 
 /**

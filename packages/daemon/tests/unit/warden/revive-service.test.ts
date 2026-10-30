@@ -133,7 +133,9 @@ describe('auto-revive of a session that died', () => {
 
     // Assert
     should(h.resumed).have.length(1);
-    should(h.resumed[0]?.message).startWith('[ferretry] Your terminal ended because its terminal disappeared at ');
+    should(h.resumed[0]?.message).startWith(
+      'Ferretry started your terminal again: it ended because its terminal disappeared at ',
+    );
     should(h.resumed[0]?.message).containEql('Re-read your last turn file and continue');
     should([...result.revived]).deepEqual(['a']);
     should(result.revive.sessions.a).containEql({ attempts: 1, crashRevives: 0 });
