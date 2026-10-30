@@ -10,7 +10,9 @@ import {
   appBarDestinationForRoute,
   appBarTitle,
   crumbTrail,
+  INSIGHTS_PLACES,
   MORE_PLACES,
+  TAB_BAR_PLACES,
   mobileDestinationMenuOpen,
   SESSIONS_ENTRY,
   SidebarDrawerTrigger,
@@ -152,7 +154,9 @@ describe('APP_NAVIGATION', () => {
   });
 
   it('puts every place either on the phone bar or under More, never both', () => {
-    expect(MORE_PLACES).toEqual(['analytics', 'warden', 'learning']);
+    expect(TAB_BAR_PLACES).toEqual(['sessions', 'attention', 'board']);
+    expect(MORE_PLACES).toEqual(['projects', 'analytics', 'warden', 'learning', 'settings']);
+    expect([...TAB_BAR_PLACES, ...MORE_PLACES].sort()).toEqual(APP_NAVIGATION.map(place => place.id).sort());
   });
 });
 
@@ -546,7 +550,7 @@ const primaryClick = (): Event => {
 };
 
 describe('AppTabBar', () => {
-  it('shows Sessions, Attention, Projects, Find, Settings and More, in that order, scoped to the daemon', async () => {
+  it('shows Sessions, Inbox, Board, Find and More, in that order, scoped to the daemon', async () => {
     setViewport(PHONE);
     const mounted = await mount(tabBar());
     const nav = mounted.container.querySelector('[data-app-tab-bar]') as HTMLElement;
@@ -555,32 +559,28 @@ describe('AppTabBar', () => {
     expect([...nav.querySelectorAll('[data-app-tab]')].map(item => item.getAttribute('data-app-tab'))).toEqual([
       'sessions',
       'attention',
-      'projects',
+      'board',
       'find',
-      'settings',
       'more',
     ]);
     expect([...nav.querySelectorAll('[data-app-tab]')].map(item => item.textContent)).toEqual([
       'Sessions',
       'Inbox',
-      'Projects',
+      'Board',
       'Find',
-      'Settings',
       'More',
     ]);
     expect([...nav.querySelectorAll('a')].map(link => link.getAttribute('href'))).toEqual([
       '/d/workshop',
       '/d/workshop/inbox',
-      '/d/workshop/projects',
-      '/d/workshop/settings',
+      '/d/workshop/board',
     ]);
 
     await mounted.render(tabBar({ daemon: OTHER }));
     expect([...nav.querySelectorAll('a')].map(link => link.getAttribute('href'))).toEqual([
       '/d/laptop',
       '/d/laptop/inbox',
-      '/d/laptop/projects',
-      '/d/laptop/settings',
+      '/d/laptop/board',
     ]);
 
     await mounted.unmount();
@@ -588,20 +588,22 @@ describe('AppTabBar', () => {
 
   it('marks the current place, and marks More when the current place is under it', async () => {
     setViewport(PHONE);
-    const mounted = await mount(tabBar({ active: 'projects' }));
+    const mounted = await mount(tabBar({ active: 'board' }));
     const current = (): (string | null)[] =>
       [...mounted.container.querySelectorAll('[data-app-tab]')].map(item => item.getAttribute('aria-current'));
 
-    expect(current()).toEqual([null, null, 'page', null, null, null]);
+    expect(current()).toEqual([null, null, 'page', null, null]);
 
-    await mounted.render(tabBar({ active: 'warden' }));
-    expect(current()).toEqual([null, null, null, null, null, 'page']);
+    for (const under of ['warden', 'projects', 'settings'] as const) {
+      await mounted.render(tabBar({ active: under }));
+      expect(current()).toEqual([null, null, null, null, 'page']);
+    }
 
     await mounted.render(tabBar({ active: 'attention' }));
-    expect(current()).toEqual([null, 'page', null, null, null, null]);
+    expect(current()).toEqual([null, 'page', null, null, null]);
 
     await mounted.render(tabBar());
-    expect(current()).toEqual([null, null, null, null, null, null]);
+    expect(current()).toEqual([null, null, null, null, null]);
 
     await mounted.unmount();
   });
@@ -654,6 +656,33 @@ describe('AppTabBar', () => {
     await mounted.unmount();
   });
 
+  it('badges the Board tab with the cards that need the owner, in words, and draws nothing at zero', async () => {
+    setViewport(PHONE);
+    const mounted = await mount(tabBar({ boardCount: 4 }));
+    const tab = (): HTMLAnchorElement => mounted.container.querySelector('[data-app-tab="board"]') as HTMLAnchorElement;
+    const badge = (): HTMLElement | null => tab().querySelector('[data-unread-badge] [aria-hidden="true"]');
+
+    expect(tab().getAttribute('href')).toBe('/d/workshop/board');
+    expect(badge()?.textContent).toBe('4');
+    expect(tab().textContent).toContain('4 board cards need you');
+
+    await mounted.render(tabBar({ boardCount: 1 }));
+    expect(tab().textContent).toContain('1 board card needs you');
+
+    await mounted.render(tabBar({ boardCount: 0 }));
+    expect(badge()).toBeNull();
+    expect(tab().textContent).toBe('Board');
+
+    // The Board's number never lands on another tab, and the Inbox keeps its own.
+    await mounted.render(tabBar({ boardCount: 7, agendaCount: 2 }));
+    expect(mounted.container.querySelectorAll('[data-unread-badge]')).toHaveLength(2);
+    expect(mounted.container.querySelector('[data-app-tab="attention"] [data-unread-badge]')?.textContent).toContain(
+      '2',
+    );
+
+    await mounted.unmount();
+  });
+
   it('opens the palette from Find', async () => {
     setViewport(PHONE);
     let opened = 0;
@@ -672,16 +701,16 @@ describe('AppTabBar', () => {
     setViewport(PHONE);
     const visited: string[] = [];
     const mounted = await mount(tabBar({ onNavigate: to => visited.push(to) }));
-    const projects = mounted.container.querySelector('[data-app-tab="projects"]') as HTMLAnchorElement;
+    const board = mounted.container.querySelector('[data-app-tab="board"]') as HTMLAnchorElement;
 
-    await interact(() => projects.dispatchEvent(primaryClick()));
+    await interact(() => board.dispatchEvent(primaryClick()));
 
-    expect(visited).toEqual(['/d/workshop/projects']);
+    expect(visited).toEqual(['/d/workshop/board']);
 
     await mounted.unmount();
   });
 
-  it('opens More as a sheet of Analytics, Warden and Learning, and closes it on a pick', async () => {
+  it('opens More as a sheet of Projects, Analytics, Warden, Learning and Settings, and closes it on a pick', async () => {
     setViewport(PHONE);
     const visited: string[] = [];
     const mounted = await mount(tabBar({ active: 'learning', onNavigate: to => visited.push(to) }));
@@ -696,16 +725,24 @@ describe('AppTabBar', () => {
     const sheet = document.getElementById(more.getAttribute('aria-controls') as string) as HTMLElement;
     expect(sheet.getAttribute('role')).toBe('dialog');
     const rows = [...sheet.querySelectorAll('[data-app-more]')] as HTMLAnchorElement[];
-    expect(rows.map(row => row.getAttribute('data-app-more'))).toEqual(['analytics', 'warden', 'learning']);
+    expect(rows.map(row => row.getAttribute('data-app-more'))).toEqual([
+      'projects',
+      'analytics',
+      'warden',
+      'learning',
+      'settings',
+    ]);
     expect(rows.map(row => row.getAttribute('href'))).toEqual([
+      '/d/workshop/projects',
       '/d/workshop/analytics',
       '/d/workshop/warden',
       '/d/workshop/learning',
+      '/d/workshop/settings',
     ]);
-    expect(rows.map(row => row.getAttribute('aria-current'))).toEqual([null, null, 'page']);
-    expect(rows[1]?.textContent).toContain('Open fleet supervision and verdicts');
+    expect(rows.map(row => row.getAttribute('aria-current'))).toEqual([null, null, null, 'page', null]);
+    expect(rows[2]?.textContent).toContain('Open fleet supervision and verdicts');
 
-    await interact(() => rows[1]?.dispatchEvent(primaryClick()));
+    await interact(() => rows[2]?.dispatchEvent(primaryClick()));
 
     expect(visited).toEqual(['/d/workshop/warden']);
     expect(more.getAttribute('aria-expanded')).toBe('false');
@@ -789,7 +826,8 @@ describe('SidebarDrawerTrigger', () => {
 
 describe('AppBar phone title', () => {
   it('names Insights for the three views under More, and nothing elsewhere', () => {
-    expect(MORE_PLACES.map(appBarTitle)).toEqual(['Insights', 'Insights', 'Insights']);
+    expect(INSIGHTS_PLACES.map(appBarTitle)).toEqual(['Insights', 'Insights', 'Insights']);
+    expect(appBarTitle('projects')).toBeNull();
     expect(appBarTitle('settings')).toBeNull();
     expect(appBarTitle(null)).toBeNull();
   });

@@ -9,6 +9,7 @@
 import { createRoot } from 'react-dom/client';
 import { useState } from 'react';
 import { BoardPage } from '../src/features/board/board-page.tsx';
+import { AppTabBar } from '../src/shell/app-bar.tsx';
 import { DaemonBoardStore } from '../src/lib/board-store.ts';
 import {
   boardAnswer,
@@ -382,14 +383,17 @@ function Harness() {
   const params = new URLSearchParams(window.location.search);
   const [search, setSearch] = useState(() => {
     const view = params.get('view');
-    return view === null || view === 'kanban' ? '' : `view=${view}`;
+    const start = view === null || view === 'kanban' ? [] : [`view=${view}`];
+    const at = params.get('at');
+    return (at === null ? start : [...start, `at=${at}`]).join('&');
   });
+  const phone = window.innerWidth < 640;
   return (
     <div className="bg-bg text-fg" data-fixture={params.get('view') ?? 'kanban'} style={{ minHeight: '100vh' }}>
       <BoardPage
         agenda={{ respond: async () => undefined }}
         callsigns={CALLSIGNS}
-        compact={window.innerWidth < 640}
+        phone={phone}
         machines={[{ connection: laptop, name: 'laptop' }]}
         now={NOW}
         onNavigate={() => undefined}
@@ -397,6 +401,11 @@ function Harness() {
         search={search}
         store={store}
       />
+      {phone && params.get('bar') !== null ? (
+        <div style={{ position: 'fixed', insetInline: 0, bottom: 0 }}>
+          <AppTabBar active="board" boardCount={3} daemon={laptop.daemonId} onOpenPalette={() => undefined} />
+        </div>
+      ) : null}
     </div>
   );
 }
