@@ -151,7 +151,6 @@ import {
   StorageSessionParents,
 } from '../src/adapters/board/session-board-adapters.ts';
 import { type LivenessLedgerReader, StorageSessionRoster } from '../src/adapters/board/session-roster.ts';
-import { StorageSessionCardFacts } from '../src/adapters/board/storage-session-card-facts.ts';
 import { GhCliRunner, GitWorkingCopies } from '../src/adapters/board-github/index.ts';
 import {
   AgendaImportAgenda,
@@ -1985,7 +1984,6 @@ function createBoardWorld(
     projects: { nameOf: async projectId => (await lanes.project(projectId))?.name ?? projectId },
     focus,
     parents,
-    sessions: new StorageSessionCardFacts(storage, id => createSessionPaths(paths, id).directory),
     pending,
     clock,
     diagnostics,

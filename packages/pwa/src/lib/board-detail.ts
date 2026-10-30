@@ -229,6 +229,15 @@ const describe = (event: BoardTaskEvent, context: HistoryContext): Pick<HistoryR
       return { text: 'reordered it in its lane', detail: null, minor: true };
     case 'refiled':
       return { text: 'moved it to another project', detail: event.reason, minor: false };
+    case 'reparented':
+      return {
+        text:
+          event.to === null
+            ? `made it a top-level card (was under ${event.from === null ? 'nothing' : refText(event.from)})`
+            : `moved it under ${refText(event.to)}${event.from === null ? ' (was top level)' : ` (was under ${refText(event.from)})`}`,
+        detail: event.reason,
+        minor: false,
+      };
     case 'dropped':
       return { text: 'dropped it', detail: event.reason, minor: false };
     case 'migrated':

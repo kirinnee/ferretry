@@ -49,6 +49,12 @@ export function describeBoardEvent(event: BoardTaskEvent, lane: BoardNamer, name
       return `ranked ${event.from === null ? '—' : String(event.from)} → ${event.to === null ? '—' : String(event.to)}`;
     case 'refiled':
       return `refiled to ${event.toProject} (${lane(event.toLane)})${event.reason === null ? '' : `: ${event.reason}`}`;
+    case 'reparented': {
+      const why = event.reason === null ? '' : `: ${event.reason}`;
+      const to = event.to === null ? 'now top level' : `under ${formatTaskRef(event.to)}`;
+      const from = event.from === null ? 'top level' : formatTaskRef(event.from);
+      return `re-parented ${to} (was ${from})${why}`;
+    }
     case 'dropped':
       return `dropped: ${event.reason}`;
     case 'migrated':

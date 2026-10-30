@@ -148,6 +148,33 @@ describe('the board session adapters', () => {
     should(TaskRefSchema.parse(config?.focusTask)).eql({ id: 'F12' });
   });
 
+  it('should set the delegation anchor only when asked, so a plain touch moves the focus and leaves the anchor', async () => {
+    // Arrange
+    const storage = await openStorage();
+    const id = await session(storage, 'lead');
+    const focus = new StorageSessionFocus(storage);
+
+    // Act
+    const none = await focus.anchorOf('lead');
+    await focus.setFocus('lead', { id: 'F1' }, undefined, { anchor: true });
+    await focus.setFocus('lead', { id: 'F2' });
+    const config = jsonObject(await storage.readConfig(id));
+
+    // Assert
+    should(none).be.null();
+    should(await focus.anchorOf('lead')).eql({ id: 'F1' });
+    should(await focus.focusOf('lead')).eql({ id: 'F2' });
+    should(TaskRefSchema.parse(config?.focusAnchor)).eql({ id: 'F1' });
+  });
+
+  it('should read no anchor from a session the daemon does not hold', async () => {
+    // Arrange
+    const focus = new StorageSessionFocus(await openStorage());
+
+    // Act / Assert
+    should(await focus.anchorOf('ghost')).be.null();
+  });
+
   it('should not focus a session the daemon does not hold', async () => {
     // Arrange
     const storage = await openStorage();

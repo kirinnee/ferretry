@@ -29,6 +29,7 @@ import {
   type LaneSet,
   type LaneTrigger,
   type TaskKind,
+  type TaskRef,
   UNFILED_PROJECT_ID,
 } from '@ferretry/protocol';
 import type { SerialExecutor } from '../ports.ts';
@@ -218,7 +219,7 @@ export class BoardService {
       laneSet,
       index,
     });
-    await this.afterWrite(caller, card, [card.projectId]);
+    await this.afterWrite(caller, card, [card.projectId], true);
     return await this.view(await this.ports.store.read(), id);
   }
 
@@ -253,10 +254,57 @@ export class BoardService {
       index,
     });
     await this.afterWrite(caller, card, [card.projectId]);
-    if (!(await this.ports.focus.setFocus(spawn.focus, { id: card.id }, card.title).catch(() => false))) {
+    if (
+      !(await this.ports.focus.setFocus(spawn.focus, { id: card.id }, card.title, { anchor: true }).catch(() => false))
+    ) {
       this.ports.diagnostics.warn(`could not focus ${spawn.focus} on ${formatTaskRef(card)}`);
     }
     return card;
+  }
+
+  /**
+   * Whether the lead may hand an EXISTING card to a sub-ferret (`fy new --card`): the card is here, not dropped,
+   * and the lead may reassign it. Throws the refusal otherwise; changes nothing.
+   */
+  async requireHandOver(id: BoardTaskId, lead: string): Promise<BoardTask> {
+    const machineId = this.requireMachine();
+    const card = new BoardIndex((await this.ports.store.read()).cards, machineId).get({ id });
+    if (card === undefined)
+      throw new BoardError('not-found', `there is no card ${formatTaskRef({ id })} on this machine`);
+    if (card.dropped !== null) {
+      throw new BoardError(
+        'invalid',
+        `${formatTaskRef(card)} is dropped; reopen it before you hand it to a sub-ferret`,
+      );
+    }
+    requireStanding('assign', await this.standing({ kind: 'ferret', sessionId: lead }, card), card);
+    return card;
+  }
+
+  /**
+   * `fy new --card`, once the sub-ferret's session exists: the lead's existing card is assigned to it — its owner
+   * and parent stay — and becomes the session's focus and delegation anchor. Never makes a second card. The
+   * assignment is recorded as the lead's; the lead's own focus is not touched.
+   */
+  async handOver(id: BoardTaskId, lead: string, session: string): Promise<BoardTask> {
+    const caller: BoardCaller = { kind: 'ferret', sessionId: lead };
+    const outcome = await this.ports.store.write(id, async current => {
+      const card = this.requireCard(current, id);
+      if (card.dropped !== null) {
+        throw new BoardError(
+          'invalid',
+          `${formatTaskRef(card)} is dropped; reopen it before you hand it to a sub-ferret`,
+        );
+      }
+      const applied = applyAction(card, { action: 'assign', assignee: session }, await this.context(card, caller));
+      const task = requireValidCard(applied.task as BoardTask);
+      return { task, result: task };
+    });
+    await this.afterWrite({ kind: 'daemon', sessionId: lead }, outcome, [outcome.projectId]);
+    if (!(await this.ports.focus.setFocus(session, { id }, outcome.title, { anchor: true }).catch(() => false))) {
+      this.ports.diagnostics.warn(`could not focus ${session} on ${formatTaskRef(outcome)}`);
+    }
+    return outcome;
   }
 
   /**
@@ -307,7 +355,9 @@ export class BoardService {
       request.action === 'depend' ? await this.ports.serial.run(DEPENDENCY_SECTION, write) : await write();
     if (request.action === 'focus') {
       if (
-        !(await this.ports.focus.setFocus((caller as { sessionId: string }).sessionId, { id: card.id }, card.title))
+        !(await this.ports.focus.setFocus((caller as { sessionId: string }).sessionId, { id: card.id }, card.title, {
+          anchor: true,
+        }))
       ) {
         throw new BoardError('not-found', 'there is no session to focus');
       }
@@ -454,7 +504,17 @@ export class BoardService {
       request.action === 'refile' && request.projectId !== card.projectId
         ? await this.ports.lanes.laneSet(request.projectId)
         : null;
-    return applyAction(card, request, context, target);
+    const parentStanding =
+      request.action === 'reparent' && request.parent !== null
+        ? await this.parentStanding(request.parent, caller, context.index)
+        : null;
+    return applyAction(card, request, context, target, parentStanding);
+  }
+
+  /** The caller's standing on the card a re-parent would put a card under; `null` when that card is not here. */
+  private async parentStanding(parent: TaskRef, caller: BoardCaller, index: BoardIndex) {
+    const found = index.isLocal(parent) ? index.get(parent) : undefined;
+    return found === undefined ? null : await this.standing(caller, found);
   }
 
   private async context(card: BoardTask, caller: BoardCaller) {
@@ -556,10 +616,15 @@ export class BoardService {
    * fleet feed hears `board.changed`, journalled on the writer's session — the card's owner ferret's
    * when the owner or the daemon wrote it, because a feed event always belongs to a session.
    */
-  private async afterWrite(caller: BoardCaller, task: BoardTask, projects: readonly BoardProjectId[]): Promise<void> {
+  private async afterWrite(
+    caller: BoardCaller,
+    task: BoardTask,
+    projects: readonly BoardProjectId[],
+    anchor = false,
+  ): Promise<void> {
     if (caller.kind === 'ferret') {
       await this.ports.focus
-        .setFocus(caller.sessionId, { id: task.id }, task.title)
+        .setFocus(caller.sessionId, { id: task.id }, task.title, { anchor })
         .catch((error: unknown) => this.warn(`could not focus ${caller.sessionId} on ${formatTaskRef(task)}`, error));
     }
     const session = sessionOf(caller) ?? task.owner;

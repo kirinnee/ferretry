@@ -71,6 +71,14 @@ export const parseTaskRef = (input: string): BoardResult<TaskRef, TaskRefParseEr
   return BOARD_TASK_ID_PATTERN.test(id) ? boardOk({ id }) : boardErr({ code: 'malformed', input });
 };
 
+const CARD_REF_IN_TEXT = /(?<![\w&])&([BFIC][1-9][0-9]{0,8})(?!\w)/u;
+
+/** The first `&F412`-style card reference in free text (a brief), or `undefined` when it names none. */
+export const firstTaskRefIn = (text: string): TaskRef | undefined => {
+  const found = CARD_REF_IN_TEXT.exec(text)?.[1];
+  return found === undefined ? undefined : { id: found };
+};
+
 /** The longest reason a card-less turn is recorded with: the same bound as a card's own reasons. */
 export const MAX_BOARD_SKIP_REASON_LENGTH = 2 * 1024;
 

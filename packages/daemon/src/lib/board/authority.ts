@@ -14,7 +14,8 @@
  * | `daemon`      | the daemon's own automation                            | trigger moves, link cache, refile    |
  * | `reader`      | any other ferret                                       | read; depend from ITS OWN card only   |
  *
- * Re-plan means retitle, rewrite the brief, reassign, drop and reorder.
+ * Re-plan means retitle, rewrite the brief, reassign, drop, reorder and re-parent (which also needs `adopt` on
+ * the new parent: a card never moves onto a tree its caller cannot write).
  */
 import { type BoardTask, formatTaskRef } from '@ferretry/protocol';
 
@@ -45,6 +46,7 @@ export type BoardOperation =
   | 'assign'
   | 'order'
   | 'replan'
+  | 'reparent'
   | 'adopt'
   | 'override'
   | 'pass-gate'
@@ -76,6 +78,7 @@ export const OPERATION_STANDINGS: Readonly<Record<BoardOperation, readonly Board
   assign: PLANNERS,
   order: PLANNERS,
   replan: PLANNERS,
+  reparent: PLANNERS,
   adopt: WORKERS,
   override: HUMAN,
   'pass-gate': HUMAN,
@@ -133,6 +136,7 @@ const OPERATION_WORDS: Readonly<Record<BoardOperation, string>> = {
   assign: 'reassign',
   order: 'reorder',
   replan: 'retitle or rewrite the brief of',
+  reparent: 'move under another card',
   adopt: 'add a child card under',
   override: 'override a dependency of',
   'pass-gate': 'pass the owner gate of',

@@ -40,13 +40,22 @@ export class StorageSessionParents implements SessionParents {
 export class StorageSessionFocus implements SessionFocus {
   constructor(private readonly storage: SessionDocuments) {}
 
-  async setFocus(sessionId: string, task: TaskRef, title?: string): Promise<boolean> {
+  async setFocus(
+    sessionId: string,
+    task: TaskRef,
+    title?: string,
+    options: { readonly anchor?: boolean } = {},
+  ): Promise<boolean> {
     const id = known(this.storage, sessionId);
     if (id === undefined) return false;
     const focusTask = TaskRefSchema.parse(task);
     await this.storage.updateConfig(id, current => {
       const { boardSkip: _cleared, ...rest } = jsonObject(current) ?? {};
-      return { ...(title === undefined ? rest : withAutoTitle(rest, 'card', title)), focusTask };
+      return {
+        ...(title === undefined ? rest : withAutoTitle(rest, 'card', title)),
+        focusTask,
+        ...(options.anchor === true ? { focusAnchor: focusTask } : {}),
+      };
     });
     return true;
   }
@@ -55,6 +64,13 @@ export class StorageSessionFocus implements SessionFocus {
     const id = known(this.storage, sessionId);
     if (id === undefined) return null;
     const parsed = TaskRefSchema.safeParse(jsonObject(await this.storage.readConfig(id))?.focusTask);
+    return parsed.success ? parsed.data : null;
+  }
+
+  async anchorOf(sessionId: string): Promise<TaskRef | null> {
+    const id = known(this.storage, sessionId);
+    if (id === undefined) return null;
+    const parsed = TaskRefSchema.safeParse(jsonObject(await this.storage.readConfig(id))?.focusAnchor);
     return parsed.success ? parsed.data : null;
   }
 

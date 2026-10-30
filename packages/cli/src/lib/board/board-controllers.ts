@@ -38,6 +38,7 @@ import {
   buildMoveAction,
   buildNoteAction,
   buildOrderAction,
+  buildReparentAction,
   buildRefileAction,
   buildReopenAction,
   buildUnblockAction,
@@ -344,6 +345,18 @@ export class BoardController {
 
   async order(idText: string, rank: string | undefined, options: BoardCommonOptions & { readonly none?: boolean }) {
     await this.perform('order', requireCardRef(idText), options, buildOrderAction(rank, options.none));
+  }
+
+  async reparent(
+    idText: string,
+    options: BoardCommonOptions & { readonly parent?: string; readonly none?: boolean; readonly reason?: string },
+  ) {
+    await this.perform(
+      'reparent',
+      requireCardRef(idText),
+      options,
+      buildReparentAction(options.parent, options.none, options.reason),
+    );
   }
 
   async file(

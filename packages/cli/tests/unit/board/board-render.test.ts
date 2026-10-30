@@ -638,6 +638,7 @@ describe('renderActed', () => {
     ['assign', 'assigned'],
     ['note', 'noted'],
     ['order', 'ranked'],
+    ['reparent', 're-parented'],
     ['file', 'file recorded'],
     ['edit', 'edited'],
     ['refile', 'refiled'],

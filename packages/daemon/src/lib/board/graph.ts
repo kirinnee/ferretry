@@ -127,3 +127,18 @@ export const dependencyCycle = (index: BoardIndex, from: BoardTaskId, to: TaskRe
   const cycle = walk(to, [{ id: from }, to]);
   return cycle === null ? null : cycle.map(formatTaskRef).join(' → ');
 };
+
+/**
+ * Whether putting `card` under `parent` would close a loop in the parent chain: `parent` is `card` itself,
+ * or one of its descendants. The walk is bounded by the chain's own length and stops at a repeat.
+ */
+export const parentLoop = (index: BoardIndex, card: BoardTaskId, parent: TaskRef): boolean => {
+  const seen = new Set<BoardTaskId>();
+  let next: TaskRef | null = parent;
+  while (next !== null && index.isLocal(next) && !seen.has(next.id)) {
+    if (next.id === card) return true;
+    seen.add(next.id);
+    next = index.get(next)?.parent ?? null;
+  }
+  return false;
+};

@@ -222,6 +222,8 @@ describe('every remaining task verb', () => {
     ['clarify', ['clarify', 'F412', 'also', 'the', 'header', '--source', 'chat://2'], 'clarify'],
     ['link', ['link', 'F412', '--branch', 'feat/x'], 'link'],
     ['order', ['order', 'F412', '3'], 'order'],
+    ['reparent', ['reparent', 'F412', '--parent', 'F85'], 'reparent'],
+    ['reparent --none', ['reparent', 'F412', '--none'], 'reparent'],
     ['file', ['file', 'F412', 'src/a.ts'], 'file'],
     ['edit', ['edit', 'F412', '--summary', 'a line', '--term', 'x=y'], 'edit'],
     ['refile', ['refile', 'F412', '--project', 'Ferretry'], 'refile'],

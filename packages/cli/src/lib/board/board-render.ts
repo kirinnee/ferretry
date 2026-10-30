@@ -299,6 +299,7 @@ export type BoardVerb =
   | 'assign'
   | 'note'
   | 'order'
+  | 'reparent'
   | 'file'
   | 'edit'
   | 'refile';
@@ -318,6 +319,7 @@ const PAST: Readonly<Record<BoardVerb, string>> = {
   assign: 'assigned',
   note: 'noted',
   order: 'ranked',
+  reparent: 're-parented',
   file: 'file recorded',
   edit: 'edited',
   refile: 'refiled',
