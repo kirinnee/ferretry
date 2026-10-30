@@ -8,13 +8,13 @@
  *
  * - ONE ROW above the composer: what is running on its left, the agenda pill on its right. The pill opens a
  *   raised DRAWER of rows (blocking → needs you → ferret's turn) over a scrim on the chat; every row is one button.
- * - A row opens the item's VIEW: a full-width, full-height OVERLAY over the chat column (`agenda-item-view.tsx`)
- *   — sticky title and ask, one scrolling body, a sticky action bar in the composer's place. The chat stays
- *   mounted underneath, so it is exactly where it was when the view closes. ‹ › page through the agenda, ✕ / Esc /
- *   ↓ go back; an answer moves on to the next item that needs the owner, else back to the chat.
- * - "Add to reply" in the bar adds a removable "re: <title>" chip — several allowed — and returns to the chat; the
- *   next message carries the `!A5` references of its chips (`withReferencePrefix`), then clears them. Text typed
- *   in the bar goes as a message that names the item (`withReferences`), and an answer carries it as its note.
+ * - A row opens the item's VIEW: an OVERLAY over the MESSAGE LIST only (`agenda-item-view.tsx`) — sticky title and
+ *   ask, one scrolling body, the quick replies directly above the composer. The row and the REAL composer stay
+ *   visible and typeable. The transcript stays mounted underneath, so it is exactly where it was when the view
+ *   closes without sending. ‹ › page through the agenda, ✕ / Esc / ↓ go back.
+ * - While an item is open the composer carries a small removable "about !A5 ×" chip: what is typed goes with the
+ *   item's reference (`withReferencePrefix`). × means plain chat. A send, or a quick-reply tap, sends AND closes the
+ *   view, and the conversation returns to the new message. A quick reply carries the composer's text as its note.
  * - A wide screen with a mouse can DOCK the agenda beside the chat; the view opens over the chat column.
  * - `?agenda=A5` or `?attention=A5` (a notification tap, a proved `!A5`) arrives as a `focus` request: an open
  *   item opens its card, a resolved one opens in the resolved list, and an id the board does not hold is said
@@ -25,24 +25,24 @@ import type { AgendaId, AgendaItem, AgendaSnapshot } from '@ferretry/protocol';
 import { CircleAlert, PanelRight } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ChatProse } from '../../components/chat-prose.tsx';
-import { agendaCounts, agendaItems } from '../../lib/agenda-chat.ts';
-import { itemHistory } from '../../lib/agenda-history.ts';
-import { nextOwnerItem, sortAgenda } from '../../lib/agenda-status.ts';
 import type { InboxAction } from '../../lib/agenda-answers.ts';
+import { agendaCounts, agendaItems } from '../../lib/agenda-chat.ts';
 import type { DaemonAgendaClient } from '../../lib/agenda-client.ts';
+import { itemHistory } from '../../lib/agenda-history.ts';
 import { actionSentence } from '../../lib/agenda-inbox.ts';
-import { withComposerNote, withReferences } from '../../lib/agenda-reply.ts';
+import { withComposerNote } from '../../lib/agenda-reply.ts';
+import { sortAgenda } from '../../lib/agenda-status.ts';
 import type { AgendaLoadStatus } from '../../lib/agenda-store.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../../lib/daemon-scope.ts';
 import { composerQuoteTarget } from '../../lib/quote.ts';
 import type { TranscriptEntry } from '../../lib/session-screens.ts';
 import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
-import { AgendaDrawer, AgendaLine, AgendaPanel, AgendaReferenceChips } from './agenda-line.tsx';
 import { agendaReference } from './agenda-board.tsx';
 import { useAgendaDock } from './agenda-collapse.ts';
 import { AgendaDeliveryContext, agendaHeading, deliveringIds } from './agenda-delivery.tsx';
 import { AgendaItemView } from './agenda-item-view.tsx';
+import { AgendaDrawer, AgendaLine, AgendaPanel, AgendaReferenceChips } from './agenda-line.tsx';
 
 /** What the chat sends of the agenda client, and nothing else of it. */
 export type AgendaActionClient = Pick<
@@ -98,13 +98,11 @@ const NO_ITEMS: readonly AgendaItem[] = [];
 const NO_ENTRIES: readonly TranscriptEntry[] = [];
 const copyWriter = browserClipboardWriter();
 
-/** What was typed in the item view's bar goes into the composer's draft, after what is already there. */
-const keepTyped = (scope: DaemonSessionScope, typed: string): void => {
-  const composer = typed === '' ? null : composerQuoteTarget(scope);
-  if (composer === null) return;
-  const draft = composer.draft();
-  composer.replaceDraft(draft.trim() === '' ? typed : `${draft.replace(/\s*$/u, '')}\n\n${typed}`);
-};
+/** What is typed in the composer right now: an answer carries it as its note. */
+const composerDraft = (scope: DaemonSessionScope): string => composerQuoteTarget(scope)?.draft() ?? '';
+
+/** The note an answer took is spent: the composer is emptied. */
+const spendDraft = (scope: DaemonSessionScope): void => composerQuoteTarget(scope)?.replaceDraft('');
 
 const failure = (reason: unknown): string =>
   reason instanceof Error ? reason.message : 'The machine did not accept this answer.';
@@ -134,19 +132,19 @@ export interface UseAgendaInput {
   readonly live?: ReactNode;
   /** The conversation, so an item's view can show what was said about it. */
   readonly entries?: readonly TranscriptEntry[];
-  /** Sends one chat message to this session; the view's text field goes through it. Absent: that field says so. */
-  readonly send?: (message: string) => Promise<unknown>;
+  /** An answer went and the view closed: the conversation returns to the newest message. */
+  readonly onAnswered?: () => void;
   readonly now?: number;
 }
 
 export interface Agenda {
   /** The drawer, the line and the chips, in that order — siblings above the composer. `null`: nothing to say. */
   readonly above: ReactNode;
-  /** The open item's view: an overlay over the whole chat column. */
+  /** The open item's view: an overlay over the message list only. */
   readonly view: ReactNode;
   /** The scrim behind the open drawer, over the chat only. */
   readonly scrim: ReactNode;
-  /** A view is open: the chat underneath is hidden from sight and from the keyboard, but stays mounted. */
+  /** A view is open: the message list underneath is hidden from sight and from the keyboard, but stays mounted. */
   readonly covered: boolean;
   /** The line takes `live` itself, so the transcript must not draw it a second time. */
   readonly hostsLive: boolean;
@@ -154,9 +152,9 @@ export interface Agenda {
   readonly side: ReactNode;
   /** The header's "Agenda" button that docks the panel (a wide screen only). */
   readonly dockButton: ReactNode;
-  /** The ids the next message is about, in chip order. */
+  /** The ids the next message is about: the open item, unless the owner took its chip off. */
   readonly references: () => readonly AgendaId[];
-  /** Wire this into the Composer: a message went, so its chips are spent. */
+  /** Wire this into the Composer: a message went, so the open item closes. */
   readonly composer: { readonly onSent: () => void };
 }
 
@@ -175,7 +173,7 @@ export const useAgenda = ({
   swipeable,
   live,
   entries = NO_ENTRIES,
-  send,
+  onAnswered,
   now,
 }: UseAgendaInput): Agenda => {
   const domId = useId();
@@ -190,13 +188,14 @@ export const useAgenda = ({
     readonly key: string;
     readonly drawer: boolean;
     readonly card: AgendaId | null;
-    readonly chips: readonly AgendaId[];
-  }>({ key: scopeKey, drawer: false, card: null, chips: [] });
-  const here = shown.key === scopeKey ? shown : { key: scopeKey, drawer: false, card: null, chips: [] };
+    /** The owner took the "about" chip off: the next message is plain chat. */
+    readonly plain: boolean;
+  }>({ key: scopeKey, drawer: false, card: null, plain: false });
+  const here = shown.key === scopeKey ? shown : { key: scopeKey, drawer: false, card: null, plain: false };
   const update = useCallback(
     (change: (current: typeof here) => Partial<typeof here>): void =>
       setShown(current => {
-        const base = current.key === scopeKey ? current : { key: scopeKey, drawer: false, card: null, chips: [] };
+        const base = current.key === scopeKey ? current : { key: scopeKey, drawer: false, card: null, plain: false };
         return { ...base, ...change(base) };
       }),
     [scopeKey],
@@ -205,16 +204,13 @@ export const useAgenda = ({
   const [dock, toggleDock] = useAgendaDock();
   const docked = desktop && dock;
   const cardId = here.card !== null && byId.has(here.card) ? here.card : null;
-  const chipItems = here.chips.flatMap(id => {
-    const item = byId.get(id);
-    return item === undefined ? [] : [item];
-  });
-  const chipsRef = useRef<readonly AgendaId[]>([]);
-  chipsRef.current = chipItems.map(item => item.id);
+  const aboutItem = cardId === null || here.plain ? undefined : byId.get(cardId);
+  const aboutRef = useRef<readonly AgendaId[]>([]);
+  aboutRef.current = aboutItem === undefined ? [] : [aboutItem.id];
 
   const [busy, setBusy] = useState<ReadonlyMap<AgendaId, string | null>>(new Map());
   const [announcement, setAnnouncement] = useState('');
-  const onSent = useCallback((): void => update(() => ({ chips: [] })), [update]);
+  const onSent = useCallback((): void => update(() => ({ card: null, plain: false })), [update]);
 
   const setCard = useCallback((id: AgendaId, state: string | null | undefined): void => {
     setBusy(current => {
@@ -228,24 +224,22 @@ export const useAgenda = ({
   const act = (item: AgendaItem, action: InboxAction, note: string): void => {
     if (client === undefined || busy.get(item.id) === null) return;
     const sent = withComposerNote(action, note);
-    const order = agenda;
-    const onCard = cardId === item.id;
     setCard(item.id, null);
     setAnnouncement('');
     runAgendaAction(client, connection, scope, item.id, sent).then(
       () => {
         setCard(item.id, undefined);
         setAnnouncement(actionSentence(sent, item.id));
-        if (onCard) update(() => ({ card: nextOwnerItem(order, item.id)?.id ?? null }));
+        if (note.trim() !== '') spendDraft(scope);
+        // The answer is a message in the conversation: the view closes and the chat returns to it.
+        update(current => (current.card === item.id ? { card: null, plain: false } : {}));
+        onAnswered?.();
       },
       (reason: unknown) => setCard(item.id, failure(reason)),
     );
   };
 
-  const addReply = (item: AgendaItem): void =>
-    update(current => ({ chips: current.chips.includes(item.id) ? current.chips : [...current.chips, item.id] }));
-
-  const openCard = (item: AgendaItem): void => update(() => ({ card: item.id, drawer: false }));
+  const openCard = (item: AgendaItem): void => update(() => ({ card: item.id, drawer: false, plain: false }));
 
   // A REQUEST IS HONOURED ONCE, when it can be: after the board that says where the item is has been read.
   const handled = useRef<number | null>(null);
@@ -259,7 +253,7 @@ export const useAgenda = ({
     if (location === 'pending') return;
     handled.current = focusSeq;
     if (location === 'resolved') onOpenResolved?.(focusTarget);
-    else if (location === 'open' && inAgenda) update(() => ({ card: focusTarget, drawer: false }));
+    else if (location === 'open' && inAgenda) update(() => ({ card: focusTarget, drawer: false, plain: false }));
   }, [focusTarget, focusSeq, location, inAgenda, onOpenResolved, update]);
   const missing = agendaMode && focusTarget !== null && location === 'unknown' && !isNotice;
 
@@ -328,8 +322,8 @@ export const useAgenda = ({
         {...(repliesSlot === undefined ? {} : { repliesSlot })}
       />
       <AgendaReferenceChips
-        items={chipItems}
-        onRemove={id => update(current => ({ chips: current.chips.filter(chip => chip !== id) }))}
+        items={aboutItem === undefined ? NO_ITEMS : [aboutItem]}
+        onRemove={() => update(() => ({ plain: true }))}
       />
     </AgendaDeliveryContext.Provider>
   );
@@ -349,23 +343,14 @@ export const useAgenda = ({
           history={history}
           item={cardItem}
           key={cardItem.id}
-          onAct={(action, note) => act(cardItem, action, note)}
-          onClose={() => update(() => ({ card: null }))}
-          onReply={typed => {
-            addReply(cardItem);
-            keepTyped(scope, typed);
-            update(() => ({ card: null }));
-          }}
-          onSend={async text => {
-            if (send === undefined) throw new Error('This conversation cannot take a message from here.');
-            await send(withReferences(text, [cardItem.id]));
-          }}
+          onAct={action => act(cardItem, action, composerDraft(scope))}
+          onClose={() => update(() => ({ card: null, plain: false }))}
           position={{ index: at, total: agenda.length }}
           renderProse={proseText => <ChatProse copyable={copyWriter} text={proseText} />}
           swipeable={swipeable}
           {...(now === undefined ? {} : { now })}
-          {...(previous === undefined ? {} : { onPrevious: () => update(() => ({ card: previous.id })) })}
-          {...(next === undefined ? {} : { onNext: () => update(() => ({ card: next.id })) })}
+          {...(previous === undefined ? {} : { onPrevious: () => update(() => ({ card: previous.id, plain: false })) })}
+          {...(next === undefined ? {} : { onNext: () => update(() => ({ card: next.id, plain: false })) })}
           {...(client === undefined ? {} : { onProgress: stepTicker(client, connection, scope, cardItem.id) })}
         />
       </AgendaDeliveryContext.Provider>
@@ -411,7 +396,7 @@ export const useAgenda = ({
     hostsLive,
     side,
     dockButton,
-    references: () => chipsRef.current,
+    references: () => aboutRef.current,
     composer: { onSent },
   };
 };

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import type { AgendaMessagePart } from '@ferretry/protocol';
 import { AgendaItemHistory } from '../../../src/features/agenda/agenda-item-history.tsx';
 import type { HistoryEvent } from '../../../src/lib/agenda-history.ts';
-import { type Mounted, mount, must } from '../../support/dom.ts';
+import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 
 let view: Mounted | null = null;
 afterEach(async () => {
@@ -20,9 +20,12 @@ const part = (kind: AgendaMessagePart['kind'], text: string, note?: string): Age
     ...(note === undefined ? {} : { note }),
   }) as unknown as AgendaMessagePart;
 
-const draw = async (events: readonly HistoryEvent[]): Promise<HTMLElement> => {
+const draw = async (events: readonly HistoryEvent[], unfold = true): Promise<HTMLElement> => {
   view = await mount(<AgendaItemHistory events={events} ferret="Zoe" now={NOW} prose={text => <em>{text}</em>} />);
-  return must(view.container, 'the view');
+  const root = must(view.container, 'the view');
+  const toggle = root.querySelector<HTMLButtonElement>('[data-agenda-history-toggle]');
+  if (unfold && toggle !== null) await interact(() => toggle.click());
+  return root;
 };
 
 const rows = (root: HTMLElement): string[] =>
@@ -87,6 +90,37 @@ describe('the history of an item', () => {
     expect(reply?.querySelector('.fy-item-history__choice')).toBeNull();
     expect(reply?.textContent).toContain('one more thing');
     expect(dismissed?.querySelector('.fy-item-history__bubble')).toBeNull();
+  });
+
+  test('is folded: a count on the toggle and the owner’s latest message in view, nothing drawn twice', async () => {
+    const root = await draw(
+      [
+        { kind: 'ferret', key: 'f1', at: NOW - 120_000, text: 'Looking.' },
+        { kind: 'owner-text', key: 'o1', at: NOW - 90_000, text: '!A47 first' },
+        { kind: 'ferret', key: 'f2', at: NOW - 60_000, text: 'Done.' },
+        { kind: 'owner', key: 'p1', at: NOW - 30_000, part: part('answer', 'SQLite') },
+      ],
+      false,
+    );
+    const toggle = must(root.querySelector<HTMLButtonElement>('[data-agenda-history-toggle]'), 'toggle');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.textContent).toContain('4');
+    const latest = must(root.querySelector('[data-agenda-history-latest]'), 'the latest owner message');
+    expect(latest.querySelectorAll('li')).toHaveLength(1);
+    expect(latest.textContent).toContain('SQLite');
+    expect(rows(root)).toEqual(['owner']);
+    await interact(() => toggle.click());
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(root.querySelector('[data-agenda-history-latest]')).toBeNull();
+    expect(rows(root)).toEqual(['ferret', 'owner', 'ferret', 'owner']);
+    await interact(() => toggle.click());
+    expect(rows(root)).toEqual(['owner']);
+  });
+
+  test('is folded to just the toggle when the owner has said nothing', async () => {
+    const root = await draw([{ kind: 'ferret', key: 'f1', at: NOW - 120_000, text: 'Looking.' }], false);
+    expect(root.querySelector('[data-agenda-history-latest]')).toBeNull();
+    expect(rows(root)).toEqual([]);
   });
 
   test('leaves the time off an event with no known time', async () => {

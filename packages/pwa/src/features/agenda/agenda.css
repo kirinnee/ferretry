@@ -133,16 +133,13 @@
   }
 }
 
-/* ---- the item in focus: a full-height overlay over the chat column ---------------------------------------- */
-/* The overlay is the chat column's own box (`position: absolute; inset: 0` inside `.kt-chat-surface`): the
-   messages, the composer and the agenda row all sit underneath it, inert, so nothing of the chat shows or takes
-   focus. Top and bar are flex items OUTSIDE the one scroller, so scrolling the body moves neither. */
-.kt-chat-surface[data-agenda-focus] {
-  position: relative;
-}
+/* ---- the item in focus: an overlay over the MESSAGE LIST only -------------------------------------------- */
+/* The overlay takes the message list's own grid cell (`.fy-chat-log`, `grid-area: 1 / 1`), above the scrim: the
+   transcript underneath is inert, while the agenda row and the REAL composer below stay put and typeable. Top and
+   quick replies are flex items OUTSIDE the one scroller, so scrolling the body moves neither. */
 .fy-item-view {
-  position: absolute;
-  inset: 0;
+  position: relative;
+  grid-area: 1 / 1;
   z-index: 40;
   display: flex;
   min-width: 0;
@@ -229,8 +226,8 @@
   line-height: var(--leading-base);
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
 }
 .fy-item-view__body {
   min-height: 0;
@@ -261,35 +258,48 @@
   }
 }
 
-/* ---- the action bar: the composer's place while an item is open -------------------------------------------- */
-.fy-item-bar {
+/* ---- the quick replies: directly above the real composer ------------------------------------------------- */
+.fy-qr {
   position: relative;
   display: flex;
   flex-shrink: 0;
   flex-direction: column;
-  gap: var(--gap-sm);
-  padding: var(--gap-sm) max(var(--gap-md), env(safe-area-inset-right, 0px)) 0
+  gap: var(--gap-xs);
+  padding: var(--gap-sm) max(var(--gap-md), env(safe-area-inset-right, 0px)) var(--gap-sm)
     max(var(--gap-md), env(safe-area-inset-left, 0px));
   border-top: var(--stroke) solid var(--divider-color);
   background: var(--surface);
-  --own-pad-bottom: var(--gap-sm);
 }
-.fy-item-bar__answers {
+.fy-qr[data-swipeable] {
+  touch-action: pan-y;
+}
+.fy-qr__row {
   display: flex;
   width: 100%;
   min-width: 0;
   max-width: var(--chat-column, 720px);
-  flex-direction: column;
+  flex-wrap: wrap;
+  align-items: center;
   gap: var(--gap-xs);
-  margin-inline: auto;
+  margin: 0 auto;
+  border: 0;
+  padding: 0;
 }
-.fy-item-bar__answers[data-swipeable] {
-  touch-action: pan-y;
+.fy-qr__chip {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 36px;
+  max-width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gap-xs);
 }
-.fy-item-bar__answers[data-swipeable] .fy-attn-answers {
-  touch-action: none;
+.fy-qr__label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: left;
 }
-.fy-item-bar__stamp {
+.fy-qr__stamp {
   position: absolute;
   inset: auto 0 100%;
   z-index: 1;
@@ -303,84 +313,68 @@
   font-weight: var(--weight-strong);
   pointer-events: none;
 }
-.fy-item-bar__stamp[data-committed] {
+.fy-qr__stamp[data-committed] {
   background: var(--accent);
   color: var(--accent-fg, var(--bg));
 }
-.fy-item-bar__error {
-  color: var(--err);
-  font-size: var(--text-sm);
-}
-.fy-item-bar .fy-attn-answers > .fy-attn-answer {
-  min-height: 44px;
-}
-.fy-item-bar__reply {
-  min-width: 44px;
-  min-height: 44px;
-  justify-content: center;
-  gap: var(--gap-xs);
-  color: var(--muted);
-}
-.fy-item-bar__field {
-  display: flex;
+.fy-qr__error,
+.fy-qr__note {
   width: 100%;
   max-width: var(--chat-column, 720px);
-  align-items: flex-end;
-  gap: var(--gap-xs);
   margin-inline: auto;
+  font-size: var(--text-sm);
 }
-.fy-item-bar__input {
-  min-width: 0;
-  min-height: 44px;
-  max-height: 8rem;
-  flex: 1 1 auto;
-  resize: none;
-  padding: 10px var(--gap-sm);
-  border: var(--stroke) solid var(--divider-color);
-  border-radius: var(--radius-control);
-  background: var(--bg);
-  color: var(--fg);
-  font: inherit;
-  font-size: max(16px, var(--text-base));
+.fy-qr__error {
+  color: var(--err);
+}
+.fy-qr__note {
+  color: var(--muted);
+}
+
+/* ---- inside the view: quieter section labels, compact option chips ---------------------------------------- */
+.fy-item-view .fy-attn-sec__heading {
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-strong);
   line-height: var(--leading-base);
 }
-.fy-item-bar__input:focus-visible {
-  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
-  outline-offset: -2px;
+.fy-item-view .fy-attn-secs[data-layout='open'] {
+  gap: var(--gap-md);
 }
-.fy-item-bar__send {
-  display: inline-flex;
-  min-width: 44px;
-  min-height: 44px;
-  flex-shrink: 0;
+.fy-item-view .fy-attn-sec--open + .fy-attn-sec--open {
+  margin-top: 0;
+}
+.fy-item-view .fy-attn-q {
+  gap: var(--gap-md);
+}
+.fy-item-view .fy-attn-q__picker {
+  gap: var(--gap-sm);
+}
+.fy-item-view .fy-attn-q__options {
+  display: flex;
+  flex-wrap: wrap;
+}
+.fy-item-view .fy-attn-q__option {
+  width: auto;
+  min-height: 36px;
+  max-width: 100%;
+  flex: 0 1 auto;
   align-items: center;
-  justify-content: center;
-  border: var(--stroke) solid var(--accent);
-  border-radius: var(--radius-control);
-  background: var(--accent);
-  color: var(--accent-fg, var(--bg));
-  cursor: pointer;
-}
-.fy-item-bar__send:disabled {
+  padding: 4px var(--gap-md);
   border-color: var(--divider-color);
-  background: var(--surface-2);
+  background: var(--surface);
+}
+.fy-item-view .fy-attn-q__option:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.fy-item-view .fy-attn-q__option[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.fy-attn-options__why {
   color: var(--muted);
-  cursor: default;
-}
-.fy-item-bar__send:focus-visible {
-  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
-  outline-offset: 2px;
-}
-@media (min-width: 768px) {
-  .fy-item-bar__reply,
-  .fy-item-bar__send {
-    min-width: 36px;
-    min-height: 36px;
-  }
-  .fy-item-bar__input {
-    min-height: 36px;
-    padding-block: 6px;
-  }
+  font-size: var(--text-sm);
 }
 
 /* ---- the history at the foot of the body ------------------------------------------------------------------ */
@@ -393,9 +387,29 @@
 }
 .fy-item-history__title {
   margin: 0;
-  color: var(--fg);
+  color: var(--muted);
   font-size: var(--text-sm);
   font-weight: var(--weight-strong);
+}
+.fy-item-history__toggle {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  gap: var(--gap-xs);
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.fy-item-history__toggle:focus-visible {
+  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
+  outline-offset: 2px;
+}
+.fy-item-history__count {
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
 }
 .fy-item-history__list {
   display: flex;

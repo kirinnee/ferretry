@@ -234,6 +234,57 @@ const A5_LONG = {
   })),
 } as AgendaItem;
 
+// A MULTI-QUESTION ITEM, as a ferret really wrote it: three questions with no options, its picks in the context.
+const JAEDA_QUESTIONS = [
+  {
+    question:
+      "A. Workspace's .dockerignore has '!README.md' meant to put README.md into Docker images, but the next line '*.md' cancels it, so README is never included. Delete the useless line, or make README go into images?",
+  },
+  {
+    question:
+      'B. The merge tool rebuilds nix/yaml lists from scratch, so comments written inside those lists disappear in generated projects. Accept that, moving important notes above the lists?',
+  },
+  {
+    question:
+      "C. Finalize: each template ships only the files it changed; the final check compares meaning, not exact spacing; and the merge tool's 6 formatting/sorting bugs get reported and fixed in your resolver repos? (yes to all, or which not)",
+  },
+];
+const A47 = item('A47', 6, {
+  title: '3 calls left for the nix fix',
+  subject: "Three calls left. Reply 'all your picks' or change any.",
+  why: 'The review is otherwise done; these three are the only open threads.',
+  ask: { kind: 'open-question' },
+  questions: JAEDA_QUESTIONS,
+  context: 'My picks: A delete the line · B accept · C yes to all',
+} as Partial<AgendaItem>);
+
+// …and the same item written the structured way: options on each question and a recommended pick.
+const A48 = item('A48', 5, {
+  title: 'Three leftovers, with choices',
+  subject: 'Three leftovers from the review of the relay change — pick one answer for each',
+  why: 'The review is otherwise done; these three are the only open threads.',
+  ask: { kind: 'open-question' },
+  questions: [
+    {
+      question: 'The duplicate `retry` line in relay.ts?',
+      options: [{ label: 'Delete the line' }, { label: 'Keep it' }],
+      recommended: 'Delete the line',
+      why: 'Nothing reads it; the other retry covers the same case',
+    },
+    {
+      question: "The reviewer's rename of `carrier` to `route`?",
+      options: [{ label: 'Accept' }, { label: 'Decline' }],
+      recommended: 'Accept',
+    },
+    {
+      question: 'The same cleanup in the other two relay files?',
+      options: [{ label: 'Yes to all' }, { label: 'Only this file' }],
+      recommended: 'Yes to all',
+      why: 'Same pattern, same risk',
+    },
+  ],
+} as Partial<AgendaItem>);
+
 const owner = (id: string, at: number, text: string) => ({ id, kind: 'user', text, at: NOW - at * 60_000 });
 const ferretSays = (id: string, at: number, text: string) => ({ id, kind: 'assistant', text, at: NOW - at * 60_000 });
 const HISTORY_ENTRIES = [
@@ -250,8 +301,9 @@ const withHistory = params.get('history') === '1';
 const long = params.get('long') === '1';
 const fakeKeyboard = params.get('kb') === '1';
 const configChange = params.get('config') === '1';
+const jaeda = params.get('jaeda') === '1';
 
-const items = AGENDA.map(entry =>
+const items = [...AGENDA, ...(jaeda ? [A47, A48] : [])].map(entry =>
   entry.id === 'A5'
     ? long
       ? A5_LONG

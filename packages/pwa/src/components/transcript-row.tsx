@@ -4,7 +4,7 @@ import { handedOverDraft, isOwnSend, ledgerPlacementCopy } from '../lib/ledger-p
 import { clockOfInstant } from '../lib/message-clock.ts';
 import type { LedgerSendRecord } from '../lib/send-ledger.ts';
 import type { AgentRunMark, TranscriptEntry } from '../lib/session-screens.ts';
-import { AgendaMessageOr } from './agenda-message.tsx';
+import { AgendaMessageOr, useAgendaChatReply } from './agenda-message.tsx';
 import { HandoffNoticeRow, PeerMessageRow, SystemNoticeRow } from './agent-message-rows.tsx';
 import { ChatProse } from './chat-prose.tsx';
 import { CommandRow } from './command-row.tsx';
@@ -222,7 +222,7 @@ function OwnSendRow({
               source={source}
             />
           ) : (
-            <OwnWords text={travelling ? record.message : entry.text} />
+            <OwnWords onItsWay={travelling} text={travelling ? record.message : entry.text} />
           )}
           {boundary === undefined ? null : (
             <span className="sr-only" data-ledger-boundary>
@@ -346,8 +346,11 @@ function OwnMessageRow({
  * The reader's own words, literal — or, when the daemon worded them about agenda items (an answer from a card, a
  * reply naming `!A45`), the compact agenda card that reads them (`agenda-message.tsx`).
  */
-function OwnWords({ text }: { readonly text: string }) {
-  return <AgendaMessageOr fallback={<p>{text}</p>} text={text} />;
+function OwnWords({ text, onItsWay = false }: { readonly text: string; readonly onItsWay?: boolean }) {
+  // Still on its way: worded as the ferret will receive it, so a reply about an open item (`!A5 …`) shows as its
+  // agenda card at once. One component either way, so the bubble stays ONE element from sent to answered.
+  const worded = useAgendaChatReply(text);
+  return <AgendaMessageOr fallback={<p>{text}</p>} text={onItsWay ? worded : text} />;
 }
 
 function TranscriptTextRow({
