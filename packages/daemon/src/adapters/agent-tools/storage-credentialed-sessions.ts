@@ -1,7 +1,7 @@
 import { SessionConfigSchema, SessionStateSchema } from '@ferretry/protocol';
 import { z } from 'zod';
 import type { CredentialedSession } from '../../lib/agent-tools/policy.ts';
-import { readTaskBoardFleet } from '../../lib/tasks/fleet-read.ts';
+import { readSessionFleet } from '../../lib/agent-tools/fleet-read.ts';
 import { isTerminalStatus, type WardenSessionStatus } from '../../lib/warden/types.ts';
 
 /**
@@ -34,14 +34,14 @@ export interface CredentialedSessionSource {
  * warden's own answer to "has this status been left for good", and a session whose state document
  * cannot be read is not assumed live — "I cannot tell" answers no.
  *
- * The walk goes through {@link readTaskBoardFleet}, which limits SESSIONS in flight; this adapter
+ * The walk goes through {@link readSessionFleet}, which limits SESSIONS in flight; this adapter
  * starts TWO document reads per session, so the peak is 64 sessions and 128 open documents.
  */
 export class StorageCredentialedSessions {
   constructor(private readonly source: CredentialedSessionSource) {}
 
   async snapshot(): Promise<readonly CredentialedSession[]> {
-    const sessions = await readTaskBoardFleet(this.source.sessionIds(), async id => await this.session(id));
+    const sessions = await readSessionFleet(this.source.sessionIds(), async id => await this.session(id));
     return sessions.filter((session): session is CredentialedSession => session !== undefined);
   }
 

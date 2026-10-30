@@ -8,12 +8,6 @@ import type {
   BoardTaskActionRequestInput,
   BoardTaskCreateRequestInput,
   BoardTaskResponse,
-  FleetTaskListResponse,
-  ScopedTaskDetailResponse,
-  ScopedTaskView,
-  SessionTaskListResponse,
-  TaskActionRequest,
-  TaskId,
 } from '@ferretry/protocol';
 import { Command } from 'commander';
 import should from 'should';
@@ -21,10 +15,8 @@ import { registerBoardCommands } from '../../../src/adapters/board/board-command
 import { registerTaskCommands } from '../../../src/adapters/tasks/task-commands';
 import { BoardController } from '../../../src/lib/board/board-controllers';
 import type { IBoardGateway, SessionDirectoryEntry } from '../../../src/lib/board/ports';
-import type { ITaskGateway, ITaskOutput, ITextFileReader } from '../../../src/lib/tasks/ports';
-import type { TaskScope } from '../../../src/lib/tasks/task-scope';
+import type { ITextFileReader } from '../../../src/lib/tasks/ports';
 import { boardResponse, FERRETRY_ID, listing, taskResponse } from '../board/fixtures';
-import { taskSummary, taskView } from './fake-daemon';
 
 class FakeBoardGateway implements IBoardGateway {
   queried: BoardQueryInput | undefined;
@@ -71,34 +63,7 @@ class FakeBoardGateway implements IBoardGateway {
   }
 }
 
-class LegacyGateway implements ITaskGateway {
-  listedScope: TaskScope | undefined;
-
-  create(): Promise<ScopedTaskView> {
-    throw new Error('the legacy gateway is only read by `list --legacy`');
-  }
-
-  list(scope: TaskScope): Promise<SessionTaskListResponse | FleetTaskListResponse> {
-    this.listedScope = scope;
-    return Promise.resolve({
-      v: 1,
-      sessionId: 'session-7',
-      tasks: [{ ...taskSummary('F1'), sessionId: 'session-7' }],
-      parseErrors: 0,
-      updatedAt: '2026-01-02T00:00:00.000Z',
-    });
-  }
-
-  show(sessionId: string, id: TaskId): Promise<ScopedTaskDetailResponse> {
-    return Promise.resolve({ sessionId, task: { ...taskView(id), sessionId }, activity: [] });
-  }
-
-  act(_sessionId: string, _id: TaskId, _request: TaskActionRequest): Promise<ScopedTaskView> {
-    throw new Error('the legacy gateway is only read by `list --legacy`');
-  }
-}
-
-class CapturedOutput implements ITaskOutput {
+class CapturedOutput {
   readonly lines: string[] = [];
   readonly notices: string[] = [];
 
@@ -124,23 +89,20 @@ class StubFiles implements ITextFileReader {
 interface Harness {
   readonly run: (...argv: string[]) => Promise<void>;
   readonly gateway: FakeBoardGateway;
-  readonly legacy: LegacyGateway;
   readonly output: CapturedOutput;
 }
 
 /** Builds the command groups exactly as the composition root does, over test doubles. */
 function harness(environmentSessionId: string | undefined = 'session-7'): Harness {
   const gateway = new FakeBoardGateway();
-  const legacy = new LegacyGateway();
   const output = new CapturedOutput();
   const board = new BoardController({ gateway, output, files: new StubFiles(), binary: 'fy', environmentSessionId });
   const program = new Command().name('fy').exitOverride();
   program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
-  registerTaskCommands(program, { board, legacyGateway: legacy, io: output, environmentSessionId });
+  registerTaskCommands(program, { board });
   registerBoardCommands(program, board);
   return {
     gateway,
-    legacy,
     output,
     run: async (...argv: string[]) => void (await program.parseAsync(['node', 'fy', ...argv])),
   };
@@ -306,18 +268,6 @@ describe('the transition shims', () => {
     // Assert
     should(output.notices.join('\n')).containEql('fy board --mine');
     should(gateway.queried).have.property('ferret', 'session-7');
-  });
-
-  it('should keep the old routes behind --legacy', async () => {
-    // Arrange
-    const { run, legacy, gateway } = harness();
-
-    // Act
-    await run('task', 'list', '--legacy');
-
-    // Assert
-    should(legacy.listedScope).not.equal(undefined);
-    should(gateway.queried).equal(undefined);
   });
 });
 

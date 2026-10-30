@@ -16,7 +16,7 @@ import { type ApiResponse, decodeParameter } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import { describeLaneSetFailure, type LaneActor, type LaneSetFailure } from '../../board-projects/index.ts';
-import { TaskStateUnavailableError } from '../../tasks/task-error.ts';
+import { LaneSetUnavailableError } from '../../board-projects/errors.ts';
 import type { SessionDirectorySubsystem } from './sessions.ts';
 
 /** The board's projects and their lanes, as the routes need them. */
@@ -92,7 +92,7 @@ async function guarded(work: () => Promise<ApiResponse>): Promise<ApiResponse> {
   try {
     return await work();
   } catch (error) {
-    if (error instanceof TaskStateUnavailableError) throw new ApiError(503, error.message, error.code);
+    if (error instanceof LaneSetUnavailableError) throw new ApiError(503, error.message, error.code);
     throw error;
   }
 }

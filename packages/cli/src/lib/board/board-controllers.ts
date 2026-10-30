@@ -416,7 +416,7 @@ export class BoardController {
   async listShim(options: TaskListShimFlags): Promise<void> {
     const mine = options.all !== true;
     this.deps.output.diagnostic(
-      `\`${this.deps.binary} task list\` is now \`${this.deps.binary} board ${mine ? '--mine' : '--project all'}\`; the old per-session list stays behind \`--legacy\` until it is removed`,
+      `\`${this.deps.binary} task list\` is now \`${this.deps.binary} board ${mine ? '--mine' : '--project all'}\``,
     );
     await this.board({
       ...options,

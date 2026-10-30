@@ -1,4 +1,4 @@
-import { type TaskAssigneeCandidate, exactWorkerAssignee } from '../../lib/tasks/index.ts';
+import { type TaskAssigneeCandidate, exactWorkerAssignee } from '../../lib/board-import/index.ts';
 import type { ImportSessions } from '../../lib/board-import/index.ts';
 
 /** The sessions the daemon holds, and which string names one, by the same rule the task board uses. */

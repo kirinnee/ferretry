@@ -1,6 +1,6 @@
 import type { BoardActor, BoardProjectId, BoardTask, BoardTaskId, LaneSet } from '@ferretry/protocol';
 import type { BoardStore } from '../board/ports.ts';
-import type { TaskEntry } from '../tasks/task-snapshot.ts';
+import type { TaskEntry } from './legacy-snapshot.ts';
 import {
   buildCard,
   isUntriagedCard,

@@ -105,8 +105,6 @@ export interface SessionForkDecisionIdentity {
  * already on disk would then read as a mismatch against the very plan it was written from, and the
  * replay would refuse a fork that has nothing wrong with it. `<` and `>` on strings are defined by
  * code unit and consult no locale, so the spelling is a property of the value alone.
- *
- * `src/lib/tasks/task-order.ts` records the same lesson from the ordering kteam shipped.
  */
 function byCodeUnit(left: string, right: string): number {
   if (left < right) return -1;

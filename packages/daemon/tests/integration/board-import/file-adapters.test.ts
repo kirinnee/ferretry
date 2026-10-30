@@ -4,9 +4,8 @@ import { join } from 'node:path';
 import should from 'should';
 import { FileBoardImportMarker, FileLegacyTaskSource } from '../../../src/adapters/board-import/index.ts';
 import { GitProjectFacts } from '../../../src/adapters/board-projects/git-project-facts.ts';
-import { serializeTaskSnapshot } from '../../../src/lib/tasks/task-snapshot.ts';
-import { withTempRoot } from '../tasks/fixtures.ts';
-import { snapshotOf, task } from '../../unit/tasks/fixtures.ts';
+import { withTempRoot } from '../atomic-file/fixtures.ts';
+import { serializeLegacySnapshot, snapshotOf, task } from '../../unit/board-import/legacy-fixtures.ts';
 
 const SUMMARY = {
   dryRun: false,
@@ -70,8 +69,8 @@ describe('FileLegacyTaskSource', () => {
     await withTempRoot(async root => {
       await mkdir(join(root, 'a'));
       await mkdir(join(root, 'empty'));
-      await writeFile(join(root, 'a', 'tasks.json'), serializeTaskSnapshot(snapshotOf(task())));
-      await writeFile(join(root, 'empty', 'tasks.json'), serializeTaskSnapshot(snapshotOf()));
+      await writeFile(join(root, 'a', 'tasks.json'), serializeLegacySnapshot(snapshotOf(task())));
+      await writeFile(join(root, 'empty', 'tasks.json'), serializeLegacySnapshot(snapshotOf()));
       const found = await source(root, ['a', 'empty', 'missing']).read();
       should(found.map(file => file.sessionId)).eql(['a']);
       should(found[0]?.entries).length(1);
@@ -102,7 +101,7 @@ describe('FileLegacyTaskSource', () => {
   it('should leave the old file exactly as it was', async () => {
     await withTempRoot(async root => {
       await mkdir(join(root, 'a'));
-      const text = serializeTaskSnapshot(snapshotOf(task()));
+      const text = serializeLegacySnapshot(snapshotOf(task()));
       await writeFile(join(root, 'a', 'tasks.json'), text);
       await source(root, ['a']).read();
       should(await readFile(join(root, 'a', 'tasks.json'), 'utf8')).equal(text);

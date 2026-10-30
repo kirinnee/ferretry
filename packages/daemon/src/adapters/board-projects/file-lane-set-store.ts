@@ -1,9 +1,9 @@
 import { join } from 'node:path';
 import { type BoardProjectId, type LaneSet, LaneSetSchema } from '@ferretry/protocol';
 import type { LaneSetMutation, LaneSetStore } from '../../lib/board-projects/index.ts';
-import { TaskStateUnavailableError } from '../../lib/tasks/task-error.ts';
-import { AtomicFileWriter } from '../tasks/atomic-file.ts';
-import { KeyedSerialExecutor, type SerialExecutor } from '../tasks/serial-executor.ts';
+import { LaneSetUnavailableError } from '../../lib/board-projects/errors.ts';
+import { AtomicFileWriter } from '../atomic-file/atomic-file.ts';
+import { KeyedSerialExecutor, type SerialExecutor } from '../atomic-file/serial-executor.ts';
 
 /**
  * One JSON document per project at `<directory>/<projectId>.json`. A project id is a UUID or `unfiled`,
@@ -41,11 +41,11 @@ export class FileLaneSetStore implements LaneSetStore {
     try {
       value = JSON.parse(text);
     } catch {
-      throw new TaskStateUnavailableError(`refusing to use a damaged lane set at ${path}: not JSON`);
+      throw new LaneSetUnavailableError(`refusing to use a damaged lane set at ${path}: not JSON`);
     }
     const parsed = LaneSetSchema.safeParse(value);
     if (!parsed.success) {
-      throw new TaskStateUnavailableError(`refusing to use a damaged lane set at ${path}: ${parsed.error.message}`);
+      throw new LaneSetUnavailableError(`refusing to use a damaged lane set at ${path}: ${parsed.error.message}`);
     }
     return parsed.data;
   }

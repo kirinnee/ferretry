@@ -1,0 +1,132 @@
+import { TaskActivitySchema, TaskSchema, type Task, type TaskActivity } from '@ferretry/protocol';
+
+/** The old outer container reused the task-record version, so v1 remains a read-only migration input. */
+const LEGACY_TASK_SNAPSHOT_SCHEMA_VERSION = 1 as const;
+
+/**
+ * The outer task-file container version.
+ *
+ * It is deliberately distinct from the public task-record version. Once a current daemon has
+ * persisted the actor/authority receipt, an older v1 daemon must refuse this container before it
+ * can parse-and-rewrite away fields it does not know.
+ */
+export const TASK_SNAPSHOT_SCHEMA_VERSION = 2 as const;
+
+/** One task snapshot and the complete activity history that belongs to it. */
+export interface TaskEntry {
+  readonly task: Task;
+  readonly activity: readonly TaskActivity[];
+}
+
+/** Pure task content embedded in whichever authoritative board container owns it. */
+export interface TaskSnapshot {
+  readonly v: typeof TASK_SNAPSHOT_SCHEMA_VERSION;
+  readonly tasks: readonly TaskEntry[];
+}
+
+export interface TaskParseIssue {
+  readonly scope: 'snapshot' | 'task' | 'activity';
+  readonly taskId: string | null;
+  readonly detail: string;
+}
+
+export interface DecodedTaskSnapshot {
+  readonly snapshot: TaskSnapshot;
+  readonly parseErrors: readonly TaskParseIssue[];
+  readonly fatal: boolean;
+}
+
+const issue = (scope: TaskParseIssue['scope'], taskId: string | null, detail: string): TaskParseIssue => ({
+  scope,
+  taskId,
+  detail,
+});
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const hintedTaskId = (value: unknown): string | null => {
+  if (!isRecord(value) || !isRecord(value['task'])) return null;
+  const id = value['task']['id'];
+  return typeof id === 'string' && id.length > 0 && id.length <= 32 ? id : null;
+};
+
+const emptyTaskSnapshot = (): TaskSnapshot => ({ v: TASK_SNAPSHOT_SCHEMA_VERSION, tasks: [] });
+
+const fatalSnapshot = (detail: string): DecodedTaskSnapshot => ({
+  snapshot: emptyTaskSnapshot(),
+  parseErrors: [issue('snapshot', null, detail)],
+  fatal: true,
+});
+
+const decodeActivity = (value: unknown, taskId: string, parseErrors: TaskParseIssue[]): readonly TaskActivity[] => {
+  if (!Array.isArray(value)) {
+    parseErrors.push(issue('activity', taskId, 'activity is not an array'));
+    return [];
+  }
+  const activity: TaskActivity[] = [];
+  let expectedSequence = 1;
+  for (const candidate of value) {
+    const parsed = TaskActivitySchema.safeParse(candidate);
+    if (!parsed.success) {
+      parseErrors.push(issue('activity', taskId, `activity seq ${expectedSequence} is malformed`));
+      continue;
+    }
+    if (parsed.data.seq !== expectedSequence) {
+      parseErrors.push(
+        issue(
+          'activity',
+          taskId,
+          `activity seq ${parsed.data.seq} is not the expected gap-free seq ${expectedSequence}`,
+        ),
+      );
+      continue;
+    }
+    activity.push(parsed.data);
+    expectedSequence += 1;
+  }
+  return activity;
+};
+
+/** Defensively decodes pure task content without knowing where its enclosing board is stored. */
+export const decodeTaskSnapshot = (value: unknown): DecodedTaskSnapshot => {
+  if (!isRecord(value)) return fatalSnapshot('task snapshot is not an object');
+  if (value['v'] !== LEGACY_TASK_SNAPSHOT_SCHEMA_VERSION && value['v'] !== TASK_SNAPSHOT_SCHEMA_VERSION) {
+    return fatalSnapshot('task snapshot schema version is unknown');
+  }
+  if (!Array.isArray(value['tasks'])) return fatalSnapshot('task snapshot has no task list');
+
+  const tasks: TaskEntry[] = [];
+  const parseErrors: TaskParseIssue[] = [];
+  const seen = new Set<string>();
+  for (const candidate of value['tasks']) {
+    const parsedTask = isRecord(candidate) ? TaskSchema.safeParse(candidate['task']) : null;
+    if (parsedTask === null || !parsedTask.success) {
+      parseErrors.push(issue('task', hintedTaskId(candidate), 'malformed task record'));
+      continue;
+    }
+    if (seen.has(parsedTask.data.id)) {
+      parseErrors.push(issue('task', parsedTask.data.id, 'duplicate task id in snapshot'));
+      continue;
+    }
+    seen.add(parsedTask.data.id);
+    const activity = decodeActivity(
+      isRecord(candidate) ? candidate['activity'] : undefined,
+      parsedTask.data.id,
+      parseErrors,
+    );
+    tasks.push({ task: parsedTask.data, activity });
+  }
+  // Reading v1 is intentionally a one-way migration. The next whole-snapshot write carries v2,
+  // which a rollback to the old reader refuses instead of silently stripping new provenance.
+  return { snapshot: { v: TASK_SNAPSHOT_SCHEMA_VERSION, tasks }, parseErrors, fatal: false };
+};
+
+/** Parses JSON only; board placement, path selection, and missing-file policy remain outside core. */
+export const parseTaskSnapshot = (rawText: string): DecodedTaskSnapshot => {
+  try {
+    return decodeTaskSnapshot(JSON.parse(rawText));
+  } catch {
+    return fatalSnapshot('task snapshot is not valid JSON');
+  }
+};

@@ -845,6 +845,35 @@ describe('server-decided membership and honest coverage', () => {
     }
   });
 
+  test('renders the daemon compatibility stub as an ordinary empty task half, with no error', async () => {
+    // The literal body the daemon's deprecated `GET /v1/sessions/:sessionId/tasks` answers now that the
+    // per-session store is gone: an empty list in the exact v1 shape an older bundle also parses.
+    const stub = { v: 1, sessionId: 'session-a', tasks: [], parseErrors: 0, updatedAt: '2026-08-06T00:00:00.000Z' };
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith('/fs/index')) return Response.json(fileIndexResponse({ files: [] }));
+      if (url.pathname.endsWith('/tasks')) return Response.json(stub);
+      return new Response('not found', { status: 404 });
+    }) as typeof fetch;
+    const view = render(
+      <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
+        <SessionSearchControl />
+      </SessionSearchProvider>,
+    );
+    try {
+      await settle();
+      run(() => view.root.findByType('input').props.onChange({ target: { value: 'needle' } }));
+      await afterQuerySettles();
+
+      const drawn = JSON.stringify(view.toJSON());
+      expect(drawn).toContain('No current-session files or tasks match');
+      expect(drawn).not.toContain('unavailable');
+      expect(view.root.findAll(node => node.props.role === 'alert')).toHaveLength(0);
+    } finally {
+      run(() => view.unmount());
+    }
+  });
+
   test('still makes an unqualified no-match claim when the index really is complete', async () => {
     const { view } = await mountControl({ tasks: [], index: fileIndexResponse({ files: [] }) });
     try {

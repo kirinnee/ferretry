@@ -4,8 +4,8 @@ import { join } from 'node:path';
 import { LANE_TEMPLATES, type LaneSet } from '@ferretry/protocol';
 import should from 'should';
 import { FileLaneSetStore } from '../../../src/adapters/board-projects/file-lane-set-store.ts';
-import { TaskStateUnavailableError } from '../../../src/lib/tasks/task-error.ts';
-import { withTempRoot } from '../tasks/fixtures.ts';
+import { LaneSetUnavailableError } from '../../../src/lib/board-projects/errors.ts';
+import { withTempRoot } from '../atomic-file/fixtures.ts';
 
 const PROJECT = '0b1f6d1e-6c1b-4f0c-8f4e-2f6f2a3c9a10' as LaneSet['projectId'];
 
@@ -68,13 +68,13 @@ describe('the lane-set store', () => {
       const store = new FileLaneSetStore(directory);
       await store.read(PROJECT).then(
         () => should.fail('expected a refusal', 'a refusal'),
-        (error: unknown) => should(error).be.instanceof(TaskStateUnavailableError),
+        (error: unknown) => should(error).be.instanceof(LaneSetUnavailableError),
       );
       await store
         .transact(PROJECT, () => ({ next: proposal(1), result: undefined }))
         .then(
           () => should.fail('expected a refusal', 'a refusal'),
-          (error: unknown) => should(error).be.instanceof(TaskStateUnavailableError),
+          (error: unknown) => should(error).be.instanceof(LaneSetUnavailableError),
         );
       should(await readFile(join(directory, `${PROJECT}.json`), 'utf8')).equal('{ not json');
     });
@@ -87,7 +87,7 @@ describe('the lane-set store', () => {
       await writeFile(join(directory, `${PROJECT}.json`), JSON.stringify({ projectId: PROJECT, version: 0 }));
       await new FileLaneSetStore(directory).read(PROJECT).then(
         () => should.fail('expected a refusal', 'a refusal'),
-        (error: unknown) => should(error).be.instanceof(TaskStateUnavailableError),
+        (error: unknown) => should(error).be.instanceof(LaneSetUnavailableError),
       );
     });
   });

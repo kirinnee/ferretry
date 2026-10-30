@@ -3,7 +3,7 @@ import { chmod, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import should from 'should';
 import { GH_TIMEOUT_MS, GhCliRunner } from '../../../src/adapters/board-github/gh-cli-runner.ts';
-import { withTempRoot } from '../tasks/fixtures.ts';
+import { withTempRoot } from '../atomic-file/fixtures.ts';
 
 /** A stand-in `gh`: a shell script, so nothing here reaches GitHub. */
 const fakeGh = async (root: string, body: string): Promise<string> => {

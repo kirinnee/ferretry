@@ -30,8 +30,6 @@ import {
   type StartSessionRequest,
   type SttEnhancementResult,
   type SurfaceOpener,
-  type TaskActionRequest,
-  type TaskCreateRequestInput,
   TERMINAL_MAX_GLOBAL,
   TERMINAL_MAX_PER_SESSION,
   type TerminalListView,
@@ -129,7 +127,6 @@ import { SessionSignalError, type SessionSignalSubsystem } from '../../../../src
 import { type SessionDirectorySubsystem, SessionReadError } from '../../../../src/lib/runtime/mounts/sessions.ts';
 import type { SpeedupsSubsystem } from '../../../../src/lib/runtime/mounts/speedups.ts';
 import type { SttEnhancementSubsystem } from '../../../../src/lib/runtime/mounts/stt.ts';
-import type { AssigneeObservation, TaskBoardPort, TaskSubsystem } from '../../../../src/lib/runtime/mounts/tasks.ts';
 import { TerminalMountError, type TerminalSubsystem } from '../../../../src/lib/runtime/mounts/terminals.ts';
 import type { WardenError, WardenSubsystem } from '../../../../src/lib/runtime/mounts/warden.ts';
 import {
@@ -166,19 +163,6 @@ import type { StoredSessionEvent } from '../../../../src/lib/session/reads/index
 import type { ObservedTerminalPane, RegisteredTerminalPane } from '../../../../src/lib/session/reap.ts';
 import type { ResumeActor } from '../../../../src/lib/session/resume/index.ts';
 import { SttEnhancementError } from '../../../../src/lib/stt/errors.ts';
-import {
-  applyTaskAction,
-  assertActorCanWriteSession,
-  createTask,
-  emptyTaskSnapshot,
-  requireTaskEntry,
-  type TaskActor,
-  type TaskEntry,
-  TaskError,
-  type TaskParseIssue,
-  type TaskSnapshot,
-  TaskStateUnavailableError,
-} from '../../../../src/lib/tasks/index.ts';
 import {
   DEFAULT_TERMINAL_SIZE,
   nextTerminalTitle,
@@ -275,105 +259,6 @@ export function agendaService(repository: AgendaLedgerRepository = new FakeLedge
     { has: async sessionId => sessionId === 's1' },
     { raised: async () => undefined },
   );
-}
-
-/**
- * What the unreadable board refuses with — shaped like the real thing, an absolute path under the
- * operator's state home. Exported so a route test can prove this never reaches the wire.
- */
-export const BOARD_UNREADABLE_DETAIL = 'refusing to use a damaged task snapshot at /home/operator/.fy/s1/tasks.json';
-
-/**
- * An in-memory task board.
- *
- * The reducer, the ordering and the authorization rules are the REAL ones — only the JSON file is
- * replaced — so a route test that passes here is exercising the same domain the daemon runs. The
- * board mirrors `TaskRecordService`: the session is fixed at construction, and every mutation sees
- * the whole snapshot.
- */
-export class FakeTaskBoard implements TaskBoardPort {
-  constructor(
-    private readonly sessionId: string,
-    private snapshot: TaskSnapshot = emptyTaskSnapshot(),
-    private readonly parseErrors: readonly TaskParseIssue[] = [],
-    /**
-     * Set to make every read fail, standing in for a snapshot the decoder refused. It raises the
-     * SAME error the file store raises over a damaged snapshot — a persistence refusal, not a
-     * protocol one — so a route test cannot pass here on a classification the daemon never produces.
-     */
-    private readonly unreadable = false,
-  ) {}
-
-  async list(): Promise<{ readonly entries: readonly TaskEntry[]; readonly parseErrors: readonly TaskParseIssue[] }> {
-    if (this.unreadable) throw new TaskStateUnavailableError(BOARD_UNREADABLE_DETAIL);
-    return { entries: this.snapshot.tasks, parseErrors: this.parseErrors };
-  }
-
-  async detail(id: string): Promise<TaskEntry> {
-    return requireTaskEntry(this.snapshot, id);
-  }
-
-  async create(request: TaskCreateRequestInput, actor: TaskActor): Promise<TaskEntry> {
-    return this.mutate(actor, snapshot => createTask(snapshot, request, { actor, sessionId: this.sessionId, at: AT }));
-  }
-
-  async act(id: string, action: TaskActionRequest, actor: TaskActor): Promise<TaskEntry> {
-    return this.mutate(actor, snapshot =>
-      applyTaskAction(snapshot, id, action, { actor, sessionId: this.sessionId, at: AT }),
-    );
-  }
-
-  private mutate(
-    actor: TaskActor,
-    reduce: (snapshot: TaskSnapshot) => { snapshot: TaskSnapshot; entry: TaskEntry },
-  ): TaskEntry {
-    assertActorCanWriteSession(actor, this.sessionId);
-    const outcome = reduce(this.snapshot);
-    this.snapshot = outcome.snapshot;
-    return outcome.entry;
-  }
-}
-
-/** How a fixture describes the fleet its task subsystem serves. */
-export interface TaskWorld {
-  /** The boards that exist, by session id. A session absent from here has an empty board. */
-  readonly boards?: Readonly<Record<string, FakeTaskBoard>>;
-  readonly sessionIds?: readonly string[];
-  readonly observations?: Readonly<Record<string, AssigneeObservation>>;
-  /** Every batch of assignees the mount asked about, appended in order. Supply an array to observe
-   *  the mount's resolution behaviour; leave it out and the calls go unrecorded. */
-  readonly observed?: string[][];
-  /** Session ids the layout refuses, so the mount's bad-request path can be driven. */
-  readonly unusable?: readonly string[];
-}
-
-/** A task subsystem over in-memory boards, with a fixed instant so a body can be asserted exactly. */
-export function taskSubsystem(world: TaskWorld = {}): TaskSubsystem {
-  const boards = new Map(Object.entries(world.boards ?? {}));
-  return {
-    board: sessionId => {
-      if ((world.unusable ?? []).includes(sessionId))
-        throw new TaskError('invalid', `${JSON.stringify(sessionId)} is not a usable session id`);
-      const existing = boards.get(sessionId);
-      if (existing !== undefined) return existing;
-      const fresh = new FakeTaskBoard(sessionId);
-      boards.set(sessionId, fresh);
-      return fresh;
-    },
-    sessionIds: async () => world.sessionIds ?? [],
-    /** Records every batch it was asked for, so a test can assert the mount asks ONCE per response
-     *  for the distinct assignees rather than once per row. */
-    observe: async assignees => {
-      const known = world.observations ?? {};
-      (world.observed ?? []).push([...assignees]);
-      return new Map(
-        assignees
-          .map(assignee => [assignee, known[assignee]] as const)
-          .filter((pair): pair is readonly [string, AssigneeObservation] => pair[1] !== undefined),
-      );
-    },
-    now: () => AT,
-  };
 }
 
 /**

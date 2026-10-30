@@ -87,6 +87,22 @@ describe('readComposerReferenceCatalogs', () => {
     expect(catalogs.failures).toEqual({});
   });
 
+  test('proves nothing and fails nothing against the daemon compatibility stub', async () => {
+    // The literal body `GET /v1/sessions/:sessionId/tasks` still answers after the per-session task
+    // store was deleted (daemon mounts/legacy-tasks.ts): an empty list in the exact v1 shape.
+    const stub = { v: 1, sessionId: 'session-a', tasks: [], parseErrors: 0, updatedAt: '2026-08-06T00:00:00.000Z' };
+    const client = reader(path => {
+      if (path.endsWith('/tasks')) return stub;
+      if (path.endsWith('/attention')) return agendaListing();
+      return skillsListing;
+    });
+
+    const catalogs = await readComposerReferenceCatalogs(client, 'session-a', new AbortController().signal);
+
+    expect(catalogs.tasks).toEqual([]);
+    expect(catalogs.failures).toEqual({});
+  });
+
   test('keeps valid families when one route fails', async () => {
     const client = reader(path => {
       if (path.endsWith('/tasks')) return taskListing();

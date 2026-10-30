@@ -143,12 +143,14 @@
 # PR #5 — the task-board membership lifecycle: DELETED (U17), nothing to list.
 # The grant ACL (roles, invitations, child grants, `fy task-board`, `/v1/task-boards/*`) is gone.
 # Board authority is ownership + lineage (`packages/daemon/src/lib/board/authority.ts`).
-# `readTaskBoardFleet` and `exactWorkerAssignee` outlived it: they serve the v1 task reads, so they
-# live under `packages/daemon/src/lib/tasks/`.
+# `exactWorkerAssignee` outlived it and now lives with the importer in
+# `packages/daemon/src/lib/board-import/`; the bounded all-sessions read is
+# `packages/daemon/src/lib/agent-tools/fleet-read.ts`.
 
-# PR #10 — port the task record system and its file store: FULLY MOUNTED, nothing to list.
-# bin/fyd.ts builds a FileTaskStore-backed TaskRecordService per session and the task routes serve
-# it. `task-title.ts` was DELETED rather than wired: it duplicated packages/cli/src/lib/tasks/
+# PR #10 — port the task record system and its file store: DELETED (U18a), nothing to list.
+# The per-session store and its writes are gone; two deprecated empty list reads remain for older clients
+# (mounts/legacy-tasks.ts, removed after one release) and the importer only reads the old tasks.json.
+# `task-title.ts` was DELETED rather than wired: it duplicated packages/cli/src/lib/tasks/
 # task-title.ts, which the CLI already uses for its own --title guidance, and the API boundary
 # enforces the five-word rule through the protocol's TaskTitleSchema.
 

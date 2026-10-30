@@ -15,7 +15,7 @@ import should from 'should';
 import { ApiDispatcher, ApiRouter } from '../../../../src/lib/api/index.ts';
 import type { LaneActor, LaneSetFailure } from '../../../../src/lib/board-projects/index.ts';
 import { type BoardProjectsSubsystem, boardProjectRoutes } from '../../../../src/lib/runtime/mounts/board-projects.ts';
-import { TaskStateUnavailableError } from '../../../../src/lib/tasks/task-error.ts';
+import { LaneSetUnavailableError } from '../../../../src/lib/board-projects/errors.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { agentIn, CREDENTIALS, grantSubsystem, human, sessionDirectory, sessionView } from './support.ts';
 
@@ -175,7 +175,7 @@ describe('the board projects mount', () => {
 
   it('should answer 503 with the fixed message for a damaged lane document, on every route', async () => {
     const damaged = () => {
-      throw new TaskStateUnavailableError('/state/board/lanes/x.json: not JSON');
+      throw new LaneSetUnavailableError('/state/board/lanes/x.json: not JSON');
     };
     const surface = await dispatcher(boards({ projects: damaged, project: damaged, apply: damaged }));
 

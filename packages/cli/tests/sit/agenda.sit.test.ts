@@ -46,8 +46,7 @@ const EPOCH = new Date(0).toISOString();
  * `packages/daemon/bin/fyd.ts`) belong to `packages/daemon/tests/unit/agenda/{service,
  * state-machine}.test.ts`. This repo's SIT tier is deliberately CLI-only and black-box — no SIT
  * journey anywhere spawns a live `fyd` — so this doubles the daemon at exactly the seam the CLI's own
- * transport speaks, the same way `tests/integration/tasks/fake-daemon.ts`'s `FakeTransport` does one
- * layer further in.
+ * transport speaks.
  */
 class FakeAgendaDaemon {
   readonly #items: AgendaItem[] = [];

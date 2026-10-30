@@ -65,6 +65,7 @@ import { harnessUpdateRoutes } from './harness-update.ts';
 import type { LegacyWireUseRecorder } from '../../legacy-wire/index.ts';
 import { type DaemonHealthSubsystem, daemonHealthRoutes } from './health.ts';
 import { type LearningSubsystem, learningRoutes } from './learning.ts';
+import { type LegacyTaskSubsystem, legacyTaskRoutes } from './legacy-tasks.ts';
 import { type McpInventorySubsystem, mcpInventoryRoutes } from './mcp-inventory.ts';
 import { type McpOAuthSubsystem, mcpOAuthRoutes } from './mcp-oauth.ts';
 import { type ModelsSubsystem, modelRoutes } from './models.ts';
@@ -108,7 +109,6 @@ import { type SpeedupsSubsystem, speedupRoutes } from './speedups.ts';
 import { stepUpRoutes } from './step-up.ts';
 import { type SttEnhancementSubsystem, sttEnhancementRoutes } from './stt.ts';
 import { type SystemOpenSubsystem, systemOpenRoutes } from './system-open.ts';
-import { type TaskSubsystem, taskRoutes } from './tasks.ts';
 import { type TerminalSubsystem, terminalRoutes, terminalSocketRoutes } from './terminals.ts';
 import { tunnelRoutes } from './tunnel.ts';
 import { type WardenSubsystem, wardenRoutes } from './warden.ts';
@@ -337,8 +337,8 @@ export interface MountedSubsystems {
    *  unserved route, and before this field `fy migrate` was a manual operation with nothing watching
    *  the quota that makes it necessary. */
   readonly quotaFailover: QuotaFailoverLoop;
-  /** The task record boards: one per session, plus the fleet-wide read across all of them. */
-  readonly tasks: TaskSubsystem;
+  /** The retired per-session task store's two list reads, answered empty for older clients (see legacy-tasks.ts). */
+  readonly legacyTasks: LegacyTaskSubsystem;
   /** The project boards (v2): every project's cards, one file per card, written under ownership and lineage. */
   readonly board: BoardSubsystem;
   /** The board's GitHub watcher (board-design.md §3.1): it serves no route, and it is a mounted subsystem
@@ -625,7 +625,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
           configFilesConfirmations(subsystems.configFiles.service),
         ),
         ...pinRoutes(subsystems.pins),
-        ...taskRoutes(subsystems.tasks),
+        ...legacyTaskRoutes(subsystems.legacyTasks),
         // The project boards live under `/v1/board`, which no other subsystem uses, and their fixed
         // literals are registered before the patterns beneath them.
         ...boardRoutes(subsystems.board),

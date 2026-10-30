@@ -6,8 +6,7 @@
   "type": "module",
   "exports": {
     ".": "./src/lib/index.ts",
-    "./adapters": "./src/adapters/index.ts",
-    "./tasks": "./src/adapters/tasks/index.ts"
+    "./adapters": "./src/adapters/index.ts"
   },
   "types": "./src/lib/index.ts",
   "bin": {

@@ -122,7 +122,6 @@ export * from './step-up/index.ts';
 export * from './storage-types.ts';
 export * from './stt/index.ts';
 export * from './board-projects/index.ts';
-export * from './tasks/index.ts';
 export * from './terminal/index.ts';
 export * from './tmux/index.ts';
 export * from './transcript/index.ts';
