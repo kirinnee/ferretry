@@ -129,7 +129,12 @@ beforeEach(async () => {
       { id: 'work', resolution: work, usedBy: ['work-runtime'] },
       { id: 'cx', resolution: cx, usedBy: ['codex-runtime'] },
     ],
-    sessions: async () => [{ agent: 'codex-runtime', transcript: { home: root, file: rollout } }],
+    roster: {
+      current: async () => ({
+        generation: 1,
+        sessions: [{ agent: 'codex-runtime', transcript: { home: root, file: rollout } }],
+      }),
+    },
     jobs: counted,
     watch: (path, listener) => hub.subscribe(path, () => listener()),
     passiveFile: id => new FilePassiveUsageStore(root).path(id),

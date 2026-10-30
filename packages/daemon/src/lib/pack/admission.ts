@@ -25,6 +25,27 @@ export interface ParentFacts {
   readonly runningChildren: number;
 }
 
+/** The statuses a child is over in, and so stops counting against its parent's width. */
+export const PACK_CHILD_FINISHED_STATUSES: ReadonlySet<string> = new Set(['completed', 'failed', 'stalled', 'stopped']);
+
+/** One session as width counting reads it. */
+export interface PackChild {
+  readonly parent?: string | undefined;
+  readonly status: string;
+}
+
+/**
+ * How many of `parentId`'s children are not finished — {@link ParentFacts.runningChildren}.
+ *
+ * Every non-finished status counts, `starting` included: a launch in flight will be a running child a
+ * moment later. That is only safe because a launch a daemon restart interrupted is settled `failed` at
+ * boot (`InterruptedLaunchReconciler`); a record stuck in `starting` would otherwise hold its parent's
+ * slot for good.
+ */
+export function runningChildCount(parentId: string, sessions: readonly PackChild[]): number {
+  return sessions.filter(child => child.parent === parentId && !PACK_CHILD_FINISHED_STATUSES.has(child.status)).length;
+}
+
 /** Why `parent` may not start another sub-ferret, or `undefined` when it may. */
 export function admitChild(parent: ParentFacts, limits: PackConfig['limits']): PackRefusal | undefined {
   if (parent.depth + 1 > limits.maxDepth)

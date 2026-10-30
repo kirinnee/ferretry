@@ -41,8 +41,10 @@ export interface PaletteSession extends SessionEntry {
   readonly view: SessionView;
   /** The project group's display name, without the cwd the matcher also sees. */
   readonly folderName: string;
-  /** The rendered headline: the callsign, else the name, else a short id. */
+  /** The rendered headline: the task it was named, else the callsign, else a short id. */
   readonly headline: string;
+  /** The rendered callsign, the secondary line beside the headline; empty when it would only repeat it. */
+  readonly callsign: string;
   /** The short id rendered on the right of the row. */
   readonly shortId: string;
   /**
@@ -197,7 +199,8 @@ export const paletteSessionEntries = (views: readonly SessionView[], origin?: Pa
         finished: TERMINAL_STATUSES.has(state.status),
         view,
         folderName,
-        headline: displayCallsign(teammate) || config.name || shortSessionId(config.id),
+        headline: parseTaskName(config.name).task || displayCallsign(teammate) || shortSessionId(config.id),
+        callsign: parseTaskName(config.name).task === '' ? '' : displayCallsign(teammate),
         shortId: shortSessionId(config.id),
         ...(origin === undefined ? {} : { daemonId: origin.daemonId, machine: origin.machine }),
       };

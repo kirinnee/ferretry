@@ -16,11 +16,13 @@ const stale = (id: string) => ({ ...sessionView(id), outdated: { sections: ['pac
 const SESSIONS = [stale('a'), stale('b'), sessionView('c')];
 
 describe('OutdatedMark', () => {
-  it('should draw the word with the sections in its name, only on an outdated ferret', async () => {
+  it('should draw a compact icon, not a word, with the sections in its name, only on an outdated ferret', async () => {
     mounted = await mount(<OutdatedMark view={stale('a')} />);
     const mark = must(mounted.container.querySelector('[data-outdated-mark]'), 'mark');
-    expect(mark.textContent).toBe('Outdated');
-    expect(mark.getAttribute('aria-label')).toContain('(Pack mode)');
+    expect(mark.textContent).toBe('');
+    expect(mark.querySelector('svg')).not.toBeNull();
+    expect(mark.getAttribute('aria-label')).toBe('Outdated — restart to load new instructions (Pack mode)');
+    expect(mark.getAttribute('title')).toBe(mark.getAttribute('aria-label'));
     await mounted.unmount();
     mounted = await mount(<OutdatedMark view={sessionView('c')} />);
     expect(mounted.container.querySelector('[data-outdated-mark]')).toBeNull();
@@ -132,9 +134,10 @@ describe('after a press', () => {
       failed: [],
     };
     const marks = (): string[] =>
-      [...(mounted?.container.querySelectorAll('[data-row]') ?? [])].map(
-        row => row.querySelector('[data-outdated-mark]')?.textContent ?? '',
-      );
+      [...(mounted?.container.querySelectorAll('[data-row]') ?? [])].map(row => {
+        const mark = row.querySelector('[data-outdated-mark]');
+        return mark === null ? '' : mark.getAttribute('data-outdated-mark') || 'outdated';
+      });
     const tree = (
       <RestartOverlayProvider>
         <RestartOutdatedStrip onRestart={async () => result} sessions={SESSIONS} />
@@ -147,10 +150,10 @@ describe('after a press', () => {
     );
     mounted = await mount(tree);
     const root = mounted.container;
-    expect(marks()).toEqual(['Outdated', 'Outdated', '']);
+    expect(marks()).toEqual(['outdated', 'outdated', '']);
     await interact(() => must(root.querySelector<HTMLButtonElement>('[data-restart-outdated-button]'), 'b').click());
 
-    expect(marks()).toEqual(['', 'Queued', '']);
+    expect(marks()).toEqual(['', 'queued', '']);
     expect(root.querySelector('[data-outdated-mark="queued"]')?.getAttribute('aria-label')).toContain(
       'next idle moment',
     );
@@ -160,7 +163,7 @@ describe('after a press', () => {
     await interact(() =>
       must(root.querySelector<HTMLButtonElement>('.fy-restart-outdated__dismiss'), 'dismiss').click(),
     );
-    expect(marks()).toEqual(['Outdated', 'Outdated', '']);
+    expect(marks()).toEqual(['outdated', 'outdated', '']);
     expect(must(root.querySelector('[data-restart-outdated-button]'), 'button').textContent).toBe(
       'Restart outdated (2)',
     );

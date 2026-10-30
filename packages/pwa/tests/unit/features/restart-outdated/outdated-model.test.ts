@@ -29,9 +29,9 @@ describe('outdated ferrets', () => {
     );
     expect(outdatedSectionWords(sessionView('a'))).toBe('');
     expect(outdatedLabel(outdated('a', ['tools']) as never)).toBe(
-      'Outdated: running on older instructions (tools). Restart to apply the new ones.',
+      'Outdated — restart to load new instructions (tools)',
     );
-    expect(outdatedLabel(sessionView('a'))).toContain('running on older instructions. Restart');
+    expect(outdatedLabel(sessionView('a'))).toBe('Outdated — restart to load new instructions');
   });
 
   it('should count only the outdated live ferrets, and none while unread', () => {

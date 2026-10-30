@@ -166,8 +166,18 @@ function sameJournalFile(left: JournalFingerprint, right: JournalFingerprint): b
 /** How many session documents the identity cache holds before it starts again from empty. */
 const DOCUMENT_CACHE_LIMIT = 4_096;
 
-/** How many session documents are watched for changes, at most; a document past it is `stat`ed per read. */
-const WATCHED_DOCUMENT_LIMIT = 1_024;
+/**
+ * How many session documents are watched for changes, at most; a document past it is `stat`ed per read.
+ *
+ * A background reader watches two documents per session — its marker and its config — so this is room for
+ * 2,048 sessions. It was 1,024: a fleet of ~600 sessions ran past it, and every document past the bound was
+ * `stat`ed on every pass of every reader that asks about all of them. A watched document costs an entry in
+ * the hub, and the hub's OS watch is per session DIRECTORY (inotify on Linux, FSEvents elsewhere), shared
+ * by both; where the OS refuses another watch the hub polls that directory and says so, so a large bound
+ * degrades to the old `stat`, never to a missed change. It matches the identity cache's bound: a document
+ * worth watching is one the cache holds.
+ */
+const WATCHED_DOCUMENT_LIMIT = DOCUMENT_CACHE_LIMIT;
 
 /** A document as last read: the identity of the file it came from, its text, and its parsed value. */
 interface CachedDocument {
@@ -260,6 +270,8 @@ export class DaemonStorage {
    * index sync, so a listener sees writes to one session in the order they committed.
    */
   private readonly stateListeners = new Set<(id: SessionId, state: JsonValue) => void>();
+  /** How many session configs THIS storage has written: {@link configWrites}. */
+  private configChanges = 0;
 
   constructor(
     readonly paths: FoundationPaths,
@@ -941,8 +953,21 @@ export class DaemonStorage {
     await this.serial.run(id, async () => {
       await this.ensureSessionDirectory(id);
       await this.writeDocument(createSessionPaths(this.paths, id).config, document);
+      this.configChanges += 1;
       await this.syncSessionUnlocked(id);
     });
+  }
+
+  /**
+   * How many session configs this storage has written — counted once each write has landed, so a reader
+   * that sees the count move and reads again sees the new document.
+   *
+   * A stamp for a reader that derives something from EVERY session's config (the fleet reading's session
+   * roster): while it holds, nothing this daemon wrote changed a config. It cannot see an edit made outside
+   * the daemon, so such a reader also re-reads on a time bound of its own.
+   */
+  configWrites(): number {
+    return this.configChanges;
   }
 
   async writeState(id: SessionId, value: unknown): Promise<void> {
@@ -1101,6 +1126,7 @@ export class DaemonStorage {
       await this.ensureSessionDirectory(id);
       const next = canonicalJsonValue(await compute());
       await this.writeDocument(paths[kind], serializeJsonDocument(next));
+      if (kind === 'config') this.configChanges += 1;
       await this.syncSessionUnlocked(id);
       if (kind === 'state') this.publishState(id, next);
       return next;

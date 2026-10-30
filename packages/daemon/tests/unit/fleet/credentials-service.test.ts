@@ -30,9 +30,11 @@ import should from 'should';
 import type { CallerGovernance } from '../../../src/lib/api/capability.ts';
 import {
   attributedTranscripts,
+  CREDENTIAL_LIST_FRESH_MS,
   type CredentialEmailSource,
   type CredentialEnvironmentDeps,
   type CredentialHarnessRun,
+  type CredentialListCache,
   type CredentialSessionRecord,
   type CredentialStatusReader,
   createFleetCredentialsSubsystem,
@@ -143,6 +145,7 @@ interface ServiceOptions {
   readonly exitCode?: number;
   readonly runs?: CredentialHarnessRun[];
   readonly afterRun?: () => void;
+  readonly listCache?: CredentialListCache;
 }
 
 const emailKey = (source: CredentialEmailSource): string =>
@@ -169,6 +172,7 @@ const serviceOf = (
       return options.exitCode ?? 0;
     },
     baseEnvironment: () => ({ PATH: '/usr/bin' }),
+    ...(options.listCache === undefined ? {} : { listCache: options.listCache }),
   });
 
 const governed = { governed: true } as CallerGovernance;
@@ -580,6 +584,183 @@ describe('the credential list', () => {
   });
 });
 
+describe('the shared credential list', () => {
+  /** A list's inputs, counted: each catalogue read, and each login's status asked. */
+  const counted = (model: AccountModel = v2({ work: claudeFerretry, cx: codexFerretry })) => {
+    const clock = { now: 1_786_000_000_000 };
+    const reads = { catalog: 0 };
+    let current = model;
+    const fake = new FakeStatus();
+    const catalog = catalogOf(undefined, {
+      document: async () => {
+        reads.catalog += 1;
+        return current;
+      },
+    });
+    const service = serviceOf(catalog, fake, {
+      binary: '/usr/local/bin',
+      listCache: { now: () => clock.now, freshMs: CREDENTIAL_LIST_FRESH_MS },
+    });
+    const listsMade = () => fake.calls.filter(call => call === 'view:work').length;
+    return {
+      clock,
+      fake,
+      reads,
+      service,
+      listsMade,
+      change: (next: AccountModel) => {
+        current = next;
+      },
+    };
+  };
+
+  it('should answer repeated lists within the keep from ONE made list', async () => {
+    // Arrange
+    const { clock, service, listsMade } = counted();
+
+    // Act
+    const first = await service.list();
+    clock.now += CREDENTIAL_LIST_FRESH_MS - 1;
+    const again = await service.list();
+    const third = await service.list();
+    clock.now += 1;
+    const expired = await service.list();
+
+    // Assert — one list for the first three, a new one once the keep ran out.
+    should(again).equal(first);
+    should(third).equal(first);
+    should(expired).not.equal(first);
+    should(listsMade()).equal(2);
+  });
+
+  it('should make ONE list for callers asking at once, with or without a keep', async () => {
+    // Arrange
+    const kept = counted();
+    const fake = new FakeStatus();
+    const unkept = serviceOf(catalogOf(v2({ work: claudeFerretry })), fake);
+
+    // Act
+    const [a, b, c] = await Promise.all([kept.service.list(), kept.service.list(), kept.service.list()]);
+    const [d, e] = await Promise.all([unkept.list(), unkept.list()]);
+    const after = await unkept.list();
+
+    // Assert — without a keep, a list is shared only while it is being made.
+    should(kept.listsMade()).equal(1);
+    should(b).equal(a);
+    should(c).equal(a);
+    should(e).equal(d);
+    should(after).not.equal(d);
+    should(fake.calls).deepEqual(['view:work', 'view:work']);
+  });
+
+  it('should keep a settled list apart from a live one', async () => {
+    // Arrange
+    const { service, listsMade } = counted();
+
+    // Act
+    const live = await service.list();
+    const settled = await service.list({ settled: true });
+    const settledAgain = await service.list({ settled: true });
+
+    // Assert
+    should(settled).not.equal(live);
+    should(settledAgain).equal(settled);
+    should(listsMade()).equal(2);
+  });
+
+  it('should make a new list when the catalogue changes', async () => {
+    // Arrange
+    const { service, change, listsMade } = counted();
+    await service.list();
+
+    // Act
+    change(v2({ work: claudeFerretry, cx: codexFerretry, more: claudeFerretry }));
+    const changed = await service.list();
+
+    // Assert
+    should(changed.credentials.map(row => row.id)).deepEqual(['work', 'cx', 'more']);
+    should(listsMade()).equal(2);
+  });
+
+  it('should drop the kept list after a usage pass, a Check now and a sign-out', async () => {
+    // Arrange
+    const { service, listsMade } = counted();
+    await service.list();
+
+    // Act
+    await service.observeAll();
+    await service.list();
+    await service.check('cx', governed);
+    await service.list();
+    await service.signOut('work');
+    await service.list();
+
+    // Assert — every list after something that changes a word is a new one.
+    should(listsMade()).equal(5);
+  });
+
+  it('should make a new list when an environment login’s quota reading moves', async () => {
+    // Arrange
+    const clock = { now: 1_786_000_000_000 };
+    const fake = new FakeStatus();
+    let usedPercent = 40;
+    const service = createFleetCredentialsSubsystem({
+      catalog: catalogOf(v2({ keyed: claudeEnvironment, work: claudeFerretry })),
+      status: fake,
+      email: async () => undefined,
+      machineName: () => 'studio',
+      locate: () => undefined,
+      run: async () => 0,
+      baseEnvironment: () => ({}),
+      providerQuota: {
+        peek: () => ({
+          source: 'zai-coding-plan',
+          via: 'endpoint',
+          windows: [{ label: '5h', usedPercent }],
+          exhausted: false,
+          unverified: true,
+          at: '2026-10-16T09:00:00.000Z',
+        }),
+      },
+      listCache: { now: () => clock.now, freshMs: CREDENTIAL_LIST_FRESH_MS },
+    });
+    const first = await service.list();
+
+    // Act — a person watching the logins page had the quota read again.
+    const unchanged = await service.list();
+    usedPercent = 55;
+    const moved = await service.list();
+
+    // Assert
+    should(unchanged).equal(first);
+    should(moved.credentials.find(row => row.id === 'keyed')?.usage.fiveHour.usedPercent).equal(55);
+  });
+
+  it('should not keep a list that failed', async () => {
+    // Arrange
+    const { fake, service, listsMade } = counted();
+    let failing = true;
+    const view = fake.view.bind(fake);
+    fake.view = async subject => {
+      if (failing && subject.id === 'cx') throw new Error('status unreadable');
+      return await view(subject);
+    };
+
+    // Act
+    const failure = await service.list().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    failing = false;
+    const recovered = await service.list();
+
+    // Assert
+    should(failure).be.instanceOf(Error);
+    should(recovered.credentials).have.length(2);
+    should(listsMade()).equal(2);
+  });
+});
+
 describe('the usage pass', () => {
   it('should observe every stored credential and nothing that has no store', async () => {
     // Arrange
@@ -900,7 +1081,7 @@ describe('FleetCredentialsService — environment logins (docs/provider-presets.
       provider: reading,
     });
     should(list.credentials.find(entry => entry.id === 'signed')?.usage).not.have.property('provider');
-    should(peeked).deepEqual(['glm']);
+    should(new Set(peeked)).deepEqual(new Set(['glm']));
   });
 
   it('should list a machine with no environment login without reading presets or secrets', async () => {

@@ -25,13 +25,13 @@ import { activeSessionAncestorIds, type BulkStopRequest } from './agent-sidebar-
 import { stopScopeLabel } from './stop-actions.ts';
 
 /**
- * How a session is named to someone about to end it. The callsign first because
- * that is what the fleet is discussed in; the raw id last but always present,
+ * How a session is named to someone about to end it. The task it was given first, because
+ * that is its title everywhere; the callsign next, the raw id last but always present,
  * because two teammates can share a display name and only one of them is being
  * stopped.
  */
 export const stopTargetName = (view: SessionView): string =>
-  displayCallsign(view.config.teammate) || view.config.name || view.config.id;
+  view.config.name || displayCallsign(view.config.teammate) || view.config.id;
 
 export interface BulkStopConfirmationProps {
   readonly request: BulkStopRequest | null;

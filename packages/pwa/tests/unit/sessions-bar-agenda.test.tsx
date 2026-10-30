@@ -38,13 +38,13 @@ const unread = (
   extra: SessionView['state'] | object = {},
 ) =>
   sessionView(id, {
-    config: { teammate: id, label: `Task ${id}`, cwd: `/work/${id}`, mode: 'interactive' },
+    config: { teammate: id, name: `Task ${id}`, cwd: `/work/${id}`, mode: 'interactive' },
     state: { lastActivityAt: recent, attention: agenda(open, first, minutesAgo), ...extra },
   });
 
 const calm = (id: string) =>
   sessionView(id, {
-    config: { teammate: id, label: `Task ${id}`, cwd: `/work/${id}`, mode: 'interactive' },
+    config: { teammate: id, name: `Task ${id}`, cwd: `/work/${id}`, mode: 'interactive' },
     state: { lastActivityAt: recent },
   });
 
@@ -238,11 +238,11 @@ describe('the collapsed rail', () => {
     view = await mount(element);
     const dots = [...view.container.querySelectorAll('.fy-sbar__dot')];
     expect(dots.map(dot => dot.getAttribute('aria-label'))).toEqual([
-      'New-1 — 1 open Inbox item',
-      'Tie-A — 1 open Inbox item',
-      'Tie-B — 1 open Inbox item',
-      'Old-1 — 2 open Inbox items',
-      'Calm-1',
+      'Task new-1 — 1 open Inbox item',
+      'Task tie-a — 1 open Inbox item',
+      'Task tie-b — 1 open Inbox item',
+      'Task old-1 — 2 open Inbox items',
+      'Task calm-1',
     ]);
     expect(dots[3]?.querySelector('[data-unread-badge]')?.textContent).toBe('2');
     expect(dots[4]?.querySelector('[data-unread-badge]')).toBeNull();
