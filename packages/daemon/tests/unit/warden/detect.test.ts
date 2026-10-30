@@ -646,15 +646,15 @@ describe('anomaly fingerprints', () => {
  * a node would then be flagged for having asked a question, and the question
  * would be evidence of the fault it reported.
  */
-type AttentionShaped<T> = Extract<keyof T, `attention${string}` | `board${string}` | `needsHuman${string}`>;
+type AgendaShaped<T> = Extract<keyof T, `agenda${string}` | `board${string}` | `needsHuman${string}`>;
 
 describe('what the detector is allowed to see', () => {
   it('should declare no attention member anywhere in a session view', () => {
     // Arrange — a compile-time claim, asserted at runtime so it is a visible test.
     const free: [
-      AttentionShaped<WardenSessionView>,
-      AttentionShaped<WardenSessionConfig>,
-      AttentionShaped<WardenSessionState>,
+      AgendaShaped<WardenSessionView>,
+      AgendaShaped<WardenSessionConfig>,
+      AgendaShaped<WardenSessionState>,
     ] extends [never, never, never]
       ? true
       : false = true;

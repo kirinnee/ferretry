@@ -1,10 +1,10 @@
 import type { WardenJevCheck } from '@ferretry/protocol';
 import type { TriageDecision, TriageSnapshot } from '../../../src/lib/speedups/jev.ts';
 import {
-  type AttentionBoardInput,
+  type AgendaBoardInput,
   defaultWardenConfig,
   type WardenAnomalyKind,
-  type WardenAttentionWrite,
+  type WardenAgendaWrite,
   type WardenConfig,
   type WardenEscalationBoardItem,
   type WardenEscalationRaise,
@@ -131,10 +131,10 @@ export function harness(
     readonly latest?: () => Promise<{ readonly reportId: string; readonly head: string } | undefined>;
     readonly writeProvenance?: () => Promise<void>;
     readonly verdicts?: () => Promise<readonly WardenEscalationVerdict[] | undefined>;
-    /** Nodes whose attention board cannot be read this sweep. */
+    /** Nodes whose agenda board cannot be read this sweep. */
     readonly unreadableBoards?: readonly string[];
     /** Force every raise to one outcome, for the paths a real store reaches rarely. */
-    readonly raiseWrite?: WardenAttentionWrite;
+    readonly raiseWrite?: WardenAgendaWrite;
     /** The Jev guard's answer to each snapshot, in order; the last one repeats. */
     readonly guard?: readonly (TriageDecision | Error)[];
     readonly evidence?: (
@@ -146,7 +146,7 @@ export function harness(
     /** How many leftover browsers a close finds; one by default. */
     readonly closeLeftoverBrowsers?: (sessionId: string) => Promise<number>;
     readonly cost?: (wardenId: string) => Promise<number | undefined>;
-    readonly feedBoards?: Readonly<Record<string, AttentionBoardInput | undefined>>;
+    readonly feedBoards?: Readonly<Record<string, AgendaBoardInput | undefined>>;
     /** The clock, for the tests that let time pass. Fixed at noon otherwise. */
     readonly now?: () => number;
     /** Make the Jev check record refuse writes, or reads. */

@@ -104,7 +104,7 @@ describe('Jev acting as first responder', () => {
 
     // Act
     await subject.service.run({ force: false });
-    const feed = await subject.service.attention();
+    const feed = await subject.service.agenda();
 
     // Assert
     should(subject.spawns).be.empty();
@@ -122,7 +122,7 @@ describe('Jev acting as first responder', () => {
 
     // Act
     await subject.service.run({ force: false });
-    const feed = await subject.service.attention();
+    const feed = await subject.service.agenda();
 
     // Assert
     should(subject.spawns).be.empty();
@@ -158,7 +158,7 @@ describe('Jev acting as first responder', () => {
 
     // Act
     await subject.service.run({ force: false });
-    const feed = await subject.service.attention();
+    const feed = await subject.service.agenda();
 
     // Assert
     should(subject.spawns).be.empty();
@@ -212,7 +212,7 @@ describe('Jev’s one try at a situation', () => {
     time.advance(10);
     subject.setFleet([stuck(time.now())]);
     await subject.service.run({ force: false });
-    const whileLanding = await subject.service.attention();
+    const whileLanding = await subject.service.agenda();
     const spawnsWhileLanding = subject.spawns.length;
     time.advance(25);
     subject.setFleet([stuck(time.now())]);
@@ -242,7 +242,7 @@ describe('Jev’s one try at a situation', () => {
     time.advance(35);
     subject.setFleet([stuck(time.now())]);
     await subject.service.run({ force: false });
-    const feed = await subject.service.attention();
+    const feed = await subject.service.agenda();
 
     // Assert
     should(subject.guarded).have.length(1);
@@ -364,7 +364,7 @@ describe('one act per ferret at a time', () => {
 
     // Act
     const run = await subject.service.run({ force: false });
-    const feed = await subject.service.attention();
+    const feed = await subject.service.agenda();
 
     // Assert
     should(run.anomalies.map(anomaly => anomaly.kind).toSorted()).deepEqual([

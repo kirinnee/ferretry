@@ -10,8 +10,8 @@
  * proved", never an empty daemon fact.
  */
 import {
-  type AttentionItem,
-  AttentionSnapshotSchema,
+  type AgendaItem,
+  AgendaSnapshotSchema,
   type IFyApiClient,
   type SessionSkills,
   SessionSkillsSchema,
@@ -26,7 +26,7 @@ type ComposerReferenceTask = Pick<TaskSummary, 'id' | 'title' | 'status'>;
 
 export interface ComposerReferenceCatalogs {
   readonly tasks?: readonly ComposerReferenceTask[];
-  readonly attention?: readonly AttentionItem[];
+  readonly attention?: readonly AgendaItem[];
   readonly skills?: SessionSkills;
   readonly failures: Readonly<Partial<Record<ComposerReferenceCatalogFamily, string>>>;
 }
@@ -46,12 +46,12 @@ export interface ComposerReferenceCatalogSources {
   readonly waitForTasks: () => Promise<void> | undefined;
   readonly waitForSkills: () => Promise<void> | undefined;
   /**
-   * The session's live Attention board, when the host subscribes to one: its open items, `undefined`
+   * The session's live Agenda board, when the host subscribes to one: its open items, `undefined`
    * until first read. Present, it is THE source — a newly raised item reaches the `!` menu the moment
    * the board moves, where a one-shot read here would offer the board as it was when the page opened.
    */
   readonly attention?: {
-    readonly items: readonly AttentionItem[] | undefined;
+    readonly items: readonly AgendaItem[] | undefined;
     readonly failure?: string;
   };
 }
@@ -90,8 +90,8 @@ async function readComposerReferenceCatalogsIncrementally(
   const tasks = client
     .request(sessionTasksPath(sessionId), SessionTaskListResponseSchema, { signal })
     .then(value => sameSession(sessionId, value));
-  const attention = client
-    .request(sessionAgendaPath(sessionId, wire), AttentionSnapshotSchema, { signal })
+  const agenda = client
+    .request(sessionAgendaPath(sessionId, wire), AgendaSnapshotSchema, { signal })
     .then(value => sameSession(sessionId, value));
   const skills = client.request(sessionSkillsPath(sessionId), SessionSkillsSchema, { signal });
   const publishIfLive = (patch: ComposerReferenceCatalogPatch): void => {
@@ -107,7 +107,7 @@ async function readComposerReferenceCatalogsIncrementally(
       throw reason;
     },
   );
-  const reportedAttention = attention.then(
+  const reportedAgenda = agenda.then(
     value => {
       publishIfLive({ attention: value.items, failures: {} });
       return value;
@@ -127,34 +127,34 @@ async function readComposerReferenceCatalogsIncrementally(
       throw reason;
     },
   );
-  const settled = await Promise.allSettled([reportedTasks, reportedAttention, reportedSkills] as const);
+  const settled = await Promise.allSettled([reportedTasks, reportedAgenda, reportedSkills] as const);
   if (signal.aborted) throw signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
 
-  const [taskResult, attentionResult, skillResult] = settled;
+  const [taskResult, agendaResult, skillResult] = settled;
   const failures: Partial<Record<ComposerReferenceCatalogFamily, string>> = {};
   if (taskResult.status === 'rejected') failures.tasks = failureMessage(taskResult.reason);
-  if (attentionResult.status === 'rejected') failures.attention = failureMessage(attentionResult.reason);
+  if (agendaResult.status === 'rejected') failures.attention = failureMessage(agendaResult.reason);
   if (skillResult.status === 'rejected') failures.skills = failureMessage(skillResult.reason);
   return {
     ...(taskResult.status === 'fulfilled' ? { tasks: taskResult.value.tasks } : {}),
-    ...(attentionResult.status === 'fulfilled' ? { attention: attentionResult.value.items } : {}),
+    ...(agendaResult.status === 'fulfilled' ? { attention: agendaResult.value.items } : {}),
     ...(skillResult.status === 'fulfilled' ? { skills: skillResult.value } : {}),
     failures,
   };
 }
 
 /** Attention, for a session page that supplies tasks and skills but subscribes to no live board. */
-async function readComposerAttentionIncrementally(
+async function readComposerAgendaIncrementally(
   client: ComposerReferenceCatalogReader,
   sessionId: string,
   signal: AbortSignal,
   publish: (patch: ComposerReferenceCatalogPatch) => void,
   wire: AgendaWire,
 ): Promise<void> {
-  const attention = client
-    .request(sessionAgendaPath(sessionId, wire), AttentionSnapshotSchema, { signal })
+  const agenda = client
+    .request(sessionAgendaPath(sessionId, wire), AgendaSnapshotSchema, { signal })
     .then(value => sameSession(sessionId, value));
-  await attention.then(
+  await agenda.then(
     value => {
       if (!signal.aborted) publish({ attention: value.items, failures: {} });
     },
@@ -246,12 +246,12 @@ export function useComposerReferenceCatalogs(
   }, []);
   const usesSharedSources = sources !== undefined;
   // A host that owns the live board leaves this module nothing to read for the session page.
-  const ownsAttention = sources?.attention !== undefined;
+  const ownsAgenda = sources?.attention !== undefined;
 
   useEffect(() => {
     const controller = new AbortController();
     setSnapshot(null);
-    if (typeof client.request !== 'function' || (usesSharedSources && ownsAttention)) {
+    if (typeof client.request !== 'function' || (usesSharedSources && ownsAgenda)) {
       pending.current = null;
       return () => controller.abort();
     }
@@ -262,7 +262,7 @@ export function useComposerReferenceCatalogs(
       }));
     };
     const operation = usesSharedSources
-      ? readComposerAttentionIncrementally(
+      ? readComposerAgendaIncrementally(
           client as ComposerReferenceCatalogReader,
           sessionId,
           controller.signal,
@@ -290,19 +290,19 @@ export function useComposerReferenceCatalogs(
       controller.abort();
       pending.current = null;
     };
-  }, [client, sessionId, usesSharedSources, ownsAttention, wire]);
+  }, [client, sessionId, usesSharedSources, ownsAgenda, wire]);
 
   const owned = snapshot?.sessionId === sessionId ? snapshot.catalogs : EMPTY_CATALOGS;
   const catalogs = useMemo<ComposerReferenceCatalogs>(() => {
     if (sources === undefined) return owned;
-    const attention = sources.attention?.items ?? (sources.attention === undefined ? owned.attention : undefined);
-    const attentionFailure = sources.attention === undefined ? owned.failures.attention : sources.attention.failure;
+    const agenda = sources.attention?.items ?? (sources.attention === undefined ? owned.attention : undefined);
+    const agendaFailure = sources.attention === undefined ? owned.failures.attention : sources.attention.failure;
     return {
       ...(sources.tasks === undefined ? {} : { tasks: sources.tasks }),
-      ...(attention === undefined ? {} : { attention }),
+      ...(agenda === undefined ? {} : { attention: agenda }),
       ...(sources.skills === undefined ? {} : { skills: sources.skills }),
       failures: {
-        ...(attentionFailure === undefined ? {} : { attention: attentionFailure }),
+        ...(agendaFailure === undefined ? {} : { attention: agendaFailure }),
         ...(sources.taskFailure === undefined ? {} : { tasks: sources.taskFailure }),
         ...(sources.skillFailure === undefined ? {} : { skills: sources.skillFailure }),
       },

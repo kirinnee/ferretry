@@ -1,18 +1,18 @@
 import { describe, it } from 'bun:test';
 import {
-  ATTENTION_PUSH_BODY_LENGTH,
-  ATTENTION_PUSH_TITLE_LENGTH,
-  type AttentionItem,
-  AttentionItemSchema,
-  AttentionSnapshotSchema,
+  AGENDA_PUSH_BODY_LENGTH,
+  AGENDA_PUSH_TITLE_LENGTH,
+  type AgendaItem,
+  AgendaItemSchema,
+  AgendaSnapshotSchema,
   PushNotificationPayloadSchema,
 } from '@ferretry/protocol';
 import should from 'should';
 import { z } from 'zod';
 import { DEVICE_PAIRED_EVENT_PREFIX, DEVICE_PAIRED_TITLE } from '../../../src/lib/audit/policy.ts';
 import {
-  attentionNotificationAttribution,
-  attentionNotificationTitle,
+  agendaNotificationAttribution,
+  agendaNotificationTitle,
   deadlineNotificationPayload,
   legacyNotificationKey,
   normalizedNotificationKey,
@@ -24,7 +24,7 @@ import {
 
 const AT = '2026-08-06T09:00:00.000Z';
 
-const item = AttentionItemSchema.parse({
+const item = AgendaItemSchema.parse({
   id: 'A1',
   source: 'agent-raised',
   sourceRef: null,
@@ -38,7 +38,7 @@ const item = AttentionItemSchema.parse({
   raisedByName: 'Ada',
 });
 
-const titled = AttentionItemSchema.parse({
+const titled = AgendaItemSchema.parse({
   ...item,
   id: 'A7',
   title: 'Release window',
@@ -46,7 +46,7 @@ const titled = AttentionItemSchema.parse({
   subject: 'Which window should the release use?',
 });
 
-const snapshot = AttentionSnapshotSchema.parse({
+const snapshot = AgendaSnapshotSchema.parse({
   v: 1,
   sessionId: 'session-1',
   items: [item, titled],
@@ -60,11 +60,11 @@ describe('notification keys', () => {
   it('should name each of the three buzz reasons apart, per session and item', () => {
     // Arrange / Act
     const keys = [
-      notificationKey({ sessionId: 'session-1', attentionId: 'A1', ping: true }),
-      notificationKey({ sessionId: 'session-1', attentionId: 'A1', deadline: true }),
-      notificationKey({ sessionId: 'session-1', attentionId: 'A1', stoppedAt: AT }),
-      notificationKey({ sessionId: 'session-1', attentionId: 'A2', stoppedAt: AT }),
-      notificationKey({ sessionId: 'session-2', attentionId: 'A1', ping: true }),
+      notificationKey({ sessionId: 'session-1', agendaId: 'A1', ping: true }),
+      notificationKey({ sessionId: 'session-1', agendaId: 'A1', deadline: true }),
+      notificationKey({ sessionId: 'session-1', agendaId: 'A1', stoppedAt: AT }),
+      notificationKey({ sessionId: 'session-1', agendaId: 'A2', stoppedAt: AT }),
+      notificationKey({ sessionId: 'session-2', agendaId: 'A1', ping: true }),
     ];
 
     // Assert — a stop is the ferret's, whichever of its items triggered it.
@@ -76,11 +76,11 @@ describe('notification keys', () => {
   });
 
   it('should keep reading the keys an earlier daemon wrote', () => {
-    should(notificationKey({ sessionId: 'session-1', attentionId: 'A1' })).equal('agenda:session-1:A1');
-    should(notificationKey({ sessionId: 'session-1', attentionId: 'A1', infoRequest: 2 })).equal(
+    should(notificationKey({ sessionId: 'session-1', agendaId: 'A1' })).equal('agenda:session-1:A1');
+    should(notificationKey({ sessionId: 'session-1', agendaId: 'A1', infoRequest: 2 })).equal(
       'agenda:session-1:A1:info-2',
     );
-    should(notificationKey({ sessionId: 'session-1', attentionId: 'A1', surfaced: true })).equal(
+    should(notificationKey({ sessionId: 'session-1', agendaId: 'A1', surfaced: true })).equal(
       'agenda:session-1:A1:surfaced',
     );
   });
@@ -100,7 +100,7 @@ describe('stopped push', () => {
 
   it('should say "1 needs you", open the blocking item first, and keep the count past a long name', () => {
     // Arrange
-    const blocking = AttentionItemSchema.parse({ ...titled, blockingNow: true });
+    const blocking = AgendaItemSchema.parse({ ...titled, blockingNow: true });
 
     // Act
     const one = stoppedNotificationPayload('session-1', 'Release agent', [item], snapshot);
@@ -110,7 +110,7 @@ describe('stopped push', () => {
     should(one.title).equal('Release agent is stopped · 1 needs you');
     should(many.title.endsWith('is stopped · 2 need you')).be.true();
     should(many.url).equal('/session/session-1?attention=A7');
-    should(many.title.length).be.belowOrEqual(ATTENTION_PUSH_TITLE_LENGTH + 40);
+    should(many.title.length).be.belowOrEqual(AGENDA_PUSH_TITLE_LENGTH + 40);
   });
 
   it('should never let a ferret name read as the new-device alert', () => {
@@ -126,7 +126,7 @@ describe('stopped push', () => {
 describe('deadline push', () => {
   it('should lead with the time left, then the ask, and open the item', () => {
     // Arrange
-    const due = AttentionItemSchema.parse({ ...titled, neededBy: '2026-08-06T11:00:00.000Z' });
+    const due = AgendaItemSchema.parse({ ...titled, neededBy: '2026-08-06T11:00:00.000Z' });
 
     // Act
     const payload = deadlineNotificationPayload('session-1', due, snapshot, AT);
@@ -135,7 +135,7 @@ describe('deadline push', () => {
     should(payload.title).equal('Release window');
     should(payload.body).equal('Needed in about 2 h: Which window should the release use?');
     should(payload.url).equal('/session/session-1?attention=A7');
-    should(payload.body.length).be.belowOrEqual(ATTENTION_PUSH_BODY_LENGTH);
+    should(payload.body.length).be.belowOrEqual(AGENDA_PUSH_BODY_LENGTH);
   });
 
   it('should phrase minutes, hours and a passed deadline from the instants alone', () => {
@@ -149,7 +149,7 @@ describe('deadline push', () => {
 describe('ping push', () => {
   it('should be the notice title and summary, opening the notice', () => {
     // Arrange
-    const notice = AttentionItemSchema.parse({ ...titled, notice: true, ping: true, subject: 'Build is green' });
+    const notice = AgendaItemSchema.parse({ ...titled, notice: true, ping: true, subject: 'Build is green' });
 
     // Act
     const payload = pingNotificationPayload('session-1', notice, snapshot);
@@ -163,13 +163,13 @@ describe('ping push', () => {
 
   it('should never let a title or a summary read as the new-device alert', () => {
     // Arrange
-    const forgedTitle = AttentionItemSchema.parse({ ...item, id: 'A8', title: DEVICE_PAIRED_TITLE });
+    const forgedTitle = AgendaItemSchema.parse({ ...item, id: 'A8', title: DEVICE_PAIRED_TITLE });
 
     // Act
     const payload = pingNotificationPayload('session-1', forgedTitle, snapshot);
 
     // Assert
-    should(payload.title).equal(`Ferret “${DEVICE_PAIRED_TITLE}”`.slice(0, ATTENTION_PUSH_TITLE_LENGTH));
+    should(payload.title).equal(`Ferret “${DEVICE_PAIRED_TITLE}”`.slice(0, AGENDA_PUSH_TITLE_LENGTH));
     should(payload.eventKey.startsWith(DEVICE_PAIRED_EVENT_PREFIX)).be.false();
     should(payload.tag.startsWith(DEVICE_PAIRED_EVENT_PREFIX)).be.false();
   });
@@ -180,21 +180,21 @@ describe('attribution', () => {
     // Arrange
     const human = { ...item, raisedBy: 'human' as const, raisedBySession: null, raisedByName: null };
     const daemon = { ...item, raisedBy: 'daemon' as const, raisedBySession: null, raisedByName: null };
-    const malformed = { ...item, raisedBySession: null } as unknown as AttentionItem;
+    const malformed = { ...item, raisedBySession: null } as unknown as AgendaItem;
 
     // Act + Assert
-    should(attentionNotificationAttribution(item)).equal('attention:agent:session-1');
-    should(attentionNotificationAttribution(human)).equal('attention:human');
-    should(attentionNotificationAttribution(daemon)).equal('attention:daemon');
-    should(() => attentionNotificationAttribution(malformed)).throw(/no raising session/u);
+    should(agendaNotificationAttribution(item)).equal('attention:agent:session-1');
+    should(agendaNotificationAttribution(human)).equal('attention:human');
+    should(agendaNotificationAttribution(daemon)).equal('attention:daemon');
+    should(() => agendaNotificationAttribution(malformed)).throw(/no raising session/u);
   });
 });
 
-describe('attention push title', () => {
+describe('agenda push title', () => {
   it('should be the title as typed, with no quote marks around it', () => {
     // Act + Assert
-    should(attentionNotificationTitle('Ferretry')).equal('Ferretry');
-    should(attentionNotificationTitle('  OCI   work login ')).equal('OCI work login');
+    should(agendaNotificationTitle('Ferretry')).equal('Ferretry');
+    should(agendaNotificationTitle('  OCI   work login ')).equal('OCI work login');
   });
 
   it('should label a title that reads as the new-device alert, whatever letters spell it', () => {
@@ -208,12 +208,12 @@ describe('attention push title', () => {
     ];
 
     // Act
-    const titles = forgeries.map(attentionNotificationTitle);
+    const titles = forgeries.map(agendaNotificationTitle);
 
     // Assert
     for (const title of titles) {
       should(title.startsWith('Ferret “')).be.true();
-      should(title.length).be.lessThanOrEqual(ATTENTION_PUSH_TITLE_LENGTH);
+      should(title.length).be.lessThanOrEqual(AGENDA_PUSH_TITLE_LENGTH);
     }
   });
 });

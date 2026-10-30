@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import * as attention from '../../src/lib/attention.ts';
+import * as agenda from '../../src/lib/agenda.ts';
 import * as pins from '../../src/lib/pins.ts';
 import * as boards from '../../src/lib/task-boards.ts';
 import * as tasks from '../../src/lib/tasks.ts';
@@ -303,7 +303,7 @@ const boardCases: SchemaCase[] = [
 ];
 
 const permissionAsk = { kind: 'permission' };
-const attentionItem = {
+const agendaItem = {
   id: 'A1',
   source: 'agent-raised',
   sourceRef: null,
@@ -317,8 +317,8 @@ const attentionItem = {
   raisedBySession: 'session-1',
   raisedByName: 'Ada',
 };
-const resolvedAttention = {
-  ...attentionItem,
+const resolvedAgenda = {
+  ...agendaItem,
   resolvedAt: LATER_INSTANT,
   resolvedBy: 'human',
   resolvedBySession: null,
@@ -328,14 +328,14 @@ const resolvedAttention = {
   disposition: 'done',
 };
 
-const attentionCases: SchemaCase[] = [
-  { name: 'attention source', schema: attention.AttentionSourceSchema, value: 'agent-raised' },
-  { name: 'card kind', schema: attention.AttentionKindSchema, value: 'yesno' },
-  { name: 'swipe direction', schema: attention.AttentionDirectionSchema, value: 'up' },
-  { name: 'revisable field', schema: attention.AttentionRevisableFieldSchema, value: 'stillOpen' },
+const agendaCases: SchemaCase[] = [
+  { name: 'attention source', schema: agenda.AgendaSourceSchema, value: 'agent-raised' },
+  { name: 'card kind', schema: agenda.AgendaKindSchema, value: 'yesno' },
+  { name: 'swipe direction', schema: agenda.AgendaDirectionSchema, value: 'up' },
+  { name: 'revisable field', schema: agenda.AgendaRevisableFieldSchema, value: 'stillOpen' },
   {
     name: 'revision',
-    schema: attention.AttentionRevisionSchema,
+    schema: agenda.AgendaRevisionSchema,
     value: {
       at: '2026-05-01T10:00:00.000Z',
       by: 'agent',
@@ -343,25 +343,25 @@ const attentionCases: SchemaCase[] = [
       previous: { stillOpen: '- who signs' },
     },
   },
-  { name: 'answer effect', schema: attention.AttentionAnswerEffectSchema, value: 'needs-info' },
+  { name: 'answer effect', schema: agenda.AgendaAnswerEffectSchema, value: 'needs-info' },
   {
     name: 'card answer',
-    schema: attention.AttentionCardAnswerSchema,
+    schema: agenda.AgendaCardAnswerSchema,
     value: { direction: 'up', does: 'approve', label: 'Always allow', description: 'Stop asking for this command' },
   },
   {
     name: 'ask option',
-    schema: attention.AttentionAskOptionSchema,
+    schema: agenda.AgendaAskOptionSchema,
     value: { label: 'Proceed', description: 'Run the operation' },
   },
   {
     name: 'brief term',
-    schema: attention.AttentionTermSchema,
+    schema: agenda.AgendaTermSchema,
     value: { term: 'OCI', meaning: 'Oracle Cloud Infrastructure' },
   },
   {
     name: 'brief question',
-    schema: attention.AttentionQuestionSchema,
+    schema: agenda.AgendaQuestionSchema,
     value: {
       question: 'Which plan?',
       options: [{ label: 'Defaults' }, { label: 'Changes' }],
@@ -371,22 +371,22 @@ const attentionCases: SchemaCase[] = [
   },
   {
     name: 'brief recommendation',
-    schema: attention.AttentionRecommendationSchema,
+    schema: agenda.AgendaRecommendationSchema,
     value: { decision: 'Ship on Thursday', why: 'Nobody is on call on Friday' },
   },
-  { name: 'brief link', schema: attention.AttentionLinkSchema, value: { label: 'Plan', target: '#F12' } },
-  { name: 'attention ask', schema: attention.AttentionAskSchema, value: permissionAsk },
-  { name: 'to-do ask', schema: attention.AttentionAskSchema, value: { kind: 'task' } },
+  { name: 'brief link', schema: agenda.AgendaLinkSchema, value: { label: 'Plan', target: '#F12' } },
+  { name: 'attention ask', schema: agenda.AgendaAskSchema, value: permissionAsk },
+  { name: 'to-do ask', schema: agenda.AgendaAskSchema, value: { kind: 'task' } },
   {
     name: 'attention history entry',
-    schema: attention.AttentionHistoryEntrySchema,
+    schema: agenda.AgendaHistoryEntrySchema,
     value: { at: INSTANT, kind: 'needs-info', note: 'Which account?' },
   },
   {
     name: 'item waiting on the ferret',
-    schema: attention.AttentionItemSchema,
+    schema: agenda.AgendaItemSchema,
     value: {
-      ...attentionItem,
+      ...agendaItem,
       ask: { kind: 'task' },
       waitingOn: 'ferret',
       askedAt: LATER_INSTANT,
@@ -396,52 +396,52 @@ const attentionCases: SchemaCase[] = [
   },
   {
     name: 'needs-info action',
-    schema: attention.AttentionActionRequestSchema,
+    schema: agenda.AgendaActionRequestSchema,
     value: { action: 'needs-info', id: 'A1', note: 'Which account?' },
   },
   {
     name: 'needs-info action without a note',
-    schema: attention.AttentionActionRequestSchema,
+    schema: agenda.AgendaActionRequestSchema,
     value: { action: 'needs-info', id: 'A1' },
   },
   {
     name: 'attention response',
-    schema: attention.AttentionResponseSchema,
+    schema: agenda.AgendaResponseSchema,
     value: { kind: 'permission', decision: 'approve' },
   },
-  { name: 'disposition', schema: attention.AttentionDispositionSchema, value: 'done' },
-  { name: 'attention id', schema: attention.AttentionIdSchema, value: 'A1' },
-  { name: 'attention actor', schema: attention.AttentionBySchema, value: 'agent' },
-  { name: 'attention item', schema: attention.AttentionItemSchema, value: attentionItem },
-  { name: 'resolved attention', schema: attention.ResolvedAttentionItemSchema, value: resolvedAttention },
+  { name: 'disposition', schema: agenda.AgendaDispositionSchema, value: 'done' },
+  { name: 'attention id', schema: agenda.AgendaIdSchema, value: 'A1' },
+  { name: 'attention actor', schema: agenda.AgendaBySchema, value: 'agent' },
+  { name: 'attention item', schema: agenda.AgendaItemSchema, value: agendaItem },
+  { name: 'resolved attention', schema: agenda.ResolvedAgendaItemSchema, value: resolvedAgenda },
   {
     name: 'session attention summary',
-    schema: attention.SessionAttentionSummarySchema,
+    schema: agenda.SessionAgendaSummarySchema,
     value: { open: 2, first: 'A1', ask: 'Rebase onto main now?', latestAt: '2026-10-23T10:00:00.000Z' },
   },
   {
     name: 'held attention replies',
-    schema: attention.AttentionRepliesSchema,
+    schema: agenda.AgendaRepliesSchema,
     value: { pending: ['A1', 'A3'], dueAt: INSTANT },
   },
   {
-    name: 'attention answers on their way',
-    schema: attention.AttentionDeliverySchema,
+    name: 'agenda answers on their way',
+    schema: agenda.AgendaDeliverySchema,
     value: { sending: ['A2'], heldForComposer: true },
   },
   {
     name: 'an agenda field an edit can clear',
-    schema: attention.AttentionClearableFieldSchema,
+    schema: agenda.AgendaClearableFieldSchema,
     value: 'neededBy',
   },
   {
     name: 'an undelivered retry',
-    schema: attention.AttentionUndeliveredReplySchema,
+    schema: agenda.AgendaUndeliveredReplySchema,
     value: { action: 'discuss', note: 'The premise is wrong' },
   },
   {
     name: 'a held configuration change an item confirms',
-    schema: attention.AttentionConfirmsSchema,
+    schema: agenda.AgendaConfirmsSchema,
     value: {
       path: 'warden.yaml',
       etag: 'a'.repeat(64),
@@ -451,7 +451,7 @@ const attentionCases: SchemaCase[] = [
   },
   {
     name: 'an undelivered answer',
-    schema: attention.AttentionUndeliveredSchema,
+    schema: agenda.AgendaUndeliveredSchema,
     value: {
       at: INSTANT,
       reply: { action: 'resolve', response: { kind: 'permission', decision: 'approve' } },
@@ -460,11 +460,11 @@ const attentionCases: SchemaCase[] = [
   },
   {
     name: 'attention snapshot',
-    schema: attention.AttentionSnapshotSchema,
+    schema: agenda.AgendaSnapshotSchema,
     value: {
       v: 1,
       sessionId: 'session-1',
-      items: [attentionItem],
+      items: [agendaItem],
       resolved: [],
       count: 1,
       parseErrors: 0,
@@ -473,7 +473,7 @@ const attentionCases: SchemaCase[] = [
   },
   {
     name: 'attention action',
-    schema: attention.AttentionActionRequestSchema,
+    schema: agenda.AgendaActionRequestSchema,
     value: {
       action: 'add',
       source: 'agent-raised',
@@ -485,20 +485,20 @@ const attentionCases: SchemaCase[] = [
   },
   {
     name: 'direct notification',
-    schema: attention.DirectNotificationRequestSchema,
+    schema: agenda.DirectNotificationRequestSchema,
     value: { body: 'Finished', title: 'Complete', kind: 'completed' },
   },
   {
     name: 'attention count',
-    schema: attention.AttentionCountResponseSchema,
+    schema: agenda.AgendaCountResponseSchema,
     value: { sessionId: 'session-1', count: 1 },
   },
   {
     name: 'notification response',
-    schema: attention.DirectNotificationResponseSchema,
+    schema: agenda.DirectNotificationResponseSchema,
     value: { sessionId: 'session-1', delivered: 1 },
   },
-  { name: 'attention error', schema: attention.AttentionErrorCodeSchema, value: 'invalid' },
+  { name: 'attention error', schema: agenda.AgendaErrorCodeSchema, value: 'invalid' },
 ];
 
 const messagePin = {
@@ -1182,11 +1182,11 @@ describe('task-board schemas', () => {
 describe('attention schemas', () => {
   it('should round-trip every public attention schema', () => {
     // Arrange
-    const cases = attentionCases;
+    const cases = agendaCases;
 
     // Act + Assert
     assertRoundTrips(cases);
-    assertCoversEverySchema(attention, cases);
+    assertCoversEverySchema(agenda, cases);
   });
 
   it('should resolve every ask, response, provenance, and action member', () => {
@@ -1246,21 +1246,21 @@ describe('attention schemas', () => {
 
     // Act + Assert
     // A waiting mark needs its time, and the history is bounded.
-    should(attention.AttentionItemSchema.safeParse({ ...attentionItem, waitingOn: 'ferret' }).success).be.false();
+    should(agenda.AgendaItemSchema.safeParse({ ...agendaItem, waitingOn: 'ferret' }).success).be.false();
     // What the owner waits FOR exists only while they wait.
-    should(attention.AttentionItemSchema.safeParse({ ...attentionItem, waitingFor: 'discussion' }).success).be.false();
+    should(agenda.AgendaItemSchema.safeParse({ ...agendaItem, waitingFor: 'discussion' }).success).be.false();
     should(
-      attention.AttentionItemSchema.safeParse({
-        ...attentionItem,
+      agenda.AgendaItemSchema.safeParse({
+        ...agendaItem,
         history: Array.from({ length: 21 }, () => ({ at: INSTANT, kind: 'updated' })),
       }).success,
     ).be.false();
-    for (const value of asks) should(attention.AttentionAskSchema.safeParse(value).success).be.true();
-    for (const value of responses) should(attention.AttentionResponseSchema.safeParse(value).success).be.true();
+    for (const value of asks) should(agenda.AgendaAskSchema.safeParse(value).success).be.true();
+    for (const value of responses) should(agenda.AgendaResponseSchema.safeParse(value).success).be.true();
     for (const raisedBy of ['human', 'daemon'] as const) {
       should(
-        attention.AttentionItemSchema.safeParse({
-          ...attentionItem,
+        agenda.AgendaItemSchema.safeParse({
+          ...agendaItem,
           raisedBy,
           raisedBySession: null,
           raisedByName: null,
@@ -1269,21 +1269,21 @@ describe('attention schemas', () => {
     }
     for (const resolvedBy of ['agent', 'daemon'] as const) {
       should(
-        attention.ResolvedAttentionItemSchema.safeParse({
-          ...resolvedAttention,
+        agenda.ResolvedAgendaItemSchema.safeParse({
+          ...resolvedAgenda,
           resolvedBy,
           resolvedBySession: resolvedBy === 'agent' ? 'session-2' : null,
           resolvedByName: resolvedBy === 'agent' ? 'Grace' : null,
         }).success,
       ).be.true();
     }
-    for (const value of actions) should(attention.AttentionActionRequestSchema.safeParse(value).success).be.true();
+    for (const value of actions) should(agenda.AgendaActionRequestSchema.safeParse(value).success).be.true();
   });
 
   it('should accept an other answer on a resolved item whose ask offers options, and no other', () => {
     // Arrange
     const other = { kind: 'other', answer: 'neither, rewrite it' };
-    const withAsk = (ask: unknown) => ({ ...resolvedAttention, ask, response: other });
+    const withAsk = (ask: unknown) => ({ ...resolvedAgenda, ask, response: other });
 
     // Act / Assert
     for (const ask of [
@@ -1291,9 +1291,9 @@ describe('attention schemas', () => {
       { kind: 'permission' },
       { kind: 'answer-review' },
     ])
-      should(attention.ResolvedAttentionItemSchema.safeParse(withAsk(ask)).success).be.true();
+      should(agenda.ResolvedAgendaItemSchema.safeParse(withAsk(ask)).success).be.true();
     for (const ask of [{ kind: 'open-question' }, { kind: 'task' }, undefined])
-      should(attention.ResolvedAttentionItemSchema.safeParse(withAsk(ask)).success).be.false();
+      should(agenda.ResolvedAgendaItemSchema.safeParse(withAsk(ask)).success).be.false();
   });
 
   it('should reject ambiguous attention and resolution state', () => {
@@ -1302,55 +1302,55 @@ describe('attention schemas', () => {
     const cases: SchemaCase[] = [
       {
         name: 'duplicate choices',
-        schema: attention.AttentionAskSchema,
+        schema: agenda.AgendaAskSchema,
         value: { kind: 'multiple-choice', options: [{ label: 'A' }, { label: 'A' }] },
       },
       {
         name: 'multiline subject',
-        schema: attention.AttentionItemSchema,
-        value: { ...attentionItem, subject: 'A\nB' },
+        schema: agenda.AgendaItemSchema,
+        value: { ...agendaItem, subject: 'A\nB' },
       },
       {
         name: 'human with session',
-        schema: attention.AttentionItemSchema,
-        value: { ...attentionItem, raisedBy: 'human', raisedBySession: 'spoof', raisedByName: null },
+        schema: agenda.AgendaItemSchema,
+        value: { ...agendaItem, raisedBy: 'human', raisedBySession: 'spoof', raisedByName: null },
       },
       {
         name: 'sequence on task attention',
-        schema: attention.AttentionItemSchema,
-        value: { ...attentionItem, source: 'task', sourceSeq: 1 },
+        schema: agenda.AgendaItemSchema,
+        value: { ...agendaItem, source: 'task', sourceSeq: 1 },
       },
       {
         name: 'response without ask',
-        schema: attention.ResolvedAttentionItemSchema,
-        value: { ...resolvedAttention, ask: undefined },
+        schema: agenda.ResolvedAgendaItemSchema,
+        value: { ...resolvedAgenda, ask: undefined },
       },
       {
         name: 'response kind mismatch',
-        schema: attention.ResolvedAttentionItemSchema,
-        value: { ...resolvedAttention, response: { kind: 'open-question', answer: 'x' } },
+        schema: agenda.ResolvedAgendaItemSchema,
+        value: { ...resolvedAgenda, response: { kind: 'open-question', answer: 'x' } },
       },
       {
         name: 'choice outside options',
-        schema: attention.ResolvedAttentionItemSchema,
+        schema: agenda.ResolvedAgendaItemSchema,
         value: {
-          ...resolvedAttention,
+          ...resolvedAgenda,
           ask: multipleChoice,
           response: { kind: 'multiple-choice', choice: 'C' },
         },
       },
       {
         name: 'dismissal with response',
-        schema: attention.ResolvedAttentionItemSchema,
-        value: { ...resolvedAttention, disposition: 'dismissed' },
+        schema: agenda.ResolvedAgendaItemSchema,
+        value: { ...resolvedAgenda, disposition: 'dismissed' },
       },
       {
         name: 'count mismatch',
-        schema: attention.AttentionSnapshotSchema,
+        schema: agenda.AgendaSnapshotSchema,
         value: {
           v: 1,
           sessionId: 'session-1',
-          items: [attentionItem],
+          items: [agendaItem],
           resolved: [],
           count: 0,
           parseErrors: 0,
@@ -1359,11 +1359,11 @@ describe('attention schemas', () => {
       },
       {
         name: 'duplicate active ids',
-        schema: attention.AttentionSnapshotSchema,
+        schema: agenda.AgendaSnapshotSchema,
         value: {
           v: 1,
           sessionId: 'session-1',
-          items: [attentionItem, attentionItem],
+          items: [agendaItem, agendaItem],
           resolved: [],
           count: 2,
           parseErrors: 0,
@@ -1372,12 +1372,12 @@ describe('attention schemas', () => {
       },
       {
         name: 'duplicate resolved ids',
-        schema: attention.AttentionSnapshotSchema,
+        schema: agenda.AgendaSnapshotSchema,
         value: {
           v: 1,
           sessionId: 'session-1',
           items: [],
-          resolved: [resolvedAttention, resolvedAttention],
+          resolved: [resolvedAgenda, resolvedAgenda],
           count: 0,
           parseErrors: 0,
           updatedAt: INSTANT,
@@ -1385,12 +1385,12 @@ describe('attention schemas', () => {
       },
       {
         name: 'active resolved overlap',
-        schema: attention.AttentionSnapshotSchema,
+        schema: agenda.AgendaSnapshotSchema,
         value: {
           v: 1,
           sessionId: 'session-1',
-          items: [attentionItem],
-          resolved: [resolvedAttention],
+          items: [agendaItem],
+          resolved: [resolvedAgenda],
           count: 1,
           parseErrors: 0,
           updatedAt: INSTANT,
@@ -1398,7 +1398,7 @@ describe('attention schemas', () => {
       },
       {
         name: 'forbidden add source',
-        schema: attention.AttentionActionRequestSchema,
+        schema: agenda.AgendaActionRequestSchema,
         value: { action: 'add', source: 'task', subject: 'x', why: 'x', howToResolve: 'x' },
       },
     ];
@@ -1411,8 +1411,8 @@ describe('attention schemas', () => {
 describe('where a push opens, relative to the machine’s own pages', () => {
   it('names the conversation, and the item when there is one, escaping both', () => {
     // Arrange / Act
-    const plain = attention.sessionNotificationPath('session 1/x');
-    const atItem = attention.attentionNotificationPath('session 1/x', 'A3');
+    const plain = agenda.sessionNotificationPath('session 1/x');
+    const atItem = agenda.agendaNotificationPath('session 1/x', 'A3');
 
     // Assert
     should(plain).equal('/session/session%201%2Fx');

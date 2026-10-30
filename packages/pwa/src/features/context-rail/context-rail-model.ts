@@ -3,7 +3,7 @@
  *
  * The rail shows four facts about one agent in one folder: what it is waiting on you for (Signals), the
  * MCP servers it can reach (MCP), the skills it can run (Skills) and the instruction files it reads
- * (Instructions). Every one of those facts has an owner elsewhere — the attention board, the MCP and skills
+ * (Instructions). Every one of those facts has an owner elsewhere — the agenda board, the MCP and skills
  * inventories (docs/mcp-scopes.md), the session filesystem — and this module owns none of
  * them. It owns only the ROWS: which chip a row falls under, what a search matches, and the one short
  * line each row says about itself.
@@ -13,17 +13,17 @@
  */
 
 import type {
-  AttentionItem,
-  AttentionSnapshot,
+  AgendaItem,
+  AgendaSnapshot,
   McpInventoryServer,
-  ResolvedAttentionItem,
+  ResolvedAgendaItem,
   SessionFsEntry,
   SkillEntry,
   SkillScope,
 } from '@ferretry/protocol';
 import { formatBytes } from '../../components/files-model.ts';
 import { relativeTime } from '../../lib/session-screens.ts';
-import { attentionKindMeta, describeResponse } from '../attention/attention-board.tsx';
+import { agendaKindMeta, describeResponse } from '../agenda/agenda-board.tsx';
 import {
   checkResultOf,
   MCP_SCOPE_LABEL,
@@ -88,11 +88,11 @@ const SIGNAL_CHIPS: readonly SignalChip[] = ['open', 'answered'];
 const SIGNAL_CHIP_LABEL: Readonly<Record<SignalChip, string>> = { open: 'Open', answered: 'Answered' };
 
 export type SignalRow =
-  | { readonly state: 'open'; readonly item: AttentionItem }
-  | { readonly state: 'answered'; readonly item: ResolvedAttentionItem };
+  | { readonly state: 'open'; readonly item: AgendaItem }
+  | { readonly state: 'answered'; readonly item: ResolvedAgendaItem };
 
 /** Open items first, oldest wait first; answered ones after, most recent first. */
-export const signalRows = (snapshot: AttentionSnapshot): SignalRow[] => [
+export const signalRows = (snapshot: AgendaSnapshot): SignalRow[] => [
   ...[...snapshot.items]
     .sort((left, right) => Date.parse(left.waitingSince) - Date.parse(right.waitingSince))
     .map(item => ({ state: 'open' as const, item })),
@@ -102,14 +102,14 @@ export const signalRows = (snapshot: AttentionSnapshot): SignalRow[] => [
 ];
 
 /** What the row says it is: "question", "permission", "pick one". */
-export const signalKind = (item: AttentionItem): string => attentionKindMeta(item).label.toLocaleLowerCase();
+export const signalKind = (item: AgendaItem): string => agendaKindMeta(item).label.toLocaleLowerCase();
 
 /** Who raised it: the agent that did, else the agent whose rail this is. */
-export const signalAuthor = (item: AttentionItem, agentName: string): string =>
+export const signalAuthor = (item: AgendaItem, agentName: string): string =>
   item.raisedBy === 'agent' ? (item.raisedByName ?? agentName) : item.raisedBy === 'daemon' ? 'Ferretry' : 'You';
 
 /** How an answered item ended, in a few words: “Start over”, "Approved", "dismissed". */
-export const signalOutcome = (item: ResolvedAttentionItem): string => {
+export const signalOutcome = (item: ResolvedAgendaItem): string => {
   if (item.response !== undefined) return describeResponse(item.response);
   return item.disposition === 'dismissed' ? 'Dismissed' : 'Done';
 };
@@ -150,11 +150,8 @@ const MCP_CHIP_LABEL: Readonly<Record<McpChip, string>> = { all: 'All', attentio
 const mcpMatches = (server: McpInventoryServer, query: string): boolean =>
   matchesQuery(query, server.name, MCP_SCOPE_LABEL[server.scope], server.target);
 
-const needsAttention = (
-  server: McpInventoryServer,
-  checks: ReadonlyMap<string, McpCheckState>,
-  nowMs: number,
-): boolean => mcpRowStatus(server, checkResultOf(checks, server.id), nowMs).attention;
+const needsAgenda = (server: McpInventoryServer, checks: ReadonlyMap<string, McpCheckState>, nowMs: number): boolean =>
+  mcpRowStatus(server, checkResultOf(checks, server.id), nowMs).attention;
 
 /** The chips, counted under the current search. A Check's answer moves a server in or out of attention. */
 export const mcpChips = (
@@ -167,7 +164,7 @@ export const mcpChips = (
     MCP_CHIPS,
     MCP_CHIP_LABEL,
     servers.filter(server => mcpMatches(server, query)),
-    (server, chip) => chip === 'all' || needsAttention(server, checks, nowMs),
+    (server, chip) => chip === 'all' || needsAgenda(server, checks, nowMs),
   );
 
 export const visibleMcpServers = (
@@ -177,7 +174,7 @@ export const visibleMcpServers = (
   checks: ReadonlyMap<string, McpCheckState>,
   nowMs: number,
 ): McpInventoryServer[] =>
-  servers.filter(server => mcpMatches(server, query) && (chip === 'all' || needsAttention(server, checks, nowMs)));
+  servers.filter(server => mcpMatches(server, query) && (chip === 'all' || needsAgenda(server, checks, nowMs)));
 
 // ── Skills ───────────────────────────────────────────────────────────────────────────────────────
 

@@ -46,7 +46,7 @@
  * Ported from kteam's `src/components/Markdown.tsx`.
  */
 
-import type { AttentionId } from '@ferretry/protocol';
+import type { AgendaId } from '@ferretry/protocol';
 import {
   type ComponentProps,
   createContext,
@@ -74,7 +74,7 @@ import { LOCATION_FENCE_LANGUAGE, parseLocationBlock } from '../lib/location-sha
 import { daemonSessionPath } from '../lib/pages/routes.ts';
 import {
   type AgentReferenceResolver,
-  type AttentionReferenceResolver,
+  type AgendaReferenceResolver,
   type CodeReference,
   findReferences,
   parseReferenceHref,
@@ -233,7 +233,7 @@ export interface MarkdownProps {
   /** Proves `&task` against the daemon's board. Syntax alone never links. */
   readonly taskReferenceResolver?: TaskReferenceResolver;
   /** Proves `!attention` against this session's ledger. */
-  readonly attentionReferenceResolver?: AttentionReferenceResolver;
+  readonly agendaReferenceResolver?: AgendaReferenceResolver;
   /** Proves `%terminal:…` against the surfaces THIS session owns. It is also what
    *  makes a tombstone possible: only this resolver can say "closed" rather than
    *  "unknown". */
@@ -244,7 +244,7 @@ export interface MarkdownProps {
   readonly resolveFilePaths?: FilePathResolver;
   readonly onTaskOpen?: (id: string, opener?: HTMLElement | null) => void;
   readonly onCodeReferenceOpen?: (reference: CodeReference, opener?: HTMLElement | null) => void;
-  readonly onAttentionOpen?: (id: AttentionId, opener?: HTMLElement | null) => void;
+  readonly onAgendaOpen?: (id: AgendaId, opener?: HTMLElement | null) => void;
   /** Focuses one proved live surface — the terminal or page the token names.
    *  Without it a proved surface stays inert text, exactly like a task reference
    *  in a surface that cannot open a task board. */
@@ -448,13 +448,13 @@ export const Markdown = memo(function Markdown({
   readWorkspaceMedia,
   agentReferenceResolver,
   taskReferenceResolver,
-  attentionReferenceResolver,
+  agendaReferenceResolver,
   surfaceReferenceResolver,
   skillReferenceResolver,
   resolveFilePaths,
   onTaskOpen,
   onCodeReferenceOpen,
-  onAttentionOpen,
+  onAgendaOpen,
   onSurfaceOpen,
   onSkillOpen,
   onNavigate,
@@ -494,7 +494,7 @@ export const Markdown = memo(function Markdown({
     agent: agentReferenceResolver,
     file: path => resolvedPaths.get(path) ?? null,
     task: taskReferenceResolver,
-    attention: attentionReferenceResolver,
+    attention: agendaReferenceResolver,
     surface: surfaceReferenceResolver,
     skill: skillReferenceResolver,
   };
@@ -524,7 +524,7 @@ export const Markdown = memo(function Markdown({
         onTaskOpen?.(target.id, opener);
         break;
       case 'attention':
-        onAttentionOpen?.(target.id, opener);
+        onAgendaOpen?.(target.id, opener);
         break;
       case 'surface':
         onSurfaceOpen?.(target, opener);
@@ -547,7 +547,7 @@ export const Markdown = memo(function Markdown({
       case 'task':
         return onTaskOpen !== undefined;
       case 'attention':
-        return onAttentionOpen !== undefined;
+        return onAgendaOpen !== undefined;
       case 'surface':
         return onSurfaceOpen !== undefined;
       case 'skill':

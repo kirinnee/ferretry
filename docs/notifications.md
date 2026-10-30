@@ -82,17 +82,17 @@ Read at start; a change needs a restart.
   title of the item the owner most likely wants first.
 - **A deadline or a ping:** the card's title as the heading and its ask as the text, nothing else. The
   title is trimmed to 40 characters at a word boundary; an item from before titles uses the start of its
-  ask (`attentionTitle`). The body is at most 120 characters, trimmed with `…`. A push never carries the
+  ask (`agendaTitle`). The body is at most 120 characters, trimmed with `…`. A push never carries the
   context, the options or the recommendation.
 
 A title is an agent's own words, so it must never read as the daemon's new-device alert title. Only a name
 that reads as that alert is labelled, as `Ferret “…”`: any spelling, case or punctuation, and Cyrillic, Greek
-and accented look-alikes (`attentionNotificationTitle`). Every other title is as written.
+and accented look-alikes (`agendaNotificationTitle`). Every other title is as written.
 
 ## Where a tap goes
 
 The push's `url` is relative to the machine's own pages: `/session/<id>?attention=A3`
-(`attentionNotificationPath`). The daemon never knows which name a browser files it under. The
+(`agendaNotificationPath`). The daemon never knows which name a browser files it under. The
 browser's per-machine push worker places the path under that machine, so it opens
 `/d/<daemonId>/session/<id>?attention=A3` (`packages/pwa/src/lib/push-scope.ts`). It reuses an open app
 window when there is one, whichever worker controls it, and never a sign-in popup.
@@ -217,19 +217,19 @@ notified before the upgrade is never notified again.
 
 ## Every automatic push, and why it stays or goes
 
-| Path                                             | Where                                          | Decision                                                                                                               |
-| ------------------------------------------------ | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| A ferret stops on the owner                      | daemon `AttentionBuzz` → `NotificationService` | **The** push. One per stop, grouped. See above.                                                                        |
-| An item's `neededBy` comes near                  | daemon `AttentionBuzz`                         | **One push** per item.                                                                                                 |
-| A notice with `--ping`                           | `fy notify --ping`                             | **One push** per notice.                                                                                               |
-| An item is created, edited, surfaced or answered | daemon                                         | **Never pushed.** Inbox badge only. (The per-turn grouped push, the surfaced push and the more-info push are retired.) |
-| A notice without `--ping`                        | `fy notify`, legacy `POST …/notify`            | **Never pushed.** Inbox badge only.                                                                                    |
-| Enrolment confirmation                           | daemon `PushService.register`                  | Kept. One push, only to the browser that just enrolled.                                                                |
-| A new device was paired                          | daemon audit log                               | Kept. This is a security alert.                                                                                        |
-| A harness parks on its own prompt                | daemon `HarnessPromptAttention`                | **An item** like any other: it buzzes through a stop, not by itself.                                                   |
-| A session starts, finishes or idles              | daemon                                         | Never pushed on its own (a stop is idle **with** an item waiting).                                                     |
-| `failed` / `stalled` / `kill_failed`             | PWA page watcher                               | Kept. A dead ferret cannot raise an item.                                                                              |
-| Notifications a device's own filter hides        | push worker                                    | Kept as one quiet, silent line per machine (a push that shows nothing gets a subscription revoked). Carries the mark.  |
+| Path                                             | Where                                       | Decision                                                                                                               |
+| ------------------------------------------------ | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| A ferret stops on the owner                      | daemon `AgendaBuzz` → `NotificationService` | **The** push. One per stop, grouped. See above.                                                                        |
+| An item's `neededBy` comes near                  | daemon `AgendaBuzz`                         | **One push** per item.                                                                                                 |
+| A notice with `--ping`                           | `fy notify --ping`                          | **One push** per notice.                                                                                               |
+| An item is created, edited, surfaced or answered | daemon                                      | **Never pushed.** Inbox badge only. (The per-turn grouped push, the surfaced push and the more-info push are retired.) |
+| A notice without `--ping`                        | `fy notify`, legacy `POST …/notify`         | **Never pushed.** Inbox badge only.                                                                                    |
+| Enrolment confirmation                           | daemon `PushService.register`               | Kept. One push, only to the browser that just enrolled.                                                                |
+| A new device was paired                          | daemon audit log                            | Kept. This is a security alert.                                                                                        |
+| A harness parks on its own prompt                | daemon `HarnessPromptAgenda`                | **An item** like any other: it buzzes through a stop, not by itself.                                                   |
+| A session starts, finishes or idles              | daemon                                      | Never pushed on its own (a stop is idle **with** an item waiting).                                                     |
+| `failed` / `stalled` / `kill_failed`             | PWA page watcher                            | Kept. A dead ferret cannot raise an item.                                                                              |
+| Notifications a device's own filter hides        | push worker                                 | Kept as one quiet, silent line per machine (a push that shows nothing gets a subscription revoked). Carries the mark.  |
 
 ## GAPs
 

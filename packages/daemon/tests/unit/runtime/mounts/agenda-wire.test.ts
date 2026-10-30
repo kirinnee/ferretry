@@ -3,10 +3,10 @@ import { DAEMON_FEATURES, LIMITED_DEVICE_GRANTS, type CapabilityGrants } from '@
 import should from 'should';
 import { ApiDispatcher, ApiRouter, type ApiRoute, type SessionDevice } from '../../../../src/lib/api/index.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
-import { attentionRoutes } from '../../../../src/lib/runtime/mounts/attention.ts';
+import { agendaRoutes } from '../../../../src/lib/runtime/mounts/agenda.ts';
 import { wardenRoutes } from '../../../../src/lib/runtime/mounts/warden.ts';
 import { request } from '../../api/support.ts';
-import { attentionService, CREDENTIALS, FakeWarden, grantSubsystem, human, NO_HELD_REPLIES } from './support.ts';
+import { agendaService, CREDENTIALS, FakeWarden, grantSubsystem, human, NO_HELD_REPLIES } from './support.ts';
 
 /**
  * THE AGENDA WIRE (`agenda.wire.1`), server side: every new route is the old one under a new name.
@@ -18,10 +18,10 @@ import { attentionService, CREDENTIALS, FakeWarden, grantSubsystem, human, NO_HE
  * let a remote phone through a door its old spelling kept shut.
  */
 
-const noNotifications = { enrolledDevices: async () => 0, attentionDelivered: async () => 0 };
+const noNotifications = { enrolledDevices: async () => 0, agendaDelivered: async () => 0 };
 
 const routes: readonly ApiRoute[] = [
-  ...attentionRoutes(attentionService(), noNotifications, NO_HELD_REPLIES),
+  ...agendaRoutes(agendaService(), noNotifications, NO_HELD_REPLIES),
   ...wardenRoutes(new FakeWarden()),
 ];
 

@@ -1065,7 +1065,7 @@ export type WardenLeaveView = z.infer<typeof WardenLeaveViewSchema>;
 export const WARDEN_AGENDA_PATH = '/v1/warden/agenda';
 
 /** The older spelling, still served until the agenda removal release (docs/agenda.md § Compatibility). */
-export const WARDEN_ATTENTION_PATH = '/v1/warden/attention';
+export const LEGACY_WARDEN_ATTENTION_PATH = '/v1/warden/attention';
 
 export const WardenJudgementStateSchema = z.enum(['judged', 'pending', 'queued', 'failed', 'none']);
 export type WardenJudgementState = z.infer<typeof WardenJudgementStateSchema>;
@@ -1090,7 +1090,7 @@ export const WardenJudgementSchema = z.object({
 });
 export type WardenJudgement = z.infer<typeof WardenJudgementSchema>;
 
-export const FleetAttentionItemSchema = z.object({
+export const FleetAgendaItemSchema = z.object({
   sessionId: z.string().min(1),
   teammate: z.string().optional(),
   label: z.string().optional(),
@@ -1110,25 +1110,25 @@ export const FleetAttentionItemSchema = z.object({
   provider: z.string().optional(),
   anomalyKind: WardenAnomalyKindSchema.optional(),
 });
-export type FleetAttentionItem = z.infer<typeof FleetAttentionItemSchema>;
+export type FleetAgendaItem = z.infer<typeof FleetAgendaItemSchema>;
 
-export const WardenAttentionOutcomeSchema = z.enum(['items', 'clean-sweep', 'degraded', 'no-sweep']);
-export type WardenAttentionOutcome = z.infer<typeof WardenAttentionOutcomeSchema>;
+export const WardenAgendaOutcomeSchema = z.enum(['items', 'clean-sweep', 'degraded', 'no-sweep']);
+export type WardenAgendaOutcome = z.infer<typeof WardenAgendaOutcomeSchema>;
 
 /**
- * What the Warden needs the owner for: its own open Attention cards (`raisedBy: daemon`, a `warden:`
- * source reference), read back from every live ferret's board — the same items the unified Attention
+ * What the Warden needs the owner for: its own open Agenda cards (`raisedBy: daemon`, a `warden:`
+ * source reference), read back from every live ferret's board — the same items the unified Agenda
  * inbox shows, never a second list. `warden-anomaly` and `warden-action` rows are no longer sent; the
  * enum keeps them so an app reads an older machine. The four outcomes never collapse: an unreadable
  * board is `degraded`, not an all-clear.
  */
-export const WardenAttentionViewSchema = z.object({
+export const WardenAgendaViewSchema = z.object({
   generatedAt: InstantSchema,
   lastSweepAt: InstantSchema.optional(),
-  outcome: WardenAttentionOutcomeSchema,
+  outcome: WardenAgendaOutcomeSchema,
   wardenDegraded: z.object({ since: InstantSchema.optional(), reason: z.string().min(1) }).optional(),
-  items: z.array(FleetAttentionItemSchema),
+  items: z.array(FleetAgendaItemSchema),
   boardsWithParseErrors: z.array(z.object({ sessionId: z.string().min(1), parseErrors: PositiveIntegerSchema })),
   verdictCoverage: z.object({ limit: PositiveIntegerSchema, truncated: z.boolean() }),
 });
-export type WardenAttentionView = z.infer<typeof WardenAttentionViewSchema>;
+export type WardenAgendaView = z.infer<typeof WardenAgendaViewSchema>;

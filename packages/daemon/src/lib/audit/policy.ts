@@ -164,7 +164,7 @@ export function withinAuditBounds(entry: AuditEntry): AuditEntry {
  *
  * RESERVED, because an agent pushes its own words: an Attention card's title is the push's heading. An
  * agent that could send "A new device was paired" — or a reassuring fake — would be able to impersonate
- * the one notification a person must be able to trust. `attentionNotificationTitle` labels any title
+ * the one notification a person must be able to trust. `agendaNotificationTitle` labels any title
  * that reads as this alert as `Ferret “…”`, and an Attention push's eventKey and tag are its own, so no
  * agent payload can open with either.
  */

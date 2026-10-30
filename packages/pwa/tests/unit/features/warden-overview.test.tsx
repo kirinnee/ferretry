@@ -12,10 +12,10 @@ import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { interact, mount, must } from '../../support/dom.ts';
 import { sessionView } from '../../support/sessions.ts';
 import {
-  attentionItem,
+  agendaItem,
   wardenAction,
   wardenAnomaly,
-  wardenAttention,
+  wardenAgenda,
   wardenConfig,
   wardenFailover,
   wardenInvestigation,
@@ -41,7 +41,7 @@ const props = (overrides: Partial<WardenOverviewProps> = {}): { props: WardenOve
     props: {
       connection,
       status: ready(wardenStatus({ lastSweepAt: '2026-07-31T11:59:00.000Z' })),
-      attention: ready(wardenAttention()),
+      attention: ready(wardenAgenda()),
       now: NOW,
       settingsHref: '/d/daemon-a/settings#warden',
       onNavigate: to => calls.navigations.push(to),
@@ -220,7 +220,7 @@ describe('WardenOverview', () => {
     const view = await render({
       attention: {
         status: 'stale',
-        view: wardenAttention({ outcome: 'items', items: [attentionItem({ sessionId: 'sess-a' })] }),
+        view: wardenAgenda({ outcome: 'items', items: [agendaItem({ sessionId: 'sess-a' })] }),
         reason: 'offline',
       },
     });
@@ -244,7 +244,7 @@ describe('WardenOverview', () => {
         view: wardenStatus({ lastSweepAt: '2026-07-31T11:59:00.000Z' }),
         reason: 'timeout',
       },
-      attention: { status: 'stale', view: wardenAttention(), reason: 'offline' },
+      attention: { status: 'stale', view: wardenAgenda(), reason: 'offline' },
     });
     try {
       // Act
@@ -284,7 +284,7 @@ describe('WardenOverview', () => {
     const view = await render({
       status: ready(actionsStatus()),
       attention: ready(
-        wardenAttention({ outcome: 'items', items: [attentionItem({ sessionId: 'sess-a', source: 'question' })] }),
+        wardenAgenda({ outcome: 'items', items: [agendaItem({ sessionId: 'sess-a', source: 'question' })] }),
       ),
       sessions: known,
     });
@@ -365,17 +365,17 @@ describe('WardenOverview', () => {
 
   it('should link to the Inbox with the notification count and route the click', async () => {
     // Arrange
-    const attention = wardenAttention({
+    const agenda = wardenAgenda({
       outcome: 'items',
       items: [
-        attentionItem({ id: 'a', sessionId: 'sess-a', source: 'question' }),
-        attentionItem({ id: 'b', sessionId: 'sess-b', source: 'question' }),
+        agendaItem({ id: 'a', sessionId: 'sess-a', source: 'question' }),
+        agendaItem({ id: 'b', sessionId: 'sess-b', source: 'question' }),
       ],
     });
     const one = await render({
-      attention: ready(wardenAttention({ outcome: 'items', items: [attentionItem({ sessionId: 'sess-a' })] })),
+      attention: ready(wardenAgenda({ outcome: 'items', items: [agendaItem({ sessionId: 'sess-a' })] })),
     });
-    const two = await render({ attention: ready(attention) });
+    const two = await render({ attention: ready(agenda) });
     try {
       // Act
       const link = must(two.container.querySelector<HTMLElement>('[data-warden-inbox="link"] a'), 'the inbox link');
@@ -395,7 +395,7 @@ describe('WardenOverview', () => {
 
   it('should say there are no notifications as plain text, not a link', async () => {
     // Arrange
-    const view = await render({ attention: ready(wardenAttention({ outcome: 'clean-sweep' })) });
+    const view = await render({ attention: ready(wardenAgenda({ outcome: 'clean-sweep' })) });
     try {
       // Act
       const line = must(view.container.querySelector('[data-warden-inbox="none"]'), 'the none line');
@@ -411,9 +411,9 @@ describe('WardenOverview', () => {
   it('should warn instead of reporting none when the feed is degraded or no sweep has run', async () => {
     // Arrange
     const degraded = await render({
-      attention: ready(wardenAttention({ outcome: 'degraded', wardenDegraded: { reason: 'boards unreadable' } })),
+      attention: ready(wardenAgenda({ outcome: 'degraded', wardenDegraded: { reason: 'boards unreadable' } })),
     });
-    const noSweep = await render({ attention: ready(wardenAttention({ outcome: 'no-sweep' })) });
+    const noSweep = await render({ attention: ready(wardenAgenda({ outcome: 'no-sweep' })) });
     try {
       // Act
       const lines = [degraded, noSweep].map(view => view.container.querySelector('[data-warden-inbox]'));

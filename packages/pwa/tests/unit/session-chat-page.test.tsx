@@ -23,13 +23,9 @@ import type { RuntimeModelControls } from '../../src/components/runtime-controls
 import { SessionTopBar, sessionDisplayName } from '../../src/components/session-top-bar.tsx';
 import { Transcript } from '../../src/components/transcript.tsx';
 import { SessionAnalyticsSurface } from '../../src/features/analytics/session-analytics-surface.tsx';
-import {
-  AttentionAgendaDrawer,
-  AttentionAgendaLine,
-  AttentionReferenceChips,
-} from '../../src/features/attention/attention-agenda-line.tsx';
-import { AttentionAgendaRow } from '../../src/features/attention/attention-agenda-row.tsx';
-import { AttentionItemView } from '../../src/features/attention/attention-item-view.tsx';
+import { AgendaDrawer, AgendaLine, AgendaReferenceChips } from '../../src/features/agenda/agenda-line.tsx';
+import { AgendaRow } from '../../src/features/agenda/agenda-row.tsx';
+import { AgendaItemView } from '../../src/features/agenda/agenda-item-view.tsx';
 import { ContextRailBody } from '../../src/features/context-rail/context-rail-body.tsx';
 import { DialogCard } from '../../src/features/harness-dialog/dialog-card.tsx';
 import { ApprovalCard } from '../../src/features/permission-request/approval-card.tsx';
@@ -47,13 +43,13 @@ import { SessionWorkspace } from '../../src/features/workspace/session-workspace
 import { WorkspaceView } from '../../src/features/workspace/workspace-view.tsx';
 import { TOUCH_SELECTION_RELEASE_SETTLE_MS } from '../../src/hooks/use-live-clock.ts';
 import { DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
-import { DaemonAttentionClient } from '../../src/lib/attention-client.ts';
+import { DaemonAgendaClient } from '../../src/lib/agenda-client.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { createLiveActivityHub, type LiveActivityFeed } from '../../src/lib/live-activity-feed.ts';
 import { daemonSessionPath } from '../../src/lib/pages/routes.ts';
 import {
-  type SessionAttentionModel,
+  type SessionAgendaModel,
   type SessionChatClient,
   SessionChatPage,
 } from '../../src/lib/pages/session-chat-page.tsx';
@@ -289,11 +285,11 @@ class ReceiverBoundChatClient {
 }
 
 /**
- * What Info reads through, beyond the page: the Attention ledger (refused here, so Signals is honest
+ * What Info reads through, beyond the page: the Agenda ledger (refused here, so Signals is honest
  * about an unread board) and a fleet whose MCP catalogue is empty.
  */
 const contextDependencies = (): NonNullable<ComponentProps<typeof SessionChatPage>['context']> => ({
-  attention: new DaemonAttentionClient(undefined, async () => Response.json({}, { status: 503 })),
+  attention: new DaemonAgendaClient(undefined, async () => Response.json({}, { status: 503 })),
   createFleetClient: factoryFor({
     'GET /v1/fleet/components': { format: 'version-2', kinds: [] },
     [`GET ${MCP_OAUTH_PATH}`]: { connections: [] },
@@ -2285,13 +2281,13 @@ describe('SessionChatPage', () => {
   /**
    * ROW 17's SURFACE, IN THE SHIPPED WORKSPACE — not in a fixture.
    *
-   * The Attention board had no host at all before this: `DaemonAttentionClient`,
+   * The Agenda board had no host at all before this: `DaemonAgendaClient`,
    * the hooks and the board were constructed only by tests. These cases assert
    * the production journey, because "the component renders in isolation" is
    * exactly the evidence that was mistaken for a shipped feature before.
    */
   describe('Attention', () => {
-    const attentionItem = {
+    const agendaItem = {
       id: 'A3',
       source: 'agent-raised',
       sourceRef: null,
@@ -2306,7 +2302,7 @@ describe('SessionChatPage', () => {
       raisedByName: 'zoe',
     };
     const resolvedItem = {
-      ...attentionItem,
+      ...agendaItem,
       id: 'A2',
       subject: 'Pick the release branch',
       resolvedAt: '2026-07-31T11:20:00.000Z',
@@ -2317,7 +2313,7 @@ describe('SessionChatPage', () => {
       disposition: 'resolved',
       response: { kind: 'permission', decision: 'approve' },
     };
-    const attentionModel = (items: readonly unknown[] = [attentionItem], resolved: readonly unknown[] = []) =>
+    const agendaModel = (items: readonly unknown[] = [agendaItem], resolved: readonly unknown[] = []) =>
       ({
         client: {
           respond: async () => undefined,
@@ -2337,7 +2333,7 @@ describe('SessionChatPage', () => {
           updatedAt: '2026-07-31T12:00:00.000Z',
         },
         status: 'ready',
-      }) as unknown as SessionAttentionModel;
+      }) as unknown as SessionAgendaModel;
 
     /** A session whose ferret works in agenda mode: only then does its chat draw an agenda. */
     const agendaSession = (id = 'shared') => sessionView(id, { state: { attention: { agendaMode: true } as never } });
@@ -2354,7 +2350,7 @@ describe('SessionChatPage', () => {
       />
     );
     const agendaPage = (props: Partial<ComponentProps<typeof SessionChatPage>> = {}) =>
-      chatPage({ session: agendaSession(), attention: attentionModel(), ...props });
+      chatPage({ session: agendaSession(), attention: agendaModel(), ...props });
     const update = (page: ReturnType<typeof renderSessionChatPage>, element: ReactElement) =>
       run(() => page.update(withSessionSearch(element as ReactElement<ComponentProps<typeof SessionChatPage>>)));
 
@@ -2386,7 +2382,7 @@ describe('SessionChatPage', () => {
       try {
         expect(needsYouButtons(page.root)).toHaveLength(0);
         expect(lines(page.root)).toHaveLength(1);
-        expect(page.root.findByType(AttentionAgendaLine).props.counts).toEqual({
+        expect(page.root.findByType(AgendaLine).props.counts).toEqual({
           blocking: 0,
           needYou: 1,
           withFerret: 0,
@@ -2394,7 +2390,7 @@ describe('SessionChatPage', () => {
         expect(page.root.findAll(node => node.props?.role === 'dialog')).toHaveLength(0);
         // The line sits in the input column, ahead of the composer; nothing else is under it.
         const col = column(page.root);
-        expect(col.findAllByType(AttentionAgendaLine)).toHaveLength(1);
+        expect(col.findAllByType(AgendaLine)).toHaveLength(1);
         expect(col.findAllByType(Composer)).toHaveLength(1);
         expect(drawers(page.root)).toHaveLength(0);
         expect(cards(page.root)).toHaveLength(0);
@@ -2405,11 +2401,11 @@ describe('SessionChatPage', () => {
 
     test('reads agenda mode from the `agenda` summary, which wins over `attention`', () => {
       const only = sessionView('shared', { state: { agenda: { agendaMode: true } as never } });
-      const page = renderSessionChatPage(chatPage({ session: only, attention: attentionModel() }));
+      const page = renderSessionChatPage(chatPage({ session: only, attention: agendaModel() }));
       const stale = sessionView('shared', {
         state: { agenda: { agendaMode: false } as never, attention: { agendaMode: true } as never },
       });
-      const off = renderSessionChatPage(chatPage({ session: stale, attention: attentionModel() }));
+      const off = renderSessionChatPage(chatPage({ session: stale, attention: agendaModel() }));
       try {
         expect(lines(page.root)).toHaveLength(1);
         expect(lines(off.root)).toHaveLength(0);
@@ -2420,23 +2416,21 @@ describe('SessionChatPage', () => {
     });
 
     test('draws no agenda for a ferret that is not in agenda mode, whatever its board holds', () => {
-      const page = renderSessionChatPage(chatPage({ attention: attentionModel() }));
+      const page = renderSessionChatPage(chatPage({ attention: agendaModel() }));
       try {
         expect(lines(page.root)).toHaveLength(0);
         expect(drawers(page.root)).toHaveLength(0);
         expect(cards(page.root)).toHaveLength(0);
         // The ledger still proves a `!A3`, so a link in older chat stays a link.
         const surface = page.root.findByType(ReferenceSurfaceProvider).props.surface;
-        expect(surface.attentionReferenceResolver('A3')).toBe(true);
+        expect(surface.agendaReferenceResolver('A3')).toBe(true);
       } finally {
         run(() => page.unmount());
       }
     });
 
     test('keeps plain notifications out of the agenda', () => {
-      const page = renderSessionChatPage(
-        agendaPage({ attention: attentionModel([{ ...attentionItem, notice: true }]) }),
-      );
+      const page = renderSessionChatPage(agendaPage({ attention: agendaModel([{ ...agendaItem, notice: true }]) }));
       try {
         expect(lines(page.root)).toHaveLength(0);
       } finally {
@@ -2445,15 +2439,15 @@ describe('SessionChatPage', () => {
     });
 
     test('keeps the resolved history in the header menu as "N resolved", and shows no row when there is none', () => {
-      const withHistory = renderSessionChatPage(agendaPage({ attention: attentionModel([], [resolvedItem]) }));
+      const withHistory = renderSessionChatPage(agendaPage({ attention: agendaModel([], [resolvedItem]) }));
       try {
         expect(actionLabels(withHistory.root)).toContain('1 resolved');
         expect(lines(withHistory.root)).toHaveLength(0);
-        expect(withHistory.root.findAll(node => node.props?.['data-attention-record'] !== undefined)).toHaveLength(0);
+        expect(withHistory.root.findAll(node => node.props?.['data-agenda-record'] !== undefined)).toHaveLength(0);
       } finally {
         run(() => withHistory.unmount());
       }
-      const without = renderSessionChatPage(agendaPage({ attention: attentionModel([], []) }));
+      const without = renderSessionChatPage(agendaPage({ attention: agendaModel([], []) }));
       try {
         expect(actionLabels(without.root).some(label => label.endsWith('resolved'))).toBe(false);
       } finally {
@@ -2470,31 +2464,31 @@ describe('SessionChatPage', () => {
         expect(actionLabels(page.root)).not.toContain('Attention');
         expect(lines(page.root)).toHaveLength(0);
         const surface = page.root.findByType(ReferenceSurfaceProvider).props.surface;
-        expect(surface.attentionReferenceResolver).toBeUndefined();
-        expect(surface.onAttentionOpen).toBeUndefined();
+        expect(surface.agendaReferenceResolver).toBeUndefined();
+        expect(surface.onAgendaOpen).toBeUndefined();
       } finally {
         run(() => page.unmount());
       }
     });
 
     test('proves every id on this session’s ledger and opens an open one as its card, a resolved one in the list', () => {
-      const page = renderSessionChatPage(agendaPage({ attention: attentionModel([attentionItem], [resolvedItem]) }));
+      const page = renderSessionChatPage(agendaPage({ attention: agendaModel([agendaItem], [resolvedItem]) }));
       try {
         const surface = page.root.findByType(ReferenceSurfaceProvider).props.surface;
-        expect(surface.attentionReferenceResolver('A3')).toBe(true);
+        expect(surface.agendaReferenceResolver('A3')).toBe(true);
         // Answered, but still on the record — older chat keeps its link.
-        expect(surface.attentionReferenceResolver('A2')).toBe(true);
+        expect(surface.agendaReferenceResolver('A2')).toBe(true);
         // On no ledger here: Markdown leaves it as prose.
-        expect(surface.attentionReferenceResolver('A9')).toBe(false);
+        expect(surface.agendaReferenceResolver('A9')).toBe(false);
 
-        run(() => surface.onAttentionOpen('A3', null));
+        run(() => surface.onAgendaOpen('A3', null));
         expect(cards(page.root)).toHaveLength(1);
-        expect(page.root.findByType(AttentionItemView).props.item.id).toBe('A3');
+        expect(page.root.findByType(AgendaItemView).props.item.id).toBe('A3');
 
-        run(() => page.root.findByType(AttentionItemView).props.onClose());
+        run(() => page.root.findByType(AgendaItemView).props.onClose());
         expect(cards(page.root)).toHaveLength(0);
 
-        run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onAttentionOpen('A2', null));
+        run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onAgendaOpen('A2', null));
         expect(actionLabels(page.root)).toContain('1 resolved');
         expect(cards(page.root)).toHaveLength(0);
       } finally {
@@ -2503,12 +2497,12 @@ describe('SessionChatPage', () => {
     });
 
     test('proves nothing while the board is unread: unread is not empty', () => {
-      const unread = { ...attentionModel(), snapshot: null, status: 'loading' } as unknown as SessionAttentionModel;
+      const unread = { ...agendaModel(), snapshot: null, status: 'loading' } as unknown as SessionAgendaModel;
       const page = renderSessionChatPage(agendaPage({ attention: unread }));
       try {
         const surface = page.root.findByType(ReferenceSurfaceProvider).props.surface;
-        expect(surface.attentionReferenceResolver).toBeUndefined();
-        expect(surface.onAttentionOpen).toBeUndefined();
+        expect(surface.agendaReferenceResolver).toBeUndefined();
+        expect(surface.onAgendaOpen).toBeUndefined();
         expect(lines(page.root)).toHaveLength(0);
       } finally {
         run(() => page.unmount());
@@ -2516,17 +2510,17 @@ describe('SessionChatPage', () => {
     });
 
     test('lands in the chat AT the item a link names, and re-targets when the link changes', () => {
-      const board = attentionModel([attentionItem, { ...attentionItem, id: 'A5' }], [resolvedItem]);
-      const page = renderSessionChatPage(agendaPage({ attention: board, attentionTarget: 'A3' }));
+      const board = agendaModel([agendaItem, { ...agendaItem, id: 'A5' }], [resolvedItem]);
+      const page = renderSessionChatPage(agendaPage({ attention: board, agendaTarget: 'A3' }));
       try {
-        expect(page.root.findByType(AttentionItemView).props.item.id).toBe('A3');
+        expect(page.root.findByType(AgendaItemView).props.item.id).toBe('A3');
         // The only dialog is the item view itself, laid over the chat column rather than over the page.
         expect(
           page.root.findAll(node => node.props?.role === 'dialog').map(node => node.props['data-agenda-view']),
         ).toEqual(['A3']);
 
-        update(page, agendaPage({ attention: board, attentionTarget: 'A5' }));
-        expect(page.root.findByType(AttentionItemView).props.item.id).toBe('A5');
+        update(page, agendaPage({ attention: board, agendaTarget: 'A5' }));
+        expect(page.root.findByType(AgendaItemView).props.item.id).toBe('A5');
       } finally {
         run(() => page.unmount());
       }
@@ -2534,16 +2528,16 @@ describe('SessionChatPage', () => {
 
     test('a new navigation to the SAME item re-opens its card after it was closed', () => {
       const props = {
-        attention: attentionModel([attentionItem, { ...attentionItem, id: 'A5' }]),
-        attentionTarget: 'A3' as const,
+        attention: agendaModel([agendaItem, { ...agendaItem, id: 'A5' }]),
+        agendaTarget: 'A3' as const,
       };
-      const page = renderSessionChatPage(agendaPage({ ...props, attentionTargetKey: 'entry-1' }));
+      const page = renderSessionChatPage(agendaPage({ ...props, agendaTargetKey: 'entry-1' }));
       try {
-        run(() => page.root.findByType(AttentionItemView).props.onClose());
+        run(() => page.root.findByType(AgendaItemView).props.onClose());
         expect(cards(page.root)).toHaveLength(0);
 
-        update(page, agendaPage({ ...props, attentionTargetKey: 'entry-2' }));
-        expect(page.root.findByType(AttentionItemView).props.item.id).toBe('A3');
+        update(page, agendaPage({ ...props, agendaTargetKey: 'entry-2' }));
+        expect(page.root.findByType(AgendaItemView).props.item.id).toBe('A3');
       } finally {
         run(() => page.unmount());
       }
@@ -2552,7 +2546,7 @@ describe('SessionChatPage', () => {
     test('never carries one session’s open card into another session', () => {
       const page = renderSessionChatPage(agendaPage());
       try {
-        run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onAttentionOpen('A3', null));
+        run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onAgendaOpen('A3', null));
         expect(cards(page.root)).toHaveLength(1);
 
         update(page, agendaPage({ session: agendaSession('other') }));
@@ -2565,9 +2559,9 @@ describe('SessionChatPage', () => {
     test('a link into another session opens that session’s card at its item', () => {
       const page = renderSessionChatPage(agendaPage());
       try {
-        update(page, agendaPage({ attentionTarget: 'A3', session: agendaSession('other') }));
+        update(page, agendaPage({ agendaTarget: 'A3', session: agendaSession('other') }));
         // The reset for the new session runs first; the link's target wins.
-        expect(page.root.findByType(AttentionItemView).props.item.id).toBe('A3');
+        expect(page.root.findByType(AgendaItemView).props.item.id).toBe('A3');
       } finally {
         run(() => page.unmount());
       }
@@ -2580,18 +2574,18 @@ describe('SessionChatPage', () => {
         press(page.root);
         expect(drawers(page.root)).toHaveLength(1);
         // Siblings of the composer, drawn before it: the drawer and the line never wrap it.
-        expect(column(page.root).findAllByType(AttentionAgendaDrawer)).toHaveLength(1);
-        expect(page.root.findByType(AttentionAgendaLine).props.open).toBe(true);
+        expect(column(page.root).findAllByType(AgendaDrawer)).toHaveLength(1);
+        expect(page.root.findByType(AgendaLine).props.open).toBe(true);
 
-        run(() => page.root.findByType(AttentionAgendaRow).props.onOpen());
+        run(() => page.root.findByType(AgendaRow).props.onOpen());
         expect(drawers(page.root)).toHaveLength(0);
         expect(cards(page.root)).toHaveLength(1);
         // Focus mode: the item is a direct child of the chat surface, over the log AND the composer.
         const last = surface(page.root).children.at(-1);
-        expect(typeof last === 'string' ? 0 : last?.findAllByType(AttentionItemView).length).toBe(1);
-        expect(surface(page.root).findAllByType(AttentionItemView)).toHaveLength(1);
-        expect(log(page.root).findAllByType(AttentionItemView)).toHaveLength(0);
-        expect(column(page.root).findAllByType(AttentionItemView)).toHaveLength(0);
+        expect(typeof last === 'string' ? 0 : last?.findAllByType(AgendaItemView).length).toBe(1);
+        expect(surface(page.root).findAllByType(AgendaItemView)).toHaveLength(1);
+        expect(log(page.root).findAllByType(AgendaItemView)).toHaveLength(0);
+        expect(column(page.root).findAllByType(AgendaItemView)).toHaveLength(0);
         // The chat stays mounted underneath, so its scroll position is kept.
         expect(column(page.root).findAllByType(Composer)).toHaveLength(1);
         expect(names(column(page.root)).at(-1)).toBe(composerBefore);
@@ -2606,11 +2600,11 @@ describe('SessionChatPage', () => {
         expect(surface(page.root).props['data-agenda-focus']).toBeUndefined();
         expect(log(page.root).props.inert).toBeUndefined();
         expect(chatInput(page.root).props.inert).toBeUndefined();
-        run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onAttentionOpen('A3', null));
+        run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onAgendaOpen('A3', null));
         expect(surface(page.root).props['data-agenda-focus']).toBe(true);
         expect(log(page.root).props.inert).toBe(true);
         expect(chatInput(page.root).props.inert).toBe(true);
-        run(() => page.root.findByType(AttentionItemView).props.onClose());
+        run(() => page.root.findByType(AgendaItemView).props.onClose());
         expect(surface(page.root).props['data-agenda-focus']).toBeUndefined();
         expect(log(page.root).props.inert).toBeUndefined();
         expect(chatInput(page.root).props.inert).toBeUndefined();
@@ -2662,7 +2656,7 @@ describe('SessionChatPage', () => {
     });
 
     test('never moves the composer in the chat: it stays the input column’s last child whether the line or the drawer is open', () => {
-      const closedBoard = attentionModel([], []);
+      const closedBoard = agendaModel([], []);
       const page = renderSessionChatPage(agendaPage({ attention: closedBoard }));
       try {
         const lastChildIsComposer = () => {
@@ -2699,16 +2693,14 @@ describe('SessionChatPage', () => {
         // No chip: the message goes out exactly as typed.
         await send('plain');
         press(page.root);
-        run(() => page.root.findByType(AttentionAgendaRow).props.onOpen());
-        run(() => page.root.findByType(AttentionItemView).props.onReply(''));
-        expect(
-          page.root.findByType(AttentionReferenceChips).props.items.map((item: { id: string }) => item.id),
-        ).toEqual(['A3']);
+        run(() => page.root.findByType(AgendaRow).props.onOpen());
+        run(() => page.root.findByType(AgendaItemView).props.onReply(''));
+        expect(page.root.findByType(AgendaReferenceChips).props.items.map((item: { id: string }) => item.id)).toEqual([
+          'A3',
+        ]);
         await send('ship it');
         run(() => page.root.findByType(Composer).props.onSent());
-        expect(page.root.findAllByType(AttentionReferenceChips).every(chips => chips.props.items.length === 0)).toBe(
-          true,
-        );
+        expect(page.root.findAllByType(AgendaReferenceChips).every(chips => chips.props.items.length === 0)).toBe(true);
         await send('later');
         expect(sent).toEqual(['plain', '!A3 ship it', 'later']);
       } finally {
@@ -2716,7 +2708,7 @@ describe('SessionChatPage', () => {
       }
     });
 
-    test('counts a held answer down on the line when the host passes attentionReplies', () => {
+    test('counts a held answer down on the line when the host passes agendaReplies', () => {
       const replies = {
         secondsLeft: 8,
         pending: ['A3'],
@@ -2725,9 +2717,9 @@ describe('SessionChatPage', () => {
         sending: false,
         sendNow: () => undefined,
       };
-      const page = renderSessionChatPage(agendaPage({ attentionReplies: replies }));
+      const page = renderSessionChatPage(agendaPage({ agendaReplies: replies }));
       try {
-        const slot = page.root.findByType(AttentionAgendaLine).props.repliesSlot;
+        const slot = page.root.findByType(AgendaLine).props.repliesSlot;
         expect(slot.props.secondsLeft).toBe(8);
         expect(slot.props.onSendNow).toBe(replies.sendNow);
       } finally {
@@ -2739,12 +2731,10 @@ describe('SessionChatPage', () => {
       const page = renderSessionChatPage(agendaPage());
       try {
         const offered = () =>
-          (page.root.findByType(Composer).props.autocompleteAttention as readonly { id: string }[]).map(
-            item => item.id,
-          );
+          (page.root.findByType(Composer).props.autocompleteAgenda as readonly { id: string }[]).map(item => item.id);
         expect(offered()).toEqual(['A3']);
 
-        update(page, agendaPage({ attention: attentionModel([attentionItem, { ...attentionItem, id: 'A7' }]) }));
+        update(page, agendaPage({ attention: agendaModel([agendaItem, { ...agendaItem, id: 'A7' }]) }));
         expect(offered()).toEqual(['A3', 'A7']);
       } finally {
         run(() => page.unmount());
