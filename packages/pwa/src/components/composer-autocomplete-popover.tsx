@@ -44,6 +44,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import { useInputModality } from '../hooks/use-input-modality.ts';
+import { isTaskMenuLabel } from './composer-autocomplete-providers.ts';
 import type {
   ComposerAutocompleteCandidate,
   ComposerAutocompleteController,
@@ -237,7 +238,51 @@ export const autocompleteFooterHint = (
  * at most six rows of icon · name · one-line hint, and a footer naming the keys. On a phone the same
  * popover spans the composer just above the keyboard, and its rows keep the 44px touch floor.
  */
-export function ComposerAutocompletePopover({ surface }: { readonly surface: ComposerAutocompleteSurface }) {
+/** The task menu's one switch: asks the human did not make stay out of it until this is on. */
+export interface AgentTasksSwitch {
+  readonly included: boolean;
+  readonly onToggle: () => void;
+}
+
+function AgentTasksToggle({ included, onToggle }: AgentTasksSwitch) {
+  const pointer = useRef<number | null>(null);
+  return (
+    <button
+      aria-checked={included}
+      className="fy-ac-switch"
+      data-agent-tasks-switch=""
+      onClick={event => {
+        // A keyboard or assistive click has no pointer id; a pointer's own click is handled on lift.
+        if (event.detail === 0) onToggle();
+      }}
+      onPointerCancel={() => {
+        pointer.current = null;
+      }}
+      onPointerDown={event => {
+        pointer.current = event.pointerId;
+        event.preventDefault();
+      }}
+      onPointerUp={event => {
+        if (pointer.current === event.pointerId) onToggle();
+        pointer.current = null;
+      }}
+      role="switch"
+      tabIndex={-1}
+      type="button"
+    >
+      <span aria-hidden="true" className="fy-ac-switch-track" data-on={included || undefined} />
+      Include agent tasks
+    </button>
+  );
+}
+
+export function ComposerAutocompletePopover({
+  surface,
+  agentTasks,
+}: {
+  readonly surface: ComposerAutocompleteSurface;
+  readonly agentTasks?: AgentTasksSwitch | undefined;
+}) {
   const { activeIndex, candidates, contextLabel, error, listboxId, match, notice, open, provider, status } = surface;
   // A touch screen gets no key names it cannot press.
   const { touchAffected } = useInputModality();
@@ -289,6 +334,7 @@ export function ComposerAutocompletePopover({ surface }: { readonly surface: Com
               <TierLadder activeTier={match?.referenceTier} legend={provider.legend} />
             )}
           </div>
+          {agentTasks === undefined || !isTaskMenuLabel(contextLabel) ? null : <AgentTasksToggle {...agentTasks} />}
           <div
             {...(ready ? { 'aria-label': provider?.label ?? 'Suggestions', role: 'listbox' } : {})}
             className="fy-ac-list"

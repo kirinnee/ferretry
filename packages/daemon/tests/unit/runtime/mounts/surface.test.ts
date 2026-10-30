@@ -396,6 +396,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   sessionResume: new FakeSessionResume(),
   sessionSend: new FakeSessionSend(),
   sendTracking: { arm: () => () => {} },
+  sendReproof: { run: async () => undefined, stop: () => undefined },
   queueDelivery: { arm: async () => undefined, stop: async () => undefined },
   sessionAnswer: {
     answer: async id => sessionView(id),

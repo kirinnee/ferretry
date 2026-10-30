@@ -1,24 +1,23 @@
 /**
- * Screenshots of the theme quick switch, which lives in a header that is already there. Each scene is shot
- * closed and with the popover open, in the light and dark studio themes:
+ * Screenshots and close-path checks of the theme picker. Each scene is shot closed and with the picker open
+ * (its ✕ and Done showing), in the light and dark studio themes, and the open picker must close every way out
+ * (owner, 2026-10-30: "make sure i can close it!"): ✕, Done, Escape, a tap outside it, and the platform Back.
  *
- *   * desktop — the session header's action row, the switch last after Actions (the REAL `SessionTopBar`, 1440px).
+ *   * desktop — the session header, the theme icon beside Interrupt/Stop (the REAL `SessionTopBar`, 1440px).
+ *   * phone-chat — the compact session header, the theme icon beside ⓘ (the REAL `SessionTopBar`, 390px).
  *   * desktop-page — a page with no session header: the Insights tab strip carries it at its right end (the REAL
  *     `InsightsFrame` and `PageThemeSwitch`, 1440px).
  *   * phone — the top bar of a non-session page (the REAL `AppBar` with its theme slot, 390px).
  *
- * A session page on a phone has no switch in its bar: it is Actions ▾ › Theme… there
- * (`phone-chat-screenshot.ts` shoots and checks it).
- *
  *   bun harness/theme-switch-screenshot.tsx   # writes harness/out/theme-switch-<scene>-<scheme>-<state>.png
  *
- * The popover writes the same `fy-theme` preference Settings does; this harness only looks. Review evidence;
- * nothing compares the PNGs.
+ * The picker writes the same `fy-theme` preference Settings does; this harness only looks and closes it. The
+ * PNGs are review evidence; nothing compares them.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { chromium } from 'playwright-core';
+import { chromium, type Page } from 'playwright-core';
 
 const harnessDir = import.meta.dir;
 const packageDir = resolve(harnessDir, '..');
@@ -69,9 +68,24 @@ const desktop = (
       compact={false}
       menu={<Menu />}
       onToggleInfo={noop}
-      project="ferretry"
       session={session}
-      trailing={<ThemeToggle iconOnly />}
+      themeToggle={<ThemeToggle iconOnly />}
+      turn="your-turn"
+    />
+    <Body />
+  </div>
+);
+
+const phoneChat = (
+  <div className="kt-shell flex flex-col overflow-hidden">
+    <SessionTopBar
+      actions={null}
+      compact
+      menu={<Menu />}
+      onOpenSessions={noop}
+      onToggleInfo={noop}
+      session={session}
+      themeToggle={<ThemeToggle iconOnly touch />}
       turn="your-turn"
     />
     <Body />
@@ -104,7 +118,13 @@ const phone = (
 );
 
 createRoot(document.getElementById('root')).render(
-  scene === 'desktop' ? desktop : scene === 'desktop-page' ? desktopPage : phone,
+  scene === 'desktop'
+    ? desktop
+    : scene === 'phone-chat'
+      ? phoneChat
+      : scene === 'desktop-page'
+        ? desktopPage
+        : phone,
 );
 `;
 
@@ -145,9 +165,89 @@ const executablePath =
 const browser = await chromium.launch({ executablePath, headless: true });
 const SCENES = [
   { name: 'desktop', width: 1440, height: 900, mobile: false },
+  { name: 'phone-chat', width: 390, height: 844, mobile: true },
   { name: 'desktop-page', width: 1440, height: 900, mobile: false },
   { name: 'phone', width: 390, height: 844, mobile: true },
 ] as const;
+
+const PANEL = '[role="dialog"][aria-label="Theme"]';
+
+/** A point beside the open theme picker (on whichever side has room) at height `y`, i.e. outside it. */
+const freeSide = async (page: Page, y: number): Promise<{ x: number; y: number }> => {
+  const width = page.viewportSize()?.width ?? 0;
+  const panel = await page.locator('[role="dialog"][aria-label="Theme"]').boundingBox();
+  const left = panel === null ? 0 : panel.x;
+  const right = panel === null ? 0 : width - (panel.x + panel.width);
+  return { x: left >= right ? Math.max(1, left / 2) : width - Math.max(1, right / 2), y };
+};
+
+const checkClosePaths = async (
+  page: Page,
+  label: string,
+  touch: boolean,
+  width: number,
+  height: number,
+): Promise<void> => {
+  const press = async (selector: string): Promise<void> => {
+    const target = page.locator(selector).first();
+    if (touch) await target.tap();
+    else await target.click();
+  };
+  const isGone = async (): Promise<boolean> =>
+    await page
+      .locator(PANEL)
+      .waitFor({ state: 'hidden', timeout: 3_000 })
+      .then(
+        () => true,
+        () => false,
+      );
+  const open = async (): Promise<void> => {
+    await press('[data-theme-trigger]');
+    await page.locator(PANEL).waitFor({ state: 'visible', timeout: 3_000 });
+    await page.waitForTimeout(150);
+  };
+  const startPath = new URL(page.url()).pathname;
+  const outside = { x: 0, y: Math.min(height - 8, 600) };
+  const paths: readonly [string, () => Promise<void>][] = [
+    ['the ✕', () => press('[data-theme-close]')],
+    ['Done', () => press('[data-theme-done]')],
+    ['Escape', () => page.keyboard.press('Escape')],
+    [
+      'a tap outside it',
+      async () => {
+        const at = await freeSide(page, outside.y);
+        if (touch) await page.touchscreen.tap(at.x, at.y);
+        else await page.mouse.click(at.x, at.y);
+      },
+    ],
+    ['the platform Back', () => page.evaluate(() => history.back())],
+  ];
+  // A picker left open from the shots above is closed first, so every path starts from a fresh open.
+  if ((await page.locator(PANEL).count()) > 0) {
+    await page.keyboard.press('Escape');
+    if (!(await isGone())) fail(`${label}: Escape did not clear the picker left open by the shot`);
+  }
+  await open();
+  const close = await page.locator('[data-theme-close]').first().boundingBox();
+  if (
+    close === null ||
+    close.x < 0 ||
+    close.y < 0 ||
+    close.x + close.width > width ||
+    close.y + close.height > height
+  ) {
+    fail(`${label}: the ✕ is not on screen (${JSON.stringify(close)})`);
+  }
+  await page.keyboard.press('Escape');
+  if (!(await isGone())) fail(`${label}: Escape did not close the picker`);
+  for (const [path, act] of paths) {
+    await open();
+    await act();
+    if (!(await isGone())) fail(`${label}: ${path} did not close the picker`);
+    if (new URL(page.url()).pathname !== startPath) fail(`${label}: ${path} left the page it was opened over`);
+    process.stdout.write(`✅ ${label}: ${path} closes it\n`);
+  }
+};
 
 try {
   for (const scheme of ['light', 'dark'] as const) {
@@ -184,13 +284,14 @@ try {
             await page.locator('[role="dialog"][aria-label="Theme"]').waitFor({ state: 'visible' });
             const panel = await page.locator('[role="dialog"][aria-label="Theme"]').boundingBox();
             if (panel !== null && (panel.x < 0 || panel.x + panel.width > scene.width)) {
-              fail(`${scene.name} ${scheme}: the popover leaves the viewport`);
+              fail(`${scene.name} ${scheme}: the popover leaves the viewport (${JSON.stringify(panel)})`);
             }
           }
           const target = join(outDir, `theme-switch-${scene.name}-${scheme}-${state}.png`);
           await page.screenshot({ path: target });
           process.stdout.write(`📸 ${target}\n`);
         }
+        await checkClosePaths(page, `${scene.name} ${scheme}`, scene.mobile, scene.width, scene.height);
       } finally {
         await context.close();
       }

@@ -76,6 +76,7 @@ const EVIDENCE_LOSING_ISSUES: readonly TranscriptIssueCode[] = [
   'source-missing',
   'source-read-failed',
   'source-truncated',
+  'window-capped',
 ];
 
 interface UsageTotals {

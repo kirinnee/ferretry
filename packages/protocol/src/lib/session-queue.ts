@@ -59,8 +59,13 @@ export const QueueAuthorSchema = z.strictObject({
   kind: z.enum(['owner', 'ferret', 'ferretry']),
   /** A ferret's name (its callsign), for a ferret's message. */
   name: z.string().min(1).optional(),
-  /** The part of Ferretry that sent it: Board, Warden, Agenda, Monitor, Lessons. */
+  /** The part of Ferretry that sent it: Board, Warden, Agenda, Monitor, Lessons, Instructions. */
   feature: z.string().min(1).optional(),
+  /**
+   * What the message is about, by name, for a row that says so instead of showing the words: the always-on
+   * instruction sections an `Instructions` message restates ("Board", "Notify"…).
+   */
+  sections: z.array(z.string().min(1).max(64)).min(1).max(16).optional(),
 });
 export type QueueAuthor = z.infer<typeof QueueAuthorSchema>;
 

@@ -213,7 +213,7 @@ describe('BoardCard', () => {
     expect(elsewhere.querySelector('.fy-board-card__verdict')).toBeNull();
     await release();
     const side = await draw({ category: 'verify', density: 'side', moves: moves() });
-    expect(side.querySelector('.fy-board-card__verdict')).toBeNull();
+    expect(side.querySelector('.fy-board-card__verdict [data-verdict="not-good"]')).not.toBeNull();
   });
 
   it('closes a card waiting to be tried with the shared Done, in place of Close, and keeps Not good', async () => {
@@ -259,7 +259,7 @@ describe('BoardCard', () => {
     expect(merged.querySelector('.fy-board-done')).toBeNull();
     await release();
     const side = await draw({ category: 'shipped', density: 'side', done, moves: moves() });
-    expect(side.querySelector('.fy-board-done')).toBeNull();
+    expect(side.querySelector('.fy-board-card__verdict .fy-board-done')).not.toBeNull();
     await release();
     const bare = await draw({ category: 'shipped' });
     expect(bare.querySelector('.fy-board-done')).toBeNull();

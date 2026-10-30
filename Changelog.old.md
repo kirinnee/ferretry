@@ -1,3 +1,36 @@
+## [4.141.5](https://github.com/kirinnee/ferretry/compare/v4.141.4...v4.141.5) (2026-10-30)
+
+### Fixes
+
+* **pwa:** give the Inbox card a margin and let it swipe from anywhere ([#1059](https://github.com/kirinnee/ferretry/issues/1059)) ([b5501ba](https://github.com/kirinnee/ferretry/commit/b5501ba37c6c86a9f26424abc67c39995033b9e6))
+
+## [4.141.4](https://github.com/kirinnee/ferretry/compare/v4.141.3...v4.141.4) (2026-10-30)
+
+### Fixes
+
+* **daemon:** a transcript paged past one step can prove a send absent again ([#1058](https://github.com/kirinnee/ferretry/issues/1058)) ([4ca2325](https://github.com/kirinnee/ferretry/commit/4ca2325aabaf29b47c125835152cc43d7408da9a))
+
+## [4.141.3](https://github.com/kirinnee/ferretry/compare/v4.141.2...v4.141.3) (2026-10-30)
+
+### Fixes
+
+* **agenda:** offer snooze only to a machine that can do it ([#1056](https://github.com/kirinnee/ferretry/issues/1056)) ([e535ff6](https://github.com/kirinnee/ferretry/commit/e535ff6c9d452b80754ec3d677aec1a71d8901ef))
+* **board:** any open PR pulls a shipped card back to Review/CI ([#1055](https://github.com/kirinnee/ferretry/issues/1055)) ([7e6a0fe](https://github.com/kirinnee/ferretry/commit/7e6a0febc36f33b427c098f2222b8c44a6b70124))
+* **daemon:** re-prove the old "not delivered" sends, and read a paste Claude lifted an image out of ([#1054](https://github.com/kirinnee/ferretry/issues/1054)) ([bb6b5dc](https://github.com/kirinnee/ferretry/commit/bb6b5dc773d337a62da6bcd3f508a389b2dc2175)), closes [#967](https://github.com/kirinnee/ferretry/issues/967) [#N](https://github.com/kirinnee/ferretry/issues/N)
+
+## [4.141.2](https://github.com/kirinnee/ferretry/compare/v4.141.1...v4.141.2) (2026-10-30)
+
+### Fixes
+
+* **pwa:** put the theme picker back in the chat bar and make it always closable ([#1053](https://github.com/kirinnee/ferretry/issues/1053)) ([924962e](https://github.com/kirinnee/ferretry/commit/924962ed7acc8d6a660bc2e965e48480e0d31a3f))
+* **pwa:** small inline On/Off switch in runtime and login card headers ([#1052](https://github.com/kirinnee/ferretry/issues/1052)) ([1f6f206](https://github.com/kirinnee/ferretry/commit/1f6f20684f4cb589e98db515174ef7fbed1349c5))
+
+## [4.141.1](https://github.com/kirinnee/ferretry/compare/v4.141.0...v4.141.1) (2026-10-30)
+
+### Fixes
+
+* **agenda:** count parked items in the snapshot again, so the board reads back on the wire ([#1051](https://github.com/kirinnee/ferretry/issues/1051)) ([fbe4e00](https://github.com/kirinnee/ferretry/commit/fbe4e0090f2f1d68c7c029e94ed5600e71374465)), closes [#1043](https://github.com/kirinnee/ferretry/issues/1043)
+
 ## [4.141.0](https://github.com/kirinnee/ferretry/compare/v4.140.0...v4.141.0) (2026-10-30)
 
 ### Features

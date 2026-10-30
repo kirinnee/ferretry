@@ -3,9 +3,9 @@
  * "Restarting ferrets whose instructions are out of date").
  *
  * The comparison is between two {@link SessionLaunchInstructions}: what the launch RECORDED (kept current by
- * the live `[instructions updated]` note, which re-records the always-on sections it told), and what the
- * very renderer a launch uses (`launchInstructions` in `@ferretry/fleet`) answers for the environment a
- * relaunch would build now. So a section the live note already delivered is not outdated, and one only a
+ * the live instructions-updated note, Ferretry · Instructions, which re-records the always-on sections it
+ * told), and what the very renderer a launch uses (`launchInstructions` in `@ferretry/fleet`) answers for
+ * the environment a relaunch would build now. So a section the live note already delivered is not outdated, and one only a
  * restart can deliver is.
  *
  * A section differs when it is on in one and not the other (a switch flipped since the launch), or its

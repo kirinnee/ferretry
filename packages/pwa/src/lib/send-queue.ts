@@ -14,6 +14,7 @@ interface QueueSender {
   readonly kind: 'owner' | 'ferret' | 'ferretry';
   readonly name?: string;
   readonly feature?: string;
+  readonly sections?: readonly string[];
 }
 
 const senderOf = (message: QueuedMessage): QueueSender | undefined => {

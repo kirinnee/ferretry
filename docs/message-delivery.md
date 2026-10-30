@@ -242,14 +242,33 @@ send stays watched for the repair window (`repairLimitMs`, 3 days), like a cance
 the transcript holds corrects it to delivered: the rows the old reader got wrong correct themselves the
 next time their ferret's sends are read.
 
+**A paste Claude lifted an image out of is the same message.** Claude Code records a long typed message as
+`<pasted_content id="…">…</pasted_content id="…">`, and an image path in it that names a real file becomes an
+attachment: the path leaves the text, an `[Image #N]` goes in FRONT of the paste (not where the path was), and
+the paste is re-wrapped. Neither the wrapper's text nor the placeholder's place matches what was typed, so on
+2026-10-30 a ferret's message the lead had read four times was called "not delivered". With the wrapper and the
+file placeholders out of the record, and every image-path token out of both, the two must be the same text —
+and the send must have had an image path to lift and the record a placeholder for it.
+
+**The pre-queue "not delivered" rows are re-proved once** (`LegacySendReproof`, marker
+`send-reproof-migration.json` in the daemon's home). After the tracker is armed, every session's typed
+`timed_out` rows — however old — are read against the recipient's transcript with the same incremental
+evidence reader, one session at a time, judging every look: found is `delivered` (journalled as a
+correction), read to the end and not found is `unaccounted` (`landing_unconfirmed`), and a transcript that
+cannot be read to its end is `unaccounted` (`transcript_unreadable`). None stays red: only a send nothing
+was ever typed for keeps "not delivered". A stop mid-pass writes no marker, so the next start finishes it.
+
 **A long transcript is slow, not unreadable.** The tracker reads a session's transcript through a window it
 holds from the oldest send it watches, appending only what is new on each later look, and a look reads at
 most `WINDOW_STEP_LIMIT` batches. A window that stopped at that budget kept its place and has more to read
 (`catchingUp`), so the send WAITS for the next look rather than settling `unaccounted`
 (`transcript_unreadable`) — the lead's 369 MB transcript was called unreadable on every look, each send to
 it read "unconfirmed", and each sender was told it might need sending again, though every one had arrived.
-Only a read that fails, or a window that cannot start where it was asked, is unreadable; the hold ceiling
-still ends a read that never finishes.
+Only a read that fails, or a window that cannot start where it was asked (`window-capped`), is unreadable;
+the hold ceiling still ends a read that never finishes. A step that stops at its read limit (8 MiB) reports
+`source-truncated`, and that is paging: the next step reads on from there, so a window read to its end saw
+every record. Counting it as blind meant no send to a transcript longer than one step could ever be proven
+absent — an 11 MB conversation's sends all read "transcript unreadable".
 
 The incident: one `fy send` to a mid-turn Claude ferret was not recognised as held, so at each deadline
 (15 s, 30 s, 60 s) the tracker called it absent and typed it again — **four copies in one queue**, and

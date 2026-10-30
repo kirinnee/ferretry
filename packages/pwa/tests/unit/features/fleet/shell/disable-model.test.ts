@@ -3,6 +3,7 @@ import {
   disableChange,
   disabledDetail,
   enableChange,
+  OFF_HELPER,
   offHeadline,
   REASON_LIMIT,
   reasonProblem,
@@ -105,6 +106,6 @@ describe('whose block it is', () => {
   it('should keep its own block, and a login’s, with the switch in front of you', () => {
     expect(switchOwner(RUNTIME, { source: 'runtime' })).toBe('own');
     expect(switchOwner(LOGIN, { source: 'login' })).toBe('own');
-    expect(offHeadline(LOGIN, { source: 'login' }, '')).toBe('Switched off');
+    expect(offHeadline(LOGIN, { source: 'login' }, '')).toBe(OFF_HELPER);
   });
 });

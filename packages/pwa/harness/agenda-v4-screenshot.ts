@@ -781,6 +781,77 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
     await shot(inbox, `${which}-filter`, form, theme, 'agenda-snooze');
   }
   await inbox.close();
+
+  // THE OPEN INBOX CARD: a margin from the panel's edges and from the composer, and a swipe that starts mid-card
+  const card = await open(browserContext, theme, 'entry=inbox&view=open');
+  await card.locator('.fy-attn-deck__top .fy-inbox-open').waitFor({ state: 'visible' });
+  const panel = await boxOf(card.locator('main[data-agenda-inbox="card"]'), 'inbox panel');
+  const at = await boxOf(card.locator('.fy-attn-deck__top .fy-inbox-open'), 'inbox card');
+  const composer = await boxOf(card.locator('[data-inbox-composer]'), 'inbox composer');
+  const side = phone ? 12 : 8;
+  check(
+    at.x - panel.x >= side,
+    `inbox ${form}: the card is ${Math.round(at.x - panel.x)}px from the panel's left edge, under ${side}px`,
+  );
+  check(
+    panel.x + panel.width - (at.x + at.width) >= side,
+    `inbox ${form}: the card is ${Math.round(panel.x + panel.width - (at.x + at.width))}px from the panel's right edge, under ${side}px`,
+  );
+  check(
+    composer.y - (at.y + at.height) >= 8,
+    `inbox ${form}: the card is ${Math.round(composer.y - (at.y + at.height))}px above the composer, under 8px`,
+  );
+  console.log(
+    `📏 inbox ${form} ${theme}: card ${Math.round(at.x - panel.x)}px from the left edge, ${Math.round(panel.x + panel.width - (at.x + at.width))}px from the right`,
+  );
+  await shot(card, 'card', form, theme, 'inbox');
+  if (phone) {
+    const touch = (type: string, dx: number, dy: number) =>
+      card.evaluate(
+        ([kind, x, y]) => {
+          const body = document.querySelector<HTMLElement>('.fy-attn-deck__top [data-agenda-body]');
+          if (body === null) return;
+          const at = body.getBoundingClientRect();
+          body.dispatchEvent(
+            new PointerEvent(kind as string, {
+              bubbles: true,
+              cancelable: true,
+              clientX: at.left + at.width / 2 + (x as number),
+              clientY: at.top + at.height / 2 + (y as number),
+              pointerId: 21,
+              pointerType: 'touch',
+            }),
+          );
+        },
+        [type, dx, dy] as const,
+      );
+    const dragging = () => card.locator('.fy-attn-deck__top[data-dragging]').count();
+    // a vertical start in the body is the reader scrolling: the card stays put
+    await touch('pointerdown', 0, 0);
+    await touch('pointermove', 2, -40);
+    await card.waitForTimeout(100);
+    check((await dragging()) === 0, 'inbox phone: a vertical drag from the middle of the card moved the card');
+    await touch('pointerup', 2, -40);
+    // a sideways start in the middle of the card follows the finger
+    await touch('pointerdown', 0, 0);
+    await touch('pointermove', 60, 3);
+    await touch('pointermove', 110, 4);
+    await card.waitForTimeout(150);
+    check((await dragging()) === 1, 'inbox phone: a swipe from the middle of the card did not follow the finger');
+    check(
+      (await card.locator('.fy-attn-deck__top').getAttribute('data-swipe-direction')) === 'right',
+      'inbox phone: the mid-card swipe did not read as right',
+    );
+    await shot(card, 'swipe-mid', form, theme, 'inbox');
+    await card.evaluate(() =>
+      document
+        .querySelector('.fy-attn-deck__top [data-agenda-body]')
+        ?.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true, pointerId: 21, pointerType: 'touch' })),
+    );
+    await card.waitForTimeout(150);
+    check((await dragging()) === 0, 'inbox phone: the card did not spring back');
+  }
+  await card.close();
   await browserContext.close();
 };
 

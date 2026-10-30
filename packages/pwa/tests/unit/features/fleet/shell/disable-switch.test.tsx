@@ -210,7 +210,9 @@ describe('the switch on a login', () => {
     const card = must(view.container.querySelector('[data-credential-card="codex"]'), 'card');
     expect(toggle.getAttribute('aria-checked')).toBe('false');
     expect(card.querySelector('[data-credential-disabled-badge]')?.textContent).toBe('Disabled');
-    expect(card.querySelector('[data-disable-headline]')?.textContent).toBe('Switched off');
+    expect(card.querySelector('[data-disable-headline]')?.textContent).toBe(
+      'Off: new starts won’t use it; running ferrets keep going',
+    );
     expect(card.querySelector('[data-disable-detail]')?.textContent).toBe('Spend limit reached. Back on 1 Nov 2026.');
 
     // Act
@@ -256,6 +258,38 @@ describe('the switch on a login', () => {
 
     // Assert
     expect(view.container.querySelector('[data-disable-error]')).not.toBeNull();
+  });
+});
+
+describe('the inline switch in a card header', () => {
+  it('should sit in the header row beside the runtime name, with no box, no On label and no helper while on', async () => {
+    // Act
+    const view = await openRuntimes('#machines/studio-mac/runtimes');
+
+    // Assert
+    const card = must(view.container.querySelector('[data-runtime-card="claude-agent"]'), 'card');
+    const toggle = switchOf(view.container, 'claude-agent');
+    expect(toggle.getAttribute('aria-label')).toBe('claude-agent: on for new starts');
+    expect(toggle.textContent).toBe('');
+    expect(card.querySelector('[data-disable-note]')).toBeNull();
+    expect(card.textContent).not.toContain('New starts can use it.');
+    const header = must(toggle.closest('[data-disable-switch]')?.parentElement ?? null, 'header row');
+    expect(header.querySelector('[data-runtime-row="claude-agent"]')).not.toBeNull();
+  });
+
+  it('should word an off runtime as a small muted note, and name the state in the label', async () => {
+    // Act
+    const view = await openRuntimes('#machines/studio-mac/runtimes', {
+      'GET /v1/fleet/runtimes': runtimesWith({ 'claude-review': 'runtime' }),
+    });
+
+    // Assert
+    expect(switchOf(view.container, 'claude-review').getAttribute('aria-label')).toBe(
+      'claude-review: off for new starts',
+    );
+    expect(
+      view.container.querySelector('[data-runtime-card="claude-review"] [data-disable-headline]')?.textContent,
+    ).toBe('Off: new starts won’t use it; running ferrets keep going');
   });
 });
 

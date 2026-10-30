@@ -14,15 +14,14 @@
  * - DOWN IS NOTHING — unless the host can SKIP (`onSkip`, the Inbox): then a drag down past the threshold moves on
  *   to the next card without answering, and the card follows it down. Without `onSkip` the card
  *   does not follow a downward drag and the browser keeps it as a scroll.
- * - A SWIPE STARTS ONLY FROM THE CARD'S HEAD ({@link startsInHandle}): its header and title (on a full item view:
- *   its sticky top, the Inbox's who-and-what line and the quick-reply bar). The detail
- *   below is its own scroller and the answer bar is for pressing, so a drag there is the reader scrolling
- *   or tapping, never an answer — the card is the full height of the screen, and most of it scrolls.
- * - A SCROLL IS NEVER A SWIPE. `touch-action` on the card hands the browser every direction the card does
- *   not use: with no up answer it keeps vertical panning entirely (`pan-y`), and with one it keeps only
- *   the downward pan (`pan-down`) — the detail inside it scrolls on that rule.
- *   A drag that moved swallows the click it ends in, so a swipe that ends over a button does not also
- *   press it.
+ * - THE WHOLE CARD SWIPES, BY TOUCH ONLY. A touch may start anywhere on the card ({@link ./agenda-swipe-gesture.ts}):
+ *   the direction is decided after 10px and kept. Sideways is a swipe (left and right answers). Up or down from the
+ *   body is the reader scrolling and is handed to the browser (`touch-action: pan-y`); only the card's head, which
+ *   does not scroll, keeps the up answer and the skip. A mouse drag is the reader selecting text, never a swipe; a
+ *   touch that starts on a link, a button or a field, or inside something that scrolls sideways (a table), is that
+ *   element's, never the deck's.
+ * - A SCROLL IS NEVER A SWIPE. A drag that moved swallows the click it ends in, so a swipe that ends over a button
+ *   does not also press it.
  * - KEYBOARD AND SCREEN-READER PARITY: the same answers are the card's own buttons, and a focused card
  *   takes ←, → and ↑ for the mapped answer ({@link AgendaCardFrame}), said in an sr-only hint.
  * - REDUCED MOTION (the OS preference, or Settings › Appearance › Motion) drops the fly-off and the
@@ -51,6 +50,13 @@ import {
   swipeThreshold,
 } from '../../lib/agenda-inbox.ts';
 import { usePrefersReducedMotion } from '../../shell/bottom-sheet.tsx';
+import {
+  isTouch,
+  lockOf,
+  startsInHead,
+  startsInSidewaysScroller,
+  startsOnInteractive,
+} from './agenda-swipe-gesture.ts';
 
 /** How long a committed card takes to leave. The answer is handed over at once; this is only the look. */
 const FLY_MS = 220;
@@ -232,8 +238,8 @@ interface Drag {
 /** A drag in progress, as the pointer moved it: raw, before {@link dragOffset} draws it. */
 interface RawDrag extends Drag {
   readonly width: number;
-  /** Where it began in a detail that scrolls, or `null` outside one: see {@link verticalTargets}. */
-  readonly scroll: ScrollStart | null;
+  /** Whether it began in the card's head: see {@link bodyTargets}. */
+  readonly head: boolean;
 }
 
 interface Gesture {
@@ -241,7 +247,7 @@ interface Gesture {
   readonly startX: number;
   readonly startY: number;
   readonly width: number;
-  readonly scroll: ScrollStart | null;
+  readonly head: boolean;
   moved: boolean;
   dx: number;
   dy: number;
@@ -259,49 +265,15 @@ export const dragOffset = (dx: number, dy: number, targets: SwipeTargets, canSki
   dy: dy >= 0 ? (canSkip ? dy : 0) : targets.up === undefined ? dy * 0.2 : dy,
 });
 
-/** A drag that began inside the card's detail while it overflowed: whether the detail sat at its top, or its bottom. */
-export interface ScrollStart {
-  readonly atTop: boolean;
-  readonly atBottom: boolean;
-}
-
 /**
- * The card's swipe targets for a drag that began at `scroll` — `null` for the header, the title or the answer
- * bar, which keep every target. Inside a detail that overflows, a vertical drag is the reader scrolling,
- * except where the detail cannot scroll any further that way: ↑ stays only when it was at its bottom. The sideways answers always stay; a detail never scrolls sideways.
+ * The swipe targets for a drag that began in the card's body: the sideways answers only. Up and down from there
+ * are the reader scrolling, so a drag that drifts that way after it locked to sideways never answers up.
  */
-export const verticalTargets = (targets: SwipeTargets, scroll: ScrollStart | null): SwipeTargets => {
-  if (scroll === null) return targets;
-  const { up, ...sideways } = targets;
-  return {
-    ...sideways,
-    ...(scroll.atBottom && up !== undefined ? { up } : {}),
-  };
+export const bodyTargets = (targets: SwipeTargets, head: boolean): SwipeTargets => {
+  if (head) return targets;
+  const { left, right } = targets;
+  return { ...(left === undefined ? {} : { left }), ...(right === undefined ? {} : { right }) };
 };
-
-/** Where a pointer went down in the card's detail, or `null` when it was outside it or the detail fits whole. */
-export const scrollStartOf = (target: EventTarget | null): ScrollStart | null => {
-  const scroller = target instanceof Element ? target.closest<HTMLElement>('[data-agenda-scroll]') : null;
-  if (scroller === null || scroller.scrollHeight <= scroller.clientHeight + 1) return null;
-  return {
-    atTop: scroller.scrollTop <= 1,
-    atBottom: scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 1,
-  };
-};
-
-/** A drag never starts where the reader types. */
-const startsInField = (target: EventTarget | null): boolean =>
-  target instanceof Element && target.closest('textarea, input, select, [contenteditable="true"]') !== null;
-
-/**
- * A SWIPE STARTS ONLY FROM THE CARD'S HEAD — its header and its title, the part every card has in the same
- * place. The detail is for scrolling and the answer bar for pressing, so neither ever turns into a swipe.
- */
-const startsInHandle = (target: EventTarget | null): boolean =>
-  target instanceof Element &&
-  target.closest(
-    '.fy-attn-card__meta, [data-agenda-title], [data-agenda-top], [data-inbox-who], [data-agenda-quick-replies]',
-  ) !== null;
 
 export interface AgendaSwipeDeckProps {
   /** The deck, newest first: the first card is on top. */
@@ -402,9 +374,9 @@ export function AgendaSwipeDeck({
     swallowClick.current = false;
     if (
       top === undefined ||
-      (event.pointerType === 'mouse' && event.button !== 0) ||
-      startsInField(event.target) ||
-      !startsInHandle(event.target) ||
+      !isTouch(event) ||
+      startsOnInteractive(event.target) ||
+      startsInSidewaysScroller(event.target, event.currentTarget) ||
       (ownGesturesIn !== undefined && event.target instanceof Element && event.target.closest(ownGesturesIn) !== null)
     )
       return;
@@ -413,7 +385,7 @@ export function AgendaSwipeDeck({
       startX: event.clientX,
       startY: event.clientY,
       width: event.currentTarget.getBoundingClientRect().width,
-      scroll: scrollStartOf(event.target),
+      head: startsInHead(event.target),
       moved: false,
       dx: 0,
       dy: 0,
@@ -426,7 +398,13 @@ export function AgendaSwipeDeck({
     current.dx = event.clientX - current.startX;
     current.dy = event.clientY - current.startY;
     if (!current.moved) {
-      if (Math.hypot(current.dx, current.dy) < SWIPE_SLOP_PX) return;
+      const lock = lockOf(current.dx, current.dy);
+      if (lock === null) return;
+      if (lock === 'vertical' && !current.head) {
+        // The body scrolls: the browser has this touch now, and it is never a swipe.
+        gesture.current = null;
+        return;
+      }
       current.moved = true;
       try {
         event.currentTarget.setPointerCapture(event.pointerId);
@@ -434,7 +412,7 @@ export function AgendaSwipeDeck({
         // A pointer the browser already released cannot be captured; the drag still reads.
       }
     }
-    setDrag({ dx: current.dx, dy: current.dy, width: current.width, scroll: current.scroll });
+    setDrag({ dx: current.dx, dy: current.dy, width: current.width, head: current.head });
   };
 
   const onPointerUp = (event: PointerEvent<HTMLDivElement>): void => {
@@ -443,9 +421,10 @@ export function AgendaSwipeDeck({
     gesture.current = null;
     if (!current.moved) return;
     swallowClick.current = true;
-    const live = verticalTargets(targets, current.scroll);
-    const intent = deckIntent(current.dx, current.dy, current.width, live, canSkip);
-    const from = dragOffset(current.dx, current.dy, live, canSkip);
+    const live = bodyTargets(targets, current.head);
+    const skips = canSkip && current.head;
+    const intent = deckIntent(current.dx, current.dy, current.width, live, skips);
+    const from = dragOffset(current.dx, current.dy, live, skips);
     const direction = intent.committed ? intent.direction : null;
     if (direction === 'down') skip(top, from);
     else if (direction !== null) give(top, direction, from);
@@ -460,9 +439,10 @@ export function AgendaSwipeDeck({
 
   if (top === undefined && leaving === null) return null;
 
-  const live = drag === null ? targets : verticalTargets(targets, drag.scroll);
-  const intent = drag === null ? null : deckIntent(drag.dx, drag.dy, drag.width, live, canSkip);
-  const offset = drag === null ? null : dragOffset(drag.dx, drag.dy, live, canSkip);
+  const live = drag === null ? targets : bodyTargets(targets, drag.head);
+  const skips = canSkip && (drag === null || drag.head);
+  const intent = drag === null ? null : deckIntent(drag.dx, drag.dy, drag.width, live, skips);
+  const offset = drag === null ? null : dragOffset(drag.dx, drag.dy, live, skips);
   const aim: SwipeTarget | undefined =
     intent?.direction == null
       ? undefined
@@ -509,8 +489,8 @@ export function AgendaSwipeDeck({
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           style={{
-            // A deck that skips reads every vertical drag that starts on a handle; the detail scrolls on its own rule.
-            touchAction: canSkip ? 'none' : targets.up === undefined ? 'pan-y' : 'pan-down',
+            // The body scrolls vertically; the head (`touch-action: none` in the CSS) reads its own up and down.
+            touchAction: 'pan-y',
             ...(offset === null
               ? {}
               : {

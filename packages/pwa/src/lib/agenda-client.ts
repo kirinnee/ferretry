@@ -13,6 +13,7 @@ import { ConcurrencyLimit } from './concurrency-limit.ts';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from './daemon-scope.ts';
 import { daemonRequest } from './daemon-transport.ts';
+import { UPDATE_MACHINE_WHERE } from './machine-update-words.ts';
 import { browserFetch, type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
 
 const assertScopeDaemon = (daemon: DaemonConnection, scope: DaemonSessionScope): void => {
@@ -72,6 +73,13 @@ export const fetchAgendaCount = async (
 };
 
 /** Applies one protocol-validated board mutation and returns the daemon's authoritative snapshot. */
+/** What snoozing says on a machine whose daemon predates `agenda.snooze.1`. */
+export const SNOOZE_NEEDS_UPDATE = `This machine needs an update to snooze: ${UPDATE_MACHINE_WHERE}.`;
+
+/** A request the daemon's schema refused: from a machine not yet read, an unknown action reads this way. */
+const isInvalidRequest = (error: unknown): boolean =>
+  error instanceof DaemonResponseError && error.status === 400 && error.code === 'invalid_request';
+
 export const applyAgendaAction = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
@@ -333,13 +341,21 @@ export class DaemonAgendaClient {
     action: AgendaActionRequest | (() => Promise<AgendaSnapshot>),
   ): Promise<void> {
     assertScopeDaemon(daemon, scope);
+    // THE APP SHIPS FIRST: a machine older than `agenda.snooze.1` refuses snooze as an unknown action, so it is
+    // never sent there, and a refusal from a machine not yet read says the same plain thing.
+    const parks = typeof action !== 'function' && (action.action === 'snooze' || action.action === 'unsnooze');
+    if (parks && this.wires.snoozeOf(daemon.daemonId) === false) return Promise.reject(new Error(SNOOZE_NEEDS_UPDATE));
     const generation = this.#bind(daemon);
     const key = daemonSessionKey(scope);
     const revision = this.#advanceBoardRevision(key);
     const promise = (
       typeof action === 'function'
         ? action()
-        : applyAgendaAction(daemon, scope, action, this.fetcher, this.wires.wireOf(daemon.daemonId))
+        : applyAgendaAction(daemon, scope, action, this.fetcher, this.wires.wireOf(daemon.daemonId)).catch(
+            (error: unknown) => {
+              throw parks && isInvalidRequest(error) ? new Error(SNOOZE_NEEDS_UPDATE) : error;
+            },
+          )
     )
       .then(snapshot => {
         if (this.#current(daemon, generation, key, revision)) {

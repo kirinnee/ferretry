@@ -508,21 +508,26 @@ describe('ThemeToggle', () => {
     const dialog = panel();
     if (!dialog) throw new Error('the panel did not open');
 
-    // Act — forwards from the last tab stop wraps to the first.
+    const first = dialog.querySelector<HTMLElement>('[data-theme-close]');
+    const last = dialog.querySelector<HTMLElement>('[data-theme-done]');
+    if (!first || !last) throw new Error('the ✕ and Done did not render');
+
+    // Act — forwards from the last tab stop (Done) wraps to the first (the ✕).
+    last.focus();
     let event = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
-    await interact(() => (document.activeElement ?? dialog).dispatchEvent(event));
+    await interact(() => last.dispatchEvent(event));
 
     // Assert
     expect(event.defaultPrevented).toBe(true);
-    expect(dialog.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).toBe(first);
 
     // Act — backwards from the first wraps to the last.
     event = new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true });
-    await interact(() => (document.activeElement ?? dialog).dispatchEvent(event));
+    await interact(() => first.dispatchEvent(event));
 
     // Assert
     expect(event.defaultPrevented).toBe(true);
-    expect(dialog.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).toBe(last);
 
     // Act — a key that is not Tab is none of the cycle's business.
     const other = new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true });
@@ -552,6 +557,126 @@ describe('ThemeToggle', () => {
     expect(event.defaultPrevented).toBe(false);
     await view.unmount();
   });
+});
+
+describe('ThemeToggle always closes', () => {
+  // The owner (2026-10-30): the phone's picker covered the chat with no way out. Every way out is pinned here,
+  // for a touch trigger and a desktop one, because the two draw the same panel.
+  const closeButton = (): HTMLButtonElement | null => document.querySelector<HTMLButtonElement>('[data-theme-close]');
+  const doneButton = (): HTMLButtonElement | null => document.querySelector<HTMLButtonElement>('[data-theme-done]');
+  const backdrop = (): HTMLElement | null => document.querySelector<HTMLElement>('[data-theme-backdrop]');
+
+  const variants = [
+    ['touch', { touch: true }],
+    ['desktop', { iconOnly: true }],
+  ] as const;
+
+  for (const [name, props] of variants) {
+    describe(name, () => {
+      const mountOpen = async () => {
+        installMatchMedia();
+        const view = await mount(<ThemeToggle {...props} store={new ThemePreferenceStore(memoryStorage())} />);
+        await interact(() => trigger(view.container).click());
+        expect(panel()).not.toBeNull();
+        return view;
+      };
+
+      it('shows a visible, named ✕ in the panel header', async () => {
+        const view = await mountOpen();
+
+        const close = closeButton();
+        expect(close).not.toBeNull();
+        expect(close?.getAttribute('aria-label')).toBe('Close theme picker');
+        expect(close?.closest('[role="dialog"]')).toBe(panel());
+        await view.unmount();
+      });
+
+      it('closes from the ✕ and hands focus back to the trigger', async () => {
+        const view = await mountOpen();
+
+        await interact(() => closeButton()?.click());
+
+        expect(panel()).toBeNull();
+        expect(backdrop()).toBeNull();
+        expect(document.activeElement).toBe(trigger(view.container));
+        await view.unmount();
+      });
+
+      it('closes from Done', async () => {
+        const view = await mountOpen();
+
+        await interact(() => doneButton()?.click());
+
+        expect(panel()).toBeNull();
+        expect(document.activeElement).toBe(trigger(view.container));
+        await view.unmount();
+      });
+
+      it('closes on Escape', async () => {
+        const view = await mountOpen();
+
+        await interact(() => pressKey(document, 'Escape'));
+
+        expect(panel()).toBeNull();
+        await view.unmount();
+      });
+
+      it('closes on a tap or click on the scrim around it, leaving focus where the reader put it', async () => {
+        const view = await mountOpen();
+        const elsewhere = document.createElement('button');
+        document.body.appendChild(elsewhere);
+
+        await interact(() => {
+          elsewhere.focus();
+          backdrop()?.click();
+        });
+
+        expect(panel()).toBeNull();
+        expect(document.activeElement).toBe(elsewhere);
+        elsewhere.remove();
+        await view.unmount();
+      });
+
+      it('closes on the platform Back, and stays on the page it was opened over', async () => {
+        const before = window.location.href;
+        const view = await mountOpen();
+
+        await interact(() => {
+          window.history.back();
+        });
+        await settleUntil(() => panel() === null, 'the theme panel to close on Back', interact);
+
+        expect(panel()).toBeNull();
+        expect(window.location.href).toBe(before);
+        await view.unmount();
+      });
+
+      it('takes its history entry back out when closed another way, so Back is not left a dead press', async () => {
+        const view = await mountOpen();
+
+        // Open: the entry Back would take is the one it pushed.
+        expect(window.history.state?.fyBackDismiss).toBeDefined();
+
+        await interact(() => closeButton()?.click());
+        await settleUntil(() => window.history.state?.fyBackDismiss === undefined, 'the entry to be popped', interact);
+
+        expect(window.history.state?.fyBackDismiss).toBeUndefined();
+        expect(panel()).toBeNull();
+        await view.unmount();
+      });
+
+      it('stays open while a theme or mode is chosen, so Done is the one way a choice ends', async () => {
+        const view = await mountOpen();
+
+        await interact(() => familyControls()[2]?.click());
+        await interact(() => modeControl('dark').click());
+
+        expect(panel()).not.toBeNull();
+        expect(doneButton()).not.toBeNull();
+        await view.unmount();
+      });
+    });
+  }
 });
 
 describe('PageThemeSwitch', () => {

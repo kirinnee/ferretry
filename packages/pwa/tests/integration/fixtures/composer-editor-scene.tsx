@@ -127,6 +127,7 @@ const TASK: SessionCard = {
   active: true,
   assignee: null,
   touchedAt: '2026-07-02T00:00:00.000Z',
+  agentAsked: false,
   legacyId: null,
 };
 const SKILLS = {

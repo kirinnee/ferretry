@@ -171,13 +171,17 @@ describe('a window over a 300 MB transcript', () => {
     const batches = await drain(window);
 
     should(batches[0]?.issues[0]).match({
-      code: 'source-truncated',
+      code: 'window-capped',
       message: 'transcript window reached its byte limit before the requested instant',
       byteOffset: 0,
     });
     should(runtime.bytes).be.below(3 * MiB);
     // Placed on a record boundary: every record it read is whole.
-    should(batches.flatMap(batch => batch.issues).filter(issue => issue.code !== 'source-truncated')).eql([]);
+    should(
+      batches
+        .flatMap(batch => batch.issues)
+        .filter(issue => issue.code !== 'window-capped' && issue.code !== 'source-truncated'),
+    ).eql([]);
     should(DEFAULT_MAX_WINDOW_BYTES).equal(256 * MiB);
   });
 
@@ -189,7 +193,7 @@ describe('a window over a 300 MB transcript', () => {
       .window(file, { sessionId: 's', start: since(0) })
       .next();
 
-    should(step.batch?.issues.map(issue => issue.code)).eql(['source-truncated']);
+    should(step.batch?.issues.map(issue => issue.code)).eql(['window-capped']);
     should(step.batch?.cursor.byteOffset).equal(user('old', -60_000).length + 2 * MiB);
   });
 
@@ -212,7 +216,7 @@ describe('a window over a 300 MB transcript', () => {
       .window(file, { sessionId: 's', start: since(0) })
       .next();
 
-    should(step.batch?.issues.map(issue => issue.code)).eql(['source-truncated']);
+    should(step.batch?.issues.map(issue => issue.code)).eql(['window-capped']);
     should(step.batch?.events).eql([]);
   });
 

@@ -2,16 +2,19 @@
  * One ferret's chat header and Info side pane, drawn by the real `SessionTopBar`, `InfoPanel`
  * and `BoardSideTab` over a fake daemon (`board-chat-screenshot.ts` bundles this).
  *
- * `?state=card|none` picks a session with or without a focus card, and `?lanes=closed` collapses the lanes.
+ * `?state=card|none` picks a session with or without a focus card, `?view=kanban|list` the Tasks view, `?cards=few`
+ * the six-card fixture (the default is 70 cards).
  */
 
 import type { SessionView } from '@ferretry/protocol';
 import { createRoot } from 'react-dom/client';
 import { SessionTopBar } from '../src/components/session-top-bar.tsx';
-import { BoardSideTab } from '../src/features/board/board-side-tab.tsx';
+import { ChatTasks } from '../src/features/board/chat-tasks.tsx';
 import { InfoPanel } from '../src/features/session-info/info-panel.tsx';
 import { INFO_TABS } from '../src/features/session-info/info-model.ts';
 import { useChatCard } from '../src/hooks/use-chat-card.ts';
+import { DaemonAgendaStore } from '../src/lib/agenda-store.ts';
+import { boardSideView } from '../src/lib/board-side-view.ts';
 import { DaemonBoardStore } from '../src/lib/board-store.ts';
 import {
   boardAnswer,
@@ -127,14 +130,75 @@ const OPEN = [
   card('F99', { title: 'Someone else’s card', laneId: 'implement', owner: 'mvzzzzzz-00000000', lastTouchedAt: ago(5) }),
 ];
 
+const TITLES = [
+  'Retry a failed move',
+  'Drawer opens wrong card',
+  'Pair a second phone',
+  'Relay fallback copy',
+  'Show lane in footer',
+  'Keyboard move between lanes',
+  'Daemon returns 502',
+  'Dark contrast on counts',
+  'Release notes for 0.14',
+  'Archive search is slow',
+  'Sub-ferret cards hidden',
+  'Rename Attention to Agenda',
+  'Warden remedy needs reason',
+  'Terminal loses focus',
+  'Stale badge is wrong',
+  'Move Done into footer',
+  'Add a project picker',
+  'Explain Not good',
+  'Fix flaky relay test',
+  'Document the grant model',
+];
+const LANES = ['todo', 'plan', 'implement', 'implement', 'review', 'merged', 'released', 'tested', 'tested', 'closed'];
+const OWNERS = [LEAD, LEAD, LEAD, OTTILIE, OTTILIE, MARGOT];
+const kindOf = (index: number) => (index % 5 === 0 ? 'bug' : index % 7 === 0 ? 'chore' : 'feature');
+const PREFIX = { bug: 'B', chore: 'C', feature: 'F' } as const;
+const MANY = Array.from({ length: 64 }, (_, index) =>
+  card(`${PREFIX[kindOf(index)]}${100 + index}`, {
+    title: `${TITLES[index % TITLES.length]}${index >= TITLES.length ? ` (${Math.floor(index / TITLES.length) + 1})` : ''}`,
+    laneId: LANES[(index * 7) % LANES.length] ?? 'todo',
+    owner: OWNERS[index % OWNERS.length] ?? LEAD,
+    kind: kindOf(index),
+    lastTouchedAt: ago(3 + ((index * 37) % 4000)),
+    ...(index % 11 === 0 ? { activity: 'stale' } : {}),
+  }),
+);
+const FEW = params.get('cards') === 'few';
+const CARDS = FEW ? OPEN : [...OPEN, ...MANY];
+
 const store = new DaemonBoardStore(
   fakePort({
     board: async () =>
-      boardAnswer(OPEN, { projectId: PROJECT, laneSet: laneSetFor(), counts: { ...COUNTS, active: 3 } }),
+      boardAnswer(CARDS, { projectId: PROJECT, laneSet: laneSetFor(), counts: { ...COUNTS, active: 3 } }),
+    task: async (_daemon, id) => {
+      const task = CARDS.find(candidate => candidate.id === id);
+      return task === undefined ? null : { task, laneSet: laneSetFor() };
+    },
     projects: async () => [{ id: PROJECT, name: 'Ferretry', path: null, laneSet: laneSetFor() }],
   }),
   fakeEnvironment(),
 );
+
+const agendaStore = new DaemonAgendaStore();
+const agenda = {
+  store: agendaStore,
+  hydrate: async (_daemon: unknown, scope: { readonly sessionId: string }) => {
+    agendaStore.applySnapshot(scope as never, {
+      v: 1,
+      sessionId: scope.sessionId,
+      items: [],
+      resolved: [],
+      count: 0,
+      parseErrors: 0,
+      updatedAt: ago(1),
+    });
+  },
+  respond: async () => undefined,
+};
+boardSideView.set(params.get('view') === 'list' ? 'list' : 'kanban');
 
 function Harness() {
   const chat = useChatCard({
@@ -170,7 +234,17 @@ function Harness() {
             overview: () => null,
             tasks: () =>
               chat === null ? null : (
-                <BoardSideTab callsigns={CALLSIGNS} chat={chat} now={NOW} onNavigate={() => undefined} scope={scope} />
+                <ChatTasks
+                  agenda={agenda as never}
+                  callsigns={CALLSIGNS}
+                  chat={chat}
+                  machine={{ connection: laptop, name: 'laptop' }}
+                  now={NOW}
+                  phone={compact}
+                  ports={{ sendMessage: async () => undefined }}
+                  scope={scope}
+                  store={store}
+                />
               ),
             runtime: () => null,
             usage: () => null,

@@ -3,13 +3,14 @@ import {
   type QueuedMessage,
   type SessionView,
   splitTranscriptImageMarkers,
+  type TranscriptImageMarker,
 } from '@ferretry/protocol';
 import { projectPackCalls } from '../lib/pack-calls.ts';
 import { projectDeliveries } from '../lib/peer-delivery.ts';
 import { isTerminalSessionStatus, type TranscriptEntry } from '../lib/session-screens.ts';
 import { parseSlashCommandText, type SlashCommand, withCommandOutput } from '../lib/slash-commands.ts';
 import { classifySystemText } from '../lib/system-blocks.ts';
-import type { ToolResultData, ToolUseData } from '../lib/tool-extract.ts';
+import { IMAGE_READ_TOOL, type ToolResultData, type ToolUseData } from '../lib/tool-extract.ts';
 import { readUserMessage } from '../lib/user-message.ts';
 import { fieldHash } from './session-chat-model.ts';
 
@@ -229,6 +230,30 @@ const recordIds = (): ((signature: string) => string) => {
   };
 };
 
+/** Whether the next record that shows anything is another picture. */
+const followedByImages = (records: readonly LogRecord[], index: number): boolean => {
+  for (let next = index + 1; next < records.length; next += 1) {
+    const record = records[next];
+    if (record === undefined || isHiddenRecord(record)) continue;
+    return showsImages(record);
+  }
+  return false;
+};
+
+/** Adds pictures to the run's image read, opening it when the run has none yet. */
+const addImageRead = (run: ToolRun, images: readonly TranscriptImageMarker[], key: string): void => {
+  const index = run.calls.findIndex(call => call.use.name === IMAGE_READ_TOOL);
+  const existing = index === -1 ? [] : (run.calls[index]?.result?.images ?? []);
+  const all = [...existing, ...images];
+  const call = {
+    key: index === -1 ? key : (run.calls[index]?.key ?? key),
+    use: { name: IMAGE_READ_TOOL, input: { count: all.length } },
+    result: { images: all },
+  };
+  if (index === -1) run.calls.push(call);
+  else run.calls[index] = call;
+};
+
 const projectRecords = (records: readonly LogRecord[], now: number): readonly TranscriptEntry[] => {
   const instants = recordInstants(records, now);
   const idFor = recordIds();
@@ -256,6 +281,16 @@ const projectRecords = (records: readonly LogRecord[], now: number): readonly Tr
       return;
     }
     if (showsImages(record)) {
+      // Pictures read one after another are ONE `Read N images` call in the tool run, not a card each.
+      if (run !== null || followedByImages(records, index)) {
+        run ??= { calls: [] };
+        addImageRead(
+          run,
+          attachmentImages(record),
+          idFor(`${record.clock ?? ''}|${record.role}|${record.kind}|${text}`),
+        );
+        return;
+      }
       flush();
       entries.push(
         imageEntryFor(record, idFor(`${record.clock ?? ''}|${record.role}|${record.kind}|${text}`), instants[index]),

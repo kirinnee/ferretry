@@ -105,6 +105,9 @@ export type SwitchOwner = 'own' | 'login';
 export const switchOwner = (target: DisableTarget, disabled: FleetDisabled): SwitchOwner =>
   target.kind === 'runtime' && disabled.source === 'login' ? 'login' : 'own';
 
-/** The headline beside a switch that is off. */
+/** What a switch that is off says in one line: it does NOT stop what is already running. */
+export const OFF_HELPER = 'Off: new starts won’t use it; running ferrets keep going';
+
+/** The line under the account line of a switch that is off. */
 export const offHeadline = (target: DisableTarget, disabled: FleetDisabled, loginId: string): string =>
-  switchOwner(target, disabled) === 'login' ? `Off because its login ${loginId} is disabled` : 'Switched off';
+  switchOwner(target, disabled) === 'login' ? `Off because its login ${loginId} is disabled` : OFF_HELPER;

@@ -3,12 +3,18 @@ import type { ObservedHumanInput, TranscriptBatch, TranscriptIssueCode } from '.
 /**
  * Issues that make a transcript read BLIND to its newest records — the only ones a send could be
  * proven by. A read with one of these can prove presence of what it did see, never absence.
+ *
+ * `source-truncated` is NOT one. A window pages through a transcript in bounded steps, and every step
+ * that stops at its limit says so; the next step reads on from exactly there. Counting it as blind made
+ * every transcript longer than one step (8 MiB) unable to prove any send absent, however far it was read.
+ * Whether the reader got to the END is the drain's answer (`more`), not an issue's. A window that could
+ * not START where it was asked (`window-capped`) did miss records, and is blind before it.
  */
 const BLIND: ReadonlySet<TranscriptIssueCode> = new Set([
   'source-missing',
   'source-read-failed',
-  'source-truncated',
   'oversized-record',
+  'window-capped',
 ]);
 
 /** What a send watch has seen of a session's transcript since the oldest watched send. */
@@ -29,6 +35,6 @@ export function foldSendEvidenceBatch(watch: SendEvidenceWatch, batch: Transcrip
   return {
     inputs: [...(batch.reset ? [] : watch.inputs), ...batch.observedInputs],
     blind: watch.blind || batch.issues.some(issue => BLIND.has(issue.code)),
-    partial: watch.partial || batch.issues.some(issue => issue.code === 'source-truncated'),
+    partial: watch.partial || batch.issues.some(issue => issue.code === 'window-capped'),
   };
 }

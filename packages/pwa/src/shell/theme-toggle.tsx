@@ -7,6 +7,10 @@
  * why `app-bar.tsx` takes the control as a `themeToggle` slot and renders it
  * only outside `drawer` layout, rather than this component learning the width.
  *
+ * IT MUST ALWAYS CLOSE (owner, 2026-10-30: a phone's picker covered the chat with no way out). Five paths, one
+ * state: the ✕ in its header, Done, Escape, a tap or click on the scrim around it, and the platform Back
+ * (`useBackDismiss`). Choosing a family or a mode does NOT close it — those are two choices — Done does.
+ *
  * The family previews are the real thing, not an approximation: each swatch
  * carries `data-swatch="<family>-<mode>"`, and `styles/themes.css` declares that
  * theme's tokens on `[data-swatch=…]` alongside `:root[data-theme=…]`. So a
@@ -15,9 +19,10 @@
  * rest of the app stays in the current one. Nothing here hardcodes a colour.
  */
 
-import { useCallback, useEffect, useId, useRef, useState, type RefObject } from 'react';
-import { Check, Monitor, Moon, Palette, Sun } from 'lucide-react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { Check, Monitor, Moon, Palette, Sun, X } from 'lucide-react';
 import { isTopEscapeLayer, pushEscapeLayer } from '../hooks/use-dialog-focus.ts';
+import { useBackDismiss } from '../hooks/use-back-dismiss.ts';
 import { useLayoutMode } from '../hooks/use-layout-mode.ts';
 import { useKeyboardOpen } from '../hooks/use-keyboard-open.ts';
 import { useTheme, type ThemeState } from '../hooks/use-theme.ts';
@@ -334,14 +339,6 @@ export interface ThemeToggleProps {
   readonly iconOnly?: boolean;
 }
 
-/**
- * The same controls as the popover, for a host that already gives them a sheet of their own: a phone's chat
- * header has no room for the switch, so its Actions ▾ opens these under a "Theme" heading.
- */
-export function ThemeSettingsPanel() {
-  return <ThemeSettings theme={useTheme()} />;
-}
-
 export function ThemeToggle({ store, touch = false, iconOnly = false }: ThemeToggleProps = {}) {
   const theme = useTheme(store);
   const { family, mode, resolved, families } = theme;
@@ -364,6 +361,11 @@ export function ThemeToggle({ store, touch = false, iconOnly = false }: ThemeTog
    * layer instead of inventing a second one.
    */
   const layer = useRef<object>({});
+
+  // The platform Back closes the picker too, so a phone's back gesture is never a way out of the page
+  // instead of out of the picker.
+  const dismissForBack = useCallback(() => close(false), [close]);
+  useBackDismiss(open, dismissForBack);
 
   // Escape closes and hands focus back; a click anywhere outside just closes.
   //
@@ -476,6 +478,19 @@ export function ThemeToggle({ store, touch = false, iconOnly = false }: ThemeTog
     }
   }, []);
 
+  // The panel hangs from its trigger's right edge, so a trigger near the left of a narrow screen would push it
+  // off the glass with its ✕; slide it back inside the viewport (an inline transform, not a layout change).
+  useLayoutEffect(() => {
+    const panel = panelRef.current;
+    if (!open || panel === null) return;
+    panel.style.transform = '';
+    const { left, right } = panel.getBoundingClientRect();
+    const edge = 8;
+    const width = document.documentElement.clientWidth;
+    const shift = left < edge ? edge - left : right > width - edge ? width - edge - right : 0;
+    if (shift !== 0) panel.style.transform = `translateX(${Math.round(shift)}px)`;
+  }, [open]);
+
   const activeFamily = families.find(option => option.id === family);
   const modeLabel = MODE_OPTIONS.find(option => option.id === mode)?.label ?? 'Auto';
   const summary = `Theme: ${activeFamily?.label ?? family}, ${modeLabel}${mode === 'system' ? ` (${resolved})` : ''}`;
@@ -502,6 +517,17 @@ export function ThemeToggle({ store, touch = false, iconOnly = false }: ThemeTog
       </Button>
 
       {open && (
+        // The scrim: a tap or click anywhere outside the panel closes it (the pointer path of Escape). Inside
+        // `rootRef`, so the document-level outside-press handler above leaves it to this click.
+        <div
+          aria-hidden="true"
+          className={cn('fixed inset-0 z-40', touch && 'bg-scrim')}
+          data-theme-backdrop=""
+          onClick={() => close(false)}
+        />
+      )}
+
+      {open && (
         <div
           ref={panelRef}
           id={panelId}
@@ -514,13 +540,32 @@ export function ThemeToggle({ store, touch = false, iconOnly = false }: ThemeTog
           // geometry rather than a fixed 8px/8px.
           className="absolute right-0 top-full z-50 mt-1 w-[272px] rounded-panel border border-border bg-surface p-panel shadow-popover sm:w-[292px]"
         >
-          <p className="mb-2 mt-0 flex items-baseline justify-between gap-2 text-meta">
+          <div className="mb-2 mt-0 flex items-center justify-between gap-2 text-meta">
             <span className="font-semibold text-fg">Theme</span>
-            <span className="text-faint" data-theme-scope="">
+            <span className="ml-auto text-faint" data-theme-scope="">
               This device
             </span>
-          </p>
+            <button
+              type="button"
+              aria-label="Close theme picker"
+              title="Close"
+              data-theme-close=""
+              onClick={() => close(true)}
+              className="inline-grid h-8 w-8 shrink-0 place-items-center rounded-control text-muted hover:bg-surface-2 hover:text-fg"
+            >
+              <X size={16} aria-hidden="true" />
+            </button>
+          </div>
           <ThemeSettings theme={theme} constrained listRef={listRef} />
+          <Button
+            variant="ghost"
+            size="sm"
+            className="mt-2 w-full justify-center"
+            data-theme-done=""
+            onClick={() => close(true)}
+          >
+            Done
+          </Button>
         </div>
       )}
     </div>

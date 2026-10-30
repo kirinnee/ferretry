@@ -479,6 +479,10 @@ export function Composer({
     autocompleteTasks !== undefined ||
     autocompleteSkills !== undefined ||
     autocompleteReady !== undefined;
+  // "Include agent tasks" in the `&` menu: a menu-only choice, off at rest, read live by the providers.
+  const [includeAgentTasks, setIncludeAgentTasks] = useState(false);
+  const includeAgentTasksRef = useRef(includeAgentTasks);
+  includeAgentTasksRef.current = includeAgentTasks;
   const hostRef = useRef({
     sessions: autocompleteSessions,
     attention: autocompleteAgenda,
@@ -522,6 +526,7 @@ export function Composer({
               getAgendaItems: () => hostRef.current.attention ?? EMPTY_AGENDA,
               getSkills: () => hostRef.current.skills,
               getTasks: () => hostRef.current.tasks ?? EMPTY_TASKS,
+              getIncludeAgentTasks: () => includeAgentTasksRef.current,
               waitForAgendaItems: hostWarmup,
               waitForTasks: hostWarmup,
               waitForSkills: hostWarmup,
@@ -1374,7 +1379,14 @@ export function Composer({
           {/* Anchored to the input layer, opening UPWARD: the composer sits at the
               bottom of the session, so a downward list would land off-screen and
               under the on-screen keyboard. */}
-          <ComposerAutocompletePopover surface={autocomplete} />
+          <ComposerAutocompletePopover
+            agentTasks={
+              hosted
+                ? { included: includeAgentTasks, onToggle: () => setIncludeAgentTasks(current => !current) }
+                : undefined
+            }
+            surface={autocomplete}
+          />
         </div>
         {/* The controls after the field: inline in the row on a desktop (`display: contents`), on a phone
             Interrupt & send's slot then Send — side by side while empty, stacked with a draft. */}

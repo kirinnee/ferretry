@@ -1,9 +1,11 @@
 import { splitFerretryNotice } from '@ferretry/protocol';
 import { Cog } from 'lucide-react';
-import { type MouseEvent, type ReactNode, useState } from 'react';
+import { type MouseEvent, type ReactNode, useId, useState } from 'react';
 import { displayCallsign } from '../lib/callsign.ts';
 import { clockOfInstant } from '../lib/message-clock.ts';
 import { ferretryChip, stripFraming } from '../lib/message-framing.ts';
+import type { InstructionsUpdate } from '../lib/instructions-update.ts';
+import { peerPreview } from '../lib/peer-preview.ts';
 import { daemonSessionPath } from '../lib/pages/routes.ts';
 import type { PeerFrom } from '../lib/peer-message.ts';
 import type { ResolvedAgent } from '../lib/references.ts';
@@ -79,19 +81,56 @@ function OpenConversation({ agent, surface }: { readonly agent: ResolvedAgent; r
   );
 }
 
+/**
+ * A ferret's message at rest: the sender chip above and the first line (about 120 characters) here, with
+ * "Show more" for the rest. A message that fits in its preview has nothing to open, so no control shows.
+ * `text` is what the message says, for the preview; `children` is the whole of it, drawn once opened.
+ */
+function PeerBody({ text, children }: { readonly text: string | undefined; readonly children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  const { preview, truncated } = peerPreview(text ?? '');
+  if (text === undefined || !truncated) return <>{children}</>;
+  return (
+    <>
+      {open ? (
+        <div id={id}>{children}</div>
+      ) : (
+        <p className="fy-peer-preview" data-peer-preview="" id={id}>
+          {preview}
+        </p>
+      )}
+      <button
+        aria-controls={id}
+        aria-expanded={open}
+        className="fy-peer-more"
+        data-peer-more=""
+        onClick={() => setOpen(current => !current)}
+        type="button"
+      >
+        {open ? 'Show less' : 'Show more'}
+      </button>
+    </>
+  );
+}
+
 export function PeerMessageRow({
   entry,
   peer,
   rhythm,
   body,
+  text,
 }: {
   readonly entry: TranscriptEntry;
   readonly peer: PeerFrom;
   readonly rhythm: Rhythm;
   /** What the message holds, when it is not `entry.text` — a hand-off's document and its files. */
   readonly body?: ReactNode;
+  /** The words of a hand-off's `body`, once read; absent while the document is still being read. */
+  readonly text?: string;
 }) {
   const surface = useReferenceSurface();
+  const words = body === undefined ? stripFraming(entry.text).body : text;
   const name = displayCallsign(peer.name);
   const agent = provedPeer(surface, peer);
   const kind = KIND_LABEL[peer.kind];
@@ -116,7 +155,9 @@ export function PeerMessageRow({
           </span>
         )}
       </header>
-      {body ?? <Markdown className="fy-peer-body" text={stripFraming(entry.text).body} {...surface} />}
+      <PeerBody text={words}>
+        {body ?? <Markdown className="fy-peer-body" text={stripFraming(entry.text).body} {...surface} />}
+      </PeerBody>
       {/* Where this send is, as the same small receipt mark the reader's own bubbles wear. */}
       <MessageFooter clock={clockOfInstant(entry.at)} record={entry.send} side="other" />
       {agent === null ? null : <OpenConversation agent={agent} surface={surface} />}
@@ -138,6 +179,60 @@ export function SystemNoticeRow({ entry, rhythm }: { readonly entry: TranscriptE
       </span>
       <Markdown className="fy-system-text" text={framed.body} />
       <MessageFooter clock={clockOfInstant(entry.at)} side="other" />
+    </div>
+  );
+}
+
+/**
+ * "Ferretry changed part of your instructions": one gear line naming the sections, folded. Opening it
+ * shows the changed sections whole — never the lead-in, which is addressed to the agent.
+ */
+export function InstructionsUpdateRow({
+  entry,
+  rhythm,
+  update,
+}: {
+  readonly entry: TranscriptEntry;
+  readonly rhythm: Rhythm;
+  readonly update: InstructionsUpdate;
+}) {
+  const [open, setOpen] = useState(false);
+  const detailId = useId();
+  return (
+    <div
+      className="fy-message fy-message-system fy-message-chrome"
+      data-instructions-update=""
+      data-transcript-kind="system"
+      role="note"
+      {...rhythm}
+    >
+      <Cog aria-hidden="true" className="fy-system-icon" size={12} />
+      <span className="fy-system-text">
+        <span className="sr-only">Ferretry: </span>
+        {update.headline}
+        {update.sections.length === 0 ? null : (
+          <>
+            <span aria-hidden="true"> · </span>
+            <button
+              aria-controls={detailId}
+              aria-expanded={open}
+              className="fy-system-details"
+              onClick={() => setOpen(current => !current)}
+              type="button"
+            >
+              {open ? 'hide changes' : 'show changes'}
+            </button>
+          </>
+        )}
+      </span>
+      <MessageFooter clock={clockOfInstant(entry.at)} side="other" />
+      {open ? (
+        <div className="fy-system-detail" data-system-detail="" id={detailId}>
+          {update.sections.map(section => (
+            <p key={section.label}>{section.text}</p>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

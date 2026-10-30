@@ -339,7 +339,7 @@ describe('GitHubWatcher: auto-link', () => {
       "PR #950 linked automatically: its head branch feat/x is the card's branch",
       "PR #951 linked automatically: its head branch feat/x is the card's branch",
     ]);
-    should(task.laneId).equal('merged');
+    should(task.laneId).equal('review');
     should(field(subject.gh.calls[0] ?? [], 'b0')).equal('feat/x');
   });
 
@@ -584,7 +584,7 @@ describe('GitHubWatcher: releases', () => {
     should((await subject.watcher.tick()).polled).be.empty();
   });
 
-  it('should pull a card in To test back to Review/CI on the next poll when a newer PR is open on it', async () => {
+  it('should pull a card in To test back to Review/CI on the next poll when an open PR sits beside the shipped one', async () => {
     const shipped = link(1008, {
       state: 'merged',
       mergedAt: '2026-10-30T09:00:00Z',
@@ -614,7 +614,7 @@ describe('GitHubWatcher: releases', () => {
       backward: true,
       auto: true,
       trigger: 'pr.ready',
-      reason: 'moved back to Review/CI: PR #1013 opened after #1008 shipped',
+      reason: 'moved back to Review/CI: PR #1013 ready for review',
     });
     // Settled: a later tick does not move it again, and does not fight it.
     subject.clock.ms += POLL_OPEN_MS * 2;
@@ -623,7 +623,7 @@ describe('GitHubWatcher: releases', () => {
     should(subject.stored().history.filter(entry => entry.type === 'moved')).have.length(moved.length);
   });
 
-  it('should leave a card in To test alone for an older open PR, and for one with no open time by its number', async () => {
+  it('should pull a card in To test back for a parallel PR opened before the merge, and for one with no open time', async () => {
     const shipped = link(1008, {
       state: 'merged',
       mergedAt: '2026-10-30T09:00:00Z',
@@ -639,7 +639,7 @@ describe('GitHubWatcher: releases', () => {
       version: '4.110.0',
     });
     await stale.watcher.tick();
-    should(stale.stored().laneId).equal('tested');
+    should(stale.stored().laneId).equal('review');
     const unsaid = rig({
       cards: [withLinks([shipped, link(1013)], { laneId: 'tested' })],
       gh: new FakeGh(

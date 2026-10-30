@@ -125,6 +125,9 @@ The owner can put an open item away ("we are waiting for approval"): **for** a w
   changes its words). Only `--now` — it is urgent — wakes it, and a ferret may do that **once an hour per item**
   (`urgentAt`; a second try inside the hour is refused as `rate-limited`).
 - Only the owner snoozes and unsnoozes; only the daemon's own timer wakes. A notice is read, not snoozed.
+- **The app ships first**: a daemon reports `agenda.snooze.1` on `GET /v1/health`, and the app sends snooze or
+  unsnooze only to a machine that lists it. To an older machine it sends nothing and says the machine needs an
+  update; a machine not yet read that refuses the request as an unknown action is told apart the same way.
 
 **Migration.** Replies used to close items (`disposition: 'replied'`), and before that they left an item on the
 ferret's turn. When a board is read, an item still waiting on the ferret only because of an owner reply is
@@ -344,9 +347,9 @@ max wait is **refused** by the config check, not clamped. All four are read at s
 - **Exactly once per item.** An item held, sending or delivered is never queued again. A batch is sent
   under `attention-<session>-<ids>-<stamp>`, the stamp being when the batch began. It is written down
   before it is sent, so a batch told twice, or re-sent after a restart, is one message. The stamp keeps an
-  item answered again after an undelivered first answer off the id the ledger already settled. The
-  instructions-updated note ([launch-settings.md](launch-settings.md)) is queued here too, under
-  `instructions~<digest>`, and belongs to no item.
+  item answered again after an undelivered first answer off the id the ledger already settled. With the
+  durable queue switched off, the instructions-updated note ([launch-settings.md](launch-settings.md)) is
+  queued here too, under `instructions~<digest>`, and belongs to no item.
 - **Durable.** A daemon restarted before a batch was accepted re-sends it under the same id; one
   restarted after looks for its proof. Answers held across a restart are delivered once it is back.
 - **A damaged outbox** is set aside as `agenda-replies.json.damaged-<id>` and a fresh one starts, so it

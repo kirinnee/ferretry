@@ -234,11 +234,11 @@ baseline, not news.
 A card never sits behind its own PR. `laneFromFacts` (`packages/daemon/src/lib/board/lane-facts.ts`) is the one
 owner of where PR facts put a card: all PRs merged and released is the `release.published` lane (`release.running`
 once this machine runs that release), any merged with none open is `pr.merged`, any open is `pr.opened` /
-`pr.ready`, and otherwise no opinion. It never moves a card backward, with one exception: an open PR opened after
-everything that shipped on the card (by its `createdAt` against the latest `mergedAt`, else by a higher number in the
-same repository) pulls it back to Review/CI as "moved back to Review/CI: PR #1013 opened after #1008 shipped". An older
-open PR never does. Nor does it move a card out of Closed or a drop, or into a Closed lane in a set with a To test
-lane. A fact passes an owner gate (out of Plan/Design, and back out of To test); gates still stop ferrets.
+`pr.ready`, and otherwise no opinion. It never moves a card backward, with one exception: any open PR, draft or
+not and however old, on a card that has shipped something pulls it back to Review/CI ("moved back to Review/CI: PR
+#1013 ready for review"), because work still in flight means the card is not shipped. A PR closed unmerged says
+nothing. Nor does a fact move a card out of Closed or a drop, or into a Closed lane in a set with a To test lane. A
+fact passes an owner gate (out of Plan/Design, and back out of To test); gates still stop ferrets.
 The GitHub watcher reconciles every linked card on every poll, refile and `fy task link --pr` re-evaluate at once, and a
 PR nobody has asked GitHub about is polled on the next tick. A card the owner sent back stays back until a PR newer
 than that move merges. History names the fact; no move is ever typed into a chat

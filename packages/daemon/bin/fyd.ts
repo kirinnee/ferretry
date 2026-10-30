@@ -457,6 +457,7 @@ import {
 import {
   FileSendChannel,
   FileSendLedger,
+  FileSendReproofMarker,
   FileSendTurnStore,
   ResumeSendReviver,
   StorageSendRepository,
@@ -820,6 +821,7 @@ import {
   InputAuditAdapter,
   InputCardClosedObserver,
   InputRequestService,
+  INSTRUCTIONS_FEATURE,
   InstructionRefresh,
   type InterruptedLaunchOutcome,
   InterruptedLaunchReconciler,
@@ -838,6 +840,7 @@ import {
   LaneProposalAcceptance,
   LaneSetService,
   type LearningSubsystem,
+  LegacySendReproof,
   LegacyWireUseCounter,
   LessonsService,
   LiveDeviceConnections,
@@ -997,6 +1000,7 @@ import {
   SecuritySettingsService,
   SelfRestartCoordinator,
   SendDraftRefused,
+  type SendEvidenceSource,
   type SendLedger,
   SendPending,
   SendRefused,
@@ -9003,11 +9007,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         const config = SessionConfigSchema.safeParse(await storage.readConfig(id).catch(() => undefined));
         return config.success ? { sessionId, harness: config.data.harness } : undefined;
       }, sendTranscripts);
+      // One queue for the tracker's looks AND the re-proof's corrections, so the two never write one ledger at once.
+      const sendTrackerSerial = new KeyedSerialExecutor();
+      const sendEvidence: SendEvidenceSource = {
+        // A running session's worker reads its own transcript; the rest are read here, as before.
+        read: async (id, since) => await sessionObserver.sendEvidence(id, since),
+      };
       const sendTracker = new SendTracker(
         {
           ledger: sendLedger,
-          // A running session's worker reads its own transcript; the rest are read here, as before.
-          evidence: { read: async (id, since) => await sessionObserver.sendEvidence(id, since) },
+          evidence: sendEvidence,
           terminal: sendTerminal,
           repository: sendRepository,
           attempts: {
@@ -9019,11 +9028,23 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
           scheduler: new TimerSendScheduler(),
           roster: { sessions: () => storage.listSessions().map(session => session.id) },
-          serial: new KeyedSerialExecutor(),
+          serial: sendTrackerSerial,
           clock,
         },
         defaultSendTrackerSettings,
       );
+      // The old "not delivered" rows, re-proved once against each recipient's transcript (lib/session/send/reproof.ts).
+      const sendReproof = new LegacySendReproof({
+        ledger: sendLedger,
+        evidence: sendEvidence,
+        repository: sendRepository,
+        roster: { sessions: () => storage.listSessions().map(session => session.id) },
+        serial: sendTrackerSerial,
+        clock,
+        marker: new FileSendReproofMarker(join(paths.home, 'send-reproof-migration.json')),
+        pause: async () => await new Promise<void>(resolve => setTimeout(resolve, 0)),
+        log: line => process.stderr.write(`${line}\n`),
+      });
       const sendTurns = new FileSendTurnStore(resumeTurns, id => createSessionPaths(paths, id).directory);
       const sends: SessionSendService = new SessionSendService(
         {
@@ -10991,6 +11012,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sessionControl,
         sessionResume: sessionResumeSubsystem,
         sendTracking: sendTracker,
+        sendReproof,
         queueDelivery: queueDeliverer,
         sessionSend: createSessionSendSubsystem(
           storage,
@@ -11035,8 +11057,22 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           new AgendaConversation(agenda),
           new InstructionRefresh({
             sections: subFerret => ALWAYS_ON_SECTIONS(CLIENT_NAME, subFerret),
-            queue: async (sessionId, digest, note) =>
-              await agendaReplies.add(sessionId, instructionsReplyKey(digest), note),
+            // Its own message in the session's queue, right behind the owner's that triggered it. Sent as the
+            // person's (`human`) so it is typed into an interactive session too, as it always was; WHO it is
+            // from is the `by` — Ferretry · Instructions, with the sections it restates — never text in it.
+            // Only durable here, not handed over: the owner's send this follows answers without waiting.
+            queue: async (sessionId, digest, note, sections) => {
+              const id = tryParseSessionId(sessionId);
+              if (id === undefined) throw new Error(`${JSON.stringify(sessionId)} is not a usable session id`);
+              if (!delivery.queue) return await agendaReplies.add(sessionId, instructionsReplyKey(digest), note);
+              await sessionQueue.enqueue(id, {
+                id: `instructions-${digest}`,
+                sender: 'human',
+                by: { kind: 'ferretry', feature: INSTRUCTIONS_FEATURE, sections: [...sections] },
+                text: note,
+              });
+              void queueDeliverer.enqueued(id).catch(() => undefined);
+            },
             recorded: async sessionId => {
               const id = tryParseSessionId(sessionId);
               if (id === undefined) return undefined;
@@ -12544,6 +12580,9 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * re-types nothing it cannot prove absent — and the disarm cancels the one pending look per session.
    */
   cleanups.push(subsystems.sendTracking.arm());
+  // Re-proves the pre-queue "not delivered" rows once, one session at a time, behind the tracker's lock.
+  void subsystems.sendReproof.run().catch(() => undefined);
+  cleanups.push(() => subsystems.sendReproof.stop());
   // The queue's deliverer looks once at every session for what a restart left open. Its stop is the FIRST
   // thing a shutdown does: a send answers once its message is on disk, so one sent just before a stop is
   // being typed while the daemon goes down, and the tmux client it types through is released below.

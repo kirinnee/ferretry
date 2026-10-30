@@ -129,6 +129,8 @@ export interface ComposerReferenceProviderOptions extends ComposerProviderScopeO
    */
   readonly getTasks?: ComposerScopedGetter<ComposerReferenceTask>;
   readonly waitForTasks?: ComposerProviderWarmup;
+  /** The menu's "Include agent tasks" switch, read live. Off: asks the human did not make stay out of the menu. */
+  readonly getIncludeAgentTasks?: () => boolean;
 }
 
 /** Injected so a test can drive the surfaces family without a live daemon; the
@@ -758,18 +760,31 @@ const compareTasks = (left: ComposerReferenceTask, right: ComposerReferenceTask)
   taskRecency(right) - taskRecency(left) ||
   left.id.localeCompare(right.id);
 
+const neverAgentTasks = (): boolean => false;
+
+const TASK_MENU_LABELS: ReadonlySet<string> = new Set(['Tasks', '& tasks']);
+
+/** Whether an open list is the task menu, the only one "Include agent tasks" applies to. */
+export const isTaskMenuLabel = (label: string | undefined): boolean =>
+  label !== undefined && TASK_MENU_LABELS.has(label);
+
 /**
  * Closed work (done, dropped) is hidden until the reader types its id exactly: a finished task is rarely
  * the one being referenced, and ten of them above the live ones would bury the menu's purpose.
+ *
+ * The same holds for a task whose ask the human did not make (another ferret's, the Warden's, an auto
+ * card): the menu offers what the owner asked for, unless the reader turns "Include agent tasks" on.
  */
 const taskCandidates = (
   scope: DaemonSessionScope,
   tasks: readonly ComposerReferenceTask[],
   query: string,
+  includeAgentTasks: boolean,
 ): ComposerAutocompleteCandidate[] => {
   const typed = query.toUpperCase();
+  const exact = (task: ComposerReferenceTask): boolean => task.id.toUpperCase() === typed;
   return tasks
-    .filter(task => !task.closed || task.id.toUpperCase() === typed)
+    .filter(task => exact(task) || (!task.closed && (includeAgentTasks || !task.agentAsked)))
     .sort(compareTasks)
     .map(task => {
       const reference = formatReference({ kind: 'task', id: task.id });
@@ -818,7 +833,12 @@ const tasksResult = (
   tasks: readonly ComposerReferenceTask[],
   query: string,
   contextLabel: string,
-): ComposerProviderResult => ({ candidates: taskCandidates(scope, tasks, query), filterQuery: query, contextLabel });
+  includeAgentTasks: boolean,
+): ComposerProviderResult => ({
+  candidates: taskCandidates(scope, tasks, query, includeAgentTasks),
+  filterQuery: query,
+  contextLabel,
+});
 
 /** A stable token that changes only when one of the read sources does, so the
  *  engine re-asks a provider whose store moved and no other. */
@@ -902,6 +922,7 @@ export function createReferencesProvider({
   waitForAgendaItems,
   getTasks = noTasks,
   waitForTasks,
+  getIncludeAgentTasks = neverAgentTasks,
 }: ComposerReferenceProviderOptions): ComposerAutocompleteProvider {
   assertProviderScope(daemon, scope);
   const files = createFilesProvider({ daemon, scope, fetcher });
@@ -915,7 +936,7 @@ export function createReferencesProvider({
   const tierResult = (tier: number, query: string): ComposerProviderResult => {
     if (tier === 2) return agentsResult(scope, getSessions(scope), query, 'Agents');
     if (tier === 3) return agendaResult(scope, getAgendaItems(scope), query, 'Agenda');
-    if (tier === 4) return tasksResult(scope, getTasks(scope), query, 'Tasks');
+    if (tier === 4) return tasksResult(scope, getTasks(scope), query, 'Tasks', getIncludeAgentTasks());
     return {
       candidates: [],
       filterQuery: query,
@@ -940,6 +961,7 @@ export function createReferencesProvider({
         sessions,
         getAgendaItems(scope),
         getTasks(scope),
+        getIncludeAgentTasks(),
         agentReferenceIdentityKey(scope.daemonId, sessions),
       ]);
     },
@@ -980,6 +1002,7 @@ export function createDirectReferenceProviders({
   waitForAgendaItems,
   getTasks = noTasks,
   waitForTasks,
+  getIncludeAgentTasks = neverAgentTasks,
 }: ComposerReferenceProviderOptions): ComposerAutocompleteProvider[] {
   assertProviderScope(daemon, scope);
   const scopeKey = daemonSessionKey(scope);
@@ -1023,12 +1046,16 @@ export function createDirectReferenceProviders({
       label: 'Tasks',
       shouldOpen: allow,
       get snapshotKey() {
-        return trackTasks([getTasks(scope)]);
+        return trackTasks([getTasks(scope), getIncludeAgentTasks()]);
       },
       initialCandidates: ({ query, signal }) =>
-        initialUnlessWarming(waitForTasks, signal, () => tasksResult(scope, getTasks(scope), query, '& tasks')),
+        initialUnlessWarming(waitForTasks, signal, () =>
+          tasksResult(scope, getTasks(scope), query, '& tasks', getIncludeAgentTasks()),
+        ),
       candidates: ({ query, signal }) =>
-        warmed(waitForTasks, signal, () => tasksResult(scope, getTasks(scope), query, '& tasks')),
+        warmed(waitForTasks, signal, () =>
+          tasksResult(scope, getTasks(scope), query, '& tasks', getIncludeAgentTasks()),
+        ),
     },
   ];
 }

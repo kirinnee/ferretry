@@ -9,7 +9,7 @@
  * among the owned, and an owned card is not repeated among the children's.
  */
 
-import { formatTaskRef, type SessionView, type TaskRef } from '@ferretry/protocol';
+import { formatTaskRef, type LaneCategory, type SessionView, type TaskRef } from '@ferretry/protocol';
 import type { BoardModel } from './board-model.ts';
 import type { BoardLoadStatus } from './board-store.ts';
 import {
@@ -63,6 +63,8 @@ export interface ChatCards {
   /** The sub-ferrets' cards, a card under its parent when the parent is among them. */
   readonly children: readonly BoardTreeRow[];
   readonly places: ReadonlyMap<string, BoardCardPlace>;
+  /** The same cards as Kanban columns (`chatKanban`). */
+  readonly lanes: readonly ChatKanbanLane[];
   /** Every card drawn, once. */
   readonly total: number;
 }
@@ -116,6 +118,7 @@ export const chatCards = (model: BoardModel, who: ChatWho): ChatCards => {
     owned: groups,
     children: flattenTree(buildTree(childCards)),
     places,
+    lanes: chatKanban(model, taken, who.daemonId),
     total: taken.size,
   };
 };
@@ -204,3 +207,66 @@ export interface BoardChat {
   readonly status: BoardLoadStatus;
   readonly refresh: () => void;
 }
+
+// ---------------------------------------------------------------------------------------------------
+// The Kanban: the same cards, one column per lane
+// ---------------------------------------------------------------------------------------------------
+
+/** One lane of the chat's Kanban: only the cards this ferret holds, in the lane's own order. */
+interface ChatKanbanLane {
+  readonly key: string;
+  readonly name: string;
+  readonly category: LaneCategory | null;
+  readonly cards: readonly BoardCardOf[];
+}
+
+/**
+ * Every card the chat draws, once: the focus card, the owned cards, then the sub-ferrets'. The List and the
+ * Kanban arrange this same set, so a view switch never changes which cards are there.
+ */
+export const chatDrawn = (cards: ChatCards): readonly BoardCardOf[] => [
+  ...(cards.focus === null ? [] : [cards.focus]),
+  ...cards.owned.flatMap(group => group.cards),
+  ...cards.children.map(row => row.card),
+];
+
+/**
+ * The chat's cards as Kanban columns. A lane with none of this ferret's cards is left out, since a pane this
+ * narrow has no room for empty columns and the card count already says what is there. A project with no lane
+ * set (a daemon from before lanes) keeps its cards in one `Unplaced` column rather than losing them.
+ */
+const chatKanban = (
+  model: BoardModel,
+  drawn: ReadonlySet<BoardCardOf>,
+  daemonId: DaemonId,
+): readonly ChatKanbanLane[] => {
+  const lanes: ChatKanbanLane[] = [];
+  for (const group of model.groups) {
+    if (group.daemonId !== daemonId) continue;
+    for (const lane of group.lanes) {
+      const held = lane.cards.filter(card => drawn.has(card));
+      if (held.length > 0) {
+        lanes.push({ key: `${group.key}/${lane.id}`, name: lane.name, category: lane.category, cards: held });
+      }
+    }
+    const unplaced = group.unplaced.filter(card => drawn.has(card));
+    if (unplaced.length > 0) {
+      lanes.push({ key: `${group.key}/unplaced`, name: 'Unplaced', category: null, cards: unplaced });
+    }
+  }
+  return lanes;
+};
+
+/** What the card detail needs of its neighbours (children, the release each machine runs): the chat's cards. */
+export const chatSiblings = (
+  cards: ChatCards,
+): readonly {
+  readonly task: BoardCardOf['task'];
+  readonly laneName: string;
+  readonly runningOn: BoardCardOf['runningOn'];
+}[] =>
+  chatDrawn(cards).map(card => ({
+    task: card.task,
+    laneName: cards.places.get(card.key)?.laneName ?? card.task.laneId,
+    runningOn: card.runningOn,
+  }));

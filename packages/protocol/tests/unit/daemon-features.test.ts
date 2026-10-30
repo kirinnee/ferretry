@@ -55,6 +55,8 @@ describe('daemon features', () => {
     // Assert
     should([...list]).deepEqual([...new Set(list)].sort());
     should(list).containEql('pack.idea.4000');
+    // The app offers snooze only where this name is listed (an older daemon refuses it as an unknown action).
+    should(list).containEql('agenda.snooze.1');
   });
 
   it('should keep the older idea limit below the raised one the feature unlocks', () => {
