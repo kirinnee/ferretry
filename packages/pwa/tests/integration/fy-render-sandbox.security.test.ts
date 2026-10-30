@@ -183,25 +183,31 @@ const drive = (options: DriveOptions): string => {
       if (!event.data || event.data.kind !== 'shell-ready') return;
       removeEventListener('message', onGlobal);
       const channel = new MessageChannel();
-      channel.port1.onmessage = e => {
-        replies.push(e.data);
-        if (replies.length >= ${expectReplies} && !settled) { settled = true; setTimeout(finish, 250); }
-      };
-      frame.contentWindow.postMessage({ kind: 'init' }, '*', [channel.port2]);
-      channel.port1.postMessage(Object.assign({}, ${JSON.stringify(command)}, { library }));
       ${
         secondHandshake === null
           ? ''
-          : `setTimeout(() => {
+          : `// Offered once the FIRST port has answered (a condition, not a 1 s sleep), so the
+      // first port is provably live when the second arrives. No gap is needed between the
+      // offer and the send: port messages queue until the receiver wires onmessage, so a
+      // frame that wrongly adopted the second port would still receive this command.
+      const offerSecondPort = () => {
         const second = new MessageChannel();
         second.port1.onmessage = e => { secondPortReplies.push(e.data); };
         frame.contentWindow.postMessage({ kind: 'init' }, '*', [second.port2]);
-        setTimeout(() => {
-          second.port1.postMessage(Object.assign({}, ${JSON.stringify(secondHandshake.command)}, { library }));
-          channel.port1.postMessage({ kind: 'set-playing', playing: false });
-        }, 250);
-      }, 1000);`
+        second.port1.postMessage(Object.assign({}, ${JSON.stringify(secondHandshake.command)}, { library }));
+        channel.port1.postMessage({ kind: 'set-playing', playing: false });
+      };`
       }
+      channel.port1.onmessage = e => {
+        replies.push(e.data);
+        // Quiet window kept on purpose: callers assert that something did NOT happen
+        // (empty ledger, empty second-port list), so they need a beat after the last
+        // reply. Loopback hits land in milliseconds; 150 ms is slack, not a guess.
+        if (replies.length >= ${expectReplies} && !settled) { settled = true; setTimeout(finish, 150); }
+        ${secondHandshake === null ? '' : 'if (replies.length === 1) offerSecondPort();'}
+      };
+      frame.contentWindow.postMessage({ kind: 'init' }, '*', [channel.port2]);
+      channel.port1.postMessage(Object.assign({}, ${JSON.stringify(command)}, { library }));
     };
     addEventListener('message', onGlobal);
     document.body.appendChild(frame);
@@ -235,8 +241,10 @@ const reportingLibrary = (body: string): string => `(() => {
     initialize() {},
     render() {
       return Promise.all(pending).then(() => new Promise(done => {
-        // One extra turn, so an outcome that arrives on a later task is included.
-        setTimeout(() => done({ svg: JSON.stringify(report) }), 300);
+        // One extra turn, so an outcome that arrives on a later task is included. Every
+        // outcome that can matter is already in \`pending\`; this only covers stragglers
+        // (a refused Worker's error event), which take a task or two, not 300 ms.
+        setTimeout(() => done({ svg: JSON.stringify(report) }), 100);
       }));
     },
   };
@@ -548,14 +556,14 @@ describe('fy-render fixture loader — the manifest gate', () => {
 
     const savedMemo = fyRenderFixtureTestSeam.takeMemo();
     fyRenderFixtureTestSeam.useBuilder(stub);
-    fyRenderFixtureTestSeam.useTimeout(750);
+    fyRenderFixtureTestSeam.useTimeout(500);
     try {
       const rejection = await loaderRejection();
       const wedgedDirectory = fyRenderFixtureTestSeam.lastDirectory();
 
       // Assert — it rejected, promptly, naming the bound.
       should(rejection).be.an.Error();
-      should(String(rejection)).match(/did not finish within 750ms/u);
+      should(String(rejection)).match(/did not finish within 500ms/u);
 
       // Assert — the exact private directory is gone, and the rejection was not
       // remembered: the next call builds again rather than replaying the failure.

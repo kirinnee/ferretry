@@ -188,6 +188,51 @@ const documentFacts = async (tab: Page): Promise<DocumentFacts> =>
 const scrollTopOf = async (tab: Page, selector: string): Promise<number> =>
   await tab.$eval(selector, node => node.scrollTop);
 
+/**
+ * Runs one journey at both form factors AT ONCE, each in its own browser profile, and fails with the
+ * form named. The two never share a context, IndexedDB, storage or history, so running them side by side
+ * proves exactly what running them one after the other did, in the time of the slower one.
+ */
+const eachForm = async (journey: (form: Form) => Promise<void>): Promise<void> => {
+  const outcomes = await Promise.allSettled(
+    FORMS.map(async form => {
+      try {
+        await journey(form);
+      } catch (error) {
+        if (error instanceof Error) error.message = `[${form}] ${error.message}`;
+        throw error;
+      }
+    }),
+  );
+  for (const outcome of outcomes) if (outcome.status === 'rejected') throw outcome.reason;
+};
+
+/** Waits until the scroll memory in this tab's session storage holds a place with this offset for a page. */
+const pageOffsetRemembered = async (tab: Page, top: number): Promise<void> => {
+  await tab.waitForFunction(offset => {
+    const raw = sessionStorage.getItem('fy-scroll-memory:v1');
+    if (raw === null) return false;
+    const places = (JSON.parse(raw) as { places?: Record<string, Record<string, number>> }).places ?? {};
+    return Object.entries(places).some(
+      ([key, place]) => key.startsWith('page:') && Object.values(place).some(value => Math.abs(value - offset) <= 1),
+    );
+  }, top);
+};
+
+/** Waits until the chat's reading position has been filed (it settles 150 ms after the last scroll). */
+const chatPositionRemembered = async (tab: Page, selector: string): Promise<void> => {
+  await tab.waitForFunction(scroller => {
+    const raw = sessionStorage.getItem('fy-scroll-memory:v1');
+    const node = document.querySelector(scroller);
+    if (raw === null || node === null) return false;
+    const places = (JSON.parse(raw) as { places?: Record<string, { top?: number; atLatest?: boolean }> }).places ?? {};
+    return Object.entries(places).some(
+      ([key, place]) =>
+        key.startsWith('chat:') && place.atLatest === false && Math.abs((place.top ?? -9) - node.scrollTop) <= 1,
+    );
+  }, selector);
+};
+
 /** Puts a scroller at an offset the way a reader's scroll lands, then lets the memory record it. */
 const scrollTo = async (tab: Page, selector: string, top: number): Promise<number> => {
   const landed = await tab.$eval(
@@ -198,7 +243,7 @@ const scrollTo = async (tab: Page, selector: string, top: number): Promise<numbe
     },
     top,
   );
-  await tab.waitForTimeout(400);
+  await pageOffsetRemembered(tab, landed);
   return landed;
 };
 
@@ -271,246 +316,251 @@ describe('navigation without reloads, and the session cache, in the real shell',
     if (directory !== '') await rm(directory, { force: true, recursive: true });
   });
 
-  it.each(FORMS)(
-    'goes Back to the sessions list without reloading the document (%s)',
-    async form => {
-      // Arrange
-      const { context, tab } = await open(form);
-      try {
-        const daemon = await boot(tab);
-        const listIndex = (await documentFacts(tab)).index;
-        await markDocument(tab);
+  it(
+    'goes Back to the sessions list without reloading the document, on a desktop and a phone',
+    async () =>
+      await eachForm(async form => {
+        // Arrange
+        const { context, tab } = await open(form);
+        try {
+          const daemon = await boot(tab);
+          const listIndex = (await documentFacts(tab)).index;
+          await markDocument(tab);
 
-        // Act: the browser's Back, from a session opened off the list.
-        await tab.click(listRow('s-03'));
-        await tab.waitForSelector('.fy-transcript');
-        await tab.goBack();
-        await tab.waitForSelector(listRow('s-03'));
-        const afterBrowserBack = await documentFacts(tab);
+          // Act: the browser's Back, from a session opened off the list.
+          await tab.click(listRow('s-03'));
+          await tab.waitForSelector('.fy-transcript');
+          await tab.goBack();
+          await tab.waitForSelector(listRow('s-03'));
+          const afterBrowserBack = await documentFacts(tab);
 
-        // Act: the in-app "← Sessions", from New session opened off the list.
-        await tab.click(`a[href="${sessionsPathOf(daemon)}/new"]`);
-        await tab.waitForSelector('#new-session-heading');
-        await tab.click('button:has-text("← Sessions")');
-        await tab.waitForSelector(listRow('s-03'));
-        const afterInAppBack = await documentFacts(tab);
+          // Act: the in-app "← Sessions", from New session opened off the list.
+          await tab.click(`a[href="${sessionsPathOf(daemon)}/new"]`);
+          await tab.waitForSelector('#new-session-heading');
+          await tab.click('button:has-text("← Sessions")');
+          await tab.waitForSelector(listRow('s-03'));
+          const afterInAppBack = await documentFacts(tab);
 
-        // Assert
-        const expected: DocumentFacts = {
-          marker: 'same-document',
-          navigations: 1,
-          shellConnected: true,
-          sawSkeleton: false,
-          index: listIndex,
-        };
-        expect(afterBrowserBack).toEqual(expected);
-        // A real step back, not a push of the list: the trail is where it was before New session.
-        expect(afterInAppBack).toEqual(expected);
-        expect(new URL(tab.url()).pathname).toBe(sessionsPathOf(daemon));
-      } finally {
-        await context.close();
-      }
-    },
+          // Assert
+          const expected: DocumentFacts = {
+            marker: 'same-document',
+            navigations: 1,
+            shellConnected: true,
+            sawSkeleton: false,
+            index: listIndex,
+          };
+          expect(afterBrowserBack).toEqual(expected);
+          // A real step back, not a push of the list: the trail is where it was before New session.
+          expect(afterInAppBack).toEqual(expected);
+          expect(new URL(tab.url()).pathname).toBe(sessionsPathOf(daemon));
+        } finally {
+          await context.close();
+        }
+      }),
     120_000,
   );
 
-  it.each(FORMS)(
-    'draws the cached rows and transcript on reload, then the live answer (%s)',
-    async form => {
-      // Arrange: one live visit saves the list and s-03's transcript into this profile's IndexedDB.
-      const { context, tab } = await open(form);
-      try {
-        const daemon = await boot(tab);
-        await tab.click(listRow('s-03'));
-        await tab.waitForSelector('.fy-transcript :text("Live tail of s-03.")');
-        await cacheSaved(tab, ['s-03']);
-        await nextBoot(tab, { hold: true, renamed: true });
+  it(
+    'draws the cached rows and transcript on reload, then the live answer, on a desktop and a phone',
+    async () =>
+      await eachForm(async form => {
+        // Arrange: one live visit saves the list and s-03's transcript into this profile's IndexedDB.
+        const { context, tab } = await open(form);
+        try {
+          const daemon = await boot(tab);
+          await tab.click(listRow('s-03'));
+          await tab.waitForSelector('.fy-transcript :text("Live tail of s-03.")');
+          await cacheSaved(tab, ['s-03']);
+          await nextBoot(tab, { hold: true, renamed: true });
 
-        // Act: a reload of the sessions list with the daemon's first answer held.
-        await tab.goto(`${origin()}${sessionsPathOf(daemon)}`);
-        await tab.waitForSelector(listRow('s-00'));
-        // The list as drawn: a desktop table puts the task in its own cell, beside the row's link.
-        const cachedList = await tab.$eval(SCROLLER, node => (node as HTMLElement).innerText);
-        const pillWhileHeld = await tab.$$eval(PILL, nodes => nodes.length);
-        const skeletonWhileHeld = await tab.$$eval(SKELETON, nodes => nodes.length);
-        await tab.emulateMedia({ colorScheme: 'dark' });
-        await capture(tab, `sessions-updating-${form}-dark`);
-        await tab.emulateMedia({ colorScheme: 'light' });
-        await release(tab);
-        await tab.waitForSelector(`${SCROLLER} :text("Renamed by the live read")`);
-        await tab.waitForSelector(PILL, { state: 'detached' });
+          // Act: a reload of the sessions list with the daemon's first answer held.
+          await tab.goto(`${origin()}${sessionsPathOf(daemon)}`);
+          await tab.waitForSelector(listRow('s-00'));
+          // The list as drawn: a desktop table puts the task in its own cell, beside the row's link.
+          const cachedList = await tab.$eval(SCROLLER, node => (node as HTMLElement).innerText);
+          const pillWhileHeld = await tab.$$eval(PILL, nodes => nodes.length);
+          const skeletonWhileHeld = await tab.$$eval(SKELETON, nodes => nodes.length);
+          await tab.emulateMedia({ colorScheme: 'dark' });
+          await capture(tab, `sessions-updating-${form}-dark`);
+          await tab.emulateMedia({ colorScheme: 'light' });
+          await release(tab);
+          await tab.waitForSelector(`${SCROLLER} :text("Renamed by the live read")`);
+          await tab.waitForSelector(PILL, { state: 'detached' });
 
-        // Act: a reload of the chat, held the same way.
-        await nextBoot(tab, { hold: true, renamed: true });
-        await tab.goto(`${origin()}${sessionsPathOf(daemon)}/session/s-03`);
-        await tab.waitForSelector('.fy-transcript :text("Live tail of s-03.")');
-        const chatPillWhileHeld = await tab.$$eval(PILL, nodes => nodes.length);
-        await release(tab);
-        await tab.waitForSelector('.fy-transcript :text("Fresh tail of s-03.")');
-        await tab.waitForSelector(PILL, { state: 'detached' });
+          // Act: a reload of the chat, held the same way.
+          await nextBoot(tab, { hold: true, renamed: true });
+          await tab.goto(`${origin()}${sessionsPathOf(daemon)}/session/s-03`);
+          await tab.waitForSelector('.fy-transcript :text("Live tail of s-03.")');
+          const chatPillWhileHeld = await tab.$$eval(PILL, nodes => nodes.length);
+          await release(tab);
+          await tab.waitForSelector('.fy-transcript :text("Fresh tail of s-03.")');
+          await tab.waitForSelector(PILL, { state: 'detached' });
 
-        // Assert
-        expect(cachedList).toContain('Cached relay bench');
-        expect(cachedList).not.toContain('Renamed by the live read');
-        expect(pillWhileHeld).toBe(1);
-        expect(skeletonWhileHeld).toBe(0);
-        expect(chatPillWhileHeld).toBe(1);
-        expect(await tab.$$eval('.fy-transcript :text("Live tail of s-03.")', nodes => nodes.length)).toBe(0);
-      } finally {
-        await context.close();
-      }
-    },
+          // Assert
+          expect(cachedList).toContain('Cached relay bench');
+          expect(cachedList).not.toContain('Renamed by the live read');
+          expect(pillWhileHeld).toBe(1);
+          expect(skeletonWhileHeld).toBe(0);
+          expect(chatPillWhileHeld).toBe(1);
+          expect(await tab.$$eval('.fy-transcript :text("Live tail of s-03.")', nodes => nodes.length)).toBe(0);
+        } finally {
+          await context.close();
+        }
+      }),
     120_000,
   );
 
-  it.each(FORMS)(
-    'forgets the cache when Cached data is cleared: a held reload draws a skeleton (%s)',
-    async form => {
-      // Arrange
-      const { context, tab } = await open(form);
-      try {
-        const daemon = await boot(tab);
-        await cacheSaved(tab, []);
-        await nextBoot(tab, {});
-        await tab.goto(`${origin()}${sessionsPathOf(daemon)}/settings#device`);
-        await tab.waitForSelector('[data-clear-cached-data="idle"]');
-        // From here on the daemon never answers a list again, so nothing can write the cache back in.
-        await tab.evaluate(() => (globalThis as unknown as { __navCache: { stall(): void } }).__navCache.stall());
+  it(
+    'forgets the cache when Cached data is cleared: a held reload draws a skeleton, on a desktop and a phone',
+    async () =>
+      await eachForm(async form => {
+        // Arrange
+        const { context, tab } = await open(form);
+        try {
+          const daemon = await boot(tab);
+          await cacheSaved(tab, []);
+          await nextBoot(tab, {});
+          await tab.goto(`${origin()}${sessionsPathOf(daemon)}/settings#device`);
+          await tab.waitForSelector('[data-clear-cached-data="idle"]');
+          // From here on the daemon never answers a list again, so nothing can write the cache back in.
+          await tab.evaluate(() => (globalThis as unknown as { __navCache: { stall(): void } }).__navCache.stall());
 
-        // Act
-        await tab.click('[data-clear-cached-data] button:has-text("Clear cached data")');
-        await tab.click('[data-clear-cached-data="confirming"] button:has-text("Clear")');
-        await tab.waitForSelector('[data-clear-cached-data="cleared"]');
-        await nextBoot(tab, { hold: true });
-        await tab.goto(`${origin()}${sessionsPathOf(daemon)}`);
-        await tab.waitForSelector(SKELETON);
-        const rowsWhileHeld = await tab.$$eval(`${SCROLLER} a[href*="/session/"]`, nodes => nodes.length);
-        const pillWhileHeld = await tab.$$eval(PILL, nodes => nodes.length);
-        await release(tab);
-        await tab.waitForSelector(listRow('s-03'));
+          // Act
+          await tab.click('[data-clear-cached-data] button:has-text("Clear cached data")');
+          await tab.click('[data-clear-cached-data="confirming"] button:has-text("Clear")');
+          await tab.waitForSelector('[data-clear-cached-data="cleared"]');
+          await nextBoot(tab, { hold: true });
+          await tab.goto(`${origin()}${sessionsPathOf(daemon)}`);
+          await tab.waitForSelector(SKELETON);
+          const rowsWhileHeld = await tab.$$eval(`${SCROLLER} a[href*="/session/"]`, nodes => nodes.length);
+          const pillWhileHeld = await tab.$$eval(PILL, nodes => nodes.length);
+          await release(tab);
+          await tab.waitForSelector(listRow('s-03'));
 
-        // Assert
-        expect(rowsWhileHeld).toBe(0);
-        expect(pillWhileHeld).toBe(0);
-        expect(await tab.$$eval(SKELETON, nodes => nodes.length)).toBe(0);
-      } finally {
-        await context.close();
-      }
-    },
+          // Assert
+          expect(rowsWhileHeld).toBe(0);
+          expect(pillWhileHeld).toBe(0);
+          expect(await tab.$$eval(SKELETON, nodes => nodes.length)).toBe(0);
+        } finally {
+          await context.close();
+        }
+      }),
     120_000,
   );
 
-  it.each(FORMS)(
-    'puts Settings and the sessions list back where they were scrolled (%s)',
-    async form => {
-      // Arrange
-      const { context, tab } = await open(form);
-      const settings = '[data-settings-scroller]';
-      try {
-        const daemon = await boot(tab);
-        const listTop = await scrollTo(tab, SCROLLER, 1_234);
+  it(
+    'puts Settings and the sessions list back where they were scrolled, on a desktop and a phone',
+    async () =>
+      await eachForm(async form => {
+        // Arrange
+        const { context, tab } = await open(form);
+        const settings = '[data-settings-scroller]';
+        try {
+          const daemon = await boot(tab);
+          const listTop = await scrollTo(tab, SCROLLER, 1_234);
 
-        // Act: the list, out to a session on screen and Back, then reloaded.
-        await tab.click(listRow(await rowOnScreen(tab)));
-        await tab.waitForSelector('.fy-transcript');
-        await tab.goBack();
-        await tab.waitForSelector(listRow('s-03'));
-        const listAfterBack = await settlesAt(tab, SCROLLER, listTop);
-        await tab.reload();
-        await tab.waitForSelector(listRow('s-03'));
-        const listAfterReload = await settlesAt(tab, SCROLLER, listTop);
+          // Act: the list, out to a session on screen and Back, then reloaded.
+          await tab.click(listRow(await rowOnScreen(tab)));
+          await tab.waitForSelector('.fy-transcript');
+          await tab.goBack();
+          await tab.waitForSelector(listRow('s-03'));
+          const listAfterBack = await settlesAt(tab, SCROLLER, listTop);
+          await tab.reload();
+          await tab.waitForSelector(listRow('s-03'));
+          const listAfterReload = await settlesAt(tab, SCROLLER, listTop);
 
-        // Act: Settings, out to the sessions list and Back, then reloaded.
-        await tab.click(`a[href="${sessionsPathOf(daemon)}/settings"]`);
-        await tab.waitForSelector(settings);
-        // Behaviour is the longest section at either width.
-        await tab.click('[data-settings-section-choice="behaviour"]:visible');
-        await tab.waitForFunction(selector => {
-          const node = document.querySelector(selector);
-          return node !== null && node.scrollHeight > node.clientHeight + 600;
-        }, settings);
-        const settingsTop = await scrollTo(tab, settings, 500);
-        await tab.click(
-          form === 'phone' ? `a[href="${sessionsPathOf(daemon)}"]:visible` : '[data-sbar-session="s-05"]',
-        );
-        await tab.waitForSelector(form === 'phone' ? listRow('s-03') : '.fy-transcript');
-        await tab.goBack();
-        await tab.waitForSelector(settings);
-        const settingsAfterBack = await settlesAt(tab, settings, settingsTop);
-        await tab.reload();
-        await tab.waitForSelector(settings);
-        const settingsAfterReload = await settlesAt(tab, settings, settingsTop);
+          // Act: Settings, out to the sessions list and Back, then reloaded.
+          await tab.click(`a[href="${sessionsPathOf(daemon)}/settings"]`);
+          await tab.waitForSelector(settings);
+          // Behaviour is the longest section at either width.
+          await tab.click('[data-settings-section-choice="behaviour"]:visible');
+          await tab.waitForFunction(selector => {
+            const node = document.querySelector(selector);
+            return node !== null && node.scrollHeight > node.clientHeight + 600;
+          }, settings);
+          const settingsTop = await scrollTo(tab, settings, 500);
+          await tab.click(
+            form === 'phone' ? `a[href="${sessionsPathOf(daemon)}"]:visible` : '[data-sbar-session="s-05"]',
+          );
+          await tab.waitForSelector(form === 'phone' ? listRow('s-03') : '.fy-transcript');
+          await tab.goBack();
+          await tab.waitForSelector(settings);
+          const settingsAfterBack = await settlesAt(tab, settings, settingsTop);
+          await tab.reload();
+          await tab.waitForSelector(settings);
+          const settingsAfterReload = await settlesAt(tab, settings, settingsTop);
 
-        // Assert
-        expect(listTop).toBe(1_234);
-        expect(Math.abs(listAfterBack - listTop)).toBeLessThanOrEqual(1);
-        expect(Math.abs(listAfterReload - listTop)).toBeLessThanOrEqual(1);
-        expect(settingsTop).toBe(500);
-        expect(Math.abs(settingsAfterBack - settingsTop)).toBeLessThanOrEqual(1);
-        expect(Math.abs(settingsAfterReload - settingsTop)).toBeLessThanOrEqual(1);
-      } finally {
-        await context.close();
-      }
-    },
+          // Assert
+          expect(listTop).toBe(1_234);
+          expect(Math.abs(listAfterBack - listTop)).toBeLessThanOrEqual(1);
+          expect(Math.abs(listAfterReload - listTop)).toBeLessThanOrEqual(1);
+          expect(settingsTop).toBe(500);
+          expect(Math.abs(settingsAfterBack - settingsTop)).toBeLessThanOrEqual(1);
+          expect(Math.abs(settingsAfterReload - settingsTop)).toBeLessThanOrEqual(1);
+        } finally {
+          await context.close();
+        }
+      }),
     120_000,
   );
 
-  it.each(FORMS)(
-    'keeps a chat’s reading position, detached, across Back, Forward and a reload (%s)',
-    async form => {
-      // Arrange: a chat opened at its latest message, then scrolled up by the reader's wheel.
-      const { context, tab } = await open(form);
-      const transcript = '.fy-transcript';
-      try {
-        await boot(tab);
-        await tab.click(listRow('s-03'));
-        await tab.waitForSelector(`${transcript} :text("Live tail of s-03.")`);
-        const box = await tab.$eval(transcript, node => {
-          const rect = node.getBoundingClientRect();
-          return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-        });
-        await tab.mouse.move(box.x, box.y);
-        for (let step = 0; step < 6; step += 1) await tab.mouse.wheel(0, -400);
-        await tab.waitForSelector('.fy-jump-latest');
-        await tab.waitForTimeout(600);
-        const reading = await scrollTopOf(tab, transcript);
+  it(
+    'keeps a chat’s reading position, detached, across Back, Forward and a reload, on a desktop and a phone',
+    async () =>
+      await eachForm(async form => {
+        // Arrange: a chat opened at its latest message, then scrolled up by the reader's wheel.
+        const { context, tab } = await open(form);
+        const transcript = '.fy-transcript';
+        try {
+          await boot(tab);
+          await tab.click(listRow('s-03'));
+          await tab.waitForSelector(`${transcript} :text("Live tail of s-03.")`);
+          const box = await tab.$eval(transcript, node => {
+            const rect = node.getBoundingClientRect();
+            return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+          });
+          await tab.mouse.move(box.x, box.y);
+          for (let step = 0; step < 6; step += 1) await tab.mouse.wheel(0, -400);
+          await tab.waitForSelector('.fy-jump-latest');
+          await chatPositionRemembered(tab, transcript);
+          const reading = await scrollTopOf(tab, transcript);
 
-        // Act: Back to the list, Forward into the chat again.
-        await tab.goBack();
-        await tab.waitForSelector(listRow('s-03'));
-        await tab.goForward();
-        await tab.waitForSelector(transcript);
-        const afterForward = await settlesAt(tab, transcript, reading);
-        const jumpAfterForward = await tab.$$eval('.fy-jump-latest', nodes => nodes.length);
+          // Act: Back to the list, Forward into the chat again.
+          await tab.goBack();
+          await tab.waitForSelector(listRow('s-03'));
+          await tab.goForward();
+          await tab.waitForSelector(transcript);
+          const afterForward = await settlesAt(tab, transcript, reading);
+          const jumpAfterForward = await tab.$$eval('.fy-jump-latest', nodes => nodes.length);
 
-        // Act: and reopened by clicking it, and reloaded.
-        await tab.goBack();
-        await tab.waitForSelector(listRow('s-03'));
-        await tab.click(listRow('s-03'));
-        await tab.waitForSelector(transcript);
-        const afterClick = await settlesAt(tab, transcript, reading);
-        await tab.reload();
-        await tab.waitForSelector(`${transcript} :text("Live tail of s-03.")`, { state: 'attached' });
-        const afterReload = await settlesAt(tab, transcript, reading);
-        const jumpAfterReload = await tab.$$eval('.fy-jump-latest', nodes => nodes.length);
+          // Act: and reopened by clicking it, and reloaded.
+          await tab.goBack();
+          await tab.waitForSelector(listRow('s-03'));
+          await tab.click(listRow('s-03'));
+          await tab.waitForSelector(transcript);
+          const afterClick = await settlesAt(tab, transcript, reading);
+          await tab.reload();
+          await tab.waitForSelector(`${transcript} :text("Live tail of s-03.")`, { state: 'attached' });
+          const afterReload = await settlesAt(tab, transcript, reading);
+          const jumpAfterReload = await tab.$$eval('.fy-jump-latest', nodes => nodes.length);
 
-        // Assert: well away from the latest message, and the same place every time.
-        const latest = await tab.$eval(transcript, node => node.scrollHeight - node.clientHeight);
-        expect(latest - reading).toBeGreaterThan(1_000);
-        expect(Math.abs(afterForward - reading)).toBeLessThanOrEqual(1);
-        expect(Math.abs(afterClick - reading)).toBeLessThanOrEqual(1);
-        expect(Math.abs(afterReload - reading)).toBeLessThanOrEqual(1);
-        expect([jumpAfterForward, jumpAfterReload]).toEqual([1, 1]);
-      } finally {
-        await context.close();
-      }
-    },
+          // Assert: well away from the latest message, and the same place every time.
+          const latest = await tab.$eval(transcript, node => node.scrollHeight - node.clientHeight);
+          expect(latest - reading).toBeGreaterThan(1_000);
+          expect(Math.abs(afterForward - reading)).toBeLessThanOrEqual(1);
+          expect(Math.abs(afterClick - reading)).toBeLessThanOrEqual(1);
+          expect(Math.abs(afterReload - reading)).toBeLessThanOrEqual(1);
+          expect([jumpAfterForward, jumpAfterReload]).toEqual([1, 1]);
+        } finally {
+          await context.close();
+        }
+      }),
     120_000,
   );
 
   it('shows This device › Cached data on a desktop and a phone, light and dark', async () => {
-    for (const form of FORMS)
-      for (const mode of ['light', 'dark'] as const) {
+    const outcomes = await Promise.allSettled(
+      FORMS.flatMap(form => (['light', 'dark'] as const).map(mode => ({ form, mode }))).map(async ({ form, mode }) => {
         // Arrange
         const { context, tab } = await open(form, mode);
         try {
@@ -528,9 +578,14 @@ describe('navigation without reloads, and the session cache, in the real shell',
             await tab.$eval('[data-settings-section="device"]', node => (node as HTMLElement).innerText),
           ).toContain('Cached data');
           expect(wide).toBeLessThanOrEqual(0);
+        } catch (error) {
+          if (error instanceof Error) error.message = `[${form} ${mode}] ${error.message}`;
+          throw error;
         } finally {
           await context.close();
         }
-      }
+      }),
+    );
+    for (const outcome of outcomes) if (outcome.status === 'rejected') throw outcome.reason;
   }, 180_000);
 });
