@@ -519,8 +519,8 @@ export function SessionChatPage({
   // THE LATEST REQUEST TO SHOW ONE ITEM (a `?attention=` link, a `!A3` click): the agenda opens its card.
   // It belongs to this session and resets with it.
   const [agendaFocus, setAgendaFocus] = useState<AgendaFocus | null>(null);
-  const showAgenda = useCallback((target: AgendaId | null): void => {
-    setAgendaFocus(current => ({ target, seq: (current?.seq ?? 0) + 1 }));
+  const showAgenda = useCallback((target: AgendaId | null, onEntry = false): void => {
+    setAgendaFocus(current => ({ target, seq: (current?.seq ?? 0) + 1, ...(onEntry ? { onEntry } : {}) }));
   }, []);
   // The resolved item a link named, so the list the header menu opens rings it. Cleared with the form.
   const [resolvedTarget, setResolvedTarget] = useState<AgendaId | null>(null);
@@ -690,7 +690,7 @@ export function SessionChatPage({
   // navigation that carries a target, the reset runs first and the new target wins.
   // biome-ignore lint/correctness/useExhaustiveDependencies: the pairing, the session id and the navigation re-arm the same target
   useEffect(() => {
-    if (agendaTarget !== null) showAgenda(agendaTarget);
+    if (agendaTarget !== null) showAgenda(agendaTarget, true);
   }, [agendaTarget, agendaTargetKey, showAgenda, connection, session.config.id]);
 
   const publish = useCallback(
