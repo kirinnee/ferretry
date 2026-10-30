@@ -1,5 +1,5 @@
-import { afterEach, describe, it } from 'bun:test';
-import { connect, createServer, type Server } from 'node:net';
+import { afterEach, describe, it, onTestFinished } from 'bun:test';
+import { connect, createServer, type Server, type Socket } from 'node:net';
 import should from 'should';
 import { ProxySignInRelay } from '../../../../src/adapters/browser/proxy/sign-in-relay.ts';
 
@@ -187,7 +187,11 @@ describe('ProxySignInRelay', () => {
   });
 
   it('should give up on an HTTPS proxy that never completes its handshake', async () => {
-    const silent = await listen(createServer(() => undefined));
+    const held: Socket[] = [];
+    const silent = await listen(createServer(socket => held.push(socket)));
+    onTestFinished(() => {
+      for (const socket of held) socket.destroy();
+    });
     const started = await ProxySignInRelay.start(
       { scheme: 'https', host: '127.0.0.1', port: silent },
       { username: 'user', password: 'pass' },
