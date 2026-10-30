@@ -1,3 +1,17 @@
+## [4.141.0](https://github.com/kirinnee/ferretry/compare/v4.140.0...v4.141.0) (2026-10-30)
+
+### Features
+
+* **agenda:** let a lead edit, surface, close and dismiss its sub-ferrets' items ([#1050](https://github.com/kirinnee/ferretry/issues/1050)) ([fd07e80](https://github.com/kirinnee/ferretry/commit/fd07e80e7ae612d990126e1a55d9920929a2afab))
+
+### Fixes
+
+* **board:** a newer open PR pulls a shipped card back to Review/CI ([#1049](https://github.com/kirinnee/ferretry/issues/1049)) ([6df084f](https://github.com/kirinnee/ferretry/commit/6df084f4615b17ce886434357cae1dbc83e1d5c6))
+
+### Performance
+
+* **pwa:** trim the settings walk on a 2-vCPU runner ([#1034](https://github.com/kirinnee/ferretry/issues/1034)) ([9cde5df](https://github.com/kirinnee/ferretry/commit/9cde5df5df133243ba19334973aa3c2e6d0dacdb))
+
 ## [4.140.0](https://github.com/kirinnee/ferretry/compare/v4.139.0...v4.140.0) (2026-10-30)
 
 ### Features

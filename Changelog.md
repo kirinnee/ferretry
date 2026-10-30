@@ -1,3 +1,9 @@
+## [4.141.1](https://github.com/kirinnee/ferretry/compare/v4.141.0...v4.141.1) (2026-10-30)
+
+### Fixes
+
+* **agenda:** count parked items in the snapshot again, so the board reads back on the wire ([#1051](https://github.com/kirinnee/ferretry/issues/1051)) ([fbe4e00](https://github.com/kirinnee/ferretry/commit/fbe4e0090f2f1d68c7c029e94ed5600e71374465)), closes [#1043](https://github.com/kirinnee/ferretry/issues/1043)
+
 ## [4.141.0](https://github.com/kirinnee/ferretry/compare/v4.140.0...v4.141.0) (2026-10-30)
 
 ### Features
