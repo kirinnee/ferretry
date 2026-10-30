@@ -198,6 +198,14 @@ export function readDoctorReport(input: DoctorReportInput): DoctorReport {
       'optional',
       'Generated Claude wrappers skip their first-run JSON seeding step; they continue with a warning.',
     ),
+    // Found is all this says: the board's watcher runs it with the host's own sign-in, and reports a
+    // signed-out `gh` in the daemon log the first time it meets one.
+    binary(
+      input,
+      'gh',
+      'optional',
+      "The board's GitHub watcher cannot read PR state, link PRs or find releases; cards keep their PR state unknown.",
+    ),
   ];
   return {
     checks,

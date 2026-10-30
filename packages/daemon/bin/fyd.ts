@@ -138,6 +138,7 @@ import {
 } from '../src/adapters/attention/storage-harness-prompt.ts';
 import { StorageSessionAttentionState } from '../src/adapters/attention/storage-session-attention-state.ts';
 import { FileBoardStore } from '../src/adapters/board/file-board-store.ts';
+import { GhCliRunner, GitWorkingCopies } from '../src/adapters/board-github/index.ts';
 import {
   JournalBoardChanges,
   StorageSessionFocus,
@@ -150,6 +151,7 @@ import {
   NoopReopenNotifier,
   StubLaneSetSource,
 } from '../src/lib/board/index.ts';
+import { GitHubWatcher } from '../src/lib/board-github/index.ts';
 import { FileAcceptedConfigStore, FileConfigDirectory } from '../src/adapters/config-files/files.ts';
 import { unrefFileEventTimers } from '../src/adapters/file-events/bun-file-event-source.ts';
 import { platformFileEventSource } from '../src/adapters/file-events/platform.ts';
@@ -1822,6 +1824,9 @@ export interface BrowserTransportWorld {
   openViewerStream(host: BrowserViewerHost, sessionId: string, socket: ViewerSocket): Promise<BrowserViewerStream>;
 }
 
+/** Where the project boards report what they could not do: the daemon's log. */
+const boardDiagnostics = { warn: (message: string) => void process.stderr.write(`board: ${message}\n`) };
+
 /**
  * The project boards (v2): one file per card under `<state>/board`, written under ownership and lineage.
  *
@@ -1837,7 +1842,7 @@ function createBoardService(
   clock: SystemClock,
   machineId: () => string | undefined,
 ): BoardService {
-  const diagnostics = { warn: (message: string) => void process.stderr.write(`board: ${message}\n`) };
+  const diagnostics = boardDiagnostics;
   return new BoardService({
     store: new FileBoardStore(join(paths.state, 'board'), stateFiles, new KeyedSerialExecutor(), diagnostics),
     lanes: new StubLaneSetSource(),
@@ -10099,6 +10104,33 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             `pack: the routing prompt migration did not run: ${error instanceof Error ? error.message : String(error)}\n`,
           );
         });
+      // The project boards, and the GitHub watcher that moves their cards on PR facts (board-design.md
+      // §3.1): it runs the host's own `gh`, links the PRs a card's work opened, and nudges through the
+      // ordinary send path. Armed after the bind with the other loops, and stopped with the daemon.
+      const board = createBoardService(paths, stateFiles, storage, clock, () => attachmentDaemonId);
+      const boardSessionFacts = new StorageSessionFacts(storage);
+      const boardGitHub = new GitHubWatcher({
+        board,
+        gh: new GhCliRunner(),
+        copies: new GitWorkingCopies(),
+        sessions: { cwdOf: async sessionId => (await boardSessionFacts.read(sessionId))?.cwd ?? null },
+        projects: { projects: async () => await catalogs.projects() },
+        transcripts: createSessionTranscriptTail(storage),
+        nudges: {
+          send: async (sessionId, message) => {
+            await sends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message });
+          },
+        },
+        timers: {
+          after: (ms, run) => {
+            const handle = setTimeout(asActivity(activities, 'board github watch', run), ms);
+            return () => clearTimeout(handle);
+          },
+        },
+        clock: { now: () => clock.now(), random: () => Math.random() },
+        diagnostics: boardDiagnostics,
+        version: daemonVersion,
+      });
       const mounted: Omit<MountedSubsystems, 'sessionMcp' | 'mcpInventory'> = {
         pack: {
           service: packService,
@@ -10483,7 +10515,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
         }),
         tasks: createTaskSubsystem(paths, storage, clock, taskBoards, taskBoardTaskActionAuthorizer(boards)),
-        board: createBoardService(paths, stateFiles, storage, clock, () => attachmentDaemonId),
+        board,
+        boardGitHub,
         taskBoards: boards,
         analytics: createAnalyticsSubsystem(analyticsIngestion, () => analyticsMachineName ?? hostname()),
         analyticsPricing,
@@ -11836,6 +11869,9 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * reported as a receipt that did not advance.
    */
   cleanups.push(subsystems.handoverReconcile.arm());
+  // The board's GitHub watcher: its first look comes shortly after the bind, then about every half
+  // minute; a host without `gh`, or signed out of it, is told once and looked at again later.
+  cleanups.push(subsystems.boardGitHub.arm());
   /**
    * The update check, armed after the bind: it asks GitHub once now and then at most every six hours,
    * and moves an update waiting for idle (or an opted-in automatic one) on. A failed check never fails

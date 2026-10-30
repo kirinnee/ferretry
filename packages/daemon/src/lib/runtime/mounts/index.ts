@@ -336,6 +336,9 @@ export interface MountedSubsystems {
   readonly tasks: TaskSubsystem;
   /** The project boards (v2): every project's cards, one file per card, written under ownership and lineage. */
   readonly board: BoardSubsystem;
+  /** The board's GitHub watcher (board-design.md §3.1): it serves no route, and it is a mounted subsystem
+   *  for the reason `handoverReconcile` is — a loop nothing arms is a watcher that never looks. */
+  readonly boardGitHub: { arm(): () => void };
   /** The shared task-board MEMBERSHIP lifecycle — who is on a board and what they may do — as
    *  distinct from `tasks`, which is the records themselves. Three of the CLI's eleven board routes
    *  are not served; the mount's own header names each one and why. */

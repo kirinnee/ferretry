@@ -116,7 +116,7 @@ describe('doctor report', () => {
   it('should exercise every platform verdict and state the PATH limitation in the rendered report', () => {
     const installed = ['tmux', 'bash', 'git', 'launchctl', 'cat', 'tail', 'ps', 'nix-store', 'jq'];
     const darwin = report('darwin', installed);
-    const linux = report('linux', [...installed, 'systemctl']);
+    const linux = report('linux', [...installed, 'systemctl', 'gh']);
     const noConfinement = readDoctorReport({
       platform: 'linux',
       harnesses,
@@ -128,6 +128,9 @@ describe('doctor report', () => {
     should(linux.checks.find(check => check.name === 'systemctl')?.status).equal('present');
     should(linux.checks.find(check => check.name === 'launchctl')?.status).equal('not_applicable');
     should(noConfinement.checks.find(check => check.name === 'directory syscalls')?.status).equal('missing');
+    // The board's GitHub watcher runs the host's own `gh`; without it, PR state stays unknown, and nothing else breaks.
+    should(linux.checks.find(check => check.name === 'gh')?.status).equal('present');
+    should(darwin.checks.find(check => check.name === 'gh')).match({ status: 'missing', requirement: 'optional' });
     // The limit is stated every time, and it now has two halves: nothing here was launched, and
     // resolving a program is not evidence that it is signed in.
     should(renderDoctorReport(noConfinement).join('\n')).match(/nothing here was launched/u);
