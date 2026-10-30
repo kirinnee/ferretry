@@ -3,6 +3,7 @@ import {
   type AttentionAsk,
   type AttentionBrief,
   type AttentionClearableField,
+  type AttentionConfirms,
   type AttentionCardAnswer,
   type AttentionErrorCode,
   type AttentionHistoryEntry,
@@ -79,6 +80,11 @@ export interface RaiseAttentionRequest extends AttentionBrief, AttentionCardFiel
   readonly notice?: true;
   /** The notice asks the phone to buzz; only a notice can. */
   readonly ping?: true;
+  /**
+   * The held configuration change the owner's answer acts on, resolved by the route from the config files
+   * (never taken from the caller): the file, the held edit's digest and its words.
+   */
+  readonly confirms?: AttentionConfirms;
 }
 
 /** The writing an edit may change: never the ask, the kind, the answers, the reason or who raised the item. */
@@ -177,6 +183,20 @@ export type AttentionCommand =
       readonly id: AttentionId;
       readonly request?: number;
       readonly reason: string;
+      readonly at: string;
+    }
+  | {
+      /**
+       * The held configuration change an item confirms moved on after it was raised (docs/agenda.md §
+       * Confirming a configuration change): the item now names the new one, marked restated, and is the
+       * owner's turn again. Daemon-only: the config files are the one witness.
+       */
+      readonly action: 'restate-confirms';
+      readonly actor: AttentionActor;
+      readonly id: AttentionId;
+      readonly confirms: AttentionConfirms;
+      /** The card's premise for the new change: its words, as the raise wrote them. */
+      readonly premise: string;
       readonly at: string;
     }
   | {
@@ -355,6 +375,8 @@ function applyToLedger(ledger: AttentionLedger, command: AttentionCommand): Atte
       return surface(ledger, command);
     case 'undelivered':
       return undelivered(ledger, command);
+    case 'restate-confirms':
+      return restateConfirms(ledger, command);
     case 'resolve-source':
       return resolveSource(ledger, command);
   }
@@ -370,6 +392,7 @@ type ReplyCommand = Extract<AttentionCommand, { action: 'reply' }>;
 type SurfaceCommand = Extract<AttentionCommand, { action: 'surface' }>;
 type ResolveSourceCommand = Extract<AttentionCommand, { action: 'resolve-source' }>;
 type UndeliveredCommand = Extract<AttentionCommand, { action: 'undelivered' }>;
+type RestateConfirmsCommand = Extract<AttentionCommand, { action: 'restate-confirms' }>;
 
 function raise(ledger: AttentionLedger, command: RaiseCommand): AttentionMutation {
   const { actor, request } = command;
@@ -441,6 +464,7 @@ function raise(ledger: AttentionLedger, command: RaiseCommand): AttentionMutatio
       // A new ask is the OWNER's turn: no `waitingOn`. The ferret's turn begins only when the owner replies.
       ...(request.notice === true ? { notice: true as const } : {}),
       ...(request.ping === true ? { ping: true as const } : {}),
+      ...(request.confirms === undefined ? {} : { confirms: request.confirms }),
     },
     actor,
   );
@@ -532,6 +556,13 @@ function addressById(
     return failure('forbidden', 'an agent or daemon may resolve only an agenda item it raised');
   }
   if (command.action === 'answer') {
+    // An answer to a confirmation is the owner's decision about a configuration change: never a ferret's.
+    if (target.item.confirms !== undefined && command.actor.kind !== 'human') {
+      return failure(
+        'forbidden',
+        `only the owner answers ${command.id}: it decides a change to ${target.item.confirms.path}; close it with dismiss instead`,
+      );
+    }
     if (!responseMatchesAsk(target.item.ask, command.response)) {
       const message =
         target.item.ask === undefined
@@ -1092,6 +1123,40 @@ function undelivered(ledger: AttentionLedger, command: UndeliveredCommand): Atte
     updatedAt: command.at,
   };
   return success(next, true, 'reopened', parsed.data);
+}
+
+/**
+ * The held change an item confirms moved on (docs/agenda.md § Confirming a configuration change): the item
+ * names the new change and its digest, marked `restated` so the card says it was edited, and its premise is the
+ * new change's words — kept as a revision by the daemon. It is the owner's turn again: a wait on the ferret ends.
+ * Only the daemon says so, and only of an open item that confirms the same file.
+ */
+function restateConfirms(ledger: AttentionLedger, command: RestateConfirmsCommand): AttentionMutation {
+  if (command.actor.kind !== 'daemon') return failure('forbidden', 'only the daemon may restate a confirmation');
+  const target = ledger.entries.filter(isActiveAttention).find(entry => entry.item.id === command.id);
+  if (target === undefined) return failure('not-found', `no unresolved attention item ${command.id} in this session`);
+  if (target.item.confirms?.path !== command.confirms.path) {
+    return failure('invalid', `${command.id} does not confirm a change to ${command.confirms.path}`);
+  }
+  const confirms: AttentionConfirms = { ...command.confirms, restated: true };
+  if (sameField(confirms, target.item.confirms) && target.item.premise === command.premise) return unchanged(ledger);
+  const { waitingOn: _w, askedAt: _a, waitingFor: _f, ...open } = target.item;
+  const premiseChanged = target.item.premise !== command.premise;
+  const revision: AttentionRevision = {
+    at: command.at,
+    by: 'daemon',
+    changed: ['premise'],
+    previous: target.item.premise === undefined ? {} : { premise: target.item.premise },
+  };
+  const item: AttentionItem = {
+    ...open,
+    confirms,
+    premise: command.premise,
+    ...(premiseChanged
+      ? { revisions: [...(target.item.revisions ?? []), revision].slice(-MAX_ATTENTION_REVISIONS) }
+      : {}),
+  };
+  return replaceItem(ledger, item, command.at, 'refreshed');
 }
 
 /** The note on the newest history entry of this kind, if it had one. */

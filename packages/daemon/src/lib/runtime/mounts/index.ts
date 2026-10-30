@@ -38,6 +38,7 @@ import { agentToolRoutes } from './agent-tools.ts';
 import { type AnalyticsSubsystem, analyticsRoutes } from './analytics.ts';
 import { type AnalyticsPricingSubsystem, analyticsPricingRoutes } from './analytics-pricing.ts';
 import { attentionRoutes, type DirectNotificationSubsystem } from './attention.ts';
+import { configFilesConfirmations } from './attention-confirms.ts';
 import { type AuditSubsystem, auditRoutes } from './audit.ts';
 import { type BrowserMountedSubsystem, browserLoginRoutes, browserSocketRoutes } from './browser-login.ts';
 import { carrierRoutes } from './carriers.ts';
@@ -604,7 +605,12 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // Attachment routes are mounted before sends may honour attachment ids. Their
         // deeper unlock path cannot shadow this one-segment upload route.
         ...sessionAttachmentRoutes(subsystems.sessionAttachments),
-        ...attentionRoutes(subsystems.attention, subsystems.notifications, subsystems.attentionReplies),
+        ...attentionRoutes(
+          subsystems.attention,
+          subsystems.notifications,
+          subsystems.attentionReplies,
+          configFilesConfirmations(subsystems.configFiles.service),
+        ),
         ...pinRoutes(subsystems.pins),
         ...taskRoutes(subsystems.tasks),
         // The board membership surface registers beside the records it governs. Every path is under

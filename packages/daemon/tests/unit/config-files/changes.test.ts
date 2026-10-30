@@ -48,6 +48,9 @@ const service = (files: Record<string, string>) => {
       write: async (path, text) => {
         disk.set(path, text);
       },
+      remove: async path => {
+        disk.delete(path);
+      },
       writeSchemas: async () => undefined,
     },
     accepted: {

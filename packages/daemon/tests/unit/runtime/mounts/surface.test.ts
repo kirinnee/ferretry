@@ -287,6 +287,9 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       confirm: async () => {
         throw new Error('not exercised by the surface inventory');
       },
+      discard: async () => {
+        throw new Error('not exercised by the surface inventory');
+      },
     },
     agentControl: { allows: async () => false },
     identities: { resolve: async () => undefined },

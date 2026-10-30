@@ -64,7 +64,7 @@ import { AGENT_SESSION_CAPABILITY_HEADER } from './agent-tools.ts';
 
 /** The configuration files as these routes need them, and the loop the composition root arms. */
 export interface ConfigFilesSubsystem {
-  readonly service: Pick<ConfigFilesService, 'status' | 'file' | 'write' | 'validate' | 'confirm'>;
+  readonly service: Pick<ConfigFilesService, 'status' | 'file' | 'write' | 'validate' | 'confirm' | 'discard'>;
   /** "What agents may control", read fresh for every agent call. */
   readonly agentControl: AgentControlPolicy;
   readonly identities: AgentIdentityResolver;
@@ -179,23 +179,45 @@ async function put(subsystem: ConfigFilesSubsystem, context: RouteContext): Prom
   }
 }
 
-async function confirm(subsystem: ConfigFilesSubsystem, context: RouteContext): Promise<ApiResponse> {
-  const request = await parseBody(context.request, ConfigConfirmRequestSchema);
-  const refused = refusedFor(context, request.path, 'configure');
+/**
+ * Whether this caller may act on a HELD edit to `path` as the owner (docs/config-files.md): the file's
+ * capability on `configure`, never an agent, and — to put the edit into effect (`act: 'confirm'`) — from a
+ * governed device a passkey proved for this act (`loosen-config`). Dropping a held edit (`act: 'discard'`)
+ * only tightens, so it asks no more than `configure`. Answers a refusal, or `undefined` when allowed; an
+ * agent is refused by throwing. Shared by `POST /v1/config/confirm` and the agenda's Allow
+ * (docs/agenda.md § Confirming a configuration change), so both doors keep one rule.
+ */
+export function heldEditRefusal(
+  context: RouteContext,
+  path: string,
+  act: 'confirm' | 'discard',
+): ApiResponse | undefined {
+  const refused = refusedFor(context, path, 'configure');
   if (refused !== undefined) return refused;
   if (isAgentCaller(context)) {
     throw new ApiError(403, 'an agent cannot confirm a configuration change; the owner confirms it', 'forbidden');
   }
-  const governed = context.governance?.governed === true;
-  if (governed && context.presentation?.freshStepUp !== true) {
+  if (act === 'confirm' && context.governance?.governed === true && context.presentation?.freshStepUp !== true) {
     return stepUpRefusal(
-      `putting this change to ${request.path} into effect needs a passkey confirmation for it`,
-      configFileCapability(addressOf(request.path)),
+      `putting this change to ${path} into effect needs a passkey confirmation for it`,
+      configFileCapability(addressOf(path)),
       STEP_UP_ACTS.loosenConfig,
     );
   }
+  return undefined;
+}
+
+/** A confirmation went through: a passkey proved for the act is spent, so it admits exactly this one. */
+export function spendHeldEditProof(context: RouteContext): void {
+  if (context.governance?.governed === true) context.spendFreshStepUp?.();
+}
+
+async function confirm(subsystem: ConfigFilesSubsystem, context: RouteContext): Promise<ApiResponse> {
+  const request = await parseBody(context.request, ConfigConfirmRequestSchema);
+  const refused = heldEditRefusal(context, request.path, 'confirm');
+  if (refused !== undefined) return refused;
   const confirmed = await subsystem.service.confirm(request.path, request.etag);
-  if (confirmed && governed) context.spendFreshStepUp?.();
+  if (confirmed) spendHeldEditProof(context);
   return jsonResponse({ path: request.path, confirmed } satisfies ConfigConfirmResult);
 }
 
@@ -239,7 +261,7 @@ async function agentTool(subsystem: ConfigFilesSubsystem, call: AgentConfigToolC
       summary:
         written.outcome === 'applied'
           ? `Wrote ${call.path}; it is in effect.`
-          : `Wrote ${call.path}, but it loosens what this machine allows (${(written.pending?.changes ?? []).join('; ')}), so it waits for the owner to confirm it; the earlier version stays in effect until then. Tell the owner.`,
+          : `Wrote ${call.path}, but it loosens what this machine allows (${(written.pending?.changes ?? []).join('; ')}), so it waits for the owner to confirm it; the earlier version stays in effect until then. Tell the owner with a card whose Allow confirms it: fy agenda add "<the ask>" --title "<title>" --confirms ${call.path}.`,
       etag: written.etag,
     };
   } catch (error) {
