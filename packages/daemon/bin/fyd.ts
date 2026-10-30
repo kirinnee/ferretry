@@ -5478,7 +5478,7 @@ export function createSessionHandoverSubsystem(
           reportPath: null,
         }),
       },
-      attention: { raise: async () => seamAbsent('raise its attention item') },
+      attention: { raise: async () => seamAbsent('raise its agenda item') },
       journal: {
         appendOnce: async input => await appendHandoverEventOnce(wiring.storage, wiring.journalSerial, input),
       },
