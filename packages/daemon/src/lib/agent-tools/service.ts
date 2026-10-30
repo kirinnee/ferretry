@@ -17,6 +17,7 @@ import {
 } from '@ferretry/protocol';
 import type { AuditSink } from '../audit/types.ts';
 import { BrowserSessionError, type BrowserPageAction, type BrowserSubsystem } from '../browser/runtime/index.ts';
+import { BrowserTransportError } from '../browser/transport/worker-protocol.ts';
 import type { AgentControlPolicy } from '../fleet/agent-control.ts';
 import type { TextRedactor } from '../secrets/redaction.ts';
 import { TerminalMountError, type TerminalSubsystem } from '../runtime/mounts/terminals.ts';
@@ -735,6 +736,7 @@ function shown(surface: SurfaceKind, rows: readonly (AgentSurface | undefined)[]
 function translate(error: unknown): AgentToolError | undefined {
   if (error instanceof AgentToolError) return error;
   if (error instanceof TerminalMountError) return new AgentToolError(error.code, error.message);
+  if (error instanceof BrowserTransportError) return fromWorker(error);
   if (!(error instanceof BrowserSessionError)) return undefined;
   if (error.code === 'launch_failed') return new AgentToolError('unavailable', browserUnavailable(error.message));
   if (error.code === 'not_running')
@@ -743,6 +745,29 @@ function translate(error: unknown): AgentToolError | undefined {
       'The browser is not running in this session. Open a page with browser.open.',
     );
   return new AgentToolError(error.code, error.message);
+}
+
+/**
+ * The worker's refusal of an act — a ref the page no longer knows, an element that never appeared — in
+ * this domain's words. The worker's own sentence is what the agent needs to act on ("read the page
+ * again"), so it is kept, without the transport's "browser action failed:" prefix.
+ */
+function fromWorker(error: BrowserTransportError): AgentToolError {
+  const message = error.message.replace(/^browser action failed: /u, '');
+  switch (error.code) {
+    case 'launch_failed':
+      return new AgentToolError('unavailable', browserUnavailable(message));
+    case 'not_running':
+      return new AgentToolError(
+        'not_found',
+        'The browser is not running in this session. Open a page with browser.open.',
+      );
+    case 'profile_busy':
+    case 'login_window_open':
+      return new AgentToolError('conflict', message);
+    default:
+      return new AgentToolError(error.code, message);
+  }
 }
 
 /** One sentence: what is missing, and how to fix it. */

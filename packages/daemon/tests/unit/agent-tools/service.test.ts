@@ -4,6 +4,7 @@ import {
   AGENT_TOOL_POLL_MS,
   AgentToolError,
   BrowserSessionError,
+  BrowserTransportError,
   browserUnavailable,
   TerminalMountError,
 } from '../../../src/lib/index.ts';
@@ -809,6 +810,28 @@ describe('AgentToolService — refs, points and what a page shows', () => {
     should(clicked.summary).containEql('reveal=[redacted:STRIPE_KEY]');
     should(byPerson.output).equal('Your API key is [redacted:STRIPE_KEY] — keep it safe.');
     should(JSON.stringify([read, clicked, byPerson])).not.containEql('sk_live_51Hx');
+  });
+
+  it('should hand the agent the worker’s own sentence when an act is refused, as a tool refusal', async () => {
+    // Arrange — what the worker answers for a ref the page no longer knows (verified against a real Chrome).
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+    world.browser.failure = new BrowserTransportError(
+      'upstream_failed',
+      'browser action failed: e4 is not on the page\'s latest snapshot (it changed, or was never read): read the page again with mode "snapshot" and use a fresh ref',
+      502,
+    );
+
+    // Act
+    const stale = await refusal(world.service.call(agent, { tool: 'browser.click', name: 'app', ref: 'e4' }));
+    world.browser.failure = new BrowserTransportError('profile_busy', 'the agent profile is in use', 409);
+    const busy = await refusal(world.service.call(agent, { tool: 'browser.click', name: 'app', ref: 'e4' }));
+
+    // Assert
+    should(stale.code).equal('upstream_failed');
+    should(stale.message).startWith("e4 is not on the page's latest snapshot");
+    should(busy).match({ code: 'conflict', message: 'the agent profile is in use' });
+    should(world.audit.entries.slice(-2).map(entry => entry.outcome)).deepEqual(['failed', 'refused']);
   });
 
   it('should withhold what a page shows, rather than serve it unmasked, when the vault cannot be opened', async () => {
