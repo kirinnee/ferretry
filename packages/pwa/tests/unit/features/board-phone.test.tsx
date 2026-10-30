@@ -1,10 +1,15 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { boardOk } from '@ferretry/protocol';
+import { PhoneKanban } from '../../../src/features/board/board-phone.tsx';
 import { BoardPage, type BoardPageProps } from '../../../src/features/board/board-page.tsx';
+import type { BoardCardEnv } from '../../../src/features/board/board-views.tsx';
+import { ferretNamer } from '../../../src/lib/board-present.ts';
+import { cardPlaces } from '../../../src/lib/board-view.ts';
 import { DaemonBoardStore } from '../../../src/lib/board-store.ts';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import {
   boardAnswer,
+  boardModelOf,
   COUNTS,
   card,
   fakeEnvironment,
@@ -12,6 +17,7 @@ import {
   flush,
   laneSetFor,
   laptop,
+  OTHER_PROJECT,
   PROJECT,
 } from '../board-support.ts';
 
@@ -176,6 +182,64 @@ describe('Board on a phone — the lane strip', () => {
     await swipe(root, [300, 400], [270, 400]);
     await swipe(root, [300, 300], [230, 520]);
     expect(searches).toEqual([]);
+  });
+
+  it('does not follow the card link a swipe ended on, and follows the next tap', async () => {
+    const opened: string[] = [];
+    const { root } = await open('at=implement', { onNavigate: to => void opened.push(to) });
+    const link = () => must(root.querySelector<HTMLElement>('[role="tabpanel"] a'), 'the card link');
+    await swipe(root, [300, 400], [200, 410]);
+    await interact(() => link().click());
+    expect(opened).toEqual([]);
+    await interact(() => link().click());
+    expect(opened).toHaveLength(1);
+  });
+
+  it('forgets a drag the browser cancelled, so the next lift does not swipe', async () => {
+    const { root, searches } = await open('at=implement');
+    const panel = must(root.querySelector('[role="tabpanel"]'), 'the lane');
+    await pointer(panel, 'pointerdown', 300, 400);
+    await interact(() => void panel.dispatchEvent(new Event('pointercancel', { bubbles: true })));
+    await pointer(panel, 'pointerup', 200, 410);
+    expect(searches).toEqual([]);
+  });
+
+  it('says "Nothing here" for a lane with no card', async () => {
+    const { root } = await open('at=todo');
+    expect(root.querySelector('.fy-board-lane__empty')?.textContent).toBe('Nothing here');
+  });
+
+  it('gives each project its own strip under a heading, with the machine when several', async () => {
+    const model = await boardModelOf([
+      card('F1', { laneId: 'plan' }),
+      card('F2', { laneId: 'plan', projectId: OTHER_PROJECT }),
+    ]);
+    const env: BoardCardEnv = {
+      names: ferretNamer(new Map()),
+      now: NOW,
+      showMachine: false,
+      hrefFor: entry => `/d/laptop/board/${entry.task.id}`,
+      onNavigate: () => undefined,
+      movesFor: () => undefined,
+      places: cardPlaces(model),
+      dragging: null,
+      touch: true,
+    };
+    view = await mount(
+      <PhoneKanban
+        at={null}
+        env={env}
+        hideClosed
+        model={{ ...model, multiMachine: true }}
+        onLane={() => undefined}
+        projectName={group => (group.projectId === OTHER_PROJECT ? 'other' : 'ferretry')}
+      />,
+    );
+    expect([...view.container.querySelectorAll('.fy-board-project__head')].map(node => node.textContent)).toEqual([
+      'ferretrylaptop',
+      'otherlaptop',
+    ]);
+    expect(view.container.querySelectorAll('[role="tablist"]')).toHaveLength(2);
   });
 
   it('draws cards with no drag handle: a finger scrolls, it does not drag', async () => {
