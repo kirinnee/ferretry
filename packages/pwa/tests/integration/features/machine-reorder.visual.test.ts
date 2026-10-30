@@ -11,12 +11,13 @@
  *
  * Set `FY_MACHINE_REORDER_SHOTS_DIR` to keep the captures; every name in them is fake.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { afterAll, beforeAll, describe, expect } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { sharedChromium } from '../support/chromium.ts';
+import { boundedContext, overlapped } from '../support/overlap.ts';
 
 const packageRoot = resolve(import.meta.dir, '../../..');
 const shotsDir = process.env.FY_MACHINE_REORDER_SHOTS_DIR ?? '';
@@ -25,6 +26,8 @@ const ANDROID_UA =
   'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36';
 
 let browser: Browser;
+const overlap = overlapped();
+const bounded = boundedContext(() => browser, 3);
 let directory = '';
 let server: ReturnType<typeof Bun.serve> | undefined;
 
@@ -68,7 +71,7 @@ const open = async (
 };
 
 const newContext = async (phone: boolean, mode: 'light' | 'dark'): Promise<BrowserContext> =>
-  await browser.newContext({
+  await bounded({
     viewport: phone ? { width: 390, height: 844 } : { width: 1_440, height: 900 },
     colorScheme: mode,
     reducedMotion: 'reduce',
@@ -112,112 +115,126 @@ describe('dragging a machine heading in the sessions bar', () => {
     if (shotsDir !== '') await mkdir(shotsDir, { recursive: true });
   }, 180_000);
 
+  beforeAll(overlap.start);
+
   afterAll(async () => {
     server?.stop(true);
     if (directory !== '') await rm(directory, { force: true, recursive: true });
   });
 
-  it('drags with a mouse, shows the drop line, moves on release, and keeps the order across a reload', async () => {
-    const context = await newContext(false, 'light');
-    try {
-      const tab = await open(context, 'bar', 'studio', 'light');
-      expect(await heads(tab)).toEqual(['studio', 'laptop', 'pibox']);
-      // A click on the grip reorders nothing.
-      await tab.click(gripOf('laptop'));
-      expect(await heads(tab)).toEqual(['studio', 'laptop', 'pibox']);
-
-      const from = await center(tab, gripOf('pibox'));
-      const target = await tab.locator(groupOf('studio')).boundingBox();
-      if (target === null) throw new Error('the first machine has no box');
-      await tab.mouse.move(from.x, from.y);
-      await tab.mouse.down();
-      await tab.mouse.move(from.x, from.y - 20, { steps: 4 });
-      await tab.mouse.move(from.x + 40, target.y + 6, { steps: 8 });
-      await tab.waitForSelector('[data-drop-edge="before"]');
-      expect(await tab.locator(groupOf('pibox')).getAttribute('data-dragging')).toBe('');
-      await shot(tab, 'desktop-dragging-light');
-      // Nothing has moved yet.
-      expect(await heads(tab)).toEqual(['studio', 'laptop', 'pibox']);
-      await tab.mouse.up();
-      expect(await heads(tab)).toEqual(['pibox', 'studio', 'laptop']);
-      await shot(tab, 'desktop-reordered-light');
-
-      await tab.reload();
-      await tab.waitForSelector('[data-machine-grip]');
-      expect(await heads(tab)).toEqual(['pibox', 'studio', 'laptop']);
-      const overflow = await tab.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-      expect(overflow).toBeLessThanOrEqual(0);
-    } finally {
-      await context.close();
-    }
-  }, 120_000);
-
-  it('moves with the keyboard and the heading menu, and says what it did', async () => {
-    const context = await newContext(false, 'dark');
-    try {
-      const tab = await open(context, 'bar', 'studio', 'dark');
-      await tab.focus(gripOf('studio'));
-      await tab.keyboard.press('Space');
-      await tab.keyboard.press('ArrowDown');
-      await tab.keyboard.press('ArrowDown');
-      expect(await heads(tab)).toEqual(['laptop', 'pibox', 'studio']);
-      expect(await tab.locator('[role="status"]').first().textContent()).toBe('studio moved to position 3 of 3.');
-      expect(await tab.evaluate(() => (document.activeElement as HTMLElement).getAttribute('aria-label'))).toBe(
-        'Reorder studio',
-      );
-      await shot(tab, 'desktop-keyboard-dark');
-      await tab.keyboard.press('Escape');
-      expect(await heads(tab)).toEqual(['studio', 'laptop', 'pibox']);
-      await tab.keyboard.press('Space');
-      await tab.keyboard.press('ArrowDown');
-      await tab.keyboard.press('Space');
-      expect(await heads(tab)).toEqual(['laptop', 'studio', 'pibox']);
-
-      await tab.click('[aria-label="More for pibox"]');
-      await tab.getByRole('menuitem', { name: 'Move up' }).click();
-      expect(await heads(tab)).toEqual(['laptop', 'pibox', 'studio']);
-      await shot(tab, 'desktop-reordered-dark');
-    } finally {
-      await context.close();
-    }
-  }, 120_000);
-
-  it('lifts with a held finger on a phone, and treats a swipe from the grip as a scroll', async () => {
-    for (const mode of ['light', 'dark'] as const) {
-      const context = await newContext(true, mode);
+  overlap.it(
+    'drags with a mouse, shows the drop line, moves on release, and keeps the order across a reload',
+    async () => {
+      const context = await newContext(false, 'light');
       try {
-        const tab = await open(context, 'drawer', 'studio', mode);
-        const cdp = await context.newCDPSession(tab);
-        const touch = async (type: 'touchStart' | 'touchMove' | 'touchEnd', x: number, y: number) =>
-          await cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
-        const from = await center(tab, gripOf('pibox'));
-        // A swipe starts moving at once: nothing lifts.
-        await touch('touchStart', from.x, from.y);
-        await touch('touchMove', from.x, from.y - 40);
-        await tab.waitForTimeout(450);
-        expect(await tab.locator(groupOf('pibox')).getAttribute('data-dragging')).toBeNull();
-        await touch('touchEnd', from.x, from.y - 40);
+        const tab = await open(context, 'bar', 'studio', 'light');
+        expect(await heads(tab)).toEqual(['studio', 'laptop', 'pibox']);
+        // A click on the grip reorders nothing.
+        await tab.click(gripOf('laptop'));
         expect(await heads(tab)).toEqual(['studio', 'laptop', 'pibox']);
 
-        // A rest, then a drag to the top.
-        const again = await center(tab, gripOf('pibox'));
-        const top = await tab.locator(groupOf('studio')).boundingBox();
-        if (top === null) throw new Error('the first machine has no box');
-        await touch('touchStart', again.x, again.y);
-        await tab.waitForTimeout(450);
-        await touch('touchMove', again.x, again.y - 40);
-        await touch('touchMove', again.x, top.y + 6);
+        const from = await center(tab, gripOf('pibox'));
+        const target = await tab.locator(groupOf('studio')).boundingBox();
+        if (target === null) throw new Error('the first machine has no box');
+        await tab.mouse.move(from.x, from.y);
+        await tab.mouse.down();
+        await tab.mouse.move(from.x, from.y - 20, { steps: 4 });
+        await tab.mouse.move(from.x + 40, target.y + 6, { steps: 8 });
         await tab.waitForSelector('[data-drop-edge="before"]');
-        await shot(tab, `phone-dragging-${mode}`);
-        await touch('touchEnd', again.x, top.y + 6);
+        expect(await tab.locator(groupOf('pibox')).getAttribute('data-dragging')).toBe('');
+        await shot(tab, 'desktop-dragging-light');
+        // Nothing has moved yet.
+        expect(await heads(tab)).toEqual(['studio', 'laptop', 'pibox']);
+        await tab.mouse.up();
         expect(await heads(tab)).toEqual(['pibox', 'studio', 'laptop']);
-        await shot(tab, `phone-reordered-${mode}`);
-        expect(await tab.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(
-          0,
-        );
+        await shot(tab, 'desktop-reordered-light');
+
+        await tab.reload();
+        await tab.waitForSelector('[data-machine-grip]');
+        expect(await heads(tab)).toEqual(['pibox', 'studio', 'laptop']);
+        const overflow = await tab.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+        expect(overflow).toBeLessThanOrEqual(0);
       } finally {
         await context.close();
       }
-    }
-  }, 120_000);
+    },
+    120_000,
+  );
+
+  overlap.it(
+    'moves with the keyboard and the heading menu, and says what it did',
+    async () => {
+      const context = await newContext(false, 'dark');
+      try {
+        const tab = await open(context, 'bar', 'studio', 'dark');
+        await tab.focus(gripOf('studio'));
+        await tab.keyboard.press('Space');
+        await tab.keyboard.press('ArrowDown');
+        await tab.keyboard.press('ArrowDown');
+        expect(await heads(tab)).toEqual(['laptop', 'pibox', 'studio']);
+        expect(await tab.locator('[role="status"]').first().textContent()).toBe('studio moved to position 3 of 3.');
+        expect(await tab.evaluate(() => (document.activeElement as HTMLElement).getAttribute('aria-label'))).toBe(
+          'Reorder studio',
+        );
+        await shot(tab, 'desktop-keyboard-dark');
+        await tab.keyboard.press('Escape');
+        expect(await heads(tab)).toEqual(['studio', 'laptop', 'pibox']);
+        await tab.keyboard.press('Space');
+        await tab.keyboard.press('ArrowDown');
+        await tab.keyboard.press('Space');
+        expect(await heads(tab)).toEqual(['laptop', 'studio', 'pibox']);
+
+        await tab.click('[aria-label="More for pibox"]');
+        await tab.getByRole('menuitem', { name: 'Move up' }).click();
+        expect(await heads(tab)).toEqual(['laptop', 'pibox', 'studio']);
+        await shot(tab, 'desktop-reordered-dark');
+      } finally {
+        await context.close();
+      }
+    },
+    120_000,
+  );
+
+  overlap.it(
+    'lifts with a held finger on a phone, and treats a swipe from the grip as a scroll',
+    async () => {
+      for (const mode of ['light', 'dark'] as const) {
+        const context = await newContext(true, mode);
+        try {
+          const tab = await open(context, 'drawer', 'studio', mode);
+          const cdp = await context.newCDPSession(tab);
+          const touch = async (type: 'touchStart' | 'touchMove' | 'touchEnd', x: number, y: number) =>
+            await cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
+          const from = await center(tab, gripOf('pibox'));
+          // A swipe starts moving at once: nothing lifts.
+          await touch('touchStart', from.x, from.y);
+          await touch('touchMove', from.x, from.y - 40);
+          await tab.waitForTimeout(450);
+          expect(await tab.locator(groupOf('pibox')).getAttribute('data-dragging')).toBeNull();
+          await touch('touchEnd', from.x, from.y - 40);
+          expect(await heads(tab)).toEqual(['studio', 'laptop', 'pibox']);
+
+          // A rest, then a drag to the top.
+          const again = await center(tab, gripOf('pibox'));
+          const top = await tab.locator(groupOf('studio')).boundingBox();
+          if (top === null) throw new Error('the first machine has no box');
+          await touch('touchStart', again.x, again.y);
+          await tab.waitForTimeout(450);
+          await touch('touchMove', again.x, again.y - 40);
+          await touch('touchMove', again.x, top.y + 6);
+          await tab.waitForSelector('[data-drop-edge="before"]');
+          await shot(tab, `phone-dragging-${mode}`);
+          await touch('touchEnd', again.x, top.y + 6);
+          expect(await heads(tab)).toEqual(['pibox', 'studio', 'laptop']);
+          await shot(tab, `phone-reordered-${mode}`);
+          expect(
+            await tab.evaluate(() => document.documentElement.scrollWidth - window.innerWidth),
+          ).toBeLessThanOrEqual(0);
+        } finally {
+          await context.close();
+        }
+      }
+    },
+    120_000,
+  );
 });
