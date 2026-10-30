@@ -213,7 +213,7 @@ describe('the card on a Cloudflare tunnel or WebRTC (§15)', () => {
 
   it('should name the tunnel and its hostname, with Cloudflare’s observers and its stream caveat', () => {
     const choice = chooseConnection([
-      { method: DIRECT, reachable: false, detail: 'Failed to fetch' },
+      { method: DIRECT, reachable: false, detail: 'Failed to fetch', connected: true },
       { method: WEBRTC, reachable: false, detail: 'WebRTC isn’t available in this build yet', untried: true },
       { method: TUNNEL, reachable: true },
     ]);
@@ -227,6 +227,8 @@ describe('the card on a Cloudflare tunnel or WebRTC (§15)', () => {
     // A carrier passed over without being tried says so.
     should(rendered).containEql('WebRTC');
     should(rendered).containEql(' (not tried)');
+    // One that connected and then lost its session was reached, and says so rather than "unreachable".
+    should(rendered).containEql(' (connected, then the session failed)');
     should(card.root.findByProps({ 'data-active-carrier': '' }).props['data-carrier-kind']).equal('tunnel');
   });
 

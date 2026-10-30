@@ -312,4 +312,19 @@ describe('carrier disclosure and choice', () => {
     should(chosen.passedOver[1]).deepEqual({ method: tunnel, detail: 'timed out' });
     should(describeSkip({ method: direct, detail: 'refused' })).equal('direct was not reachable (refused)');
   });
+
+  it('should say a carrier that connected and then lost its session was reached, not unreachable', () => {
+    // The owner's screen read "Cloudflare tunnel was not reachable" over a session that had connected
+    // and then failed; the tunnel had carried every frame it was given.
+    const lost = { kind: 'transport-failure' as const, detail: 'the session ended (4400)', connected: true as const };
+    should(carrierWalkAdvances(lost)).be.true();
+    const probe = carrierProbe(tunnel, lost);
+    should(probe).deepEqual({ method: tunnel, reachable: false, detail: 'the session ended (4400)', connected: true });
+    const chosen = chooseConnection([probe]);
+    if (chosen.ok) throw new Error('expected nothing to carry');
+    should(chosen.passedOver[0]).deepEqual({ method: tunnel, detail: 'the session ended (4400)', connected: true });
+    should(chosen.reason).equal(
+      'No configured connection worked: Cloudflare tunnel connected, but the session on it failed (the session ended (4400)).',
+    );
+  });
 });

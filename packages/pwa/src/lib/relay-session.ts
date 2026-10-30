@@ -50,7 +50,6 @@ import {
 } from '@ferretry/protocol';
 import {
   type ChannelState,
-  CREDIT_WINDOW_FRAMES,
   completeClientHandshake,
   creditToReturn,
   decodeControlMessage,
@@ -129,6 +128,47 @@ export const PAIRING_REFUSED_REASON = 'pairing_refused' as const;
  * with the protocol's own plaintext ceiling — one source, one number, no second opinion here.
  */
 export const RELAY_DATA_BYTE_BUDGET = relayDataByteBudget(MAX_PLAINTEXT_BYTES);
+
+/**
+ * How many whole requests may wait for credit on one session before the next one is refused, unsent.
+ *
+ * A BURST IS BACK-PRESSURE, NEVER A FAILURE. These requests are this browser's own — a surface that
+ * fired its reads in one tick — so a queue deeper than one window says nothing about the daemon: the
+ * window has not even had a round trip to refill. This bound is only memory's, and crossing it refuses
+ * THAT request with {@link RelayRequestNotSentError} while every request already queued keeps its place.
+ */
+export const MAX_QUEUED_REQUESTS = 256;
+
+/**
+ * How long a request may wait for credit before it is withdrawn, unsent.
+ *
+ * The backstop for a caller that gave no deadline of its own: a machine read gives twenty seconds
+ * (`MACHINE_READ_DEADLINE_MS`), so this is longer and that deadline is what normally answers first.
+ */
+export const REQUEST_QUEUE_WAIT_MS = 30_000;
+
+/**
+ * This request never left this browser, and asking again is safe.
+ *
+ * NOT A {@link RelaySessionError}, deliberately: the session is fine and every other request on it is
+ * still going. A carrier that read this as a session failure would retire a working session over its
+ * own caller's burst — the exact failure this class exists to separate from that one.
+ */
+export class RelayRequestNotSentError extends Error {
+  readonly retryable = true;
+  constructor(message: string) {
+    super(message);
+    this.name = 'RelayRequestNotSentError';
+  }
+}
+
+/** One timer, and how to cancel it. Injected so no suite waits thirty real seconds. */
+export type RelaySessionSchedule = (delayMs: number, run: () => void) => () => void;
+
+const realSchedule: RelaySessionSchedule = (delayMs, run) => {
+  const timer = setTimeout(run, delayMs);
+  return () => clearTimeout(timer);
+};
 
 /**
  * What the daemon may say back.
@@ -377,6 +417,8 @@ export interface RelayClientSessionDependencies {
    * unprovable refusal is a refusal nobody can be sure of.
    */
   readonly maxRequestId?: number;
+  /** Timers for {@link REQUEST_QUEUE_WAIT_MS}. The real clock by default. */
+  readonly schedule?: RelaySessionSchedule;
   /** One arrived stream frame. Only a stream session ever calls it. */
   readonly onData?: (frame: RelayStreamFrame) => void;
   /** Observe a faulty close listener without coupling this pure domain module to browser IO. */
@@ -461,6 +503,15 @@ type SessionPhase =
 interface PendingRequest {
   readonly resolve: (answer: RelayTunnelAnswer) => void;
   readonly reject: (reason: Error) => void;
+}
+
+/** One record waiting for credit. */
+interface QueuedRecord {
+  readonly plaintext: Uint8Array;
+  /** A body's later part: it leaves behind its head and is never counted on its own. */
+  readonly part: boolean;
+  /** The request this record carries, when it carries one. */
+  readonly request?: number;
 }
 
 /** What a thrown value says about itself, without pretending an unknown one is an `Error`. */
@@ -577,13 +628,18 @@ export class RelayClientSession {
    */
   readonly #abandoned = new Set<number>();
   /**
-   * Records waiting for the peer to return credit. The WHOLE records among them are bounded by one
-   * window; a body's later parts are not counted, because the request that owns them was already
-   * bounded by `MAX_TUNNEL_BODY_BYTES` when it was queued.
+   * Records waiting for the peer to return credit, in the order they will leave.
+   *
+   * `request` names the request a record belongs to, so one that has not left yet can be withdrawn
+   * whole; `part` marks a body's later parts, which leave consecutively behind their head.
    */
-  readonly #waiting: { readonly plaintext: Uint8Array; readonly part: boolean }[] = [];
-  /** How many of {@link #waiting} are whole records — the number the window bound is asked of. */
-  #waitingWhole = 0;
+  readonly #waiting: QueuedRecord[] = [];
+  /** How many requests have their head record in {@link #waiting} — what {@link MAX_QUEUED_REQUESTS} bounds. */
+  #waitingRequests = 0;
+  /** The record a seal has captured. It is leaving, so nothing may withdraw it. */
+  #sealing: QueuedRecord | undefined;
+  /** Each queued request's {@link REQUEST_QUEUE_WAIT_MS} timer, cancelled the moment its head leaves. */
+  readonly #queueTimers = new Map<number, () => void>();
   /** Serialises everything that assigns a sequence number: a record's nonce IS its sequence, and
    *  two sealers racing would hand one nonce to two records under one key. */
   #outbox: Promise<void> = Promise.resolve();
@@ -796,6 +852,11 @@ export class RelayClientSession {
         RELAY_CLOSE_CODES.frameTooLarge,
       );
     }
+    if (this.#waitingRequests >= MAX_QUEUED_REQUESTS) {
+      throw new RelayRequestNotSentError(
+        `this app already has ${MAX_QUEUED_REQUESTS} requests waiting to reach the daemon, so this one was not sent; trying again is safe`,
+      );
+    }
     const id = this.#nextRequestId;
     this.#nextRequestId += 1;
     // THE CALLER'S DEADLINE IS HONOURED HERE, because nothing else on this path can. A daemon that never
@@ -803,14 +864,32 @@ export class RelayClientSession {
     // used to leave this promise pending for good, and one pending read froze every poll that coalesces
     // behind it: a phone's message sat at "Sending" while the daemon had long since settled it. An
     // abandoned request may still have been applied, so its caller is told it gave up, never "not sent".
+    //
+    // A REQUEST THAT HAS NOT LEFT YET IS WITHDRAWN, NOT ABANDONED. Still waiting for credit, it has
+    // reached nothing, so it is taken out of the queue — it will never be sent, and no answer to it can
+    // ever arrive. Only one whose head record already left is kept in `#abandoned` for its late answer.
     const answer = new Promise<RelayTunnelAnswer>((resolve, reject) => {
       const abandon = (): void => {
         if (!this.#pending.delete(id)) return;
         this.#partial.delete(id);
-        this.#abandoned.add(id);
+        if (!this.#withdraw(id)) this.#abandoned.add(id);
         reject(signal?.reason instanceof Error ? signal.reason : new Error('the request was abandoned'));
       };
       const settled = (): void => signal?.removeEventListener('abort', abandon);
+      this.#queueTimers.set(
+        id,
+        (this.deps.schedule ?? realSchedule)(REQUEST_QUEUE_WAIT_MS, () => {
+          this.#queueTimers.delete(id);
+          if (!this.#withdraw(id)) return;
+          this.#pending.delete(id);
+          settled();
+          reject(
+            new RelayRequestNotSentError(
+              `this request waited ${REQUEST_QUEUE_WAIT_MS / 1000} s for the daemon to take more requests and was not sent; trying again is safe`,
+            ),
+          );
+        }),
+      );
       this.#pending.set(id, {
         resolve: value => {
           settled();
@@ -831,14 +910,17 @@ export class RelayClientSession {
     parts.forEach((part, index) => {
       const more = index < parts.length - 1 ? ({ more: true } as const) : {};
       if (index === 0)
-        this.#sendRecord({
-          ...head,
-          t: 'req',
-          id,
-          ...(part === '' && parts.length === 1 && message.body === undefined ? {} : { body: part }),
-          ...more,
-        });
-      else this.#sendRecord({ t: 'req-more', id, body: part, ...more }, true);
+        this.#sendRecord(
+          {
+            ...head,
+            t: 'req',
+            id,
+            ...(part === '' && parts.length === 1 && message.body === undefined ? {} : { body: part }),
+            ...more,
+          },
+          { request: id },
+        );
+      else this.#sendRecord({ t: 'req-more', id, body: part, ...more }, { request: id, part: true });
     });
     // Watched from here on: the session can end while the outbox drains, and a rejection nobody is
     // watching yet is an unhandled one — the caller still receives it through the `await` below.
@@ -1402,25 +1484,55 @@ export class RelayClientSession {
   /**
    * Queue one record for sending.
    *
-   * The only thing checked here is the QUEUE DEPTH: a queue deeper than one window
-   * is an unbounded buffer, and the peer's own window bounds how many answers can be
-   * outstanding, so a deeper one means the peer is not honouring the protocol.
-   * Whether a record FITS is `sealRecord`'s question and is asked there — checking
-   * the same length in two places is how two places come to disagree about the
-   * envelope.
+   * NO DEPTH HERE ENDS A SESSION, and one used to. A queue deeper than one window was read as "the
+   * peer is not honouring the protocol", but everything in this queue is THIS browser's own: a surface
+   * that fires its reads in one tick queues them all before the first is even sealed, so the window
+   * has had no round trip to refill and the daemon has done nothing wrong. Ending the session there
+   * failed every request on it at once — the owner's `4400` "too many records waiting on credit",
+   * reported as a carrier that was not reachable. A daemon that genuinely stopped returning credit is
+   * found by the deadlines its callers keep, which retire the session (`relay-carrier.ts`), and by
+   * {@link REQUEST_QUEUE_WAIT_MS} for a caller that kept none.
+   *
+   * What bounds the queue is therefore the requests' own admission ({@link MAX_QUEUED_REQUESTS}, asked
+   * in `request` and refusing only the excess) and, for a stream, the person typing into it. Whether
+   * a record FITS is `sealRecord`'s question and is asked there — checking the same length in two
+   * places is how two places come to disagree about the envelope.
    */
-  #sendRecord(message: RelayTunnelClientMessage, part = false): void {
-    // A body's later parts are exempt, and NOT COUNTED EITHER: the request that owns them was already
-    // bounded by `MAX_TUNNEL_BODY_BYTES`, and they drain as the daemon returns credit. Counting them is
-    // what made one phone photo — about eighty parts — end the session the moment a second upload or
-    // any poll queued its first record behind it, failing every upload on the session at once.
-    if (!part && this.#waitingWhole >= CREDIT_WINDOW_FRAMES) {
-      this.#fail(RELAY_CLOSE_CODES.protocolError, 'this session has too many records waiting on credit');
-      return;
-    }
-    this.#waiting.push({ plaintext: encodeTunnelClientMessage(message), part });
-    if (!part) this.#waitingWhole += 1;
+  #sendRecord(
+    message: RelayTunnelClientMessage,
+    carries: { readonly request?: number; readonly part?: boolean } = {},
+  ): void {
+    const part = carries.part === true;
+    this.#waiting.push({
+      plaintext: encodeTunnelClientMessage(message),
+      part,
+      ...(carries.request === undefined ? {} : { request: carries.request }),
+    });
+    if (carries.request !== undefined && !part) this.#waitingRequests += 1;
     this.#flush();
+  }
+
+  /**
+   * Take a request that has not left yet out of the queue, whole. False when its head already left —
+   * or is being sealed, which is the same thing — because then the daemon may be reading it.
+   *
+   * Its parts go with it: none can have left before its head, since a body's parts leave consecutively
+   * behind it.
+   */
+  #withdraw(id: number): boolean {
+    const head = this.#waiting.findIndex(record => record.request === id && !record.part);
+    if (head === -1 || this.#waiting[head] === this.#sealing) return false;
+    for (let index = this.#waiting.length - 1; index >= head; index -= 1)
+      if (this.#waiting[index]?.request === id) this.#waiting.splice(index, 1);
+    this.#waitingRequests -= 1;
+    this.#left(id);
+    return true;
+  }
+
+  /** A request's head left the queue, one way or the other: its wait is over. */
+  #left(id: number): void {
+    this.#queueTimers.get(id)?.();
+    this.#queueTimers.delete(id);
   }
 
   /**
@@ -1437,13 +1549,20 @@ export class RelayClientSession {
         const channel = this.#channel;
         const next = this.#waiting[0];
         if (channel === undefined || next === undefined) return;
+        this.#sealing = next;
         const sealed = await sealRecord(this.deps.crypto, channel, next.plaintext);
+        this.#sealing = undefined;
         if (!sealed.ok) {
           this.#fail(sealed.code, sealed.reason);
           return;
         }
+        // The session ended while this record was sealing, and took the queue with it: nothing leaves.
+        if (this.#waiting[0] !== next) return;
         this.#waiting.shift();
-        if (!next.part) this.#waitingWhole -= 1;
+        if (next.request !== undefined && !next.part) {
+          this.#waitingRequests -= 1;
+          this.#left(next.request);
+        }
         // The mirror of the rule in `#onRecord`: this side owns the SEND counter and nothing else.
         // An arriving record may have advanced `receiveSequence` while this seal was awaiting, and
         // writing the whole captured state back would rewind it.
@@ -1480,7 +1599,9 @@ export class RelayClientSession {
     const failure = new RelaySessionError(reason, code);
     this.#failure = failure;
     this.#waiting.length = 0;
-    this.#waitingWhole = 0;
+    this.#waitingRequests = 0;
+    for (const cancel of this.#queueTimers.values()) cancel();
+    this.#queueTimers.clear();
     for (const [, waiting] of this.#pending) waiting.reject(failure);
     this.#pending.clear();
     this.#refused?.(failure);

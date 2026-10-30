@@ -10,8 +10,9 @@ import type {
   ProcessTableRead,
 } from '../../lib/migrate/process-inventory-port.ts';
 import { descendantsOf, inventoryProcesses, type ProcRow, parseProcessTable } from '../../lib/migrate/process-table.ts';
-import { capturePaneArguments, hasSessionArguments, panePidArguments } from '../../lib/tmux/commands.ts';
+import { capturePaneArguments, hasSessionArguments } from '../../lib/tmux/commands.ts';
 import type { TmuxCommandPort } from '../../lib/tmux/contracts.ts';
+import { paneProofArguments, parsePaneSighting } from '../../lib/tmux/pane-proof.ts';
 
 const processTableArguments = ['-Ao', 'pid=,ppid=,etime=,args='] as const;
 
@@ -226,7 +227,7 @@ export class PaneProcessInventory implements ProcessInventoryPort {
 
   async collect(tmuxSession: string): Promise<ProcessObservation> {
     try {
-      const pane = await this.tmux.execute(panePidArguments(tmuxSession));
+      const pane = await this.tmux.execute(paneProofArguments(tmuxSession));
       if (pane.code !== 0) {
         // ASK A SECOND QUESTION BEFORE CALLING THIS A BLIND SPOT. A failed pane-pid read used to be
         // unobservable unconditionally, which is right when tmux may be hiding something and wrong
@@ -237,9 +238,12 @@ export class PaneProcessInventory implements ProcessInventoryPort {
         if (await this.paneConfirmedAbsent(tmuxSession)) return { kind: 'observed', processes: [] };
         return unobservable(`the pane pid could not be resolved: ${pane.stderr.trim() || `tmux exited ${pane.code}`}`);
       }
-      const panePid = Number(pane.stdout.trim());
-      if (!Number.isFinite(panePid) || panePid <= 1)
+      const sighting = parsePaneSighting(pane.stdout);
+      if (sighting === undefined)
         return unobservable(`tmux reported an unusable pane pid ${JSON.stringify(pane.stdout.trim())}`);
+      // A dead pane runs nothing. tmux 3.8 says so with no pid at all; older releases keep the dead one.
+      if (sighting.pid === undefined) return { kind: 'observed', processes: [] };
+      const panePid = sighting.pid;
       const subtree = await this.probe.descendants?.(panePid);
       let rows: readonly ProcRow[];
       if (subtree !== undefined) rows = subtree;

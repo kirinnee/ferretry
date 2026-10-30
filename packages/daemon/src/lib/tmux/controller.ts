@@ -27,6 +27,7 @@ import {
   parsePaneIdentityTable,
   parsePaneMetadata,
 } from './pane.ts';
+import { type PaneSighting, paneProofArguments, parsePaneSighting } from './pane-proof.ts';
 import { isTmuxServerAbsent } from './server-absent.ts';
 
 /** Orchestrates only validated tmux commands; spawning remains in an injected adapter. */
@@ -112,6 +113,12 @@ export class TmuxController {
   async paneIdentity(session: string): Promise<PaneIdentity | undefined> {
     const result = await this.commands.execute(paneIdentityArguments(session));
     return result.code === 0 ? parsePaneIdentity(result.stdout) : undefined;
+  }
+
+  /** What tmux says the pane `-t <session>` names is, alive or dead (`pane-proof.ts`). */
+  async paneSighting(session: string): Promise<PaneSighting | undefined> {
+    const result = await this.commands.execute(paneProofArguments(session));
+    return result.code === 0 ? parsePaneSighting(result.stdout) : undefined;
   }
 
   async killPaneExact(paneId: string): Promise<void> {

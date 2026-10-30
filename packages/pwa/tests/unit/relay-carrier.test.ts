@@ -749,6 +749,11 @@ describe('the carrier router', () => {
     should(auto.requests).have.length(1);
     should(carriers.hosts()).eql([DIRECT_HOST]);
     should(router.choice(daemon.daemonId)?.ok).be.false();
+    // The session had opened and the daemon had the request: that carrier was reached, and the copy
+    // says what actually failed rather than calling it unreachable.
+    should(router.choice(daemon.daemonId)?.reason).match(
+      /^No configured connection worked: direct connected, but the session on it failed \(/u,
+    );
   });
 
   it('should walk multiple relays in published order until one carries an answer', async () => {

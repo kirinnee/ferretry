@@ -312,6 +312,12 @@ export interface ConnectionProbe {
    * and found unreachable. The two are different facts and are said differently.
    */
   readonly untried?: true;
+  /**
+   * The carrier CONNECTED, and the session on it then failed under the request. It was reachable, so
+   * saying it was not would send somebody to debug a tunnel that was fine — the owner's `4400`, which
+   * read "Cloudflare tunnel was not reachable" while the tunnel carried every frame it was given.
+   */
+  readonly connected?: true;
 }
 
 export interface ConnectionSkip {
@@ -319,6 +325,8 @@ export interface ConnectionSkip {
   readonly detail: string;
   /** See {@link ConnectionProbe.untried}. */
   readonly untried?: true;
+  /** See {@link ConnectionProbe.connected}. */
+  readonly connected?: true;
 }
 
 export type ConnectionChoice =
@@ -410,7 +418,12 @@ export function publishedConnectionMethods(
  */
 export type CarrierAttempt =
   | { readonly kind: 'answered'; readonly status: number }
-  | { readonly kind: 'transport-failure'; readonly detail: string };
+  | {
+      readonly kind: 'transport-failure';
+      readonly detail: string;
+      /** The carrier connected and the session on it failed afterwards: see {@link ConnectionProbe.connected}. */
+      readonly connected?: true;
+    };
 
 /**
  * Does a walk over the carrier set advance past this attempt?
@@ -436,7 +449,7 @@ export function carrierWalkAdvances(
  */
 export function carrierProbe(method: ConnectionMethod, attempt: CarrierAttempt): ConnectionProbe {
   return carrierWalkAdvances(attempt)
-    ? { method, reachable: false, detail: attempt.detail }
+    ? { method, reachable: false, detail: attempt.detail, ...(attempt.connected === true ? { connected: true } : {}) }
     : { method, reachable: true };
 }
 
@@ -455,6 +468,7 @@ export function chooseConnection(probes: readonly ConnectionProbe[]): Connection
         method: probe.method,
         detail: probe.detail ?? 'unreachable, with no reason reported',
         ...(probe.untried === true ? { untried: true as const } : {}),
+        ...(probe.connected === true ? { connected: true as const } : {}),
       });
       continue;
     }
@@ -475,10 +489,12 @@ export function chooseConnection(probes: readonly ConnectionProbe[]): Connection
   };
 }
 
-/** One passed-over carrier, as a clause: tried and unreachable, or never tried, and why. */
+/**
+ * One passed-over carrier, as a clause: never tried, connected and then lost, or unreachable — and why.
+ */
 export function describeSkip(skip: ConnectionSkip): string {
   const noun = describeConnectionMethod(skip.method).noun;
-  return skip.untried === true
-    ? `${noun} was not tried (${skip.detail})`
-    : `${noun} was not reachable (${skip.detail})`;
+  if (skip.untried === true) return `${noun} was not tried (${skip.detail})`;
+  if (skip.connected === true) return `${noun} connected, but the session on it failed (${skip.detail})`;
+  return `${noun} was not reachable (${skip.detail})`;
 }

@@ -70,6 +70,20 @@ describe('exited session transition', () => {
     });
   });
 
+  it.each([
+    [{ exitStatus: 0 }, 'the agent exited on its own (exit status 0)'],
+    [{ signal: 15 }, 'the agent was ended by signal 15'],
+    [{}, 'the agent exited on its own; how it exited was not recorded'],
+  ])('should say when an exit %j rests on the pane id alone', (fields, said) => {
+    // Act
+    const actual = exitedSessionTransition(observation({ kind: 'exited', byPaneIdOnly: true, ...fields }));
+
+    // Assert — settled as any exit is, and the reason says what the match rested on.
+    should(actual?.reason).equal(
+      `${said} (matched on its pane id alone: tmux 3.8 shows no pid for a dead pane, and this session's pane was registered before Ferretry recorded the stamp that proves it)`,
+    );
+  });
+
   it('should fail a session whose terminal is gone without inventing an exit status', () => {
     // Act
     const actual = exitedSessionTransition(observation({ kind: 'gone' }, 'waiting'));

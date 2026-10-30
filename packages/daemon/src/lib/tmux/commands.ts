@@ -54,10 +54,6 @@ export function paneMetadataArguments(session: string): readonly string[] {
   return ['display-message', '-p', '-t', sessionTarget(session), paneMetadataFormat];
 }
 
-export function panePidArguments(session: string): readonly string[] {
-  return ['display-message', '-p', '-t', sessionTarget(session), '#{pane_pid}'];
-}
-
 export function paneIdentityArguments(session: string): readonly string[] {
   return ['display-message', '-p', '-t', sessionTarget(session), '#{pane_id} #{pane_pid}'];
 }

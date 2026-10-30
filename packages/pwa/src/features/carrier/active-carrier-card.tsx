@@ -264,7 +264,12 @@ export function ActiveCarrierCard({
             {choice.passedOver.map(skip => (
               <li key={`${skip.method.kind}:${skip.detail}`}>
                 {describeConnectionMethod(skip.method).label}
-                {skip.untried === true ? ' (not tried)' : ''}: {skip.detail}
+                {skip.untried === true
+                  ? ' (not tried)'
+                  : skip.connected === true
+                    ? ' (connected, then the session failed)'
+                    : ''}
+                : {skip.detail}
               </li>
             ))}
           </ul>

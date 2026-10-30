@@ -10,6 +10,7 @@ export * from './delivery.ts';
 export * from './harness-dialog.ts';
 export * from './harness-guard.ts';
 export * from './pane.ts';
+export * from './pane-proof.ts';
 export * from './permission-prompt.ts';
 export * from './queue.ts';
 export * from './retry.ts';
