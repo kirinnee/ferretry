@@ -205,4 +205,26 @@ for input in "${all_inputs[@]}"; do
   triggers_on "${input}" || fail "${workflow}: a pull request that changes ${input} would not run it; add it to \`on.pull_request.paths\`"
 done
 
+# ─── 6. the tmux 3.8 leg ────────────────────────────────────────────────────────────────────────
+
+tmux38_of() {
+  local out="${tmp_dir}/out"
+  printf '%s\n' "$@" >"${tmp_dir}/files"
+  : >"${out}"
+  MACOS_RELEVANCE_FILES="${tmp_dir}/files" GITHUB_OUTPUT="${out}" "${decider}" >/dev/null
+  sed -n 's/^tmux38=//p' "${out}"
+}
+for input in packages/daemon/src/lib/tmux/pane-proof.ts packages/daemon/src/adapters/tmux/control-tmux-process.ts \
+  packages/daemon/src/adapters/session/lifecycle/tmux-session-exit-observer.ts packages/daemon/src/lib/session/health/exit.ts \
+  packages/daemon/tests/integration/tmux/x.test.ts nix/packages.nix flake.lock scripts/ci/test.sh config/test-groups.json; do
+  [ "$(tmux38_of "${input}")" = true ] || fail "a pull request that changes ${input} must run the tmux 3.8 leg"
+  triggers_on "${input}" || fail "${workflow}: a pull request that changes ${input} would not run the tmux 3.8 leg"
+done
+for input in docs/x.md packages/pwa/src/x.ts packages/daemon/src/lib/grants/policy.ts; do
+  [ "$(tmux38_of "${input}")" = false ] || fail "a pull request that changes only ${input} must not run the tmux 3.8 leg"
+done
+block_has tmux-38 '^    needs: changes$' 'must need changes'
+block_has tmux-38 "^    if: needs[.]changes[.]outputs[.]tmux38 == 'true'\$" 'must run only when tmux38 is true'
+block_has tmux-38 'nix develop [.]#ci-tmux38 ' 'must run in the ci-tmux38 shell'
+
 echo "✅ macOS relevance holds: every input of the three optional macOS jobs selects its job, main runs them all, and realworld.yaml triggers on each"
