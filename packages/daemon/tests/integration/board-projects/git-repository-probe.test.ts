@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { mkdir, realpath } from 'node:fs/promises';
+import { mkdir, realpath, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import should from 'should';
 import { GitRepositoryProbe } from '../../../src/adapters/board-projects/git-repository-probe.ts';
@@ -71,6 +71,17 @@ describe('locating a repository', () => {
         commonDirectory: await realpath(join(root, 'store.git')),
         root: await realpath(tree),
       });
+    });
+  });
+
+  it('should answer null when git names a folder that is not there', async () => {
+    await withTempRoot(async root => {
+      // A git that answers, but with a common directory and work tree that do not exist on disk.
+      const fakeGit = join(root, 'git');
+      await writeFile(fakeGit, `#!/bin/sh\necho ${root}/gone/.git\necho ${root}/gone\n`, { mode: 0o755 });
+      const probe = new GitRepositoryProbe(fakeGit);
+      should(await probe.locate(root)).equal(null);
+      should(await probe.commonDirectory(root)).equal(null);
     });
   });
 
