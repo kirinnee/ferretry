@@ -597,5 +597,13 @@ describe('the lane editor page', () => {
 
     // Assert
     expect(window.location.pathname).toBe(`/d/${encodeURIComponent(laptop.daemonId)}/projects/${PROJECT}`);
+
+    // Act
+    const unfiled = await show(pageFor(async () => [projectOf(proposed())], 'unfiled'));
+    await settle();
+    await click(buttonSaying(unfiled, 'Back'));
+
+    // Assert
+    expect(window.location.pathname).toBe(`/d/${encodeURIComponent(laptop.daemonId)}/projects`);
   });
 });
