@@ -907,6 +907,173 @@ describe('a ledger read that asks for a look first', () => {
   });
 });
 
+describe('a send the harness recorded with a placeholder in it', () => {
+  const PATH = '/state/attachments/a1/shot.png';
+  const typed = `[from hadi] please look at the failing layout test\n\nAttached files — open them from these paths:\n- ${PATH} (image/png)`;
+  const sent = () => record({ message: typed, matchText: typed });
+
+  it('is proven by a record where Claude turned the attached image path into [Image #5]', async () => {
+    const world = new World(sent());
+    world.evidence(new ClaudeObservedInputObserver(), [
+      claude.user(typed.replace(PATH, '[Image #5]'), 400, 'with-image'),
+    ]);
+
+    await world.checkAt(1_000);
+
+    should(world.only).match({ fate: 'delivered', evidence: { key: 'with-image' } });
+  });
+
+  it('is proven when the image is its own text block and the typed text arrives whole after it', async () => {
+    const world = new World(sent());
+    world.evidence(new ClaudeObservedInputObserver(), [
+      {
+        type: 'user',
+        uuid: 'blocks',
+        timestamp: at(400),
+        message: {
+          role: 'user',
+          content: [
+            { type: 'text', text: '[Image #5]' },
+            { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } },
+            { type: 'text', text: typed },
+          ],
+        },
+      },
+    ]);
+
+    await world.checkAt(1_000);
+
+    should(world.only).match({ fate: 'delivered', evidence: { key: 'blocks' } });
+  });
+
+  it('is proven when the placeholder leads and the record is wrapped across lines', async () => {
+    const world = new World(sent());
+    world.evidence(new ClaudeObservedInputObserver(), [
+      claude.user(`[Image #5]\n${typed.replace(PATH, '[Image #5]').replaceAll(' ', '\n')}`, 400, 'wrapped'),
+    ]);
+
+    await world.checkAt(1_000);
+
+    should(world.only.fate).equal('delivered');
+  });
+
+  it('is proven through a drained queue entry carrying the placeholder, and seen as held by its enqueue', async () => {
+    const world = new World(record({ ...sent(), path: 'native-inline' }));
+    world.evidence(new ClaudeObservedInputObserver(), [claude.enqueue(typed.replace(PATH, '[Image #5]'), 200)]);
+    await world.checkAt(1_000);
+    const held = world.only;
+    world.evidence(new ClaudeObservedInputObserver(), [
+      claude.enqueue(typed.replace(PATH, '[Image #5]'), 200),
+      claude.remove(typed.replace(PATH, '[Image #5]'), 4_900),
+      claude.drained(typed.replace(PATH, '[Image #5]'), 5_000),
+    ]);
+    await world.checkAt(6_000);
+
+    should(held).match({ fate: 'queued', queueProof: 'transcript' });
+    should(world.only).match({ fate: 'delivered', evidence: { kind: 'queued_command' } });
+  });
+
+  it('is proven when a long paste is recorded with its middle elided', async () => {
+    const body = `${'line of a long report that the harness elides '.repeat(30)}the end of the report`;
+    const world = new World(
+      record({ message: `start of the report ${body}`, matchText: `start of the report ${body}` }),
+    );
+    world.evidence(new ClaudeObservedInputObserver(), [
+      claude.user('start of the report [...Truncated text #1 +40 lines...] the end of the report', 400, 'elided'),
+    ]);
+
+    await world.checkAt(1_000);
+
+    should(world.only).match({ fate: 'delivered', evidence: { key: 'elided' } });
+  });
+
+  it('is NOT proven by a different message that merely shares the start and an image', async () => {
+    const world = new World(sent());
+    world.evidence(new ClaudeObservedInputObserver(), [
+      claude.user(
+        '[from hadi] please look at the failing layout test [Image #5] and then also fix everything else',
+        400,
+      ),
+      claude.user('[Image #5] [from hadi] please look', 500),
+      claude.user('[from hadi] please look at the failing layout test and nothing was attached [Image #5]', 600),
+    ]);
+
+    await world.checkAt(1_000);
+
+    should(world.only.fate).equal('accepted');
+  });
+});
+
+describe('a send the agent already started working on', () => {
+  const agentSend = (overrides: Partial<SendRecord> = {}) =>
+    record({ senderKind: 'agent', from: SENDER, fromName: 'kenton', path: 'native-inline', ...overrides });
+
+  it('is never typed again once a turn began after the harness queued it, even if the transcript cannot match it', async () => {
+    const world = new World(agentSend());
+    world.evidence(new ClaudeObservedInputObserver(), [claude.enqueue('ship it now please', 200)]);
+    await world.checkAt(1_000);
+    // The queue drained into a turn the matcher could not read, and the pane is idle again.
+    world.target = { id: ID, status: 'running', mode: 'auto', turn: 5, turnState: 'idle', turnStateAt: at(20_000) };
+    world.evidence(new ClaudeObservedInputObserver(), [
+      claude.enqueue('ship it now please', 200),
+      claude.dequeue('ship it now please', 19_000),
+    ]);
+    world.inPane = false;
+
+    await world.checkAt(75_000);
+    await world.checkAt(90_000);
+    await world.checkAt(120_000);
+
+    should(world.retyped).be.empty();
+    should(world.events).not.containEql('control.send_retried');
+    should(world.only.fate).equal('queued');
+    should(world.only.attempt).equal(1);
+  });
+
+  it('is not typed again while the turn that began after it was typed is still working', async () => {
+    const world = new World(agentSend({ path: 'direct' }));
+    world.evidence(new ClaudeObservedInputObserver(), []);
+    world.target = { id: ID, status: 'running', mode: 'auto', turn: 5, turnState: 'working', turnStateAt: at(8_000) };
+
+    await world.checkAt(16_000);
+    await world.checkAt(40_000);
+
+    should(world.retyped).be.empty();
+    should(world.only).match({ fate: 'accepted', attempt: 1 });
+  });
+
+  it('is still ended as unconfirmed, not lost, once the hold ceiling passes', async () => {
+    const world = new World(agentSend({ path: 'direct' }));
+    world.evidence(new ClaudeObservedInputObserver(), []);
+    world.target = { id: ID, status: 'running', mode: 'auto', turn: 5, turnState: 'working', turnStateAt: at(8_000) };
+
+    await world.checkAt(16_000);
+    await world.checkAt(7_200_000);
+
+    should(world.retyped).be.empty();
+    should(world.only).match({ fate: 'unaccounted', unaccountedReason: 'timeout' });
+  });
+
+  it('is still typed again when no turn began after it, or the turn clock cannot be read', async () => {
+    const stale = new World(agentSend({ path: 'direct' }));
+    stale.evidence(new ClaudeObservedInputObserver(), []);
+    stale.target = { id: ID, status: 'running', mode: 'auto', turn: 4, turnState: 'working', turnStateAt: at(-5_000) };
+    const unread = new World(agentSend({ path: 'direct' }));
+    unread.evidence(new ClaudeObservedInputObserver(), []);
+    const idleAfter = new World(agentSend({ path: 'direct' }));
+    idleAfter.evidence(new ClaudeObservedInputObserver(), []);
+    idleAfter.target = { id: ID, status: 'running', mode: 'auto', turn: 4, turnState: 'idle', turnStateAt: at(8_000) };
+
+    await stale.checkAt(16_000);
+    await unread.checkAt(16_000);
+    await idleAfter.checkAt(16_000);
+
+    should(stale.retyped).eql(['send-1']);
+    should(unread.retyped).eql(['send-1']);
+    should(idleAfter.retyped).eql(['send-1']);
+  });
+});
+
 describe('a conversation too large to read whole', () => {
   it('reads evidence only from the oldest watched send on, less the clock slack', async () => {
     const world = new World(

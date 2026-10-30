@@ -66,6 +66,8 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
   'POST /v1/sessions/:sessionId/tasks/:taskId': 'a task record on a session',
   'POST /v1/board/tasks': 'a work card on a project board; its own append-only history records who did what',
   'POST /v1/board/tasks/:taskId': 'a work card on a project board; its own append-only history records who did what',
+  'POST /v1/board/import':
+    'a one-time import of the old per-session task files; every card it makes ends with a migrated history event and the daemon logs the summary',
   'POST /v1/task-boards/create': 'coordination between sessions; the board is its own ledger',
   'POST /v1/task-boards/child-grants/request': 'coordination between sessions; the board is its own ledger',
   'POST /v1/task-boards/child-grants/approve': 'coordination between sessions; the board is its own ledger',
