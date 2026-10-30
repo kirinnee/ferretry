@@ -419,6 +419,18 @@ export class SessionSendService {
    * section F). Pressing the generic interrupt at a form would answer it with whatever the keys land
    * on, which is a worse outcome than a clear refusal.
    */
+  /**
+   * Every refusal a send makes before a keystroke that only a person can lift — an unconfirmed kill, a
+   * quarantined harness, an unanswered structured question — without typing anything.
+   *
+   * The queue asks it before it accepts a message: holding prose behind a question the pane may never
+   * release would be a message that silently never arrives, where the refusal tells its sender to answer
+   * the question first.
+   */
+  async authorize(id: SessionId, attachmentIds: readonly string[]): Promise<void> {
+    authorizeSend(await this.require(id), attachmentIds);
+  }
+
   async interrupt(id: SessionId): Promise<SendTarget> {
     return await this.ports.serial.run(id, async () => await this.interruptLocked(id));
   }

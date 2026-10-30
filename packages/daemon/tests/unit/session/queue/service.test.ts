@@ -76,6 +76,21 @@ describe('a message whose sender waits for the reply', () => {
 
     should(message.replyExpected).be.true();
   });
+
+  it('should keep that a daemon notice was made for the owner’s chat', async () => {
+    const { service } = subject();
+
+    const { message } = await service.enqueue(ID, {
+      id: 'b1',
+      sender: 'daemon',
+      chat: true,
+      text: '[board] &F1 → Merged',
+    });
+    const plain = await service.enqueue(ID, { id: 'b2', sender: 'daemon', text: 'nudge' });
+
+    should(message.chat).be.true();
+    should(plain.message).not.have.property('chat');
+  });
 });
 
 describe('changing a message that still waits', () => {

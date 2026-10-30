@@ -63,6 +63,7 @@ import {
   DORMANT_AGENT_STATUSES,
   type FleetCredentialList,
   FY_DEFAULT_DAEMON_PORT,
+  ferretryNotice,
   type Harness,
   ioPressureView,
   type LearningConfig,
@@ -659,6 +660,7 @@ import {
   agendaBlockNotice,
   agentSpokenName,
   answerArguments,
+  answerOf,
   answerPaused,
   attachmentDirectory,
   authorizeSessionCommand,
@@ -917,7 +919,9 @@ import {
   portCandidates,
   previousConversation,
   publishableDirectCarrier,
+  QUEUE_ANSWER_WAIT_MS,
   QueueDeliverer,
+  QueueingSends,
   QueueRefused,
   type QuotaFailoverLoop,
   QuotaFailoverService,
@@ -3300,31 +3304,34 @@ function createSessionSendSubsystem(
         : { message: request.message, referenced: [] };
       // `now` stops the running turn first: that is the send path's to do, not a queue's to wait for.
       if (queueing && request.now !== true) {
-        const enqueued = await pending
-          .send(
-            id,
-            turn.message,
-            async message =>
-              await queue.enqueue(id, {
-                id: request.sendId,
-                sender: person ? 'human' : 'agent',
-                ...(request.senderSessionId === undefined ? {} : { from: request.senderSessionId }),
-                text: messageWithAttachments(message, delivered),
-                ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
-                ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
-              }),
-            (sent, line) => sent.message.text.includes(line),
-          )
+        // The refusals only a person can lift are said now, exactly as the direct path says them.
+        await service.authorize(id, request.attachmentIds ?? []).catch((error: unknown) => sendRefusal(error));
+        const enqueued = await queue
+          .enqueue(id, {
+            id: request.sendId,
+            sender: person ? 'human' : 'agent',
+            ...(request.senderSessionId === undefined ? {} : { from: request.senderSessionId }),
+            text: messageWithAttachments(turn.message, delivered),
+            ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
+            ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
+          })
           .catch((error: unknown) => sendRefusal(error));
-        // Answered as soon as it is on disk — the first tick — and typed by the deliverer, never by the caller.
-        void deliverer.enqueued(id).catch(() => undefined);
+        // The board's held news goes as Ferretry's own message, never on top of the sender's words: the
+        // queue types it after theirs, and the app shows it as a notice, not as the owner speaking.
+        await pending.sendSeparately(id, async line =>
+          queue.enqueue(id, { id: crypto.randomUUID(), sender: 'daemon', chat: true, text: ferretryNotice(line) }),
+        );
+        // On disk now — the first tick. The deliverer's first look types it into an empty box, and the
+        // answer is then what the ledger proves, as the direct path's was; held for a reason, it is queued.
+        await Promise.race([deliverer.enqueued(id).catch(() => undefined), Bun.sleep(QUEUE_ANSWER_WAIT_MS)]);
+        const answer = answerOf((await ledger.list(id)).find(record => record.sendId === enqueued.message.id));
         if (turn.referenced.length > 0) await conversation.settle(id, turn);
         if (person) await instructions.queueIfStale(id);
         return {
-          ...(await view(id, 'queued the message')),
-          disposition: 'queued',
+          ...(await view(id, 'took the message')),
+          disposition: answer.disposition,
           sendId: enqueued.message.id,
-          fate: 'accepted',
+          fate: answer.fate,
         };
       }
       const outcome = await pending
@@ -9011,9 +9018,26 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         view: async id => await deliveryView.view(id),
         transport: new SendPathQueueTransport(sends, sendLedger),
         sessions: () => storage.listSessions().map(session => session.id),
+        sleep: async milliseconds => await Bun.sleep(milliseconds),
       });
       storage.subscribeStates(id => void queueDeliverer.changed(id).catch(() => undefined));
-      void queueDeliverer.arm().catch(() => undefined);
+      /**
+       * What every producer inside this daemon sends through: with the queue on, its message is enqueued and
+       * the deliverer types it — the Warden, the board, the declared-wait watcher as the daemon's, the owner's
+       * agenda answers as the owner's. Off, the direct send path, as before. The deliverer itself, a revive's
+       * release and the send route keep the direct path: each IS a step of delivery, not a producer.
+       */
+      const queueingPorts = {
+        queue: sessionQueue,
+        deliverer: queueDeliverer,
+        direct: sends,
+        target: async (id: SessionId) => await sendRepository.read(id),
+        ledger: sendLedger,
+        clock,
+        sleep: async (milliseconds: number) => await Bun.sleep(milliseconds),
+      };
+      const daemonSends = delivery.queue ? new QueueingSends(queueingPorts, 'daemon') : sends;
+      const answerSends = delivery.queue ? new QueueingSends(queueingPorts, 'human') : sends;
       /**
        * The declared-wait watcher, built LAST among the session slices because it drives two of them.
        *
@@ -9030,7 +9054,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         {
           waits: new StorageMonitorWaits(storage, signalRepository, signals, defaultSessionMonitorSettings),
           heartbeats: new FileWaitHeartbeat(id => createSessionPaths(paths, id).directory),
-          nudge: new SendMonitorNudge(sends),
+          nudge: new SendMonitorNudge(daemonSends),
           // The session observer's question part over every live session, one at a time — see
           // `InlineObserverHost.questions` for why it hands the loop back between them.
           questions: { reconcile: async () => await sessionObserver.questions() },
@@ -9104,7 +9128,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         clock,
         () => attachmentDaemonId,
         laneSets,
-        sends,
+        daemonSends,
         async sessionId => {
           const listed = await agenda.list(sessionId);
           if (!listed.ok) throw new Error(listed.error.message);
@@ -9133,7 +9157,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         nudges: {
           send: async (sessionId, message) => {
             await boardNudgeDelivery.send(sessionId, message, async composed => {
-              await sends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message: composed });
+              await daemonSends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message: composed });
             });
           },
         },
@@ -9444,13 +9468,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           undefined,
           agendaFilesMigrated,
         ),
-        new SendAgendaMessenger(sends),
+        new SendAgendaMessenger(answerSends),
         new KeyedAgendaReplyTimers(),
         new KeyedSerialExecutor(),
         { now: () => clock.now() },
+        // With the queue on, an answer is not held for a batch, a working ferret or a draft: the queue orders
+        // it, holds it for a draft and types it into an empty box mid-turn (&C38). Its receipt and reopen
+        // still come from here.
         {
-          settleMs: agendaConfig.replySettleSeconds * 1_000,
-          capMs: agendaConfig.replyMaxWaitSeconds * 1_000,
+          settleMs: delivery.queue ? 0 : agendaConfig.replySettleSeconds * 1_000,
+          capMs: delivery.queue ? 0 : agendaConfig.replyMaxWaitSeconds * 1_000,
           composerWaitMs: agendaConfig.replyComposerWaitSeconds * 1_000,
           receiptMs: agendaConfig.replyReceiptSeconds * 1_000,
         },
@@ -9458,6 +9485,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // is not busy, so a damaged document never holds an answer.
         {
           busy: async sessionId => {
+            if (delivery.queue) return false;
             const id = tryParseSessionId(sessionId);
             if (id === undefined) return false;
             const state = SessionStateSchema.safeParse(await storage.readState(id));
@@ -9465,7 +9493,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
         },
         {
-          composer: new PaneAgendaComposer(sendTerminal),
+          composer: delivery.queue ? { state: async () => 'empty' as const } : new PaneAgendaComposer(sendTerminal),
           receipts: new LedgerAgendaReceipts(sendLedger),
           undelivered: new AgendaBoardUndelivered({
             undelivered: async (...parameters) => await agenda.undelivered(...parameters),
@@ -9580,7 +9608,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         context: boardPending,
         nudges: {
           send: async (sessionId, message) => {
-            await sends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message });
+            await daemonSends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message });
           },
         },
         clock,
@@ -9686,7 +9714,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
           send: async (sessionId, sendId, message) => {
             const id = tryParseSessionId(sessionId);
-            if (id !== undefined) await sends.send({ id, sendId, message });
+            if (id !== undefined) await daemonSends.send({ id, sendId, message });
           },
           record: async (sessionId, asks) => await nudgeSessions.record(sessionId, asks),
         },
@@ -9713,7 +9741,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           card: async ref => await boardWorld.board.task(ref.id),
           send: async (sessionId, sendId, message) => {
             const id = tryParseSessionId(sessionId);
-            if (id !== undefined) await sends.send({ id, sendId, message });
+            if (id !== undefined) await daemonSends.send({ id, sendId, message });
           },
           record: async (sessionId, seen) => await boardChecks.record(sessionId, seen),
           now: () => Date.parse(clock.now()),
@@ -10319,7 +10347,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         send: async (sessionId, message, sendId) => {
           const id = tryParseSessionId(sessionId);
           if (id === undefined) throw new Error(`${JSON.stringify(sessionId)} is not a usable session id`);
-          await sends.send({ id, sendId, message });
+          await daemonSends.send({ id, sendId, message });
         },
         userHome,
         pricing: async () => {
@@ -10870,6 +10898,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sessionControl,
         sessionResume: sessionResumeSubsystem,
         sendTracking: sendTracker,
+        queueDelivery: queueDeliverer,
         sessionSend: createSessionSendSubsystem(
           storage,
           sessions,
@@ -11171,7 +11200,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               ...(settings.endpoint === undefined ? {} : { endpoint: settings.endpoint }),
               usdPerMillionInputTokens: settings.usdPerMillionInputTokens,
             }),
-          sends,
+          sends: daemonSends,
           resume,
           revive: {
             events: {
@@ -12414,6 +12443,11 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * re-types nothing it cannot prove absent — and the disarm cancels the one pending look per session.
    */
   cleanups.push(subsystems.sendTracking.arm());
+  // The queue's deliverer looks once at every session for what a restart left open. Its stop is the FIRST
+  // thing a shutdown does: a send answers once its message is on disk, so one sent just before a stop is
+  // being typed while the daemon goes down, and the tmux client it types through is released below.
+  void subsystems.queueDelivery.arm().catch(() => undefined);
+  cleanups.unshift(async () => await subsystems.queueDelivery.stop());
   // The line an operator greps for. Everything above it is a step that can stall; a log that reaches
   // here and stops is a daemon that is serving, which is a completely different report from one that
   // stops at "state home opened" — and before any of this existed the two were the same empty file.

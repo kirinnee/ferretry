@@ -71,6 +71,46 @@ describe('quiet items', () => {
   });
 });
 
+describe('pending context sent as a message of its own', () => {
+  it('should send what is held alone, never on anybody’s words, and empty the queue', async () => {
+    // The owner read "[board] &F115 → Manually tested" glued to the front of their own message.
+    const context = new MemoryContext();
+    await context.append('lead', [item('F1:lane', '&F1 → Merged'), item('F2:lane', '&F2 → Review')]);
+    const sent: string[] = [];
+
+    await new PendingContextDelivery(context).sendSeparately('lead', async line => {
+      sent.push(line);
+    });
+
+    should(sent).eql(['[board] &F1 → Merged · &F2 → Review']);
+    should(context.held.has('lead')).be.false();
+  });
+
+  it('should send nothing when nothing is held or the queue cannot be read', async () => {
+    const sent: string[] = [];
+    const send = async (line: string): Promise<void> => {
+      sent.push(line);
+    };
+
+    await new PendingContextDelivery(new MemoryContext()).sendSeparately('lead', send);
+    await new PendingContextDelivery(new MemoryContext(new Set(['take']))).sendSeparately('lead', send);
+
+    should(sent).be.empty();
+  });
+
+  it('should put the context back when the send fails, and not fail itself', async () => {
+    const context = new MemoryContext();
+    await context.append('lead', [item('F1:lane', '&F1 → Merged')]);
+    const broken = new MemoryContext(new Set(['restore']));
+    await broken.append('lead', [item('F1:lane', '&F1 → Merged')]);
+
+    await new PendingContextDelivery(context).sendSeparately('lead', async () => Promise.reject(new Error('full')));
+    await new PendingContextDelivery(broken).sendSeparately('lead', async () => Promise.reject(new Error('full')));
+
+    should(context.held.get('lead')?.map(entry => entry.text)).eql(['&F1 → Merged']);
+  });
+});
+
 describe('pending context delivery', () => {
   it('should put what is held on top of the next message and empty the queue', async () => {
     // Arrange
