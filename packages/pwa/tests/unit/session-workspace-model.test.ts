@@ -11,6 +11,7 @@ import {
   startSessionWorkspaceRefresh,
   transcriptEntriesFromLog,
 } from '../../src/components/session-workspace-model.ts';
+import { extractToolSummary, IMAGE_READ_TOOL } from '../../src/lib/tool-extract.ts';
 import { sessionView } from '../support/sessions.ts';
 
 const NOW = Date.UTC(2026, 9, 18, 12, 0, 0);
@@ -1096,18 +1097,47 @@ describe('transcriptEntriesFromLog: images', () => {
     expect(transcriptEntriesFromLog(`tool/attachment: image ${shot}`)).toEqual([]);
   });
 
-  test('an image row follows a finished tool run and sits between its neighbours in order', () => {
+  test('a lone picture between messages stays a row of its own, in order', () => {
+    const entries = transcriptEntriesFromLog(
+      ['user/message: look', `user/attachment: image ${shot}`, 'assistant/message: seen'].join('\n'),
+    );
+    expect(entries.map(entry => entry.kind)).toEqual(['user', 'user', 'assistant']);
+    expect(entries[1]?.images).toHaveLength(1);
+  });
+
+  test('pictures read after a tool run join that run as ONE Read call, however many there are', () => {
+    const second = '[fy-image 5000.1024.0 image/png]';
     const entries = transcriptEntriesFromLog(
       [
         'user/message: look',
-        'assistant/tool-call: Read({})',
+        'assistant/tool-call: Read({"file_path":"a.png"})',
         'tool/tool-result: read',
         `user/attachment: image ${shot}`,
+        'assistant/tool-call: Read({"file_path":"b.png"})',
+        'tool/tool-result: read',
+        `user/attachment: image ${second}`,
+        `user/attachment: image ${other}`,
         'assistant/message: seen',
       ].join('\n'),
     );
-    expect(entries.map(entry => entry.kind)).toEqual(['user', 'tool', 'user', 'assistant']);
-    expect(entries[2]?.images).toHaveLength(1);
+    expect(entries.map(entry => entry.kind)).toEqual(['user', 'tool', 'assistant']);
+    const calls = entries[1]?.tools ?? [];
+    expect(calls).toHaveLength(3);
+    const reads = calls.filter(call => call.use.name === IMAGE_READ_TOOL);
+    expect(reads).toHaveLength(1);
+    expect(reads[0]?.result?.images).toHaveLength(3);
+    expect(extractToolSummary(reads[0]?.use.name, reads[0]?.use.input).headline).toBe('3 images');
+  });
+
+  test('two pictures in a row with no tool run before them still collapse into one group', () => {
+    const entries = transcriptEntriesFromLog(
+      [`assistant/attachment: image ${shot}`, `assistant/attachment: image ${other}`, 'assistant/message: seen'].join(
+        '\n',
+      ),
+    );
+    expect(entries.map(entry => entry.kind)).toEqual(['tool', 'assistant']);
+    expect(entries[0]?.tools).toHaveLength(1);
+    expect(entries[0]?.tools?.[0]?.result?.images).toHaveLength(2);
   });
 
   test('a tool result splits its marker lines into images and keeps the text', () => {

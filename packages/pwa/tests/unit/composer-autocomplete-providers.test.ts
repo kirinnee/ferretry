@@ -901,6 +901,7 @@ describe('composer task family', () => {
     active: false,
     assignee: 'zelda',
     touchedAt: '2026-10-01T00:00:00.000Z',
+    agentAsked: false,
     legacyId: null,
     ...patch,
   });
@@ -932,6 +933,27 @@ describe('composer task family', () => {
     expect(labels(direct?.initialCandidates?.(context('&', 'f4')))).toContain('&F4');
     expect(labels(direct?.initialCandidates?.(context('&', 'F')))).not.toContain('&F3');
     expect(labels(direct?.initialCandidates?.(context('&', 'F')))).not.toContain('&F4');
+  });
+
+  it('hides tasks the human did not ask for until the switch is on or their id is typed exactly', () => {
+    const mixed = [
+      task('F1', { touchedAt: '2026-10-03T00:00:00.000Z' }),
+      task('F2', { touchedAt: '2026-10-02T00:00:00.000Z', agentAsked: true }),
+      task('F3', { lane: 'Shipped', closed: true, agentAsked: true }),
+    ];
+    let include = false;
+    const options = { daemon: daemonA, scope: scopeA, getTasks: () => mixed, getIncludeAgentTasks: () => include };
+    const [, , direct] = createDirectReferenceProviders(options);
+    const ladderProvider = createReferencesProvider(options);
+    expect(labels(direct?.initialCandidates?.(context('&', 'F')))).toEqual(['&F1']);
+    expect(labels(ladderProvider.initialCandidates?.(referenceContext(4, '')))).toEqual(['&F1']);
+    expect(labels(direct?.initialCandidates?.(context('&', 'f2')))).toContain('&F2');
+    expect(labels(direct?.initialCandidates?.(context('&', 'F3')))).toContain('&F3');
+    const before = direct?.snapshotKey;
+    include = true;
+    expect(direct?.snapshotKey).not.toBe(before);
+    expect(labels(direct?.initialCandidates?.(context('&', 'F')))).toEqual(['&F1', '&F2']);
+    expect(labels(ladderProvider.initialCandidates?.(referenceContext(4, '')))).toEqual(['&F1', '&F2']);
   });
 
   it('says id, title, lane and owner on each row, and inserts the canonical token', () => {

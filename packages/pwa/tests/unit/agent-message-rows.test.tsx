@@ -68,6 +68,48 @@ describe('a message from another ferret', () => {
     expect(view.root.findByProps({ 'data-transcript-kind': 'user' }).props['data-peer']).toBe('torrey');
   });
 
+  test('minimises a bulky message to its first line, and opens it on "Show more"', () => {
+    const bulky = { ...PEER, text: '## Status report\n\n- one\n- two\n\nLots more detail follows here.' };
+    const view = render(<TranscriptRow entry={bulky} />);
+    expect(view.root.findByProps({ 'data-peer': 'torrey' })).toBeDefined();
+    expect(view.root.findByProps({ 'data-peer-preview': '' }).children).toEqual(['Status report']);
+    expect(textOf(view)).not.toContain('Lots more detail');
+    const more = view.root.findByProps({ 'data-peer-more': '' });
+    expect(more.props['aria-expanded']).toBe(false);
+    run(() => more.props.onClick());
+    expect(textOf(view)).toContain('Lots more detail');
+    expect(view.root.findAllByProps({ 'data-peer-preview': '' })).toHaveLength(0);
+    expect(view.root.findByProps({ 'data-peer-more': '' }).children).toEqual(['Show less']);
+  });
+
+  test('cuts a long single line at about 120 characters, and shows a short message whole with no control', () => {
+    const long = { ...PEER, text: `${'word '.repeat(60)}end` };
+    const view = render(<TranscriptRow entry={long} />);
+    const preview = view.root.findByProps({ 'data-peer-preview': '' }).children.join('');
+    expect(preview.length).toBeLessThanOrEqual(121);
+    expect(preview.endsWith('…')).toBe(true);
+    const short = render(<TranscriptRow entry={PEER} />);
+    expect(short.root.findAllByProps({ 'data-peer-more': '' })).toHaveLength(0);
+  });
+
+  test('draws an instructions update as one folded gear line with no text prefix, and opens its sections', () => {
+    const note = {
+      id: 'iu',
+      kind: 'user' as const,
+      text: '[instructions updated] Ferretry changed part of the instructions you were started with:\n\nBoard: all work is a card.\n\nFerretry tools: terminals.',
+      at: Date.UTC(2026, 9, 18, 1, 1, 2),
+    };
+    const view = render(<TranscriptRow entry={note} />);
+    const shown = textOf(view);
+    expect(shown).toContain("Ferretry updated this ferret's instructions · Board, Ferretry tools");
+    expect(shown).not.toContain('[instructions updated]');
+    expect(shown).not.toContain('all work is a card');
+    const toggle = view.root.findByProps({ className: 'fy-system-details' });
+    run(() => toggle.props.onClick());
+    expect(textOf(view)).toContain('all work is a card');
+    expect(view.root.findByProps({ 'data-instructions-update': '' })).toBeDefined();
+  });
+
   test('offers a quiet link to the sender’s own conversation, which a modifier-click leaves to the browser', () => {
     const navigated: string[] = [];
     const view = render(

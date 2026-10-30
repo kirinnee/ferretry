@@ -130,8 +130,24 @@ const patchSummary = (patch: string): ExtractedTool => ({
 /** The one reading of a tool call: its verb, its headline, and the body an
  *  expanded row shows. Never throws — an unrecognised tool still reads as
  *  something a human can scan. */
+/** The synthetic call the transcript files a run of picture-only rows under: one `Read`, however many pictures. */
+export const IMAGE_READ_TOOL = 'ferretry:image-read';
+
+export const imageReadHeadline = (count: number): string => `${count} image${count === 1 ? '' : 's'}`;
+
 export const extractToolSummary = (name: string | undefined, input: unknown): ExtractedTool => {
   const lower = (name ?? '').toLowerCase();
+
+  if (name === IMAGE_READ_TOOL) {
+    const count = inputAsObject(input)?.['count'];
+    return {
+      verb: 'Read',
+      headline: imageReadHeadline(typeof count === 'number' ? count : 0),
+      bodyLines: [],
+      kind: 'read',
+      isExec: false,
+    };
+  }
 
   if (name === 'exec' && typeof input === 'string') {
     const parsed = extractExecCommand(input);
