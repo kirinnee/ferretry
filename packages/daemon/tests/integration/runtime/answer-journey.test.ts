@@ -66,7 +66,7 @@ if read -r _; then printf 'submit\\n' >> "$log"; fi
 printf '\\033[2J\\033[H'
 printf 'Understood. Working on it now.\\n'
 while read -r _; do printf 'submit\\n' >> "$log"; done
-sleep 300
+exec sleep 300
 `;
 
 /** Holds the visible advance behind a file gate, so a concurrent stop can be ordered exactly. */
@@ -79,7 +79,7 @@ while [[ ! -e "$gate" ]]; do sleep 0.01; done
 printf '\\033[2J\\033[H'
 printf 'Understood. Working on it now.\\n'
 while read -r _; do printf 'submit\\n' >> "$log"; done
-sleep 300
+exec sleep 300
 `;
 
 /** Accept Enter without advancing, then advance only when recovery sends its one bounded Escape. */
@@ -100,7 +100,7 @@ if IFS= read -r prose; then
   printf '\\033[2J\\033[H'
   printf 'Continuing from the prose fallback.\\n'
 fi
-sleep 300
+exec sleep 300
 `;
 
 const transcriptFor = (toolUseId: string): string =>
@@ -149,7 +149,7 @@ while IFS= read -r line; do
   printf 'turn:%s\\n' "$line" >> "$log"
   printf '\\n> '
 done
-sleep 300
+exec sleep 300
 `;
 
 /** The tmux this daemon will itself resolve, so the test and the daemon drive one binary. */
@@ -161,6 +161,41 @@ async function tmuxCommand(socket: string, ...args: string[]): Promise<number> {
   if (TMUX === null) throw new Error('tmux is required for this journey and was not found');
   const child = Bun.spawn([TMUX, '-S', socket, ...args], { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
   return await child.exited;
+}
+
+/** The process group each pane on `socket` leads: tmux starts every pane in a session of its own. */
+async function paneGroups(socket: string): Promise<number[]> {
+  if (TMUX === null) return [];
+  const child = Bun.spawn([TMUX, '-S', socket, 'list-panes', '-a', '-F', '#{pane_pid}'], {
+    stdin: 'ignore',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const [listed] = await Promise.all([new Response(child.stdout).text(), child.exited]);
+  return listed
+    .split('\n')
+    .map(line => Number(line.trim()))
+    .filter(pid => Number.isInteger(pid) && pid > 1);
+}
+
+/**
+ * Ends a socket's server AND everything its panes started.
+ *
+ * `kill-server` alone only hangs the panes up, and what a hangup reaches is the kernel's and the
+ * shell's business: a pane script's `sleep 300` once outlived it and failed the run's leak check.
+ * The scripts now `exec` their sleep so nothing sits below the pane's own process, and this kills
+ * each pane's whole group outright as well, so no ordering of the two can leave one behind.
+ */
+async function endServer(socket: string): Promise<void> {
+  const groups = await paneGroups(socket).catch(() => []);
+  await tmuxCommand(socket, 'kill-server').catch(() => 0);
+  for (const group of groups) {
+    try {
+      process.kill(-group, 'SIGKILL');
+    } catch {
+      // Already gone with its pane: what was wanted.
+    }
+  }
 }
 
 /**
@@ -511,7 +546,7 @@ describe('the structured answer journey', () => {
   afterEach(async () => {
     // A journey that failed has already reported why; stopping what it left must not add a second story.
     for (const daemon of [...started.values()]) await shutdown(daemon).catch(() => undefined);
-    for (const socket of sockets) await tmuxCommand(socket, 'kill-server').catch(() => 0);
+    for (const socket of sockets) await endServer(socket);
     sockets.clear();
     if (previousHome === undefined) delete process.env.FY_HOME;
     else process.env.FY_HOME = previousHome;

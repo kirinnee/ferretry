@@ -79,6 +79,17 @@ function childEnvironment(source: Readonly<Record<string, string | undefined>>):
   return environment;
 }
 
+/** Run one write to the child's stdin, ignoring a pipe the child already closed, whether the sink
+ *  throws or rejects. */
+function quietly(work: () => unknown): void {
+  try {
+    const result = work();
+    if (result instanceof Promise) void result.catch(() => undefined);
+  } catch {
+    // The child stopped reading; its stdout and stderr carry the rest of the story.
+  }
+}
+
 export class CodexAppServerCatalog {
   constructor(private readonly options: CodexAppServerOptions) {}
 
@@ -107,8 +118,13 @@ export class CodexAppServerCatalog {
     const diagnostics = { text: '' };
     const stderr = this.#drain(child.stderr, diagnostics);
     const exchange = new CodexModelListExchange();
+    // A BROKEN STDIN IS NOT THE ANSWER. A child that exits at once — the usual way Codex says "auth
+    // expired" — closes its end before the first request lands, and the write then throws `EPIPE`.
+    // Letting that escape replaced the child's own complaint with a pipe error, and which one won was
+    // a race. The child cannot be listening any more, so stdout reaching EOF (or the deadline) is what
+    // ends the exchange, and stderr still says why.
     const write = (message: unknown): void => {
-      child.stdin.write(`${JSON.stringify(message)}\n`);
+      quietly(() => child.stdin.write(`${JSON.stringify(message)}\n`));
     };
 
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -128,7 +144,7 @@ export class CodexAppServerCatalog {
         outcome = await this.#converse(child.stdout, exchange, write, deadline);
       } finally {
         clearTimeout(timer);
-        child.stdin.end();
+        quietly(() => child.stdin.end());
         await this.#reap(child);
       }
 
