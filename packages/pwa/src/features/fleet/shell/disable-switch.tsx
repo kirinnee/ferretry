@@ -10,7 +10,7 @@
  */
 
 import type { FleetDisabled } from '@ferretry/protocol';
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import { cn } from '../../../lib/class-names.ts';
 import { Button } from '../../../shell/primitives.tsx';
 import { runtimeActionRefusal } from '../runtimes/runtime-actions-model.ts';
@@ -46,11 +46,28 @@ export interface DisableSwitchProps {
   readonly now?: () => number;
   /** In a list row: the hints stay on the page and in the form. */
   readonly compact?: boolean;
+  /** Class names for the details block. */
   readonly className?: string;
+  /** The label beside the switch when no \`children\` lay it out. */
+  readonly title?: string;
+  /** Lays the switch and its details out; a card puts the switch in its header row. */
+  readonly children?: (parts: DisableSwitchParts) => ReactNode;
+}
+
+export interface DisableSwitchParts {
+  /** The small switch itself: put it in the header row, right-aligned beside the name. */
+  readonly toggle: ReactNode;
+  /** Everything else, only when there is something to say: the off note, the lock, an error, the form. */
+  readonly details: ReactNode;
 }
 
 const targetName = (target: DisableTarget): string => (target.kind === 'login' ? target.id : target.name);
 
+/**
+ * A small inline switch (a 44px tap target around a compact track — no box, no On/Off word: the switch state
+ * is the label). `children` lays the two parts out; without it the switch is a row with `title` and the
+ * details under it.
+ */
 export function DisableSwitch({
   target,
   disabled,
@@ -62,6 +79,8 @@ export function DisableSwitch({
   now = Date.now,
   compact = false,
   className,
+  title,
+  children,
 }: DisableSwitchProps) {
   const [asking, setAsking] = useState(false);
   const [reason, setReason] = useState('');
@@ -102,60 +121,54 @@ export function DisableSwitch({
     await onChanged();
   };
 
-  return (
-    <div
-      className={cn('flex min-w-0 flex-col gap-2', className)}
+  const control = (
+    <span
+      className="relative z-10 inline-flex shrink-0"
       data-disable-switch={name}
       data-disabled-state={off ? 'off' : 'on'}
     >
-      <div className="flex min-w-0 items-center gap-3">
-        <button
-          type="button"
-          role="switch"
-          aria-checked={!off}
-          aria-label={`${name} is used for new starts`}
-          aria-describedby={`${id}-note`}
-          disabled={!online || lockedToLogin || refusal !== null}
-          title={refusal ?? undefined}
-          onClick={() => void toggle()}
+      <button
+        type="button"
+        role="switch"
+        aria-checked={!off}
+        aria-label={`${name}: ${off ? 'off' : 'on'} for new starts`}
+        {...(off ? { 'aria-describedby': `${id}-note` } : {})}
+        disabled={!online || lockedToLogin || refusal !== null}
+        title={refusal ?? undefined}
+        onClick={() => void toggle()}
+        className="-my-3 inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-control disabled:cursor-not-allowed disabled:opacity-60"
+        data-disable-toggle=""
+      >
+        <span
+          aria-hidden="true"
           className={cn(
-            'inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center gap-2 rounded-control border px-control-x text-ui font-semibold transition-colors',
-            off ? 'border-border bg-surface-2 text-muted' : 'border-accent bg-accent-soft text-accent',
-            'disabled:cursor-not-allowed disabled:opacity-60',
+            'relative h-5 w-9 shrink-0 rounded-full border transition-colors',
+            off ? 'border-border-strong bg-surface-2' : 'border-accent bg-accent',
           )}
-          data-disable-toggle=""
         >
           <span
-            aria-hidden="true"
             className={cn(
-              'relative h-5 w-9 shrink-0 rounded-full border transition-colors',
-              off ? 'border-border-strong bg-surface' : 'border-accent bg-accent',
+              'absolute left-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-full transition-transform',
+              off ? 'translate-x-[2px] bg-muted' : 'translate-x-[18px] bg-accent-fg',
             )}
-          >
-            <span
-              className={cn(
-                'absolute left-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-full bg-fg transition-transform',
-                off ? 'translate-x-[2px]' : 'translate-x-[18px]',
-              )}
-            />
-          </span>
-          {off ? 'Off' : 'On'}
-        </button>
-        <span id={`${id}-note`} className="min-w-0 text-cell leading-base" data-disable-note="">
-          {off ? (
-            <>
-              <span className="block font-semibold text-warn" data-disable-headline="">
-                {offHeadline(target, disabled, login?.id ?? '')}
-              </span>
-              <span className="block text-muted" data-disable-detail="">
-                {disabledDetail(disabled)}
-              </span>
-            </>
-          ) : (
-            <span className="block text-muted">New starts can use it.</span>
-          )}
+          />
         </span>
-      </div>
+      </button>
+    </span>
+  );
+
+  const details = (
+    <div className={cn('flex min-w-0 flex-col gap-1', className)} data-disable-details={name}>
+      {off ? (
+        <span id={`${id}-note`} className="min-w-0 text-meta leading-base text-muted" data-disable-note="">
+          <span className="block" data-disable-headline="">
+            {offHeadline(target, disabled, login?.id ?? '')}
+          </span>
+          <span className="block" data-disable-detail="">
+            {disabledDetail(disabled)}
+          </span>
+        </span>
+      ) : null}
 
       {lockedToLogin && login !== undefined ? (
         <p className="m-0 text-meta leading-base text-muted" data-disable-owner="login">
@@ -163,12 +176,7 @@ export function DisableSwitch({
           <a href={login.href} className="font-semibold text-accent underline" data-disable-login-link="">
             {login.id}
           </a>
-          .{compact ? '' : ` ${KEEPS_RUNNING}`}
-        </p>
-      ) : null}
-      {off && !lockedToLogin && !compact ? (
-        <p className="m-0 text-meta leading-base text-muted" data-disable-keeps="">
-          {KEEPS_RUNNING}
+          .
         </p>
       ) : null}
       {refusal === null || compact ? null : (
@@ -262,6 +270,17 @@ export function DisableSwitch({
           </ChangeApplyPanel>
         </div>
       ) : null}
+    </div>
+  );
+
+  if (children !== undefined) return <>{children({ toggle: control, details })}</>;
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <div className="flex min-h-[20px] min-w-0 items-center justify-between gap-3">
+        <h4 className="m-0 text-meta font-semibold uppercase text-muted">{title ?? 'Use for new starts'}</h4>
+        {control}
+      </div>
+      {details}
     </div>
   );
 }

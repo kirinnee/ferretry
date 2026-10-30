@@ -19,7 +19,7 @@ import { ImportConversations } from '../conversations/conversation-picker.tsx';
 import { credentialEmail } from '../credentials/credentials-model.ts';
 import { AccountStatus } from '../shell/account-status.tsx';
 import { type AccountChanges, useAccountChanges } from '../shell/apply-change-panel.tsx';
-import { DisableSwitch } from '../shell/disable-switch.tsx';
+import { DisableSwitch, type DisableSwitchParts } from '../shell/disable-switch.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import { AddRuntime } from './add-runtime.tsx';
 import { type MachineData, machineDetailHash, useMachineData, useMachineDetail } from './machine-data.ts';
@@ -106,7 +106,7 @@ function RuntimeSwitch({
   changes,
   reload,
   compact,
-  className,
+  children,
 }: {
   readonly runtime: FleetRuntimeView;
   readonly machineName: string;
@@ -114,12 +114,12 @@ function RuntimeSwitch({
   readonly changes: AccountChanges;
   readonly reload: () => Promise<unknown>;
   readonly compact?: boolean;
-  readonly className?: string;
+  readonly children?: (parts: DisableSwitchParts) => React.ReactNode;
 }) {
   return (
     <DisableSwitch
       {...(compact === undefined ? {} : { compact })}
-      {...(className === undefined ? {} : { className })}
+      {...(children === undefined ? {} : { children })}
       target={{ kind: 'runtime', name: runtime.name }}
       disabled={runtime.disabled}
       login={{ id: runtime.credential.id, href: machineDetailHash(machineName, 'credentials', runtime.credential.id) }}
@@ -184,9 +184,7 @@ function RuntimePage({
         </div>
       </div>
 
-      <Section title="Use for new starts">
-        <RuntimeSwitch runtime={runtime} machineName={machineName} online={online} changes={changes} reload={reload} />
-      </Section>
+      <RuntimeSwitch runtime={runtime} machineName={machineName} online={online} changes={changes} reload={reload} />
 
       {installed ? null : (
         <div role="status" className="kt-panel flex flex-col gap-1 p-panel" data-runtime-note="missing">
@@ -392,44 +390,52 @@ function RuntimeRow({
   return (
     <div className="flex flex-col gap-1">
       <div
-        className="kt-panel flex min-w-0 flex-col gap-2 p-panel has-[a:hover]:border-accent"
+        className="kt-panel relative flex min-w-0 flex-col gap-2 p-panel has-[a:hover]:border-accent"
         data-runtime-card={runtime.name}
       >
-        <a
-          href={machineDetailHash(machineName, 'runtimes', runtime.name)}
-          className="flex min-h-control min-w-0 items-start gap-3 text-left no-underline hover:no-underline"
-          data-runtime-row={runtime.name}
+        <RuntimeSwitch
+          compact
+          runtime={runtime}
+          machineName={machineName}
+          online={online}
+          changes={changes}
+          reload={reload}
         >
-          <AccountStatus word={runtimeWord(runtime)} className="mt-1" />
-          <span className="flex min-w-0 flex-1 flex-col gap-1">
-            <span className="truncate font-mono text-row font-semibold text-fg">{runtime.name}</span>
-            <span className="break-words text-cell text-muted">
-              <span className="font-mono">{loginLine(runtime, data)}</span> · {runtime.profile} profile ·{' '}
-              {runtimeDefaultModel(runtime)}
-            </span>
-            {runtime.agent || runtime.disabled !== undefined ? (
-              <span className="flex flex-wrap gap-1">
-                {runtime.agent ? <Badge tone="accent">Agent</Badge> : null}
-                {runtime.disabled === undefined ? null : (
-                  <Badge tone="warn" data-runtime-disabled-badge="">
-                    Disabled
-                  </Badge>
-                )}
-              </span>
-            ) : null}
-          </span>
-          <ChevronRight size={16} aria-hidden="true" className="mt-1 shrink-0 text-muted" />
-        </a>
-        <div className="flex flex-wrap items-start justify-between gap-2 border-t border-border-soft pt-2">
-          <RuntimeSwitch
-            compact
-            className="min-w-[14rem] flex-1"
-            runtime={runtime}
-            machineName={machineName}
-            online={online}
-            changes={changes}
-            reload={reload}
-          />
+          {({ toggle, details }) => (
+            <>
+              <div className="flex min-w-0 items-start gap-3">
+                <a
+                  href={machineDetailHash(machineName, 'runtimes', runtime.name)}
+                  className="flex min-h-control min-w-0 flex-1 items-start gap-3 text-left no-underline after:absolute after:inset-0 after:content-[''] hover:no-underline"
+                  data-runtime-row={runtime.name}
+                >
+                  <AccountStatus word={runtimeWord(runtime)} className="mt-1" />
+                  <span className="flex min-w-0 flex-1 flex-col gap-1">
+                    <span className="truncate font-mono text-row font-semibold text-fg">{runtime.name}</span>
+                    <span className="break-words text-cell text-muted">
+                      <span className="font-mono">{loginLine(runtime, data)}</span> · {runtime.profile} profile ·{' '}
+                      {runtimeDefaultModel(runtime)}
+                    </span>
+                    {runtime.agent || runtime.disabled !== undefined ? (
+                      <span className="flex flex-wrap gap-1">
+                        {runtime.agent ? <Badge tone="accent">Agent</Badge> : null}
+                        {runtime.disabled === undefined ? null : (
+                          <Badge tone="warn" data-runtime-disabled-badge="">
+                            Disabled
+                          </Badge>
+                        )}
+                      </span>
+                    ) : null}
+                  </span>
+                </a>
+                {toggle}
+                <ChevronRight size={16} aria-hidden="true" className="mt-1 shrink-0 text-muted" />
+              </div>
+              {details}
+            </>
+          )}
+        </RuntimeSwitch>
+        <div className="flex flex-wrap items-start justify-end gap-2 border-t border-border-soft pt-2">
           <RuntimeActionButtons
             runtime={runtime}
             refusal={refusal}
