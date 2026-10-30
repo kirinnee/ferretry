@@ -11,7 +11,8 @@
  *
  * Two switches, read from `localStorage` so that no URL the worker opens carries them:
  *
- *   `scene-boot-ms`  how long the "store" takes to load before the router mounts (default 0);
+ *   `scene-hold`     `1` keeps the "store" loading, so the router does not mount, until the page calls
+ *                    `__mountScene()` (default: it mounts at once);
  *   `scene-app`      `none` makes this a page with no notification wiring at all — an app too old to
  *                    know the message, or a page that is not the app.
  */
@@ -32,7 +33,7 @@ const setting = (key: string): string | null => {
 };
 
 const wired = setting('scene-app') !== 'none';
-const bootMs = Number(setting('scene-boot-ms') ?? '0');
+const held = setting('scene-hold') === '1';
 
 /** Every in-app navigation a notification asked for, in order. */
 const opens: string[] = [];
@@ -69,7 +70,7 @@ function Shown() {
 
 const host = document.getElementById('root');
 if (host === null) throw new Error('missing #root');
-setTimeout(() => {
+const mount = (): void => {
   createRoot(host).render(
     <NotificationOpenContext.Provider value={inbox}>
       <RouterProvider>
@@ -77,4 +78,6 @@ setTimeout(() => {
       </RouterProvider>
     </NotificationOpenContext.Provider>,
   );
-}, bootMs);
+};
+(globalThis as unknown as { __mountScene: () => void }).__mountScene = mount;
+if (!held) setTimeout(mount, 0);

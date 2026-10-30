@@ -411,7 +411,7 @@ describe('navigation without reloads, and the session cache, in the real shell',
   );
 
   it(
-    'forgets the cache when Cached data is cleared: a held reload draws a skeleton, on a desktop and a phone',
+    'shows This device › Cached data, light and dark, and forgets the cache when it is cleared: a held reload draws a skeleton, on a desktop and a phone',
     async () =>
       await eachForm(async form => {
         // Arrange
@@ -422,6 +422,20 @@ describe('navigation without reloads, and the session cache, in the real shell',
           await nextBoot(tab, {});
           await tab.goto(`${origin()}${sessionsPathOf(daemon)}/settings#device`);
           await tab.waitForSelector('[data-clear-cached-data="idle"]');
+          // The section as drawn in light and in dark: the theme follows the OS answer live, so the same
+          // profile shows both without a second boot.
+          const sectionFacts: { readonly mode: string; readonly text: string; readonly wide: number }[] = [];
+          for (const mode of ['light', 'dark'] as const) {
+            await tab.emulateMedia({ colorScheme: mode });
+            await tab.$eval('[data-clear-cached-data]', node => node.scrollIntoView({ block: 'center' }));
+            sectionFacts.push({
+              mode,
+              text: await tab.$eval('[data-settings-section="device"]', node => (node as HTMLElement).innerText),
+              wide: await tab.evaluate(() => document.documentElement.scrollWidth - innerWidth),
+            });
+            await capture(tab, `settings-cached-data-${form}-${mode}`);
+          }
+          await tab.emulateMedia({ colorScheme: 'light' });
           // From here on the daemon never answers a list again, so nothing can write the cache back in.
           await tab.evaluate(() => (globalThis as unknown as { __navCache: { stall(): void } }).__navCache.stall());
 
@@ -438,6 +452,10 @@ describe('navigation without reloads, and the session cache, in the real shell',
           await tab.waitForSelector(listRow('s-03'));
 
           // Assert
+          for (const { mode, text, wide } of sectionFacts) {
+            expect(text, `${mode} Cached data section text`).toContain('Cached data');
+            expect(wide, `${mode} horizontal overflow`).toBeLessThanOrEqual(0);
+          }
           expect(rowsWhileHeld).toBe(0);
           expect(pillWhileHeld).toBe(0);
           expect(await tab.$$eval(SKELETON, nodes => nodes.length)).toBe(0);
@@ -559,35 +577,4 @@ describe('navigation without reloads, and the session cache, in the real shell',
       }),
     120_000,
   );
-
-  it('shows This device › Cached data on a desktop and a phone, light and dark', async () => {
-    const outcomes = await Promise.allSettled(
-      FORMS.flatMap(form => (['light', 'dark'] as const).map(mode => ({ form, mode }))).map(async ({ form, mode }) => {
-        // Arrange
-        const { context, tab } = await open(form, mode);
-        try {
-          const daemon = await boot(tab);
-
-          // Act
-          await tab.goto(`${origin()}${sessionsPathOf(daemon)}/settings#device`);
-          await tab.waitForSelector('[data-clear-cached-data="idle"]');
-          await tab.$eval('[data-clear-cached-data]', node => node.scrollIntoView({ block: 'center' }));
-          const wide = await tab.evaluate(() => document.documentElement.scrollWidth - innerWidth);
-          await capture(tab, `settings-cached-data-${form}-${mode}`);
-
-          // Assert
-          expect(
-            await tab.$eval('[data-settings-section="device"]', node => (node as HTMLElement).innerText),
-          ).toContain('Cached data');
-          expect(wide).toBeLessThanOrEqual(0);
-        } catch (error) {
-          if (error instanceof Error) error.message = `[${form} ${mode}] ${error.message}`;
-          throw error;
-        } finally {
-          await context.close();
-        }
-      }),
-    );
-    for (const outcome of outcomes) if (outcome.status === 'rejected') throw outcome.reason;
-  }, 180_000);
 });

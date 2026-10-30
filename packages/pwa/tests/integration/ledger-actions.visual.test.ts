@@ -109,43 +109,63 @@ const open = async (context: BrowserContext, state: string, mode: 'light' | 'dar
   return tab;
 };
 
+/** Checks one send state's button and menu in a page that has already opened it. */
+const checkState = async (tab: Page, viewport: (typeof VIEWPORTS)[number]): Promise<void> => {
+  const button = tab.getByRole('button', { name: 'Message actions' });
+  expect(await button.count()).toBe(1);
+  expect(await tab.locator('[data-ledger-actions]').count()).toBe(0);
+  const box = await button.boundingBox();
+  expect(box?.height).toBeLessThanOrEqual(30);
+  const hit = await button.evaluate(node => {
+    const rect = node.getBoundingClientRect();
+    const after = getComputedStyle(node, '::after');
+    return {
+      width: Math.max(rect.width, Number.parseFloat(after.width)),
+      height: Math.max(rect.height, Number.parseFloat(after.height)),
+    };
+  });
+  expect(hit.width).toBeGreaterThanOrEqual(44);
+  expect(hit.height).toBeGreaterThanOrEqual(44);
+  await button.click();
+  const menu = tab.getByRole('menu', { name: 'Message actions' });
+  await menu.waitFor();
+  const bounds = await menu.boundingBox();
+  expect(bounds?.x).toBeGreaterThanOrEqual(0);
+  expect((bounds?.x ?? 0) + (bounds?.width ?? 0)).toBeLessThanOrEqual(viewport.width);
+  expect((bounds?.y ?? 0) + (bounds?.height ?? 0)).toBeLessThanOrEqual(viewport.height);
+  await tab.keyboard.press('Escape');
+  await menu.waitFor({ state: 'detached' });
+  expect(await tab.evaluate(() => document.activeElement?.getAttribute('aria-label'))).toBe('Message actions');
+};
+
+/** Two lanes, each its own browser profile, take alternate states; failures are reported lane 0 first. */
+const LANES = 2;
+
 describe('a send’s actions are one small button', () => {
   for (const viewport of VIEWPORTS) {
     it(`keeps every state's button small, tappable and its menu on screen at ${viewport.name}`, async () => {
-      const context = await newContext(viewport, 'light');
-      try {
-        for (const state of STATES) {
-          const tab = await open(context, state, 'light');
-          const button = tab.getByRole('button', { name: 'Message actions' });
-          expect(await button.count()).toBe(1);
-          expect(await tab.locator('[data-ledger-actions]').count()).toBe(0);
-          const box = await button.boundingBox();
-          expect(box?.height).toBeLessThanOrEqual(30);
-          const hit = await button.evaluate(node => {
-            const rect = node.getBoundingClientRect();
-            const after = getComputedStyle(node, '::after');
-            return {
-              width: Math.max(rect.width, Number.parseFloat(after.width)),
-              height: Math.max(rect.height, Number.parseFloat(after.height)),
-            };
-          });
-          expect(hit.width).toBeGreaterThanOrEqual(44);
-          expect(hit.height).toBeGreaterThanOrEqual(44);
-          await button.click();
-          const menu = tab.getByRole('menu', { name: 'Message actions' });
-          await menu.waitFor();
-          const bounds = await menu.boundingBox();
-          expect(bounds?.x).toBeGreaterThanOrEqual(0);
-          expect((bounds?.x ?? 0) + (bounds?.width ?? 0)).toBeLessThanOrEqual(viewport.width);
-          expect((bounds?.y ?? 0) + (bounds?.height ?? 0)).toBeLessThanOrEqual(viewport.height);
-          await tab.keyboard.press('Escape');
-          await menu.waitFor({ state: 'detached' });
-          expect(await tab.evaluate(() => document.activeElement?.getAttribute('aria-label'))).toBe('Message actions');
-          await tab.close();
-        }
-      } finally {
-        await context.close();
-      }
+      const outcomes = await Promise.allSettled(
+        Array.from({ length: LANES }, async (_, lane) => {
+          const context = await newContext(viewport, 'light');
+          try {
+            const tab = await context.newPage();
+            for (const [index, state] of STATES.entries()) {
+              if (index % LANES !== lane) continue;
+              try {
+                await tab.goto(`${server?.url.origin ?? ''}/?state=${state}&theme=studio-light`);
+                await tab.waitForSelector('.fy-transcript-content');
+                await checkState(tab, viewport);
+              } catch (error) {
+                if (error instanceof Error) error.message = `[${state}] ${error.message}`;
+                throw error;
+              }
+            }
+          } finally {
+            await context.close();
+          }
+        }),
+      );
+      for (const outcome of outcomes) if (outcome.status === 'rejected') throw outcome.reason;
     }, 120_000);
   }
 });
