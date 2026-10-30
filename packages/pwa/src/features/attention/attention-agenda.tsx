@@ -6,16 +6,19 @@
  * section, off by default). With it off the chat has no agenda line; what is on its way ("Sending…") still
  * shows on its own slim row. Plain notifications belong to the Inbox, never to the agenda.
  *
- * - ONE LINE above the composer counts what needs the owner and what waits on the ferret; tapping it opens a
- *   bounded DRAWER of rows upward (blocking → needs you → ferret's turn).
- * - A row's title opens the item's FULL CARD over the transcript (the header, the line and the composer stay);
- *   the drawer closes. ‹ › page through the agenda; an answer moves on to the next item that needs the owner.
- * - "＋ reply" adds a removable "re: <title>" chip — several allowed — and the next message carries the `!A5`
- *   references of its chips (`withReferencePrefix`), then clears them. An option picked on a row or the card
- *   carries the composer's text as its note and empties the composer when it was used.
- * - A wide screen with a mouse can DOCK the agenda beside the chat; the full card opens in the chat area.
- * - `?attention=A5` (a notification tap, a proved `!A5`) arrives as a `focus` request: an open item opens its
- *   full card, a resolved one opens in the resolved list, and an id the board does not hold is said out loud.
+ * - ONE ROW above the composer: what is running on its left, the agenda pill on its right. The pill opens a
+ *   raised DRAWER of rows (blocking → needs you → ferret's turn) over a scrim on the chat; every row is one button.
+ * - A row opens the item's VIEW: a full-width, full-height OVERLAY over the chat column (`attention-item-view.tsx`)
+ *   — sticky title and ask, one scrolling body, a sticky action bar in the composer's place. The chat stays
+ *   mounted underneath, so it is exactly where it was when the view closes. ‹ › page through the agenda, ✕ / Esc /
+ *   ↓ go back; an answer moves on to the next item that needs the owner, else back to the chat.
+ * - "Add to reply" in the bar adds a removable "re: <title>" chip — several allowed — and returns to the chat; the
+ *   next message carries the `!A5` references of its chips (`withReferencePrefix`), then clears them. Text typed
+ *   in the bar goes as a message that names the item (`withReferences`), and an answer carries it as its note.
+ * - A wide screen with a mouse can DOCK the agenda beside the chat; the view opens over the chat column.
+ * - `?agenda=A5` or `?attention=A5` (a notification tap, a proved `!A5`) arrives as a `focus` request: an open
+ *   item opens its card, a resolved one opens in the resolved list, and an id the board does not hold is said
+ *   out loud.
  */
 
 import type { AttentionId, AttentionItem, AttentionSnapshot } from '@ferretry/protocol';
@@ -23,25 +26,28 @@ import { CircleAlert, PanelRight } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ChatProse } from '../../components/chat-prose.tsx';
 import { agendaCounts, agendaItems } from '../../lib/agenda-chat.ts';
+import { itemHistory } from '../../lib/agenda-history.ts';
 import { nextOwnerItem, sortAgenda } from '../../lib/agenda-status.ts';
 import type { InboxAction } from '../../lib/attention-answers.ts';
 import type { DaemonAttentionClient } from '../../lib/attention-client.ts';
 import { actionSentence } from '../../lib/attention-inbox.ts';
-import { withComposerNote } from '../../lib/attention-reply.ts';
+import { withComposerNote, withReferences } from '../../lib/attention-reply.ts';
 import type { AttentionLoadStatus } from '../../lib/attention-store.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../../lib/daemon-scope.ts';
+import { composerQuoteTarget } from '../../lib/quote.ts';
+import type { TranscriptEntry } from '../../lib/session-screens.ts';
 import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
-import { attentionReference } from './attention-board.tsx';
 import {
   AttentionAgendaDrawer,
   AttentionAgendaLine,
   AttentionAgendaPanel,
   AttentionReferenceChips,
 } from './attention-agenda-line.tsx';
+import { attentionReference } from './attention-board.tsx';
 import { useAgendaDock } from './attention-collapse.ts';
 import { AttentionDeliveryContext, attentionHeading, deliveringIds } from './attention-delivery.tsx';
-import { AttentionFullCard } from './attention-full-card.tsx';
+import { AttentionItemView } from './attention-item-view.tsx';
 
 /** What the chat sends of the attention client, and nothing else of it. */
 export type AttentionActionClient = Pick<
@@ -94,7 +100,16 @@ const runAttentionAction = async (
 };
 
 const NO_ITEMS: readonly AttentionItem[] = [];
+const NO_ENTRIES: readonly TranscriptEntry[] = [];
 const copyWriter = browserClipboardWriter();
+
+/** What was typed in the item view's bar goes into the composer's draft, after what is already there. */
+const keepTyped = (scope: DaemonSessionScope, typed: string): void => {
+  const composer = typed === '' ? null : composerQuoteTarget(scope);
+  if (composer === null) return;
+  const draft = composer.draft();
+  composer.replaceDraft(draft.trim() === '' ? typed : `${draft.replace(/\s*$/u, '')}\n\n${typed}`);
+};
 
 const failure = (reason: unknown): string =>
   reason instanceof Error ? reason.message : 'The machine did not accept this answer.';
@@ -120,27 +135,34 @@ export interface UseAttentionAgendaInput {
   readonly desktop: boolean;
   /** The primary pointer is touch: the card can be swiped. */
   readonly swipeable: boolean;
+  /** What is running ("Pondering… 11s"), for the line's left half. Drawn there only while the line exists. */
+  readonly live?: ReactNode;
+  /** The conversation, so an item's view can show what was said about it. */
+  readonly entries?: readonly TranscriptEntry[];
+  /** Sends one chat message to this session; the view's text field goes through it. Absent: that field says so. */
+  readonly send?: (message: string) => Promise<unknown>;
   readonly now?: number;
 }
 
 export interface AttentionAgenda {
   /** The drawer, the line and the chips, in that order — siblings above the composer. `null`: nothing to say. */
   readonly above: ReactNode;
-  /** The open item's full card, laid over the transcript only. */
-  readonly card: ReactNode;
+  /** The open item's view: an overlay over the whole chat column. */
+  readonly view: ReactNode;
+  /** The scrim behind the open drawer, over the chat only. */
+  readonly scrim: ReactNode;
+  /** A view is open: the chat underneath is hidden from sight and from the keyboard, but stays mounted. */
+  readonly covered: boolean;
+  /** The line takes `live` itself, so the transcript must not draw it a second time. */
+  readonly hostsLive: boolean;
   /** The docked panel, beside the chat. */
   readonly side: ReactNode;
   /** The header's "Agenda" button that docks the panel (a wide screen only). */
   readonly dockButton: ReactNode;
   /** The ids the next message is about, in chip order. */
   readonly references: () => readonly AttentionId[];
-  /** Wire these into the Composer. */
-  readonly composer: {
-    readonly onDraftChange: (text: string) => void;
-    readonly clearSignal: number;
-    /** A message went: its chips are spent. */
-    readonly onSent: () => void;
-  };
+  /** Wire this into the Composer: a message went, so its chips are spent. */
+  readonly composer: { readonly onSent: () => void };
 }
 
 export const useAttentionAgenda = ({
@@ -156,6 +178,9 @@ export const useAttentionAgenda = ({
   repliesSlot,
   desktop,
   swipeable,
+  live,
+  entries = NO_ENTRIES,
+  send,
   now,
 }: UseAttentionAgendaInput): AttentionAgenda => {
   const domId = useId();
@@ -194,11 +219,6 @@ export const useAttentionAgenda = ({
 
   const [busy, setBusy] = useState<ReadonlyMap<AttentionId, string | null>>(new Map());
   const [announcement, setAnnouncement] = useState('');
-  const [clearSignal, setClearSignal] = useState(0);
-  const text = useRef('');
-  const onDraftChange = useCallback((next: string): void => {
-    text.current = next;
-  }, []);
   const onSent = useCallback((): void => update(() => ({ chips: [] })), [update]);
 
   const setCard = useCallback((id: AttentionId, state: string | null | undefined): void => {
@@ -210,9 +230,9 @@ export const useAttentionAgenda = ({
     });
   }, []);
 
-  const act = (item: AttentionItem, action: InboxAction): void => {
+  const act = (item: AttentionItem, action: InboxAction, note: string): void => {
     if (client === undefined || busy.get(item.id) === null) return;
-    const sent = withComposerNote(action, text.current);
+    const sent = withComposerNote(action, note);
     const order = agenda;
     const onCard = cardId === item.id;
     setCard(item.id, null);
@@ -221,7 +241,6 @@ export const useAttentionAgenda = ({
       () => {
         setCard(item.id, undefined);
         setAnnouncement(actionSentence(sent, item.id));
-        if (sent !== action) setClearSignal(signal => signal + 1);
         if (onCard) update(() => ({ card: nextOwnerItem(order, item.id)?.id ?? null }));
       },
       (reason: unknown) => setCard(item.id, failure(reason)),
@@ -262,13 +281,12 @@ export const useAttentionAgenda = ({
   const parseErrors = agendaMode ? (snapshot?.parseErrors ?? 0) : 0;
   const counts = agendaMode && agenda.length > 0 ? agendaCounts(agenda) : undefined;
   const drawerOpen = here.drawer && counts !== undefined && !docked;
+  const closeDrawer = (): void => update(() => ({ drawer: false }));
+  const sendingCount = repliesSlot === undefined ? delivering.size : 0;
+  const hostsLive = !loading && (counts !== undefined || repliesSlot !== undefined || sendingCount > 0);
 
   const rows = {
     ferret,
-    busy: busyIds,
-    referenced: chipsRef.current,
-    onAct: act,
-    onAddReply: addReply,
     onOpen: openCard,
     ...(now === undefined ? {} : { now }),
   };
@@ -282,7 +300,9 @@ export const useAttentionAgenda = ({
       <p aria-live="polite" className="sr-only" role="status">
         {announcement}
       </p>
-      {drawerOpen ? <AttentionAgendaDrawer id={drawerId} items={agenda} {...rows} /> : null}
+      {drawerOpen ? (
+        <AttentionAgendaDrawer counts={counts} id={drawerId} items={agenda} onClose={closeDrawer} {...rows} />
+      ) : null}
       {missing && focusTarget !== null ? (
         <p className="fy-agenda-note" data-agenda-missing={focusTarget} role="status">
           <CircleAlert aria-hidden="true" size={14} />
@@ -307,8 +327,9 @@ export const useAttentionAgenda = ({
         ferret={ferret}
         onToggle={() => update(current => ({ drawer: !current.drawer }))}
         open={drawerOpen}
-        sending={{ count: repliesSlot === undefined ? delivering.size : 0, headings: sendingHeadings }}
+        sending={{ count: sendingCount, headings: sendingHeadings }}
         {...(counts === undefined ? {} : { counts })}
+        {...(live === undefined ? {} : { live })}
         {...(repliesSlot === undefined ? {} : { repliesSlot })}
       />
       <AttentionReferenceChips
@@ -322,30 +343,49 @@ export const useAttentionAgenda = ({
   const at = cardItem === undefined ? -1 : agenda.indexOf(cardItem);
   const previous = at > 0 ? agenda[at - 1] : undefined;
   const next = at >= 0 && at < agenda.length - 1 ? agenda[at + 1] : undefined;
-  const card =
+  const history = useMemo(() => (cardItem === undefined ? [] : itemHistory(cardItem, entries)), [cardItem, entries]);
+  const view =
     cardItem === undefined ? null : (
-      <div className="fy-agenda-card" data-agenda-card={cardItem.id}>
-        <AttentionDeliveryContext.Provider value={deliveryState}>
-          <AttentionFullCard
-            busy={busyIds.has(cardItem.id)}
-            error={typeof busy.get(cardItem.id) === 'string' ? (busy.get(cardItem.id) ?? null) : null}
-            ferret={ferret}
-            item={cardItem}
-            key={cardItem.id}
-            onAct={action => act(cardItem, action)}
-            onAddReply={() => addReply(cardItem)}
-            onClose={() => update(() => ({ card: null }))}
-            position={{ index: at, total: agenda.length }}
-            renderProse={proseText => <ChatProse copyable={copyWriter} text={proseText} />}
-            swipeable={swipeable}
-            {...(now === undefined ? {} : { now })}
-            {...(previous === undefined ? {} : { onPrevious: () => update(() => ({ card: previous.id })) })}
-            {...(next === undefined ? {} : { onNext: () => update(() => ({ card: next.id })) })}
-            {...(client === undefined ? {} : { onProgress: stepTicker(client, connection, scope, cardItem.id) })}
-          />
-        </AttentionDeliveryContext.Provider>
-      </div>
+      <AttentionDeliveryContext.Provider value={deliveryState}>
+        <AttentionItemView
+          busy={busyIds.has(cardItem.id)}
+          error={typeof busy.get(cardItem.id) === 'string' ? (busy.get(cardItem.id) ?? null) : null}
+          ferret={ferret}
+          history={history}
+          item={cardItem}
+          key={cardItem.id}
+          onAct={(action, note) => act(cardItem, action, note)}
+          onClose={() => update(() => ({ card: null }))}
+          onReply={typed => {
+            addReply(cardItem);
+            keepTyped(scope, typed);
+            update(() => ({ card: null }));
+          }}
+          onSend={async text => {
+            if (send === undefined) throw new Error('This conversation cannot take a message from here.');
+            await send(withReferences(text, [cardItem.id]));
+          }}
+          position={{ index: at, total: agenda.length }}
+          renderProse={proseText => <ChatProse copyable={copyWriter} text={proseText} />}
+          swipeable={swipeable}
+          {...(now === undefined ? {} : { now })}
+          {...(previous === undefined ? {} : { onPrevious: () => update(() => ({ card: previous.id })) })}
+          {...(next === undefined ? {} : { onNext: () => update(() => ({ card: next.id })) })}
+          {...(client === undefined ? {} : { onProgress: stepTicker(client, connection, scope, cardItem.id) })}
+        />
+      </AttentionDeliveryContext.Provider>
     );
+
+  const scrim = drawerOpen ? (
+    <button
+      aria-label="Close the agenda"
+      className="fy-agenda-scrim"
+      data-agenda-scrim=""
+      onClick={closeDrawer}
+      tabIndex={-1}
+      type="button"
+    />
+  ) : null;
 
   const side = !docked ? null : (
     <AttentionDeliveryContext.Provider value={deliveryState}>
@@ -370,10 +410,13 @@ export const useAttentionAgenda = ({
 
   return {
     above,
-    card,
+    view,
+    scrim,
+    covered: cardItem !== undefined,
+    hostsLive,
     side,
     dockButton,
     references: () => chipsRef.current,
-    composer: { onDraftChange, clearSignal, onSent },
+    composer: { onSent },
   };
 };

@@ -1,6 +1,7 @@
-/* The agenda's surfaces: the kind chip on a card, the status pill, one row of the drawer and the full card.
-   Role tokens only. Calm: one soft surface and a hairline, no tinted boxes. Every press target is at least 44px
-   tall; every transition is stilled for a reader who asked for less motion. */
+/* The agenda's shared surfaces: the kind chip on a card, the status mark, one row of the drawer and the card
+   that replaces the chat. Theme role tokens only, so every theme (Studio, Mission Control, Neo-Brutalism, Geist)
+   in light and dark draws them from its own palette. Every press target is at least 44px tall; every transition
+   is stilled for a reader who asked for less motion. */
 
 /* ---- the kind chip on a card ("Question", "To do", "Notification", "New") ------------------------------- */
 .fy-attn-kind {
@@ -57,302 +58,130 @@
   font-weight: var(--weight-normal);
 }
 
-/* ---- one row of the drawer ------------------------------------------------------------------------------- */
+/* ---- one row of the drawer: ONE button ------------------------------------------------------------------ */
+/* The whole row is the button: title, the ask under it, the status mark. Nothing is nested in it. */
 .fy-agenda-row {
+  position: relative;
   display: flex;
+  width: 100%;
   min-width: 0;
+  min-height: 44px;
   flex-direction: column;
-  gap: var(--gap-xs);
-  padding: var(--gap-sm) var(--gap-md);
-  border-bottom: var(--stroke) solid var(--border-soft);
+  align-items: stretch;
+  gap: 2px;
+  margin: 0;
+  padding: var(--gap-md);
+  border: var(--stroke) solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface);
   color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.fy-agenda-row:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.fy-agenda-row:active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 var(--stroke) var(--accent);
+}
+.fy-agenda-row:focus-visible {
+  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
+  outline-offset: 2px;
 }
 .fy-agenda-row[data-agenda-dimmed] {
   color: var(--muted);
 }
 .fy-agenda-row[data-agenda-dimmed] .fy-agenda-row__title {
-  color: var(--muted);
   font-weight: var(--weight-normal);
 }
-.fy-agenda-row__head {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--gap-xs) var(--gap-sm);
-}
-/* The title is the one focal point: the largest, the strongest, and the whole row's way in. */
 .fy-agenda-row__title {
   display: block;
   min-width: 0;
-  min-height: 44px;
-  flex: 1 1 12rem;
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--fg);
-  font: inherit;
+  overflow: hidden;
   font-size: var(--text-base);
   font-weight: var(--weight-strong);
   line-height: var(--leading-base);
-  overflow-wrap: anywhere;
-  text-align: left;
-  cursor: pointer;
-}
-.fy-agenda-row__title:hover {
-  text-decoration: underline;
-}
-.fy-agenda-row__title:active {
-  color: var(--accent);
-}
-.fy-agenda-row__acts {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--gap-xs);
-}
-.fy-agenda-row__chips {
-  display: flex;
-  min-width: 0;
-  flex: 1 1 auto;
-  flex-wrap: wrap;
-  gap: var(--gap-xs);
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-.fy-agenda-chip,
-.fy-agenda-reply {
-  display: inline-flex;
-  min-width: 44px;
-  min-height: 44px;
-  max-width: 100%;
-  align-items: center;
-  justify-content: center;
-  gap: var(--gap-xs);
-  padding: 0 var(--gap-md);
-  border: var(--stroke) solid var(--border);
-  border-radius: var(--radius-pill);
-  background: var(--surface);
-  color: var(--fg);
-  font: inherit;
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-  cursor: pointer;
-  transition:
-    background-color 120ms ease,
-    border-color 120ms ease;
-}
-.fy-agenda-chip__label {
-  min-width: 0;
-  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.fy-agenda-chip[data-recommended] {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-.fy-agenda-chip:hover:not(:disabled),
-.fy-agenda-reply:hover {
-  background: var(--surface-2);
-}
-.fy-agenda-chip:active:not(:disabled),
-.fy-agenda-reply:active {
-  background: var(--accent-soft);
-}
-.fy-agenda-chip:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-/* "＋ reply" is the quietest control; once added it reads as a state, not a button. */
-.fy-agenda-reply {
-  margin-left: auto;
-  border-color: transparent;
-  background: transparent;
+.fy-agenda-row__ask {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
   color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
-.fy-agenda-reply[data-referenced] {
-  color: var(--accent);
+.fy-agenda-row__status {
+  display: flex;
+  min-width: 0;
+  margin-top: 2px;
 }
-.fy-agenda-row__title:focus-visible,
-.fy-agenda-chip:focus-visible,
-.fy-agenda-reply:focus-visible {
-  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
-  outline-offset: 2px;
-}
-@media (prefers-reduced-motion: reduce) {
-  .fy-agenda-chip,
-  .fy-agenda-reply {
-    transition: none;
+@media (prefers-reduced-motion: no-preference) {
+  .fy-agenda-row {
+    transition:
+      background-color 120ms ease,
+      border-color 120ms ease;
   }
 }
 
-/* ---- the full card --------------------------------------------------------------------------------------- */
-/* It fills the chat area it covers. The BODY is the only scroller; the top strip and the answer bar stay put. */
-.fy-full {
+/* ---- the item in focus: a full-height overlay over the chat column ---------------------------------------- */
+/* The overlay is the chat column's own box (`position: absolute; inset: 0` inside `.kt-chat-surface`): the
+   messages, the composer and the agenda row all sit underneath it, inert, so nothing of the chat shows or takes
+   focus. Top and bar are flex items OUTSIDE the one scroller, so scrolling the body moves neither. */
+.kt-chat-surface[data-agenda-focus] {
+  position: relative;
+}
+.fy-item-view {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
   display: flex;
-  height: 100%;
-  min-height: 0;
   min-width: 0;
+  min-height: 0;
   flex-direction: column;
+  overflow: hidden;
   background: var(--bg);
   color: var(--fg);
+  outline: none;
 }
-.fy-full__top {
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap-xs);
-  padding: var(--gap-md) var(--gap-md) var(--gap-sm);
-  border-bottom: var(--stroke) solid var(--border-soft);
-  background: var(--surface);
-  touch-action: pan-y;
-}
-.fy-full[data-swipeable] .fy-full__top {
-  touch-action: none;
-  cursor: grab;
-}
-.fy-full__top[data-dragging] {
-  cursor: grabbing;
-  user-select: none;
-}
-.fy-full__head {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--gap-xs) var(--gap-sm);
-  color: var(--muted);
-  font-size: var(--text-sm);
-}
-.fy-full__who {
-  color: var(--fg);
-  font-weight: var(--weight-medium);
-}
-.fy-full__notice {
-  color: var(--fg);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-medium);
-}
-.fy-full__age,
-.fy-full__updated {
-  font-size: var(--text-xs);
-}
-/* "Updated 6 min ago": the one place the item says it was edited, and what opens the earlier versions. */
-.fy-full__updated {
-  display: inline-flex;
-  min-height: 24px;
-  align-items: center;
-  gap: 2px;
-  margin: 0;
-  padding: 0 var(--gap-xs);
-  border: 0;
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  font: inherit;
-  font-size: var(--text-xs);
-}
-.fy-full__updated:hover {
-  color: var(--fg);
-}
-.fy-full__updated[aria-expanded='true'] .fy-full__updated-chevron {
-  transform: rotate(180deg);
-}
-@media (pointer: coarse) {
-  .fy-full__updated {
-    min-height: 44px;
-    margin-block: -10px;
+@media (prefers-reduced-motion: no-preference) {
+  .fy-item-view {
+    animation: fy-agenda-open 160ms ease-out;
   }
 }
-/* The title IS the question, so it reads as one. */
-.fy-full__title {
-  margin: 0;
-  overflow-wrap: anywhere;
-  font-family: var(--font-display);
-  font-size: var(--text-display);
-  font-weight: var(--weight-display);
-  line-height: 1.25;
-}
-.fy-full__body {
+.fy-item-view__top {
   display: flex;
-  min-height: 0;
-  min-width: 0;
-  flex: 1 1 auto;
-  flex-direction: column;
-  gap: var(--gap-md);
-  padding: var(--gap-md);
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-.fy-full__history {
-  margin: 0;
-  color: var(--faint);
-  font-size: var(--text-meta);
-}
-.fy-full__bar {
-  display: flex;
+  flex-shrink: 0;
   flex-direction: column;
   gap: var(--gap-xs);
-  padding: var(--gap-sm) var(--gap-md);
-  border-top: var(--stroke) solid var(--border-soft);
+  padding: var(--gap-sm)
+    max(var(--gap-md), env(safe-area-inset-right, 0px), calc((100% - var(--chat-column, 720px)) / 2)) var(--gap-sm)
+    max(var(--gap-md), env(safe-area-inset-left, 0px), calc((100% - var(--chat-column, 720px)) / 2));
+  border-bottom: var(--stroke) solid var(--divider-color);
   background: var(--surface);
 }
-.fy-full__error {
-  margin: 0;
-  color: var(--err);
-  font-size: var(--text-meta);
-}
-.fy-full__waiting {
+.fy-item-view__nav {
   display: flex;
-  flex-direction: column;
-  gap: var(--gap-xs);
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-sm);
 }
-.fy-full__waiting-line {
-  margin: 0;
-  color: var(--muted);
-  font-size: var(--text-sm);
-}
-/* The options in ONE row: the arrow beside the label, not over it; the tag drops under only when it must. */
-.fy-full .fy-attn-answers > .fy-attn-answer {
-  min-height: 44px;
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: 0 6px;
-  padding-block: 4px;
-}
-.fy-full .fy-attn-answers > .fy-attn-answer > svg {
-  order: 0;
-}
-/* ONE row: ‹ 1 of 7 ›, Add to reply, ⋯, ✕. */
-.fy-full .fy-attn-actions__row--secondary[data-hosted] {
-  flex-wrap: nowrap;
-  justify-content: flex-start;
-  gap: var(--gap-xs);
-}
-.fy-full__reply {
-  min-width: 44px;
-  min-height: 44px;
-  justify-content: center;
-  gap: var(--gap-xs);
-  margin-left: auto;
-  color: var(--muted);
-}
-.fy-full .fy-attn-menu__button {
-  min-width: 44px;
-  min-height: 44px;
-}
-.fy-full__nav {
+.fy-item-view__pager {
   display: flex;
   flex-shrink: 0;
   align-items: center;
   gap: var(--gap-xs);
 }
-.fy-full__where {
+.fy-item-view__where {
   min-width: 3.5rem;
   color: var(--muted);
   font-size: var(--text-sm);
@@ -360,44 +189,267 @@
   text-align: center;
   white-space: nowrap;
 }
-.fy-full__step {
+.fy-item-view__step {
   display: inline-flex;
   min-width: 44px;
   min-height: 44px;
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
+  border: var(--stroke-control, var(--stroke)) solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
 }
-.fy-full__step:disabled {
+.fy-item-view__step:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+.fy-item-view__step:focus-visible {
+  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
+  outline-offset: -2px;
+}
+.fy-item-view__step:disabled {
   opacity: 0.35;
+  cursor: default;
 }
-@media (max-width: 767.98px) {
-  .fy-full__reply-label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-  }
+.fy-item-view__title {
+  margin: 0;
+  font-size: var(--text-lg, var(--text-base));
+  font-weight: var(--weight-strong);
+  line-height: var(--leading-tight, 1.25);
+  overflow-wrap: anywhere;
 }
-/* A mouse needs less room: the bar stays about two lines tall. */
+.fy-item-view__ask {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+.fy-item-view__body {
+  min-height: 0;
+  flex: 1 1 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--gap-md) max(var(--gap-md), env(safe-area-inset-right, 0px)) calc(var(--gap-md) * 2)
+    max(var(--gap-md), env(safe-area-inset-left, 0px));
+}
+.fy-item-view__column {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  max-width: var(--chat-column, 720px);
+  flex-direction: column;
+  gap: var(--gap-md);
+  margin-inline: auto;
+}
+.fy-item-view .fy-render {
+  max-width: 100%;
+  overflow-x: auto;
+}
 @media (min-width: 768px) {
-  .fy-full__bar {
-    padding-block: var(--gap-xs);
-  }
-  .fy-full .fy-attn-answers > .fy-attn-answer {
-    min-height: 40px;
-    padding-block: 2px;
-  }
-  .fy-full__step,
-  .fy-full__reply,
-  .fy-full .fy-attn-menu__button {
+  .fy-item-view__step {
     min-width: 36px;
     min-height: 36px;
   }
 }
-.fy-full .fy-render {
+
+/* ---- the action bar: the composer's place while an item is open -------------------------------------------- */
+.fy-item-bar {
+  position: relative;
+  display: flex;
+  flex-shrink: 0;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  padding: var(--gap-sm) max(var(--gap-md), env(safe-area-inset-right, 0px)) 0
+    max(var(--gap-md), env(safe-area-inset-left, 0px));
+  border-top: var(--stroke) solid var(--divider-color);
+  background: var(--surface);
+  --own-pad-bottom: var(--gap-sm);
+}
+.fy-item-bar__answers {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  max-width: var(--chat-column, 720px);
+  flex-direction: column;
+  gap: var(--gap-xs);
+  margin-inline: auto;
+}
+.fy-item-bar__answers[data-swipeable] {
+  touch-action: pan-y;
+}
+.fy-item-bar__answers[data-swipeable] .fy-attn-answers {
+  touch-action: none;
+}
+.fy-item-bar__stamp {
+  position: absolute;
+  inset: auto 0 100%;
+  z-index: 1;
+  margin: 0 auto var(--gap-xs);
+  width: fit-content;
+  padding: var(--gap-xs) var(--gap-md);
+  border: var(--stroke) solid var(--divider-color);
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+  color: var(--fg);
+  font-weight: var(--weight-strong);
+  pointer-events: none;
+}
+.fy-item-bar__stamp[data-committed] {
+  background: var(--accent);
+  color: var(--accent-fg, var(--bg));
+}
+.fy-item-bar__error {
+  color: var(--err);
+  font-size: var(--text-sm);
+}
+.fy-item-bar .fy-attn-answers > .fy-attn-answer {
+  min-height: 44px;
+}
+.fy-item-bar__reply {
+  min-width: 44px;
+  min-height: 44px;
+  justify-content: center;
+  gap: var(--gap-xs);
+  color: var(--muted);
+}
+.fy-item-bar__field {
+  display: flex;
+  width: 100%;
+  max-width: var(--chat-column, 720px);
+  align-items: flex-end;
+  gap: var(--gap-xs);
+  margin-inline: auto;
+}
+.fy-item-bar__input {
+  min-width: 0;
+  min-height: 44px;
+  max-height: 8rem;
+  flex: 1 1 auto;
+  resize: none;
+  padding: 10px var(--gap-sm);
+  border: var(--stroke) solid var(--divider-color);
+  border-radius: var(--radius-control);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: max(16px, var(--text-base));
+  line-height: var(--leading-base);
+}
+.fy-item-bar__input:focus-visible {
+  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
+  outline-offset: -2px;
+}
+.fy-item-bar__send {
+  display: inline-flex;
+  min-width: 44px;
+  min-height: 44px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: var(--stroke) solid var(--accent);
+  border-radius: var(--radius-control);
+  background: var(--accent);
+  color: var(--accent-fg, var(--bg));
+  cursor: pointer;
+}
+.fy-item-bar__send:disabled {
+  border-color: var(--divider-color);
+  background: var(--surface-2);
+  color: var(--muted);
+  cursor: default;
+}
+.fy-item-bar__send:focus-visible {
+  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
+  outline-offset: 2px;
+}
+@media (min-width: 768px) {
+  .fy-item-bar__reply,
+  .fy-item-bar__send {
+    min-width: 36px;
+    min-height: 36px;
+  }
+  .fy-item-bar__input {
+    min-height: 36px;
+    padding-block: 6px;
+  }
+}
+
+/* ---- the history at the foot of the body ------------------------------------------------------------------ */
+.fy-item-history {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  padding-top: var(--gap-md);
+  border-top: var(--stroke) solid var(--divider-color);
+}
+.fy-item-history__title {
+  margin: 0;
+  color: var(--fg);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-strong);
+}
+.fy-item-history__list {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  flex-direction: column;
+  gap: var(--gap-md);
+  list-style: none;
+}
+.fy-item-history__event {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-xs);
+}
+.fy-item-history__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-xs) var(--gap-sm);
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.fy-item-history__head > span:last-child {
+  color: var(--fg);
+  font-weight: var(--weight-strong);
+}
+.fy-item-history__bubble {
   max-width: 100%;
-  overscroll-behavior: contain;
+  padding: var(--gap-sm) var(--gap-md);
+  border: var(--stroke) solid var(--border-soft);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+  overflow-wrap: anywhere;
+}
+[data-history='owner'] > .fy-item-history__bubble {
+  background: var(--accent-soft);
+}
+.fy-item-history__choice {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  font-weight: var(--weight-strong);
+}
+.fy-item-history__note {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.fy-item-history__was {
+  color: var(--muted);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+.fy-item-history__was dt {
+  font-weight: var(--weight-strong);
 }

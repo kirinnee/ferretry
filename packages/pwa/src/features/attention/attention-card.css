@@ -386,9 +386,12 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
 .fy-attn-options__what {
   color: var(--muted);
 }
-/* Terms: a two-column table, the term bold on the left and its meaning beside it. */
+/* Terms: ALWAYS a two-column table — Term | Meaning, the term bold on the left — wherever terms are drawn. */
 .fy-attn-terms-table {
   width: 100%;
+  /* Auto layout: the term column is at least as wide as its longest word, so a term only ever wraps between
+     words. 30% is its preferred width, never a cap that splits a word. */
+  table-layout: auto;
   border-collapse: collapse;
   font-size: var(--text-sm);
   line-height: var(--leading-base);
@@ -399,13 +402,23 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
   padding: 4px 0;
   text-align: left;
   vertical-align: top;
-  overflow-wrap: anywhere;
+  /* break-word, never anywhere: a word is split only when it alone is wider than the whole table. */
+  overflow-wrap: break-word;
+  word-break: normal;
+  hyphens: manual;
 }
-.fy-attn-terms-table tr:last-child > * {
+.fy-attn-terms-table thead th {
+  padding-bottom: 2px;
+  border-bottom: var(--stroke) solid var(--divider-color);
+  color: var(--muted);
+  font-size: var(--text-xs, var(--text-sm));
+  font-weight: var(--weight-strong);
+}
+.fy-attn-terms-table tbody tr:last-child > * {
   border-bottom: 0;
 }
-.fy-attn-terms-table th {
-  width: 34%;
+.fy-attn-terms-table th:first-child {
+  width: 30%;
   padding-right: var(--gap-md);
   color: var(--fg);
   font-weight: var(--weight-strong);
@@ -431,23 +444,6 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
   gap: var(--gap-xs);
   min-width: 0;
   overflow-wrap: anywhere;
-}
-.fy-attn-terms {
-  display: flex;
-  margin: 0;
-  flex-direction: column;
-  gap: var(--gap-xs);
-}
-.fy-attn-terms__row {
-  display: flex;
-  flex-direction: column;
-}
-.fy-attn-terms dt {
-  font-weight: var(--weight-strong);
-}
-.fy-attn-terms dd {
-  margin: 0;
-  color: var(--muted);
 }
 .fy-attn-q {
   display: flex;

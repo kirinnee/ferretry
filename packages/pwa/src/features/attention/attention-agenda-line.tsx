@@ -1,9 +1,11 @@
 /**
  * THE AGENDA'S PARTS IN A FERRET'S CHAT, all siblings of the composer so its own box never moves:
  *
- * - the ONE LINE above it — "● Agenda · 5 need you · 2 with Johnnie ▴" — with what is on its way ("Sending…")
- *   on its right;
- * - the DRAWER the line opens upward, bounded and scrolling on its own, one row per item;
+ * - the ONE ROW above it: what is running ("Pondering… 11s") on its left, and on its right what is on its way
+ *   ("Sending…") and the agenda PILL — "● Agenda · 5 need you · 2 with Johnnie ▴", "Agenda · 7" when the row is
+ *   narrow. The row never wraps, and has no left half when nothing is running;
+ * - the DRAWER the pill opens: a raised sheet above the chat, over a scrim, with its own header and scroll, one
+ *   row (one button) per item;
  * - the removable "re: <title> ✕" CHIPS of the items the next message is about;
  * - the DOCKED PANEL a wide screen can keep beside the chat instead of the drawer.
  */
@@ -11,8 +13,7 @@
 import type { AttentionId, AttentionItem } from '@ferretry/protocol';
 import { ChevronUp, LoaderCircle, X } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
-import { agendaSegments, type AgendaCounts } from '../../lib/agenda-chat.ts';
-import type { InboxAction } from '../../lib/attention-answers.ts';
+import { type AgendaCounts, agendaSegments } from '../../lib/agenda-chat.ts';
 import { AttentionAgendaRow } from './attention-agenda-row.tsx';
 import { attentionHeading } from './attention-delivery.tsx';
 
@@ -35,6 +36,8 @@ export interface AttentionAgendaLineProps {
   readonly sending: AgendaSending;
   /** Drawn on the right instead of "Sending…" while the machine holds answers ("Sending in 8 s… Send now"). */
   readonly repliesSlot?: ReactNode;
+  /** What is running, drawn on the row's left ("Pondering… 11s"). Absent: nothing runs and the pill stands alone. */
+  readonly live?: ReactNode;
 }
 
 export function AttentionAgendaLine({
@@ -46,6 +49,7 @@ export function AttentionAgendaLine({
   onToggle,
   sending,
   repliesSlot,
+  live,
 }: AttentionAgendaLineProps) {
   const hasStatus = repliesSlot !== undefined || sending.count > 0;
   if (counts === undefined && !hasStatus) return null;
@@ -55,6 +59,11 @@ export function AttentionAgendaLine({
   const summary = (
     <>
       <span aria-hidden="true" className="fy-agenda-line__dot" data-urgent={urgent || undefined} />
+      {counts === undefined ? null : (
+        <span className="fy-agenda-line__short" data-agenda-line-short="">
+          Agenda · {counts.needYou + counts.withFerret}
+        </span>
+      )}
       <span className="fy-agenda-line__words">
         <strong className="fy-agenda-line__name">Agenda</strong>
         {segments.map(segment => (
@@ -74,11 +83,12 @@ export function AttentionAgendaLine({
     <div
       className="fy-agenda-line"
       data-composer-status={state}
+      data-shared={live ? '' : undefined}
       {...(counts === undefined ? {} : { 'data-agenda-line': '' })}
     >
-      {counts === undefined ? (
-        <span className="fy-agenda-line__fill" />
-      ) : docked ? (
+      <AgendaLineLive live={live} />
+      <AgendaLineStatus repliesSlot={repliesSlot} sending={sending} />
+      {counts === undefined ? null : docked ? (
         <p className="fy-agenda-line__main" data-agenda-line-summary="">
           {summary}
         </p>
@@ -95,7 +105,16 @@ export function AttentionAgendaLine({
           <ChevronUp aria-hidden="true" className="fy-agenda-line__chevron" data-open={open || undefined} size={14} />
         </button>
       )}
-      <AgendaLineStatus repliesSlot={repliesSlot} sending={sending} />
+    </div>
+  );
+}
+
+/** What is running, on the row's left; nothing at all (no empty box) when nothing runs. */
+function AgendaLineLive({ live }: { readonly live: ReactNode | undefined }) {
+  if (!live) return null;
+  return (
+    <div className="fy-agenda-line__live" data-agenda-live="">
+      {live}
     </div>
   );
 }
@@ -127,26 +146,18 @@ interface AgendaRowsProps {
   readonly items: readonly AttentionItem[];
   readonly ferret: string;
   readonly now?: number;
-  readonly busy: ReadonlySet<AttentionId>;
-  readonly referenced: readonly AttentionId[];
-  readonly onAct: (item: AttentionItem, action: InboxAction) => void;
-  readonly onAddReply: (item: AttentionItem) => void;
   readonly onOpen: (item: AttentionItem) => void;
 }
 
-function AgendaRows({ items, ferret, now, busy, referenced, onAct, onAddReply, onOpen }: AgendaRowsProps) {
+function AgendaRows({ items, ferret, now, onOpen }: AgendaRowsProps) {
   return (
     <ul className="fy-agenda-rows">
       {items.map(item => (
         <li className="fy-agenda-rows__item" key={item.id}>
           <AttentionAgendaRow
-            busy={busy.has(item.id)}
             ferret={ferret}
             item={item}
-            onAct={action => onAct(item, action)}
-            onAddReply={() => onAddReply(item)}
             onOpen={() => onOpen(item)}
-            referenced={referenced.includes(item.id)}
             {...(now === undefined ? {} : { now })}
           />
         </li>
@@ -157,11 +168,13 @@ function AgendaRows({ items, ferret, now, busy, referenced, onAct, onAddReply, o
 
 export interface AttentionAgendaDrawerProps extends AgendaRowsProps {
   readonly id: string;
+  readonly counts: AgendaCounts;
+  readonly onClose: () => void;
 }
 
 /** Whether a scroller has more below what it shows, so a fade can say so. */
 const useMoreBelow = () => {
-  const ref = useRef<HTMLElement | null>(null);
+  const ref = useRef<HTMLDivElement | null>(null);
   const [more, setMore] = useState(false);
   const measure = useCallback(() => {
     const box = ref.current;
@@ -179,21 +192,52 @@ const useMoreBelow = () => {
   return { ref, more, measure };
 };
 
-/** Opens upward from the line, between the chat and the composer; bounded, with its own scroll and a fade when more rows are below. */
-export function AttentionAgendaDrawer({ id, ...rows }: AttentionAgendaDrawerProps) {
+/** "Agenda · 3 need you", or "Agenda · Nothing needs you" when it is all with the ferret. */
+const drawerHeading = (counts: AgendaCounts): string =>
+  counts.needYou > 0 ? `${counts.needYou} need you` : 'Nothing needs you';
+
+/**
+ * A RAISED SHEET over the chat, opening upward from the pill: the theme's surface, border, radius and shadow, a
+ * header ("Agenda · 3 need you" and a close ×) and rows in a scroller of its own, so a long agenda never
+ * grows past the screen. It floats above the line and the composer — neither moves.
+ */
+export function AttentionAgendaDrawer({ id, counts, onClose, ...rows }: AttentionAgendaDrawerProps) {
   const { ref, more, measure } = useMoreBelow();
   return (
-    <section
-      aria-label={`${rows.ferret}’s agenda`}
-      className="fy-agenda-drawer"
-      data-agenda-drawer=""
-      data-more={more || undefined}
-      id={id}
-      onScroll={measure}
-      ref={ref}
-    >
-      <AgendaRows {...rows} />
-    </section>
+    <div className="fy-agenda-layer">
+      <section
+        aria-label={`${rows.ferret}’s agenda`}
+        className="fy-agenda-drawer"
+        data-agenda-drawer=""
+        id={id}
+        onKeyDown={event => {
+          if (event.key !== 'Escape') return;
+          event.stopPropagation();
+          onClose();
+        }}
+      >
+        <header className="fy-agenda-drawer__head">
+          <h2 className="fy-agenda-drawer__title">
+            Agenda
+            <span className="fy-agenda-drawer__count" data-urgent={counts.needYou > 0 || undefined}>
+              {drawerHeading(counts)}
+            </span>
+          </h2>
+          <button
+            aria-label="Close the agenda"
+            className="fy-agenda-drawer__close"
+            data-agenda-drawer-close=""
+            onClick={onClose}
+            type="button"
+          >
+            <X aria-hidden="true" size={18} />
+          </button>
+        </header>
+        <div className="fy-agenda-drawer__list" data-more={more || undefined} onScroll={measure} ref={ref}>
+          <AgendaRows {...rows} />
+        </div>
+      </section>
+    </div>
   );
 }
 

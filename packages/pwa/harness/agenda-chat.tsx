@@ -1,18 +1,20 @@
 /**
- * A ferret's chat as the agenda sits in it: a header (where the "Agenda" dock button lives), the transcript with
- * the full card laid over it, and above a composer-shaped box the line, the drawer and the "re:" chips. The REAL
- * `useAttentionAgenda` drives it; only the data is invented and the answers go nowhere.
+ * A ferret's chat as the agenda sits in it: a header (where the "Agenda" dock button lives), the transcript, and
+ * above a composer-shaped box the line, the drawer and the "re:" chips. An opened item is the full-height overlay
+ * over the whole chat column. The REAL `useAttentionAgenda` drives it; only the data is invented and the answers go
+ * nowhere.
  *
  * The composer is a box of one fixed height, so what the screenshot script measures — that nothing the agenda
- * does ever moves it — is the layout's doing, not the box's.
+ * does ever moves it in the normal chat — is the layout's doing, not the box's.
  */
 
 import type { AttentionId, AttentionSnapshot } from '@ferretry/protocol';
-import { type ReactElement, useMemo } from 'react';
+import { type ReactElement, type ReactNode, useMemo } from 'react';
 import { Markdown } from '../src/components/markdown.tsx';
 import { useAttentionAgenda } from '../src/features/attention/attention-agenda.tsx';
 import { daemonConnection } from '../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../src/lib/daemon-scope.ts';
+import type { TranscriptEntry } from '../src/lib/session-screens.ts';
 
 const CONNECTION = daemonConnection({
   daemonId: 'studio',
@@ -33,6 +35,8 @@ export interface AgendaChatHarnessProps {
   readonly agendaMode?: boolean;
   readonly desktop?: boolean;
   readonly target?: AttentionId | null;
+  readonly entries?: readonly TranscriptEntry[];
+  readonly live?: ReactNode;
 }
 
 const MESSAGES: readonly { readonly when: string; readonly text: string }[] = [
@@ -54,6 +58,8 @@ export function AgendaChatHarness({
   agendaMode = true,
   desktop = harnessIsDesktop(),
   target = null,
+  entries,
+  live,
 }: AgendaChatHarnessProps): ReactElement {
   const scope = useMemo(() => daemonSessionScope(CONNECTION, 'fr'), []);
   const agenda = useAttentionAgenda({
@@ -68,10 +74,16 @@ export function AgendaChatHarness({
     snapshot: board,
     status: 'ready',
     swipeable: !desktop,
+    send: noop,
+    ...(entries === undefined ? {} : { entries }),
+    ...(live === undefined ? {} : { live }),
   });
   const chat = (
-    <div className="kt-chat-surface flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="fy-chat-log">
+    <div
+      className="kt-chat-surface flex min-h-0 min-w-0 flex-1 flex-col"
+      data-agenda-focus={agenda.covered || undefined}
+    >
+      <div className="fy-chat-log" inert={agenda.covered || undefined}>
         <div className="flex min-h-0 flex-col justify-end gap-sm overflow-y-auto p-panel" style={{ gridArea: '1 / 1' }}>
           {MESSAGES.map(message => (
             <article
@@ -89,9 +101,8 @@ export function AgendaChatHarness({
             </article>
           ))}
         </div>
-        {agenda.card}
       </div>
-      <div className="fy-chat-input" data-safe-bottom="" data-session-input="">
+      <div className="fy-chat-input" data-safe-bottom="" data-session-input="" inert={agenda.covered || undefined}>
         <div className="fy-chat-input__column">
           {agenda.above}
           <div
@@ -102,6 +113,7 @@ export function AgendaChatHarness({
           </div>
         </div>
       </div>
+      {agenda.view}
     </div>
   );
   return (

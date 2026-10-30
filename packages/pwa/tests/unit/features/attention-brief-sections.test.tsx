@@ -112,14 +112,16 @@ describe('the brief sections, by card', () => {
   const heading = (root: ParentNode): string | null | undefined =>
     root.querySelector('[data-attention-section="questions"] .fy-attn-sec__heading')?.textContent;
 
-  test('the board folds Terms into a list of each term and its meaning', async () => {
+  test('the board folds Terms into a Term | Meaning table, one row for each term', async () => {
     view = await mount(<AttentionBriefSections item={{ ...item, terms }} renderProse={text => text} />);
     const section = must(
       must(view.container, 'view').querySelector('[data-attention-section="terms"]'),
       'the terms section',
     );
     expect(section.textContent).toContain('Terms (2)');
-    expect([...section.querySelectorAll('dt')].map(term => term.textContent)).toEqual(['CI', 'PR']);
+    expect([...section.querySelectorAll('thead th')].map(head => head.textContent)).toEqual(['Term', 'Meaning']);
+    expect([...section.querySelectorAll('tbody th')].map(term => term.textContent)).toEqual(['CI', 'PR']);
+    expect(section.querySelector('dl')).toBeNull();
   });
 
   test('names the ask by what the card is: what happened, a to-do, or a question', async () => {

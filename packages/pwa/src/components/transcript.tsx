@@ -46,6 +46,8 @@ export interface TranscriptProps {
   readonly live?: SessionLiveActivity | null;
   /** The agent's own name, which every assistant row is labelled with instead of a harness or account. */
   readonly agentName?: string;
+  /** The live line is drawn elsewhere (beside the agenda pill above the composer), so not at the foot of the log. */
+  readonly liveInRow?: boolean;
   /**
    * Bumped to put the reader back at the tail and re-engage follow — the reader just SENT something,
    * so they want to watch the reply arrive even if they had scrolled up to re-read while composing.
@@ -127,6 +129,7 @@ export function Transcript({
   turnStartedAt = null,
   live = null,
   agentName,
+  liveInRow = false,
   pinSignal = 0,
   readingPosition,
 }: TranscriptProps) {
@@ -267,7 +270,7 @@ export function Transcript({
             <CompactionStrip compaction={compaction} />
           ) : null}
           {compaction?.phase === 'running' ? <CompactionCard compaction={compaction} /> : null}
-          {shown.busy && compaction?.phase !== 'running' ? (
+          {shown.busy && !liveInRow && compaction?.phase !== 'running' ? (
             <LiveActivityLine
               activity={shown.activity}
               fallback={shown.activityFallback}

@@ -519,33 +519,22 @@ export function AttentionBriefSections({
       )}
       {termsLine === null ? null : (
         <Section fold={fold} name="terms" open={open} title={fold ? `Terms (${termsLine.length})` : 'Terms'}>
-          {fold ? (
-            <dl className="fy-attn-terms">
+          <table className="fy-attn-terms-table" data-attention-terms="">
+            <thead>
+              <tr>
+                <th scope="col">Term</th>
+                <th scope="col">Meaning</th>
+              </tr>
+            </thead>
+            <tbody>
               {termsLine.map(entry => (
-                <div className="fy-attn-terms__row" key={entry.term}>
-                  <dt>{entry.term}</dt>
-                  <dd>{entry.meaning}</dd>
-                </div>
-              ))}
-            </dl>
-          ) : (
-            <table className="fy-attn-terms-table" data-attention-terms="">
-              <thead className="sr-only">
-                <tr>
-                  <th scope="col">Term</th>
-                  <th scope="col">Meaning</th>
+                <tr key={entry.term}>
+                  <th scope="row">{entry.term}</th>
+                  <td>{entry.meaning}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {termsLine.map(entry => (
-                  <tr key={entry.term}>
-                    <th scope="row">{entry.term}</th>
-                    <td>{entry.meaning}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+              ))}
+            </tbody>
+          </table>
         </Section>
       )}
       {asCard || steps === undefined ? null : (
