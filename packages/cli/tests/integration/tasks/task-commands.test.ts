@@ -1,40 +1,76 @@
 import { describe, it } from 'bun:test';
 import type {
+  BoardProjectsResponse,
+  BoardQueryInput,
+  BoardResponse,
+  BoardTaskActionRequestInput,
+  BoardTaskCreateRequestInput,
+  BoardTaskResponse,
   FleetTaskListResponse,
   ScopedTaskDetailResponse,
   ScopedTaskView,
   SessionTaskListResponse,
   TaskActionRequest,
-  TaskCreateRequest,
   TaskId,
 } from '@ferretry/protocol';
 import { Command } from 'commander';
 import should from 'should';
+import { registerBoardCommands } from '../../../src/adapters/board/board-commands';
 import { registerTaskCommands } from '../../../src/adapters/tasks/task-commands';
+import { BoardController } from '../../../src/lib/board/board-controllers';
+import type { IBoardGateway, SessionDirectoryEntry } from '../../../src/lib/board/ports';
 import type { ITaskGateway, ITaskOutput, ITextFileReader } from '../../../src/lib/tasks/ports';
 import type { TaskScope } from '../../../src/lib/tasks/task-scope';
+import { boardResponse, FERRETRY_ID, listing, taskResponse } from '../board/fixtures';
 import { taskSummary, taskView } from './fake-daemon';
 
-const scoped = (id = 'F1'): ScopedTaskView => ({ ...taskView(id), sessionId: 'session-7' });
+class FakeBoardGateway implements IBoardGateway {
+  queried: BoardQueryInput | undefined;
+  shown: string | undefined;
+  created: { as: string | undefined; request: BoardTaskCreateRequestInput } | undefined;
+  acted: { as: string | undefined; id: string; request: BoardTaskActionRequestInput } | undefined;
+  projectsAs: string | undefined;
+  projectsAnswer: BoardProjectsResponse = listing({ current: FERRETRY_ID as BoardProjectsResponse['current'] });
 
-class RecordingGateway implements ITaskGateway {
-  createdWith: TaskCreateRequest | undefined;
-  listedScope: TaskScope | undefined;
-  listedFilters: readonly (readonly [string, string])[] | undefined;
-  shownWith: readonly [string, TaskId, number] | undefined;
-  actedWith: readonly [string, TaskId, TaskActionRequest] | undefined;
-
-  create(sessionId: string, request: TaskCreateRequest): Promise<ScopedTaskView> {
-    this.createdWith = request;
-    return Promise.resolve({ ...scoped('F9'), sessionId });
+  board(query: BoardQueryInput): Promise<BoardResponse> {
+    this.queried = query;
+    return Promise.resolve(boardResponse());
   }
 
-  list(
-    scope: TaskScope,
-    filters: readonly (readonly [string, string])[],
-  ): Promise<SessionTaskListResponse | FleetTaskListResponse> {
+  task(id: string): Promise<BoardTaskResponse> {
+    this.shown = id;
+    return Promise.resolve(taskResponse());
+  }
+
+  create(as: string | undefined, request: BoardTaskCreateRequestInput): Promise<BoardTaskResponse> {
+    this.created = { as, request };
+    return Promise.resolve(taskResponse({ id: 'F9' as never }));
+  }
+
+  act(as: string | undefined, id: string, request: BoardTaskActionRequestInput): Promise<BoardTaskResponse> {
+    this.acted = { as, id, request };
+    return Promise.resolve(taskResponse({ laneId: 'doing' }));
+  }
+
+  projects(as: string | undefined): Promise<BoardProjectsResponse> {
+    this.projectsAs = as;
+    return Promise.resolve(this.projectsAnswer);
+  }
+
+  sessions(): Promise<readonly SessionDirectoryEntry[]> {
+    return Promise.resolve([{ id: 'session-8', callsign: 'denisha' }]);
+  }
+}
+
+class LegacyGateway implements ITaskGateway {
+  listedScope: TaskScope | undefined;
+
+  create(): Promise<ScopedTaskView> {
+    throw new Error('the legacy gateway is only read by `list --legacy`');
+  }
+
+  list(scope: TaskScope): Promise<SessionTaskListResponse | FleetTaskListResponse> {
     this.listedScope = scope;
-    this.listedFilters = filters;
     return Promise.resolve({
       v: 1,
       sessionId: 'session-7',
@@ -44,22 +80,29 @@ class RecordingGateway implements ITaskGateway {
     });
   }
 
-  show(sessionId: string, id: TaskId, afterSequence: number): Promise<ScopedTaskDetailResponse> {
-    this.shownWith = [sessionId, id, afterSequence];
+  show(sessionId: string, id: TaskId): Promise<ScopedTaskDetailResponse> {
     return Promise.resolve({ sessionId, task: { ...taskView(id), sessionId }, activity: [] });
   }
 
-  act(sessionId: string, id: TaskId, request: TaskActionRequest): Promise<ScopedTaskView> {
-    this.actedWith = [sessionId, id, request];
-    return Promise.resolve({ ...scoped(id), sessionId });
+  act(_sessionId: string, _id: TaskId, _request: TaskActionRequest): Promise<ScopedTaskView> {
+    throw new Error('the legacy gateway is only read by `list --legacy`');
   }
 }
 
 class CapturedOutput implements ITaskOutput {
   readonly lines: string[] = [];
+  readonly notices: string[] = [];
 
   success(message: string): void {
     this.lines.push(message);
+  }
+
+  report(message: string): void {
+    this.lines.push(message);
+  }
+
+  diagnostic(message: string): void {
+    this.notices.push(message);
   }
 }
 
@@ -71,27 +114,31 @@ class StubFiles implements ITextFileReader {
 
 interface Harness {
   readonly run: (...argv: string[]) => Promise<void>;
-  readonly gateway: RecordingGateway;
+  readonly gateway: FakeBoardGateway;
+  readonly legacy: LegacyGateway;
   readonly output: CapturedOutput;
 }
 
-/** Builds the command group exactly as the composition root does, over test doubles. */
+/** Builds the command groups exactly as the composition root does, over test doubles. */
 function harness(environmentSessionId: string | undefined = 'session-7'): Harness {
-  const gateway = new RecordingGateway();
+  const gateway = new FakeBoardGateway();
+  const legacy = new LegacyGateway();
   const output = new CapturedOutput();
+  const board = new BoardController({ gateway, output, files: new StubFiles(), binary: 'fy', environmentSessionId });
   const program = new Command().name('fy').exitOverride();
   program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
-  registerTaskCommands(program, { gateway, io: output, files: new StubFiles(), environmentSessionId });
+  registerTaskCommands(program, { board, legacyGateway: legacy, io: output, environmentSessionId });
+  registerBoardCommands(program, board);
   return {
     gateway,
+    legacy,
     output,
-    run: async (...argv: string[]) => {
-      await program.parseAsync(['node', 'fy', 'task', ...argv]);
-    },
+    run: async (...argv: string[]) => void (await program.parseAsync(['node', 'fy', ...argv])),
   };
 }
 
 const creating = [
+  'task',
   'create',
   '--kind',
   'feature',
@@ -104,17 +151,18 @@ const creating = [
 ];
 
 describe('fy task create', () => {
-  it('should send the record and print the new id', async () => {
+  it('should send the record as the ambient session and print the new id', async () => {
     // Arrange
     const { run, gateway, output } = harness();
 
     // Act
-    await run(...creating);
+    await run(...creating, '--term', 'widget=the thing', '--depends-on', 'F2');
 
     // Assert
-    should(gateway.createdWith?.title).equal('Rename the widget');
-    should(gateway.createdWith?.ask).eql({ text: 'please rename it', source: 'chat://1' });
-    should(output.lines).eql(['#F9']);
+    should(gateway.created?.as).equal('session-7');
+    should(gateway.created?.request.title).equal('Rename the widget');
+    should(gateway.created?.request.ask).eql({ text: 'please rename it', source: 'chat://1' });
+    should(output.lines.join('\n')).containEql('&F9');
   });
 
   it('should take the title from the trailing words', async () => {
@@ -122,331 +170,134 @@ describe('fy task create', () => {
     const { run, gateway } = harness();
 
     // Act
-    await run('create', '-k', 'bug', '--ask', 'a', '--ask-source', 'chat://1', 'Fix', 'the', 'widget');
+    await run('task', 'create', '-k', 'bug', '--ask', 'a', '--ask-source', 'chat://1', 'Fix', 'the', 'widget');
 
     // Assert
-    should(gateway.createdWith?.title).equal('Fix the widget');
-    should(gateway.createdWith?.kind).equal('bug');
-  });
-
-  it('should collect repeated dependency, file and link flags', async () => {
-    // Arrange
-    const { run, gateway } = harness();
-
-    // Act
-    await run(
-      ...creating,
-      '--depends-on',
-      'F2',
-      '--depends-on',
-      '#b3',
-      '--file',
-      'src/a.ts',
-      '--file',
-      'src/b.ts',
-      '--pr',
-      'pr://1',
-      '--doc',
-      'docs/x.md',
-      '--branch',
-      'port/x',
-    );
-
-    // Assert
-    should(gateway.createdWith?.dependsOn).eql(['F2', 'B3']);
-    should(gateway.createdWith?.files).eql(['src/a.ts', 'src/b.ts']);
-    should(gateway.createdWith?.links).eql({ prs: ['pr://1'], docs: ['docs/x.md'], branch: 'port/x' });
-  });
-
-  it('should read the brief from --description-file', async () => {
-    // Arrange
-    const { run, gateway } = harness();
-
-    // Act
-    await run(...creating, '--description-file', 'brief.md');
-
-    // Assert
-    should(gateway.createdWith?.description).equal('the brief from disk');
-  });
-
-  it('should refuse a create with no --kind', async () => {
-    // Arrange
-    const { run } = harness();
-
-    // Act + Assert — commander enforces the required flag before the controller runs.
-    await should(run('create', '--title', 'x')).be.rejected();
-  });
-
-  it('should refuse a create with no session in scope', async () => {
-    // Arrange
-    const { run } = harness('');
-
-    // Act + Assert
-    await should(run(...creating)).be.rejectedWith(/no session id/u);
+    should(gateway.created?.request.title).equal('Fix the widget');
   });
 });
 
-describe('fy task list', () => {
-  it('should use the ambient session and render the board', async () => {
+describe('fy task lifecycle verbs', () => {
+  it('should show a card, accepting every spelling of its id', async () => {
     // Arrange
     const { run, gateway, output } = harness();
 
     // Act
-    await run('list');
+    await run('task', 'show', '#F412');
 
     // Assert
-    should(gateway.listedScope).eql({ sessionId: 'session-7' });
-    should(output.lines[0]).containEql('#F1');
+    should(gateway.shown).equal('F412');
+    should(output.lines.join('\n')).containEql('&F412');
   });
 
-  it('should pass repeated --status filters through in order', async () => {
+  it('should move a card to a named lane with its reason', async () => {
     // Arrange
     const { run, gateway } = harness();
 
     // Act
-    await run('list', '--status', 'todo', '--status', 'live', '--assignee', 'ada', '--kind', 'bug', '--repo', '/w/app');
+    await run('task', 'move', '&F412', 'doing', '--reason', 'started');
 
     // Assert
-    should(gateway.listedFilters).eql([
-      ['repo', '/w/app'],
-      ['assignee', 'ada'],
-      ['kind', 'bug'],
-      ['status', 'todo'],
-      ['status', 'live'],
-    ]);
+    should(gateway.acted?.id).equal('F412');
+    should(gateway.acted?.as).equal('session-7');
+    should(gateway.acted?.request).containEql({ action: 'move' });
   });
 
-  it('should read the fleet with --all and honour an explicit --session', async () => {
+  it('should let --session override the ambient session', async () => {
     // Arrange
-    const fleet = harness();
-    const explicit = harness();
+    const { run, gateway } = harness();
 
     // Act
-    await fleet.run('list', '--all');
-    await explicit.run('list', '--session', 'other');
+    await run('task', 'note', 'F412', 'a note', '--session', 'session-9');
 
     // Assert
-    should(fleet.gateway.listedScope).eql({ sessionId: null });
-    should(explicit.gateway.listedScope).eql({ sessionId: 'other' });
+    should(gateway.acted?.as).equal('session-9');
   });
 
-  it('should refuse --all together with --session', async () => {
+  it('should resolve a callsign when assigning', async () => {
     // Arrange
-    const { run } = harness();
-
-    // Act + Assert
-    await should(run('list', '--all', '--session', 'other')).be.rejectedWith(/not both/u);
-  });
-
-  it('should render the kanban, dag, markdown and json shapes', async () => {
-    // Arrange
-    const kanban = harness();
-    const dag = harness();
-    const markdown = harness();
-    const json = harness();
+    const { run, gateway } = harness();
 
     // Act
-    await kanban.run('list', '--view', 'kanban');
-    await dag.run('list', '--view', 'dag');
-    await markdown.run('list', '--md');
-    await json.run('list', '--json');
+    await run('task', 'assign', 'F412', 'denisha');
 
     // Assert
-    should(kanban.output.lines[0]).containEql('NOT STARTED (1)');
-    should(dag.output.lines[0]).containEql('→ ∅');
-    should(markdown.output.lines[0]).startWith('# Tasks');
-    should(JSON.parse(json.output.lines[0] ?? '{}')).have.property('sessionId', 'session-7');
+    should(gateway.acted?.request).containEql({ action: 'assign', assignee: 'session-8' });
   });
 });
 
-describe('fy task show', () => {
-  it('should normalize the id and default the cursor', async () => {
-    // Arrange
-    const { run, gateway, output } = harness();
-
-    // Act
-    await run('show', '#f7');
-
-    // Assert
-    should(gateway.shownWith).eql(['session-7', 'F7', 0]);
-    should(output.lines[0]).containEql('#F7');
-  });
-
-  it('should pass --after and render markdown on request', async () => {
-    // Arrange
-    const { run, gateway, output } = harness();
-
-    // Act
-    await run('show', 'F7', '--after', '12', '--md');
-
-    // Assert
-    should(gateway.shownWith).eql(['session-7', 'F7', 12]);
-    should(output.lines[0]).startWith('# #F7');
-  });
-});
-
-describe('fy task mutations', () => {
-  it('should build a status move', async () => {
-    // Arrange
-    const { run, gateway, output } = harness();
-
-    // Act
-    await run('status', 'F7', 'live', '--reason', 'deployed', '--note', 'behind a flag');
-
-    // Assert
-    should(gateway.actedWith).eql([
-      'session-7',
-      'F7',
-      { action: 'status', status: 'live', reason: 'deployed', note: 'behind a flag' },
-    ]);
-    should(output.lines[0]).containEql('#F7');
-  });
-
-  it('should refuse a status move with no --reason', async () => {
-    // Arrange
+describe('the transition shims', () => {
+  it('should refuse fy task status with the new spelling', async () => {
     const { run } = harness();
-
-    // Act + Assert
-    await should(run('status', 'F7', 'live')).be.rejected();
-  });
-
-  it('should build a phase move', async () => {
-    // Arrange
-    const { run, gateway } = harness();
-
-    // Act
-    await run('phase', 'F7', 'design', '--reason', 'needs a spec');
-
-    // Assert
-    should(gateway.actedWith?.[2]).eql({ action: 'phase', phase: 'design', reason: 'needs a spec' });
-  });
-
-  it('should build a reopen carrying the new ask', async () => {
-    // Arrange
-    const { run, gateway } = harness();
-
-    // Act
-    await run('reopen', 'F7', '--reason', 'regressed', '--ask', 'it broke', '--source', 'chat://9');
-
-    // Assert
-    should(gateway.actedWith?.[2]).eql({
-      action: 'reopen',
-      reason: 'regressed',
-      ask: 'it broke',
-      source: 'chat://9',
+    await should(run('task', 'status', 'F412', 'done', '--reason', 'x')).be.rejectedWith({
+      message: /task move &F412/,
     });
   });
 
-  it('should join the clarification words', async () => {
-    // Arrange
-    const { run, gateway } = harness();
-
-    // Act
-    await run('clarify', 'F7', 'make', 'it', 'blue', '--source', 'chat://4');
-
-    // Assert
-    should(gateway.actedWith?.[2]).eql({ action: 'clarify', text: 'make it blue', source: 'chat://4' });
-  });
-
-  it('should add and remove a dependency', async () => {
-    // Arrange
-    const added = harness();
-    const removed = harness();
-
-    // Act
-    await added.run('depend', 'F7', '#f2');
-    await removed.run('depend', 'F7', 'F2', '--remove');
-
-    // Assert
-    should(added.gateway.actedWith?.[2]).eql({ action: 'dependency', taskId: 'F2', remove: false });
-    should(removed.gateway.actedWith?.[2]).eql({ action: 'dependency', taskId: 'F2', remove: true });
-  });
-
-  it('should claim a file with an optional reason', async () => {
-    // Arrange
-    const { run, gateway } = harness();
-
-    // Act
-    await run('file', 'F7', 'src/a.ts', '--reason', 'mine for now');
-
-    // Assert
-    should(gateway.actedWith?.[2]).eql({
-      action: 'file',
-      path: 'src/a.ts',
-      remove: false,
-      reason: 'mine for now',
+  it('should refuse fy task phase with the new spelling', async () => {
+    const { run } = harness();
+    await should(run('task', 'phase', 'F412', 'review', '--reason', 'x')).be.rejectedWith({
+      message: /task move &F412/,
     });
   });
 
-  it('should record a note and a feedback entry', async () => {
+  it('should answer fy task list as fy board --mine with a notice', async () => {
     // Arrange
-    const note = harness();
-    const feedback = harness();
+    const { run, gateway, output } = harness();
 
     // Act
-    await note.run('note', 'F7', 'looked', 'at', 'it');
-    await feedback.run('feedback', 'F7', 'needs', 'tests');
+    await run('task', 'list');
 
     // Assert
-    should(note.gateway.actedWith?.[2]).eql({ action: 'note', text: 'looked at it' });
-    should(feedback.gateway.actedWith?.[2]).eql({ action: 'feedback', text: 'needs tests' });
+    should(output.notices.join('\n')).containEql('fy board --mine');
+    should(gateway.queried).have.property('ferret', 'session-7');
   });
 
-  it('should attach exactly one link', async () => {
+  it('should keep the old routes behind --legacy', async () => {
+    // Arrange
+    const { run, legacy, gateway } = harness();
+
+    // Act
+    await run('task', 'list', '--legacy');
+
+    // Assert
+    should(legacy.listedScope).not.equal(undefined);
+    should(gateway.queried).equal(undefined);
+  });
+});
+
+describe('fy board', () => {
+  it('should print the current project board grouped by lane', async () => {
+    // Arrange
+    const { run, gateway, output } = harness();
+
+    // Act
+    await run('board');
+
+    // Assert
+    should(gateway.queried).have.property('project');
+    should(output.lines.join('\n')).containEql('&F412');
+  });
+
+  it('should pass the filters through to the query', async () => {
     // Arrange
     const { run, gateway } = harness();
 
     // Act
-    await run('link', 'F7', '--pr', 'pr://1');
+    await run('board', '--project', 'all', '--kind', 'bug', '--pr', 'open', '--activity', 'stale', '--closed');
 
     // Assert
-    should(gateway.actedWith?.[2]).eql({ action: 'link', field: 'pr', value: 'pr://1' });
+    should(gateway.queried).containEql({ kind: 'bug', pr: 'open', activity: 'stale' });
   });
 
-  it('should refuse two links at once', async () => {
-    // Arrange
-    const { run } = harness();
-
-    // Act + Assert
-    await should(run('link', 'F7', '--pr', 'pr://1', '--doc', 'docs/x.md')).be.rejectedWith(/exactly one of/u);
-  });
-
-  it('should assign, unassign, rank and unrank', async () => {
-    // Arrange
-    const assign = harness();
-    const unassign = harness();
-    const order = harness();
-    const unrank = harness();
-
-    // Act
-    await assign.run('assign', 'F7', 'ada');
-    await unassign.run('assign', 'F7', '--none');
-    await order.run('order', 'F7', '3');
-    await unrank.run('order', 'F7', '--none');
-
-    // Assert
-    should(assign.gateway.actedWith?.[2]).eql({ action: 'assign', assignee: 'ada' });
-    should(unassign.gateway.actedWith?.[2]).eql({ action: 'assign', assignee: null });
-    should(order.gateway.actedWith?.[2]).eql({ action: 'order', order: 3 });
-    should(unrank.gateway.actedWith?.[2]).eql({ action: 'order', order: null });
-  });
-
-  it('should print the whole record for a mutation with --json', async () => {
+  it('should print JSON when asked', async () => {
     // Arrange
     const { run, output } = harness();
 
     // Act
-    await run('note', 'F7', 'hello', '--json');
+    await run('board', '--json');
 
     // Assert
-    should(JSON.parse(output.lines[0] ?? '{}')).have.property('id', 'F7');
-  });
-
-  it('should refuse a mutation against the fleet-wide scope', async () => {
-    // Arrange
-    const { run } = harness('');
-
-    // Act + Assert
-    await should(run('note', 'F7', 'hello')).be.rejectedWith(/no session id/u);
+    should(() => JSON.parse(output.lines.join('\n'))).not.throw();
   });
 });

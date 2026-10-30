@@ -54,6 +54,9 @@ import { createFyClientConnector, FySessionApi, SessionFiles, SystemClock } from
 import { FileStateHomeClaim } from '../src/adapters/state-home/claim-files';
 import { createStatuslineController } from '../src/adapters/statusline/index.ts';
 import { BunTextFileReader } from '../src/adapters/tasks/bun-text-file-reader';
+import { registerBoardCommands } from '../src/adapters/board/board-commands';
+import { FyBoardGateway } from '../src/adapters/board/fy-board-gateway';
+import { BoardController } from '../src/lib/board/board-controllers';
 import { FyTaskBoardGateway } from '../src/adapters/tasks/fy-task-board-gateway';
 import { FyTaskGateway } from '../src/adapters/tasks/fy-task-gateway';
 import { registerTaskBoardCommands } from '../src/adapters/tasks/task-board-commands';
@@ -893,13 +896,22 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
     ),
   ({ program, world, ownSessionId, restartPatience: patience }) =>
     registerSessionCommands(program, sessionCommands(world, ownSessionId, patience)),
-  ({ program, world, client, ownSessionId }) =>
-    registerTaskCommands(program, {
-      gateway: new FyTaskGateway(client),
-      io: world.io,
+  ({ program, world, client, ownSessionId }) => {
+    const board = new BoardController({
+      gateway: new FyBoardGateway(client),
+      output: world.io,
       files: new BunTextFileReader(),
+      binary: BINARY_NAME,
       environmentSessionId: ownSessionId,
-    }),
+    });
+    registerTaskCommands(program, {
+      board,
+      legacyGateway: new FyTaskGateway(client),
+      io: world.io,
+      environmentSessionId: ownSessionId,
+    });
+    registerBoardCommands(program, board);
+  },
   ({ program, world, client }) =>
     registerLaneCommands(program, { gateway: new FyLaneGateway(client), io: world.io, binaryName: BINARY_NAME }),
   ({ program, world, client }) =>
