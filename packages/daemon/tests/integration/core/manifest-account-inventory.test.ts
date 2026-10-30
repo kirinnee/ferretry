@@ -1,12 +1,17 @@
 import { describe, it } from 'bun:test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { buildFleetManifest } from '@ferretry/fleet';
 import should from 'should';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
 import { ManifestAccountInventory } from '../../../src/adapters/core/index.ts';
-import { createFoundationPaths, FleetManifestUnreadableError, resolveStateHome } from '../../../src/lib/index.ts';
+import {
+  createFoundationPaths,
+  type FileSystemPort,
+  FleetManifestUnreadableError,
+  resolveStateHome,
+} from '../../../src/lib/index.ts';
 
 const ACCOUNT_ID = '00000000-0000-4000-8000-000000000001';
 
@@ -103,6 +108,34 @@ describe('ManifestAccountInventory', () => {
 
       // Assert
       should(refusal).be.instanceof(FleetManifestUnreadableError);
+    } finally {
+      await rm(subject.home, { recursive: true, force: true });
+    }
+  });
+
+  it('should read the manifest again after the provisioner republishes it, and in full on a filesystem without identities', async () => {
+    // Arrange
+    const subject = await fixture(published);
+    try {
+      const paths = createFoundationPaths(resolveStateHome({ fyHome: subject.home, homeDirectory: subject.home }));
+      const files = new StateFileSystem(paths);
+      const plain = new ManifestAccountInventory(
+        { readText: async (path: string) => await files.readText(path) } as unknown as FileSystemPort,
+        paths.fleetManifest,
+      );
+      const first = await subject.inventory.accounts();
+
+      // Act — the provisioner publishes by rename: a new file, so a new identity.
+      const next = `${paths.fleetManifest}.next`;
+      await writeFile(next, published.replace('"Primary"', '"Renamed"'), 'utf8');
+      await rename(next, paths.fleetManifest);
+      const republished = await subject.inventory.accounts();
+      const unidentified = await plain.accounts();
+
+      // Assert
+      should(first[0]?.displayName).equal('Primary');
+      should(republished[0]?.displayName).equal('Renamed');
+      should(unidentified[0]?.displayName).equal('Renamed');
     } finally {
       await rm(subject.home, { recursive: true, force: true });
     }
