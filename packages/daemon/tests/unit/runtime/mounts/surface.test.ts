@@ -586,6 +586,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   },
   tasks: taskSubsystem(),
   board: boardSubsystem(),
+  boardGitHub: { arm: () => () => undefined },
   analytics: analyticsSubsystem(),
   analyticsPricing: {
     view: async () => ({

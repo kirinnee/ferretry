@@ -141,6 +141,7 @@ import {
   probePdfDecryptWorker,
 } from '../src/adapters/attachments/index.ts';
 import { FileBoardStore } from '../src/adapters/board/file-board-store.ts';
+import { GhCliRunner, GitWorkingCopies } from '../src/adapters/board-github/index.ts';
 import {
   AgendaImportAgenda,
   FileBoardImportMarker,
@@ -156,6 +157,7 @@ import {
 } from '../src/adapters/board/session-board-adapters.ts';
 import { type LivenessLedgerReader, StorageSessionRoster } from '../src/adapters/board/session-roster.ts';
 import { StorageSessionCardFacts } from '../src/adapters/board/storage-session-card-facts.ts';
+import { GitHubWatcher } from '../src/lib/board-github/index.ts';
 import { FileAcceptedConfigStore, FileConfigDirectory } from '../src/adapters/config-files/files.ts';
 import { unrefFileEventTimers } from '../src/adapters/file-events/bun-file-event-source.ts';
 import { platformFileEventSource } from '../src/adapters/file-events/platform.ts';
@@ -540,7 +542,6 @@ import {
   BoardService,
   BoardSweep,
   LivenessActivityDeriver,
-  NoLaneProposals,
   type PendingContext,
   PendingContextDelivery,
   ReopenDeliveryLadder,
@@ -808,6 +809,7 @@ import {
   jsonObject,
   KnownAndFerretFolders,
   LaneProposalAcceptance,
+  InferredLaneProposer,
   LaneSetService,
   type LearningSubsystem,
   LegacyWireUseCounter,
@@ -1865,6 +1867,9 @@ export interface BrowserTransportWorld {
   openViewerStream(host: BrowserViewerHost, sessionId: string, socket: ViewerSocket): Promise<BrowserViewerStream>;
 }
 
+/** Where the project boards report what they could not do: the daemon's log. */
+const boardDiagnostics = { warn: (message: string) => void process.stderr.write(`board: ${message}\n`) };
+
 /** The board, and the cards a start makes on it. */
 interface BoardWorld {
   readonly store: FileBoardStore;
@@ -1876,8 +1881,8 @@ interface BoardWorld {
  * The project boards (v2): one file per card under `<state>/board`, written under ownership and lineage,
  * and the cards every start with a brief gets (`SessionCards`, board-design.md §3.1).
  *
- * Lanes and projects are U3's `LaneSetService`. Lane proposals for a project with none are still a STUB
- * (`NoLaneProposals`, until the template inference lands, so such a card is filed on Unfiled with a hint).
+ * Lanes and projects are U3's `LaneSetService`; a start in a project with no lanes is proposed the template its
+ * folder suggests (`InferredLaneProposer`).
  * Activity is derived from the session roster with the Warden's liveness ledger laid over it, and the
  * lead's quiet lines wait in its pending context for its next turn. The agenda link reads each ferret's
  * agenda through the agenda service, and a reopen is delivered through the ordinary send path. The
@@ -1890,7 +1895,7 @@ function createBoardWorld(
   clock: SystemClock,
   machineId: () => string | undefined,
   /** Which board a session works on, each board's lanes and its name (U3's `LaneSetService`). */
-  lanes: Pick<LaneSetService, 'projectOf' | 'laneSet' | 'project'>,
+  lanes: Pick<LaneSetService, 'projectOf' | 'laneSet' | 'project' | 'apply'>,
   sends: Pick<SessionSendService, 'send'>,
   /** One ferret's open agenda items; read lazily, because the agenda service is built after the board. */
   agendaItems: (sessionId: string) => Promise<readonly AgendaItem[]>,
@@ -1922,7 +1927,7 @@ function createBoardWorld(
   const cards = new SessionCards({
     board,
     lanes,
-    proposer: new NoLaneProposals(),
+    proposer: new InferredLaneProposer(lanes, new GitProjectFacts()),
     // The name the board list shows: a registered project's, `Unfiled`, or the id of one no longer listed.
     projects: { nameOf: async projectId => (await lanes.project(projectId))?.name ?? projectId },
     focus,
@@ -1935,8 +1940,6 @@ function createBoardWorld(
   });
   return { store, board, cards };
 }
-
-const boardDiagnostics = { warn: (message: string) => void process.stderr.write(`board: ${message}\n`) };
 
 /**
  * The task record boards, over the state home and the opened session index.
@@ -8925,6 +8928,36 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         boardSessions,
         boardPending,
       );
+      // The GitHub watcher that moves the board's cards on PR facts (board-design.md §3.1): it runs the host's
+      // own `gh`, links the PRs a card's work opened, and nudges through the board's nudge path. Armed after
+      // the bind with the other loops, and stopped with the daemon.
+      const boardSessionFacts = new StorageSessionFacts(storage);
+      const boardNudgeDelivery = new PendingContextDelivery(boardPending);
+      const boardGitHub = new GitHubWatcher({
+        board: boardWorld.board,
+        gh: new GhCliRunner(),
+        copies: new GitWorkingCopies(),
+        sessions: { cwdOf: async sessionId => (await boardSessionFacts.read(sessionId))?.cwd ?? null },
+        projects: { projects: async () => await catalogs.projects() },
+        transcripts: createSessionTranscriptTail(storage),
+        // The board's nudge path (U5): the recipient's pending board context rides on top of the nudge.
+        nudges: {
+          send: async (sessionId, message) => {
+            await boardNudgeDelivery.send(sessionId, message, async composed => {
+              await sends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message: composed });
+            });
+          },
+        },
+        timers: {
+          after: (ms, run) => {
+            const handle = setTimeout(asActivity(activities, 'board github watch', run), ms);
+            return () => clearTimeout(handle);
+          },
+        },
+        clock: { now: () => clock.now(), random: () => Math.random() },
+        diagnostics: boardDiagnostics,
+        version: daemonVersion,
+      });
       // The warden spawns wardens through the SAME start every other caller uses, so a warden is an
       // ordinary managed session that happens to carry the warden label — which is exactly what the
       // detector's lineage shield reads. A private launch path would produce a session the fleet
@@ -10680,6 +10713,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           act: async (id, request, caller) => await boardWorld.board.act(id, request, caller),
           importLegacy: async options => await boardImporter.run({ dryRun: options.dryRun, force: true }),
         },
+        boardGitHub,
         analytics: createAnalyticsSubsystem(analyticsIngestion, () => analyticsMachineName ?? hostname()),
         analyticsPricing,
         analyticsIngest: analyticsIngestion,
@@ -12081,6 +12115,9 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * reported as a receipt that did not advance.
    */
   cleanups.push(subsystems.handoverReconcile.arm());
+  // The board's GitHub watcher: its first look comes shortly after the bind, then about every half
+  // minute; a host without `gh`, or signed out of it, is told once and looked at again later.
+  cleanups.push(subsystems.boardGitHub.arm());
   /**
    * The update check, armed after the bind: it asks GitHub once now and then at most every six hours,
    * and moves an update waiting for idle (or an opted-in automatic one) on. A failed check never fails
