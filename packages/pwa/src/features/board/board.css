@@ -1306,6 +1306,7 @@
   .fy-board-table__cell[data-col='status'] {
     grid-column: 1;
     grid-row: 2;
+    align-self: center;
   }
   .fy-board-table__cell[data-col='done'] {
     grid-column: 4;
@@ -1329,5 +1330,21 @@
   .fy-board-detail__done .fy-board-done {
     width: 100%;
     justify-content: center;
+  }
+}
+
+/* A touch screen's 44px floor would double a row's height; the tap area is laid over the text instead. */
+@media (pointer: coarse) {
+  :root a.fy-board-table__title[href],
+  :root a.fy-board-table__more[href] {
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+  }
+  .fy-board-table__title::after,
+  .fy-board-table__more::after {
+    content: '';
+    position: absolute;
+    inset: -10px -4px;
   }
 }
