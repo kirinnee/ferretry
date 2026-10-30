@@ -92,7 +92,7 @@ describe('an agenda message in the owner bubble', () => {
   test('a written answer is the prominent text, with the note under it', () => {
     const view = draw(agendaAnswerMessage({ id: 'A7', quote: 'Ship it?' }, 'after lunch', 'not before'));
     expect(textOf(byClass(view, 'fy-agenda-msg-text')[0] as ReactTestInstance)).toBe('after lunch');
-    expect(textOf(byClass(view, 'fy-agenda-msg-note')[0] as ReactTestInstance)).toBe('Note not before');
+    expect(textOf(byClass(view, 'fy-agenda-msg-note')[0] as ReactTestInstance)).toBe('Note: not before');
     expect(byClass(view, 'fy-agenda-msg-option')).toHaveLength(0);
   });
 
