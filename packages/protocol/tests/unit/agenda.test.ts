@@ -4,6 +4,7 @@ import {
   AgendaActionRequestSchema,
   AgendaClearableFieldSchema,
   AgendaItemSchema,
+  agendaBriefRequiredProblems,
   agendaNoticeProblems,
 } from '../../src/lib/agenda.ts';
 import { agendaTurn } from '../../src/lib/agenda-card.ts';
@@ -156,6 +157,28 @@ describe('the edit request: clear', () => {
     // Assert
     should(AgendaActionRequestSchema.safeParse({ action: 'edit', id: 'A1', clearAll: true }).success).be.false();
     should(AgendaActionRequestSchema.safeParse({ action: 'edit', id: 'A1', notice: true }).success).be.false();
+  });
+});
+
+describe('agendaBriefRequiredProblems', () => {
+  it('should find nothing missing when both are given, or on a notice', () => {
+    // Assert
+    should(agendaBriefRequiredProblems({ premise: 'A deploy waits', context: 'It ships at 14:00' })).deepEqual([]);
+    should(agendaBriefRequiredProblems({ notice: true })).deepEqual([]);
+  });
+
+  it('should name each missing field, premise first, and count a blank or null one as missing', () => {
+    // Assert
+    should(agendaBriefRequiredProblems({})).deepEqual([
+      'premise (--premise) is required: the situation, what is going on',
+      'context (--context) is required: why it matters now',
+    ]);
+    should(agendaBriefRequiredProblems({ premise: '  ', context: 'Why' })).deepEqual([
+      'premise (--premise) is required: the situation, what is going on',
+    ]);
+    should(agendaBriefRequiredProblems({ premise: 'What', context: null })).deepEqual([
+      'context (--context) is required: why it matters now',
+    ]);
   });
 });
 

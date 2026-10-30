@@ -122,6 +122,10 @@ describe('agenda command flags', () => {
       '--blocking',
       '--will-block',
       'the 14:00 deploy',
+      '--premise',
+      'A deploy is queued',
+      '--context',
+      'It ships at 14:00',
       '--by',
       'in 3h',
     ]);

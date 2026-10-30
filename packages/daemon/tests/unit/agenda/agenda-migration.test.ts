@@ -33,6 +33,7 @@ const ASK = {
   subject: 'Rebase onto main now?',
   why: 'main moved under the PR.',
   context: 'Finishing the relay PR.',
+  premise: 'A ferret needs the owner.',
   howToResolve: 'Pick one.',
   ask: { kind: 'open-question' as const },
 };

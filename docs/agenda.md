@@ -155,7 +155,8 @@ An edit that loosens what the machine may spend or do is **held** until the owne
 **Allow is the confirmation** — the owner answers it and nothing else has to be run:
 
 ```
-fy agenda add "Allow the Jev price correction?" --title "Jev price correction" --confirms warden.yaml
+fy agenda add "Allow the Jev price correction?" --title "Jev price correction" \
+  --context "The Warden overcharges every run until it is on" --confirms warden.yaml
 ```
 
 - **Raising.** `--confirms <file>` names the file; the daemon looks up its held edit and records on the item
@@ -217,8 +218,22 @@ ignores it.
 The card is read cold, so it must stand alone: a title of about 40 characters, an ask in one sentence
 (120 at most), the premise, context and what is decided or still open as short bullets, every term of art
 defined with `--term`, never a secret value. The daemon lints for this and answers with advice, never a
-refusal. Agents close their own items as soon as the reason is gone: an open item whose blocker has
-cleared is a bug.
+refusal — with one exception below. Agents close their own items as soon as the reason is gone: an open item
+whose blocker has cleared is a bug.
+
+**The premise and the context are required.** They are what a cold reader starts from — what is going on, and
+why it matters now — so every NEW item a ferret raises must carry both:
+
+- `fy agenda add` refuses without `--premise` and `--context` (or the same fields in `--json-file`), naming
+  the flag that is missing, before anything is sent. A blank one counts as missing.
+- The daemon refuses the same raise from a ferret (`invalid`, naming the missing field), so a client that
+  skips the CLI cannot skip the rule (`agendaBriefRequiredProblems` in `@ferretry/protocol`).
+- **Exempt:** a notice (`fy notify`, read rather than answered); an item the daemon or the Warden raises (a
+  lane proposal, a harness prompt, a handover, a Warden escalation), which writes its own words; an item the
+  owner raises in the app, which is only warned about. A confirmation (`--confirms`) needs only
+  `--context`: its premise is the held change, in the daemon's words.
+- **Only new items.** It is checked when an item is raised, never when one is read or edited: an item already
+  on a board keeps working without them, and `agenda edit` may still reword either.
 
 ## Delivery
 

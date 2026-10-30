@@ -43,6 +43,8 @@ const ASK = {
   sourceRef: null,
   subject: 'Which region?',
   why: 'The deploy needs one.',
+  premise: 'A ferret needs the owner.',
+  context: 'The work waits on this answer.',
   howToResolve: 'Name it.',
   ask: { kind: 'open-question' as const },
 };

@@ -64,6 +64,8 @@ const request = {
   sourceRef: null,
   subject: 'Approve release?',
   why: 'It is ready to deploy.',
+  premise: 'A release is ready to go out.',
+  context: 'It changes the public service.',
   howToResolve: 'Approve or reject it.',
   ask: { kind: 'permission' as const },
 };
