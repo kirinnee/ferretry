@@ -359,6 +359,15 @@ describe('a message the durable queue holds', () => {
     expect(sendReceipt(queued('failed', {}, { fate: 'timed_out' })).detail).toBe('it could not be delivered');
   });
 
+  test('a queue failure over an unaccounted ledger row is unconfirmed, never failed, with the failure sentence', () => {
+    const maybe = 'nothing proves it reached the agent, though it may have';
+    const row = queued('failed', { failure: maybe }, { fate: 'unaccounted' });
+    expect(sendReceipt(row)).toEqual({ kind: 'unconfirmed', name: 'Unconfirmed', detail: maybe, chip: 'unconfirmed' });
+    expect(sendBadge(row)).toMatchObject({ label: 'unconfirmed', detail: maybe });
+    expect(sendBadge(queued('failed', {}, { fate: 'unaccounted' })).detail).toBe(maybe);
+    expect(sendBadge(queued('failed', {}, { fate: 'timed_out' })).label).toBe('failed');
+  });
+
   test('cancelled before it was typed says the agent never saw it', () => {
     const receipt = sendReceipt(queued('cancelled', {}, { fate: 'cancelled' }));
     expect(receipt).toMatchObject({ kind: 'cancelled', chip: 'cancelled' });

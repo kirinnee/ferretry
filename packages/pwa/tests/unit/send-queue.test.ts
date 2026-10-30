@@ -122,11 +122,16 @@ describe('joinQueue', () => {
   });
 
   test('the queue gives up on a message the ledger had unsettled: failed and cancelled replace the fate', () => {
-    expect(joinQueue([row({ fate: 'queued' })], [message({ state: 'failed' })])[0]?.fate).toBe('timed_out');
+    expect(joinQueue([row({ fate: 'timed_out' })], [message({ state: 'failed' })])[0]?.fate).toBe('timed_out');
     expect(joinQueue([row()], [message({ state: 'cancelled', stateAt: 'c' })])[0]).toMatchObject({
       fate: 'cancelled',
       fateAt: 'c',
     });
+  });
+
+  test('a queue failure over an unaccounted ledger row stays unaccounted: it may have landed', () => {
+    for (const fate of ['unaccounted', 'queued', 'accepted'] as const)
+      expect(joinQueue([row({ fate })], [message({ state: 'failed' })])[0]?.fate).toBe('unaccounted');
   });
 
   test('a message still queued or typing is open again even if the ledger had timed out on an earlier try', () => {

@@ -92,7 +92,10 @@ const synthesize = (message: QueuedMessage): LedgerSendRecord => ({
 const joinedFate = (row: LedgerSendRecord, state: QueuedMessage['state']): LedgerSendRecord['fate'] => {
   if (row.fate === 'delivered' || isQueueArrived(state)) return 'delivered';
   if (row.fate === 'cancelled') return 'cancelled';
-  if (state === 'cancelled' || state === 'failed') return fateOf(state);
+  if (state === 'cancelled') return 'cancelled';
+  // Failed in the queue means nothing PROVED the message arrived — not that it didn't. Only a ledger that
+  // proved it absent (or no ledger row at all, in `synthesize`) is red; anything else may have landed.
+  if (state === 'failed') return row.fate === 'timed_out' ? 'timed_out' : 'unaccounted';
   return row.fate === 'timed_out' || row.fate === 'unaccounted' ? 'accepted' : row.fate;
 };
 

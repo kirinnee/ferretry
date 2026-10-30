@@ -67,8 +67,9 @@ const queueReceipt = (record: LedgerSendRecord, detail: string): SendReceipt | u
     case 'typing':
       return record.fate === 'cancelled' ? undefined : { kind: 'queued', name: 'Sending', detail };
     case 'failed':
-      return record.fate === 'cancelled' || record.fate === 'delivered'
-        ? undefined
+      if (record.fate === 'cancelled' || record.fate === 'delivered') return undefined;
+      return record.fate === 'unaccounted'
+        ? { kind: 'unconfirmed', name: 'Unconfirmed', detail, chip: 'unconfirmed' }
         : { kind: 'failed', name: 'Failed', detail, chip: 'failed' };
     default:
       return undefined;

@@ -77,6 +77,12 @@ const queueBadge = (record: LedgerSendRecord): SendBadge | undefined => {
     case 'typing':
       return { label: 'sending', tone: QUIET_TONE, detail: 'sending — it is being typed into the agent now' };
     case 'failed':
+      if (record.fate === 'unaccounted')
+        return {
+          label: 'unconfirmed',
+          tone: QUIET_TONE,
+          detail: queue.failure ?? 'nothing proves it reached the agent, though it may have',
+        };
       return {
         label: 'failed',
         tone: 'border-err-border bg-err-bg text-err',
