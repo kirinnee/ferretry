@@ -12,7 +12,6 @@ describe('projectLaunchRequest', () => {
       agent: 'claude-auto-loge',
       cwd: '/work/ferretry',
       mode: 'interactive',
-      boardAccess: 'none',
     });
   });
 

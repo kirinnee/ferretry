@@ -79,7 +79,6 @@ const view = {
     name: 'Review the pack service',
     teammate: 'nadia',
     parent: 'mvlead-0001',
-    boardAccess: 'none',
     agent: 'claude-auto-work',
     harness: 'claude',
     modelHint: 'claude-opus-5-5',

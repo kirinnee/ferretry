@@ -7,7 +7,7 @@
  * `BoardCountsBar` and `BoardFilterBar`, which the phone and the side pane reuse.
  */
 
-import type { BoardProjectId } from '@ferretry/protocol';
+import type { BoardActivityFilter, BoardProjectId } from '@ferretry/protocol';
 import { X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Spinner } from '../../components/spinner.tsx';
@@ -20,7 +20,7 @@ import {
 } from '../../hooks/use-board.ts';
 import type { DaemonBoardStore } from '../../lib/board-store.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
-import type { BoardFilters } from '../../lib/board-model.ts';
+import { type BoardFilters, boardFiltersToSearch } from '../../lib/board-model.ts';
 import { moveChoices, planMove } from '../../lib/board-move.ts';
 import { ferretNamer } from '../../lib/board-present.ts';
 import {
@@ -42,7 +42,8 @@ import { daemonBoardCardPath, daemonBoardPath } from '../../lib/pages/routes.ts'
 import { PageThemeSwitch } from '../../shell/theme-toggle.tsx';
 import type { BoardCardMoves } from './board-card.tsx';
 import { BoardCountsBar } from './board-counts.tsx';
-import { BoardFilterBar } from './board-filters.tsx';
+import { BoardFilterBar, BoardFilterSheet } from './board-filters.tsx';
+import { PhoneKanban } from './board-phone.tsx';
 import { BoardReasonBox } from './board-reason-box.tsx';
 import { type BoardAgenda, BoardDetail, type BoardDetailPorts } from './detail/board-detail.tsx';
 import { BoardNewCard, type NewCardPorts } from './detail/board-new-card.tsx';
@@ -62,12 +63,12 @@ export interface BoardPageProps {
   readonly onNavigate: (to: string) => void;
   /** A fixed clock for the age labels; the live page re-reads the time every 30 seconds. */
   readonly now?: number;
-  /** Starts the filters folded: a narrow screen opens them from the "Filters" button. */
-  readonly compact?: boolean;
   /** The card the address names (`/d/<id>/board/<taskId>`); it opens as a drawer, or a page on a phone. */
   readonly openCard?: { readonly daemonId: DaemonId; readonly taskId: string } | null;
   /** Speaking to ferrets and starting one; without them the detail cannot comment and there is no "+ Card". */
   readonly ports?: BoardDetailPorts & NewCardPorts;
+  /** A phone: one lane at a time under a chip strip, the filters in a bottom sheet, rows sized for a thumb. */
+  readonly phone?: boolean;
 }
 
 interface PendingMove {
@@ -98,9 +99,9 @@ export function BoardPage({
   onSearch,
   onNavigate,
   now: fixedNow,
-  compact = false,
   openCard = null,
   ports,
+  phone = false,
 }: BoardPageProps) {
   const params = useMemo(() => new URLSearchParams(search), [search]);
   const view = parseBoardView(params.get('view'));
@@ -116,7 +117,7 @@ export function BoardPage({
   const writeFilters = useCallback(
     (filterSearch: string) => {
       const next = new URLSearchParams(filterSearch);
-      for (const key of ['view', 'sort']) {
+      for (const key of ['view', 'sort', 'at']) {
         const kept = params.get(key);
         if (kept !== null) next.set(key, kept);
       }
@@ -129,6 +130,11 @@ export function BoardPage({
     const nextParams = new URLSearchParams(params);
     if (next === 'kanban') nextParams.delete('view');
     else nextParams.set('view', next);
+    writeParams(nextParams);
+  };
+  const setLane = (laneId: string): void => {
+    const nextParams = new URLSearchParams(params);
+    nextParams.set('at', laneId);
     writeParams(nextParams);
   };
   const setSort = (next: string): void => {
@@ -264,13 +270,14 @@ export function BoardPage({
       names,
       now,
       showMachine: model.multiMachine || machines.length > 1,
+      touch: phone,
       hrefFor: card => daemonBoardCardPath(card.daemonId, card.task.id),
       onNavigate,
       movesFor: archive ? () => undefined : movesFor,
       places,
       dragging,
     }),
-    [names, now, model.multiMachine, machines.length, onNavigate, archive, movesFor, places, dragging],
+    [names, now, model.multiMachine, machines.length, onNavigate, archive, movesFor, places, dragging, phone],
   );
 
   const [archiveQuery, setArchiveQuery] = useState('');
@@ -322,12 +329,27 @@ export function BoardPage({
   const closeDetail = useCallback(() => {
     if (openCard !== null) onNavigate(daemonBoardPath(openCard.daemonId));
   }, [openCard, onNavigate]);
+  // A count pressed on a phone opens the matching cards as a list (pressed again, it lifts the filter).
+  const pressCount = (activity: BoardActivityFilter | null): void => {
+    if (!phone || activity === null) {
+      setFilters({ ...filters, activity });
+      return;
+    }
+    const next = boardFiltersToSearch({ ...filters, activity });
+    for (const key of ['sort']) {
+      const kept = params.get(key);
+      if (kept !== null) next.set(key, kept);
+    }
+    next.set('view', 'list');
+    writeParams(next);
+  };
+
   const hideClosed = filters.state === 'open';
   const reading = board.status === 'loading' || board.status === 'idle';
   const failed = board.status === 'error';
 
   return (
-    <section aria-label="Board" className="fy-board" data-view={view}>
+    <section aria-label="Board" className="fy-board" data-phone={phone ? '' : undefined} data-view={view}>
       <header className="fy-board__head">
         <h1 className="fy-board__title">Board</h1>
         <nav aria-label="Board views" className="fy-board__views">
@@ -353,19 +375,27 @@ export function BoardPage({
           <PageThemeSwitch />
         </div>
       </header>
-      <BoardCountsBar
-        activity={filters.activity}
-        counts={model.counts}
-        onActivity={activity => setFilters({ ...filters, activity })}
-        onOpenArchive={() => setView('archive')}
-      />
-      <BoardFilterBar
-        archive={archive}
-        choices={choices}
-        defaultOpen={!compact}
-        filters={filters}
-        onChange={next => setFilters(next)}
-      />
+      {phone ? (
+        <div className="fy-board__phone-bar">
+          <BoardFilterSheet archive={archive} choices={choices} filters={filters} onChange={next => setFilters(next)} />
+          <BoardCountsBar
+            activity={filters.activity}
+            counts={model.counts}
+            onActivity={pressCount}
+            onOpenArchive={() => setView('archive')}
+          />
+        </div>
+      ) : (
+        <>
+          <BoardCountsBar
+            activity={filters.activity}
+            counts={model.counts}
+            onActivity={pressCount}
+            onOpenArchive={() => setView('archive')}
+          />
+          <BoardFilterBar archive={archive} choices={choices} filters={filters} onChange={next => setFilters(next)} />
+        </>
+      )}
       {notice === null ? null : (
         <p className="fy-board__notice" role="status">
           <span>{notice}</span>
@@ -396,6 +426,15 @@ export function BoardPage({
       ) : view === 'kanban' ? (
         model.groups.length === 0 ? (
           <p className="fy-board__empty">No project has a board yet.</p>
+        ) : phone ? (
+          <PhoneKanban
+            at={params.get('at')}
+            env={env}
+            hideClosed={hideClosed}
+            model={model}
+            onLane={setLane}
+            projectName={projectName}
+          />
         ) : (
           <KanbanView
             env={env}
@@ -427,7 +466,7 @@ export function BoardPage({
         />
       )}
       {pending === null ? null : (
-        <div className="fy-board__scrim">
+        <div className="fy-board__scrim" data-phone={phone ? '' : undefined}>
           <BoardReasonBox
             busy={busy}
             error={problem}
@@ -449,7 +488,7 @@ export function BoardPage({
           now={now}
           onClose={closeDetail}
           onNavigate={onNavigate}
-          phone={compact}
+          phone={phone}
           ports={ports}
           projectName={id => projectNames.get(id) ?? id.slice(0, 8)}
           siblings={siblings}

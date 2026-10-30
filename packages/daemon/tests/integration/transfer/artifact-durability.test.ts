@@ -177,7 +177,6 @@ function plan(attachment: SourceAttachment): SessionTransferPlan {
       cwd: '/work/repo',
       mode: 'auto',
       parentSessionId: null,
-      boardAccess: 'none',
       label: 'teammate',
       harnessFlags: [],
       remoteControl: true,

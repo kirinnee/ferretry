@@ -157,10 +157,11 @@ export const APP_NAVIGATION = [SESSIONS_ENTRY, ...APP_BAR_DESTINATIONS] as const
 type AppNavigationEntry = (typeof APP_NAVIGATION)[number];
 export type AppBarDestinationId = AppNavigationEntry['id'];
 
-/** The phone's bottom bar: the most-used places, with everything else under More. */
-const TAB_BAR_PLACES: readonly AppBarDestinationId[] = ['sessions', 'attention', 'projects'];
-const TAB_BAR_TAIL: readonly AppBarDestinationId[] = ['settings'];
-export const MORE_PLACES: readonly AppBarDestinationId[] = ['analytics', 'warden', 'learning'];
+/** The phone's bottom bar: Sessions · Inbox · Board, then Find and More. Every other place is under More. */
+export const TAB_BAR_PLACES: readonly AppBarDestinationId[] = ['sessions', 'attention', 'board'];
+export const MORE_PLACES: readonly AppBarDestinationId[] = ['projects', 'analytics', 'warden', 'learning', 'settings'];
+/** The three Insights views, which sit together under More and share a phone title. */
+export const INSIGHTS_PLACES: readonly AppBarDestinationId[] = ['analytics', 'warden', 'learning'];
 
 /**
  * The name a phone's top bar gives the place, overriding the page's own. The Insights views share one:
@@ -168,7 +169,7 @@ export const MORE_PLACES: readonly AppBarDestinationId[] = ['analytics', 'warden
  * Every other page is named by the last crumb of its trail ({@link AppBar}).
  */
 export const appBarTitle = (active: AppBarDestinationId | null): string | null =>
-  active !== null && MORE_PLACES.includes(active) ? 'Insights' : null;
+  active !== null && INSIGHTS_PLACES.includes(active) ? 'Insights' : null;
 
 const entry = (id: AppBarDestinationId): AppNavigationEntry =>
   APP_NAVIGATION.find(candidate => candidate.id === id) ?? SESSIONS_ENTRY;
@@ -557,6 +558,19 @@ export interface AppTabBarProps {
   readonly onOpenPalette: () => void;
   /** Open Agenda items across every paired machine: the Inbox tab's badge. */
   readonly agendaCount?: number;
+  /** Cards to test plus cards waiting on the owner, across every machine: the Board tab's badge. */
+  readonly boardCount?: number;
+}
+
+/** The Board tab's count: the same pill as the Inbox's, announced as what it counts. */
+function BoardCountBadge({ count }: { readonly count: number }) {
+  if (count <= 0) return null;
+  return (
+    <>
+      <UnreadBadge announce={false} className="kt-tabbar__badge" count={count} />
+      <span className="sr-only">{`${count} board ${count === 1 ? 'card needs' : 'cards need'} you`}</span>
+    </>
+  );
 }
 
 const TAB_ICONS: Readonly<Record<AppBarDestinationId, ReactNode>> = {
@@ -571,8 +585,8 @@ const TAB_ICONS: Readonly<Record<AppBarDestinationId, ReactNode>> = {
 };
 
 /**
- * The phone's level one: a bottom bar with the five most-used places plus More (Analytics, Warden,
- * Learning), safe-area aware so it sits above the home indicator. Rendered by the shell only at drawer
+ * The phone's level one: a bottom bar with Sessions, Inbox and Board plus Find and More (Projects,
+ * Analytics, Warden, Learning, Settings), safe-area aware so it sits above the home indicator. Rendered by the shell only at drawer
  * widths, and not inside a session ({@link showsTabBar}).
  *
  * WHILE THE KEYBOARD IS UP THE BAR IS GONE (`data-kb-hide`). It rode up above the keyboard and sat on top
@@ -580,7 +594,14 @@ const TAB_ICONS: Readonly<Record<AppBarDestinationId, ReactNode>> = {
  * here that can be open, so it closes through its own dismissal path first, as the `data-kb-hide` contract
  * in index.css requires.
  */
-export function AppTabBar({ daemon, active = null, onNavigate, onOpenPalette, agendaCount = 0 }: AppTabBarProps) {
+export function AppTabBar({
+  daemon,
+  active = null,
+  onNavigate,
+  onOpenPalette,
+  agendaCount = 0,
+  boardCount = 0,
+}: AppTabBarProps) {
   const [moreOpen, setMoreOpen] = useState(false);
   const moreId = useId();
   const keyboardOpen = useKeyboardOpen();
@@ -602,6 +623,7 @@ export function AppTabBar({ daemon, active = null, onNavigate, onOpenPalette, ag
         <span className="kt-tabbar__icon">
           {TAB_ICONS[id]}
           {id === 'attention' ? <AgendaCountBadge className="kt-tabbar__badge" count={agendaCount} /> : null}
+          {id === 'board' ? <BoardCountBadge count={boardCount} /> : null}
         </span>
         <span className="kt-tabbar__label">{destination.label}</span>
       </RouteLink>
@@ -622,7 +644,6 @@ export function AppTabBar({ daemon, active = null, onNavigate, onOpenPalette, ag
           <Search size={20} aria-hidden="true" />
           <span>Find</span>
         </button>
-        {TAB_BAR_TAIL.map(place)}
         <button
           type="button"
           className="kt-tabbar__item"

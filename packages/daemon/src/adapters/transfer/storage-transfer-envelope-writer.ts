@@ -9,8 +9,8 @@
  *
  * THREE FACTS LAND HERE, AND THE THIRD IS THE SAFETY-CRITICAL ONE:
  *
- *   * the durable configuration the transfer decided — the operator knobs, and the two hard
- *     statements `parent: absent` and `boardAccess: 'none'` that make a transferred session a
+ *   * the durable configuration the transfer decided — the operator knobs, and the hard
+ *     statement `parent: absent` that makes a transferred session a
  *     top-level session with no inherited coordination authority;
  *   * `transferredFrom`, the target-only lineage edge back to the exact source, incarnation, cut and
  *     plan. It is written on the TARGET; nothing in this seam ever stamps the source;
@@ -155,7 +155,6 @@ export class StorageTransferEnvelopeWriter implements TransferEnvelopeWriter {
       ...current,
       cwd: durable.cwd,
       mode: durable.mode,
-      boardAccess: durable.boardAccess,
       harnessFlags: [...durable.harnessFlags],
       remoteControl: durable.remoteControl,
       intervalSeconds: durable.intervalSeconds,

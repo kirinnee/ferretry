@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TaskRefSchema } from './board-refs.ts';
 import { InstantSchema, NonNegativeFiniteSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 import { SessionStatusSchema } from './session.ts';
 import {
@@ -367,6 +368,11 @@ export const WardenAnomalyKindSchema = z.enum([
   'provider_unavailable',
   /** Not detected: the owner asked for an investigation of this ferret. */
   'owner_request',
+  /**
+   * A card in an active or review lane whose ferret is finished and with nothing alive under it
+   * (`board-design.md` §3.3). Its `sessionId` is that ferret, its `task` the card.
+   */
+  'orphaned_card',
 ]);
 export type WardenAnomalyKind = z.infer<typeof WardenAnomalyKindSchema>;
 
@@ -403,6 +409,8 @@ export const WardenAnomalySchema = z.object({
   ledger: LivenessLedgerSchema.optional(),
   /** What the anomaly is about (its turn, and for a stuck command which command): the backoff's key. */
   subject: z.string().min(1).optional(),
+  /** The board card the anomaly is about, for a kind about a card (`orphaned_card`). */
+  task: TaskRefSchema.optional(),
 });
 export type WardenAnomaly = z.infer<typeof WardenAnomalySchema>;
 

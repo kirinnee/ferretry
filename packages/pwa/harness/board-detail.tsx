@@ -296,7 +296,7 @@ function Harness() {
       <BoardPage
         agenda={agenda as never}
         callsigns={CALLSIGNS}
-        compact={phone}
+        phone={phone}
         machines={[{ connection: laptop, name: 'laptop' }]}
         now={NOW}
         onNavigate={() => undefined}

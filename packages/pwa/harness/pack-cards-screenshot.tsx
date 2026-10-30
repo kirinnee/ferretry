@@ -52,7 +52,7 @@ const KAMILA = 'mvkamil4-0a9b8c7d';
 const CWD = '/home/kirin/Workspace/personal/ferretry';
 const view = (id, config, state) => ({
   config: { id, name: 'Session ' + id, agent: 'claude-work', harness: 'claude', modelHint: 'claude-opus-5-5', mode: 'auto',
-    cwd: CWD, createdAt: '2026-10-20T02:00:00.000Z', updatedAt: '2026-10-20T02:00:00.000Z', boardAccess: 'none', ...config },
+    cwd: CWD, createdAt: '2026-10-20T02:00:00.000Z', updatedAt: '2026-10-20T02:00:00.000Z', ...config },
   state: { id, status: 'running', turn: 1, lastActivityAt: '2026-10-20T02:09:00.000Z', ...state },
   directory: '/state/' + id,
 });

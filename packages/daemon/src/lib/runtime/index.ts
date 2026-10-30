@@ -37,7 +37,6 @@ export * from './mounts/session-send.ts';
 export * from './mounts/session-signal.ts';
 export * from './mounts/sessions.ts';
 export * from './mounts/stt.ts';
-export * from './mounts/task-boards.ts';
 export * from './mounts/tasks.ts';
 export * from './mounts/terminals.ts';
 export * from './mounts/warden.ts';

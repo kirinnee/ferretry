@@ -170,7 +170,6 @@ describe('NewSessionPage', () => {
         connection,
         request: {
           agent: 'claude-auto-loge',
-          boardAccess: 'none',
           cwd: '/work/ferretry',
           mode: 'auto',
           prompt: 'Port PWA pages',
@@ -625,7 +624,6 @@ describe('NewSessionPage with the daemon pickers', () => {
         connection: props.connection,
         request: {
           agent: 'codex-auto-atelier',
-          boardAccess: 'none',
           cwd: '/work/ferretry',
           mode: 'auto',
           prompt: 'Wire the pickers',

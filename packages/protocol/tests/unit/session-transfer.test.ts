@@ -96,7 +96,6 @@ const plan = {
     cwd: '/work/repo',
     mode: 'auto' as const,
     parentSessionId: null,
-    boardAccess: 'none' as const,
     label: null,
     harnessFlags: [],
     remoteControl: true,
@@ -165,6 +164,19 @@ describe('session transfer protocol', () => {
 
   it('should preserve an empty durable conversation facet for a plan written before a cut was required', () => {
     should(transfer.ConversationFacetSchema.parse({ messages: [] })).deepEqual({ messages: [] });
+  });
+
+  it('should strip the retired boardAccess from a stored plan instead of rejecting it', () => {
+    // Arrange — a plan persisted while the task-board ACL still stamped its durable config.
+    const stored = JSON.parse(
+      JSON.stringify({ ...plan, durable: { ...plan.durable, boardAccess: 'none' } }),
+    ) as unknown;
+
+    // Act
+    const parsed = transfer.SessionTransferPlanSchema.parse(stored);
+
+    // Assert
+    should(parsed.durable).deepEqual(plan.durable);
   });
 
   it('should keep the durable message row binding-free so a plan stored before bindings still reads', () => {

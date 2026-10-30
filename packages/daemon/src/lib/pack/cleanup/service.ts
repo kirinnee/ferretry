@@ -234,7 +234,6 @@ export class CleanUpService {
       label: PACK_CLEAN_UP_LABEL,
       name: mode === 'generate' ? GENERATE_NAME : CLEAN_UP_NAME,
       cwd: this.ports.home,
-      boardAccess: 'none',
       ...(model === undefined ? {} : { model }),
     });
     const job: PackCleanUpJob = {

@@ -30,7 +30,7 @@ interface Options {
   readonly withAgenda?: boolean;
   readonly openCard?: BoardPageProps['openCard'];
   readonly machines?: BoardPageProps['machines'];
-  readonly compact?: boolean;
+  readonly phone?: boolean;
 }
 
 const open = async (options: Options = {}) => {
@@ -66,7 +66,7 @@ const open = async (options: Options = {}) => {
     onSearch: () => undefined,
     onNavigate: to => void navigated.push(to),
     now: NOW,
-    compact: options.compact ?? false,
+    phone: options.phone ?? false,
     ...(options.openCard === undefined ? {} : { openCard: options.openCard }),
     ...(options.withPorts === false
       ? {}
@@ -103,7 +103,7 @@ describe('BoardPage — the card detail', () => {
   });
 
   it('is a page on a phone', async () => {
-    const { root } = await open({ openCard: CARD, compact: true });
+    const { root } = await open({ openCard: CARD, phone: true });
     expect(root.querySelector('aside')?.getAttribute('data-mode')).toBe('page');
   });
 

@@ -34,7 +34,7 @@ export interface ISessionApi {
   list(): Promise<SessionView[]>;
   get(id: string): Promise<SessionView>;
   suggestNames(count: number): Promise<string[]>;
-  start(input: StartSessionRequestInput, requestId?: string, boardCapability?: string): Promise<SessionView>;
+  start(input: StartSessionRequestInput, requestId?: string): Promise<SessionView>;
   send(id: string, input: SendRequest): Promise<SendResult>;
   /** Where one send settled — the ledger fate the daemon has proven. */
   sendStatus(id: string, sendId: string): Promise<SendRecord>;
@@ -76,5 +76,4 @@ export interface ISessionFiles {
 export interface SessionEnvironment {
   readonly callerSessionId?: string;
   readonly cwd: string;
-  readonly boardCapability?: string;
 }

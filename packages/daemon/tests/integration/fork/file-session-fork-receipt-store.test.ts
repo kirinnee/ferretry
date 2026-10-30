@@ -187,7 +187,6 @@ function makePlan(key: SessionForkKey = KEY): SessionTransferPlan {
       cwd: '/work',
       mode: 'auto',
       parentSessionId: null,
-      boardAccess: 'none',
       label: null,
       harnessFlags: [],
       remoteControl: false,
