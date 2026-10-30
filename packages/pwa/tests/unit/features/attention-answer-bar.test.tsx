@@ -35,6 +35,8 @@ const draw = async (
   onSend?: (text: string) => Promise<void>,
 ): Promise<Spy> => {
   const spy: Spy = { acted: [], sent: [], replies: 0, replied: [], closed: 0 };
+  // A test that draws twice must not leave the first bar in the page: 'view' holds only the latest.
+  await view?.unmount();
   view = await mount(
     <AttentionAnswerBar
       busy={false}
