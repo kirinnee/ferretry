@@ -1043,6 +1043,26 @@ describe('SessionChatPage', () => {
     }
   });
 
+  test('on a phone offers no Interrupt in ▾ for a ferret that is not running', () => {
+    const stopped = sessionView('shared', { state: { status: 'stopped' } });
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={client([], stopped)}
+        connection={alpha}
+        entries={[]}
+        onSessionChange={() => undefined}
+        presentation="sheet"
+        session={stopped}
+      />,
+    );
+    try {
+      expect(actionLabels(page.root)).not.toContain('Interrupt turn');
+      expect(actionLabels(page.root)[0]).toBe('Theme…');
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
   test('copies the session id from Actions and says so when the clipboard refuses', async () => {
     const copied: string[] = [];
     const page = renderSessionChatPage(
