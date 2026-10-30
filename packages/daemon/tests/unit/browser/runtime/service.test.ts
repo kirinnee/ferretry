@@ -69,7 +69,7 @@ class Tabs {
     },
     click: async pageId => this.acted('click', pageId),
     type: async pageId => this.acted('type', pageId),
-    read: async (pageId, _selector, mode) => ({ ...this.acted(`read-${mode ?? 'text'}`, pageId), text: 'hello' }),
+    read: async (pageId, options) => ({ ...this.acted(`read-${options?.mode ?? 'text'}`, pageId), text: 'hello' }),
     screenshot: async pageId => ({ ...this.acted('screenshot', pageId), screenshotBase64: 'iVBOR' }),
     back: async pageId => this.acted('back', pageId),
     forward: async pageId => this.acted('forward', pageId),

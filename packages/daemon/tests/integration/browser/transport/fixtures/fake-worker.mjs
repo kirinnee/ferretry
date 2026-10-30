@@ -85,7 +85,7 @@ function handle({ id, method, params }) {
   }
   if (endpoint === 'no-screencast' && method === 'startScreencast') return;
   // A request's own argument selects the reply behaviour, so one fixture covers every path.
-  switch (params?.url ?? params?.selector ?? method) {
+  switch (params?.url ?? params?.target?.selector ?? params?.selector ?? method) {
     case 'never-replies':
       return;
     case 'refuses':

@@ -146,9 +146,28 @@ function content(result: AgentToolResult) {
       { type: 'text', text: renderToolResult(result) },
       ...(result.screenshotBase64 === undefined
         ? []
-        : [{ type: 'image', data: result.screenshotBase64, mimeType: 'image/png' }]),
+        : [
+            {
+              type: 'image',
+              data: result.screenshotBase64,
+              mimeType: result.screenshotFormat === 'jpeg' ? 'image/jpeg' : 'image/png',
+            },
+          ]),
     ],
   };
+}
+
+/**
+ * The flags the wire takes only as `true` — present means on. A model fills a boolean the tools list
+ * declares with `false` as readily as it leaves it out, and both mean "off", so `false` is dropped
+ * here rather than refused there.
+ */
+const ON_ONLY_FLAGS: ReadonlySet<string> = new Set(['incognito', 'double', 'submit', 'slowly', 'boxes', 'fullPage']);
+
+function withoutUnsetFlags(args: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(args).filter(([key, value]) => !(ON_ONLY_FLAGS.has(key) && value === false)),
+  );
 }
 
 const toolError = (message: string) => ({ content: [{ type: 'text', text: message }], isError: true });
@@ -253,7 +272,7 @@ export class McpServer {
         });
         return { jsonrpc: '2.0', id, result: content(result) };
       }
-      const call = AgentToolCallSchema.safeParse({ ...args, tool: tool.tool });
+      const call = AgentToolCallSchema.safeParse({ ...withoutUnsetFlags(args), tool: tool.tool });
       if (!call.success) return { jsonrpc: '2.0', id, result: toolError(refusal(call.error)) };
       return { jsonrpc: '2.0', id, result: content(await this.tools.call(call.data)) };
     } catch (error) {

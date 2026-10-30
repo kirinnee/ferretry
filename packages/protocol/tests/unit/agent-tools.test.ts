@@ -49,6 +49,7 @@ const cases: SchemaCase[] = [
   { name: 'kind', schema: tools.SurfaceKindSchema, value: 'browser' },
   { name: 'key press', schema: tools.TerminalKeySchema, value: 'ctrl-c' },
   { name: 'url', schema: tools.AgentUrlSchema, value: 'https://example.test/login' },
+  { name: 'history step', schema: tools.BrowserHistoryStepSchema, value: 'back' },
   { name: 'call', schema: tools.AgentToolCallSchema, value: { tool: 'terminal.send', name: 'dev', text: 'ls' } },
   { name: 'surface', schema: tools.AgentSurfaceSchema, value: { id: 'page-1', name: 'app', title: 'x', url: 'a' } },
   {
@@ -124,6 +125,57 @@ describe('agent tool schemas', () => {
       ...tools.AGENT_TOOL_NAMES.slice(0, 5),
       'terminal.wait',
       ...tools.AGENT_TOOL_NAMES.slice(5),
+    ]);
+  });
+
+  it('should accept the ref, point and history forms of the browser acts', () => {
+    // Arrange
+    const calls: AgentToolCall[] = [
+      { tool: 'browser.navigate', name: 'app', history: 'back' },
+      { tool: 'browser.click', name: 'app', ref: 'e12', double: true, button: 'right', modifiers: ['Shift'] },
+      { tool: 'browser.click', name: 'app', ref: 'f1e3' },
+      { tool: 'browser.click', name: 'app', x: 120, y: 340.5 },
+      { tool: 'browser.type', name: 'app', ref: 'e5', text: 'hadi', submit: true, slowly: true },
+      { tool: 'browser.read', name: 'app', mode: 'snapshot', ref: 'e3', depth: 4, boxes: true },
+      { tool: 'browser.read', name: 'app', find: 'Sign in' },
+      { tool: 'browser.screenshot', name: 'app', fullPage: true, format: 'jpeg' },
+      { tool: 'browser.screenshot', name: 'app', ref: 'e4' },
+    ];
+
+    // Act
+    const parsed = calls.map(call => tools.AgentToolCallSchema.safeParse(call).success);
+
+    // Assert
+    should(parsed.every(Boolean)).be.true();
+  });
+
+  it('should refuse a browser act that names no target, two targets, or the wrong kind', () => {
+    const call = (value: Record<string, unknown>): SchemaCase => ({
+      name: JSON.stringify(value).slice(0, 60),
+      schema: tools.AgentToolCallSchema,
+      value,
+    });
+    assertRejects([
+      call({ tool: 'browser.click', name: 'app' }),
+      call({ tool: 'browser.click', name: 'app', ref: 'e1', selector: 'a' }),
+      call({ tool: 'browser.click', name: 'app', ref: 'e1', x: 1, y: 2 }),
+      call({ tool: 'browser.click', name: 'app', x: 1 }),
+      call({ tool: 'browser.click', name: 'app', x: -1, y: 2 }),
+      call({ tool: 'browser.click', name: 'app', x: 10_001, y: 2 }),
+      call({ tool: 'browser.click', name: 'app', ref: 'button' }),
+      call({ tool: 'browser.click', name: 'app', ref: 'e1', double: false }),
+      call({ tool: 'browser.click', name: 'app', ref: 'e1', modifiers: ['Hyper'] }),
+      call({ tool: 'browser.type', name: 'app', text: 'x' }),
+      call({ tool: 'browser.type', name: 'app', x: 1, y: 2, text: 'x' }),
+      call({ tool: 'browser.read', name: 'app', mode: 'text', find: 'x' }),
+      call({ tool: 'browser.read', name: 'app', mode: 'a11y', depth: 2 }),
+      call({ tool: 'browser.read', name: 'app', find: 'x'.repeat(257) }),
+      call({ tool: 'browser.read', name: 'app', mode: 'snapshot', depth: 65 }),
+      call({ tool: 'browser.screenshot', name: 'app', ref: 'e2', fullPage: true }),
+      call({ tool: 'browser.screenshot', name: 'app', format: 'webp' }),
+      call({ tool: 'browser.navigate', name: 'app' }),
+      call({ tool: 'browser.navigate', name: 'app', url: 'https://example.test/', history: 'back' }),
+      call({ tool: 'browser.navigate', name: 'app', history: 'home' }),
     ]);
   });
 

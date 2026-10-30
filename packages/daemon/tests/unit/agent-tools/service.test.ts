@@ -7,7 +7,8 @@ import {
   browserUnavailable,
   TerminalMountError,
 } from '../../../src/lib/index.ts';
-import { agent, agentToolWorld, otherAgent, person } from './support.ts';
+import { AGENT_TOOL_MAX_OUTPUT_CHARS } from '@ferretry/protocol';
+import { agent, agentToolWorld, otherAgent, person, SNAPSHOT } from './support.ts';
 
 const refusal = async (work: Promise<unknown>): Promise<AgentToolError> => {
   const error = await work.then(
@@ -694,6 +695,182 @@ describe('AgentToolService — browser pages', () => {
     });
     should(full.code).equal('capacity');
     should(taken.code).equal('conflict');
+  });
+});
+
+describe('AgentToolService — refs, points and what a page shows', () => {
+  it('should hand the browser each act exactly as the agent named it: a ref, a point, history, a snapshot', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'browser.open', name: 'app', url: 'https://app.test/' });
+
+    // Act
+    await world.service.call(agent, {
+      tool: 'browser.click',
+      name: 'app',
+      ref: 'e4',
+      double: true,
+      button: 'right',
+      modifiers: ['Shift'],
+    });
+    await world.service.call(agent, { tool: 'browser.click', name: 'app', x: 120, y: 340 });
+    await world.service.call(agent, {
+      tool: 'browser.type',
+      name: 'app',
+      ref: 'e5',
+      text: 'hadi',
+      submit: true,
+      slowly: true,
+    });
+    await world.service.call(agent, { tool: 'browser.read', name: 'app', find: 'Sign in' });
+    await world.service.call(agent, { tool: 'browser.read', name: 'app', mode: 'snapshot', ref: 'e3', depth: 2 });
+    await world.service.call(agent, { tool: 'browser.navigate', name: 'app', history: 'back' });
+    const shot = await world.service.call(agent, {
+      tool: 'browser.screenshot',
+      name: 'app',
+      fullPage: true,
+      format: 'jpeg',
+    });
+
+    // Assert
+    should(world.browser.actions).deepEqual([
+      { action: 'click', ref: 'e4', button: 'right', double: true, modifiers: ['Shift'] },
+      { action: 'click', x: 120, y: 340 },
+      { action: 'type', ref: 'e5', text: 'hadi', submit: true, slowly: true },
+      { action: 'read', mode: 'snapshot', find: 'Sign in' },
+      { action: 'read', ref: 'e3', mode: 'snapshot', depth: 2 },
+      { action: 'back' },
+      { action: 'screenshot', fullPage: true, format: 'jpeg' },
+    ]);
+    should(shot).match({ screenshotBase64: '/9j/4AAQ', screenshotFormat: 'jpeg' });
+  });
+
+  it('should hand back a snapshot with its refs, and tell the agent to act on them', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+
+    // Act
+    const snapshot = await world.service.call(agent, { tool: 'browser.read', name: 'app', mode: 'snapshot' });
+    const found = await world.service.call(agent, { tool: 'browser.read', name: 'app', find: 'sign in' });
+    const nothing = await world.service.call(agent, { tool: 'browser.read', name: 'app', find: 'checkout' });
+
+    // Assert
+    should(snapshot.output).equal(SNAPSHOT);
+    should(snapshot.summary).equal(
+      'Read %browser:app (now at https://blank.test/). Pass a ref from it (ref: "e12") to any browser tool instead of a selector.',
+    );
+    should(found.output).equal('- button "Sign in" [ref=e4]');
+    should(nothing).deepEqual({
+      summary: 'Nothing in the snapshot of %browser:app contains that text (now at https://blank.test/).',
+      output: '',
+    });
+  });
+
+  it('should keep the top of a snapshot too long for one answer, and say how to read less', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+    const lines = Array.from(
+      { length: 5_000 },
+      (_, index) => `- listitem "row ${String(index)}" [ref=e${String(index)}]`,
+    );
+    world.browser.readText = lines.join('\n');
+
+    // Act
+    const snapshot = await world.service.call(agent, { tool: 'browser.read', name: 'app', mode: 'snapshot' });
+    const text = await world.service.call(agent, { tool: 'browser.read', name: 'app' });
+
+    // Assert
+    should(snapshot.output?.startsWith(lines[0] ?? '')).be.true();
+    should(snapshot.output?.length).be.belowOrEqual(AGENT_TOOL_MAX_OUTPUT_CHARS);
+    should(snapshot.output?.endsWith(']')).be.true();
+    should(snapshot.summary).containEql('It was clipped to fit');
+    // Visible text keeps its tail, as it always has.
+    should(text.output?.endsWith(lines.at(-1) ?? '')).be.true();
+  });
+
+  it('should mask every vault secret a page shows, in its text and in its address, before anyone reads it', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+    world.redactor.values.set('sk_live_51Hx', 'STRIPE_KEY');
+    world.browser.readText = 'Your API key is sk_live_51Hx — keep it safe.';
+    world.browser.actedUrl = 'https://dash.test/keys?reveal=sk_live_51Hx';
+
+    // Act
+    const read = await world.service.call(agent, { tool: 'browser.read', name: 'app' });
+    const clicked = await world.service.call(agent, { tool: 'browser.click', name: 'app', ref: 'e2' });
+    const byPerson = await world.service.call(person, { tool: 'browser.read', name: 'app' });
+
+    // Assert
+    should(read.output).equal('Your API key is [redacted:STRIPE_KEY] — keep it safe.');
+    should(read.summary).containEql('reveal=[redacted:STRIPE_KEY]');
+    should(clicked.summary).containEql('reveal=[redacted:STRIPE_KEY]');
+    should(byPerson.output).equal('Your API key is [redacted:STRIPE_KEY] — keep it safe.');
+    should(JSON.stringify([read, clicked, byPerson])).not.containEql('sk_live_51Hx');
+  });
+
+  it('should withhold what a page shows, rather than serve it unmasked, when the vault cannot be opened', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+    world.redactor.locked = true;
+
+    // Act
+    const error = await refusal(world.service.call(agent, { tool: 'browser.read', name: 'app' }));
+
+    // Assert
+    should(error.code).equal('unavailable');
+    should(error.message).containEql('could not open its secret store');
+    should(world.browser.acts).deepEqual(['s1:page-1:read']);
+    should(world.audit.entries.at(-1)).match({ outcome: 'refused', detail: { tool: 'browser.read' } });
+  });
+
+  it('should audit refs, points and options by what they were, never by the text typed or searched for', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    const secret = 'correct-horse-battery-staple';
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+
+    // Act
+    await world.service.call(agent, {
+      tool: 'browser.click',
+      name: 'app',
+      ref: 'e4',
+      double: true,
+      modifiers: ['Alt'],
+    });
+    await world.service.call(agent, { tool: 'browser.click', name: 'app', x: 1, y: 2, button: 'middle' });
+    await world.service.call(agent, { tool: 'browser.type', name: 'app', ref: 'e5', text: secret, submit: true });
+    await world.service.call(agent, { tool: 'browser.read', name: 'app', find: secret, depth: 3 });
+    await world.service.call(agent, { tool: 'browser.navigate', name: 'app', history: 'reload' });
+    await world.service.call(agent, { tool: 'browser.screenshot', name: 'app', ref: 'e4', format: 'jpeg' });
+
+    // Assert
+    should(JSON.stringify(world.audit.entries)).not.containEql(secret);
+    should(world.audit.entries.slice(1).map(entry => entry.detail)).deepEqual([
+      { tool: 'browser.click', by: 'agent', surface: '%browser:app', ref: 'e4', double: true, modifiers: 1 },
+      { tool: 'browser.click', by: 'agent', surface: '%browser:app', point: true, button: 'middle' },
+      {
+        tool: 'browser.type',
+        by: 'agent',
+        surface: '%browser:app',
+        ref: 'e5',
+        textLength: secret.length,
+        submit: true,
+      },
+      {
+        tool: 'browser.read',
+        by: 'agent',
+        surface: '%browser:app',
+        mode: 'snapshot',
+        findLength: secret.length,
+        depth: 3,
+      },
+      { tool: 'browser.navigate', by: 'agent', surface: '%browser:app', history: 'reload' },
+      { tool: 'browser.screenshot', by: 'agent', surface: '%browser:app', ref: 'e4', format: 'jpeg' },
+    ]);
   });
 });
 
