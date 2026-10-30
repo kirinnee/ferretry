@@ -576,6 +576,12 @@
   text-transform: var(--display-transform, none);
   white-space: nowrap;
 }
+.fy-session-bar__callsign {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
 .fy-session-bar__project {
   flex-shrink: 1;
   min-width: 0;

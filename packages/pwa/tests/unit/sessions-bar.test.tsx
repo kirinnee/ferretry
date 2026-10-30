@@ -541,8 +541,14 @@ describe('SessionsBar as a rail', () => {
     view = await mount(element);
     expect(view.container.querySelector('[data-sessions-bar="rail"]')).not.toBeNull();
     const dots = [...view.container.querySelectorAll<HTMLAnchorElement>('.fy-sbar__dot')];
-    expect(dots.map(dot => dot.getAttribute('aria-label'))).toEqual(['Maryah — 1 open Inbox item', 'nameless', 'Hadi']);
-    expect(dots.find(dot => dot.getAttribute('aria-current') === 'page')?.getAttribute('aria-label')).toBe('Hadi');
+    expect(dots.map(dot => dot.getAttribute('aria-label'))).toEqual([
+      'Diene work — 1 open Inbox item',
+      'nameless',
+      'Fix the stuck sign-in',
+    ]);
+    expect(dots.find(dot => dot.getAttribute('aria-current') === 'page')?.getAttribute('aria-label')).toBe(
+      'Fix the stuck sign-in',
+    );
     expect(view.container.querySelector('[aria-label="Projects"]')?.getAttribute('aria-current')).toBe('page');
     await click(dots[0] ?? null, 'a dot');
     await click(view.container.querySelector('[data-sbar-expand]'), 'Expand');
@@ -756,11 +762,11 @@ describe('SessionsBar across every machine', () => {
     view = await mount(element);
     const dots = [...view.container.querySelectorAll('.fy-sbar__dot')];
     expect(dots.map(dot => dot.getAttribute('aria-label'))).toEqual([
-      'Ora on kirin-box — 1 open Inbox item',
-      'Maryah on work-mac — 1 open Inbox item',
-      'Hadi on work-mac',
+      'A question on kirin-box — 1 open Inbox item',
+      'Diene work on work-mac — 1 open Inbox item',
+      'Fix the stuck sign-in on work-mac',
       'nameless on work-mac',
-      'Pim on kirin-box',
+      'Same id, other machine on kirin-box',
     ]);
     expect(dots.map(dot => dot.getAttribute('aria-current'))).toEqual([null, null, 'page', null, null]);
     expect(view.container.querySelector('[data-new-session-menu]')).not.toBeNull();
