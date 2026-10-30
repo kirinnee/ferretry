@@ -34,7 +34,7 @@ Run \`${bin} config path\` for the directory. Inside it:
 
 | File | What it holds |
 | --- | --- |
-| \`machine.yaml\` | agent permissions, the default runtime, what agents may control, browser mode, auto-resume after restart (\`autoResume\`, on by default), the agenda check (\`attentionNudge\`, on by default: a ferret whose reply asks the owner to act without raising an item is reminded once), Agenda mode for new ferrets (\`agendaMode\`, on by default; a ferret's own recorded switch wins), conversations (\`listComputer\`: Continue also lists this computer's own Claude Code and Codex history), advanced settings |
+| \`machine.yaml\` | agent permissions, the default runtime, what agents may control, browser mode, auto-resume after restart (\`autoResume\`, on by default), the agenda check (\`agendaNudge\`, on by default; the older name \`attentionNudge\` is still read until the agenda removal release and \`agendaNudge\` wins when both are written: a ferret whose reply asks the owner to act without raising an item is reminded once), Agenda mode for new ferrets (\`agendaMode\`, on by default; a ferret's own recorded switch wins), conversations (\`listComputer\`: Continue also lists this computer's own Claude Code and Codex history), advanced settings |
 | \`logins/<id>.yaml\` | one login: \`harness\`, \`store\` (\`host\`, \`ferretry\` or \`environment\`), \`env\` |
 | \`components/<kind>/<name>.yaml\` | one component; kind is \`instructions\`, \`mcp\`, \`skills\`, \`settings\`, \`hooks\` or \`modelSets\` |
 | \`profiles/<name>.yaml\` | \`contents:\` — components and other profiles (\`mcp/github\`, \`profile/base\`), in order; a later entry overrides an earlier one |

@@ -88,6 +88,39 @@ export function schemaIssues(
   });
 }
 
+/**
+ * Settings renamed for the agenda wire, per file: the older key is still read until the agenda removal
+ * release, so it is a warning that says where it went, and a file that writes BOTH is told which one counts.
+ */
+const RENAMED_KEYS: Partial<Record<ConfigSchemaId, ReadonlyArray<{ readonly old: string; readonly renamed: string }>>> =
+  {
+    machine: [{ old: 'attentionNudge', renamed: 'agendaNudge' }],
+  };
+
+function renamedKeyWarnings(
+  path: string,
+  schema: ConfigSchemaId,
+  value: unknown,
+  locate: (path: readonly PropertyKey[]) => TextPosition | undefined,
+): readonly ConfigIssue[] {
+  const written = value as Record<string, unknown>;
+  return (RENAMED_KEYS[schema] ?? []).flatMap(({ old, renamed }): readonly ConfigIssue[] => {
+    if (written[old] === undefined) return [];
+    const both = written[renamed] !== undefined;
+    return [
+      {
+        path,
+        ...at(locate([old])),
+        severity: 'warning',
+        message: both
+          ? `${old} is renamed to ${renamed}, and both are written: ${renamed} wins and ${old} is ignored`
+          : `${old} is renamed to ${renamed}; still read until the agenda removal release`,
+        fix: both ? `delete ${old}` : `rename ${old} to ${renamed}`,
+      },
+    ];
+  });
+}
+
 /** Check one file, found at `path` relative to the config directory, with this text. */
 export function checkConfigFile(path: string, text: string): ConfigFileCheck {
   const address = classifyConfigPath(path);
@@ -143,7 +176,7 @@ export function checkConfigFile(path: string, text: string): ConfigFileCheck {
     address,
     schema,
     value: configValue(schema, parsed.data),
-    issues: [],
+    issues: renamedKeyWarnings(path, schema, read.read.value, read.read.locate),
     locate: read.read.locate,
   };
 }
