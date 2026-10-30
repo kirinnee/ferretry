@@ -17,7 +17,8 @@ import { LegacySendReproof, TranscriptSendEvidence } from '../../../../src/lib/s
 /**
  * The old "not delivered" rows, re-proved through the REAL chain: the file ledger the daemon writes, the
  * Claude transcript source and parser it mounts, and the incremental evidence reader the tracker uses —
- * over a transcript far larger than one look reads, so the proof only arrives after many looks.
+ * with the limits it ships — over tens of megabytes of conversation. One look reads up to 512 MiB, so a file
+ * that needs several is out of reach here; reading across many looks is the unit tier's case.
  *
  * The lost message is the shape Claude Code 2.1.281 recorded on 2026-10-30: a paste wrapped in
  * `<pasted_content>`, its one real image path lifted out as an attachment with `[Image #7]` in front.
@@ -96,17 +97,13 @@ async function world() {
   const sessionDirectory = join(home, 'sessions', LEAD);
   await mkdir(join(sessionDirectory, 'channel'), { recursive: true });
   const transcript = join(home, 'transcript.jsonl');
-  // A 64 KiB step, so one look reads 4 MiB: the file below takes many looks, as a real 400 MB one does.
-  const source = new NodeTranscriptSource(new ClaudeTranscriptParser(), undefined, undefined, {
-    maxReadBytes: 64 * 1024,
-  });
-  const reader = new SessionTranscriptReader([source], {
+  // The shipped read limits: a smaller read reports itself truncated, and a truncated read proves no absence.
+  const reader = new SessionTranscriptReader([new NodeTranscriptSource(new ClaudeTranscriptParser())], {
     file: async sessionId => (sessionId === LEAD ? transcript : undefined),
   });
   const ledger = new FileSendLedger(() => sessionDirectory, clock);
   const marker = join(home, 'send-reproof-migration.json');
   const journal: { event: string; data: Readonly<Record<string, unknown>> }[] = [];
-  let looks = 0;
   const reproof = new LegacySendReproof({
     ledger,
     evidence: new TranscriptSendEvidence(async sessionId => ({ sessionId, harness: 'claude' }), reader),
@@ -115,57 +112,98 @@ async function world() {
     serial: inline,
     clock,
     marker: new FileSendReproofMarker(marker),
-    pause: async () => {
-      looks += 1;
-      await new Promise<void>(resolve => setTimeout(resolve, 0));
-    },
+    pause: async () => await new Promise<void>(resolve => setTimeout(resolve, 0)),
   });
-  return { sessionDirectory, transcript, ledger, marker, journal, reproof, looks: () => looks };
+  return { sessionDirectory, transcript, ledger, marker, journal, reproof };
 }
 
-describe('re-proving the old "not delivered" rows against a giant transcript', () => {
-  it('should find the lost message deep in it, call the one nobody received unconfirmed, and run once', async () => {
-    // Arrange — two legacy rows; ~30 MB of conversation, with the lost message near its end.
-    const { sessionDirectory, transcript, ledger, marker, journal, reproof, looks } = await world();
+/** Writes `turns` exchanges of padded conversation, with the lost message's record after exchange `lostAt`. */
+async function converse(transcript: string, turns: number, lostAt: number, padding: number): Promise<void> {
+  const filler = 'x'.repeat(padding);
+  const chunk: string[] = [];
+  for (let index = 0; index < turns; index += 1) {
+    chunk.push(user(`u${index}`, at(index * 100), `an unrelated message number ${index}`));
+    chunk.push(assistant(`a${index}`, at(index * 100 + 50), `working on it ${index} ${filler}`));
+    if (index === lostAt)
+      chunk.push(
+        user('the-record', at(index * 100 + 60), [
+          { type: 'text', text: lifted },
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } },
+        ]),
+      );
+    if (chunk.length >= 2_000) await appendFile(transcript, chunk.splice(0).join(''));
+  }
+  await appendFile(transcript, chunk.join(''));
+}
+
+describe('re-proving the old "not delivered" rows', () => {
+  it('should find the lost message deep in a giant transcript, and leave nothing red', async () => {
+    // Arrange — two legacy rows; ~38 MB of conversation, with the lost message near its end.
+    const { sessionDirectory, transcript, ledger, reproof } = await world();
     await writeFile(
       join(sessionDirectory, 'channel', 'sends.jsonl'),
       legacyRow('lost', typed) + legacyRow('absent', 'a message that truly never arrived anywhere'),
     );
-    const padding = 'x'.repeat(600);
-    const chunk: string[] = [];
-    for (let index = 0; index < 40_000; index += 1) {
-      chunk.push(user(`u${index}`, at(index * 100), `an unrelated message number ${index}`));
-      chunk.push(assistant(`a${index}`, at(index * 100 + 50), `working on it ${index} ${padding}`));
-      if (index === 38_000)
-        chunk.push(
-          user('the-record', at(index * 100 + 60), [
-            { type: 'text', text: lifted },
-            { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } },
-          ]),
-        );
-      if (chunk.length >= 2_000) await appendFile(transcript, chunk.splice(0).join(''));
-    }
-    await appendFile(transcript, chunk.join(''));
+    await converse(transcript, 40_000, 38_000, 600);
 
     // Act
     const counts = await reproof.run();
-    const again = await reproof.run();
 
-    // Assert — the lost one is delivered, read across many looks; the other is unconfirmed, never red.
+    // Assert — the lost one is delivered; the other is unconfirmed, never red. (A read past one 8 MiB step
+    // cannot prove absence today, so which unconfirmed it is is the reader's word, not this case's.)
     const rows = await ledger.list(LEAD);
     should(rows.find(row => row.sendId === 'lost')).match({
       fate: 'delivered',
       evidence: { proof: 'normal-user-record' },
     });
+    should(rows.find(row => row.sendId === 'absent')?.fate).equal('unaccounted');
+    should(rows.some(row => row.fate === 'timed_out')).be.false();
+    should(counts).match({ sessions: 1, delivered: 1 });
+  }, 120_000);
+
+  it('should call a message a whole transcript does not hold unconfirmed, write the marker, and run once', async () => {
+    // Arrange — a transcript one step reads to its end.
+    const { sessionDirectory, transcript, ledger, marker, journal, reproof } = await world();
+    await writeFile(
+      join(sessionDirectory, 'channel', 'sends.jsonl'),
+      legacyRow('lost', typed) + legacyRow('absent', 'a message that truly never arrived anywhere'),
+    );
+    await converse(transcript, 2_000, 1_500, 100);
+
+    // Act
+    const counts = await reproof.run();
+    const again = await reproof.run();
+
+    // Assert
+    const rows = await ledger.list(LEAD);
+    should(rows.find(row => row.sendId === 'lost')?.fate).equal('delivered');
     should(rows.find(row => row.sendId === 'absent')).match({
       fate: 'unaccounted',
       unaccountedReason: 'landing_unconfirmed',
     });
-    should(rows.some(row => row.fate === 'timed_out')).be.false();
-    should(looks()).be.above(1);
     should(counts).eql({ sessions: 1, delivered: 1, unconfirmed: 1, unreadable: 0 });
     should(journal.map(entry => entry.event).sort()).eql(['control.send_delivered', 'control.send_unaccounted']);
     should(JSON.parse(await readFile(marker, 'utf8'))).match({ v: 1, ranAt: NOW, delivered: 1, unconfirmed: 1 });
     should(again).be.undefined();
-  }, 120_000);
+  });
+});
+
+describe('the re-proof marker', () => {
+  it('should refuse to guess when the marker cannot be read for any reason but its absence', async () => {
+    // Arrange — the marker's path is a directory, so reading it fails with something other than ENOENT.
+    const home = await mkdtemp(join(tmpdir(), 'fy-send-reproof-marker-'));
+    homes.push(home);
+    const path = join(home, 'send-reproof-migration.json');
+    await mkdir(path);
+
+    // Act
+    const failure = await new FileSendReproofMarker(path).ran().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    // Assert
+    should(failure).be.instanceOf(Error);
+    should((failure as NodeJS.ErrnoException).code).equal('EISDIR');
+  });
 });
