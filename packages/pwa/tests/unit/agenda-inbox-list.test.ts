@@ -10,6 +10,7 @@ import {
   inboxRowTitle,
   inboxSections,
   inboxSourceFromSearch,
+  inboxWho,
   isFromWarden,
   NO_FILTER,
   nextSelection,
@@ -287,5 +288,35 @@ describe('inboxSections reading a stopped ferret under the agenda name', () => {
     } as never);
     const sections = inboxSections([inboxCard(agendaItem('A1'), view)], []);
     expect(sections.stopped.map(group => group.ferret)).toEqual(['Moe']);
+  });
+});
+
+describe('who an item is from', () => {
+  it('says the ferret, its task, its card and its machine — the item’s own card first', () => {
+    const view = sessionView('s1', {
+      config: { teammate: 'kai', name: 'Release train', focusTask: { id: 'F9' } } as never,
+    });
+    expect(inboxWho(inboxCard(agendaItem('A1', { task: { id: 'F12' } } as never), view, 'Laptop'))).toEqual({
+      ferret: 'Kai',
+      task: 'Release train',
+      card: '&F12',
+      machine: 'Laptop',
+    });
+    expect(inboxWho(inboxCard(agendaItem('A1'), view, 'Laptop')).card).toBe('&F9');
+  });
+
+  it('says the folder it works in when the conversation has no task of its own, and no card when it has none', () => {
+    const view = sessionView('s2', { config: { teammate: 'moe', name: 'Moe', cwd: '/work/ledger' } });
+    expect(inboxWho(inboxCard(agendaItem('A1'), view))).toEqual({
+      ferret: 'Moe',
+      task: 'ledger',
+      card: null,
+      machine: 'Workshop',
+    });
+  });
+
+  it('has no task when there is neither a task nor a folder: the callsign alone', () => {
+    const view = sessionView('s3', { config: { teammate: 'moe', name: 'Moe', cwd: '' } });
+    expect(inboxWho(inboxCard(agendaItem('A1'), view)).task).toBeNull();
   });
 });

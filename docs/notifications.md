@@ -164,8 +164,10 @@ thing only the owner can decide or do on the agenda, as its own item (`fy agenda
 on unless the machine default (below) is turned off.
 
 The section (`AGENDA_INSTRUCTION` in `@ferretry/fleet`, about 1,000 characters, capped at 1,300 by a
-test) names the verbs and flags `fy agenda` takes, what `--blocking`, `--will-block` and `--by` mean, and
-that `"[answer to !A3 …]"` is an answer while `"[re !A3 …]"` is chat that closes the item (re-raise it with `fy agenda surface` only if the owner still has to decide or do something).
+test) names the verbs and flags `fy agenda` takes — its one `agenda add` example carries `--premise` and
+`--context`, which every new item requires ([agenda.md](agenda.md#rules-the-writing-keeps)) — what `--blocking`,
+`--will-block` and `--by` mean, and that `"[answer to !A3 …]"` is an answer while `"[re !A3 …]"` is chat that
+closes the item (re-raise it with `fy agenda surface` only if the owner still has to decide or do something).
 
 - **The switch** is the session's own recorded setting, `config.agenda` (`sessionAgendaEnabled`, absent
   means OFF), exactly like `config.hypermedia` and `config.pack`. At each launch the daemon turns it into

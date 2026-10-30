@@ -40,6 +40,7 @@ function request(overrides: Partial<RaiseAgendaRequest> = {}): RaiseAgendaReques
     subject: 'Approve the deployment?',
     why: 'The release cannot proceed without a human decision.',
     context: 'This deploy changes the public service.',
+    premise: 'A release is ready to go out.',
     howToResolve: 'Approve or reject the request.',
     ask: { kind: 'permission' },
     ...overrides,
@@ -96,6 +97,56 @@ describe('Agenda state machine', () => {
     should(actual.resolved).have.length(0);
     should(isActiveAgenda(activeEntry(created.ledger))).be.true();
     should(created.item).deepEqual(actual.items[0]);
+  });
+
+  it('should refuse a ferret’s new item without a premise or a context, and only a ferret’s', () => {
+    // Arrange
+    const { premise: _premise, context: _context, ...bare } = request();
+    const raise = (actor: AgendaActor, overrides: Partial<RaiseAgendaRequest>) =>
+      applyAgendaCommandToSession(null, SESSION_ID, {
+        action: 'raise',
+        actor,
+        request: { ...bare, ...overrides },
+        at: FIRST,
+      });
+
+    // Act
+    const neither = failed(raise(AGENT, {})).error;
+    const blankContext = failed(raise(AGENT, { premise: 'A release waits', context: ' ' })).error;
+    const notice = raise(AGENT, { kind: 'info', notice: true, ask: undefined });
+    const others = [HUMAN, DAEMON, WARDEN].map(actor => raise(actor, {}).ok);
+
+    // Assert
+    should(neither).deepEqual({
+      code: 'invalid',
+      message:
+        'a new agenda item needs both: premise (--premise) is required: the situation, what is going on; context (--context) is required: why it matters now',
+    });
+    should(blankContext.message).equal(
+      'a new agenda item needs both: context (--context) is required: why it matters now',
+    );
+    should(notice.ok).be.true();
+    should(others).deepEqual([true, true, true]);
+  });
+
+  it('should keep an item raised before the rule working: an edit or an answer never asks for them', () => {
+    // Arrange: an item with neither, as an older daemon stored it
+    const { premise: _premise, context: _context, ...bare } = request();
+    const old = succeeded(
+      applyAgendaCommandToSession(null, SESSION_ID, { action: 'raise', actor: DAEMON, request: bare, at: FIRST }),
+    ).ledger;
+
+    // Act
+    const edited = applyAgendaCommand(old, {
+      action: 'edit',
+      actor: HUMAN,
+      id: 'A1',
+      patch: { subject: 'Ship it?' },
+      at: SECOND,
+    });
+
+    // Assert
+    should(edited.ok).be.true();
   });
 
   it('should stamp exact human, agent, daemon, and warden provenance', () => {
@@ -2638,8 +2689,11 @@ describe('an item that confirms a held configuration change', () => {
   });
 
   it('should record no previous premise for an item that had none', () => {
-    // Arrange
-    const { ledger } = raised(AGENT, { ask: CHOICE, confirms: CONFIRMS });
+    // Arrange: an item from before a ferret had to give a premise — only the daemon raises one without it now
+    const { premise: _premise, ...bare } = request({ ask: CHOICE, confirms: CONFIRMS });
+    const ledger = succeeded(
+      applyAgendaCommandToSession(null, SESSION_ID, { action: 'raise', actor: DAEMON, request: bare, at: FIRST }),
+    ).ledger;
 
     // Act
     const result = succeeded(restate(ledger));

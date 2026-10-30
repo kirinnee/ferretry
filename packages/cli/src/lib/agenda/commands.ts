@@ -22,8 +22,9 @@ const WRITING_GUIDE = `The reader has NOT been following this session. Write for
                  no IDs): it heads the card and is the notification's title — not the conversation's name
   <the ask>      the ASK: one plain sentence, 120 characters or fewer, answer first — not backstory;
                  it is the notification's body (\`--ask\` says the same when it is not given as words)
-  --premise      the SITUATION: what is going on, so a cold reader starts here; repeat for one bullet each
-  --context      WHY IT MATTERS NOW and the supporting facts (not the situation); repeat for bullets
+  --premise      REQUIRED. The SITUATION: what is going on, so a cold reader starts here; repeat for one
+                 bullet each (a --confirms card's premise is the daemon's: the held change)
+  --context      REQUIRED. WHY IT MATTERS NOW and the supporting facts (not the situation); repeat for bullets
   --decided      earlier answers that bear on this item, one bullet each (repeat)
   --still-open   what is still open to decide, one bullet each (repeat); update it as the talk goes on
   --term         TERM=meaning for every codename or term of art you use (repeat)
@@ -39,7 +40,8 @@ const WRITING_GUIDE = `The reader has NOT been following this session. Write for
   --json-file    the same fields as JSON (- reads stdin); flags win over the file
 
 THE RULE IS ISOLATION: could the owner answer with nothing else open? A card is read cold, so it
-carries everything the answer needs — premise and context are guides to that, not boxes to tick.
+carries everything the answer needs. Premise and context are required because they are where a cold
+reader starts — write them for that reader, not to fill a box.
 Every field renders as markdown: short bullets, one idea each, no walls of text; a fence in --body
 (fy-render) draws a chart or diagram when a picture beats words. Never use ticket or PR numbers,
 internal codenames, file paths or unexplained capitals — say it in plain words, or define the term

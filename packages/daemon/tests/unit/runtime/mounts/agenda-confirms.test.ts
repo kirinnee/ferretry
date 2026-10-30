@@ -224,6 +224,8 @@ const RAISE = {
   title: 'Turn on AI investigations',
   subject: 'Allow the Warden to spend on AI investigations?',
   why: 'investigations need the LLM layer on',
+  // No premise: a confirmation's premise is the held change, in the daemon's words.
+  context: 'The work waits on this answer.',
   howToResolve: 'Allow, Deny or Discard change',
   confirms: 'warden.yaml',
 } as const;
@@ -648,6 +650,8 @@ describe('Allow on an agenda card that confirms a held configuration change', ()
         title: 'Pick a branch',
         subject: 'which base branch?',
         why: 'the ticket names two',
+        premise: 'A ferret needs the owner.',
+        context: 'The work waits on this answer.',
         howToResolve: 'pick one',
         ask: { kind: 'multiple-choice', options: [{ label: 'Allow' }, { label: 'main' }] },
       });

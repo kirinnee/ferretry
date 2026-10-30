@@ -19,6 +19,7 @@ import {
   type AgendaSource,
   type AgendaUndelivered,
   agendaBriefOf,
+  agendaBriefRequiredProblems,
   agendaNoticeProblems,
   agendaOptionDetailProblems,
   MAX_AGENDA_DETAIL_LENGTH,
@@ -465,6 +466,9 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
   if (request.notice === true && actor.kind === 'human') {
     return failure('forbidden', 'only a ferret or the daemon sends a notice');
   }
+  // A ferret's new item carries its premise and context; the daemon's and the Warden's raises write their own.
+  const briefProblems = actor.kind === 'agent' ? agendaBriefRequiredProblems(request) : [];
+  if (briefProblems.length > 0) return failure('invalid', `a new agenda item needs both: ${briefProblems.join('; ')}`);
   if (request.ask === undefined && request.kind !== 'info' && request.notice !== true && actor.kind !== 'daemon') {
     return failure(
       'invalid',

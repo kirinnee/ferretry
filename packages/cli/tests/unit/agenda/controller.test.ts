@@ -99,6 +99,9 @@ describe('agenda controller reads', () => {
   });
 });
 
+/** The premise and context every new item a ferret raises must carry. */
+const BRIEF = { premise: ['A ferret needs the owner.'], context: ['The work waits on this answer.'] };
+
 describe('agenda controller add', () => {
   const after = snapshot([humanItem('A1', 'approve the deploy'), agentItem('A2', 'pick a cluster')]);
 
@@ -107,7 +110,7 @@ describe('agenda controller add', () => {
     const { controller, gateway } = build(SESSION, after);
 
     // Act
-    await controller.add(['pick', 'a', 'cluster'], { title: 'Pick a cluster' });
+    await controller.add(['pick', 'a', 'cluster'], { ...BRIEF, title: 'Pick a cluster' });
 
     // Assert
     should(gateway.applied).deepEqual([
@@ -121,7 +124,8 @@ describe('agenda controller add', () => {
           title: 'Pick a cluster',
           kind: 'reply',
           why: 'pick a cluster',
-          context: null,
+          premise: 'A ferret needs the owner.',
+          context: 'The work waits on this answer.',
           howToResolve: 'Answer this item on the agenda (it records who answered).',
           ask: { kind: 'open-question' },
         },
@@ -135,9 +139,10 @@ describe('agenda controller add', () => {
 
     // Act
     await controller.add(['approve', 'the', 'deploy'], {
+      ...BRIEF,
       title: 'Deploy approval',
       why: 'the release is blocked',
-      context: 'the smoke test passed',
+      context: ['the smoke test passed'],
       resolve: 'run `fy attention done !A2 --approve`',
       kind: 'permission',
     });
@@ -165,7 +170,7 @@ describe('agenda controller add', () => {
     const controller = new AgendaController(gateway, out, SESSION);
 
     // Act
-    await controller.add(['same', 'subject'], { title: 'Pick a cluster' });
+    await controller.add(['same', 'subject'], { ...BRIEF, title: 'Pick a cluster' });
 
     // Assert
     should(out.messages[0]).startWith('agenda !A2 recorded');
@@ -176,7 +181,7 @@ describe('agenda controller add', () => {
     const { controller, gateway } = build(SESSION, after);
 
     // Act
-    await controller.add(['pick', 'a', 'cluster'], { title: 'Pick a cluster' });
+    await controller.add(['pick', 'a', 'cluster'], { ...BRIEF, title: 'Pick a cluster' });
 
     // Assert
     should(gateway.read).deepEqual([SESSION]);
@@ -190,7 +195,7 @@ describe('agenda controller add', () => {
     const controller = new AgendaController(gateway, out, SESSION);
 
     // Act
-    await controller.add(['ours'], { title: 'Pick a cluster' });
+    await controller.add(['ours'], { ...BRIEF, title: 'Pick a cluster' });
 
     // Assert
     should(out.messages[0]).startWith('agenda item recorded — 2 open items');
@@ -203,7 +208,12 @@ describe('agenda controller add', () => {
     const input = {
       read: async (path: string) => {
         read.push(path);
-        return JSON.stringify({ summary: 'Approve the plan', questions: ['Which plan?', 'When?'] });
+        return JSON.stringify({
+          summary: 'Approve the plan',
+          premise: ['Two plans are written'],
+          context: 'The work waits on the pick.',
+          questions: ['Which plan?', 'When?'],
+        });
       },
     };
     const controller = new AgendaController(gateway, new CapturingOutput(), SESSION, input);
@@ -261,7 +271,7 @@ describe('agenda controller add', () => {
     const { controller, gateway } = build(SESSION, after);
 
     // Act
-    await controller.add(['line\none', 'line   two'], { title: 'T' });
+    await controller.add(['line\none', 'line   two'], { ...BRIEF, title: 'T' });
 
     // Assert
     should(gateway.applied[0]?.request).match({ subject: 'line one line two' });
@@ -485,7 +495,7 @@ describe('agenda controller steps and body', () => {
     const { gateway, controller } = withInput({ 'body.md': '## Notes', '-': '## From stdin' });
 
     // Act
-    await controller.add(['Log in'], { title: 'Log in', step: ['Run `fy login`'], bodyFile: 'body.md' });
+    await controller.add(['Log in'], { ...BRIEF, title: 'Log in', step: ['Run `fy login`'], bodyFile: 'body.md' });
     await controller.edit('A1', { step: ['One'], bodyFile: '-' });
 
     // Assert

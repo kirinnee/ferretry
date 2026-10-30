@@ -155,7 +155,8 @@ An edit that loosens what the machine may spend or do is **held** until the owne
 **Allow is the confirmation** — the owner answers it and nothing else has to be run:
 
 ```
-fy agenda add "Allow the Jev price correction?" --title "Jev price correction" --confirms warden.yaml
+fy agenda add "Allow the Jev price correction?" --title "Jev price correction" \
+  --context "The Warden overcharges every run until it is on" --confirms warden.yaml
 ```
 
 - **Raising.** `--confirms <file>` names the file; the daemon looks up its held edit and records on the item
@@ -217,8 +218,43 @@ ignores it.
 The card is read cold, so it must stand alone: a title of about 40 characters, an ask in one sentence
 (120 at most), the premise, context and what is decided or still open as short bullets, every term of art
 defined with `--term`, never a secret value. The daemon lints for this and answers with advice, never a
-refusal. Agents close their own items as soon as the reason is gone: an open item whose blocker has
-cleared is a bug.
+refusal — with one exception below. Agents close their own items as soon as the reason is gone: an open item
+whose blocker has cleared is a bug.
+
+**The premise and the context are required.** They are what a cold reader starts from — what is going on, and
+why it matters now — so every NEW item a ferret raises must carry both:
+
+- `fy agenda add` refuses without `--premise` and `--context` (or the same fields in `--json-file`), naming
+  the flag that is missing, before anything is sent. A blank one counts as missing.
+- The daemon refuses the same raise from a ferret (`invalid`, naming the missing field), so a client that
+  skips the CLI cannot skip the rule (`agendaBriefRequiredProblems` in `@ferretry/protocol`).
+- **Exempt:** a notice (`fy notify`, read rather than answered); an item the daemon or the Warden raises (a
+  lane proposal, a harness prompt, a handover, a Warden escalation), which writes its own words; an item the
+  owner raises in the app, which is only warned about. A confirmation (`--confirms`) needs only
+  `--context`: its premise is the held change, in the daemon's words.
+- **Only new items.** It is checked when an item is raised, never when one is read or edited: an item already
+  on a board keeps working without them, and `agenda edit` may still reword either.
+
+## In the Inbox
+
+The Inbox lists every item waiting on the owner, from every paired machine, grouped by ferret. Each group — and
+each open item — says **who and what**, never the callsign alone: the ferret, what it works on (its task's name and
+its card, `&F12`), and the machine. A row whose item is about a different card than its ferret's says that card too.
+
+- **Opening an item shows the chat's own item view** — the same component (`AgendaItemView`), so Markdown, the
+  options, the quick replies, the terms and the history read exactly as in the chat — with that ferret's **real
+  composer** under it. A message typed there goes to the ferret's chat about the item (`!A5 …`, delivered as
+  `[re !A5 …]`), the chat's own path; a quick reply carries what is typed as its note. "Open chat" goes to the
+  conversation at the item, and so does a modified click on a row.
+- **The open items are a deck**, on a phone and a wide screen alike. Swipe — from the item's head, its
+  who-and-what line or its quick replies; the body scrolls — or press the arrow keys:
+  - **↑** sends the **primary** answer (the recommended one, the right-hand answer on the card);
+  - **←** and **→** send the others (→ takes what ↑ gave on the card, else it is the primary again);
+  - **↓ skips** to the next item: nothing is sent and the item stays open.
+
+  A held drag is stamped with what letting go would do (there is no hint line under the card). Every answer
+  goes into the same undo window as a tap. Reduced motion (the OS preference or Settings › Appearance › Motion) drops
+  the fly-off and the spring.
 
 ## Delivery
 

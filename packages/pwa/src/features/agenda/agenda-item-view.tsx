@@ -50,6 +50,8 @@ export interface AgendaItemViewProps {
   readonly onAct: (action: InboxAction) => void;
   readonly onProgress?: (step: number, done: boolean) => Promise<void>;
   readonly renderProse: (text: string) => ReactNode;
+  /** What ✕ is called: "Back to the chat", unless the host is somewhere else (the Inbox). */
+  readonly closeLabel?: string;
 }
 
 /** The option a question's recommendation names, or '' when it names none. */
@@ -83,6 +85,7 @@ export function AgendaItemView({
   onAct,
   onProgress,
   renderProse,
+  closeLabel = 'Back to the chat',
 }: AgendaItemViewProps) {
   const root = useRef<HTMLElement | null>(null);
   const [picks, setPicks] = useState<readonly string[]>([]);
@@ -178,7 +181,7 @@ export function AgendaItemView({
               <ChevronRight aria-hidden="true" size={18} />
             </button>
             <button
-              aria-label="Back to the chat"
+              aria-label={closeLabel}
               className="fy-item-view__step fy-item-view__close"
               data-agenda-close=""
               onClick={onClose}

@@ -528,3 +528,16 @@ describe('a change to the Ferretry config', () => {
     expect(root().textContent).toContain('The board keeps every finished item');
   });
 });
+
+describe('the Inbox’s item view', () => {
+  test('names ✕ as the host asks: "Back to the chat" unless it is somewhere else', async () => {
+    await draw(richItem);
+    const closeLabel = (): string | null | undefined =>
+      view?.container.querySelector('[data-agenda-close]')?.getAttribute('aria-label');
+    expect(closeLabel()).toBe('Back to the chat');
+    await view?.unmount();
+    view = null;
+    await draw(richItem, { closeLabel: 'Back to the Inbox' });
+    expect(closeLabel()).toBe('Back to the Inbox');
+  });
+});

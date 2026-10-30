@@ -17,7 +17,20 @@ import {
 const board = snapshot([humanItem('A1', 'approve the deploy')], { resolved: [resolvedItem('A9', 'old ask')] });
 const afterAdd = snapshot([humanItem('A1', 'approve the deploy'), agentItem('A2', 'pick a cluster')]);
 
-function run(argv: string[], result = board, offered: readonly string[] = []) {
+/**
+ * A ferret's `agenda add` must say its premise and its context; every add here gets a stand-in for whichever
+ * one it does not name, so a test of another flag reads as that flag alone. `bare` sends the argv as typed.
+ */
+const withBrief = (argv: readonly string[]): string[] => {
+  if (argv[0] !== 'agenda' || argv[1] !== 'add' || argv.includes('--help')) return [...argv];
+  return [
+    ...argv,
+    ...(argv.includes('--premise') ? [] : ['--premise', 'A ferret needs the owner.']),
+    ...(argv.includes('--context') || argv.includes('-c') ? [] : ['--context', 'The work waits on this answer.']),
+  ];
+};
+
+function run(argv: string[], result = board, offered: readonly string[] = [], bare = false) {
   const gateway = new RecordingAgendaGateway(board, result);
   gateway.offered = offered;
   const out = new CapturingOutput();
@@ -27,7 +40,7 @@ function run(argv: string[], result = board, offered: readonly string[] = []) {
   registerAgendaCommands(program, new AgendaController(gateway, out, SESSION), async (words, options) => {
     sent.push({ words, options });
   });
-  return { parsed: program.parseAsync(['node', 'fy', ...argv]), gateway, out, sent };
+  return { parsed: program.parseAsync(['node', 'fy', ...(bare ? argv : withBrief(argv))]), gateway, out, sent };
 }
 
 describe('agenda command surface', () => {
@@ -112,6 +125,43 @@ describe('agenda command surface', () => {
     // Assert
     await should(parsed).be.rejectedWith(/no agenda item !A404 in /u);
     should(out.messages).be.empty();
+  });
+
+  it('should refuse an add with no --premise or no --context, naming the flags, and raise nothing', async () => {
+    // Arrange + Act
+    const neither = run(['agenda', 'add', 'pick a cluster', '--title', 'Pick'], afterAdd, [], true);
+    const noContext = run(
+      ['agenda', 'add', 'pick', '--title', 'Pick', '--premise', 'Two clusters'],
+      afterAdd,
+      [],
+      true,
+    );
+    const noPremise = run(
+      ['agenda', 'add', 'pick', '--title', 'Pick', '--context', 'The deploy waits'],
+      afterAdd,
+      [],
+      true,
+    );
+
+    // Assert
+    await should(neither.parsed).be.rejectedWith(/agenda add needs --premise and --context/u);
+    await should(noContext.parsed).be.rejectedWith(/agenda add needs --context: context \(--context\) is required/u);
+    await should(noPremise.parsed).be.rejectedWith(/agenda add needs --premise: premise \(--premise\) is required/u);
+    should([...neither.gateway.applied, ...noContext.gateway.applied, ...noPremise.gateway.applied]).be.empty();
+  });
+
+  it('should take a confirmation without --premise: its premise is the held change, in the daemon words', async () => {
+    // Arrange + Act
+    const confirms = run(
+      ['agenda', 'add', 'Allow it?', '--title', 'Allow', '--confirms', 'warden.yaml', '--context', 'It turns on AI'],
+      afterAdd,
+      [],
+      true,
+    );
+    await confirms.parsed;
+
+    // Assert
+    should(confirms.gateway.applied[0]?.request).match({ confirms: 'warden.yaml', context: 'It turns on AI' });
   });
 
   it('should accept the explicit add verb', async () => {
