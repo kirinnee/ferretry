@@ -200,6 +200,23 @@ describe('migrateAgendaFile', () => {
     should(store.get(SESSION, 'attention.json')).be.undefined();
   });
 
+  it('should keep the newer old ledger readable when its copy over the new name does not read back equal', async () => {
+    // Arrange
+    const store = new MemoryStore();
+    store.put(SESSION, LEDGER.legacy, ledger(T2));
+    store.put(SESSION, LEDGER.current, ledger(T1));
+    store.corruptWriteOf = 'agenda.json';
+
+    // Act
+    const result = await migrateAgendaFile(store, SESSION, 'ledger');
+
+    // Assert — the reader falls back to the old (newer) file; the next start migrates it again.
+    should(result).equal('failed');
+    should(store.get(SESSION, 'attention.json')).equal(ledger(T2));
+    should(store.get(SESSION, 'agenda.json')).be.undefined();
+    should(store.get(SESSION, `agenda.json${MIGRATED_SUFFIX}`)).equal(ledger(T1));
+  });
+
   it('should break a tie on the same instant by the ledger that raised more items', async () => {
     // Arrange
     const store = new MemoryStore();
