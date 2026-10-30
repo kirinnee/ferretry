@@ -208,6 +208,13 @@ finds it does nothing, so an owner who later turns a ferret's mode off is never 
 A start that could not switch some session writes no marker and tries again next time (switching a
 ferret already on is a no-op). It never stops the daemon starting.
 
+A second, separate marker, `agenda-files-migration.json`, records the move of each session's `attention.json` and
+`attention-replies.json` to `agenda.json` and `agenda-replies.json` (one line of counts in the log). It follows the same
+rules: written only when every session succeeded, a failed session keeps its old file and is retried next start, and it
+never stops the daemon starting. [agenda.md § On disk](agenda.md#on-disk) has the rest. Records in
+`notifications.jsonl` are not rewritten: both key spellings (`attention:`, `agenda:`) are read as one, so an item
+notified before the upgrade is never notified again.
+
 ## Every automatic push, and why it stays or goes
 
 | Path                                             | Where                                          | Decision                                                                                                               |

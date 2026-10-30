@@ -3,6 +3,7 @@ import { AttentionItemSchema, AttentionSnapshotSchema, type PushDeliveryResult }
 import should from 'should';
 import { KeyedSerialExecutor } from '../../../src/adapters/system/keyed-serial-executor.ts';
 import { NotificationService } from '../../../src/lib/notifications/service.ts';
+import { NotificationRecordSchema } from '../../../src/lib/notifications/types.ts';
 import type {
   NotificationDeliveryLedger,
   NotificationLedgerEntry,
@@ -164,7 +165,7 @@ describe('NotificationService stop push', () => {
       title: 'Release agent is stopped · 2 need you',
       url: `/session/${SESSION}?attention=A1`,
     });
-    should(requested(world)[0]).containDeep({ key: `attention:${SESSION}:stopped:${AT}`, stoppedAt: AT });
+    should(requested(world)[0]).containDeep({ key: `agenda:${SESSION}:stopped:${AT}`, stoppedAt: AT });
   });
 
   it('should push again for the next stop of the same ferret', async () => {
@@ -205,7 +206,7 @@ describe('NotificationService deadline push', () => {
     // Assert
     should(world.push.calls).equal(1);
     should(world.push.dispatches[0]?.payload.body).startWith('Needed in about 2 h');
-    should(requested(world)[0]).containDeep({ key: `attention:${SESSION}:A1:deadline`, deadline: true });
+    should(requested(world)[0]).containDeep({ key: `agenda:${SESSION}:A1:deadline`, deadline: true });
   });
 
   it('should keep its own key apart from a stop of the same item', async () => {
@@ -234,7 +235,7 @@ describe('NotificationService ping push', () => {
 
     // Assert
     should(world.push.calls).equal(1);
-    should(requested(world).map(record => record.key)).deepEqual([`attention:${SESSION}:A4:ping`]);
+    should(requested(world).map(record => record.key)).deepEqual([`agenda:${SESSION}:A4:ping`]);
     should(world.push.dispatches[0]?.payload.body).equal('Build is green');
   });
 
@@ -318,5 +319,127 @@ describe('NotificationService enrolled devices', () => {
     // Act + Assert
     should(await world.service.enrolledDevices()).equal(2);
     should(await fixture({ push: nobody }).service.enrolledDevices()).equal(0);
+  });
+});
+
+/** A push recorded by a daemon that predates the agenda rename: `attention:` key, `attention` origin. */
+function legacyRecord(key: string, extra: Record<string, unknown>): NotificationRecord {
+  return NotificationRecordSchema.parse({
+    v: 1,
+    phase: 'requested',
+    key,
+    at: AT,
+    origin: 'attention',
+    attribution: 'attention:agent:session-1',
+    sessionId: SESSION,
+    attentionId: 'A1',
+    ...extra,
+    sent: { kind: 'attention', interactive: true, title: 'earlier', body: 'earlier' },
+    enrolled: 1,
+  });
+}
+
+describe('NotificationService across the agenda rename', () => {
+  it('should write the new spelling: an agenda key and the agenda origin', async () => {
+    // Arrange
+    const world = fixture();
+
+    // Act
+    await world.service.stopped(SESSION, AT, snapshot);
+
+    // Assert
+    should(requested(world)[0]).containDeep({ key: `agenda:${SESSION}:stopped:${AT}`, origin: 'agenda' });
+  });
+
+  it('should never push again a stop, deadline or ping already recorded under the attention key', async () => {
+    // Arrange — the ledger a daemon wrote BEFORE the upgrade.
+    const ledger = new MemoryLedger(
+      [],
+      [
+        legacyRecord(`attention:${SESSION}:stopped:${AT}`, { stoppedAt: AT }),
+        legacyRecord(`attention:${SESSION}:A1:deadline`, { deadline: true }),
+        legacyRecord(`attention:${SESSION}:A4:ping`, { attentionId: 'A4', ping: true }),
+      ],
+    );
+    const world = fixture({ ledger });
+
+    // Act
+    await world.service.stopped(SESSION, AT, snapshot);
+    await world.service.deadline(SESSION, due, snapshot);
+    await world.service.raised(SESSION, pinging, snapshot);
+
+    // Assert
+    should(world.push.calls).equal(0);
+    should(ledger.appends).deepEqual([]);
+  });
+
+  it('should still push a stop the old ledger does not hold, once', async () => {
+    // Arrange
+    const ledger = new MemoryLedger([], [legacyRecord(`attention:${SESSION}:stopped:${AT}`, { stoppedAt: AT })]);
+    const world = fixture({ ledger });
+    const later = '2026-08-06T11:00:00.000Z';
+
+    // Act
+    await world.service.stopped(SESSION, later, snapshot);
+    await world.service.stopped(SESSION, later, snapshot);
+
+    // Assert
+    should(world.push.calls).equal(1);
+  });
+
+  it('should report the delivery of a ping recorded under the attention key', async () => {
+    // Arrange
+    const ledger = new MemoryLedger(
+      [],
+      [
+        legacyRecord(`attention:${SESSION}:A4:ping`, { attentionId: 'A4', ping: true }),
+        NotificationRecordSchema.parse({
+          v: 1,
+          phase: 'outcome',
+          key: `attention:${SESSION}:A4:ping`,
+          at: AT,
+          delivered: 2,
+          failed: 0,
+        }),
+      ],
+    );
+    const world = fixture({ ledger });
+
+    // Act / Assert
+    should(await world.service.attentionDelivered(SESSION, 'A4')).equal(2);
+  });
+});
+
+describe('NotificationRecordSchema across the agenda rename', () => {
+  const base = {
+    v: 1,
+    phase: 'requested',
+    at: AT,
+    attribution: 'attention:agent:session-1',
+    sessionId: SESSION,
+    attentionId: 'A1',
+    ping: true,
+    sent: { kind: 'attention', interactive: true, title: 't', body: 'b' },
+    enrolled: 1,
+  };
+
+  it('should parse a record written before the rename and one written after', () => {
+    // Arrange / Act / Assert
+    should(
+      NotificationRecordSchema.safeParse({ ...base, key: `attention:${SESSION}:A1:ping`, origin: 'attention' }).success,
+    ).be.true();
+    should(
+      NotificationRecordSchema.safeParse({ ...base, key: `agenda:${SESSION}:A1:ping`, origin: 'agenda' }).success,
+    ).be.true();
+  });
+
+  it('should refuse a key that does not name its session and item, in either spelling', () => {
+    // Arrange / Act / Assert
+    should(
+      NotificationRecordSchema.safeParse({ ...base, key: `attention:${OTHER}:A1:ping`, origin: 'attention' }).success,
+    ).be.false();
+    should(
+      NotificationRecordSchema.safeParse({ ...base, key: `agenda:${OTHER}:A1:ping`, origin: 'agenda' }).success,
+    ).be.false();
   });
 });

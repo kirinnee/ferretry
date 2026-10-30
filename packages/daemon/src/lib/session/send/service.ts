@@ -17,6 +17,7 @@ import {
   turnInstruction,
   typedIntoBusyPane,
 } from './policy.ts';
+import { sameSendId } from './send-id.ts';
 import type { SessionSendSettings } from './settings.ts';
 import { sameComposerText, showsOwnPointer, strandablePointer, strandedPointerSend } from './stranded.ts';
 import {
@@ -1055,6 +1056,13 @@ export class SessionSendService {
     sender: SendTarget | undefined,
     input: Pick<SendRecord, 'sendId' | 'path' | 'message' | 'matchText' | 'turn' | 'payloadFile'>,
   ): Promise<{ record: SendRecord; created: boolean }> {
+    // A send the ledger already holds under the other spelling of a daemon-written id (`attention-…` before
+    // the agenda rename, `agenda-…` after) IS that send: a batch in flight across an upgrade is never typed twice.
+    // A withdrawn one is the exception, exactly as the ledger's own `accept` makes it.
+    const prior = (await this.ports.ledger.list(target.id)).find(
+      entry => entry.sendId !== input.sendId && sameSendId(entry.sendId, input.sendId) && entry.fate !== 'withdrawn',
+    );
+    if (prior !== undefined) return { record: prior, created: false };
     const now = this.ports.clock.now();
     const accepted = await this.ports.ledger.accept(target.id, {
       ...input,

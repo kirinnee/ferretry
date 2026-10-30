@@ -42,9 +42,9 @@ describe('FileAttentionOutboxRepository', () => {
     // Assert
     should(before).be.null();
     should(after).deepEqual(outbox);
-    should(repository.file(SESSION)).equal(join(directory(SESSION), 'attention-replies.json'));
+    should(repository.file(SESSION)).equal(join(directory(SESSION), 'agenda-replies.json'));
     should((await stat(repository.file(SESSION))).mode & 0o777).equal(0o600);
-    should(await readdir(directory(SESSION))).deepEqual(['attention-replies.json']);
+    should(await readdir(directory(SESSION))).deepEqual(['agenda-replies.json']);
   });
 
   it('should keep a needs-info request key beside an answer key across a restart', async () => {
@@ -97,7 +97,7 @@ describe('FileAttentionOutboxRepository', () => {
     // Assert
     should(damaged).be.null();
     should(misfiled).be.null();
-    should(await readdir(directory(SESSION))).deepEqual(['attention-replies.json.damaged-fixed']);
+    should(await readdir(directory(SESSION))).deepEqual(['agenda-replies.json.damaged-fixed']);
   });
 
   it('should surface a read failure that is not a missing file rather than discarding the outbox', async () => {
@@ -130,7 +130,7 @@ describe('FileAttentionOutboxRepository', () => {
 
     // Act + Assert
     await should(repository.write(emptyAttentionOutbox(SESSION))).be.rejected();
-    should(await readdir(directory(SESSION))).deepEqual(['attention-replies.json']);
+    should(await readdir(directory(SESSION))).deepEqual(['agenda-replies.json']);
   });
 
   it('should carry a held answer across a restart and deliver it once', async () => {
@@ -158,6 +158,6 @@ describe('FileAttentionOutboxRepository', () => {
     await second.flush(SESSION);
 
     // Assert — one message, under the id the second daemon stamped when it began the batch.
-    should(sent).deepEqual([`attention-session-1-A1-${Date.parse('2026-10-28T17:05:00.000Z').toString(36)}`]);
+    should(sent).deepEqual([`agenda-session-1-A1-${Date.parse('2026-10-28T17:05:00.000Z').toString(36)}`]);
   });
 });

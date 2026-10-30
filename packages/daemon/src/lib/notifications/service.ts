@@ -3,6 +3,7 @@ import { type AttentionRaisedObserver, ownerTurnItems } from '../attention/index
 import {
   attentionNotificationAttribution,
   deadlineNotificationPayload,
+  legacyNotificationKey,
   type NotificationIdentity,
   notificationKey,
   pingNotificationPayload,
@@ -12,6 +13,7 @@ import {
 import {
   type NotificationClock,
   type NotificationDeliveryLedger,
+  type NotificationLedgerEntry,
   type NotificationPushDispatcher,
   NotificationRecordSchema,
   type NotificationSerialExecutor,
@@ -48,9 +50,7 @@ export class NotificationService implements AttentionRaisedObserver {
    * nothing was pushed (no device, an unreadable ledger, or a notice that did not ask).
    */
   async attentionDelivered(sessionId: string, attentionId: string): Promise<number> {
-    const entry = await this.options.ledger
-      .find(notificationKey({ sessionId, attentionId, ping: true }))
-      .catch(() => undefined);
+    const entry = await this.recorded(notificationKey({ sessionId, attentionId, ping: true })).catch(() => undefined);
     return entry?.outcome?.error === undefined ? (entry?.outcome?.delivered ?? 0) : 0;
   }
 
@@ -85,6 +85,14 @@ export class NotificationService implements AttentionRaisedObserver {
     );
   }
 
+  /**
+   * What the ledger knows of one identity under EITHER spelling of its key. A push made before the agenda
+   * rename is recorded as `attention:…`; looking only for `agenda:…` would announce it a second time.
+   */
+  private async recorded(key: string): Promise<NotificationLedgerEntry | undefined> {
+    return (await this.options.ledger.find(key)) ?? (await this.options.ledger.find(legacyNotificationKey(key)));
+  }
+
   private async announce(
     identity: NotificationIdentity,
     item: AttentionItem,
@@ -94,7 +102,7 @@ export class NotificationService implements AttentionRaisedObserver {
     const key = notificationKey(identity);
     await this.options.serial
       .run(key, async () => {
-        if ((await this.options.ledger.find(key)) !== undefined) return;
+        if ((await this.recorded(key)) !== undefined) return;
         const session = await this.options.sessions.describe(sessionId);
         if (session === undefined) return;
         const payload = compose(session);
@@ -105,7 +113,7 @@ export class NotificationService implements AttentionRaisedObserver {
             phase: 'requested',
             key,
             at: this.options.clock.now(),
-            origin: 'attention',
+            origin: 'agenda',
             attribution: attentionNotificationAttribution(item),
             sessionId,
             attentionId: item.id,

@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
 import {
+  AGENDA_FILES,
+  readAgendaFile,
   isAttentionSessionId,
   parseAttentionLedger,
   type AttentionLedger,
   type AttentionLedgerRepository,
   type AttentionMutation,
 } from '../../lib/attention/index.ts';
+import { FileAgendaFileStore } from './file-agenda-file-store.ts';
 
 /** Raised when a durable board cannot safely be supplied to the state machine. */
 export class InvalidAttentionLedgerError extends Error {
@@ -17,37 +18,39 @@ export class InvalidAttentionLedgerError extends Error {
 }
 
 /**
- * Durable per-session attention storage. The owning daemon process supplies one
+ * Durable per-session agenda storage, as `agenda.json` (a board written before the rename is read from
+ * `attention.json` until the migration moves it, and every write goes to `agenda.json`). The owning daemon process supplies one
  * instance, so the keyed queue serializes every read-modify-write transition.
  */
 export class FileAttentionLedgerRepository implements AttentionLedgerRepository {
   private readonly tails = new Map<string, Promise<void>>();
+  private readonly files: FileAgendaFileStore;
 
+  /** `ready` settles when the agenda files migration has finished; no read or write goes to disk before it. */
   constructor(
-    private readonly sessionDirectory: (sessionId: string) => string,
-    private readonly uniqueId: () => string = randomUUID,
-  ) {}
+    sessionDirectory: (sessionId: string) => string,
+    uniqueId: () => string = randomUUID,
+    private readonly ready: Promise<unknown> = Promise.resolve(),
+  ) {
+    this.files = new FileAgendaFileStore(sessionDirectory, uniqueId);
+  }
 
   file(sessionId: string): string {
     this.assertSessionId(sessionId);
-    return join(this.sessionDirectory(sessionId), 'attention.json');
+    return this.files.file(sessionId, AGENDA_FILES.ledger.current);
   }
 
   async read(sessionId: string): Promise<AttentionLedger | null> {
-    const file = this.file(sessionId);
-    let text: string;
+    this.assertSessionId(sessionId);
+    await this.ready;
+    const found = await readAgendaFile(this.files, sessionId, 'ledger');
+    if (found === undefined) return null;
     try {
-      text = await readFile(file, 'utf8');
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
-      throw error;
-    }
-    try {
-      const ledger = parseAttentionLedger(JSON.parse(text), sessionId);
+      const ledger = parseAttentionLedger(JSON.parse(found.text), sessionId);
       if (ledger === null) throw new Error('invalid ledger');
       return ledger;
     } catch {
-      throw new InvalidAttentionLedgerError(file);
+      throw new InvalidAttentionLedgerError(this.files.file(sessionId, found.name));
     }
   }
 
@@ -64,17 +67,7 @@ export class FileAttentionLedgerRepository implements AttentionLedgerRepository 
   }
 
   private async write(sessionId: string, ledger: AttentionLedger): Promise<void> {
-    const file = this.file(sessionId);
-    const directory = dirname(file);
-    const temporary = join(directory, `.attention-${this.uniqueId()}.tmp`);
-    await mkdir(directory, { recursive: true, mode: 0o700 });
-    try {
-      await writeFile(temporary, `${JSON.stringify(ledger, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
-      await rename(temporary, file);
-    } catch (error) {
-      await rm(temporary, { force: true });
-      throw error;
-    }
+    await this.files.writeAtomic(sessionId, AGENDA_FILES.ledger.current, `${JSON.stringify(ledger, null, 2)}\n`);
   }
 
   private async serial<T>(sessionId: string, work: () => Promise<T>): Promise<T> {

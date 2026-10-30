@@ -146,7 +146,7 @@ export function attentionBatchMessage(pending: readonly PendingReply[]): string 
  */
 export function attentionBatchSendId(sessionId: string, ids: readonly ReplyKey[], begunAt?: string): string {
   const stamp = begunAt === undefined ? '' : `-${Date.parse(begunAt).toString(36)}`;
-  return `attention-${sessionId}-${ids.join('-')}${stamp}`;
+  return `agenda-${sessionId}-${ids.join('-')}${stamp}`;
 }
 
 /** Moves every held answer into one batch to send, or `undefined` when nothing is held. */

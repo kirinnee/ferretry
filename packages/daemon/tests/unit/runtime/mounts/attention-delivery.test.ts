@@ -238,7 +238,7 @@ describe('the attention loop, from a ferret’s raise to its delivered answer', 
     should(timers.armed.get(SESSION)).equal(ATTENTION_REPLY_SETTLE_MS);
     should([...sends.sent.entries()]).deepEqual([
       [
-        `attention-${SESSION}-${id}-${STAMP}`,
+        `agenda-${SESSION}-${id}-${STAMP}`,
         { sessionId: SESSION, message: `[answer to !${id} «Does the loop work?»] Something’s off` },
       ],
     ]);
@@ -263,7 +263,7 @@ describe('the attention loop, from a ferret’s raise to its delivered answer', 
     // Assert
     should([...sends.sent.entries()]).deepEqual([
       [
-        `attention-${SESSION}-${named}-${doneInApp}-${doneAtShell}-${dismissed}-${STAMP}`,
+        `agenda-${SESSION}-${named}-${doneInApp}-${doneAtShell}-${dismissed}-${STAMP}`,
         {
           sessionId: SESSION,
           message: [
@@ -438,7 +438,7 @@ describe('the attention loop, from a ferret’s raise to its delivered answer', 
     // delivered only once their receipts are read.
     should([...sends.sent.keys()]).deepEqual([
       `attention-${SESSION}-${interrupted}`,
-      `attention-${SESSION}-${held}-${STAMP}`,
+      `agenda-${SESSION}-${held}-${STAMP}`,
     ]);
     should(outboxes.files.get(SESSION)).containDeep({ pending: [], sending: [], delivered: [interrupted, held] });
   });
