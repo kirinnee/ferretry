@@ -439,8 +439,9 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     for (const phrase of [
       'login, sudo or a website step',
       'do it yourself first',
-      'open the terminal or page',
-      'fill every non-secret field',
+      'filling every non-secret field',
+      'ALWAYS for sudo',
+      'The card flags any risk',
       'terminal_request_input',
       'input_wait',
       'you never receive it',

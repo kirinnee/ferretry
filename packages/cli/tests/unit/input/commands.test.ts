@@ -42,16 +42,15 @@ describe('fy input commands', () => {
     should(withArgument.gateway.delivered).have.length(0);
   });
 
-  it('should honour --no-enter and pass --trust-program through', async () => {
+  it('should honour --no-enter', async () => {
     // Arrange
-    const { parsed, gateway } = run(['input', 'answer', '!A7', '-s', SESSION, '--no-enter', '--trust-program']);
+    const { parsed, gateway } = run(['input', 'answer', '!A7', '-s', SESSION, '--no-enter']);
 
     // Act
     await parsed;
 
     // Assert
     should(gateway.delivered[0]?.body.submit).equal(false);
-    should(gateway.delivered[0]?.body.trustProgram).equal(true);
   });
 
   it('should list and cancel', async () => {

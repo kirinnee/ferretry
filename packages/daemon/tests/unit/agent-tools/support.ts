@@ -21,7 +21,10 @@ import { FakeTerminals } from '../runtime/mounts/support.ts';
 /** Every audit record written, in order. */
 class RecordingAudit implements AuditSink {
   readonly entries: AuditEntry[] = [];
+  /** Runs while a record is being written: a case suspends the audit here. */
+  during: (() => void | Promise<void>) | undefined;
   async record(entry: AuditEntry): Promise<void> {
+    await this.during?.();
     this.entries.push(entry);
   }
 }

@@ -122,19 +122,28 @@ export class AgentToolService {
 
   async call(caller: AgentToolCaller, call: AgentToolCall): Promise<AgentToolResult> {
     const facts: { surface?: ResolvedSurface } = {};
+    let result: AgentToolResult;
     try {
       const kind = kindOf(call);
       if (caller.kind === 'agent' && kind !== undefined && !(await this.ports.policy.allows(kind)))
         throw new AgentToolError('forbidden', controlRefusal(kind));
-      const result = await this.dispatch(caller, call, facts);
+      result = await this.dispatch(caller, call, facts);
       await this.record(caller, call, facts.surface, 'succeeded');
-      return result;
     } catch (error) {
       const refusal = translate(error);
       const failed = refusal === undefined || refusal.code === 'upstream_failed';
       await this.record(caller, call, facts.surface, failed ? 'failed' : 'refused');
       throw refusal ?? error;
     }
+    // The last step before anything leaves the daemon: a hold that began during the capture, the redaction
+    // or the audit record above is honoured here, synchronously, at the point of publication.
+    if (result.output !== undefined && facts.surface !== undefined)
+      this.assertReadable(
+        caller,
+        facts.surface,
+        surfaceReference(facts.surface.surface, facts.surface.name ?? facts.surface.id),
+      );
+    return result;
   }
 
   /**

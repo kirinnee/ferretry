@@ -14,8 +14,6 @@ export interface InputCommandOptions {
 export interface InputAnswerOptions extends InputCommandOptions {
   /** `--no-enter` is `false`; `--enter` (browser targets) is `true`. */
   readonly enter?: boolean | undefined;
-  /** The owner ticked "I trust this program" for a program not known to ask for secrets. */
-  readonly trustProgram?: boolean | undefined;
 }
 
 /** Said when a ferret reaches for the owner's command. */
@@ -68,16 +66,6 @@ export class InputController {
       throw new Error(`!${request.agendaItemId} is still being re-checked after a restart: try again in a moment`);
     }
     for (const line of renderInputFacts(request)) this.ports.out.diagnostic(line);
-    if (
-      request.sensitivity === 'secret' &&
-      request.observed.kind === 'terminal' &&
-      !request.observed.recognisedConsumer &&
-      options.trustProgram !== true
-    ) {
-      throw new Error(
-        `${request.observed.foreground.comm} is not a program known to ask for secrets; if you trust it, run again with --trust-program`,
-      );
-    }
     const value = await this.ports.prompt.askHidden(`value for !${request.agendaItemId} (hidden): `);
     const problem = inputValueProblem(value, request.sensitivity);
     if (problem !== undefined) throw new Error(problem);
@@ -87,7 +75,6 @@ export class InputController {
       observedDigest: request.observedDigest,
       padded: padInputValue(value),
       submit,
-      ...(options.trustProgram === true ? { trustProgram: true as const } : {}),
     });
     if (options.json === true) {
       this.ports.out.success(JSON.stringify(result, null, 2));

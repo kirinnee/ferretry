@@ -13,9 +13,11 @@ import type { InputClock } from './ports.ts';
  * delivered before it. A hold taken for a delivery in flight cannot expire before the write is done: it
  * reads as a full window from now until it is settled or released.
  *
- * A hold names the terminal by every name a reader may use (its key and its id) and holds an end time. It
- * has no value, no digest and no length. Nothing here is written to disk: the daemon journals the names
- * and the end time (`InputQuarantineEvent`) and replays them with {@link restore}.
+ * A hold names the terminal by every name a reader may use (its key and its id) and holds an end time, or is
+ * unresolved (a write may be in flight, or may have landed before a restart) and then has none: it holds until
+ * it is settled. It has no value, no digest and no length. Nothing here is written to disk: the daemon
+ * journals each hold by its id, its names and its end time or unresolved state (`InputQuarantineEvent`) and
+ * replays them with {@link restore}.
  *
  * Until the journal has been replayed after a restart the registry is {@link lock locked}: every terminal is
  * held. A session whose replay failed is locked on its own for a window.
@@ -25,7 +27,7 @@ import type { InputClock } from './ports.ts';
 export const EVERY_TERMINAL = '*';
 
 interface Entry {
-  readonly id: number;
+  readonly id: string;
   readonly names: readonly string[];
   /** A settled hold ends here; an in-flight one is open until it is settled or released. */
   until: number | 'in-flight';
@@ -33,7 +35,7 @@ interface Entry {
 
 /** What a delivery attempt holds until it settles or lets go. */
 export interface QuarantineHold {
-  readonly id: number;
+  readonly id: string;
   readonly sessionId: string;
   readonly names: readonly string[];
 }
@@ -49,9 +51,8 @@ export class QuarantineRegistry {
   ) {}
 
   /** Hold the terminal known by `names` for a delivery that is about to happen. It cannot expire until settled or released. */
-  begin(sessionId: string, names: readonly string[]): QuarantineHold {
-    this.next += 1;
-    const hold: QuarantineHold = { id: this.next, sessionId, names: [...new Set(names)] };
+  begin(sessionId: string, names: readonly string[], owner: string): QuarantineHold {
+    const hold: QuarantineHold = { id: this.mint(owner), sessionId, names: [...new Set(names)] };
     this.held.set(sessionId, [
       ...(this.held.get(sessionId) ?? []),
       { id: hold.id, names: hold.names, until: 'in-flight' },
@@ -75,11 +76,24 @@ export class QuarantineRegistry {
     return this.until(hold.sessionId, hold.names);
   }
 
-  /** Bring a quarantine back with the end time it had (a restart). Adds a hold; it never replaces one. */
-  restore(sessionId: string, names: readonly string[], until: number): void {
+  /**
+   * Bring a hold back as the journal had it (a restart): with its end time, or still unresolved. It adds
+   * the hold, keeping its id, and never replaces another. Nothing comes back for an end time that has passed.
+   */
+  restore(
+    sessionId: string,
+    names: readonly string[],
+    until: number | 'in-flight',
+    id: string,
+  ): QuarantineHold | undefined {
     this.purge();
-    if (until <= this.clock.now() || names.length === 0) return;
-    this.add(sessionId, names, until);
+    if ((until !== 'in-flight' && until <= this.clock.now()) || names.length === 0) return undefined;
+    const hold: QuarantineHold = { id, sessionId, names: [...new Set(names)] };
+    this.held.set(sessionId, [
+      ...(this.held.get(sessionId) ?? []).filter(entry => entry.id !== id),
+      { id, names: hold.names, until },
+    ]);
+    return hold;
   }
 
   /** Every terminal is held until {@link unlock}, or until `until` when given. */
@@ -96,6 +110,13 @@ export class QuarantineRegistry {
     this.add(sessionId, [EVERY_TERMINAL], this.clock.now() + this.window);
   }
 
+  /** The holds that are unresolved: a write may have landed under them, and nothing has settled them yet. */
+  unresolved(sessionId: string): readonly QuarantineHold[] {
+    return (this.held.get(sessionId) ?? [])
+      .filter(entry => entry.until === 'in-flight')
+      .map(entry => ({ id: entry.id, sessionId, names: entry.names }));
+  }
+
   /** When the quarantine on a terminal ends, or nothing when it is not quarantined. `names` are all the ways it is known. */
   until(sessionId: string, names: readonly (string | undefined)[]): number | undefined {
     this.purge();
@@ -108,8 +129,11 @@ export class QuarantineRegistry {
     return ends.length === 0 ? undefined : Math.max(...ends);
   }
 
-  /** The owner ends the quarantine on a terminal. A delivery in flight keeps its hold. The names it was known by, or nothing. */
-  end(sessionId: string, name: string): readonly string[] | undefined {
+  /**
+   * The owner ends the quarantine on a terminal. A hold that is unresolved keeps holding. The holds actually
+   * released, each by its id, or nothing when there was none to end.
+   */
+  end(sessionId: string, name: string): readonly QuarantineHold[] | undefined {
     this.purge();
     const entries = this.held.get(sessionId) ?? [];
     const target = entries.find(entry => entry.until !== 'in-flight' && entry.names.includes(name));
@@ -119,7 +143,7 @@ export class QuarantineRegistry {
       sessionId,
       entries.filter(entry => !gone.includes(entry)),
     );
-    return [...new Set(gone.flatMap(entry => entry.names))];
+    return gone.map(entry => ({ id: entry.id, sessionId, names: entry.names }));
   }
 
   /** Every quarantine in a session: its first name and the end time. */
@@ -161,11 +185,20 @@ export class QuarantineRegistry {
   }
 
   private add(sessionId: string, names: readonly string[], until: number): void {
-    this.next += 1;
     this.held.set(sessionId, [
       ...(this.held.get(sessionId) ?? []),
-      { id: this.next, names: [...new Set(names)], until },
+      { id: this.mint('hold'), names: [...new Set(names)], until },
     ]);
+  }
+
+  private mint(owner: string): string {
+    const taken = new Set([...this.held.values()].flat().map(entry => entry.id));
+    let id: string;
+    do {
+      this.next += 1;
+      id = `${owner}/${String(this.next)}`;
+    } while (taken.has(id));
+    return id;
   }
 
   private store(sessionId: string, entries: Entry[]): void {

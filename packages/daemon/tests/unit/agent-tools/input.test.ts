@@ -535,6 +535,25 @@ describe('AgentToolService — a terminal the owner just typed a secret into', (
     });
   });
 
+  it('should not hand back a screen when the quarantine began while its audit record was being written', async () => {
+    // Arrange
+    let quarantined = false;
+    const world = agentToolWorld({ quarantinedUntil: () => (quarantined ? until : undefined) });
+    await world.service.call(agent, { tool: 'terminal.open', name: 'dev' });
+    world.terminals.screens.set('000000000001', 'password: hunter2\n');
+    world.audit.during = async () => {
+      await Promise.resolve();
+      quarantined = true;
+    };
+
+    // Act
+    const error = await refusal(world.service.call(agent, { tool: 'terminal.read', name: 'dev' }));
+
+    // Assert
+    should(error.code).equal('conflict');
+    should(error.message).not.containEql('hunter2');
+  });
+
   it('should read normally once the quarantine is gone', async () => {
     // Arrange
     const world = agentToolWorld({ quarantinedUntil: () => undefined });

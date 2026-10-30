@@ -21,12 +21,13 @@ import {
   type InputRaise,
   type InputReason,
   type InputRequest,
+  type InputRisk,
   type InputTarget,
   type InputTargetFacts,
   inputValueProblem,
   unpadInputValue,
 } from '@ferretry/protocol';
-import { digestFacts, digestLine } from './digest.ts';
+import { digestFacts } from './digest.ts';
 import type { EphemeralValues } from './ephemeral-values.ts';
 import { InputRequestError } from './errors.ts';
 import type {
@@ -40,7 +41,6 @@ import type {
   InputSessionDirectory,
   InputTargetPort,
   InputTimers,
-  InputTrustedPrograms,
   TypeResult,
 } from './ports.ts';
 import type { QuarantineHold, QuarantineRegistry } from './quarantine.ts';
@@ -92,6 +92,8 @@ const TITLES = { secret: 'Needs a secret', private: 'Needs a code', plain: 'Need
 
 interface Held {
   request: InputRequest;
+  /** Every name the terminal was seen under (its key and its id), so a quarantine on any of them seals it. */
+  names: readonly string[];
   checkFailures: number;
   /** Every `deliveryId` seen and what came of it, so a retry gets the first outcome and never types twice. */
   readonly deliveries: Map<string, Promise<InputDeliverResult>>;
@@ -107,7 +109,6 @@ export interface InputRequestServiceDependencies {
   readonly clock: InputClock;
   readonly ids: InputIds;
   readonly timers: InputTimers;
-  readonly trusted: InputTrustedPrograms;
   readonly sessions: InputSessionDirectory;
   readonly values: EphemeralValues;
   /** The terminals a secret was just typed into, which an agent may not read until the window ends. */
@@ -152,7 +153,7 @@ export class InputRequestService {
           : 'that target cannot take an input request',
       );
     }
-    this.guardScope(raise, seen.facts);
+    this.guardScope(raise);
     const shown = await this.project(sessionId, seen.facts, [target.key, ...(seen.names ?? [])]);
     const expiresAt = instant(now + (raise.expiresInSeconds ?? INPUT_DEFAULT_EXPIRY_SECONDS) * 1000);
     const requestId = this.deps.ids.requestId();
@@ -178,6 +179,7 @@ export class InputRequestService {
       expiresAt,
       ...(raise.chain === undefined ? {} : { chain: raise.chain }),
       observed: shown,
+      risk: riskOf(raise.sensitivity, seen.facts),
       observedDigest: digestFacts(seen.facts),
       state: 'pending',
     };
@@ -187,30 +189,28 @@ export class InputRequestService {
       await this.deps.agenda.close(sessionId, card.id, 'Input request could not be recorded.');
       throw new InputRequestError('unavailable', 'Ferretry could not record the request, so it did not ask the owner');
     }
-    this.held.set(requestId, { request, checkFailures: 0, deliveries: new Map(), waiters: new Set() });
+    const held: Held = {
+      request,
+      names: [target.key, ...(seen.names ?? [])],
+      checkFailures: 0,
+      deliveries: new Map(),
+      waiters: new Set(),
+    };
+    this.held.set(requestId, held);
     this.noteRaise(sessionId, now);
     await this.record(request, 'input.requested', { kind: 'agent' }, auditDetail(request));
-    return this.view(request);
+    return this.view(held);
   }
 
   /**
-   * The narrow v1: a terminal takes a `secret` only while the program is not echoing it, and a `plain` answer the
-   * card calls visible. A code that echoes (`private`) is not typed by the daemon into a terminal yet, because
-   * the screen would then hold it where the agent reads.
+   * A request is never refused for a risky target: the card carries a {@link riskOf risk flag} and the owner
+   * decides. The one scope refusal is a code that echoes (`private`), which is not typed into a terminal yet.
    */
-  private guardScope(raise: InputRaise, facts: InputTargetFacts): void {
+  private guardScope(raise: InputRaise): void {
     if (raise.sensitivity === 'private')
       throw new InputRequestError(
         'bad_request',
         'a code that shows on screen cannot be typed for you into a terminal yet; ask the owner in chat to type it there',
-      );
-    if (raise.sensitivity === 'secret' && facts.kind === 'terminal' && facts.echo !== 'off')
-      throw new InputRequestError(
-        'conflict',
-        facts.echo === 'on'
-          ? 'the terminal is echoing what is typed, so a secret would show on screen; wait for a password prompt, or raise this as plain if it is not secret'
-          : 'Ferretry could not tell whether the terminal echoes, so it will not ask for a secret here',
-        INPUT_ERROR_CODES.echoOn,
       );
   }
 
@@ -226,7 +226,7 @@ export class InputRequestService {
       ]);
       await this.sweep();
     }
-    return this.view(held.request);
+    return this.view(held);
   }
 
   /** The requests still open, newest last: for one session or, with none named, for all. Owner only. */
@@ -234,10 +234,10 @@ export class InputRequestService {
     requireOwner(caller);
     await this.sweep();
     const open = [...this.held.values()]
-      .map(held => held.request)
-      .filter(request => !isFinal(request) && (sessionId === undefined || request.sessionId === sessionId))
-      .sort((a, b) => (a.raisedAt < b.raisedAt ? -1 : a.raisedAt > b.raisedAt ? 1 : 0));
-    return await Promise.all(open.map(async request => await this.exposed(request)));
+      .filter(held => !isFinal(held.request) && (sessionId === undefined || held.request.sessionId === sessionId))
+      .sort((a, b) => (a.request.raisedAt < b.request.raisedAt ? -1 : a.request.raisedAt > b.request.raisedAt ? 1 : 0));
+    const shown = await Promise.all(open.map(async held => await this.exposed(held)));
+    return shown.map((request, index) => this.sealed(open[index] as Held, request));
   }
 
   /**
@@ -245,11 +245,18 @@ export class InputRequestService {
    * command line pass the redactor (a screen can echo a value, and an argv can carry one), and are cut to
    * their limits again. Nothing here is the held copy, so the raw binding material stays in RAM.
    */
-  private async exposed(request: InputRequest): Promise<InputRequest> {
+  private async exposed(held: Held): Promise<InputRequest> {
+    const { request } = held;
     const facts = request.observed;
     const prompt = (await this.deps.redact(request.prompt)).slice(0, INPUT_PROMPT_MAX_LENGTH);
     if (facts === undefined) return { ...request, prompt };
-    return { ...request, prompt, observed: await this.project(request.sessionId, facts, [request.target.key]) };
+    return { ...request, prompt, observed: await this.project(request.sessionId, facts, held.names) };
+  }
+
+  /** The last word before a request leaves the service: a hold taken while it was being redacted still seals it. */
+  private sealed(held: Held, shown: InputRequest): InputRequest {
+    if (shown.observed?.kind !== 'terminal' || !this.quarantined(shown.sessionId, held.names)) return shown;
+    return { ...shown, observed: maskedFacts(shown.observed) };
   }
 
   /**
@@ -272,7 +279,7 @@ export class InputRequestService {
     if (this.quarantined(sessionId, names)) return maskedFacts(facts);
     const clip = async (text: string, limit: number): Promise<string> =>
       (await this.deps.redact(text)).slice(0, limit).trimEnd();
-    return {
+    const shown: InputTargetFacts = {
       ...facts,
       promptLine: this.deps.values.fragments(sessionId, facts.promptLine)
         ? HIDDEN_PROMPT
@@ -283,6 +290,7 @@ export class InputRequestService {
         argv: await clip(facts.foreground.argv, FACT_TEXT_LIMIT),
       },
     };
+    return this.quarantined(sessionId, names) ? maskedFacts(facts) : shown;
   }
 
   /** `text` with any value delivered to this session in the redaction window masked, for an agent's terminal reads. */
@@ -341,7 +349,7 @@ export class InputRequestService {
     if (held.request.state === 'delivering')
       throw new InputRequestError('conflict', 'the value is being typed now', INPUT_ERROR_CODES.alreadyDelivered);
     await this.finish(held, 'cancelled', 'owner_declined', owner, { closeCard: true, tellAgent: true });
-    return await this.exposed(held.request);
+    return this.sealed(held, await this.exposed(held));
   }
 
   /** The owner dismissed the card without answering: the request ends, and the card is already closed. */
@@ -394,7 +402,13 @@ export class InputRequestService {
     for (const sessionId of sessionIds) {
       await this.restoreQuarantines(sessionId, now).catch(() => this.deps.quarantine.lockSession(sessionId));
     }
+    // A hold that was unresolved when the daemon stopped (a write may have landed) runs a full window from now.
+    const settled = sessionIds.flatMap(sessionId =>
+      this.deps.quarantine.unresolved(sessionId).map(hold => ({ hold, until: this.deps.quarantine.settle(hold) })),
+    );
     this.deps.quarantine.unlock();
+    for (const { hold, until } of settled)
+      await this.journalHold(hold, INPUT_QUARANTINE_EVENT_TYPES.started, until).catch(() => undefined);
     for (const sessionId of sessionIds) {
       const latest = new Map<string, InputEvent>();
       for (const event of await this.deps.journal.history(sessionId)) {
@@ -404,18 +418,24 @@ export class InputRequestService {
     }
   }
 
-  /** A quarantine still running when the daemon stopped is running again, for the time it had left. */
+  /**
+   * Every hold the journal still has comes back with all of its names: a hold's last word decides it, so a
+   * finished request can never erase one. Holds that were unresolved come back unresolved.
+   */
   private async restoreQuarantines(sessionId: string, now: number): Promise<void> {
-    let holds: { readonly hold?: string; readonly names: readonly string[]; readonly until: number }[] = [];
+    const holds = new Map<string, { readonly names: readonly string[]; readonly until: number | 'in-flight' }>();
     for (const event of await this.deps.journal.quarantines(sessionId)) {
       if (event.sessionId !== sessionId) continue;
-      if (event.type === INPUT_QUARANTINE_EVENT_TYPES.started) {
-        const entry = { hold: event.hold, names: event.names, until: Date.parse(event.until) };
-        holds = [...holds.filter(held => event.hold === undefined || held.hold !== event.hold), entry];
-      } else if (event.hold !== undefined) holds = holds.filter(held => held.hold !== event.hold);
-      else holds = holds.filter(held => !held.names.some(name => event.names.includes(name)));
+      if (event.type === INPUT_QUARANTINE_EVENT_TYPES.started)
+        holds.set(event.hold, {
+          names: event.names,
+          until: event.unresolved === true ? 'in-flight' : Date.parse(event.until),
+        });
+      else holds.delete(event.hold);
     }
-    for (const { names, until } of holds) if (until > now) this.deps.quarantine.restore(sessionId, names, until);
+    for (const [id, { names, until }] of holds) {
+      if (until === 'in-flight' || until > now) this.deps.quarantine.restore(sessionId, names, until, id);
+    }
   }
 
   /** The terminals of a session kept from an agent's eyes now, for the owner's viewer. Owner only. */
@@ -432,12 +452,10 @@ export class InputRequestService {
   /** The owner opens a quarantined terminal to the agent again. Owner only; it is recorded and journalled. */
   async endQuarantine(caller: InputCaller, sessionId: string, key: string): Promise<void> {
     const owner = requireOwner(caller);
-    const names = this.deps.quarantine.end(sessionId, key);
-    if (names === undefined) throw new InputRequestError('not_found', `${key} is not quarantined`);
-    const at = instant(this.deps.clock.now());
-    await this.deps.journal
-      .quarantine(sessionId, { type: INPUT_QUARANTINE_EVENT_TYPES.ended, sessionId, names: [...names], until: at, at })
-      .catch(() => undefined);
+    const released = this.deps.quarantine.end(sessionId, key);
+    if (released === undefined) throw new InputRequestError('not_found', `${key} is not quarantined`);
+    for (const hold of released)
+      await this.journalHold(hold, INPUT_QUARANTINE_EVENT_TYPES.ended, this.deps.clock.now()).catch(() => undefined);
     await this.deps.audit
       .record({
         event: 'input.quarantine_ended',
@@ -485,16 +503,18 @@ export class InputRequestService {
       expiresAt: event.expiresAt,
       state: 'pending',
     };
-    const held: Held = { request, checkFailures: 0, deliveries: new Map(), waiters: new Set() };
+    const held: Held = { request, names: [target.key], checkFailures: 0, deliveries: new Map(), waiters: new Set() };
     this.held.set(request.id, held);
     const seen = await this.deps.target.observe(request.sessionId, target);
     if (!seen.ok) {
       await this.finish(held, 'cancelled', 'interrupted', undefined, { closeCard: true, tellAgent: true });
       return;
     }
+    held.names = [target.key, ...(seen.names ?? [])];
     held.request = {
       ...request,
-      observed: await this.project(request.sessionId, seen.facts, [target.key, ...(seen.names ?? [])]),
+      observed: await this.project(request.sessionId, seen.facts, held.names),
+      risk: riskOf(request.sensitivity, seen.facts),
       observedDigest: digestFacts(seen.facts),
     };
   }
@@ -515,9 +535,14 @@ export class InputRequestService {
       expiresAt: event.expiresAt ?? event.at,
       state: 'delivering',
     };
-    const held: Held = { request, checkFailures: 0, deliveries: new Map(), waiters: new Set() };
+    const held: Held = {
+      request,
+      names: [request.target.key],
+      checkFailures: 0,
+      deliveries: new Map(),
+      waiters: new Set(),
+    };
     this.held.set(request.id, held);
-    if (event.sensitivity === 'secret') await this.holdAfterRestart(request);
     await this.finish(held, 'refused', 'interrupted', undefined, { closeCard: true, tellAgent: true, uncertain: true });
   }
 
@@ -578,18 +603,12 @@ export class InputRequestService {
       const seen = await this.deps.target.observe(request.sessionId, request.target);
       if (!seen.ok) return await fail('target_gone', targetChanged());
       if (digestFacts(seen.facts) !== request.observedDigest) return await fail('target_changed', targetChanged());
-      const refusal = this.consumerRefusal(
-        request,
-        seen.facts,
-        await this.project(request.sessionId, seen.facts, [request.target.key, ...(seen.names ?? [])]),
-        body,
-      );
-      if (refusal !== undefined) return await fail(refusal.reason, refusal.error);
-      if (request.sensitivity === 'secret') hold = await this.holdFor(request, seen.names);
+      held.names = [...new Set([...held.names, request.target.key, ...(seen.names ?? [])])];
+      if (request.sensitivity === 'secret') hold = await this.holdFor(request, held.names);
       try {
         await this.journal(request, 'delivering', undefined, undefined, body.deliveryId);
       } catch {
-        await this.letGo(request, hold);
+        await this.letGo(hold);
         hold = undefined;
         throw new InputRequestError('unavailable', 'Ferretry could not record the attempt, so nothing was typed');
       }
@@ -598,7 +617,7 @@ export class InputRequestService {
         .type(request.sessionId, request.target, value, submitted, seen.facts)
         .catch((): TypeResult => 'uncertain');
       if (typed === 'uncertain') {
-        await this.settle(request, hold);
+        await this.settle(hold);
         hold = undefined;
         await this.finish(held, 'refused', 'interrupted', undefined, {
           closeCard: true,
@@ -611,12 +630,12 @@ export class InputRequestService {
         );
       }
       if (typed !== 'typed') {
-        await this.letGo(request, hold);
+        await this.letGo(hold);
         hold = undefined;
         await this.journalQuietly({ ...held.request, state: 'pending' }, 'requested');
         return await fail(typed, targetChanged());
       }
-      await this.settle(request, hold);
+      await this.settle(hold);
       hold = undefined;
       await this.finish(held, 'delivered', undefined, by, { closeCard: true, tellAgent: true, submitted });
       return {
@@ -627,7 +646,7 @@ export class InputRequestService {
       };
     } catch (error) {
       // A hold still open here is for a write that may have started: it runs its window rather than lifting.
-      await this.settle(request, hold);
+      await this.settle(hold);
       if (held.request.state === 'delivering') held.request = { ...held.request, state: 'pending' };
       throw error;
     }
@@ -641,14 +660,9 @@ export class InputRequestService {
    */
   private async holdFor(request: InputRequest, seenNames: readonly string[] | undefined): Promise<QuarantineHold> {
     const names = [...new Set([request.target.key, ...(seenNames ?? [])])].slice(0, 4);
-    const hold = this.deps.quarantine.begin(request.sessionId, names);
+    const hold = this.deps.quarantine.begin(request.sessionId, names, request.id);
     try {
-      await this.journalHold(
-        request,
-        hold,
-        INPUT_QUARANTINE_EVENT_TYPES.started,
-        this.deps.clock.now() + 2 * QUARANTINE_MS,
-      );
+      await this.journalHold(hold, INPUT_QUARANTINE_EVENT_TYPES.started, this.deps.clock.now() + QUARANTINE_MS, true);
     } catch {
       this.deps.quarantine.release(hold);
       throw new InputRequestError('unavailable', 'Ferretry could not record the quarantine, so nothing was typed');
@@ -657,77 +671,36 @@ export class InputRequestService {
   }
 
   /** The write was made, or may have been: this hold now runs a full window from here. */
-  private async settle(request: InputRequest, hold: QuarantineHold | undefined): Promise<void> {
+  private async settle(hold: QuarantineHold | undefined): Promise<void> {
     if (hold === undefined) return;
     const until = this.deps.quarantine.settle(hold);
-    await this.journalHold(request, hold, INPUT_QUARANTINE_EVENT_TYPES.started, until).catch(() => undefined);
+    await this.journalHold(hold, INPUT_QUARANTINE_EVENT_TYPES.started, until).catch(() => undefined);
   }
 
   /** Nothing was typed after all: this attempt's hold is let go. Another delivery's hold on the terminal stays. */
-  private async letGo(request: InputRequest, hold: QuarantineHold | undefined): Promise<void> {
+  private async letGo(hold: QuarantineHold | undefined): Promise<void> {
     if (hold === undefined) return;
     this.deps.quarantine.release(hold);
     const at = this.deps.clock.now();
-    await this.journalHold(request, hold, INPUT_QUARANTINE_EVENT_TYPES.ended, at).catch(() => undefined);
+    await this.journalHold(hold, INPUT_QUARANTINE_EVENT_TYPES.ended, at).catch(() => undefined);
   }
 
-  /** A write was begun before a restart and never recorded as done: the terminal is held again for a full window. */
-  private async holdAfterRestart(request: InputRequest): Promise<void> {
-    const hold = this.deps.quarantine.begin(request.sessionId, [request.target.key]);
-    await this.settle(request, hold);
-  }
-
+  /** Journals a hold by its id; an unresolved one has no end time that can be trusted until it is settled. */
   private async journalHold(
-    request: InputRequest,
     hold: QuarantineHold,
     type: InputQuarantineEvent['type'],
     until: number,
+    unresolved?: true,
   ): Promise<void> {
-    await this.deps.journal.quarantine(request.sessionId, {
+    await this.deps.journal.quarantine(hold.sessionId, {
       type,
-      sessionId: request.sessionId,
+      sessionId: hold.sessionId,
       names: [...hold.names],
-      hold: `${request.id}/${hold.id}`,
+      hold: hold.id,
+      ...(unresolved === undefined ? {} : { unresolved }),
       until: instant(until),
       at: instant(this.deps.clock.now()),
     });
-  }
-
-  private consumerRefusal(
-    request: InputRequest,
-    facts: InputTargetFacts,
-    shown: InputTargetFacts,
-    body: InputDeliverBody,
-  ): { reason: InputReason; error: InputRequestError } | undefined {
-    if (facts.kind !== 'terminal') return undefined;
-    if (request.sensitivity === 'secret' && facts.echo !== 'off')
-      return {
-        reason: 'echo_on',
-        error: new InputRequestError(
-          'conflict',
-          facts.echo === 'on'
-            ? 'the terminal is echoing what is typed, so a secret would show on screen'
-            : 'Ferretry could not tell whether the terminal echoes, so it will not type a secret',
-          INPUT_ERROR_CODES.echoOn,
-        ),
-      };
-    if (
-      request.sensitivity !== 'plain' &&
-      !facts.recognisedConsumer &&
-      !this.deps.trusted.isTrusted(digestLine(facts.foreground.comm))
-    ) {
-      if (body.trustProgram !== true)
-        return {
-          reason: 'not_secret_field',
-          error: new InputRequestError(
-            'conflict',
-            `${shown.kind === 'terminal' ? shown.foreground.comm : 'this program'} is not a program Ferretry knows asks for secrets; tick "I trust this program" to type anyway`,
-            'trust_required',
-          ),
-        };
-      this.deps.trusted.trust(digestLine(facts.foreground.comm));
-    }
-    return undefined;
   }
 
   /** A check failed: nothing was typed. Three failures end the request; fewer leave it pending. */
@@ -751,7 +724,7 @@ export class InputRequestService {
       state === 'delivered' && by !== undefined
         ? { at, by, submitted: options.submitted ?? false, source: 'typed' as const }
         : undefined;
-    const seenDetail = auditDetail(held.request, this.quarantined(held.request.sessionId, [held.request.target.key]));
+    const seenDetail = auditDetail(held.request, this.quarantined(held.request.sessionId, held.names));
     const { observed: _seen, observedDigest: _digest, ...rest } = held.request;
     held.request = {
       ...rest,
@@ -791,8 +764,8 @@ export class InputRequestService {
     return undefined;
   }
 
-  private view(request: InputRequest): InputAgentView {
-    const quarantined = this.quarantined(request.sessionId, [request.target.key]);
+  private view({ request, names }: Held): InputAgentView {
+    const quarantined = this.quarantined(request.sessionId, names);
     const facts =
       request.observed?.kind === 'terminal' && quarantined ? maskedFacts(request.observed) : request.observed;
     const terminal = facts?.kind === 'terminal' ? facts : undefined;
@@ -883,6 +856,33 @@ function targetChanged(): InputRequestError {
 }
 
 const PLAIN_FLAG = 'Not secret: the ferret can see this value.';
+
+/**
+ * The flag a card carries, from what was seen at the target: it is never a refusal, the owner decides. The
+ * sentence is fixed text (no program name, nothing the terminal showed), so it is safe to show and to log.
+ */
+function riskOf(sensitivity: InputRequest['sensitivity'], facts: InputTargetFacts): InputRisk {
+  if (sensitivity !== 'secret') return { level: 'red', reason: PLAIN_FLAG };
+  if (facts.kind !== 'terminal') return { level: 'amber', reason: 'Ferretry cannot check this target before typing.' };
+  if (facts.echo === 'on')
+    return {
+      level: 'amber',
+      reason:
+        'The terminal is echoing what is typed, so the value will show on screen; Ferretry hides it from the ferret for a while.',
+    };
+  if (facts.echo !== 'off')
+    return {
+      level: 'amber',
+      reason: 'Ferretry could not tell whether the terminal echoes, so the value may show on screen.',
+    };
+  if (!facts.recognisedConsumer)
+    return {
+      level: 'amber',
+      reason:
+        'The program reading the terminal is a bare shell or not one known to ask for secrets, so the value may land somewhere unexpected.',
+    };
+  return { level: 'green', reason: 'Typing is hidden and the program is one known to ask for a password.' };
+}
 
 function askOf(facts: InputTargetFacts, sensitivity: InputRequest['sensitivity']): string {
   const where = facts.kind === 'terminal' ? `Type it into ${facts.foreground.comm}` : 'Type it into the page';

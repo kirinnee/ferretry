@@ -33,6 +33,7 @@ export function renderInputFacts(request: InputRequest): string[] {
     `!${request.agendaItemId} wants a ${request.sensitivity} value typed into ${inputTargetReference(request)}`,
     `the agent says: ${compact(request.prompt, 200)}`,
   ];
+  if (request.risk !== undefined) lines.push(`risk ${request.risk.level}: ${request.risk.reason}`);
   const observed = request.observed;
   if (observed?.kind === 'terminal') {
     lines.push(
@@ -47,8 +48,6 @@ export function renderInputFacts(request: InputRequest): string[] {
 const REASONS: Readonly<Record<InputReason, string>> = {
   target_changed: 'the terminal is no longer the one the card showed',
   target_gone: 'the terminal is gone',
-  echo_on: 'the terminal would show what you type',
-  not_secret_field: 'the field is not a secret field',
   insecure_origin: 'the page is not a secure origin',
   interrupted: 'the daemon was interrupted',
   owner_declined: 'declined',

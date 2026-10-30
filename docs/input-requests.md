@@ -14,8 +14,8 @@ Which parts are live is the phase table at the end.
 **This applies to a `secret` value (a password or passphrase). A `plain` value (a username, an email, a
 hostname, `y`) is not secret: the card says so and the ferret may see it.**
 
-**The bridge never carries a `secret` value through the agent, a tool call, the journal, `agenda.json`, the
-audit log, a push payload or disk.** This extends [secrets](secrets.md) ("use, never read"): no route,
+**The bridge itself never carries a `secret` value through the agent, a tool call, the journal, `agenda.json`,
+the audit log, a push payload or disk.** This extends [secrets](secrets.md) ("use, never read"): no route,
 command or API returns a value or a digest of one, and nothing logs a body.
 
 That is a promise about how the **bridge** handles the value, and one more: for a limited window
@@ -73,11 +73,11 @@ through the input tool; the generic add refuses it.
 
 ### Sensitivity
 
-| Value     | Meaning                                                              | Checks                                                                                        |
-| --------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `secret`  | A password or passphrase. Never reaches the agent, a log or disk.    | Echo must be **off** (unknown counts as on): raising on an echoing terminal is 409 `echo_on`. |
-| `plain`   | A username, email, hostname or `y`. **Not secret.**                  | Target binding only. The card says "Not secret: the ferret can see this value." and flags it. |
-| `private` | A code that echoes (a 2FA code typed into a terminal). **Deferred.** | Refused at raise (400 `bad_request`) until it has a design: masking cannot make an echo safe. |
+| Value     | Meaning                                                                                                                                                                          | Checks                                                                                                                                                                                                                                           |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `secret`  | A password or passphrase. The bridge never carries it to the agent, a log or disk; what the target prints afterwards is held back (quarantine) and then only masked best effort. | Never refused for its target: the card flags the risk (green, amber or red) and Send stays available. Hard refusals: a control character or line break in the value, a changed target (409 `target_changed`), and a caller who is not the owner. |
+| `plain`   | A username, email, hostname or `y`. **Not secret.**                                                                                                                              | Target binding only. The card says "Not secret: the ferret can see this value." and flags it.                                                                                                                                                    |
+| `private` | A code that echoes (a 2FA code typed into a terminal). **Deferred.**                                                                                                             | Refused at raise (400 `bad_request`) until it has a design: masking cannot make an echo safe.                                                                                                                                                    |
 
 `secret` values (and the deferred `private`) containing a control character or a line break are refused
 ("this would press keys"). `plain` allows Tab. `inputValueProblem` is that rule.
@@ -126,13 +126,26 @@ hidden. Handing the value back in the agent's result arrives with the multi-fiel
 - **Limits**: 3 pending requests and 20 raises an hour per session; 30 remote deliveries an hour per
   daemon.
 
-## Phishing is made visible
+## The risk is flagged, never a reason to refuse
 
-A rogue program can print `[sudo] password for kirin:` itself. The card therefore draws what the
-**daemon** observed (`sudo` is reading it, typing is hidden) large and what the **agent** wrote
-small. A `secret` request read by the bare shell, an interpreter, `cat`, `tee` or any unrecognised
-program shows an amber warning and keeps Send off until the owner ticks "I trust this program". It is
-a warning, not a refusal.
+The owner can always be asked. A rogue program can print `[sudo] password for kirin:` itself, so the
+card draws what the **daemon** observed (`sudo` is reading it, typing is hidden) large and what the
+**agent** wrote small, and carries a **risk flag** with one fixed sentence that says what the risk is
+(`request.risk`: a level and a reason; the sentence never contains terminal text):
+
+| Level | When                                                                                                              |
+| ----- | ----------------------------------------------------------------------------------------------------------------- |
+| green | A `secret`, echo off, and a recognised program (`sudo`, `ssh`, `gpg` and so on).                                  |
+| amber | A `secret` with echo on (the value will show on screen), echo unknown, an unrecognised program or the bare shell. |
+| red   | A `plain` value: "Not secret: the ferret can see this value."                                                     |
+
+The flag is computed from what the daemon observed, when the request is raised and again when it is
+restored. Send is available at every level. The only refusals are a control character or line break in
+a `secret` ("this would press keys"), a target that changed since the card was drawn (`target_changed`),
+a caller who is not the owner, and the deferred `private` sensitivity.
+
+**`sudo` always goes through the app.** The agent instruction makes `terminal_request_input` the only way
+to answer a `sudo` password prompt: the agent never types it and never asks for it in chat.
 
 ## The relay can see sizes
 
@@ -154,10 +167,11 @@ the write:
   `conflict` error that says when the quarantine ends, for the agent **and for the owner's ordinary
   terminal-tools endpoint** (`POST /v1/sessions/:sessionId/surfaces/terminals/tools`); the owner's way to
   look is the viewer's "Show anyway", which is audited. The agent can still send keys.
-- **A read that was already in flight is not published.** The check is made again after every awaited
-  capture, redaction and wait tail, and before a result is returned, matched against a predicate or drawn
-  as a stream frame (full, delta and re-attach). A screen read before the quarantine began is discarded
-  if the quarantine began before the read finished.
+- **ONE publication gate, asked where a result is published.** Whatever is derived from a pane is checked
+  again, synchronously, at the point it leaves the daemon: after every awaited capture, redaction, batch,
+  audit record and wait tail, and before it is returned, matched against a predicate, sent as a stream
+  frame (full, delta, re-attach and the second capture of a redraw) or remembered as the last frame sent.
+  A screen read before the quarantine began is discarded if the quarantine began before it was published.
 - **Every projection of what the daemon saw is covered.** While a pane is quarantined the prompt line, the
   program name and the argv in the card, the owner's list, the agent's view, the audit record and a
   restored request are replaced with a notice, not just masked.
@@ -165,25 +179,34 @@ the write:
   is per connection (`?reveal=1` on the viewer socket), owner-gated, and audited as
   `input.quarantine_revealed`.
 - **The owner can end it early** (`POST /v1/sessions/:sessionId/input-quarantines/:key/end`, audited as
-  `input.quarantine_ended`); `GET .../input-quarantines` lists the live ones.
+  `input.quarantine_ended`); `GET .../input-quarantines` lists the live ones. Ending it lets go of exactly the
+  settled holds it released, each journalled by its own id, never every hold that shares a name. A hold whose
+  write may still be in flight or unresolved is never ended this way.
 - **It is durable before the write, or nothing is written.** The hold is journalled before the first byte
   is typed. If the journal cannot record it, the delivery is aborted with nothing typed. While the write is
   in flight the hold reads as "now plus the window" and so cannot expire before the write; once the write
   returns, the window runs in full from that moment.
 - **Each delivery attempt has its own hold.** An attempt that fails, is refused or is uncertain releases
   only its own hold, never one an earlier delivery left on the same terminal, live or after a restart.
-- **It survives a restart, and a restart reads closed.** The daemon journals the terminal's names, the end
-  time and the hold (`surface.input_quarantined`, `surface.input_quarantine_ended`; no value, digest or
-  length) and replays them on start. Until every session's quarantines are replayed, every terminal reads
-  as quarantined; a session whose replay fails stays quarantined for a window. A quarantine whose window
-  has passed is not restored, and a request interrupted mid-write on restart starts a fresh window.
+- **A hold stays unresolved until its settlement is recorded.** The first journal entry for a delivery is
+  marked `unresolved` and has no end time. The end time is only journalled after the write, so a daemon that
+  stops, or a journal that cannot record the settlement, leaves the unresolved entry: a delivery that landed,
+  and one that was uncertain, are both still held after a restart. A request reaching a final state does not
+  remove that evidence.
+- **It survives a restart, and a restart reads closed.** The daemon journals every name of the terminal (its
+  key, name and id), the hold and its end time or unresolved state (`surface.input_quarantined`,
+  `surface.input_quarantine_ended`; no value, digest or length) and replays them on start. Every hold,
+  with all its names, is restored in a first pass over every session before anything is unlocked; recovery
+  does not wait on the agenda or the request history. Until then every terminal reads as quarantined, and a
+  session whose replay fails stays quarantined for a window. A hold still unresolved after a restart gets a
+  fresh window from the restart. A quarantine whose window has passed is not restored.
 - **"Show anyway" is audited, and is refused if it cannot be.** If the daemon cannot record that the owner
   chose to see the terminal, it does not show it. The audit log itself may report a persistence failure
   rather than propagate it, so a lost audit record is a limit, below.
 - **A terminal is known by every name** (its key, name and id), so a read by any of them is refused.
-- **Raise-time rules**: a `secret` on a terminal that is not known to have echo off is refused (409
-  `echo_on`), and the check is made again at delivery. That is the compare-and-enqueue check below, not a
-  proof that nothing is ever shown; `private` is refused.
+- **Raise-time rules**: nothing is refused for its target. A `secret` on a terminal that echoes, or whose
+  echo is unknown, is allowed and flagged amber; the quarantine hides the pane, including what echoed, and
+  the facts are checked again at delivery (the compare-and-enqueue check below). `private` is refused.
 
 The daemon holds each delivered `secret` in RAM, for the window above, and masks it as
 `[redacted:input !A7]` wherever it scrubs text: the operator's screen, transcript and journal reads,
@@ -219,9 +242,6 @@ and (after the quarantine) the agent's `terminal.read` and `terminal.wait`. Reda
   `capture-pane -N`, so tmux does not trim a value typed with trailing spaces before it is matched;
   the trailing spaces are dropped only after masking. Values of one or two characters count half of
   themselves as a piece, so `ab ` cut at the edge of a row is still found.
-- **The trust set never holds a program name.** The trusted-program set is keyed by the keyed digest of
-  the name, so a foreground program whose name is itself a typed value is not kept after the window or
-  the session ends.
 - **Digests are keyed.** `observedDigest` and the prompt-line digest are HMACs under a per-process key,
   so a leaked digest cannot be used to test guesses against a low-entropy prompt line.
 - **Values are really dropped.** Each purge replaces the stored array with only the unexpired entries.
@@ -263,7 +283,7 @@ and (after the quarantine) the agent's `terminal.read` and `terminal.wait`. Reda
   anything that changes between the queue and the program reading the bytes. In that gap the foreground
   can become **any** command (a different name as well as a same-named replacement), echo can flip, and
   the prompt can change; the bytes then go to whatever reads the pty next. Unit tests pin each of these as
-  a declared limit. One unit test pins the gap (`DECLARED LIMIT` in `terminal-target.test.ts`). The remaining defences are the owner's warning card, the trusted-program gate, the
+  a declared limit. One unit test pins the gap (`DECLARED LIMIT` in `terminal-target.test.ts`). The remaining defences are the owner's warning card, the risk flag, the
   short window and the masking above. The `if-shell` syntax itself is exercised against a real tmux
   in CI (`tmux-input-guard.test.ts`); if a tmux build rejects it the write fails closed as _uncertain_,
   never as a silent type.

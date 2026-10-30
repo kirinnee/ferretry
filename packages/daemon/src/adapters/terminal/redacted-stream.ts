@@ -24,6 +24,8 @@ export type QuarantineGate = (sessionId: string, terminalId: string) => number |
  * a gate and gets the masked pane.
  */
 export class RedactingTerminalStreamService implements TerminalStreamService {
+  private readonly notices = new WeakSet<TerminalCapture>();
+
   constructor(
     private readonly inner: TerminalStreamService,
     private readonly redactor: TextRedactor,
@@ -42,12 +44,28 @@ export class RedactingTerminalStreamService implements TerminalStreamService {
   async capture(sessionId: string, terminalId: string, historyLines: number): Promise<TerminalCapture> {
     const capture = await this.inner.capture(sessionId, terminalId, historyLines);
     const early = this.quarantined?.(sessionId, terminalId);
-    if (early !== undefined) return notice(capture, early, this.now());
+    if (early !== undefined) return this.hidden(capture, early);
     const redacted = await redactCapture(capture, this.redactor);
     // Asked again once the capture and the redaction are done: a secret typed while they were in flight
     // must not be drawn from a screen that was read before it.
-    const late = this.quarantined?.(sessionId, terminalId);
-    return late === undefined ? redacted : notice(capture, late, this.now());
+    return this.publishable(sessionId, terminalId, redacted, capture);
+  }
+
+  /** The capture, or the notice in its place if the terminal is quarantined now. A notice already drawn is left as it is. */
+  publishable(
+    sessionId: string,
+    terminalId: string,
+    capture: TerminalCapture,
+    shape: TerminalCapture = capture,
+  ): TerminalCapture {
+    const until = this.quarantined?.(sessionId, terminalId);
+    return until === undefined || this.notices.has(capture) ? capture : this.hidden(shape, until);
+  }
+
+  private hidden(shape: TerminalCapture, until: number): TerminalCapture {
+    const shown = notice(shape, until, this.now());
+    this.notices.add(shown);
+    return shown;
   }
 }
 

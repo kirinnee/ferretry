@@ -57,11 +57,11 @@ describe('InputAuditAdapter', () => {
     const expired = await written({ event: 'input.expired', actor: { kind: 'daemon' } });
     const refused = await written({
       event: 'input.refused',
-      detail: { targetKind: 'terminal', sensitivity: 'secret', reason: 'echo_on' },
+      detail: { targetKind: 'terminal', sensitivity: 'secret', reason: 'target_changed' },
     });
 
     should(expired.cause).equal('daemon');
     should(refused.outcome).equal('refused');
-    should(refused.detail?.reason).equal('echo_on');
+    should(refused.detail?.reason).equal('target_changed');
   });
 });

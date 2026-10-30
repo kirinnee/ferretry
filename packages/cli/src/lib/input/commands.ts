@@ -16,8 +16,8 @@ request instead of asking for the value; you answer it here, or on its card in t
 
 There is no flag, argument, environment variable or pipe that carries the value: it is typed at the
 prompt, sent once, and dropped. A ferret cannot run these commands.
-\`answer\` presses Enter for you in a terminal (--no-enter to leave it); an unfamiliar program needs
---trust-program.`;
+\`answer\` presses Enter for you in a terminal (--no-enter to leave it); the card flags the
+risk (green, amber or red) before you type, and never refuses for it.`;
 
 /** Mounts `fy input ls|answer|cancel`. */
 export function registerInputCommands(program: Command, controller: InputController): void {
@@ -48,7 +48,6 @@ export function registerInputCommands(program: Command, controller: InputControl
     .option(JSON_FLAG, JSON_HELP)
     .option('--no-enter', 'type it without pressing Enter')
     .option('--enter', 'press Enter after typing (browser fields otherwise stay unsubmitted)')
-    .option('--trust-program', 'the program reading the terminal is not one known to ask for secrets; I trust it')
     .action(async (reference: string, _options: unknown, command: Command) => {
       await controller.answer(reference, merged<InputAnswerOptions>(command));
     });

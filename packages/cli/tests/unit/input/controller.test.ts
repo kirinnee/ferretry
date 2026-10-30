@@ -137,7 +137,7 @@ describe('fy input answer', () => {
     should(gateway.delivered).have.length(0);
   });
 
-  it('should ask for --trust-program before typing a secret into an unfamiliar program', async () => {
+  it('should show the risk flag and still type into an unfamiliar program, with no extra flag', async () => {
     // Arrange
     const base = request();
     const unfamiliar = request({
@@ -147,18 +147,19 @@ describe('fy input answer', () => {
         recognisedConsumer: false,
       },
     });
-    const { ports, gateway, prompt } = rig({}, new FakeInputGateway([unfamiliar]));
-    const controller = new InputController(ports);
+    const flagged = {
+      ...unfamiliar,
+      risk: { level: 'amber', reason: 'The program is not one known to ask for secrets.' },
+    } as typeof unfamiliar;
+    const { ports, gateway, prompt, out } = rig({}, new FakeInputGateway([flagged]));
 
     // Act
-    const refused = await controller.answer('!A7', options).catch((error: unknown) => error);
-    await controller.answer('!A7', { ...options, trustProgram: true });
+    await new InputController(ports).answer('!A7', options);
 
     // Assert
-    should((refused as Error).message).containEql('--trust-program');
+    should(out.diagnostics.join('\n')).containEql('risk amber: The program is not one known to ask for secrets.');
     should(prompt.asked).have.length(1);
     should(gateway.delivered).have.length(1);
-    should(gateway.delivered[0]?.body.trustProgram).equal(true);
   });
 
   it('should leave Enter to the agent when it asked to press it, and honour --no-enter otherwise', async () => {

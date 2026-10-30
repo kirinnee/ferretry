@@ -187,8 +187,6 @@ export type InputRequestState = z.infer<typeof InputRequestStateSchema>;
 export const INPUT_REASONS = [
   'target_changed',
   'target_gone',
-  'echo_on',
-  'not_secret_field',
   'insecure_origin',
   'interrupted',
   'owner_declined',
@@ -219,6 +217,18 @@ export const InputOutcomeSchema = z.strictObject({
 export type InputOutcome = z.infer<typeof InputOutcomeSchema>;
 
 /**
+ * HOW RISKY THE VALUE IS TO TYPE where it is going, as a flag on the card and never a refusal: the owner
+ * decides. green = typing hidden and a program known to ask for secrets; amber = it may show on screen, or
+ * the program is not known to ask; red = not a secret, the ferret can see it. `reason` is one sentence.
+ */
+export const INPUT_RISK_LEVELS = ['green', 'amber', 'red'] as const;
+export const InputRiskSchema = z.strictObject({
+  level: z.enum(INPUT_RISK_LEVELS),
+  reason: boundedLine(240),
+});
+export type InputRisk = z.infer<typeof InputRiskSchema>;
+
+/**
  * THE REQUEST, as the owner's card reads it. `observed` is absent while the daemon is re-observing after
  * a restart: Send stays disabled until it is back.
  */
@@ -236,6 +246,8 @@ export const InputRequestSchema = z.strictObject({
   expiresAt: InstantSchema,
   chain: AgendaIdSchema.optional(),
   observed: InputTargetFactsSchema.optional(),
+  /** The risk flag for what was observed; absent while the daemon is re-observing. */
+  risk: InputRiskSchema.optional(),
   /** A digest of the facts the card showed; deliver refuses `target_changed` when it no longer matches. */
   observedDigest: Digest.optional(),
   state: InputRequestStateSchema,
@@ -285,8 +297,6 @@ export const InputDeliverBodySchema = z
     submit: z.boolean(),
     /** Save a typed value to the secret store under this name (only for a typed `secret`). */
     saveAs: SecretNameSchema.optional(),
-    /** The owner ticked "I trust this program" on an amber card. */
-    trustProgram: z.literal(true).optional(),
   })
   .superRefine((body, context) => {
     if ((body.padded === undefined) === (body.secretName === undefined)) {
@@ -326,8 +336,6 @@ export const INPUT_ERROR_CODES = {
   alreadyDelivered: 'already_delivered',
   /** 410: the request expired or was cancelled. */
   gone: 'gone',
-  /** 409: `secret` and the TTY echoes (or cannot be probed). */
-  echoOn: 'echo_on',
   /** 409: an input request is pending on the surface an agent tried to type into. */
   inputPending: 'input_pending',
   /** 429: too many pending or recent requests. */
@@ -385,10 +393,9 @@ export type InputEvent = z.infer<typeof InputEventSchema>;
  * The journal event that keeps a quarantine across a restart: the terminal's names (its key and its id, because
  * a reader may hold either), when the window ends, and nothing else. `ended` closes the window early.
  *
- * `hold` is an opaque id for the one delivery attempt that made the event. A later `started` with the same
- * `hold` replaces that attempt's end time, and an `ended` with it lets go of that attempt's hold alone, so
- * an attempt that failed never lifts the hold of a value delivered before it. An event without a `hold`
- * (the owner ending a quarantine) ends every hold on the names.
+ * `hold` is an opaque id for one hold. A later `started` with the same `hold` replaces its end time (or, with
+ * `unresolved`, says a write may be in flight and the hold has none), and an `ended` with it lets go of that
+ * hold alone, so an attempt that failed, or an owner ending one delivered value, never lifts another hold.
  */
 export const INPUT_QUARANTINE_EVENT_TYPES = {
   started: 'surface.input_quarantined',
@@ -398,7 +405,9 @@ export const InputQuarantineEventSchema = z.strictObject({
   type: z.enum([INPUT_QUARANTINE_EVENT_TYPES.started, INPUT_QUARANTINE_EVENT_TYPES.ended]),
   sessionId: boundedLine(128),
   names: z.array(SurfaceKeySchema).min(1).max(4),
-  hold: boundedLine(128).optional(),
+  hold: boundedLine(128),
+  /** The write under this hold may be in flight or may have landed: it holds until a later event for the same hold settles it. */
+  unresolved: z.literal(true).optional(),
   until: InstantSchema,
   at: InstantSchema,
 });

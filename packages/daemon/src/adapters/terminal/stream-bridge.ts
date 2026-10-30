@@ -24,6 +24,12 @@ export interface TerminalStreamService {
   resize(sessionId: string, terminalId: string, cols: number, rows: number): Promise<unknown>;
   /** The pane with its newest `historyLines` of history: a window for a poll, the whole limit for a full redraw. */
   capture(sessionId: string, terminalId: string, historyLines: number): Promise<TerminalCapture>;
+  /**
+   * What of a capture may be drawn at this instant. Asked synchronously, right where the bridge resumes
+   * from a capture and before it sends or remembers a frame, so a screen that was fine when it was read
+   * is not drawn after the terminal was quarantined. Absent, every capture may be drawn.
+   */
+  publishable?(sessionId: string, terminalId: string, capture: TerminalCapture): TerminalCapture;
 }
 
 export interface TerminalStreamDownstream {
@@ -175,7 +181,7 @@ export class TerminalStreamBridge {
     try {
       // A poll reads a window of history; with no picture to be a delta against, the whole limit at once.
       const depth = this.lastSent === undefined ? TERMINAL_REATTACH_LINES : TERMINAL_POLL_HISTORY_LINES;
-      let capture = await this.service.capture(this.sessionId, this.terminalId, depth);
+      let capture = this.publishable(await this.service.capture(this.sessionId, this.terminalId, depth));
       // CHECKED AGAIN, BECAUSE THE CAPTURE ABOVE IS AN AWAIT. The check at the top of this method was
       // the only one, so a capture in flight when `close()` landed still called `downstream.send`
       // afterwards — a bridge that had been told it was over, writing to a transport that was over
@@ -189,7 +195,9 @@ export class TerminalStreamBridge {
       if (plan.kind === 'full' && depth !== TERMINAL_REATTACH_LINES) {
         // A complete redraw is worth the whole history the limit allows, not the poll's window. The
         // pane may have moved on in between; this second capture is simply the newer picture.
-        capture = await this.service.capture(this.sessionId, this.terminalId, TERMINAL_REATTACH_LINES);
+        capture = this.publishable(
+          await this.service.capture(this.sessionId, this.terminalId, TERMINAL_REATTACH_LINES),
+        );
         if (this.closed) return;
       }
       const frame = plan.kind === 'delta' ? plan.frame : terminalFullRedraw(capture, TERMINAL_MAX_REDRAW_BYTES);
@@ -203,6 +211,11 @@ export class TerminalStreamBridge {
     } catch {
       this.finish(TERMINAL_STREAM_CLOSES.redrawFailed.code, TERMINAL_STREAM_CLOSES.redrawFailed.reason);
     }
+  }
+
+  /** The capture as it may be drawn NOW: asked synchronously where it resumes, so no hold can begin between the check and the send. */
+  private publishable(capture: TerminalCapture): TerminalCapture {
+    return this.service.publishable?.(this.sessionId, this.terminalId, capture) ?? capture;
   }
 
   private finish(code: number, reason: string, closeDownstream = true): void {

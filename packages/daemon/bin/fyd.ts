@@ -814,6 +814,7 @@ import {
   harnessOverrideFailures,
   harnessPreflightSummary,
   harnessQuirks,
+  INSTRUCTIONS_FEATURE,
   InferredLaneProposer,
   InitialAttachmentError,
   InputAgendaAdapter,
@@ -821,7 +822,6 @@ import {
   InputAuditAdapter,
   InputCardClosedObserver,
   InputRequestService,
-  INSTRUCTIONS_FEATURE,
   InstructionRefresh,
   type InterruptedLaunchOutcome,
   InterruptedLaunchReconciler,
@@ -6033,7 +6033,6 @@ function createInputRequestService(input: {
   readonly redact: (text: string) => Promise<string>;
 }): InputRequestService {
   const clock = { now: () => Date.now() };
-  const trusted = new Set<string>();
   return new InputRequestService({
     target: new TmuxInputTarget(
       input.tmux,
@@ -6096,7 +6095,6 @@ function createInputRequestService(input: {
     clock,
     ids: { requestId: () => crypto.randomUUID().replaceAll('-', '') },
     timers: { after: async milliseconds => await Bun.sleep(milliseconds) },
-    trusted: { isTrusted: digest => trusted.has(digest), trust: digest => void trusted.add(digest) },
     sessions: {
       ended: async sessionId => {
         const id = tryParseSessionId(sessionId);

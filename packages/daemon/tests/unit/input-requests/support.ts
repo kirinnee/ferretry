@@ -58,7 +58,6 @@ export function inputRequestService(options: { readonly crash?: () => boolean } 
     clock,
     ids: { requestId: () => (id++).toString(16).padStart(32, '0') },
     timers: { after: async () => await new Promise<void>(() => undefined) },
-    trusted: { isTrusted: () => false, trust: () => undefined },
     sessions: { ended: async candidate => candidate !== SESSION, all: async () => [SESSION] },
     values,
     quarantine: new QuarantineRegistry(clock),

@@ -15,7 +15,6 @@ import {
   type TerminalStreamService,
   TmuxTerminalRuntime,
 } from '../../../src/adapters/index.ts';
-import { digestLine } from '../../../src/lib/input-requests/digest.ts';
 import { EphemeralAwareRedactor } from '../../../src/lib/input-requests/ephemeral-redactor.ts';
 import { EphemeralValues } from '../../../src/lib/input-requests/ephemeral-values.ts';
 import type { InputAuditEntry, InputCaller } from '../../../src/lib/input-requests/ports.ts';
@@ -161,7 +160,6 @@ function composed(
     clockAt?: number;
   } = {},
 ) {
-  const trusted = new Set<string>();
   const pane: Pane = {
     physical: ['[sudo] password for kirin:'],
     joined: ['[sudo] password for kirin:'],
@@ -215,7 +213,6 @@ function composed(
     clock,
     ids: { requestId: () => (id++).toString(16).padStart(32, '0') },
     timers: { after: async () => await new Promise<void>(() => undefined) },
-    trusted: { isTrusted: digest => trusted.has(digest), trust: digest => void trusted.add(digest) },
     sessions: { ended: async () => false, all: async () => [SESSION] },
     values,
     quarantine,
@@ -245,7 +242,6 @@ function composed(
     events,
     underlying,
     scenario,
-    trusted,
     reader,
     advance,
     quarantine,
@@ -259,12 +255,11 @@ const RAISE = {
   submit: 'owner-default',
 } as const;
 
-const bodyFor = (digest: string, value: string, trustProgram = false): InputDeliverBody => ({
+const bodyFor = (digest: string, value: string): InputDeliverBody => ({
   deliveryId: crypto.randomUUID(),
   observedDigest: digest,
   padded: padInputValue(value),
   submit: true,
-  ...(trustProgram ? { trustProgram: true } : {}),
 });
 
 /** The pieces of a value an eye or a grep could match: whole, its first six characters and its last nine. */
@@ -424,7 +419,7 @@ describe('the value is unfindable outside the program it was typed into, over th
     should(masked.frames).not.containEql(':');
   });
 
-  it('should keep a program name the owner typed earlier out of every view, record and the trusted-program memory', async () => {
+  it('should keep a program name the owner typed earlier out of every view and record', async () => {
     const scenario: Scenario = { ...(SCENARIOS[0] as Scenario), value: 'Tr0ub4dor3-LEAKPROBE' };
     const world = composed(scenario);
     await typedInto(world);
@@ -432,18 +427,11 @@ describe('the value is unfindable outside the program it was typed into, over th
     world.pane.argv = scenario.value;
     await world.service.raise(SESSION, RAISE);
     const [request] = await world.service.list(HOST);
-    await world.service.deliver(
-      SESSION,
-      request?.id ?? '',
-      bodyFor(request?.observedDigest ?? '', 'other', true),
-      HOST,
-    );
+    await world.service.deliver(SESSION, request?.id ?? '', bodyFor(request?.observedDigest ?? '', 'other'), HOST);
     world.advance(2 * 60 * 60 * 1000);
     await world.service.sessionEnded(SESSION);
-    const everything = [JSON.stringify(await world.service.list(HOST)), ...world.emitted, ...world.trusted].join('\n');
+    const everything = [JSON.stringify(await world.service.list(HOST)), ...world.emitted].join('\n');
 
-    should(world.trusted.size).equal(1);
-    should(world.trusted.has(digestLine(scenario.value))).be.true();
     should(world.values.heldCount()).equal(0);
     for (const piece of piecesOf(scenario.value)) should(everything).not.containEql(piece);
   });
