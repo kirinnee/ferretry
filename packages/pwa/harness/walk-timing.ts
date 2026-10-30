@@ -24,8 +24,44 @@ export const timed = async <T>(label: string, work: () => Promise<T>): Promise<T
 
 const PAGE_METHODS = ['goto', 'reload', 'screenshot', 'waitForTimeout', 'setViewportSize', 'emulateMedia'] as const;
 
+const LOCATOR_METHODS = [
+  'click',
+  'fill',
+  'press',
+  'hover',
+  'waitFor',
+  'boundingBox',
+  'evaluate',
+  'evaluateAll',
+  'count',
+  'textContent',
+  'innerText',
+  'getAttribute',
+  'isVisible',
+  'scrollIntoViewIfNeeded',
+  'focus',
+  'check',
+  'selectOption',
+] as const;
+let locatorsTimed = false;
+
+/** Charge every Locator action to a `locator.<method>` bucket, once per process, so the log says which kind of action the walk spends its time on. */
+const timeLocators = (page: Page): void => {
+  if (locatorsTimed) return;
+  locatorsTimed = true;
+  const proto = Object.getPrototypeOf(page.locator('body')) as Record<string, unknown>;
+  for (const method of LOCATOR_METHODS) {
+    const original = proto[method];
+    if (typeof original !== 'function') continue;
+    proto[method] = function (this: unknown, ...args: unknown[]) {
+      return timed(`locator.${method}`, async () => (original as (...a: unknown[]) => unknown).apply(this, args));
+    };
+  }
+};
+
 /** Charge every call to the page methods that cost wall clock to a `page.<method>` bucket. */
 export const timePage = (page: Page): void => {
+  timeLocators(page);
   for (const method of PAGE_METHODS) {
     const original = page[method].bind(page) as (...args: unknown[]) => Promise<unknown>;
     (page as unknown as Record<string, unknown>)[method] = (...args: unknown[]) =>
