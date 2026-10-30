@@ -85,15 +85,20 @@ a fingerprint of each one (`digest`, `instructionDigest`) beside its size.
 
 When the owner next writes to a ferret, the daemon compares those fingerprints with the words every agent
 is told now (`packages/daemon/src/lib/session/launch/instruction-refresh.ts`). For each section that
-changed, it queues the new words once, under `[instructions updated]`, as a replacement for the matching
-part of the system prompt. Once the note is durably queued, the launch record marks those sections as told,
+changed, it queues the new words once as a replacement for the matching part of the system prompt. The note
+opens with a plain sentence ("Ferretry changed part of the instructions you were started with…"), never a
+bracketed tag: who sent it and what it is about are metadata. Once the note is durably queued, the launch record marks those sections as told,
 so the next message queues nothing. The Instructions row then shows the new sizes.
 
 - **The owner's message triggers it and goes out exactly as typed.** The note is its own message in the
-  ferret's agenda outbox, under the key `instructions~<digest>` (a key made from the note's words, so
-  the same note is never queued twice). It rides the same quiet window and the same hold while the ferret
-  is mid-turn as the owner's answers ([agenda.md](agenda.md#delivery)), and joins a batch of them as one
-  message. Only an owner's message triggers it: a release must not start a turn for every ferret on the
+  ferret's durable queue, right behind the owner's, under the id `instructions-<digest>` (made from the
+  note's words, so the same note is never queued twice). Its `by` is `{ kind: 'ferretry', feature:
+'Instructions', sections: [...] }`: the app's sender chip, and the names of the sections it restates
+  (`Tools`, `Settings`, `Notify`, `Board`, `Sub-ferret`), so the app can draw it as one compact row. It is
+  queued as the person's (`human`), so an interactive session receives it too, where a daemon notice would
+  go to the board instead; the owner's send only makes it durable and never waits on it. With the queue
+  switched off it falls back to the agenda outbox, under the key `instructions~<digest>`
+  ([agenda.md](agenda.md#delivery)). Only an owner's message triggers it: a release must not start a turn for every ferret on the
   machine, and a teammate's message never does. If the note cannot be queued it is not marked as told, so
   the next owner message offers it again.
 - **A record with no fingerprint** (launched before they were kept) compares sizes. A session with no

@@ -807,6 +807,7 @@ import {
   harnessQuirks,
   InferredLaneProposer,
   InitialAttachmentError,
+  INSTRUCTIONS_FEATURE,
   InstructionRefresh,
   type InterruptedLaunchOutcome,
   InterruptedLaunchReconciler,
@@ -10880,8 +10881,22 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           new AgendaConversation(agenda),
           new InstructionRefresh({
             sections: subFerret => ALWAYS_ON_SECTIONS(CLIENT_NAME, subFerret),
-            queue: async (sessionId, digest, note) =>
-              await agendaReplies.add(sessionId, instructionsReplyKey(digest), note),
+            // Its own message in the session's queue, right behind the owner's that triggered it. Sent as the
+            // person's (`human`) so it is typed into an interactive session too, as it always was; WHO it is
+            // from is the `by` — Ferretry · Instructions, with the sections it restates — never text in it.
+            // Only durable here, not handed over: the owner's send this follows answers without waiting.
+            queue: async (sessionId, digest, note, sections) => {
+              const id = tryParseSessionId(sessionId);
+              if (id === undefined) throw new Error(`${JSON.stringify(sessionId)} is not a usable session id`);
+              if (!delivery.queue) return await agendaReplies.add(sessionId, instructionsReplyKey(digest), note);
+              await sessionQueue.enqueue(id, {
+                id: `instructions-${digest}`,
+                sender: 'human',
+                by: { kind: 'ferretry', feature: INSTRUCTIONS_FEATURE, sections: [...sections] },
+                text: note,
+              });
+              void queueDeliverer.enqueued(id).catch(() => undefined);
+            },
             recorded: async sessionId => {
               const id = tryParseSessionId(sessionId);
               if (id === undefined) return undefined;
