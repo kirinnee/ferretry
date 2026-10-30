@@ -2151,7 +2151,6 @@ html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-compos
 .fy-message-peer {
   background: var(--card-bg);
   border: var(--card-stroke) solid var(--card-border);
-  border-left: var(--card-edge) solid var(--fy-accent);
   border-radius: var(--card-tail-radius) var(--card-radius) var(--card-radius) var(--card-radius);
   box-shadow: var(--card-shadow);
   margin-right: auto;
