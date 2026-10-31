@@ -140,6 +140,12 @@ class FakeBrowser {
   }
   readonly automation: BrowserAutomation = {
     unexpectedExit: new Promise<number>(() => undefined),
+    // No journey here asks the owner for a value in a page.
+    inputObserve: async () => ({ ok: false, missing: 'value' }),
+    inputShot: async () => {
+      throw new Error('no field shots in this journey');
+    },
+    inputType: async () => 'target_gone',
     navigate: async (pageId, url) => {
       this.pages = this.pages.map(page => (page.id === pageId ? { ...page, url } : page));
       return this.act('navigate', pageId);

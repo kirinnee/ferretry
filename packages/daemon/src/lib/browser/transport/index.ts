@@ -5,6 +5,7 @@ export * from './download-stage.ts';
 export * from './envelope.ts';
 export * from './frame-governor.ts';
 export * from './input.ts';
+export * from './input-contracts.ts';
 export * from './page-acts.ts';
 export * from './page-lifecycle.ts';
 export * from './pointer-acts.ts';

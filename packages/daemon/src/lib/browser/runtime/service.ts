@@ -24,6 +24,7 @@ import {
 } from '@ferretry/protocol';
 import { agentSpokenName } from '../../names/session-names.ts';
 import type { BrowserAutomation } from '../transport/automation-contracts.ts';
+import type { BrowserInputFieldsPort } from '../transport/input-contracts.ts';
 import type { BrowserUploadMode } from '../transport/page-acts.ts';
 import type { WorkerStagedFile } from '../transport/worker-protocol.ts';
 import type { BrowserViewerHost, ViewerAttachment, ViewerTerminalSignal } from '../transport/viewer-contracts.ts';
@@ -174,6 +175,16 @@ export interface BrowserSubsystem extends BrowserViewerHost {
     action: BrowserFileAction,
     guard?: BrowserActGuard,
   ): Promise<BrowserFileResult>;
+  /**
+   * The input bridge's look, picture or write on this session's page with this name (or id), run in the page's
+   * own queue so no act of the agent lands between the bridge's check and its write. Refuses (`not_found`) a
+   * page that is not this session's, or a browser that is not running: the bridge reads that as "gone".
+   */
+  inputOnPage<T>(
+    sessionId: string,
+    key: string,
+    work: (fields: BrowserInputFieldsPort, pageId: string) => Promise<T>,
+  ): Promise<T>;
   /** Closes this session's page with this name (or id). An incognito page's whole context goes with it. */
   closePage(sessionId: string, key: string, guard?: BrowserActGuard): Promise<void>;
   /** A session ended: every page it owns closes, and every incognito context it held is discarded. */
@@ -307,6 +318,20 @@ export class BrowserSessionService implements BrowserSubsystem {
       run.snapshot = pageOf(result);
       this.touch(run);
       return { status: this.project(run, sessionId), result };
+    });
+  }
+
+  async inputOnPage<T>(
+    sessionId: string,
+    key: string,
+    work: (fields: BrowserInputFieldsPort, pageId: string) => Promise<T>,
+  ): Promise<T> {
+    await this.requireSession(sessionId);
+    const run = this.requireRunning();
+    const page = this.requirePage(run, sessionId, key);
+    return await this.exclusive(page.id, async () => {
+      this.touch(run);
+      return await work(run.driver, page.id);
     });
   }
 
