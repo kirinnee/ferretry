@@ -49,6 +49,24 @@ describe('MachineHome', () => {
       expect(tile(container, label)?.textContent).toContain('—');
   });
 
+  it('never says "all clear" under a number it has not read', async () => {
+    const { container } = await mount(
+      <MachineHome {...props({ sessions: null, toTest: null, spendTodayUsd: null, health: null })} />,
+    );
+
+    for (const label of ['Running', 'Needs you', 'To test'])
+      expect(tile(container, label)?.textContent).toContain('not loaded yet');
+    expect(tile(container, 'Spend today')?.textContent).toContain('not available');
+    expect(container.textContent).not.toContain('all clear');
+  });
+
+  it('says "all clear" once a read has landed and found nothing', async () => {
+    const { container } = await mount(<MachineHome {...props({ sessions: [], toTest: 0 })} />);
+
+    expect(tile(container, 'Needs you')?.textContent).toContain('all clear');
+    expect(tile(container, 'To test')?.textContent).toContain('all clear');
+  });
+
   it('lists only the top ferrets and points at every session', async () => {
     const sessions = Array.from({ length: TOP_FERRETS + 4 }, (_, index) => interactive(`s${index}`));
     const { container } = await mount(<MachineHome {...props({ sessions })} />);

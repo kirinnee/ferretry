@@ -180,7 +180,7 @@ export function MachineHome({
           label="Running"
           onNavigate={onNavigate}
           span="col-span-2 sm:col-span-1"
-          sub={counts === null ? '' : `of ${counts.interactive} ferrets`}
+          sub={counts === null ? 'not loaded yet' : `of ${counts.interactive} ferrets`}
           to={allSessions}
           value={counts === null ? dash : counts.running}
         />
@@ -189,7 +189,7 @@ export function MachineHome({
           lit={counts !== null && counts.waitingOnYou > 0}
           onNavigate={onNavigate}
           span="col-span-2 sm:col-span-1"
-          sub={counts === null || counts.waitingOnYou === 0 ? 'all clear' : 'open Inbox'}
+          sub={counts === null ? 'not loaded yet' : counts.waitingOnYou === 0 ? 'all clear' : 'open Inbox'}
           to={daemonAgendaPath(daemonId)}
           value={counts === null ? dash : counts.waitingOnYou}
         />
@@ -197,7 +197,7 @@ export function MachineHome({
           label="To test"
           onNavigate={onNavigate}
           span="col-span-2 sm:col-span-1"
-          sub={toTest === null || toTest === 0 ? 'all clear' : 'on the board'}
+          sub={toTest === null ? 'not loaded yet' : toTest === 0 ? 'all clear' : 'on the board'}
           to={`${daemonBoardPath(daemonId)}?activity=to_test&machine=${encodeURIComponent(daemonId)}`}
           value={toTest ?? dash}
         />
@@ -205,7 +205,7 @@ export function MachineHome({
           label="Spend today"
           onNavigate={onNavigate}
           span="col-span-3 sm:col-span-1"
-          sub="this machine"
+          sub={spendTodayUsd === null ? 'not available' : 'this machine'}
           to={daemonAnalyticsPath(daemonId)}
           value={spendTodayUsd === null ? dash : dollars(spendTodayUsd)}
         />

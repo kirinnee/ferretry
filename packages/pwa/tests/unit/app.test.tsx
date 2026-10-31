@@ -2455,6 +2455,24 @@ describe('AppShell', () => {
     }
   });
 
+  it("titles the machine home with the machine's name, and falls back to its address only when unnamed", async () => {
+    const named = await renderShell(`/d/${ALPHA}`, [daemonConnection({ ...alpha, daemonName: 'Liftoff EC2' })]);
+    try {
+      await settle();
+      expect(named.view.container.querySelector('#machine-home-title')?.textContent).toBe('Liftoff EC2');
+    } finally {
+      await named.view.unmount();
+    }
+
+    const unnamed = await renderShell(`/d/${ALPHA}`, [alpha.daemonId]);
+    try {
+      await settle();
+      expect(unnamed.view.container.querySelector('#machine-home-title')?.textContent).toBe(alpha.baseUrl);
+    } finally {
+      await unnamed.view.unmount();
+    }
+  });
+
   it('mounts every daemon-qualified destination through its own slot', async () => {
     const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId], { sessions: ['one'] });
     await settle();
