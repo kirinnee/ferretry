@@ -301,6 +301,13 @@ the target's key (`sudo@kirin-box` → `SUDO_KIRIN_BOX`, "sudo on kirin-box"; a 
   a delete, `fy secret entry` — runs its read, merge and write in one store-wide queue (`LoginStoreLock`), so
   two that overlap both land and every acknowledged secret stays masked. A per-entry or per-session lock would
   not be enough: the files are shared.
+- **All or nothing, across a crash.** A change never overwrites a sealed value the index points at. New
+  secret values are sealed under **fresh, versioned names** and added beside the old ones; then the index —
+  written to a temporary file, synced and renamed into place — is published pointing at them. That rename is
+  the one commit point: before it, the entry is entirely the old one (old username, old password, the old
+  ciphertext still sealed and still masked); after it, entirely the new one. Ciphertext nothing points at any
+  more is swept after the commit and again at boot (`LoginDirectory.sweepUnreferenced`), and stays masked until
+  then. A boot with no committed index sweeps nothing.
 - **A username and a password from one card are kept together** (`LoginDirectory.saveFields`, one change), so a
   login card never leaves an entry with half of what was typed. The one-field card saves the one field it has.
 

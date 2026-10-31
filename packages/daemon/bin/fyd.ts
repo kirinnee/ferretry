@@ -7149,6 +7149,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   const loginSealed = new FileSecretDocumentStore(paths, stateFiles, LOGIN_SECRETS_DOCUMENT);
   const loginDirectory = new LoginDirectory(loginIndex, loginSealed, secretCipher, clock);
   const loginVault = new LoginVault(loginIndex, loginSealed, secretCipher);
+  // A change that stopped between staging new ciphertext and committing the index left sealed values no entry
+  // points at; they stay masked until this sweep, which runs under the store lock before any change can.
+  void loginDirectory.sweepUnreferenced().catch(() => undefined);
   // Copying secrets to another machine signs and checks offers with THIS daemon's identity — the key its
   // daemon id fingerprints — read per clone, so a daemon whose identity cannot be read refuses the copy
   // and serves everything else.
