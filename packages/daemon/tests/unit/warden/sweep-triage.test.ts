@@ -154,7 +154,7 @@ describe('the Jev guard', () => {
 
   it('should investigate a skip it is not sure enough about', async () => {
     // Arrange
-    const subject = harness({ config: jev(), fleet: [unattended('s1')], guard: [{ otherwise: yes(0.8) }] });
+    const subject = harness({ config: jev(), fleet: [unattended('s1')], guard: [{ otherwise: yes(0.6) }] });
 
     // Act
     await subject.service.run({ force: false });

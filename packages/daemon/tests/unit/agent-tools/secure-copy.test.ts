@@ -5,6 +5,7 @@ import {
   type AgentInputPort,
   type AgentToolError,
   EphemeralValues,
+  PageCopyRecords,
   type SecretChildOutcome,
   SecureCopyService,
 } from '../../../src/lib/index.ts';
@@ -428,5 +429,173 @@ describe('a person and secure.copy', () => {
 
     should(error.code).equal('bad_request');
     should(world.ran).eql([]);
+  });
+});
+
+describe('copying from a page the agent opened', () => {
+  /** The copy service and the page records over a fake page whose document the case moves on. */
+  function pageWorld(options: { readonly heldByOwner?: boolean } = {}) {
+    const clock = new ManualClock();
+    const masking = new EphemeralValues(clock);
+    const records = new PageCopyRecords(clock);
+    const page = { document: 'loader-1', asked: [] as string[] };
+    const copies = new SecureCopyService({
+      clock,
+      runner: {
+        run: async () => {
+          throw new Error('a page copy runs no command');
+        },
+      },
+      folders: { folderOf: async () => '/work' },
+      exposure: { transcriptHolds: async () => 'clean' },
+      masking,
+      redact: async text => text,
+      pages: {
+        // As the page's queue runs it: the guard, the read, the seal.
+        read: async (_sessionId, key, _target, _part, _attribute, queue) => {
+          await queue.guard?.({ document: async () => page.document });
+          page.asked.push(key);
+          const found = {
+            ok: true as const,
+            value: TOKEN,
+            pageId: 'page-1',
+            origin: 'https://github.com',
+            frameOrigin: 'https://github.com',
+            navigationId: page.document,
+          };
+          queue.seal(found);
+          return found;
+        },
+      },
+      pageHolds: records,
+    });
+    const input: AgentInputPort = {
+      raise: async () => {
+        throw new Error('no request here');
+      },
+      agentView: async () => ({ id: 'A1', state: 'pending' }),
+      pendingOn: () => undefined,
+      exclusive: async (_sessionId, work) => await work(),
+      pageDocument: async () => page.document,
+      // The owner's value was just typed into the page: its text is not read while it shows that document.
+      ...(options.heldByOwner === true
+        ? { pageHeld: () => ({ until: Date.parse('2026-10-31T12:02:00.000Z'), documents: ['loader-1'] }) }
+        : {}),
+    };
+    const tools = agentToolWorld({
+      copy: copies,
+      copyPages: records,
+      input,
+      scrub: (sessionId, text) => masking.scrub(sessionId, text),
+    });
+    return { ...tools, copies, records, page };
+  }
+  const FROM_PAGE: AgentToolCall = {
+    tool: 'secure.copy',
+    name: 'gh',
+    source: { kind: 'browser', key: 'app', ref: 'e12', read: 'text' },
+  };
+  const SHOT: AgentToolCall = { tool: 'browser.screenshot', name: 'app' };
+
+  it('should seal an element of its own page, by the name the page is known by, and say where it came from', async () => {
+    const w = pageWorld();
+    await w.service.call(agent, { tool: 'browser.open', name: 'app' });
+
+    const result = await w.service.call(agent, FROM_PAGE);
+
+    should(w.page.asked).eql(['app']);
+    should(result.copies?.[0]).match({ from: { kind: 'browser', origin: 'https://github.com', surface: 'app' } });
+    should(JSON.stringify(result)).not.containEql(TOKEN);
+  });
+
+  it("should refuse a copy from a person's page, and with the browser switch off, reading nothing", async () => {
+    const w = pageWorld();
+    await w.service.call(person, { tool: 'browser.open', name: 'theirs' });
+    await w.service.call(agent, { tool: 'browser.open', name: 'app' });
+
+    const theirs = await refused(
+      w.service.call(agent, { ...FROM_PAGE, source: { kind: 'browser', key: 'theirs', ref: 'e1', read: 'text' } }),
+    );
+    w.policy.off.add('browser');
+    const switchedOff = await refused(w.service.call(agent, FROM_PAGE));
+
+    should([theirs.code, switchedOff.code]).eql(['forbidden', 'forbidden']);
+    should(w.page.asked).eql([]);
+  });
+
+  it('should not picture the page while it shows the copied document, read its text, and picture it once it moved on', async () => {
+    const w = pageWorld();
+    await w.service.call(agent, { tool: 'browser.open', name: 'app' });
+    await w.service.call(agent, FROM_PAGE);
+
+    const held = await refused(w.service.call(agent, SHOT));
+    const text = await w.service.call(agent, { tool: 'browser.read', name: 'app' });
+    // The page navigated: the browser and the input bridge both see the new document.
+    w.page.document = 'loader-2';
+    w.browser.document = 'loader-2';
+    const moved = await w.service.call(agent, SHOT);
+
+    should(held.code).equal('conflict');
+    should(held.message).containEql('still shows the page a secure copy was read from');
+    should(text.summary).not.be.empty();
+    should(moved.screenshotBase64).not.be.undefined();
+  });
+
+  it('should not picture it for a person either, pointing them at the browser view', async () => {
+    const w = pageWorld();
+    await w.service.call(agent, { tool: 'browser.open', name: 'app' });
+    await w.service.call(agent, FROM_PAGE);
+
+    const held = await refused(w.service.call(person, SHOT));
+
+    should(held.code).equal('conflict');
+    should(held.message).containEql('Look at it in the browser view.');
+  });
+
+  it('should mask the copied value anywhere in a page result as it leaves, the page address included', async () => {
+    const w = pageWorld();
+    await w.service.call(agent, { tool: 'browser.open', name: 'app' });
+    await w.service.call(agent, FROM_PAGE);
+    w.browser.readText = `Your new token: ${TOKEN}`;
+    w.browser.actedUrl = `https://github.com/settings/tokens?created=${TOKEN}`;
+
+    const read = await w.service.call(agent, { tool: 'browser.read', name: 'app' });
+
+    should(JSON.stringify(read)).not.containEql(TOKEN);
+    should(read.summary).containEql('created=[sealed:gh]');
+  });
+
+  it("should refuse a copy inside the page's queue while the owner's value holds the page, reading nothing", async () => {
+    const w = pageWorld({ heldByOwner: true });
+    await w.service.call(agent, { tool: 'browser.open', name: 'app' });
+
+    const refusal = await refused(w.service.call(agent, FROM_PAGE));
+
+    should(refusal.code).equal('conflict');
+    should(w.page.asked).eql([]);
+    should(w.copies.list('s1')).eql([]);
+  });
+
+  it('should not count the copy itself as the agent reading the page', async () => {
+    const w = pageWorld();
+    await w.service.call(agent, { tool: 'browser.open', name: 'app' });
+
+    const result = await w.service.call(agent, FROM_PAGE);
+
+    should(result.copies?.[0]?.exposure.pageReadBeforeCapture).be.false();
+    should(w.records.seen('s1', ['app'])).eql([]);
+  });
+
+  it('should say the agent read the very document it then copied from', async () => {
+    const w = pageWorld();
+    await w.service.call(agent, { tool: 'browser.open', name: 'app' });
+    await w.service.call(agent, { tool: 'browser.read', name: 'app' });
+
+    const result = await w.service.call(agent, FROM_PAGE);
+
+    should(result.copies?.[0]?.exposure.pageReadBeforeCapture).be.true();
+    should(result.summary).containEql('WARNING: you read this page before sealing it');
+    should(result.summary).containEql('The page is not pictured until it shows another document');
+    should(w.records.seen('s1', ['app'])).eql(['loader-1']);
   });
 });

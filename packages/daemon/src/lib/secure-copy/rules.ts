@@ -254,7 +254,8 @@ function fromMatches(rule: PasteRule, from: CopyOrigin): boolean {
       );
     case 'browser':
     case 'clipboard':
-      return from.kind === rule.from.kind && from.origin === rule.from.origin;
+      // Never a field's value: the agent could have typed it there, on any page.
+      return from.kind === rule.from.kind && from.origin === rule.from.origin && from.editable !== true;
   }
 }
 

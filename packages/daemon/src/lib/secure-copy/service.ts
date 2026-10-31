@@ -21,7 +21,7 @@ import {
 } from '@ferretry/protocol';
 import type { InputSealedPort } from '../input-requests/ports.ts';
 import { SecureCopyError } from './errors.ts';
-import type { CopyPorts } from './ports.ts';
+import type { CopyPageGuard, CopyPorts } from './ports.ts';
 
 /**
  * SECURE COPY: values an agent may name and never read (docs/secure-copy.md).
@@ -67,19 +67,51 @@ export interface CopyCaptured {
 interface Read {
   readonly value: string;
   readonly from: CopyOrigin;
-  /** How a command ended, and its stderr AS IT WAS: masked only once the value is held. Every source is a command until pages arrive (SC3). */
-  readonly command: {
+  /** How a command ended, and its stderr AS IT WAS: masked only once the value is held. Absent for a page. */
+  readonly command?: {
     readonly outcome: CopyCommandReport['outcome'];
     readonly exitCode?: number;
     readonly stderr: string;
     readonly stdout: string;
   };
-  readonly pageReadBeforeCapture?: boolean;
+  /** The page and document a page copy was read from: every name the page is known by. */
+  readonly page?: { readonly names: readonly string[]; readonly navigationId: string };
+}
+
+/**
+ * What the CALLER knows about the capture, beside the agent's own request: for a page copy, the documents of that
+ * page the agent has already read, screenshotted or evaluated (`exposure.pageReadBeforeCapture`).
+ */
+export interface CopyCaptureContext {
+  /** Asked AFTER the read: a read of the page queued before the copy has recorded its document by then. */
+  readonly seen?: () => readonly string[];
+  /** Run inside the page's queue before the read: the agent tools' takeover and hold checks. */
+  readonly guard?: CopyPageGuard;
 }
 
 /** The spellings of a value a reader may meet it in: as read, and with its surrounding white space dropped. */
 const spellings = (value: string): readonly string[] =>
   [...new Set([value, value.trimEnd(), value.trim()])].filter(spelling => spelling !== '');
+
+/**
+ * Every spelling a reader may meet a value in, for MASKING (the transcript is searched for the value's own
+ * spellings only): as read and trimmed; with its white space collapsed to single spaces, as a page snapshot lays
+ * text out; each of its lines, collapsed the same way, when long enough to be a value rather than a word on a
+ * button ("Done", "Copy"), which masked would leave the agent unable to find it; and each of those as a JSON or
+ * YAML string escapes it.
+ */
+/** The shortest line of a multi-line value masked on its own: a recovery code or a key's line, not a button's word. */
+const MASKED_LINE_MIN_CHARS = 8;
+
+const maskSpellings = (value: string): readonly string[] => {
+  const collapse = (text: string): string => text.replace(/\s+/gu, ' ').trim();
+  const lines = value
+    .split(/\r\n|\r|\n/u)
+    .map(collapse)
+    .filter(line => [...line].length >= MASKED_LINE_MIN_CHARS);
+  const plain = [...new Set([...spellings(value), collapse(value), ...lines])];
+  return [...new Set([...plain, ...plain.map(each => JSON.stringify(each).slice(1, -1))])].filter(each => each !== '');
+};
 
 export class SecureCopyService implements InputSealedPort {
   private readonly copies = new Map<string, Map<CopyName, Entry>>();
@@ -90,7 +122,7 @@ export class SecureCopyService implements InputSealedPort {
   constructor(private readonly ports: CopyPorts) {}
 
   /** Reads a value from `source` and holds it as `sealed:<name>`; refuses with a sentence when it cannot. */
-  async capture(sessionId: string, request: CopyCapture): Promise<CopyCaptured> {
+  async capture(sessionId: string, request: CopyCapture, context: CopyCaptureContext = {}): Promise<CopyCaptured> {
     this.purge();
     const own = this.copies.get(sessionId);
     const running = this.capturing.get(sessionId) ?? new Set<CopyName>();
@@ -117,7 +149,7 @@ export class SecureCopyService implements InputSealedPort {
     running.add(request.name);
     this.capturing.set(sessionId, running);
     try {
-      return await this.hold(sessionId, request);
+      return await this.hold(sessionId, request, context);
     } finally {
       running.delete(request.name);
       if (running.size === 0) this.capturing.delete(sessionId);
@@ -125,15 +157,20 @@ export class SecureCopyService implements InputSealedPort {
   }
 
   /** Reads the value and holds it: the second half of a capture, run with its name taken. */
-  private async hold(sessionId: string, request: CopyCapture): Promise<CopyCaptured> {
-    const read = await this.read(sessionId, request.name, request.source);
+  private async hold(sessionId: string, request: CopyCapture, context: CopyCaptureContext): Promise<CopyCaptured> {
+    const read = await this.read(sessionId, request, context);
     const capturedAt = this.ports.clock.now();
     const expiresAt = capturedAt + (request.expiresInSeconds ?? COPY_DEFAULT_LIFETIME_SECONDS) * 1000;
     // Masked BEFORE anything else is awaited or returned, in every spelling a reader may meet it in: no read after
     // this point can carry the value, whether a program printed it with its newline or without.
-    for (const spelling of spellings(read.value))
-      this.ports.masking.holdUntil(sessionId, spelling, copyMask(request.name), expiresAt + AFTER_MASK_MS);
-    const command = await this.report(read.command, [read.command.stdout, read.value], request.name);
+    // A page copy was already masked, and its page held, inside the page's queue; this is the same mask again.
+    this.mask(sessionId, request.name, read.value, expiresAt + AFTER_MASK_MS);
+    const command =
+      read.command === undefined
+        ? undefined
+        : await this.report(read.command, [read.command.stdout, read.value], request.name);
+    const pageReadBeforeCapture =
+      read.page === undefined ? undefined : (context.seen?.() ?? []).includes(read.page.navigationId);
     const found: readonly ('found' | 'clean' | 'unknown')[] = await Promise.all(
       spellings(read.value).map(async spelling => await this.ports.exposure.transcriptHolds(sessionId, spelling)),
     ).catch(() => ['unknown']);
@@ -148,7 +185,7 @@ export class SecureCopyService implements InputSealedPort {
       expiresAt,
       exposure: {
         transcript,
-        ...(read.pageReadBeforeCapture === undefined ? {} : { pageReadBeforeCapture: read.pageReadBeforeCapture }),
+        ...(pageReadBeforeCapture === undefined ? {} : { pageReadBeforeCapture }),
       },
       state: 'live',
       uses: 0,
@@ -156,7 +193,7 @@ export class SecureCopyService implements InputSealedPort {
     const session = this.copies.get(sessionId) ?? new Map<CopyName, Entry>();
     session.set(request.name, entry);
     this.copies.set(sessionId, session);
-    return { copy: meta(entry), command };
+    return { copy: meta(entry), ...(command === undefined ? {} : { command }) };
   }
 
   /** Every copy of this session, live or recently ended, oldest first. */
@@ -181,6 +218,7 @@ export class SecureCopyService implements InputSealedPort {
     const ended = end(entry, 'discarded', now);
     this.copies.get(sessionId)?.set(name, ended);
     this.ports.masking.retime(sessionId, copyMask(name), now + AFTER_MASK_MS);
+    this.ports.pageHolds?.retime(sessionId, name, now + AFTER_MASK_MS);
     return meta(ended);
   }
 
@@ -205,6 +243,7 @@ export class SecureCopyService implements InputSealedPort {
   drop(sessionId: string): void {
     this.copies.delete(sessionId);
     this.captures.delete(sessionId);
+    this.ports.pageHolds?.drop(sessionId);
   }
 
   /** What the daemon recorded about a LIVE copy, for a paste's card: never the value. */
@@ -245,17 +284,80 @@ export class SecureCopyService implements InputSealedPort {
     );
   }
 
-  private async read(sessionId: string, name: CopyName, source: CopySource): Promise<Read> {
+  private async read(sessionId: string, request: CopyCapture, context: CopyCaptureContext): Promise<Read> {
+    const { source } = request;
     switch (source.kind) {
       case 'command':
-        return await this.runCommand(sessionId, name, source);
+        return await this.runCommand(sessionId, request.name, source);
       case 'browser':
+        return await this.readPage(sessionId, { ...request, source }, context);
       case 'clipboard':
         throw new SecureCopyError(
           'unavailable',
-          'Copying from a page or its clipboard arrives with the browser input bridge; for now copy what a command prints.',
+          "Copying from a page's clipboard is not here yet; copy the element that shows the value instead.",
         );
     }
+  }
+
+  /**
+   * One element of one of the session's pages: its text, a field's value or one attribute, with the page's and the
+   * frame's origin and the document as the browser reported them. The copy's origin is the FRAME's: where the value
+   * actually was. White space around the value is dropped, as a page lays text out with it.
+   */
+  private async readPage(
+    sessionId: string,
+    request: CopyCapture & { readonly source: Extract<CopySource, { readonly kind: 'browser' }> },
+    context: CopyCaptureContext,
+  ): Promise<Read> {
+    const { source } = request;
+    const pages = this.ports.pages;
+    if (pages === undefined)
+      throw new SecureCopyError('unavailable', 'Copying from a page is not available on this daemon.');
+    const target =
+      source.ref === undefined
+        ? { kind: 'selector' as const, selector: source.selector ?? '' }
+        : { kind: 'ref' as const, ref: source.ref };
+    const until =
+      this.ports.clock.now() + (request.expiresInSeconds ?? COPY_DEFAULT_LIFETIME_SECONDS) * 1000 + AFTER_MASK_MS;
+    const read = await pages.read(sessionId, source.key, target, source.read, source.attribute, {
+      ...(context.guard === undefined ? {} : { guard: context.guard }),
+      // Inside the page's queue, before it moves on: an act queued behind the copy already meets the mask and the
+      // hold. A value the copy will refuse is not masked.
+      seal: found => {
+        if (pageValueProblem(found.value) !== undefined) return;
+        this.mask(sessionId, request.name, found.value, until);
+        this.ports.pageHolds?.hold(sessionId, request.name, [source.key, found.pageId], found.navigationId, until);
+      },
+    });
+    if (!read.ok)
+      throw new SecureCopyError(
+        'bad_request',
+        read.reason === 'missing'
+          ? 'That element is not on the page (read the page again for a fresh ref); nothing was copied.'
+          : read.reason === 'changed'
+            ? 'The page moved to another document while it was read; nothing was copied.'
+            : 'That element holds nothing to copy; nothing was copied.',
+      );
+    const problem = pageValueProblem(read.value);
+    if (problem !== undefined) throw new SecureCopyError('bad_request', problem);
+    return {
+      value: read.value.trim(),
+      from: {
+        kind: 'browser',
+        origin: read.frameOrigin,
+        surface: source.key,
+        // A field's value, or the text of an element anyone may edit, is whatever was typed into it, by the agent
+        // too: no rule ever matches it.
+        ...(source.read === 'value' || read.editable === true ? { editable: true as const } : {}),
+      },
+      page: { names: [source.key, read.pageId], navigationId: read.navigationId },
+    };
+  }
+
+  /** Masks a value in every spelling a reader may meet it in, as the copy's `[sealed:<name>]`, until `until`. */
+  private mask(sessionId: string, name: CopyName, value: string, until: number): void {
+    for (const spelling of maskSpellings(value))
+      this.ports.masking.holdUntil(sessionId, spelling, copyMask(name), until);
   }
 
   private async runCommand(
@@ -424,4 +526,13 @@ function oneLine(text: string, maximum: number): string {
   const line = text.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, '?');
   // A cut is marked, so a long path never passes for one whose file name was simply short.
   return line.length <= maximum ? line : `${line.slice(0, maximum - 1)}…`;
+}
+
+/** Why a page value cannot be a copy (too long, or too short to mask safely), or nothing when it can. */
+function pageValueProblem(value: string): string | undefined {
+  if (encoder.encode(value).length > COPY_VALUE_MAX_BYTES)
+    return `The element holds more than ${String(COPY_VALUE_MAX_BYTES)} bytes; nothing was copied.`;
+  if ([...value.trim()].length < COPY_VALUE_MIN_CHARS)
+    return `The element holds fewer than ${String(COPY_VALUE_MIN_CHARS)} characters: too short to seal and mask safely; nothing was copied.`;
+  return undefined;
 }

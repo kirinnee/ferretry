@@ -24,6 +24,7 @@ import {
 } from '@ferretry/protocol';
 import { agentSpokenName } from '../../names/session-names.ts';
 import type { BrowserAutomation, BrowserPageActed } from '../transport/automation-contracts.ts';
+import type { BrowserCopyPort } from '../transport/copy-contracts.ts';
 import type { BrowserInputFieldsPort } from '../transport/input-contracts.ts';
 import type { BrowserUploadMode } from '../transport/page-acts.ts';
 import type { PageScript } from '../transport/page-script.ts';
@@ -360,6 +361,26 @@ export class BrowserSessionService implements BrowserSubsystem {
     const run = this.requireRunning();
     const page = this.requirePage(run, sessionId, key);
     return await this.exclusive(page.id, async () => {
+      this.touch(run);
+      return await work(run.driver, page.id);
+    });
+  }
+
+  /** Secure copy's read of one page, in that page's own queue (copy-contracts.ts). */
+  async copyOnPage<T>(
+    sessionId: string,
+    key: string,
+    {
+      work,
+      guard,
+    }: { readonly work: (copy: BrowserCopyPort, pageId: string) => Promise<T>; readonly guard?: BrowserActGuard },
+  ): Promise<T> {
+    await this.requireSession(sessionId);
+    const run = this.requireRunning();
+    const page = this.requirePage(run, sessionId, key);
+    return await this.exclusive(page.id, async () => {
+      // The same in-queue check an agent's act gets: a takeover or a hold that landed while the copy waited wins.
+      await guard?.(this.guardPage(run, page.id));
       this.touch(run);
       return await work(run.driver, page.id);
     });

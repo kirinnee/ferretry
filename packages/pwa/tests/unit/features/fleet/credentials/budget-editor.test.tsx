@@ -1,12 +1,17 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import type {
-  ConfigFileView,
-  FleetBudgetPeriodView,
-  FleetCredentialBudget,
-  FleetCredentialView,
+import {
+  DAEMON_FEATURES,
+  type ConfigFileView,
+  type FleetBudgetPeriodView,
+  type FleetCredentialBudget,
+  type FleetCredentialView,
 } from '@ferretry/protocol';
+import { BUDGET_UPDATE_WORDS } from '../../../../../src/features/fleet/credentials/budget-editor.tsx';
 import { CredentialsTab } from '../../../../../src/features/fleet/credentials/credentials-tab.tsx';
 import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
+import type { FyApiClient } from '@ferretry/protocol/client';
+import { DaemonClientProvider } from '../../../../../src/lib/store.tsx';
+import { healthOf } from '../../../../support/health.ts';
 import { interact, mount, must } from '../../../../support/dom.ts';
 import { httpError } from '../../config-files/config-files-support.ts';
 import { type Call, CREDENTIALS, credential, NOW, READS, STUDIO, scripted, withStatus } from '../account-support.ts';
@@ -94,6 +99,10 @@ interface Options {
   readonly hash?: string;
   readonly credentials?: readonly FleetCredentialView[];
   readonly routes?: Record<string, unknown>;
+  /** What the machine's `/v1/health` lists; budgets by default, `[]` for a machine older than them. */
+  readonly features?: readonly string[];
+  /** The health read fails, as a machine that is slow or unreachable: the app knows nothing yet. */
+  readonly unreadHealth?: boolean;
 }
 
 const open = async (options: Options = {}) => {
@@ -110,17 +119,25 @@ const open = async (options: Options = {}) => {
     },
     calls,
   );
+  const health = healthOf('4.171.0', [...(options.features ?? [DAEMON_FEATURES.loginBudget])]);
   const view = await mount(
-    <CredentialsTab
-      connection={STUDIO}
-      machineName="studio-mac"
-      machine={null}
-      online
-      checking={false}
-      onRetry={() => undefined}
-      createClient={async () => client}
-      now={() => NOW}
-    />,
+    <DaemonClientProvider
+      client={async () => {
+        if (options.unreadHealth === true) throw new Error('the machine did not answer');
+        return { request: async () => health } as unknown as FyApiClient;
+      }}
+    >
+      <CredentialsTab
+        connection={STUDIO}
+        machineName="studio-mac"
+        machine={null}
+        online
+        checking={false}
+        onRetry={() => undefined}
+        createClient={async () => client}
+        now={() => NOW}
+      />
+    </DaemonClientProvider>,
   );
   for (let turn = 0; turn < 12; turn += 1) await interact(async () => await Promise.resolve());
   return { view, calls };
@@ -600,6 +617,60 @@ describe('BudgetEditor · saving', () => {
     await type(input(c, 'dailyTrigger'), '30');
     await interact(() => button(c, 'Save budget').click());
     for (let turn = 0; turn < 12; turn += 1) await settle();
+    // Which file and what — not "the file does not check (1 problem)", which told the owner nothing.
+    expect(c.querySelector('[data-budget-save="invalid"]')?.textContent).toBe(
+      'logins/claude-personal.yaml:3: unknown key "spend"',
+    );
+  });
+
+  it('falls back to the daemon’s sentence when a refusal locates no error', async () => {
+    const { view } = await open({
+      hash: PAGE,
+      routes: {
+        [GET_MACHINE_FILE]: { ...MACHINE_FILE, text: 'name: studio-mac\ntimeZone: Asia/Singapore\n' },
+        [PUT]: httpError('the file has problems', 422, 'config_invalid', {
+          error: 'the file has problems',
+          code: 'config_invalid',
+          issues: [{ path: 'machine.yaml', severity: 'warning', message: 'odd but fine', fix: 'Nothing.' }],
+        }),
+      },
+    });
+    const c = view.container;
+    await type(input(c, 'dailyTrigger'), '30');
+    await interact(() => button(c, 'Save budget').click());
+    for (let turn = 0; turn < 12; turn += 1) await settle();
     expect(c.querySelector('[data-budget-save="invalid"]')?.textContent).toBe('the file has problems');
+  });
+});
+
+describe('BudgetEditor · a machine older than budgets (owner report: "cant save")', () => {
+  it('offers no editor, and says the machine needs an update, where the machine does not keep budgets', async () => {
+    // A 4.163 daemon refuses `budget` and `timeZone` as unknown keys: an editor there could only fail to save.
+    const { view, calls } = await open({
+      hash: PAGE,
+      credentials: [credential({ ...PERSONAL, budget: undefined }), CODEX, WORK],
+      features: [],
+    });
+    const c = view.container;
+    expect(c.querySelector('[data-budget-editor]')).toBeNull();
+    expect(c.querySelector('[data-budget-update]')?.textContent).toContain(BUDGET_UPDATE_WORDS);
+    expect(calls.some(call => call.method === 'PUT')).toBe(false);
+  });
+
+  it('still edits a budget the login already has: the machine plainly keeps them', async () => {
+    const { view } = await open({ hash: PAGE, features: [] });
+    expect(view.container.querySelector('[data-budget-editor="claude-personal"]')).not.toBeNull();
+    expect(view.container.querySelector('[data-budget-update]')).toBeNull();
+  });
+
+  it('shows nothing yet while the machine has not said what it can do', async () => {
+    const { view } = await open({
+      hash: PAGE,
+      credentials: [credential({ ...PERSONAL, budget: undefined }), CODEX, WORK],
+      features: undefined,
+      unreadHealth: true,
+    });
+    expect(view.container.querySelector('[data-budget-editor]')).toBeNull();
+    expect(view.container.querySelector('[data-budget-update]')).toBeNull();
   });
 });

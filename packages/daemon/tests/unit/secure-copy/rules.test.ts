@@ -135,6 +135,16 @@ describe('PasteRuleService: who may change the rules', () => {
 });
 
 describe('PasteRuleService: matching a paste', () => {
+  it("should never match a page field's value, which the agent could have typed there", async () => {
+    const { service } = rules();
+    await service.load();
+    const page = { kind: 'browser', origin: 'https://github.com' } as const;
+    await service.create(OWNER, { from: page, to: VERCEL_TERMINAL });
+
+    should(service.reserve('s1', { ...page, editable: true }, AT_VERCEL)).be.undefined();
+    should(service.reserve('s1', page, AT_VERCEL)).not.be.undefined();
+  });
+
   it('should match a program only where the daemon found it, in a file no ferret could have swapped', async () => {
     const { service } = rules();
     await service.load();

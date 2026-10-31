@@ -406,12 +406,12 @@ describe('configLoosening: warden', () => {
     [{ intervalMinutes: 1 }, ['the minutes between Warden sweeps goes down from 2 to 1']],
     [{ minSpawnGapMinutes: 0 }, ['the minutes between two Warden investigations goes down from 15 to 0']],
     [
-      { jevActs: { ...DEFAULT_WARDEN_CONFIG.jevActs, stop: 0.9 } },
-      ['how sure Jev must be to stop a ferret on its own goes down from 0.98 to 0.9'],
+      { jevActs: { ...DEFAULT_WARDEN_CONFIG.jevActs, stop: 0.5 } },
+      ['how sure Jev must be to stop a ferret on its own goes down from 0.8 to 0.5'],
     ],
     [
-      { jevActs: { ...DEFAULT_WARDEN_CONFIG.jevActs, nudge: 0.85 } },
-      ['how sure Jev must be to nudge a ferret on its own goes down from 0.9 to 0.85'],
+      { jevActs: { ...DEFAULT_WARDEN_CONFIG.jevActs, nudge: 0.3 } },
+      ['how sure Jev must be to nudge a ferret on its own goes down from 0.7 to 0.3'],
     ],
   ] as const)('should hold %j, saying %j', (changes, expected) => {
     // Act

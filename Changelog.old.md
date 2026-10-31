@@ -1,3 +1,9 @@
+## [4.173.0](https://github.com/kirinnee/ferretry/compare/v4.172.0...v4.173.0) (2026-10-31)
+
+### Features
+
+* **secure-copy:** paste a secure copy into a page field, and name the file a copy came from (SC3a) ([#1169](https://github.com/kirinnee/ferretry/issues/1169)) ([4400a6c](https://github.com/kirinnee/ferretry/commit/4400a6c85bec65dec13f1846366a33dbb4a136ee)), closes [#1147](https://github.com/kirinnee/ferretry/issues/1147) [#F230](https://github.com/kirinnee/ferretry/issues/F230)
+
 ## [4.172.0](https://github.com/kirinnee/ferretry/compare/v4.171.0...v4.172.0) (2026-10-31)
 
 ### Features

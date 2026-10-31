@@ -71,6 +71,12 @@ export const DAEMON_FEATURES = {
    * machine reports it and otherwise walks the conversation forward as before.
    */
   messagesTail: 'messages.tail.1',
+  /**
+   * Login spend budgets (docs/budgets.md): `budget` in a login's file and `timeZone` in machine.yaml, metered and
+   * enforced. A daemon without this name refuses both keys as unknown, so the app offers the budget editor only
+   * where the machine reports it and otherwise says the machine needs an update.
+   */
+  loginBudget: 'login.budget.1',
 } as const;
 
 export type DaemonFeature = (typeof DAEMON_FEATURES)[keyof typeof DAEMON_FEATURES];

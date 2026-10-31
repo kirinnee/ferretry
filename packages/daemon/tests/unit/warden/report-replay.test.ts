@@ -314,9 +314,10 @@ const jevAgreeing = (shape: ReportShape, sure: number): TriageDecision => {
   };
 };
 
+/** The bars the 39 reports were replayed against: pinned, so a change of defaults does not rewrite the history. */
 const policyFor = (shape: ReportShape) => ({
-  leaveThreshold: defaultWardenConfig.guard.threshold,
-  acts: defaultWardenConfig.jevActs,
+  leaveThreshold: 0.85,
+  acts: { nudge: 0.9, resume: 0.93, restart: 0.95, stop: 0.98 },
   mayActAlone: defaultWardenConfig.mayActAlone,
   offered: jevActsFor({ kind: shape.kind }),
 });
