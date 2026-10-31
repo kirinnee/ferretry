@@ -31,6 +31,8 @@ class Tabs {
   castFailure: Error | undefined;
   /** A dialog the worker reports on the page of every result, as a worker with a dialog open does. */
   dialog: { type: 'alert' | 'confirm' | 'prompt' | 'beforeunload'; message: string } | undefined;
+  /** The browser cannot say which document a page shows. */
+  documentFails = false;
   /** While set, a click does not return: the page's queue is stuck behind it, as it is behind a dialog. */
   clickGate: Promise<void> | undefined;
   private minted = 0;
@@ -97,6 +99,7 @@ class Tabs {
     location: async pageId => this.state(pageId),
     inputDocument: async pageId => {
       this.calls.push(`inputDocument:${pageId}`);
+      if (this.documentFails) throw new Error('the page is gone');
       return { navigationId: 'loader-1' };
     },
     inputObserve: async pageId => {
@@ -885,6 +888,22 @@ describe('the machine agent browser — a page’s lifecycle', () => {
     should(answered).equal(app.id);
     should(tabs.calls).containEql(`inputDocument:${app.id}`);
     should(refused.code).equal('not_found');
+  });
+
+  it('should let a guard read, from inside the page queue, which document the page shows, or nothing when it cannot', async () => {
+    // Arrange
+    const { tabs, service } = harness();
+    await service.openPage('s1', 'app');
+    const seen: (string | undefined)[] = [];
+    const guard = async (page: { document(): Promise<string | undefined> }) => void seen.push(await page.document());
+
+    // Act
+    await service.actOnPage('s1', 'app', { action: 'back' }, guard);
+    tabs.documentFails = true;
+    await service.actOnPage('s1', 'app', { action: 'back' }, guard);
+
+    // Assert
+    should(seen).eql(['loader-1', undefined]);
   });
 
   it('should refuse a lifecycle request on a page of another session', async () => {

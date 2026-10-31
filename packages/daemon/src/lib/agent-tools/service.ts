@@ -31,6 +31,7 @@ import {
 import { AGENT_FILE_LIMITS, AgentFileError, type AgentFiles, extensionOf, sizeWords } from '../agent-files/index.ts';
 import type { AuditSink } from '../audit/types.ts';
 import {
+  type BrowserActGuard,
   type BrowserFileAction,
   type BrowserLifecycleOutcome,
   type BrowserPageAction,
@@ -50,8 +51,8 @@ import {
   clipOutput,
   clipReading,
   controlRefusal,
-  pageScriptsRefusal,
   isShellForeground,
+  pageScriptsRefusal,
   surfaceReference,
   terminalInput,
 } from './policy.ts';
@@ -264,10 +265,10 @@ export class AgentToolService {
       result = await this.dispatch(caller, call, facts);
       await this.record(caller, call, facts, 'succeeded');
     } catch (error) {
-      const refusal = translate(error);
-      const failed = refusal === undefined || refusal.code === 'upstream_failed';
+      const refusal = await this.heldOrMasked(caller, call.tool, facts.surface, translate(error) ?? error);
+      const failed = !(refusal instanceof AgentToolError) || refusal.code === 'upstream_failed';
       await this.record(caller, call, facts, failed ? 'failed' : 'refused');
-      throw refusal ?? error;
+      throw refusal;
     }
     const pane = facts.pane ?? facts.surface;
     if (pane === undefined || (result.output === undefined && result.input?.observed === undefined)) return result;
@@ -580,7 +581,7 @@ export class AgentToolService {
     reference: string,
     facts: CallFacts,
   ): Promise<AgentToolResult> {
-    const guard = this.browserGuard(caller, surface);
+    const guard = this.browserGuard(caller, surface, call.tool);
     const send = async (request: BrowserPageLifecycleRequest): Promise<BrowserLifecycleOutcome> =>
       await this.ports.browser.lifecycleOnPage(caller.sessionId, surface.id, request, guard);
     switch (call.tool) {
@@ -690,7 +691,7 @@ export class AgentToolService {
       caller.sessionId,
       surface.id,
       pageActionOf(call),
-      this.browserGuard(caller, surface),
+      this.browserGuard(caller, surface, call.tool),
     );
     const page: {
       readonly url?: string;
@@ -757,7 +758,7 @@ export class AgentToolService {
         ...(target === undefined ? {} : { target }),
         ...(call.timeoutMs === undefined ? {} : { timeoutMs: call.timeoutMs }),
       },
-      this.browserGuard(caller, surface),
+      this.browserGuard(caller, surface, call.tool),
     );
     facts.detail = { resultLength: answer.text.length };
     const dialog = pendingDialogOf(answer.result);
@@ -778,7 +779,7 @@ export class AgentToolService {
     facts: CallFacts,
   ): Promise<AgentToolResult> {
     const { sessionId } = caller;
-    const guard = this.browserGuard(caller, surface);
+    const guard = this.browserGuard(caller, surface, call.tool);
     if (call.tool === 'browser.upload') {
       const prepared = await this.ports.files.prepareUpload(sessionId, call.files);
       facts.detail = uploadFacts(prepared.files);
@@ -852,8 +853,22 @@ export class AgentToolService {
    * The check the browser runs INSIDE the page's own queue, right before an agent's act: a takeover
    * that landed while the act was waiting its turn still refuses it.
    */
-  private browserGuard(caller: AgentToolCaller, surface: ResolvedSurface): (() => Promise<void>) | undefined {
-    return caller.kind === 'agent' ? async () => await this.assertFree(caller.sessionId, surface) : undefined;
+  /**
+   * What the page's own queue checks immediately before it runs an act: an agent's takeover, and the input bridge's
+   * gate (a value pending on the page, a hold on it) for EVERY caller. The check before the queue fails fast; this
+   * one is the boundary, because a request can be raised or a value typed while the act waits. It reads the page's
+   * document from the browser it runs on, never by queueing behind itself.
+   */
+  private browserGuard(caller: AgentToolCaller, surface: ResolvedSurface, tool?: string): BrowserActGuard | undefined {
+    const gated =
+      this.ports.input !== undefined &&
+      tool !== undefined &&
+      (PAGE_TYPING.has(tool) || PAGE_TEXT.has(tool) || PAGE_PICTURES.has(tool));
+    if (caller.kind !== 'agent' && !gated) return undefined;
+    return async page => {
+      if (caller.kind === 'agent') await this.assertFree(caller.sessionId, surface);
+      if (gated) await this.guardPage(caller, tool, surface, async () => await page.document());
+    };
   }
 
   /**
@@ -947,7 +962,12 @@ export class AgentToolService {
    * that types into it while a request is pending on it (the value is the owner's to type), and a read of it
    * during its hold ({@link assertPageReadable}).
    */
-  private async guardPage(caller: AgentToolCaller, tool: string, surface: ResolvedSurface): Promise<void> {
+  private async guardPage(
+    caller: AgentToolCaller,
+    tool: string,
+    surface: ResolvedSurface,
+    document?: () => Promise<string | undefined>,
+  ): Promise<void> {
     const input = this.ports.input;
     if (input === undefined) return;
     const reference = surfaceReference('browser', surface.name ?? surface.id);
@@ -962,7 +982,7 @@ export class AgentToolService {
           `an input request is pending on ${reference}; wait for !${pending} (input.wait) and do not type there yourself`,
         );
     }
-    await this.assertPageReadable(caller, tool, surface);
+    await this.assertPageReadable(caller, tool, surface, document);
   }
 
   /**
@@ -971,13 +991,20 @@ export class AgentToolService {
    * waits (no mask can be drawn on pixels). Text may be read again as soon as the page has left the document the
    * value went into, because every read is masked for the redaction window anyway.
    */
-  private async assertPageReadable(caller: AgentToolCaller, tool: string, surface: ResolvedSurface): Promise<void> {
+  private async assertPageReadable(
+    caller: AgentToolCaller,
+    tool: string,
+    surface: ResolvedSurface,
+    document?: () => Promise<string | undefined>,
+  ): Promise<void> {
     if (!PAGE_PICTURES.has(tool) && !PAGE_TEXT.has(tool)) return;
     const input = this.ports.input;
     const held = input?.pageHeld(caller.sessionId, [surface.name, surface.id]);
     if (input === undefined || held === undefined) return;
     if (PAGE_TEXT.has(tool) && held.documents.length > 0) {
-      const now = await input.pageDocument(caller.sessionId, surface.name ?? surface.id);
+      const now = await (
+        document ?? (async () => await input.pageDocument(caller.sessionId, surface.name ?? surface.id))
+      )();
       if (now !== undefined && !held.documents.includes(now)) return;
     }
     const reference = surfaceReference('browser', surface.name ?? surface.id);
@@ -988,6 +1015,35 @@ export class AgentToolService {
         ? `${reference} is quarantined until ${when}: the owner's secret was just typed there, so you cannot read or picture it for a short while. You can still click and navigate; text reads come back once the page has moved on, pictures after that time.`
         : `${reference} is quarantined until ${when}: a secret was just typed there. Look at it in the browser view, or try again after that time.`,
     );
+  }
+
+  /**
+   * A failed call's error as it may leave the daemon. A read or picture of a page under a hold answers with the hold,
+   * success or not: an error can carry the page's words as well as a result can. Every other message passes the
+   * same redactor as a read (a page's thrown error can echo a value just typed), and fails CLOSED to a fixed
+   * sentence when the redactor cannot run.
+   */
+  private async heldOrMasked(
+    caller: AgentToolCaller,
+    tool: string,
+    surface: ResolvedSurface | undefined,
+    error: unknown,
+  ): Promise<unknown> {
+    if (surface?.surface === 'browser') {
+      try {
+        await this.assertPageReadable(caller, tool, surface);
+      } catch (held) {
+        return held;
+      }
+    }
+    const message = error instanceof Error ? error.message : undefined;
+    if (message === undefined || message === '') return error;
+    const masked = await this.ports.redactor.batch(scrub => scrub.text(message)).catch(() => undefined);
+    if (masked === message) return error;
+    const text =
+      masked ??
+      'The call failed, and Ferretry could not open its secret store to check its message, so it is withheld.';
+    return error instanceof AgentToolError ? new AgentToolError(error.code, text) : new Error(text);
   }
 
   /** Runs `work` as one turn in the session when input requests are wired; just runs it where they are not. */

@@ -347,9 +347,22 @@ A `secret` or `private` value typed into a page holds that page for the same win
   window like every other read: a next page that prints the password back shows a mask.
 - While a request is pending on a page, the agent's `browser_type`, `browser_fill_form`, `browser_press` and `browser_eval`
   on it are refused: those values are the owner's to type.
+- **The decision is made inside the page's own queue**, immediately before the act runs, for every caller:
+  a request raised or a value typed while an act waited in the queue stops it there. The check before the queue
+  only fails fast, and a check after the act still withholds a result a hold began under.
+- **Errors are reads too.** A failed page call under a hold answers with the hold; every other error message
+  passes the same redactor as a read (a page that throws the password back shows a mask), and fails closed to a
+  fixed sentence when the redactor cannot run.
 - Page holds share the terminal's registry under their own names (a hold on page `app` never seals terminal
   `app`) and are not journalled: a page does not outlive the daemon that drove it, and a page's card ends as
   interrupted on restart. GAP: the owner cannot end a page's hold early from the app; it runs its two minutes.
+
+### Password saving is off in the agent profile
+
+On every lease of the agent profile, before Chrome starts on it, the daemon forces Chrome's own preferences
+`credentials_enable_service`, `credentials_enable_autosignin` and `profile.password_manager_enabled` to false
+in `Default/Preferences`, keeping every other preference (a profile made before this rule gets it on its next
+lease). A profile whose preferences cannot be written is not handed out, so the browser does not start.
 
 ### Passkeys are off in the agent browser
 

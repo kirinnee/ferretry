@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import { type AgendaId, type InputTarget, type InputTargetFacts, padInputValue } from '@ferretry/protocol';
 import should from 'should';
+import { BrowserTransportError } from '../../../src/lib/browser/transport/worker-protocol.ts';
 import type { AgentToolError } from '../../../src/lib/index.ts';
 import { EphemeralAwareRedactor } from '../../../src/lib/input-requests/ephemeral-redactor.ts';
 import { EphemeralValues } from '../../../src/lib/input-requests/ephemeral-values.ts';
@@ -211,6 +212,7 @@ describe('a page the owner’s password was just typed into', () => {
   it('should hand text back MASKED once the page has moved on, even a page that echoes the password', async () => {
     const { tools, browser } = await typedIn();
     browser.document = 'loader-2';
+    tools.browser.document = 'loader-2';
     tools.browser.readText = `Signed in. Your password is ${PASSWORD} — keep it safe.`;
 
     const read = await tools.service.call(agent, { tool: 'browser.read', name: 'app' });
@@ -222,6 +224,7 @@ describe('a page the owner’s password was just typed into', () => {
   it('should keep pictures refused until the window ends, even after the page moved on', async () => {
     const { tools, browser, clock } = await typedIn();
     browser.document = 'loader-2';
+    tools.browser.document = 'loader-2';
 
     const early = await refusal(tools.service.call(agent, { tool: 'browser.screenshot', name: 'app' }));
     clock.ms += 121_000;
@@ -245,5 +248,102 @@ describe('a page the owner’s password was just typed into', () => {
     should(service.quarantines(HOST, SESSION)).eql([]);
     should(service.pageHeld(SESSION, ['app'])?.documents).eql(['loader-1']);
     should(service.quarantinedUntil(SESSION, ['app'])).be.undefined();
+  });
+});
+
+describe('review regressions: what reaches a page while the owner’s value is on its way or just typed', () => {
+  const sendValue = async (built: Awaited<ReturnType<typeof delivered>>) => {
+    await built.service.deliver(
+      SESSION,
+      built.request.id,
+      {
+        deliveryId: crypto.randomUUID(),
+        observedDigest: built.request.observedDigest ?? '',
+        submit: false,
+        fields: [
+          { field: 'email', padded: padInputValue('kirin@example.test') },
+          { field: 'password', padded: padInputValue(PASSWORD) },
+        ],
+      },
+      HOST,
+    );
+  };
+  const raise = async (built: ReturnType<typeof world>) => {
+    await built.tools.service.call(agent, {
+      tool: 'browser.request_input',
+      name: 'app',
+      prompt: 'log in to the console',
+      fields: [
+        { id: 'email', label: 'Email', sensitivity: 'plain', selector: '#email' },
+        { id: 'password', sensitivity: 'secret', ref: 'e12' },
+      ],
+    });
+    const [request] = await built.service.list(HOST);
+    if (request === undefined) throw new Error('no request');
+    return { ...built, request };
+  };
+
+  it('should refuse, inside the page’s queue, a script that waited there while the value was asked for and typed', async () => {
+    const built = world();
+    await built.tools.service.call(agent, { tool: 'browser.open', name: 'app' });
+    // The script passed the check before the queue; while it waited, a request was raised and answered.
+    built.tools.browser.beforeGuard.push(async () => await sendValue(await raise(built)));
+
+    const error = await refusal(
+      built.tools.service.call(agent, { tool: 'browser.eval', name: 'app', function: '() => 1' }),
+    );
+
+    should(error.message).containEql('%browser:app is quarantined until');
+    should(built.tools.browser.scripts).have.length(0);
+  });
+
+  it('should refuse, inside the page’s queue, typing that waited there while a request was raised', async () => {
+    const built = world();
+    await built.tools.service.call(agent, { tool: 'browser.open', name: 'app' });
+    built.tools.browser.beforeGuard.push(async () => {
+      await raise(built);
+    });
+
+    const error = await refusal(
+      built.tools.service.call(agent, { tool: 'browser.type', name: 'app', ref: 'e12', text: 'x' }),
+    );
+
+    should(error.message).containEql('an input request is pending on %browser:app');
+    should(built.tools.browser.acts.filter(act => act.endsWith(':type'))).eql([]);
+  });
+
+  it('should mask a page’s thrown error once the page has moved on, so a page that throws the password shows a mask', async () => {
+    const built = await delivered();
+    await sendValue(built);
+    built.browser.document = 'loader-2';
+    built.tools.browser.document = 'loader-2';
+    built.tools.browser.scriptOnPage = async () => {
+      throw new BrowserTransportError(
+        'upstream_failed',
+        `browser action failed: the script threw: Error: ${PASSWORD}`,
+        502,
+      );
+    };
+
+    const error = await refusal(
+      built.tools.service.call(agent, { tool: 'browser.eval', name: 'app', function: '() => { throw 1; }' }),
+    );
+
+    should(error.message).not.containEql(PASSWORD);
+    should(error.message).containEql('[redacted');
+  });
+
+  it('should answer a read that failed while the value was being typed with the hold, not with what the page said', async () => {
+    const built = await delivered();
+    built.tools.browser.lifecycleOnPage = async () => {
+      // The value lands while the log is being read, and the read then fails with the page's own words.
+      await sendValue(built);
+      throw new BrowserTransportError('upstream_failed', `browser action failed: console said ${PASSWORD}`, 502);
+    };
+
+    const error = await refusal(built.tools.service.call(agent, { tool: 'browser.console', name: 'app' }));
+
+    should(error.message).containEql('%browser:app is quarantined until');
+    should(error.message).not.containEql(PASSWORD);
   });
 });
