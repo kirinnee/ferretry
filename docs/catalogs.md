@@ -490,6 +490,17 @@ SHA-256 of a code is stored.
   constant-time find against every share and a dummy, live/expired/ended, room (128 members, 512 keys, 200 per
   member), the share's hourly count (60), burn or count a use, reserve a key slot. Room and hourly refusals
   leave the code live. `commit` and `release` finish a reservation; a failed persist leaves the code spent.
+- **A reservation can be voided.** A reservation lives 30 seconds, then lapses and frees its slot. A revoke,
+  a catalog taken from a member or deleted, and an ended share void the reservations they touch in the same
+  queue, and a `commit` refuses a reservation that is no longer held. A commit also files only the catalogs
+  that the share still gives and that still exist, and a join for an existing member needs that member to be
+  there, so nothing the owner removed comes back through a join already in flight. Whoever admits MUST commit
+  or `release` in a try/finally.
+- **A burn is on disk before the answer.** Every admission that changed a share (a burn, a counted use, a Q5
+  refusal) returns `persisted`, a promise for the write; the caller awaits it before replying, and
+  `flushed()` waits for every queued write. A failed write still leaves the code burned in memory.
+- **The share list is bounded.** A share that has been over for 30 days is forgotten on the next write or
+  sweep, the stored list holds at most 500, and a mint past that is refused with a sentence.
 - **Redeem rules (owner decision Q5).** A single-use code burns before it is compared with the redeeming
   browser's member; another member, or a code made for a new member, is refused and the owner is told
   (`catalog.share.cross-member`). A multi-use code counts a use only when the redeem adds a catalog, and a
@@ -506,7 +517,8 @@ SHA-256 of a code is stored.
   Deleting a catalog also removes it from every member and share.
 - **CLI.** `fy catalog share <catalog...> (--member <name> | --to <person>) --expires 15m|1h|3h|8h|1d
 [--multi [--cap N]]` prints the link once with a locally drawn QR; `fy catalog shares`, `fy catalog unshare`,
-  `fy member ls|rename|revoke|forget-key|take`. `--json` prints one payload; the code is in the mint's only.
+  `fy member ls|rename|revoke|forget-key|take`. `--json` prints one payload; the code is in the mint's only. `--to` warns what the link opens BEFORE it
+  makes one and asks y/N; `--yes` skips the question and is required off a terminal.
 
 ## Declared gaps
 

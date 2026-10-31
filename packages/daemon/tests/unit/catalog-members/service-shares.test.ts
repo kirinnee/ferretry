@@ -346,6 +346,7 @@ describe('CatalogMemberService.endShare', () => {
     // Arrange
     const r = await rig();
     const minted = await r.service.mint(singleFor('Alice'));
+    await r.service.flushed();
     r.log.length = 0;
 
     // Act

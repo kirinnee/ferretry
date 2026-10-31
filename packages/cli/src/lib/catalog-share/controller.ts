@@ -27,7 +27,11 @@ export interface ShareCommandOptions {
   readonly json?: boolean;
 }
 
-export interface ShareMintOptions extends ShareCommandOptions {
+export interface ConfirmedShareOptions extends ShareCommandOptions {
+  readonly yes?: boolean;
+}
+
+export interface ShareMintOptions extends ConfirmedShareOptions {
   /** A new person's name. */
   readonly member?: string;
   /** A person who is already a member: their id or name. */
@@ -36,10 +40,6 @@ export interface ShareMintOptions extends ShareCommandOptions {
   readonly multi?: boolean;
   readonly cap?: string;
   readonly large?: boolean;
-}
-
-export interface ConfirmedShareOptions extends ShareCommandOptions {
-  readonly yes?: boolean;
 }
 
 export interface ShareDeps {
@@ -100,6 +100,9 @@ export class ShareController {
       expiresIn,
       uses: options.multi === true ? { kind: 'multi', cap: cap(options) } : { kind: 'single' },
     };
+    // The warning comes BEFORE the link exists: once minted, the link is live and cannot be taken back unseen.
+    if (member.warning !== undefined)
+      await this.#confirm(`${member.warning} Make the link for ${member.label}?`, options);
     const mint = await this.deps.sharing.mint(request);
     if (options.json === true) {
       this.deps.out.success(JSON.stringify(mint, null, 2));
@@ -186,11 +189,19 @@ export class ShareController {
 
   async #recipient(
     options: ShareMintOptions,
-  ): Promise<{ target: CatalogShareMintRequest['member']; warning: string | undefined }> {
+  ): Promise<{ target: CatalogShareMintRequest['member']; warning: string | undefined; label: string }> {
     if (options.member !== undefined)
-      return { target: { kind: 'new', label: options.member.trim() }, warning: undefined };
+      return {
+        target: { kind: 'new', label: options.member.trim() },
+        warning: undefined,
+        label: options.member.trim(),
+      };
     const found = await this.#member(options.to ?? '');
-    return { target: { kind: 'existing', memberId: found.memberId }, warning: existingMemberWarning(found.label) };
+    return {
+      target: { kind: 'existing', memberId: found.memberId },
+      warning: existingMemberWarning(found.label),
+      label: found.label,
+    };
   }
 
   async #confirm(question: string, options: ConfirmedShareOptions): Promise<void> {

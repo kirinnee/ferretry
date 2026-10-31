@@ -38,6 +38,7 @@ describe('CatalogMemberService.sweep', () => {
     const r = await rig({ shares: sharesDoc(storedShare(1)) });
     const reservation = joinOf(r.service.admitJoin(codeOf(1), T0));
     const joined = await r.service.commit(reservation, newKey(1));
+    await r.service.flushed();
     r.log.length = 0;
 
     // Act

@@ -120,6 +120,7 @@ describe('CatalogMemberService.commit', () => {
     // Arrange
     const r = await rig({ shares: sharesDoc(storedShare(1)) });
     const reservation = joinOf(r.service.admitJoin(codeOf(1), T0));
+    await r.service.flushed();
     r.log.length = 0;
 
     // Act
@@ -154,14 +155,14 @@ describe('CatalogMemberService.commit', () => {
     // Arrange
     const r = await rig({ shares: sharesDoc(storedShare(1)) });
     const reservation = joinOf(r.service.admitJoin(codeOf(1), T0));
-    r.clock.now = T0 + 5 * MINUTE;
+    r.clock.now = T0 + 20_000;
 
     // Act
     const joined = await r.service.commit(reservation, newKey(1));
 
     // Assert
-    should(joined.passkeyWindowEndsAt).equal(iso(T0 + 15 * MINUTE));
-    should(memberOf(r.members.document, 1).createdAt).equal(iso(T0 + 5 * MINUTE));
+    should(joined.passkeyWindowEndsAt).equal(iso(T0 + 20_000 + 10 * MINUTE));
+    should(memberOf(r.members.document, 1).createdAt).equal(iso(T0 + 20_000));
   });
 
   it('should add a browser to an existing member and merge the catalogs without repeating one', async () => {
@@ -208,6 +209,8 @@ describe('CatalogMemberService.commit', () => {
     const members = membersDoc(storedMember(7, { keys: [storedKey(5)] }));
     const r = await rig({ members, shares: sharesDoc(storedShare(1)) });
     const reservation = joinOf(r.service.admitJoin(codeOf(1), T0));
+    await r.service.flushed();
+    const writes = r.shares.writes;
 
     // Act
     const error = await refusal(() => r.service.commit(reservation, newKey(5)));
@@ -216,7 +219,7 @@ describe('CatalogMemberService.commit', () => {
     should(error.refusal).equal('share_refused');
     should(error.message).equal('that browser key is already registered here');
     should(r.members.writes).equal(0);
-    should(r.shares.writes).equal(0);
+    should(r.shares.writes).equal(writes);
   });
 
   it('should leave the code spent and take the member back out when the members file will not write', async () => {
@@ -257,6 +260,7 @@ describe('CatalogMemberService.commit', () => {
     // Arrange: park the commit's shares write, spend another code, then let the first write fail
     const r = await rig({ shares: sharesDoc(storedShare(1), storedShare(2)) });
     const first = joinOf(r.service.admitJoin(codeOf(1), T0));
+    await r.service.flushed();
     const resume = r.shares.hold();
     const settled = r.service.commit(first, newKey(1)).then(
       () => undefined,
@@ -285,6 +289,7 @@ describe('CatalogMemberService.commit', () => {
     const r = await rig({ shares });
     const first = joinOf(r.service.admitJoin(codeOf(1), T0));
     const second = joinOf(r.service.admitJoin(codeOf(1), T0));
+    await r.service.flushed();
     r.log.length = 0;
 
     // Act
@@ -319,7 +324,8 @@ describe('CatalogMemberService.release', () => {
     // Arrange
     const r = await rig({ shares: sharesDoc(storedShare(1)) });
     const reservation = joinOf(r.service.admitJoin(codeOf(1), T0));
-    should(shareOf(r.shares.document, 1).state).equal('live');
+    await r.service.flushed();
+    should(shareOf(r.shares.document, 1).state).equal('spent');
 
     // Act
     await r.service.release(reservation);
@@ -333,14 +339,16 @@ describe('CatalogMemberService.release', () => {
     // Arrange
     const r = await rig({ shares: sharesDoc(storedShare(1)) });
     const reservation = joinOf(r.service.admitJoin(codeOf(1), T0));
+    await r.service.flushed();
     r.shares.failing = true;
+    const writes = r.shares.writes;
 
     // Act
     await r.service.release(reservation);
 
     // Assert
-    should(r.shares.writes).equal(1);
-    should(shareOf(r.shares.document, 1).state).equal('live');
+    should(r.shares.writes).equal(writes + 1);
+    should(shareOf(r.shares.document, 1).state).equal('spent');
     should(refusedOf(r.service.admitJoin(codeOf(1), T0)).reason).equal('spent');
   });
 });
@@ -358,6 +366,7 @@ describe('CatalogMemberService.commitRedeem', () => {
     const r = await rig({ members: holders() });
     const { code } = await r.service.mint(singleForMember(7, [catalogId(1), catalogId(2)]));
     const reservation = redeemOf(r.service.admitRedeem(code, memberId(7), T0));
+    await r.service.flushed();
     r.log.length = 0;
 
     // Act
@@ -375,6 +384,7 @@ describe('CatalogMemberService.commitRedeem', () => {
     const r = await rig({ members: holders() });
     const { code } = await r.service.mint(singleForMember(7, [catalogId(1)]));
     const reservation = redeemOf(r.service.admitRedeem(code, memberId(7), T0));
+    await r.service.flushed();
     const writes = [r.members.writes, r.shares.writes];
 
     // Act
@@ -385,7 +395,7 @@ describe('CatalogMemberService.commitRedeem', () => {
     should([r.members.writes, r.shares.writes]).eql(writes);
   });
 
-  it('should refuse when the member has gone since the admission', async () => {
+  it('should refuse a redeem the revoke of its member voided', async () => {
     // Arrange
     const r = await rig({ members: holders() });
     const { code } = await r.service.mint(singleForMember(7, [catalogId(2)]));
@@ -396,7 +406,7 @@ describe('CatalogMemberService.commitRedeem', () => {
     const error = await refusal(() => r.service.commitRedeem(reservation, by));
 
     // Assert
-    should(error.refusal).equal('member_unknown');
+    should(error.refusal).equal('share_refused');
   });
 
   it('should put the catalogs back, and leave the code spent, when the members file will not write', async () => {

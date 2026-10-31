@@ -11,14 +11,16 @@
  * ## Two files, one rule
  *
  * A member's catalogs and a share's catalogs are ids into `catalogs.json`; deleting a catalog removes
- * it from both (`CatalogMemberService.forgetCatalog`). Every cross reference is checked on read so a
- * damaged or hand-edited file is an error that names the problem, not a silent grant.
+ * it from both (`CatalogMemberService.forgetCatalog`). What a read checks is each file on its own: its shape,
+ * that no id or code is listed twice, and the size bounds. Whether a catalog id still exists is the SERVICE's
+ * check, made at each commit against the catalogs the directory knows, never a trust in what the file says.
  */
 import {
   CATALOG_MAX_KEYS_PER_MEMBER,
   CATALOG_MAX_MEMBER_KEYS,
   CATALOG_MAX_MEMBERS,
   CATALOG_SHARE_MAX_CATALOGS,
+  CATALOG_SHARES_LISTED_MAX,
   CatalogMemberIdSchema,
   CatalogMemberKeyIdSchema,
   CatalogMemberLabelSchema,
@@ -125,7 +127,7 @@ export type StoredShare = z.infer<typeof StoredShareSchema>;
 export const SharesDocumentSchema = z
   .strictObject({
     schemaVersion: z.literal(CATALOG_SHARES_SCHEMA_VERSION),
-    shares: z.array(StoredShareSchema),
+    shares: z.array(StoredShareSchema).max(CATALOG_SHARES_LISTED_MAX),
   })
   .check(ctx => {
     const issue = (message: string): void => {

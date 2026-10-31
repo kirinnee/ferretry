@@ -11,6 +11,15 @@
  * A burned code is the exception: it stays burned in memory when a persist fails (contract step 3), so the
  * owner sees a share used with no key behind it and mints another.
  *
+ * ## Reservations
+ *
+ * A join that passed the admission step holds a slot until it is committed or released. Whoever admits MUST
+ * commit or {@link release} in a try/finally, and MUST await `persisted` on the answer before replying: the
+ * burn of a code is on disk before the joiner hears anything. A reservation also lapses on its own after
+ * 30 seconds. Every change that takes access away (a revoke, a catalog taken or deleted, a share ended)
+ * VOIDS the reservations it touches in the same queue, and a commit refuses a reservation that is no longer
+ * held, so nothing the owner removed comes back through a join that was already in flight.
+ *
  * ## The order of a revoke
  *
  * `members.json` is written FIRST, then `shares.json`, then live sessions are closed (a no-op until phase
@@ -20,6 +29,7 @@ import {
   CATALOG_MAX_LIVE_SHARES,
   CATALOG_SHARE_EXPIRY_SECONDS,
   CATALOG_SHARE_MAX_CATALOGS,
+  CATALOG_SHARES_LISTED_MAX,
   CatalogShareCodeSchema,
   type CatalogMemberList,
   type CatalogMemberView,
@@ -65,6 +75,7 @@ import type {
   ShareCodeHasher,
   ShareLinkSource,
 } from './ports.ts';
+import { pruneShares } from './prune.ts';
 import { CatalogMemberRefusal } from './refusal.ts';
 import { sweepMembers, type RemovedKey } from './sweep.ts';
 import { listedShares, memberView, shareView } from './views.ts';
@@ -127,6 +138,20 @@ interface State {
   readonly shares: SharesDocument;
 }
 
+/** How long a reservation holds its slot before it lapses. */
+const RESERVATION_TTL_MS = 30_000;
+
+/** An admission answer plus the write that makes its change durable. A refusal that burned a code has one too. */
+export type Durable<T> = T & { readonly persisted: Promise<void> };
+
+interface Held {
+  readonly reservation: Reservation;
+  readonly expiresAt: number;
+}
+
+const reservedCatalogs = (reservation: Reservation): readonly string[] =>
+  reservation.kind === 'join' ? reservation.catalogIds : reservation.added;
+
 const instant = (ms: number): string => new Date(ms).toISOString();
 
 function randomText(crypto: Pick<RelayCrypto, 'randomBytes'>): string {
@@ -140,7 +165,7 @@ export class CatalogMemberService {
   #queue: Promise<unknown> = Promise.resolve();
   #state: State | undefined;
   #loading: Promise<void> | undefined;
-  readonly #pending = new Map<string, JoinReservation>();
+  readonly #held = new Map<string, Held>();
   readonly #compare: DigestComparison;
 
   constructor(private readonly deps: CatalogMemberDeps) {
@@ -172,12 +197,12 @@ export class CatalogMemberService {
    * Step 2 of a join, synchronously: find the code, check it is live, check room and the hourly count, spend
    * it, reserve a key slot. Answers a reservation or ONE refusal. {@link ready} must have resolved.
    */
-  admitJoin(codeText: string, now: number): JoinAdmission {
+  admitJoin(codeText: string, now: number): Durable<JoinAdmission> {
     return this.#admit(codeText, now, probe => admitJoin(probe));
   }
 
   /** Step 2 of a redeem by a browser that already belongs to `memberId`. */
-  admitRedeem(codeText: string, memberId: string, now: number): RedeemAdmission {
+  admitRedeem(codeText: string, memberId: string, now: number): Durable<RedeemAdmission> {
     return this.#admit(codeText, now, probe => admitRedeem(probe, memberId));
   }
 
@@ -185,26 +210,63 @@ export class CatalogMemberService {
     codeText: string,
     now: number,
     run: (probe: Probe) => Admitted<R> | Refused,
-  ): Admitted<R> | Refused {
+  ): Durable<Admitted<R> | Refused> {
     const state = this.#state;
     // Not loaded is a refusal, not a guess: the caller forgot to await `ready`, and nothing is spent.
     if (state === undefined)
-      return { ok: false, refusal: 'share_refused', reason: 'unknown', shares: EMPTY_SHARES_DOCUMENT, leftLive: false };
+      return {
+        ok: false,
+        refusal: 'share_refused',
+        reason: 'unknown',
+        shares: EMPTY_SHARES_DOCUMENT,
+        leftLive: false,
+        persisted: Promise.resolve(),
+      };
+    for (const [id, held] of this.#held) if (held.expiresAt <= now) this.#held.delete(id);
     const decision = run({
       members: state.members,
       shares: state.shares,
-      pending: [...this.#pending.values()],
+      pending: [...this.#held.values()].flatMap(held => (held.reservation.kind === 'join' ? [held.reservation] : [])),
       now,
       digest: this.deps.hasher.hex(codeText),
       compare: this.#compare,
       reservationId: randomText(this.deps.crypto),
     });
-    this.#state = { ...state, shares: decision.shares };
-    if (decision.ok) {
-      if (decision.reservation.kind === 'join')
-        this.#pending.set(decision.reservation.reservationId, decision.reservation);
-    } else if (decision.crossMember !== undefined) this.#tell(decision.crossMember);
-    return decision;
+    const shares = pruneShares(decision.shares, now);
+    this.#state = { ...state, shares };
+    if (decision.ok)
+      this.#held.set(decision.reservation.reservationId, {
+        reservation: decision.reservation,
+        expiresAt: now + RESERVATION_TTL_MS,
+      });
+    else if (decision.crossMember !== undefined) this.#tell(decision.crossMember);
+    // Every change to a share (a burn, a counted use, a refusal that spent the code) is on disk before the answer.
+    return { ...decision, shares, persisted: shares === state.shares ? Promise.resolve() : this.#persistShares() };
+  }
+
+  /** Resolves when every write queued so far, the burns an admission made included, has finished. */
+  async flushed(): Promise<void> {
+    await this.#serially(async () => undefined);
+  }
+
+  #persistShares(): Promise<void> {
+    const written = this.#serially(async () => {
+      await this.deps.shares.write(this.#loaded().shares);
+    });
+    written.catch(() => undefined);
+    return written;
+  }
+
+  /** The reservation, taken out of the held ones; a reservation that was voided or has lapsed is refused. */
+  #claim(reservation: Reservation, now: number): void {
+    const held = this.#held.get(reservation.reservationId);
+    this.#held.delete(reservation.reservationId);
+    if (held === undefined || held.expiresAt <= now)
+      throw new CatalogMemberRefusal('share_refused', 'that join is no longer open');
+  }
+
+  #void(which: (reservation: Reservation) => boolean): void {
+    for (const [id, held] of this.#held) if (which(held.reservation)) this.#held.delete(id);
   }
 
   /**
@@ -214,8 +276,19 @@ export class CatalogMemberService {
    */
   async commit(reservation: JoinReservation, key: NewMemberKey): Promise<JoinedMember> {
     return await this.#serially(async () => {
+      const known = await this.deps.catalogs.knownIds();
       const state = this.#loaded();
       const now = this.deps.now();
+      this.#claim(reservation, now);
+      const share = state.shares.shares.find(entry => entry.shareId === reservation.shareId);
+      const existing = state.members.members.find(member => member.memberId === reservation.memberId);
+      // What the owner took away while the join was in flight does not come back: the member must still be
+      // there when the share names one, and only catalogs the share still gives and that still exist are filed.
+      const memberGone = share?.memberKind === 'existing' && existing === undefined;
+      const given = memberGone ? [] : (share?.catalogIds ?? []);
+      const catalogIds = given.filter(id => reservation.catalogIds.includes(id) && known.has(id));
+      if (catalogIds.length === 0)
+        throw new CatalogMemberRefusal('share_refused', 'that share no longer gives anything');
       if (state.members.members.some(member => member.keys.some(other => other.memberKey === key.memberKey)))
         throw new CatalogMemberRefusal('share_refused', 'that browser key is already registered here');
       const keyId = `mk_${randomText(this.deps.crypto)}`;
@@ -229,19 +302,18 @@ export class CatalogMemberService {
         passkeyCount: 0,
         passkeyWindowEndsAt: windowEnds,
       };
-      const existing = state.members.members.find(member => member.memberId === reservation.memberId);
       const member: StoredMember =
         existing === undefined
           ? {
               memberId: reservation.memberId,
               label: reservation.memberLabel,
-              catalogIds: [...reservation.catalogIds],
+              catalogIds,
               createdAt: instant(now),
               keys: [stored],
             }
           : {
               ...existing,
-              catalogIds: [...new Set([...existing.catalogIds, ...reservation.catalogIds])],
+              catalogIds: [...new Set([...existing.catalogIds, ...catalogIds])],
               keys: [...existing.keys, stored],
             };
       const members: MembersDocument = {
@@ -256,7 +328,6 @@ export class CatalogMemberService {
         keyId,
         at: instant(now),
       });
-      this.#pending.delete(reservation.reservationId);
       this.#state = { members, shares };
       try {
         await this.deps.shares.write(shares);
@@ -278,13 +349,20 @@ export class CatalogMemberService {
   /** Step 3 of a redeem: the catalogs it adds are filed. A redeem that adds nothing writes nothing. */
   async commitRedeem(reservation: RedeemReservation, by: RedeemedBy): Promise<void> {
     await this.#serially(async () => {
+      const known = await this.deps.catalogs.knownIds();
       const state = this.#loaded();
+      this.#claim(reservation, this.deps.now());
       const member = state.members.members.find(entry => entry.memberId === reservation.memberId);
       if (member === undefined) throw new CatalogMemberRefusal('member_unknown', 'that member no longer exists');
       if (reservation.added.length === 0) return;
+      const share = state.shares.shares.find(entry => entry.shareId === reservation.shareId);
+      const added = (share?.catalogIds ?? []).filter(
+        id => reservation.added.includes(id) && known.has(id) && !member.catalogIds.includes(id),
+      );
+      if (added.length === 0) throw new CatalogMemberRefusal('share_refused', 'that share no longer gives anything');
       const members = this.#membersWith(state.members, {
         ...member,
-        catalogIds: [...new Set([...member.catalogIds, ...reservation.added])],
+        catalogIds: [...new Set([...member.catalogIds, ...added])],
       });
       const shares = this.#usedBy(state.shares, reservation.shareId, {
         clientName: by.clientName,
@@ -308,7 +386,7 @@ export class CatalogMemberService {
    * that just failed may still take the smaller write.
    */
   async release(reservation: Reservation): Promise<void> {
-    this.#pending.delete(reservation.reservationId);
+    this.#held.delete(reservation.reservationId);
     const state = this.#state;
     if (state === undefined) return;
     await this.deps.shares.write(state.shares).catch(() => undefined);
@@ -322,8 +400,9 @@ export class CatalogMemberService {
     // The link is checked BEFORE a code is made: a machine with nowhere to point a link spends nothing.
     const target = this.deps.links.target();
     if (target.kind === 'unavailable') throw new CatalogMemberRefusal('share_link_unavailable', target.reason);
-    const known = await this.deps.catalogs.knownIds();
     return await this.#serially(async () => {
+      // Read inside the queue: a catalog deleted or a member revoked a moment ago is not minted for.
+      const known = await this.deps.catalogs.knownIds();
       const state = this.#loaded();
       const now = this.deps.now();
       const missing = request.catalogIds.filter(id => !known.has(id));
@@ -334,6 +413,11 @@ export class CatalogMemberService {
         throw new CatalogMemberRefusal(
           'shares_full',
           `${String(CATALOG_MAX_LIVE_SHARES)} shares are live at once. End one, or wait for one to expire.`,
+        );
+      if (pruneShares(state.shares, now).shares.length >= CATALOG_SHARES_LISTED_MAX)
+        throw new CatalogMemberRefusal(
+          'shares_full',
+          `${String(CATALOG_SHARES_LISTED_MAX)} shares are stored. Old ones are forgotten after 30 days; end some, or try again later.`,
         );
       const existing =
         request.member.kind === 'existing'
@@ -390,6 +474,7 @@ export class CatalogMemberService {
       const now = this.deps.now();
       const share = state.shares.shares.find(entry => entry.shareId === shareId);
       if (share === undefined) throw new CatalogMemberRefusal('share_unknown', 'There is no such share.');
+      this.#void(reservation => reservation.shareId === shareId);
       if (shareState(share, now) !== 'live') return shareView(share, now);
       const ended: StoredShare = { ...share, state: 'ended' };
       await this.#applyShares(this.#sharesWith(state.shares, ended), state.shares);
@@ -435,6 +520,7 @@ export class CatalogMemberService {
       const named = state.shares.shares.filter(share => share.memberId === memberId && share.state === 'live');
       if (member === undefined && named.length === 0)
         throw new CatalogMemberRefusal('member_unknown', 'There is no such member.');
+      this.#void(reservation => reservation.memberId === memberId);
       const members: MembersDocument = {
         ...state.members,
         members: state.members.members.filter(entry => entry.memberId !== memberId),
@@ -479,6 +565,7 @@ export class CatalogMemberService {
       const member = this.#member(state, memberId);
       if (!member.catalogIds.includes(catalogId))
         throw new CatalogMemberRefusal('catalog_unknown', 'That member cannot read such a catalog.');
+      this.#void(reservation => reservation.memberId === memberId && reservedCatalogs(reservation).includes(catalogId));
       const next: StoredMember = { ...member, catalogIds: member.catalogIds.filter(id => id !== catalogId) };
       await this.#applyMembers(this.#membersWith(state.members, next), state.members);
       const before = this.#loaded().shares;
@@ -499,6 +586,7 @@ export class CatalogMemberService {
     await this.ready();
     await this.#serially(async () => {
       const state = this.#loaded();
+      this.#void(reservation => reservedCatalogs(reservation).includes(catalogId));
       const members: MembersDocument = {
         ...state.members,
         members: state.members.members.map(member =>
@@ -525,9 +613,12 @@ export class CatalogMemberService {
     await this.ready();
     return await this.#serially(async () => {
       const state = this.#loaded();
-      const swept = sweepMembers(state.members, this.deps.now());
-      if (swept.members === state.members) return [];
-      await this.#applyMembers(swept.members, state.members);
+      const now = this.deps.now();
+      const swept = sweepMembers(state.members, now);
+      const forgotten = pruneShares(state.shares, now);
+      if (swept.members === state.members && forgotten === state.shares) return [];
+      if (swept.members !== state.members) await this.#applyMembers(swept.members, state.members);
+      if (forgotten !== state.shares) await this.#applyShares(forgotten, this.#loaded().shares);
       for (const key of swept.removed) await this.deps.sessions.closeKey(key.memberId, key.keyId);
       return swept.removed;
     });
@@ -594,8 +685,9 @@ export class CatalogMemberService {
     }
   }
 
-  async #applyShares(next: SharesDocument, before: SharesDocument): Promise<void> {
+  async #applyShares(requested: SharesDocument, before: SharesDocument): Promise<void> {
     const state = this.#loaded();
+    const next = pruneShares(requested, this.deps.now());
     this.#state = { ...state, shares: next };
     try {
       await this.deps.shares.write(next);

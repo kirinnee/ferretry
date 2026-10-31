@@ -70,6 +70,11 @@ describe('fy catalog share', () => {
     should(calls[0]?.args[1]).not.have.property('member');
   });
 
+  it('should pass --yes to skip the question for a person who has joined', async () => {
+    const calls = await run(['catalog', 'share', 'Team tools', '--to', 'Sam', '--expires', '15m', '-y']);
+    should(calls[0]?.args[1]).match({ to: 'Sam', yes: true });
+  });
+
   it('should refuse a share with no --expires before it reaches the controller', async () => {
     const { controller, calls } = recorder();
     const root = program();

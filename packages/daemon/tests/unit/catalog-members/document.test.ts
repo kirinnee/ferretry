@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { CATALOG_SHARES_LISTED_MAX } from '@ferretry/protocol';
 import should from 'should';
 import {
   CATALOG_MEMBERS_SCHEMA_VERSION,
@@ -241,5 +242,18 @@ describe('documentProblem', () => {
 
     // Assert
     should(problem).equal('it is malformed');
+  });
+});
+
+describe('the stored list of shares: size', () => {
+  it('should refuse a document that lists more shares than a list may hold', () => {
+    // Arrange
+    const shares = Array.from({ length: CATALOG_SHARES_LISTED_MAX + 1 }, (_, index) => storedShare(index + 1));
+
+    // Act
+    const parsed = SharesDocumentSchema.safeParse(sharesDoc(...shares));
+
+    // Assert
+    should(parsed.success).be.false();
   });
 });

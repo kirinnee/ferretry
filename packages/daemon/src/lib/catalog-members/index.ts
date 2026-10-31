@@ -21,4 +21,4 @@ export { shareLinkTarget } from './link-target.ts';
 export { CATALOG_MEMBER_REFUSALS, CatalogMemberRefusal } from './refusal.ts';
 export type { CatalogMemberRefusalCode } from './refusal.ts';
 export { CatalogMemberService } from './service.ts';
-export type { CatalogMemberDeps, JoinedMember, NewMemberKey, RedeemedBy } from './service.ts';
+export type { CatalogMemberDeps, Durable, JoinedMember, NewMemberKey, RedeemedBy } from './service.ts';

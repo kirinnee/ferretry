@@ -208,6 +208,7 @@ describe('CatalogMemberService.revokeMember', () => {
     // Arrange
     const r = await rig(fixture());
     await r.service.revokeMember(memberId(7));
+    await r.service.flushed();
     r.log.length = 0;
 
     // Act
@@ -424,6 +425,7 @@ describe('CatalogMemberService.forgetCatalog', () => {
       storedShare(4, { catalogIds: [catalogId(2)] }),
     );
     const r = await rig({ members, shares });
+    await r.service.flushed();
     r.log.length = 0;
 
     // Act

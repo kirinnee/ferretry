@@ -153,7 +153,7 @@ describe('ShareController.share minting', () => {
 
   it('should share to a person who has joined, by name, and warn what the link opens', async () => {
     const { controller, sharing, screen } = build();
-    await controller.share(['Team tools'], { to: 'sam', expires: '3h' });
+    await controller.share(['Team tools'], { to: 'sam', expires: '3h', yes: true });
     should(sharing.calls.map(call => call.call)).eql(['members', 'mint']);
     should(sharing.calls[1]).match({
       call: 'mint',
@@ -167,8 +167,44 @@ describe('ShareController.share minting', () => {
 
   it('should share to a person by id', async () => {
     const { controller, sharing } = build();
-    await controller.share(['Team tools'], { to: MEMBER_ID, expires: '8h' });
+    await controller.share(['Team tools'], { to: MEMBER_ID, expires: '8h', yes: true });
     should(sharing.calls[1]).match({ request: { member: { kind: 'existing', memberId: MEMBER_ID }, expiresIn: '8h' } });
+  });
+
+  it('should ask, with the warning in the question, BEFORE it makes a link for a person who has joined', async () => {
+    const { controller, sharing, prompt } = build({ interactive: true, answers: ['y'] });
+    await controller.share(['Team tools'], { to: 'sam', expires: '1h' });
+    should(prompt.asked).eql([
+      'Whoever opens this link can read everything Sam can read, on top of what you are sharing now. Make the link for Sam? [y/N]',
+    ]);
+    should(sharing.calls.map(call => call.call)).eql(['members', 'mint']);
+  });
+
+  it('should make no link when the owner declines the question', async () => {
+    const { controller, sharing, screen } = build({ interactive: true, answers: ['n'] });
+    await should(controller.share(['Team tools'], { to: 'sam', expires: '1h' })).rejectedWith(
+      'cancelled — nothing was changed',
+    );
+    should(sharing.calls.map(call => call.call)).eql(['members']);
+    should(screen.writes).have.length(0);
+  });
+
+  it('should need --yes off a terminal, and make no link without it', async () => {
+    const { controller, sharing, prompt } = build({ interactive: false });
+    await should(controller.share(['Team tools'], { to: 'sam', expires: '1h' })).rejectedWith(
+      'nobody to ask on this terminal — pass --yes to go ahead',
+    );
+    should(prompt.asked).have.length(0);
+    should(sharing.calls.map(call => call.call)).eql(['members']);
+  });
+
+  it('should not ask when --yes is given, or when the person is new', async () => {
+    const yes = build({ interactive: true });
+    await yes.controller.share(['Team tools'], { to: 'sam', expires: '1h', yes: true });
+    should(yes.prompt.asked).have.length(0);
+    const fresh = build({ interactive: true });
+    await fresh.controller.share(['Team tools'], forSam);
+    should(fresh.prompt.asked).have.length(0);
   });
 
   it('should not warn when the person is new', async () => {

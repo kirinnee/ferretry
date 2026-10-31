@@ -31,6 +31,7 @@ export function registerShareCommands(program: Command, controller: ShareControl
     .requiredOption('--expires <time>', 'how long the link lives: 15m, 1h, 3h, 8h or 1d')
     .option('--multi', 'let several browsers use the link (it makes its own person; needs --member)')
     .option('--cap <count>', 'with --multi, the most browsers that may join (2 to 200)')
+    .option('-y, --yes', 'with --to, skip the y/N warning; required when not on a terminal')
     .option('--large', 'draw the QR at full size, for a camera that will not focus on the compact one')
     .option('--json', JSON_HELP)
     .addHelpText('after', `\n${SHARE_HELP}`)
