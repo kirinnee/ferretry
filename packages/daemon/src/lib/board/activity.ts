@@ -198,7 +198,11 @@ export const deriveActivities = (
     let active = sessions.some(
       session => isWorking(session) || nowMs - instant(strongSignalAt(session)) <= ACTIVE_WINDOW_MS,
     );
-    let live = presenceOf(roster, effectiveAssignee(card)) !== 'dead';
+    // An UNASSIGNED card still in the backlog is nobody's work yet: it falls to its owner only as a default,
+    // so the owner being alive keeps nothing under a parent alive. Counted, a lead's live session hid every
+    // card whose ferret had finished behind one Todo child it had not handed out (&F240, 2026-10-31).
+    const unclaimed = card.assignee === null && cardCategory(card, inputs.laneSets) === 'backlog';
+    let live = !unclaimed && presenceOf(roster, effectiveAssignee(card)) !== 'dead';
     for (const child of inputs.index.children(card.id)) {
       if (child.dropped !== null) continue;
       const below = walk(child);
