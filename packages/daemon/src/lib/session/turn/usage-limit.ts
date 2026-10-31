@@ -1,4 +1,5 @@
-import type { HarnessDialog, SessionState } from '@ferretry/protocol';
+import type { HarnessDialog, SessionState, SessionTurnState } from '@ferretry/protocol';
+import type { TranscriptEvent } from '../../transcript/types.ts';
 
 /**
  * A SESSION PARKED ON "YOU'VE HIT YOUR … LIMIT".
@@ -8,6 +9,12 @@ import type { HarnessDialog, SessionState } from '@ferretry/protocol';
  * `fy recommend`) could tell its login was spent. This module reads that dialog as a quota fact and
  * says how the session's state document should record it. It never picks an option: all three change
  * what the person has chosen to wait for.
+ *
+ * Codex shows no dialog: it ends the turn at once with "Usage limit reached" on the pane and writes
+ * the reason on the turn's own boundary in its rollout (`task_complete` with
+ * `error.codex_error_info: usage_limit_exceeded`). Read as an ordinary end of turn, a sub-ferret on a
+ * spent login sat at `your-turn` for hours while every message to it ended the same way in half a
+ * second (2026-10-31). {@link transcriptUsageLimit} reads that record as the same quota fact.
  *
  * Pure: a dialog and a clock in, a value out.
  */
@@ -63,14 +70,46 @@ export function usageLimitOf(dialog: HarnessDialog | undefined, nowMs: number): 
 
 type Quota = NonNullable<SessionState['quota']>;
 
+/**
+ * The error codes a harness writes on a turn its provider refused for quota. Codex's
+ * `codex_error_info`; anything else — a stream error, a refusal, a crash — is not a quota fact.
+ */
+const USAGE_LIMIT_CODES: ReadonlySet<string> = new Set(['usage_limit_exceeded']);
+
+/**
+ * The limit the transcript's NEWEST turn ended on, or `undefined` when that turn ended any other way,
+ * has not ended, or there is no turn at all.
+ *
+ * Read from the end: the boundary's own error is written right after it, so an error met before any
+ * boundary is the newest turn's. Bookkeeping (usage, settings, attachments) is skipped; anything else —
+ * a message, a tool call, a new `started` — means a later turn and so no limit.
+ */
+export function transcriptUsageLimit(events: readonly TranscriptEvent[]): UsageLimit | undefined {
+  let limit: UsageLimit | undefined;
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index] as TranscriptEvent;
+    if (event.kind === 'usage' || event.kind === 'settings' || event.kind === 'attachment') continue;
+    if (event.kind === 'error') {
+      if (limit === undefined && event.error.code !== undefined && USAGE_LIMIT_CODES.has(event.error.code)) {
+        const notice = event.error.message.split('\n')[0]?.trim() || 'The login hit its usage limit';
+        limit = { notice, spend: /\bspend\b/iu.test(notice) };
+      }
+      continue;
+    }
+    return event.kind === 'turn' && event.state !== 'started' ? limit : undefined;
+  }
+  return undefined;
+}
+
 /** The quota fields this module owns: the ones it sets and the ones it removes again. */
-const OWNED = ['atLimit', 'unavailable', 'unavailableReason', 'retryAt', 'resetAt'] as const;
+const OWNED = ['atLimit', 'unavailable', 'unavailableReason', 'retryAt', 'resetAt', 'limitNotice'] as const;
 
 /** The quota a limited session records: the login is at its limit, and until when when that is known. */
 export function limitedQuota(current: Quota | undefined, limit: UsageLimit): Quota {
   return {
     ...clearedQuota(current),
     atLimit: true,
+    limitNotice: limit.notice,
     ...(limit.spend ? { unavailable: true, unavailableReason: 'spend_limit' as const } : {}),
     ...(limit.retryAt === undefined ? {} : { retryAt: limit.retryAt, resetAt: limit.retryAt }),
   };
@@ -87,19 +126,27 @@ export function clearedQuota(current: Quota | undefined): Quota | undefined {
 /**
  * The status and quota to record beside a turn change, or `undefined` when the change settles neither.
  *
- * Limited: a live session whose dialog is the usage-limit one becomes `rate_limited` with the limit in
- * its quota. Released: a `rate_limited` session whose RECORDED dialog was the usage-limit one and whose
- * pane no longer shows it goes back to `running` — only on that signature, so a `rate_limited` this
- * module did not set is never undone by it.
+ * Limited: a live session whose dialog is the usage-limit one, or whose newest turn the transcript says
+ * ended on its limit (`proved`, from {@link transcriptUsageLimit}), becomes `rate_limited` with the limit
+ * in its quota. A turn seen WORKING is a turn the provider accepted, so it proves no limit whatever an
+ * older record says. Released: a `rate_limited` session this module limited — its recorded dialog was
+ * the usage-limit one, or its quota carries the notice this module wrote — goes back to `running` once
+ * neither shows a limit, and a `running` one loses a notice a send left behind; only on that signature,
+ * so a `rate_limited` this module did not set is never undone by it.
  */
 export function limitPatch(
   current: Pick<SessionState, 'status' | 'quota' | 'harnessDialog'>,
   dialog: HarnessDialog | undefined,
   nowMs: number,
+  proved?: { readonly limit: UsageLimit | undefined; readonly to: SessionTurnState | undefined },
 ): { readonly status: 'rate_limited' | 'running'; readonly quota: Quota | undefined } | undefined {
-  const limit = usageLimitOf(dialog, nowMs);
+  const limit = usageLimitOf(dialog, nowMs) ?? (proved?.to === 'working' ? undefined : proved?.limit);
   if (limit !== undefined) return { status: 'rate_limited', quota: limitedQuota(current.quota, limit) };
-  if (current.status === 'rate_limited' && current.harnessDialog?.kind === 'usage-limit')
+  const ours = current.harnessDialog?.kind === 'usage-limit' || current.quota?.limitNotice !== undefined;
+  if (current.status === 'rate_limited' && ours) return { status: 'running', quota: clearedQuota(current.quota) };
+  // A send moves a limited session to `running` without touching its quota; its next turn that proves no
+  // limit takes the stale notice away, so no reader counts a login spent on a session that is working.
+  if (current.status === 'running' && current.quota?.limitNotice !== undefined)
     return { status: 'running', quota: clearedQuota(current.quota) };
   return undefined;
 }

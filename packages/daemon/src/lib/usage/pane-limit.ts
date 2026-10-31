@@ -5,8 +5,8 @@ import type { HarnessDialog, SessionState } from '@ferretry/protocol';
  *
  * The usage feed reads a login's windows from the provider and its own statusline; it cannot see a
  * spend limit that the provider only announces on the pane ("You've hit your org's monthly spend
- * limit"). A session parked on that dialog is recorded `rate_limited` (see `session/turn/usage-limit.ts`),
- * and this module turns those sessions into the logins they prove spent, so the feed (quota failover)
+ * limit"). A session parked on that dialog — or a Codex session whose turn its rollout says ended on the
+ * login's limit — is recorded `rate_limited` (see `session/turn/usage-limit.ts`), and this module turns those sessions into the logins they prove spent, so the feed (quota failover)
  * and `fy recommend` count the login exhausted until the time the harness gave.
  *
  * Derived from session documents on every read — nothing is remembered here, so it survives a restart
@@ -38,12 +38,20 @@ export interface PaneLimitSession {
 export const paneLimitHolds = (limit: PaneLimit, nowMs: number): boolean =>
   limit.retryAt === undefined || limit.retryAt > nowMs;
 
+/** The words a limited session's limit was read from: its usage-limit dialog, else the notice its quota records. */
+const limitNoticeOf = (session: PaneLimitSession): string | undefined => {
+  const dialog = session.harnessDialog;
+  if (dialog?.kind === 'usage-limit') return dialog.body?.split('\n')[0]?.trim() || dialog.title;
+  return session.quota?.limitNotice;
+};
+
 /** The limits live sessions prove, by agent. Where several sessions share one, the latest reset wins. */
 export function sessionPaneLimits(sessions: Iterable<PaneLimitSession>, nowMs: number): ReadonlyMap<string, PaneLimit> {
   const limits = new Map<string, PaneLimit>();
   for (const session of sessions) {
-    if (session.status !== 'rate_limited' || session.harnessDialog?.kind !== 'usage-limit') continue;
-    const notice = session.harnessDialog.body?.split('\n')[0]?.trim() || session.harnessDialog.title;
+    if (session.status !== 'rate_limited') continue;
+    const notice = limitNoticeOf(session);
+    if (notice === undefined) continue;
     const retryAt = session.quota?.retryAt;
     const limit: PaneLimit = {
       notice,

@@ -40,6 +40,25 @@ describe('sessionPaneLimits', () => {
     });
   });
 
+  it('should prove a limit from a rate_limited session whose quota records the notice it was read from', () => {
+    // Arrange — a Codex turn its rollout said ended on the login's limit: no dialog, the notice in the quota.
+    const codex: PaneLimitSession = {
+      agent: 'codex-atomi',
+      status: 'rate_limited',
+      quota: { atLimit: true, limitNotice: 'Your workspace is out of credits. Add credits to continue.' },
+    };
+
+    // Act
+    const limits = sessionPaneLimits([codex, { ...codex, agent: 'codex-other', status: 'running' }], NOW);
+
+    // Assert
+    should([...limits.keys()]).deepEqual(['codex-atomi']);
+    should(limits.get('codex-atomi')).deepEqual({
+      notice: 'Your workspace is out of credits. Add credits to continue.',
+      spend: false,
+    });
+  });
+
   it('should drop a limit whose reset has passed, and keep the latest reset of several sessions', () => {
     // Act
     const expired = sessionPaneLimits([limited('a', 500)], NOW);
