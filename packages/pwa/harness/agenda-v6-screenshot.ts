@@ -1,6 +1,6 @@
 /**
  * Screenshots and checks for the v6 agenda card (the owner-approved mockup): title and its one line, ONE card —
- * type, "↓ Not needed" and the version picker in its top bar, premise + context, the question, the options, folding
+ * type, "↓ Not needed" and the version picker in its top bar, premise + context, the question, the options, open
  * sections, ONE answer row — then the History, all at the composer's width.
  *
  *   bun harness/agenda-v6-screenshot.ts [outDir]   # writes <outDir>/v6-<scene>-<phone|desktop>-<theme>.png
@@ -143,6 +143,13 @@ const checkLayout = async (page: Page, label: string): Promise<void> => {
       Math.round(node.getBoundingClientRect().top),
     );
     const view = document.querySelector('[data-agenda-view]');
+    const pictures = [
+      ...(card?.querySelectorAll('.fy-render-image:not([data-fy-render-sized="true"]), .fy-render-chart') ?? []),
+    ].map(node => Math.round(node.getBoundingClientRect().width));
+    const folds = card?.querySelectorAll('details, summary').length ?? 0;
+    const hiddenSections = [...(card?.querySelectorAll('.fy-card__section-body') ?? [])].filter(
+      node => node.getBoundingClientRect().height === 0,
+    ).length;
     const block = (name: string) => {
       const node = document.querySelector(`.fy-card [data-agenda-situation] [data-agenda-section="${name}"]`);
       const label = node?.querySelector('h4');
@@ -175,6 +182,9 @@ const checkLayout = async (page: Page, label: string): Promise<void> => {
       ),
       whyNow: /why now/iu.test(view?.textContent ?? ''),
       bars,
+      folds,
+      pictures,
+      hiddenSections,
       chips,
     };
   });
@@ -196,6 +206,12 @@ const checkLayout = async (page: Page, label: string): Promise<void> => {
   }
   if (found.premise !== null && found.context !== null)
     check(found.premise.background !== found.context.background, `${label}: premise and context share one tint`);
+  check(
+    found.pictures.every(width => width <= 481),
+    `${label}: a picture or chart is drawn wider than 480px (${found.pictures.join(',')})`,
+  );
+  check(found.folds === 0, `${label}: ${found.folds} folding element(s) in the card`);
+  check(found.hiddenSections === 0, `${label}: ${found.hiddenSections} section(s) drawn with no body`);
   check(found.chips.length <= 3, `${label}: the answer row holds ${found.chips.length} buttons`);
   check(new Set(found.chips).size <= 1, `${label}: the answer row wraps (${found.chips.join(',')})`);
   const composer = found.composer;
@@ -291,8 +307,7 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
     `choice ${form} ${theme}: Not needed is ${heights[0]}px tall, the version picker ${heights[1]}px`,
   );
   await shot(choice, 'choice', form, theme);
-  // A term opened: its meaning shows under it, inside the card (the Terms list open too).
-  await choice.locator('[data-agenda-section="terms"] > summary').click();
+  // A term opened: its meaning shows under it, inside the card (the Terms list is already open: nothing folds).
   await choice.locator('.fy-card a[href^="#fy-term-"]').nth(1).click();
   await choice.waitForTimeout(150);
   const tip = choice.locator('[data-agenda-term-tip]');
@@ -317,7 +332,7 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
 
   const todo = await open('A91');
   await checkLayout(todo, `todo ${form} ${theme}`);
-  check((await todo.locator('[data-agenda-section="steps"][open]').count()) === 1, `todo ${form}: steps not open`);
+  check((await todo.locator('[data-agenda-section="steps"]:visible').count()) === 1, `todo ${form}: steps not drawn`);
   await shot(todo, 'todo', form, theme);
   await todo.close();
 

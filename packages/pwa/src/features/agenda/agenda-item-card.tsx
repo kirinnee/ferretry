@@ -5,7 +5,7 @@
  *   situation  PREMISE and CONTEXT — the two fields every item carries — as two tinted blocks, each label above its points
  *   question   the one thing asked, said plainly
  *   options    each option's one-word name (or its letter) and what it means, the recommended one said in words
- *   sections   only what the item carries, each folding: why the recommendation, steps, reasoning or more detail
+ *   sections   only what the item carries, each open, none folding: why the recommendation, steps, reasoning or more detail
  *              (Markdown with fy-render), decided, still open, impact, links, terms
  *   answers    ONE row of at most three — ← ↑ → — or the item's own form (an input request), or why it cannot be
  *              answered here (parked or resolved)
@@ -66,24 +66,21 @@ const forConfirmation = (item: AgendaItem): AgendaItem => {
   return rest;
 };
 
-function Fold({
+/** One titled section of the card. Always drawn open: the owner reads everything at once, nothing folds. */
+function Section({
   name,
   title,
-  open = false,
   children,
 }: {
   readonly name: string;
   readonly title: string;
-  readonly open?: boolean;
   readonly children: ReactNode;
 }) {
   return (
-    <details className="fy-card__fold" data-agenda-section={name} open={open}>
-      <summary className="fy-card__fold-title">
-        <span className="fy-card__label">{title}</span>
-      </summary>
-      <div className="fy-card__fold-body">{children}</div>
-    </details>
+    <section className="fy-card__section" data-agenda-section={name}>
+      <h4 className="fy-card__label fy-card__section-title">{title}</h4>
+      <div className="fy-card__section-body">{children}</div>
+    </section>
   );
 }
 
@@ -376,21 +373,17 @@ export function AgendaItemCard({
         ) : null}
       </TermLayer>
       {recommendation === undefined || model.perQuestion || recommendation.why === undefined ? null : (
-        <Fold
-          name="recommendation"
-          open
-          title={`Why I recommend ${recommendedOption?.name ?? recommendation.decision}`}
-        >
+        <Section name="recommendation" title={`Why I recommend ${recommendedOption?.name ?? recommendation.decision}`}>
           {recommendedOption === undefined ? (
             <p className="fy-card__decision">
               <strong>{recommendation.decision}</strong>
             </p>
           ) : null}
           <PointForm renderProse={renderProse} text={recommendation.why} />
-        </Fold>
+        </Section>
       )}
       {steps.length === 0 ? null : (
-        <Fold name="steps" open={kind === 'task'} title="Steps">
+        <Section name="steps" title="Steps">
           <AgendaSteps
             disabled={busy || !answerable}
             done={item.stepsDone ?? []}
@@ -398,39 +391,38 @@ export function AgendaItemCard({
             steps={steps}
             {...(onProgress === undefined || !answerable ? {} : { onProgress })}
           />
-        </Fold>
+        </Section>
       )}
       {body === null || model.notice ? null : (
-        <Fold
+        <Section
           name={kind === 'review' ? 'reasoning' : 'more'}
-          open={kind === 'review'}
           title={kind === 'review' ? 'Reasoning' : 'More detail'}
         >
           <AgendaBody renderProse={renderProse} text={body} />
-        </Fold>
+        </Section>
       )}
       {read.decided?.trim() ? (
-        <Fold name="decided" title="Decided so far">
+        <Section name="decided" title="Decided so far">
           <PointForm renderProse={renderProse} text={read.decided} />
-        </Fold>
+        </Section>
       ) : null}
       {read.stillOpen?.trim() ? (
-        <Fold name="still-open" title="Still open">
+        <Section name="still-open" title="Still open">
           <PointForm renderProse={renderProse} text={read.stillOpen} />
-        </Fold>
+        </Section>
       ) : null}
       {item.impact === undefined && item.urgency === undefined ? null : (
-        <Fold name="impact" title={kind === 'permission' ? 'What it allows' : 'Impact'}>
+        <Section name="impact" title={kind === 'permission' ? 'What it allows' : 'Impact'}>
           {item.impact === undefined ? null : <PointForm renderProse={renderProse} text={item.impact} />}
           {item.urgency === undefined ? null : (
             <p className="fy-card__decision">
               <strong>Urgency:</strong> {item.urgency}
             </p>
           )}
-        </Fold>
+        </Section>
       )}
       {item.links === undefined ? null : (
-        <Fold name="links" title="Links">
+        <Section name="links" title="Links">
           <ul className="fy-card__links">
             {item.links.map(link => (
               <li key={`${link.label ?? ''}\u0000${link.target}`}>
@@ -438,12 +430,12 @@ export function AgendaItemCard({
               </li>
             ))}
           </ul>
-        </Fold>
+        </Section>
       )}
       {terms.length === 0 ? null : (
-        <Fold name="terms" title="Terms">
+        <Section name="terms" title="Terms">
           <TermsList renderProse={renderProse} terms={terms} />
-        </Fold>
+        </Section>
       )}
       {!latest ? (
         <p className="fy-card__old" data-agenda-old-version="">

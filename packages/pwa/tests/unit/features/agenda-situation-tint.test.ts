@@ -10,6 +10,17 @@ const rule = (selector: string): string => {
   return css.slice(start, css.indexOf('}', start));
 };
 
+describe('a picture or chart in the card', () => {
+  test('is capped at its natural size, never stretched to the card, and a sized diagram is left alone', () => {
+    const start = css.indexOf('.fy-card .fy-render :is(');
+    expect(start).toBeGreaterThanOrEqual(0);
+    const capped = css.slice(start, css.indexOf('}', start));
+    expect(capped).toContain('.fy-render-image:not([data-fy-render-sized=');
+    expect(capped).toContain('.fy-render-chart');
+    expect(capped).toContain('max-width: min(100%, 480px)');
+  });
+});
+
 describe('the premise and context blocks on the agenda card', () => {
   test('stack the label above its text instead of a label column beside it', () => {
     const row = rule('.fy-card__sit-row');
