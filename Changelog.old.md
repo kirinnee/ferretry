@@ -1,3 +1,14 @@
+## [4.151.0](https://github.com/kirinnee/ferretry/compare/v4.150.0...v4.151.0) (2026-10-31)
+
+### Features
+
+* **browser:** upload, download and pdf file tools ([#1087](https://github.com/kirinnee/ferretry/issues/1087)) ([a39a0af](https://github.com/kirinnee/ferretry/commit/a39a0af362f4c14fd3419c3ac9a806695813fdcb))
+
+### Fixes
+
+* **daemon:** ignore a pressure read that finishes after stop ([#1098](https://github.com/kirinnee/ferretry/issues/1098)) ([1f72a64](https://github.com/kirinnee/ferretry/commit/1f72a64ed4f400db1f0693f3b6d10f62be0952fd))
+* **pwa:** visible close and a failure-proof door for What's new on phones ([#1096](https://github.com/kirinnee/ferretry/issues/1096)) ([de87390](https://github.com/kirinnee/ferretry/commit/de87390f37675c2f57379831c0a460587ce554c1))
+
 ## [4.150.0](https://github.com/kirinnee/ferretry/compare/v4.149.0...v4.150.0) (2026-10-31)
 
 ### Features
