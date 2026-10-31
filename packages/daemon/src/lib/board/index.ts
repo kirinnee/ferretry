@@ -1,4 +1,5 @@
 export * from './activity.ts';
+export * from './agenda-to-test.ts';
 export * from './agenda-links.ts';
 export * from './authority.ts';
 export * from './card-actions.ts';

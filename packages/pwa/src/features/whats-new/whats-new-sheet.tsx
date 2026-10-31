@@ -243,10 +243,24 @@ function WhatsNewBottomSheet({ open, onClose, releases, fresh }: WhatsNewSheetPr
       maxHeight="min(90dvh, calc(var(--app-h, 100dvh) - var(--gap-xs)))"
       zIndexClass="z-50"
     >
-      <div className="shrink-0 border-b border-border-soft px-panel pb-row-y" data-whats-new="sheet">
-        <Heading id={titleId} />
-        <p className="mb-0 mt-1 text-ui leading-base text-muted">{WHATS_NEW_DESCRIPTION}</p>
-      </div>
+      <header
+        className="flex min-w-0 shrink-0 items-start gap-sm border-b border-border-soft px-panel pb-row-y"
+        data-whats-new="sheet"
+      >
+        <div className="min-w-0 flex-1">
+          <Heading id={titleId} />
+          <p className="mb-0 mt-1 text-ui leading-base text-muted">{WHATS_NEW_DESCRIPTION}</p>
+        </div>
+        <button
+          type="button"
+          aria-label="Close what’s new"
+          className="kt-btn h-11 w-11 shrink-0 p-0"
+          data-whats-new-close=""
+          onClick={onClose}
+        >
+          <X aria-hidden="true" size={18} />
+        </button>
+      </header>
       {open ? <Body releases={releases} fresh={fresh} /> : null}
     </BottomSheet>
   );

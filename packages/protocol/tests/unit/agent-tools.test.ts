@@ -5,6 +5,8 @@ import type { AgentToolCall, SurfaceControlView } from '../../src/lib/index.ts';
 import { INSTANT, LATER_INSTANT } from '../fixtures.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 
+const ATTACHMENT = `att_${'ab'.repeat(32)}`;
+
 const driving = {
   surface: 'terminal',
   id: 'a1b2c3d4e5f6',
@@ -50,8 +52,16 @@ const cases: SchemaCase[] = [
   { name: 'key press', schema: tools.TerminalKeySchema, value: 'ctrl-c' },
   { name: 'url', schema: tools.AgentUrlSchema, value: 'https://example.test/login' },
   { name: 'history step', schema: tools.BrowserHistoryStepSchema, value: 'back' },
+  { name: 'upload file by path', schema: tools.AgentUploadFileSchema, value: 'reports/q3.pdf' },
+  { name: 'upload file by attachment', schema: tools.AgentUploadFileSchema, value: { attachment: ATTACHMENT } },
+  { name: 'upload mode', schema: tools.BrowserUploadModeSchema, value: 'drop' },
   { name: 'call', schema: tools.AgentToolCallSchema, value: { tool: 'terminal.send', name: 'dev', text: 'ls' } },
   { name: 'surface', schema: tools.AgentSurfaceSchema, value: { id: 'page-1', name: 'app', title: 'x', url: 'a' } },
+  {
+    name: 'popup surface',
+    schema: tools.AgentSurfaceSchema,
+    value: { id: 'popup-1', title: 'x', url: 'a', openerId: 'page-1' },
+  },
   {
     name: 'result',
     schema: tools.AgentToolResultSchema,
@@ -115,6 +125,24 @@ describe('agent tool schemas', () => {
       { tool: 'browser.type', name: 'app', selector: '#email', text: '' },
       { tool: 'browser.read', name: 'app', mode: 'a11y' },
       { tool: 'browser.screenshot', name: 'app' },
+      { tool: 'browser.dialog', name: 'app', action: 'accept' },
+      { tool: 'browser.tabs', action: 'list' },
+      { tool: 'browser.wait_for', name: 'app', time: 500 },
+      { tool: 'browser.console', name: 'app' },
+      { tool: 'browser.network', name: 'app', action: 'list' },
+      { tool: 'browser.emulate', name: 'app', reset: true },
+      { tool: 'browser.upload', name: 'app', selector: '#file', files: ['a.txt'] },
+      { tool: 'browser.download', name: 'app' },
+      { tool: 'browser.pdf', name: 'app' },
+      { tool: 'browser.hover', name: 'app', ref: 'e2' },
+      { tool: 'browser.drag', name: 'app', fromRef: 'e2', toRef: 'e3' },
+      { tool: 'browser.mouse', name: 'app', action: 'move', x: 1, y: 2 },
+      { tool: 'browser.press', name: 'app', keys: ['Enter'] },
+      { tool: 'browser.scroll', name: 'app', pages: 1 },
+      { tool: 'browser.select', name: 'app', ref: 'e4', values: ['uk'] },
+      { tool: 'browser.check', name: 'app', ref: 'e5', checked: false },
+      { tool: 'browser.fill_form', name: 'app', fields: [{ ref: 'e4', text: 'hadi' }] },
+      { tool: 'browser.highlight', name: 'app', clear: true },
       { tool: 'browser.close', name: 'app' },
       { tool: 'browser.ask_owner', name: 'app' },
     ];
@@ -142,6 +170,34 @@ describe('agent tool schemas', () => {
       { tool: 'browser.read', name: 'app', find: 'Sign in' },
       { tool: 'browser.screenshot', name: 'app', fullPage: true, format: 'jpeg' },
       { tool: 'browser.screenshot', name: 'app', ref: 'e4' },
+      { tool: 'browser.dialog', name: 'app', action: 'dismiss' },
+      { tool: 'browser.dialog', name: 'app', action: 'accept', promptText: 'hadi' },
+      { tool: 'browser.tabs', action: 'list' },
+      { tool: 'browser.tabs', action: 'adopt', id: 'popup-1', as: 'checkout' },
+      { tool: 'browser.wait_for', name: 'app', ref: 'e3', state: 'hidden', timeoutMs: 5_000 },
+      { tool: 'browser.wait_for', name: 'app', selector: '#done' },
+      { tool: 'browser.wait_for', name: 'app', text: 'Welcome' },
+      { tool: 'browser.wait_for', name: 'app', textGone: 'Loading' },
+      { tool: 'browser.wait_for', name: 'app', url: '/dashboard' },
+      { tool: 'browser.wait_for', name: 'app', load: 'networkidle' },
+      { tool: 'browser.wait_for', name: 'app', time: 2_000 },
+      { tool: 'browser.console', name: 'app' },
+      { tool: 'browser.console', name: 'app', level: 'warning', since: 12, limit: 20 },
+      { tool: 'browser.network', name: 'app', action: 'list', filter: '/api', types: ['xhr', 'fetch'] },
+      { tool: 'browser.network', name: 'app', action: 'get', id: 'r12' },
+      { tool: 'browser.emulate', name: 'app', reset: true },
+      {
+        tool: 'browser.emulate',
+        name: 'app',
+        viewport: { width: 390, height: 844 },
+        media: { colorScheme: 'dark' },
+        geolocation: { latitude: 52.5, longitude: 13.4 },
+        locale: 'de-DE',
+        timezone: 'Europe/Berlin',
+        cpuThrottle: 4,
+        network: { latency: 200, throughput: 400 },
+        permissions: ['geolocation'],
+      },
     ];
 
     // Act
@@ -178,6 +234,62 @@ describe('agent tool schemas', () => {
       call({ tool: 'browser.navigate', name: 'app' }),
       call({ tool: 'browser.navigate', name: 'app', url: 'https://example.test/', history: 'back' }),
       call({ tool: 'browser.navigate', name: 'app', history: 'home' }),
+    ]);
+  });
+
+  it('should refuse a dialog, tab, wait, console, network or emulate call that is not well formed', () => {
+    const call = (value: Record<string, unknown>): SchemaCase => ({
+      name: JSON.stringify(value).slice(0, 60),
+      schema: tools.AgentToolCallSchema,
+      value,
+    });
+    assertRejects([
+      call({ tool: 'browser.dialog', name: 'app' }),
+      call({ tool: 'browser.dialog', name: 'app', action: 'ignore' }),
+      call({ tool: 'browser.dialog', name: 'app', action: 'dismiss', promptText: 'x' }),
+      call({ tool: 'browser.dialog', name: 'app', action: 'accept', promptText: 'x'.repeat(1_025) }),
+      call({ tool: 'browser.tabs', action: 'adopt' }),
+      call({ tool: 'browser.tabs', action: 'adopt', id: 'popup-1' }),
+      call({ tool: 'browser.tabs', action: 'adopt', as: 'checkout' }),
+      call({ tool: 'browser.tabs', action: 'list', id: 'popup-1' }),
+      call({ tool: 'browser.tabs', action: 'list', as: 'checkout' }),
+      call({ tool: 'browser.wait_for', name: 'app' }),
+      call({ tool: 'browser.wait_for', name: 'app', text: 'a', textGone: 'b' }),
+      call({ tool: 'browser.wait_for', name: 'app', ref: 'e1', text: 'a' }),
+      call({ tool: 'browser.wait_for', name: 'app', ref: 'e1', selector: '#a' }),
+      call({ tool: 'browser.wait_for', name: 'app', x: 1, y: 2 }),
+      call({ tool: 'browser.wait_for', name: 'app', text: 'a', state: 'visible' }),
+      call({ tool: 'browser.wait_for', name: 'app', time: 25_001 }),
+      call({ tool: 'browser.wait_for', name: 'app', text: 'a', timeoutMs: 25_001 }),
+      call({ tool: 'browser.wait_for', name: 'app', text: 'a', timeoutMs: 10 }),
+      call({ tool: 'browser.wait_for', name: 'app', load: 'idle' }),
+      call({ tool: 'browser.wait_for', name: 'app', text: '' }),
+      call({ tool: 'browser.console', name: 'app', level: 'trace' }),
+      call({ tool: 'browser.console', name: 'app', limit: 501 }),
+      call({ tool: 'browser.console', name: 'app', since: -1 }),
+      call({ tool: 'browser.network', name: 'app', action: 'get' }),
+      call({ tool: 'browser.network', name: 'app', action: 'get', id: 'r1', filter: 'x' }),
+      call({ tool: 'browser.network', name: 'app', action: 'get', id: 'r1', types: ['xhr'] }),
+      call({ tool: 'browser.network', name: 'app', action: 'list', id: 'r1' }),
+      call({ tool: 'browser.network', name: 'app', action: 'get', id: 'request-1' }),
+      call({ tool: 'browser.network', name: 'app', action: 'list', types: [] }),
+      call({ tool: 'browser.network', name: 'app', action: 'list', types: ['video'] }),
+      call({ tool: 'browser.emulate', name: 'app' }),
+      call({ tool: 'browser.emulate', name: 'app', media: {} }),
+      call({ tool: 'browser.emulate', name: 'app', network: {} }),
+      call({ tool: 'browser.emulate', name: 'app', reset: false }),
+      call({ tool: 'browser.emulate', name: 'app', viewport: { width: 10, height: 10 } }),
+      call({ tool: 'browser.emulate', name: 'app', viewport: { width: 5_000, height: 800 } }),
+      call({ tool: 'browser.emulate', name: 'app', geolocation: { latitude: 91, longitude: 0 } }),
+      call({ tool: 'browser.emulate', name: 'app', locale: 'not a locale' }),
+      call({ tool: 'browser.emulate', name: 'app', timezone: 'Mars time' }),
+      call({ tool: 'browser.emulate', name: 'app', cpuThrottle: 0.5 }),
+      call({ tool: 'browser.emulate', name: 'app', cpuThrottle: 21 }),
+      call({ tool: 'browser.emulate', name: 'app', permissions: [] }),
+      call({ tool: 'browser.emulate', name: 'app', permissions: ['clipboard-read'] }),
+      call({ tool: 'browser.emulate', name: 'app', permissions: ['camera'] }),
+      call({ tool: 'browser.emulate', name: 'app', userAgent: 'curl/8' }),
+      call({ tool: 'browser.emulate', name: 'app', headers: { 'sec-ch-ua': 'x' } }),
     ]);
   });
 
@@ -234,12 +346,96 @@ describe('agent tool schemas', () => {
   });
 });
 
+describe('the file tools', () => {
+  const upload = { tool: 'browser.upload', name: 'app', selector: '#file', files: ['a.txt'] };
+  const accepts = (call: unknown): boolean => tools.AgentToolCallSchema.safeParse(call).success;
+
+  it('should accept each file tool in the forms an agent uses', () => {
+    should(
+      [
+        upload,
+        { ...upload, selector: undefined, ref: 'e5', mode: 'drop' },
+        { ...upload, files: ['a.txt', { attachment: ATTACHMENT }], mode: 'input' },
+        { tool: 'browser.download', name: 'app', id: 'dl-3', saveAs: 'data/out.csv', overwrite: true },
+        { tool: 'browser.pdf', name: 'app', saveAs: 'page.pdf', overwrite: true },
+      ].map(accepts),
+    ).deepEqual([true, true, true, true, true]);
+  });
+
+  it('should refuse an upload with no target, both targets, no files, too many files, or a bad mode', () => {
+    const refused = [
+      { ...upload, selector: undefined },
+      { ...upload, ref: 'e5' },
+      { ...upload, files: [] },
+      { ...upload, files: Array.from({ length: tools.AGENT_TOOL_MAX_UPLOAD_FILES + 1 }, () => 'a.txt') },
+      { ...upload, mode: 'paste' },
+      { ...upload, files: [''] },
+      { ...upload, files: ['x'.repeat(tools.AGENT_TOOL_MAX_PATH_CHARS + 1)] },
+    ];
+    should(refused.map(accepts)).deepEqual(refused.map(() => false));
+  });
+
+  it('should refuse an attachment id that is not att_ and 64 hex digits, or carries more keys', () => {
+    const refused = [
+      { ...upload, files: [{ attachment: 'att_123' }] },
+      { ...upload, files: [{ attachment: '../etc/passwd' }] },
+      { ...upload, files: [{ attachment: ATTACHMENT, path: '/etc/passwd' }] },
+    ];
+    should(refused.map(accepts)).deepEqual(refused.map(() => false));
+  });
+
+  it('should refuse a download id that is not dl-…, an overwrite that is not true, and unknown keys', () => {
+    const refused = [
+      { tool: 'browser.download', name: 'app', id: '../x' },
+      { tool: 'browser.download', name: 'app', overwrite: false },
+      { tool: 'browser.download', name: 'app', saveAs: '' },
+      { tool: 'browser.download', name: 'app', url: 'https://e.test/' },
+      { tool: 'browser.pdf', name: 'app', id: 'dl-1' },
+      { tool: 'browser.pdf', name: 'app', saveAs: 'x'.repeat(tools.AGENT_TOOL_MAX_PATH_CHARS + 1) },
+    ];
+    should(refused.map(accepts)).deepEqual(refused.map(() => false));
+  });
+
+  it('should keep the caps in the order an upload is checked: file, then call', () => {
+    should(tools.AGENT_TOOL_MAX_UPLOAD_FILE_BYTES).be.below(tools.AGENT_TOOL_MAX_UPLOAD_CALL_BYTES);
+    should(tools.AGENT_TOOL_MAX_UPLOAD_FILE_BYTES * tools.AGENT_TOOL_MAX_UPLOAD_FILES).be.above(
+      tools.AGENT_TOOL_MAX_UPLOAD_CALL_BYTES,
+    );
+  });
+
+  it('should list the file tools as acts to run once, never to repeat after a dropped request', () => {
+    should(['browser.upload', 'browser.download', 'browser.pdf'].map(tools.isRepeatableAgentTool)).deepEqual([
+      false,
+      false,
+      false,
+    ]);
+  });
+});
+
 describe('isRepeatableAgentTool', () => {
   it('should repeat only the tools that change nothing, after a request the daemon dropped', () => {
     // Arrange
-    const reads = ['terminal.list', 'terminal.read', 'terminal.wait', 'browser.list', 'browser.read'];
+    const reads = [
+      'terminal.list',
+      'terminal.read',
+      'terminal.wait',
+      'browser.list',
+      'browser.read',
+      'browser.tabs',
+      'browser.wait_for',
+      'browser.console',
+    ];
     const looks = ['browser.screenshot', 'config.read', 'config.validate'];
-    const acts = ['terminal.open', 'terminal.send', 'terminal.close', 'browser.click', 'config.write'];
+    const acts = [
+      'terminal.open',
+      'terminal.send',
+      'terminal.close',
+      'browser.click',
+      'browser.dialog',
+      'browser.network',
+      'browser.emulate',
+      'config.write',
+    ];
 
     // Act
     const repeatable = [...reads, ...looks].map(tools.isRepeatableAgentTool);

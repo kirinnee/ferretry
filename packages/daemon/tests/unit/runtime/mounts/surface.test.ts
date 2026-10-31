@@ -668,7 +668,16 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     actOnPage: async () => {
       throw new Error('not exercised by the surface inventory');
     },
+    filesOnPage: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
     closePage: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    lifecycleOnPage: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    adoptPage: async () => {
       throw new Error('not exercised by the surface inventory');
     },
     releaseSession: async () => undefined,

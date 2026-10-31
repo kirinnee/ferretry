@@ -9,12 +9,14 @@ import {
   type AgentToolResult,
 } from '@ferretry/protocol';
 import should from 'should';
-import type { TerminalWait } from '../../../src/lib/agent-tools/client';
+import type { BrowserWait, TerminalWait } from '../../../src/lib/agent-tools/client';
 import { McpServer } from '../../../src/lib/mcp/server';
 import { MCP_CONFIG_TOOLS, MCP_LESSON_TOOLS, MCP_TOOLS } from '../../../src/lib/mcp/tools';
 
 function harness(
-  answer: (call: AgentToolCall | TerminalWait) => Promise<AgentToolResult> = async () => ({ summary: 'ok' }),
+  answer: (call: AgentToolCall | TerminalWait | BrowserWait) => Promise<AgentToolResult> = async () => ({
+    summary: 'ok',
+  }),
   options: {
     config?: (call: AgentConfigToolCall) => Promise<AgentConfigToolResult>;
     lessons?: (call: AgentLessonToolCall) => Promise<AgentLessonToolResult>;
@@ -22,7 +24,7 @@ function harness(
     environment?: Readonly<Record<string, string>>;
   } = {},
 ) {
-  const calls: (AgentToolCall | TerminalWait)[] = [];
+  const calls: (AgentToolCall | TerminalWait | BrowserWait)[] = [];
   const configCalls: AgentConfigToolCall[] = [];
   const lessonCalls: AgentLessonToolCall[] = [];
   const server = new McpServer(
@@ -32,6 +34,10 @@ function harness(
         return await answer(call);
       },
       wait: async wait => {
+        calls.push(wait);
+        return await answer(wait);
+      },
+      browserWait: async wait => {
         calls.push(wait);
         return await answer(wait);
       },
@@ -194,6 +200,69 @@ describe('McpServer — the tools', () => {
     ]);
   });
 
+  it('should map the file tools, drop an overwrite that is off, and refuse an upload with no files', async () => {
+    // Arrange
+    const { calls, request } = harness(async () => ({ summary: 'ok' }));
+    const attachment = `att_${'ef'.repeat(32)}`;
+
+    // Act
+    await request(
+      'tools/call',
+      toolCall('browser_upload', { name: 'app', selector: '#f', files: ['a.txt', { attachment }], mode: 'drop' }),
+    );
+    await request('tools/call', toolCall('browser_download', { name: 'app', id: 'dl-2', overwrite: false }));
+    await request('tools/call', toolCall('browser_download', { name: 'app', saveAs: 'x.csv', overwrite: true }));
+    await request('tools/call', toolCall('browser_pdf', { name: 'app', overwrite: false }));
+    const empty = await request('tools/call', toolCall('browser_upload', { name: 'app', selector: '#f', files: [] }));
+
+    // Assert
+    should(calls).deepEqual([
+      { tool: 'browser.upload', name: 'app', selector: '#f', files: ['a.txt', { attachment }], mode: 'drop' },
+      { tool: 'browser.download', name: 'app', id: 'dl-2' },
+      { tool: 'browser.download', name: 'app', saveAs: 'x.csv', overwrite: true },
+      { tool: 'browser.pdf', name: 'app' },
+    ]);
+    should(empty).match({ result: { isError: true } });
+  });
+
+  it('should offer the pointer and keys tools, and send them as their wire calls', async () => {
+    // Arrange
+    const { calls, request } = harness();
+    const names = MCP_TOOLS.map(tool => tool.name);
+
+    // Act
+    await request('tools/call', toolCall('browser_hover', { name: 'app', ref: 'e2' }));
+    await request(
+      'tools/call',
+      toolCall('browser_drag', { name: 'app', fromX: 1, fromY: 2, toX: 3, toY: 4, steps: 9 }),
+    );
+    await request('tools/call', toolCall('browser_mouse', { name: 'app', action: 'wheel', deltaY: 300 }));
+    await request('tools/call', toolCall('browser_press', { name: 'app', keys: ['Enter'] }));
+    await request('tools/call', toolCall('browser_scroll', { name: 'app', pages: -1 }));
+    await request('tools/call', toolCall('browser_select', { name: 'app', ref: 'e3', values: ['uk'] }));
+    await request('tools/call', toolCall('browser_check', { name: 'app', ref: 'e4', checked: false }));
+    await request('tools/call', toolCall('browser_fill_form', { name: 'app', fields: [{ ref: 'e5', text: 'a' }] }));
+    await request('tools/call', toolCall('browser_highlight', { name: 'app', clear: true }));
+    await request('tools/call', toolCall('browser_highlight', { name: 'app', ref: 'e2', clear: false }));
+
+    // Assert
+    for (const name of ['hover', 'drag', 'mouse', 'press', 'scroll', 'select', 'check', 'fill_form', 'highlight'])
+      should(names).containEql(`browser_${name}`);
+    should(calls).deepEqual([
+      { tool: 'browser.hover', name: 'app', ref: 'e2' },
+      { tool: 'browser.drag', name: 'app', fromX: 1, fromY: 2, toX: 3, toY: 4, steps: 9 },
+      { tool: 'browser.mouse', name: 'app', action: 'wheel', deltaY: 300 },
+      { tool: 'browser.press', name: 'app', keys: ['Enter'] },
+      { tool: 'browser.scroll', name: 'app', pages: -1 },
+      { tool: 'browser.select', name: 'app', ref: 'e3', values: ['uk'] },
+      // A false `checked` is the question "untick it", so it travels; a false `clear` is a flag left out.
+      { tool: 'browser.check', name: 'app', ref: 'e4', checked: false },
+      { tool: 'browser.fill_form', name: 'app', fields: [{ ref: 'e5', text: 'a' }] },
+      { tool: 'browser.highlight', name: 'app', clear: true },
+      { tool: 'browser.highlight', name: 'app', ref: 'e2' },
+    ]);
+  });
+
   it('should send a JPEG screenshot as a JPEG', async () => {
     const { request } = harness(async () => ({
       summary: 'A screenshot of %browser:app.',
@@ -215,8 +284,10 @@ describe('McpServer — the tools', () => {
     const bytes = JSON.stringify(listed).length;
     const longest = Math.max(...listed.map(tool => tool.description.length));
 
-    // Assert — 11.9 KB measured with refs (#F199); 20 KB is the ceiling the browser-tools plan set.
-    should(bytes).be.below(20_000);
+    // Assert — 20.0 KB measured with refs, page lifecycle and file tools, ~27.4 KB once pointer and keys land
+    // (#F199): a runtime that defers MCP schemas (Claude) pays only the names; one that loads them all
+    // (Codex) pays this. 30 KB is the ceiling; owner-gated groups are listed only while they are on.
+    should(bytes).be.below(30_000);
     should(longest).be.belowOrEqual(300);
   });
 
@@ -259,6 +330,73 @@ describe('McpServer — the tools', () => {
         content: [{ type: 'text', text: 'give "text" to wait for, or "exit": true — one of them' }],
       },
     });
+    should(tooLong).match({ result: { isError: true, content: [{ text: /^timeoutMs: /u }] } });
+  });
+
+  it('should map each page-lifecycle tool to its wire call', async () => {
+    // Arrange
+    const { calls, request } = harness();
+
+    // Act
+    await request('tools/call', toolCall('browser_dialog', { name: 'app', action: 'accept', promptText: 'yes' }));
+    await request('tools/call', toolCall('browser_tabs', { action: 'adopt', id: 'page-7', as: 'popup' }));
+    await request('tools/call', toolCall('browser_console', { name: 'app', level: 'warning', since: 4, limit: 20 }));
+    await request('tools/call', toolCall('browser_network', { name: 'app', action: 'get', id: 'r12' }));
+    await request(
+      'tools/call',
+      toolCall('browser_network', { name: 'app', action: 'list', filter: '/api', types: ['xhr', 'fetch'] }),
+    );
+    await request(
+      'tools/call',
+      toolCall('browser_emulate', {
+        name: 'app',
+        viewport: { width: 390, height: 844 },
+        media: { colorScheme: 'dark', print: false },
+        network: { offline: false, latency: 200 },
+        reset: false,
+      }),
+    );
+    await request('tools/call', toolCall('browser_emulate', { name: 'app', reset: true }));
+
+    // Assert — a false on an on-only flag, nested ones included, is read as left out
+    should(calls).deepEqual([
+      { tool: 'browser.dialog', name: 'app', action: 'accept', promptText: 'yes' },
+      { tool: 'browser.tabs', action: 'adopt', id: 'page-7', as: 'popup' },
+      { tool: 'browser.console', name: 'app', level: 'warning', since: 4, limit: 20 },
+      { tool: 'browser.network', name: 'app', action: 'get', id: 'r12' },
+      { tool: 'browser.network', name: 'app', action: 'list', filter: '/api', types: ['xhr', 'fetch'] },
+      {
+        tool: 'browser.emulate',
+        name: 'app',
+        viewport: { width: 390, height: 844 },
+        media: { colorScheme: 'dark' },
+        network: { latency: 200 },
+      },
+      { tool: 'browser.emulate', name: 'app', reset: true },
+    ]);
+  });
+
+  it('should hand browser_wait_for to the looping wait with its total budget, and refuse a bad one', async () => {
+    // Arrange
+    const { calls, request } = harness(async () => ({ summary: 'There.', matched: true }));
+
+    // Act
+    await request('tools/call', toolCall('browser_wait_for', { name: 'app', text: 'Welcome', timeoutMs: 90_000 }));
+    await request('tools/call', toolCall('browser_wait_for', { name: 'app', selector: '#done', state: 'hidden' }));
+    await request('tools/call', toolCall('browser_wait_for', { name: 'app', time: 2_000 }));
+    const none = await request('tools/call', toolCall('browser_wait_for', { name: 'app' }));
+    const tooLong = await request(
+      'tools/call',
+      toolCall('browser_wait_for', { name: 'app', text: 'x', timeoutMs: 600_000 }),
+    );
+
+    // Assert
+    should(calls).deepEqual([
+      { call: { tool: 'browser.wait_for', name: 'app', text: 'Welcome' }, totalMs: 90_000 },
+      { call: { tool: 'browser.wait_for', name: 'app', selector: '#done', state: 'hidden' }, totalMs: 10_000 },
+      { call: { tool: 'browser.wait_for', name: 'app', time: 2_000 }, totalMs: 10_000 },
+    ]);
+    should(none).match({ result: { isError: true } });
     should(tooLong).match({ result: { isError: true, content: [{ text: /^timeoutMs: /u }] } });
   });
 

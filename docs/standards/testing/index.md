@@ -89,6 +89,13 @@ the quarantine below only keeps a known flake from holding a release hostage whi
 `tests/realworld/` with the same file name. A rig both need lives in `tests/integration/support/`, where
 the realworld test imports it.
 
+**Moving a matrix.** A deterministic browser file whose full matrix costs more than a merge gate may spend
+(a desktop and a phone, eight cold boots of the real app) may keep its whole matrix in `tests/realworld/` with
+no assertion dropped, if a FAST blocking file in `tests/integration/` still proves every distinct behaviour
+once, on one form factor, over the same scene. The shared rig lives in `tests/integration/support/`; the
+blocking file names what it dropped. The first one is `nav-cache` (Back, reload and the session cache):
+`tests/integration/shell/nav-cache.test.ts` blocks, `tests/realworld/shell/nav-cache.visual.test.ts` is the matrix.
+
 **A fixture never hands a daemon a port it guessed.** Probing a free port, closing it and passing the number
 on is a check-then-use race: a parallel test file or the kernel's outgoing-connection ports can take the
 number before the daemon binds it. A fixture writes `"port": 0` into `config/daemon.json` and the daemon
@@ -549,6 +556,18 @@ a passing run of the same files at the same commit, so this proves nothing a gre
 entry older than 14 days still works, and its warning says it has outstayed the budget.
 
 ---
+
+### A group that runs several processes (last resort)
+
+An integration group may set `"processes": 2` (up to 4) in `config/test-groups.json`, and
+`scripts/ci/test.sh` then runs its files in that many `bun` processes inside its ONE runner: no new job,
+every test still blocking. It is the owner's last resort, after faster tests and nightly moves, for a group
+that still cannot finish within two minutes. Each process runs under its own `swept.sh` (its own TMPDIR,
+HOME and leak sweep), and tests already make their homes under TMPDIR, bind OS-chosen ports and keep their
+tmux sockets in their own home, so the processes share nothing. Files are split by PACKAGE
+(`scripts/test/partition-files.ts`), never one package across two processes, because the coverage ledger
+passes a source file only when ONE run covers it to 100%: a split by test directory was measured and failed
+that. `scripts/validate/test-tiers.sh` holds the bounds.
 
 ## Test Organization
 

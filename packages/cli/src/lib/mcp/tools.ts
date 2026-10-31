@@ -8,6 +8,10 @@ import {
   type AgentToolName,
   INPUT_MAX_EXPIRY_SECONDS,
   INPUT_PROMPT_MAX_LENGTH,
+  BROWSER_CONSOLE_LEVELS,
+  BROWSER_CPU_THROTTLE_MAX,
+  BROWSER_EMULATED_PERMISSIONS,
+  BROWSER_RESOURCE_TYPES,
   LESSON_RULE_MAX_CHARS,
   TERMINAL_KEYS,
 } from '@ferretry/protocol';
@@ -303,6 +307,320 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
       },
       ['name'],
     ),
+  },
+  {
+    name: 'browser_dialog',
+    tool: 'browser.dialog',
+    description:
+      'Answer the dialog (alert, confirm, prompt, beforeunload) a page is waiting on; any browser result tells you when one is open. Unanswered, it is dismissed after 30 s. promptText answers a prompt.',
+    inputSchema: object(
+      { name: NAME, action: { type: 'string', enum: ['accept', 'dismiss'] }, promptText: { type: 'string' } },
+      ['name', 'action'],
+    ),
+  },
+  {
+    name: 'browser_tabs',
+    tool: 'browser.tabs',
+    description:
+      'list: your pages and the popups they opened (available: false means not yours). adopt: give a popup (id from the list) a name so you can use it. Never switches the person’s tab.',
+    inputSchema: object(
+      {
+        action: { type: 'string', enum: ['list', 'adopt'] },
+        id: { type: 'string', description: 'adopt: the popup’s id from the list.' },
+        as: NEW_NAME,
+      },
+      ['action'],
+    ),
+  },
+  {
+    name: 'browser_wait_for',
+    tool: 'browser.wait_for',
+    description:
+      'Wait for exactly one thing: an element (ref or selector, with state), text, textGone, url (part of the address), load, or time (ms). Answers whether it happened within timeoutMs.',
+    inputSchema: object(
+      {
+        name: NAME,
+        ref: REF,
+        selector: SELECTOR,
+        state: {
+          type: 'string',
+          enum: ['visible', 'hidden', 'attached', 'detached'],
+          description: 'visible by default.',
+        },
+        text: { type: 'string' },
+        textGone: { type: 'string' },
+        url: { type: 'string' },
+        load: { type: 'string', enum: ['load', 'domcontentloaded', 'networkidle'] },
+        time: { type: 'integer', minimum: 1, maximum: AGENT_TOOL_MAX_WAIT_MS, description: 'Just wait this many ms.' },
+        timeoutMs: {
+          type: 'integer',
+          minimum: 100,
+          maximum: AGENT_TOOL_MAX_TOTAL_WAIT_MS,
+          description: `How long to wait; ${String(AGENT_TOOL_DEFAULT_WAIT_MS)} by default.`,
+        },
+      },
+      ['name'],
+    ),
+  },
+  {
+    name: 'browser_console',
+    tool: 'browser.console',
+    description:
+      'The page’s recent console messages and errors, numbered. level: this level and worse. since: only entries after that number.',
+    inputSchema: object(
+      {
+        name: NAME,
+        level: { type: 'string', enum: BROWSER_CONSOLE_LEVELS },
+        since: { type: 'integer', minimum: 0 },
+        limit: { type: 'integer', minimum: 1, maximum: 500, description: '100 by default.' },
+      },
+      ['name'],
+    ),
+  },
+  {
+    name: 'browser_network',
+    tool: 'browser.network',
+    description:
+      'list: the page’s recent requests (method, url, status, type, size, time), each with an id. get: one request by id, with safe response headers and a text body. Cookies and credentials are never shown.',
+    inputSchema: object(
+      {
+        name: NAME,
+        action: { type: 'string', enum: ['list', 'get'] },
+        id: { type: 'string', pattern: '^r\\d{1,9}$', description: 'get: a request id, e.g. "r12".' },
+        filter: { type: 'string', description: 'list: only URLs containing this.' },
+        types: {
+          type: 'array',
+          items: { type: 'string', enum: BROWSER_RESOURCE_TYPES },
+          description: 'list: only these kinds.',
+        },
+      },
+      ['name', 'action'],
+    ),
+  },
+  {
+    name: 'browser_emulate',
+    tool: 'browser.emulate',
+    description:
+      'Make a page look like another device or setting: viewport, media, geolocation, locale, timezone, cpuThrottle, network, permissions. reset puts it all back. Never the user agent.',
+    inputSchema: object(
+      {
+        name: NAME,
+        viewport: object({ width: { type: 'integer', minimum: 320 }, height: { type: 'integer', minimum: 240 } }, [
+          'width',
+          'height',
+        ]),
+        media: object({
+          colorScheme: { type: 'string', enum: ['light', 'dark', 'no-preference'] },
+          reducedMotion: { type: 'string', enum: ['reduce', 'no-preference'] },
+          forcedColors: { type: 'string', enum: ['active', 'none'] },
+          contrast: { type: 'string', enum: ['more', 'less', 'custom', 'no-preference'] },
+          print: { type: 'boolean', description: 'Lay out as for print.' },
+        }),
+        geolocation: object(
+          { latitude: { type: 'number' }, longitude: { type: 'number' }, accuracy: { type: 'number' } },
+          ['latitude', 'longitude'],
+        ),
+        locale: { type: 'string', description: 'e.g. "en-US".' },
+        timezone: { type: 'string', description: 'e.g. "Europe/Berlin".' },
+        cpuThrottle: { type: 'number', minimum: 1, maximum: BROWSER_CPU_THROTTLE_MAX, description: '1 is none.' },
+        network: object({
+          offline: { type: 'boolean' },
+          latency: { type: 'integer', minimum: 0, description: 'Added ms.' },
+          throughput: { type: 'integer', minimum: 1, description: 'Kilobits per second.' },
+        }),
+        permissions: { type: 'array', items: { type: 'string', enum: BROWSER_EMULATED_PERMISSIONS } },
+        reset: { type: 'boolean', description: 'Put everything back as it was.' },
+      },
+      ['name'],
+    ),
+  },
+  {
+    name: 'browser_upload',
+    tool: 'browser.upload',
+    description:
+      'Give a page files: a file input, or the button that opens the file picker (ref or selector). files are paths in your working folder, or {"attachment": "att_…"}. mode "drop" drops them on a dropzone with no input. Needs the files switch.',
+    inputSchema: object(
+      {
+        name: NAME,
+        ref: REF,
+        selector: SELECTOR,
+        files: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 20,
+          items: {
+            anyOf: [
+              { type: 'string', maxLength: 1024 },
+              { type: 'object', properties: { attachment: { type: 'string' } }, required: ['attachment'] },
+            ],
+          },
+        },
+        mode: { type: 'string', enum: ['input', 'drop'] },
+      },
+      ['name', 'files'],
+    ),
+  },
+  {
+    name: 'browser_download',
+    tool: 'browser.download',
+    description:
+      'Save a file the page downloaded (a result says "a download started … id dl-1") into your working folder: downloads/<its name> unless saveAs says where. Refuses to overwrite unless overwrite is true. Needs the files switch.',
+    inputSchema: object(
+      {
+        name: NAME,
+        id: { type: 'string', description: 'The download id from the result, e.g. "dl-1"; the latest when absent.' },
+        saveAs: { type: 'string', maxLength: 1024, description: 'A path inside your working folder.' },
+        overwrite: { type: 'boolean' },
+      },
+      ['name'],
+    ),
+  },
+  {
+    name: 'browser_pdf',
+    tool: 'browser.pdf',
+    description:
+      'Print the page to a PDF in your working folder (downloads/<title>.pdf unless saveAs says where). Needs a headless browser, not the Real window mode. Refuses to overwrite unless overwrite is true. Needs the files switch.',
+    inputSchema: object(
+      {
+        name: NAME,
+        saveAs: { type: 'string', maxLength: 1024, description: 'A path inside your working folder.' },
+        overwrite: { type: 'boolean' },
+      },
+      ['name'],
+    ),
+  },
+  {
+    name: 'browser_hover',
+    tool: 'browser.hover',
+    description: 'Move the pointer over an element (ref or selector) or a point (x, y): menus, tooltips, hover states.',
+    inputSchema: object({ name: NAME, ref: REF, selector: SELECTOR, x: COORDINATE, y: COORDINATE }, ['name']),
+  },
+  {
+    name: 'browser_drag',
+    tool: 'browser.drag',
+    description:
+      'Drag from one element to another (fromRef/fromSelector to toRef/toSelector): drag and drop. Or from a point to a point (fromX, fromY to toX, toY, in steps): sliders, canvases, maps.',
+    inputSchema: object(
+      {
+        name: NAME,
+        fromRef: REF,
+        fromSelector: SELECTOR,
+        fromX: COORDINATE,
+        fromY: COORDINATE,
+        toRef: REF,
+        toSelector: SELECTOR,
+        toX: COORDINATE,
+        toY: COORDINATE,
+        steps: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 100,
+          description: 'Points only: moves on the way. 10 by default.',
+        },
+      },
+      ['name'],
+    ),
+  },
+  {
+    name: 'browser_mouse',
+    tool: 'browser.mouse',
+    description:
+      'Low-level mouse: action move (x, y), down or up (button), or wheel (deltaX, deltaY up to ±20000 pixels). Give x, y to move there first.',
+    inputSchema: object(
+      {
+        name: NAME,
+        action: { type: 'string', enum: ['move', 'down', 'up', 'wheel'] },
+        x: COORDINATE,
+        y: COORDINATE,
+        button: { type: 'string', enum: ['left', 'right', 'middle'] },
+        deltaX: { type: 'number', minimum: -20000, maximum: 20000 },
+        deltaY: { type: 'number', minimum: -20000, maximum: 20000 },
+      },
+      ['name', 'action'],
+    ),
+  },
+  {
+    name: 'browser_press',
+    tool: 'browser.press',
+    description:
+      'Press up to 32 keys in order, e.g. ["Enter"], ["ArrowDown"], ["Control+Shift+K"]. Modifiers Alt, Control, ControlOrMeta, Meta, Shift, then a named key or one character. ref/selector focuses an element first. Never a secret.',
+    inputSchema: object(
+      {
+        name: NAME,
+        keys: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 32 },
+        ref: REF,
+        selector: SELECTOR,
+      },
+      ['name', 'keys'],
+    ),
+  },
+  {
+    name: 'browser_scroll',
+    tool: 'browser.scroll',
+    description:
+      'Scroll one way: an element into view (ref or selector), to the first place a text shows, by deltaX/deltaY pixels, or by pages (1 is a screen down, -1 up; up to ±20).',
+    inputSchema: object(
+      {
+        name: NAME,
+        ref: REF,
+        selector: SELECTOR,
+        text: { type: 'string' },
+        deltaX: { type: 'number', minimum: -20000, maximum: 20000 },
+        deltaY: { type: 'number', minimum: -20000, maximum: 20000 },
+        pages: { type: 'number', minimum: -20, maximum: 20 },
+      },
+      ['name'],
+    ),
+  },
+  {
+    name: 'browser_select',
+    tool: 'browser.select',
+    description: 'Choose options of a select (ref or selector), by value or label. Up to 64.',
+    inputSchema: object(
+      { name: NAME, ref: REF, selector: SELECTOR, values: { type: 'array', items: { type: 'string' }, minItems: 1 } },
+      ['name', 'values'],
+    ),
+  },
+  {
+    name: 'browser_check',
+    tool: 'browser.check',
+    description: 'Tick (checked true) or untick (false) a checkbox or radio button (ref or selector).',
+    inputSchema: object({ name: NAME, ref: REF, selector: SELECTOR, checked: { type: 'boolean' } }, [
+      'name',
+      'checked',
+    ]),
+  },
+  {
+    name: 'browser_fill_form',
+    tool: 'browser.fill_form',
+    description:
+      'Fill up to 32 fields in one call. Each: ref or selector, plus exactly one of text, checked, option (select), value (slider, date, colour). Never a secret: a password field is flagged.',
+    inputSchema: object(
+      {
+        name: NAME,
+        fields: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 32,
+          items: object({
+            ref: REF,
+            selector: SELECTOR,
+            text: { type: 'string' },
+            checked: { type: 'boolean' },
+            option: { type: 'string' },
+            value: { type: 'string' },
+          }),
+        },
+      },
+      ['name', 'fields'],
+    ),
+  },
+  {
+    name: 'browser_highlight',
+    tool: 'browser.highlight',
+    description:
+      'Outline an element (ref or selector) so the person watching sees what you mean. clear: true removes it.',
+    inputSchema: object({ name: NAME, ref: REF, selector: SELECTOR, clear: { type: 'boolean' } }, ['name']),
   },
   {
     name: 'browser_close',

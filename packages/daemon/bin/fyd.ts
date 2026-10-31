@@ -273,6 +273,7 @@ import {
   LoadSafeWorker,
   ManifestAccountInventory,
   MCP_OAUTH_SECRETS_DOCUMENT,
+  NodeAgentFilesystem,
   NodeBrowserLoginRuntime,
   NodeCatalog,
   NodeConversationFiles,
@@ -555,6 +556,7 @@ import {
 } from '../src/lib/analytics/pricing-service.ts';
 import {
   AgendaCardLinks,
+  AgendaToTestLanes,
   BOARD_SWEEP_INTERVAL_MS,
   BoardService,
   BoardSweep,
@@ -637,6 +639,7 @@ import {
   AgendaTurnNudge,
   AgendaWaker,
   type AgentInputPort,
+  AgentFiles,
   AgentSendFailureNotifier,
   AgentToolService,
   ANALYTICS_BACKSTOP_MS,
@@ -5983,6 +5986,7 @@ function createAgentToolsSubsystem(input: {
   readonly input: AgentInputPort;
   readonly scrub: (sessionId: string, text: string) => string;
   readonly quarantinedUntil: (sessionId: string, names: readonly (string | undefined)[]) => number | undefined;
+  readonly files: AgentFiles;
   /** The vault redactor every operator read is scrubbed by; a page's text goes through it too. */
   readonly redactor: Pick<SecretRedactor, 'batch'>;
 }): MountedSubsystems['agentTools'] {
@@ -6013,6 +6017,7 @@ function createAgentToolsSubsystem(input: {
       browser: input.browser,
       control,
       policy: input.policy,
+      files: input.files,
       audit: input.audit,
       input: input.input,
       scrub: input.scrub,
@@ -8615,6 +8620,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           return setting === undefined ? undefined : resolveBrowserProxy(setting, await secretVault.values());
         },
         display: agentBrowserDisplay,
+        // Where the worker keeps a page's downloads until the agent saves them (or fifteen minutes pass).
+        stageDirectory: join(paths.temporary, 'browser-stage'),
       },
     ),
     relayDirectory: new HostedRelayDirectory(environment.relayDirectoryOrigin()),
@@ -9234,6 +9241,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // The Unfiled board's cards that belong on a project's board are refiled there: by a linked PR's repository,
       // else by the folder the card's ferret works in (registering its repository by `ProjectAdoption`'s rules).
       // ONE instance, so the watcher's tick and the boot run never overlap.
+      const boardLaneProposer = new InferredLaneProposer(laneSets, new GitProjectFacts());
       const unfiledRefiler = new UnfiledRefiler({
         board: boardWorld.board,
         sessions: new SessionBoardResolver(
@@ -9246,6 +9254,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           ),
           boardWorld.adoption,
         ),
+        // A target with no lanes gets the ones its folder suggests first, as the card's ferret: one agenda choice.
+        lanes: {
+          laneSet: async projectId => await laneSets.laneSet(projectId),
+          propose: async (projectId, sessionId) => await boardLaneProposer.propose(projectId, sessionId),
+        },
         projects: { projects: async () => await catalogs.projects() },
         copies: boardCopies,
         clock: { now: () => clock.now() },
@@ -9712,6 +9725,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // the CLI's, a harness question's and a Warden escalation's alike.
         new StorageSessionFocus(storage),
         new StorageSubFerretDirectory(storage),
+        // A to-do or review on a card waiting to be tried offers the owner to close it with the answer.
+        new AgendaToTestLanes(
+          async id => {
+            const found = await boardWorld.board.task(id);
+            return { task: found.task, laneSet: found.laneSet };
+          },
+          () => attachmentDaemonId,
+        ),
       );
       // Off unless `attention.resurfaceAfterMinutes` is set: asks left in discussion that long surface themselves.
       if (agendaConfig.resurfaceAfterMinutes !== undefined) {
@@ -10436,7 +10457,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         releaseSession: browserService.releaseSession.bind(browserService),
         openPage: browserService.openPage.bind(browserService),
         actOnPage: browserService.actOnPage.bind(browserService),
+        filesOnPage: browserService.filesOnPage.bind(browserService),
         closePage: browserService.closePage.bind(browserService),
+        lifecycleOnPage: browserService.lifecycleOnPage.bind(browserService),
+        adoptPage: browserService.adoptPage.bind(browserService),
         closeAll: browserService.closeAll.bind(browserService),
         stream: async (sessionId, downstream) => {
           let viewer: BrowserViewerStream | undefined;
@@ -11235,6 +11259,21 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           input: inputRequestService,
           scrub: (sessionId, text) => inputRequestService.scrub(sessionId, text),
           quarantinedUntil: (sessionId, names) => inputRequestService.quarantinedUntil(sessionId, names),
+          files: new AgentFiles({
+            fs: new NodeAgentFilesystem(),
+            folderOf: async sessionId => {
+              const id = tryParseSessionId(sessionId);
+              if (id === undefined || storage.findSession(id) === undefined) return undefined;
+              const config = SessionConfigSchema.safeParse(await storage.readConfig(id).catch(() => undefined));
+              return config.success ? config.data.cwd : undefined;
+            },
+            readAttachment: async (sessionId, attachmentId) => {
+              const { attachment, bytes } = await attachmentStore.download(sessionId, attachmentId);
+              return { filename: attachment.filename, bytes };
+            },
+            uploadDirectory: join(paths.temporary, 'browser-upload'),
+            token: () => crypto.randomUUID().replaceAll('-', ''),
+          }),
           redactor: secretRedactor,
         }),
         configFiles: createConfigFilesSubsystem({

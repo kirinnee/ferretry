@@ -1,7 +1,15 @@
 import {
   BROWSER_MAX_PAGE_ID_LENGTH,
   type BrowserChallenge,
+  BROWSER_DIALOG_MESSAGE_MAX_CHARS,
+  type BrowserDialogInfo,
+  BrowserDialogInfoSchema,
+  BrowserDialogTypeSchema,
+  type BrowserPageLifecycleReply,
   BrowserChallengeProviderSchema,
+  BROWSER_MAX_DOWNLOAD_NOTICES,
+  type BrowserDownloadNotice,
+  BrowserDownloadNoticeSchema,
   type BrowserErrorCode,
   type BrowserPageActionSnapshot,
   BrowserPageActionSnapshotSchema,
@@ -21,6 +29,8 @@ export const MAX_WORKER_ERROR_CHARS = 200;
 export const MAX_SCREENSHOT_BASE64_CHARS = 24 * 1024 * 1024;
 export const MAX_FRAME_BASE64_CHARS = 16 * 1024 * 1024;
 export const MAX_READ_TEXT_CHARS = 200_000;
+/** A body of 64 KiB plus its headers and log lines, with room for multi-byte text. */
+export const MAX_LIFECYCLE_TEXT_CHARS = 300_000;
 /**
  * A screenshot reply is the largest legitimate record. Anything past it plus JSON overhead is a
  * worker that has lost the protocol, and there is no resynchronization point before the newline.
@@ -162,12 +172,76 @@ export function normalizeWorkerActionSnapshot(value: unknown): WorkerSnapshotRes
   if (actedPageId === undefined) return { ok: false, message: 'browser worker returned no acted page' };
   const snapshot = normalizeWorkerSnapshot(value);
   if (!snapshot.ok) return snapshot;
-  return parsed(BrowserPageActionSnapshotSchema, { ...snapshot.value, actedPageId });
+  const downloads = normalizeWorkerDownloads(asRecord(value)['downloads']);
+  // Only the exact value means anything: the worker found a password input.
+  const passwordField = asRecord(value)['passwordField'] === true;
+  return parsed(BrowserPageActionSnapshotSchema, {
+    ...snapshot.value,
+    actedPageId,
+    ...(downloads.length === 0 ? {} : { downloads }),
+    ...(passwordField ? { passwordField: true as const } : {}),
+  });
+}
+
+/** Downloads the worker says this act started or finished: each one parsed, the unusable ones dropped. */
+export function normalizeWorkerDownloads(value: unknown): readonly BrowserDownloadNotice[] {
+  if (!Array.isArray(value)) return [];
+  const notices: BrowserDownloadNotice[] = [];
+  for (const item of value.slice(0, BROWSER_MAX_DOWNLOAD_NOTICES)) {
+    const record = asRecord(item);
+    const notice = BrowserDownloadNoticeSchema.safeParse({
+      id: record['id'],
+      name: bounded(record['name'], 255) || 'download',
+      state: record['state'],
+      ...(typeof record['size'] === 'number' && Number.isSafeInteger(record['size']) && record['size'] >= 0
+        ? { size: record['size'] }
+        : {}),
+    });
+    if (notice.success) notices.push(notice.data);
+  }
+  return notices;
+}
+
+/** A file the worker staged for the daemon to save: an absolute path in the worker's own directory, a name and a size. */
+export interface WorkerStagedFile {
+  readonly path: string;
+  readonly name: string;
+  readonly size: number;
+}
+
+export function normalizeWorkerStaged(value: unknown): WorkerStagedFile | undefined {
+  const staged = asRecord(asRecord(value)['staged']);
+  const path = staged['path'];
+  const size = staged['size'];
+  if (typeof path !== 'string' || path === '' || path.length > 4_096 || typeof size !== 'number') return undefined;
+  if (!Number.isSafeInteger(size) || size < 0) return undefined;
+  return { path, name: bounded(staged['name'], 255) || 'download', size };
 }
 
 /** Text results are bounded here so no page content can grow without limit inside the daemon. */
 export function boundedReadText(value: unknown): string {
   return bounded(asRecord(value)['text'], MAX_READ_TEXT_CHARS);
+}
+
+/** The dialog a page is waiting on, if the worker reported one the wire knows. */
+export function normalizeWorkerDialog(value: unknown): BrowserDialogInfo | undefined {
+  const raw = asRecord(asRecord(value)['dialog']);
+  const dialog = BrowserDialogInfoSchema.safeParse({
+    type: raw['type'],
+    message: bounded(raw['message'], BROWSER_DIALOG_MESSAGE_MAX_CHARS),
+  });
+  return dialog.success ? dialog.data : undefined;
+}
+
+/** What a lifecycle request answers with, bounded: its text is page-derived and is scrubbed by the caller. */
+export function normalizeLifecycleReply(value: unknown): BrowserPageLifecycleReply {
+  const raw = asRecord(asRecord(value)['lifecycle']);
+  const dialogType = BrowserDialogTypeSchema.safeParse(raw['dialogType']);
+  return {
+    text: bounded(raw['text'], MAX_LIFECYCLE_TEXT_CHARS),
+    ...(typeof raw['matched'] === 'boolean' ? { matched: raw['matched'] } : {}),
+    ...(dialogType.success ? { dialogType: dialogType.data } : {}),
+  };
 }
 
 export function boundedScreenshot(value: unknown): string {

@@ -105,3 +105,24 @@ export const isReleaseLane = (laneSet: DoneLanes | null, laneId: string): boolea
     lanes.filter(lane => lane.category === 'shipped').at(-1);
   return release !== undefined && release.id === laneId;
 };
+
+/** The one row of answers a card wears: Done + Not good (`verdict`), Done alone (`done`), or none. */
+export type AnswerRow = 'verdict' | 'done' | null;
+
+export interface AnswerRowInput {
+  readonly category: LaneCategory | null;
+  /** The owner can move this card from here (a read-only list cannot ask Not good). */
+  readonly movable: boolean;
+  /** The Done a host would draw as a row of its own, or `null` when it draws none. */
+  readonly done: BoardDone | null;
+}
+
+/**
+ * THE ONLY DECISION ABOUT A CARD'S ANSWER ROW, so no card ever draws two Done buttons. A card in a verify lane
+ * gets the verdict row (Done + Not good), even when that lane is also where a release enters; any other card
+ * that has a Done to offer (a classic board's Released lane) gets the Done-only row. The ⋯ menu is not a row.
+ */
+export const answerRowOf = ({ category, movable, done }: AnswerRowInput): AnswerRow => {
+  if (movable && category === 'verify') return 'verdict';
+  return done?.kind === 'done' ? 'done' : null;
+};

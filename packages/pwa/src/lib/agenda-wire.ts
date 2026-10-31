@@ -37,6 +37,8 @@ export class AgendaWireDirectory {
   readonly #wires = new Map<DaemonId, AgendaWire>();
   /** Whether each read machine can snooze (`agenda.snooze.1`); absent until its health answered. */
   readonly #snooze = new Map<DaemonId, boolean>();
+  /** Whether each read machine takes an offer to close a card (`agenda.offer-close.1`); absent until its health answered. */
+  readonly #offerClose = new Map<DaemonId, boolean>();
   readonly #listeners = new Set<() => void>();
 
   subscribe = (listener: () => void): (() => void) => {
@@ -57,21 +59,30 @@ export class AgendaWireDirectory {
     return this.#snooze.get(daemonId);
   }
 
+  /**
+   * Whether the machine takes `offerClose` on an item (`agenda.offer-close.1`): the app offers "Done · closes"
+   * only where it does. `undefined` until its health answered, which offers nothing.
+   */
+  offerCloseOf(daemonId: DaemonId): boolean | undefined {
+    return this.#offerClose.get(daemonId);
+  }
+
   note(daemonId: DaemonId, read: DaemonHealthRead): void {
     if (read.kind !== 'read') return;
     this.#snooze.set(daemonId, machineOffers(read, DAEMON_FEATURES.agendaSnooze));
-    this.#set(daemonId, agendaWireOf(read));
+    const offers = machineOffers(read, DAEMON_FEATURES.agendaOfferClose);
+    const changed = this.#offerClose.get(daemonId) !== offers;
+    this.#offerClose.set(daemonId, offers);
+    const wire = agendaWireOf(read);
+    const spelled = this.#wires.get(daemonId) !== wire;
+    this.#wires.set(daemonId, wire);
+    if (changed || spelled) this.#notify();
   }
 
   clearDaemon(daemonId: DaemonId): void {
     this.#snooze.delete(daemonId);
-    if (this.#wires.delete(daemonId)) this.#notify();
-  }
-
-  #set(daemonId: DaemonId, wire: AgendaWire): void {
-    if (this.#wires.get(daemonId) === wire) return;
-    this.#wires.set(daemonId, wire);
-    this.#notify();
+    const had = this.#offerClose.delete(daemonId);
+    if (this.#wires.delete(daemonId) || had) this.#notify();
   }
 
   #notify(): void {

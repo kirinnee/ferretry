@@ -17,7 +17,17 @@ import {
 } from '../../../src/lib/board-github/index.ts';
 import type { TranscriptTailResult } from '../../../src/lib/session/reads/service.ts';
 import type { TranscriptEvent } from '../../../src/lib/transcript/types.ts';
-import { card, FakeLanes, lanes, MemoryBoardStore, NOW, OTHER_PROJECT, PROJECT, world } from '../board/support.ts';
+import {
+  card,
+  FakeLanes,
+  lanes,
+  MemoryBoardStore,
+  NOW,
+  OTHER_PROJECT,
+  oldQuickLanes,
+  PROJECT,
+  world,
+} from '../board/support.ts';
 import { answer, prNode, prUrl, REPO, SHA } from './support.ts';
 
 const RELEASE: ReleasedIn = { version: '4.110.0', tag: 'v4.110.0', at: '2026-10-30T09:30:00Z' };
@@ -103,18 +113,19 @@ interface RigOptions {
 
 const rig = (options: RigOptions): Rig => {
   const store = new MemoryBoardStore(options.cards);
+  const boardLanes =
+    options.lanes ??
+    new FakeLanes(
+      new Map([
+        [PROJECT, lanes(PROJECT)],
+        [OTHER_PROJECT, lanes(OTHER_PROJECT, 'pr')],
+        [UNFILED_PROJECT_ID, lanes(UNFILED_PROJECT_ID, 'quick')],
+      ]),
+    );
   const service = new BoardService(
     world({
       store,
-      lanes:
-        options.lanes ??
-        new FakeLanes(
-          new Map([
-            [PROJECT, lanes(PROJECT)],
-            [OTHER_PROJECT, lanes(OTHER_PROJECT, 'pr')],
-            [UNFILED_PROJECT_ID, lanes(UNFILED_PROJECT_ID, 'quick')],
-          ]),
-        ),
+      lanes: boardLanes,
     }),
   );
   const gh = options.gh ?? new FakeGh();
@@ -170,6 +181,7 @@ const rig = (options: RigOptions): Rig => {
     unfiled: new UnfiledRefiler({
       board,
       sessions: { boardOf: async sessionId => options.sessionBoards?.[sessionId] ?? null },
+      lanes: { laneSet: async projectId => await boardLanes.laneSet(projectId), propose: async () => null },
       projects,
       copies,
       clock: { now },
@@ -746,7 +758,49 @@ describe('GitHubWatcher: nudges and refiling', () => {
     should(subject.stored()).match({ projectId: OTHER_PROJECT, laneId: 'implement' });
   });
 
-  it('should warn once about a card it cannot refile, and about projects it cannot list', async () => {
+  it('should move a card whose PRs were all final before its lane set changed, on the next tick, asking GitHub nothing (&F116)', async () => {
+    // Arrange: every PR merged and released, cached long ago, while Unfiled still had the quick lanes from before To test.
+    const final = (number: number, version: string) =>
+      link(number, {
+        state: 'merged',
+        checks: 'passing',
+        mergedAt: '2026-10-30T14:10:43Z',
+        mergeSha: SHA,
+        releasedIn: { version, tag: `v${version}`, at: '2026-10-30T14:45:03Z' },
+        polledAt: '2026-10-30T14:45:45.681Z',
+      });
+    const sets = new Map([[UNFILED_PROJECT_ID, oldQuickLanes(UNFILED_PROJECT_ID)]]);
+    const subject = rig({
+      cards: [
+        withLinks([final(990, '4.128.0'), final(1048, '4.140.0'), final(1063, '4.142.0')], {
+          id: 'F116',
+          projectId: UNFILED_PROJECT_ID,
+          laneId: 'doing',
+        }),
+      ],
+      lanes: new FakeLanes(sets),
+      projects: [],
+    });
+    await subject.watcher.tick();
+    should(subject.stored('F116').laneId).equal('doing');
+
+    // Act: the boot migration gives the set its To test lane.
+    sets.set(UNFILED_PROJECT_ID, lanes(UNFILED_PROJECT_ID, 'quick'));
+    await subject.watcher.tick();
+
+    // Assert
+    should(subject.stored('F116').laneId).equal('to-test');
+    should(subject.stored('F116').history.at(-1)).match({
+      type: 'moved',
+      from: 'doing',
+      to: 'to-test',
+      trigger: 'release.published',
+      reason: 'PR #990, #1048, #1063 released in 4.128.0, 4.140.0, 4.142.0',
+    });
+    should(subject.gh.polls()).equal(0);
+  });
+
+  it('should warn once about a project it cannot give lanes to, and about projects it cannot list', async () => {
     const subject = rig({
       cards: [
         withLinks([link(940, { state: 'closed', polledAt: NOW })], {
@@ -759,7 +813,7 @@ describe('GitHubWatcher: nudges and refiling', () => {
     await subject.watcher.tick();
     await subject.watcher.tick();
     should(subject.warnings).have.length(1);
-    should(subject.warnings[0]).match(/^Unfiled board: could not refile &F1: /u);
+    should(subject.warnings[0]).match(/^Unfiled board: could not propose lanes for project /u);
 
     const unlisted = rig({ cards: [], listProjects: async () => Promise.reject(new Error('registry damaged')) });
     await unlisted.watcher.tick();

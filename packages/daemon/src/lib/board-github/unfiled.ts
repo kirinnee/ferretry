@@ -10,13 +10,23 @@
  *      ferret's first card follows (`ProjectAdoption`: never the home folder, a temp or scratch folder, a
  *      folder that is not a git repository, or one outside every project root).
  *
+ * A project that has no lanes yet (one registered before projects got lanes, or by hand) is given the lanes its
+ * folder suggests first, unconfirmed and raised as the owner's one agenda choice, and the card is refiled in the
+ * same pass.
+ *
  * It runs on every watcher tick and once at boot, and is idempotent: a refiled card is no longer Unfiled, a
  * card someone put on the Unfiled board on purpose stays there, and two runs never overlap — a run asked for
  * while one is going gets that one's answer. A ferret whose folder said nothing is asked again only after
  * {@link SESSION_BOARD_RETRY_MS}, so a board of old cards costs no git call per card per tick. It never
  * throws: a card it cannot refile is reported once, and the rest go on.
  */
-import { type BoardProjectId, type BoardTask, formatTaskRef, UNFILED_PROJECT_ID } from '@ferretry/protocol';
+import {
+  type BoardProjectId,
+  type BoardTask,
+  formatTaskRef,
+  type LaneSet,
+  UNFILED_PROJECT_ID,
+} from '@ferretry/protocol';
 import type { BoardDiagnostics } from '../board/index.ts';
 import { isRefilable, PROJECT_REMOTES_TTL_MS, type RefileTarget, refileTargets, repoKey } from './plan.ts';
 import type { ProjectFolders, WatchedBoard, WatcherClock, WorkingCopies } from './ports.ts';
@@ -36,9 +46,20 @@ export interface SessionBoards {
   boardOf(sessionId: string): Promise<BoardProjectId | null>;
 }
 
+/**
+ * A target project's lanes, and the proposal that gives a project with none the lanes its folder suggests:
+ * unconfirmed, live at once, and raised as the one agenda choice on `sessionId`. `null` when it could not.
+ */
+interface TargetLanes {
+  laneSet(projectId: BoardProjectId): Promise<LaneSet | null>;
+  propose(projectId: BoardProjectId, sessionId: string): Promise<LaneSet | null>;
+}
+
 export interface UnfiledRefilerPorts {
   readonly board: Pick<WatchedBoard, 'snapshot' | 'act'>;
   readonly sessions: SessionBoards;
+  /** The target's lanes, and the inferred proposal for a project that has none (`InferredLaneProposer`). */
+  readonly lanes: TargetLanes;
   /** Read when a run is not handed the remotes (the boot run); the watcher hands its own. */
   readonly projects: ProjectFolders;
   readonly copies: Pick<WorkingCopies, 'repositoryOf'>;
@@ -148,9 +169,13 @@ export class UnfiledRefiler {
     return projectId;
   }
 
-  /** Refiles one card as the daemon; `true` when it moved. */
+  /**
+   * Refiles one card as the daemon; `true` when it moved. A project with no lanes yet gets the ones its folder
+   * suggests first, proposed as the card's ferret (the owner's one agenda choice), so the refile can land.
+   */
   private async refile(target: RefileTarget): Promise<boolean> {
     try {
+      if (!(await this.hasLanes(target))) return false;
       await this.ports.board.act(
         target.card.id,
         { action: 'refile', projectId: target.projectId, reason: target.reason },
@@ -165,6 +190,20 @@ export class UnfiledRefiler {
       );
       return false;
     }
+  }
+
+  /** Whether the target has lanes, proposing them when it has none; a project it could not propose for waits. */
+  private async hasLanes(target: RefileTarget): Promise<boolean> {
+    if ((await this.ports.lanes.laneSet(target.projectId)) !== null) return true;
+    if ((await this.ports.lanes.propose(target.projectId, target.card.owner)) !== null) {
+      this.warned.delete(`lanes:${target.projectId}`);
+      return true;
+    }
+    this.warnOnce(
+      `lanes:${target.projectId}`,
+      `Unfiled board: could not propose lanes for project ${target.projectId}, so its cards stay Unfiled for now`,
+    );
+    return false;
   }
 
   private warnOnce(key: string, message: string): void {

@@ -146,11 +146,21 @@ class FakeBrowser {
     },
     click: async pageId => this.act('click', pageId),
     type: async pageId => this.act('type', pageId),
+    pointer: async (pageId, act) => this.act(`pointer-${act.action}`, pageId),
     read: async (pageId, options) => ({
       ...this.act(`read-${options?.mode ?? 'text'}`, pageId),
       text: 'Sign in to continue',
     }),
     screenshot: async pageId => ({ ...this.act('screenshot', pageId), screenshotBase64: 'iVBORw0KGgo=' }),
+    upload: async pageId => this.act('upload', pageId),
+    download: async pageId => ({
+      ...this.act('download', pageId),
+      staged: { path: '/stage/dl-1', name: 'report.csv', size: 3 },
+    }),
+    pdf: async pageId => ({
+      ...this.act('pdf', pageId),
+      staged: { path: '/stage/pdf-1', name: 'page.pdf', size: 5 },
+    }),
     back: async pageId => this.state(pageId),
     forward: async pageId => this.state(pageId),
     reload: async pageId => this.state(pageId),
@@ -171,6 +181,7 @@ class FakeBrowser {
       return { ...this.state(), actedPageId: pageId };
     },
     resize: async pageId => this.state(pageId),
+    lifecycle: async pageId => ({ ...this.state(pageId), lifecycle: { text: 'ok' } }),
     startScreencast: async () => undefined,
     stopScreencast: async () => undefined,
     dispatchInput: async pageId => {

@@ -3,7 +3,11 @@ import {
   BROWSER_MAX_PAGES,
   type BrowserAction,
   type BrowserActionResult,
+  type BrowserDialogInfo,
+  BrowserDialogInfoSchema,
   type BrowserInputEvent,
+  type BrowserPageLifecycleReply,
+  type BrowserPageLifecycleRequest,
   type BrowserPageActionSnapshot,
   type BrowserPageSnapshot,
   type BrowserPageSummary,
@@ -20,6 +24,8 @@ import {
 } from '@ferretry/protocol';
 import { agentSpokenName } from '../../names/session-names.ts';
 import type { BrowserAutomation } from '../transport/automation-contracts.ts';
+import type { BrowserUploadMode } from '../transport/page-acts.ts';
+import type { WorkerStagedFile } from '../transport/worker-protocol.ts';
 import type { BrowserViewerHost, ViewerAttachment, ViewerTerminalSignal } from '../transport/viewer-contracts.ts';
 
 export const DEFAULT_BROWSER_VIEWPORT: BrowserViewport = { width: 1280, height: 800 };
@@ -66,8 +72,56 @@ export interface BrowserSessionDirectory {
 /** What can be done to ONE named page: the agent tools' browser verbs. */
 export type BrowserPageAction = Extract<
   BrowserAction,
-  { readonly action: 'navigate' | 'click' | 'type' | 'read' | 'screenshot' | 'back' | 'forward' | 'reload' }
+  {
+    readonly action:
+      | 'navigate'
+      | 'click'
+      | 'type'
+      | 'read'
+      | 'screenshot'
+      | 'back'
+      | 'forward'
+      | 'reload'
+      | 'hover'
+      | 'drag'
+      | 'mouse'
+      | 'press'
+      | 'scroll'
+      | 'select'
+      | 'check'
+      | 'fill-form'
+      | 'highlight';
+  }
 >;
+
+/** What a lifecycle request answered, and the dialog the page is waiting on afterwards, if it has one. */
+export interface BrowserLifecycleOutcome {
+  readonly reply: BrowserPageLifecycleReply;
+  readonly dialog?: BrowserDialogInfo;
+}
+
+/**
+ * What the FILE tools do to one page. Deliberately not part of {@link BrowserAction}: that is the wire a
+ * person's toolbar posts, and a host path must never be something it can carry. These come only from the
+ * daemon's own file service, which has already confined every path.
+ */
+export type BrowserFileAction =
+  | {
+      readonly action: 'upload';
+      readonly target: BrowserElementTarget;
+      /** Absolute paths the file service resolved and size-checked. */
+      readonly paths: readonly string[];
+      readonly mode: BrowserUploadMode;
+    }
+  | { readonly action: 'download'; readonly downloadId?: string }
+  | { readonly action: 'pdf' };
+
+/** A file act's answer: the usual status and page, plus the file the browser staged when the act made one. */
+export interface BrowserFileResult {
+  readonly status: BrowserActionResult['status'];
+  readonly result: BrowserPageActionSnapshot;
+  readonly staged?: WorkerStagedFile;
+}
 
 /** How a named page is opened. */
 export interface BrowserOpenOptions {
@@ -100,6 +154,26 @@ export interface BrowserSubsystem extends BrowserViewerHost {
     action: BrowserPageAction,
     guard?: BrowserActGuard,
   ): Promise<BrowserActionResult>;
+  /**
+   * A page-lifecycle request on this session's page: answer its dialog, wait a moment for a condition,
+   * read its console or network log, or emulate a device. A dialog answer and a log read are NOT queued
+   * behind the page's other work — the work in front of them may be stuck on that very dialog.
+   */
+  lifecycleOnPage(
+    sessionId: string,
+    key: string,
+    request: BrowserPageLifecycleRequest,
+    guard?: BrowserActGuard,
+  ): Promise<BrowserLifecycleOutcome>;
+  /** Names a page of this session that has no name — a popup its page opened — and credits `openedBy` with it. */
+  adoptPage(sessionId: string, key: string, name: string, openedBy?: SurfaceOpener): Promise<BrowserPageSummary>;
+  /** The file tools' acts on this session's page: the same queue, guard and rules as {@link actOnPage}. */
+  filesOnPage(
+    sessionId: string,
+    key: string,
+    action: BrowserFileAction,
+    guard?: BrowserActGuard,
+  ): Promise<BrowserFileResult>;
   /** Closes this session's page with this name (or id). An incognito page's whole context goes with it. */
   closePage(sessionId: string, key: string, guard?: BrowserActGuard): Promise<void>;
   /** A session ended: every page it owns closes, and every incognito context it held is discarded. */
@@ -233,6 +307,81 @@ export class BrowserSessionService implements BrowserSubsystem {
       run.snapshot = pageOf(result);
       this.touch(run);
       return { status: this.project(run, sessionId), result };
+    });
+  }
+
+  async lifecycleOnPage(
+    sessionId: string,
+    key: string,
+    request: BrowserPageLifecycleRequest,
+    guard?: BrowserActGuard,
+  ): Promise<BrowserLifecycleOutcome> {
+    await this.requireSession(sessionId);
+    const run = this.requireRunning();
+    const page = this.requirePage(run, sessionId, key);
+    const perform = async (): Promise<BrowserLifecycleOutcome> => {
+      const answered = await run.driver.lifecycle(page.id, request);
+      run.snapshot = pageOf(answered);
+      if (request.op === 'emulate') {
+        const { viewport, reset } = request.emulation;
+        if (reset === true) run.viewports.delete(page.id);
+        if (viewport !== undefined) run.viewports.set(page.id, viewport);
+      }
+      this.touch(run);
+      return { reply: answered.lifecycle, ...(answered.dialog === undefined ? {} : { dialog: answered.dialog }) };
+    };
+    if (request.op === 'dialog' || request.op === 'console' || request.op === 'network') {
+      await guard?.();
+      return await perform();
+    }
+    return await this.exclusive(page.id, async () => {
+      await guard?.();
+      return await perform();
+    });
+  }
+
+  async adoptPage(sessionId: string, key: string, name: string, openedBy?: SurfaceOpener): Promise<BrowserPageSummary> {
+    await this.requireSession(sessionId);
+    const run = this.requireRunning();
+    run.snapshot = pageOf(await run.driver.location());
+    const page = this.requirePage(run, sessionId, key);
+    const named = run.names.get(page.id);
+    if (named !== undefined) throw new BrowserSessionError('conflict', `that page already has the name ${named}`);
+    if (this.page(run, sessionId, name) !== undefined)
+      throw new BrowserSessionError('conflict', `this session already has a browser page named ${name}`);
+    run.owners.set(page.id, sessionId);
+    run.names.set(page.id, name);
+    if (openedBy !== undefined) run.openers.set(page.id, openedBy);
+    return this.named(run, page.id);
+  }
+
+  async filesOnPage(
+    sessionId: string,
+    key: string,
+    action: BrowserFileAction,
+    guard?: BrowserActGuard,
+  ): Promise<BrowserFileResult> {
+    await this.requireSession(sessionId);
+    const run = this.requireRunning();
+    const page = this.requirePage(run, sessionId, key);
+    return await this.exclusive(page.id, async () => {
+      await guard?.();
+      let staged: WorkerStagedFile | undefined;
+      let result: BrowserPageActionSnapshot;
+      if (action.action === 'upload')
+        result = await run.driver.upload(page.id, action.target, action.paths, action.mode);
+      else {
+        const done =
+          action.action === 'download'
+            ? await run.driver.download(page.id, action.downloadId)
+            : await run.driver.pdf(page.id);
+        const { staged: file, ...snapshot } = done;
+        staged = file;
+        result = snapshot;
+      }
+      run.snapshot = pageOf(result);
+      this.touch(run);
+      return { status: this.project(run, sessionId), result, ...(staged === undefined ? {} : { staged }) };
     });
   }
 
@@ -420,7 +569,7 @@ export class BrowserSessionService implements BrowserSubsystem {
     sessionId: string,
   ): Promise<BrowserActionResult> {
     return await this.exclusive(pageId, async () => {
-      const result = await work();
+      const result = withoutDialog(await work());
       run.snapshot = pageOf(result);
       this.touch(run);
       return { status: this.project(run, sessionId), result };
@@ -464,6 +613,16 @@ export class BrowserSessionService implements BrowserSubsystem {
           ...(action.format === undefined ? {} : { format: action.format }),
         });
       }
+      case 'hover':
+      case 'drag':
+      case 'mouse':
+      case 'press':
+      case 'scroll':
+      case 'select':
+      case 'check':
+      case 'fill-form':
+      case 'highlight':
+        return await run.driver.pointer(pageId, action);
       case 'back':
         return await run.driver.back(pageId);
       case 'forward':
@@ -655,6 +814,19 @@ export class BrowserSessionService implements BrowserSubsystem {
       if (this.serial.get(key) === next) this.serial.delete(key);
     }
   }
+}
+
+/** The dialog a worker reports is for an agent's tools; a person's response has no field for it. */
+function withoutDialog<T extends BrowserPageActionSnapshot>(result: T): T {
+  if (!('dialog' in result)) return result;
+  const { dialog: _dialog, ...rest } = result as T & { dialog?: unknown };
+  return rest as T;
+}
+
+/** The dialog an act's result carries, if the worker reported one the wire knows. */
+export function pendingDialogOf(result: unknown): BrowserDialogInfo | undefined {
+  const dialog = BrowserDialogInfoSchema.safeParse((result as { dialog?: unknown } | undefined)?.dialog);
+  return dialog.success ? dialog.data : undefined;
 }
 
 /**

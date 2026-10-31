@@ -289,6 +289,37 @@ describe('AboutMachineSurface', () => {
     expect(container.textContent).toContain('Update available');
   });
 
+  it('keeps the What’s new door open when the machine is older or did not answer', async () => {
+    for (const read of [new HttpRefusal('unknown route', 404, 'unknown_route'), new Error('the relay is down')]) {
+      let opened = 0;
+      const container = await show(new FakeMachine(read), 5, {
+        open: () => (opened += 1),
+        unread: true,
+        latest: '4.29.0',
+      });
+      const button = must(container.querySelector<HTMLElement>('[data-about-whats-new]'), 'button');
+      expect(container.querySelector('[data-about-whats-new-unread]')?.textContent).toBe('New');
+      await interact(() => button.click());
+      expect(opened).toBe(1);
+      await mounted?.unmount();
+    }
+  });
+
+  it('shows no What’s new door on an unreadable machine when no host is mounted', async () => {
+    const container = await show(new FakeMachine(new Error('the relay is down')));
+    expect(container.querySelector('[data-about-whats-new]')).toBeNull();
+  });
+
+  it('shows the door without a New badge on an unreadable machine once the latest entry was read', async () => {
+    const container = await show(new FakeMachine(new Error('the relay is down')), 5, {
+      open: () => undefined,
+      unread: false,
+      latest: '4.29.0',
+    });
+    expect(container.querySelector('[data-about-whats-new]')).not.toBeNull();
+    expect(container.querySelector('[data-about-whats-new-unread]')).toBeNull();
+  });
+
   it('says it is reading until the machine answers', async () => {
     mounted = await mount(
       <AboutMachineSurface connection={connection} createClient={() => new Promise(() => undefined)} />,

@@ -5,6 +5,7 @@
  *
  *   ?agenda=A55   the item is open on arrival (a `!A55` link, a notification tap)
  *   ?turn=idle    the ferret is waiting on the owner instead of working
+ *   ?info=tasks   the Info panel (a phone's sheet) opens on the Tasks tab, where the board's Expand lives
  *
  * The stand-in transcript the agenda harness draws carried its own `grid-area: 1 / 1`, so that harness stayed green
  * while the real transcript fell into a second grid row: the item view was squeezed to nothing and the inert
@@ -16,6 +17,7 @@ import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { SessionSearchProvider } from '../src/features/session-search/session-search.tsx';
 import { useAppViewport } from '../src/hooks/use-app-viewport.ts';
+import { useStateChatTasks } from '../src/hooks/use-chat-tasks-url.ts';
 import { useLayoutMode } from '../src/hooks/use-layout-mode.ts';
 import { DaemonAgendaClient } from '../src/lib/agenda-client.ts';
 import { agendaTargetFromSearch } from '../src/lib/agenda-inbox.ts';
@@ -212,6 +214,7 @@ function Harness() {
   useAppViewport();
   const presentation = useLayoutMode() === 'drawer' ? 'sheet' : 'pane';
   const [session, setSession] = useState(SESSION);
+  const tasks = useStateChatTasks();
   return (
     <div className="kt-shell flex flex-col overflow-hidden" id="harness-phone-chat">
       <div className="relative min-h-0 min-w-0 flex-1 px-1 sm:px-3" data-shell-main="">
@@ -232,7 +235,9 @@ function Harness() {
           daemonSessions={[session, ...CHILDREN]}
           dictationSettings={DEFAULT_STT_SETTINGS}
           entries={ENTRIES}
-          {...(withInfo === null ? {} : { initialInfo: 'overview' as const })}
+          {...(withInfo === null
+            ? {}
+            : { initialInfo: withInfo === 'tasks' ? ('tasks' as const) : ('overview' as const) })}
           onNavigate={to => window.history.pushState(null, '', `#nav=${to}`)}
           onOpenSessions={() => undefined}
           onSessionChange={setSession}
@@ -240,6 +245,7 @@ function Harness() {
           project="ferretry"
           readSnapshot={async () => ''}
           session={session}
+          tasksView={tasks}
         />
       </div>
     </div>

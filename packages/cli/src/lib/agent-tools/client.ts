@@ -63,6 +63,16 @@ export interface TerminalWait {
   readonly totalMs: number;
 }
 
+/** The `browser.wait_for` call a wait is made of; its `timeoutMs` is set per slice. */
+type BrowserWaitCall = Extract<AgentToolCall, { readonly tool: 'browser.wait_for' }>;
+
+/** A `browser.wait_for` as a caller asks for it: the one thing to wait for and a total budget. */
+export interface BrowserWait {
+  readonly call: BrowserWaitCall;
+  /** Up to {@link AGENT_TOOL_MAX_TOTAL_WAIT_MS}; ignored for a `time` wait, which is one request. */
+  readonly totalMs: number;
+}
+
 /**
  * How long one tool request may take. It must outlast the longest thing the daemon does inside one:
  * a page load (the worker gives a navigation 45 s) and a held-open wait ({@link AGENT_TOOL_MAX_WAIT_MS}).
@@ -160,6 +170,21 @@ export class AgentToolsClient {
         session,
       );
       if (result.matched === true || remaining <= 0) return result;
+    }
+  }
+
+  /**
+   * Waits up to `totalMs` for a page condition, in slices of at most {@link AGENT_TOOL_MAX_WAIT_MS}
+   * like {@link wait}. A `time` wait is a plain sleep and is asked once.
+   */
+  async browserWait(wait: BrowserWait, session?: string): Promise<AgentToolResult> {
+    if (wait.call.time !== undefined) return await this.call({ ...wait.call }, session);
+    let remaining = Math.min(Math.max(wait.totalMs, 100), AGENT_TOOL_MAX_TOTAL_WAIT_MS);
+    for (;;) {
+      const slice = Math.min(remaining, AGENT_TOOL_MAX_WAIT_MS);
+      remaining -= slice;
+      const result = await this.call({ ...wait.call, timeoutMs: Math.max(slice, 100) }, session);
+      if (result.matched !== false || remaining <= 0) return result;
     }
   }
 

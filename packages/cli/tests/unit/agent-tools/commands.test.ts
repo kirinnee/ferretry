@@ -182,6 +182,100 @@ describe('fy browser page', () => {
     ]);
   });
 
+  it('should turn the file verbs into upload, download and pdf calls, telling an attachment id from a path', async () => {
+    // Arrange
+    const { calls, run } = harness();
+    const attachment = `att_${'cd'.repeat(32)}`;
+
+    // Act
+    await run('browser', 'page', 'upload', 'app', '#file', 'reports/q3.pdf', attachment);
+    await run('browser', 'page', 'upload', 'app', 'e5', 'a.png', '--drop');
+    await run('browser', 'page', 'download', 'app');
+    await run('browser', 'page', 'download', 'app', 'data/out.csv', '--id', 'dl-3', '--overwrite');
+    await run('browser', 'page', 'pdf', 'app');
+    await run('browser', 'page', 'pdf', 'app', 'page.pdf', '--overwrite');
+
+    // Assert
+    should(calls).deepEqual([
+      {
+        kind: 'call',
+        call: { tool: 'browser.upload', name: 'app', selector: '#file', files: ['reports/q3.pdf', { attachment }] },
+      },
+      { kind: 'call', call: { tool: 'browser.upload', name: 'app', ref: 'e5', files: ['a.png'], mode: 'drop' } },
+      { kind: 'call', call: { tool: 'browser.download', name: 'app' } },
+      {
+        kind: 'call',
+        call: { tool: 'browser.download', name: 'app', id: 'dl-3', saveAs: 'data/out.csv', overwrite: true },
+      },
+      { kind: 'call', call: { tool: 'browser.pdf', name: 'app' } },
+      { kind: 'call', call: { tool: 'browser.pdf', name: 'app', saveAs: 'page.pdf', overwrite: true } },
+    ]);
+  });
+
+  it('should turn every pointer and keys verb into its tool call', async () => {
+    // Arrange
+    const { calls, run } = harness();
+
+    // Act
+    await run('browser', 'page', 'hover', 'app', 'e3');
+    await run('browser', 'page', 'hover', 'app', '10,20');
+    await run('browser', 'page', 'drag', 'app', 'e1', '#bin');
+    await run('browser', 'page', 'drag', 'app', '1,2', '300,2', '--steps', '25');
+    await run('browser', 'page', 'press', 'app', 'Control+a', 'Delete', '--on', 'e4');
+    await run('browser', 'page', 'scroll', 'app', '--to', 'e9');
+    await run('browser', 'page', 'scroll', 'app', '--text', 'Terms');
+    await run('browser', 'page', 'scroll', 'app', '--by', '0,-600');
+    await run('browser', 'page', 'scroll', 'app', '--pages', '1.5');
+    await run('browser', 'page', 'select', 'app', 'e5', 'uk', 'United States');
+    await run('browser', 'page', 'check', 'app', 'e6');
+    await run('browser', 'page', 'check', 'app', '#tos', '--off');
+    await run('browser', 'page', 'highlight', 'app', 'e2');
+    await run('browser', 'page', 'highlight', 'app', '--clear');
+
+    // Assert
+    should(calls).deepEqual(
+      [
+        { tool: 'browser.hover', name: 'app', ref: 'e3' },
+        { tool: 'browser.hover', name: 'app', x: 10, y: 20 },
+        { tool: 'browser.drag', name: 'app', fromRef: 'e1', toSelector: '#bin' },
+        { tool: 'browser.drag', name: 'app', fromX: 1, fromY: 2, toX: 300, toY: 2, steps: 25 },
+        { tool: 'browser.press', name: 'app', keys: ['Control+a', 'Delete'], ref: 'e4' },
+        { tool: 'browser.scroll', name: 'app', ref: 'e9' },
+        { tool: 'browser.scroll', name: 'app', text: 'Terms' },
+        { tool: 'browser.scroll', name: 'app', deltaX: 0, deltaY: -600 },
+        { tool: 'browser.scroll', name: 'app', pages: 1.5 },
+        { tool: 'browser.select', name: 'app', ref: 'e5', values: ['uk', 'United States'] },
+        { tool: 'browser.check', name: 'app', ref: 'e6', checked: true },
+        { tool: 'browser.check', name: 'app', selector: '#tos', checked: false },
+        { tool: 'browser.highlight', name: 'app', ref: 'e2' },
+        { tool: 'browser.highlight', name: 'app', clear: true },
+      ].map(call => ({ kind: 'call', call })),
+    );
+  });
+
+  it('should refuse a bad distance, or a point where only an element will do, before calling anything', async () => {
+    // Arrange
+    const { calls, run } = harness();
+    const refused = (work: Promise<unknown>) =>
+      work.then(
+        () => undefined,
+        (error: unknown) => (error as Error).message,
+      );
+
+    // Act
+    const messages = [
+      await refused(run('browser', 'page', 'scroll', 'app', '--by', '10')),
+      await refused(run('browser', 'page', 'scroll', 'app', '--by', 'a,b')),
+      await refused(run('browser', 'page', 'scroll', 'app', '--pages', 'lots')),
+      await refused(run('browser', 'page', 'select', 'app', '1,2', 'uk')),
+      await refused(run('browser', 'page', 'press', 'app', 'a', '--on', '1,2')),
+    ];
+
+    // Assert
+    should(messages.every(message => message !== undefined)).be.true();
+    should(calls).deepEqual([]);
+  });
+
   it('should refuse a point where only an element will do, before calling anything', async () => {
     // Arrange
     const { calls, run } = harness();
@@ -240,5 +334,125 @@ describe('wholeNumber', () => {
     should(() => wholeNumber('2.5', '--lines')).throw('--lines must be a whole number, not "2.5"');
     should(() => wholeNumber('-1', '--timeout')).throw(/--timeout must be a whole number/u);
     should(() => wholeNumber('9'.repeat(20), '--lines')).throw(/whole number/u);
+  });
+});
+
+describe('fy browser page — the page lifecycle', () => {
+  it('should turn every verb into the matching tool call', async () => {
+    // Arrange
+    const { calls, run } = harness();
+
+    // Act
+    await run('browser', 'page', 'dialog', 'app', 'accept', '--text', 'yes');
+    await run('browser', 'page', 'dialog', 'app', 'dismiss');
+    await run('browser', 'page', 'tabs');
+    await run('browser', 'page', 'tabs', 'adopt', 'page-7', 'popup');
+    await run('browser', 'page', 'console', 'app', '--level', 'error', '--since', '12', '--limit', '30');
+    await run('browser', 'page', 'network', 'app', '--filter', '/api', '--type', 'xhr,fetch', '--type', 'script');
+    await run('browser', 'page', 'network', 'app', 'r12');
+    await run(
+      'browser',
+      'page',
+      'emulate',
+      'app',
+      '--viewport',
+      '390x844',
+      '--color-scheme',
+      'dark',
+      '--print',
+      '--geolocation',
+      '52.5,13.4,50',
+      '--locale',
+      'de-DE',
+      '--timezone',
+      'Europe/Berlin',
+      '--cpu-throttle',
+      '4',
+      '--offline',
+      '--latency',
+      '300',
+      '--throughput',
+      '500',
+      '--permission',
+      'geolocation',
+    );
+    await run('browser', 'page', 'emulate', 'app', '--reset');
+
+    // Assert
+    should(calls).deepEqual([
+      { kind: 'call', call: { tool: 'browser.dialog', name: 'app', action: 'accept', promptText: 'yes' } },
+      { kind: 'call', call: { tool: 'browser.dialog', name: 'app', action: 'dismiss' } },
+      { kind: 'call', call: { tool: 'browser.tabs', action: 'list' } },
+      { kind: 'call', call: { tool: 'browser.tabs', action: 'adopt', id: 'page-7', as: 'popup' } },
+      {
+        kind: 'call',
+        call: { tool: 'browser.console', name: 'app', level: 'error', since: 12, limit: 30 },
+      },
+      {
+        kind: 'call',
+        call: {
+          tool: 'browser.network',
+          name: 'app',
+          action: 'list',
+          filter: '/api',
+          types: ['xhr', 'fetch', 'script'],
+        },
+      },
+      { kind: 'call', call: { tool: 'browser.network', name: 'app', action: 'get', id: 'r12' } },
+      {
+        kind: 'call',
+        call: {
+          tool: 'browser.emulate',
+          name: 'app',
+          viewport: { width: 390, height: 844 },
+          media: { colorScheme: 'dark', print: true },
+          geolocation: { latitude: 52.5, longitude: 13.4, accuracy: 50 },
+          locale: 'de-DE',
+          timezone: 'Europe/Berlin',
+          cpuThrottle: 4,
+          network: { offline: true, latency: 300, throughput: 500 },
+          permissions: ['geolocation'],
+        },
+      },
+      { kind: 'call', call: { tool: 'browser.emulate', name: 'app', reset: true } },
+    ]);
+  });
+
+  it('should hand wait to the looping browser wait with its total budget', async () => {
+    // Arrange
+    const { calls, run } = harness();
+
+    // Act
+    await run('browser', 'page', 'wait', 'app', '--text', 'Welcome', '--timeout', '90000');
+    await run('browser', 'page', 'wait', 'app', '--selector', '#done', '--state', 'hidden', '-s', 's1');
+    await run('browser', 'page', 'wait', 'app', '--time', '1500');
+
+    // Assert
+    should(calls).deepEqual([
+      { kind: 'browser-wait', call: { name: 'app', text: 'Welcome' }, totalMs: 90_000 },
+      {
+        kind: 'browser-wait',
+        call: { name: 'app', selector: '#done', state: 'hidden' },
+        totalMs: 10_000,
+        session: 's1',
+      },
+      { kind: 'browser-wait', call: { name: 'app', time: 1_500 }, totalMs: 10_000 },
+    ]);
+  });
+
+  it('should refuse a viewport or a position it cannot read', async () => {
+    const { run } = harness();
+    const viewport = await run('browser', 'page', 'emulate', 'app', '--viewport', 'wide').catch(
+      (error: unknown) => error,
+    );
+    const position = await run('browser', 'page', 'emulate', 'app', '--geolocation', '52.5').catch(
+      (error: unknown) => error,
+    );
+    should((viewport as Error).message).match(/--viewport must be WIDTHxHEIGHT/u);
+    should((position as Error).message).match(/--geolocation must be LAT,LON/u);
+    const throttle = await run('browser', 'page', 'emulate', 'app', '--cpu-throttle', 'fast').catch(
+      (error: unknown) => error,
+    );
+    should((throttle as Error).message).match(/--cpu-throttle must be a number/u);
   });
 });

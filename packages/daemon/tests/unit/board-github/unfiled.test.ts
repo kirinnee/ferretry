@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type BoardProjectId, type BoardTask, type PrLink, UNFILED_PROJECT_ID } from '@ferretry/protocol';
+import { type BoardProjectId, type BoardTask, type LaneSet, type PrLink, UNFILED_PROJECT_ID } from '@ferretry/protocol';
 import should from 'should';
 import { BoardService } from '../../../src/lib/board/index.ts';
 import {
@@ -10,7 +10,17 @@ import {
   UnfiledRefiler,
   type UnfiledRefilerPorts,
 } from '../../../src/lib/board-github/index.ts';
-import { card, FakeLanes, lanes, MemoryBoardStore, NOW, OTHER_PROJECT, PROJECT, world } from '../board/support.ts';
+import {
+  card,
+  FakeLanes,
+  lanes,
+  MemoryBoardStore,
+  NOW,
+  OTHER_PROJECT,
+  PROJECT,
+  templateLanes,
+  world,
+} from '../board/support.ts';
 import { prUrl, REPO } from './support.ts';
 
 const merged = (number: number, repo = REPO): PrLink => ({
@@ -54,34 +64,56 @@ interface RigOptions {
   readonly sessions?: Boards;
   readonly board?: (service: BoardService) => UnfiledRefilerPorts['board'];
   readonly projects?: UnfiledRefilerPorts['projects'];
+  /** Whether a proposal for a project with no lanes succeeds (default) or fails, or throws. */
+  readonly propose?: 'ok' | 'refused' | 'throws';
 }
 
 const rig = (options: RigOptions) => {
   const store = new MemoryBoardStore(options.cards);
+  const sets = new Map<BoardProjectId, LaneSet>([
+    [PROJECT, lanes(PROJECT)],
+    [OTHER_PROJECT, lanes(OTHER_PROJECT, 'pr')],
+    [UNFILED_PROJECT_ID, lanes(UNFILED_PROJECT_ID, 'quick')],
+  ]);
   const service = new BoardService(
     world({
       store,
-      lanes: new FakeLanes(
-        new Map([
-          [PROJECT, lanes(PROJECT)],
-          [OTHER_PROJECT, lanes(OTHER_PROJECT, 'pr')],
-          [UNFILED_PROJECT_ID, lanes(UNFILED_PROJECT_ID, 'quick')],
-        ]),
-      ),
+      lanes: new FakeLanes(sets),
     }),
   );
+  const proposals: { projectId: string; sessionId: string }[] = [];
   const warnings: string[] = [];
   const clock = { ms: Date.parse(NOW) };
   const sessions = options.sessions ?? new Boards();
   const refiler = new UnfiledRefiler({
     board: options.board?.(service) ?? service,
     sessions,
+    lanes: {
+      laneSet: async projectId => sets.get(projectId) ?? null,
+      propose: async (projectId, sessionId) => {
+        proposals.push({ projectId, sessionId });
+        if (options.propose === 'throws') throw new Error('lane store damaged');
+        if (options.propose === 'refused') return null;
+        const proposed = { ...templateLanes(projectId, 'pr-release-verify'), confirmedBy: null };
+        sets.set(projectId, proposed);
+        return proposed;
+      },
+    },
     projects: options.projects ?? { projects: async () => [{ id: PROJECT, name: 'Ferretry', path: '/p' }] },
     copies: { repositoryOf: async path => (path === '/p' ? REPO : null) },
     clock: { now: () => new Date(clock.ms).toISOString() },
     diagnostics: { warn: message => warnings.push(message) },
   });
-  return { refiler, store, sessions, warnings, clock, stored: (id = 'F1') => store.cards.get(id) as BoardTask };
+  return {
+    refiler,
+    store,
+    sessions,
+    warnings,
+    clock,
+    proposals,
+    sets,
+    stored: (id = 'F1') => store.cards.get(id) as BoardTask,
+  };
 };
 
 describe('UnfiledRefiler: a linked PR in a project’s repository', () => {
@@ -342,5 +374,74 @@ describe('readProjectRemotes', () => {
       { id: PROJECT, name: 'Ferretry', repo: REPO },
       { id: OTHER_PROJECT, name: 'Notes', repo: null },
     ]);
+  });
+});
+
+describe('UnfiledRefiler: the live audit after 4.147.0', () => {
+  const NIX_REGISTRY = '33333333-3333-4333-8333-333333333333';
+  const released = (number: number, version: string): PrLink => ({
+    ...merged(number),
+    releasedIn: { version, tag: `v${version}`, at: '2026-10-30T14:45:03Z' },
+  });
+
+  it('should give a project with no lanes its inferred lanes as the card’s ferret, then refile, in one pass (&I26)', async () => {
+    // Arrange: nix-registry was registered before projects got lanes; its ferret's folder is in it.
+    const i26 = withPrs([merged(96, 'AtomiCloud/nix-registry')], { id: 'I26', kind: 'infra', owner: 'mvuk89us' });
+    const i1 = withPrs([merged(98, 'AtomiCloud/nix-registry')], { id: 'I1', kind: 'infra', owner: 'mvuk89us' });
+    const subject = rig({ cards: [i26, i1], sessions: new Boards({ mvuk89us: NIX_REGISTRY }) });
+
+    // Act
+    const refiled = await subject.refiler.run([...REMOTES, { id: NIX_REGISTRY, name: 'nix-registry', repo: null }]);
+
+    // Assert
+    should(refiled).deepEqual(['I26', 'I1']);
+    should(subject.proposals).deepEqual([{ projectId: NIX_REGISTRY, sessionId: 'mvuk89us' }]);
+    should(subject.sets.get(NIX_REGISTRY)?.confirmedBy).be.null();
+    should(subject.stored('I26')).match({ projectId: NIX_REGISTRY, laneId: 'merged' });
+    should(subject.warnings).be.empty();
+  });
+
+  it('should leave the cards Unfiled and say so once when the proposal is refused, and report one that throws', async () => {
+    // Arrange
+    const cards = [unfiled({ owner: 'mvuk89us' }), unfiled({ id: 'F2', owner: 'mvuk89us' })];
+    const refused = rig({ cards, sessions: new Boards({ mvuk89us: NIX_REGISTRY }), propose: 'refused' });
+    const throws = rig({ cards, sessions: new Boards({ mvuk89us: NIX_REGISTRY }), propose: 'throws' });
+
+    // Act
+    await refused.refiler.run(REMOTES);
+    refused.clock.ms += SESSION_BOARD_RETRY_MS;
+    await refused.refiler.run(REMOTES);
+    await throws.refiler.run(REMOTES);
+
+    // Assert
+    should(refused.warnings).deepEqual([
+      `Unfiled board: could not propose lanes for project ${NIX_REGISTRY}, so its cards stay Unfiled for now`,
+    ]);
+    should(refused.stored().projectId).equal(UNFILED_PROJECT_ID);
+    should(throws.warnings).deepEqual([
+      'Unfiled board: could not refile &F1: lane store damaged',
+      'Unfiled board: could not refile &F2: lane store damaged',
+    ]);
+  });
+
+  it('should refile a card whose merged PRs are in a project’s repository by its PRs, at boot (&F116)', async () => {
+    // Arrange: three merged, released PRs in kirinnee/ferretry; its ferret's folder names nothing.
+    const f116 = withPrs([released(990, '4.128.0'), released(1048, '4.140.0'), released(1063, '4.142.0')], {
+      id: 'F116',
+      owner: 'mvuzx42l',
+      laneId: 'to-test',
+    });
+    const subject = rig({ cards: [f116] });
+
+    // Act: the boot run reads the projects' repositories itself.
+    const refiled = await subject.refiler.run();
+
+    // Assert
+    should(refiled).deepEqual(['F116']);
+    should(subject.stored('F116')).match({ projectId: PROJECT, laneId: 'released' });
+    should(subject.stored('F116').history.find(event => event.type === 'refiled')).match({
+      reason: "&F116's PR #990 is in kirinnee/ferretry, which Ferretry owns",
+    });
+    should(subject.sessions.asked).be.empty();
   });
 });

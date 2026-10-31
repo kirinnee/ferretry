@@ -20,6 +20,13 @@ export type AgentToolsCommand =
     }
   | { readonly kind: 'wait'; readonly wait: TerminalWait; readonly session?: string }
   | {
+      readonly kind: 'browser-wait';
+      /** The `browser.wait_for` fields as typed, without `tool` or `timeoutMs`. */
+      readonly call: Readonly<Record<string, unknown>>;
+      readonly totalMs: number;
+      readonly session?: string;
+    }
+  | {
       readonly kind: 'control';
       readonly surface: SurfaceKind;
       readonly action: 'takeover' | 'handback' | 'handover';
@@ -42,7 +49,7 @@ export function renderToolResult(result: AgentToolResult): string {
   const lines = [result.summary];
   for (const surface of result.surfaces ?? [])
     lines.push(
-      `  ${surface.name ?? surface.id}  ${surface.title}${surface.url === undefined ? '' : `  ${surface.url}`}`,
+      `  ${surface.name ?? surface.id}  ${surface.title}${surface.url === undefined ? '' : `  ${surface.url}`}${surface.openerId === undefined ? '' : `  (popup of ${surface.openerId})`}${surface.available === false ? '  [not yours]' : ''}`,
     );
   if (result.output !== undefined && result.output !== '') lines.push(result.output);
   return lines.join('\n');
@@ -112,6 +119,17 @@ export class AgentToolsController implements IAgentToolsRunner {
           );
         const result = await this.client.wait(command.wait, command.session);
         return { text: renderToolResult(result), matched: result.matched === true };
+      }
+      case 'browser-wait': {
+        if (!(command.totalMs >= 100 && command.totalMs <= AGENT_TOOL_MAX_TOTAL_WAIT_MS))
+          throw new AgentToolsCommandError(
+            `--timeout must be between 100 and ${String(AGENT_TOOL_MAX_TOTAL_WAIT_MS)} milliseconds`,
+          );
+        const parsed = AgentToolCallSchema.safeParse({ ...command.call, tool: 'browser.wait_for' });
+        if (!parsed.success) throw new AgentToolsCommandError(parsed.error.issues[0]?.message ?? 'not a valid call');
+        if (parsed.data.tool !== 'browser.wait_for') throw new AgentToolsCommandError('not a browser wait');
+        const result = await this.client.browserWait({ call: parsed.data, totalMs: command.totalMs }, command.session);
+        return { text: renderToolResult(result), matched: result.matched !== false };
       }
       case 'control': {
         const view = await this.client.control(command.surface, command.action, command.key, personal(command.session));

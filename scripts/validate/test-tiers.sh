@@ -108,6 +108,16 @@ for tier in $(jq -r 'keys[] | select(. != "schemaVersion")' "${groups}"); do
       )')
 done
 
+# A group's "processes" (scripts/ci/test.sh runs its files in that many isolated bun processes inside its
+# one runner) is the owner's last resort, so it is bounded: an integer from 2 to 4, and only for int.
+while IFS= read -r problem; do
+  [[ -n ${problem} ]] && refuse "${groups}: ${problem}"
+done < <(jq -r 'to_entries[] | select(.key != "schemaVersion") | .key as $tier | .value[] | select(has("processes")) |
+  if ($tier != "int") then "\($tier) group \"\(.name)\" sets processes; only int groups may run several processes"
+  elif ((.processes | type) != "number" or .processes != (.processes | floor) or .processes < 2 or .processes > 4)
+  then "int group \"\(.name)\" has processes \(.processes); it must be an integer from 2 to 4"
+  else empty end' "${groups}")
+
 # ─── 4. no guessed ports ────────────────────────────────────────────────────────────────────────
 
 # Binding port 0, reading the number and closing the socket leaves a window in which another process

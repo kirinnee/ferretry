@@ -549,7 +549,13 @@ export function SessionChatPage({
   // THE LATEST REQUEST TO SHOW ONE ITEM (a `?attention=` link, a `!A3` click): the agenda opens its card.
   // It belongs to this session and resets with it.
   const [agendaFocus, setAgendaFocus] = useState<AgendaFocus | null>(null);
+  // THE BOARD AND THE AGENDA NEVER SHARE THE CHAT COLUMN: whichever was asked for last is the one on screen.
+  // Showing an item collapses an expanded board; expanding the board closes the agenda (the effect below).
+  // Read through refs so neither a new `tasks` view nor a new agenda changes `showAgenda`'s identity.
+  const boardFullRef = useRef(false);
+  const collapseBoardRef = useRef<() => void>(() => undefined);
   const showAgenda = useCallback((target: AgendaId | null, onEntry = false): void => {
+    if (boardFullRef.current) collapseBoardRef.current();
     setAgendaFocus(current => ({ target, seq: (current?.seq ?? 0) + 1, ...(onEntry ? { onEntry } : {}) }));
   }, []);
   const openAgendaReference = useCallback((id: AgendaId): void => showAgenda(id), [showAgenda]);
@@ -1304,6 +1310,13 @@ export function SessionChatPage({
     };
   }, [contextDependencies, connection, scope, referenceFetch, openFile, routedClient]);
   const tasksFull = tasks.expanded && cardChat !== null && board !== undefined;
+  boardFullRef.current = tasksFull;
+  collapseBoardRef.current = () => tasks.setExpanded(false);
+  const closeAgendaRef = useRef(agenda.close);
+  closeAgendaRef.current = agenda.close;
+  useEffect(() => {
+    if (tasksFull) closeAgendaRef.current();
+  }, [tasksFull]);
   // The board takes the whole chat column on a desktop: the side panel steps out of the way.
   const panelCovered = tasksFull && formFactor === 'desktop';
   const infoSlot: SessionInfoSlot | undefined =
@@ -1607,7 +1620,9 @@ export function SessionChatPage({
   // so expanding never remounts the chat.
   const chatWithTasks = (
     <div className="relative flex min-h-0 min-w-0 flex-1 flex-col" data-chat-tasks-full={tasksFull ? '' : undefined}>
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col" inert={tasksFull}>
+      {/* `isolate`: the agenda's drawer, scrim and item view carry z-indexes of their own (25-40); a stacking context
+          here keeps all of them beneath the board whatever they are doing. */}
+      <div className="isolate flex min-h-0 min-w-0 flex-1 flex-col" inert={tasksFull}>
         {chat}
       </div>
       {tasksFull ? (

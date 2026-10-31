@@ -266,6 +266,7 @@ function OpenItem({
       <AgendaItemView
         busy={false}
         closeLabel="Back to the Inbox"
+        daemonId={card.daemonId}
         error={failureFor(inbox.deferredState.failed, card.key)}
         ferret={inboxWho(card).ferret}
         history={history}

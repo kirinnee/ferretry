@@ -1,6 +1,18 @@
-import type { BrowserActionResult, BrowserPageSnapshot, BrowserPageSummary, BrowserStatus } from '@ferretry/protocol';
+import type {
+  AgentUploadFile,
+  BrowserActionResult,
+  BrowserDialogInfo,
+  BrowserDownloadNotice,
+  BrowserPageLifecycleRequest,
+  BrowserPageSnapshot,
+  BrowserPageSummary,
+  BrowserStatus,
+  SurfaceOpener,
+} from '@ferretry/protocol';
 import type { AgentControlKind, AgentControlPolicy } from '../../../src/lib/fleet/agent-control.ts';
 import {
+  type AgentFiles,
+  AgentFileError,
   type AgentIdentity,
   type AgentIdentityResolver,
   type AgentToolPorts,
@@ -8,6 +20,9 @@ import {
   type AuditEntry,
   type AuditSink,
   type BrowserActGuard,
+  type BrowserLifecycleOutcome,
+  type BrowserFileAction,
+  type BrowserFileResult,
   type BrowserOpenOptions,
   type BrowserPageAction,
   BrowserSessionError,
@@ -110,16 +125,40 @@ type FakePage = BrowserPageSummary & { readonly sessionId: string };
  * service raises. It records every act (by the page that was active when it ran), runs a guard where
  * the real one does, and can be told to fail the next call with any error.
  */
-class FakeBrowserPages implements Pick<BrowserSubsystem, 'status' | 'openPage' | 'actOnPage' | 'closePage'> {
+class FakeBrowserPages implements Pick<
+  BrowserSubsystem,
+  'status' | 'openPage' | 'actOnPage' | 'filesOnPage' | 'closePage' | 'lifecycleOnPage' | 'adoptPage'
+> {
+  /** Every lifecycle request, exactly as the agent-tools service built it. */
+  readonly lifecycles: BrowserPageLifecycleRequest[] = [];
+  /** What the next lifecycle requests answer, oldest first; once spent, a plain "done". */
+  readonly lifecycleReplies: BrowserLifecycleOutcome[] = [];
+  /** Run, oldest first, just before each lifecycle request reaches its guard: a person acting mid-wait. */
+  readonly beforeLifecycle: (() => void | Promise<void>)[] = [];
+  /** The dialog every act reports as waiting on the page, when a case wants one. */
+  pendingDialog: BrowserDialogInfo | undefined;
+  readonly adopted: { readonly id: string; readonly name: string; readonly openedBy?: SurfaceOpener }[] = [];
   readonly pages = new Map<string, FakePage[]>();
   readonly active = new Map<string, string>();
   readonly acts: string[] = [];
   /** Every action, exactly as the agent-tools service built it. */
   readonly actions: BrowserPageAction[] = [];
+  /** Every file action, exactly as the agent-tools service built it. */
+  readonly fileActions: BrowserFileAction[] = [];
+  /** Downloads every act reports the page to have started. */
+  downloads: readonly BrowserDownloadNotice[] | undefined;
+  /** What a download or a PDF stages, when a case wants something other than the defaults. */
+  staged: { readonly path: string; readonly name: string; readonly size: number } = {
+    path: '/stage/dl-1',
+    name: 'report.csv',
+    size: 2048,
+  };
   /** What the next read answers, when a case wants something other than the defaults. */
   readText: string | undefined;
   /** Where every act reports the page to be, when a case wants an address other than the page's own. */
   actedUrl: string | undefined;
+  /** Whether every act reports that it put text in a password field. */
+  passwordField = false;
   failure: unknown;
   private minted = 0;
 
@@ -180,7 +219,10 @@ class FakeBrowserPages implements Pick<BrowserSubsystem, 'status' | 'openPage' |
     const snapshot = {
       ...this.snapshot(sessionId),
       ...(this.actedUrl === undefined ? {} : { url: this.actedUrl }),
+      ...(this.downloads === undefined ? {} : { downloads: [...this.downloads] }),
       actedPageId: page.id,
+      ...(this.pendingDialog === undefined ? {} : { dialog: this.pendingDialog }),
+      ...(this.passwordField ? { passwordField: true as const } : {}),
     };
     if (action.action === 'read') {
       const text =
@@ -207,6 +249,62 @@ class FakeBrowserPages implements Pick<BrowserSubsystem, 'status' | 'openPage' |
         },
       };
     return { status, result: snapshot };
+  }
+
+  /** A popup the page `openerId` opened: listed with its opener, and with no name. */
+  popup(sessionId: string, openerId: string, id = 'popup-1'): void {
+    const pages = this.pages.get(sessionId) ?? [];
+    this.pages.set(sessionId, [...pages, { id, url: 'https://popup.test/', title: 'A popup', openerId, sessionId }]);
+  }
+
+  async lifecycleOnPage(
+    sessionId: string,
+    key: string,
+    request: BrowserPageLifecycleRequest,
+    guard?: BrowserActGuard,
+  ): Promise<BrowserLifecycleOutcome> {
+    this.fail();
+    await this.beforeLifecycle.shift()?.();
+    await guard?.();
+    const page = this.page(sessionId, key);
+    this.lifecycles.push(request);
+    this.acts.push(`${sessionId}:${page.id}:lifecycle-${request.op}`);
+    return this.lifecycleReplies.shift() ?? { reply: { text: 'done' } };
+  }
+
+  async adoptPage(sessionId: string, key: string, name: string, openedBy?: SurfaceOpener): Promise<BrowserPageSummary> {
+    this.fail();
+    const page = this.page(sessionId, key);
+    this.adopted.push({ id: page.id, name, ...(openedBy === undefined ? {} : { openedBy }) });
+    this.pages.set(
+      sessionId,
+      (this.pages.get(sessionId) ?? []).map(candidate =>
+        candidate.id === page.id ? { ...candidate, name, ...(openedBy === undefined ? {} : { openedBy }) } : candidate,
+      ),
+    );
+    return { ...page, name, ...(openedBy === undefined ? {} : { openedBy }) };
+  }
+
+  async filesOnPage(
+    sessionId: string,
+    key: string,
+    action: BrowserFileAction,
+    guard?: BrowserActGuard,
+  ): Promise<BrowserFileResult> {
+    this.fail();
+    await guard?.();
+    const page = this.page(sessionId, key);
+    this.active.set(sessionId, page.id);
+    this.acts.push(`${sessionId}:${page.id}:${action.action}`);
+    this.fileActions.push(action);
+    const status = (await this.status(sessionId)) as Extract<BrowserStatus, { readonly state: 'running' }>;
+    const result = {
+      ...this.snapshot(sessionId),
+      ...(this.actedUrl === undefined ? {} : { url: this.actedUrl }),
+      ...(this.downloads === undefined ? {} : { downloads: [...this.downloads] }),
+      actedPageId: page.id,
+    };
+    return action.action === 'upload' ? { status, result } : { status, result, staged: this.staged };
   }
 
   async closePage(sessionId: string, key: string, guard?: BrowserActGuard): Promise<void> {
@@ -253,6 +351,58 @@ class FakeBrowserPages implements Pick<BrowserSubsystem, 'status' | 'openPage' |
   }
 }
 
+/** The file service, over canned answers: it records what it was asked and what it released. */
+class FakeAgentFiles implements Pick<AgentFiles, 'prepareUpload' | 'save'> {
+  readonly prepared: (readonly AgentUploadFile[])[] = [];
+  readonly saves: {
+    readonly name: string;
+    readonly saveAs: string | undefined;
+    readonly overwrite: boolean;
+    readonly maxBytes: number;
+  }[] = [];
+  released = 0;
+  /** Sizes the upload reports, by position; 1024 bytes each otherwise. */
+  sizes: readonly number[] = [];
+  /** An error the next call raises. */
+  failure: AgentFileError | undefined;
+
+  async prepareUpload(_sessionId: string, sources: readonly AgentUploadFile[]) {
+    this.fail();
+    this.prepared.push(sources);
+    return {
+      files: sources.map((source, index) => ({
+        path: `/upload/${String(index)}`,
+        name: typeof source === 'string' ? (source.split('/').at(-1) as string) : 'notes.pdf',
+        size: this.sizes[index] ?? 1024,
+      })),
+      release: async () => {
+        this.released += 1;
+      },
+    };
+  }
+
+  async save(
+    _sessionId: string,
+    staged: { readonly name: string; readonly size: number },
+    options: { readonly saveAs?: string | undefined; readonly overwrite?: boolean; readonly maxBytes: number },
+  ) {
+    this.fail();
+    this.saves.push({
+      name: staged.name,
+      saveAs: options.saveAs,
+      overwrite: options.overwrite === true,
+      maxBytes: options.maxBytes,
+    });
+    return { saved: options.saveAs ?? `downloads/${staged.name}`, name: staged.name, size: staged.size };
+  }
+
+  private fail(): void {
+    const failure = this.failure;
+    this.failure = undefined;
+    if (failure !== undefined) throw failure;
+  }
+}
+
 /** A whole agent-tools domain over fakes, with every collaborator exposed for assertions. */
 export function agentToolWorld(extra: Pick<AgentToolPorts, 'input' | 'scrub' | 'quarantinedUntil'> = {}) {
   const terminals = new FakeTerminals(['s1', 's2']);
@@ -265,11 +415,13 @@ export function agentToolWorld(extra: Pick<AgentToolPorts, 'input' | 'scrub' | '
   const control = new SurfaceControl(events, clock);
   const onSleep: (() => void | Promise<void>)[] = [];
   const redactor = new FakeRedactor();
+  const files = new FakeAgentFiles();
   const service = new AgentToolService({
     terminals,
     browser,
     control,
     policy,
+    files,
     audit,
     redactor,
     clock,
@@ -280,7 +432,21 @@ export function agentToolWorld(extra: Pick<AgentToolPorts, 'input' | 'scrub' | '
       await onSleep.shift()?.();
     },
   });
-  return { terminals, browser, audit, events, clock, policy, slept, onSleep, control, redactor, service, identities };
+  return {
+    terminals,
+    browser,
+    files,
+    audit,
+    events,
+    clock,
+    policy,
+    slept,
+    onSleep,
+    control,
+    redactor,
+    service,
+    identities,
+  };
 }
 
 export const agent = { kind: 'agent', sessionId: 's1', name: 'Hadi' } as const;

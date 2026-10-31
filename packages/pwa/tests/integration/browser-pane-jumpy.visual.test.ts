@@ -10,12 +10,13 @@
  * Set `FY_BROWSER_JUMPY_SHOTS_DIR` to keep `browser-<state>-<viewport>.png` for review. Without it no file is
  * written.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { afterAll, beforeAll, describe, expect } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
 import { sharedChromium } from './support/chromium.ts';
+import { laneTests } from './support/lanes.ts';
 
 const packageRoot = resolve(import.meta.dir, '../..');
 const shotsDir = process.env.FY_BROWSER_JUMPY_SHOTS_DIR ?? '';
@@ -91,96 +92,99 @@ const shoot = async (tab: Page, state: string, viewport: string): Promise<void> 
   if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `browser-${state}-${viewport}.png`) });
 };
 
-describe('the browser pane holds still while the browser works', () => {
-  for (const viewport of viewports) {
-    it(`never moves the page view or the toolbar as busy and loading flip (${viewport.name})`, async () => {
-      const context = await browser.newContext({
-        viewport: { width: viewport.width, height: viewport.height },
-        colorScheme: 'light',
-        deviceScaleFactor: 2,
-      });
-      try {
-        const origin = server?.url.origin ?? '';
-        await context.route('**/*', async route =>
-          new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
-        );
-        const tab = await context.newPage();
-        await tab.goto(`${origin}/?theme=studio-light`);
-        await tab.waitForSelector('[data-page-view]');
-        await tab.waitForSelector(ACTIVITY, { state: 'attached' });
-        await tab.waitForSelector(PROGRESS, { state: 'attached' });
-        await tab.evaluate(() => {
-          window.__tops = { page: [], controls: [] };
-        });
-        await pause(100);
-        await shoot(tab, 'idle', viewport.name);
+type Viewport = (typeof viewports)[number];
 
-        // A blip shorter than the show delay is never announced.
-        await tab.evaluate(() => window.__setBusy(true));
-        await pause(120);
-        await tab.evaluate(() => window.__setBusy(false));
-        await pause(500);
-        expect(await activityText(tab)).toBe('');
+const check = async (viewport: Viewport): Promise<void> => {
+  const context = await browser.newContext({
+    viewport: { width: viewport.width, height: viewport.height },
+    colorScheme: 'light',
+    deviceScaleFactor: 2,
+  });
+  try {
+    const origin = server?.url.origin ?? '';
+    await context.route('**/*', async route =>
+      new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+    );
+    const tab = await context.newPage();
+    await tab.goto(`${origin}/?theme=studio-light`);
+    await tab.waitForSelector('[data-page-view]');
+    await tab.waitForSelector(ACTIVITY, { state: 'attached' });
+    await tab.waitForSelector(PROGRESS, { state: 'attached' });
+    await tab.evaluate(() => {
+      window.__tops = { page: [], controls: [] };
+    });
+    await pause(100);
+    await shoot(tab, 'idle', viewport.name);
 
-        // Sustained work shows the label once the delay has passed...
-        await tab.evaluate(() => window.__setBusy(true));
-        await tab.waitForFunction(selector => document.querySelector(selector)?.textContent === 'Working…', ACTIVITY, {
-          timeout: 2_000,
-        });
-        await pause(300);
-        await shoot(tab, 'working', viewport.name);
+    // A blip shorter than the show delay is never announced.
+    await tab.evaluate(() => window.__setBusy(true));
+    await pause(120);
+    await tab.evaluate(() => window.__setBusy(false));
+    await pause(500);
+    expect(await activityText(tab)).toBe('');
 
-        // ...and keeps it through a short pause (the hide delay), so work in bursts reads as one run.
-        await tab.evaluate(() => window.__setBusy(false));
-        await pause(300);
-        expect(await activityText(tab)).toBe('Working…');
-        await tab.waitForFunction(selector => document.querySelector(selector)?.textContent === '', ACTIVITY, {
-          timeout: 3_000,
-        });
+    // Sustained work shows the label once the delay has passed...
+    await tab.evaluate(() => window.__setBusy(true));
+    await tab.waitForFunction(selector => document.querySelector(selector)?.textContent === 'Working…', ACTIVITY, {
+      timeout: 2_000,
+    });
+    await pause(300);
+    await shoot(tab, 'working', viewport.name);
 
-        // A long flicker: busy and loading flipping faster than either delay, then a loading page.
-        for (let flip = 0; flip < 12; flip += 1) {
-          await tab.evaluate(
-            on => {
-              window.__setBusy(on);
-              window.__setLoading(on);
-            },
-            flip % 2 === 0,
-          );
-          await pause(90);
-        }
-        await tab.evaluate(() => {
-          window.__setBusy(false);
-          window.__setLoading(true);
-        });
-        await tab.waitForFunction(
-          selector => document.querySelector(selector)?.textContent === 'Loading page…',
-          ACTIVITY,
-          {
-            timeout: 2_000,
-          },
-        );
-        await pause(300);
-        await shoot(tab, 'loading', viewport.name);
-        await tab.evaluate(() => window.__setLoading(false));
-        await tab.waitForFunction(selector => document.querySelector(selector)?.textContent === '', ACTIVITY, {
-          timeout: 3_000,
-        });
+    // ...and keeps it through a short pause (the hide delay), so work in bursts reads as one run.
+    await tab.evaluate(() => window.__setBusy(false));
+    await pause(300);
+    expect(await activityText(tab)).toBe('Working…');
+    await tab.waitForFunction(selector => document.querySelector(selector)?.textContent === '', ACTIVITY, {
+      timeout: 3_000,
+    });
 
-        const seen = await edges(tab);
-        expect(seen.page).toHaveLength(1);
-        expect(seen.controls).toHaveLength(1);
+    // A long flicker: busy and loading flipping faster than either delay, then a loading page.
+    for (let flip = 0; flip < 12; flip += 1) {
+      await tab.evaluate(
+        on => {
+          window.__setBusy(on);
+          window.__setLoading(on);
+        },
+        flip % 2 === 0,
+      );
+      await pause(90);
+    }
+    await tab.evaluate(() => {
+      window.__setBusy(false);
+      window.__setLoading(true);
+    });
+    await tab.waitForFunction(selector => document.querySelector(selector)?.textContent === 'Loading page…', ACTIVITY, {
+      timeout: 2_000,
+    });
+    await pause(300);
+    await shoot(tab, 'loading', viewport.name);
+    await tab.evaluate(() => window.__setLoading(false));
+    await tab.waitForFunction(selector => document.querySelector(selector)?.textContent === '', ACTIVITY, {
+      timeout: 3_000,
+    });
 
-        const overflow = await tab.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-        expect(overflow).toBeLessThanOrEqual(0);
-        const rowFits = await tab.evaluate(() => {
-          const row = document.querySelector<HTMLElement>('[data-browser-status-row]');
-          return row !== null && row.scrollWidth <= row.clientWidth + 1;
-        });
-        expect(rowFits || viewport.name === 'phone').toBe(true);
-      } finally {
-        await context.close();
-      }
-    }, 60_000);
+    const seen = await edges(tab);
+    expect(seen.page).toHaveLength(1);
+    expect(seen.controls).toHaveLength(1);
+
+    const overflow = await tab.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
+    const rowFits = await tab.evaluate(() => {
+      const row = document.querySelector<HTMLElement>('[data-browser-status-row]');
+      return row !== null && row.scrollWidth <= row.clientWidth + 1;
+    });
+    expect(rowFits || viewport.name === 'phone').toBe(true);
+  } finally {
+    await context.close();
   }
+};
+
+const lane = laneTests();
+
+describe('the browser pane holds still while the browser works', () => {
+  for (const viewport of viewports)
+    lane(`never moves the page view or the toolbar as busy and loading flip (${viewport.name})`, async () => {
+      await check(viewport);
+    });
 });

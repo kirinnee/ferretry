@@ -123,7 +123,7 @@ import { StepUpDialog, UNLOCK_COPY } from './features/step-up/step-up-dialog.tsx
 import { useStuckMessageActions } from './features/stuck-messages/use-stuck-message-actions.tsx';
 import { useAskWardenActions } from './features/warden/ask-warden.tsx';
 import { WardenOverviewSurface } from './features/warden/warden-overview-surface.tsx';
-import { useWhatsNewHost, WhatsNewProvider } from './features/whats-new/whats-new-host.tsx';
+import { useWhatsNewEntry, useWhatsNewHost, WhatsNewProvider } from './features/whats-new/whats-new-host.tsx';
 import { WhatsNewSheet } from './features/whats-new/whats-new-sheet.tsx';
 import { useAccountPickerSlice } from './hooks/use-account-picker.ts';
 import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.ts';
@@ -2111,7 +2111,10 @@ function PhoneTabBar(props: Omit<AppTabBarProps, 'boardCount'>) {
   const store = useAppStore();
   const machines = useBoardMachines();
   const { model } = useBoard(store.board, machines, NO_BOARD_FILTERS);
-  return <AppTabBar {...props} boardCount={boardBadgeCount(model.counts)} />;
+  const whatsNew = useWhatsNewEntry();
+  return (
+    <AppTabBar {...props} boardCount={boardBadgeCount(model.counts)} {...(whatsNew === null ? {} : { whatsNew })} />
+  );
 }
 
 function QueueRoute({ connection, sessionId }: QueuePageProps) {

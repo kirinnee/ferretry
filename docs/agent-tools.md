@@ -22,7 +22,15 @@ the page and end with it. The reference grammar is unchanged — see
 `browser.list` · `browser.open(name, url?, incognito?, askOwner?)` · `browser.navigate(name, url | history)` ·
 `browser.click(name, target, button?, double?, modifiers?)` · `browser.type(name, target, text, submit?, slowly?)` ·
 `browser.read(name, mode: text | a11y | snapshot, target?, find?, depth?, boxes?)` ·
-`browser.screenshot(name, target?, fullPage?, format?)` · `browser.close(name)` · `browser.ask_owner(name, message?)`.
+`browser.screenshot(name, target?, fullPage?, format?)` · `browser.dialog(name, action, promptText?)` ·
+`browser.tabs(action: list | adopt, id?, as?)` · `browser.wait_for(name, condition, timeoutMs?)` ·
+`browser.console(name, level?, since?, limit?)` · `browser.network(name, action: list | get, id?, filter?, types?)` ·
+`browser.emulate(name, viewport?, media?, geolocation?, locale?, timezone?, cpuThrottle?, network?, permissions?, reset?)` ·
+`browser.upload(name, target, files, mode?)` · `browser.download(name, id?, saveAs?, overwrite?)` ·
+`browser.pdf(name, saveAs?, overwrite?)` ·
+`browser.hover` · `browser.drag` · `browser.mouse` · `browser.press` · `browser.scroll` · `browser.select` · `browser.check` ·
+`browser.fill_form` · `browser.highlight` (see [Pointer and keys](#pointer-and-keys)) ·
+`browser.close(name)` · `browser.ask_owner(name, message?)`.
 
 A **target** is exactly one of a `ref`, a `selector`, or — for a click only — a point `x`, `y`; see
 [Refs and targets](#refs-and-targets). `history` is `back`, `forward` or `reload`.
@@ -62,19 +70,99 @@ element takes `ref: "e4"` in place of a selector, so an agent reads once and act
 - The CLI reads the same shapes from one word: `fy browser page click app e12`, `… click app 120,340`,
   `… read app --snapshot --find "Sign in"`, `… navigate app back`.
 - An MCP client that sends `false` for an on-only flag (`double`, `submit`, `slowly`, `boxes`, `fullPage`,
-  `incognito`) is read as having left it out.
+  `incognito`, `overwrite`, and `reset`, `print` and `offline` in `browser.emulate`) is read as having left it out.
+
+## Page lifecycle
+
+Six tools for what happens around a page rather than on it. Each is `fy browser page <verb>` and
+`browser_<verb>` over MCP (`browser_wait_for` for `wait`).
+
+- **`browser.dialog`** answers an `alert`, `confirm`, `prompt` or `beforeunload` the page is blocked on:
+  `action: "accept" | "dismiss"`, and `promptText` with an accept. An unanswered dialog is held **up to 30 s per
+  page**, then dismissed. While one is pending, **every act result on that page reports its type and its
+  scrubbed message**, so the agent knows why the page is not answering. The audit records the type, whether it
+  was accepted and the length of `promptText` — never the text.
+- **`browser.tabs`** is `list` or `adopt`. A popup whose opener chain ends at a page this agent opened or was
+  handed is the agent's; `list` shows it with its `openerId` and whether it is `available` to the agent, and
+  `adopt` (`id`, `as`) gives it a name so the other tools can reach it. It never selects a tab and never
+  brings one to the front — there is no active tab ([above](#the-browser-one-shared-agent-profile-per-machine)).
+- **`browser.wait_for`** waits for **exactly one** condition: an element (`ref` or `selector`, `state` =
+  `visible` (the default), `hidden`, `attached` or `detached`), `text`, `textGone`, a `url` fragment, a
+  `load` state, or a `time`. `timeoutMs` is **at most 25 s per call** on the wire. The page is checked in
+  **slices of at most 1 s**, and the takeover check runs between slices, so a person taking the page back stops
+  the wait. The MCP server and the CLI repeat the call, as `terminal.wait` does, until it matches or
+  **120 s** are spent (`timeoutMs` default 25 s, `fy browser page wait --timeout`); a `time` wait is not
+  repeated. A miss answers `matched: false`, never an error. The audit records the condition's **kind and the
+  timeout only**, never the text or the url.
+- **`browser.console`** reads the page's console: a ring of **500 entries per page**, each numbered.
+  `level` means that level **and worse** (`error` > `warning` > `info` > `log` > `debug`); `since` is an
+  entry number and returns only later ones; `limit` is 100 by default and 500 at most. Messages are scrubbed
+  and clipped.
+- **`browser.network`** is `list` or `get`. A ring of **300 requests per page**; `list` gives each an id
+  (`r12`), method, address, status, kind and timing, narrowed by `filter` (address contains) and `types`.
+  `get` takes an `id` and adds the response headers and, for text, the body — **at most 64 KiB**. `Cookie`,
+  `Set-Cookie`, `Authorization`, `Proxy-Authorization` and **any header whose name contains `token`,
+  `api-key` or `secret`** are always stripped. This version shows **no request bodies and no full headers**.
+  Everything is scrubbed like any other page text.
+- **`browser.emulate`** changes how one page presents itself, **per page, over CDP**: `viewport` (the same
+  bounds and the same resize as the page-size control), `media` (`colorScheme`, `reducedMotion`,
+  `forcedColors`, `contrast`, `print`), `geolocation`, `locale`, `timezone`, `cpuThrottle`, `network`
+  (`offline`, `latency`, `throughput` in kbit/s) and `permissions`. **Never the user agent or client hints, and
+  never clipboard-read.** `permissions` is a closed list, and `reset: true` puts everything back.
+
+On the command line: `fy browser page dialog app accept --text hi`, `… tabs`, `… tabs adopt p7 popup`,
+`… wait app --text "Welcome" --timeout 60000`, `… console app --level warning --since 40`, `… network app`,
+`… network app r12`, `… emulate app --viewport 390x844 --color-scheme dark`, `… emulate app --reset`.
+
+## Pointer and keys
+
+Nine more tools drive the pointer and the keyboard. They are the same agent-tool path as a click — the
+browser switch, the session's own pages, the takeover guard (a taken-over page is a `409 taken_over`), the
+driving marker and exactly one audit record — and their grammar is one file,
+`packages/protocol/src/lib/browser-pointer.ts`, shared by the wire tool and the browser's own action (the
+worker parses the action again with the same schema).
+
+| Tool                                                             | Does                                                                                                                                                                                    | Bounds                                           |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| `browser.hover(name, target)`                                    | Moves the pointer over an element, or to a point                                                                                                                                        |                                                  |
+| `browser.drag(name, from…, to…, steps?)`                         | Element to element with Playwright's `dragTo` (HTML5 drag and drop), or point to point (`fromX/fromY` → `toX/toY`) with the mouse down, `steps` moves, up — for a slider, canvas or map | `steps` 1–100 (10); never an element and a point |
+| `browser.mouse(name, action, x?, y?, button?, deltaX?, deltaY?)` | `move` (needs a point), `down`, `up` (optional `button`), `wheel` (needs a delta)                                                                                                       | delta ±20,000                                    |
+| `browser.press(name, keys, target?)`                             | Presses each chord in order, focusing the element first when one is named                                                                                                               | ≤ 32 keys of ≤ 40 characters                     |
+| `browser.scroll(name, target \| text \| deltaX/deltaY \| pages)` | Into view, to a text, by pixels or by screens — exactly one                                                                                                                             | pixels ±20,000; pages ±20; text 256              |
+| `browser.select(name, target, values)`                           | Picks options by value or by label                                                                                                                                                      | ≤ 64 values of ≤ 256                             |
+| `browser.check(name, target, checked)`                           | Ticks or unticks; `checked: false` is meaningful and is never read as "left out"                                                                                                        |                                                  |
+| `browser.fill_form(name, fields)`                                | Per field, a target and exactly one of `text`, `checked`, `option`, `value`                                                                                                             | ≤ 32 fields; ≤ 64 KiB of text in all             |
+| `browser.highlight(name, target \| clear)`                       | An outline the person watching sees; `clear: true` removes it                                                                                                                           |                                                  |
+
+- **A key is a closed grammar**: zero or more distinct modifiers (`Alt`, `Control`, `ControlOrMeta`, `Meta`,
+  `Shift`), then a named key (`Enter`, `Tab`, `Escape`, `ArrowDown`, `F1`–`F12`, …) or one printable character:
+  `Enter`, `a`, `Control+Shift+K`, `Control++`. Anything else is refused before the first key is pressed.
+- **Scrolling does not need a viewport**: a distance or a number of screens scrolls the page itself; a text
+  scrolls to its first place and says so when it is not on the page.
+- **A password field is flagged, not blocked.** When `browser.type` or `browser.fill_form` writes into an
+  `input type=password`, the worker notices, the answer says it was a password field and that **a real
+  secret must never go in a tool call** — it would sit in the agent's transcript — and to hand the page to the
+  owner with `browser_ask_owner` so they type it. The audit record carries `passwordField: true`.
+- **Audit facts are counts, lengths, refs and flags**: `keys: 2`, `values: 1`, `fields: 3` with the total
+  `textLength`, a drag as `from`/`to` (a ref, a clipped selector or `point`), `checked`. Never a key name,
+  an option, a value or typed text.
+- The CLI has a verb for each but `fill_form`: `fy browser page hover app e3`, `… drag app e1 '#bin'`,
+  `… drag app 1,2 300,2 --steps 25`, `… press app Control+a Delete --on e4`, `… scroll app --to e9` /
+  `--text Terms` / `--by 0,-600` / `--pages 1`, `… select app e5 uk`, `… check app e6 --off`,
+  `… highlight app e2` / `--clear`. `fill_form` is on the wire and in MCP only.
+- An MCP client that sends `clear: false` is read as having left it out; `checked: false` is kept.
 
 ## Routes
 
-| Route                                                     | Who                       | Session from                |
-| --------------------------------------------------------- | ------------------------- | --------------------------- |
-| `POST /v1/agent/tools`                                    | an agent, on this machine | its session credential ONLY |
-| `POST /v1/sessions/:sessionId/surfaces/terminals/tools`   | a person (CLI, app)       | the path; `terminal` grant  |
-| `POST /v1/sessions/:sessionId/surfaces/browser/tools`     | a person                  | the path; `browser` grant   |
-| `POST /v1/sessions/:sessionId/surfaces/terminals/control` | a person: control         | the path; `terminal` grant  |
-| `POST /v1/sessions/:sessionId/surfaces/browser/control`   | a person: control         | the path; `browser` grant   |
-| `GET /v1/sessions/:sessionId/surfaces/terminals/control`  | a person: who drives what | the path; `terminal` grant  |
-| `GET /v1/sessions/:sessionId/surfaces/browser/control`    | a person: who drives what | the path; `browser` grant   |
+| Route                                                     | Who                       | Session from                                                              |
+| --------------------------------------------------------- | ------------------------- | ------------------------------------------------------------------------- |
+| `POST /v1/agent/tools`                                    | an agent, on this machine | its session credential ONLY                                               |
+| `POST /v1/sessions/:sessionId/surfaces/terminals/tools`   | a person (CLI, app)       | the path; `terminal` grant                                                |
+| `POST /v1/sessions/:sessionId/surfaces/browser/tools`     | a person                  | the path; `browser` grant, plus `filesystem` for the [file tools](#files) |
+| `POST /v1/sessions/:sessionId/surfaces/terminals/control` | a person: control         | the path; `terminal` grant                                                |
+| `POST /v1/sessions/:sessionId/surfaces/browser/control`   | a person: control         | the path; `browser` grant                                                 |
+| `GET /v1/sessions/:sessionId/surfaces/terminals/control`  | a person: who drives what | the path; `terminal` grant                                                |
+| `GET /v1/sessions/:sessionId/surfaces/browser/control`    | a person: who drives what | the path; `browser` grant                                                 |
 
 A control request is `{ action: 'takeover' | 'handback' | 'handover', key }` and answers
 `SurfaceControlView { sessionId, driving[], takeovers[], handed[], opened[], asked[] }` for that kind.
@@ -85,6 +173,44 @@ Control changes are published on the session's journal, so `/v1/events` streams 
 `incognito` for an incognito page), `surface.takeover`, `surface.handback`, `surface.handed`,
 `surface.opened` (`SurfaceOpenedSchema`) and `surface.asked` (`SurfaceAskedSchema`). The daemon replays its
 journal on start, so a takeover, a hand-over, an open or an ask outlives a restart.
+
+## Files
+
+`browser.upload`, `browser.download` and `browser.pdf` move files between a page and the **session's own working
+folder** — the one `terminal.open` resolves `folder` against. They never reach anywhere else on the host.
+`fy browser page upload <name> <target> <files…> [--drop]`, `… download <name> [saveAs] [--id dl-3] [--overwrite]`
+and `… pdf <name> [saveAs] [--overwrite]` are the same calls; MCP has `browser_upload`, `browser_download`, `browser_pdf`.
+
+**Which paths are accepted** (`packages/daemon/src/lib/agent-files/`, the pure policy; the disk is a port,
+`NodeAgentFilesystem` in `src/adapters/agent-files/`). A path is resolved twice: lexically, then by `realpath`
+(a destination that does not exist yet is resolved through its nearest existing ancestor), and must land inside
+the folder's own real path both times. Refused, in a sentence that names the rule: `..`; an absolute path
+outside the folder; a symlink — file or directory — that leads out; anything inside `.git/` at any depth; and
+the daemon's own scratch entries at the top of the folder (`DAEMON_OWNED_SCRATCH_ENTRIES`: `chat.jsonl`,
+`events.jsonl`, `config.json`, `attachments/` …). An upload may instead name `{ "attachment": "att_<64 hex>" }` — a file
+the owner put in THIS session's chat; the daemon copies it into its own private directory for the call and
+removes it afterwards.
+
+**Caps.** An upload is at most 20 files, 50 MiB each and 200 MiB per call. A download or PDF saved is at most 500 MiB.
+
+**`browser.upload`.** `target` is a ref or a selector, as for a click. `mode: "input"` (the default) fills an
+`<input type=file>`, or clicks the target and answers the file chooser it opens; `mode: "drop"` drops the files on
+the target's centre, for a dropzone with no input. The summary tells the agent when the page now shows a human
+check, and lists any download the upload started.
+
+**`browser.download`.** The browser worker stages every file a page downloads in a daemon-owned directory for
+15 minutes. The act that started one reports it ("A download started: name, size — save it with browser_download (id dl-3)"),
+and `browser.download` copies the chosen one (the page's latest when `id` is absent) into the folder: at `saveAs`, else
+`downloads/<sanitized name>`. It never replaces a file that is already there unless `overwrite: true`, never writes
+through a symlink (it is opened `O_EXCL|O_NOFOLLOW`), and never sets an executable bit (mode 0644). The name a page
+suggests is sanitised to a leaf name and scrubbed like any page text.
+
+**`browser.pdf`.** Prints the page with CDP `Page.printToPDF`, then saves it by the same rule (`downloads/<title>.pdf`).
+Chrome prints only when headless; in **Real window** mode it is refused with one sentence.
+
+**Wire shape.** The file actions are NOT in `BrowserActionSchema`, so the toolbar route cannot carry a host path: the
+daemon hands the worker an already-confined absolute path (`BrowserFileAction`, daemon-only), and a download comes back as
+a staged path the daemon alone saves.
 
 ## Handing a surface to the owner
 
@@ -163,7 +289,10 @@ call.
 5. **What agents may control.** Every agent call first asks the machine's `AgentControlPolicy` (unit S's
    store, read per call). The same switches also wrap every ordinary terminal, browser and filesystem
    route — HTTP and sockets — for an agent caller, so `files` is enforced on the session filesystem
-   routes. A person is never asked.
+   routes. A person is never asked. **The three [file tools](#files) need the `files` switch AS WELL AS
+   `browser`**; on a person's route `POST /v1/sessions/:id/surfaces/browser/tools` they additionally need the
+   `filesystem` grant on `use` ([grants.md](grants.md)), so a paired phone granted the browser cannot reach the host's
+   disk through it. A caller whose grants cannot be read is refused; the owner at the machine is not governed.
 6. **Take over / hand back, per tab and per terminal.** While a person holds a surface, every agent tool
    call on THAT surface is refused ("A person has taken over %terminal:dev; wait or ask them."); the
    agent keeps working everywhere else. The check is repeated inside the page's own queue, so a takeover
@@ -174,7 +303,9 @@ call.
    `incognito` — never typed text, a URL's path or query (host only), or a selector over 120 characters.
    A target is recorded as its ref, its clipped selector or `point: true` (never the coordinates); a
    `find` as its length; options (`double`, `submit`, `fullPage`, `format`, a history step) by what they were.
-   A refused credential or a body that is not a call is recorded too (`reason`). Takeovers and
+   The one exception to "no text" is the file tools: `browser.upload` records the count, total bytes and, for up to four files,
+   the leaf name (≤120 characters, never a path) and size; `browser.download` and `browser.pdf` record the saved size and
+   extension only. A refused credential or a body that is not a call is recorded too (`reason`). Takeovers and
    hand-overs write `surface.control`. Identical successes fold per minute like all activity.
 8. **What a page shows is scrubbed.** Every text a browser tool hands back — a read, a snapshot, the address
    in the summary — goes through the vault redactor first, to an agent and a person alike, as the operator's
@@ -210,6 +341,11 @@ agenda items in a sub-ferret's session with `-s <session>`, proven by lineage.
   removal this change can make unconditionally. Until then a renderer exploit on a page an agent is
   steered to runs as the daemon's user.
 - **A terminal's folder** is where the shell starts, not a boundary.
+- **Files: check, then use.** A path is confined by `realpath` when the call is made, and the worker reads it a
+  moment later; a same-user process that swaps a checked path for a symlink in that window can still redirect an
+  upload. The file tools' destination is closed against this (`O_EXCL|O_NOFOLLOW`); the read side is not.
+- **PDF needs a headless browser.** In Real window mode `browser.pdf` is refused rather than faked.
+- **A staged download** sits in a daemon-owned directory (mode 0700) for up to 15 minutes before it is saved or pruned.
 
 ## The tools server in every agent runtime
 

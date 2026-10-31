@@ -3677,3 +3677,45 @@ describe('Agenda ledger migration: the replies earlier daemons left open or clos
     should(parked.entries.map(entry => entry.lifecycle)).deepEqual(['addressed']);
   });
 });
+
+describe('Agenda state machine offer to close', () => {
+  it('should store the offer on an item that names a card', () => {
+    // Act
+    const result = raised(AGENT, { task: { id: 'F12' }, offerClose: true });
+
+    // Assert
+    should(activeEntry(result.ledger).item).containDeep({ task: { id: 'F12' }, offerClose: true });
+  });
+
+  it('should leave the offer off an item that did not ask for it', () => {
+    // Act
+    const result = raised(AGENT, { task: { id: 'F12' } });
+
+    // Assert
+    should(activeEntry(result.ledger).item.offerClose).be.undefined();
+  });
+
+  it('should refuse an offer with no card to close', () => {
+    // Act
+    const result = failed(applyAgendaCommandToSession(null, SESSION_ID, raiseCommand(AGENT, { offerClose: true })));
+
+    // Assert
+    should(result.error).containDeep({ code: 'invalid' });
+    should(result.error.message).containEql('--task');
+  });
+
+  it('should refuse an offer to close on a notice', () => {
+    // Act
+    const result = failed(
+      applyAgendaCommandToSession(
+        null,
+        SESSION_ID,
+        raiseCommand(AGENT, { kind: 'info', notice: true, ask: undefined, task: { id: 'F12' }, offerClose: true }),
+      ),
+    );
+
+    // Assert
+    should(result.error).containDeep({ code: 'invalid' });
+    should(result.error.message).containEql('notice');
+  });
+});
