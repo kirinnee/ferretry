@@ -194,6 +194,18 @@ describe('the chat search bar', () => {
     expect(currentRow(mounted)).toBe('40');
   });
 
+  test('takes the mark off the match’s row when the box is emptied', async () => {
+    mounted = await mount(<Scene search={port(() => found([300]))} />);
+    await type(box(mounted), 'parser');
+    await settle();
+    await settle(40);
+    expect(currentRow(mounted)).toBe('300');
+
+    await type(box(mounted), '');
+    await settle(40);
+    expect(currentRow(mounted)).toBeNull();
+  });
+
   test('says a failed search in its own words', async () => {
     mounted = await mount(<Scene search={port(() => new Error('the daemon is away'))} />);
     await type(box(mounted), 'parser');
