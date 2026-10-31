@@ -1,3 +1,14 @@
+## [4.171.0](https://github.com/kirinnee/ferretry/compare/v4.170.0...v4.171.0) (2026-10-31)
+
+### Features
+
+* **pwa:** show and edit login spend budgets ([#1073](https://github.com/kirinnee/ferretry/issues/1073)) ([459daca](https://github.com/kirinnee/ferretry/commit/459daca5b4dbb4241dca7a8f39a461a0d6c36359))
+* **send:** never tell a ferret no reply is needed; add send --expect-reply ([#1167](https://github.com/kirinnee/ferretry/issues/1167)) ([2fd0bc9](https://github.com/kirinnee/ferretry/commit/2fd0bc91213dbf46bead6027bdd85bee839ca084))
+
+### Fixes
+
+* **board:** an unassigned Todo child never keeps its parent from being orphaned ([#1168](https://github.com/kirinnee/ferretry/issues/1168)) ([9d74719](https://github.com/kirinnee/ferretry/commit/9d74719df3e51e0382a1d8696e6448d13a192396))
+
 ## [4.170.0](https://github.com/kirinnee/ferretry/compare/v4.169.0...v4.170.0) (2026-10-31)
 
 ### Features
