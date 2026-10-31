@@ -1,3 +1,13 @@
+## [4.187.0](https://github.com/kirinnee/ferretry/compare/v4.186.0...v4.187.0) (2026-10-31)
+
+### Features
+
+* **pwa:** name and filter by daemon on the Warden page ([#1200](https://github.com/kirinnee/ferretry/issues/1200)) ([a0ef4e4](https://github.com/kirinnee/ferretry/commit/a0ef4e40fa1b882e1f833478cf3ee5b5ebb96a5b))
+
+### Fixes
+
+* **pwa:** one rule decides every Resume button ([#1202](https://github.com/kirinnee/ferretry/issues/1202)) ([4013ddb](https://github.com/kirinnee/ferretry/commit/4013ddbe1587df5ec31d33ed83e883c1bfac0018))
+
 ## [4.186.0](https://github.com/kirinnee/ferretry/compare/v4.185.0...v4.186.0) (2026-10-31)
 
 ### Features
