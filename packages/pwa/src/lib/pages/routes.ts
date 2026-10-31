@@ -218,6 +218,15 @@ export const daemonHomePath = (id: DaemonId): string => `/d/${encodeURIComponent
 /** Builds the canonical sessions-list pathname for one daemon: every session, one tap from the home. */
 export const daemonSessionsPath = (id: DaemonId): string => `${daemonHomePath(id)}/sessions`;
 
+/** Where an in-app "back" from a page opened off this machine goes: the list when the reader came from it, otherwise the home. */
+export const daemonBackPlace = (
+  id: DaemonId,
+  previousPath: string | undefined,
+): { readonly path: string; readonly label: string } =>
+  previousPath === daemonSessionsPath(id)
+    ? { path: daemonSessionsPath(id), label: '← Sessions' }
+    : { path: daemonHomePath(id), label: '← Home' };
+
 /** Builds the canonical new-session pathname for one daemon. */
 export const daemonNewSessionPath = (id: DaemonId): string => `${daemonHomePath(id)}/new`;
 

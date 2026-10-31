@@ -6,6 +6,7 @@ import {
   daemonAgendaPath,
   daemonAnalyticsPath,
   daemonAnalyticsQueryPath,
+  daemonBackPlace,
   daemonBoardCardPath,
   daemonBoardForFerretPath,
   daemonBoardPath,
@@ -358,5 +359,25 @@ describe('the Inbox route', () => {
       to: { kind: 'attention', daemonId: daemonB },
     });
     should([routePath(legacy), routePageKey(legacy)]).deepEqual(['/d/daemon-b/inbox', routePageKey(canonical)]);
+  });
+});
+
+describe('daemonBackPlace', () => {
+  it('should lead back to the sessions list only when that is the page the reader came from', () => {
+    // Act
+    const actual = [
+      daemonBackPlace(daemonA, daemonSessionsPath(daemonA)),
+      daemonBackPlace(daemonA, daemonHomePath(daemonA)),
+      daemonBackPlace(daemonA, daemonSessionsPath(daemonB)),
+      daemonBackPlace(daemonA, undefined),
+    ];
+
+    // Assert
+    should(actual).deepEqual([
+      { path: '/d/daemon%2Fa/sessions', label: '← Sessions' },
+      { path: '/d/daemon%2Fa', label: '← Home' },
+      { path: '/d/daemon%2Fa', label: '← Home' },
+      { path: '/d/daemon%2Fa', label: '← Home' },
+    ]);
   });
 });

@@ -112,16 +112,23 @@ export const startNavCacheRig = async (): Promise<NavCacheRig> => {
 const daemonOf = async (tab: Page): Promise<string> =>
   await tab.evaluate(() => (globalThis as unknown as { __navCache: { daemonId: string } }).__navCache.daemonId);
 
-export const sessionsPathOf = (daemon: string): string => `/d/${encodeURIComponent(daemon)}`;
+/** The machine home: the address the front door opens, and the root every other page of the machine hangs from. */
+export const homePathOf = (daemon: string): string => `/d/${encodeURIComponent(daemon)}`;
+
+/** The sessions list, one tap from the home. */
+export const sessionsPathOf = (daemon: string): string => `${homePathOf(daemon)}/sessions`;
 
 /** The sessions list's link to one session, wherever the list draws it. */
 export const listRow = (sessionId: string): string => `${SCROLLER} a[href$="/session/${sessionId}"]`;
 
-/** Opens the app at its front door and waits for the sessions list it lands on. */
+/** Opens the app at its front door (the machine home), then takes its "All sessions" link to the list. */
 export const boot = async (rig: NavCacheRig, tab: Page): Promise<string> => {
   await tab.goto(`${rig.origin}/`);
+  await tab.waitForSelector('[data-home-all-sessions]');
+  const daemon = await daemonOf(tab);
+  await tab.click('[data-home-all-sessions]');
   await tab.waitForSelector(listRow('s-03'));
-  return await daemonOf(tab);
+  return daemon;
 };
 
 /** Waits until the browser's own IndexedDB holds the session list and the named transcripts. */

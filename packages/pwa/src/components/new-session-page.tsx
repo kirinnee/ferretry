@@ -69,6 +69,8 @@ export interface NewSessionPageProps {
    * `back`), so the list returns as it was left. Absent, it is an ordinary `onNavigate`.
    */
   readonly onBack?: (path: string) => void;
+  /** Where "back" leads and what it is called: the list the reader came from, or the home. Absent, the home. */
+  readonly backPlace?: { readonly path: string; readonly label: string };
   /**
    * Whether Continue is the open choice, owned by the host so it survives Back and a reload — the list
    * the reader scrolled is only there to return to if Continue is still chosen. Absent, the page keeps
@@ -282,6 +284,7 @@ export function NewSessionPage({
   resumeSession,
   onNavigate,
   onBack = onNavigate,
+  backPlace,
   continuing: hostContinuing,
   onContinuingChange,
   accounts,
@@ -306,6 +309,7 @@ export function NewSessionPage({
   const update = (field: TextDraftField, value: string): void => setDraft(current => ({ ...current, [field]: value }));
   const canSubmit = canSubmitNewSession(draft, connection, submitting);
   const homePath = daemonHomePath(connection.daemonId);
+  const back = backPlace ?? { path: homePath, label: '← Home' };
   const chosen = chosenForDraft(chosenRuntime, connection, draft.agent);
   const models = modelSuggestions(chosen);
   const blocker = createBlocker(draft, submitting, noRunnableAccount);
@@ -351,8 +355,8 @@ export function NewSessionPage({
       className="mx-auto flex h-full min-h-0 w-full max-w-[720px] flex-1 flex-col overflow-y-auto px-3 pb-3 sm:px-0"
     >
       <div className="mb-3 mt-3 flex items-center gap-2.5">
-        <button className="text-meta text-muted hover:text-fg" onClick={() => onBack(homePath)} type="button">
-          ← Sessions
+        <button className="text-meta text-muted hover:text-fg" onClick={() => onBack(back.path)} type="button">
+          {back.label}
         </button>
         <h1 className="m-0 text-title font-semibold tracking-tight" id="new-session-heading">
           New session

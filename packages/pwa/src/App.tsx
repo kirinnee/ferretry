@@ -217,6 +217,7 @@ import {
 import {
   connectionPickerPath,
   daemonAgendaPath,
+  daemonBackPlace,
   daemonBoardForFerretPath,
   daemonHomePath,
   daemonLearningPath,
@@ -855,7 +856,7 @@ const launchHint = (search: string): { readonly initialAgent?: string } => {
 
 function NewSessionRoute({ connection }: DaemonPageProps) {
   const store = useAppStore();
-  const { navigate, back } = useRouter();
+  const { navigate, back, previousPath } = useRouter();
   // Continue is part of the address (`#continue`), replaced in place: Back to this page, or a reload, opens
   // the list the reader was scrolling rather than the empty form.
   const continuing = window.location.hash === CONTINUE_HASH;
@@ -880,6 +881,7 @@ function NewSessionRoute({ connection }: DaemonPageProps) {
       usage={store.usage}
       onNavigate={navigate}
       onBack={back}
+      backPlace={daemonBackPlace(connection.daemonId, previousPath)}
       continuing={continuing}
       onContinuingChange={chooseContinuing}
       {...launchHint(window.location.search)}
@@ -1119,7 +1121,8 @@ function SessionRoute({
       ),
     [daemonFetch, store.carrier, store.connectionHealth],
   );
-  const { navigate, back, entryKey } = useRouter();
+  const { navigate, back, entryKey, previousPath } = useRouter();
+  const failureBack = daemonBackPlace(scope.daemonId, previousPath);
   const tasksView = useChatTasksUrl({ navigate, back }, window.location);
   const layout = useLayoutMode();
   const dictation = useSttSettings(store.stt);
@@ -1755,8 +1758,8 @@ function SessionRoute({
         </QueueActionsContext.Provider>
       ) : (
         <main className="mx-auto flex h-full w-full max-w-[980px] flex-col gap-3 overflow-y-auto py-3">
-          <button type="button" className="kt-btn self-start" onClick={() => back(daemonHomePath(scope.daemonId))}>
-            ← Sessions
+          <button type="button" className="kt-btn self-start" onClick={() => back(failureBack.path)}>
+            {failureBack.label}
           </button>
           <section className="kt-panel p-panel" aria-labelledby="session-route-heading">
             <h1 id="session-route-heading" className="m-0 font-display text-display font-bold tracking-display">

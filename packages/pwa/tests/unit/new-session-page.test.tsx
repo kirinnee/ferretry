@@ -194,22 +194,22 @@ describe('NewSessionPage', () => {
     expect(button(view, 'Create session').props.disabled).toBeFalse();
   });
 
-  it('returns to the current daemon sessions list for both back and cancel', () => {
+  it('returns to the current daemon home for both back and cancel', () => {
     const { navigated, view } = page();
 
-    run(() => button(view, '← Sessions').props.onClick());
+    run(() => button(view, '← Home').props.onClick());
     run(() => button(view, 'Cancel').props.onClick());
 
     expect(navigated).toEqual(['/d/daemon%2Fa', '/d/daemon%2Fa']);
   });
 
-  it('sends "← Sessions" through onBack when the host gives one, and Cancel through onNavigate', () => {
+  it('sends the back button through onBack when the host gives one, and Cancel through onNavigate', () => {
     // Arrange
     const backed: string[] = [];
     const { navigated, view } = page({ onBack: path => backed.push(path) });
 
     // Act
-    run(() => button(view, '← Sessions').props.onClick());
+    run(() => button(view, '← Home').props.onClick());
     run(() => button(view, 'Cancel').props.onClick());
 
     // Assert

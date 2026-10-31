@@ -5070,18 +5070,18 @@ describe('the navigation cache', () => {
     }
   });
 
-  it('steps back to the sessions list from a failed session reached from it', async () => {
+  it('steps back to the home from a failed session reached from it', async () => {
     // Arrange
     const backs: string[] = [];
     const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId], { sessionFailure: 'daemon refused the read' });
     const restoreBack = patchGlobal(window.history, 'back', () => backs.push(window.location.pathname));
     try {
       await settle();
-      // Reached FROM the list (a notification tap, a link), so the list is the entry behind it.
+      // Reached FROM the home (a link), so the home is the entry behind it.
       await popTo(`/d/${ALPHA}/session/shared`);
       await settle();
       const sessions = must(
-        [...view.container.querySelectorAll('button')].find(button => button.textContent === '← Sessions'),
+        [...view.container.querySelectorAll('button')].find(button => button.textContent === '← Home'),
         'the error page’s way back',
       );
 
@@ -5096,7 +5096,7 @@ describe('the navigation cache', () => {
     }
   });
 
-  it('pushes the sessions list from a failed session opened by a deep link', async () => {
+  it('pushes the home from a failed session opened by a deep link', async () => {
     // Arrange
     const backs: string[] = [];
     const { view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId], {
@@ -5106,7 +5106,7 @@ describe('the navigation cache', () => {
     try {
       await settle();
       const sessions = must(
-        [...view.container.querySelectorAll('button')].find(button => button.textContent === '← Sessions'),
+        [...view.container.querySelectorAll('button')].find(button => button.textContent === '← Home'),
         'the error page’s way back',
       );
 
@@ -5167,7 +5167,7 @@ describe('the navigation cache', () => {
     }
   });
 
-  it('steps back to the sessions list from New session opened from it', async () => {
+  it('steps back to the home from New session opened from it', async () => {
     // Arrange
     const backs: string[] = [];
     const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId]);
@@ -5179,8 +5179,35 @@ describe('the navigation cache', () => {
       );
       await settle();
       const sessions = must(
-        [...view.container.querySelectorAll('button')].find(button => button.textContent === '← Sessions'),
+        [...view.container.querySelectorAll('button')].find(button => button.textContent === '← Home'),
         'the New session page’s way back',
+      );
+
+      // Act
+      await interact(() => sessions.click());
+
+      // Assert
+      expect(backs).toEqual([`/d/${ALPHA}/new`]);
+    } finally {
+      restoreBack();
+      await view.unmount();
+    }
+  });
+
+  it('names the way back from New session after the sessions list it was opened from', async () => {
+    // Arrange
+    const backs: string[] = [];
+    const { view } = await renderShell(`/d/${ALPHA}/sessions`, [alpha.daemonId]);
+    const restoreBack = patchGlobal(window.history, 'back', () => backs.push(window.location.pathname));
+    try {
+      await settle();
+      await interact(() =>
+        must(view.container.querySelector<HTMLAnchorElement>('main a[href$="/new"]'), 'the New session link').click(),
+      );
+      await settle();
+      const sessions = must(
+        [...view.container.querySelectorAll('button')].find(button => button.textContent === '← Sessions'),
+        'the New session page’s way back to the list',
       );
 
       // Act
