@@ -151,7 +151,9 @@ back at boot, so a fleet published before the first count of the week finishes c
 
 - `fy login check <id>` and `fy credentials` print each budget: spent today and this week on this machine
   against the limits, the zone, any unpriced requests, and what holds the login and until when.
-- The app's Settings › Machines › Credentials shows the same, with an editor.
+- The app's Settings › Machines › Credentials shows the same, with an editor — on a machine that keeps budgets
+  (its `/v1/health` lists `login.budget.1`). A machine older than budgets refuses `budget` and `timeZone` as
+  unknown keys, so there the app offers no editor and says the machine needs `fy daemon update`.
 - `GET /v1/fleet/credentials`: each login's `budget` (`FleetCredentialBudgetSchema`).
 
 ## Code
