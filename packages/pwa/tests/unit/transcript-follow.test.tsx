@@ -65,6 +65,8 @@ describe('follow decisions', () => {
     // The content or the viewport got shorter: scrollTop fell by itself.
     expect(scrollVerdict({ ...up, scrollHeight: 900 }, memory, { following: true, byReader: true })).toBe('stay');
     expect(scrollVerdict({ ...up, clientHeight: 150 }, memory, { following: true, byReader: true })).toBe('stay');
+    // The viewport GREW and the browser clamped scrollTop to the new maximum: still not a person.
+    expect(scrollVerdict({ ...up, clientHeight: 250 }, memory, { following: true, byReader: true })).toBe('stay');
   });
 
   test('re-engages inside the band only when not moving up', () => {
@@ -245,16 +247,14 @@ describe('Transcript follow', () => {
     expect(element.scrollTop).toBe(2_000);
   });
 
-  test('a nudge within reach of the tail detaches without showing the pill, and the pill row is always there', async () => {
+  test('a nudge within reach of the tail detaches without showing the pill, and the pill row exists only with the pill', async () => {
     const { view, element } = await open(rows(4));
-    expect(view.container.querySelectorAll('.fy-jump-latest-shell')).toHaveLength(1);
-    expect(view.container.querySelector('.fy-jump-latest-reserve')).not.toBeNull();
+    expect(view.container.querySelectorAll('.fy-jump-latest-shell')).toHaveLength(0);
     await readerScroll(element, 2_000 - 400 - 10);
     expect(pill(view)).toBeNull();
     await readerScroll(element, 600);
     expect(pill(view)).not.toBeNull();
     expect(view.container.querySelectorAll('.fy-jump-latest-shell')).toHaveLength(1);
-    expect(view.container.querySelector('.fy-jump-latest-reserve')).toBeNull();
   });
 
   test('a send (a bumped pinSignal) and a session switch both return a detached reader to the tail', async () => {

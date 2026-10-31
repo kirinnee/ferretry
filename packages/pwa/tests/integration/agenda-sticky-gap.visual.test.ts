@@ -248,6 +248,33 @@ describe('the chat at its tail', () => {
         }
       });
 
+  for (const { name } of VIEWPORTS)
+    for (const scheme of ['light', 'dark'] as const)
+      it(`leaves no band above the composer in a chat with no agenda (${name}, ${scheme})`, async () => {
+        const { tab, close } = await open('chat', name, scheme, '&agenda=0');
+        try {
+          await tab.waitForSelector('.fy-transcript-content > :last-child');
+          await framesSettled(tab);
+          await tab.evaluate(() => {
+            const scroller = document.querySelector('.fy-transcript') as HTMLElement;
+            scroller.scrollTop = scroller.scrollHeight;
+          });
+          await framesSettled(tab);
+          const gap = await tab.evaluate(() => {
+            const last = document.querySelector('.fy-transcript-content > :last-child') as HTMLElement;
+            const composer = document.querySelector('.scene-composer') as HTMLElement;
+            return composer.getBoundingClientRect().top - last.getBoundingClientRect().bottom;
+          });
+          // Only the scroller's own padding and the composer's top padding: less than one row of chrome.
+          expect(gap).toBeLessThanOrEqual(40);
+          expect(await tab.locator('.fy-jump-latest-shell').count()).toBe(0);
+          if (shotsDir !== '')
+            await tab.screenshot({ path: join(shotsDir, `${name}-${scheme}-plain-chat-bottom.png`) });
+        } finally {
+          await close();
+        }
+      });
+
   it('draws the Jump pill in the agenda row without changing that row or the transcript', async () => {
     const { tab, close } = await open('chat', 'phone', 'light', '');
     try {
