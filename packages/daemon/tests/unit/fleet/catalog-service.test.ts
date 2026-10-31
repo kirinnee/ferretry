@@ -672,10 +672,13 @@ describe('installing from a catalog', () => {
     const { service, applied } = world();
 
     // Act
-    const outcome = FleetAccountChangeOutcomeSchema.parse(await service.installCatalogItem(SKILL_INSTALL, governance));
+    const installed = await service.installCatalogItem(SKILL_INSTALL, governance);
+    const outcome = FleetAccountChangeOutcomeSchema.parse(installed.outcome);
 
     // Assert
     should(outcome.outcome).equal('applied');
+    should(installed.component).containEql({ installedFrom: ORIGIN });
+    should(await service.storedComponent('skills', 'nothing-here')).be.undefined();
     should(applied).have.length(1);
     const written = new Map(applied[0]?.documents.map(document => [document.path, document.content]));
     should(written.get('/state/fleet/assets/skills/pdf-tools/SKILL.md')).equal('---\nname: pdf-tools\n---\n');

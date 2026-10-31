@@ -530,7 +530,7 @@ export class FleetCatalogService {
   async installCatalogItem(
     change: FleetCatalogInstallChange,
     governance: CallerGovernance | undefined,
-  ): Promise<FleetAccountChangeOutcome> {
+  ): Promise<{ readonly outcome: FleetAccountChangeOutcome; readonly component: unknown }> {
     if (governance === undefined) {
       throw new ApiError(403, 'this daemon cannot say whether this caller may change the fleet', 'forbidden');
     }
@@ -550,7 +550,21 @@ export class FleetCatalogService {
       const failed = outcome.apply as { readonly reason?: string };
       throw new FleetCatalogRefusal('fleet_change_failed', failed.reason ?? 'the change did not land');
     }
-    return outcome;
+    // The component as the daemon holds it, taken from the model that was just written, so nothing
+    // after the write has to read the configuration again.
+    return {
+      outcome,
+      component: staged.model.components[change.component.kind === 'skills' ? 'skills' : 'mcp'][change.name],
+    };
+  }
+
+  /**
+   * One stored component exactly as the daemon holds it (every field, hidden environment values as
+   * their real stored text), or `undefined` when there is none. It exists for the installer's
+   * edited-locally hash and is never served by a route.
+   */
+  async storedComponent(kind: 'mcp' | 'skills', name: string): Promise<unknown> {
+    return (await this.#read()).model.components[kind][name];
   }
 
   /** `GET /v1/fleet/proposals/:id`. */
@@ -719,7 +733,7 @@ export class FleetCatalogService {
   async #stagePlan(
     reading: AccountDocumentReading,
     change: AccountPlanChange,
-  ): Promise<{ readonly payload: ChangePayload; readonly summary: string }> {
+  ): Promise<{ readonly payload: ChangePayload; readonly summary: string; readonly model: AccountModel }> {
     let ids: RuntimeIds;
     try {
       ids = (await this.deps.ids()) ?? EMPTY_RUNTIME_IDS;
@@ -791,6 +805,7 @@ export class FleetCatalogService {
     }
     return {
       summary: edit.summary,
+      model: edit.model,
       payload: {
         kind: 'apply',
         plan,

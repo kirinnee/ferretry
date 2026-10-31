@@ -13,6 +13,7 @@ import {
   PushNotificationPayloadSchema,
   SECURITY_SETTING_BOUNDS,
   type SecuritySettings,
+  type StepUpAct,
   type StepUpAssertion,
   type StepUpGranted,
   type StepUpOptions,
@@ -263,8 +264,8 @@ export class StepUpService {
   }
 
   /** Takes the fresh proof for an act, atomically: of concurrent acts on one proof, one gets `true`. */
-  claimFresh(subject: StepUpSubject): boolean {
-    return this.deps.registry.claimFresh(subject, this.deps.clock.nowMs());
+  claimFresh(subject: StepUpSubject, act?: StepUpAct): boolean {
+    return this.deps.registry.claimFresh(subject, this.deps.clock.nowMs(), act);
   }
 
   /** Spends the fresh proof an act that adds access was admitted on. */
@@ -408,8 +409,8 @@ export class StepUpService {
     return { ok: true, value: passkeyView(stored) };
   }
 
-  async stepUpOptions(caller: StepUpCaller, origin: string): Promise<StepUpOutcome<StepUpOptions>> {
-    return await this.#assertionOptions(caller, origin, 'step-up');
+  async stepUpOptions(caller: StepUpCaller, origin: string, act?: StepUpAct): Promise<StepUpOutcome<StepUpOptions>> {
+    return await this.#assertionOptions(caller, origin, 'step-up', act);
   }
 
   /** Options for a confirmation on opening: the same ceremony, its own challenge. */
@@ -444,6 +445,7 @@ export class StepUpService {
     caller: StepUpCaller,
     origin: string,
     purpose: 'step-up' | 'unlock',
+    act?: StepUpAct,
   ): Promise<StepUpOutcome<StepUpOptions>> {
     const device = caller.device;
     if (device === undefined) return refuse('not-a-device');
@@ -454,7 +456,7 @@ export class StepUpService {
     if (usable.length === 0) return refuse('no-passkey');
     const now = this.deps.clock.nowMs();
     const challenge = this.deps.random.bytes(CHALLENGE_BYTES);
-    this.deps.challenges.issue(device, purpose, challenge, now);
+    this.deps.challenges.issue(device, purpose, challenge, now, undefined, act);
     return {
       ok: true,
       value: {
@@ -484,7 +486,7 @@ export class StepUpService {
     const now = this.deps.clock.nowMs();
     const done = await this.#ceremony(caller, device, 'step-up', assertion, now);
     if (!done.ok) return done;
-    const expiresAt = instant(this.deps.registry.grant(device, now));
+    const expiresAt = instant(this.deps.registry.grant(device, now, true, done.act));
     return { ok: true, value: done.rotated ? { expiresAt, keyRotated: true } : { expiresAt } };
   }
 
@@ -506,7 +508,8 @@ export class StepUpService {
     assertion: StepUpAssertion,
     now: number,
   ): Promise<
-    { readonly ok: true; readonly rotated: boolean } | { readonly ok: false; readonly refusal: StepUpRefusal }
+    | { readonly ok: true; readonly rotated: boolean; readonly act?: StepUpAct }
+    | { readonly ok: false; readonly refusal: StepUpRefusal }
   > {
     const rotateBy = this.rotateBy(device.deviceId);
     if (rotateBy !== undefined && rotateBy <= now && assertion.rotation === undefined)
@@ -526,14 +529,15 @@ export class StepUpService {
     }
     const verified = await this.#verify(device, purpose, assertion, now);
     if (!verified.ok) return verified;
+    const stamp = verified.act === undefined ? {} : { act: verified.act };
     if (rotation === undefined || this.deps.rotation === undefined || transcriptHash === undefined)
-      return { ok: true, rotated: false };
+      return { ok: true, rotated: false, ...stamp };
     // The device was revoked between the assertion and the swap: nothing to step up any more.
     if (
       !(await this.deps.rotation.rotate({ deviceId: device.deviceId, deviceKey: rotation.deviceKey, transcriptHash }))
     )
       return refuse('not-a-device');
-    return { ok: true, rotated: true };
+    return { ok: true, rotated: true, ...stamp };
   }
 
   /**
@@ -545,12 +549,14 @@ export class StepUpService {
     purpose: 'step-up' | 'unlock',
     assertion: StepUpAssertion,
     now: number,
-  ): Promise<{ readonly ok: true } | { readonly ok: false; readonly refusal: StepUpRefusal }> {
-    const challenge = this.deps.challenges.take(device, purpose, now);
-    if (challenge === undefined) return refuse('not-verified');
+  ): Promise<
+    { readonly ok: true; readonly act?: StepUpAct } | { readonly ok: false; readonly refusal: StepUpRefusal }
+  > {
+    const issued = this.deps.challenges.takeWithAct(device, purpose, now);
+    if (issued === undefined) return refuse('not-verified');
     const passkeys = await this.deps.store.list(device.deviceId);
-    if (!(await this.#verifyAssertion(device, passkeys, assertion, challenge, now))) return refuse('not-verified');
-    return { ok: true };
+    if (!(await this.#verifyAssertion(device, passkeys, assertion, issued.bytes, now))) return refuse('not-verified');
+    return issued.act === undefined ? { ok: true } : { ok: true, act: issued.act };
   }
 
   /**

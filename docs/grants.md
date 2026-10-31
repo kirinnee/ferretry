@@ -312,9 +312,13 @@ with the unlock turned off always asks per act. **Adding access always asks:** m
 widening another device, and turning "what agents may control" (terminals/browsers/files, T) back ON
 want a passkey proved for that one act, from any device, unlocked or not
 ([design/zero-trust.md](design/zero-trust.md) B6) — turning one of those three OFF never does. So does
-**installing from a catalog** (act `catalog-install`, [catalogs.md](catalogs.md)): the unlock never counts
-as that proof, and the proof is claimed atomically at admission so one passkey buys one install. At the
-machine, nothing is asked.
+**installing from a catalog** (act `catalog-install`, [catalogs.md](catalogs.md)). **An unlock is never a
+fresh proof for any act**: it opens the machine and holds the step-up for ordinary acts, but minting a
+pairing code, widening a device, agent control, a daemon update and an install each ask for a passkey even
+right after an unlock. **A fresh proof is stamped with the act it was proved for** (the app names the act when
+it asks for the passkey), and a claim for one act takes only a proof stamped for that act, so a leftover proof
+for another act (loosening a configuration file, say) never buys an install. The proof is claimed atomically
+at admission, so one passkey buys one install. At the machine, nothing is asked.
 
 **The app asks only for the machine on screen.** With several machines paired, every page reads all of
 them in the background, so a locked second machine used to raise its unlock over the first machine's
@@ -688,8 +692,8 @@ command says so at the moment somebody might be tempted to do that instead.
 Catalog installs use the same split as the session MCP add below: `filesystem` governs a write into a
 project folder and `fleet` governs a runtime write, each with a preview (`use`) and an apply
 (`configure`). The seven routes are listed in [catalogs.md](catalogs.md#installing-from-a-file). An
-apply from a governed caller demands a fresh step-up for the act `catalog-install`
-(`STEP_UP_ACTS.catalogInstall`), spent on success, for every install and every update. Removing needs
+apply from a governed caller demands a fresh step-up proved for the act `catalog-install`
+(`STEP_UP_ACTS.catalogInstall`), claimed at admission and not given back, for every install and every update. Removing needs
 only the capability. A ferret may preview and list but is refused an install or a remove, whatever its
 grants say.
 

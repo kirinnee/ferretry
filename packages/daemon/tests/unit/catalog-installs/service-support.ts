@@ -8,7 +8,6 @@ import type {
   FleetAccountChange,
   FleetAccountChangeView,
   FleetCatalogInstallChange,
-  FleetComponentCatalog,
   FleetLayeredProfileCatalog,
   FleetRuntimeCatalog,
 } from '@ferretry/protocol';
@@ -190,11 +189,7 @@ export class FakeFleet {
         format: 'version-2',
         profiles: [{ name: 'work' }, { name: 'play' }],
       }) as unknown as FleetLayeredProfileCatalog,
-    components: async () =>
-      ({
-        format: 'version-2',
-        kinds: [...this.components].map(([kind, components]) => ({ kind, components })),
-      }) as unknown as FleetComponentCatalog,
+    storedComponent: async (kind, name) => this.components.get(kind)?.find(component => component.name === name),
     propose: async change => {
       this.proposed.push(change);
       return { id: `change-${this.proposed.length}` } as FleetAccountChangeView;
@@ -203,18 +198,21 @@ export class FakeFleet {
       this.proposed.push(change);
       this.applied.push(`change-${this.proposed.length}`);
       if (this.failApply !== undefined) throw this.failApply;
-      {
-        const kind = change.component.kind === 'mcp' ? 'mcp' : 'skills';
-        const list = (this.components.get(kind) ?? []).filter(component => component.name !== change.name);
-        list.push({ name: change.name, detail: change.component, installedFrom: change.installedFrom });
-        this.components.set(kind, list);
-        for (const file of change.files) {
-          const folder = this.assets.folders.get(`runtime/${change.name}`) ?? new Map<string, string>();
-          folder.set(file.path, file.content);
-          this.assets.folders.set(`runtime/${change.name}`, folder);
-        }
+      const kind = change.component.kind === 'mcp' ? 'mcp' : 'skills';
+      const list = (this.components.get(kind) ?? []).filter(component => component.name !== change.name);
+      const stored: FakeComponent = {
+        name: change.name,
+        detail: change.component,
+        installedFrom: change.installedFrom,
+      };
+      list.push(stored);
+      this.components.set(kind, list);
+      for (const file of change.files) {
+        const folder = this.assets.folders.get(`runtime/${change.name}`) ?? new Map<string, string>();
+        folder.set(file.path, file.content);
+        this.assets.folders.set(`runtime/${change.name}`, folder);
       }
-      return { outcome: 'executed', executor: 'setup', summary: 'done' };
+      return { outcome: { outcome: 'executed', executor: 'setup', summary: 'done' }, component: stored };
     },
     apply: async id => {
       this.applied.push(id);

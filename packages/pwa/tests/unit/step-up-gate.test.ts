@@ -4,6 +4,7 @@
  */
 
 import { describe, it } from 'bun:test';
+import type { StepUpAct } from '@ferretry/protocol';
 import should from 'should';
 import { type DaemonConnection, daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { STEP_UP_FALLBACK_ACT as FALLBACK } from '../../src/lib/grants.ts';
@@ -26,7 +27,7 @@ function manualCeremony() {
   return { calls, pending, ceremony };
 }
 
-const gateWith = (ceremony: (daemon: DaemonConnection) => Promise<void>) =>
+const gateWith = (ceremony: (daemon: DaemonConnection, act?: StepUpAct) => Promise<void>) =>
   new StepUpGate({ ceremony, describe: reason => `described: ${String(reason)}` });
 
 const flush = async (): Promise<void> => {
@@ -74,6 +75,51 @@ describe('asking for a step-up', () => {
     should(calls).eql([first]);
     should(answers).eql([true, true, true]);
     should(gate.snapshot()).be.null();
+  });
+});
+
+describe('stamping the proof with the act', () => {
+  const acts = () => {
+    const stamped: (StepUpAct | undefined)[] = [];
+    const gate = gateWith(async (_daemon, act) => {
+      stamped.push(act);
+    });
+    return { gate, stamped };
+  };
+
+  it('should run the ceremony for the one act every waiting request named', async () => {
+    // Arrange
+    const { gate, stamped } = acts();
+    const waiting = [
+      gate.require(first, 'install a catalog item', 'explicit', 'catalog-install'),
+      gate.require(first, 'install a catalog item', 'explicit', 'catalog-install'),
+    ];
+
+    // Act
+    await gate.confirm();
+    await Promise.all(waiting);
+
+    // Assert
+    should(stamped).eql(['catalog-install']);
+  });
+
+  it('should leave the proof unstamped when a request named no act, or several acts share the prompt', async () => {
+    // Arrange
+    const unnamed = acts();
+    const named = unnamed.gate.require(first, 'install a catalog item', 'explicit', 'catalog-install');
+    const other = unnamed.gate.require(first);
+    const mixed = acts();
+    const one = mixed.gate.require(first, 'install a catalog item', 'explicit', 'catalog-install');
+    const two = mixed.gate.require(first, 'loosen a file', 'explicit', 'loosen-config');
+
+    // Act
+    await unnamed.gate.confirm();
+    await mixed.gate.confirm();
+    await Promise.all([named, other, one, two]);
+
+    // Assert
+    should(unnamed.stamped).eql([undefined]);
+    should(mixed.stamped).eql([undefined]);
   });
 });
 

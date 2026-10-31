@@ -131,7 +131,8 @@ function callerOf(context: RouteContext): CatalogCaller {
  * none (or someone else already spent it). `undefined` means it may go on; an ungoverned caller needs none.
  */
 function claimPasskey(context: RouteContext, scope: CatalogInstallScope): ApiResponse | undefined {
-  if (context.governance?.governed !== true || context.claimFreshStepUp?.() === true) return undefined;
+  if (context.governance?.governed !== true || context.claimFreshStepUp?.(STEP_UP_ACTS.catalogInstall) === true)
+    return undefined;
   return jsonResponse(
     {
       error: 'installing from a catalog needs a passkey confirmation for it, from this device',

@@ -240,6 +240,30 @@ describe('step-up routes', () => {
     should(store.held[0]?.signCount).equal(5);
   });
 
+  it('should stamp the proof with the act the options asked for, so only that act can claim it', async () => {
+    // Arrange
+    const world = mount({ store: new MemoryStore([stored(CREDENTIAL_ID)]) });
+    const dispatcher = await world.surface;
+
+    // Act
+    const options = await dispatcher.dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/step-up/options',
+        body: json({ origin: ORIGIN, act: 'catalog-install' }),
+        ...asDevice,
+      }),
+    );
+    const stepped = await dispatcher.dispatch(
+      request({ method: 'POST', path: '/v1/step-up', body: assertionBody, ...asDevice }),
+    );
+
+    // Assert
+    should([options.status, stepped.status]).deepEqual([200, 200]);
+    should(world.service.claimFresh(browser, 'loosen-config')).be.false();
+    should(world.service.claimFresh(browser, 'catalog-install')).be.true();
+  });
+
   it('should never cache an answer, success or refusal', async () => {
     // Arrange
     const dispatcher = await mount().surface;
@@ -415,6 +439,7 @@ describe('step-up routes', () => {
       { path: '/v1/passkeys/options', body: json({ origin: 'https://app.example.test/path' }) },
       { path: '/v1/passkeys', body: json({ credentialId: CREDENTIAL_ID }) },
       { path: '/v1/step-up/options', body: json({ origin: ORIGIN, extra: true }) },
+      { path: '/v1/step-up/options', body: json({ origin: ORIGIN, act: 'loosen-everything' }) },
       { path: '/v1/step-up', body: json({ credentialId: '!!!' }) },
     ];
 

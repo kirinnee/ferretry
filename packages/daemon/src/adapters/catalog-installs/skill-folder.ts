@@ -60,25 +60,25 @@ async function checkedFolder(
   return { absolute: current, exists: true };
 }
 
+/** Opening a link with O_NOFOLLOW fails ELOOP (EMLINK on some systems); a socket fails ENXIO. */
+const NOT_PLAIN_OPEN_CODES = new Set(['ELOOP', 'EMLINK', 'ENXIO']);
+
 async function readPlainFile(path: string): Promise<Uint8Array> {
-  let handle: Awaited<ReturnType<typeof open>>;
-  try {
-    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-  } catch (error) {
-    if (codeOf(error) === 'ELOOP' || codeOf(error) === 'EMLINK')
-      throw new SkillFolderRefused(`${path} is a symbolic link, and Ferretry will not follow it.`);
-    throw error;
-  }
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK).catch(
+    (error: unknown) => Promise.reject(NOT_PLAIN_OPEN_CODES.has(codeOf(error) ?? '') ? notPlain(path) : error),
+  );
   try {
     const info = await handle.stat();
-    if (!info.isFile())
-      throw new SkillFolderRefused(`${path} is not a plain file, so Ferretry will not read or replace it.`);
+    if (!info.isFile()) throw notPlain(path);
     if (info.size > MAX_SKILL_FOLDER_BYTES) throw new SkillFolderRefused(`${path} is larger than a skill file can be.`);
     return new Uint8Array(await handle.readFile());
   } finally {
     await handle.close();
   }
 }
+
+const notPlain = (path: string): SkillFolderRefused =>
+  new SkillFolderRefused(`${path} is not a plain file (a link or a special file), so Ferretry will not read it.`);
 
 /** Every file below `directory` as relative path → hash. */
 async function readTree(directory: string): Promise<Map<string, string>> {
@@ -89,16 +89,13 @@ async function readTree(directory: string): Promise<Map<string, string>> {
       const next = relative === '' ? entry.name : `${relative}/${entry.name}`;
       const path = join(absolute, entry.name);
       if (entry.isDirectory()) await walk(path, next);
-      else if (entry.isFile()) {
+      else {
         const bytes = await readPlainFile(path);
         total += bytes.byteLength;
         if (files.size >= MAX_SKILL_FOLDER_FILES || total > MAX_SKILL_FOLDER_BYTES)
           throw new SkillFolderRefused(`${directory} holds more than a skill can, so Ferretry left it alone.`);
         files.set(next, sha256(bytes));
-      } else
-        throw new SkillFolderRefused(
-          `${path} is not a plain file or folder (a link or a special file), so Ferretry left ${directory} alone.`,
-        );
+      }
     }
   };
   await walk(directory, '');
@@ -123,6 +120,15 @@ async function ensureDirectories(base: string, absolute: string): Promise<void> 
     current = join(current, part);
     if (await plainDirectory(current)) continue;
     await mkdir(current, { mode: NEW_DIRECTORY_MODE });
+  }
+}
+
+/** `lstat`, so a link is not a directory; a path that is gone is not either. */
+async function isDirectory(path: string): Promise<boolean> {
+  try {
+    return (await lstat(path)).isDirectory();
+  } catch {
+    return false;
   }
 }
 
@@ -184,7 +190,7 @@ export async function applySkillFolder(
     ...change.remove.map(path => dirname(join(absolute, path))),
   ]);
   for (const directory of touched) {
-    if ((await plainDirectory(directory).catch(() => false)) === false) continue;
+    if (!(await isDirectory(directory))) continue;
     await pruneEmpty(directory, absolute);
   }
 }

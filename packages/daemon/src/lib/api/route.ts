@@ -1,3 +1,4 @@
+import type { StepUpAct } from '@ferretry/protocol';
 import type { ApiActor } from './actor.ts';
 import type { AuthenticatedCredential } from './authentication.ts';
 import type { CallerGovernance, CapabilityDemand, CapabilityPresentation } from './capability.ts';
@@ -115,7 +116,7 @@ export interface RouteContext {
    * requests racing on one proof exactly one is answered `true`, so one confirmation buys one act. A
    * caller with no proven device holds none. The proof is not refunded when the act then refuses.
    */
-  readonly claimFreshStepUp?: () => boolean;
+  readonly claimFreshStepUp?: (act?: StepUpAct) => boolean;
 }
 
 /**

@@ -1,4 +1,4 @@
-import type { CapabilityAxis, CapabilityGrants, DaemonCapability, GrantRefusal } from '@ferretry/protocol';
+import type { CapabilityAxis, CapabilityGrants, DaemonCapability, GrantRefusal, StepUpAct } from '@ferretry/protocol';
 import type { ApiActor } from './actor.ts';
 import type { SessionDevice } from './http.ts';
 
@@ -226,7 +226,7 @@ export interface StepUpWitness {
   /** Spends that proof. */
   spendFresh?(subject: SessionDevice): void;
   /** Takes that proof atomically: of concurrent acts on one proof, exactly one is answered `true`. */
-  claimFresh?(subject: SessionDevice): boolean;
+  claimFresh?(subject: SessionDevice, act?: StepUpAct): boolean;
 }
 
 /**

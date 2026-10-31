@@ -215,8 +215,8 @@ Installing is two steps and every route has exactly one capability. A project wr
   placeholders. Each maps to one of B's own secrets (it must exist) or to `null` (unbound). Nothing is
   bound silently, so a mismatch is `catalog_bindings_invalid`. **`null` leaves the variable OUT** of what is
   written (the project `.mcp.json` and the runtime component alike), the install records it as unbound,
-  and the apply's notes say "NAME is not set. The program runs without it until you bind one of your
-  secrets to it." An unbound placeholder is never filled by a secret of the same name. A bound project
+  and the apply's notes say "NAME is not set by this install. The program runs without it unless its own
+  environment already has a variable of that name." An unbound placeholder is never filled by a secret of the same name. A bound project
   server gets `${OWN}` in `.mcp.json` (the variable must be set in the ferret's environment, and the apply
   says so); a bound runtime server gets `${secret:OWN}`. No secret value crosses any route.
 - **It writes only through existing paths**: the project `.mcp.json` compare-and-swap, a project skill
@@ -232,7 +232,9 @@ Installing is two steps and every route has exactly one capability. A project wr
   removal needs no re-derivation from the spelling the install used. Keeping your edits is phase 3.
 - **A passkey for every install.** An apply from a governed caller needs a fresh step-up for the act
   `catalog-install` (`403 grant_step_up_required` otherwise). **The unlock is not that proof**: it
-  opens the machine, and only a passkey proved for this act counts. The proof is claimed atomically at
+  opens the machine, and only a passkey proved for this act counts. Each proof is stamped with the act it
+  was proved for (the app names the act when it asks), so a leftover proof for another act, such as loosening
+  a configuration file, does not count either. The proof is claimed atomically at
   admission, so one confirmation buys one install even when two applies race, and it is **not** given
   back when the install is then refused: if the install is refused after you confirm, you confirm again. An update asks too. **Removing never asks.** A loopback caller is ungoverned: the CLI asks y/N instead.
 - **A ferret may preview and list, but never install or remove**: it is refused with `403 forbidden`

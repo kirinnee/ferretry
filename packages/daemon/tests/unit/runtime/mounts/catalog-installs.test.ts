@@ -152,8 +152,9 @@ async function drive(
       stepUp: false,
       freshStepUp: false,
     },
-    claimFreshStepUp: () => {
-      if (proofs.left <= 0) return false;
+    claimFreshStepUp: act => {
+      // Only a proof stamped for THIS act counts, as the registry decides.
+      if (act !== 'catalog-install' || proofs.left <= 0) return false;
       proofs.left -= 1;
       claimed += 1;
       return true;

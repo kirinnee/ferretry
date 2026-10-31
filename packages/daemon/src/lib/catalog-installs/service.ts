@@ -37,7 +37,6 @@ import {
   catalogItemWarnings,
   catalogSecretPlaceholders,
   type FleetComponentInput,
-  type FleetComponentView,
   mcpServerRefusal,
   type SessionMcpServer,
   type SharedCatalogItem,
@@ -78,7 +77,7 @@ export interface CatalogInstallServiceDeps {
   readonly runtimeSkills: RuntimeSkillAssets;
   readonly fleet: Pick<
     FleetCatalogService,
-    'runtimes' | 'profiles' | 'components' | 'propose' | 'apply' | 'installCatalogItem'
+    'runtimes' | 'profiles' | 'storedComponent' | 'propose' | 'apply' | 'installCatalogItem'
   >;
   /** The NAMES of the secrets this machine holds. Never a value. */
   secretNames(): Promise<ReadonlySet<string>>;
@@ -152,7 +151,7 @@ interface Written {
 }
 
 const UNBOUND_NOTE = (placeholder: string): string =>
-  `${placeholder} is not set. The program runs without it until you bind one of your secrets to it.`;
+  `${placeholder} is not set by this install. The program runs without it unless its own environment already has a variable of that name.`;
 
 interface Judged {
   readonly replaces: CatalogInstallRecord | undefined;
@@ -579,8 +578,7 @@ export class CatalogInstallService {
     replaces: CatalogInstallRecord | undefined,
   ): Promise<SkillFolderReading | undefined> {
     const kind = item.kind === 'mcp' ? 'mcp' : 'skills';
-    const group = (await this.deps.fleet.components()).kinds.find(candidate => candidate.kind === kind);
-    const component = group?.components.find(candidate => candidate.name === item.name);
+    const component = await this.deps.fleet.storedComponent(kind, item.name);
     if (component !== undefined) {
       if (replaces === undefined)
         refuse(
@@ -865,7 +863,18 @@ export class CatalogInstallService {
       component = { kind: 'skills', items: [item.name] };
       files = item.skill.files.map(file => ({ path: file.path, content: file.content }));
     }
-    await this.deps.fleet.installCatalogItem(
+    // Everything the record needs that does not depend on the write is made BEFORE it, so once the
+    // component is written nothing below can throw and leave it without a record of ours.
+    const recorded =
+      item.kind === 'skill'
+        ? await Promise.all(
+            item.skill.files.map(async file => ({
+              path: `skills/${item.name}/${file.path}`,
+              sha256: await this.#hash(file.content),
+            })),
+          )
+        : [];
+    const { component: stored } = await this.deps.fleet.installCatalogItem(
       {
         kind: 'catalog.install',
         name: item.name,
@@ -887,24 +896,16 @@ export class CatalogInstallService {
             item.name,
             new Map(stale.map(path => [path, reading.files.get(path) as string])),
           );
-        } catch (error) {
-          throw this.#folderRefusal(error);
+        } catch {
+          // The new version is already written, so refusing now would leave it without a record.
+          notes.push(
+            `${stale.length === 1 ? 'A file' : 'Files'} from the earlier version could not be removed from skills/${item.name}/ and ${stale.length === 1 ? 'is' : 'are'} still there: ${stale.join(', ')}.`,
+          );
         }
     }
-    const stored = (await this.deps.fleet.components()).kinds
-      .find(group => group.kind === (item.kind === 'mcp' ? 'mcp' : 'skills'))
-      ?.components.find(candidate => candidate.name === item.name);
     return {
-      componentSha256: await this.#componentHash(stored as FleetComponentView),
-      files:
-        item.kind === 'skill'
-          ? await Promise.all(
-              item.skill.files.map(async file => ({
-                path: `skills/${item.name}/${file.path}`,
-                sha256: await this.#hash(file.content),
-              })),
-            )
-          : [],
+      componentSha256: await this.#componentHash(stored),
+      files: recorded,
       notes: [
         ...notes,
         `It is a layer of profile ${target.profile}, so ${target.runtime} gets it the next time it starts.`,
@@ -919,8 +920,7 @@ export class CatalogInstallService {
   ): Promise<void> {
     const kind = record.provenance.kind === 'mcp' ? 'mcp' : 'skills';
     const name = record.provenance.name;
-    const group = (await this.deps.fleet.components()).kinds.find(candidate => candidate.kind === kind);
-    const component = group?.components.find(candidate => candidate.name === name);
+    const component = await this.deps.fleet.storedComponent(kind, name);
     if (component !== undefined && (await this.#componentHash(component)) !== record.componentSha256)
       refuse(
         'catalog_install_conflict',
@@ -966,9 +966,14 @@ export class CatalogInstallService {
     };
   }
 
-  /** A stored component's hash in its canonical form: what it holds, however it is spelled on disk. */
-  async #componentHash(component: FleetComponentView): Promise<string> {
-    return await this.#hash(canonical(component.detail));
+  /**
+   * A stored component's hash in its canonical form: ALL of what the daemon holds, however it is spelled
+   * on disk — hidden environment values as their real stored text, the harness, the oauth flag and the
+   * recorded provenance. It is never the redacted view a route serves, which could not see a hand edit
+   * of a hidden value. The hash is internal and leaves no route.
+   */
+  async #componentHash(component: unknown): Promise<string> {
+    return await this.#hash(canonical(component));
   }
 
   /** The target as this machine spells it, so two spellings of one place are one place (`sameTarget`, the key). */

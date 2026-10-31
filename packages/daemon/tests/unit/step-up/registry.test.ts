@@ -111,6 +111,58 @@ describe('StepUpRegistry fresh proof (acts that add access)', () => {
     should(registry.claimFresh(phone, NOW + 1)).be.true();
   });
 
+  it('should claim a proof for an act only when it was proved for that very act', () => {
+    // Arrange
+    const registry = openRegistry();
+    registry.grant(phone, NOW, true, 'loosen-config');
+
+    // Act / Assert — a leftover proof for another act is not a catalog-install proof, and is kept.
+    should(registry.claimFresh(phone, NOW, 'catalog-install')).be.false();
+    should(registry.freshlyHeld(phone, NOW)).be.true();
+    should(registry.claimFresh(phone, NOW, 'loosen-config')).be.true();
+    should(registry.claimFresh(phone, NOW, 'loosen-config')).be.false();
+  });
+
+  it('should not count a proof with no act, or an unlock, as a proof for a named act', () => {
+    // Arrange
+    const registry = openRegistry();
+    registry.grant(phone, NOW);
+    registry.grant(laptop, NOW, false);
+
+    // Act / Assert
+    should(registry.claimFresh(phone, NOW, 'catalog-install')).be.false();
+    should(registry.claimFresh(laptop, NOW, 'catalog-install')).be.false();
+    should(registry.claimFresh(phone, NOW)).be.true();
+  });
+
+  it('should hand a proof for an act to exactly one of two claims that race for it', () => {
+    // Arrange
+    const registry = openRegistry();
+    registry.grant(phone, NOW, true, 'catalog-install');
+
+    // Act
+    const claims = [
+      registry.claimFresh(phone, NOW, 'catalog-install'),
+      registry.claimFresh(phone, NOW, 'catalog-install'),
+    ];
+
+    // Assert
+    should(claims).deepEqual([true, false]);
+  });
+
+  it('should replace the act a proof was stamped for when the next passkey is proved for another', () => {
+    // Arrange
+    const registry = openRegistry();
+    registry.grant(phone, NOW, true, 'catalog-install');
+
+    // Act
+    registry.grant(phone, NOW + 1, true, 'loosen-config');
+
+    // Assert
+    should(registry.claimFresh(phone, NOW + 1, 'catalog-install')).be.false();
+    should(registry.claimFresh(phone, NOW + 1, 'loosen-config')).be.true();
+  });
+
   it('should claim no proof that was never given, that lapsed, or that another tab holds', () => {
     // Arrange
     const registry = openRegistry();
@@ -246,6 +298,22 @@ describe('ChallengeLedger', () => {
     // Assert
     should(first).eql(bytes(1));
     should(second).be.undefined();
+  });
+
+  it('should hand back the act a challenge was issued for, once', () => {
+    // Arrange
+    const ledger = new ChallengeLedger();
+    ledger.issue(phone, 'step-up', bytes(1), NOW, undefined, 'catalog-install');
+    ledger.issue(laptop, 'step-up', bytes(2), NOW);
+
+    // Act / Assert
+    const first = ledger.takeWithAct(phone, 'step-up', NOW);
+    should(first?.bytes).eql(bytes(1));
+    should(first?.act).equal('catalog-install');
+    should(ledger.takeWithAct(phone, 'step-up', NOW)).be.undefined();
+    const plain = ledger.takeWithAct(laptop, 'step-up', NOW);
+    should(plain?.bytes).eql(bytes(2));
+    should(plain?.act).be.undefined();
   });
 
   it('should refuse a lapsed challenge and spend it in the same call', () => {

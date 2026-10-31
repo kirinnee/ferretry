@@ -760,6 +760,39 @@ describe('StepUpService', () => {
       should(service.held(phone)).be.false();
     });
 
+    it('should stamp the proof with the act the options asked for, and claim it for that act only', async () => {
+      // Arrange
+      const { service, registry } = fixture();
+      const authenticator = await es256Authenticator();
+      await enrol(service, authenticator);
+      registry.forgetDevice(phone.deviceId);
+
+      // Act
+      await service.stepUpOptions(remote(), ORIGIN, 'catalog-install');
+      await service.stepUp(remote(), await assertionBody(authenticator));
+
+      // Assert
+      should(service.claimFresh(phone, 'loosen-config')).be.false();
+      should(service.claimFresh(phone, 'catalog-install')).be.true();
+      should(service.claimFresh(phone, 'catalog-install')).be.false();
+    });
+
+    it('should leave a proof asked for no act unstamped, so no named act claims it', async () => {
+      // Arrange
+      const { service, registry } = fixture();
+      const authenticator = await es256Authenticator();
+      await enrol(service, authenticator);
+      registry.forgetDevice(phone.deviceId);
+
+      // Act
+      await service.stepUpOptions(remote(), ORIGIN);
+      await service.stepUp(remote(), await assertionBody(authenticator));
+
+      // Assert
+      should(service.claimFresh(phone, 'catalog-install')).be.false();
+      should(service.claimFresh(phone)).be.true();
+    });
+
     it('should accept only a credential registered to THIS device: a synced passkey steps up nobody else', async () => {
       // iCloud Keychain or Google Password Manager puts the phone's credential on the laptop too. It is the
       // phone's: a valid signature by it, presented by another paired device, is refused.
@@ -1107,6 +1140,20 @@ describe('StepUpService unlock on opening (B6)', () => {
 
     // Act / Assert
     should(service.unlockRequired(phone)).be.false();
+  });
+
+  it('should never count an unlock as a fresh passkey for any act', async () => {
+    // Arrange
+    const { service, authenticator } = await enrolled({ settings: { unlockOnOpen: true } });
+    await service.unlockOptions(remote(), ORIGIN);
+
+    // Act
+    await service.unlock(remote(), await nextAssertion(authenticator, 1));
+
+    // Assert
+    should(service.held(phone)).be.true();
+    should(service.claimFresh(phone, 'catalog-install')).be.false();
+    should(service.claimFresh(phone)).be.false();
   });
 
   it('should ask a device that has never confirmed, until it does', async () => {

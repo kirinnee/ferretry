@@ -115,7 +115,7 @@ describe('inspectSkillFolder', () => {
 
     // Assert
     should(error).be.instanceOf(SkillFolderRefused);
-    should((error as Error).message).match(/is not a plain file or folder/u);
+    should((error as Error).message).match(/is not a plain file \(a link or a special file\)/u);
   });
 
   it('should refuse a special file such as a named pipe', async () => {

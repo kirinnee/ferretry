@@ -511,7 +511,8 @@ describe('catalog install apply: secret bindings', () => {
     should(runtime.install.secretBindings).eql({ ACME_TOKEN: 'ACME_TOKEN_OWN' });
   });
 
-  const UNSET = 'ACME_TOKEN is not set. The program runs without it until you bind one of your secrets to it.';
+  const UNSET =
+    'ACME_TOKEN is not set by this install. The program runs without it unless its own environment already has a variable of that name.';
 
   it('should leave an unbound placeholder OUT of a project .mcp.json, record it, and say so', async () => {
     const r = rig();
@@ -1203,15 +1204,19 @@ describe('catalog install: a replace is guarded by the reading that was checked'
     should([...(r.folders.folders.get('runtime/pdf-tools')?.keys() ?? [])]).eql(['SKILL.md']);
   });
 
-  it('should refuse as a conflict when the folder changes under the removal of a stale file', async () => {
+  it('should record the install and say so when a stale file cannot be removed after the write', async () => {
     const r = rig();
     await installSkill(r, v1(), runtimeTarget());
     const preview = await r.service.preview('runtime', await request(alice, v2(), runtimeTarget()));
     r.folders.racing = true;
-    const error = await refusal(
-      r.service.apply('runtime', { previewId: preview.previewId, secretBindings: {} }, GOVERNANCE, STEP_UP),
+    const applied = await r.service.apply(
+      'runtime',
+      { previewId: preview.previewId, secretBindings: {} },
+      GOVERNANCE,
+      STEP_UP,
     );
-    should(error.code).equal('catalog_install_conflict');
+    should(applied.notes.join(' ')).match(/from the earlier version could not be removed from skills\/pdf-tools\//u);
+    should((await r.service.list()).installs.map(install => install.provenance.version)).eql([2]);
   });
 });
 

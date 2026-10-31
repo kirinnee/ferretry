@@ -1,4 +1,4 @@
-import { PASSKEY_CHALLENGE_TTL_SECONDS, STEP_UP_TTL_SECONDS } from '@ferretry/protocol';
+import { PASSKEY_CHALLENGE_TTL_SECONDS, STEP_UP_TTL_SECONDS, type StepUpAct } from '@ferretry/protocol';
 import { bytesEqual } from '@ferretry/relay';
 
 /** One running copy of the app on one device: what a step-up and a challenge are bound to. */
@@ -18,6 +18,12 @@ export const APP_SESSION_GRACE_MS = 60_000;
 /** One verified step-up: when it was proved. Its end is read from the window in force, every time. */
 interface HeldStepUp {
   readonly grantedAtMs: number;
+}
+
+/** A passkey proved for an act: when, and the act the person said it was for (none when they did not say). */
+interface FreshProof {
+  readonly provedAtMs: number;
+  readonly act: StepUpAct | undefined;
 }
 
 /** The step-up window in force, in minutes. `0` means a step-up admits exactly one governed act. */
@@ -58,7 +64,7 @@ export class StepUpRegistry {
    * when each was proved. Such an act wants a passkey proved for it, so it takes one of these, and only
    * while it is a challenge's lifetime old: the window a step-up otherwise covers is not enough.
    */
-  readonly #fresh = new Map<string, number>();
+  readonly #fresh = new Map<string, FreshProof>();
   readonly #spans = new Map<string, AppSessionSpan>();
 
   constructor(
@@ -87,12 +93,12 @@ export class StepUpRegistry {
   /**
    * Records a verified step-up and returns when it lapses. `fresh` is whether the passkey was proved FOR
    * AN ACT (a step-up): the unlock opens the machine and is never one (`fresh: false`), so it can never
-   * be spent on an act that adds access.
+   * be spent on an act that adds access. `act` stamps the proof with the act it was proved for.
    */
-  grant(subject: StepUpSubject, nowMs: number, fresh = true): number {
+  grant(subject: StepUpSubject, nowMs: number, fresh = true, act?: StepUpAct): number {
     const held: HeldStepUp = { grantedAtMs: nowMs };
     this.#held.set(key(subject), held);
-    if (fresh) this.#fresh.set(key(subject), nowMs);
+    if (fresh) this.#fresh.set(key(subject), { provedAtMs: nowMs, act });
     else this.#fresh.delete(key(subject));
     return this.#endOf(held);
   }
@@ -128,10 +134,10 @@ export class StepUpRegistry {
    * act that adds access. Never true without a live step-up, so a page that closed holds none.
    */
   freshlyHeld(subject: StepUpSubject, nowMs: number): boolean {
-    const provedAtMs = this.#fresh.get(key(subject));
+    const proof = this.#fresh.get(key(subject));
     return (
-      provedAtMs !== undefined &&
-      nowMs - provedAtMs < PASSKEY_CHALLENGE_TTL_SECONDS * 1_000 &&
+      proof !== undefined &&
+      nowMs - proof.provedAtMs < PASSKEY_CHALLENGE_TTL_SECONDS * 1_000 &&
       this.held(subject, nowMs)
     );
   }
@@ -139,9 +145,13 @@ export class StepUpRegistry {
   /**
    * Takes this copy's fresh proof if it holds one, in ONE step: of two acts racing on one proof exactly
    * one gets `true`. Nothing awaits between the check and the spend.
+   *
+   * Given an `act`, only a proof stamped for exactly that act is taken: a leftover proof for another act
+   * (or none) stays where it is and does not count.
    */
-  claimFresh(subject: StepUpSubject, nowMs: number): boolean {
+  claimFresh(subject: StepUpSubject, nowMs: number, act?: StepUpAct): boolean {
     if (!this.freshlyHeld(subject, nowMs)) return false;
+    if (act !== undefined && this.#fresh.get(key(subject))?.act !== act) return false;
     this.#fresh.delete(key(subject));
     return true;
   }
@@ -202,6 +212,8 @@ interface IssuedChallenge {
   readonly expiresAtMs: number;
   /** The registration challenge a `register-confirm` was issued with. */
   readonly boundTo?: Uint8Array;
+  /** The act a `step-up` challenge was asked for, which the proof it buys is stamped with. */
+  readonly act?: StepUpAct;
 }
 
 /**
@@ -222,12 +234,14 @@ export class ChallengeLedger {
     bytes: Uint8Array,
     nowMs: number,
     boundTo?: Uint8Array,
+    act?: StepUpAct,
   ): void {
     for (const [id, issued] of this.#issued) if (issued.expiresAtMs <= nowMs) this.#issued.delete(id);
     this.#issued.set(`${purpose}\u0000${key(subject)}`, {
       bytes,
       expiresAtMs: nowMs + PASSKEY_CHALLENGE_TTL_SECONDS * 1_000,
       ...(boundTo === undefined ? {} : { boundTo }),
+      ...(act === undefined ? {} : { act }),
     });
   }
 
@@ -237,6 +251,15 @@ export class ChallengeLedger {
    */
   take(subject: StepUpSubject, purpose: ChallengePurpose, nowMs: number): Uint8Array | undefined {
     return this.#take(subject, purpose, nowMs)?.bytes;
+  }
+
+  /** {@link take}, with the act the challenge was asked for. */
+  takeWithAct(
+    subject: StepUpSubject,
+    purpose: ChallengePurpose,
+    nowMs: number,
+  ): { readonly bytes: Uint8Array; readonly act?: StepUpAct } | undefined {
+    return this.#take(subject, purpose, nowMs);
   }
 
   /**
