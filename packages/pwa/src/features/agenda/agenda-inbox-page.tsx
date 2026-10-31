@@ -78,6 +78,7 @@ import { laneEditDestination } from '../../lib/lane-proposal-link.ts';
 import { daemonAgendaPath, daemonSessionPath } from '../../lib/pages/routes.ts';
 import { composerQuoteTarget } from '../../lib/quote.ts';
 import type { TranscriptEntry } from '../../lib/session-screens.ts';
+import { filterToTest } from '../../lib/to-test-inbox.ts';
 import { AgendaCountBadge } from '../../shell/app-bar.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { sessionsBarNames } from '../../shell/sessions-bar-model.ts';
@@ -93,6 +94,7 @@ import { AgendaStatusPill } from './agenda-status-pill.tsx';
 import { AgendaSwipeDeck } from './agenda-swipe-deck.tsx';
 import { AgendaUndoToast } from './agenda-undo-toast.tsx';
 import { ClearAgentsControl } from './clear-agents.tsx';
+import { type ToTestHost, ToTestList, useToTestAnswers } from './to-test-rows.tsx';
 
 /**
  * Where a card came from: the FERRET that asked (its callsign, else the row's title), what it is working
@@ -734,6 +736,8 @@ export interface AgendaInboxPageProps {
   readonly renderComposer?: (card: InboxCard) => ReactNode;
   /** How "Clear all from agent ferrets" reaches the machines. Absent: the Agents filter has no such button. */
   readonly clearPort?: ClearPort;
+  /** How the "Ready to test" items move their cards (the Board's own verbs). Absent: they list, and refuse to move. */
+  readonly toTestHost?: ToTestHost;
 }
 
 /** Everything a row needs besides the card itself. */
@@ -897,17 +901,22 @@ function Section({
   env,
   open,
   onToggle,
+  extra = null,
+  extraCount = 0,
 }: {
   readonly id: string;
   readonly title: string;
   readonly groups: readonly FerretGroup[];
   readonly env: RowEnv;
+  /** Rows of another kind that sit in this section, above its ferrets (the cards to test). */
+  readonly extra?: ReactNode;
+  readonly extraCount?: number;
   /** Present when the section folds. */
   readonly open?: boolean;
   readonly onToggle?: () => void;
 }) {
   const bodyId = useId();
-  const count = groups.reduce((total, group) => total + group.items.length + group.notices.length, 0);
+  const count = groups.reduce((total, group) => total + group.items.length + group.notices.length, extraCount);
   const shown = open ?? true;
   const heading =
     onToggle === undefined ? (
@@ -941,6 +950,7 @@ function Section({
       {heading}
       {shown ? (
         <ul className="fy-inbox-section__groups" id={bodyId}>
+          {extra === null ? null : <li className="fy-inbox-section__extra">{extra}</li>}
           {groups.map(group => (
             <GroupView env={env} group={group} key={group.key} />
           ))}
@@ -996,6 +1006,7 @@ export function AgendaInboxPage({
   withFerretsOpen = false,
   renderComposer,
   clearPort,
+  toTestHost,
 }: AgendaInboxPageProps) {
   const headingId = useId();
   const [cursor, setCursor] = useState<string | null>(null);
@@ -1018,6 +1029,11 @@ export function AgendaInboxPage({
   const visible = filterInboxCards(inbox.cards, listFilter);
   const withFerret = filterInboxCards(inbox.withFerret, listFilter);
   const sections = useMemo(() => inboxSections(visible, withFerret), [visible, withFerret]);
+  const toTestRows = useMemo(
+    () => filterToTest(inbox.toTest, { machine: machineFilter, query, agendaOnly: from !== null || kind !== 'all' }),
+    [inbox.toTest, machineFilter, query, from, kind],
+  );
+  const toTestAnswers = useToTestAnswers(toTestHost, phone);
   const filtered = machineFilter !== null || query !== '' || from !== null || kind !== 'all';
   const snoozed = parkedBy(inbox.parked, 'snoozed');
   const replied = parkedBy(inbox.parked, 'replied');
@@ -1080,9 +1096,9 @@ export function AgendaInboxPage({
     row?.scrollIntoView?.({ block: 'nearest' });
   }, [selectedKey, rowRefs]);
 
-  const count = inbox.reading && inbox.cards.length === 0 ? inbox.total : inbox.cards.length;
-  const empty = inbox.cards.length === 0 && inbox.withFerret.length === 0;
-  const nothingForYou = inbox.cards.length === 0;
+  const count = inbox.reading && inbox.cards.length === 0 ? inbox.total : inbox.cards.length + inbox.toTest.length;
+  const empty = inbox.cards.length === 0 && inbox.withFerret.length === 0 && inbox.toTest.length === 0;
+  const nothingForYou = inbox.cards.length === 0 && inbox.toTest.length === 0;
   const updating =
     filter === 'open'
       ? inbox.reading && !empty
@@ -1151,7 +1167,8 @@ export function AgendaInboxPage({
     </header>
   );
 
-  const nothingShown = sections.stopped.length + sections.needsYou.length + sections.withFerrets.length === 0;
+  const nothingShown =
+    sections.stopped.length + sections.needsYou.length + sections.withFerrets.length + toTestRows.length === 0;
   const openBody =
     empty && !filtered ? (
       inbox.reading ? (
@@ -1178,8 +1195,19 @@ export function AgendaInboxPage({
         {sections.stopped.length === 0 ? null : (
           <Section env={env} groups={sections.stopped} id="stopped" title="Stopped on you" />
         )}
-        {sections.needsYou.length === 0 ? null : (
-          <Section env={env} groups={sections.needsYou} id="needs-you" title="Needs you" />
+        {sections.needsYou.length === 0 && toTestRows.length === 0 ? null : (
+          <Section
+            env={env}
+            extra={
+              toTestRows.length === 0 ? null : (
+                <ToTestList answers={toTestAnswers} now={now} onNavigate={onNavigate} rows={toTestRows} />
+              )
+            }
+            extraCount={toTestRows.length}
+            groups={sections.needsYou}
+            id="needs-you"
+            title="Needs you"
+          />
         )}
         {sections.withFerrets.length === 0 ? null : (
           <Section
@@ -1298,6 +1326,7 @@ export function AgendaInboxPage({
       ) : (
         openBody
       )}
+      {toTestAnswers.composer}
       <AgendaUndoToast inbox={inbox} {...(clock === undefined ? {} : { clock })} />
     </main>
   );

@@ -74,6 +74,7 @@
         "harness/doneclose-screenshot.ts",
         "harness/doneclose-page.tsx",
         "harness/inbox-v2-screenshot.ts",
+        "harness/to-test-inbox-screenshot.ts",
         "harness/allow-confirm-screenshot.tsx",
         "harness/agenda-page.tsx",
         "harness/inbox-page.tsx",

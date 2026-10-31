@@ -7,27 +7,31 @@
  *   ?view=open            an item OPEN: who and what, the chat's full item view and the ferret's REAL composer
  *                         under it (`inbox-v2-screenshot.ts` drags it mid-swipe up and down)
  *   ?view=open-long       a LONG item open (premise, context, options, terms, a picture): one scroll for all of it
+ *   ?view=to-test         the Needs you section with cards waiting for the owner's try among the agenda items
  *   ?view=open-5|open-7   an item with five or seven options: the row of three, the rest in full-width rows
  *
  * The REAL `AgendaInboxPage` and `Composer`; only the data is invented and nothing is sent anywhere.
  */
 
-import type { AgendaItem, SessionView } from '@ferretry/protocol';
+import { type AgendaItem, boardOk, type SessionView } from '@ferretry/protocol';
 import { type ReactElement, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AgendaInboxComposer } from '../src/features/agenda/agenda-inbox-composer.tsx';
 import { AgendaInboxPage } from '../src/features/agenda/agenda-inbox-page.tsx';
+import type { ToTestHost } from '../src/features/agenda/to-test-rows.tsx';
 import type { AgendaInbox } from '../src/hooks/use-agenda-inbox.ts';
 import type { ClearPort } from '../src/lib/agenda-clear-agents.ts';
 import { DeferredAgendaActions, type InboxCard, inboxCardKey } from '../src/lib/agenda-inbox.ts';
 import { type DaemonConnection, daemonConnection, daemonId } from '../src/lib/daemon-connection.ts';
 import type { TranscriptEntry } from '../src/lib/session-screens.ts';
 import { ScrollMemory } from '../src/lib/scroll-memory.ts';
+import { toTestCards } from '../src/lib/to-test-inbox.ts';
 import { AppTabBar } from '../src/shell/app-bar.tsx';
 import { PageScrollRegion } from '../src/shell/page-scroll-region.tsx';
 import { PullToPaletteRegion } from '../src/shell/pull-to-palette-region.tsx';
 import { healthOf } from '../tests/support/health.ts';
 import { sessionView } from '../tests/support/sessions.ts';
+import { card as boardCard, laptop as boardLaptop, boardModelOf } from '../tests/unit/board-support.ts';
 
 const NOW = Date.parse('2026-10-29T09:00:00.000Z');
 const ago = (minutes: number): string => new Date(NOW - minutes * 60_000).toISOString();
@@ -288,6 +292,40 @@ const CLEAR_PORT: ClearPort = {
       headers: { 'content-type': 'application/json' },
     }),
 };
+/** Cards waiting for the owner's try, from a real board model; nothing is sent, a move is only noted on the window. */
+const TO_TEST_VIEW = new URLSearchParams(location.search).get('view') === 'to-test';
+const TO_TEST = TO_TEST_VIEW
+  ? toTestCards(
+      await boardModelOf([
+        boardCard('F61', {
+          laneId: 'tested',
+          title: 'Pairing a second phone',
+          shippedIn: { version: '5.4.0', tag: 'v5.4.0', at: ago(90) },
+          howToTest:
+            '1. Open Settings and choose Pair a device.\n2. Scan the code from a second phone.\n3. Check both phones show in Devices.',
+        }),
+        boardCard('F58', {
+          laneId: 'tested',
+          title: 'Faster board loading',
+          shippedIn: { version: '5.3.2', tag: 'v5.3.2', at: ago(60 * 26) },
+          howToTest: '1. Open the Board on a phone.\n2. It should draw in under a second.',
+        }),
+      ]),
+    )
+  : [];
+const TO_TEST_HOST: ToTestHost = {
+  actions: {
+    moveTask: async (target: { readonly taskId?: string; readonly id?: string }, to: string, reason?: string) => {
+      const win = window as unknown as { __moves?: unknown[] };
+      const moves = win.__moves ?? [];
+      win.__moves = moves;
+      moves.push({ id: target.taskId ?? target.id, to, reason });
+      return boardOk(boardCard('F61'));
+    },
+  } as unknown as ToTestHost['actions'],
+  ports: {},
+  connectionOf: () => boardLaptop,
+};
 const FAKE_CLIENT = { send: async () => ({}) as never };
 const deferred = new DeferredAgendaActions(async () => undefined);
 
@@ -308,7 +346,7 @@ function Inbox({
   const [source, setSource] = useState(from);
   const inbox: AgendaInbox = {
     unread: [],
-    total: OWNER.length + (extra === undefined ? 0 : 1),
+    total: OWNER.length + (extra === undefined ? 0 : 1) + TO_TEST.length,
     cards: extra === undefined ? OWNER : [extra, ...OWNER],
     withFerret: FERRET,
     reading: false,
@@ -319,6 +357,7 @@ function Inbox({
     deferred,
     deferredState: state,
     connectionFor: id => (id === LAPTOP ? { ...MACHINE, daemonId: LAPTOP } : MACHINE),
+    toTest: TO_TEST,
   };
   return (
     <div className={`kt-shell flex overflow-hidden ${phone ? 'flex-col' : 'flex-row'}`} data-fixture="">
@@ -331,6 +370,7 @@ function Inbox({
           <PageScrollRegion entryKey="inbox" memory={memory}>
             <AgendaInboxPage
               clearPort={CLEAR_PORT}
+              toTestHost={TO_TEST_HOST}
               from={source}
               inbox={inbox}
               now={NOW}

@@ -44,6 +44,7 @@ import { AgendaInboxComposer } from './features/agenda/agenda-inbox-composer.tsx
 import { AgendaInboxPage } from './features/agenda/agenda-inbox-page.tsx';
 import { useAgendaSessionActions } from './features/agenda/agenda-session-actions.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
+import type { ToTestHost } from './features/agenda/to-test-rows.tsx';
 import { BoardOriginProvider, useBoardOrigin } from './features/board/board-origin.tsx';
 import { BoardPage } from './features/board/board-page.tsx';
 import { LinkBehaviourProvider } from './features/browser/external-link.tsx';
@@ -132,11 +133,11 @@ import { useWhatsNewEntry, useWhatsNewHost, WhatsNewProvider } from './features/
 import { WhatsNewSheet } from './features/whats-new/whats-new-sheet.tsx';
 import { useAccountPickerSlice } from './hooks/use-account-picker.ts';
 import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.ts';
+import { type BoardMachine, useBoard, useBoardActions } from './hooks/use-board.ts';
 import { useAgendaSession, useAgendaSnapshot } from './hooks/use-agenda.ts';
 import { AgendaInboxContext, useAgendaInbox, useAgendaInboxModel, useInboxMachines } from './hooks/use-agenda-inbox.ts';
 import { useAgendaReplies } from './hooks/use-agenda-replies.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
-import { type BoardMachine, useBoard } from './hooks/use-board.ts';
 import { useCarrierPreferences, useTunnelService, useTunnelSwitches } from './hooks/use-carrier-preferences.ts';
 import { useChatTasksUrl } from './hooks/use-chat-tasks-url.ts';
 import { useConfigChangeFeed } from './hooks/use-config-change-feed.ts';
@@ -172,6 +173,7 @@ import {
 } from './hooks/use-service-worker-update.ts';
 import { useSttSettings } from './hooks/use-stt-settings.ts';
 import { useTheme } from './hooks/use-theme.ts';
+import { useToTestCards } from './hooks/use-to-test-cards.ts';
 import { useWardenDaemonScope } from './hooks/use-warden-daemon-scope.ts';
 import { agendaClearPort } from './lib/agenda-clear-agents.ts';
 import { agendaTargetFromSearch } from './lib/agenda-inbox.ts';
@@ -2059,9 +2061,24 @@ function AgendaRoute({ connection }: DaemonPageProps) {
   const daemonFetch = useDaemonFetch();
   const clientFor = useCallback((target: DaemonConnection) => store.clients.client(target), [store.clients]);
   const clearPort = useMemo(() => agendaClearPort(store.clients, daemonFetch), [store, daemonFetch]);
+  const pairings = useBoardMachines();
+  const boardActions = useBoardActions(
+    store.board,
+    store.attention,
+    useMemo(() => pairings.map(machine => machine.connection), [pairings]),
+  );
+  const toTestHost = useMemo<ToTestHost>(
+    () => ({
+      actions: boardActions,
+      ports: boardPorts(daemon => store.clients.client(daemon), daemonFetch),
+      connectionOf: id => pairings.find(machine => machine.connection.daemonId === id)?.connection,
+    }),
+    [boardActions, store.clients, daemonFetch, pairings],
+  );
   return inbox === null ? null : (
     <AgendaInboxPage
       clearPort={clearPort}
+      toTestHost={toTestHost}
       banner={
         <NotificationsOffBanner
           rows={machineNotifications.rows}
@@ -2377,7 +2394,13 @@ export function AppShell() {
     useCallback((daemonId, event) => store.board.noteEvent(daemonId, event), [store.board]),
   );
   const lockedMachines = useLockedMachines(store.unlockGate);
-  const agendaInbox = useAgendaInboxModel(store.attention, useInboxMachines(store.fleet, everyPairedMachine));
+  const toTest = useToTestCards(store.board, everyPairedMachine);
+  const agendaInbox = useAgendaInboxModel(
+    store.attention,
+    useInboxMachines(store.fleet, everyPairedMachine),
+    undefined,
+    toTest,
+  );
   const machineSources = useMachineSources(store, listedMachines, lockedMachines);
   const allMachines = useMemo<AllMachinesList | undefined>(
     () =>

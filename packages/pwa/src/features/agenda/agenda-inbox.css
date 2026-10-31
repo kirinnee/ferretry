@@ -1184,3 +1184,113 @@
   align-items: center;
   gap: var(--gap-sm);
 }
+/* Cards waiting for the owner's try: a list inside the Needs you section. */
+.fy-inbox-section__extra {
+  min-width: 0;
+  list-style: none;
+}
+.fy-totest-list {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+/* The row's own ground shows as the surface slides: green for Done, red for Not good. */
+.fy-totest {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+.fy-totest[data-swipe-direction='right'] {
+  background: var(--ok-bg);
+  border-color: var(--ok-border);
+}
+.fy-totest[data-swipe-direction='left'] {
+  background: var(--err-bg);
+  border-color: var(--err-border);
+}
+.fy-totest[data-swipe-committed] {
+  filter: saturate(1.4);
+}
+.fy-totest__surface {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  background: var(--surface);
+  padding: var(--gap-md);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.fy-totest__surface[data-dragging] {
+  transition: none;
+}
+.fy-totest__top {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gap-md);
+}
+.fy-totest__title {
+  min-width: 0;
+  color: var(--fg);
+  font-weight: var(--weight-strong);
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+.fy-totest__title:hover {
+  color: var(--accent);
+}
+.fy-totest__age {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+.fy-totest__meta {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: var(--gap-xs) var(--gap-sm);
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.fy-totest__how {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  border-radius: var(--radius-control);
+  background: var(--border-soft);
+  padding: var(--gap-sm) var(--gap-md);
+  user-select: text;
+  -webkit-user-select: text;
+}
+.fy-totest__how-title {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-strong);
+}
+.fy-totest__error {
+  margin: 0;
+  color: var(--err);
+  font-size: var(--text-sm);
+}
+.fy-totest__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--gap-sm);
+}
+.fy-totest__actions .kt-btn {
+  min-height: 44px;
+}

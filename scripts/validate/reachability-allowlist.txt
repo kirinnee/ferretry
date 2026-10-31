@@ -283,14 +283,12 @@ packages/pwa/src/lib/chat-search.ts # search within a conversation: used by comp
 # The lane editor (board U15), imported only from the .tsx app tree that the gate does not root.
 packages/pwa/src/lib/lane-editor-model.ts # the lane editor draft model, used by features/projects/lane-editor.tsx ← App.tsx ← main.tsx
 
-packages/pwa/src/lib/board-move.ts # the Board page's move rules (U11), reached from board-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/lib/board-present.ts # the Board card's meta line (U11), reached from board-card.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/lib/board-summary.ts # the Board table summary (sections and time window), reached from board-table.tsx and board-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/lib/board-phone.ts # the phone Board's lane switching and tab badge (U13), reached from board-phone.tsx and App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/lib/board-ports.ts # the Board's send-and-start ports (U12), reached from App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/hooks/use-board-asks.ts # the card detail's ask reader (U12), reached from board-detail.tsx ← board-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/lib/board-detail.ts # the card detail's pure helpers (U12), reached from board-detail.tsx ← board-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/lib/item-conversation.ts # the Inbox item's History read, used by App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/lib/board-side-view.ts # the in-ferret Tasks tab's Kanban/List choice, reached from chat-tasks.tsx ← session-chat-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
+packages/pwa/src/hooks/use-to-test-cards.ts # the Inbox's cards-to-test read, used by App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/features/queue-view/queue-action.ts # the Find/Cmd-K Message queue destination, used by App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/lib/queue-view.ts # the queue page's row and group model, used by queue-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
