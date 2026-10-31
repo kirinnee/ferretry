@@ -70,7 +70,7 @@ const item = {
   sourceSeq: 1,
   kind: 'input',
   title: 'Needs a secret',
-  subject: 'Needs a secret',
+  subject: 'Type it into sudo',
   why: 'Type it into sudo',
   context: 'sudo for the rebuild you asked for in &F131',
   howToResolve: 'Open the card and type the value in its form. Nothing is sent until you press Send.',
