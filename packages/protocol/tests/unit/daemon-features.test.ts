@@ -38,6 +38,11 @@ describe('daemon features', () => {
     should(daemonFeatureList()).containEql('messages.tail.1');
   });
 
+  it('should name login budgets, so the app offers the editor only on a machine that keeps them', () => {
+    should(DAEMON_FEATURES.loginBudget).equal('login.budget.1');
+    should(daemonFeatureList()).containEql('login.budget.1');
+  });
+
   it('should offer a feature only when the daemon listed it', () => {
     // Arrange
     const listed = { features: [DAEMON_FEATURES.packIdea4000] };

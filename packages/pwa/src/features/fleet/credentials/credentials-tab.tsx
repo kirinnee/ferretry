@@ -24,7 +24,7 @@ import { type AccountChanges, ChangeApplyPanel, useAccountChanges } from '../she
 import { DisableSwitch } from '../shell/disable-switch.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import { AddLogin } from './add-login.tsx';
-import { BudgetEditor } from './budget-editor.tsx';
+import { BudgetSection } from './budget-editor.tsx';
 import { BudgetMeter } from './budget-meter.tsx';
 import { CredentialEnvironment, environmentChip } from './credential-environment.tsx';
 import { CredentialSignIn } from './credential-sign-in.tsx';
@@ -283,7 +283,7 @@ function CredentialPage({
         />
       </div>
 
-      <BudgetEditor
+      <BudgetSection
         credential={credential}
         machineName={machineName}
         online={online}
