@@ -14,3 +14,9 @@ describe('bulletPoints', () => {
     expect(bulletPoints('-dash')).toBeNull();
   });
 });
+
+describe('bulletPoints with a marker inside the point', () => {
+  test('a stored "- - x" reads as one bullet "x", not a nested list', () => {
+    expect(bulletPoints('- - You asked to\n- * second\n- 1. third')).toEqual(['You asked to', 'second', 'third']);
+  });
+});

@@ -10,11 +10,12 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
 
 const POINT = /^\s*[-*•]\s+(\S.*)$/u;
+const NESTED_MARKER = /^(?:(?:[-*•]|\d+[.)])\s+)+(?=\S)/u;
 
 /** The points of a text written as bullets (every non-blank line one), or `null` when it is prose. */
 export function bulletPoints(text: string): readonly string[] | null {
   const lines = text.split(/\r?\n/u).filter(line => line.trim() !== '');
-  const points = lines.map(line => POINT.exec(line)?.[1]?.trim());
+  const points = lines.map(line => POINT.exec(line)?.[1]?.trim().replace(NESTED_MARKER, ''));
   return lines.length > 0 && points.every(point => point !== undefined) ? (points as string[]) : null;
 }
 

@@ -565,7 +565,8 @@ describe('attention writing flags', () => {
 
     // Assert
     should(help).containEql('--summary');
-    should(help).containEql('bullet points');
+    should(help).containEql('a plain');
+    should(help).containEql('no leading "- "');
   });
 });
 

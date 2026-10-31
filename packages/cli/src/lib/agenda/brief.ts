@@ -13,6 +13,7 @@ import {
   MAX_AGENDA_SUBJECT_LENGTH,
   MAX_AGENDA_TITLE_LENGTH,
   recommendedAgendaOption,
+  stripListMarker,
   toBullets,
   type UpAnswer,
 } from '@ferretry/protocol';
@@ -482,7 +483,11 @@ function prose(value: string | readonly string[] | undefined): string | undefine
   if (typeof value === 'string') return text(value);
   const points = value.map(point => point.trim()).filter(point => point !== '');
   if (points.length === 0) return undefined;
-  return points.length === 1 ? points[0] : toBullets(points);
+  return points.length === 1
+    ? /[\r\n]/u.test(points[0] as string)
+      ? points[0]
+      : stripListMarker(points[0] as string)
+    : toBullets(points);
 }
 
 /** The steps, in order, with blank ones dropped; nothing when none are left. */

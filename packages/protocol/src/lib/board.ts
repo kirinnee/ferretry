@@ -18,7 +18,7 @@
  * the same facts.
  */
 import { z } from 'zod';
-import { AgendaIdSchema } from './agenda.ts';
+import { AgendaIdSchema, unnestBullets } from './agenda.ts';
 import {
   DependencyUntilSchema,
   isBackwardMove,
@@ -423,9 +423,9 @@ const BoardTaskShape = {
   ask: TaskMessageSchema,
   clarifications: z.array(BoardClarificationSchema).max(MAX_BOARD_CLARIFICATIONS),
   /** Why this work exists: the problem or belief it rests on (markdown, short). */
-  premise: z.string().max(MAX_BOARD_PREMISE_LENGTH),
+  premise: z.string().max(MAX_BOARD_PREMISE_LENGTH).transform(unnestBullets),
   /** What a newcomer needs: prior PRs, related cards, constraints (markdown). */
-  context: z.string().max(MAX_BOARD_CONTEXT_LENGTH),
+  context: z.string().max(MAX_BOARD_CONTEXT_LENGTH).transform(unnestBullets),
   terms: BoardTermsSchema,
   /** The full description or plan (markdown); a sub-ferret's brief for a card `fy new` made. */
   brief: z.string().max(MAX_BOARD_BRIEF_LENGTH),
@@ -694,8 +694,8 @@ export const BoardTaskCreateRequestSchema = z.strictObject({
   title: TaskTitleSchema,
   summary: oneLine(MAX_BOARD_SUMMARY_LENGTH).default(''),
   ask: TaskMessageSchema,
-  premise: z.string().max(MAX_BOARD_PREMISE_LENGTH).default(''),
-  context: z.string().max(MAX_BOARD_CONTEXT_LENGTH).default(''),
+  premise: z.string().max(MAX_BOARD_PREMISE_LENGTH).transform(unnestBullets).default(''),
+  context: z.string().max(MAX_BOARD_CONTEXT_LENGTH).transform(unnestBullets).default(''),
   terms: BoardTermsSchema.default([]),
   brief: z.string().max(MAX_BOARD_BRIEF_LENGTH).default(''),
   howToTest: z.string().max(MAX_BOARD_HOW_TO_TEST_LENGTH).default(''),
@@ -719,8 +719,8 @@ export type BoardTaskCreateRequestInput = z.input<typeof BoardTaskCreateRequestS
 const editFields = {
   title: TaskTitleSchema.optional(),
   summary: oneLine(MAX_BOARD_SUMMARY_LENGTH).optional(),
-  premise: z.string().max(MAX_BOARD_PREMISE_LENGTH).optional(),
-  context: z.string().max(MAX_BOARD_CONTEXT_LENGTH).optional(),
+  premise: z.string().max(MAX_BOARD_PREMISE_LENGTH).transform(unnestBullets).optional(),
+  context: z.string().max(MAX_BOARD_CONTEXT_LENGTH).transform(unnestBullets).optional(),
   terms: BoardTermsSchema.optional(),
   brief: z.string().max(MAX_BOARD_BRIEF_LENGTH).optional(),
   howToTest: z.string().max(MAX_BOARD_HOW_TO_TEST_LENGTH).optional(),
