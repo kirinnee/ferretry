@@ -118,8 +118,8 @@ describe('the hint carries recipes', () => {
     const summary = loginHintSummary('vercel.com', loginHintsFor('vercel.com', [google, okta, vercel]));
     expect(summary).toContain("Recipe (the owner's steps), between the markers:\n<<<recipe\nOpen vercel.com");
     expect(summary).toContain('[[OKTA]]\nrecipe>>>');
-    expect(summary).toContain('login_propose');
-    expect(loginHintSummary('nothing.com', [])).not.toContain('login_propose');
+    expect(summary).toContain('account_propose');
+    expect(loginHintSummary('nothing.com', [])).not.toContain('account_propose');
   });
 
   it('should still have no field for a value', () => {

@@ -84,7 +84,7 @@ const INPUT_OPTIONS = {
   chain: { type: 'string', description: 'The card this login step follows, like A7.' },
   secretHint: {
     type: 'string',
-    description: 'Saved login you expect, by handle (SUDO_KIRIN_BOX): a hint only, the owner still taps.',
+    description: 'Account you expect, by handle (SUDO_KIRIN_BOX): a hint only, the owner still taps.',
   },
 };
 
@@ -211,17 +211,17 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     ),
   },
   {
-    name: 'login_hint',
-    tool: 'login.hint',
+    name: 'account_hint',
+    tool: 'account.hint',
     description:
-      "Before a sign-in: the owner's saved logins for a page or site (label, method, login domain, username, recipe). Never a value.",
+      "Before a sign-in: the owner's accounts for a page or site (label, method, login domain, username, recipe). Never a value.",
     inputSchema: object({ name: NAME, site: { type: 'string', description: 'Or a host or URL.' } }),
   },
   {
-    name: 'login_propose',
-    tool: 'login.propose',
+    name: 'account_propose',
+    tool: 'account.propose',
     description:
-      "After a sign-in, propose the saved login's recipe: the steps (Markdown, no values; [[ID]] names another login). The owner approves it.",
+      "After a sign-in, propose the account's recipe: the steps (Markdown, no values; [[ID]] names another account). The owner approves it.",
     inputSchema: object(
       {
         login: { type: 'string', description: 'Its handle, like GOOGLE_KIRIN.' },

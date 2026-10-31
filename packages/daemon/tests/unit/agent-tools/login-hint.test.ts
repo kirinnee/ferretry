@@ -34,11 +34,11 @@ const ENTRIES: readonly LoginEntrySummary[] = [
 
 const listing = (entries: readonly LoginEntrySummary[] = ENTRIES) => ({ list: async () => entries });
 
-describe('login.hint', () => {
+describe('account.hint', () => {
   it('should name the site login, how it signs in and the provider login, by metadata only', async () => {
     const world = agentToolWorld({ logins: listing() });
 
-    const result = await world.service.call(agent, { tool: 'login.hint', site: 'https://vercel.com/login' });
+    const result = await world.service.call(agent, { tool: 'account.hint', site: 'https://vercel.com/login' });
 
     should(result.logins?.site).equal('vercel.com');
     should(result.logins?.passkeys).equal('off');
@@ -56,7 +56,7 @@ describe('login.hint', () => {
     const world = agentToolWorld({ logins: listing() });
     await world.service.call(agent, { tool: 'browser.open', name: 'app', url: 'https://accounts.google.com/signin' });
 
-    const result = await world.service.call(agent, { tool: 'login.hint', name: 'app' });
+    const result = await world.service.call(agent, { tool: 'account.hint', name: 'app' });
 
     should(result.logins?.site).equal('accounts.google.com');
     should(result.logins?.hints.map(hint => hint.id)).deepEqual(['GOOGLE_KIRIN']);
@@ -67,22 +67,22 @@ describe('login.hint', () => {
     await world.service.call(otherAgent, { tool: 'browser.open', name: 'app', url: 'https://vercel.com/' });
 
     const error = (await world.service
-      .call(agent, { tool: 'login.hint', name: 'app' })
+      .call(agent, { tool: 'account.hint', name: 'app' })
       .catch((caught: unknown) => caught)) as AgentToolError;
 
     should(error.code).equal('not_found');
   });
 
-  it('should say when nothing is saved, and when this daemon keeps no saved logins', async () => {
+  it('should say when nothing is saved, and when this daemon keeps no accounts', async () => {
     const none = await agentToolWorld({ logins: listing([]) }).service.call(agent, {
-      tool: 'login.hint',
+      tool: 'account.hint',
       site: 'github.com',
     });
     should(none.logins?.hints).deepEqual([]);
-    should(none.summary).containEql('No saved login for github.com');
+    should(none.summary).containEql('No account for github.com');
 
     const error = (await agentToolWorld()
-      .service.call(agent, { tool: 'login.hint', site: 'github.com' })
+      .service.call(agent, { tool: 'account.hint', site: 'github.com' })
       .catch((caught: unknown) => caught)) as AgentToolError;
     should(error.code).equal('unavailable');
   });
@@ -98,10 +98,10 @@ describe('login.hint', () => {
     };
 
     const site = (await world.service
-      .call(agent, { tool: 'login.hint', site: 'not a site' })
+      .call(agent, { tool: 'account.hint', site: 'not a site' })
       .catch((caught: unknown) => caught)) as AgentToolError;
     const page = (await world.service
-      .call(agent, { tool: 'login.hint', name: 'app' })
+      .call(agent, { tool: 'account.hint', name: 'app' })
       .catch((caught: unknown) => caught)) as AgentToolError;
 
     should(site.code).equal('bad_request');
@@ -120,7 +120,7 @@ describe('login.hint', () => {
     });
 
     const error = (await world.service
-      .call(agent, { tool: 'login.hint', site: 'github.com' })
+      .call(agent, { tool: 'account.hint', site: 'github.com' })
       .catch((caught: unknown) => caught)) as AgentToolError;
 
     should(error.code).equal('unavailable');
@@ -130,15 +130,15 @@ describe('login.hint', () => {
   it('should name the page in the audit when the hint was for a page', async () => {
     const world = agentToolWorld({ logins: listing() });
     await world.service.call(agent, { tool: 'browser.open', name: 'app', url: 'https://vercel.com/' });
-    await world.service.call(agent, { tool: 'login.hint', name: 'app' });
-    should(world.audit.entries.at(-1)?.detail).match({ tool: 'login.hint', from: 'page', surface: '%browser:app' });
+    await world.service.call(agent, { tool: 'account.hint', name: 'app' });
+    should(world.audit.entries.at(-1)?.detail).match({ tool: 'account.hint', from: 'page', surface: '%browser:app' });
   });
 
   it('should be audited by how it was asked, never by what it answered', async () => {
     const world = agentToolWorld({ logins: listing() });
-    await world.service.call(agent, { tool: 'login.hint', site: 'vercel.com' });
+    await world.service.call(agent, { tool: 'account.hint', site: 'vercel.com' });
     const record = world.audit.entries.at(-1);
-    should(record?.detail).match({ tool: 'login.hint', from: 'site' });
+    should(record?.detail).match({ tool: 'account.hint', from: 'site' });
     should(JSON.stringify(record)).not.containEql('kirin@example.com');
   });
 });

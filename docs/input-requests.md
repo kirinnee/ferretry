@@ -523,8 +523,8 @@ reads ("GitHub (kirinnee)"), what it is for (`match`), and its fields. The wire 
 | ---------- | ------------------ | ----------------------------------------------------- | -------------------------------------------------------- |
 | `label`    | plain              | the index, `login-entries.json` (`0600`)              | the owner's list and card                                |
 | `match`    | plain              | the index                                             | the owner's list and card                                |
-| `method`   | plain              | the index                                             | the owner, and the ferret's `login_hint`                 |
-| `domains`  | plain              | the index                                             | the owner, and the ferret's `login_hint`                 |
+| `method`   | plain              | the index                                             | the owner, and the ferret's `account_hint`               |
+| `domains`  | plain              | the index                                             | the owner, and the ferret's `account_hint`               |
 | `username` | **plain**          | the index                                             | the owner, and the ferret once it is typed (it is plain) |
 | `password` | **secret**         | sealed in `login-secrets.json`, under the vault's key | **nobody**: it is typed into a target and masked         |
 | `totp`     | **secret**, opt-in | sealed in `login-secrets.json`                        | **nobody**: the daemon makes the code and types it       |
@@ -557,13 +557,15 @@ is for (`match`, the site the work is on):
   'Google (kirin@…)'", `InputSaved.signIn`), and the provider's login is **not** offered as the one tap there:
   it is typed only on the provider's own domain.
 
-### The ferret's hint: `login_hint`
+### The ferret's hint: `account_hint`
 
-Before a sign-in, a ferret calls **`login_hint`** (a page by name, so the daemon reads the host from where the page
+`account_hint` and `account_propose` were `login_hint` and `login_propose`; the daemon still accepts the old tool names, read as the new ones through the same checks.
+
+Before a sign-in, a ferret calls **`account_hint`** (a page by name, so the daemon reads the host from where the page
 **is**, or a site) and gets each entry for that site and the provider entries they go via: **handle, label,
 method, login domains and the plain username**, and its [recipe and observed facts](#login-recipes-how-it-signs-in-and-what-the-daemon-saw). Never a password, a seed, a code, nor even which secret fields
 exist (`LoginHintSchema` has no field for one). Every hint ends "passkeys are off". The owner sees the same words
-with `fy secret entry hint <site>`; the route is `GET /v1/secrets/logins/hint?site=` (`secrets` use). It is
+with `fy account hint <site>`; the route is `GET /v1/secrets/logins/hint?site=` (`secrets` use). It is
 not more than a ferret could list before (`GET /v1/secrets/logins` was already readable with the admin token);
 it is a narrower view, offered at the moment it helps.
 
@@ -585,7 +587,7 @@ facts are `packages/daemon/src/lib/input-requests/login-observer.ts`.
 - **A recipe never holds a value**, checked twice. On every WRITE (the owner's text, a ferret's proposal and its
   reason, and again on approval) the text goes through the daemon's own redactor: one in which any vault secret,
   saved login or just-typed value is found is refused (`recipe_holds_value`), and a redactor that cannot run refuses
-  too. On every READ (the list, the hint route, the ferret's `login_hint`) the recipe and every proposal are masked
+  too. On every READ (the list, the hint route, the ferret's `account_hint`) the recipe and every proposal are masked
   again, so a value kept AFTER a recipe was written reaches nobody; where nothing can mask, no recipe is served.
   Masking does not catch a value shorter than `MIN_SECRET_VALUE_LENGTH`: a short PIN in a recipe is not caught.
 - **Who wrote it.** A recipe is the owner's unless it is an auto-applied proposal (`recipeBy: ferret`), which stays
@@ -617,12 +619,12 @@ facts are `packages/daemon/src/lib/input-requests/login-observer.ts`.
   act after that moment does not undo it. A raise time that cannot be read keeps no after-submit fact. The proposal
   card and the owner's change and approval answers are masked like any read. The facts of the write itself come from
   the card's own observation.
-- **The ferret reads both** in `login_hint`, and the agent instruction says to read it before a sign-in.
-- **The ferret proposes, the owner decides.** After a sign-in a ferret may call `login_propose` (`login`, the whole
+- **The ferret reads both** in `account_hint`, and the agent instruction says to read it before a sign-in.
+- **The ferret proposes, the owner decides.** After a sign-in a ferret may call `account_propose` (`login`, the whole
   new `recipe`, `why`). The proposal waits on the entry (three at most; a fourth pushes out the oldest and closes its
   card) and on an agenda card that shows the changed lines and "The ferret says: …". **The card approves nothing**:
-  the owner approves or declines in Settings › Saved logins › the login › Recipe, or with
-  `fy secret entry recipe approve|decline <id> <proposal>`, through the owner-only
+  the owner approves or declines in Settings › Accounts › the login › Recipe, or with
+  `fy account recipe approve|decline <id> <proposal>`, through the owner-only
   `POST /v1/secrets/logins/:id/recipe/proposals/:proposalId` (`secrets` configure, a kept `secrets.changed` record).
   An approval is refused (`stale_proposal`) when the recipe changed after the proposal was made, because the owner
   was shown a diff from the older text. Only an owner who turns **auto-apply** on for that ONE login lets a proposal
@@ -661,7 +663,7 @@ the target's key (`sudo@kirin-box` → `SUDO_KIRIN_BOX`, "sudo on kirin-box"; a 
   the handle and the field, exactly as `fy secret set` is audited. Never the value.
 - **One change at a time, for the whole store.** Every saved login shares the same two files, and a change
   reads both, seals and writes both back whole. Every change — a card's "Save as", a Settings edit, a rename,
-  a delete, `fy secret entry` — runs its read, merge and write in one store-wide queue (`LoginStoreLock`), so
+  a delete, `fy account` (alias `fy secret entry`) — runs its read, merge and write in one store-wide queue (`LoginStoreLock`), so
   two that overlap both land and every acknowledged secret stays masked. A per-entry or per-session lock would
   not be enough: the files are shared.
 - **All or nothing, across a crash.** A change never overwrites a sealed value the index points at. New
@@ -698,7 +700,7 @@ for `ssh`, `scp` and `sftp`), or the web host for a page. A saved login whose `m
 - **The ferret may hint** (`secretHint` / `secret_hint`): the card marks that entry as "the ferret suggested
   this", but a hint never makes an entry matched, and the agent's answer is the same whether the entry exists.
 - **The agent learns `source: saved`** from the delivery and nothing else: not the handle, not the label, not the
-  value. What it may know beforehand is the [hint](#the-ferrets-hint-login_hint): metadata, never a value.
+  value. What it may know beforehand is the [hint](#the-ferrets-hint-account_hint): metadata, never a value.
 
 ### 2FA seeds (opt-in, per entry)
 
@@ -712,7 +714,7 @@ explicit confirmation of this sentence (`LOGIN_TOTP_WARNING`), shown in the app 
 
 ### Managing them
 
-Settings › Secrets › Saved logins and `fy secret entry ls|add|edit|rename|rm|recipe` list entries (never values),
+Settings › Secrets › Saved logins and `fy account ls|add|edit|rename|rm|recipe` (`fy secret entry …` is a hidden alias for one release) list entries (never values),
 add and edit the label, match, sign-in method (`--method`, `--via`, `--sso-name`), login domains (`--domain`)
 and username, replace a password, add or remove a 2FA seed, rename the handle and
 delete. Values are typed into a masked field or read from the TTY with echo off; never a flag.
@@ -795,12 +797,12 @@ default**, revocable, and audited on every use. Until then every placement is a 
 
 ## Phases
 
-| Phase | What                                                                                        | State       |
-| ----- | ------------------------------------------------------------------------------------------- | ----------- |
-| P0    | This contract and the schemas                                                               | done        |
-| P1    | Terminal secret and plain: service, agent tools, deliver and cancel, quarantine, `fy input` | done        |
-| P2    | The app card, cards of several fields, `chain` steps                                        | done        |
-| P3    | Saved logins (one tap), "Save as", 2FA codes, `fy secret entry`, Settings › Saved logins    | done        |
-| P4    | Pages: browser fields, field shot, page holds, passkeys off, captcha handover               | done        |
-| P4b   | Login recipes: steps, daemon-observed facts, ferret proposals the owner approves            | this change |
-| P5    | Multi-step chains, consumer configuration, a per-daemon remote cap                          | later       |
+| Phase | What                                                                                                          | State       |
+| ----- | ------------------------------------------------------------------------------------------------------------- | ----------- |
+| P0    | This contract and the schemas                                                                                 | done        |
+| P1    | Terminal secret and plain: service, agent tools, deliver and cancel, quarantine, `fy input`                   | done        |
+| P2    | The app card, cards of several fields, `chain` steps                                                          | done        |
+| P3    | Saved logins (one tap), "Save as", 2FA codes, `fy account` (alias `fy secret entry`), Settings › Saved logins | done        |
+| P4    | Pages: browser fields, field shot, page holds, passkeys off, captcha handover                                 | done        |
+| P4b   | Login recipes: steps, daemon-observed facts, ferret proposals the owner approves                              | this change |
+| P5    | Multi-step chains, consumer configuration, a per-daemon remote cap                                            | later       |

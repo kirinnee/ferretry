@@ -135,7 +135,7 @@ function controllerOf(context: RouteContext): SurfaceController {
 
 /** The kind a person's route must match; `input.wait` is about a request, so no per-kind route takes it. */
 const kindOf = (call: AgentToolCall): SurfaceKind | undefined =>
-  call.tool === 'input.wait' || call.tool === 'login.hint' || call.tool === 'login.propose'
+  call.tool === 'input.wait' || call.tool === 'account.hint' || call.tool === 'account.propose'
     ? undefined
     : call.tool.startsWith('terminal.')
       ? 'terminal'

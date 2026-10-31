@@ -7,7 +7,7 @@ import { agent, agentToolWorld } from './support.ts';
 
 /** `login_propose`: a ferret's suggested recipe for a saved login, which the owner approves. */
 
-describe('login.propose', () => {
+describe('account.propose', () => {
   it("should file the ferret's recipe for the owner and say the card it waits on", async () => {
     const calls: unknown[] = [];
     const world = agentToolWorld({
@@ -21,7 +21,7 @@ describe('login.propose', () => {
     });
 
     const result = await world.service.call(agent, {
-      tool: 'login.propose',
+      tool: 'account.propose',
       login: 'VERCEL',
       recipe: 'Open vercel.com → Continue with Google → [[GOOGLE_KIRIN]]',
       why: 'the first sign-in needed the Google step',
@@ -53,7 +53,7 @@ describe('login.propose', () => {
         propose: async () => ({ id: 'rp_0000000000000001', login: 'VERCEL', state: 'applied' }),
       },
     });
-    const result = await world.service.call(agent, { tool: 'login.propose', login: 'VERCEL', recipe: 'x', why: 'y' });
+    const result = await world.service.call(agent, { tool: 'account.propose', login: 'VERCEL', recipe: 'x', why: 'y' });
     should(result.summary).containEql('was updated');
   });
 
@@ -62,7 +62,7 @@ describe('login.propose', () => {
       agentToolWorld({
         recipes: { scrubbed: async entries => entries, propose: async () => await Promise.reject(error) },
       });
-    const call = { tool: 'login.propose', login: 'VERCEL', recipe: 'x', why: 'y' } as const;
+    const call = { tool: 'account.propose', login: 'VERCEL', recipe: 'x', why: 'y' } as const;
     const unknown = (await refusing(new LoginEntryError('unknown_login', 'there is no saved login VERCEL'))
       .service.call(agent, call)
       .catch((caught: unknown) => caught)) as AgentToolError;
@@ -93,7 +93,7 @@ describe('a ferret driving a surface', () => {
     await world.service.call(agent, { tool: 'browser.navigate', name: 'app', url: 'https://vercel.com/' });
     await world.service.call(agent, { tool: 'browser.read', name: 'app' });
     await world.service.call(agent, { tool: 'browser.close', name: 'app' }).catch(() => undefined);
-    await world.service.call(agent, { tool: 'login.hint', site: 'vercel.com' }).catch(() => undefined);
+    await world.service.call(agent, { tool: 'account.hint', site: 'vercel.com' }).catch(() => undefined);
     await world.service.call(agent, { tool: 'terminal.list' });
     should(acted).deepEqual([
       ['s1', 'browser', false],
@@ -126,7 +126,7 @@ describe('a ferret driving a surface', () => {
   });
 });
 
-describe('login.hint masks recipes as it serves them', () => {
+describe('account.hint masks recipes as it serves them', () => {
   const ENTRY = {
     id: 'VERCEL',
     label: 'Vercel',
@@ -145,14 +145,14 @@ describe('login.hint masks recipes as it serves them', () => {
         propose: async () => await Promise.reject(new Error('unused')),
       },
     });
-    const result = await world.service.call(agent, { tool: 'login.hint', site: 'vercel.com' });
+    const result = await world.service.call(agent, { tool: 'account.hint', site: 'vercel.com' });
     should(JSON.stringify(result)).not.containEql('8841-2297-ab');
     should(result.summary).containEql('PIN [redacted]');
   });
 
   it('should hand no recipe at all where nothing can mask it', async () => {
     const world = agentToolWorld({ logins: { list: async () => [ENTRY] } });
-    const result = await world.service.call(agent, { tool: 'login.hint', site: 'vercel.com' });
+    const result = await world.service.call(agent, { tool: 'account.hint', site: 'vercel.com' });
     should(JSON.stringify(result)).not.containEql('PIN');
   });
 });

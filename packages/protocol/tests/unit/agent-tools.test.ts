@@ -123,8 +123,8 @@ describe('agent tool schemas', () => {
       { tool: 'terminal.ask_owner', name: 'dev', message: 'Type your password.' },
       { tool: 'terminal.request_input', name: 'dev', prompt: 'sudo password for deploy', sensitivity: 'secret' },
       { tool: 'input.wait', id: '!A7', timeoutMs: 5_000 },
-      { tool: 'login.hint', site: 'vercel.com' },
-      { tool: 'login.propose', login: 'VERCEL', recipe: 'Open vercel.com', why: 'first sign-in' },
+      { tool: 'account.hint', site: 'vercel.com' },
+      { tool: 'account.propose', login: 'VERCEL', recipe: 'Open vercel.com', why: 'first sign-in' },
       { tool: 'browser.list' },
       { tool: 'browser.open', name: 'app', url: 'http://localhost:5173/', incognito: true, askOwner: 'Sign in.' },
       { tool: 'browser.navigate', name: 'app', url: 'https://example.test/' },
@@ -517,16 +517,16 @@ describe('isRepeatableAgentTool', () => {
   });
 });
 
-describe('the login hint tool', () => {
+describe('the account hint tool', () => {
   it('should take a page of the agent or a site, never both and never neither', () => {
-    should(tools.AgentToolCallSchema.safeParse({ tool: 'login.hint', name: 'app' }).success).be.true();
+    should(tools.AgentToolCallSchema.safeParse({ tool: 'account.hint', name: 'app' }).success).be.true();
     should(
-      tools.AgentToolCallSchema.safeParse({ tool: 'login.hint', site: 'https://vercel.com/login' }).success,
+      tools.AgentToolCallSchema.safeParse({ tool: 'account.hint', site: 'https://vercel.com/login' }).success,
     ).be.true();
     should(
-      tools.AgentToolCallSchema.safeParse({ tool: 'login.hint', name: 'app', site: 'vercel.com' }).success,
+      tools.AgentToolCallSchema.safeParse({ tool: 'account.hint', name: 'app', site: 'vercel.com' }).success,
     ).be.false();
-    should(tools.AgentToolCallSchema.safeParse({ tool: 'login.hint' }).success).be.false();
+    should(tools.AgentToolCallSchema.safeParse({ tool: 'account.hint' }).success).be.false();
   });
 
   it('should answer metadata only: a hint carrying a password is not a result', () => {
@@ -546,6 +546,21 @@ describe('the login hint tool', () => {
   });
 
   it('should be repeatable after a dropped request: it changes nothing', () => {
+    should(tools.isRepeatableAgentTool('account.hint')).be.true();
+  });
+
+  it('should read the old login tool names as the account tools', () => {
+    should(tools.AgentToolCallSchema.parse({ tool: 'login.hint', site: 'vercel.com' })).eql({
+      tool: 'account.hint',
+      site: 'vercel.com',
+    });
+    should(
+      tools.AgentToolCallSchema.parse({ tool: 'login.propose', login: 'VERCEL', recipe: 'Open vercel.com', why: 'x' })
+        .tool,
+    ).equal('account.propose');
+    should(
+      tools.AgentToolCallSchema.safeParse({ tool: 'login.hint', name: 'app', site: 'vercel.com' }).success,
+    ).be.false();
     should(tools.isRepeatableAgentTool('login.hint')).be.true();
   });
 });

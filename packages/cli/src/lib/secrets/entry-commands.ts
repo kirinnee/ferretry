@@ -4,7 +4,7 @@ import type { LoginEntryController } from './entry-controller.ts';
 
 const collect = (value: string, previous: readonly string[] = []): string[] => [...previous, value];
 
-const ENTRY_HELP = `Saved logins: the owner's password manager, which the input bridge types from. An entry is a label,
+const ENTRY_HELP = `Accounts: the owner's password manager, which the input bridge types from. An entry is a label,
 what it is for (--match sudo@kirin-box, or a web host like github.com), how it signs in (--method:
 password, or a provider such as google --via GOOGLE_KIRIN), where the sign-in happens (--domain
 accounts.google.com), an optional username (plain text) and secret fields: a password, and optionally a
@@ -15,20 +15,36 @@ environment variable or pipe that carries one, and no command that prints one: a
 types it for you (\`input answer !A7 --secret HANDLE\`) and nothing else ever reads it back.`;
 
 const RECIPE_HELP = `A recipe is the steps to sign in, in Markdown, with no values in it: "Open app.vercel.com, Continue with
-Google, [[GOOGLE_KIRIN]], wait for the phone approval". [[ID]] names another saved login, whose recipe the ferret
+Google, [[GOOGLE_KIRIN]], wait for the phone approval". [[ID]] names another account, whose recipe the ferret
 is handed too. A ferret that finds the steps wrong proposes a better recipe after it signs in; nothing changes
 until you approve it here (or turn on --auto-apply-recipe for that one login).`;
 
-/** Mounts `fy secret entry ls|add|edit|hint|recipe|rename|rm` under the `secret` command. */
-export function registerLoginEntryCommands(secret: Command, controller: LoginEntryController): void {
-  const entry = secret
-    .command('entry')
-    .description('saved logins the input bridge can type for you')
-    .addHelpText('after', `\n${ENTRY_HELP}`);
+/** Mounts `fy account ls|add|edit|hint|recipe|rename|rm`. */
+export function registerAccountCommands(program: Command, controller: LoginEntryController): void {
+  mountAccountCommands(
+    program
+      .command('account')
+      .description('accounts the input bridge can type for you')
+      .addHelpText('after', `\n${ENTRY_HELP}`),
+    controller,
+  );
+}
 
+/** `fy account …`: the old spelling of `fy account …`, i.e. `fy secret entry …`, kept for one release and hidden from `fy secret --help`. */
+export function registerLoginEntryCommands(secret: Command, controller: LoginEntryController): void {
+  mountAccountCommands(
+    secret
+      .command('entry', { hidden: true })
+      .description('alias of `fy account`')
+      .addHelpText('after', `\n${ENTRY_HELP}`),
+    controller,
+  );
+}
+
+function mountAccountCommands(entry: Command, controller: LoginEntryController): void {
   entry
     .command('ls', { isDefault: true })
-    .description('list the saved logins: label, handle, what they match, username, which fields exist')
+    .description('list the accounts: label, handle, what they match, username, which fields exist')
     .option('--json', 'print the protocol document instead of the human listing')
     .action(async (options: { json?: boolean }) => {
       await controller.list(options);
@@ -42,7 +58,7 @@ export function registerLoginEntryCommands(secret: Command, controller: LoginEnt
     .option('--username <text>', 'the username (plain text, shown on cards)')
     .option('--method <kind>', `how it signs in: ${LOGIN_METHODS.join(', ')} (default password)`)
     .option('--sso-name <text>', 'with --method sso: the provider as its button says it, e.g. Okta')
-    .option('--via <id>', "with a provider method: the provider's saved login, e.g. GOOGLE_KIRIN")
+    .option('--via <id>', "with a provider method: the provider's account, e.g. GOOGLE_KIRIN")
     .option('--domain <host>', 'where the sign-in happens, e.g. accounts.google.com (repeatable)', collect)
     .option('--no-password', 'save it without a password for now')
     .action(async (id: string, options: Parameters<LoginEntryController['add']>[1]) => {
@@ -58,8 +74,8 @@ export function registerLoginEntryCommands(secret: Command, controller: LoginEnt
     .option('--no-username', 'remove the username')
     .option('--method <kind>', `how it signs in: ${LOGIN_METHODS.join(', ')}`)
     .option('--sso-name <text>', 'with --method sso: the provider as its button says it')
-    .option('--via <id>', "the provider's saved login this one signs in via")
-    .option('--no-via', 'sign in via no saved login')
+    .option('--via <id>', "the provider's account this one signs in via")
+    .option('--no-via', 'sign in via no account')
     .option('--domain <host>', 'REPLACE where the sign-in happens (repeatable)', collect)
     .option('--password', 'replace the password (typed at a hidden prompt)')
     .option('--totp', 'keep a 2FA seed (typed at a hidden prompt, after a warning)')
@@ -131,7 +147,7 @@ export function registerLoginEntryCommands(secret: Command, controller: LoginEnt
 
   entry
     .command('rm <id>')
-    .description('delete a saved login')
+    .description('delete an account')
     .option('-y, --yes', 'do not ask first')
     .action(async (id: string, options: { yes?: boolean }) => {
       await controller.remove(id, options);
