@@ -4,7 +4,7 @@
  *
  *   ?theme=<family>-<mode>
  *   ?view=cards|table          the device's table view (phone only; a desktop always draws the table)
- *   ?wide=1                    a table whose columns cannot wrap (an unbroken token), so it must scroll sideways
+ *   ?wide=1                    five columns, one with an unbroken token, so the table must scroll sideways
  */
 
 import { createRoot } from 'react-dom/client';
@@ -30,10 +30,14 @@ const rows = [
   ['**Atlas**', 'Yes. A thin wrapper over the template with no state of its own.'],
 ];
 const wide = params.get('wide') === '1';
+const extra = ['Owner', 'Repo', 'Pipeline'];
 const table = [
-  '| App | Fits divine? |',
-  '| --- | --- |',
-  ...rows.map(([app, fit]) => `| ${app ?? ''} | ${wide ? `${fit ?? ''} ${'x'.repeat(60)}` : (fit ?? '')} |`),
+  `| App | Fits divine? |${wide ? ` ${extra.join(' | ')} |` : ''}`,
+  `| --- | --- |${wide ? ` ${extra.map(() => '---').join(' | ')} |` : ''}`,
+  ...rows.map(
+    ([app, fit]) =>
+      `| ${app ?? ''} | ${fit ?? ''} |${wide ? ` ${extra.map(name => `${name} of the platform team ${'x'.repeat(40)}`).join(' | ')} |` : ''}`,
+  ),
 ].join('\n');
 
 const prose = (text: string) => <ChatProse text={text} />;

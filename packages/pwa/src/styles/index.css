@@ -796,7 +796,9 @@ pre,
   [data-md-table-view='table'] th,
   [data-md-table-view='table'] td {
     max-width: 16em;
-    overflow-wrap: normal;
+    /* Only a word that cannot fit its cell breaks (a URL, an id). A token left to overflow its cell widens the
+       scroll area but not the table, and the sticky first column — bounded by the table — is pushed off. */
+    overflow-wrap: break-word;
     word-break: normal;
     hyphens: manual;
     border-width: 0 var(--divider-width) var(--divider-width) 0;

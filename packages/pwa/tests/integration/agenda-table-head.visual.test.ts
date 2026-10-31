@@ -194,9 +194,24 @@ describe('a markdown table in the open agenda item', () => {
           expect(state.cue, 'there is more to the right and the box says so').toBe('end');
           await tab.evaluate(() => {
             const box = document.querySelector('.fy-item-view__body .md-table-scroll') as HTMLElement;
+            box.scrollLeft = (box.scrollWidth - box.clientWidth) / 2;
+          });
+          await framesSettled(tab);
+          const middle = await tab.evaluate(
+            () => (document.querySelector('.fy-item-view__body .md-table-scroll') as HTMLElement).dataset.mdTableMore,
+          );
+          expect(middle, 'in the middle both edges have more beyond them').toBe('both');
+          await tab.evaluate(() => {
+            const box = document.querySelector('.fy-item-view__body .md-table-scroll') as HTMLElement;
             box.scrollLeft = box.scrollWidth;
           });
           await framesSettled(tab);
+          const pinned = await tab.evaluate(() => {
+            const box = document.querySelector('.fy-item-view__body .md-table-scroll') as HTMLElement;
+            const cell = box.querySelector('tbody tr > :first-child') as HTMLElement;
+            return { cell: cell.getBoundingClientRect().left, box: box.getBoundingClientRect().left };
+          });
+          expect(Math.abs(pinned.cell - pinned.box), 'the first column stays pinned to the box').toBeLessThanOrEqual(1);
           const atEnd = await tab.evaluate(
             () =>
               (document.querySelector('.fy-item-view__body .md-table-scroll') as HTMLElement).dataset.mdTableMore ??
