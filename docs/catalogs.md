@@ -406,7 +406,9 @@ fy catalog uninstall <installId> [--yes] [--json]
 command and warning), asks for each placeholder you did not name (or fails when it cannot ask), asks
 y/N unless `--yes`, then applies. When the daemon wants a passkey it says so and changes nothing.
 
-With `--json` (on the verb, or on `fy catalog` itself), stdout carries exactly one protocol payload: the
+With `--json` (on the verb, or on `fy catalog` itself), which `install` and `uninstall` accept only
+together with `--yes` (a script cannot answer y/N; a person reads the review without `--json`), stdout
+carries exactly one protocol payload: the
 applied install with its notes, the install list, or what was removed. The preview still goes out in full,
 as JSON on stderr, so a script never skips the review a person would have read.
 

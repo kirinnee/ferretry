@@ -49,6 +49,13 @@ export interface CatalogInstallJsonOption {
 /** A sentence for the person, thrown inside the controller and printed once at its edge. */
 class Stop extends Error {}
 
+/**
+ * `--json` is for scripts, which cannot read a review and answer y/N, so it needs `--yes`. A person at a
+ * terminal who wants to read the review first runs the verb without `--json`.
+ */
+const JSON_NEEDS_YES =
+  '--json is for scripts, so it needs --yes too. To read the review and answer yourself, run this without --json.';
+
 const isYes = (answer: string): boolean => ['y', 'yes'].includes(answer.trim().toLowerCase());
 
 /** `fy catalog install <file>`, `fy catalog installs`, `fy catalog uninstall <id>` (docs/catalogs.md § Installing). */
@@ -57,6 +64,7 @@ export class CatalogInstallController {
 
   async install(path: string, options: CatalogInstallOptions): Promise<void> {
     await this.#guarded(async () => {
+      if (options.json === true && options.yes !== true) throw new Stop(JSON_NEEDS_YES);
       const target = this.#target(options);
       const bindFlags = this.#bindFlags(options);
       const item = await this.#readItem(path, options.item);
@@ -101,6 +109,7 @@ export class CatalogInstallController {
 
   async uninstall(installId: string, options: { readonly yes?: boolean } & CatalogInstallJsonOption): Promise<void> {
     await this.#guarded(async () => {
+      if (options.json === true && options.yes !== true) throw new Stop(JSON_NEEDS_YES);
       const found = (await this.deps.gateway.catalogInstalls()).installs.find(
         install => install.installId === installId,
       );
