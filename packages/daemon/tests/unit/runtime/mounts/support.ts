@@ -2132,6 +2132,22 @@ export const NARROWED: CapabilityGuard = {
 };
 
 /**
+ * A governed device granted everything but `secrets.configure`: refused it outright, or asked for a passkey
+ * first. What a paste into the secret store must also hold, behind a `terminal` route.
+ */
+export function withoutSecretsConfigure(refusal: 'not-granted' | 'step-up-required'): CapabilityGuard {
+  const decide = (demand: CapabilityDemand) =>
+    demand.capability === 'secrets' && demand.axis === 'configure'
+      ? { allowed: false, refusal }
+      : { allowed: true, refusal: 'granted' as const };
+  return {
+    decide,
+    governance: () => ({ governed: true, decide }),
+    explain: (demand, refused) => describeGrantRefusal(demand, refused, 'fy'),
+  };
+}
+
+/**
  * The REAL device-grant subsystem over a grant subsystem and an in-memory device store.
  *
  * `devices` maps an id to its grants; an id absent from it is a device this daemon does not hold.

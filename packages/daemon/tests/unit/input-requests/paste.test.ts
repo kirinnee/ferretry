@@ -7,6 +7,7 @@ import {
   type InputTargetFacts,
   type PasteRule,
   padInputValue,
+  type SecretName,
 } from '@ferretry/protocol';
 import should from 'should';
 import {
@@ -15,6 +16,7 @@ import {
   type InputCaller,
   InputRequestError,
   InputRequestService,
+  type InputStoreAuditEntry,
   PasteRuleService,
   QuarantineRegistry,
   SecureCopyService,
@@ -57,10 +59,12 @@ async function world(
   const writes: string[] = [];
   const events: InputEvent[] = [];
   const audits: InputAuditEntry[] = [];
+  const stores: InputStoreAuditEntry[] = [];
   const told: string[] = [];
   const cards: { title: string; ask: string }[] = [];
   const closed: string[] = [];
   const typed: { result: TypeResult } = { result: 'typed' };
+  const held = { quarantines: 0 };
   const facts = { current: options.facts ?? VERCEL };
   const copies = new SecureCopyService({
     clock,
@@ -114,10 +118,16 @@ async function world(
     journal: {
       publish: async (_session, event) => void events.push(event),
       history: async () => options.history ?? [],
-      quarantine: async () => undefined,
+      quarantine: async () => {
+        held.quarantines += 1;
+      },
       quarantines: async () => [],
     },
-    audit: { record: async entry => void audits.push(entry), saved: async () => undefined },
+    audit: {
+      record: async entry => void audits.push(entry),
+      saved: async () => undefined,
+      stored: async entry => void stores.push(entry),
+    },
     clock,
     ids: { requestId: () => (id++).toString(16).padStart(32, '0') },
     timers: { after: async () => await new Promise<void>(() => undefined) },
@@ -151,6 +161,8 @@ async function world(
     writes,
     events,
     audits,
+    stores,
+    held,
     told,
     cards,
     closed,
@@ -224,6 +236,7 @@ describe('pasting a secure copy as an input request', () => {
     const after = await w.service.agentView(SESSION, view.id, 0);
 
     should(result).match({ state: 'delivered', submitted: true });
+    should(w.held.quarantines).be.above(0);
     should(w.writes).eql([TOKEN]);
     should(after).match({ state: 'delivered', source: 'sealed' });
     should(w.copies.list(SESSION)[0]?.uses).equal(1);
@@ -497,5 +510,159 @@ describe('a pre-approved paste into a page', () => {
 
     should([pasted.state, waiting.state]).eql(['delivered', 'pending']);
     should([hidden.writes, shown.writes]).eql([[TOKEN], []]);
+  });
+});
+
+describe('a paste saved as a secret', () => {
+  const NEW_SECRET: InputTargetFacts = { kind: 'secret', name: 'VERCEL_TOKEN' as SecretName, exists: false };
+  const INTO_STORE: InputRaise = {
+    target: { kind: 'secret', key: 'VERCEL_TOKEN' as SecretName },
+    prompt: 'the minted Vercel token',
+    sensitivity: 'plain',
+    submit: 'agent',
+    source: { kind: 'sealed', name: 'vercel' },
+  };
+  const OWNER_RULER = { kind: 'owner', actor: { kind: 'host' } } as const;
+
+  it('should refuse a store target that is not a paste, raising no card', async () => {
+    const w = await world({ facts: NEW_SECRET });
+
+    const error = await refusal(w.service.raise(SESSION, { ...INTO_STORE, source: undefined } as InputRaise));
+    const fields = await refusal(
+      w.service.raise(SESSION, {
+        ...INTO_STORE,
+        sensitivity: undefined,
+        fields: [{ id: 'value', sensitivity: 'secret', element: { kind: 'ref', ref: 'e1' } }],
+      } as unknown as InputRaise),
+    );
+
+    should(error.message).equal(
+      'the secret store takes only a secure copy, by secure.paste; the owner adds other secrets in Settings',
+    );
+    should(fields.message).equal('a secret holds one value: raise it with one field and no element');
+    should(w.cards).eql([]);
+  });
+
+  it('should ask the owner naming the secret, green when new and amber when it replaces one', async () => {
+    const fresh = await world({ facts: NEW_SECRET });
+    await fresh.capture();
+    const replacing = await world({ facts: { ...NEW_SECRET, exists: true } });
+    await replacing.capture();
+
+    await fresh.service.raise(SESSION, INTO_STORE);
+    await replacing.service.raise(SESSION, INTO_STORE);
+
+    should(fresh.cards[0]?.ask).equal(
+      `Allow pasting sealed:vercel (${String(TOKEN.length)} characters from vercel) into the secret VERCEL_TOKEN. You type nothing.`,
+    );
+    should(replacing.cards[0]?.ask).containEql('into the secret VERCEL_TOKEN, replacing its value.');
+    should((await fresh.pending())?.risk?.level).equal('green');
+    should((await replacing.pending())?.risk).eql({
+      level: 'amber',
+      reason: 'This replaces the value the secret holds now; the old value is gone for good.',
+    });
+  });
+
+  it('should save it once the owner allows it, keep the change in the secrets log and tell the agent its name', async () => {
+    const w = await world({ facts: NEW_SECRET });
+    await w.capture();
+    const view = await w.service.raise(SESSION, INTO_STORE);
+    const request = await w.pending();
+
+    await w.service.deliver(SESSION, request?.id ?? '', w.allow(request?.observedDigest ?? ''), OWNER);
+
+    should(w.writes).eql([TOKEN]);
+    should(w.held.quarantines).equal(0);
+    should(w.stores).eql([
+      { sessionId: SESSION, requestId: request?.id, actor: OWNER.actor, name: 'VERCEL_TOKEN', replaced: false },
+    ]);
+    should(w.told.at(-1)).equal(
+      `${view.id}: sealed:vercel was saved as the secret VERCEL_TOKEN. Use it as \${secret:VERCEL_TOKEN}; you can never read it.`,
+    );
+    should(JSON.stringify([w.stores, w.audits, w.events, w.told])).not.containEql(TOKEN);
+  });
+
+  it('should tell the agent the secret was not saved when the owner declines, or may be when the write was cut', async () => {
+    const declined = await world({ facts: NEW_SECRET });
+    await declined.capture();
+    await declined.service.raise(SESSION, INTO_STORE);
+    const cut = await world({ facts: NEW_SECRET });
+    await cut.capture();
+    await cut.service.raise(SESSION, INTO_STORE);
+    const request = await cut.pending();
+    cut.typed.result = 'uncertain';
+
+    await declined.service.cancel(SESSION, (await declined.pending())?.id ?? '', OWNER);
+    await cut.service
+      .deliver(SESSION, request?.id ?? '', cut.allow(request?.observedDigest ?? ''), OWNER)
+      .catch(() => undefined);
+
+    should(declined.told.at(-1)).match(/ended without saving sealed:vercel \(cancelled.*call secure_paste again/);
+    should(cut.told.at(-1)).containEql('it may or may not hold it now');
+    should(cut.stores).match([{ name: 'VERCEL_TOKEN', uncertain: true }]);
+    should(declined.stores).eql([]);
+  });
+
+  it('should save at once under a rule naming that exact secret, and wait for the owner under any other name', async () => {
+    const named = await world({ facts: NEW_SECRET });
+    const rule = await named.rules.create(OWNER_RULER, {
+      from: { kind: 'command', program: 'vercel' },
+      to: { kind: 'secret', name: 'VERCEL_TOKEN' as SecretName },
+    });
+    await named.capture();
+    const other = await world({ facts: NEW_SECRET });
+    await other.rules.create(OWNER_RULER, {
+      from: { kind: 'command', program: 'vercel' },
+      to: { kind: 'secret', name: 'VERCEL_TOKEN_2' as SecretName },
+    });
+    await other.capture();
+
+    const saved = await named.service.raise(SESSION, INTO_STORE);
+    const waiting = await other.service.raise(SESSION, INTO_STORE);
+
+    should([saved.state, waiting.state]).eql(['delivered', 'pending']);
+    should([named.writes, other.writes]).eql([[TOKEN], []]);
+    should(named.stores).match([{ actor: { kind: 'rule', ruleId: rule.id }, name: 'VERCEL_TOKEN' }]);
+  });
+});
+
+describe('what a rule never pastes unasked (the security review of SC2b)', () => {
+  const OWNER_RULER = { kind: 'owner', actor: { kind: 'host' } } as const;
+  const SECRET: InputTargetFacts = { kind: 'secret', name: 'VERCEL_TOKEN' as SecretName, exists: true };
+  const INTO_STORE: InputRaise = {
+    target: { kind: 'secret', key: 'VERCEL_TOKEN' as SecretName },
+    prompt: 'the minted Vercel token',
+    sensitivity: 'secret',
+    submit: 'agent',
+    source: { kind: 'sealed', name: 'vercel' },
+  };
+
+  it('should wait for the owner before replacing a secret, even under a rule naming it', async () => {
+    const w = await world({ facts: SECRET });
+    await w.rules.create(OWNER_RULER, {
+      from: { kind: 'command', program: 'vercel' },
+      to: { kind: 'secret', name: 'VERCEL_TOKEN' as SecretName },
+    });
+    await w.capture();
+
+    const view = await w.service.raise(SESSION, INTO_STORE);
+
+    should(view.state).equal('pending');
+    should(w.writes).eql([]);
+    should(w.rules.list(OWNER_RULER)).match([{ used: 0 }]);
+  });
+
+  it('should wait for the owner on a copy the ferret had already seen, whatever the rule says', async () => {
+    const w = await world({ transcript: 'found', facts: { ...VERCEL, echo: 'off' } });
+    await w.rules.create(OWNER_RULER, {
+      from: { kind: 'command', program: 'vercel' },
+      to: { kind: 'terminal', program: 'vercel' },
+    });
+    await w.capture();
+
+    const view = await w.service.raise(SESSION, PASTE);
+
+    should(view.state).equal('pending');
+    should(w.writes).eql([]);
   });
 });

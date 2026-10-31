@@ -103,3 +103,31 @@ describe('InputAuditAdapter, saving a typed value to a saved login', () => {
     ]);
   });
 });
+
+describe('InputAuditAdapter, a secure copy pasted into the secret store', () => {
+  it('should write the KEPT secrets.changed record by the secret NAME, saying whether it replaced one and by whose leave', async () => {
+    const records: AuditEntry[] = [];
+    const adapter = new InputAuditAdapter({ record: async record => void records.push(record) });
+    const base = { sessionId: 's1', requestId: 'r'.repeat(32), name: 'VERCEL_TOKEN' } as const;
+
+    await adapter.stored({ ...base, actor: { kind: 'device', deviceId: 'phone-1' }, replaced: false });
+    await adapter.stored({ ...base, actor: { kind: 'rule', ruleId: 'f'.repeat(32) }, replaced: true });
+
+    should(records).eql([
+      {
+        event: 'secrets.changed',
+        actor: { kind: 'device', deviceId: 'phone-1' },
+        subject: 'VERCEL_TOKEN',
+        outcome: 'succeeded',
+        detail: { action: 'paste', requestId: 'r'.repeat(32), session: 's1' },
+      },
+      {
+        event: 'secrets.changed',
+        actor: { kind: 'host' },
+        subject: 'VERCEL_TOKEN',
+        outcome: 'succeeded',
+        detail: { action: 'paste-replace', requestId: 'r'.repeat(32), session: 's1', by: 'rule', rule: 'f'.repeat(32) },
+      },
+    ]);
+  });
+});

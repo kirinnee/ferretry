@@ -78,10 +78,28 @@ const refusal = async (work: Promise<unknown>): Promise<SecureCopyError> => {
 };
 
 describe('SecureCopyService capturing what a command prints', () => {
+  it('should keep a program run by its path as written, so a rule naming the bare program never matches it', async () => {
+    const { service } = world();
+
+    const local = await service.capture('s1', {
+      ...command(['./vercel', 'tokens', 'create']),
+      name: 'local',
+    } as CopyCapture);
+    const absolute = await service.capture('s1', {
+      ...command(['/usr/bin/gh', 'auth', 'token']),
+      name: 'absolute',
+    } as CopyCapture);
+
+    should([local.copy.from, absolute.copy.from]).eql([
+      { kind: 'command', program: './vercel' },
+      { kind: 'command', program: '/usr/bin/gh' },
+    ]);
+  });
+
   it('should hold stdout under the name and say only where it came from, how long it is and when it lapses', async () => {
     const { service, runner, clock } = world();
 
-    const { copy, command: report } = await service.capture('s1', command(['/usr/bin/gh', 'auth', 'token']));
+    const { copy, command: report } = await service.capture('s1', command(['gh', 'auth', 'token']));
 
     should(copy).eql({
       handle: 'sealed:token',
@@ -99,7 +117,7 @@ describe('SecureCopyService capturing what a command prints', () => {
     should(JSON.stringify({ copy, report })).not.containEql(TOKEN);
     should(runner.specs).eql([
       {
-        command: ['/usr/bin/gh', 'auth', 'token'],
+        command: ['gh', 'auth', 'token'],
         cwd: '/work/s1',
         env: {},
         timeoutMs: 30_000,

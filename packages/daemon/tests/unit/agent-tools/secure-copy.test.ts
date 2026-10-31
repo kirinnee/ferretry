@@ -256,6 +256,34 @@ describe('the secure.paste and secure.preapprove agent tools', () => {
     );
   });
 
+  it('should raise a paste saved as a secret with no terminal of its own, and say how to use it once saved', async () => {
+    const asking = recordingInput();
+    const saving = recordingInput('delivered');
+    const INTO_STORE = { ...PASTE, to: { kind: 'secret', name: 'VERCEL_TOKEN' } } as AgentToolCall;
+
+    const pending = await agentToolWorld({ input: asking.input }).service.call(agent, INTO_STORE);
+    const saved = await agentToolWorld({ input: saving.input }).service.call(agent, INTO_STORE);
+
+    should(asking.raised).eql([
+      {
+        sessionId: 's1',
+        raise: {
+          target: { kind: 'secret', key: 'VERCEL_TOKEN' },
+          prompt: 'the deploy token',
+          sensitivity: 'secret',
+          submit: 'agent',
+          source: { kind: 'sealed', name: 'vercel' },
+        },
+      },
+    ]);
+    should(pending.summary).equal(
+      'Asked the owner to allow saving sealed:vercel as the secret VERCEL_TOKEN (!A7). Wait with input.wait.',
+    );
+    should(saved.summary).equal(
+      'Saved sealed:vercel as the secret VERCEL_TOKEN under a rule the owner approved in advance (!A7). Use it as ${secret:VERCEL_TOKEN}.',
+    );
+  });
+
   it('should refuse a paste into a terminal a person opened, a person pasting, and the terminal switch off', async () => {
     const { input, raised } = recordingInput();
     const world = agentToolWorld({ input });

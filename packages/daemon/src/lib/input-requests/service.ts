@@ -173,6 +173,11 @@ export class InputRequestService {
   /** The agent raises. Nothing in `raise` was observed; everything in the answer and the card was. */
   async raise(sessionId: string, raise: InputRaise): Promise<InputAgentView> {
     guardFields(raise.target, inputRaiseFields(raise));
+    if (raise.target.kind === 'secret' && raise.source === undefined)
+      throw new InputRequestError(
+        'bad_request',
+        'the secret store takes only a secure copy, by secure.paste; the owner adds other secrets in Settings',
+      );
     if (raise.source !== undefined && inputRaiseFields(raise).length !== 1)
       throw new InputRequestError('bad_request', 'a paste fills one field: raise it with one field');
     await this.sweep();
@@ -292,7 +297,7 @@ export class InputRequestService {
     facts: InputTargetFacts,
     submit: InputRaise['submit'],
   ): Promise<void> {
-    if (!hidesTyping(facts)) return;
+    if (!hidesTyping(facts) || !ruleMayPaste(copy, facts)) return;
     const ruleId = this.deps.rules?.reserve(held.request.sessionId, copy.from, facts);
     if (ruleId === undefined) return;
     const body: InputDeliverBody = {
@@ -475,6 +480,12 @@ export class InputRequestService {
     });
     held.deliveries.set(body.deliveryId, attempt);
     return await attempt;
+  }
+
+  /** Where a request's value goes, for a route that gates by destination: names only, never a value. */
+  targetOf(sessionId: string, requestId: string): InputRequest['target'] | undefined {
+    const held = this.held.get(requestId);
+    return held === undefined || held.request.sessionId !== sessionId ? undefined : held.request.target;
   }
 
   /** The owner declines. Owner only, before anything is read or changed. Only a pending request can be cancelled. */
@@ -791,7 +802,9 @@ export class InputRequestService {
         values.push({ field: field.id, text });
       }
       held.names = [...new Set([...held.names, request.target.key, ...(seen.names ?? [])])];
-      if (request.sensitivity !== 'plain') hold = await this.holdFor(request, held.names);
+      // The secret store is no surface anybody reads, so there is nothing to hold from view.
+      if (request.sensitivity !== 'plain' && request.target.kind !== 'secret')
+        hold = await this.holdFor(request, held.names);
       try {
         await this.journal(request, 'delivering', undefined, undefined, body.deliveryId);
       } catch {
@@ -807,9 +820,23 @@ export class InputRequestService {
         .type(request.sessionId, request.target, values, submitted, seen.facts)
         .catch((): TypeResult => 'uncertain');
       wrote?.(outcome);
+      const stored = async (uncertain: boolean): Promise<void> => {
+        if (seen.facts.kind !== 'secret') return;
+        await this.deps.audit
+          .stored({
+            sessionId: request.sessionId,
+            requestId: request.id,
+            actor: by,
+            name: seen.facts.name,
+            replaced: seen.facts.exists,
+            ...(uncertain ? { uncertain: true as const } : {}),
+          })
+          .catch(() => undefined);
+      };
       if (outcome === 'uncertain') {
         await this.settle(hold);
         hold = undefined;
+        await stored(true);
         await this.finish(held, 'refused', 'interrupted', undefined, {
           closeCard: true,
           tellAgent: true,
@@ -829,6 +856,7 @@ export class InputRequestService {
       await this.settle(hold);
       hold = undefined;
       if (pasted !== undefined) this.deps.sealed?.used(request.sessionId, pasted);
+      await stored(false);
       const saved =
         body.save === undefined || kept === undefined ? undefined : await this.save(held, body.save, kept, by);
       await this.finish(held, 'delivered', undefined, by, {
@@ -1210,7 +1238,8 @@ function targetChanged(kind: InputTarget['kind']): InputRequestError {
   );
 }
 
-const surfaceWord = (kind: InputTarget['kind']): string => (kind === 'terminal' ? 'terminal' : 'page');
+const surfaceWord = (kind: InputTarget['kind']): string =>
+  kind === 'terminal' ? 'terminal' : kind === 'secret' ? 'secret store' : 'page';
 
 /** The host of an origin the browser reported, or the origin itself when it does not parse. */
 function hostOf(origin: string): string {
@@ -1250,6 +1279,11 @@ function withRisk(fields: readonly InputRequestField[], facts: InputTargetFacts)
  * element (a second prompt is a chained request); every field of a page names the element it goes into.
  */
 function guardFields(target: InputTarget, fields: readonly InputFieldRaise[]): void {
+  if (target.kind === 'secret') {
+    if (fields.length !== 1 || fields[0]?.element !== undefined)
+      throw new InputRequestError('bad_request', 'a secret holds one value: raise it with one field and no element');
+    return;
+  }
   if (target.kind === 'terminal') {
     if (fields.length !== 1)
       throw new InputRequestError(
@@ -1312,6 +1346,10 @@ const PRIVATE_FLAG = 'This code will show on screen while the terminal is hidden
 function riskOf(field: Pick<InputRequestField, 'id' | 'sensitivity'>, facts: InputTargetFacts): InputRisk {
   const { sensitivity } = field;
   if (sensitivity === 'plain') return { level: 'red', reason: PLAIN_FLAG };
+  if (facts.kind === 'secret')
+    return facts.exists
+      ? { level: 'amber', reason: 'This replaces the value the secret holds now; the old value is gone for good.' }
+      : { level: 'green', reason: 'Saved encrypted on this machine; ferrets can use it by name and never read it.' };
   if (facts.kind === 'browser') return pageRiskOf(field, facts);
   if (sensitivity === 'private') return { level: 'amber', reason: PRIVATE_FLAG };
   if (facts.echo === 'on')
@@ -1389,7 +1427,12 @@ const PASTE_TITLE = 'Wants to paste a secure copy';
 /** A paste's ask: what is pasted and where it came from, in the daemon's words. There is nothing to type. */
 function pasteAskOf(copy: CopyMeta, facts: InputTargetFacts): string {
   const from = copy.from.origin ?? copy.from.program ?? copy.from.kind;
-  const into = facts.kind === 'terminal' ? 'the terminal' : 'the page';
+  const into =
+    facts.kind === 'terminal'
+      ? 'the terminal'
+      : facts.kind === 'secret'
+        ? `the secret ${facts.name}${facts.exists ? ', replacing its value' : ''}`
+        : 'the page';
   return `Allow pasting ${copy.handle} (${String(copy.length)} characters from ${from}) into ${into}. You type nothing.`;
 }
 
@@ -1401,8 +1444,19 @@ function pasteRisk(risk: InputRisk | undefined, copy: CopyMeta | undefined): Inp
   return { level: risk?.level === 'red' ? 'red' : 'amber', reason: SEEN_FLAG };
 }
 
+/**
+ * What a rule never does unasked, whatever it names: paste a copy the ferret had already seen (it is not
+ * protected, and the owner should be told), or replace a value the secret store holds now (the old one is gone
+ * for good). Both wait for the owner on the card, which says so.
+ */
+function ruleMayPaste(copy: CopyMeta, facts: InputTargetFacts): boolean {
+  if (copy.exposure.transcript === 'found') return false;
+  return facts.kind !== 'secret' || !facts.exists;
+}
+
 /** A target that does not show what is typed: a terminal with echo off, or a page whose fields are all password fields. */
 function hidesTyping(facts: InputTargetFacts): boolean {
+  if (facts.kind === 'secret') return true;
   return facts.kind === 'terminal'
     ? facts.echo === 'off'
     : facts.fields.every(field => field.field.type === 'password');
@@ -1426,6 +1480,7 @@ function tellOf(request: InputRequest, state: string, reason: InputReason | unde
   const { kind, key } = request.target;
   const surface = surfaceWord(kind);
   const tool = `${kind}_request_input`;
+  if (kind === 'secret') return storeTellOf(request, state, reason, uncertain);
   if (uncertain)
     return `${request.agendaItemId} was interrupted while the owner's value was going into %${kind}:${key}; it may be partly or fully typed there. Read the ${surface} before you act once its quarantine allows; if you still need a value, raise a fresh ${tool}, or ask the owner to take over the ${surface}.`;
   if (state === 'delivered' && request.source !== undefined)
@@ -1433,4 +1488,20 @@ function tellOf(request: InputRequest, state: string, reason: InputReason | unde
   if (state === 'delivered')
     return `${request.agendaItemId} was answered and typed into %${kind}:${key}. Read the ${surface} to continue.`;
   return `${request.agendaItemId} ended without a value (${state}${reason === undefined ? '' : `: ${reason.replaceAll('_', ' ')}`}). If you still need a value, raise a fresh ${tool}, or ask the owner to take over the ${surface}.`;
+}
+
+/** What the agent is told about a paste into the secret store: it never reads the store, so it is told whether the name now holds the copy. */
+function storeTellOf(
+  request: InputRequest,
+  state: string,
+  reason: InputReason | undefined,
+  uncertain: boolean,
+): string {
+  const { key } = request.target;
+  const handle = copyHandle(request.source?.name ?? '');
+  if (uncertain)
+    return `${request.agendaItemId} was interrupted while ${handle} was being saved as the secret ${key}; it may or may not hold it now. Ask the owner to check the secret in Settings before you use \${secret:${key}}.`;
+  if (state === 'delivered')
+    return `${request.agendaItemId}: ${handle} was saved as the secret ${key}. Use it as \${secret:${key}}; you can never read it.`;
+  return `${request.agendaItemId} ended without saving ${handle} (${state}${reason === undefined ? '' : `: ${reason.replaceAll('_', ' ')}`}). If you still need it saved, call secure_paste again or ask the owner.`;
 }

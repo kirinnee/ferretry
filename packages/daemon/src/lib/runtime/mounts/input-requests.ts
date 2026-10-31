@@ -15,6 +15,7 @@ import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import { InputRequestError } from '../../input-requests/errors.ts';
 import type { InputCaller } from '../../input-requests/ports.ts';
 import type { InputRequestService } from '../../input-requests/service.ts';
+import { refusedSecretWrite, spentSecretWrite } from './secret-write-grant.ts';
 
 /**
  * THE OWNER'S ROUTES FOR INPUT REQUESTS (docs/input-requests.md).
@@ -130,10 +131,14 @@ export function inputRequestRoutes(service: InputRequestService): readonly ApiRo
       noStore: true,
       handle: async context => {
         const caller = ownerOf(context);
+        // A paste into the secret store changes it, so it needs what `POST /v1/secrets` needs as well.
+        const intoStore = service.targetOf(sessionOf(context), requestOf(context))?.kind === 'secret';
+        const refused = intoStore ? refusedSecretWrite(context, 'allow a paste into the secret store') : undefined;
+        if (refused !== undefined) return refused;
         const body = await parseBody(context.request, InputDeliverBodySchema);
-        return jsonResponse(
-          await service.deliver(sessionOf(context), requestOf(context), body, caller).catch(answered),
-        );
+        const result = await service.deliver(sessionOf(context), requestOf(context), body, caller).catch(answered);
+        if (intoStore) spentSecretWrite(context);
+        return jsonResponse(result);
       },
     },
     {

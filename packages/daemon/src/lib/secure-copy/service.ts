@@ -265,7 +265,7 @@ export class SecureCopyService implements InputSealedPort {
   ): Promise<Read> {
     const cwd = await this.workingFolder(sessionId, source.cwd);
     const [program] = source.argv;
-    const from: CopyOrigin = { kind: 'command', program: basename(program ?? '').slice(0, 64) || 'command' };
+    const from: CopyOrigin = { kind: 'command', program: programOf(program ?? '') };
     const outcome = await this.ports.runner.run({
       command: source.argv,
       cwd,
@@ -396,4 +396,13 @@ function meta(entry: Entry): CopyMeta {
     exposure: entry.exposure,
     uses: entry.uses,
   };
+}
+
+/**
+ * The program a command copy came from, as a rule matches it. A bare name (`vercel`) is the program the
+ * daemon's PATH finds. A name with a slash (`./vercel`, `/tmp/x/vercel`) is kept as written, because it is a
+ * file the ferret may have made: it never matches a rule naming `vercel`, and the card shows the path.
+ */
+function programOf(argv0: string): string {
+  return (argv0.includes('/') ? argv0 : basename(argv0)).slice(0, 64) || 'command';
 }

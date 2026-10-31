@@ -55,6 +55,7 @@ import {
   InputSubmitModeSchema,
 } from './input-request.ts';
 import { LoginEntryIdSchema } from './login-entries.ts';
+import { SecretNameSchema } from './secrets.ts';
 import {
   COPY_MAX_LIFETIME_SECONDS,
   COPY_MAX_LIVE_PER_SESSION,
@@ -629,8 +630,14 @@ export const AgentToolCallSchema = z.discriminatedUnion('tool', [
   z.strictObject({
     tool: z.literal('secure.paste'),
     handle: CopyHandleSchema,
-    /** Where it goes: a terminal prompt the agent opened. The daemon observes what reads it. */
-    to: z.strictObject({ kind: z.literal('terminal'), name: SurfaceKeySchema }),
+    /**
+     * Where it goes: a terminal prompt the agent opened (the daemon observes what reads it), or the secret store
+     * under a name (the daemon observes whether the name already holds a value).
+     */
+    to: z.discriminatedUnion('kind', [
+      z.strictObject({ kind: z.literal('terminal'), name: SurfaceKeySchema }),
+      z.strictObject({ kind: z.literal('secret'), name: SecretNameSchema }),
+    ]),
     /** What the paste is for, shown to the owner as the agent's words. */
     prompt: z.string().trim().min(1).max(INPUT_PROMPT_MAX_LENGTH),
     submit: InputSubmitModeSchema.optional(),

@@ -152,6 +152,19 @@ export interface InputAudit {
   record(entry: InputAuditEntry): Promise<void>;
   /** The owner saved a typed value to a saved login: kept, like every change to the secret store. */
   saved(entry: InputSaveAuditEntry): Promise<void>;
+  /** A secure copy was pasted into the secret store under `name`: kept, like `fy secret set`. */
+  stored(entry: InputStoreAuditEntry): Promise<void>;
+}
+
+export interface InputStoreAuditEntry {
+  readonly sessionId: string;
+  readonly requestId: string;
+  readonly actor: InputActor;
+  readonly name: string;
+  /** The name held a value before: the paste replaced it. */
+  readonly replaced: boolean;
+  /** The write was cut off: the store may or may not hold the copy now. */
+  readonly uncertain?: true;
 }
 
 /**

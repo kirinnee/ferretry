@@ -19,10 +19,10 @@ import {
   type BrowserWaitCondition,
   browserReadModeOf,
   browserTargetOf,
-  INPUT_SINGLE_FIELD_ID,
   COPY_HANDLE_PREFIX,
   type CopyMeta,
   copyHandle,
+  INPUT_SINGLE_FIELD_ID,
   type InputAgentView,
   type SurfaceController,
   type SurfaceControlRequest,
@@ -446,11 +446,12 @@ export class AgentToolService {
             'bad_request',
             'Only an agent pastes a secure copy; the owner allows it on the card.',
           );
+        const name = bareCopyName(call.handle);
+        if (call.to.kind === 'secret') return await this.pasteToStore(sessionId, caller, call, call.to.name, name);
         const surface = await this.resolve(sessionId, 'terminal', call.to.name);
         facts.surface = surface;
         await this.assertAgentMay(sessionId, surface);
         const reference = surfaceReference('terminal', surface.name ?? surface.id);
-        const name = bareCopyName(call.handle);
         const view = await this.inputPort(caller).raise(sessionId, {
           target: { kind: 'terminal', key: surface.name ?? surface.id },
           prompt: call.prompt,
@@ -1038,6 +1039,31 @@ export class AgentToolService {
   /** Screen text with the values the daemon just typed masked; text unchanged where no mask is wired. */
   private masked(sessionId: string, text: string): string {
     return this.ports.scrub === undefined ? text : this.ports.scrub(sessionId, text);
+  }
+
+  /** A paste "as the secret NAME": no surface is involved, so there is nothing of the agent's to resolve. */
+  private async pasteToStore(
+    sessionId: string,
+    caller: AgentToolCaller,
+    call: Extract<AgentToolCall, { readonly tool: 'secure.paste' }>,
+    secret: string,
+    name: string,
+  ): Promise<AgentToolResult> {
+    const view = await this.inputPort(caller).raise(sessionId, {
+      target: { kind: 'secret', key: secret },
+      prompt: call.prompt,
+      sensitivity: 'secret',
+      submit: 'agent',
+      source: { kind: 'sealed', name },
+      ...(call.expiresInSeconds === undefined ? {} : { expiresInSeconds: call.expiresInSeconds }),
+    });
+    return {
+      summary:
+        view.state === 'delivered'
+          ? `Saved ${copyHandle(name)} as the secret ${secret} under a rule the owner approved in advance (!${view.id}). Use it as \${secret:${secret}}.`
+          : `Asked the owner to allow saving ${copyHandle(name)} as the secret ${secret} (!${view.id}). Wait with input.wait.`,
+      input: view,
+    };
   }
 
   private copyPort(): AgentCopyPort {

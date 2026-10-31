@@ -164,6 +164,17 @@ describe('PasteRuleService: matching a paste', () => {
     should(service.reserve('s1', GH, AT_VERCEL)).be.undefined();
   });
 
+  it('should let a rule for the secret store match only the exact secret it names', async () => {
+    const { service } = rules();
+    await service.load();
+    const rule = await service.create(OWNER, { from: GH, to: { kind: 'secret', name: 'VERCEL_TOKEN' } });
+    const into = (name: string) => ({ kind: 'secret', name, exists: false }) as InputTargetFacts;
+
+    should(service.reserve('s1', GH, into('VERCEL_TOKEN_2'))).be.undefined();
+    should(service.reserve('s1', GH, into('vercel_token'))).be.undefined();
+    should(service.reserve('s1', GH, into('VERCEL_TOKEN'))).equal(rule.id);
+  });
+
   it("should hand out a counted rule's last use once, give it back on release, and drop the rule once spent", async () => {
     const { service, stored } = rules();
     await service.load();

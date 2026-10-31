@@ -1038,6 +1038,8 @@ import {
   SecretExportService,
   SecretImportService,
   SecretRedactor,
+  type SecretStoreDirectory,
+  SecretStoreTarget,
   type SecretSubsystem,
   SecretUseService,
   SecretVault,
@@ -6144,6 +6146,8 @@ function createInputRequestService(input: {
   /** Secure copies a paste types from, and the owner's rules that approve pastes in advance. */
   readonly sealed: InputSealedPort;
   readonly rules: InputPasteRules;
+  /** Where a paste "as the secret NAME" is kept. */
+  readonly secretStore: SecretStoreDirectory;
 }): InputRequestService {
   const clock = { now: () => Date.now() };
   return new InputRequestService({
@@ -6160,6 +6164,10 @@ function createInputRequestService(input: {
         new SttyTerminalModes(process.platform, runProgram),
         runProgram,
       ),
+      undefined,
+      // A secure copy pasted "as the secret NAME" (docs/secure-copy.md): the vault's management surface, which
+      // replaces a value and lists names, never returns one.
+      new SecretStoreTarget(input.secretStore),
     ),
     agenda: new InputAgendaAdapter(input.agenda),
     notifier: new InputAgentNotifierAdapter(
@@ -10081,6 +10089,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         logins: new InputLoginAdapter(loginDirectory, loginVault),
         sealed: secureCopies,
         rules: pasteRules,
+        secretStore: secretDirectory,
       });
       inputRequests = inputRequestService;
       setInterval(
