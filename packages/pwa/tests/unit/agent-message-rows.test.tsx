@@ -263,4 +263,10 @@ describe('a Ferretry message from any part of Ferretry', () => {
     run(() => view.root.findByProps({ className: 'fy-system-details' }).props.onClick());
     expect(textOf(view)).toContain('fy signal working');
   });
+
+  test('draws the same row while it travels as a ledger row', () => {
+    const { send } = entryFor('Warden', 'Still with us?');
+    const view = render(<TranscriptRow entry={{ id: 'l1', kind: 'ledger', text: send.message, ledger: send }} />);
+    expect(view.root.findByProps({ 'data-ferretry-message': 'Warden' })).toBeDefined();
+  });
 });

@@ -16,3 +16,15 @@ export function ferretryLine(text: string): { readonly line: string; readonly lo
   const line = first.length > 140 ? `${first.slice(0, 139).trimEnd()}…` : first;
   return { line, long: lines.length > 1 || first.length > 140 };
 }
+
+/** What "Show" reveals: the lines after the one already on the row, or everything when that line was cut short. */
+export function ferretryRest(text: string): string {
+  const lines = text.split('\n');
+  const start = lines.findIndex(candidate => candidate.trim() !== '');
+  const first = lines[start]?.trim() ?? '';
+  if (first.length > 140) return text.trim();
+  return lines
+    .slice(start + 1)
+    .join('\n')
+    .trim();
+}

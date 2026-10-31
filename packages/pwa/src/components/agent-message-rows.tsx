@@ -15,7 +15,7 @@ import { type MouseEvent, type ReactNode, useId, useState } from 'react';
 import { linkNudgePullRequests } from '../lib/board-nudge.ts';
 import { displayCallsign } from '../lib/callsign.ts';
 import { useCardPullRequests } from '../lib/card-pull-requests.tsx';
-import { ferretryLine } from '../lib/ferretry-sender.ts';
+import { ferretryLine, ferretryRest } from '../lib/ferretry-sender.ts';
 import { clockOfInstant } from '../lib/message-clock.ts';
 import { ferretryChip, stripFraming } from '../lib/message-framing.ts';
 import type { InstructionsUpdate } from '../lib/instructions-update.ts';
@@ -399,8 +399,8 @@ export function FerretryMessageRow({
       </span>
       <MessageFooter clock={clockOfInstant(entry.at)} side="other" />
       {open ? (
-        <div className="fy-system-detail" data-system-detail="" id={detailId}>
-          <p>{stripFraming(text).body}</p>
+        <div className="fy-system-detail" data-ferretry-detail="" data-system-detail="" id={detailId}>
+          <p>{ferretryRest(stripFraming(text).body)}</p>
         </div>
       ) : null}
     </div>
