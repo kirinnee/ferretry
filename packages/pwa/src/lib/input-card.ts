@@ -11,9 +11,11 @@
  */
 
 import {
+  type InputBrowserFieldFacts,
   type InputDeliverBody,
   type InputDeliverResult,
   type InputRequest,
+  type InputRisk,
   type InputSaved,
   type InputSavedOffer,
   type InputSensitivity,
@@ -26,34 +28,30 @@ import {
 import { grantRefusalNotice } from './grants.ts';
 
 /**
- * One value the card asks for. Today a request has exactly one; the multi-field card (username + password on one
- * card) adds fields to this list and nothing else here changes.
+ * One value the card asks for: a request has one to four (a login's email and password sit on ONE card), each
+ * with its own sensitivity and its own risk flag.
  */
 export interface InputCardField {
-  /** Stable within the card: the key its own state is kept under. */
+  /** The field's id in the request: the key its own state is kept under and the id a deliver names it by. */
   readonly key: string;
   readonly requestId: string;
   readonly sensitivity: InputSensitivity;
   readonly label: string;
+  readonly risk?: InputRisk;
+  /** Only a card of ONE field: "Save as" keeps one typed value, and a login's several are never saved together. */
   readonly saved?: InputSaved;
 }
 
-const FIELD_LABEL: Readonly<Record<InputSensitivity, string>> = {
-  secret: 'Password',
-  private: 'Code',
-  plain: 'Value',
-};
-
-/** The fields of a request: one today. */
-export const fieldsOf = (request: InputRequest): readonly InputCardField[] => [
-  {
-    key: 'value',
+/** The fields of a request, in the order the daemon types them. */
+export const fieldsOf = (request: InputRequest): readonly InputCardField[] =>
+  request.fields.map(field => ({
+    key: field.id,
     requestId: request.id,
-    sensitivity: request.sensitivity,
-    label: FIELD_LABEL[request.sensitivity],
-    ...(request.saved === undefined ? {} : { saved: request.saved }),
-  },
-];
+    sensitivity: field.sensitivity,
+    label: field.label,
+    ...(field.risk === undefined ? {} : { risk: field.risk }),
+    ...(request.fields.length === 1 && request.saved !== undefined ? { saved: request.saved } : {}),
+  }));
 
 const NEEDS: Readonly<Record<InputSensitivity, string>> = {
   secret: 'a password',
@@ -61,9 +59,19 @@ const NEEDS: Readonly<Record<InputSensitivity, string>> = {
   plain: 'an answer',
 };
 
+/** A card with a secret AND a plain field is a login; every other card is named by its strongest field. */
+const needsWords = (request: InputRequest): string => {
+  const kinds = new Set(request.fields.map(field => field.sensitivity));
+  return kinds.has('secret') && kinds.has('plain') ? 'a login' : NEEDS[request.sensitivity];
+};
+
 /** `!A7 · Hadi needs a password` — the agenda reference first, because it is how the owner names the card. */
 export const titleWords = (request: InputRequest, agentName: string): string =>
-  `!${request.agendaItemId} · ${agentName} needs ${NEEDS[request.sensitivity]}`;
+  `!${request.agendaItemId} · ${agentName} needs ${needsWords(request)}`;
+
+/** `Step 2 · after !A7` on a card that follows another of a multi-step login; `undefined` on a lone card. */
+export const chainWords = (request: InputRequest): string | undefined =>
+  request.chain === undefined ? undefined : `Step ${request.step ?? 2} · after !${request.chain}`;
 
 /** The target as the owner writes a reference to it: `%terminal:dev`. */
 export const targetRef = (request: InputRequest): string => `%${request.target.kind}:${request.target.key}`;
@@ -124,14 +132,45 @@ export const expiryWords = (expiresAt: string, now: number): string => {
 
 const ECHO_WORDS = { off: 'typing hidden', on: 'typing shows', unknown: 'echo unknown' } as const;
 
+/** What the daemon found for one field of a page, beside the label the card gives it. */
+export interface ObservedFieldWords {
+  readonly key: string;
+  readonly label: string;
+  /** `password field`, `email field`, and `in a frame from <host>` when the field is not in the page's own frame. */
+  readonly words: string;
+}
+
 export interface ObservedWords {
-  /** The program, or the page's origin. */
+  /** The program, or the page's host. */
   readonly program: string;
+  /** Typing hidden or showing for a terminal; https or not for a page. */
   readonly echo: string;
   /** The prompt's own line, as the daemon read it; absent for a page. */
   readonly promptLine?: string;
   readonly recognised: boolean;
+  /** A page's fields, one line each; absent for a terminal. */
+  readonly fields?: readonly ObservedFieldWords[];
+  /** The captcha warning when the page shows one. */
+  readonly challenge?: string;
 }
+
+export const CAPTCHA_WARNING =
+  'This page is showing a captcha. Take over the browser and complete it yourself; Ferretry never solves one.';
+
+const parsedOrigin = (origin: string): URL | undefined => (URL.canParse(origin) ? new URL(origin) : undefined);
+
+const hostOf = (origin: string): string => parsedOrigin(origin)?.host ?? origin;
+
+const schemeWords = (origin: string, secure: boolean): string => {
+  if (!secure) return 'not secure (http)';
+  return parsedOrigin(origin)?.protocol === 'http:' ? 'http on this machine' : 'https';
+};
+
+const fieldWords = (field: InputBrowserFieldFacts, pageOrigin: string): string => {
+  const kind = field.field.type === 'password' ? 'password' : (field.field.type ?? field.field.tag);
+  const frame = field.frameOrigin === pageOrigin ? '' : ` in a frame from ${hostOf(field.frameOrigin)}`;
+  return `${kind} field${frame}`;
+};
 
 /** What the daemon saw, in words: drawn large, because the agent's own sentence is not evidence. */
 export const observedWords = (request: InputRequest): ObservedWords | undefined => {
@@ -145,9 +184,15 @@ export const observedWords = (request: InputRequest): ObservedWords | undefined 
       recognised: facts.recognisedConsumer,
     };
   return {
-    program: facts.origin,
-    echo: facts.field.type === 'password' ? 'password field' : 'field',
+    program: hostOf(facts.origin),
+    echo: schemeWords(facts.origin, facts.secure),
     recognised: true,
+    fields: facts.fields.map(found => ({
+      key: found.fieldId,
+      label: request.fields.find(field => field.id === found.fieldId)?.label ?? found.fieldId,
+      words: fieldWords(found, facts.origin),
+    })),
+    ...(facts.challenge === undefined ? {} : { challenge: CAPTCHA_WARNING }),
   };
 };
 
@@ -166,6 +211,31 @@ export const fieldAttributes = (sensitivity: InputSensitivity, revealed: boolean
 };
 
 export const PLAIN_NOTICE = 'Not secret: the ferret can see this value.';
+
+/** The red flag drawn beside a PLAIN field: the daemon's own sentence when it gave one. */
+export const plainFlagWords = (field: InputCardField): string => field.risk?.reason ?? PLAIN_NOTICE;
+
+/**
+ * A secret or private field's own risk line, only when it says something the header's flag does not. A plain
+ * field has its red flag beside it instead.
+ */
+export const fieldRiskLine = (request: InputRequest, field: InputCardField): InputRisk | undefined => {
+  if (field.sensitivity === 'plain' || field.risk === undefined) return undefined;
+  const header = request.risk;
+  return header !== undefined && header.level === field.risk.level && header.reason === field.risk.reason
+    ? undefined
+    : field.risk;
+};
+
+/** What is wrong with a typed value of this field, shown under it; nothing for an empty one. */
+export const fieldProblem = (field: InputCardField, value: string): string | undefined =>
+  value === '' ? undefined : inputValueProblem(value, field.sensitivity);
+
+/** Whether Send may go: one typed value, or EVERY field of a larger card typed and fine. */
+export const typedReady = (fields: readonly InputCardField[], values: Readonly<Record<string, string>>): boolean =>
+  fields.length > 0 &&
+  fields.every(field => (values[field.key] ?? '') !== '') &&
+  (fields.length === 1 || fields.every(field => fieldProblem(field, values[field.key] ?? '') === undefined));
 
 /** The handle as it is typed: uppercase letters, digits and underscores only. */
 export const normalizeHandle = (text: string): string =>
@@ -231,8 +301,7 @@ export interface TypedSend {
 }
 
 export type BuiltBody =
-  | { readonly ok: true; readonly body: InputDeliverBody }
-  | { readonly ok: false; readonly problem: string };
+  { readonly ok: true; readonly body: InputDeliverBody } | { readonly ok: false; readonly problem: string };
 
 const enterFor = (request: InputRequest, submit: boolean): boolean => offersPressEnter(request) && submit;
 
@@ -253,6 +322,39 @@ export const typedBody = ({ request, field, value, submit, save, deliveryId }: T
       padded: padInputValue(value),
       submit: enterFor(request, submit),
       ...(keeps ? { save: { entry: save.id, label: save.label.trim() } } : {}),
+    },
+  };
+};
+
+export interface TypedFieldsSend {
+  readonly request: InputRequest;
+  readonly fields: readonly InputCardField[];
+  readonly values: Readonly<Record<string, string>>;
+  readonly submit: boolean;
+  readonly deliveryId: string;
+}
+
+/**
+ * What typing the values of a card of several fields sends: each value padded on its own, named by its field.
+ * Never `save`: that only goes with the one-field form. A field left empty or refused is a sentence, not a throw.
+ */
+export const typedFieldsBody = ({ request, fields, values, submit, deliveryId }: TypedFieldsSend): BuiltBody => {
+  const typed: { field: string; padded: string }[] = [];
+  for (const field of fields) {
+    const value = values[field.key] ?? '';
+    if (value === '') return { ok: false, problem: `Type ${field.label} too.` };
+    const problem = inputValueProblem(value, field.sensitivity);
+    if (problem !== undefined) return { ok: false, problem: `${field.label}: ${problem}` };
+    typed.push({ field: field.key, padded: padInputValue(value) });
+  }
+  if (request.observedDigest === undefined) return { ok: false, problem: REOBSERVING };
+  return {
+    ok: true,
+    body: {
+      deliveryId,
+      observedDigest: request.observedDigest,
+      fields: typed,
+      submit: enterFor(request, submit),
     },
   };
 };

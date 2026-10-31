@@ -1,13 +1,19 @@
 import { describe, expect, it } from 'bun:test';
 import { INPUT_ERROR_CODES, unpadInputValue } from '@ferretry/protocol';
 import {
+  CAPTCHA_WARNING,
+  chainWords,
   defaultSubmit,
   expiryWords,
+  fieldProblem,
+  fieldRiskLine,
   fieldsOf,
   initialSaveDraft,
   inputFailure,
   observedWords,
   offersPressEnter,
+  PLAIN_NOTICE,
+  plainFlagWords,
   REOBSERVING,
   SAVE_TOO_SHORT,
   saveBlock,
@@ -19,9 +25,20 @@ import {
   targetRef,
   titleWords,
   typedBody,
+  typedFieldsBody,
+  typedReady,
 } from '../../../src/lib/input-card.ts';
 import { must } from '../../support/dom.ts';
-import { NOW, offer, request, saved, withSaved } from '../../support/input-fixtures.ts';
+import {
+  browserField,
+  field as cardField,
+  NOW,
+  offer,
+  request,
+  requestOf,
+  saved,
+  withSaved,
+} from '../../support/input-fixtures.ts';
 
 const DELIVERY = '11111111-1111-4111-8111-111111111111';
 const draft = (overrides: Partial<ReturnType<typeof initialSaveDraft>> = {}) => ({
@@ -87,7 +104,7 @@ describe('what Send does and does not wait for', () => {
 describe('press Enter', () => {
   it('defaults on for a terminal secret and is not offered when the agent presses it', () => {
     expect(defaultSubmit(request())).toBe(true);
-    expect(defaultSubmit(request({ sensitivity: 'plain' }))).toBe(false);
+    expect(defaultSubmit(requestOf('plain'))).toBe(false);
     expect(offersPressEnter(request({ submit: 'agent' }))).toBe(false);
   });
 });
@@ -217,32 +234,199 @@ describe('savedOutcomeWords', () => {
   });
 });
 
+const email = cardField('plain', { id: 'email', label: 'Email' });
+const password = cardField('secret', { id: 'password', label: 'Password' });
+const login = (overrides: Partial<Parameters<typeof request>[0]> = {}) =>
+  request({
+    target: { kind: 'browser', key: 'app' },
+    fields: [email, password],
+    risk: email.risk,
+    ...overrides,
+  });
+
+describe('a card of several fields', () => {
+  it('keeps each field by its id, label and sensitivity, and offers Save to none of them', () => {
+    const fields = fieldsOf(login({ saved: saved() }));
+
+    expect(fields.map(each => [each.key, each.label, each.sensitivity])).toEqual([
+      ['email', 'Email', 'plain'],
+      ['password', 'Password', 'secret'],
+    ]);
+    expect(fields.every(each => each.saved === undefined)).toBe(true);
+    expect(fields[0]?.risk?.level).toBe('red');
+  });
+
+  it('hands a lone field the saved logins, so Save as still has its suggestion', () => {
+    expect(fieldsOf(withSaved(saved()))[0]?.saved?.saves).toBe('password');
+  });
+
+  it('reads "needs a login" for a secret AND a plain field, and keeps the old words otherwise', () => {
+    expect(titleWords(login(), 'Hadi')).toBe('!A7 · Hadi needs a login');
+    expect(titleWords(requestOf('plain'), 'Hadi')).toBe('!A7 · Hadi needs an answer');
+    expect(titleWords(requestOf('private'), 'Hadi')).toBe('!A7 · Hadi needs a code');
+    const codes = request({
+      sensitivity: 'secret',
+      fields: [cardField('secret', { id: 'password' }), cardField('private', { id: 'code' })],
+    });
+    expect(titleWords(codes, 'Hadi')).toBe('!A7 · Hadi needs a password');
+  });
+
+  it('says which step a chained card is, two when the daemon did not count', () => {
+    expect(chainWords(request())).toBeUndefined();
+    expect(chainWords(request({ chain: 'A7' }))).toBe('Step 2 · after !A7');
+    expect(chainWords(request({ chain: 'A7', step: 3 }))).toBe('Step 3 · after !A7');
+  });
+
+  it('flags a plain field in the daemon words when it gave some, and says so itself otherwise', () => {
+    const [plain] = fieldsOf(login());
+    const [bare] = fieldsOf(login({ fields: [cardField('plain', { id: 'email', risk: undefined })] }));
+
+    expect(plainFlagWords(must(plain, 'the field'))).toBe(PLAIN_NOTICE);
+    expect(plainFlagWords(must(bare, 'the field'))).toBe(PLAIN_NOTICE);
+    const worded = cardField('plain', { id: 'email', risk: { level: 'red', reason: 'Anyone can read an email.' } });
+    expect(plainFlagWords(must(fieldsOf(login({ fields: [worded] }))[0], 'the field'))).toBe(
+      'Anyone can read an email.',
+    );
+  });
+
+  it("draws a secret field's own risk line only when it differs from the header", () => {
+    const same = login({ fields: [password], risk: password.risk });
+    const amber = { level: 'amber', reason: 'This field may show what is typed.' } as const;
+    const differs = login({ fields: [email, cardField('secret', { id: 'password', risk: amber })] });
+
+    expect(fieldRiskLine(same, must(fieldsOf(same)[0], 'the field'))).toBeUndefined();
+    expect(fieldRiskLine(differs, must(fieldsOf(differs)[1], 'the field'))).toEqual(amber);
+    expect(fieldRiskLine(differs, must(fieldsOf(differs)[0], 'the field'))).toBeUndefined();
+  });
+
+  it('is ready to send only when every field is typed and fine', () => {
+    const fields = fieldsOf(login());
+
+    expect(typedReady(fields, {})).toBe(false);
+    expect(typedReady(fields, { email: 'a@b.test' })).toBe(false);
+    expect(typedReady(fields, { email: 'a@b.test', password: 'pass\tword' })).toBe(false);
+    expect(typedReady(fields, { email: 'a@b.test', password: 'longenough1' })).toBe(true);
+    expect(typedReady(fieldsOf(request()), { value: 'x' })).toBe(true);
+    expect(fieldProblem(must(fields[1], 'the field'), 'pass\tword')).toContain('would press keys');
+    expect(fieldProblem(must(fields[1], 'the field'), '')).toBeUndefined();
+  });
+});
+
+describe('typedFieldsBody', () => {
+  const send = (values: Record<string, string>, overrides: Partial<Parameters<typeof request>[0]> = {}) => {
+    const value = login(overrides);
+    return typedFieldsBody({ request: value, fields: fieldsOf(value), values, submit: true, deliveryId: DELIVERY });
+  };
+
+  it('sends each typed value padded on its own, named by its field, and nothing else about them', () => {
+    const built = send({ email: 'kirin@example.test', password: 'longenough1' });
+
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.body.padded).toBeUndefined();
+    expect(built.body.entry).toBeUndefined();
+    expect(built.body.save).toBeUndefined();
+    expect(built.body.observedDigest).toBe('a'.repeat(64));
+    expect(built.body.submit).toBe(true);
+    expect(built.body.fields?.map(typed => typed.field)).toEqual(['email', 'password']);
+    expect(built.body.fields?.map(typed => unpadInputValue(typed.padded))).toEqual([
+      'kirin@example.test',
+      'longenough1',
+    ]);
+  });
+
+  it('says which field is missing or refused, and sends nothing', () => {
+    expect(send({ email: 'kirin@example.test' })).toEqual({ ok: false, problem: 'Type Password too.' });
+    const refused = send({ email: 'kirin@example.test', password: 'pass\tword' });
+    expect(refused.ok).toBe(false);
+    expect(!refused.ok && refused.problem).toContain('Password: ');
+    expect(send({ email: 'a', password: 'b' }, { observedDigest: undefined })).toEqual({
+      ok: false,
+      problem: REOBSERVING,
+    });
+  });
+
+  it('never presses Enter when the agent does', () => {
+    const built = send({ email: 'a@b.test', password: 'longenough1' }, { submit: 'agent' });
+    expect(built.ok && built.body.submit).toBe(false);
+  });
+});
+
 describe('what the daemon saw in a browser', () => {
-  const facts = (type: string | undefined) =>
-    request({
-      target: { kind: 'browser', key: 'app', selector: '#password' },
+  const page = (
+    overrides: { origin?: string; secure?: boolean; frameOrigin?: string; type?: string; challenge?: boolean } = {},
+  ) => {
+    const origin = overrides.origin ?? 'https://accounts.google.com';
+    return login({
       observed: {
         kind: 'browser',
         pageId: 'page-1',
-        origin: 'https://github.com',
-        secure: true,
-        frameOrigin: 'https://github.com',
+        origin,
+        secure: overrides.secure ?? true,
         navigationId: 'nav-1',
-        backendNodeId: 7,
-        field: { tag: 'input', ...(type === undefined ? {} : { type }) },
-        box: { x: 0, y: 0, w: 100, h: 20 },
-        visible: true,
+        fields: [
+          browserField('email', { frameOrigin: origin, field: { tag: 'input', type: 'email' } }),
+          browserField('password', {
+            frameOrigin: overrides.frameOrigin ?? origin,
+            field: { tag: 'input', type: overrides.type ?? 'password' },
+          }),
+        ],
+        ...(overrides.challenge === true ? { challenge: { provider: 'recaptcha' } } : {}),
       },
     });
+  };
 
-  it('names the origin, and says whether the field is a password field', () => {
-    expect(observedWords(facts('password'))).toEqual({
-      program: 'https://github.com',
-      echo: 'password field',
+  it('names the host and says https, then each field by its label: a password field, or its type', () => {
+    expect(observedWords(page())).toEqual({
+      program: 'accounts.google.com',
+      echo: 'https',
+      recognised: true,
+      fields: [
+        { key: 'email', label: 'Email', words: 'email field' },
+        { key: 'password', label: 'Password', words: 'password field' },
+      ],
+    });
+  });
+
+  it('falls back to the tag when a field has no type', () => {
+    const value = page();
+    const facts = value.observed;
+    if (facts?.kind !== 'browser') throw new Error('a browser request');
+    const bare = {
+      ...value,
+      observed: { ...facts, fields: [browserField('email', { field: { tag: 'textarea' } }), ...facts.fields.slice(1)] },
+    };
+    expect(observedWords(bare)?.fields?.[0]?.words).toBe('textarea field');
+  });
+
+  it('says a plain http page is not secure, and a page on this machine is not called https', () => {
+    expect(observedWords(page({ origin: 'http://example.test', secure: false }))?.echo).toBe('not secure (http)');
+    expect(observedWords(page({ origin: 'http://localhost:3000', secure: true }))?.echo).toBe('http on this machine');
+    expect(observedWords(page({ origin: 'http://localhost:3000', secure: true }))?.program).toBe('localhost:3000');
+  });
+
+  it('flags a field that sits in a frame from another origin', () => {
+    const words = observedWords(page({ frameOrigin: 'https://ads.example.test' }));
+
+    expect(words?.fields?.[0]?.words).toBe('email field');
+    expect(words?.fields?.[1]?.words).toBe('password field in a frame from ads.example.test');
+  });
+
+  it('carries the captcha warning only when the page shows one', () => {
+    expect(observedWords(page())?.challenge).toBeUndefined();
+    expect(observedWords(page({ challenge: true }))?.challenge).toBe(CAPTCHA_WARNING);
+    expect(CAPTCHA_WARNING).toBe(
+      'This page is showing a captcha. Take over the browser and complete it yourself; Ferretry never solves one.',
+    );
+  });
+
+  it('names a terminal by its program, with no field list', () => {
+    expect(observedWords(request())).toEqual({
+      program: 'sudo',
+      echo: 'typing hidden',
+      promptLine: '[sudo] password for kirin:',
       recognised: true,
     });
-    expect(observedWords(facts('text'))?.echo).toBe('field');
-    expect(observedWords(facts(undefined))?.echo).toBe('field');
   });
 });
 
