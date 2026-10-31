@@ -893,6 +893,22 @@ const CASES: readonly MethodCase[] = [
     expected: TRANSCRIPT_PAGE,
   },
   {
+    name: 'the messages tail with no stated page size',
+    invoke: client => client.messagesTail(SESSION_ID),
+    verb: 'GET',
+    path: '/v1/sessions/session-1/messages?tail=1',
+    response: () => jsonResponse(TRANSCRIPT_PAGE),
+    expected: TRANSCRIPT_PAGE,
+  },
+  {
+    name: 'messages reading back through an opaque cursor with a stated page size',
+    invoke: client => client.messagesTail(SESSION_ID, { through: 'message-cursor-1', limit: 200 }),
+    verb: 'GET',
+    path: '/v1/sessions/session-1/messages?through=message-cursor-1&limit=200',
+    response: () => jsonResponse(TRANSCRIPT_PAGE),
+    expected: TRANSCRIPT_PAGE,
+  },
+  {
     name: 'messages with both a cursor and the server maximum',
     invoke: client => client.messages('sessions/../secrets', 'message-cursor-1', 1_000),
     verb: 'GET',

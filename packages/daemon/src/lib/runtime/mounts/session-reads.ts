@@ -243,6 +243,10 @@ async function logSearch(
  * restart a walk they thought they were resuming. The domain owns that refusal, so the mount is not a
  * second place a token's bytes could be trimmed, decoded or re-spelled on the way in.
  *
+ * `?tail=1` reads the newest rows and `?through=<cursor>` the rows ending at the one a cursor names; either
+ * makes the answer carry `previousCursor` (see `OperatorReadService.messages`). `?through` is passed raw
+ * like `?cursor`, and neither combines with it.
+ *
  * `?limit` is the ordinary numeric form, and its default and ceiling belong to the domain rather than
  * to this route — a page size decided in two places is a page size that can disagree with the client's
  * own stated ceiling.
@@ -255,7 +259,14 @@ async function messages(
   const id = sessionId(context);
   await requireSession(sessions, id);
   try {
-    return jsonResponse(await reads.messages(id, queryValue(context.request, 'cursor'), numberQuery(context, 'limit')));
+    const tail = queryValue(context.request, 'tail') === '1';
+    const through = queryValue(context.request, 'through');
+    if (tail && through !== undefined)
+      throw new OperatorReadError('invalid_query', 'tail and through name two different ends; send one');
+    const backward = tail || through !== undefined ? { ...(through === undefined ? {} : { through }) } : undefined;
+    return jsonResponse(
+      await reads.messages(id, queryValue(context.request, 'cursor'), numberQuery(context, 'limit'), backward),
+    );
   } catch (error) {
     return refuse(error);
   }

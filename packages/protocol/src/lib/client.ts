@@ -44,6 +44,7 @@ import type { SessionLiveActivity, SessionTranscriptMoved } from './session-live
 import type {
   LogPageOptions,
   LogSearchOptions,
+  MessagesTailOptions,
   SessionLogPage,
   SessionLogSearch,
   SessionTranscriptPage,
@@ -276,6 +277,13 @@ export interface IFyApiClient {
    * the default page size, so an omitted `limit` stays absent rather than gaining a client-side default.
    */
   messages(id: string, cursor?: string, limit?: number, signal?: AbortSignal): Promise<SessionTranscriptPage>;
+  /**
+   * `messages` read BACKWARD: the newest `limit` rows, or with `through` the newest rows ending at the row that
+   * cursor names (inclusive; pass the `previousCursor` of the page already held to read the one just older).
+   * Rows are oldest-first within a page. Gate on `DAEMON_FEATURES.messagesTail`: an older daemon ignores the
+   * request and serves the first page forward, which carries no `previousCursor`.
+   */
+  messagesTail(id: string, options?: MessagesTailOptions): Promise<SessionTranscriptPage>;
   /**
    * One image of a session's transcript, by the handle of a `[fy-image <handle> <type>]` marker in its logs.
    * The daemon proves the handle and the bytes, so a refusal (`image_not_found`, `unsupported_image`, ...) is an
