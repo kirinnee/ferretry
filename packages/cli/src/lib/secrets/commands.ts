@@ -1,5 +1,7 @@
 import type { Command } from 'commander';
 import type { SecretController, SecretListOptions, SecretUseOptions } from './controller.ts';
+import { registerLoginEntryCommands } from './entry-commands.ts';
+import type { LoginEntryController } from './entry-controller.ts';
 
 const JSON_FLAG = '--json';
 
@@ -21,7 +23,11 @@ const JSON_FLAG = '--json';
  * The help text says what this does and does not promise, because a person who believes the stronger
  * version will hand an untrusted agent a production credential.
  */
-export function registerSecretCommands(program: Command, controller: SecretController): void {
+export function registerSecretCommands(
+  program: Command,
+  controller: SecretController,
+  entries?: LoginEntryController,
+): void {
   const secret = program
     .command('secret')
     .description('daemon secrets agents can use without ever holding one')
@@ -38,6 +44,8 @@ export function registerSecretCommands(program: Command, controller: SecretContr
         'There is no command that prints a secret. There is no daemon route that could serve one.',
       ].join('\n'),
     );
+
+  if (entries !== undefined) registerLoginEntryCommands(secret, entries);
 
   secret
     .command('ls', { isDefault: true })
