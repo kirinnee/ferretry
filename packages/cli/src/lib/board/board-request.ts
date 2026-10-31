@@ -20,6 +20,7 @@ import {
   TaskKindSchema,
   type TaskRef,
   TaskWorkflowSchema,
+  stripListMarker,
   toBullets,
 } from '@ferretry/protocol';
 import type { z } from 'zod';
@@ -111,13 +112,15 @@ const trimmedAll = (values: readonly string[] | undefined): string[] =>
  * `--premise` / `--context` as the card stores them: one flag is its text, several are one bullet each. Absent
  * (never passed) is `undefined`; passed but blank is `''`, so an edit can clear the field.
  */
+const singlePoint = (value: string): string => (/[\r\n]/u.test(value) ? value : stripListMarker(value));
+
 const points = (value: string | readonly string[] | undefined): string | undefined => {
   if (value === undefined) return undefined;
   const given = typeof value === 'string' ? [value] : value;
   if (given.length === 0) return undefined;
   const kept = trimmedAll(given);
   if (kept.length === 0) return '';
-  return kept.length === 1 ? (kept[0] as string) : toBullets(kept);
+  return kept.length === 1 ? singlePoint(kept[0] as string) : toBullets(kept);
 };
 
 const requirePrUrl = (value: string): string =>

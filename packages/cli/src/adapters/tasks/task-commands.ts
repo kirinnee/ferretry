@@ -48,8 +48,18 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
     .option('--summary <line>', 'one line for the card face')
     .option('--ask <text>', "the human's words, verbatim")
     .option('--ask-source <link>', 'where those words came from')
-    .option('--premise <point>', 'why this work exists; repeat for bullet points', collect, [])
-    .option('--context <point>', 'what a newcomer needs to know; repeat for bullet points', collect, [])
+    .option(
+      '--premise <point>',
+      'why this work exists; a plain line, no leading "- " (repeat for more points)',
+      collect,
+      [],
+    )
+    .option(
+      '--context <point>',
+      'what a newcomer needs to know; a plain line, no leading "- " (repeat for more points)',
+      collect,
+      [],
+    )
     .option('--term <term=meaning>', 'a glossary entry (repeatable)', collect, [])
     .option('--brief <text>', 'the full description or plan')
     .option('--brief-file <path>', 'read the brief from a file instead')
@@ -239,8 +249,18 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
     .argument('<id>', ID_HELP)
     .option('--title <title>', TASK_TITLE_GUIDANCE)
     .option('--summary <line>', 'one line for the card face')
-    .option('--premise <point>', 'replace why this work exists; repeat for bullet points', collect, [])
-    .option('--context <point>', 'replace what a newcomer needs to know; repeat for bullet points', collect, [])
+    .option(
+      '--premise <point>',
+      'replace why this work exists; a plain line, no leading "- " (repeat for more points)',
+      collect,
+      [],
+    )
+    .option(
+      '--context <point>',
+      'replace what a newcomer needs to know; a plain line, no leading "- " (repeat for more points)',
+      collect,
+      [],
+    )
     .option('--term <term=meaning>', 'replace the glossary with these entries (repeatable)', collect, [])
     .option('--brief <text>', 'the full description or plan')
     .option('--brief-file <path>', 'read the brief from a file instead')

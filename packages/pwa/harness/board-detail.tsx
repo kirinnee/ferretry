@@ -206,6 +206,10 @@ const PAIRING_DIAGRAM = [
   FENCE,
 ].join('\n');
 
+/** `?nested=1`: premise and context stored with a marker inside each point ("- - x"), as old cards are. */
+const NESTED = new URLSearchParams(window.location.search).get('nested') === '1';
+const nest = (text: string): string => (NESTED ? text.replaceAll(/^- /gmu, '- - ') : text);
+
 const TESTED_CARD = card('F10', {
   createdAt: ago(4000),
   title: 'Device tokens stay on host',
@@ -214,8 +218,8 @@ const TESTED_CARD = card('F10', {
   assignee: MARGOT,
   summary: 'Pair a phone, then check Settings: no token is shown anywhere.',
   ask: { text: 'A paired device must never be able to read a token back.', source: `session:${DENISHA}` },
-  premise: '- A paired phone holds a device grant\n- Settings used to print the token after pairing',
-  context: '- The daemon keeps only a hash of each token\n- Shipped in 4.109.0',
+  premise: nest('- A paired phone holds a device grant\n- Settings used to print the token after pairing'),
+  context: nest('- The daemon keeps only a hash of each token\n- Shipped in 4.109.0'),
   terms: [{ term: 'device grant', meaning: 'What a paired phone holds instead of a token: it can be revoked.' }],
   howToTest:
     'On your phone, once the Mac runs 4.109.0:\n\n1. Open **Settings › Devices** and pair this phone.\n2. Open the new device row.\n3. You should see its name and when it paired, and no token anywhere.',

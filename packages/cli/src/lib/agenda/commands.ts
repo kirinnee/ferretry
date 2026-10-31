@@ -24,7 +24,8 @@ const WRITING_GUIDE = `The reader has NOT been following this session. Write for
                  no IDs): it heads the card and is the notification's title — not the conversation's name
   <the ask>      the ASK: one plain sentence, 120 characters or fewer, answer first — not backstory;
                  it is the notification's body (\`--ask\` says the same when it is not given as words)
-  --premise      REQUIRED. The SITUATION: what is going on, so a cold reader starts here; repeat for one
+  --premise      REQUIRED. The SITUATION: what is going on, so a cold reader starts here; plain lines, no
+                 leading "- " (the card adds the bullet); repeat for one
                  bullet each (a --confirms card's premise is the daemon's: the held change)
   --context      REQUIRED. The CONTEXT: the facts around the situation that bear on the ask; repeat for bullets
   --decided      earlier answers that bear on this item, one bullet each (repeat)
@@ -172,22 +173,42 @@ function mountVerbs(
         [],
       )
       .option('--option-detail <label=markdown>', "an option's longer explanation, in Markdown; repeat", collect, [])
-      .option('--premise <point>', 'the situation: what is going on; repeat for bullet points', collect, [])
       .option(
-        '-c, --context <point>',
-        'the facts around the situation that bear on the ask; repeat for bullet points',
+        '--premise <point>',
+        'the situation: what is going on; a plain line, no leading "- " (repeat for more points)',
         collect,
         [],
       )
-      .option('--decided <point>', 'an earlier answer that bears on this; repeat for bullet points', collect, [])
-      .option('--still-open <point>', 'what is still open to decide; repeat for bullet points', collect, [])
+      .option(
+        '-c, --context <point>',
+        'the facts around the situation that bear on the ask; a plain line, no leading "- " (repeat for more points)',
+        collect,
+        [],
+      )
+      .option(
+        '--decided <point>',
+        'an earlier answer that bears on this; a plain line, no leading "- " (repeat for more points)',
+        collect,
+        [],
+      )
+      .option(
+        '--still-open <point>',
+        'what is still open to decide; a plain line, no leading "- " (repeat for more points)',
+        collect,
+        [],
+      )
       .option('-w, --why <reason>', 'why this needs the human now (defaults to the ask)')
       .option('-r, --resolve <how>', 'the concrete action that clears it')
       .option('--term <TERM=meaning>', 'spell out one piece of jargon; repeat', collect, [])
       .option('-q, --question <text>', 'one thing the human must answer; repeat', collect, [])
       .option('--recommend <decision>', 'your suggested decision: an option label, or the answer in words')
       .option('--recommend-why <reason>', 'why you recommend it')
-      .option('--impact <point>', 'what happens if nobody answers; repeat for bullet points', collect, [])
+      .option(
+        '--impact <point>',
+        'what happens if nobody answers; a plain line, no leading "- " (repeat for more points)',
+        collect,
+        [],
+      )
       .option('--urgency <when>', 'by when it matters, in words')
       .option('-l, --link <target>', 'a PR, file or reference worth opening; repeat', collect, [])
       .option('--step <markdown>', 'one step the human follows, in order; repeat', collect, [])
@@ -214,17 +235,42 @@ function mountVerbs(
       .argument('<id>', 'the item reference, like !A3')
       .option('-t, --title <text>', 'the new title: what this is about, aim for 40 characters')
       .option('--summary <line>', 'the new one-line ask')
-      .option('--premise <point>', 'replace the premise (the situation); repeat for bullet points', collect, [])
-      .option('-c, --context <point>', 'replace the context; repeat for bullet points', collect, [])
-      .option('--decided <point>', 'replace the earlier answers; repeat for bullet points', collect, [])
-      .option('--still-open <point>', 'replace what is still open; repeat for bullet points', collect, [])
+      .option(
+        '--premise <point>',
+        'replace the premise (the situation); a plain line, no leading "- " (repeat for more points)',
+        collect,
+        [],
+      )
+      .option(
+        '-c, --context <point>',
+        'replace the context; a plain line, no leading "- " (repeat for more points)',
+        collect,
+        [],
+      )
+      .option(
+        '--decided <point>',
+        'replace the earlier answers; a plain line, no leading "- " (repeat for more points)',
+        collect,
+        [],
+      )
+      .option(
+        '--still-open <point>',
+        'replace what is still open; a plain line, no leading "- " (repeat for more points)',
+        collect,
+        [],
+      )
       .option('--term <TERM=meaning>', 'replace the terms with these; repeat', collect, [])
       .option('-q, --question <text>', "reword the item's questions, in order, one per question; repeat", collect, [])
       .option('-o, --option <label-and-detail>', "give an existing option's detail; repeat", collect, [])
       .option('--option-detail <label=markdown>', "replace an option's longer explanation; repeat", collect, [])
       .option('--recommend <decision>', 'replace the recommendation')
       .option('--recommend-why <reason>', 'why you recommend it')
-      .option('--impact <point>', 'replace what happens if nobody answers; repeat for bullet points', collect, [])
+      .option(
+        '--impact <point>',
+        'replace what happens if nobody answers; a plain line, no leading "- " (repeat for more points)',
+        collect,
+        [],
+      )
       .option('--urgency <when>', 'replace by when it matters')
       .option('-l, --link <target>', 'replace the links with these; repeat', collect, [])
       .option('--step <markdown>', 'replace the steps with these, in order; repeat (clears ticks)', collect, [])

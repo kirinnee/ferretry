@@ -233,17 +233,37 @@ export const MAX_AGENDA_OPTION_DETAIL_MARKDOWN_LENGTH = 1_000;
 
 const prose = (maximum: number) => z.string().trim().min(1).max(maximum);
 
-/** A list of short points as markdown bullets, one per line; blank points are dropped. */
+const LIST_MARKER = /^\s*(?:[-*•]|\d+[.)])\s+/u;
+const NESTED_MARKER = /^(\s*(?:[-*•]|\d+[.)])\s+)(?:(?:[-*•]|\d+[.)])\s+)+/u;
+
+/** One point without its leading list marker ("- ", "* ", "• ", "1. "): a point is a plain line, the list adds the bullet. */
+export const stripListMarker = (point: string): string => {
+  const stripped = point.replace(LIST_MARKER, '').trim();
+  return stripped === '' ? point.trim() : stripped;
+};
+
+/** A list of short points as markdown bullets, one per line; blank points are dropped, a stray leading marker is not doubled. */
 export const toBullets = (points: readonly string[]): string =>
   points
-    .map(point => point.replaceAll(/\s+/gu, ' ').trim())
+    .map(point => stripListMarker(point.replaceAll(/\s+/gu, ' ').trim()))
     .filter(point => point !== '')
     .map(point => `- ${point}`)
     .join('\n');
 
+/** Text already written as bullets with a second marker inside a point ("- - x") loses the extra one; anything else is kept. */
+export const unnestBullets = (text: string): string => {
+  const lines = text.split(/\r?\n/u).filter(line => line.trim() !== '');
+  if (lines.length === 0 || !lines.every(line => LIST_MARKER.test(line))) return text;
+  return text.replaceAll(new RegExp(NESTED_MARKER.source, 'gmu'), '$1');
+};
+
 /** Accepts text, or a list of points that becomes bullets — what a ferret writes, point form first. */
 const asBullets = (value: unknown): unknown =>
-  Array.isArray(value) && value.every((point): point is string => typeof point === 'string') ? toBullets(value) : value;
+  Array.isArray(value) && value.every((point): point is string => typeof point === 'string')
+    ? toBullets(value)
+    : typeof value === 'string'
+      ? unnestBullets(value)
+      : value;
 
 /** One piece of jargon the item uses, spelled out for a reader who has not been following. */
 export const AgendaTermSchema = z.strictObject({
