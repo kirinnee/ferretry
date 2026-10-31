@@ -11,7 +11,7 @@
  *   - otherwise (or after "Type a different one") one masked field per value, each with a local eye that is not
  *     remembered, "Press Enter for me", and "Save as" when the value is ever kept (one value, or a login
  *     card's username and password kept together);
- *   - the other saved logins stay selectable by hand under "Choose another saved login".
+ *   - the other saved logins stay selectable by hand under "Choose another account".
  *
  * A CARD OF SEVERAL FIELDS (a login's email and password) is ONE Send: it waits until every field is typed, and
  * each PLAIN field carries its own red flag, because the ferret can see that value. A saved login is one tap for
@@ -820,7 +820,7 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
 
       {others.length === 0 ? null : (
         <details className="min-w-0" data-input-others="">
-          <summary className="cursor-pointer text-cell text-muted">Choose another saved login</summary>
+          <summary className="cursor-pointer text-cell text-muted">Choose another account</summary>
           <div className="mt-2 flex flex-col items-stretch gap-2">{others.map(offer => offerButton(offer, false))}</div>
         </details>
       )}

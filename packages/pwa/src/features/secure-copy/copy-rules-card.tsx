@@ -1,5 +1,5 @@
 /**
- * Settings › Secrets › Pastes approved in advance (docs/secure-copy.md).
+ * Settings › Secure copy › Pastes approved in advance (docs/secure-copy.md).
  *
  * A rule lets a ferret paste a value it sealed (a token it minted, say) from one place into another WITHOUT a card
  * each time: from what a program prints, or a page, into the program reading a terminal or a page's field. Every

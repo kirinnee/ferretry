@@ -28,7 +28,7 @@ const surface = async (
   return { ...fake, view, text: () => view.container.textContent ?? '' };
 };
 
-describe('the saved logins surface', () => {
+describe('the accounts surface', () => {
   it('reads the daemon list through a client for this machine', async () => {
     const { calls, view } = await surface(() => logins());
 
@@ -42,7 +42,7 @@ describe('the saved logins surface', () => {
     );
     mounted.push(view);
 
-    expect(view.container.querySelector('[aria-label="Loading saved logins"]')).not.toBeNull();
+    expect(view.container.querySelector('[aria-label="Loading accounts"]')).not.toBeNull();
   });
 
   it('says a failed read is a refusal and not an empty list, for an error or a bare cause', async () => {
@@ -53,7 +53,7 @@ describe('the saved logins surface', () => {
         throw new Error('the relay is down');
       },
     );
-    expect(error.text()).toContain('Saved logins unavailable');
+    expect(error.text()).toContain('Accounts unavailable');
     expect(error.text()).toContain('the relay is down');
 
     const bare = await surface(
@@ -135,6 +135,6 @@ describe('the saved logins surface', () => {
     await view.render(<LoginsSurface connection={OTHER} createClient={() => new Promise<never>(() => undefined)} />);
 
     expect(view.container.querySelector('[data-login]')).toBeNull();
-    expect(view.container.querySelector('[aria-label="Loading saved logins"]')).not.toBeNull();
+    expect(view.container.querySelector('[aria-label="Loading accounts"]')).not.toBeNull();
   });
 });

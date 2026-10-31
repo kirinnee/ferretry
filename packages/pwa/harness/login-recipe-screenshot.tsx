@@ -1,5 +1,5 @@
 /**
- * Settings › Saved logins › one login with a recipe, two observed places and one pending proposal, on a phone
+ * Settings › Accounts › one login with a recipe, two observed places and one pending proposal, on a phone
  * and a desktop, light and dark.
  *
  *   bun harness/login-recipe-screenshot.tsx [outDir]   # writes login-recipe-<theme>-<viewport>.png

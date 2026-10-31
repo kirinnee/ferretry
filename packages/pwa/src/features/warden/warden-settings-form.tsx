@@ -535,7 +535,7 @@ export function WardenSettingsForm({
             onToggle={llm => set({ layers: { ...value.layers, llm } })}
           >
             <Segments
-              label="Logins"
+              label="AI logins"
               name={`${name}-rotation`}
               options={FAILOVER_POLICIES}
               value={value.failover.policy}

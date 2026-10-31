@@ -13,9 +13,9 @@ import {
 } from '../../../../src/features/config-files/config-files-settings.tsx';
 import { SETTINGS_LINKS, settingsPaletteEntries } from '../../../../src/features/settings/settings-catalog.ts';
 import { interact, type Mounted, mount, must } from '../../../support/dom.ts';
-import { configChangeHarness } from '../../config-change-support.tsx';
 import { runAsync } from '../../../support/react.ts';
 import { settleUntil } from '../../../support/settle.ts';
+import { configChangeHarness } from '../../config-change-support.tsx';
 import { alpha, DIRECTORY, fakeClients, fileView, type Handler, httpError, STATUS } from './config-files-support.ts';
 
 // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference, exactly as a file holds one
@@ -99,7 +99,7 @@ describe('Settings › Files', () => {
 
     // Grouped in the order kinds are declared, whatever order the daemon listed them in.
     const groups = [...panel.querySelectorAll('[data-config-group]')];
-    expect(groups.map(group => group.querySelector('h4')?.textContent)).toEqual(['Machine', 'Logins', 'Warden']);
+    expect(groups.map(group => group.querySelector('h4')?.textContent)).toEqual(['Machine', 'AI logins', 'Warden']);
     expect(
       [...panel.querySelectorAll('[data-config-file-state]')].map(chip => [
         chip.getAttribute('data-config-file-state'),

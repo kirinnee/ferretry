@@ -1,12 +1,12 @@
 /**
- * Settings › Secrets › Saved logins: the password manager the input card places values from.
+ * Settings › Accounts: the password manager the input card places values from.
  *
  * WRITE-ONLY, like the secrets above it. A person can add an entry, change what it is for, replace its
  * password, add or remove a 2FA seed, rename its handle and delete it. Nothing here can show a value: the
  * list says WHICH secret fields an entry holds (password ✓, 2FA ✓), never what they are, and a password or
  * seed field is a fresh empty box every time.
  *
- * A DAMAGED STORE IS NOT AN EMPTY ONE. It gets its own message, because a person told "no saved logins" over
+ * A DAMAGED STORE IS NOT AN EMPTY ONE. It gets its own message, because a person told "no accounts" over
  * a store the daemon simply could not read will type them all again.
  */
 
@@ -36,8 +36,8 @@ import {
   passwordProblem,
   removeTotpBody,
   replacePasswordBody,
-  seedProblem,
   type SignInDraft,
+  seedProblem,
   signInDraftOf,
   signInProblem,
   viaChoices,
@@ -207,7 +207,7 @@ function AddLoginForm({
   return (
     <form
       className="flex min-w-0 flex-col gap-2 rounded-control border border-border-strong bg-surface-2 p-3"
-      aria-label="Add a saved login"
+      aria-label="Add an account"
       data-login-add=""
       onSubmit={submit}
     >
@@ -732,7 +732,7 @@ export function LoginsCard({ list, busy = null, error = null, onPut, onRename, o
       <div className="flex flex-wrap items-center gap-2">
         <h2 id="logins-heading" className="m-0 flex items-center gap-1.5 text-row font-semibold text-fg">
           <LockKeyhole size={16} className="text-accent" aria-hidden="true" />
-          Saved logins
+          Accounts
         </h2>
         <span className="rounded-control bg-surface-2 px-2 py-0.5 text-meta font-medium text-faint">write-only</span>
       </div>
@@ -746,7 +746,7 @@ export function LoginsCard({ list, busy = null, error = null, onPut, onRename, o
         >
           <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warn" aria-hidden="true" />
           <div className="min-w-0">
-            <p className="m-0 text-ui font-semibold text-fg">This daemon cannot read its saved logins</p>
+            <p className="m-0 text-ui font-semibold text-fg">This daemon cannot read its accounts</p>
             {list.diagnosis !== undefined && (
               <p className="m-0 mt-1 text-cell leading-base text-muted">{list.diagnosis}</p>
             )}
@@ -758,10 +758,10 @@ export function LoginsCard({ list, busy = null, error = null, onPut, onRename, o
         </div>
       ) : list.entries.length === 0 ? (
         <p className="m-0 text-ui text-faint" data-testid="logins-empty">
-          No saved logins on this daemon yet.
+          No accounts on this daemon yet.
         </p>
       ) : (
-        <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Saved logins">
+        <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Accounts">
           {list.entries.map(entry => (
             <LoginRow
               key={entry.id}
@@ -796,7 +796,7 @@ export function LoginsCard({ list, busy = null, error = null, onPut, onRename, o
               data-login-add-open=""
               onClick={() => setAdding(true)}
             >
-              <Plus size={14} aria-hidden="true" /> Add a saved login
+              <Plus size={14} aria-hidden="true" /> Add an account
             </button>
           </div>
         ))}
