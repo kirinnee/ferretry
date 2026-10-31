@@ -28,7 +28,7 @@ nix develop .#ci -c ./scripts/ci/pre-commit.sh   # exactly what CI runs (CI spli
 | `typecheck`                  | `tsc --noEmit` across the workspace                                           |
 | `a-deadcode`                 | Knip, repository view (`knip.json`) — includes tests                          |
 | `a-deadcode-production`      | Knip, production view (`knip.production.json`) — from the bin entry           |
-| `a-shellcheck`               | shellcheck on every `*.sh`                                                    |
+| `a-shellcheck`               | shellcheck on every `*.sh` and `scripts/host/ferretry-loopback-firewall`      |
 | `a-enforce-exec`             | tracked shell scripts are executable                                          |
 | `a-action-pins-trusted`      | trusted GitHub Actions pin a major tag                                        |
 | `a-action-pins-non-trusted`  | everything else pins a 40-char SHA plus its tag in a comment                  |

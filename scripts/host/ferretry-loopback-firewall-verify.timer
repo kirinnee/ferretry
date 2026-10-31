@@ -1,0 +1,11 @@
+[Unit]
+Description=Ferretry loopback firewall: verify every five minutes
+Documentation=https://github.com/kirinnee/ferretry
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

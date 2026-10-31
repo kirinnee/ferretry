@@ -29,6 +29,7 @@ import { registerBoardImportCommand } from '../src/adapters/board-import/board-i
 import { FyBoardImportGateway } from '../src/adapters/board-import/fy-board-import-gateway';
 import { FyLaneGateway } from '../src/adapters/board-lanes/fy-lane-gateway';
 import { registerLaneCommands } from '../src/adapters/board-lanes/lane-commands';
+import { BUNDLED_FIREWALL_FILES } from '../src/adapters/browser/firewall-files';
 import { FileScreenshotWriter } from '../src/adapters/browser/screenshot-writer';
 import { FileConfigFiles } from '../src/adapters/config/files';
 import { StdinConfigText } from '../src/adapters/config/stdin';
@@ -96,7 +97,7 @@ import { registerAuditCommands } from '../src/lib/audit/commands';
 import { AuditController } from '../src/lib/audit/controller';
 import { ProtocolAuditGateway } from '../src/lib/audit/gateway';
 import { BoardController } from '../src/lib/board/board-controllers';
-import { BrowserController, registerBrowserCommands } from '../src/lib/browser';
+import { BrowserController, registerBrowserCommands, registerFirewallCommands } from '../src/lib/browser';
 import { registerConfigCommands } from '../src/lib/config/commands';
 import { ConfigController } from '../src/lib/config/controller';
 import { ProtocolConfigGateway } from '../src/lib/config/gateway';
@@ -960,6 +961,8 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         ...(ownSessionId === undefined ? {} : { selfSessionId: ownSessionId }),
       }),
     ),
+  // After the browser group, because `browser firewall` mounts onto it.
+  ({ program, world }) => registerFirewallCommands(program, BUNDLED_FIREWALL_FILES, world.io),
   // Terminals and browser pages by NAME — the agent tools' own actions, for scripts and for people. After
   // the browser group, because `browser page` mounts onto it.
   ({ program, world, client, ownSessionId, restartPatience: patience }) => {
