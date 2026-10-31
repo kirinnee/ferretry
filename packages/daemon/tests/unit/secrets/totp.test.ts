@@ -9,7 +9,8 @@ function base32(ascii: string): string {
   let bits = '';
   for (const byte of new TextEncoder().encode(ascii)) bits += byte.toString(2).padStart(8, '0');
   let out = '';
-  for (let index = 0; index < bits.length; index += 5) out += ALPHABET[Number.parseInt(bits.slice(index, index + 5).padEnd(5, '0'), 2)];
+  for (let index = 0; index < bits.length; index += 5)
+    out += ALPHABET[Number.parseInt(bits.slice(index, index + 5).padEnd(5, '0'), 2)];
   return out;
 }
 

@@ -185,7 +185,9 @@ describe('the first time: the owner types the value and saves it', () => {
     const result = await h.service.deliver(
       SESSION,
       request.id,
-      typed(request.observedDigest as string, PASSWORD, { save: { entry: 'SUDO_KIRIN_BOX', label: 'sudo on kirin-box' } }),
+      typed(request.observedDigest as string, PASSWORD, {
+        save: { entry: 'SUDO_KIRIN_BOX', label: 'sudo on kirin-box' },
+      }),
       HOST,
     );
 
@@ -195,14 +197,23 @@ describe('the first time: the owner types the value and saves it', () => {
       { id: 'SUDO_KIRIN_BOX', label: 'sudo on kirin-box', match: ['sudo@kirin-box'], fields: { password: true } },
     ]);
     should(h.saves).deepEqual([
-      { sessionId: SESSION, requestId: request.id, actor: { kind: 'host' }, entry: 'SUDO_KIRIN_BOX', field: 'password' },
+      {
+        sessionId: SESSION,
+        requestId: request.id,
+        actor: { kind: 'host' },
+        entry: 'SUDO_KIRIN_BOX',
+        field: 'password',
+      },
     ]);
     should(await h.everything()).not.containEql(PASSWORD);
   });
 
   it('should save to an existing entry, keeping its label and adding this target to what it matches', async () => {
     const h = harness();
-    await h.directory.put('SUDO_LAPTOP', PutLoginEntryRequestSchema.parse({ label: 'my sudo', match: ['sudo@laptop'] }));
+    await h.directory.put(
+      'SUDO_LAPTOP',
+      PutLoginEntryRequestSchema.parse({ label: 'my sudo', match: ['sudo@laptop'] }),
+    );
     const { request } = await raised(h);
     await h.service.deliver(
       SESSION,
@@ -211,7 +222,9 @@ describe('the first time: the owner types the value and saves it', () => {
       HOST,
     );
 
-    should(await h.directory.list()).match([{ id: 'SUDO_LAPTOP', label: 'my sudo', match: ['sudo@laptop', 'sudo@kirin-box'] }]);
+    should(await h.directory.list()).match([
+      { id: 'SUDO_LAPTOP', label: 'my sudo', match: ['sudo@laptop', 'sudo@kirin-box'] },
+    ]);
   });
 
   it('should keep a plain value as the username', async () => {
@@ -304,14 +317,21 @@ describe('the next time: the card offers the saved login, and the owner taps Use
     const h = harness();
     await savedOnce(h);
     const { request, view } = await raised(h);
-    const result = await h.service.deliver(SESSION, request.id, saved(request.observedDigest as string, 'SUDO_KIRIN_BOX'), HOST);
+    const result = await h.service.deliver(
+      SESSION,
+      request.id,
+      saved(request.observedDigest as string, 'SUDO_KIRIN_BOX'),
+      HOST,
+    );
     const agent = await h.service.agentView(SESSION, view.id, 0);
 
     should(result).match({ state: 'delivered', submitted: true });
     should(h.writes).deepEqual([PASSWORD]);
     should(agent).match({ state: 'delivered', source: 'saved' });
     should(JSON.stringify(agent)).not.containEql('SUDO_KIRIN_BOX');
-    should(h.sinks.some(line => line.includes('"source":"saved"') && line.includes('"entry":"SUDO_KIRIN_BOX"'))).be.true();
+    should(
+      h.sinks.some(line => line.includes('"source":"saved"') && line.includes('"entry":"SUDO_KIRIN_BOX"')),
+    ).be.true();
     should(await h.everything()).not.containEql(PASSWORD);
   });
 
@@ -332,7 +352,9 @@ describe('the next time: the card offers the saved login, and the owner taps Use
     );
     const { request } = await raised(h);
 
-    should(request.saved?.offers).deepEqual([{ id: 'SUDO_LAPTOP', label: 'sudo on laptop', fills: 'password', matched: false }]);
+    should(request.saved?.offers).deepEqual([
+      { id: 'SUDO_LAPTOP', label: 'sudo on laptop', fills: 'password', matched: false },
+    ]);
     await h.service.deliver(SESSION, request.id, saved(request.observedDigest as string, 'SUDO_LAPTOP'), HOST);
     should(h.writes).deepEqual([PASSWORD]);
   });
@@ -346,9 +368,16 @@ describe('the next time: the card offers the saved login, and the owner taps Use
 
   it('should mark the ferret’s hint without ever making it the one-tap choice, and tell the ferret nothing either way', async () => {
     const h = harness();
-    await h.directory.put('SUDO_LAPTOP', PutLoginEntryRequestSchema.parse({ label: 'laptop', match: ['sudo@laptop'], password: PASSWORD }));
+    await h.directory.put(
+      'SUDO_LAPTOP',
+      PutLoginEntryRequestSchema.parse({ label: 'laptop', match: ['sudo@laptop'], password: PASSWORD }),
+    );
     const hinted = await raised(h, { ...RAISE, secretHint: 'SUDO_LAPTOP' });
-    const unknown = await raised(h, { ...RAISE, target: { kind: 'terminal', key: 'two' }, secretHint: 'NO_SUCH_LOGIN' });
+    const unknown = await raised(h, {
+      ...RAISE,
+      target: { kind: 'terminal', key: 'two' },
+      secretHint: 'NO_SUCH_LOGIN',
+    });
 
     should(hinted.request.saved?.offers).deepEqual([
       { id: 'SUDO_LAPTOP', label: 'laptop', fills: 'password', matched: false, hinted: true },
@@ -389,8 +418,12 @@ describe('the next time: the card offers the saved login, and the owner taps Use
     const h = harness();
     await h.directory.put('BARE', PutLoginEntryRequestSchema.parse({ label: 'bare', username: 'kirin' }));
     const { request } = await raised(h);
-    const unknown = await refusal(h.service.deliver(SESSION, request.id, saved(request.observedDigest as string, 'NOPE'), HOST));
-    const empty = await refusal(h.service.deliver(SESSION, request.id, saved(request.observedDigest as string, 'BARE'), HOST));
+    const unknown = await refusal(
+      h.service.deliver(SESSION, request.id, saved(request.observedDigest as string, 'NOPE'), HOST),
+    );
+    const empty = await refusal(
+      h.service.deliver(SESSION, request.id, saved(request.observedDigest as string, 'BARE'), HOST),
+    );
 
     should(unknown.code).equal('not_found');
     should(empty.code).equal('bad_request');

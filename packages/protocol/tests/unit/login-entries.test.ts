@@ -32,9 +32,9 @@ describe('a saved login, as a client reads it', () => {
   it('should have no field for a password, a seed, a code, a length or a digest', () => {
     for (const leak of ['password', 'value', 'seed', 'code', 'length', 'digest'])
       expect(LoginEntrySummarySchema.safeParse({ ...SUMMARY, [leak]: 'hunter2-UNIQUE' }).success).toBe(false);
-    expect(LoginEntrySummarySchema.safeParse({ ...SUMMARY, fields: { password: 'hunter2', totp: false } }).success).toBe(
-      false,
-    );
+    expect(
+      LoginEntrySummarySchema.safeParse({ ...SUMMARY, fields: { password: 'hunter2', totp: false } }).success,
+    ).toBe(false);
   });
 
   it('should list entries with the store health, never a damaged store as an empty one', () => {
@@ -59,9 +59,9 @@ describe('what an entry matches', () => {
 
 describe('changing an entry', () => {
   it('should take values IN, and null to remove a field', () => {
-    expect(PutLoginEntryRequestSchema.safeParse({ label: 'sudo on kirin-box', password: 'correct-horse' }).success).toBe(
-      true,
-    );
+    expect(
+      PutLoginEntryRequestSchema.safeParse({ label: 'sudo on kirin-box', password: 'correct-horse' }).success,
+    ).toBe(true);
     expect(PutLoginEntryRequestSchema.safeParse({ username: null, password: null, totp: null }).success).toBe(true);
   });
 

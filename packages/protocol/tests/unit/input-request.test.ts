@@ -220,7 +220,10 @@ describe('delivering', () => {
   });
 
   it('should allow saving only a typed value', () => {
-    should(InputDeliverBodySchema.safeParse({ ...body, save: { entry: 'SUDO_KIRIN_BOX', label: 'sudo on kirin-box' } }).success).be.true();
+    should(
+      InputDeliverBodySchema.safeParse({ ...body, save: { entry: 'SUDO_KIRIN_BOX', label: 'sudo on kirin-box' } })
+        .success,
+    ).be.true();
     should(InputDeliverBodySchema.safeParse({ ...body, save: { entry: 'sudo', label: 'x' } }).success).be.false();
     should(InputDeliverBodySchema.safeParse({ ...body, save: { entry: 'SUDO', label: 'a\nb' } }).success).be.false();
     should(

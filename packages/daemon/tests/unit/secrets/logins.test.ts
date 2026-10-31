@@ -137,9 +137,11 @@ describe('the saved-login directory', () => {
     should(await damaged.directory.list().catch(error => error)).be.instanceOf(SecretStoreError);
     const foreign = new MemorySecretDocuments();
     await foreign.write({ v: 1, cipher: 'OTHER', entries: {} });
-    should(await world(new MemoryLoginIndex(), foreign).directory.list().catch(error => error)).be.instanceOf(
-      SecretStoreError,
-    );
+    should(
+      await world(new MemoryLoginIndex(), foreign)
+        .directory.list()
+        .catch(error => error),
+    ).be.instanceOf(SecretStoreError);
   });
 });
 
@@ -148,7 +150,13 @@ describe('the saved-login vault', () => {
     const w = world();
     await w.directory.put(
       'GITHUB',
-      change({ label: 'GitHub', username: 'kirinnee', password: PASSWORD, totp: { seed: SEED }, totpAcknowledged: true }),
+      change({
+        label: 'GitHub',
+        username: 'kirinnee',
+        password: PASSWORD,
+        totp: { seed: SEED },
+        totpAcknowledged: true,
+      }),
     );
     await w.directory.put('BARE', change({ label: 'bare' }));
     const at = 1_761_900_000_000;
@@ -167,7 +175,13 @@ describe('the saved-login vault', () => {
     const w = world();
     await w.directory.put(
       'GITHUB',
-      change({ label: 'GitHub', username: 'kirinnee', password: PASSWORD, totp: { seed: SEED }, totpAcknowledged: true }),
+      change({
+        label: 'GitHub',
+        username: 'kirinnee',
+        password: PASSWORD,
+        totp: { seed: SEED },
+        totpAcknowledged: true,
+      }),
     );
     const values = await w.vault.values();
     should([...values.keys()].sort()).deepEqual(['login:GITHUB:password', 'login:GITHUB:totp']);

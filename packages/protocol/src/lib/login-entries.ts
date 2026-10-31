@@ -131,10 +131,7 @@ export const PutLoginEntryRequestSchema = z
       .regex(/^[^\p{Cc}]*$/u, 'a password with a control character or line break would press keys')
       .nullable()
       .optional(),
-    totp: z
-      .strictObject({ seed: TotpSeedSchema, parameters: TotpParametersSchema.optional() })
-      .nullable()
-      .optional(),
+    totp: z.strictObject({ seed: TotpSeedSchema, parameters: TotpParametersSchema.optional() }).nullable().optional(),
     totpAcknowledged: z.literal(true).optional(),
   })
   .superRefine((body, context) => {

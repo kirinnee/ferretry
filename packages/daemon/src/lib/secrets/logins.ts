@@ -227,12 +227,7 @@ export class LoginDirectory {
   }
 }
 
-function nextRecord(
-  existing: LoginRecord | undefined,
-  key: string,
-  change: PutLoginEntry,
-  at: string,
-): LoginRecord {
+function nextRecord(existing: LoginRecord | undefined, key: string, change: PutLoginEntry, at: string): LoginRecord {
   const username = change.username === undefined ? existing?.username : (change.username ?? undefined);
   const totp: TotpParameters | undefined =
     change.totp === undefined
@@ -320,7 +315,8 @@ export class LoginVault {
     if (value === undefined) throw new LoginEntryError('no_such_field', `${record.label} has lost its ${role}`);
     if (role === 'password') return value;
     const code = totpCode(value, record.totp as TotpParameters, nowMs);
-    if (code === undefined) throw new LoginEntryError('no_such_field', `${record.label} has a 2FA seed that is not base32`);
+    if (code === undefined)
+      throw new LoginEntryError('no_such_field', `${record.label} has a 2FA seed that is not base32`);
     return code;
   }
 }

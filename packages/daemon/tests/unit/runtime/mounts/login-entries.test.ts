@@ -70,7 +70,9 @@ describe('the saved-login routes', () => {
   });
 
   it('should list a damaged store as damaged, never as empty', async () => {
-    const subsystem = secretSubsystem({ loginIndex: new MemoryLoginIndex(new SecretStoreError('unreadable', 'bad json')) });
+    const subsystem = secretSubsystem({
+      loginIndex: new MemoryLoginIndex(new SecretStoreError('unreadable', 'bad json')),
+    });
     const body = (await jsonBody(await dispatch(subsystem, 'GET', '/v1/secrets/logins'))) as {
       health: string;
       diagnosis: string;
@@ -80,8 +82,12 @@ describe('the saved-login routes', () => {
   });
 
   it('should answer a damaged store on a change as the server’s fault', async () => {
-    const subsystem = secretSubsystem({ loginSealed: new MemorySecretDocuments(new SecretStoreError('key_missing', 'gone')) });
-    should((await dispatch(subsystem, 'PUT', '/v1/secrets/logins/A', { label: 'a', password: PASSWORD })).status).equal(500);
+    const subsystem = secretSubsystem({
+      loginSealed: new MemorySecretDocuments(new SecretStoreError('key_missing', 'gone')),
+    });
+    should((await dispatch(subsystem, 'PUT', '/v1/secrets/logins/A', { label: 'a', password: PASSWORD })).status).equal(
+      500,
+    );
   });
 
   it('should keep the saved-login routes out of a daemon that keeps none', () => {

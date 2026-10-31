@@ -663,8 +663,7 @@ export class InputRequestService {
       }
       await this.settle(hold);
       hold = undefined;
-      const saved =
-        body.save === undefined ? undefined : await this.save(held, body.save, value, by, body.deliveryId);
+      const saved = body.save === undefined ? undefined : await this.save(held, body.save, value, by, body.deliveryId);
       await this.finish(held, 'delivered', undefined, by, {
         closeCard: true,
         tellAgent: true,
@@ -705,7 +704,10 @@ export class InputRequestService {
         'bad_request',
         `a saved password is at least ${LOGIN_PASSWORD_MIN_LENGTH} characters, so it can be masked safely; send it without saving`,
       );
-    if (field === 'username' && (value.trim() === '' || value.length > LOGIN_USERNAME_MAX_LENGTH || /\p{Cc}/u.test(value)))
+    if (
+      field === 'username' &&
+      (value.trim() === '' || value.length > LOGIN_USERNAME_MAX_LENGTH || /\p{Cc}/u.test(value))
+    )
       throw new InputRequestError('bad_request', 'that value cannot be kept as a username; send it without saving');
   }
 
@@ -716,7 +718,10 @@ export class InputRequestService {
       .fill(entry, fillRoleFor(request.sensitivity), this.deps.clock.now())
       .catch((error: unknown) => {
         throw error instanceof LoginEntryError
-          ? new InputRequestError(error.refusal === 'unknown_login' ? 'not_found' : 'bad_request', `${error.message}; nothing was typed`)
+          ? new InputRequestError(
+              error.refusal === 'unknown_login' ? 'not_found' : 'bad_request',
+              `${error.message}; nothing was typed`,
+            )
           : new InputRequestError('unavailable', 'Ferretry could not open the saved login, so nothing was typed');
       });
     const problem = inputValueProblem(value, request.sensitivity);

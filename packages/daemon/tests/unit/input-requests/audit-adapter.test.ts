@@ -77,7 +77,13 @@ describe('InputAuditAdapter, saving a typed value to a saved login', () => {
       entry: 'SUDO_KIRIN_BOX',
       field: 'password',
     });
-    await adapter.saved({ sessionId: 's1', requestId: 'r'.repeat(32), actor: { kind: 'host' }, entry: 'U', field: 'username' });
+    await adapter.saved({
+      sessionId: 's1',
+      requestId: 'r'.repeat(32),
+      actor: { kind: 'host' },
+      entry: 'U',
+      field: 'username',
+    });
 
     should(records).eql([
       {

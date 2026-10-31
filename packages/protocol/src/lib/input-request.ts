@@ -311,7 +311,12 @@ export const InputDeliverBodySchema = z
     save: z
       .strictObject({
         entry: LoginEntryIdSchema,
-        label: z.string().trim().min(1).max(LOGIN_LABEL_MAX_LENGTH).regex(/^[^\p{Cc}\p{Cf}]*$/u),
+        label: z
+          .string()
+          .trim()
+          .min(1)
+          .max(LOGIN_LABEL_MAX_LENGTH)
+          .regex(/^[^\p{Cc}\p{Cf}]*$/u),
       })
       .optional(),
   })
