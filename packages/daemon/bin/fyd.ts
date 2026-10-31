@@ -12018,23 +12018,33 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // fails and the viewer is told 1011 "terminal redraw failed" instead of the 1000 "daemon shutting
   // down" it is owed. The host does not exist yet, so this is bound once it does.
   let closeLiveSockets: () => void = () => {};
-  cleanups.push(() => {
+  // The saved-login sweep below writes under THIS home lock, so the lock must outlive it: a stop that arrives
+  // while it is in flight drains it BEFORE storage closes (closing releases the lock), and a stop that arrives
+  // before it starts means it never starts. Otherwise a second daemon could take the home while the sweep writes.
+  let stopping = false;
+  let loginSweep: Promise<LoginSweep | undefined> | undefined;
+  cleanups.push(async () => {
+    stopping = true;
+    await loginSweep?.catch(() => undefined);
     closeLiveSockets();
-    return opened.storage.close();
+    await opened.storage.close();
   });
   world.notices.step('state home opened', opened.paths.home);
   // A page left by a `fy pair --open` that was killed holds a dead code; the daemon owns the home now, so it clears it.
   await world.boot.sweepPairingRedirects?.(opened.paths.home);
   // Saved-login ciphertext a stopped change left behind, swept only NOW: this process holds the state home's
   // lock, so no other daemon can be mid-change on these files. Masked until swept; a damaged index sweeps nothing.
-  const loginSweep = await world.boot.sweepSavedLogins?.().catch((error: unknown) => ({
-    swept: 0,
-    damaged: error instanceof Error ? error.message : 'the saved logins could not be read',
-  }));
-  if (loginSweep?.damaged !== undefined)
-    world.notices.state(`saved logins kept as they are: ${loginSweep.damaged}; nothing was swept`);
-  else if (loginSweep !== undefined && loginSweep.swept > 0)
-    world.notices.step('saved logins tidied', `removed ${loginSweep.swept} sealed value(s) no saved login points at`);
+  loginSweep = stopping
+    ? undefined
+    : world.boot.sweepSavedLogins?.().catch((error: unknown) => ({
+        swept: 0,
+        damaged: error instanceof Error ? error.message : 'the saved logins could not be read',
+      }));
+  const swept = await loginSweep;
+  if (swept?.damaged !== undefined)
+    world.notices.state(`saved logins kept as they are: ${swept.damaged}; nothing was swept`);
+  else if (swept !== undefined && swept.swept > 0)
+    world.notices.step('saved logins tidied', `removed ${swept.swept} sealed value(s) no saved login points at`);
 
   progress.enter('loading configuration');
   const peeked = await world.config.peek();
