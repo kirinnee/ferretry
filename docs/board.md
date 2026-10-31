@@ -285,9 +285,9 @@ never printed ([reference-standard.md](reference-standard.md)).
 ## How a card reads
 
 Every text a ferret writes on a card — `summary`, `premise`, `context`, `brief` and `howToTest` — is Markdown,
-drawn by the chat's one renderer (`ChatProse`), so `fy-render` hypermedia (mermaid, svg, html, chart, image…) and
-references (`&F412`, `!A48`, `@file`) behave exactly as in a message or an agenda card
-([fy-render.md](fy-render.md), [reference-standard.md](reference-standard.md)). The card detail reads top to bottom
+drawn by the chat's one renderer (`ChatProse`), so `fy-render` hypermedia (mermaid, svg, html, chart, image…) draws
+exactly as in a message or an agenda card ([fy-render.md](fy-render.md)), and references are read through the one
+grammar and its proof-before-link gate ([reference-standard.md](reference-standard.md)). The card detail reads top to bottom
 as an agenda card does, with nothing folded:
 
 1. the title, with the **summary** as one line under it;
@@ -531,6 +531,10 @@ wherever it appears ([reference-standard.md](reference-standard.md)).
 
 ## Gaps and work in flight
 
+- **References in a card's text are not links yet.** The card detail sits outside any session, and the reference
+  surface is assembled per session (`components/reference-surface.tsx`), so `&F412`, `!A48` and `@file` in a
+  card's Markdown stay prose until the Board builds a surface of its own — the same as an agenda card read in the
+  Inbox.
 - **Another machine's cards.** The `&F412@mac` spelling for a card on a different machine is not wired. A `parent`
   or `dependsOn` that names a card on another machine resolves to nothing, so it neither blocks nor rolls up.
 - **Some messages bypass the pending-context carrier.** Quiet board events ride the next message, but agenda answer
