@@ -29,7 +29,7 @@ describe('the History under an open agenda card', () => {
     const root = await draw([
       { kind: 'ferret', key: 'r', at: AT, text: 'What should happen at the hard limit?' },
       { kind: 'owner', key: 'o', at: AT + 180_000, text: 'does pause kill a running turn?' },
-      { kind: 'revision', key: 'v', at: AT + 200_000, version: 2 },
+      { kind: 'revision', key: 'v', at: AT + 200_000, version: 2, summary: [] },
       { kind: 'ferret', key: 'f', at: AT + 240_000, text: 'No. A running turn finishes.' },
     ]);
     const rows = [...root.querySelectorAll('[data-agenda-history] li')];
@@ -43,6 +43,24 @@ describe('the History under an open agenda card', () => {
     expect(root.querySelectorAll('.fy-hist__me')).toHaveLength(1);
     expect(rows[1]?.className).toBe('fy-hist__me');
     expect(rows[2]?.textContent).toBe('Card updated to v2');
+  });
+
+  test('says what an edit changed in a list under the "Card updated" line', async () => {
+    const root = await draw([
+      {
+        kind: 'revision',
+        key: 'v',
+        at: AT,
+        version: 2,
+        summary: ['Premise: added “A cache is the cause”', 'Title: now “New”'],
+      },
+    ]);
+    const row = must(root.querySelector('[data-history="revision"]'), 'the revision row');
+    expect(row.querySelector('span')?.textContent).toBe('Card updated to v2');
+    expect([...row.querySelectorAll('.fy-hist__changes li')].map(li => li.textContent)).toEqual([
+      'Premise: added “A cache is the cause”',
+      'Title: now “New”',
+    ]);
   });
 
   test('ticks an answer, says a note under it, and leaves a reply unticked', async () => {

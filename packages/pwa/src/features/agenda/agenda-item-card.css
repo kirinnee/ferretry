@@ -504,6 +504,14 @@
 .fy-hist__text :is(p, .md) {
   margin-block: 0;
 }
+.fy-hist__text :is(p, ul, ol, h1, h2, h3, h4) + :is(p, ul, ol, h1, h2, h3, h4) {
+  margin-top: 6px;
+}
+.fy-hist__text :is(h1, h2, h3, h4) {
+  margin-bottom: 0;
+  font-size: var(--text-base);
+  font-weight: var(--weight-strong);
+}
 .fy-hist__me {
   align-self: flex-end;
   max-width: min(80%, 580px);
@@ -537,8 +545,16 @@
 }
 .fy-hist__sys {
   align-self: center;
+  max-width: min(100%, 520px);
   color: var(--muted);
   font-size: var(--text-xs);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.fy-hist__changes {
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
 }
 
 /* A phone's head: the pager is its own short row on the right, so the title gets the whole width under it. */

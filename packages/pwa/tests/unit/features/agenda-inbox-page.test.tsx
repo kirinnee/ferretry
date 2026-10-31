@@ -530,7 +530,12 @@ describe('AgendaInboxPage on a phone', () => {
           return [
             { id: 'a0', kind: 'assistant', text: 'Cut the release branch.', at: 1 },
             { id: 'u1', kind: 'user', text: '!A2 is staging green?', at: 2 },
-            { id: 'a1', kind: 'assistant', text: 'Yes, all green.', at: 3 },
+            {
+              id: 'a1',
+              kind: 'assistant',
+              text: 'Piper merged the probe.\n\nOn !A2: yes, all green.\n\nKylene is on the lockfile.',
+              at: 3,
+            },
           ];
         },
       }),
@@ -540,7 +545,9 @@ describe('AgendaInboxPage on a phone', () => {
     const history = must(mounted.container.querySelector('[data-agenda-history]'), 'the History');
     expect(history.textContent).not.toContain('Cut the release branch.');
     expect(history.querySelector('[data-history="owner"]')?.textContent).toContain('is staging green?');
-    expect(history.querySelector('[data-history="ferret"]')?.textContent).toContain('Yes, all green.');
+    expect(history.querySelector('[data-history="ferret"]')?.textContent).toContain('yes, all green.');
+    expect(history.textContent).not.toContain('Piper merged the probe.');
+    expect(history.textContent).not.toContain('lockfile');
     await mounted.unmount();
   });
 
