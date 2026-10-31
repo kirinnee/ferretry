@@ -26,6 +26,12 @@ export interface DaemonEnvironmentInput {
   readonly configHome?: string | undefined;
   /** `XDG_STATE_HOME` when set — CLI-owned installation artifacts live under it. */
   readonly stateDirectory?: string | undefined;
+  /**
+   * The invoking user's PRIVATE runtime directory (`XDG_RUNTIME_DIR`), already proven by the composition
+   * root to be owned by this user and closed to group and other — or undefined when there is none.
+   * The layout never trusts a raw variable here: only the claim's location depends on it.
+   */
+  readonly runtimeDirectory?: string | undefined;
   /** The invoking user's numeric id, which names the launchd domain. */
   readonly userId: number;
   /** Base name of that executable: it names the systemd unit and the launchd label. */
@@ -252,6 +258,10 @@ export function resolveDaemonLayout(input: DaemonEnvironmentInput): DaemonLayout
   const product = requireName(input.product, 'product name');
   const userId = requireUserId(input.userId, 'user id');
 
+  const runtimeDirectory =
+    input.runtimeDirectory === undefined || input.runtimeDirectory.trim().length === 0
+      ? undefined
+      : requireDirectory(input.runtimeDirectory, 'XDG_RUNTIME_DIR');
   const logDirectory = join(stateHome, 'logs');
   const launchdLabel = `com.${product}.${daemonName}`;
   const launchdDomain = `gui/${String(userId)}`;
@@ -293,6 +303,7 @@ export function resolveDaemonLayout(input: DaemonEnvironmentInput): DaemonLayout
       stateHome,
       daemonName,
       userId,
+      runtimeDirectory,
     }),
   };
 }
@@ -307,18 +318,23 @@ interface LifecycleArtifacts {
   readonly stateHome: string;
   readonly daemonName: string;
   readonly userId: number;
+  readonly runtimeDirectory: string | undefined;
 }
 
 /**
  * Where the claims live, decided by everything the mutating verbs may own on this host.
  *
  * The shared manager target covers commands sent to one systemd unit or launchd label even when two
- * environments resolve different definition paths. `/tmp` is the one stable cross-environment
- * directory on both supported platforms; the uid keeps users independent, and its sticky bit means
- * another user can at worst occupy the predictable name and make the lifecycle fail closed. The
- * definition claim covers the actual file, the direct claim covers the state home used when that file
- * is absent, and the artifact claim covers everything derived from the same `XDG_STATE_HOME`: the Nix
- * garbage-collection root, and the retired snapshot store a verb removes.
+ * environments resolve different definition paths. It lives in the user's PRIVATE runtime directory
+ * (`$XDG_RUNTIME_DIR`, `/run/user/<uid>`, `0700`) whenever the composition root proved one exists, so
+ * no other local user can pre-create the name. Only when there is none — macOS, a login that has no
+ * runtime directory, or one that is not owned by this user and closed to group and other — does it
+ * fall back to the fixed name in `/tmp`, where the uid keeps users independent and the sticky bit
+ * means another user can at worst occupy the predictable name and make the lifecycle fail closed
+ * (a limit only where no private runtime directory exists). The definition claim covers the actual
+ * file, the direct claim covers the state home used when that file is absent, and the artifact claim
+ * covers everything derived from the same `XDG_STATE_HOME`: the Nix garbage-collection root, and the
+ * retired snapshot store a verb removes.
  *
  * **The manager-target claim is per user, not per state home, and that is deliberate.** A temporary
  * `FY_HOME` does not get a service of its own: there is one `fyd.service` per user manager (one
@@ -329,6 +345,16 @@ interface LifecycleArtifacts {
  * abandoned; a claim now records which process holds it, so a holder that provably exited is removed
  * by the next command instead of waited out (`adapters/daemon/lifecycle-lock.ts`). A LIVE command
  * under any home still holds the unit for as long as it runs, which is the exclusion working.
+ *
+ * **The target claim's location is decided HERE and nowhere else.** Every lifecycle command, from any
+ * shell of this user, resolves it through this one function from the same input, so they agree on
+ * which claim is the manager target. Two environments that disagree on `XDG_RUNTIME_DIR` (one with it,
+ * one without) would take different target claims; the definition, state-artifact and direct claims
+ * below stay shared, so the daemon's unit file and state home are still excluded, and only two
+ * environments that resolve different definition paths AND differ in this variable lose the shared
+ * manager-target exclusion. During an upgrade an older `fy` still takes the `/tmp` name, so it and
+ * this release do not exclude each other on the target claim alone; they still contend on the other
+ * three, which cover everything either writes, and that overlap ends once the older one is replaced.
  *
  * **The artifact claim keeps the path and qualifier the snapshot store gave it**, which is deliberate
  * rather than leftover. During an upgrade an older `fy` is still on this host and still takes that
@@ -349,7 +375,7 @@ function lifecycleLocksFor(manager: DaemonManagerKind, artifacts: LifecycleArtif
     'definition',
   );
   const target = join(
-    '/tmp',
+    artifacts.runtimeDirectory ?? '/tmp',
     `.${String(artifacts.userId)}.${manager}.${
       manager === 'systemd' ? artifacts.systemdUnitName : artifacts.launchdLabel
     }.target.lifecycle.lock`,

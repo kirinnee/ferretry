@@ -306,9 +306,7 @@ and (after the quarantine) the agent's `terminal.read` and `terminal.wait`. Reda
 - **An uncertain write is not a retry.** If the single write fails or throws the owner is told the
   value may have been typed, and must raise a new request. Typing it again could put the password in
   the wrong place twice.
-- **The value is briefly visible to `ps`.** Delivery is one `tmux send-keys -H` call, so the value's hex
-  is in that process's arguments for the instant it runs. It is the same limit the terminal's own
-  keystroke write has today.
+- **The value never appears in a process's arguments.** The guarded write (`tmux if-shell -F … send-keys -H`) is delivered on stdin to tmux, never in argv (#1115), so it is not readable from `/proc` or `ps`.
 - **Saved secrets are refused for now.** A deliver body that names a vault secret instead of typing a
   value answers 400 until P3.
 - **The relay carrier is not known where the owner is identified.** A paired device is recorded as

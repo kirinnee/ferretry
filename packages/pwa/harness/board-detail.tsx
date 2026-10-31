@@ -192,6 +192,20 @@ const REVIEW_CARD = card('F2', {
   ],
 });
 
+/** Assembled, never typed: `no-fy-render-in-docs.sh` refuses the literal fence opener in a tracked file. */
+const FENCE = '`'.repeat(3);
+const PAIRING_DIAGRAM = [
+  `${FENCE}fy-render`,
+  'type: mermaid',
+  'alt: The phone pairs once, then only ever holds a device grant',
+  '---',
+  'flowchart TB',
+  '  Code[Two-minute pairing code] --> Phone[Phone]',
+  '  Phone --> Grant[Device grant]',
+  '  Grant --> Daemon[Daemon keeps only a hash]',
+  FENCE,
+].join('\n');
+
 const TESTED_CARD = card('F10', {
   createdAt: ago(4000),
   title: 'Device tokens stay on host',
@@ -200,6 +214,12 @@ const TESTED_CARD = card('F10', {
   assignee: MARGOT,
   summary: 'Pair a phone, then check Settings: no token is shown anywhere.',
   ask: { text: 'A paired device must never be able to read a token back.', source: `session:${DENISHA}` },
+  premise: '- A paired phone holds a device grant\n- Settings used to print the token after pairing',
+  context: '- The daemon keeps only a hash of each token\n- Shipped in 4.109.0',
+  terms: [{ term: 'device grant', meaning: 'What a paired phone holds instead of a token: it can be revoked.' }],
+  howToTest:
+    'On your phone, once the Mac runs 4.109.0:\n\n1. Open **Settings › Devices** and pair this phone.\n2. Open the new device row.\n3. You should see its name and when it paired, and no token anywhere.',
+  brief: `The device grant replaces the token on every route.\n\n${PAIRING_DIAGRAM}`,
   links: links([
     pr(918, {
       state: 'merged',

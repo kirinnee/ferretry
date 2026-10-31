@@ -60,6 +60,9 @@ curl -fsSL --connect-timeout 30 --max-time 600 https://github.com/kirinnee/ferre
 PATH="$HOME/.local/bin:$PATH" fy setup
 ```
 
+Sharing one Linux machine between several people, each with their own daemon? Follow
+[docs/multi-user-host.md](docs/multi-user-host.md) before the second person runs `fy setup`.
+
 ### What `fy setup` does
 
 | Flag      | Effect                                                                             |
@@ -323,7 +326,9 @@ fyd --version
 A few commands take you from a fresh install to a phone watching an agent work. Install `claude`
 (Claude Code) or `codex` first, and `tmux`, which runs each session — 3.7 or newer. tmux 3.6 and older
 can crash their whole server, ending every session at once, when one session ends; `fy doctor` says
-which release you run. To move to a newer tmux, install it and let the running server end on its own
+which release you run. tmux 3.1 is the hard floor: a pane's environment and the keys typed into it reach
+tmux through `source-file -` on stdin, never on a command line, and older releases cannot read a script from
+stdin — they refuse the command rather than fall back to exposing it. To move to a newer tmux, install it and let the running server end on its own
 (after the last session, or at the next restart): never kill it to switch.
 
 1. **Start the daemon.**

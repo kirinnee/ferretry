@@ -123,6 +123,16 @@ export interface RoutePattern {
   readonly method: string;
   /** A pattern of literal segments, `:name` captures and a trailing `*name` catch-all. */
   readonly path: string;
+  /**
+   * Whether the router may match this route AT ALL, asked at every lookup. Absent means always.
+   *
+   * A route that answers `false` is not refused or hidden by a handler — it is not in the table for that
+   * request, so the caller gets exactly what a path this daemon never had gets: `401` when anonymous, `404`
+   * when authenticated, `405` never. A handler that answered 404 itself would be told apart from an
+   * unrouted path by an anonymous caller, who is refused before any unrouted path is named. Synchronous on
+   * purpose: it is read on the request path, from state already in memory, and cannot fail open on a throw.
+   */
+  readonly available?: () => boolean;
 }
 
 /** A route whose reachability is decided by the token class that authenticated the request. Shared
@@ -348,6 +358,14 @@ export interface ApiRoute extends ScopedRoute {
   /** Set when the response may carry credentials, working-tree bytes, or a live machine feed whose
    *  entire value is freshness. */
   readonly noStore?: boolean;
+  /**
+   * Set when a `GET` answer has been audited to hold no secret, token, digest of one, pairing code or
+   * input-request material, and is big enough to be worth compressing (`compression.ts`, BREACH). It is
+   * OPT-IN, so a route nobody audited — including every one added later — is never compressed, and it
+   * is separate from `noStore`: the session list is `noStore` for freshness and is exactly the answer
+   * worth compressing.
+   */
+  readonly compress?: true;
   /**
    * An older spelling of a route, kept for older clients until the agenda removal release
    * (docs/agenda.md § Compatibility). The dispatcher records every hit on one (the legacy-use counter), so

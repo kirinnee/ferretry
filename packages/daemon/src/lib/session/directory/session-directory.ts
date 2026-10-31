@@ -95,17 +95,21 @@ export function createSessionDirectory(ports: SessionDirectoryPorts): SessionDir
       ...(journalSequence === undefined ? {} : { journalSequence }),
     };
   };
-  /** The single read, projected or not: `undefined` for a session the index does not hold. */
-  const read = async (reference: string, project: boolean): Promise<SessionView | undefined> => {
+  /** The indexed id a reference names, `undefined` for one the index does not hold. */
+  const indexed = (reference: string): SessionId | undefined => {
     const id = tryParseSessionId(reference);
     if (id === undefined)
       throw new SessionReadError('invalid', `${JSON.stringify(reference)} is not a usable session id`);
-    if (ports.find(id) === undefined) return undefined;
-    const found = await view(id, project);
-    if (found === undefined)
-      throw new SessionReadError('unusable', `the documents for session ${reference} do not satisfy the protocol`);
-    return found;
+    return ports.find(id) === undefined ? undefined : id;
   };
+  const unusable = (reference: string) =>
+    new SessionReadError('unusable', `the documents for session ${reference} do not satisfy the protocol`);
+  /**
+   * The pairs of documents already known to satisfy the protocol, by the values the reader handed out. The
+   * storage hands out the same frozen value until its file changes, so a pair seen once is not parsed again,
+   * and a changed file is a new value that is.
+   */
+  const usable = new WeakMap<object, WeakSet<object>>();
   return {
     list: async () => {
       const views: SessionView[] = [];
@@ -118,7 +122,24 @@ export function createSessionDirectory(ports: SessionDirectoryPorts): SessionDir
       }
       return views;
     },
-    get: async reference => await read(reference, true),
-    has: async reference => (await read(reference, false)) !== undefined,
+    get: async reference => {
+      const id = indexed(reference);
+      if (id === undefined) return undefined;
+      const found = await view(id, true);
+      if (found === undefined) throw unusable(reference);
+      return found;
+    },
+    has: async reference => {
+      const id = indexed(reference);
+      if (id === undefined) return false;
+      const [config, state] = [await ports.readConfig(id), await ports.readState(id)];
+      const pairs = typeof config === 'object' && config !== null ? usable.get(config) : undefined;
+      if (typeof state === 'object' && state !== null && pairs?.has(state) === true) return true;
+      if (!SessionConfigSchema.safeParse(config).success || !SessionStateSchema.safeParse(state).success)
+        throw unusable(reference);
+      if (typeof config === 'object' && config !== null && typeof state === 'object' && state !== null)
+        usable.set(config, (pairs ?? new WeakSet()).add(state));
+      return true;
+    },
   };
 }

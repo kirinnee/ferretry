@@ -110,6 +110,7 @@ import {
   clientData as passkeyClientData,
   registration as passkeyRegistration,
 } from '../../support/passkey-authenticator.ts';
+import { bearerSocket } from '../../support/bearer-socket.ts';
 import { deviceSession, newTestDevice, pairOverSession, TestSession } from '../../support/session-client.ts';
 import { OS_CHOSEN_PORT, recordedPort } from '../support/os-port.ts';
 import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
@@ -926,7 +927,7 @@ describe('daemon boot lifecycle', () => {
     await cleanupTempDirectories();
   });
 
-  it('should serve health and usage over the configured address, then release everything', async () => {
+  it('should serve health over the configured address, answer the public usage pair as absent paths, then release everything', async () => {
     // Arrange
     const home = await tempDirectory('fyd-boot');
     const cleanups: Array<() => void | Promise<void>> = [];
@@ -942,7 +943,10 @@ describe('daemon boot lifecycle', () => {
     const port = await recordedPort(home);
     // The server is listening once /healthz answers.
     const health = await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
+    // The public pair is opt-in and this machine.yaml never set it, so the boot serves neither.
     const usage = await fetch(`http://127.0.0.1:${port}/usage`);
+    const metrics = await fetch(`http://127.0.0.1:${port}/metrics`);
+    const unrouted = await fetch(`http://127.0.0.1:${port}/not-a-route`);
     const unauthorized = await fetch(`http://127.0.0.1:${port}/v1/usage`);
     // A mounted subsystem, reached with the token the boot minted. The session does not exist, so a
     // MOUNTED pin board answers `not-found`; an unmounted one would answer `unknown_route`.
@@ -959,14 +963,53 @@ describe('daemon boot lifecycle', () => {
     should(code).equal(0);
     should(health.status).equal(200);
     should((await health.json()) as { status: string }).have.property('status', 'ok');
-    should(usage.status).equal(200);
-    should((await usage.json()) as { ready: boolean }).have.property('ready', false);
+    should([usage.status, metrics.status, unrouted.status]).deepEqual([401, 401, 401]);
     should(unauthorized.status).equal(401);
     should(pins.status).equal(404);
     should((await pins.json()) as { code: string }).have.property('code', 'not-found');
     should(afterStop).be.undefined();
     // The API tokens were minted into the home, which only a boot that reached the server does.
     should(await readdir(home)).containEql('api-token');
+  });
+
+  it('should serve /usage and /metrics to anyone once the owner has the public usage feed on', async () => {
+    // Arrange: the owner's accepted record already holds the switch, as it does once they confirmed it.
+    const home = await tempDirectory('fyd-boot-public-usage');
+    const cleanups: Array<() => void | Promise<void>> = [];
+    let release = (): void => {};
+    const world = await worldAt(home, OS_CHOSEN_PORT, async () => {
+      await new Promise<void>(resolve => {
+        release = resolve;
+      });
+    });
+    const machineYaml = 'publicUsageFeed: true\n';
+    await writeFile(join(home, 'config', 'machine.yaml'), machineYaml, { mode: 0o600 });
+    await mkdir(join(home, 'state'), { recursive: true });
+    await writeFile(
+      join(home, 'state', 'config-accepted.json'),
+      JSON.stringify({
+        'machine.yaml': { etag: createHash('sha256').update(machineYaml, 'utf8').digest('hex'), text: machineYaml },
+      }),
+      { mode: 0o600 },
+    );
+
+    // Act
+    const exit = start(world, cleanups);
+    const port = await recordedPort(home);
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
+    const usage = await fetch(`http://127.0.0.1:${port}/usage`);
+    const metrics = await fetch(`http://127.0.0.1:${port}/metrics`);
+    const unauthorized = await fetch(`http://127.0.0.1:${port}/v1/usage`);
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    should(usage.status).equal(200);
+    should((await usage.json()) as { ready: boolean }).have.property('ready', false);
+    should(metrics.status).equal(200);
+    should(unauthorized.status).equal(401);
   });
 
   it('should resolve Codex provenance before one message read and issue against the persisted context', async () => {
@@ -4579,7 +4622,7 @@ describe('daemon boot lifecycle', () => {
    *
    * This is the case the unit tier cannot be. Everything between the client and tmux is production:
    * the bound host switches the protocol, `ApiSocketDispatcher` authenticates the upgrade off the
-   * loopback query-parameter token a browser is limited to, the mount proves the terminal exists
+   * bearer header a socket presents, the mount proves the terminal exists
    * BEFORE the switch, and `TerminalStreamBridge` polls the pane and writes the viewer's keystrokes
    * through the SAME lifecycle service the HTTP routes use. Only the tmux pane is substituted.
    */
@@ -4612,16 +4655,18 @@ describe('daemon boot lifecycle', () => {
     // Act
     // A socket aimed at a terminal nobody opened is refused on the HANDSHAKE, so the client sees a
     // failed upgrade rather than a socket that dies for reasons it cannot name.
-    const absent = await fetch(`${base}/0123456789ab/stream?token=${token}`, {
+    const absent = await fetch(`${base}/0123456789ab/stream`, {
       headers: {
+        authorization: `Bearer ${token}`,
         upgrade: 'websocket',
         connection: 'upgrade',
         'sec-websocket-version': '13',
         'sec-websocket-key': 'AAAAAAAAAAAAAAAAAAAAAA==',
       },
     }).catch(() => undefined);
-    const viewer = new WebSocket(
-      `ws://127.0.0.1:${port}/v1/sessions/${SESSION_ID}/terminals/${opened.id}/stream?token=${token}`,
+    const viewer = bearerSocket(
+      `ws://127.0.0.1:${port}/v1/sessions/${SESSION_ID}/terminals/${opened.id}/stream`,
+      token,
     );
     viewer.binaryType = 'arraybuffer';
     const frames: string[] = [];
@@ -4652,8 +4697,8 @@ describe('daemon boot lifecycle', () => {
 
     // Assert
     should(code).equal(0);
-    // The upgrade was authenticated by the query-parameter token alone, which is all a browser
-    // `WebSocket` can carry, and the first frame is the pane as tmux would draw it: a complete redraw,
+    // The upgrade was authenticated by the bearer header alone, with no credential in the URL,
+    // and the first frame is the pane as tmux would draw it: a complete redraw,
     // because nothing has been sent before it to be a delta against.
     should(frames[0]).equal('\u001b[3J\u001b[2J\u001b[Hready $\u001b[1;9H');
     // The keystrokes reached the real pane through the lifecycle service.
@@ -4672,7 +4717,7 @@ describe('daemon boot lifecycle', () => {
    *
    * This is the case no unit test can be. Everything between the client and the journal is
    * production: the bound host switches the protocol, `ApiSocketDispatcher` authenticates the upgrade
-   * off the loopback query-parameter token a browser is limited to, the mount settles the scope
+   * off the bearer header a socket presents, the mount settles the scope
    * BEFORE the switch, and the events come out of the real durable journal through the real SQLite
    * index — including the append the daemon itself makes while the socket is already open.
    *
@@ -4716,7 +4761,7 @@ describe('daemon boot lifecycle', () => {
 
     /** Opens one real socket and records every frame the protocol accepts from it. */
     const follow = async (query: string) => {
-      const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/events?token=${token}${query}`);
+      const socket = bearerSocket(`ws://127.0.0.1:${port}/v1/events${query}`, token);
       const frames: FyEventStreamFrame[] = [];
       const closes: number[] = [];
       socket.addEventListener('message', event => {
@@ -4736,10 +4781,11 @@ describe('daemon boot lifecycle', () => {
     // Act
     // Every refusal a client can be told with a STATUS is settled on the handshake, so a failed
     // upgrade is legible instead of a socket that dies for reasons it cannot name.
-    const handshake = async (query: string): Promise<number | undefined> =>
+    const handshake = async (query: string, authorized = true): Promise<number | undefined> =>
       (
         await fetch(`http://127.0.0.1:${port}/v1/events${query}`, {
           headers: {
+            ...(authorized ? { authorization: `Bearer ${token}` } : {}),
             upgrade: 'websocket',
             connection: 'upgrade',
             'sec-websocket-version': '13',
@@ -4747,12 +4793,13 @@ describe('daemon boot lifecycle', () => {
           },
         }).catch(() => undefined)
       )?.status;
-    const anonymous = await handshake('');
-    const unknownSession = await handshake(`?token=${token}&sessionId=nobody`);
-    const fleetCursor = await handshake(`?token=${token}&after=5`);
+    const anonymous = await handshake('', false);
+    const queryToken = await handshake(`?token=${token}`, false);
+    const unknownSession = await handshake('?sessionId=nobody');
+    const fleetCursor = await handshake('?after=5');
 
     const fleet = await follow('');
-    const follower = await follow(`&sessionId=${live}`);
+    const follower = await follow(`?sessionId=${live}`);
     await waitFor(() => fleet.frames.length >= 2, 'the fleet stream to deliver its backlog');
     const fleetBacklog = delivered(fleet.frames);
     const followerBacklog = delivered(follower.frames);
@@ -4786,6 +4833,7 @@ describe('daemon boot lifecycle', () => {
     // The handshake refusals: no token at all, a session the index does not hold, and a fleet cursor
     // there is no global sequence domain for.
     should(anonymous).equal(401);
+    should(queryToken).equal(401);
     should(unknownSession).equal(404);
     should(fleetCursor).equal(400);
     // The fleet backlog is real durable history from MORE THAN ONE session, which is the capability
@@ -4836,7 +4884,7 @@ describe('daemon boot lifecycle', () => {
     }, 'the daemon boot to reach the ready phase');
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
-    const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/events?token=${token}&topic=config`);
+    const socket = bearerSocket(`ws://127.0.0.1:${port}/v1/events?topic=config`, token);
     const frames: ConfigChangeFrame[] = [];
     const closes: number[] = [];
     socket.addEventListener('message', event => {

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { BrowserLifecycleSchema, BrowserProxySettingSchema, BrowserProxyStatusSchema } from './browser.ts';
 import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
+import { LoopbackFirewallStateSchema } from './loopback-firewall.ts';
 
 /** The daemon-wide "Test proxy" route (docs/browser-proxy.md § Test proxy). POST only; owner only. */
 export const BROWSER_PROXY_TEST_PATH = '/v1/browser/proxy/test';
@@ -77,5 +78,7 @@ export const BrowserStateViewSchema = z.strictObject({
   startedAt: InstantSchema.optional(),
   /** The proxy the RUNNING browser started with; absent when it is stopped or goes direct. */
   proxy: BrowserProxyStatusSchema.optional(),
+  /** Whether the loopback firewall fences this daemon's fixed browser ports; absent while the ports are random. Never blocks a start. */
+  firewall: LoopbackFirewallStateSchema.optional(),
 });
 export type BrowserStateView = z.infer<typeof BrowserStateViewSchema>;

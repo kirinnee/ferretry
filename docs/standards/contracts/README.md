@@ -38,7 +38,7 @@ laundered a defect into something every gate was right to pass.
 | `contract-registry.sh`        | `a-contract-registry`                    | executable, documented and wired contract inventories agree                                      |
 | `cors-header-agreement.sh`    | `a-cors-header-agreement`                | the transport admits every header the browser code can send                                      |
 | `daemon-scope.sh`             | `a-daemon-scope`                         | no PWA surface can read one daemon's data as another's                                           |
-| `executable-shells.sh`        | `a-enforce-exec`                         | every tracked `*.sh` is executable                                                               |
+| `executable-shells.sh`        | `a-enforce-exec`                         | every tracked `*.sh` (and the host firewall script) is executable                                |
 | `fetch-binding.sh`            | `a-fetch-binding`                        | no unbound `fetch` builtin is stored, and no PWA network call skips the carrier                  |
 | `macos-relevance.sh`          | `a-macos-relevance`, `task test:gate`    | the optional macOS jobs' path lists cover every input their scripts read                         |
 | `no-fy-render-in-docs.sh`     | `a-no-fy-render-in-docs`                 | `fy-render` fence openers appear only in their three teaching files                              |

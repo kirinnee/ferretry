@@ -36,6 +36,7 @@ import {
   HarnessLoginService,
   NO_USABLE_LOGIN,
 } from '../../../src/lib/fleet-login/service.ts';
+import { codexSharedHostEnding } from '../../../src/lib/fleet-login/codex-flow.ts';
 import { harnessLoginRoutes } from '../../../src/lib/runtime/mounts/fleet-login.ts';
 import { jsonBody, request } from '../api/support.ts';
 import { CREDENTIALS, GRANTED, human, NARROWED } from '../runtime/mounts/support.ts';
@@ -179,6 +180,8 @@ interface FixtureOptions {
   readonly holders?: readonly CallbackPortHolder[] | undefined;
   /** Whether a stop lands. It does, by default. */
   readonly stops?: boolean;
+  /** Whether this host shares its loopback ports (`browserPorts` is not `random`). Not shared, by default. */
+  readonly sharedHost?: boolean;
 }
 
 /** This daemon's own OS user in the fixture. */
@@ -275,6 +278,7 @@ function fixture(options: FixtureOptions = {}): Fixture {
     onSignedIn: credentialId => {
       signedIn.push(credentialId);
     },
+    ...(options.sharedHost === undefined ? {} : { sharedHost: async () => options.sharedHost === true }),
     ...(options.windowMinutes === undefined ? {} : { windowMinutes: options.windowMinutes }),
   });
 
@@ -1996,6 +2000,42 @@ describe('the Codex link sign-in', () => {
     should(device.killed).be.true();
     should(link.spec.command.at(-1)).equal('login');
     should(actual).match({ flowId: started.flowId, state: 'awaiting-callback', deviceCode: 'unavailable' });
+  });
+
+  it('should not move to the link by itself on a host that shares its loopback ports', async () => {
+    // Arrange
+    const subject = fixture({ sharedHost: true });
+    const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+    const device = await subject.child();
+
+    // Act
+    device.emit(DEVICE_DISABLED_LINE);
+    const actual = await subject.service.status(started.flowId);
+    await subject.settle();
+
+    // Assert
+    should(device.killed).be.true();
+    should(subject.children).have.length(1);
+    should(actual).match({ flowId: started.flowId, state: 'failed' });
+    should(actual).have.property('reason', codexSharedHostEnding().reason);
+    should(actual).have.property('remedy', codexSharedHostEnding().remedy);
+  });
+
+  it('should still move to the link when the person asks for it on a host that shares its loopback ports', async () => {
+    // Arrange
+    const subject = fixture({ sharedHost: true });
+    const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+    const device = await subject.child();
+    device.emit(CODEX_URL_LINE, CODEX_CODE_LINE);
+
+    // Act
+    await subject.service.submit(started.flowId, { method: 'link' });
+    const link = await subject.child(1);
+    link.emit(...LINK_LINES);
+
+    // Assert
+    should(link.spec.command.at(-1)).equal('login');
+    should(await subject.service.status(started.flowId)).match({ state: 'awaiting-callback' });
   });
 
   it('should move to a link when the person says the device code did not work, in the same flow', async () => {

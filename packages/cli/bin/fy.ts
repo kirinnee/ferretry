@@ -9,6 +9,7 @@ import {
   DAEMON_RESTART_PATIENCE_MS,
   type DaemonRestartPatience,
   type IFyApiClient,
+  readLoopbackFirewallMarker,
   type SessionView,
 } from '@ferretry/protocol';
 import { FyApiClient } from '@ferretry/protocol/client';
@@ -29,6 +30,7 @@ import { registerBoardImportCommand } from '../src/adapters/board-import/board-i
 import { FyBoardImportGateway } from '../src/adapters/board-import/fy-board-import-gateway';
 import { FyLaneGateway } from '../src/adapters/board-lanes/fy-lane-gateway';
 import { registerLaneCommands } from '../src/adapters/board-lanes/lane-commands';
+import { BUNDLED_FIREWALL_FILES } from '../src/adapters/browser/firewall-files';
 import { FileScreenshotWriter } from '../src/adapters/browser/screenshot-writer';
 import { FileConfigFiles } from '../src/adapters/config/files';
 import { StdinConfigText } from '../src/adapters/config/stdin';
@@ -50,6 +52,7 @@ import { ProtocolResetInventory } from '../src/adapters/daemon/reset-inventory';
 import { FileResetTrees } from '../src/adapters/daemon/reset-trees';
 import { FileDaemonRestartMarker, restartMarkerPath } from '../src/adapters/daemon/restart-marker';
 import { FileRetiredArtifacts } from '../src/adapters/daemon/retired-artifacts';
+import { privateRuntimeDirectory } from '../src/adapters/daemon/runtime-directory';
 import { FileServiceStore } from '../src/adapters/daemon/service-files';
 import { TmuxSessionTerminalServer } from '../src/adapters/daemon/session-terminals';
 import { bunTracerHost, PlatformSyscallTracer } from '../src/adapters/daemon/syscall-tracer';
@@ -96,7 +99,7 @@ import { registerAuditCommands } from '../src/lib/audit/commands';
 import { AuditController } from '../src/lib/audit/controller';
 import { ProtocolAuditGateway } from '../src/lib/audit/gateway';
 import { BoardController } from '../src/lib/board/board-controllers';
-import { BrowserController, registerBrowserCommands } from '../src/lib/browser';
+import { BrowserController, registerBrowserCommands, registerFirewallCommands } from '../src/lib/browser';
 import { registerConfigCommands } from '../src/lib/config/commands';
 import { ConfigController } from '../src/lib/config/controller';
 import { ProtocolConfigGateway } from '../src/lib/config/gateway';
@@ -104,6 +107,7 @@ import { isLocalDaemonUrl, resolveDaemonUrl } from '../src/lib/daemon/address';
 import { type InstalledDaemonBinary, resolveDaemonBinaryPath } from '../src/lib/daemon/binary';
 import { registerDaemonCommands } from '../src/lib/daemon/commands';
 import { DaemonController } from '../src/lib/daemon/controller';
+import { ProtocolFirewallStatusReader } from '../src/lib/daemon/firewall-status';
 import { type DaemonLayout, resolveDaemonLayout, resolveDaemonStateHome } from '../src/lib/daemon/layout';
 import { legacyWireReport } from '../src/lib/daemon/legacy-wire';
 import type { IServiceDefinitionSupervisor } from '../src/lib/daemon/ports';
@@ -591,13 +595,15 @@ function daemonBinaryVersion(path: string): string | undefined {
  */
 function resolveWorldDaemonLayout(world: CliWorld): DaemonLayout {
   const environment = world.environment;
+  const userId = typeof process.getuid === 'function' ? process.getuid() : 0;
   return resolveDaemonLayout({
     platform: process.platform,
     homeDirectory: resolveUserHome(environment),
     stateHome: environment.FY_HOME,
     configHome: environment.XDG_CONFIG_HOME,
     stateDirectory: environment.XDG_STATE_HOME,
-    userId: typeof process.getuid === 'function' ? process.getuid() : 0,
+    runtimeDirectory: privateRuntimeDirectory(environment.XDG_RUNTIME_DIR, userId),
+    userId,
     daemonName: DAEMON_NAME,
     product: PRODUCT_NAME,
     searchPath: environment.PATH ?? '',
@@ -766,6 +772,7 @@ function buildDaemonController(world: CliWorld, client: SharedDaemonClient): Dae
     }),
     updateStatus: new DaemonUpdateStatusReader(hostInstallFacts(world), new ProtocolDaemonUpdateView(client)),
     tunnel: new ProtocolTunnelStatusReader(client),
+    firewall: new ProtocolFirewallStatusReader(client),
     nixShellOffer: buildProfileSwitch(world, processes),
     turns: { midTurn: async () => (await new ProtocolDaemonUpdateView(client).view())?.midTurn ?? 0 },
     restartMarker: new FileDaemonRestartMarker(restartMarkerPath(layout.stateHome)),
@@ -975,8 +982,12 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       program,
       new BrowserController(client, world.io, new FileScreenshotWriter(), {
         ...(ownSessionId === undefined ? {} : { selfSessionId: ownSessionId }),
+        ...(process.getuid === undefined ? {} : { uid: process.getuid() }),
+        loopbackMarker: async () => await readLoopbackFirewallMarker(async path => await Bun.file(path).text()),
       }),
     ),
+  // After the browser group, because `browser firewall` mounts onto it.
+  ({ program, world }) => registerFirewallCommands(program, BUNDLED_FIREWALL_FILES, world.io),
   // Terminals and browser pages by NAME — the agent tools' own actions, for scripts and for people. After
   // the browser group, because `browser page` mounts onto it.
   ({ program, world, client, ownSessionId, restartPatience: patience }) => {

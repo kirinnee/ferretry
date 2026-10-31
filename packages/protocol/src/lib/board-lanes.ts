@@ -152,6 +152,48 @@ export const laneEmphasis = (lane: Pick<Lane, 'category' | 'ownerGate' | 'emphas
   return lane.ownerGate === true ? 'action' : 'progress';
 };
 
+/** What puts a card in a lane by itself, in the words `fy board lanes show` prints. */
+const TRIGGER_WORDS: Readonly<Record<LaneTrigger, string>> = {
+  'work.started': 'a session starts on it',
+  'pr.opened': 'a PR opens',
+  'pr.ready': 'a PR is ready',
+  'ci.green': 'checks pass',
+  'pr.merged': 'the PR merges',
+  'release.published': 'a release ships it',
+  'release.running': 'its release runs here',
+  'signal.done': '`fy signal done`',
+};
+
+/** When a card belongs in a lane, by its category alone, so any project's lane names are covered. */
+export const LANE_CATEGORY_USE: Readonly<Record<LaneCategory, string>> = {
+  backlog: 'not started yet',
+  active: 'you are building it now',
+  review: 'built and waiting to be reviewed',
+  shipped: 'merged, waiting for a release',
+  verify: 'the owner tests it',
+  closed: 'finished; only the owner closes it',
+};
+
+/** The category use of an active lane the owner gates: a plan or design, before the building starts. */
+const PLAN_USE = 'you are planning or designing it; the owner approves before it moves on';
+
+/**
+ * One lane's "use when …" line: its category's meaning, what moves a card in by itself, and who passes its
+ * gate. A lane nothing enters by itself says the ferret moves a card there. Pure and total.
+ */
+export const laneUse = (lane: Pick<Lane, 'category' | 'enterOn' | 'ownerGate'>): string => {
+  const planning = lane.category === 'active' && lane.ownerGate === true;
+  const base = planning ? PLAN_USE : LANE_CATEGORY_USE[lane.category];
+  const gated = lane.ownerGate === true && !planning && lane.category !== 'closed';
+  const entry =
+    lane.enterOn === undefined
+      ? lane.category === 'backlog' || lane.category === 'closed'
+        ? null
+        : 'move it here yourself'
+      : `moves in when ${lane.enterOn.map(trigger => TRIGGER_WORDS[trigger]).join(' or ')}`;
+  return [base, entry, gated ? 'the owner moves it on' : null].filter(part => part !== null).join('; ');
+};
+
 /**
  * Where Done and Not good go when a set does not say: the closed lane, and the LAST active lane (work
  * resumes where it is finished, after any plan step) — the first backlog lane in a set with no active one.

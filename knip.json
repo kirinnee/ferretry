@@ -51,6 +51,7 @@
         "harness/board-kanban-screenshot.ts",
         "harness/board-add-card-screenshot.ts",
         "harness/board-detail.tsx",
+        "harness/card-content-screenshot.ts",
         "harness/lane-editor-screenshot.ts",
         "harness/lane-editor-page.tsx",
         "harness/board-chat-screenshot.ts",

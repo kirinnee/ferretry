@@ -29,9 +29,9 @@ import {
   arrivedOnHost,
   arrivedPrivileged,
   headerValue,
-  queryValue,
   type RouteParameters,
 } from './http.ts';
+import { compressed, type ResponseCompressor } from './compression.ts';
 import { errorResponse, jsonResponse, methodNotAllowedResponse, noStore, unknownRouteResponse } from './responses.ts';
 import type {
   ApiRoute,
@@ -48,9 +48,6 @@ import type { ApiRouter } from './router.ts';
 export const SESSION_ID_HEADER = 'x-ferretry-session-id';
 /** Client self-identification (`cli`), which is what tells `admin-cli` from `admin-ui`. */
 export const CLIENT_HEADER = 'x-ferretry-client';
-/** Query parameter carrying a token for WebSocket upgrades, which cannot set headers. Honoured for
- *  loopback peers only. */
-export const TOKEN_QUERY_PARAMETER = 'token';
 /**
  * The per-assignment capability a warden presents to exercise a remedy.
  *
@@ -81,8 +78,8 @@ export type RouteAuthorization<TRoute extends ScopedRoute> =
  * It is shared by BOTH route tables rather than repeated per transport. That is what makes
  * "authentication happens on the upgrade" true by construction: a socket cannot be reached over
  * credentials the request/response surface would have refused, warden scope is enforced the same
- * way on both, and the loopback query-parameter token — the only credential a browser `WebSocket`
- * can carry — is honoured on identical terms.
+ * way on both, and the `Authorization: Bearer` header — the only place a token is read from — is
+ * honoured on identical terms.
  *
  * The order matters and differs from the source in one way worth naming. Unknown-route and
  * wrong-verb answers are produced only AFTER authentication succeeds, so an unauthenticated caller
@@ -156,12 +153,7 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
       ? credentials.devices?.has(device.deviceId) === true
         ? { kind: 'authenticated', tokenClass: 'device', deviceId: device.deviceId }
         : { kind: 'anonymous' }
-      : authenticate(credentials, {
-          bearer,
-          // A token in a URL is logged by every proxy in the path, so it is accepted only from a peer
-          // that could already read the token file it came from.
-          query: request.loopback ? queryValue(request, TOKEN_QUERY_PARAMETER) : undefined,
-        });
+      : authenticate(credentials, { bearer });
   // THERE ARE NO SOCKET TICKETS ANY MORE. They existed so a browser — which cannot put a header on a
   // WebSocket — could authenticate an upgrade with a short-lived bearer value bought over HTTP. A
   // browser now opens every stream inside a session its device key opened, so no URL ever carries a
@@ -454,6 +446,8 @@ export class ApiDispatcher {
     private readonly stepUps?: StepUpWitness,
     /** Where a request that reached a `legacy: true` route is counted. Absent where nothing counts. */
     private readonly legacyUse?: LegacyWireUseRecorder,
+    /** Where a large `GET` answer is gzipped. Absent where nothing compresses (tests, tables that serve no list). */
+    private readonly compressor?: ResponseCompressor,
   ) {}
 
   async dispatch(request: ApiRequest): Promise<ApiResponse> {
@@ -468,7 +462,8 @@ export class ApiDispatcher {
     if (authorized.kind === 'unrouted') return unknownRouteResponse(request.method, request.path);
     if (authorized.kind === 'refused') return authorized.response;
     if (authorized.route.legacy === true) this.#countLegacyUse(authorized.route, request);
-    return await run(authorized.route, authorized.context);
+    const response = await run(authorized.route, authorized.context);
+    return await compressed(request, response, this.compressor, authorized.route.compress === true);
   }
 
   /** Counted only once the caller is authorized, so a probe of an older route is not "a client still uses it". */

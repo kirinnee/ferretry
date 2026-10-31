@@ -61,7 +61,9 @@ export class ApiRouter<TRoute extends RoutePattern = ApiRoute> {
 
   lookup(method: string, path: string): RouteLookup<TRoute> {
     const segments = splitPath(path);
-    const pathMatches = this.compiled.filter(entry => match(entry.segments, segments) !== undefined);
+    const pathMatches = this.compiled.filter(
+      entry => match(entry.segments, segments) !== undefined && entry.route.available?.() !== false,
+    );
     if (pathMatches.length === 0) return { kind: 'not-found' };
     const verb = method.toUpperCase();
     const matched = pathMatches.find(entry => entry.route.method.toUpperCase() === verb);

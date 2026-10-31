@@ -149,3 +149,55 @@ describe('ApiRouter', () => {
     should(lookup.kind).equal('matched');
   });
 });
+
+describe('ApiRouter: a route that is not available', () => {
+  const gated = (available: () => boolean): ApiRouter =>
+    new ApiRouter([
+      { ...route('GET', '/gated'), available },
+      route('GET', '/open'),
+      { ...route('GET', '/shared/:id'), available: () => true },
+    ]);
+
+  it('should not find an unavailable route, as if the path had never been registered', () => {
+    // Arrange / Act
+    const lookup = gated(() => false).lookup('GET', '/gated');
+
+    // Assert
+    should(lookup.kind).equal('not-found');
+  });
+
+  it('should not name an unavailable route in a 405 for another verb', () => {
+    // Arrange / Act
+    const lookup = gated(() => false).lookup('POST', '/gated');
+
+    // Assert
+    should(lookup.kind).equal('not-found');
+  });
+
+  it('should match an available route, and a route that sets no availability', () => {
+    // Arrange
+    const router = gated(() => true);
+
+    // Act
+    const gatedLookup = router.lookup('GET', '/gated');
+    const openLookup = router.lookup('GET', '/open');
+    const sharedLookup = router.lookup('GET', '/shared/1');
+
+    // Assert
+    should([gatedLookup.kind, openLookup.kind, sharedLookup.kind]).deepEqual(['matched', 'matched', 'matched']);
+  });
+
+  it('should ask again at every lookup', () => {
+    // Arrange
+    let open = false;
+    const router = gated(() => open);
+
+    // Act
+    const closed = router.lookup('GET', '/gated').kind;
+    open = true;
+    const opened = router.lookup('GET', '/gated').kind;
+
+    // Assert
+    should([closed, opened]).deepEqual(['not-found', 'matched']);
+  });
+});
