@@ -722,6 +722,60 @@ Routes: `GET /v1/secrets/logins`, `GET /v1/secrets/logins/hint?site=`, `PUT /v1/
 `null` removes it), `POST /v1/secrets/logins/:id/rename`, `DELETE /v1/secrets/logins/:id`, `POST /v1/secrets/logins/:id/recipe/proposals/:proposalId`, all `secrets`
 capability (`use` to list, `configure` to change) and each change a kept `secrets.changed` record.
 
+### Accounts and sign-ins (data model)
+
+> **Protocol only.** The shapes below are in `packages/protocol/src/lib/accounts.ts`; the store, the migration
+> at boot and the `/v1/accounts*` routes land in R1-2. Until then every daemon keeps saved logins as above, and
+> none reports the `accounts.signins.1` feature.
+
+A saved login is being split in two:
+
+- An **account** is one identity: label, **plain** username, and its **secret** password and opt-in 2FA seed,
+  sealed exactly as today. Its handle is the saved login's handle (`GITHUB_KIRINNEE`, still `[[GITHUB_KIRINNEE]]`
+  in a recipe) and its immutable key is the saved login's `L…` key, so **no sealed name changes**.
+- A **sign-in** is how that account signs in at **one place**: a website (its login domains, plus the hosts it
+  is for) or a terminal tool (`sudo@kirin-box`, `ssh@build.example.com`). It holds the method, the provider it
+  goes `via`, the recipe (with a `recipeVersion`), what the daemon observed there and the ferrets' proposals. Its
+  id is `si_` and 16 hex digits and never changes.
+
+Same site, two accounts: two sign-ins. Same account, two places: two sign-ins.
+
+**Matching does not change.** A sign-in's keys (`placeKeys`) are byte-identical to the target key the daemon
+derives today: a page's host against a site's login domains, `program@host` (`ssh@<destination>`) for a
+terminal. What a site is _for_ never matches a page. Matching is exact: no look-alike, parent domain, other
+program or other ssh destination.
+
+**The index changes from `v: 1` to `v: 2`; the sealed document does not.** `migrateLoginIndex` is pure and
+deterministic (a migrated sign-in's id is derived from the account key and its place, so a re-run gives the
+same ids):
+
+| Saved login (`v: 1`)                      | Becomes (`v: 2`)                                                                |
+| ----------------------------------------- | ------------------------------------------------------------------------------- |
+| handle, key, label, username, seals, TOTP | the account, verbatim                                                           |
+| login domains and web `match` hosts       | one **site** sign-in                                                            |
+| each `tool@host` in `match`               | one **terminal** sign-in (ssh, scp, sftp keep the destination)                  |
+| method, via, recipe                       | every sign-in from that entry (via by the provider's key)                       |
+| auto-apply, proposals                     | the **primary** sign-in only (the site, else the first terminal)                |
+| each observed fact                        | the sign-in at its place; a fact from no place of the entry is dropped, counted |
+| nothing matched                           | an account with no sign-ins                                                     |
+
+Dropping a fact is safe: facts only ever shorten the [lock](#how-long-the-lock-lasts). A via link the new rules
+refuse (gone, itself, a provider with no site, a circle) is dropped and counted rather than written. An older
+daemon reads a `v: 2` index as **damaged**, never as empty.
+
+The index keeps its rules on every read: each sign-in's account exists, one account never has two sign-ins at
+the same place, `via` names another account that signs in on a site and never goes round in a circle.
+
+**Which account a card offers first** (`chosenSignIn`) is decided **only among the sign-ins the daemon matched**:
+the ferret's `secretHint` (a handle or a `si_…`), then the session's project default, then (an Unfiled session)
+its folder default, then the site default (`config/account-defaults.yaml`, R1-4), then the only matched one.
+Two or more matched and nothing chose one: **no one-tap primary**, the owner picks ("Pick one: 2 accounts sign
+in here"). A hint or a default naming an account with no matched sign-in is ignored. None of them types
+anything: **the tap is still the permission.**
+
+`account_hint` will answer one line per sign-in, with the sign-in id to propose against. It never says which
+secret fields an account holds, nor its 2FA parameters, seal names, auto-apply or proposals.
+
 ### Later, and off by default: standing permission
 
 Placing a saved login **without a tap** is not built. A later phase may add it as an explicit owner opt-in,

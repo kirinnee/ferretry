@@ -120,6 +120,17 @@ describe('raising an input request', () => {
     should(parsed.submit).equal('offer-owner');
   });
 
+  it('should take a hint naming an account or a sign-in, and nothing else', () => {
+    // Arrange
+    const raise = { target: { kind: 'terminal', key: 'dev' }, prompt: 'p', sensitivity: 'secret' };
+
+    // Act / Assert — an older raise (a handle) still parses; a sign-in id parses where accounts exist
+    should(InputRaiseSchema.safeParse({ ...raise, secretHint: 'SUDO_KIRIN_BOX' }).success).be.true();
+    should(InputRaiseSchema.safeParse({ ...raise, secretHint: 'si_0123456789abcdef' }).success).be.true();
+    for (const hint of ['si_0123', 'sudo_kirin_box', 'si_0123456789ABCDEF', ''])
+      should(InputRaiseSchema.safeParse({ ...raise, secretHint: hint }).success).be.false();
+  });
+
   it('should refuse anything the agent could use to claim what the daemon observes', () => {
     for (const extra of [{ observed: TERMINAL_FACTS }, { echo: 'off' }, { origin: 'https://github.com' }]) {
       should(
@@ -374,6 +385,18 @@ describe('delivering', () => {
         save: { entry: 'SUDO_Y', label: 'y' },
       }).success,
     ).be.false();
+  });
+
+  it('should take the sign-in the owner tapped only with its account', () => {
+    // Arrange
+    const tapped = { deliveryId: DELIVERY, observedDigest: DIGEST, entry: 'GITHUB_KIRINNEE', submit: true };
+
+    // Act / Assert — an older app sends the account alone, which still parses
+    should(InputDeliverBodySchema.safeParse(tapped).success).be.true();
+    should(InputDeliverBodySchema.safeParse({ ...tapped, signIn: 'si_0123456789abcdef' }).success).be.true();
+    // A sign-in without its account.
+    should(InputDeliverBodySchema.safeParse({ ...body, signIn: 'si_0123456789abcdef' }).success).be.false();
+    should(InputDeliverBodySchema.safeParse({ ...tapped, signIn: 'GITHUB_KIRINNEE' }).success).be.false();
   });
 
   it('should refuse a delivery id that is not a UUID and a body with a plain value field', () => {
