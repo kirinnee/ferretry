@@ -84,6 +84,15 @@ const TAP_SLOP_PX = 6;
 const DOUBLE_TAP_MS = 320;
 const DOUBLE_TAP_DISTANCE_PX = 32;
 
+/** The nearest ancestor that scrolls vertically, or null when nothing above the picture does. */
+const scrollParentOf = (element: HTMLElement): HTMLElement | null => {
+  for (let up = element.parentElement; up !== null; up = up.parentElement) {
+    const { overflowY } = getComputedStyle(up);
+    if ((overflowY === 'auto' || overflowY === 'scroll') && up.scrollHeight > up.clientHeight) return up;
+  }
+  return null;
+};
+
 export interface FyRenderViewportProps {
   /** Where an overflowing picture starts across the box: its left edge (default) or its middle. */
   readonly anchor?: RestAnchor;
@@ -298,7 +307,15 @@ export function FyRenderViewport({
     gesture.current = { ...g, last: point };
     if (Math.hypot(point.x - g.start.x, point.y - g.start.y) < TAP_SLOP_PX) return;
     setDragging(true);
+    const before = latest.current.view;
     change((current, p) => panBy(current, p, natural, dx, dy));
+    // A finger on a zoomed picture owns the drag (`touch-action: none`), so what the picture cannot take — it is at
+    // its edge — would be lost. Hand it to the page instead of trapping it, the way a native scroller chains.
+    const after = latest.current.view;
+    if (event.pointerType !== 'mouse' && !fullscreen && before !== null && after !== null) {
+      const parent = scrollParentOf(event.currentTarget);
+      if (parent !== null) parent.scrollTop -= dy - (after.y - before.y);
+    }
   };
 
   const endPointer = (event: PointerEvent<HTMLElement>, cancelled: boolean): void => {
@@ -421,7 +438,7 @@ export function FyRenderViewport({
             role="group"
             style={{
               height: fullscreen ? '100%' : `${plan.box.height}px`,
-              touchAction: touchActionFor(view, plan, natural),
+              touchAction: touchActionFor(view, plan, natural, fullscreen),
             }}
             // biome-ignore lint/a11y/noNoninteractiveTabindex: a pannable box must be a tab stop so a keyboard can pan and zoom it
             tabIndex={0}

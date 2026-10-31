@@ -45,11 +45,13 @@
   padding-top: calc(max(26px, var(--target-floor)) + 8px);
 }
 
+/* NO `overscroll-behavior` HERE, deliberately. This box is `overflow: hidden`, which makes it a scroll container
+   that can never scroll, and `contain` on such a box stops a wheel or a touch scroll that starts over the
+   picture from chaining on to the transcript — the page then stops scrolling whenever the pointer is on a diagram. */
 .fy-render-pan {
   position: relative;
   overflow: hidden;
   border-radius: var(--radius-sm);
-  overscroll-behavior: contain;
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;

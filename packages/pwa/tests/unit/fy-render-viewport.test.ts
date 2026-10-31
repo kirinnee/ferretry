@@ -7,8 +7,8 @@ import {
   fitScale,
   inlineMaxHeight,
   isAtRest,
-  moreBeyond,
   MERMAID_LEGIBLE_SCALE,
+  moreBeyond,
   panBy,
   pinchOf,
   planViewport,
@@ -345,10 +345,44 @@ describe('touchActionFor — a thumb that is not needed stays the page’s', () 
     should(touchActionFor(restView(p, natural), p, natural)).equal('pan-y');
   });
 
-  test('should take everything once it overflows both ways', () => {
+  test('should take everything once it is zoomed in and overflows both ways', () => {
     const p = plan(natural);
     const zoomed = zoomTo(restView(p, natural), p, natural, 3, boxCentre(p));
     should(touchActionFor(zoomed, p, natural)).equal('none');
+  });
+
+  test('should leave a vertical drag to the page at rest even when the resting picture is taller than its box', () => {
+    const tall = { height: 3_000, width: 600 };
+    const p = plan(tall);
+    should(p.pansAtRest).be.true();
+    should(touchActionFor(restView(p, tall), p, tall)).equal('pan-y');
+    const narrow = { height: 3_000, width: 300 };
+    const q = plan(narrow);
+    should(touchActionFor(restView(q, narrow), q, narrow)).equal('pan-x pan-y');
+  });
+
+  test('should keep a vertical drag the page’s for a picture panned sideways at rest', () => {
+    const p = plan(natural);
+    const panned = panBy(restView(p, natural), p, natural, -200, 0);
+    should(touchActionFor(panned, p, natural)).equal('pan-y');
+  });
+
+  test('should take everything in fullscreen, where no page is behind it', () => {
+    const p = planViewport({
+      columnWidth: 0,
+      fullscreenBox: { height: 800, width: 400 },
+      legibleScale: 0,
+      maxHeight: 800,
+      natural: { height: 1_600, width: 800 },
+    });
+    const zoomed = zoomTo(
+      restView(p, { height: 1_600, width: 800 }),
+      p,
+      { height: 1_600, width: 800 },
+      2,
+      boxCentre(p),
+    );
+    should(touchActionFor(zoomed, p, { height: 1_600, width: 800 }, true)).equal('none');
   });
 });
 
