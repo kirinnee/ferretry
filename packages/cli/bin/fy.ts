@@ -779,7 +779,7 @@ function buildPairController(world: CliWorld, client: SharedDaemonClient): PairC
     clock: new SystemMillisecondClock(),
     qr: new QrCodeTerminal(),
     terminal: new ProcessTerminalSize(),
-    browser: desktopBrowserOpener(),
+    browser: desktopBrowserOpener(resolveDaemonStateHome(world.homeDirectory, world.environment.FY_HOME, PRODUCT_NAME)),
     binaryName: BINARY_NAME,
   });
 }
