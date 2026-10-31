@@ -66,6 +66,25 @@ describe('reviewRows', () => {
     should(reviewHeading(file)).match(/files/u);
     should(reviewHeading(line)).match(/setup/u);
   });
+  it('words the heading for the one installing, not the one publishing', () => {
+    const file = reviewRows([{ label: 'Skill file SKILL.md', text: 'x', document: true }]);
+    const line = reviewRows([{ label: 'Starts', text: 'x', document: false }]);
+    should(reviewHeading(file, 'installer')).equal('What this brings, in full');
+    should(reviewHeading(line, 'installer')).equal('It will run');
+    should(reviewHeading(file, 'publisher')).not.match(/brings/u);
+  });
+  it('writes a raw hidden character as its marker, in a file, a line and a label', () => {
+    const raw = String.fromCodePoint(0x202e);
+    const rows = reviewRows([
+      { label: `Skill file a${raw}.md`, text: `run ${raw}x`, document: true },
+      { label: 'Starts', text: `cmd ${raw}`, document: false },
+    ]);
+    for (const row of rows) {
+      should(JSON.stringify(row)).not.containEql(raw);
+      should(row.marked).be.true();
+    }
+    should(rows[0]).containEql({ kind: 'file', path: 'a⟨U+202E⟩.md' });
+  });
 });
 
 describe('warningRows', () => {

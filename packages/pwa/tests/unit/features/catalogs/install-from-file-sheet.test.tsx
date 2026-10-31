@@ -27,6 +27,16 @@ beforeAll(async () => {
   withdrawnText = JSON.stringify(await signedFile(identity, [skill, mcp], [skill, mcp], [skill.itemId]));
 });
 
+/** A machine review that names the same publisher and catalog the signed test file does. */
+const agreeingPreview = (change: Record<string, unknown> = {}) => {
+  const base = installPreview();
+  return installPreview({
+    provenance: { ...base.provenance, publisher: identity.daemonId, catalogName: "Kirin's catalog" },
+    publisher: { ...base.publisher, daemonId: identity.daemonId },
+    ...change,
+  });
+};
+
 const MCP_ID = `itm_${'m'.repeat(22)}`;
 const SKILL_ID = `itm_${'s'.repeat(22)}`;
 const PROJECTS = [{ name: 'proj', path: '/work/proj' }];
@@ -85,10 +95,10 @@ const pickRuntime = async () => {
 };
 
 describe('opening a file', () => {
-  it('refuses a file over 32 MiB without reading it', async () => {
+  it('refuses a file over 32 MB without reading it', async () => {
     const { view } = await open({});
     await give({ size: 33 * 1024 * 1024, text: () => Promise.reject(new Error('must not be read')) });
-    expect(text()).toContain('larger than 32 MiB');
+    expect(text()).toContain('larger than 32 MB');
     expect(q('[data-catalog-file]')).toBeNull();
     await view.unmount();
   });
@@ -188,7 +198,7 @@ describe('choosing where', () => {
 describe('the review and the install', () => {
   const secretsReady = {
     [RUNTIME_PREVIEW]: () =>
-      installPreview({
+      agreeingPreview({
         warnings: [{ code: 'older-version', text: 'This is older than the one you have.' }],
         replaces: { installId: INSTALL_ID, version: 2 },
       }),
@@ -202,7 +212,7 @@ describe('the review and the install', () => {
     await pickRuntime();
     await tap('[data-catalog-preview]');
     const confirm = q('[data-catalog-confirm]')?.textContent ?? '';
-    expect(confirm).toContain('Team skills · kirin-box');
+    expect(confirm).toContain("Kirin's catalog · kirin-box");
     expect(confirm).toContain('Into');
     expect(confirm).toContain('replaces version 2');
     expect(confirm).toContain('This is older than the one you have.');
@@ -258,7 +268,7 @@ describe('the review and the install', () => {
   it('with nothing to bind, installs straight away and shows no first-install note for a known publisher', async () => {
     const { view } = await open({
       [RUNTIME_PREVIEW]: () =>
-        installPreview({ secrets: [], publisher: { ...installPreview().publisher, firstSeen: false } }),
+        agreeingPreview({ secrets: [], publisher: { ...agreeingPreview().publisher, firstSeen: false } }),
       [RUNTIME_APPLY]: () => ({ install: installRecord('mcp', 'acme-mcp'), notes: [] }),
     });
     await giveText(fileText);
@@ -291,7 +301,7 @@ describe('the review and the install', () => {
   });
 
   it('previews into a project and keeps the older-version offer to a refusal', async () => {
-    const projectPreview = installPreview({
+    const projectPreview = agreeingPreview({
       target: { scope: 'project', projectRoot: '/work/proj', harness: 'claude' },
       destination: 'project proj, Claude',
       secrets: [],
@@ -319,13 +329,35 @@ describe('refusals', () => {
     return made;
   };
 
+  it('refuses a review that names another publisher than the verified file, and shows no review', async () => {
+    const { view } = await ready({ [RUNTIME_PREVIEW]: () => installPreview() });
+    await tap('[data-catalog-preview]');
+    expect(q('[data-catalog-failure]')?.textContent).toContain('somewhere other than the file says');
+    expect(q('[data-catalog-confirm]')).toBeNull();
+    expect(q('[data-catalog-install]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('says a first publisher once, in the From row', async () => {
+    const { view } = await ready({
+      [RUNTIME_PREVIEW]: () =>
+        agreeingPreview({ warnings: [{ code: 'first-publisher', text: 'A grey box that says it again.' }] }),
+    });
+    await tap('[data-catalog-preview]');
+    const confirm = q('[data-catalog-confirm]')?.textContent ?? '';
+    expect(confirm).not.toContain('A grey box that says it again.');
+    expect(confirm).toContain('First install from this publisher');
+    expect(confirm).toContain('It will run');
+    await view.unmount();
+  });
+
   it('offers an older version only when asked, and previews again with permission', async () => {
     let calls = 0;
     const { fake, view } = await ready({
       [RUNTIME_PREVIEW]: () => {
         calls += 1;
         if (calls === 1) throw new FyHttpError('older', 409, 'catalog_downgrade');
-        return installPreview();
+        return agreeingPreview();
       },
     });
     await tap('[data-catalog-preview]');
@@ -342,7 +374,7 @@ describe('refusals', () => {
       [RUNTIME_PREVIEW]: () => {
         calls += 1;
         if (calls === 1) throw new FyHttpError('gone', 410, 'catalog_preview_expired');
-        return installPreview();
+        return agreeingPreview();
       },
     });
     await tap('[data-catalog-preview]');
@@ -355,7 +387,7 @@ describe('refusals', () => {
 
   it('says nothing was installed when the passkey was not confirmed, and keeps the review', async () => {
     const { view } = await ready({
-      [RUNTIME_PREVIEW]: () => installPreview({ secrets: [] }),
+      [RUNTIME_PREVIEW]: () => agreeingPreview({ secrets: [] }),
       [RUNTIME_APPLY]: () => {
         throw new FyHttpError('step up', 403, 'grant_step_up_required');
       },
@@ -369,7 +401,7 @@ describe('refusals', () => {
   });
 
   it('forgets the review when the item or place changes', async () => {
-    const { view } = await ready({ [RUNTIME_PREVIEW]: () => installPreview() });
+    const { view } = await ready({ [RUNTIME_PREVIEW]: () => agreeingPreview() });
     await tap('[data-catalog-preview]');
     expect(q('[data-catalog-confirm]')).not.toBeNull();
     await pickItem(SKILL_ID);

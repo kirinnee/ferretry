@@ -13,6 +13,7 @@
 import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { HIDDEN_CHARACTER_SOURCE } from '@ferretry/protocol';
 import { chromium, type Page } from 'playwright-core';
 
 const harnessDir = import.meta.dir;
@@ -31,6 +32,7 @@ const run = (command: string, args: readonly string[]): void => {
 
 const PAGE_ENTRY = `
 import { SharedCatalogFileSchema, SharedCatalogItemSchema } from '@ferretry/protocol';
+import { FyHttpError } from '@ferretry/protocol/client';
 import { createRoot } from 'react-dom/client';
 import { AddToCatalogSheet } from '../../src/features/catalogs/add-to-catalog-sheet.tsx';
 import { CatalogsSurface } from '../../src/features/catalogs/catalogs-surface.tsx';
@@ -80,6 +82,7 @@ const MCP_PREVIEW = {
   review: [
     { label: 'Starts', document: false, text: 'npx -y acme-mcp --stdio' },
     { label: 'Environment ACME_TOKEN', document: false, text: '\${secret:ACME_TOKEN}' },
+    { label: 'Environment ACME_WEBHOOK_KEY', document: false, text: '\${secret:ACME_WEBHOOK_KEY}' },
     { label: 'Environment ACME_REGION', document: false, text: 'eu' },
   ],
   warnings: [{ code: 'unpinned-package', text: 'npx fetches the newest acme-mcp every time it starts, so this can change without an update.' }],
@@ -93,13 +96,13 @@ const INSTALL_BASE = {
   destination: 'runtime box, profile default',
 };
 const provenance = (kind, name, itemId) => ({
-  publisher: PUBLISHER, publisherName: 'kirin-box', catalogId: CATALOG, catalogName: 'Kirin catalog',
+  publisher: PUBLISHER, publisherName: 'kirin-box', catalogId: CATALOG, catalogName: "Kirin's catalog",
   itemId, kind, name, version: 1, digest: DIGEST,
 });
 const INSTALL_MCP = {
   ...INSTALL_BASE, provenance: provenance('mcp', 'acme-mcp', MCP_ITEM),
   review: MCP_PREVIEW.review,
-  secrets: [{ placeholder: 'ACME_TOKEN' }, { placeholder: 'ACME_REGION' }],
+  secrets: [{ placeholder: 'ACME_TOKEN' }, { placeholder: 'ACME_WEBHOOK_KEY' }],
   warnings: [
     { code: 'first-publisher', text: 'This is the first install from kirin-box. Its fingerprint is remembered from now on.' },
     MCP_PREVIEW.warnings[0],
@@ -128,16 +131,22 @@ const catalogClient = {
   request: async (path, schema, init) => {
     const method = init?.method ?? 'GET';
     const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
+    if (view === 'sharing-off' && path.startsWith('/v1/catalogs')) throw new FyHttpError('This device may not use Sharing.', 403, 'grant_device_not_granted');
     if (method === 'GET' && path.startsWith('/v1/catalogs')) return schema.parse({ publisher: PUBLISHER, catalogs: CATALOGS });
     if (method === 'POST' && path.endsWith('/items/preview')) return schema.parse(view === 'add-mcp' ? MCP_PREVIEW : SKILL_PREVIEW);
     if (method === 'GET' && path === '/v1/fleet/runtimes') return { runtimes: [{ id: 'box', profile: 'default' }] };
     if (method === 'GET' && path === '/v1/secrets')
       return schema.parse({ v: 1, health: 'ready', secrets: [{ name: 'ACME_TOKEN', createdAt: AT, updatedAt: AT }, { name: 'GITHUB_TOKEN', createdAt: AT, updatedAt: AT }], references: [] });
-    if (method === 'POST' && path.endsWith('/preview')) return schema.parse(body.item.itemId === MCP_ITEM ? INSTALL_MCP : INSTALL_SKILL);
+    if (method === 'POST' && path.endsWith('/preview')) return schema.parse(agreeing(body.item.itemId === MCP_ITEM ? INSTALL_MCP : INSTALL_SKILL));
     throw new Error('the harness has no answer for ' + method + ' ' + path);
   },
 };
 const createClient = async () => catalogClient;
+const agreeing = preview => ({
+  ...preview,
+  publisher: { ...preview.publisher, daemonId: window.__publisher },
+  provenance: { ...preview.provenance, publisher: window.__publisher },
+});
 
 const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
@@ -153,7 +162,7 @@ if (view === 'add-skill' || view === 'add-mcp') {
       onClose={() => undefined}
     />,
   );
-} else if (view === 'catalogs') {
+} else if (view === 'catalogs' || view === 'sharing-off') {
   mountPage(<CatalogsSurface connection={CONNECTION} createClient={createClient} installHost={{ createClient, crypto, projects: [{ name: 'app', path: '/work/app' }] }} />);
 } else {
   const identity = await newIdentity();
@@ -161,11 +170,12 @@ if (view === 'add-skill' || view === 'add-mcp') {
     SharedCatalogItemSchema.parse(
       kind === 'skill'
         ? { format: 'ferretry-catalog-item', version: 1, publisher: identity.daemonId, catalogId: CATALOG, itemId: SKILL_ITEM, itemVersion: 1, name: 'pdf-tools', summary: 'Split, merge and OCR PDFs', kind, skill: { files: [{ path: 'SKILL.md', content: '# pdf tools\\n' }] } }
-        : { format: 'ferretry-catalog-item', version: 1, publisher: identity.daemonId, catalogId: CATALOG, itemId: MCP_ITEM, itemVersion: 1, name: 'acme-mcp', summary: 'Talk to Acme', kind, mcp: { transport: 'command', command: 'npx', args: ['-y', 'acme-mcp', '--stdio'], env: { ACME_TOKEN: '\${secret:ACME_TOKEN}', ACME_REGION: 'eu' } } },
+        : { format: 'ferretry-catalog-item', version: 1, publisher: identity.daemonId, catalogId: CATALOG, itemId: MCP_ITEM, itemVersion: 1, name: 'acme-mcp', summary: 'Talk to Acme', kind, mcp: { transport: 'command', command: 'npx', args: ['-y', 'acme-mcp', '--stdio'], env: { ACME_TOKEN: '\${secret:ACME_TOKEN}', ACME_WEBHOOK_KEY: '\${secret:ACME_WEBHOOK_KEY}', ACME_REGION: 'eu' } } },
     ),
   );
   const file = await signedFile(identity, items);
   const tampered = SharedCatalogFileSchema.parse({ ...file, items: file.items.map(item => ({ ...item, summary: 'Changed after it was signed' })) });
+  window.__publisher = identity.daemonId;
   window.__catalogFile = JSON.stringify(view === 'refused' ? tampered : file);
   mountPage(<InstallFromFileSheet connection={CONNECTION} onClose={() => undefined} host={{ createClient, crypto, projects: [{ name: 'app', path: '/work/app' }] }} />);
 }
@@ -220,18 +230,29 @@ const VIEWPORTS = {
   desktop: { viewport: { width: 1440, height: 2000 } },
 } as const;
 
-const shot = async (page: Page, name: string, theme: string, vp: string): Promise<void> => {
+const HIDDEN_ANYWHERE = new RegExp(`[${HIDDEN_CHARACTER_SOURCE}]`, 'u');
+
+const shot = async (page: Page, name: string, theme: string, vp: string, crop?: string): Promise<void> => {
+  const text = await page.evaluate(() => document.body.textContent ?? '');
+  if (HIDDEN_ANYWHERE.test(text)) fail(`${name} ${theme} ${vp} shows a hidden character instead of its marker`);
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   if (overflow > 0) fail(`${name} ${theme} ${vp} scrolls sideways by ${overflow}px`);
   const file = `catalogs-${name}-${theme}-${vp}.png`;
   await page.waitForTimeout(500);
-  const sheet = page.locator('[role="dialog"]').first();
+  const sheet = page.locator(crop ?? '[role="dialog"]').first();
   const box = (await sheet.count()) === 0 ? null : await sheet.boundingBox();
   await page.screenshot({
     path: join(outDir, file),
     ...(box === null
       ? { fullPage: true }
-      : { clip: { x: 0, y: Math.max(0, box.y - 12), width: box.width, height: box.height + 12 } }),
+      : {
+          clip: {
+            x: Math.max(0, box.x - 8),
+            y: Math.max(0, box.y - 12),
+            width: box.width + 16,
+            height: box.height + 24,
+          },
+        }),
   });
   process.stdout.write(`📸 ${join(outDir, file)}\n`);
 };
@@ -270,22 +291,26 @@ const walk = async (page: Page, theme: string, vp: string): Promise<void> => {
 
   await open(page, theme, 'catalogs');
   await page.locator('[data-catalogs-list]').waitFor({ state: 'visible' });
-  await shot(page, 'list', theme, vp);
+  await shot(page, 'list', theme, vp, '[data-catalogs-list]');
   await page.locator('[data-catalog-open]').first().click();
   await page.locator('[data-catalog-detail]').waitFor({ state: 'visible' });
-  await shot(page, 'detail', theme, vp);
+  await shot(page, 'detail', theme, vp, '[data-catalog-detail]');
 
   await open(page, theme, 'install');
   await give(page);
   await reviewItem(page, MCP_ID);
   await page.locator('[data-catalog-secret="ACME_TOKEN"] select').selectOption('ACME_TOKEN');
-  await page.locator('[data-catalog-secret="ACME_REGION"] select').selectOption({ label: 'Leave unbound' });
+  await page.locator('[data-catalog-secret="ACME_WEBHOOK_KEY"] select').selectOption({ label: 'Leave unbound' });
   await shot(page, 'install-mcp', theme, vp);
 
   await open(page, theme, 'install');
   await give(page);
   await reviewItem(page, SKILL_ID);
   await shot(page, 'install-skill', theme, vp);
+
+  await open(page, theme, 'sharing-off');
+  await page.locator('[data-sharing-off]').waitFor({ state: 'visible' });
+  await shot(page, 'sharing-off', theme, vp, '[data-sharing-off]');
 
   await open(page, theme, 'refused');
   await give(page);

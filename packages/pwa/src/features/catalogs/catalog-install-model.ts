@@ -32,13 +32,14 @@ export const NO_AUTO_UPDATE = 'It will not update by itself. You will be asked, 
 export const FIRST_INSTALL_NOTE = 'First install from this publisher. Check the fingerprint with them if this matters.';
 export const LEAVE_UNBOUND = 'Leave unbound';
 export const CHOOSE_PLACEHOLDER = 'Choose…';
+export const FILE_LIMIT_NOTE = 'Up to 32 MB.';
 export const EXPIRY_NOTE = 'This preview lasts 10 minutes. After that, preview it again.';
 
 // ── Opening a file ───────────────────────────────────────────────────────────────────────────────
 
 /** The sentence for a file over the size bound, or `null`. Checked on `File.size`, before reading a byte. */
 export function fileSizeProblem(size: number): string | null {
-  return size > SHARED_CATALOG_FILE_MAX_BYTES ? 'This file is larger than 32 MiB, so it was not read.' : null;
+  return size > SHARED_CATALOG_FILE_MAX_BYTES ? 'This file is larger than 32 MB, so it was not read.' : null;
 }
 
 const VERIFICATION_SENTENCES: Readonly<Record<CatalogVerificationRefusal, string>> = {
@@ -88,6 +89,23 @@ export function fileItemRows(opened: OpenedCatalogFile): readonly FileItemRow[] 
 export function withdrawnNote(opened: OpenedCatalogFile): string | null {
   const count = opened.manifest.withdrawn.length;
   return count === 0 ? null : `${plural(count, 'item')} withdrawn by the publisher, so not listed.`;
+}
+
+export const PREVIEW_DISAGREES =
+  'This machine reads this file as coming from somewhere other than the file says, so it was not opened. Nothing was installed.';
+
+/** `null` when the machine's review names the same publisher and catalog the verified file does; else the sentence to show instead. */
+export function previewDisagreement(opened: OpenedCatalogFile, preview: CatalogInstallPreview): string | null {
+  const { manifest } = opened;
+  const { provenance, publisher } = preview;
+  const agrees =
+    provenance.publisher === manifest.publisher &&
+    publisher.daemonId === manifest.publisher &&
+    provenance.publisherName === manifest.publisherName &&
+    publisher.name === manifest.publisherName &&
+    provenance.catalogId === manifest.catalogId &&
+    provenance.catalogName === manifest.name;
+  return agrees ? null : PREVIEW_DISAGREES;
 }
 
 export function fileSummary(opened: OpenedCatalogFile): string {

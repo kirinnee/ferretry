@@ -6,7 +6,13 @@
  * since, the daemon refuses and the next step is Preview again.
  */
 
-import type { CatalogItemPreview, CatalogItemSource, OwnedCatalog, PublishedCatalogItem } from '@ferretry/protocol';
+import {
+  type CatalogItemPreview,
+  type CatalogItemSource,
+  type OwnedCatalog,
+  type PublishedCatalogItem,
+  revealHidden,
+} from '@ferretry/protocol';
 import { type FormEvent, useCallback, useEffect, useId, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { useDaemonClient } from '../../lib/store.tsx';
@@ -306,11 +312,11 @@ function PreviewBlock({ preview }: { readonly preview: CatalogItemPreview }) {
     <section className="flex min-w-0 flex-col gap-sm" aria-label="Preview" data-catalog-preview-block="">
       <div className="flex min-w-0 flex-col gap-0.5">
         <p className="m-0 break-words font-mono text-cell text-fg">
-          {preview.name} · version {preview.version}
+          {revealHidden(preview.name)} · version {preview.version}
         </p>
-        <p className="m-0 break-words text-meta text-muted">{preview.summary}</p>
+        <p className="m-0 break-words text-meta text-muted">{revealHidden(preview.summary)}</p>
         <p className="m-0 break-all text-meta text-faint" data-catalog-location="">
-          Read from {preview.location}
+          Read from {revealHidden(preview.location)}
         </p>
         <p className="m-0 text-meta text-faint">{formatBytes(preview.size)}</p>
       </div>

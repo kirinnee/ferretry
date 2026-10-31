@@ -15,6 +15,29 @@ describe('MarkedText', () => {
   });
 });
 
+describe('hidden characters', () => {
+  const RAW = String.fromCodePoint(0x202e);
+  it('never puts the raw character on screen, in a marker or beside it', async () => {
+    const view = await mount(<MarkedText text={`run ${RAW}fdp.sh`} />);
+    expect(view.container.textContent).not.toContain(RAW);
+    expect(view.container.querySelector('mark[data-hidden-marker]')?.textContent).toBe(MARK);
+    await view.unmount();
+  });
+  it('marks a raw character in a file body and in a one-line value', async () => {
+    const view = await mount(
+      <ReviewBody
+        entries={[
+          { label: 'Skill file SKILL.md', text: `Run split.sh ${RAW}gnp.sh`, document: true },
+          { label: 'Starts', text: `acme ${RAW}`, document: false },
+        ]}
+      />,
+    );
+    expect(view.container.textContent).not.toContain(RAW);
+    expect(view.container.querySelectorAll('mark[data-hidden-marker]')).toHaveLength(2);
+    await view.unmount();
+  });
+});
+
 describe('ReviewBody', () => {
   const files = [
     { label: 'Skill file SKILL.md', text: '# pdf tools\nline two', document: true },
@@ -22,10 +45,10 @@ describe('ReviewBody', () => {
     { label: 'Skill file bad.sh', text: `echo ${MARK}`, document: true },
   ];
 
-  it('shows every file in full, opens the first and any with a hidden character, and flags it in words', async () => {
+  it('shows every file in full, every one open, and flags a hidden character in words', async () => {
     const view = await mount(<ReviewBody entries={files} />);
     const blocks = [...view.container.querySelectorAll('details')];
-    expect(blocks.map(block => block.open)).toEqual([true, false, true]);
+    expect(blocks.map(block => block.open)).toEqual([true, true, true]);
     expect(blocks[0]?.textContent).toContain('2 lines');
     expect(blocks[1]?.textContent).toContain('1 line');
     expect(blocks[2]?.textContent).toContain('Has hidden characters');

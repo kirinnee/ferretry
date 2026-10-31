@@ -16,6 +16,8 @@ import {
   installState,
   openCatalogFile,
   pickBinding,
+  previewDisagreement,
+  PREVIEW_DISAGREES,
   previewRequest,
   targetProblem,
   toTarget,
@@ -26,10 +28,35 @@ import {
 import { crypto, mcpItem, newIdentity, signedFile, skillItem, SKILL_ITEM_ID } from '../../../support/catalog-files.ts';
 import { installPreview, installRecord, PREVIEW_ID } from '../../../support/catalog-views.ts';
 
+describe('the machine and the file agree', () => {
+  it('shows the review only when it names the publisher and catalog the verified file does', async () => {
+    const identity = await newIdentity();
+    const skill = skillItem(identity.daemonId);
+    const result = await openCatalogFile(JSON.stringify(await signedFile(identity, [skill])), crypto);
+    if (!result.ok) throw new Error(result.sentence);
+    const base = installPreview();
+    const agreeing = installPreview({
+      provenance: { ...base.provenance, publisher: identity.daemonId, catalogName: "Kirin's catalog" },
+      publisher: { ...base.publisher, daemonId: identity.daemonId },
+    });
+    should(previewDisagreement(result.opened, agreeing)).be.null();
+    const other = installPreview({
+      provenance: { ...agreeing.provenance },
+      publisher: { ...agreeing.publisher, daemonId: base.publisher.daemonId },
+    });
+    should(previewDisagreement(result.opened, other)).equal(PREVIEW_DISAGREES);
+    const renamed = installPreview({
+      provenance: { ...agreeing.provenance, catalogName: 'Another catalog' },
+      publisher: agreeing.publisher,
+    });
+    should(previewDisagreement(result.opened, renamed)).equal(PREVIEW_DISAGREES);
+  });
+});
+
 describe('opening a file', () => {
   it('bounds the size before reading', () => {
     should(fileSizeProblem(SHARED_CATALOG_FILE_MAX_BYTES)).be.null();
-    should(fileSizeProblem(SHARED_CATALOG_FILE_MAX_BYTES + 1)).match(/32 MiB/u);
+    should(fileSizeProblem(SHARED_CATALOG_FILE_MAX_BYTES + 1)).match(/32 MB/u);
   });
   it('opens a signed file and lists its items', async () => {
     const identity = await newIdentity();

@@ -8,7 +8,12 @@
  * worded two ways.
  */
 
-import type { CatalogInstallWarning, CatalogInstallWarningCode, CatalogReviewEntry } from '@ferretry/protocol';
+import {
+  type CatalogInstallWarning,
+  type CatalogInstallWarningCode,
+  type CatalogReviewEntry,
+  revealHidden,
+} from '@ferretry/protocol';
 
 // ── Files and lines ──────────────────────────────────────────────────────────────────────────────
 
@@ -73,28 +78,30 @@ const lineCount = (text: string): number => (text === '' ? 0 : text.split('\n').
 /** Entries in the order the daemon gave them (SKILL.md first), each as a file or a line. */
 export function reviewRows(entries: readonly CatalogReviewEntry[]): readonly ReviewRow[] {
   return entries.map((entry): ReviewRow => {
-    const marked = holdsMarker(entry.text);
-    if (entry.document && entry.label.startsWith(SKILL_FILE_PREFIX))
-      return {
-        kind: 'file',
-        path: entry.label.slice(SKILL_FILE_PREFIX.length),
-        text: entry.text,
-        lines: lineCount(entry.text),
-        marked,
-      };
-    const placeholder = entry.label.startsWith('Environment ') ? placeholderName(entry.text) : undefined;
+    // The daemon already marks hidden characters; marking again is harmless and means a raw one never reaches the screen.
+    const text = revealHidden(entry.text);
+    const label = revealHidden(entry.label);
+    const marked = holdsMarker(text);
+    if (entry.document && label.startsWith(SKILL_FILE_PREFIX))
+      return { kind: 'file', path: label.slice(SKILL_FILE_PREFIX.length), text, lines: lineCount(text), marked };
+    const placeholder = label.startsWith('Environment ') ? placeholderName(text) : undefined;
     return placeholder === undefined
-      ? { kind: 'line', label: entry.label, text: entry.text, marked }
-      : { kind: 'line', label: entry.label, text: entry.text, marked, placeholder };
+      ? { kind: 'line', label, text, marked }
+      : { kind: 'line', label, text, marked, placeholder };
   });
 }
 
 /** What the publisher's preview says in place of a `${secret:NAME}` value. */
 export const INSTALLER_FILLS_IN = 'The installer fills in their own';
 
+/** Who is reading the review: the one adding to a catalog, or the one installing from it. */
+export type ReviewAudience = 'publisher' | 'installer';
+
 /** The heading over the files, for a skill; or the lines, for a setup. */
-export function reviewHeading(rows: readonly ReviewRow[]): string {
-  return rows.some(row => row.kind === 'file')
+export function reviewHeading(rows: readonly ReviewRow[], audience: ReviewAudience = 'publisher'): string {
+  const skill = rows.some(row => row.kind === 'file');
+  if (audience === 'installer') return skill ? 'What this brings, in full' : 'It will run';
+  return skill
     ? 'People who install this will see these files, in full'
     : 'People who install this will see this setup, in full';
 }

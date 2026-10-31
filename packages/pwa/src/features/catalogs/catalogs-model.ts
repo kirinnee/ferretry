@@ -21,8 +21,7 @@ import { plural } from './catalog-review-model.ts';
 
 export const FROZEN_COPY_NOTE = 'A frozen copy is shared. Later edits stay here until you press Publish update.';
 
-export const PUBLISH_COPY_NOTE =
-  'This freezes a new version. Versions people already have do not change, and nobody is updated for them.';
+export const PUBLISH_COPY_NOTE = 'This freezes a new version. Copies people already have stay as they are.';
 
 export const EXPORT_NOTE = 'The file is signed by this machine. Anyone you send it to can check that, offline.';
 

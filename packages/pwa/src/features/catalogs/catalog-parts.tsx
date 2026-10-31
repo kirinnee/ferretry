@@ -34,6 +34,7 @@ export function CatalogSheet({
       labelledBy={titleId}
       closeLabel={closeLabel}
       maxHeight="min(92dvh, calc(var(--app-h, 100dvh) - var(--gap-sm)))"
+      panelClassName="mx-auto max-w-[720px]"
     >
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-sm overflow-y-auto p-panel" data-catalog-sheet={name}>
         <div className="flex min-w-0 flex-col gap-0.5">

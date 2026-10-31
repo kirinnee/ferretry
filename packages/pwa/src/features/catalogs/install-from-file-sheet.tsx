@@ -7,7 +7,7 @@
  * every secret and a fresh passkey.
  */
 
-import type { CatalogInstallPreview, CatalogInstalled, SecretList } from '@ferretry/protocol';
+import { type CatalogInstallPreview, type CatalogInstalled, revealHidden, type SecretList } from '@ferretry/protocol';
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import type { RelayCrypto } from '@ferretry/relay';
 import { CircleCheck, FileUp } from 'lucide-react';
@@ -18,7 +18,7 @@ import { useAppStore, useDaemonClient } from '../../lib/store.tsx';
 import { Button } from '../../shell/primitives.tsx';
 import { readFleetRuntimes } from '../fleet/catalog-api.ts';
 import { listSecrets } from '../secrets/secrets-api.ts';
-import { fingerprintStart, formatBytes, shortDigest } from './catalog-review-model.ts';
+import { fingerprintStart, shortDigest } from './catalog-review-model.ts';
 import { ReviewBody, WarningList } from './catalog-review-view.tsx';
 import { CatalogSheet, FailureLine } from './catalog-parts.tsx';
 import { applyCatalogInstall, previewCatalogInstall } from './catalog-installs-api.ts';
@@ -28,6 +28,7 @@ import {
   bindingNote,
   CHOOSE_PLACEHOLDER,
   EXPIRY_NOTE,
+  FILE_LIMIT_NOTE,
   FIRST_INSTALL_NOTE,
   fileItemRows,
   fileSizeProblem,
@@ -43,6 +44,7 @@ import {
   type OpenedCatalogFile,
   openCatalogFile,
   pickBinding,
+  previewDisagreement,
   previewRequest,
   type TargetDraft,
   type TargetOptions,
@@ -175,6 +177,12 @@ function InstallSheetBody({
       try {
         const client: CatalogClient = await createClient(connection);
         const read = await previewCatalogInstall(client, target.scope, request);
+        const disagreement = previewDisagreement(opened, read);
+        if (disagreement !== null) {
+          setPreview(null);
+          setFailure({ sentence: disagreement, previewAgain: false, olderOffered: false });
+          return;
+        }
         setPreview(read);
         setSecrets(undefined);
         if (read.secrets.length > 0)
@@ -258,7 +266,7 @@ function InstallSheetBody({
           <FileUp size={16} aria-hidden="true" />
           {opened === null ? 'Choose a .catalog.json file' : 'Choose another file'}
         </Button>
-        <p className="m-0 text-meta text-faint">Up to {formatBytes(32 * 1024 * 1024)}.</p>
+        <p className="m-0 text-meta text-faint">{FILE_LIMIT_NOTE}</p>
       </div>
       {fileProblem === null ? null : <FailureLine sentence={fileProblem} />}
       {opened === null ? null : (
@@ -351,10 +359,10 @@ function OpenedFile({
     <section className="flex min-w-0 flex-col gap-sm" aria-label="This file" data-catalog-file="">
       <div className="flex min-w-0 flex-col gap-0.5">
         <p className="m-0 break-words text-cell font-semibold text-fg" data-catalog-file-summary="">
-          {fileSummary(opened)}
+          {revealHidden(fileSummary(opened))}
         </p>
         <p className="m-0 break-words text-meta text-muted">
-          From {opened.manifest.publisherName} · {fingerprintStart(opened.manifest.publisher)}
+          From {revealHidden(opened.manifest.publisherName)} · {fingerprintStart(opened.manifest.publisher)}
         </p>
       </div>
       <fieldset className="m-0 flex min-w-0 flex-col gap-xs border-0 p-0" aria-labelledby={legend}>
@@ -378,9 +386,10 @@ function OpenedFile({
             />
             <span className="flex min-w-0 flex-1 flex-col gap-0.5">
               <span className="break-words font-mono text-cell text-fg">
-                {row.entry.name} · {row.entry.kind === 'skill' ? 'Skill' : 'MCP server'} · version {row.entry.version}
+                {revealHidden(row.entry.name)} · {row.entry.kind === 'skill' ? 'Skill' : 'MCP server'} · version{' '}
+                {row.entry.version}
               </span>
-              <span className="break-words text-meta text-muted">{row.entry.summary}</span>
+              <span className="break-words text-meta text-muted">{revealHidden(row.entry.summary)}</span>
               {row.unavailable === null ? null : <span className="text-meta text-err">{row.unavailable}</span>}
             </span>
           </label>
@@ -590,10 +599,10 @@ function Confirm({
   const names = bindableSecretNames(secrets ?? null);
   return (
     <section className="flex min-w-0 flex-col gap-sm" aria-label="Confirm" data-catalog-confirm="">
-      <WarningList warnings={preview.warnings} />
+      <WarningList warnings={preview.warnings.filter(warning => warning.code !== 'first-publisher')} />
       <div className="flex min-w-0 flex-col">
         <Fact label="From">
-          {preview.provenance.catalogName} · {preview.publisher.name} ·{' '}
+          {revealHidden(preview.provenance.catalogName)} · {revealHidden(preview.publisher.name)} ·{' '}
           <TapToExpand
             label="Publisher fingerprint"
             short={fingerprintStart(preview.publisher.daemonId)}
@@ -614,7 +623,7 @@ function Confirm({
           <TapToExpand label="Digest" short={shortDigest(preview.provenance.digest)} full={preview.provenance.digest} />
         </Fact>
       </div>
-      <ReviewBody entries={preview.review} />
+      <ReviewBody entries={preview.review} audience="installer" />
       {preview.secrets.length === 0 ? null : (
         <section className="flex min-w-0 flex-col gap-sm" aria-label="Secrets" data-catalog-secrets="">
           <h4 className="m-0 text-meta font-semibold uppercase text-muted">Secrets it asks for</h4>

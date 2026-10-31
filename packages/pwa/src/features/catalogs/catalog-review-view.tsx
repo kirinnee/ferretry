@@ -7,11 +7,13 @@
  */
 
 import type { CatalogInstallWarning, CatalogReviewEntry } from '@ferretry/protocol';
+import { revealHidden } from '@ferretry/protocol';
 import { CircleAlert, Info, TriangleAlert } from 'lucide-react';
 import { cn } from '../../lib/class-names.ts';
 import {
   INSTALLER_FILLS_IN,
   type ReviewRow,
+  type ReviewAudience,
   reviewHeading,
   reviewRows,
   splitMarkers,
@@ -32,11 +34,11 @@ const TONE_ICON: Readonly<Record<WarningTone, typeof CircleAlert>> = {
   note: Info,
 };
 
-/** Text with each hidden-character marker drawn on its own. Nothing is dropped. */
+/** Text with each hidden character written out as its marker, and each marker drawn to stand out. */
 export function MarkedText({ text }: { readonly text: string }) {
   return (
     <>
-      {splitMarkers(text).map((segment, index) =>
+      {splitMarkers(revealHidden(text)).map((segment, index) =>
         segment.marker ? (
           <mark
             // The position is the identity: segments never reorder.
@@ -56,9 +58,9 @@ export function MarkedText({ text }: { readonly text: string }) {
   );
 }
 
-function FileBlock({ row, open }: { readonly row: Extract<ReviewRow, { kind: 'file' }>; readonly open: boolean }) {
+function FileBlock({ row }: { readonly row: Extract<ReviewRow, { kind: 'file' }> }) {
   return (
-    <details className="kt-panel min-w-0" open={open || row.marked} data-review-file={row.path}>
+    <details className="kt-panel min-w-0" open data-review-file={row.path}>
       <summary className="flex min-h-[44px] cursor-pointer select-none flex-wrap items-center gap-x-sm gap-y-xs px-control-x py-2 text-cell">
         <span className="min-w-0 flex-1 break-all font-mono text-fg">{row.path}</span>
         <span className="text-meta text-faint">{row.lines === 1 ? '1 line' : `${row.lines} lines`}</span>
@@ -68,7 +70,7 @@ function FileBlock({ row, open }: { readonly row: Extract<ReviewRow, { kind: 'fi
           </span>
         ) : null}
       </summary>
-      <pre className="m-0 max-w-full overflow-x-auto whitespace-pre-wrap break-words border-t border-border-soft p-control-x font-mono text-2xs leading-base text-fg">
+      <pre className="m-0 max-w-full overflow-x-auto whitespace-pre-wrap break-words border-t border-border-soft p-control-x font-mono text-cell leading-base text-fg">
         <MarkedText text={row.text} />
       </pre>
     </details>
@@ -107,19 +109,24 @@ function LineBlock({
 export function ReviewBody({
   entries,
   installerView = false,
+  audience = 'publisher',
 }: {
   readonly entries: readonly CatalogReviewEntry[];
   readonly installerView?: boolean;
+  readonly audience?: ReviewAudience;
 }) {
   const rows = reviewRows(entries).map((row, position) => ({ row, key: `${position}:${row.kind}` }));
   return (
     <section className="flex min-w-0 flex-col gap-xs" aria-label="What is in it" data-review-body="">
       <h4 className="m-0 text-meta font-semibold uppercase text-muted">
-        {reviewHeading(rows.map(entry => entry.row))}
+        {reviewHeading(
+          rows.map(entry => entry.row),
+          audience,
+        )}
       </h4>
-      {rows.map(({ row, key }, index) =>
+      {rows.map(({ row, key }) =>
         row.kind === 'file' ? (
-          <FileBlock key={key} row={row} open={index === 0} />
+          <FileBlock key={key} row={row} />
         ) : (
           <LineBlock key={key} row={row} installerView={installerView} />
         ),
