@@ -395,6 +395,18 @@ describe('acting on the tree', () => {
     should(response.decision.nudge).be.undefined();
   });
 
+  it('should not even recommend answering a dialog on a flag that offers no nudge', () => {
+    // Arrange: an unanswered question offers Jev no act at all.
+    const answer = judgement({ waiting_on_real: no(0.99) });
+
+    // Act
+    const response = treeResponse(facts({ dialog_on_screen: true }), answer, policy({ offered: [] }));
+
+    // Assert
+    should(response.outcome).match({ kind: 'escalate', why: 'not_offered', confidence: 0.99 });
+    should(response.outcome).not.have.property('recommends');
+  });
+
   it('should hand on a failure, and a reply that left a question on the path unanswered', () => {
     should(treeResponse(facts(), judgement({}, { failure: { code: 'timeout' } }), policy()).outcome).match({
       kind: 'escalate',

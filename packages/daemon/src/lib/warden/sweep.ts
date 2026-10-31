@@ -1568,7 +1568,8 @@ export class WardenSweepService {
       }
       // A flag Jev cannot judge — or whose ferret the daemon cannot read the tree's facts from — is handed
       // on unasked, and remembered so it is noted once, not per sweep.
-      if (!jevJudges(anomaly) || !byId.has(anomaly.sessionId)) {
+      const target = byId.get(anomaly.sessionId);
+      if (!jevJudges(anomaly) || target === undefined) {
         passed.push(anomaly);
         this.ports.journal.record('fleet.warden_jev_handed_on', {
           sessionId: anomaly.sessionId,
@@ -1592,7 +1593,7 @@ export class WardenSweepService {
         next = await this.noteCapSkip(next, anomaly, config, investigating, nowMs);
         continue;
       }
-      const guarded = await this.askGuard(anomaly, config, next, byId, investigating);
+      const guarded = await this.askGuard(anomaly, target, config, next, investigating);
       next = guarded.state;
       if (guarded.outcome === undefined) {
         capped = true;
@@ -1669,9 +1670,10 @@ export class WardenSweepService {
    */
   private async askGuard(
     anomaly: WardenAnomaly,
+    /** The flagged ferret, as the sweep sees it: where the tree's facts are read from. */
+    target: WardenFleetSession,
     config: WardenConfig,
     state: WardenRuntimeState,
-    byId: ReadonlyMap<string, WardenFleetSession>,
     investigating: boolean,
   ): Promise<{
     readonly state: WardenRuntimeState;
@@ -1694,12 +1696,6 @@ export class WardenSweepService {
         outcome: { kind: 'escalate', why: 'failed', confidence: 0 },
       };
 
-    const target = byId.get(anomaly.sessionId);
-    if (target === undefined)
-      return {
-        state: withJevBefore(state, anomaly, { verdict: 'not_asked', why: 'not_judgeable' }),
-        outcome: { kind: 'escalate', why: 'failed', confidence: 0 },
-      };
     // The tree's facts are the daemon's own: answered here, never asked of Jev (`jev-tree.ts`).
     const facts = jevFactsOf({
       anomaly,
@@ -1794,7 +1790,7 @@ export class WardenSweepService {
       confidence: outcome.confidence,
       ...(decision.reason === undefined ? {} : { reason: decision.reason }),
     };
-    if (outcome.kind === 'leave' && target !== undefined) {
+    if (outcome.kind === 'leave') {
       const cleared = this.clearFlags(
         next,
         { sessionId: anomaly.sessionId, kinds: [anomaly.kind], status: target.state.status, by: 'jev' },
@@ -1834,7 +1830,7 @@ export class WardenSweepService {
       };
       return { state: next, outcome, decided, settled: true, ...traced };
     }
-    if (outcome.kind === 'escalate' && outcome.recommends !== undefined && !investigating && target !== undefined) {
+    if (outcome.kind === 'escalate' && outcome.recommends !== undefined && !investigating) {
       this.ports.journal.record('fleet.warden_action_held', {
         targetId: anomaly.sessionId,
         action: outcome.recommends,

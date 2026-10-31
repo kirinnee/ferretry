@@ -104,6 +104,15 @@ describe('the yes/no reply', () => {
     ).be.undefined();
   });
 
+  it('should count no tokens, rather than guess, when the reply says none', () => {
+    const reply = parseJevJudgeReply(
+      { answers: { waiting_on_real: answer('yes'), wait_reasonable: answer('no') }, usage: { input_tokens: -3 } },
+      set,
+    );
+    should(reply?.inputTokens).equal(0);
+    should(reply).not.have.property('model');
+  });
+
   it('should drop a message that was not offered, or none', () => {
     const offered = (choice: string) =>
       parseJevJudgeReply(
