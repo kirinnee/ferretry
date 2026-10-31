@@ -1,3 +1,13 @@
+## [4.174.0](https://github.com/kirinnee/ferretry/compare/v4.173.0...v4.174.0) (2026-10-31)
+
+### Features
+
+* **warden:** let Jev's confidence bars go down to 30%, default 70% ([#1174](https://github.com/kirinnee/ferretry/issues/1174)) ([31df41e](https://github.com/kirinnee/ferretry/commit/31df41eddf5ede306636b205f6129f9c74a12ecc))
+
+### Fixes
+
+* **pwa:** offer the budget editor only on a machine that keeps budgets ([#1173](https://github.com/kirinnee/ferretry/issues/1173)) ([19902af](https://github.com/kirinnee/ferretry/commit/19902aff624bff70932fa3a6fab8f595e02c2cc3))
+
 ## [4.173.0](https://github.com/kirinnee/ferretry/compare/v4.172.0...v4.173.0) (2026-10-31)
 
 ### Features
