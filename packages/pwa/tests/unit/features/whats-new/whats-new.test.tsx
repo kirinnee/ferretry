@@ -112,7 +112,7 @@ describe('the What’s new dialog backdrop', () => {
   it('ignores the click synthesized from the tap that opened it, and closes on a real backdrop tap', async () => {
     let closed = 0;
     view = await mount(sheet([release('4.2.0')], 'dialog', new Set(), () => (closed += 1)));
-    const backdrop = must(view.container.ownerDocument.querySelector('button[tabindex="-1"]'), 'backdrop');
+    const backdrop = must(view.container.querySelector('[data-whats-new="dialog"] > button'), 'backdrop');
     const pointerClick = () => backdrop.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
     await interact(pointerClick);
     expect(closed).toBe(0);
