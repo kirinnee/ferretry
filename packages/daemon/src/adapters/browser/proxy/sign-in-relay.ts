@@ -1,4 +1,5 @@
 import { type AddressInfo, createServer, type Server, type Socket } from 'node:net';
+import { BrowserControlError, listenerHeldRefusal } from '../../../lib/browser/control/index.ts';
 import {
   badRequest,
   basicProxyAuthorization,
@@ -14,15 +15,29 @@ import {
   parseRequestHead,
   proxyUnreachable,
 } from '../../../lib/browser/proxy/index.ts';
+import { ProcListenerProver } from '../control/listener-prover.ts';
 import { dial, openTunnel, type ProxyCredentials, Reader } from './tunnel.ts';
 
 const CONNECT_TIMEOUT_MS = 15_000;
+
+/** Where the relay listens. */
+export interface SignInRelayListen {
+  /** A loopback port to take; absent (or `0`) lets the kernel pick a free one, which nobody can race. */
+  readonly port?: number;
+  /** Who holds a port the bind found taken, for the refusal; defaults to this host's `/proc`. */
+  readonly holder?: (port: number) => Promise<number | undefined>;
+}
 
 /**
  * A loopback HTTP proxy that signs in to the real proxy for Chrome. Chrome's `--proxy-server` cannot carry a
  * username or password, and putting them on the command line would show them in every process list, so Chrome
  * is pointed here instead and this holds the credentials in memory for as long as the browser runs. It listens
  * on 127.0.0.1 only, and it reaches nothing but the one proxy it was started for.
+ *
+ * The daemon binds it itself, so a listener on its port is this relay or the bind failed — there is nothing to
+ * prove afterwards, unlike the Chrome and x11vnc ports a child binds. A GIVEN port that is already taken therefore
+ * refuses, naming the port and its holder, rather than falling back to another one: Chrome would be pointed at a
+ * port somebody else answers on.
  */
 export class ProxySignInRelay {
   private readonly sockets = new Set<Socket>();
@@ -38,20 +53,28 @@ export class ProxySignInRelay {
     upstream: ProxyEndpoint,
     credentials: ProxyCredentials,
     connectTimeoutMs = CONNECT_TIMEOUT_MS,
+    listen: SignInRelayListen = {},
   ): Promise<ProxySignInRelay> {
+    const port = listen.port ?? 0;
     const server = createServer();
     const relay = new ProxySignInRelay(server, upstream, credentials, connectTimeoutMs);
     server.on('connection', socket => {
       relay.track(socket);
       void relay.serve(socket);
     });
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(0, '127.0.0.1', () => {
-        server.off('error', reject);
-        resolve();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(port, '127.0.0.1', () => {
+          server.off('error', reject);
+          resolve();
+        });
       });
-    });
+    } catch (error) {
+      if (port === 0 || (error as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw error;
+      const holder = await (listen.holder ?? (taken => new ProcListenerProver().holder(taken)))(port);
+      throw new BrowserControlError('launch_failed', listenerHeldRefusal(port, holder));
+    }
     return relay;
   }
 

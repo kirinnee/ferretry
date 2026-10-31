@@ -98,6 +98,7 @@ export * from './stt-cleanup-guard.ts';
 export * from './surface.ts';
 export * from './task-title.ts';
 export * from './system-callsigns.ts';
+export * from './tcp-listeners.ts';
 export * from './tasks.ts';
 export * from './terminal.ts';
 export * from './transcript-images.ts';

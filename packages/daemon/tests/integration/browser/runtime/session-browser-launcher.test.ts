@@ -204,6 +204,47 @@ describe('NodeSessionBrowserLauncher', () => {
     should(await new BrowserProfileStore(root).acquire({ sessionId: 'again' })).have.property('sessionId', 'again');
   });
 
+  it.if(process.platform === 'linux')(
+    'should refuse a debugging port another program took before Chrome could, and never ask it anything',
+    async () => {
+      // Arrange: the port handed to Chrome is already held — the squatter that used to win the freePort race.
+      const asked: string[] = [];
+      const squatter = Bun.serve({
+        hostname: '127.0.0.1',
+        port: 0,
+        fetch: request => {
+          asked.push(new URL(request.url).pathname);
+          return Response.json({});
+        },
+      });
+      const port = squatter.port as number;
+      const chrome = await fakeChrome();
+      const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
+      roots.push(root);
+      const launcher = new NodeSessionBrowserLauncher(
+        new BrowserProfileStore(root),
+        INJECTED_WORKER,
+        process.execPath,
+        environment(chrome),
+        async () => {
+          throw new Error('the worker must not be reached');
+        },
+        { ...PORT, cdpPort: async () => port },
+      );
+
+      try {
+        // Act + Assert
+        await should(launcher.launch({ width: 800, height: 600 })).be.rejectedWith(
+          `port ${String(port)} is held by another program (uid ${String(process.getuid?.())}), not this browser — someone may be squatting it; pick another port base or free it`,
+        );
+        should(asked).deepEqual([]);
+        should(await new BrowserProfileStore(root).acquire({ sessionId: 'again' })).have.property('sessionId', 'again');
+      } finally {
+        await squatter.stop(true);
+      }
+    },
+  );
+
   it("should use the port when the machine's transport cannot be read: the pipe is only ever chosen", async () => {
     const chrome = await fakeChrome({ recordArguments: true });
     const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));

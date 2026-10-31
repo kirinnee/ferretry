@@ -8,6 +8,7 @@ import {
   defaultCdpTransport,
   honestChromeUserAgent,
   BrowserControlError,
+  listenerHeldRefusal,
   type BrowserProfilePort,
   browserEnvironment,
   selectChromeExecutable,
@@ -15,6 +16,7 @@ import {
 import { browserProxyStatus, proxyEndpoint, type ResolvedBrowserProxy } from '../../../lib/browser/proxy/index.ts';
 import type { BrowserSessionLauncher, BrowserWorkerProgram } from '../../../lib/browser/runtime/index.ts';
 import { type BrowserAutomation, CDP_PIPE_ENDPOINT } from '../../../lib/browser/transport/index.ts';
+import { type ListenerProverPort, ProcListenerProver } from '../control/listener-prover.ts';
 import type { BrowserDisplayPort } from '../control/login-runtime.ts';
 import { ProxySignInRelay } from '../proxy/sign-in-relay.ts';
 import { BrowserWorkerClient, type CdpPipeEnds, type WorkerClientOptions } from '../transport/worker-client.ts';
@@ -30,7 +32,10 @@ import { BrowserWorkerClient, type CdpPipeEnds, type WorkerClientOptions } from 
  * (`CDP_PIPE_SWITCH`) Chrome is spawned with its fds 3 and 4 wired, the daemon's ends become the worker's
  * fds 3 and 4, and the daemon then closes its own copies: nothing on this host — another account included —
  * has an address to drive the owner's signed-in profile through, and there is no free-port probe for anyone
- * to race. Over a PORT, Chrome listens on loopback and the worker connects to it once it answers. Either
+ * to race. Over a PORT, Chrome listens on loopback and the worker connects to it once it answers — and only
+ * once the kernel shows the listener is THIS Chrome's own socket (`lib/browser/control/listener-proof.ts`):
+ * the port is picked free and released before Chrome binds it, and a squatter who took it in between would
+ * otherwise be the endpoint the worker drives. Either
  * way the daemon spawns Chrome itself, so it holds the real child: the pid on the lease, the exit it waits
  * on and the process it reaps are Chrome's own. A worker that dies takes the pipe's only other end with it;
  * Chrome reads end-of-file and quits, and the browser is torn down and started fresh on the next need
@@ -61,6 +66,10 @@ export interface SessionBrowserModeOptions {
    * unreadable, means the default (`defaultCdpTransport`): the port. The pipe runs only when this names it.
    */
   readonly transport?: () => Promise<CdpTransport>;
+  /** The DevTools port a PORT-transport Chrome is told to take. Defaults to a free one the kernel picks. */
+  readonly cdpPort?: () => Promise<number>;
+  /** Proves the listener on that port is the spawned Chrome's. Defaults to this host's `/proc`. */
+  readonly listenerProver?: ListenerProverPort;
   readonly platform?: NodeJS.Platform;
   /** The daemon-owned directory the worker stages downloads and PDFs in (the file tools read them from here). */
   readonly stageDirectory?: string;
@@ -100,7 +109,8 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
     let relay: ProxySignInRelay | undefined;
     let pipe: CdpPipeEnds | undefined;
     try {
-      const cdp: CdpEndpoint = transport === 'pipe' ? { kind: 'pipe' } : { kind: 'port', port: await freePort() };
+      const cdp: CdpEndpoint =
+        transport === 'pipe' ? { kind: 'pipe' } : { kind: 'port', port: await (this.modes.cdpPort ?? freePort)() };
       if (proxy?.credentials !== undefined) {
         relay = await ProxySignInRelay.start(proxyEndpoint(proxy.setting.url), proxy.credentials);
       }
@@ -139,7 +149,15 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
       // Recorded BEFORE anything else can fail: from here on, the Chrome holding the profile is this pid.
       await lease.updateChromePid(chrome.pid, version);
       const endpoint = cdp.kind === 'pipe' ? CDP_PIPE_ENDPOINT : `http://127.0.0.1:${cdp.port}`;
-      if (cdp.kind === 'port') await waitForCdp(endpoint, chrome, diagnostics);
+      if (cdp.kind === 'port') {
+        await waitForCdp(
+          endpoint,
+          cdp.port,
+          chrome,
+          diagnostics,
+          this.modes.listenerProver ?? new ProcListenerProver(),
+        );
+      }
       let worker: BrowserWorkerClient;
       try {
         worker = await this.connectWorker({
@@ -365,18 +383,29 @@ async function freePort(): Promise<number> {
     });
   });
 }
+/**
+ * Waits for Chrome's debugging endpoint — asking it for `/json/version` only once the kernel shows the listener
+ * on its port is this Chrome's own socket, so nothing is ever sent to a program that took the port first. A
+ * listener that is not Chrome's refuses at once: Chrome cannot bind a port somebody holds, so waiting longer
+ * would only report a timeout instead of the squatter. A host that cannot prove (macOS) asks as it always did.
+ */
 async function waitForCdp(
   endpoint: string,
+  port: number,
   chrome: ReturnType<typeof Bun.spawn>,
   diagnostics: () => string,
+  prover: ListenerProverPort,
 ): Promise<void> {
   const deadline = Date.now() + 20_000;
   let exited = false;
   while (Date.now() < deadline) {
+    const proof = await prover.prove(port, chrome.pid);
+    if (proof.kind === 'foreign') throw new BrowserControlError('launch_failed', listenerHeldRefusal(port, proof.uid));
     if (
-      await fetch(`${endpoint}/json/version`)
+      proof.kind !== 'absent' &&
+      (await fetch(`${endpoint}/json/version`)
         .then(response => response.ok)
-        .catch(() => false)
+        .catch(() => false))
     )
       return;
     exited = await Promise.race([chrome.exited.then(() => true), Bun.sleep(100).then(() => false)]);

@@ -1,13 +1,12 @@
 import { readFile } from 'node:fs/promises';
+import { PROC_TCP_TABLES } from '@ferretry/protocol';
 import { daemonUrlPort, foreignListenerRefusal, listenerOwnerVerdict } from '../../lib/daemon/listener-owner.ts';
-
-const TCP_TABLES = ['/proc/net/tcp', '/proc/net/tcp6'] as const;
 
 /** The kernel's socket tables, or `undefined` on a host that publishes none (macOS). */
 export async function procTcpTables(
   read: (path: string) => Promise<string> = path => readFile(path, 'utf8'),
 ): Promise<readonly string[] | undefined> {
-  const tables = await Promise.all(TCP_TABLES.map(path => read(path).catch(() => undefined)));
+  const tables = await Promise.all(PROC_TCP_TABLES.map(path => read(path).catch(() => undefined)));
   const present = tables.filter((table): table is string => table !== undefined);
   return present.length === 0 ? undefined : present;
 }

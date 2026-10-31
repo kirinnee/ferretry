@@ -1,11 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  daemonUrlPort,
-  foreignListenerRefusal,
-  listenerOwnerVerdict,
-  parseTcpListeners,
-} from '../../../src/lib/daemon/listener-owner.ts';
+import { daemonUrlPort, foreignListenerRefusal, listenerOwnerVerdict } from '../../../src/lib/daemon/listener-owner.ts';
 
 const HEADER = '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode';
 
@@ -20,44 +15,11 @@ const table = (...rows: readonly string[]): string => [HEADER, ...rows].join('\n
 const LOOPBACK_V4 = '0100007F'; // 127.0.0.1
 const WILDCARD_V4 = '00000000';
 const LAN_V4 = '0500000A'; // 10.0.0.5
-const LOOPBACK_V6 = '00000000000000000000000001000000'; // ::1
-const MAPPED_LOOPBACK_V6 = '0000000000000000FFFF00000100007F'; // ::ffff:127.0.0.1
 
 const OWNER = 1_001;
 const STRANGER = 1_002;
 
 describe('whose program holds a loopback port', () => {
-  it('should read listening sockets, their port, owner and whether loopback reaches them', () => {
-    // Arrange
-    const text = table(
-      row(LOOPBACK_V4, 7_432, OWNER),
-      row(WILDCARD_V4, 22, 0),
-      row(LAN_V4, 8_080, STRANGER),
-      row(LOOPBACK_V4, 40_000, STRANGER, '01'), // an established connection, not a listener
-    );
-
-    // Act
-    const actual = parseTcpListeners(text);
-
-    // Assert
-    should(actual).deepEqual([
-      { port: 7_432, reachableFromLoopback: true, uid: OWNER },
-      { port: 22, reachableFromLoopback: true, uid: 0 },
-      { port: 8_080, reachableFromLoopback: false, uid: STRANGER },
-    ]);
-  });
-
-  it('should judge v6 loopback, mapped v4 loopback and the v6 wildcard as reachable', () => {
-    const actual = parseTcpListeners(
-      table(row(LOOPBACK_V6, 1, OWNER), row(MAPPED_LOOPBACK_V6, 2, OWNER), row('0'.repeat(32), 3, OWNER)),
-    );
-    should(actual.map(listener => listener.reachableFromLoopback)).deepEqual([true, true, true]);
-  });
-
-  it('should skip a line that is not the table’s shape rather than guess', () => {
-    should(parseTcpListeners(`${HEADER}\n   0: garbage\n\n`)).deepEqual([]);
-  });
-
   it('should refuse a port another user is listening on — the squatted-daemon case', () => {
     // Arrange: the owner's daemon recorded 7432 and is down; a stranger bound it.
     const tables = [table(row(LOOPBACK_V4, 7_432, STRANGER))];
