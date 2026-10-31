@@ -1590,6 +1590,7 @@ export function SessionChatPage({
               daemonId={connection.daemonId}
               entries={entries}
               liveInRow={agenda.hostsLive}
+              jumpHost={agenda.jumpHost}
               {...(onRetry === undefined ? {} : { onRetry })}
               {...(onCancel === undefined ? {} : { onCancel })}
               {...(onSubmit === undefined ? {} : { onSubmit })}

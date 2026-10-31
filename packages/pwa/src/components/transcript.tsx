@@ -46,6 +46,8 @@ export interface TranscriptProps {
   readonly agentName?: string;
   /** The live line is drawn elsewhere (beside the agenda pill above the composer), so not at the foot of the log. */
   readonly liveInRow?: boolean;
+  /** The agenda row's slot for the Jump-to-latest pill (`AgendaLine`): with it the transcript keeps no pill row. */
+  readonly jumpHost?: HTMLElement | null;
   /**
    * Bumped to put the reader back at the tail and re-engage follow — the reader just SENT something,
    * so they want to watch the reply arrive even if they had scrolled up to re-read while composing.
@@ -109,6 +111,7 @@ export function Transcript({
   live = null,
   agentName,
   liveInRow = false,
+  jumpHost = null,
   pinSignal = 0,
   readingPosition,
   history,
@@ -234,7 +237,7 @@ export function Transcript({
         </div>
       </div>
       {quote.menu}
-      <JumpToLatest count={newCount} onJump={jumpToLatest} shown={jumpShown} />
+      <JumpToLatest count={newCount} host={jumpHost} onJump={jumpToLatest} shown={jumpShown} />
     </section>
   );
 }

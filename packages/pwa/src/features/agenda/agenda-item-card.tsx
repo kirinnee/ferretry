@@ -20,6 +20,7 @@
 import { type AgendaCardAnswer, type AgendaItem, type AgendaTerm, singleAgendaQuestion } from '@ferretry/protocol';
 import { Check } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { optionAction } from '../../lib/agenda-answers.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import { DISMISS_ACTION, type InboxAction, swipeMap } from '../../lib/agenda-inbox.ts';
@@ -60,6 +61,11 @@ export interface AgendaItemCardProps {
    * the composer when it is empty. Absent: the card says to type the changes there instead.
    */
   readonly onRequestChanges?: ((answer: AgendaCardAnswer) => void) | undefined;
+  /**
+   * Where a one-row answer (choice, approval, to-do, notice, review) is drawn instead of at the card's foot: the open
+   * item's sticky dock, so the buttons stay in reach while a long card scrolls. Absent: the row ends the card.
+   */
+  readonly answerDock?: HTMLElement | null | undefined;
 }
 
 /** The detail without its premise: the daemon also writes a confirmed change into it for older apps. */
@@ -250,6 +256,7 @@ export function AgendaItemCard({
   inputForm,
   planForm,
   onRequestChanges,
+  answerDock,
 }: AgendaItemCardProps) {
   const count = versionCount(current);
   // `null` follows the latest version, so an edit that lands while the card is open shows at once.
@@ -317,6 +324,29 @@ export function AgendaItemCard({
     answerable && onRequestChanges !== undefined && model.requestChanges !== undefined
       ? { answer: model.requestChanges, onTap: () => onRequestChanges(model.requestChanges as AgendaCardAnswer) }
       : undefined;
+  const replies = (
+    <AgendaQuickReplies
+      busy={busy}
+      error={error}
+      map={swipeMap(item)}
+      model={model}
+      onAct={onAct}
+      options={options}
+      swipeable={swipeable}
+      {...(canDismiss ? { onDown: dismiss } : {})}
+      {...(doneClose === undefined ? {} : { doneClose })}
+      {...(item.waitingOn === 'ferret' && !model.notice ? { waitingOn: ferret } : {})}
+      {...(requestChanges === undefined ? {} : { requestChanges })}
+    />
+  );
+  // Only a row of buttons docks; a card answered in words has none, and its note or error stays in the card.
+  const docked =
+    answerDock != null &&
+    latest &&
+    settled === undefined &&
+    !isInput &&
+    planForm === undefined &&
+    (model.notice || model.answers.length > 0 || requestChanges !== undefined);
 
   return (
     <article
@@ -481,21 +511,10 @@ export function AgendaItemCard({
         <div className="fy-card__input" data-agenda-plan-form="">
           {planForm}
         </div>
-      ) : (
-        <AgendaQuickReplies
-          busy={busy}
-          error={error}
-          map={swipeMap(item)}
-          model={model}
-          onAct={onAct}
-          options={options}
-          swipeable={swipeable}
-          {...(canDismiss ? { onDown: dismiss } : {})}
-          {...(doneClose === undefined ? {} : { doneClose })}
-          {...(item.waitingOn === 'ferret' && !model.notice ? { waitingOn: ferret } : {})}
-          {...(requestChanges === undefined ? {} : { requestChanges })}
-        />
+      ) : docked ? null : (
+        replies
       )}
+      {docked ? createPortal(replies, answerDock) : null}
     </article>
   );
 }
