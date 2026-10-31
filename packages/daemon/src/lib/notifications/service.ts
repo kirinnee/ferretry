@@ -8,6 +8,7 @@ import {
   notificationKey,
   pingNotificationPayload,
   type SessionNotificationPayload,
+  stopShows,
   stoppedNotificationPayload,
   wokeNotificationPayload,
 } from './policy.ts';
@@ -89,7 +90,7 @@ export class NotificationService implements AgendaRaisedObserver {
       { sessionId, agendaId: first.id, stoppedAt },
       first,
       session => stoppedNotificationPayload(sessionId, session.name, [first, ...rest], snapshot),
-      [first, ...rest],
+      stopShows([first, ...rest]),
     );
   }
 
@@ -116,20 +117,20 @@ export class NotificationService implements AgendaRaisedObserver {
   }
 
   /**
-   * The first of these items whose push must be high priority (a one-time code waiting), or nothing. A stop counts
-   * every item waiting on the owner: a code among them expires whichever item the push opens.
+   * The item a push SHOWS, when its push must be high priority (a one-time code card), or nothing. Only the item the
+   * push shows decides, so a code card waiting behind another item never makes that item's push loud.
    */
-  private urgentOf(sessionId: string, items: readonly AgendaItem[]): AgendaItem | undefined {
+  private urgentOf(sessionId: string, shown: AgendaItem): AgendaItem | undefined {
     const subjectOf = this.options.subjectOf;
     if (subjectOf === undefined) return undefined;
-    return items.find(item => pushUrgencyFor(subjectOf(sessionId, item)) === 'high');
+    return pushUrgencyFor(subjectOf(sessionId, shown)) === 'high' ? shown : undefined;
   }
 
   private async announce(
     identity: NotificationIdentity,
     item: AgendaItem,
     compose: (session: NotificationSessionFacts) => SessionNotificationPayload,
-    items: readonly AgendaItem[] = [item],
+    shown: AgendaItem = item,
   ): Promise<void> {
     const { sessionId } = identity;
     const key = notificationKey(identity);
@@ -140,7 +141,7 @@ export class NotificationService implements AgendaRaisedObserver {
         if (session === undefined) return;
         const composed = compose(session);
         // A high push gets its own tag (one per card), so the platform sounds it again rather than folding it in silently.
-        const urgent = this.urgentOf(sessionId, items);
+        const urgent = this.urgentOf(sessionId, shown);
         const payload: SessionNotificationPayload =
           urgent === undefined ? composed : { ...composed, urgency: 'high', tag: `${composed.tag}:${urgent.id}` };
         const enrolled = (await this.options.push.list()).length;

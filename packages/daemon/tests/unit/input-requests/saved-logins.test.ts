@@ -41,6 +41,14 @@ const sudoFacts = (comm = 'sudo', argv = 'sudo -v'): InputTargetFacts => ({
   recognisedConsumer: true,
 });
 
+/** A one-time code prompt that shows what is typed, so a `code` card stays a code (a password prompt would not). */
+const otpFacts = (): InputTargetFacts =>
+  ({
+    ...sudoFacts('ssh', 'ssh bastion'),
+    echo: 'on',
+    promptLine: 'Verification code:',
+  }) as InputTargetFacts;
+
 const RAISE: InputRaise = {
   target: { kind: 'terminal', key: 'dev' },
   prompt: 'sudo wants your password',
@@ -469,9 +477,9 @@ describe('the next time: the card offers the saved login, and the owner taps Use
     should(sunk).not.containEql(code);
   });
 
-  it('should never hand back a code it made for a `code` card: masked from reads, in no result, route or sink', async () => {
+  it('should never RETURN a code it made for a `code` card: in no result, route or sink, and masked from text reads', async () => {
     // Arrange — the approved pick: a daemon-made TOTP code is typed only into the observed field, never returned.
-    const h = harness();
+    const h = harness({ facts: otpFacts() });
     await h.directory.put(
       'GITHUB',
       PutLoginEntryRequestSchema.parse({ label: 'GitHub', totp: { seed: SEED }, totpAcknowledged: true }),
@@ -501,7 +509,7 @@ describe('the next time: the card offers the saved login, and the owner taps Use
 
   it('should leave a code the OWNER typed unmasked: it is not secret', async () => {
     // Arrange
-    const h = harness();
+    const h = harness({ facts: otpFacts() });
     const { request } = await raised(h, { ...RAISE, sensitivity: 'code' });
 
     // Act

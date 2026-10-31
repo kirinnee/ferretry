@@ -119,8 +119,10 @@ export type InputDeliveryId = z.infer<typeof InputDeliveryIdSchema>;
  * - `private`: a value that is not one-time but shows on screen as it is typed (rare). Masked from reads for a
  *   window, and the target is kept from the ferret for the full lock.
  * - `code`: a one-time code (2FA, an e-mail or SMS verification code, a device code). NOT secret: the ferret may see
- *   it, and may type one itself. No lock and no masking, except a code the DAEMON made from a saved 2FA seed, which
- *   is masked from reads so no tool ever hands it back (docs/input-requests.md, "Sensitivity").
+ *   it, and may type one itself. No lock and no masking, except a code the DAEMON made from a saved 2FA seed: no tool,
+ *   result or route RETURNS it, and its text is masked from text reads; the ferret may still see it on screen (a
+ *   screenshot, a scripted read), as the owner allowed (docs/input-requests.md, "One-time codes").
+ * - A `code` field the daemon sees going into a password field or prompt is handled as `secret` instead.
  * - `plain`: nothing sensitive (a username, a hostname, "y"). Only the target binding is checked.
  */
 export const INPUT_SENSITIVITIES = ['secret', 'private', 'code', 'plain'] as const;

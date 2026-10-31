@@ -98,8 +98,8 @@ and accented look-alikes (`agendaNotificationTitle`). Every other title is as wr
 ### High priority
 
 The owner asked for it: a push about a **one-time code** waiting on an input card (sensitivity `code`,
-[input requests](input-requests.md#one-time-codes-code)) is high priority. That is a stop with a code card among the
-items waiting, or a code card's deadline. One rule decides it, `pushUrgencyFor` (`packages/protocol/src/lib/push.ts`):
+[input requests](input-requests.md#one-time-codes-code)) is high priority: only a push that SHOWS the code card, its own
+push at raise or a stop whose shown item is the card (a code card waiting behind another item does not make that item loud). One rule decides it, `pushUrgencyFor` (`packages/protocol/src/lib/push.ts`):
 `one-time-code` is high, everything else normal. The approve-on-phone card joins it by adding its subject there.
 
 What a high push does, and who honours it:

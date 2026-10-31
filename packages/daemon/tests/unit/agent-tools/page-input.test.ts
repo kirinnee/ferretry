@@ -151,16 +151,24 @@ describe('a page the owner was asked about', () => {
     should(error.message).containEql('an input request is pending on %browser:app');
   });
 
-  it('should let the agent type into a page whose only card asks for a one-time code: it may type a code itself', async () => {
-    // Arrange — the ferret asked the owner for a code, then read it from an inbox it has.
+  /** A page with one card raised on it: its fields by id (`email` is a text field, `password` a password field). */
+  const carded = async (fields: readonly { id: string; sensitivity: 'secret' | 'code' | 'plain' }[]) => {
     const built = world();
     await built.tools.service.call(agent, { tool: 'browser.open', name: 'app' });
     await built.tools.service.call(agent, {
       tool: 'browser.request_input',
       name: 'app',
       prompt: 'the code GitHub sent',
-      fields: [{ id: 'code', label: 'Code', sensitivity: 'code', ref: 'e12' }],
+      fields: fields.map(field => ({ ...field, selector: `#${field.id}` })),
     });
+    return built;
+  };
+  const typing = async (built: Awaited<ReturnType<typeof carded>>) =>
+    await refusal(built.tools.service.call(agent, { tool: 'browser.type', name: 'app', ref: 'e12', text: '481516' }));
+
+  it('should let the agent type into a page whose only card asks for a one-time code: it may type a code itself', async () => {
+    // Arrange — the ferret asked the owner for a code, then read it from an inbox it has.
+    const built = await carded([{ id: 'email', sensitivity: 'code' }]);
 
     // Act
     const typed = await built.tools.service.call(agent, {
@@ -172,8 +180,65 @@ describe('a page the owner was asked about', () => {
 
     // Assert — nothing refused it, and the card is still there for the owner or input.wait.
     should(typed.summary).not.containEql('pending');
-    should((await built.service.list(HOST))[0]?.state).equal('pending');
+    should((await built.service.list(HOST))[0]).containDeep({ state: 'pending', sensitivity: 'code' });
   });
+
+  it('should still refuse a script, a key press or a form fill while a code card waits: only typing goes past it', async () => {
+    // Arrange
+    const built = await carded([{ id: 'email', sensitivity: 'code' }]);
+
+    // Act
+    const refusals = [
+      await refusal(built.tools.service.call(agent, { tool: 'browser.eval', name: 'app', function: '() => 1' })),
+      await refusal(built.tools.service.call(agent, { tool: 'browser.press', name: 'app', keys: ['Enter'] })),
+      await refusal(
+        built.tools.service.call(agent, {
+          tool: 'browser.fill_form',
+          name: 'app',
+          fields: [{ ref: 'e12', text: '1' }],
+        }),
+      ),
+    ];
+
+    // Assert
+    for (const error of refusals) should(error.message).containEql('an input request is pending on %browser:app');
+  });
+
+  it('should keep the agent from typing while a card mixes a code with a plain value or a secret', async () => {
+    // Act
+    const plain = await typing(
+      await carded([
+        { id: 'email', sensitivity: 'plain' },
+        { id: 'otp', sensitivity: 'code' },
+      ]),
+    );
+    const secret = await typing(
+      await carded([
+        { id: 'password', sensitivity: 'secret' },
+        { id: 'otp', sensitivity: 'code' },
+      ]),
+    );
+
+    // Assert
+    should(plain.message).containEql('an input request is pending on %browser:app');
+    should(secret.message).containEql('an input request is pending on %browser:app');
+  });
+
+  it('should handle a code aimed at a password field as a secret: hidden, held and blocking the agent', async () => {
+    // Arrange — the ferret called the page's password field a code.
+    const built = await carded([{ id: 'password', sensitivity: 'code' }]);
+    const [request] = await built.service.list(HOST);
+
+    // Act
+    const error = await typing(built);
+
+    // Assert
+    should(request?.sensitivity).equal('secret');
+    should(request?.fields[0]?.risk?.reason).equal('Treated as a secret: this is a password field.');
+    should(request?.lock).not.be.undefined();
+    should(error.message).containEql('an input request is pending on %browser:app');
+  });
+
   it('should refuse a page script while the request waits: a script can fill the field as well as type can', async () => {
     const { tools } = await delivered();
 

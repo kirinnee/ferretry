@@ -90,8 +90,8 @@ export interface AgentInputPort {
   /** Waits up to `waitMs` for the request to reach a final state, then says where it stands. */
   agentView(sessionId: string, id: AgendaId, waitMs: number): Promise<InputAgentView>;
   /**
-   * The card of a request pending on this surface, if any. With `typing`, a card of one-time codes only is left out:
-   * the agent may type a code itself, so such a card never keeps it off the surface.
+   * The card of a request pending on this surface, if any. With `typing` (terminal.send and browser.type only), a card
+   * of one-time codes only is left out: the agent may type a code itself, so such a card does not keep it from typing.
    */
   pendingOn(
     sessionId: string,

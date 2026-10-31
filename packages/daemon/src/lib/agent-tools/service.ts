@@ -1199,7 +1199,9 @@ export class AgentToolService {
     if (input !== undefined && PAGE_TYPING.has(tool)) {
       const pending = [surface.name, surface.id]
         .filter((key): key is string => key !== undefined)
-        .map(key => input.pendingOn(caller.sessionId, { kind: 'browser', key }, { typing: true }))
+        // Only typing itself (browser.type) goes past a card of one-time codes: a script, a key press or a form fill
+        // still waits, so nothing can watch or re-target the field the owner was asked about.
+        .map(key => input.pendingOn(caller.sessionId, { kind: 'browser', key }, { typing: tool === 'browser.type' }))
         .find(id => id !== undefined);
       if (pending !== undefined)
         throw new AgentToolError(

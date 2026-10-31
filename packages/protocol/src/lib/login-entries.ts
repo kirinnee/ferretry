@@ -25,8 +25,8 @@ import { MIN_SECRET_VALUE_LENGTH, SecretNameSchema, SecretStoreHealthSchema } fr
  *   username is typed where the ferret can see it anyway.
  * - `password`: SECRET. Sealed in the daemon's vault; no route, command or API returns it.
  * - `totp`: SECRET, OPT-IN. A 2FA seed, sealed the same way. The daemon makes the current code inside the
- *   use boundary and types it into a `code` (or `private`) field, masked from reads; neither the seed nor the code is
- *   ever returned.
+ *   use boundary and types it into a `code` (or `private`) field; neither the seed nor the code is ever returned (the
+ *   code's text is masked from text reads, but the ferret may see it on screen).
  *
  * ## THE SAME RULE AS EVERY OTHER SECRET: USE, NEVER READ
  *

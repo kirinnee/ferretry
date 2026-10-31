@@ -526,16 +526,29 @@ describe('NotificationService high priority', () => {
   const codeCard = (_session: string, candidate: { readonly id: string }) =>
     candidate.id === 'A2' ? ('one-time-code' as const) : ('other' as const);
 
-  it('should push a stop with a one-time code waiting at high priority, under a tag of its own', async () => {
-    // Arrange
-    const world = fixture({ subjectOf: codeCard });
+  it('should push a stop at high priority only when the item it shows is the code card', async () => {
+    // Arrange — the code card A2 blocks, so the stop shows it; in the other stop A1 is shown and A2 only waits.
+    const shown = fixture({ subjectOf: codeCard });
+    const behind = fixture({ subjectOf: codeCard });
+    const blockingCode = AgendaItemSchema.parse({ ...second, blockingNow: true });
 
     // Act
-    await world.service.stopped(SESSION, AT, twoWaiting);
+    await shown.service.stopped(
+      SESSION,
+      AT,
+      AgendaSnapshotSchema.parse({ ...twoWaiting, items: [item, blockingCode] }),
+    );
+    await behind.service.stopped(SESSION, AT, twoWaiting);
 
-    // Assert
-    should(world.push.dispatches[0]?.urgency).equal('high');
-    should(world.push.dispatches[0]?.payload).containDeep({ urgency: 'high', tag: `attention-${SESSION}:A2` });
+    // Assert — a throwaway code card cannot make every other push loud.
+    should(shown.push.dispatches[0]?.urgency).equal('high');
+    should(shown.push.dispatches[0]?.payload).containDeep({
+      urgency: 'high',
+      tag: `attention-${SESSION}:A2`,
+      url: `/session/${SESSION}?attention=A2`,
+    });
+    should(behind.push.dispatches[0]?.urgency).be.undefined();
+    should(behind.push.dispatches[0]?.payload).not.have.property('urgency');
   });
 
   it('should push everything else as before: no urgency, the shared tag', async () => {

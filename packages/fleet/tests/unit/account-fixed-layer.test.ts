@@ -903,7 +903,8 @@ describe('AGENT_TOOLS_INSTRUCTION — one-time codes', () => {
     const text = AGENT_TOOLS_INSTRUCTION;
 
     // Assert — the old "private" rule for a code is gone; the place rule is what stops a relayed code.
-    should(text).containEql('code for a 2FA or email code: you see both.');
+    should(text).containEql('code for a 2FA/email code: you see both.');
+    should(text).containEql('terminal_send is blocked until answered (not for a code)');
     should(text).containEql('Or read it from an inbox you have; type it only on its sign-in page.');
     should(text).not.containEql('An echoing 2FA code: private.');
   });

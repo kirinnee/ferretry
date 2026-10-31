@@ -6,6 +6,7 @@ import {
   type LockContext,
   lockFor,
   longerLock,
+  passwordTarget,
   pageFieldsQualify,
   probeable,
   provenByFacts,
@@ -224,5 +225,33 @@ describe('a one-time code (`code`)', () => {
       seconds: 120,
       reason: 'code',
     });
+  });
+});
+
+describe('a password target (a `code` aimed at one is handled as a secret)', () => {
+  it('should see a password field by its type or its autocomplete, and not a code field', () => {
+    // Act / Assert
+    should(passwordTarget(page(), 'password')).be.true();
+    should(
+      passwordTarget(page([pageField({}, { type: 'text', autocomplete: 'current-password' })]), 'password'),
+    ).be.true();
+    should(
+      passwordTarget(page([pageField({}, { type: 'text', autocomplete: 'section-a new-password' })]), 'password'),
+    ).be.true();
+    should(
+      passwordTarget(page([pageField({}, { type: 'text', autocomplete: 'one-time-code' })]), 'password'),
+    ).be.false();
+    should(passwordTarget(page(), 'missing')).be.false();
+  });
+
+  it('should see a password prompt by its program, hidden typing or wording, and not an echoing code prompt', () => {
+    // Arrange
+    const otp = sudo({ echo: 'on', promptLine: 'Verification code:' }, 'ssh');
+
+    // Act / Assert
+    should(passwordTarget(sudo(), 'value')).be.true();
+    should(passwordTarget(sudo({ echo: 'on', promptLine: '[sudo] password for kirin:' }, 'bash'), 'value')).be.true();
+    should(passwordTarget(sudo({ echo: 'off', promptLine: 'Verification code:' }, 'ssh'), 'value')).be.true();
+    should(passwordTarget(otp, 'value')).be.false();
   });
 });

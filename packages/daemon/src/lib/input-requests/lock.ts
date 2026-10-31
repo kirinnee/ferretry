@@ -90,6 +90,28 @@ export function provenByFacts(
  */
 const GETPASS_PROGRAMS: ReadonlySet<string> = new Set(['sudo', 'sudoedit', 'su', 'doas', 'passwd']);
 
+/**
+ * Whether the DAEMON saw a password where a field goes: a page field that is `type=password` or whose autocomplete
+ * says `current-password` / `new-password`; a terminal running a getpass program (sudo, su, doas, passwd), reading
+ * with echo off, or whose prompt line asks for a password or passphrase. A one-time `code` aimed at one is handled
+ * as a `secret` (service.ts, `observedAs`): the ferret's word "code" never makes a password visible to it.
+ */
+export function passwordTarget(facts: InputTargetFacts, fieldId: string): boolean {
+  if (facts.kind === 'terminal')
+    return (
+      facts.echo === 'off' ||
+      GETPASS_PROGRAMS.has(facts.foreground.comm) ||
+      /pass(?:word|phrase)/iu.test(facts.promptLine)
+    );
+  if (facts.kind !== 'browser') return false;
+  const found = facts.fields.find(field => field.fieldId === fieldId);
+  if (found === undefined) return false;
+  return (
+    found.field.type?.toLowerCase() === 'password' ||
+    /(?:^|\s)(?:current|new)-password(?:\s|$)/iu.test(found.field.autocomplete ?? '')
+  );
+}
+
 /** A terminal proven to hide typing: a local password prompt, from a setuid-root program the ferret could not have placed. */
 export function terminalHides(facts: InputTargetFacts): boolean {
   return (
