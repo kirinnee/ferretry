@@ -1,11 +1,11 @@
 import { afterEach, describe, it } from 'bun:test';
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import should from 'should';
-import { BrowserControlError, BrowserProfileBusyError } from '../../../../src/lib/index.ts';
 import { BrowserProfileStore } from '../../../../src/adapters/index.ts';
+import { BrowserControlError, BrowserProfileBusyError } from '../../../../src/lib/index.ts';
 
 const roots: string[] = [];
 
@@ -23,6 +23,73 @@ async function profile(alive: (pid: number) => boolean = () => false): Promise<B
 afterEach(async () => await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))));
 
 describe('BrowserProfileStore', () => {
+  it('should turn password saving off in the profile on every lease, keeping its other preferences', async () => {
+    // Arrange — a profile made before this rule, with its own preferences and saving switched on.
+    const subject = await profile();
+    const preferences = path.join(subject.browserDirectory, 'profile', 'Default', 'Preferences');
+    await mkdir(path.dirname(preferences), { recursive: true });
+    await writeFile(
+      preferences,
+      JSON.stringify({
+        credentials_enable_service: true,
+        profile: { password_manager_enabled: true, name: 'x' },
+        kept: 1,
+      }),
+    );
+
+    // Act
+    const lease = await subject.acquire({ sessionId: 'first' });
+
+    // Assert
+    should(JSON.parse(await readFile(preferences, 'utf8'))).eql({
+      credentials_enable_service: false,
+      credentials_enable_autosignin: false,
+      profile: { password_manager_enabled: false, name: 'x' },
+      kept: 1,
+    });
+    await lease.release();
+  });
+
+  it('should write a fresh preferences file for a new profile and over one that does not parse', async () => {
+    // Arrange
+    const fresh = await profile();
+    const damaged = await profile();
+    const damagedFile = path.join(damaged.browserDirectory, 'profile', 'Default', 'Preferences');
+    await mkdir(path.dirname(damagedFile), { recursive: true });
+    await writeFile(damagedFile, '{ not json');
+
+    // Act
+    await (await fresh.acquire({ sessionId: 'first' })).release();
+    await (await damaged.acquire({ sessionId: 'first' })).release();
+
+    // Assert
+    for (const file of [path.join(fresh.browserDirectory, 'profile', 'Default', 'Preferences'), damagedFile])
+      should(JSON.parse(await readFile(file, 'utf8'))).match({
+        credentials_enable_service: false,
+        profile: { password_manager_enabled: false },
+      });
+  });
+
+  it('should refuse the lease, and leave none behind, when password saving cannot be turned off', async () => {
+    // Arrange — the preferences file's place is taken by a directory, so it cannot be written.
+    const subject = await profile();
+    await mkdir(path.join(subject.browserDirectory, 'profile', 'Default', 'Preferences'), { recursive: true });
+
+    // Act
+    let refused: unknown;
+    try {
+      await subject.acquire({ sessionId: 'first' });
+    } catch (error) {
+      refused = error;
+    }
+
+    // Assert
+    should(refused).instanceOf(BrowserControlError);
+    should((refused as Error).message).containEql('could not turn off password saving');
+    await rm(path.join(subject.browserDirectory, 'profile', 'Default', 'Preferences'), { recursive: true });
+    await (await subject.acquire({ sessionId: 'again' })).release();
+  });
+
   it('should lease a private profile, record explicit priming, and protect against Chrome downgrades', async () => {
     // Arrange
     const subject = await profile();

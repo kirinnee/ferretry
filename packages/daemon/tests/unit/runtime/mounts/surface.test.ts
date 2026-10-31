@@ -684,6 +684,9 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     closePage: async () => {
       throw new Error('not exercised by the surface inventory');
     },
+    inputOnPage: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
     lifecycleOnPage: async () => {
       throw new Error('not exercised by the surface inventory');
     },
@@ -888,7 +891,7 @@ describe('the mounted daemon surface', () => {
       3 + // the skills inventory: the machine listing, one session's listing, and the Open read of a listed SKILL.md
       3 + // a ferret's processes: the list, one process's output, and Stop
       3 + // the board's projects: the list, one project's lanes, and a propose, edit or confirm of them
-      6 + // the owner's input requests: the two lists, deliver or cancel one, and the quarantine list and its end (docs/input-requests.md)
+      7 + // the owner's input requests: the two lists, a page request's picture, deliver or cancel one, and the quarantine list and its end (docs/input-requests.md)
       4 + // saved logins: the list, put, rename and delete (docs/input-requests.md#saved-logins)
       6 + // secure copy: a session's copies, the rules (list, add, remove), the paste plans and an answer to one (docs/secure-copy.md)
       2; // the board's legacy import: the old-reference lookup, and the one-time import (owner only)
@@ -1160,6 +1163,7 @@ describe('the mounted daemon surface', () => {
       // The owner's input requests: the lists, then deliver and cancel (the agent raises through its own tools route).
       'GET /v1/input-requests',
       'GET /v1/sessions/:sessionId/input-requests',
+      'GET /v1/sessions/:sessionId/input-requests/:requestId/shot',
       'POST /v1/sessions/:sessionId/input-requests/:requestId/deliver',
       'GET /v1/sessions/:sessionId/input-quarantines',
       'POST /v1/sessions/:sessionId/input-quarantines/:key/end',

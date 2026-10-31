@@ -31,6 +31,8 @@ class Tabs {
   castFailure: Error | undefined;
   /** A dialog the worker reports on the page of every result, as a worker with a dialog open does. */
   dialog: { type: 'alert' | 'confirm' | 'prompt' | 'beforeunload'; message: string } | undefined;
+  /** The browser cannot say which document a page shows. */
+  documentFails = false;
   /** While set, a click does not return: the page's queue is stuck behind it, as it is behind a dialog. */
   clickGate: Promise<void> | undefined;
   private minted = 0;
@@ -95,6 +97,23 @@ class Tabs {
     forward: async pageId => this.acted('forward', pageId),
     reload: async pageId => this.acted('reload', pageId),
     location: async pageId => this.state(pageId),
+    inputDocument: async pageId => {
+      this.calls.push(`inputDocument:${pageId}`);
+      if (this.documentFails) throw new Error('the page is gone');
+      return { navigationId: 'loader-1' };
+    },
+    inputObserve: async pageId => {
+      this.calls.push(`inputObserve:${pageId}`);
+      return { ok: false, missing: 'value' };
+    },
+    inputShot: async pageId => {
+      this.calls.push(`inputShot:${pageId}`);
+      return { pngBase64: 'AAAA', clip: { x: 0, y: 0, w: 1, h: 1 } };
+    },
+    inputType: async pageId => {
+      this.calls.push(`inputType:${pageId}`);
+      return 'typed';
+    },
     newPage: async options => {
       this.minted += 1;
       const id = `p${String(this.minted)}`;
@@ -850,6 +869,41 @@ describe('the machine agent browser — a page’s lifecycle', () => {
     should(dialog.message).equal('a person holds it');
     should(wait.message).equal('a person holds it');
     should(tabs.calls.filter(call => call.startsWith('lifecycle'))).deepEqual([]);
+  });
+
+  it('should run the input bridge on the session’s own named page, in its queue, and refuse another session’s', async () => {
+    // Arrange
+    const { tabs, service } = harness();
+    const app = await service.openPage('s1', 'app');
+    const other = await service.openPage('s2', 'app');
+
+    // Act
+    const answered = await service.inputOnPage('s1', 'app', async (fields, pageId) => {
+      await fields.inputDocument(pageId);
+      return pageId;
+    });
+    const refused = await failure(service.inputOnPage('s1', other.id, async () => 'reached'));
+
+    // Assert
+    should(answered).equal(app.id);
+    should(tabs.calls).containEql(`inputDocument:${app.id}`);
+    should(refused.code).equal('not_found');
+  });
+
+  it('should let a guard read, from inside the page queue, which document the page shows, or nothing when it cannot', async () => {
+    // Arrange
+    const { tabs, service } = harness();
+    await service.openPage('s1', 'app');
+    const seen: (string | undefined)[] = [];
+    const guard = async (page: { document(): Promise<string | undefined> }) => void seen.push(await page.document());
+
+    // Act
+    await service.actOnPage('s1', 'app', { action: 'back' }, guard);
+    tabs.documentFails = true;
+    await service.actOnPage('s1', 'app', { action: 'back' }, guard);
+
+    // Assert
+    should(seen).eql(['loader-1', undefined]);
   });
 
   it('should refuse a lifecycle request on a page of another session', async () => {

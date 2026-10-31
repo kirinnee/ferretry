@@ -4,6 +4,7 @@ export * from './ephemeral-redactor.ts';
 export * from './ephemeral-values.ts';
 export * from './errors.ts';
 export * from './login-adapter.ts';
+export * from './page-target.ts';
 export * from './ports.ts';
 export * from './quarantine.ts';
 export * from './saved-logins.ts';

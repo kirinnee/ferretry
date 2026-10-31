@@ -5,29 +5,30 @@ import {
   type BrowserActionResult,
   type BrowserDialogInfo,
   BrowserDialogInfoSchema,
+  type BrowserElementTarget,
   type BrowserInputEvent,
+  type BrowserPageActionSnapshot,
   type BrowserPageLifecycleReply,
   type BrowserPageLifecycleRequest,
-  type BrowserPageActionSnapshot,
   type BrowserPageSnapshot,
   type BrowserPageSummary,
   type BrowserScreencastFrame,
   type BrowserStateView,
   type BrowserStatus,
-  type BrowserViewport,
-  type SurfaceOpener,
-  type BrowserElementTarget,
   type BrowserTarget,
   type BrowserTargetFields,
+  type BrowserViewport,
   browserReadModeOf,
   browserTargetOf,
+  type SurfaceOpener,
 } from '@ferretry/protocol';
 import { agentSpokenName } from '../../names/session-names.ts';
 import type { BrowserAutomation, BrowserPageActed } from '../transport/automation-contracts.ts';
+import type { BrowserInputFieldsPort } from '../transport/input-contracts.ts';
 import type { BrowserUploadMode } from '../transport/page-acts.ts';
 import type { PageScript } from '../transport/page-script.ts';
-import type { WorkerStagedFile } from '../transport/worker-protocol.ts';
 import type { BrowserViewerHost, ViewerAttachment, ViewerTerminalSignal } from '../transport/viewer-contracts.ts';
+import type { WorkerStagedFile } from '../transport/worker-protocol.ts';
 
 export const DEFAULT_BROWSER_VIEWPORT: BrowserViewport = { width: 1280, height: 800 };
 
@@ -60,8 +61,20 @@ export interface BrowserIdlePolicy {
   after(milliseconds: number, action: () => void): BrowserIdleTimer;
 }
 
-/** Refuses an agent's act from inside its page's own queue — a takeover that landed while it waited. */
-export type BrowserActGuard = () => Promise<void>;
+/**
+ * What a guard may ask of the page it runs for, from inside that page's queue: which document it shows now (the
+ * main frame's loaderId), read straight from the browser, never by queueing behind itself. Nothing when the
+ * browser cannot tell.
+ */
+export interface BrowserGuardPage {
+  document(): Promise<string | undefined>;
+}
+
+/**
+ * Refuses an act from inside its page's own queue, immediately before it runs — a takeover that landed while it
+ * waited, or an owner's value pending on or just typed into the page (the input bridge's holds).
+ */
+export type BrowserActGuard = (page: BrowserGuardPage) => Promise<void>;
 
 /** The sessions the browser serves: whether one exists, and the display name a page is grouped under. */
 export interface BrowserSessionDirectory {
@@ -192,6 +205,16 @@ export interface BrowserSubsystem extends BrowserViewerHost {
     action: BrowserFileAction,
     guard?: BrowserActGuard,
   ): Promise<BrowserFileResult>;
+  /**
+   * The input bridge's look, picture or write on this session's page with this name (or id), run in the page's
+   * own queue so no act of the agent lands between the bridge's check and its write. Refuses (`not_found`) a
+   * page that is not this session's, or a browser that is not running: the bridge reads that as "gone".
+   */
+  inputOnPage<T>(
+    sessionId: string,
+    key: string,
+    work: (fields: BrowserInputFieldsPort, pageId: string) => Promise<T>,
+  ): Promise<T>;
   /** Closes this session's page with this name (or id). An incognito page's whole context goes with it. */
   closePage(sessionId: string, key: string, guard?: BrowserActGuard): Promise<void>;
   /** A session ended: every page it owns closes, and every incognito context it held is discarded. */
@@ -320,11 +343,25 @@ export class BrowserSessionService implements BrowserSubsystem {
     const run = this.requireRunning();
     const page = this.requirePage(run, sessionId, key);
     return await this.exclusive(page.id, async () => {
-      await guard?.();
+      await guard?.(this.guardPage(run, page.id));
       const result = await this.perform(run, page.id, action);
       run.snapshot = pageOf(result);
       this.touch(run);
       return { status: this.project(run, sessionId), result };
+    });
+  }
+
+  async inputOnPage<T>(
+    sessionId: string,
+    key: string,
+    work: (fields: BrowserInputFieldsPort, pageId: string) => Promise<T>,
+  ): Promise<T> {
+    await this.requireSession(sessionId);
+    const run = this.requireRunning();
+    const page = this.requirePage(run, sessionId, key);
+    return await this.exclusive(page.id, async () => {
+      this.touch(run);
+      return await work(run.driver, page.id);
     });
   }
 
@@ -349,11 +386,11 @@ export class BrowserSessionService implements BrowserSubsystem {
       return { reply: answered.lifecycle, ...(answered.dialog === undefined ? {} : { dialog: answered.dialog }) };
     };
     if (request.op === 'dialog' || request.op === 'console' || request.op === 'network') {
-      await guard?.();
+      await guard?.(this.guardPage(run, page.id));
       return await perform();
     }
     return await this.exclusive(page.id, async () => {
-      await guard?.();
+      await guard?.(this.guardPage(run, page.id));
       return await perform();
     });
   }
@@ -383,7 +420,7 @@ export class BrowserSessionService implements BrowserSubsystem {
     const run = this.requireRunning();
     const page = this.requirePage(run, sessionId, key);
     return await this.exclusive(page.id, async () => {
-      await guard?.();
+      await guard?.(this.guardPage(run, page.id));
       let staged: WorkerStagedFile | undefined;
       let result: BrowserPageActionSnapshot;
       if (action.action === 'upload')
@@ -413,7 +450,7 @@ export class BrowserSessionService implements BrowserSubsystem {
     const run = this.requireRunning();
     const page = this.requirePage(run, sessionId, key);
     return await this.exclusive(page.id, async () => {
-      await guard?.();
+      await guard?.(this.guardPage(run, page.id));
       const { text, ...result } = await run.driver.evaluate(page.id, script);
       run.snapshot = pageOf(result);
       this.touch(run);
@@ -426,7 +463,7 @@ export class BrowserSessionService implements BrowserSubsystem {
     const run = this.requireRunning();
     const page = this.requirePage(run, sessionId, key);
     await this.exclusive(page.id, async () => {
-      await guard?.();
+      await guard?.(this.guardPage(run, page.id));
       await this.closeIn(run, sessionId, page.id);
     });
   }
@@ -741,6 +778,17 @@ export class BrowserSessionService implements BrowserSubsystem {
   }
 
   /** One page as the wire shows it, carrying its name and opener when it has them. */
+  /** What a guard may ask of one page: its document, straight from the driver. */
+  private guardPage(run: Running, pageId: string): BrowserGuardPage {
+    return {
+      document: async () =>
+        await run.driver
+          .inputDocument(pageId)
+          .then(found => found.navigationId)
+          .catch(() => undefined),
+    };
+  }
+
   private named(run: Running, pageId: string): BrowserPageSummary {
     const page = run.snapshot.pages.find(candidate => candidate.id === pageId) as BrowserPageSummary;
     const name = run.names.get(page.id);

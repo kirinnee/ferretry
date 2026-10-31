@@ -285,6 +285,8 @@ export const InputBrowserFieldFactsSchema = z.strictObject({
     h: z.number().finite().nonnegative(),
   }),
   visible: z.boolean(),
+  /** Something else is on top at the field's centre, or it is off screen: the card flags it, nothing refuses it. */
+  covered: z.literal(true).optional(),
 });
 export type InputBrowserFieldFacts = z.infer<typeof InputBrowserFieldFactsSchema>;
 
@@ -437,6 +439,8 @@ export const InputRequestSchema = z.strictObject({
   risk: InputRiskSchema.optional(),
   /** A digest of the facts the card showed; deliver refuses `target_changed` when it no longer matches. */
   observedDigest: Digest.optional(),
+  /** The daemon holds a picture of a page's fields, taken before anything was typed: `GET …/shot` serves it. */
+  pictured: z.literal(true).optional(),
   /** Saved logins: what the card may offer and what "Save as" suggests. The owner's view only. */
   saved: InputSavedSchema.optional(),
   state: InputRequestStateSchema,
@@ -547,6 +551,26 @@ export const InputDeliverBodySchema = z
     }
   });
 export type InputDeliverBody = z.infer<typeof InputDeliverBodySchema>;
+
+/**
+ * `GET /v1/sessions/:sessionId/input-requests/:requestId/shot`: the picture of a page request's fields, taken at
+ * raise BEFORE anything was typed, and where it sits on the page in viewport CSS pixels, so the card can draw each
+ * field's `box` on it. The owner's only; it ends with the request.
+ */
+export const InputShotSchema = z.strictObject({
+  pngBase64: z
+    .string()
+    .min(1)
+    .max(4_000_000)
+    .regex(/^[A-Za-z0-9+/]+=*$/u),
+  clip: z.strictObject({
+    x: z.number().finite(),
+    y: z.number().finite(),
+    w: z.number().finite().nonnegative(),
+    h: z.number().finite().nonnegative(),
+  }),
+});
+export type InputShot = z.infer<typeof InputShotSchema>;
 
 /** The answer to a deliver: the outcome, no value. A repeat of a `deliveryId` returns the first one. */
 export const InputDeliverResultSchema = z.strictObject({

@@ -165,6 +165,17 @@ class FakeBrowserPages implements Pick<
   actedUrl: string | undefined;
   /** Whether every act reports that it put text in a password field. */
   passwordField = false;
+  /** The document every page shows, as an act's in-queue guard reads it: a navigation changes it. */
+  document: string | undefined = 'loader-1';
+  /** Runs, oldest first, just before each act reaches its in-queue guard: something landing while the act waited. */
+  readonly beforeGuard: (() => void | Promise<void>)[] = [];
+  private readonly guardPage = { document: async (): Promise<string | undefined> => this.document };
+
+  /** An act's in-queue guard, after whatever a case lets land while the act waited in the queue. */
+  private async guarded(guard: BrowserActGuard | undefined): Promise<void> {
+    await this.beforeGuard.shift()?.();
+    await guard?.(this.guardPage);
+  }
   failure: unknown;
   private minted = 0;
 
@@ -216,7 +227,7 @@ class FakeBrowserPages implements Pick<
     guard?: BrowserActGuard,
   ): Promise<BrowserActionResult> {
     this.fail();
-    await guard?.();
+    await this.guarded(guard);
     const page = this.page(sessionId, key);
     this.active.set(sessionId, page.id);
     this.acts.push(`${sessionId}:${page.id}:${action.action}`);
@@ -271,7 +282,7 @@ class FakeBrowserPages implements Pick<
   ): Promise<BrowserLifecycleOutcome> {
     this.fail();
     await this.beforeLifecycle.shift()?.();
-    await guard?.();
+    await this.guarded(guard);
     const page = this.page(sessionId, key);
     this.lifecycles.push(request);
     this.acts.push(`${sessionId}:${page.id}:lifecycle-${request.op}`);
@@ -298,7 +309,7 @@ class FakeBrowserPages implements Pick<
     guard?: BrowserActGuard,
   ): Promise<BrowserFileResult> {
     this.fail();
-    await guard?.();
+    await this.guarded(guard);
     const page = this.page(sessionId, key);
     this.active.set(sessionId, page.id);
     this.acts.push(`${sessionId}:${page.id}:${action.action}`);
@@ -320,7 +331,7 @@ class FakeBrowserPages implements Pick<
     guard?: BrowserActGuard,
   ): Promise<BrowserScriptResult> {
     this.fail();
-    await guard?.();
+    await this.guarded(guard);
     const page = this.page(sessionId, key);
     this.acts.push(`${sessionId}:${page.id}:eval`);
     this.scripts.push(script);
@@ -336,7 +347,7 @@ class FakeBrowserPages implements Pick<
 
   async closePage(sessionId: string, key: string, guard?: BrowserActGuard): Promise<void> {
     this.fail();
-    await guard?.();
+    await this.guarded(guard);
     const page = this.page(sessionId, key);
     this.pages.set(
       sessionId,
@@ -432,7 +443,8 @@ class FakeAgentFiles implements Pick<AgentFiles, 'prepareUpload' | 'save'> {
 
 /** A whole agent-tools domain over fakes, with every collaborator exposed for assertions. */
 export function agentToolWorld(
-  extra: Pick<AgentToolPorts, 'input' | 'scrub' | 'quarantinedUntil' | 'copy' | 'plans'> = {},
+  extra: Pick<AgentToolPorts, 'input' | 'scrub' | 'quarantinedUntil' | 'copy' | 'plans'> &
+    Partial<Pick<AgentToolPorts, 'redactor'>> = {},
 ) {
   const terminals = new FakeTerminals(['s1', 's2']);
   const browser = new FakeBrowserPages();

@@ -22,10 +22,10 @@
  * value NEVER passes through this app: tapping a login sends its handle and the daemon types it.
  */
 
-import type { InputRequest, InputSavedOffer } from '@ferretry/protocol';
+import type { InputRequest, InputSavedOffer, InputShot } from '@ferretry/protocol';
 import { Eye, EyeOff, ShieldAlert, ShieldCheck, ShieldQuestion } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
-import { cancelInput, deliverInput, type InputClient } from '../../lib/input-api.ts';
+import { cancelInput, deliverInput, type InputClient, readInputShot } from '../../lib/input-api.ts';
 import {
   cardOffersSave,
   cardSaveBlock,
@@ -50,6 +50,7 @@ import {
   savedOutcomeWords,
   sealedBody,
   sendBlock,
+  shotBoxes,
   showsHeaderRisk,
   splitOffers,
   targetRef,
@@ -225,6 +226,8 @@ export function InputCard({
           {agentName} says: “{request.prompt}”
         </p>
       </div>
+
+      {request.pictured === true ? <FieldShot client={client} fields={fields} request={request} /> : null}
 
       {facts?.challenge === undefined ? null : (
         <p className="m-0 flex items-start gap-2 text-cell text-warn" data-input-challenge="" role="status">
@@ -483,6 +486,53 @@ function FieldInput({
       )}
       <FieldFlags field={field} request={request} />
     </div>
+  );
+}
+
+/**
+ * The picture of the page the daemon took before anything was typed, with a box drawn on each field the values
+ * go into. The picture and the boxes are the BROWSER's, not the agent's: the owner sees where the value lands.
+ * A picture that cannot be fetched is simply not shown; the facts above still say what is there.
+ */
+function FieldShot({
+  client,
+  request,
+  fields,
+}: {
+  readonly client: InputClient;
+  readonly request: InputRequest;
+  readonly fields: readonly InputCardField[];
+}) {
+  const [shot, setShot] = useState<InputShot | null>(null);
+  useEffect(() => {
+    let live = true;
+    readInputShot(client, request)
+      .then(found => {
+        if (live) setShot(found);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [client, request]);
+  if (shot === null) return null;
+  return (
+    <figure className="relative m-0 min-w-0 overflow-hidden rounded-control border border-border" data-input-shot="">
+      <img
+        alt="The page where the values go, before anything was typed"
+        className="block h-auto w-full"
+        src={`data:image/png;base64,${shot.pngBase64}`}
+      />
+      {shotBoxes(request, fields, shot).map(box => (
+        <span
+          aria-hidden="true"
+          className="absolute rounded-control outline outline-2 outline-accent"
+          data-input-shot-box={box.key}
+          key={box.key}
+          style={{ left: `${box.left}%`, top: `${box.top}%`, width: `${box.width}%`, height: `${box.height}%` }}
+        />
+      ))}
+    </figure>
   );
 }
 

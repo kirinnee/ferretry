@@ -303,6 +303,13 @@ call.
   counts every page that belongs to a session, so the popups an agent's clicks opened count too; the
   pages are read fresh before each open. The browser stops
   after 15 minutes with nobody watching and nobody acting.
+- **Passkeys are off.** Every page carries a virtual authenticator that never confirms user presence, so
+  sites see no platform passkey and a WebAuthn prompt fails at once and falls back to the password form.
+  The user agent is never changed. A login that needs the owner's own passkey or key is handed over with
+  `browser_ask_owner`. See [input requests › Pages](input-requests.md#pages).
+- **Logins go through the input bridge.** `browser_request_input` asks the owner for a form's values on one
+  card (a `plain` e-mail and a `secret` password, say) and the daemon types each into its field; the agent
+  never holds a secret. A captcha is never solved: the agent hands the page over.
 - The CDP port listens on loopback and accepts no cross-origin WebSocket (`--remote-allow-origins` is
   gone; the worker sends no `Origin`).
 

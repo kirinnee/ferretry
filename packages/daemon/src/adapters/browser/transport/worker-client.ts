@@ -1,42 +1,87 @@
 import { dirname } from 'node:path';
 import type {
   BrowserElementTarget,
+  BrowserInputEvent,
   BrowserPageLifecycleReply,
   BrowserPageLifecycleRequest,
-  BrowserInputEvent,
   BrowserPageSnapshot,
   BrowserScreencastFrame,
   BrowserScreenshotFormat,
   BrowserTarget,
   BrowserViewport,
 } from '@ferretry/protocol';
+import { InputTargetFactsSchema } from '@ferretry/protocol';
 import {
+  BROWSER_INPUT_WORKER_METHODS,
   type BrowserAutomation,
-  type BrowserPageActed,
-  BrowserFrameGovernor,
-  BrowserTransportError,
   type BrowserClickOptions,
-  type FrameClock,
+  BrowserFrameGovernor,
+  type BrowserInputDocument,
+  type BrowserInputFacts,
+  type BrowserInputFieldPointer,
+  type BrowserInputObservation,
+  type BrowserInputOutcome,
+  type BrowserInputShot,
+  type BrowserInputValue,
+  type BrowserPageActed,
   type BrowserReadOptions,
   type BrowserScreenshotOptions,
+  BrowserTransportError,
   type BrowserTypeOptions,
   type BrowserUploadMode,
   type PageScript,
-  type PointerAct,
-  WorkerLineAssembler,
-  type WorkerStagedFile,
-  type WorkerSnapshotResult,
   boundedReadText,
   boundedScreenshot,
   encodeWorkerRequest,
+  type FrameClock,
   normalizeLifecycleReply,
   normalizeWorkerActionSnapshot,
   normalizeWorkerDialog,
   normalizeWorkerSnapshot,
   normalizeWorkerStaged,
+  type PointerAct,
   parseWorkerLine,
+  WorkerLineAssembler,
+  type WorkerSnapshotResult,
+  type WorkerStagedFile,
 } from '../../../lib/index.ts';
 import { SystemFrameClock } from './system-frame-clock.ts';
+
+/** What the worker saw of a page's fields, checked against the protocol before it is believed. */
+function parseObservation(raw: unknown): BrowserInputObservation {
+  const observation = (raw as { observation?: unknown } | null)?.observation as Record<string, unknown> | undefined;
+  if (observation?.ok === false && typeof observation.missing === 'string')
+    return { ok: false, missing: observation.missing.slice(0, 64) };
+  const facts = InputTargetFactsSchema.safeParse(observation?.facts);
+  if (observation?.ok === true && facts.success && facts.data.kind === 'browser')
+    return { ok: true, facts: facts.data };
+  throw new BrowserTransportError(
+    'upstream_failed',
+    'the browser described the fields in a form Ferretry does not accept',
+    502,
+  );
+}
+
+/** A field shot: a bounded PNG and a finite clip, or a refusal. */
+function parseShot(raw: unknown): BrowserInputShot {
+  const shot = (raw as { shot?: unknown } | null)?.shot as Record<string, unknown> | undefined;
+  const clip = shot?.clip as Record<string, unknown> | undefined;
+  const numbers = ['x', 'y', 'w', 'h'].map(key => clip?.[key]);
+  if (
+    typeof shot?.pngBase64 === 'string' &&
+    shot.pngBase64.length > 0 &&
+    shot.pngBase64.length <= MAX_INPUT_SHOT_CHARS &&
+    /^[A-Za-z0-9+/]+=*$/u.test(shot.pngBase64) &&
+    numbers.every(value => typeof value === 'number' && Number.isFinite(value))
+  ) {
+    const [x, y, w, h] = numbers as number[];
+    return { pngBase64: shot.pngBase64, clip: { x: x as number, y: y as number, w: w as number, h: h as number } };
+  }
+  throw new BrowserTransportError('upstream_failed', 'the browser sent no usable picture of the fields', 502);
+}
+
+/** The most a field shot may be as base64: a 900px-square PNG is far under it. */
+const MAX_INPUT_SHOT_CHARS = 4_000_000;
 
 /** A worker answer as a snapshot, with the dialog the acted page is waiting on beside it. */
 function acted(raw: unknown): BrowserPageActed {
@@ -343,6 +388,42 @@ export class BrowserWorkerClient implements BrowserAutomation {
 
   resize(pageId: string, viewport: BrowserViewport): Promise<BrowserPageActed> {
     return this.action('resize', { pageId, width: viewport.width, height: viewport.height });
+  }
+
+  async inputDocument(pageId: string): Promise<BrowserInputDocument> {
+    const raw = await this.request(BROWSER_INPUT_WORKER_METHODS.document, { pageId });
+    const navigationId = ((raw as { document?: { navigationId?: unknown } } | null)?.document ?? {}).navigationId;
+    if (typeof navigationId !== 'string' || navigationId === '' || navigationId.length > 128)
+      throw new BrowserTransportError('upstream_failed', 'the browser did not say which document the page shows', 502);
+    return { navigationId };
+  }
+
+  async inputObserve(pageId: string, fields: readonly BrowserInputFieldPointer[]): Promise<BrowserInputObservation> {
+    return parseObservation(await this.request(BROWSER_INPUT_WORKER_METHODS.observe, { pageId, fields }));
+  }
+
+  async inputShot(pageId: string, facts: BrowserInputFacts): Promise<BrowserInputShot> {
+    return parseShot(await this.request(BROWSER_INPUT_WORKER_METHODS.shot, { pageId, facts }));
+  }
+
+  /**
+   * The one write of owner-supplied values. The values ride only in this request's params; the answer is a word.
+   * Anything but one of the four words (a crash, a timeout, a garbled line) is `uncertain`: the write may have
+   * begun, so it is never repeated.
+   */
+  async inputType(
+    pageId: string,
+    expected: BrowserInputFacts,
+    values: readonly BrowserInputValue[],
+    submit: boolean,
+  ): Promise<BrowserInputOutcome> {
+    try {
+      const raw = await this.request(BROWSER_INPUT_WORKER_METHODS.type, { pageId, expected, values, submit });
+      const outcome = (raw as { outcome?: unknown } | null)?.outcome;
+      return outcome === 'typed' || outcome === 'target_changed' || outcome === 'target_gone' ? outcome : 'uncertain';
+    } catch {
+      return 'uncertain';
+    }
   }
 
   /**

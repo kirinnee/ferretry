@@ -128,12 +128,72 @@ process.stdin.on('data', chunk => {
   }
 });
 
+/** The input bridge's four calls; the page id picks the answer, so one fixture covers each path. */
+function inputReply(id, method, params) {
+  const page = params?.pageId;
+  const facts = {
+    kind: 'browser',
+    pageId: 'p1',
+    origin: 'https://example.test',
+    secure: true,
+    navigationId: 'loader-1',
+    fields: [
+      {
+        fieldId: 'password',
+        frameOrigin: 'https://example.test',
+        frameId: 'main',
+        backendNodeId: 7,
+        field: { tag: 'input', type: 'password' },
+        box: { x: 1, y: 2, w: 3, h: 4 },
+        visible: true,
+      },
+    ],
+  };
+  if (page === 'refuses') {
+    reply(id, false, 'the page is gone');
+    return;
+  }
+  if (method === 'inputDocument')
+    reply(id, true, page === 'garbled' ? { document: {} } : { document: { navigationId: 'loader-1' } });
+  else if (method === 'inputObserve')
+    reply(
+      id,
+      true,
+      page === 'missing'
+        ? { observation: { ok: false, missing: 'password' } }
+        : page === 'garbled'
+          ? { observation: { ok: true, facts: { kind: 'browser' } } }
+          : { observation: { ok: true, facts } },
+    );
+  else if (method === 'inputShot')
+    reply(
+      id,
+      true,
+      page === 'garbled'
+        ? { shot: { pngBase64: 'not base64!', clip: { x: 0 } } }
+        : { shot: { pngBase64: 'iVBORw0KGgo=', clip: { x: 0, y: 0, w: 10, h: 10 } } },
+    );
+  // The answer is a word; whether the values arrived is told back through the word, never by echoing them.
+  else if (method === 'inputType')
+    reply(
+      id,
+      true,
+      page === 'garbled'
+        ? { outcome: 'maybe' }
+        : { outcome: params?.values?.length === 1 && params?.submit === true ? 'typed' : 'target_changed' },
+    );
+}
+
 function handle({ id, method, params }) {
   if (endpoint === 'bad-location' && method === 'location') {
     reply(id, true, { activePageId: 'p1', pages: [] });
     return;
   }
   if (endpoint === 'no-screencast' && method === 'startScreencast') return;
+  if (method.startsWith('input')) {
+    inputReply(id, method, params);
+    return;
+  }
   // A request's own argument selects the reply behaviour, so one fixture covers every path.
   switch (params?.url ?? params?.target?.selector ?? params?.selector ?? method) {
     case 'never-replies':

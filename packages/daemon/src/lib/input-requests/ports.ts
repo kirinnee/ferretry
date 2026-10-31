@@ -9,6 +9,7 @@ import type {
   InputEvent,
   InputFieldElement,
   InputQuarantineEvent,
+  InputShot,
   InputTarget,
   InputTargetFacts,
   LoginEntryId,
@@ -75,6 +76,10 @@ export interface InputTargetPort {
     submit: boolean,
     expected: InputTargetFacts,
   ): Promise<TypeResult>;
+  /** A picture of where the values go, for the owner's card, taken before anything is typed; nothing when none can be had. */
+  shoot?(sessionId: string, target: InputTarget, facts: InputTargetFacts): Promise<InputShot | undefined>;
+  /** The document a session's page shows now (a page target only), or nothing when it cannot be told. */
+  document?(sessionId: string, key: string): Promise<string | undefined>;
 }
 
 /**

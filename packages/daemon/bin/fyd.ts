@@ -935,6 +935,8 @@ import {
   outdatedSections,
   overriddenBy,
   PacedTranscriptParser,
+  type PageInputHost,
+  PageInputTarget,
   PairedPushDevices,
   PairingDeviceRegistry,
   type PairingService,
@@ -6143,6 +6145,8 @@ function createInputRequestService(input: {
   readonly redact: (text: string) => Promise<string>;
   /** Saved logins: what the card offers, what "Use" types and where "Save as" keeps a value. */
   readonly logins: InputLoginAdapter;
+  /** The agent browser's pages, for a request on a page: looked at, pictured and typed into in each page's own queue. */
+  readonly pages: PageInputHost;
   /** Secure copies a paste types from, and the owner's rules that approve pastes in advance. */
   readonly sealed: InputSealedPort;
   readonly rules: InputPasteRules;
@@ -6151,7 +6155,6 @@ function createInputRequestService(input: {
 }): InputRequestService {
   const clock = { now: () => Date.now() };
   return new InputRequestService({
-    // A page cannot take a request yet: the router answers `unsupported` until a browser adapter is wired.
     target: new InputTargetRouter(
       new TmuxInputTarget(
         input.tmux,
@@ -6164,7 +6167,7 @@ function createInputRequestService(input: {
         new SttyTerminalModes(process.platform, runProgram),
         runProgram,
       ),
-      undefined,
+      new PageInputTarget(input.pages),
       // A secure copy pasted "as the secret NAME" (docs/secure-copy.md): the vault's management surface, which
       // replaces a value and lists names, never returns one.
       new SecretStoreTarget(input.secretStore),
@@ -10074,6 +10077,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       setInterval(() => copyPlans.sweep(), INPUT_REQUEST_SWEEP_MS).unref();
       // An agent stuck at a password prompt asks the owner through an agenda card (docs/input-requests.md). The value
       // lives only in this process's memory and in the one tmux write; the journal and the audit log carry names and flags.
+      let pageHost: PageInputHost | undefined;
       const inputRequestService = createInputRequestService({
         storage,
         terminals,
@@ -10087,6 +10091,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // One of the two holders of the LoginVault (docs/secrets.md; the other is the redactor): the input bridge
         // types a saved login into the target the owner tapped "Use" for, and answers only what happened.
         logins: new InputLoginAdapter(loginDirectory, loginVault),
+        // The browser is built further down; a request on a page reaches it through this hand-off once it is.
+        pages: {
+          inputOnPage: async (sessionId, key, work) => {
+            if (pageHost === undefined) throw new Error('the agent browser is not running yet');
+            return await pageHost.inputOnPage(sessionId, key, work);
+          },
+        },
         sealed: secureCopies,
         rules: pasteRules,
         secretStore: secretDirectory,
@@ -10793,6 +10804,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           return { cancel: () => clearTimeout(timer) };
         },
       });
+      pageHost = browserService;
       const agentControl = new AccountModelAgentControlPolicy(declaredAccountModel);
       closeAgentBrowsers = async () => await browserService.closeAll();
       releaseBrowserSession = async sessionId => await browserService.releaseSession(sessionId);
@@ -10809,6 +10821,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         scriptOnPage: browserService.scriptOnPage.bind(browserService),
         closePage: browserService.closePage.bind(browserService),
         lifecycleOnPage: browserService.lifecycleOnPage.bind(browserService),
+        inputOnPage: browserService.inputOnPage.bind(browserService),
         adoptPage: browserService.adoptPage.bind(browserService),
         closeAll: browserService.closeAll.bind(browserService),
         stream: async (sessionId, downstream) => {

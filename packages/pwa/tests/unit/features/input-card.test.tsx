@@ -912,3 +912,44 @@ describe('the card, Save as on a login card', () => {
     expect(unsaved.q('[data-input-save]')).toBeNull();
   });
 });
+
+describe('the card, a page’s picture', () => {
+  it('fetches the picture of a pictured page request and draws a box on each field', async () => {
+    const card = request({
+      target: { kind: 'browser', key: 'app' },
+      pictured: true,
+      fields: [field('secret', { id: 'password', label: 'Password' })],
+      observed: {
+        kind: 'browser',
+        pageId: 'page-1',
+        origin: 'https://accounts.google.com',
+        secure: true,
+        navigationId: 'nav-1',
+        fields: [browserField('password', { box: { x: 10, y: 10, w: 100, h: 20 } })],
+      },
+    });
+    const view = await show(card, call =>
+      call.path.endsWith('/shot')
+        ? { pngBase64: 'iVBORw0KGgo=', clip: { x: 0, y: 0, w: 200, h: 100 } }
+        : answerDelivered(call),
+    );
+    await settle();
+
+    expect(view.calls.map(call => [call.method, call.path.split('/').at(-1)])).toContainEqual(['GET', 'shot']);
+    expect(view.q('[data-input-shot] img')?.getAttribute('src')).toBe('data:image/png;base64,iVBORw0KGgo=');
+    expect(view.q('[data-input-shot-box="password"]')?.getAttribute('style')).toContain('left: 5%');
+  });
+
+  it('shows no picture for a request that has none, and none when it cannot be fetched', async () => {
+    const plain = await show(request());
+    const failing = await show(request({ pictured: true }), call => {
+      if (call.path.endsWith('/shot')) throw new Error('gone');
+      return answerDelivered(call);
+    });
+    await settle();
+
+    expect(plain.calls.some(call => call.path.endsWith('/shot'))).toBe(false);
+    expect(plain.q('[data-input-shot]')).toBeNull();
+    expect(failing.q('[data-input-shot]')).toBeNull();
+  });
+});

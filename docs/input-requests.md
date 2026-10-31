@@ -305,6 +305,110 @@ and (after the quarantine) the agent's `terminal.read` and `terminal.wait`. Reda
   starts with no note), because a note is the one place a value could be pasted into the ledger by
   mistake.
 
+## Pages
+
+A request on a page (`browser_request_input`) goes through the same service, card and deliver as a terminal's.
+What is different is how the daemon looks and types, and what it holds back afterwards.
+
+### Looking: the browser decides, the agent only points
+
+- The agent names each field's element (a snapshot `ref` or a selector). The **browser** resolves it and
+  reports what is there: the page's origin and whether it is secure (https, or http on this machine), the
+  document (the main frame's `loaderId`), and per field the frame it is in and that frame's origin, the node
+  (`backendNodeId`, found by a marker the worker sets and removes, never by page script), its tag and
+  `type`/`autocomplete`/`name`/`id`/`inputmode`, its box and whether it is visible.
+- A field the page lacks refuses the raise. Every look and write runs in the page's own queue
+  (`BrowserSubsystem.inputOnPage`), so no act of the agent lands between the check and the write.
+- The card's flags come from those facts: http, a field in a frame from another site, a `secret` into a field
+  that is not `type=password`, a field that cannot be seen: amber. Only a password input on a secure page
+  is green.
+- **A picture of the fields** is taken at raise, before anything is typed, and kept in RAM for the card
+  (`GET /v1/sessions/:sid/input-requests/:id/shot`, owner only; `request.pictured` says there is one). The
+  card draws each field's box on it from the browser's facts. It is let go when the request ends.
+
+- **The field's identity is the node Playwright holds.** Playwright resolves the agent's ref or selector in its
+  own isolated world and holds the element; the node is the one Playwright's own DevTools session names for that
+  handle (`DOM.describeNode` on its remote object), together with that session's TARGET: a backend node id is only
+  unique inside one renderer. The session the write uses must be a session of that same target (the frame's own,
+  or its nearest ancestor's, or the page's; never the page's for a frame in another target) and must describe the
+  same node, or the field is refused.
+  Every fact on the card (node, attributes, box) comes from that node; no page script is asked which element it
+  is. This reaches past Playwright's public API (pinned with the version the worker ships, and a unit test fails
+  when the installed Playwright is another release): a missing part refuses the field, it never guesses.
+- **Covered or off screen is a flag, not a refusal.** The node on top at the field's centre (hit-tested by
+  DevTools) that is not the field, or a field off screen, marks it `covered`; the card says "covered or off screen"
+  and flags it amber, and the owner decides.
+
+### Typing: one write into exactly the nodes the card showed
+
+`inputType` re-checks the page against the card's facts first: the same document, the same origin, and every
+node still there with the same attributes. Anything different types nothing (`target_changed`). Then, per
+value in order: focus the node, confirm the focus landed on it, select what the field holds, and insert the
+text (`Input.insertText`, which a page's script sees as ordinary input). Enter goes to the last field when
+the owner ticked it. A failure before the first insert typed nothing; one after it is `uncertain` and the
+request ends, never retried. The select, the focus proof and the insert run through an isolated world of the field's frame, where the page's
+own overrides do not exist, and the insert is the very next call after the proof. What remains is the same
+compare-then-write gap the terminal has: the page's own events (the `select` it is sent, a timer) can run in
+the moment between the proof and the insert. The value crosses the worker pipe in that one request and is in no answer,
+error or log.
+
+### The hold on a page
+
+A `secret` or `private` value typed into a page holds that page for the same window as a terminal
+(`INPUT_QUARANTINE_SECONDS`):
+
+- The agent's **pictures** of it (`browser_screenshot`, `browser_pdf`, `browser_highlight`) are refused for
+  the whole window: no mask can be drawn on pixels.
+- Its **text** (`browser_read` in every mode, `browser_console`, `browser_network`, `browser_wait_for`, `browser_eval` and
+  its results) is refused while the page still shows the document the value went into. Once the
+  page has moved on (a new `loaderId`), text reads come back, and they are **masked** for the redaction
+  window like every other read: a next page that prints the password back shows a mask.
+- While a request is pending on a page, the agent's `browser_type`, `browser_fill_form`, `browser_press` and `browser_eval`
+  on it are refused: those values are the owner's to type.
+- **The decision is made inside the page's own queue**, immediately before the act runs, for every caller:
+  a request raised or a value typed while an act waited in the queue stops it there. The check before the queue
+  only fails fast, and a check after the act still withholds a result a hold began under.
+- **Errors are reads too.** A failed page call under a hold answers with the hold; every other error message
+  passes the same redactor as a read (a page that throws the password back shows a mask), and fails closed to a
+  fixed sentence when the redactor cannot run.
+- Page holds share the terminal's registry under their own names (a hold on page `app` never seals terminal
+  `app`) and are not journalled: a page does not outlive the daemon that drove it, and a page's card ends as
+  interrupted on restart. GAP: the owner cannot end a page's hold early from the app; it runs its two minutes.
+
+### Password saving is off in the agent profile
+
+On every lease of the agent profile, before Chrome starts on it, the daemon forces Chrome's own preferences
+`credentials_enable_service`, `credentials_enable_autosignin` and `profile.password_manager_enabled` to false
+in `Default/Preferences`, keeping every other preference (a profile made before this rule gets it on its next
+lease). A profile whose preferences cannot be written is not handed out, so the browser does not start.
+
+### Passkeys are off in the agent browser
+
+Every page of the agent browser (popups included) gets a CDP virtual authenticator (`WebAuthn.addVirtualAuthenticator`,
+USB, no resident keys) that claims to verify users but never does, and answers with the user-presence bit unset
+(`setResponseOverrideBits({ isBadUP: true })`). Measured against a throwaway headless Chrome 154:
+
+- `PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()` is false, so sites do not offer a passkey.
+- Every `navigator.credentials.get` and `create` with `publicKey` (resident key required, preferred or
+  discouraged; user verification required, preferred or discouraged; cross-platform; direct attestation;
+  conditional mediation) fails with `NotAllowedError` in a few milliseconds, so nothing is registered and the
+  site falls back to its password form.
+- The one exception: a `create` that insists on a `platform` authenticator waits for one and registers nothing.
+  A site asks for that only after `isUserVerifyingPlatformAuthenticatorAvailable()` said yes, which it does not.
+
+The user agent and every fingerprint stay honest; nothing is spoofed. A login that needs the owner's real
+passkey or security key is handed over (`browser_ask_owner`), and the agent instruction forbids accepting a
+site's "create a passkey" or "add a security key" offer. GAPs: a WebAuthn call from a frame in another process
+than the page was not separately proved, and a popup that navigates before its authenticator is added is not
+covered.
+
+### Captchas are the owner's
+
+The daemon recognises the common human checks (reCAPTCHA, hCaptcha, Cloudflare Turnstile and interstitials,
+and others; `recogniseBrowserChallenge`) from what the browser knows about the page, and puts `challenge` in
+the facts. The card says so and the agent's answer tells it to hand the page over with `browser_ask_owner`
+("complete the captcha") and wait. Ferretry never solves, skips or disguises itself past one.
+
 ## Saved logins
 
 The bridge is also a small **password manager**. A saved login is a **labelled entry**: a label the owner
@@ -478,7 +582,7 @@ default**, revocable, and audited on every use. Until then every placement is a 
 | ----- | ------------------------------------------------------------------------------------------- | ----------- |
 | P0    | This contract and the schemas                                                               | done        |
 | P1    | Terminal secret and plain: service, agent tools, deliver and cancel, quarantine, `fy input` | done        |
-| P2    | The app card, cards of several fields, `chain` steps                                        | this change |
+| P2    | The app card, cards of several fields, `chain` steps                                        | done        |
 | P3    | Saved logins (one tap), "Save as", 2FA codes, `fy secret entry`, Settings › Saved logins    | done        |
-| P4    | Browser fields, and the agent-instruction extension for the browser                         | later       |
+| P4    | Pages: browser fields, field shot, page holds, passkeys off, captcha handover               | this change |
 | P5    | Multi-step chains, consumer configuration, a per-daemon remote cap                          | later       |

@@ -19,6 +19,7 @@ import type {
   BrowserTypeOptions,
   BrowserUploadMode,
 } from './page-acts.ts';
+import type { BrowserInputFieldsPort } from './input-contracts.ts';
 import type { PageScript } from './page-script.ts';
 import type { WorkerStagedFile } from './worker-protocol.ts';
 
@@ -35,7 +36,7 @@ import type { PointerAct } from './pointer-acts.ts';
  * page it acted on as `actedPageId` (and as `activePageId`, the page the answer describes), with the
  * whole page list beside it.
  */
-export interface BrowserAutomation {
+export interface BrowserAutomation extends BrowserInputFieldsPort {
   /** Resolves with an exit code when the driver dies on its own. Never rejects. */
   readonly unexpectedExit: Promise<number>;
   /** Where this browser sends its traffic, when the owner chose a proxy: the address, never a credential. */

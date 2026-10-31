@@ -179,6 +179,58 @@ describe('NodeSessionBrowserLauncher', () => {
     should(await new BrowserProfileStore(root).acquire({ sessionId: 'again' })).have.property('sessionId', 'again');
   });
 
+  it('should hand the input bridge’s four calls to the worker, each on the page it names', async () => {
+    const chrome = await fakeChrome();
+    const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
+    roots.push(root);
+    const calls: string[] = [];
+    const facts = {
+      kind: 'browser' as const,
+      pageId: 'p1',
+      origin: 'https://example.test',
+      secure: true,
+      navigationId: 'loader-1',
+      fields: [],
+    };
+    const worker = {
+      unexpectedExit: new Promise<number>(() => undefined),
+      close: async () => undefined,
+      inputDocument: async (pageId: string) => {
+        calls.push(`document:${pageId}`);
+        return { navigationId: 'loader-1' };
+      },
+      inputObserve: async (pageId: string, fields: readonly unknown[]) => {
+        calls.push(`observe:${pageId}:${fields.length}`);
+        return { ok: false, missing: 'password' };
+      },
+      inputShot: async (pageId: string) => {
+        calls.push(`shot:${pageId}`);
+        return { pngBase64: 'iVBORw0KGgo=', clip: { x: 0, y: 0, w: 1, h: 1 } };
+      },
+      inputType: async (pageId: string, _expected: unknown, values: readonly unknown[], submit: boolean) => {
+        calls.push(`type:${pageId}:${values.length}:${submit}`);
+        return 'typed';
+      },
+    };
+    const launcher = new NodeSessionBrowserLauncher(
+      new BrowserProfileStore(root),
+      INJECTED_WORKER,
+      process.execPath,
+      environment(chrome),
+      async () => worker as never,
+      PIPE,
+    );
+    const browser = await launcher.launch({ width: 800, height: 600 });
+    opened.push(browser);
+
+    should(await browser.inputDocument('p1')).eql({ navigationId: 'loader-1' });
+    should(await browser.inputObserve('p1', [])).eql({ ok: false, missing: 'password' });
+    should((await browser.inputShot('p1', facts)).clip).eql({ x: 0, y: 0, w: 1, h: 1 });
+    should(await browser.inputType('p1', facts, [{ field: 'password', text: 'x' }], true)).equal('typed');
+    should(calls).eql(['document:p1', 'observe:p1:0', 'shot:p1', 'type:p1:1:true']);
+    await browser.close();
+  });
+
   it('should keep the port transport: wait for the private CDP endpoint, then hand the worker its URL', async () => {
     // The port is still a choice a machine can make (it keeps `navigator.webdriver` false), so it must
     // still work end to end: a loopback port Chrome answers on, and no pipe handed to anyone.

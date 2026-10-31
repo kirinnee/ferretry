@@ -126,3 +126,35 @@ export function isPrimedMarker(value: unknown): boolean {
     Number.isFinite(Date.parse(record.primedAt))
   );
 }
+
+/**
+ * Chrome's own preferences that keep the AGENT browser from saving or offering passwords
+ * (docs/input-requests.md, "Pages"). The owner's values reach a page through the input bridge, and the
+ * shared profile must never keep one: `credentials_enable_service` is "Offer to save passwords",
+ * `credentials_enable_autosignin` is automatic sign-in with a saved one, and `profile.password_manager_enabled`
+ * is the older switch for the same manager.
+ */
+export const PASSWORD_SAVING_OFF = {
+  credentials_enable_service: false,
+  credentials_enable_autosignin: false,
+  profile: { password_manager_enabled: false },
+} as const;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+/**
+ * A profile's `Default/Preferences` with password saving forced off and everything else kept. `existing` is the
+ * file's parsed JSON, or anything else when there is none or it does not parse: Chrome resets a preferences file
+ * it cannot read, so a fresh one with only these switches loses nothing it would have kept.
+ */
+export function passwordSavingOff(existing: unknown): Record<string, unknown> {
+  const preferences = isRecord(existing) ? existing : {};
+  const profile = isRecord(preferences.profile) ? preferences.profile : {};
+  return {
+    ...preferences,
+    credentials_enable_service: PASSWORD_SAVING_OFF.credentials_enable_service,
+    credentials_enable_autosignin: PASSWORD_SAVING_OFF.credentials_enable_autosignin,
+    profile: { ...profile, ...PASSWORD_SAVING_OFF.profile },
+  };
+}

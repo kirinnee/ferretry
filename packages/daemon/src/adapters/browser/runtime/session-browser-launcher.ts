@@ -6,11 +6,11 @@ import {
   type CdpEndpoint,
   type CdpTransport,
   defaultCdpTransport,
-  honestChromeUserAgent,
   BrowserControlError,
   listenerHeldRefusal,
   type BrowserProfilePort,
   browserEnvironment,
+  honestChromeUserAgent,
   selectChromeExecutable,
 } from '../../../lib/browser/control/index.ts';
 import { browserProxyStatus, proxyEndpoint, type ResolvedBrowserProxy } from '../../../lib/browser/proxy/index.ts';
@@ -283,6 +283,11 @@ class LeasedBrowser implements BrowserAutomation {
   back: BrowserAutomation['back'] = pageId => this.worker.back(pageId);
   forward: BrowserAutomation['forward'] = pageId => this.worker.forward(pageId);
   reload: BrowserAutomation['reload'] = pageId => this.worker.reload(pageId);
+  inputDocument: BrowserAutomation['inputDocument'] = pageId => this.worker.inputDocument(pageId);
+  inputObserve: BrowserAutomation['inputObserve'] = (pageId, fields) => this.worker.inputObserve(pageId, fields);
+  inputShot: BrowserAutomation['inputShot'] = (pageId, facts) => this.worker.inputShot(pageId, facts);
+  inputType: BrowserAutomation['inputType'] = (pageId, expected, values, submit) =>
+    this.worker.inputType(pageId, expected, values, submit);
   location: BrowserAutomation['location'] = pageId => this.worker.location(pageId);
   newPage: BrowserAutomation['newPage'] = options => this.worker.newPage(options);
   closePage: BrowserAutomation['closePage'] = pageId => this.worker.closePage(pageId);
