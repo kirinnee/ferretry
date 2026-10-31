@@ -10,6 +10,7 @@
  */
 
 import type { BoardActivityFilter, BoardProjectId } from '@ferretry/protocol';
+import { Plus } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Spinner } from '../../components/spinner.tsx';
 import {
@@ -412,12 +413,26 @@ export function BoardPage({
     writeParams(next);
   };
 
-  const cardButton =
-    ports === undefined || machines.length === 0 ? null : (
-      <button className="kt-btn" data-variant="primary" onClick={() => setComposing(true)} type="button">
-        + Card
+  const canCompose = ports !== undefined && machines.length > 0;
+  const cardButton = !canCompose ? null : (
+    <button className="kt-btn fy-board__add" data-board-add="header" onClick={() => setComposing(true)} type="button">
+      <Plus aria-hidden="true" size={14} />
+      Add card
+    </button>
+  );
+  const cardFab = !canCompose ? null : (
+    <div className="fy-board__fab">
+      <button
+        aria-label="Add card"
+        className="fy-board__fab-button"
+        data-board-add="fab"
+        onClick={() => setComposing(true)}
+        type="button"
+      >
+        <Plus aria-hidden="true" size={24} />
       </button>
-    );
+    </div>
+  );
   const scopeToggle =
     scopeFerret === null ? null : (
       <ScopeToggle
@@ -474,8 +489,8 @@ export function BoardPage({
         </nav>
         {phone ? null : (
           <div className="fy-board__tools">
-            {cardButton}
             {scopeToggle}
+            {cardButton}
             {lanesLink}
             <PageThemeSwitch />
           </div>
@@ -491,7 +506,6 @@ export function BoardPage({
             quietFerret={scopeFerret}
             splitsAgents={model.splitsAgents}
           />
-          {cardButton}
           {scopeToggle}
           <BoardCountsBar
             activity={filters.activity}
@@ -615,6 +629,7 @@ export function BoardPage({
           taskId={openCard.taskId}
         />
       )}
+      {phone ? cardFab : null}
       {!composing || ports === undefined || composeMachine === undefined ? null : (
         <div className="fy-board__scrim">
           <BoardNewCard

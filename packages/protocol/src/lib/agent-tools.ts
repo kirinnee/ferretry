@@ -1,5 +1,18 @@
 import { z } from 'zod';
 import { AgendaIdSchema } from './agenda.ts';
+import {
+  BROWSER_MAX_FIND_CHARS,
+  BROWSER_MAX_SNAPSHOT_DEPTH,
+  BrowserCoordinateSchema,
+  BrowserModifierSchema,
+  BrowserMouseButtonSchema,
+  BrowserReadModeSchema,
+  BrowserRefSchema,
+  BrowserScreenshotFormatSchema,
+  refineBrowserRead,
+  refineBrowserScreenshot,
+  refineBrowserTarget,
+} from './browser-target.ts';
 import { InstantSchema } from './common.ts';
 import type { AgentConfigToolName } from './config-files.ts';
 import {
@@ -118,6 +131,12 @@ const AskOwnerSchema = z.union([z.literal(true), AskOwnerMessageSchema]);
 
 const SelectorSchema = z.string().trim().min(1).max(AGENT_TOOL_MAX_SELECTOR_CHARS);
 
+/** The element a browser act names: a ref from a page snapshot (`e12`), or a selector. */
+const ElementTargetShape = { selector: SelectorSchema.optional(), ref: BrowserRefSchema.optional() };
+
+/** Where in history `browser.navigate` goes instead of to a URL. */
+export const BrowserHistoryStepSchema = z.enum(['back', 'forward', 'reload']);
+
 export const AgentToolCallSchema = z.discriminatedUnion('tool', [
   z.strictObject({ tool: z.literal('terminal.list') }),
   z.strictObject({
@@ -195,22 +214,67 @@ export const AgentToolCallSchema = z.discriminatedUnion('tool', [
     /** Hand the new page to the owner at once: their tab opens on it, with this as what to do. */
     askOwner: AskOwnerSchema.optional(),
   }),
-  z.strictObject({ tool: z.literal('browser.navigate'), name: SurfaceKeySchema, url: AgentUrlSchema }),
-  z.strictObject({ tool: z.literal('browser.click'), name: SurfaceKeySchema, selector: SelectorSchema }),
-  z.strictObject({
-    tool: z.literal('browser.type'),
-    name: SurfaceKeySchema,
-    selector: SelectorSchema,
-    text: z.string().max(AGENT_TOOL_MAX_TEXT_CHARS),
-  }),
-  z.strictObject({
-    tool: z.literal('browser.read'),
-    name: SurfaceKeySchema,
-    /** `text` is the visible text; `a11y` is the accessibility tree, which names what can be clicked. */
-    mode: z.enum(['text', 'a11y']).optional(),
-    selector: SelectorSchema.optional(),
-  }),
-  z.strictObject({ tool: z.literal('browser.screenshot'), name: SurfaceKeySchema }),
+  z
+    .strictObject({
+      tool: z.literal('browser.navigate'),
+      name: SurfaceKeySchema,
+      url: AgentUrlSchema.optional(),
+      /** Back, forward or reload, instead of a URL. */
+      history: BrowserHistoryStepSchema.optional(),
+    })
+    .refine(call => (call.url === undefined) !== (call.history === undefined), 'navigate to a url or through history'),
+  z
+    .strictObject({
+      tool: z.literal('browser.click'),
+      name: SurfaceKeySchema,
+      ...ElementTargetShape,
+      /** A point in the viewport, in CSS pixels — for a canvas or anything a snapshot cannot name. */
+      x: BrowserCoordinateSchema.optional(),
+      y: BrowserCoordinateSchema.optional(),
+      button: BrowserMouseButtonSchema.optional(),
+      double: z.literal(true).optional(),
+      modifiers: z.array(BrowserModifierSchema).max(5).optional(),
+    })
+    .superRefine(refineBrowserTarget({ point: true, required: true })),
+  z
+    .strictObject({
+      tool: z.literal('browser.type'),
+      name: SurfaceKeySchema,
+      ...ElementTargetShape,
+      text: z.string().max(AGENT_TOOL_MAX_TEXT_CHARS),
+      /** Press Enter after the text. */
+      submit: z.literal(true).optional(),
+      /** One key at a time, for a field that reacts to each keystroke. */
+      slowly: z.literal(true).optional(),
+    })
+    .superRefine(refineBrowserTarget({ point: false, required: true })),
+  z
+    .strictObject({
+      tool: z.literal('browser.read'),
+      name: SurfaceKeySchema,
+      /**
+       * `text` is the visible text; `a11y` is the accessibility tree; `snapshot` is that tree with a ref
+       * beside every element, which every browser act accepts in place of a selector.
+       */
+      mode: BrowserReadModeSchema.optional(),
+      ...ElementTargetShape,
+      /** `snapshot` only: just the lines containing this text, each with its ref. */
+      find: z.string().trim().min(1).max(BROWSER_MAX_FIND_CHARS).optional(),
+      depth: z.number().int().min(1).max(BROWSER_MAX_SNAPSHOT_DEPTH).optional(),
+      boxes: z.literal(true).optional(),
+    })
+    .superRefine(refineBrowserTarget({ point: false, required: false }))
+    .superRefine(refineBrowserRead),
+  z
+    .strictObject({
+      tool: z.literal('browser.screenshot'),
+      name: SurfaceKeySchema,
+      ...ElementTargetShape,
+      fullPage: z.literal(true).optional(),
+      format: BrowserScreenshotFormatSchema.optional(),
+    })
+    .superRefine(refineBrowserTarget({ point: false, required: false }))
+    .superRefine(refineBrowserScreenshot),
   z.strictObject({ tool: z.literal('browser.close'), name: SurfaceKeySchema }),
   z.strictObject({
     tool: z.literal('browser.ask_owner'),
@@ -296,6 +360,8 @@ export const AgentToolResultSchema = z.strictObject({
   /** `terminal.wait` only: whether what it waited for happened before the timeout. */
   matched: z.boolean().optional(),
   screenshotBase64: z.string().min(1).optional(),
+  /** The screenshot's image type. Absent means PNG. */
+  screenshotFormat: BrowserScreenshotFormatSchema.optional(),
   surfaces: z.array(AgentSurfaceSchema).optional(),
   /** `*.request_input` and `input.wait` only: where the request stands. */
   input: InputAgentViewSchema.optional(),

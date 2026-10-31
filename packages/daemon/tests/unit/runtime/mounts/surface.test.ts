@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import { ANALYTICS_PRICING_RATE_APPLICABILITY } from '@ferretry/protocol';
 import should from 'should';
 import { AUDITED_ROUTES, AUDITED_SOCKET_ROUTES } from '../../../../src/lib/audit/index.ts';
+import { BrowserProxyTester } from '../../../../src/lib/browser/proxy/index.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import { HandoverReconcileLoop } from '../../../../src/lib/handover/index.ts';
 import { NO_PERFORMANCE_PROBE } from '../../../../src/lib/performance/recorder.ts';
@@ -627,6 +628,19 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   },
   terminals: new FakeTerminals(),
   browserLogin: new FakeBrowserLogin(),
+  browserProxy: {
+    tester: new BrowserProxyTester({
+      saved: async () => undefined,
+      secrets: async () => new Map(),
+      probe: {
+        run: async () => {
+          throw new Error('not exercised by the surface inventory');
+        },
+      },
+      now: () => 0,
+    }),
+    state: () => ({ state: 'stopped' }),
+  },
   browser: {
     status: async sessionId => ({
       state: 'stopped',
@@ -815,6 +829,7 @@ describe('the mounted daemon surface', () => {
       5 + // adding an MCP server for one ferret: its listing, and a preview and an add for each of the project and the login
       6 + // a person's agent tools: terminal and browser tool calls, their control changes, and each kind's control read
       2 + // the speed-up keys: their status read and one provider's Test
+      2 + // the browser: its machine-wide state read and the owner-only proxy Test
       3 + // updating this daemon: the view, starting an update, and the automatic-install setting (docs/updating.md)
       2 + // updating the agent CLIs: their view (which is when npm is asked) and starting one update
       4 + // the configuration files: status, one file, an edit and a confirmation (the agent's door is `none`)
@@ -1118,6 +1133,8 @@ describe('the mounted daemon surface', () => {
       'POST /v1/browser/login',
       'GET /v1/sessions/:sessionId/browser',
       'POST /v1/sessions/:sessionId/browser',
+      'GET /v1/browser/state',
+      'POST /v1/browser/proxy/test',
       'GET /v1/names',
       'GET /v1/learning/status',
       'GET /v1/learning/config',

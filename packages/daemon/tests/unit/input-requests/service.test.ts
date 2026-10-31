@@ -80,6 +80,8 @@ interface World {
   quarantinesThrow: boolean;
   /** Fails every quarantine append once this many have been taken. */
   quarantineBudget: number | undefined;
+  /** Holds the read of one session's quarantine journal. */
+  quarantinesGate: { session: string; gate: Promise<void> } | undefined;
   /** Holds the read of the request history. */
   historyGate: Promise<void> | undefined;
   /** The request history cannot be read. */
@@ -88,6 +90,10 @@ interface World {
   promptGate: Promise<void> | undefined;
   /** Holds every redaction of text the owner may be shown. */
   redactGate: Promise<void> | undefined;
+  /** When set, only the redaction of this text waits at the redact gate. */
+  redactOnly: string | undefined;
+  /** How many redactions are suspended at the gate. */
+  redacting: number;
   auditThrows: boolean;
   sessionsThrow: boolean;
   typeThrows: boolean;
@@ -126,11 +132,14 @@ function build(overrides: Partial<World> = {}) {
     failQuarantine: undefined,
     quarantineGate: undefined,
     quarantinesThrow: false,
+    quarantinesGate: undefined,
     quarantineBudget: undefined,
     historyGate: undefined,
     historyThrows: false,
     promptGate: undefined,
     redactGate: undefined,
+    redactOnly: undefined,
+    redacting: 0,
     auditThrows: false,
     sessionsThrow: false,
     typeThrows: false,
@@ -190,7 +199,8 @@ function build(overrides: Partial<World> = {}) {
           throw new Error('the journal is full');
         w.quarantineEvents.push(event);
       },
-      quarantines: async () => {
+      quarantines: async session => {
+        if (w.quarantinesGate?.session === session) await w.quarantinesGate.gate;
         if (w.quarantinesThrow) throw new Error('the journal cannot be read');
         return w.quarantineHistory;
       },
@@ -216,7 +226,10 @@ function build(overrides: Partial<World> = {}) {
     values,
     quarantine,
     redact: async text => {
-      await w.redactGate;
+      if (w.redactOnly === undefined || w.redactOnly === text) {
+        w.redacting += w.redactGate === undefined ? 0 : 1;
+        await w.redactGate;
+      }
       return values.scrubAll(text);
     },
   });
@@ -894,6 +907,49 @@ describe('InputRequestService.cancel, expire, wait and restore', () => {
     await twice.service.restore();
     should((await twice.service.list(HOST)).length).equal(1);
   });
+});
+
+describe('R7: the agent is never sent to chat for a value', () => {
+  const guided = (message: string | undefined): void => {
+    should(message).containEql('terminal_request_input');
+    should(message).containEql('take over');
+    should(message?.toLowerCase()).not.containEql('chat');
+  };
+
+  for (const sensitivity of ['secret', 'private'] as const) {
+    const raise = { ...RAISE, sensitivity };
+
+    it(`should point a ${sensitivity} request that was interrupted to a fresh request, not chat`, async () => {
+      const { w, service, id, digest } = await raised({ typeResult: 'uncertain' }, raise);
+      await refused(service.deliver(SESSION, id, bodyFor(digest), HOST));
+
+      should(w.told.at(-1)?.message).containEql('partly or fully typed');
+      guided(w.told.at(-1)?.message);
+    });
+
+    it(`should point a cancelled ${sensitivity} request to a fresh request, not chat`, async () => {
+      const { w, service, id } = await raised({}, raise);
+      await service.cancel(SESSION, id, HOST);
+
+      guided(w.told.at(-1)?.message);
+    });
+
+    it(`should point an expired ${sensitivity} request to a fresh request, not chat`, async () => {
+      const { w, service } = await raised({}, raise);
+      w.now += 600_000;
+      await service.sweep();
+
+      guided(w.told.at(-1)?.message);
+    });
+
+    it(`should point a refused ${sensitivity} request to a fresh request, not chat`, async () => {
+      const { w, service, id } = await raised({}, raise);
+      for (let n = 0; n < 4; n += 1) await refused(service.deliver(SESSION, id, bodyFor('d'.repeat(64)), HOST));
+
+      should(w.told.at(-1)?.message).containEql('check failures');
+      guided(w.told.at(-1)?.message);
+    });
+  }
 });
 
 describe('review regressions: delivery is one recorded, serialised, never-repeated write', () => {
@@ -1626,12 +1682,19 @@ describe('the pane quarantine: a terminal a secret was typed into is kept from a
       should(facts.foreground.argv).equal('');
     };
 
+    const suspended = async (w: { redacting: number }): Promise<void> => {
+      for (let n = 0; n < 50 && w.redacting === 0; n += 1) await new Promise(resolve => setTimeout(resolve, 0));
+      should(w.redacting).be.above(0);
+    };
+
     it('should seal a listed card when a hold began while its text was being redacted', async () => {
       const live = await raised({ names: NAMES });
       let open!: () => void;
       live.w.redactGate = new Promise<void>(resolve => (open = resolve));
+      live.w.redactOnly = FACTS.promptLine;
 
       const pending = live.service.list(HOST);
+      await suspended(live.w);
       live.quarantine.lockSession(SESSION);
       open();
       const [request] = await pending;
@@ -1639,12 +1702,14 @@ describe('the pane quarantine: a terminal a secret was typed into is kept from a
       sealed(request);
     });
 
-    it('should seal a cancelled card when a hold began while its text was being redacted', async () => {
+    // An ended request keeps no observed facts at all, so this pins the invariant rather than a race.
+    it('should show a cancelled card no terminal text, even when a hold began while its prompt was being redacted', async () => {
       const live = await raised({ names: NAMES });
       let open!: () => void;
       live.w.redactGate = new Promise<void>(resolve => (open = resolve));
 
       const pending = live.service.cancel(SESSION, live.id, HOST);
+      await suspended(live.w);
       live.quarantine.lockSession(SESSION);
       open();
 
@@ -1657,6 +1722,38 @@ describe('the pane quarantine: a terminal a secret was typed into is kept from a
       w: { events: InputEvent[]; quarantineEvents: InputQuarantineEvent[]; now: number };
     }) => build({ history: live.w.events, quarantineHistory: live.w.quarantineEvents, now: live.w.now + 10 * WINDOW });
 
+    // R7-1
+    it('should keep a live delivery pinned, under every alias, while a stalled multi-session replay finishes', async () => {
+      let open: () => void = () => undefined;
+      const live = build({ sessions: [SESSION, 'x-2'], names: NAMES });
+      live.w.quarantinesGate = {
+        session: 'x-2',
+        gate: new Promise<void>(resolve => {
+          open = resolve;
+        }),
+      };
+      const restoring = live.service.restore();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      await live.service.raise(SESSION, RAISE);
+      const [request] = await live.service.list(HOST);
+      let finish: () => void = () => undefined;
+      live.w.gate = new Promise<void>(resolve => {
+        finish = resolve;
+      });
+      const delivering = live.service.deliver(SESSION, request?.id ?? '', bodyFor(request?.observedDigest ?? ''), HOST);
+      await new Promise(resolve => setTimeout(resolve, 0));
+
+      open();
+      await restoring;
+      live.w.now += WINDOW + 1;
+
+      should(live.service.quarantinedUntil(SESSION, ['dev'])).not.be.undefined();
+      should(live.service.quarantinedUntil(SESSION, ['000000000001'])).not.be.undefined();
+      finish();
+      await delivering;
+      should(live.service.quarantinedUntil(SESSION, ['dev'])).equal(live.w.now + WINDOW);
+      should(live.service.quarantinedUntil(SESSION, ['000000000001'])).equal(live.w.now + WINDOW);
+    });
     // R6-1
     it('should keep a successful delivery held, under every name, when the settlement could not be recorded and the daemon restarts', async () => {
       const live = await raised({ names: NAMES, quarantineBudget: 1 });

@@ -8,16 +8,18 @@ import {
 } from '../../../../../src/features/fleet/shell/machine-route.ts';
 
 describe('machine route', () => {
-  it('names the five tabs in the prototype order', () => {
+  it('names the six tabs in the prototype order, Browser before Machine', () => {
     expect(MACHINE_TABS.map(tab => tab.label)).toEqual([
       'Runtimes',
       'Credentials',
       'Profiles',
       'Components',
+      'Browser',
       'Machine',
     ]);
     expect(DEFAULT_MACHINE_TAB).toBe('runtimes');
     expect(isMachineTabId('profiles')).toBe(true);
+    expect(isMachineTabId('browser')).toBe(true);
     expect(isMachineTabId('accounts')).toBe(false);
   });
 

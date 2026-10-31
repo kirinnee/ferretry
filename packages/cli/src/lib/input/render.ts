@@ -1,8 +1,18 @@
 import type { InputReason, InputRequest, InputRequestList } from '@ferretry/protocol';
 
+const UNSEEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
+
+/** Untrusted text made visible: a control or format character is spelled out, never sent to the terminal. */
+export function showUntrusted(value: string): string {
+  return value.replaceAll(UNSEEN, char => {
+    const code = char.codePointAt(0) ?? 0;
+    return code <= 0xff ? `\\x${code.toString(16).padStart(2, '0')}` : `\\u{${code.toString(16)}}`;
+  });
+}
+
 const compact = (value: string, width: number): string => {
   const line = value.replaceAll(/\s+/gu, ' ').trim();
-  return line.length > width ? `${line.slice(0, width - 1)}…` : line;
+  return showUntrusted(line.length > width ? `${line.slice(0, width - 1)}…` : line);
 };
 
 /** How a target is cited: the same `%terminal:dev` an owner types and reads everywhere. */
@@ -39,15 +49,15 @@ export function renderInputFacts(request: InputRequest): string[] {
     `!${request.agendaItemId} wants a ${request.sensitivity} value typed into ${inputTargetReference(request)}`,
     `the agent says: ${compact(request.prompt, 200)}`,
   ];
-  if (request.risk !== undefined) lines.push(`risk ${request.risk.level}: ${request.risk.reason}`);
+  if (request.risk !== undefined) lines.push(`risk ${request.risk.level}: ${showUntrusted(request.risk.reason)}`);
   const login = matchedLogin(request);
   if (login !== undefined) lines.push(`a saved login matches: ${login.text} (answer with --secret ${login.id})`);
   const observed = request.observed;
   if (observed?.kind === 'terminal') {
     lines.push(
-      `reading the terminal now: ${observed.foreground.comm}${observed.recognisedConsumer ? '' : ' (not a program known to ask for secrets)'}`,
+      `reading the terminal now: ${showUntrusted(observed.foreground.comm)}${observed.recognisedConsumer ? '' : ' (not a program known to ask for secrets)'}`,
       `echo: ${observed.echo}`,
-      ...(observed.promptLine === '' ? [] : [`its prompt line: ${observed.promptLine}`]),
+      ...(observed.promptLine === '' ? [] : [`its prompt line: ${showUntrusted(observed.promptLine)}`]),
     );
   }
   return lines;

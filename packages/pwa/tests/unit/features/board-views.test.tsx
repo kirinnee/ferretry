@@ -254,6 +254,45 @@ describe('TableView', () => {
     expect(view.container.querySelector('.fy-board-done')).toBeNull();
   });
 
+  it('gives a to-test row the same Done and Not good as a card, spinning the one pressed', async () => {
+    const model = await boardModelOf(cards);
+    const moved: string[] = [];
+    const movesFor: BoardCardEnv['movesFor'] = () => ({
+      choices: [],
+      onMove: (entry, laneId, answer) => void moved.push(`${entry.task.id}>${laneId}:${answer}`),
+      closeLaneId: 'closed',
+      reworkLaneId: 'implement',
+      onDragStart: () => undefined,
+      onDragEnd: () => undefined,
+    });
+    view = await mount(table(model, { env: envOf(model, { doneFor, movesFor }) }));
+    const root = view.container;
+    const verdicts = [...root.querySelectorAll('[data-task="F1"] .fy-board-card__verdict > *')];
+    expect(verdicts.map(node => node.textContent)).toEqual(['Done', 'Not good']);
+    expect(root.querySelectorAll('[data-task="F2"] .fy-board-card__verdict').length).toBe(0);
+    await interact(() =>
+      must(root.querySelector<HTMLButtonElement>('[data-task="F1"] [data-verdict="not-good"]'), 'Not good').click(),
+    );
+    expect(moved).toEqual(['F1>implement:not-good']);
+    await view.render(
+      table(model, {
+        env: envOf(model, {
+          doneFor,
+          movesFor,
+          answerFor: () => ({ pressed: 'not-good', error: 'No such lane.' }),
+        }),
+      }),
+    );
+    const sent = must(view.container.querySelector('[data-task="F1"] [data-verdict="not-good"]'), 'Not good');
+    expect(sent.getAttribute('aria-busy')).toBe('true');
+    expect(
+      view.container
+        .querySelector('[data-task="F1"] [data-verdict="works"], [data-task="F1"] .fy-board-done')
+        ?.hasAttribute('disabled'),
+    ).toBe(true);
+    expect(view.container.querySelector('[data-task="F1"] [data-answer-error]')?.textContent).toBe('No such lane.');
+  });
+
   it('draws the information rows lighter than the action rows', async () => {
     const model = await boardModelOf(cards);
     view = await mount(table(model));

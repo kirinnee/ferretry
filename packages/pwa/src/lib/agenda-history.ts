@@ -8,7 +8,7 @@
  * item when it names it as a `!A47` reference.
  */
 
-import { type AgendaMessagePart, type AgendaItem, parseAgendaMessage } from '@ferretry/protocol';
+import { type AgendaItem, type AgendaMessagePart, parseAgendaMessage } from '@ferretry/protocol';
 import { type RevisionEntry, revisionList } from './agenda-revisions.ts';
 import type { TranscriptEntry } from './session-screens.ts';
 
@@ -16,6 +16,7 @@ import type { TranscriptEntry } from './session-screens.ts';
 export const HISTORY_FERRET_CHARS = 700;
 
 export type HistoryEvent =
+  | { readonly kind: 'raised'; readonly key: string; readonly at: number; readonly by: AgendaItem['raisedBy'] }
   | { readonly kind: 'revision'; readonly key: string; readonly at: number; readonly entry: RevisionEntry }
   | { readonly kind: 'owner'; readonly key: string; readonly at: number; readonly part: AgendaMessagePart }
   | {
@@ -75,9 +76,55 @@ const revisions = (item: AgendaItem): readonly HistoryEvent[] =>
       }) as const,
   );
 
-/** The item's revisions and the conversation about it, oldest first: the item view reads top-down, newest last. */
-export const itemHistory = (item: AgendaItem, entries: readonly TranscriptEntry[]): readonly HistoryEvent[] =>
-  [...revisions(item), ...spoken(item.id, entries)]
+/** The words a message starts with, spaces folded: two reads of one message share it, whatever one of them cut. */
+const stem = (text: string): string => text.replace(/\s+/gu, ' ').trim().replace(/…$/u, '').slice(0, 80);
+
+/** What the ferret said lately as the chat's own rows; the ids are the reader's, never the chat's. */
+export const recentEntries = (
+  messages: readonly { readonly text: string; readonly timestamp?: string }[],
+): readonly TranscriptEntry[] =>
+  messages.map((message, order) => {
+    const at = Date.parse(message.timestamp ?? '');
+    return {
+      id: `recent:${order}`,
+      kind: 'assistant',
+      text: message.text,
+      ...(Number.isFinite(at) ? { at } : {}),
+    };
+  });
+
+/** What the ferret said lately without naming the item: the lead-up to it. One the item's own reading holds is not drawn twice. */
+const lately = (recent: readonly TranscriptEntry[], held: readonly HistoryEvent[]): readonly HistoryEvent[] => {
+  const known = new Set(held.flatMap(event => (event.kind === 'ferret' ? [stem(event.text)] : [])));
+  return recent
+    .filter(entry => !known.has(stem(entry.text)))
+    .map((entry): HistoryEvent => {
+      const text = cut(entry.text);
+      return { kind: 'ferret', key: entry.id, at: entry.at ?? 0, text, entry: { ...entry, text } };
+    });
+};
+
+/**
+ * The item's revisions and the conversation about it, oldest first: the item view reads top-down, newest last. The
+ * item's own events (raised, edited) are small dividers between the bubbles; the bubbles are what was said — the
+ * rows that name the item, and the ferret's last few messages (`recent`) that led up to it.
+ */
+export const itemHistory = (
+  item: AgendaItem,
+  entries: readonly TranscriptEntry[],
+  recent: readonly TranscriptEntry[] = [],
+): readonly HistoryEvent[] => {
+  const said = spoken(item.id, entries);
+  const events = [...revisions(item), ...said, ...lately(recent, said)];
+  if (events.length === 0) return events;
+  const raised: HistoryEvent = {
+    kind: 'raised',
+    key: 'raised',
+    at: Date.parse(item.waitingSince) || 0,
+    by: item.raisedBy,
+  };
+  return [raised, ...events]
     .map((event, order) => ({ event, order }))
     .sort((a, b) => a.event.at - b.event.at || a.order - b.order)
     .map(({ event }) => event);
+};

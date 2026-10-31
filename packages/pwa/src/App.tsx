@@ -52,6 +52,7 @@ import { NewDeviceNotices } from './features/device-notice/new-device-notice.tsx
 import { ComponentsSurface } from './features/fleet/components/components-tab.tsx';
 import { CredentialsTab } from './features/fleet/credentials/credentials-tab.tsx';
 import type { FleetClientFactory } from './features/fleet/fleet-client.ts';
+import { BrowserTab } from './features/fleet/machine/browser-tab.tsx';
 import { MachineSettingsSurface } from './features/fleet/machine/settings-tab.tsx';
 import { ProfilesTab } from './features/fleet/profiles/profiles-tab.tsx';
 import { RuntimesTab } from './features/fleet/runtimes/runtimes-tab.tsx';
@@ -128,6 +129,7 @@ import { useAccountPickerSlice } from './hooks/use-account-picker.ts';
 import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
 import { type BoardMachine, useBoard } from './hooks/use-board.ts';
+import { useChatTasksUrl } from './hooks/use-chat-tasks-url.ts';
 import { useAgendaSession, useAgendaSnapshot } from './hooks/use-agenda.ts';
 import { agendaClearPort } from './lib/agenda-clear-agents.ts';
 import { AgendaInboxContext, useAgendaInbox, useAgendaInboxModel, useInboxMachines } from './hooks/use-agenda-inbox.ts';
@@ -1064,6 +1066,7 @@ function SessionRoute({
     [daemonFetch, store.carrier, store.connectionHealth],
   );
   const { navigate, back, entryKey } = useRouter();
+  const tasksView = useChatTasksUrl({ navigate, back }, window.location);
   const layout = useLayoutMode();
   const dictation = useSttSettings(store.stt);
   // Actions › Warden: offered only where this caller's grants open the Warden (read once per machine).
@@ -1597,6 +1600,7 @@ function SessionRoute({
             accountPicker={store.accountPicker}
             board={store.board}
             boardTasks={boardTasks}
+            tasksView={tasksView}
             actionContributions={sessionActions}
             infoLearning={learningActions.passiveFor(scope.sessionId)}
             switches={{
@@ -1695,6 +1699,7 @@ const MACHINE_TAB_SURFACES: MachineTabSurfaces = {
   credentials: CredentialsTab,
   profiles: ProfilesTab,
   components: ComponentsSurface,
+  browser: BrowserTab,
   machine: MachineSettingsSurface,
 };
 

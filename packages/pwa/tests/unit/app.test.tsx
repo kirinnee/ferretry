@@ -2390,7 +2390,7 @@ describe('AppShell', () => {
     }
   });
 
-  it('reads the ferret’s last messages for the phone deck through the machine the item came from', async () => {
+  it('draws the ferret’s last messages as the History of the phone deck’s item, read through the machine the item came from', async () => {
     const restore = patchGlobal(window, 'innerWidth', 390);
     const { view } = await renderShell(`/d/${ALPHA}/inbox`, [alpha.daemonId], {
       sessions: ['shared'],
@@ -2407,14 +2407,9 @@ describe('AppShell', () => {
       const quick = must(view.container.querySelector<HTMLButtonElement>('[data-agenda-quick]'), 'Answer quickly');
       await interact(() => quick.click());
       await settle();
-      const toggle = must(
-        view.container.querySelector<HTMLButtonElement>('[data-agenda-recent-toggle]'),
-        'the last-messages fold',
-      );
-      await interact(() => toggle.click());
       for (let turn = 0; turn < 4; turn += 1) await settle();
       const shown = Array.from(
-        view.container.querySelectorAll('[data-agenda-recent-message]'),
+        view.container.querySelectorAll('[data-agenda-history] [data-history="ferret"]'),
         node => node.textContent ?? '',
       ).join('\n');
       expect(shown).toContain('Rotated; waiting on your approval.');

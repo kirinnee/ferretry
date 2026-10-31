@@ -1,3 +1,19 @@
+## [4.146.0](https://github.com/kirinnee/ferretry/compare/v4.145.0...v4.146.0) (2026-10-30)
+
+### Features
+
+* **pwa:** agenda card v5 — premise on top, typed layouts, conversation history, revisions ([#1072](https://github.com/kirinnee/ferretry/issues/1072)) ([5065fec](https://github.com/kirinnee/ferretry/commit/5065fecf4e15144d49713b8f6a929d2acf5d5e07))
+
+### Fixes
+
+* **pwa:** move Add card out of the board's chip row ([#1067](https://github.com/kirinnee/ferretry/issues/1067)) ([f8af1c9](https://github.com/kirinnee/ferretry/commit/f8af1c9e0f24362354c5b26518ef7c95a1dd832c))
+
+## [4.145.0](https://github.com/kirinnee/ferretry/compare/v4.144.0...v4.145.0) (2026-10-30)
+
+### Features
+
+* **board:** Done and Not good spin in place, never spill, and Not good sends pictures ([#1066](https://github.com/kirinnee/ferretry/issues/1066)) ([2e7ebf4](https://github.com/kirinnee/ferretry/commit/2e7ebf4d23cb018d7eb431be1b78283f0e7070e1)), closes [#1062](https://github.com/kirinnee/ferretry/issues/1062) [#1060](https://github.com/kirinnee/ferretry/issues/1060)
+
 ## [4.144.0](https://github.com/kirinnee/ferretry/compare/v4.143.0...v4.144.0) (2026-10-30)
 
 ### Features

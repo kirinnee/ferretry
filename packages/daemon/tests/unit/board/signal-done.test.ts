@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import { MAX_BOARD_NOTE_LENGTH, MAX_BOARD_REASON_LENGTH, type PrLink } from '@ferretry/protocol';
 import should from 'should';
 import { clip, DONE_WITHOUT_MESSAGE, doneLane, doneMove, doneNote, doneReason } from '../../../src/lib/board/index.ts';
-import { card, lanes, NOW, PROJECT, templateLanes } from './support.ts';
+import { card, lanes, NOW, oldQuickLanes, PROJECT, templateLanes } from './support.ts';
 
 const PR: PrLink = {
   url: 'https://github.com/kirinnee/ferretry/pull/930',
@@ -55,6 +55,31 @@ describe('where a done card goes', () => {
     should(doneLane(card({ laneId: 'implement', workflow: 'quick' }), templateLanes())?.id).equal('released');
   });
 
+  it('should send a done quick card with no PR to To test, never to Closed', () => {
+    // Act / Assert
+    should(doneLane(card({ laneId: 'doing', workflow: 'quick' }), lanes(PROJECT, 'quick'))?.id).equal('to-test');
+    should(doneLane(card({ laneId: 'doing', workflow: 'design-first' }), lanes(PROJECT, 'quick'))?.id).equal('to-test');
+  });
+
+  it('should pass over a closed lane that enters on signal.done for the verify lane, with no review lane before it', () => {
+    // Arrange: a hand-made set that still closes on done, with a verify lane added before Closed
+    const old = oldQuickLanes();
+    const [todo, doing, closed] = old.lanes;
+    const handMade = {
+      ...old,
+      lanes: [
+        todo!,
+        doing!,
+        { id: 'check', name: 'Check', category: 'verify' as const, ownerGate: true },
+        { ...closed!, ownerGate: true },
+      ],
+      variants: {},
+    };
+
+    // Act / Assert
+    should(doneLane(card({ laneId: 'doing', workflow: 'quick' }), handMade)?.id).equal('check');
+  });
+
   it('should fall back to the first review or verify lane ahead, else the next lane', () => {
     // Arrange
     const noTrigger = lanes();
@@ -73,7 +98,7 @@ describe('where a done card goes', () => {
     should(doneLane(card({ laneId: 'implement' }), noReview)?.id).equal('merged');
   });
 
-  it('should stay put with a PR, outside an active lane, dropped, or when the lane ahead is closed', () => {
+  it('should stay put with a PR, outside an active lane, dropped, or when the only lane ahead is closed', () => {
     // Arrange
     const withPr = card({ laneId: 'implement', links: { prs: [PR], branch: null, commits: [], docs: [] } });
     const dropped = card({ laneId: 'implement', dropped: { reason: 'superseded', at: NOW } });
@@ -83,7 +108,7 @@ describe('where a done card goes', () => {
     should(doneLane(card({ laneId: 'todo' }), lanes())).be.null();
     should(doneLane(card({ laneId: 'review' }), lanes())).be.null();
     should(doneLane(dropped, lanes())).be.null();
-    should(doneLane(card({ laneId: 'doing', workflow: 'quick' }), lanes(PROJECT, 'quick'))).be.null();
+    should(doneLane(card({ laneId: 'doing', workflow: 'quick' }), oldQuickLanes())).be.null();
     should(doneLane(card({ laneId: 'nowhere' }), lanes())).be.null();
   });
 

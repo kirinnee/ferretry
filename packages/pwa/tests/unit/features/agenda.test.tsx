@@ -646,7 +646,8 @@ describe('what the item view sends', () => {
       entries: [{ id: 'm1', kind: 'assistant', text: 'Looking at !A1 now.', at: 1 } as unknown as TranscriptEntry],
     });
     const events = view.root.findByType(AgendaItemView).props.history;
-    expect(events.map((event: { kind: string }) => event.kind)).toEqual(['ferret']);
+    // The conversation's message, and the item's own "raised" event as a divider (History is the conversation).
+    expect(events.map((event: { kind: string }) => event.kind)).toEqual(['ferret', 'raised']);
   });
 });
 

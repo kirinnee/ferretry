@@ -2122,6 +2122,21 @@ const HARNESS_MACHINE_CLIENT: FleetClientFactory = async connection => {
     if (setup !== undefined) return setup;
     if (path === '/v1/fleet/export') return HARNESS_CLONE_EXPORT;
     if (path === '/v1/fleet/setup/scan') return setUp ? HARNESS_SETUP_SCAN : HARNESS_FIRST_RUN_SCAN;
+    // The Browser tab: a running browser behind a proxy, and a Test proxy that reaches it.
+    if (path === '/v1/browser/state')
+      return {
+        state: 'running',
+        startedAt: '2026-10-30T08:00:00.000Z',
+        proxy: { url: 'http://proxy.example.test:8080', authenticated: true, bypassCount: 1 },
+      };
+    if (path === '/v1/browser/proxy/test')
+      return {
+        reachable: true,
+        tested: 'saved',
+        roundTripMs: 182,
+        egressIp: '203.0.113.7',
+        message: 'The proxy answered and the test endpoint saw its address.',
+      };
     if (path !== '/v1/fleet/machine') return harnessCatalogAnswer(path, init);
     return {
       name: 'studio-mac',
@@ -2130,6 +2145,19 @@ const HARNESS_MACHINE_CLIENT: FleetClientFactory = async connection => {
       agentPermissions: 'auto',
       defaultRuntime: setUp ? 'claude-default' : null,
       agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
+      ...(setUp
+        ? {
+            browserMode: 'headless',
+            browserProxy: {
+              url: 'http://proxy.example.test:8080',
+              bypass: ['*.internal.example.test'],
+              // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference, exactly as a file holds one
+              username: '${secret:PROXY_USER}',
+              // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference, exactly as a file holds one
+              password: '${secret:PROXY_PASSWORD}',
+            },
+          }
+        : {}),
       tools: [{ harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/local/bin/claude' }],
       runtimeCount: setUp ? 5 : 0,
       runningSessions: 0,

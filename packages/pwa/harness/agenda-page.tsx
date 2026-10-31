@@ -8,6 +8,9 @@
  *   ?view=status-sending  nothing on the agenda, an answer still on its way: "Sending…" alone
  *   ?attention=A5         a notification tap: A5's full card opens on arrival
  *   &parked=1             adds a snoozed (A70) and a replied (A71) item: neither counts, neither is listed
+ *   &v5=1                 adds the v5 card items: A80 (a long decision with revisions and a conversation with
+ *                         tool calls in it) and one item of each type — A81 approval, A82 to-do, A83 review,
+ *                         A84 note, A85 reply
  *
  * Every component is the REAL one (`useAgenda` through `AgendaChatHarness`); only the data is
  * invented and the answers go nowhere.
@@ -428,6 +431,169 @@ const HISTORY_ENTRIES = [
   owner('h4', 5, '!A5 leaning SQLite, but I want the nightly export'),
 ] as unknown as TranscriptEntry[];
 
+// V5: a LONG, real-looking decision — premise, context, a 4-column options table, two revisions — and one item of
+// each other type. The conversation about A80 has tool calls between its messages; none of them may reach History.
+const A80_TABLE = [
+  '## How the four options compare',
+  '',
+  '| Option | Setup | Writers | Backup |',
+  '| --- | --- | --- | --- |',
+  '| SQLite file | None — one file beside the daemon | One at a time | Copy the file |',
+  '| Postgres | A server to run, patch and secure | Many at once | `pg_dump` on a timer |',
+  '| Keep it in memory | None | Not applicable | Nothing — a restart forgets |',
+  '| Append-only log | None — a plain file the daemon owns | One at a time | Copy the file |',
+  '',
+  'Every option keeps the ledger **readable by hand**, so a bad migration can always be undone from the backup.',
+  '',
+  '## What a restart does today',
+  '',
+  'The ledger lives in the daemon’s memory. A restart reads the resolved items back from nothing, so the board shows an empty history until the next item is raised.',
+].join('\n');
+const A80 = item('A80', 120, {
+  title: 'Where should the ledger live?',
+  subject: 'Where should the board’s ledger live: a SQLite file, Postgres, a log, or stay in memory?',
+  why: 'A restart forgets every resolved item, and the release cut is on Friday.',
+  premise: [
+    '- The board keeps its ledger in **memory** only',
+    '- A daemon restart forgets every resolved item',
+    '- Two owners have already asked where an answered item went',
+    '- The ledger is read on every board load, so a slow store is felt at once',
+    '- Nothing outside the daemon reads it today',
+  ].join('\n'),
+  context: [
+    '- The release cut is on **Friday**; the migration must run before it',
+    '- SQLite is one file and needs no server; Postgres needs one run and patched',
+    '- Kai measured 4 ms per board read against a local SQLite file',
+    '- The studio machine has no spare capacity for a database server',
+    '- You said yes to “a migration, once” on Monday; the engine is the open part',
+    '- An append-only log is the cheapest, but a search needs a full read',
+  ].join('\n'),
+  decided: '- The migration runs once, on the next start (you said yes on Monday)',
+  stillOpen: '- Which engine\n- Whether to keep a nightly export',
+  terms: [
+    { term: 'Ledger', meaning: 'The list of every item raised, open and resolved.' },
+    { term: 'WAL', meaning: 'A log written before the data, so a crash can be replayed.' },
+    { term: 'Migration', meaning: 'Moving the existing items into the new store once.' },
+  ],
+  ask: {
+    kind: 'multiple-choice',
+    options: [
+      { label: 'SQLite file' },
+      { label: 'Postgres' },
+      { label: 'Append-only log' },
+      { label: 'Keep it in memory' },
+    ],
+  },
+  optionDetails: [
+    { label: 'SQLite file', detail: 'One file, **no server**. Set `journal_mode=WAL` so a crash replays cleanly.' },
+    { label: 'Postgres', detail: 'A server to run and patch, but it handles **many writers**.' },
+    { label: 'Append-only log', detail: 'A plain file the daemon appends to. Cheap, but a search reads it all.' },
+    { label: 'Keep it in memory', detail: 'Nothing changes; a restart still forgets resolved items.' },
+  ],
+  recommendation: { decision: 'SQLite file', why: 'Needs nothing installed on the machine' },
+  body: A80_TABLE,
+  revisions: [
+    {
+      at: ago(90),
+      by: 'agent',
+      changed: ['subject', 'premise'],
+      previous: {
+        subject: 'Should the ledger be stored on disk?',
+        premise: '- The board keeps its ledger in memory only\n- A daemon restart forgets every resolved item',
+      },
+    },
+    {
+      at: ago(25),
+      by: 'agent',
+      changed: ['ask', 'context'],
+      previous: {
+        ask: { kind: 'multiple-choice', options: [{ label: 'SQLite file' }, { label: 'Postgres' }] },
+        context: '- The release cut is on Friday\n- SQLite is one file and needs no server',
+      },
+    },
+  ],
+  blockingNow: true,
+} as Partial<AgendaItem>);
+
+const A81 = item('A81', 18, {
+  title: 'Restart the preview relay?',
+  subject: 'Can I restart the preview relay? It drops live sessions for about ten seconds.',
+  why: 'The relay is serving a stale advertisement.',
+  kind: 'permission',
+  ask: { kind: 'permission' },
+  premise: '- The preview relay serves an advertisement written before the key rotation',
+  context: '- Phones that pair now get an address that no longer answers\n- A restart takes about ten seconds',
+  impact: '- Drops every live session on **preview** for about ten seconds\n- Touches nothing on production',
+} as Partial<AgendaItem>);
+const A82 = item('A82', 14, {
+  title: 'Rotate the relay key',
+  subject: 'Rotate the relay key on the studio machine',
+  why: 'The old key was pasted into a chat; rotate it before the release cut.',
+  kind: 'task',
+  ask: { kind: 'task' },
+  premise: '- The old relay key was pasted into a chat on Tuesday',
+  context: '- The release cut is on Friday; a leaked key must not ship with it',
+  steps: [
+    'Store the new key: `fy secret set RELAY_KEY`',
+    'Restart the relay: `fy daemon restart`',
+    'Check a phone still pairs',
+  ],
+} as Partial<AgendaItem>);
+const A83 = item('A83', 22, {
+  title: 'Is the retry fix enough?',
+  subject: 'Review the retry fix for the login race: is it enough to ship?',
+  why: 'The fix passes its tests, but it only narrows the window.',
+  kind: 'review',
+  ask: { kind: 'answer-review' },
+  premise: '- The login race lets two sessions claim one row',
+  context: '- The fix retries with backoff; the tests pass 200 runs in a row',
+  body:
+    '## Why I think it is enough\n\nThe race needs two logins inside the same **4 ms** window. Retrying with backoff pushes the second one past it.\n\n' +
+    '## Where it is thin\n\nA slow disk widens the window. Locking the row would close it, at the cost of a migration.',
+} as Partial<AgendaItem>);
+const A84 = item('A84', 11, {
+  title: 'The ledger migration finished',
+  subject: 'The ledger migration finished: 1,204 items moved, none lost',
+  why: 'Nothing to decide; this is for your records.',
+  kind: 'info',
+  premise: '- The migration ran on the last restart and moved every resolved item',
+  context: '- The old in-memory ledger was dropped after the check passed',
+} as Partial<AgendaItem>);
+const A85 = item('A85', 16, {
+  title: 'Which login for the new runtime?',
+  subject: 'Which login should the new runtime start with, personal or team?',
+  why: 'The two bill differently and the job will run for hours.',
+  kind: 'reply',
+  ask: { kind: 'open-question' },
+  premise: '- The new runtime needs a login before it can start',
+  context: '- The personal login bills to you; the team login bills to the studio',
+} as Partial<AgendaItem>);
+const V5_ITEMS = [A80, A81, A82, A83, A84, A85] as const;
+
+const tool = (id: string, at: number, text: string) => ({ id, kind: 'tool', text, at: NOW - at * 60_000 });
+export const V5_TOOL_TEXT = 'Bash(rg ledger src/)';
+const V5_ENTRIES = [
+  ferretSays('v1', 118, 'I raised !A80 — the ledger forgets every resolved item on a restart. Where should it live?'),
+  tool('v2', 114, `${V5_TOOL_TEXT} → 14 matches in packages/daemon`),
+  owner('v3', 105, '!A80 does Postgres need its own machine?'),
+  tool('v4', 100, 'Read(packages/daemon/src/ledger.ts) → 212 lines'),
+  ferretSays(
+    'v5',
+    96,
+    'Re !A80: yes, Postgres is its own server. SQLite is a file beside the daemon — no new machine.',
+  ),
+  owner('v6', 60, '!A80 what happens to the board while the migration runs?'),
+  tool('v7', 57, 'Bash(fy daemon status --json) → ok'),
+  ferretSays('v8', 54, 'Re !A80: the board reads from memory until the migration finishes, then switches over once.'),
+  owner('v9', 30, agendaReMessage([{ id: 'A80', quote: A80.subject }], 'Add append-only log as an option')),
+  ferretSays(
+    'v10',
+    26,
+    'Done — I added the log as the third option on !A80, and put the four side by side in a table.',
+  ),
+  owner('v11', 4, '!A80 leaning SQLite, keep the nightly export'),
+] as unknown as TranscriptEntry[];
+
 const params = new URLSearchParams(location.search);
 const view = params.get('view') ?? 'board';
 const target = (params.get('attention') ?? params.get('agenda') ?? null) as AgendaId | null;
@@ -438,12 +604,14 @@ const configChange = params.get('config') === '1';
 const jaeda = params.get('jaeda') === '1';
 const v4 = params.get('v4') === '1';
 const parked = params.get('parked') === '1';
+const v5 = params.get('v5') === '1';
 
 const items = [
   ...AGENDA,
   ...(jaeda ? [A47, A48] : []),
   ...(v4 ? [A60, A61, A62, A63, A64, A65] : []),
   ...(parked ? [A70, A71] : []),
+  ...(v5 ? V5_ITEMS : []),
 ].map(entry =>
   entry.id === 'A5'
     ? long
@@ -483,7 +651,7 @@ createRoot(root).render(
     <AgendaChatHarness
       agendaMode={view !== 'none'}
       board={board}
-      entries={withHistory || long ? HISTORY_ENTRIES : undefined}
+      entries={v5 ? [...HISTORY_ENTRIES, ...V5_ENTRIES] : withHistory || long ? HISTORY_ENTRIES : undefined}
       live={live}
       now={NOW}
       target={target}

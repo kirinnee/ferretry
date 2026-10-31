@@ -31,6 +31,7 @@ import {
   laneTargets,
   needsOwner,
   nextLane,
+  QUICK_TO_TEST_LANE,
   StaleAfterSchema,
   staleAfterMinutes,
   variantLanes,
@@ -276,7 +277,7 @@ describe('lane templates', () => {
     }
   });
 
-  it('should close on the last lane’s trigger in the sets with no verify lane', () => {
+  it('should close on the last lane’s trigger in the sets with no verify lane, and only by the owner elsewhere', () => {
     const closing = (template: lanesModule.LaneTemplateName) =>
       LANE_TEMPLATES[template].lanes.find(entry => entry.category === 'closed');
     should(closing('pr-release')).deepEqual({
@@ -293,9 +294,36 @@ describe('lane templates', () => {
       enterOn: ['pr.merged'],
       emphasis: 'info',
     });
-    should(closing('quick')?.enterOn).deepEqual(['signal.done']);
+    should(closing('quick')?.ownerGate).be.true();
     should(closing('ops')?.ownerGate).be.true();
     should(closing('writing')?.ownerGate).be.true();
+  });
+
+  it('should give quick work a To test lane that a merge, a release and a done all enter', () => {
+    // Arrange
+    const quick = laneSetOf('quick');
+
+    // Act
+    const entered = (trigger: lanesModule.LaneTrigger) => {
+      const found = laneForTrigger(quick, 'quick', trigger);
+      return found.ok ? found.value?.id : undefined;
+    };
+
+    // Assert
+    should(QUICK_TO_TEST_LANE).deepEqual({
+      id: 'to-test',
+      name: 'To test',
+      category: 'verify',
+      enterOn: ['pr.merged', 'release.published', 'signal.done'],
+      ownerGate: true,
+      emphasis: 'action',
+    });
+    should(quick.lanes.map(entry => entry.id)).deepEqual(['todo', 'doing', 'to-test', 'closed']);
+    should(entered('pr.merged')).equal('to-test');
+    should(entered('release.published')).equal('to-test');
+    should(entered('signal.done')).equal('to-test');
+    should(quick).match({ doneLane: 'closed', notGoodLane: 'doing' });
+    should(LaneSetSchema.safeParse(quick).success).be.true();
   });
 
   it('should name the lanes of the other templates', () => {
@@ -304,7 +332,7 @@ describe('lane templates', () => {
     should(names('pr')).deepEqual(['Todo', 'Plan/Design', 'In progress', 'Merged']);
     should(names('ops')).deepEqual(['Todo', 'Investigate', 'Fix', 'Verify', 'Closed']);
     should(names('writing')).deepEqual(['Todo', 'Research', 'Draft', 'Review', 'Published', 'Closed']);
-    should(names('quick')).deepEqual(['Todo', 'Doing', 'Closed']);
+    should(names('quick')).deepEqual(['Todo', 'Doing', 'To test', 'Closed']);
   });
 
   it('should apply a proposal’s renames and keep lane ids and targets', () => {
@@ -482,9 +510,9 @@ describe('lane helpers', () => {
   it('should find the first lane of a category in a variant', () => {
     should(firstLaneOfCategory(CLASSIC, 'design-first', 'active')).deepEqual({ ok: true, value: CLASSIC.lanes[1] });
     should(firstLaneOfCategory(CLASSIC, 'quick', 'active')).deepEqual({ ok: true, value: CLASSIC.lanes[2] });
-    should(firstLaneOfCategory(laneSetOf('quick'), 'quick', 'verify')).deepEqual({
+    should(firstLaneOfCategory(laneSetOf('quick'), 'quick', 'review')).deepEqual({
       ok: false,
-      error: { code: 'no-lane-of-category', category: 'verify' },
+      error: { code: 'no-lane-of-category', category: 'review' },
     });
     should(firstLaneOfCategory(broken, 'quick', 'backlog')).deepEqual(unknown('ghost'));
   });
@@ -509,7 +537,9 @@ describe('lane helpers', () => {
     should(needsOwner(CLASSIC, 'tested', 'implement')).deepEqual({ ok: true, value: false });
     should(needsOwner(CLASSIC, 'plan', 'plan')).deepEqual({ ok: true, value: false });
     should(needsOwner(CLASSIC, 'implement', 'review')).deepEqual({ ok: true, value: false });
-    should(needsOwner(laneSetOf('quick'), 'doing', 'closed')).deepEqual({ ok: true, value: false });
+    should(needsOwner(laneSetOf('quick'), 'doing', 'closed')).deepEqual({ ok: true, value: true });
+    should(needsOwner(laneSetOf('quick'), 'doing', 'to-test')).deepEqual({ ok: true, value: false });
+    should(needsOwner(laneSetOf('quick'), 'to-test', 'closed')).deepEqual({ ok: true, value: true });
     should(needsOwner(CLASSIC, 'ghost', 'closed')).deepEqual(unknown('ghost'));
     should(needsOwner(CLASSIC, 'plan', 'ghost')).deepEqual(unknown('ghost'));
   });

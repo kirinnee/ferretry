@@ -43,6 +43,7 @@ import {
   prUrlParts,
   type BoardReopenAttachments,
   type TaskRef,
+  variantLanes,
 } from '@ferretry/protocol';
 import { type BoardOperation, type BoardStanding, mayDo, OPERATION_STANDINGS, refusalMessage } from './authority.ts';
 import { BoardError } from './errors.ts';
@@ -526,9 +527,10 @@ const file = (
 };
 
 /**
- * Where a refiled card lands on the other board: the named lane, else the first lane there of the
- * category it is in now, else that board's first backlog lane. A closed card stays closed: it lands in a
- * closed lane of the other board even when its workflow does not walk one, rather than being reopened.
+ * Where a refiled card lands on the other board when its PR facts say nothing ({@link factsLandingLane}):
+ * the named lane, else the first lane there of the category it is in now, else that board's first backlog
+ * lane. A closed card stays closed: it lands in a closed lane of the other board even when its workflow does
+ * not walk one, rather than being reopened.
  */
 const refileLane = (card: BoardTask, from: LaneSet, target: LaneSet, laneId: string | undefined): Lane => {
   if (laneId !== undefined) return requireLane(target, laneId);
@@ -540,6 +542,28 @@ const refileLane = (card: BoardTask, from: LaneSet, target: LaneSet, laneId: str
 };
 
 const isClosedLane = (lane: Lane): boolean => lane.category === 'closed';
+
+/**
+ * Where an open card lands on the other board when its PR facts have a say there: the last active lane its
+ * variant walks (where work resumes), for {@link reconcileFacts} to move on with the fact in its history.
+ * Landing by category instead would put a card merged but not released, sitting in the Unfiled board's To
+ * test, into a Released · to test lane, and facts never move a card back. `undefined` when the facts say
+ * nothing, so the card lands by category.
+ */
+const factsLandingLane = (card: BoardTask, target: LaneSet, context: CardContext): Lane | undefined => {
+  const lanes = variantLanesOf(target, card.workflow);
+  const resume = lanes.findLast(lane => lane.category === 'active') ?? entryLane(target, card.workflow);
+  const move = laneFromFacts({ ...card, laneId: resume.id }, target, card.workflow, {
+    prs: card.links.prs,
+    runningVersion: context.runningVersion ?? null,
+  });
+  return move === null ? undefined : resume;
+};
+
+const variantLanesOf = (laneSet: LaneSet, workflow: BoardTask['workflow']): readonly Lane[] => {
+  const lanes = variantLanes(laneSet, workflow);
+  return lanes.ok ? lanes.value : laneSet.lanes;
+};
 
 /** The first backlog lane a workflow walks, else its first lane: where a new card goes. */
 const entryLane = (laneSet: LaneSet, workflow: BoardTask['workflow']): Lane => {
@@ -562,11 +586,15 @@ const refile = (
       `that project has no lanes yet; propose them with \`fy board lanes propose\` first`,
     );
   }
-  const lane = refileLane(card, context.laneSet, target, action.laneId);
   // A refile keeps the card's state. The owner already closed a card that is closed here, so carrying it
   // into the other board's closed lane is no closing; the gate is for a card that is not closed yet.
   const source = categoryOf(context.laneSet, card.laneId);
   const alreadyClosed = source.ok && source.value === 'closed';
+  const byFacts =
+    action.laneId === undefined && !alreadyClosed && card.dropped === null
+      ? factsLandingLane(card, target, context)
+      : undefined;
+  const lane = byFacts ?? refileLane(card, context.laneSet, target, action.laneId);
   if (!(alreadyClosed && isClosedLane(lane))) requireOwnerForClosed(lane, context.standing, card);
   const fromProject: BoardProjectId = card.projectId;
   const refiled: BoardTask = {

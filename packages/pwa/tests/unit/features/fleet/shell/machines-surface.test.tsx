@@ -67,7 +67,7 @@ const click = async (container: HTMLElement, selector: string): Promise<void> =>
 };
 
 describe('MachinesSurface', () => {
-  it('names the machine in its header with its status, and shows the five tabs with the active one current', async () => {
+  it('names the machine in its header with its status, and shows the six tabs with the active one current', async () => {
     const view = await mount(surface({ tab: 'profiles' }));
     const header = must(view.container.querySelector<HTMLElement>('[data-machine-header]'), 'header');
     expect(header.querySelector('h2#settings-machine-heading')?.textContent).toBe('studio-mac');
@@ -84,8 +84,15 @@ describe('MachinesSurface', () => {
     const nav = must(view.container.querySelector('nav[data-underline-tabs]'), 'tab strip');
     expect(nav.getAttribute('aria-label')).toBe('studio-mac views');
     const tabs = Array.from(view.container.querySelectorAll('[data-machine-tab]'));
-    expect(tabs.map(tab => tab.textContent)).toEqual(['Runtimes', 'Credentials', 'Profiles', 'Components', 'Machine']);
-    expect(tabs.map(tab => tab.getAttribute('aria-current'))).toEqual([null, null, 'page', null, null]);
+    expect(tabs.map(tab => tab.textContent)).toEqual([
+      'Runtimes',
+      'Credentials',
+      'Profiles',
+      'Components',
+      'Browser',
+      'Machine',
+    ]);
+    expect(tabs.map(tab => tab.getAttribute('aria-current'))).toEqual([null, null, 'page', null, null, null]);
     for (const tab of tabs) expect(tab.querySelector('svg')).not.toBeNull();
     expect(view.container.querySelector('[data-machine-tab-panel]')?.getAttribute('data-machine-tab-panel')).toBe(
       'profiles',
@@ -188,7 +195,7 @@ describe('MachinesSurface', () => {
     expect(view.container.querySelector('[data-machine-offline]')?.textContent).toContain(
       'studio-mac is asleep or offline',
     );
-    expect(view.container.querySelectorAll('[data-machine-tab]')).toHaveLength(5);
+    expect(view.container.querySelectorAll('[data-machine-tab]')).toHaveLength(6);
     expect(must(seen.at(-1), 'props').online).toBe(false);
     expect(must(seen.at(-1), 'props').machine).toBeNull();
     expect(
@@ -295,7 +302,7 @@ describe('MachinesSurface: a machine that is not set up', () => {
   it('offers no banner when the page has no first run to open', async () => {
     const view = await mount(surface({ reach: online({ setUp: false }) }));
     expect(view.container.querySelector('[data-machine-finish-setup]')).toBeNull();
-    expect(view.container.querySelectorAll('[data-machine-tab]')).toHaveLength(5);
+    expect(view.container.querySelectorAll('[data-machine-tab]')).toHaveLength(6);
     await view.unmount();
   });
 

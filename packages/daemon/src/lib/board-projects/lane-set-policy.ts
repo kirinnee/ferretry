@@ -12,6 +12,7 @@
  * - **confirm** is the owner's accept: the lanes and the version stay as they are.
  * - **merge the release lanes** ({@link mergeReleaseLanes}) folds a set's Released and To test lanes into one
  *   at boot: a release is what the owner tests, so the two were one step drawn twice.
+ * - **add quick's To test lane** ({@link addQuickToTestLane}) at boot, to a `quick` set from before it.
  */
 import {
   type BoardResult,
@@ -27,6 +28,7 @@ import {
   laneEditProblems,
   laneLayoutFromTemplate,
   laneTargets,
+  QUICK_TO_TEST_LANE,
   UNFILED_PROJECT_ID,
 } from '@ferretry/protocol';
 
@@ -186,4 +188,47 @@ export const mergeReleaseLanes = (current: LaneSet): ReleaseLaneMerge | null => 
     from: tested.id,
     into: released.id,
   };
+};
+
+/** The lanes, by id and category, of a `quick` set stored before it had To test. */
+const OLD_QUICK_SHAPE: readonly (readonly [string, Lane['category']])[] = [
+  ['todo', 'backlog'],
+  ['doing', 'active'],
+  ['closed', 'closed'],
+];
+
+/**
+ * Gives a `quick` set from before To test its To test lane ({@link QUICK_TO_TEST_LANE}), between Doing and
+ * Closed: quick work has no release step and facts never enter Closed, so a merged card had nowhere to go.
+ * Every lane stays where it is and keeps its name, so no card moves; Closed becomes owner-gated (a set with
+ * a `verify` lane closes only by the owner) and no longer entered on `signal.done`, which goes to To test.
+ * Every variant walks To test where it walked Closed or Doing. The version rises and the confirmation
+ * stands, so the owner is asked nothing. `null` for any other set, so it is idempotent.
+ */
+export const addQuickToTestLane = (current: LaneSet): LaneSet | null => {
+  const shaped =
+    current.lanes.length === OLD_QUICK_SHAPE.length &&
+    current.lanes.every((lane, index) => {
+      const [id, category] = OLD_QUICK_SHAPE[index] ?? [];
+      return lane.id === id && lane.category === category;
+    });
+  if (!shaped) return null;
+  const [todo, doing, closed] = current.lanes as [Lane, Lane, Lane];
+  const { enterOn, ...rest } = closed;
+  const kept = enterOn?.filter(trigger => trigger !== 'signal.done') ?? [];
+  const gated: Lane = { ...rest, ...(kept.length === 0 ? {} : { enterOn: kept }), ownerGate: true };
+  const lanes = [todo, doing, QUICK_TO_TEST_LANE, gated];
+  const variants = Object.fromEntries(
+    Object.entries(current.variants).map(([workflow, ids]) => {
+      const walked = ids ?? [];
+      const walks = walked.includes(doing.id) || walked.includes(closed.id);
+      return [
+        workflow,
+        lanes.map(lane => lane.id).filter(id => walked.includes(id) || (walks && id === QUICK_TO_TEST_LANE.id)),
+      ];
+    }),
+  );
+  const layout = { lanes, variants };
+  const targets = laneTargets(layout, current) ?? { doneLane: current.doneLane, notGoodLane: current.notGoodLane };
+  return { ...current, version: current.version + 1, ...layout, ...targets };
 };

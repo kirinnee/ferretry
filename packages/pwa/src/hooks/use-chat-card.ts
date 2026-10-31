@@ -41,6 +41,8 @@ export interface UseChatCardInput {
    * costs the daemon nothing: the chip says `No card` from the session's own config.
    */
   readonly reading: boolean;
+  /** "Show agent tasks": the Tasks tab draws the cards ferrets made for other ferrets. */
+  readonly agents: boolean;
 }
 
 export const useChatCard = ({
@@ -50,13 +52,16 @@ export const useChatCard = ({
   session,
   sessions,
   reading,
+  agents,
 }: UseChatCardInput): BoardChat | null => {
   const machines = useMemo<readonly BoardMachine[]>(
     () => (store === undefined || !reading ? NO_MACHINES : [{ connection, name: machineName }]),
     [store, reading, connection, machineName],
   );
   const projectId = session.config.projectId ?? null;
-  const filters = useMemo(() => ({ ...NO_BOARD_FILTERS, project: projectId }), [projectId]);
+  // Every card is read, agent cards too: the header chip must find a sub-ferret's own focus card. What the
+  // Tasks tab draws is `chatCards`' business.
+  const filters = useMemo(() => ({ ...NO_BOARD_FILTERS, project: projectId, agents: true }), [projectId]);
   const board = useBoard(store === undefined || !reading ? IDLE_STORE : store, machines, filters);
   const focus = session.config.focusTask;
   const relatives = useMemo(
@@ -67,15 +72,18 @@ export const useChatCard = ({
   const daemonId = connection.daemonId;
   const sessionId = session.config.id;
   const cards = useMemo(
-    () => chatCards(model, { daemonId, sessionId, focus: focus ?? null, relatives }),
-    [model, daemonId, sessionId, focus, relatives],
+    () => chatCards(model, { daemonId, sessionId, focus: focus ?? null, relatives, agents }),
+    [model, daemonId, sessionId, focus, relatives, agents],
   );
   const chip = useMemo(
     () => chatChip(focus, cards.focus, cards.focus === null ? undefined : cards.places.get(cards.focus.key), status),
     [focus, cards, status],
   );
   return useMemo(
-    () => (store === undefined ? null : { chip, cards, status, refresh: board.refresh }),
-    [store, chip, cards, status, board.refresh],
+    () =>
+      store === undefined
+        ? null
+        : { chip, cards, status, refresh: board.refresh, agents, splitsAgents: model.splitsAgents },
+    [store, chip, cards, status, board.refresh, agents, model.splitsAgents],
   );
 };

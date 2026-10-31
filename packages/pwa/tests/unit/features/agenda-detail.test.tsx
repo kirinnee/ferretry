@@ -25,12 +25,12 @@ const sections = (root: ParentNode): string[] =>
   [...root.querySelectorAll('[data-agenda-section]')].map(node => node.getAttribute('data-agenda-section') ?? '');
 
 describe('AgendaDetail', () => {
-  it('draws the sections in the fixed order: going on, why it matters, decided, terms, steps, more, links', async () => {
+  it('draws the sections in the fixed order: going on, why now, decided, terms, steps, more, links', async () => {
     view = await mount(<AgendaDetail item={full} layout="panel" />);
     expect(sections(view.container)).toEqual(['premise', 'context', 'decided', 'terms', 'steps', 'more', 'links']);
     const titles = [...view.container.querySelectorAll('[data-agenda-section] > :first-child')].map(n => n.textContent);
-    expect(titles.join(' | ')).toContain("What's going on");
-    expect(titles.join(' | ')).toContain('Why it matters');
+    expect(titles.join(' | ')).toContain('What’s going on');
+    expect(titles.join(' | ')).toContain('Why now');
   });
 
   it('leaves out every section the item does not have', async () => {

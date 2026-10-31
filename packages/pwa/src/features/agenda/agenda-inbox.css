@@ -732,82 +732,6 @@
   }
 }
 
-/* ---- "Last messages from <ferret>" ----------------------------------------------------------------- */
-.fy-attn-recent {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: var(--gap-xs);
-  border-top: var(--stroke) solid var(--border-soft);
-  padding-top: var(--gap-sm);
-}
-.fy-attn-recent__toggle {
-  display: inline-flex;
-  min-height: 32px;
-  align-items: center;
-  align-self: flex-start;
-  gap: 4px;
-  border: 0;
-  border-radius: var(--radius-control);
-  background: transparent;
-  padding: 0 4px 0 0;
-  color: var(--muted);
-  font: inherit;
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-  cursor: pointer;
-}
-.fy-attn-recent__toggle:hover {
-  color: var(--fg);
-}
-.fy-attn-recent__toggle:focus-visible {
-  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
-  outline-offset: 2px;
-}
-.fy-attn-recent__chevron {
-  transition: transform 150ms ease;
-}
-.fy-attn-recent__chevron[data-open] {
-  transform: rotate(90deg);
-}
-.fy-attn-recent__note {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--gap-sm);
-  margin: 0;
-  color: var(--muted);
-  font-size: var(--text-sm);
-}
-.fy-attn-recent__list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap-sm);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.fy-attn-recent__message {
-  min-width: 0;
-  border-radius: var(--radius-control);
-  background: var(--surface-2, var(--bg));
-  padding: 8px 10px;
-  overflow-wrap: anywhere;
-}
-.fy-attn-recent__message .md {
-  font-size: var(--text-sm);
-}
-.fy-attn-recent__when {
-  display: block;
-  margin-bottom: 2px;
-  color: var(--faint);
-  font-size: var(--text-xs);
-}
-@media (prefers-reduced-motion: reduce) {
-  .fy-attn-recent__chevron {
-    transition: none;
-  }
-}
-
 /* ---- The phone's full-screen card ---------------------------------------------------------------- */
 .fy-attn-inbox[data-agenda-inbox='card'] {
   padding-top: 4px;
@@ -1183,12 +1107,6 @@
 }
 .fy-inbox-composer {
   min-width: 0;
-}
-/* The last messages, opened, scroll on their own: the composer under them never leaves the screen. */
-.fy-inbox-deck-foot > .fy-attn-recent {
-  max-height: 32vh;
-  overflow-y: auto;
-  overscroll-behavior: contain;
 }
 /* On a phone the open item is as wide as the screen, exactly as wide as it is in the chat, so its quick-reply row
    gets the chat's room; the bar above and the composer below keep the page's gutter. */

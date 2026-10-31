@@ -19,9 +19,13 @@ the page and end with it. The reference grammar is unchanged — see
 `terminal.list` · `terminal.open(name, folder?, command?, askOwner?)` · `terminal.send(name, text?, keys?)` ·
 `terminal.read(name, lines?)` · `terminal.wait(name, text | exit, timeoutMs?)` · `terminal.close(name)` · `terminal.ask_owner(name, message?)` ·
 `terminal.request_input(name, prompt, sensitivity, submit?, expiresInSeconds?, blocking?, chain?)` · `input.wait(id, timeoutMs?)` ·
-`browser.list` · `browser.open(name, url?, incognito?, askOwner?)` · `browser.navigate(name, url)` ·
-`browser.click(name, selector)` · `browser.type(name, selector, text)` ·
-`browser.read(name, mode: text | a11y, selector?)` · `browser.screenshot(name)` · `browser.close(name)` · `browser.ask_owner(name, message?)`.
+`browser.list` · `browser.open(name, url?, incognito?, askOwner?)` · `browser.navigate(name, url | history)` ·
+`browser.click(name, target, button?, double?, modifiers?)` · `browser.type(name, target, text, submit?, slowly?)` ·
+`browser.read(name, mode: text | a11y | snapshot, target?, find?, depth?, boxes?)` ·
+`browser.screenshot(name, target?, fullPage?, format?)` · `browser.close(name)` · `browser.ask_owner(name, message?)`.
+
+A **target** is exactly one of a `ref`, a `selector`, or — for a click only — a point `x`, `y`; see
+[Refs and targets](#refs-and-targets). `history` is `back`, `forward` or `reload`.
 
 The wire body is `AgentToolCallSchema` (`packages/protocol/src/lib/agent-tools.ts`); the answer is
 `AgentToolResultSchema`. The same actions are `fy terminal …` and `fy browser page …`
@@ -34,6 +38,31 @@ The MCP names swap the dot for an underscore: `terminal_open`, `terminal_ask_own
 
 A terminal opens the owner's own login shell (zsh, bash, fish …), not `/bin/sh`; a `command` is typed into it
 like keystrokes. See [terminals.md](terminals.md).
+
+## Refs and targets
+
+`browser.read` with `mode: "snapshot"` answers the page's accessibility tree with a **ref** beside every
+element — `- button "Sign in" [ref=e4]`, or `f1e3` for an element inside a frame. Every act that names an
+element takes `ref: "e4"` in place of a selector, so an agent reads once and acts on what it read
+(the target rules live in `packages/protocol/src/lib/browser-target.ts`).
+
+- **A ref is good only against the page's latest snapshot.** It is Playwright's own `ai`-mode snapshot and
+  `aria-ref` selector (playwright-mcp's mechanism, in the `playwright-core` we already pin). A ref the page
+  no longer knows — it navigated, or was never snapshotted — is refused with the fix ("read the page again
+  with mode `snapshot`"), never resolved to a guess.
+- **`find`** keeps only the snapshot lines that contain a text (case-insensitive, at most 200), each still
+  carrying its ref. `depth` limits the tree; `boxes` adds each element's viewport box, for a click by point.
+  Asking for any of the three without a `mode` reads a snapshot.
+- **A point** (`x`, `y`, viewport CSS pixels, 0–10,000) is for a canvas, a map or anything a snapshot cannot
+  name, and only a click takes one. A point's modifier keys are pressed around the click and always released.
+- **Reads keep the top.** A snapshot or tree longer than one answer keeps its first lines (cut on a line), and
+  the summary says how to read less; visible text keeps its tail, as it always has.
+- A screenshot is the viewport, the `fullPage`, or one element; PNG unless `format: "jpeg"`. The MCP server
+  sends it with the matching MIME type.
+- The CLI reads the same shapes from one word: `fy browser page click app e12`, `… click app 120,340`,
+  `… read app --snapshot --find "Sign in"`, `… navigate app back`.
+- An MCP client that sends `false` for an on-only flag (`double`, `submit`, `slowly`, `boxes`, `fullPage`,
+  `incognito`) is read as having left it out.
 
 ## Routes
 
@@ -143,9 +172,16 @@ call.
    bounded at 45 s); several people typing into one terminal at once is fine.
 7. **Audit.** Every call writes one `agent.tool` record: tool, surface name, outcome, lengths and
    `incognito` — never typed text, a URL's path or query (host only), or a selector over 120 characters.
+   A target is recorded as its ref, its clipped selector or `point: true` (never the coordinates); a
+   `find` as its length; options (`double`, `submit`, `fullPage`, `format`, a history step) by what they were.
    A refused credential or a body that is not a call is recorded too (`reason`). Takeovers and
    hand-overs write `surface.control`. Identical successes fold per minute like all activity.
-8. **Bounds.** Text 16 KiB, 64 keys, 2000 lines read, 64 KiB returned, a 25 s wait per request (a client
+8. **What a page shows is scrubbed.** Every text a browser tool hands back — a read, a snapshot, the address
+   in the summary — goes through the vault redactor first, to an agent and a person alike, as the operator's
+   screen and transcript reads do: a dashboard that shows an API key the vault holds comes back
+   `[redacted:NAME]`. A vault that cannot be opened withholds the text (`unavailable`) rather than serving it
+   raw; the act itself has already happened. Screenshots are pixels and are not scrubbed.
+9. **Bounds.** Text 16 KiB, 64 keys, 2000 lines read, 64 KiB returned, a 25 s wait per request (a client
    loops up to 120 s), URLs `http`/`https` only and 2 KiB, selectors 1 KiB; terminal creation is
    serialized, so two opens racing for one name leave one terminal.
 

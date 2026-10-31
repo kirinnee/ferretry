@@ -8,9 +8,15 @@ import {
   type BrowserPageSnapshot,
   type BrowserPageSummary,
   type BrowserScreencastFrame,
+  type BrowserStateView,
   type BrowserStatus,
   type BrowserViewport,
   type SurfaceOpener,
+  type BrowserElementTarget,
+  type BrowserTarget,
+  type BrowserTargetFields,
+  browserReadModeOf,
+  browserTargetOf,
 } from '@ferretry/protocol';
 import { agentSpokenName } from '../../names/session-names.ts';
 import type { BrowserAutomation } from '../transport/automation-contracts.ts';
@@ -60,7 +66,7 @@ export interface BrowserSessionDirectory {
 /** What can be done to ONE named page: the agent tools' browser verbs. */
 export type BrowserPageAction = Extract<
   BrowserAction,
-  { readonly action: 'navigate' | 'click' | 'type' | 'read' | 'screenshot' }
+  { readonly action: 'navigate' | 'click' | 'type' | 'read' | 'screenshot' | 'back' | 'forward' | 'reload' }
 >;
 
 /** How a named page is opened. */
@@ -285,6 +291,17 @@ export class BrowserSessionService implements BrowserSubsystem {
     await run.driver.dispatchInput(pageId, input);
   }
 
+  /** The machine browser as a whole: whether it runs, since when, and the proxy it started with. */
+  overview(): BrowserStateView {
+    const run = this.run;
+    if (run === undefined) return { state: this.starting === undefined ? 'stopped' : 'starting' };
+    return {
+      state: 'running',
+      startedAt: run.startedAt,
+      ...(run.driver.proxy === undefined ? {} : { proxy: run.driver.proxy }),
+    };
+  }
+
   async closeAll(): Promise<void> {
     await this.stop();
   }
@@ -419,13 +436,34 @@ export class BrowserSessionService implements BrowserSubsystem {
       case 'navigate':
         return await run.driver.navigate(pageId, action.url);
       case 'click':
-        return await run.driver.click(pageId, action.selector);
+        return await run.driver.click(pageId, requiredTarget(action), {
+          ...(action.button === undefined ? {} : { button: action.button }),
+          ...(action.double === true ? { double: true } : {}),
+          ...(action.modifiers === undefined ? {} : { modifiers: action.modifiers }),
+        });
       case 'type':
-        return await run.driver.type(pageId, action.selector, action.text);
-      case 'read':
-        return await run.driver.read(pageId, action.selector, action.mode);
-      case 'screenshot':
-        return await run.driver.screenshot(pageId);
+        return await run.driver.type(pageId, requiredElement(action), action.text, {
+          ...(action.submit === true ? { submit: true } : {}),
+          ...(action.slowly === true ? { slowly: true } : {}),
+        });
+      case 'read': {
+        const target = optionalElement(action);
+        return await run.driver.read(pageId, {
+          ...(target === undefined ? {} : { target }),
+          mode: browserReadModeOf(action),
+          ...(action.find === undefined ? {} : { find: action.find }),
+          ...(action.depth === undefined ? {} : { depth: action.depth }),
+          ...(action.boxes === true ? { boxes: true } : {}),
+        });
+      }
+      case 'screenshot': {
+        const target = optionalElement(action);
+        return await run.driver.screenshot(pageId, {
+          ...(target === undefined ? {} : { target }),
+          ...(action.fullPage === true ? { fullPage: true } : {}),
+          ...(action.format === undefined ? {} : { format: action.format }),
+        });
+      }
       case 'back':
         return await run.driver.back(pageId);
       case 'forward':
@@ -636,4 +674,26 @@ function pageOf(result: BrowserPageSnapshot): BrowserPageSnapshot {
     canGoBack: result.canGoBack,
     canGoForward: result.canGoForward,
   };
+}
+
+/**
+ * The target an act names. The action schema already holds every act to its target rule, so a missing
+ * or wrong-kind target here is a defect in whoever built the action, not a caller's mistake.
+ */
+function requiredTarget(fields: BrowserTargetFields): BrowserTarget {
+  const target = browserTargetOf(fields);
+  if (target === undefined) throw new Error('a browser act was built without its target');
+  return target;
+}
+
+function requiredElement(fields: BrowserTargetFields): BrowserElementTarget {
+  const target = optionalElement(fields);
+  if (target === undefined) throw new Error('a browser act was built without its target');
+  return target;
+}
+
+function optionalElement(fields: BrowserTargetFields): BrowserElementTarget | undefined {
+  const target = browserTargetOf(fields);
+  if (target?.kind === 'point') throw new Error('a browser act that takes an element was built with a point');
+  return target;
 }

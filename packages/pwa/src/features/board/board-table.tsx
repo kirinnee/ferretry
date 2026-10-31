@@ -24,6 +24,7 @@ import {
 import { type BoardCardOf, type BoardListRow, listRows } from '../../lib/board-view.ts';
 import type { BoardModel } from '../../lib/board-model.ts';
 import { RouteLink } from '../../shell/route-link.tsx';
+import { ToTestActions } from './board-card.tsx';
 import { BoardDoneAction } from './board-done-action.tsx';
 import { BoardIcon } from './board-icons.tsx';
 import type { BoardCardEnv } from './board-views.tsx';
@@ -215,6 +216,8 @@ function SummaryRowView({ entry, env }: { readonly entry: SummaryRow; readonly e
   const action = SUMMARY_SECTIONS[entry.section].action;
   const place = env.places.get(card.key);
   const done = action && place !== undefined ? env.doneFor?.(card, place) : undefined;
+  const moves = action && place !== undefined ? env.movesFor(card, place) : undefined;
+  const verdict = moves !== undefined && row.category === 'verify';
   const answer = env.answerFor?.(card) ?? ANSWER_AT_REST;
   const href = env.hrefFor(card);
   const extras = cardSegments(task, { names: env.names, now: env.now, category: row.category, machine: null }).filter(
@@ -268,7 +271,9 @@ function SummaryRowView({ entry, env }: { readonly entry: SummaryRow; readonly e
         <span className="fy-board-summary__when">{entry.when}</span>
       </div>
       <div className="fy-board-summary__act">
-        {done === undefined ? null : (
+        {verdict ? (
+          <ToTestActions answer={answer} card={card} done={done} moves={moves} touch={env.touch === true} />
+        ) : done === undefined ? null : (
           <BoardDoneAction
             disabled={answer.pressed !== null}
             done={done.done}

@@ -273,6 +273,8 @@ packages/pwa/src/lib/text-scale-postcss.ts # build tooling for the Text size set
 # The gate's roots skip .tsx entries (packages/pwa exports ./main → src/main.tsx), so a .ts module imported only from the app tree reads as unreached.
 packages/pwa/src/hooks/use-fine-pointer.ts # used by SessionChatPage via App.tsx ← main.tsx; unreached only because the gate ignores .tsx roots
 packages/pwa/src/hooks/use-chat-card.ts # the chat page's card chip and Tasks tab (U14), used by session-chat-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
+packages/pwa/src/hooks/use-chat-tasks-url.ts # the Tasks tab expand/agents view kept in the chat address, used by App.tsx ← main.tsx; the gate ignores .tsx roots
+packages/pwa/src/lib/board-chat-url.ts # the Tasks tab address grammar (tasks=full, agents=1), used by use-chat-tasks-url.ts ← App.tsx ← main.tsx; the gate ignores .tsx roots
 
 # The project board's data layer (board U10) lands before the pages that read it (board U11–U15).
 

@@ -1,8 +1,23 @@
 import { describe, it } from 'bun:test';
-import { type BoardTask, type BoardTaskCreateRequestInput, BoardTaskCreateRequestSchema } from '@ferretry/protocol';
+import {
+  type BoardTask,
+  type BoardTaskCreateRequestInput,
+  BoardTaskCreateRequestSchema,
+  UNFILED_PROJECT_ID,
+} from '@ferretry/protocol';
 import should from 'should';
 import { BoardError, BoardService, BoardUnavailableError } from '../../../src/lib/board/index.ts';
-import { card, FakeFocus, MemoryBoardStore, NOW, PROJECT, type ServiceWorld, world } from './support.ts';
+import {
+  card,
+  FakeFocus,
+  FakeLanes,
+  lanes,
+  MemoryBoardStore,
+  NOW,
+  PROJECT,
+  type ServiceWorld,
+  world,
+} from './support.ts';
 
 const create = (input: Partial<BoardTaskCreateRequestInput> = {}) =>
   BoardTaskCreateRequestSchema.parse({
@@ -124,6 +139,30 @@ describe('signal done on the card', () => {
     ]);
     should(ports.store.writes).have.length(1);
     should(ports.changes.events.map(each => each.sessionId)).deepEqual(['child']);
+  });
+
+  it('should move a done Unfiled card with no PR to To test, never to Closed', async () => {
+    // Arrange
+    const { ports, service } = serviceWith(
+      [card({ projectId: UNFILED_PROJECT_ID, laneId: 'doing', workflow: 'quick' })],
+      {
+        focus: focused('lead', 'F1'),
+        lanes: new FakeLanes(new Map([[UNFILED_PROJECT_ID, lanes(UNFILED_PROJECT_ID, 'quick')]])),
+      },
+    );
+
+    // Act
+    const done = await service.signalDone('lead', 'fixed the claim form');
+
+    // Assert
+    should(done?.moved?.id).equal('to-test');
+    should(stored(ports, 'F1').history.at(-1)).match({
+      type: 'moved',
+      from: 'doing',
+      to: 'to-test',
+      trigger: 'signal.done',
+      reason: 'fixed the claim form',
+    });
   });
 
   it('should only note a card that stays, and say why a gate or a blocker held it', async () => {

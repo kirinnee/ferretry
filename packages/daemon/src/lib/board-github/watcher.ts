@@ -14,7 +14,8 @@
  *   4. looks for the first release containing each merge (`releases.ts`), at a bounded number of compares;
  *   5. writes each card that changed through `BoardService.recordPullRequests`, as the daemon, and queues
  *      the nudges that write handed back;
- *   6. refiles Unfiled cards whose PR's repository a project owns.
+ *   6. refiles the Unfiled cards that belong on a project's board (`unfiled.ts`): a PR in its repository, or
+ *      the folder the card's ferret works in.
  *
  * Auto-link from a session (its branch, its own `gh pr create`) applies only when that session is the
  * assignee of exactly ONE card still before shipping: a lead assigned to forty cards opens PRs for all of
@@ -46,7 +47,6 @@ import {
   PROJECT_REMOTES_TTL_MS,
   pollDelay,
   prKey,
-  refileTargets,
   repoKey,
   SHARED_BRANCHES,
   WATCH_FIRST_TICK_MS,
@@ -66,6 +66,7 @@ import type {
 import { parseRepositoryAnswer, pollArguments, type RepositoryAnswer, type RepositoryPoll } from './query.ts';
 import { compareArguments, MAX_COMPARES_PER_PR, releaseCandidates, releasedIn, tagContains } from './releases.ts';
 import { createdPrUrls, TRANSCRIPT_EVENTS_SCANNED } from './transcript.ts';
+import { type ProjectRemote, readProjectRemotes, type UnfiledRefiler } from './unfiled.ts';
 
 export interface GitHubWatcherPorts {
   readonly board: WatchedBoard;
@@ -78,6 +79,8 @@ export interface GitHubWatcherPorts {
   readonly timers: WatcherTimers;
   readonly clock: WatcherClock;
   readonly diagnostics: BoardDiagnostics;
+  /** The Unfiled board's refile step, handed the projects' repositories this tick read. */
+  readonly unfiled: Pick<UnfiledRefiler, 'run'>;
   /** This daemon's own version, for a set that still has a `release.running` lane (no shipped template does). */
   readonly version: string;
 }
@@ -104,12 +107,6 @@ interface BranchCandidate {
 interface CardCandidates {
   readonly branches: readonly BranchCandidate[];
   readonly createdUrls: readonly { readonly url: string; readonly because: string }[];
-}
-
-interface ProjectRemote {
-  readonly id: string;
-  readonly name: string;
-  readonly repo: string | null;
 }
 
 export const GH_MISSING_WARNING =
@@ -185,7 +182,7 @@ export class GitHubWatcher {
       if (!this.wouldChange(card, update, cards, laneSets)) continue;
       if (await this.record(card, update)) written.push(card.id);
     }
-    const refiled = this.stopped ? [] : await this.refile(cards, laneSets, projects, nowMs);
+    const refiled = this.stopped ? [] : await this.ports.unfiled.run(projects);
     return { polled, written, refiled, reachable };
   }
 
@@ -200,13 +197,7 @@ export class GitHubWatcher {
       this.warnOnce('projects', `GitHub watcher: could not list the projects: ${detail(error)}`);
       return [];
     });
-    const projects = await Promise.all(
-      listed.map(async project => ({
-        id: project.id,
-        name: project.name,
-        repo: await this.ports.copies.repositoryOf(project.path),
-      })),
-    );
+    const projects = await readProjectRemotes({ projects: async () => listed }, this.ports.copies);
     this.remotes = { at: nowMs, projects };
     return projects;
   }
@@ -494,37 +485,6 @@ export class GitHubWatcher {
       this.warnOnce(`card:${card.id}`, `GitHub watcher: could not update ${formatTaskRef(card)}: ${detail(error)}`);
       return false;
     }
-  }
-
-  /** Refiles the Unfiled cards a project's repository claims. */
-  private async refile(
-    cards: readonly BoardTask[],
-    laneSets: LaneSets,
-    projects: readonly ProjectRemote[],
-    nowMs: number,
-  ): Promise<readonly string[]> {
-    const owners = new Map<string, { id: string; name: string }>();
-    for (const project of projects) {
-      if (project.repo !== null && !owners.has(repoKey(project.repo))) {
-        owners.set(repoKey(project.repo), { id: project.id, name: project.name });
-      }
-    }
-    const refiled: string[] = [];
-    for (const target of refileTargets(cards, laneSets, owners, nowMs)) {
-      const ref = formatTaskRef(target.card);
-      try {
-        await this.ports.board.act(
-          target.card.id,
-          { action: 'refile', projectId: target.projectId, reason: target.reason },
-          { kind: 'daemon' },
-        );
-        this.warned.delete(`refile:${target.card.id}`);
-        refiled.push(target.card.id);
-      } catch (error) {
-        this.warnOnce(`refile:${target.card.id}`, `GitHub watcher: could not refile ${ref}: ${detail(error)}`);
-      }
-    }
-    return refiled;
   }
 
   private warnOnce(key: string, message: string): void {

@@ -21,6 +21,7 @@ interface HarnessProps {
   readonly login?: WardenLogin;
   readonly machineDefault?: string;
   readonly speedupsHref?: string;
+  readonly browserHref?: string;
   readonly onNavigate?: (to: string) => void;
   readonly changes: WardenConfig[];
 }
@@ -34,6 +35,7 @@ function Harness({
   login,
   machineDefault,
   speedupsHref,
+  browserHref,
   onNavigate,
   changes,
 }: HarnessProps) {
@@ -52,6 +54,7 @@ function Harness({
       {...(login === undefined ? {} : { login })}
       {...(machineDefault === undefined ? {} : { machineDefault })}
       {...(speedupsHref === undefined ? {} : { speedupsHref })}
+      {...(browserHref === undefined ? {} : { browserHref })}
       {...(onNavigate === undefined ? {} : { onNavigate })}
     />
   );
@@ -128,6 +131,27 @@ describe('WardenSettingsForm', () => {
     run(() => toggle().props.onClick());
     expect(last(changes).enabled).toBe(true);
     run(() => renderer.unmount());
+  });
+
+  it('should link the browser row to Settings › machine › Browser, and only when given the address', () => {
+    // Arrange
+    const navigated: string[] = [];
+    const href = '/d/a/settings#machines/studio/browser';
+
+    // Act
+    const linked = render(
+      <Harness initial={wardenConfig(BOTH)} changes={[]} browserHref={href} onNavigate={to => navigated.push(to)} />,
+    );
+    const bare = render(<Harness initial={wardenConfig(BOTH)} changes={[]} />);
+
+    // Assert
+    expect(text(linked)).toContain('Close leftover browsers');
+    expect(text(linked)).toContain('Settings › machine › Browser');
+    const link = linked.root.find(node => node.type === 'a' && node.props.href === href);
+    run(() => link.props.onClick({ button: 0, preventDefault: () => {} }));
+    expect(navigated).toEqual([href]);
+    expect(text(bare)).not.toContain('Settings › machine › Browser');
+    for (const renderer of [linked, bare]) run(() => renderer.unmount());
   });
 
   it('should show the key pill for each key state and the no-key box with its links', () => {

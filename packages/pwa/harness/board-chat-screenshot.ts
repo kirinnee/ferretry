@@ -85,6 +85,7 @@ const open = async (
   state: 'card' | 'none',
   tab = 'tasks',
   view: 'kanban' | 'list' = 'kanban',
+  extra = '',
 ): Promise<Page> => {
   const page = await context.newPage();
   page.on('pageerror', error => console.error('pageerror', error.message));
@@ -92,7 +93,7 @@ const open = async (
   await page.route('**/*', route =>
     route.request().url().startsWith(server.url.origin) ? route.continue() : route.abort(),
   );
-  await page.goto(`${server.url}?theme=${theme}&state=${state}&tab=${tab}&view=${view}`);
+  await page.goto(`${server.url}?theme=${theme}&state=${state}&tab=${tab}&view=${view}${extra}`);
   await page.locator('[data-fixture]').waitFor({ state: 'visible' });
   await page.locator('[data-session-bar]').first().waitFor({ state: 'visible' });
   if (state === 'card' && tab === 'tasks') await page.locator('.fy-board-card').first().waitFor({ state: 'visible' });
@@ -122,8 +123,8 @@ const open = async (
   return page;
 };
 
-const shot = async (page: Page, name: string): Promise<void> => {
-  const path = join(shotsDir, `board-c-${name}.png`);
+const shot = async (page: Page, name: string, prefix = 'board-c'): Promise<void> => {
+  const path = join(shotsDir, `${prefix}-${name}.png`);
   await page.screenshot({ path });
   process.stdout.write(`📸 ${path}\n`);
 };
@@ -156,6 +157,26 @@ try {
             await shot(page, `drawer-${scheme}-${label}`);
           }
           await page.close();
+        }
+      }
+      for (const [label, context] of [
+        ['phone', phone],
+        ['desktop', desktop],
+      ] as const) {
+        const panel = await open(context, theme, 'card', 'tasks', 'kanban');
+        if ((await panel.locator('[data-filter="agents"]').count()) === 0) fail('no Show agent tasks toggle');
+        await shot(panel, `panel-${scheme}-${label}`, 'board-v3e');
+        await panel.locator('[data-board-side-expand="expand"]').click();
+        await panel.locator('[data-board-full] .fy-board-card').first().waitFor({ state: 'visible' });
+        await panel.waitForTimeout(200);
+        await shot(panel, `expanded-${scheme}-${label}`, 'board-v3e');
+        await panel.locator('[data-board-full] .fy-board-card__title').first().click();
+        await panel.locator('.fy-board-detail').waitFor({ state: 'visible' });
+        await panel.close();
+        if (scheme === 'light' && label === 'desktop') {
+          const agents = await open(context, theme, 'card', 'tasks', 'kanban', '&agents=1');
+          await shot(agents, 'agents-on-desktop', 'board-v3e');
+          await agents.close();
         }
       }
       if (scheme === 'light') {

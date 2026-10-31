@@ -205,8 +205,8 @@ export function BoardCard({
   );
 }
 
-/** The two one-tap answers on a card waiting to be tried: it works, or it does not. */
-function ToTestActions({
+/** The two one-tap answers on a card waiting to be tried: it works, or it does not. A Table row wears the same. */
+export function ToTestActions({
   answer,
   card,
   done,
