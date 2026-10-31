@@ -95,6 +95,44 @@ describe('the agent’s own background jobs', () => {
     should(jobs.size).equal(0);
   });
 
+  it('should not count Claude’s status line, or the person’s own command it chains, as a job', () => {
+    // Arrange — the live shape: Claude runs `statusLine.command` through `sh -c` after every turn.
+    const rows = parseProcessTable(`
+  6001  6000    00:01 /bin/sh -c 'fy' statusline --then '/bin/zsh ~/.config/claude-statusline.zsh'
+  6002  6001    00:01 fy statusline --then /bin/zsh ~/.config/claude-statusline.zsh
+  6003  6002    00:01 /bin/zsh /home/user/.config/claude-statusline.zsh
+  6010  6000    00:01 /bin/sh -c '/nix/store/abc-ferretry/bin/fy' statusline
+  6020  6000    00:30 /usr/bin/zsh -c source /home/user/.claude/shell-snapshots/snapshot.sh && eval 'sleep 600'
+`);
+
+    // Act
+    const { jobs, processes } = inventoryOf(rows, 6000);
+    const refusal = describeInflight(reportOf(processes));
+
+    // Assert — the status line is the harness's own and restarts with it; the Bash-tool shell is still a job.
+    should([...jobs.keys()]).deepEqual([6020]);
+    should(processes.find(entry => entry.pid === 6003)).match({
+      verdict: 'safe_to_kill',
+      known: { kind: 'status-line' },
+    });
+    should(processes.find(entry => entry.pid === 6010)?.known?.kind).equal('status-line');
+    should(refusal.items.filter(item => item.blocks).map(item => item.pid)).deepEqual([6020]);
+  });
+
+  it('should leave a status-line command the AGENT typed into its own shell as its job', () => {
+    // Arrange — `fy statusline` run through the Bash tool is parented by the tool shell, not by Claude.
+    const rows = parseProcessTable(`
+  6101  6100    00:10 /usr/bin/zsh -c eval 'fy statusline'
+  6102  6101    00:10 fy statusline
+`);
+
+    // Act
+    const { jobs } = inventoryOf(rows, 6100);
+
+    // Assert
+    should(jobs.get(6102)).equal(6101);
+  });
+
   it('should not count a shell that runs no command line, or a non-shell child', () => {
     // Arrange
     const rows = parseProcessTable(`

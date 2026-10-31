@@ -5,8 +5,9 @@
  *
  *   bun harness/migrate-ask-screenshot.tsx      # writes harness/out/migrate-ask-<state>-<viewport>-<scheme>.png
  *
- * It renders the REAL `MigrateSheet` with a canned refusal and a canned ask, in two states: the refusal
- * offering the ask, and the same refusal once the agent has been asked. `SHOTS_DIR` sends the PNGs
+ * It renders the REAL `MigrateSheet` with a canned refusal and a canned ask, in three states: the refusal
+ * offering the ask, the same refusal once the agent has been asked, and the refusal from a daemon too old
+ * to offer it (`update`), which says to update the machine instead. `SHOTS_DIR` sends the PNGs
  * elsewhere. No real path, name or credential appears. Like `screenshot.ts` it drives the system Chrome
  * through playwright-core and aborts every request off the loopback origin.
  */
@@ -62,7 +63,14 @@ const refusal = {
     { kind: 'process', verdict: 'safe_to_kill', title: 'A short read-only command is running', detail: 'sleep 5', age: '5s', blocks: false, backgroundJob: true, pid: 5102 },
   ] },
 };
+// state=update: the same refusal from a daemon older than the ask, which marks no job and says its version.
+const older = new URLSearchParams(location.search).get('state') === 'update';
+const unmarked = {
+  ...refusal,
+  inflight: { ...refusal.inflight, items: refusal.inflight.items.map(({ backgroundJob, pid, ...item }) => item) },
+};
 const migrateSession = async () => {
+  if (older) throw new FyHttpError(message, 409, 'migration_refused', unmarked, '4.152.0');
   throw new FyHttpError(message, 409, 'migration_refused', refusal);
 };
 const askToStopJobs = async () => ({
@@ -128,7 +136,7 @@ const server = Bun.serve({
   },
 });
 
-const STATES = ['offer', 'asked'] as const;
+const STATES = ['offer', 'asked', 'update'] as const;
 const VIEWPORTS = [
   { name: 'mobile', width: 390, height: 844, touch: true },
   { name: 'desktop', width: 1_440, height: 900, touch: false },
@@ -154,11 +162,12 @@ try {
             return await route.continue();
           });
           const page = await context.newPage();
-          await page.goto(`${server.url}?theme=studio-${scheme}`);
+          await page.goto(`${server.url}?theme=studio-${scheme}&state=${state}`);
           await page.locator('input.kt-input').first().fill('claude-home');
           await page.getByRole('button', { name: 'Review migration' }).click();
           await page.getByRole('button', { name: 'Migrate and relaunch' }).click();
-          const ask = page.locator('[data-agent-jobs-ask]');
+          const selector = state === 'update' ? '[data-agent-jobs-update]' : '[data-agent-jobs-ask]';
+          const ask = page.locator(selector);
           await ask.waitFor({ state: 'visible' });
           if (state === 'asked') {
             await page.locator('[data-agent-jobs-ask-button]').click();
@@ -170,31 +179,31 @@ try {
           if (overflow > 0) fail(`${state}/${viewport.name}/${scheme} scrolls sideways by ${overflow}px`);
           // The card must keep the sheet's side gutter: a grid track that grows to its longest unbroken line
           // pushes it past the edge while the page itself never scrolls sideways.
-          const edges = await page.evaluate(() => {
-            const box = document.querySelector('[data-agent-jobs-ask]')?.closest('section')?.getBoundingClientRect();
+          const edges = await page.evaluate(card => {
+            const box = document.querySelector(card)?.closest('section')?.getBoundingClientRect();
             return box === undefined ? null : { left: box.left, right: window.innerWidth - box.right };
-          });
+          }, selector);
           process.stdout.write(`   card gutter ${state}/${viewport.name}/${scheme}: ${JSON.stringify(edges)}\n`);
           if (edges === null || edges.left < 8 || edges.right < 8)
             fail(`${state}/${viewport.name}/${scheme} card runs into the edge: ${JSON.stringify(edges)}`);
           // Nothing inside the card may be wider than the card: a nowrap button label is the usual offender.
-          const spill = await page.evaluate(() => {
-            const card = document.querySelector('[data-agent-jobs-ask]');
+          const spill = await page.evaluate(within => {
+            const card = document.querySelector(within);
             if (card === null) return [];
             const right = card.getBoundingClientRect().right;
             return [...card.querySelectorAll<HTMLElement>('button, p')]
               .filter(node => node.scrollWidth > node.clientWidth + 1 || node.getBoundingClientRect().right > right + 1)
               .map(node => (node.textContent ?? '').trim().slice(0, 30));
-          });
+          }, selector);
           if (spill.length > 0) fail(`${state}/${viewport.name}/${scheme} spills out of the card: ${spill.join(', ')}`);
           const floor = viewport.touch ? 44 : 24;
           const small = await page.evaluate(
-            minimum =>
-              [...document.querySelectorAll<HTMLElement>('[data-agent-jobs-ask] button')]
+            ({ minimum, within }) =>
+              [...document.querySelectorAll<HTMLElement>(`${within} button`)]
                 .filter(node => node.offsetParent !== null)
                 .filter(node => node.getBoundingClientRect().height < minimum)
                 .map(node => (node.textContent ?? '').trim().slice(0, 30)),
-            floor,
+            { minimum: floor, within: selector },
           );
           if (small.length > 0)
             fail(`${state}/${viewport.name}/${scheme} has controls under ${floor}px: ${small.join(', ')}`);

@@ -116,6 +116,9 @@ command, and asks the agent to stop them or say why not (`packages/daemon/src/li
 The daemon looks again before it asks, asks about the same set of pids once, and stops nothing itself: the
 owner runs the safety check again, which stays the only way a migration starts. Anything else in the way —
 an open tool call, a program the agent did not start from its shell, a blind spot — keeps the offer away.
+Claude's own `statusLine` command (`sh -c 'fy' statusline …`, from `claudeStatuslineCommand`) is the
+harness's helper, not a job. A daemon older than 4.153.0 marks no job, so when one refuses on processes
+alone the card says to update this machine's daemon instead of offering the ask.
 
 ## What the board types into a chat
 

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import { FyHttpError } from '@ferretry/protocol/client';
 import {
+  AGENT_JOBS_ASK_SINCE,
+  askNeedsDaemonUpdate,
   contextWindowForModel,
   LARGE_CONTEXT_WINDOW,
   migrationContextDecision,
@@ -217,5 +219,49 @@ describe('a refusal the agent can clear by itself', () => {
     expect(older.inflight).toBeUndefined();
     expect(onlyAgentJobsBlock(older.inflight)).toBe(false);
     expect(onlyAgentJobsBlock(refusal([]) as never)).toBe(false);
+  });
+});
+
+describe('a refusal an older daemon could not offer the ask on', () => {
+  const process = {
+    kind: 'process' as const,
+    verdict: 'unknown' as const,
+    title: 'A program',
+    detail: 'bash ./merge.sh',
+    blocks: true,
+  };
+  const tool = { kind: 'tool' as const, verdict: 'unknown' as const, title: 'A Bash call', blocks: true };
+  const refused = (items: readonly object[], daemonVersion?: string) =>
+    migrationFailure(
+      new FyHttpError(
+        'refused',
+        409,
+        'migration_refused',
+        {
+          error: 'refused',
+          code: 'migration_refused',
+          inflight: { status: 'waiting', turn: 3, blockedBy: 'unknown', items, restartsWithCli: 1 },
+        },
+        daemonVersion,
+      ),
+    );
+
+  it('says an update would offer it when an older daemon refused only on processes', () => {
+    const failure = refused([process], '4.152.0');
+
+    expect(failure.daemonVersion).toBe('4.152.0');
+    expect(askNeedsDaemonUpdate(failure)).toBe(true);
+  });
+
+  it('says nothing about updating for a new enough daemon, another blocker, or an unknown version', () => {
+    expect(askNeedsDaemonUpdate(refused([process], AGENT_JOBS_ASK_SINCE))).toBe(false);
+    expect(askNeedsDaemonUpdate(refused([process], '4.156.2'))).toBe(false);
+    expect(askNeedsDaemonUpdate(refused([process, tool], '4.152.0'))).toBe(false);
+    expect(askNeedsDaemonUpdate(refused([{ ...process, blocks: false }], '4.152.0'))).toBe(false);
+    expect(askNeedsDaemonUpdate(refused([process]))).toBe(false);
+    expect(askNeedsDaemonUpdate(refused([process], 'not-a-version'))).toBe(false);
+    expect(
+      askNeedsDaemonUpdate(migrationFailure(new FyHttpError('x', 404, 'unknown_agent', undefined, '4.152.0'))),
+    ).toBe(false);
   });
 });
