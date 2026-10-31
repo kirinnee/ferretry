@@ -27,6 +27,6 @@
       "name": "pwa-surfaces",
       "prefixes": ["packages/pwa/tests/integration/features/", "packages/pwa/tests/integration/send-handover."]
     },
-    { "name": "everything-else", "prefixes": ["packages/"] }
+    { "name": "everything-else", "prefixes": ["packages/"], "processes": 2 }
   ]
 }

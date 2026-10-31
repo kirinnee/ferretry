@@ -90,6 +90,10 @@ if [[ -n ${group} ]]; then
   mkdir -p "${config%/*}"
   sed "s|^coverageDir = .*|coverageDir = \"${coverage_file%/*}\"|" "bunfig.${mode}.toml" >"${config}"
   echo "🧪 ${mode} test group ${group}: ${#files[@]} files"
+  # A group may run its files in more than one bun process INSIDE its one runner ("processes" in
+  # config/test-groups.json). The owner's last resort for a group that cannot get under two minutes by
+  # faster tests alone: no new job, every test still blocking. See run_processes below for the isolation.
+  processes="$(jq -r --arg mode "${mode}" --arg group "${group}" '.[$mode][] | select(.name == $group) | .processes // 1' "${groups}")"
 fi
 
 # The integration tier starts real Chromes, and the first one on a fresh runner is slow — paid once
@@ -101,16 +105,65 @@ rm -f "${coverage_file}"
 
 coverage_dir="${coverage_file%/*}"
 mkdir -p "${coverage_dir}"
+# ONE PROCESS: the files run in one bun process, its ledger at ${coverage_file}.
+run_one() {
+  local run_config=$1 run_dir=$2
+  shift 2
+  set +e
+  ./scripts/test/swept.sh bun scripts/test/stall-watch.ts "${FY_TEST_STALL_SECONDS:-300}" -- bun test --config="${run_config}" "${timeout_flag[@]}" --coverage --reporter=junit --reporter-outfile="${run_dir}/junit.xml" "$@" 2>&1 | tee "${run_dir}/console.log"
+  local status=${PIPESTATUS[0]}
+  ./scripts/test/swept.sh bun scripts/ci/quarantine.ts "${mode}" "${status}" "${run_config}" "${run_dir}" "${run_dir}/console.log" "${timeout_flag[@]}"
+  status=$?
+  set -e
+  return "${status}"
+}
+
+# SEVERAL PROCESSES, each wholly isolated from the others. Every one runs under its own `swept.sh`, so
+# it has its own TMPDIR, HOME and leak sweep; every test already makes its homes under TMPDIR, binds
+# ports the OS chooses (scripts/validate/test-tiers.sh holds that) and keeps its tmux sockets in its own
+# home, so two processes share no file, port or tmux server. Each process writes its own LCOV; the group's
+# ledger is their concatenation, which coverage-ledger.sh judges per file exactly as it judges groups: a
+# source file must reach 100% inside ONE process, so one package never spans two
+# processes: files are split by package (scripts/test/partition-files.ts), the same on every run.
+run_processes() {
+  local count=$1
+  shift
+  local -a pids=()
+  local index
+  for ((index = 0; index < count; index++)); do
+    local part_dir="${coverage_dir}/process-${index}"
+    mkdir -p "${part_dir}"
+    local part_config="${part_dir}/bunfig.toml"
+    sed "s|^coverageDir = .*|coverageDir = \"${part_dir}\"|" "${config}" >"${part_config}"
+    local -a part_files=()
+    mapfile -t part_files < <(bun scripts/test/partition-files.ts "${count}" "$@" | awk -v share="${index}" '$1 == share { print $2 }')
+    echo "🧪 process ${index}: ${#part_files[@]} files"
+    run_one "${part_config}" "${part_dir}" "${part_files[@]}" >"${part_dir}/process.log" 2>&1 &
+    pids+=($!)
+  done
+  local status=0
+  for ((index = 0; index < count; index++)); do
+    wait "${pids[index]}" || status=$?
+    echo "──── process ${index} ────"
+    cat "${coverage_dir}/process-${index}/process.log"
+  done
+  cat "${coverage_dir}"/process-*/lcov.info >"${coverage_file}" 2>/dev/null || true
+  return "${status}"
+}
+
 set +e
 # `swept.sh` gives each run its own TMPDIR and FERRETRY_TEST=1, and fails it if a tmux server outlives
 # it — see the script. The quarantine rerun below is a second run, so it is swept on its own.
 # `stall-watch.ts` kills a run that has printed nothing for FY_TEST_STALL_SECONDS — over twice the
 # per-test budget, so only a wedged test or a run that will not exit — and says which threads and
 # processes it held; a test whose main thread is stuck cannot fire its own timeout. See the script.
-./scripts/test/swept.sh bun scripts/test/stall-watch.ts "${FY_TEST_STALL_SECONDS:-300}" -- bun test --config="${config}" "${timeout_flag[@]}" --coverage --reporter=junit --reporter-outfile="${coverage_dir}/junit.xml" "${files[@]}" 2>&1 | tee "${coverage_dir}/console.log"
 # A red run whose every failure is a quarantined flake reruns those files once, and its exit is the
 # run's from here on: 0 when green or rescued, the original status otherwise — see the script.
-./scripts/test/swept.sh bun scripts/ci/quarantine.ts "${mode}" "${PIPESTATUS[0]}" "${config}" "${coverage_dir}" "${coverage_dir}/console.log" "${timeout_flag[@]}"
+if [[ ${processes:-1} -gt 1 ]]; then
+  run_processes "${processes}" "${files[@]}"
+else
+  run_one "${config}" "${coverage_dir}" "${files[@]}"
+fi
 test_status=$?
 set -e
 
