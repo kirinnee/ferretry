@@ -266,6 +266,23 @@ export const savedBody = (request: InputRequest, entry: string, submit: boolean,
         body: { deliveryId, observedDigest: request.observedDigest, entry, submit: enterFor(request, submit) },
       };
 
+/** What allowing a paste sends: no value, only that the owner allows the copy the REQUEST names (docs/secure-copy.md). */
+export const sealedBody = (request: InputRequest, submit: boolean, deliveryId: string): BuiltBody =>
+  request.observedDigest === undefined
+    ? { ok: false, problem: REOBSERVING }
+    : {
+        ok: true,
+        body: { deliveryId, observedDigest: request.observedDigest, sealed: true, submit: enterFor(request, submit) },
+      };
+
+/** "sealed:vercel_token, captured from gh": what a paste card says it pastes. */
+export const pastedWords = (request: InputRequest): string | undefined => {
+  const source = request.source;
+  if (source === undefined) return undefined;
+  const from = source.from.origin ?? source.from.program ?? source.from.kind;
+  return `sealed:${source.name}, captured from ${from}`;
+};
+
 type InputFailureKind = 'changed' | 'already' | 'gone' | 'refused' | 'step-up' | 'unknown';
 
 export interface InputFailure {

@@ -107,11 +107,14 @@ export class InputController {
       throw new Error('--save-as keeps a value you type; it cannot be combined with --secret / --entry');
     }
     if (saveAs === undefined && options.label !== undefined) throw new Error('--label goes with --save-as');
-    if (named === undefined && !this.ports.interactive) {
-      throw new Error('typing a value needs a terminal you are sitting at: run this where you can type, not in a pipe');
-    }
     const sessionId = target(options);
     const request = await this.#find(sessionId, reference);
+    const pasting = request.source !== undefined;
+    if (pasting && (named !== undefined || saveAs !== undefined))
+      throw new Error(`!${request.agendaItemId} pastes a secure copy: there is nothing to type, choose or save`);
+    if (!pasting && named === undefined && !this.ports.interactive) {
+      throw new Error('typing a value needs a terminal you are sitting at: run this where you can type, not in a pipe');
+    }
     if (request.state !== 'pending')
       throw new Error(`!${request.agendaItemId} is ${request.state}, not waiting for a value`);
     if (request.observed === undefined || request.observedDigest === undefined) {
@@ -124,7 +127,10 @@ export class InputController {
     const submit = submitAfter(request, options);
     const base = { deliveryId: this.ports.newDeliveryId(), observedDigest: request.observedDigest, submit };
     let body: InputDeliverBody;
-    if (named !== undefined) {
+    if (request.source !== undefined) {
+      this.ports.out.diagnostic(`allowing the paste of sealed:${request.source.name}`);
+      body = { ...base, sealed: true };
+    } else if (named !== undefined) {
       this.ports.out.diagnostic(`using the saved login ${named}`);
       body = { ...base, entry: named };
     } else {
@@ -150,7 +156,7 @@ export class InputController {
     const where = inputTargetReference(request);
     this.ports.out.success(
       result.state === 'delivered'
-        ? `Sent to ${where}${result.submitted ? ' and pressed Enter' : ''}.`
+        ? `${pasting ? 'Pasted into' : 'Sent to'} ${where}${result.submitted ? ' and pressed Enter' : ''}.`
         : `Not sent: ${result.reason === undefined ? result.state : describeInputReason(result.reason)}.`,
     );
     if (result.saved !== undefined) {

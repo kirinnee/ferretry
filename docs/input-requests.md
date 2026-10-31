@@ -63,7 +63,7 @@ through the input tool; the generic add refuses it.
   frame origin, navigation, node, field attributes, box and visibility.
 - **`InputRequestSchema`**: the aggregate: ids, target, prompt, sensitivity, expiry, the facts and
   their digest while observed, the state and the outcome.
-- **`InputDeliverBodySchema`**: `deliveryId` (a UUID), `observedDigest`, **exactly one of** `padded`
+- **`InputDeliverBodySchema`**: `deliveryId` (a UUID), `observedDigest`, (for a paste of a [secure copy](secure-copy.md), `sealed: true` instead of a value: the daemon pastes the copy the request names) **exactly one of** `padded`
   or `entry` (a saved login's handle), `submit`, and `save` (`{ entry, label }`, a typed value only).
 - **`InputAgentViewSchema`**: what the agent learns: state, whether Enter was pressed, `source`
   (`typed` or `saved`) and a redacted screen. **Never** the value, its length or a saved login's

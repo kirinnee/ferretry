@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { AgendaIdSchema } from './agenda.ts';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 import { InputSavedSchema, LOGIN_LABEL_MAX_LENGTH, LoginEntryIdSchema } from './login-entries.ts';
+import { CopyNameSchema, CopyOriginSchema } from './secure-copy.ts';
 import { SurfaceKeySchema, SurfaceKindSchema } from './surface-names.ts';
 
 /**
@@ -98,8 +99,21 @@ export const InputRaiseSchema = z.strictObject({
    * a hint never makes an entry the one-tap choice, and the answer is the same whether such an entry exists.
    */
   secretHint: LoginEntryIdSchema.optional(),
+  /**
+   * The value comes from a secure copy the agent holds (`sealed:<name>`, docs/secure-copy.md), not from the
+   * owner's keyboard: the owner only allows it. The daemon treats the request as a `secret` whatever it says.
+   */
+  source: z.strictObject({ kind: z.literal('sealed'), name: CopyNameSchema }).optional(),
 });
 export type InputRaise = z.infer<typeof InputRaiseSchema>;
+
+/** Where a pasted value came from, as the DAEMON recorded it when the copy was captured: names, never the value. */
+export const InputSourceSchema = z.strictObject({
+  kind: z.literal('sealed'),
+  name: CopyNameSchema,
+  from: CopyOriginSchema,
+});
+export type InputSource = z.infer<typeof InputSourceSchema>;
 
 /** The pane the value goes to, as {@link PANE_PROOF_FORMAT} proved it (daemon-side `pane-proof.ts`). */
 export const InputPaneProofSchema = z.strictObject({
@@ -198,6 +212,8 @@ export const INPUT_REASONS = [
   'agent_cancelled',
   'check_failures',
   'expired',
+  /** The secure copy a paste was to come from was discarded, expired, or forgotten by a restart. */
+  'copy_gone',
 ] as const;
 export const InputReasonSchema = z.enum(INPUT_REASONS);
 export type InputReason = z.infer<typeof InputReasonSchema>;
@@ -206,6 +222,8 @@ export type InputReason = z.infer<typeof InputReasonSchema>;
 export const InputActorSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('host') }),
   z.strictObject({ kind: z.literal('device'), deviceId: boundedLine(128) }),
+  /** A paste the owner approved IN ADVANCE: the daemon delivered it under this pre-approval rule (docs/secure-copy.md). */
+  z.strictObject({ kind: z.literal('rule'), ruleId: z.string().regex(/^[0-9a-f]{32}$/u) }),
 ]);
 export type InputActor = z.infer<typeof InputActorSchema>;
 
@@ -214,7 +232,7 @@ export const InputOutcomeSchema = z.strictObject({
   by: InputActorSchema,
   submitted: z.boolean(),
   /** Typed by the owner, or a saved login chosen by the owner. */
-  source: z.enum(['typed', 'saved']),
+  source: z.enum(['typed', 'saved', 'sealed']),
   /** The saved login used; the owner's card shows it, the agent never sees it. */
   entry: LoginEntryIdSchema.optional(),
   reason: InputReasonSchema.optional(),
@@ -243,6 +261,8 @@ export const InputRequestSchema = z.strictObject({
   sessionId: boundedLine(128),
   /** The agenda card that presents it (`kind: 'input'`): the owner knows it as `!A<n>`. */
   agendaItemId: AgendaIdSchema,
+  /** A paste of a secure copy: where the value comes from. The owner allows it; there is nothing to type. */
+  source: InputSourceSchema.optional(),
   target: InputTargetSchema,
   prompt: z.string().trim().min(1).max(INPUT_PROMPT_MAX_LENGTH),
   sensitivity: InputSensitivitySchema,
@@ -278,7 +298,7 @@ export const InputAgentViewSchema = z.strictObject({
     })
     .optional(),
   submitted: z.boolean().optional(),
-  source: z.enum(['typed', 'saved']).optional(),
+  source: z.enum(['typed', 'saved', 'sealed']).optional(),
   reason: InputReasonSchema.optional(),
   screen: z.string().max(65_536).optional(),
   note: z.string().max(400).optional(),
@@ -302,6 +322,8 @@ export const InputDeliverBodySchema = z
       .optional(),
     /** A saved login, by its handle: the daemon types the field the request needs from it. */
     entry: LoginEntryIdSchema.optional(),
+    /** Allow a paste: the daemon types the secure copy the request names (`request.source`), never one the body names. */
+    sealed: z.literal(true).optional(),
     /** Press Enter / submit after typing. */
     submit: z.boolean(),
     /**
@@ -321,8 +343,8 @@ export const InputDeliverBodySchema = z
       .optional(),
   })
   .superRefine((body, context) => {
-    if ((body.padded === undefined) === (body.entry === undefined)) {
-      context.addIssue({ code: 'custom', message: 'send exactly one of padded or entry' });
+    if ([body.padded, body.entry, body.sealed].filter(part => part !== undefined).length !== 1) {
+      context.addIssue({ code: 'custom', message: 'send exactly one of padded, entry or sealed' });
     }
     if (body.save !== undefined && body.padded === undefined) {
       context.addIssue({ code: 'custom', message: 'save keeps a typed value', path: ['save'] });
@@ -407,11 +429,13 @@ export const InputEventSchema = z.strictObject({
   sensitivity: InputSensitivitySchema,
   /** Who presses Enter, so a restart can rebuild a pending request. */
   submit: InputSubmitModeSchema.optional(),
+  /** A paste: the secure copy it was to come from, by name, so a restart (which forgets copies) can close it. */
+  sealed: CopyNameSchema.optional(),
   state: InputRequestStateSchema,
   /** The attempt a `delivering` event starts: an id, never the value. */
   deliveryId: InputDeliveryIdSchema.optional(),
   submitted: z.boolean().optional(),
-  source: z.enum(['typed', 'saved']).optional(),
+  source: z.enum(['typed', 'saved', 'sealed']).optional(),
   reason: InputReasonSchema.optional(),
   expiresAt: InstantSchema.optional(),
   at: InstantSchema,
@@ -467,12 +491,19 @@ export type InputAuditEvent = z.infer<typeof InputAuditEventSchema>;
  */
 export const InputAuditDetailSchema = z.strictObject({
   targetKind: SurfaceKindSchema,
+  /** A paste: the secure copy pasted, by name. */
+  copy: CopyNameSchema.optional(),
+  /** A paste the owner approved in advance: the rule it was delivered under. */
+  rule: z
+    .string()
+    .regex(/^[0-9a-f]{32}$/u)
+    .optional(),
   consumer: boundedLine(160).optional(),
   sensitivity: InputSensitivitySchema,
   /** The terminal a quarantine was about: its name, never what was typed there. */
   surface: SurfaceKeySchema.optional(),
   recognised: z.boolean().optional(),
-  source: z.enum(['typed', 'saved']).optional(),
+  source: z.enum(['typed', 'saved', 'sealed']).optional(),
   /** The saved login typed from, or saved to: a handle, never what it holds. */
   entry: LoginEntryIdSchema.optional(),
   /** The typed value was kept in `entry`. */

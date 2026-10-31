@@ -5,6 +5,8 @@ import type {
   CopyCommandReport,
   CopyMeta,
   CopyName,
+  CopyPlan,
+  CopyPlanItem,
   InputAgentView,
   InputRaise,
   SurfaceKind,
@@ -104,4 +106,9 @@ export interface AgentCopyPort {
   ): Promise<{ readonly copy: CopyMeta; readonly command?: CopyCommandReport }>;
   list(sessionId: string): readonly CopyMeta[];
   discard(sessionId: string, name: CopyName): CopyMeta;
+}
+
+/** What `secure.preapprove` asks: raise one card listing the pastes the agent plans. Nothing in it is a value. */
+export interface AgentPlanPort {
+  propose(sessionId: string, items: readonly CopyPlanItem[], expiresInSeconds?: number): Promise<CopyPlan>;
 }

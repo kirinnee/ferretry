@@ -44,7 +44,8 @@ export type DaemonAgendaCause =
   | 'warden-escalation'
   | 'system'
   | 'harness-prompt'
-  | 'input-request';
+  | 'input-request'
+  | 'secure-copy';
 
 /**
  * Provenance is a tagged value, not a user-supplied collection of nullable fields. The daemon

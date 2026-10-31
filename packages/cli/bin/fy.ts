@@ -100,6 +100,9 @@ import { BrowserController, registerBrowserCommands } from '../src/lib/browser';
 import { registerConfigCommands } from '../src/lib/config/commands';
 import { ConfigController } from '../src/lib/config/controller';
 import { ProtocolConfigGateway } from '../src/lib/config/gateway';
+import { registerCopyCommands } from '../src/lib/copy/commands';
+import { CopyController } from '../src/lib/copy/controller';
+import { ProtocolCopyGateway } from '../src/lib/copy/gateway';
 import { isLocalDaemonUrl, resolveDaemonUrl } from '../src/lib/daemon/address';
 import { type InstalledDaemonBinary, resolveDaemonBinaryPath } from '../src/lib/daemon/binary';
 import { registerDaemonCommands } from '../src/lib/daemon/commands';
@@ -891,6 +894,16 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         agentCredential: world.environment.FY_SESSION_BOARD_CAPABILITY,
         now: () => Date.now(),
         newDeliveryId: () => crypto.randomUUID(),
+      }),
+    ),
+  ({ program, world, client, ownSessionId }) =>
+    registerCopyCommands(
+      program,
+      new CopyController({
+        gateway: new ProtocolCopyGateway(client),
+        out: world.io,
+        ownSessionId,
+        agentCredential: world.environment.FY_SESSION_BOARD_CAPABILITY,
       }),
     ),
   ({ program, world, client, ownSessionId }) =>

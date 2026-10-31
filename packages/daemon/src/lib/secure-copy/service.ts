@@ -18,6 +18,7 @@ import {
   copyHandle,
   copyMask,
 } from '@ferretry/protocol';
+import type { InputSealedPort } from '../input-requests/ports.ts';
 import { SecureCopyError } from './errors.ts';
 import type { CopyPorts } from './ports.ts';
 
@@ -69,7 +70,7 @@ interface Read {
   readonly pageReadBeforeCapture?: boolean;
 }
 
-export class SecureCopyService {
+export class SecureCopyService implements InputSealedPort {
   private readonly copies = new Map<string, Map<CopyName, Entry>>();
   private readonly captures = new Map<string, readonly number[]>();
 
@@ -173,6 +174,30 @@ export class SecureCopyService {
   drop(sessionId: string): void {
     this.copies.delete(sessionId);
     this.captures.delete(sessionId);
+  }
+
+  /** What the daemon recorded about a LIVE copy, for a paste's card: never the value. */
+  describe(sessionId: string, name: CopyName): CopyMeta | undefined {
+    this.purge();
+    const entry = this.copies.get(sessionId)?.get(name);
+    return entry?.state === 'live' ? meta(entry) : undefined;
+  }
+
+  /**
+   * THE ONE PLACE A COPY'S VALUE LEAVES THIS SERVICE: to the input bridge's single guarded write, for a paste the
+   * owner allowed (or approved in advance). It is not on any port a route or an agent tool is given.
+   */
+  open(sessionId: string, name: CopyName): string | undefined {
+    this.purge();
+    const entry = this.copies.get(sessionId)?.get(name);
+    return entry?.state === 'live' ? entry.value : undefined;
+  }
+
+  /** A paste of the copy was typed. */
+  used(sessionId: string, name: CopyName): void {
+    const session = this.copies.get(sessionId);
+    const entry = session?.get(name);
+    if (session !== undefined && entry !== undefined) session.set(name, { ...entry, uses: entry.uses + 1 });
   }
 
   /** The sessions that hold a copy now, live or recently ended. */

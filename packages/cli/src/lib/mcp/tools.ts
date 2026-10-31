@@ -10,7 +10,6 @@ import {
   BROWSER_CPU_THROTTLE_MAX,
   BROWSER_EMULATED_PERMISSIONS,
   BROWSER_RESOURCE_TYPES,
-  COPY_MAX_LIFETIME_SECONDS,
   INPUT_MAX_EXPIRY_SECONDS,
   INPUT_PROMPT_MAX_LENGTH,
   LESSON_RULE_MAX_CHARS,
@@ -663,35 +662,43 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'secure_copy',
     tool: 'secure.copy',
     description:
-      'Seal what a command prints (a new token) as sealed:<name> without seeing it: you get its length, never the value, and it is masked everywhere. Seal BEFORE reading it anywhere.',
+      "Seal a command's stdout (a token) as sealed:<name>; you see its length, never the value. Seal before reading it.",
     inputSchema: object(
       {
-        name: { type: 'string', description: 'e.g. vercel_token' },
-        source: {
-          type: 'object',
-          properties: {
-            kind: { const: 'command' },
-            argv: { type: 'array', items: { type: 'string' }, description: 'No shell, e.g. ["gh","auth","token"]' },
-            cwd: { type: 'string' },
-          },
-          required: ['kind', 'argv'],
-        },
-        expiresInSeconds: { type: 'integer', maximum: COPY_MAX_LIFETIME_SECONDS },
+        name: { type: 'string' },
+        source: { type: 'object', description: '{"kind":"command","argv":["gh","auth","token"]}' },
       },
       ['name', 'source'],
     ),
   },
-  {
-    name: 'secure_list',
-    tool: 'secure.list',
-    description: 'List your sealed copies, never a value.',
-    inputSchema: object({}),
-  },
+  { name: 'secure_list', tool: 'secure.list', description: 'List copies.', inputSchema: object({}) },
   {
     name: 'secure_discard',
     tool: 'secure.discard',
-    description: 'Let go of a sealed copy.',
+    description: 'Drop a copy.',
     inputSchema: object({ handle: { type: 'string' } }, ['handle']),
+  },
+  {
+    name: 'secure_paste',
+    tool: 'secure.paste',
+    description: 'Paste sealed:<name> into your terminal once allowed; then input_wait.',
+    inputSchema: object(
+      {
+        handle: { type: 'string' },
+        to: { type: 'object', description: '{"kind":"terminal","name":"dev"}' },
+        prompt: { type: 'string' },
+      },
+      ['handle', 'to', 'prompt'],
+    ),
+  },
+  {
+    name: 'secure_preapprove',
+    tool: 'secure.preapprove',
+    description: 'Ask the owner to approve planned pastes in advance.',
+    inputSchema: object(
+      { items: { type: 'array', description: '[{from:{kind,program|origin},to:{kind,program|origin},why}]' } },
+      ['items'],
+    ),
   },
 ];
 

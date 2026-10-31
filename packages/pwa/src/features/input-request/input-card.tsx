@@ -37,11 +37,13 @@ import {
   offersSave,
   offerUsername,
   PLAIN_NOTICE,
+  pastedWords,
   saveBlock,
   saveDraftProblem,
   savedBody,
   savedButtonWords,
   savedOutcomeWords,
+  sealedBody,
   sendBlock,
   splitOffers,
   targetRef,
@@ -207,7 +209,20 @@ export function InputCard({
         </p>
       )}
 
-      {settled === null ? (
+      {settled === null && request.source !== undefined ? (
+        <SealedPasteSection
+          blocked={blocked}
+          busy={cancelling}
+          cancel={cancelButton}
+          client={client}
+          onRefresh={onRefresh}
+          onSettled={text => {
+            setSettled(text);
+            onDone();
+          }}
+          request={request}
+        />
+      ) : settled === null ? (
         fields.map((field, index) => (
           <InputFieldSection
             blocked={blocked}
@@ -242,6 +257,76 @@ export function InputCard({
         </div>
       )}
     </section>
+  );
+}
+
+interface PasteSectionProps {
+  readonly request: InputRequest;
+  readonly client: InputClient;
+  readonly blocked: string | undefined;
+  readonly busy: boolean;
+  readonly cancel: ReactNode;
+  readonly onSettled: (text: string) => void;
+  readonly onRefresh: (() => void) | undefined;
+}
+
+/**
+ * A PASTE (docs/secure-copy.md): the ferret asks to paste a secure copy it holds. There is no field: the owner
+ * allows it or cancels, and the daemon types the copy the request names. Its full card is a later phase.
+ */
+function SealedPasteSection({ request, client, blocked, busy, cancel, onSettled, onRefresh }: PasteSectionProps) {
+  const [sending, setSending] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+  // A paste the daemon never answered keeps its id, so pressing Allow again cannot paste twice.
+  const pending = useRef<string | null>(null);
+  const off = blocked !== undefined || sending || busy;
+
+  const allow = async (): Promise<void> => {
+    if (off) return;
+    pending.current ??= crypto.randomUUID();
+    const built = sealedBody(request, defaultSubmit(request), pending.current);
+    // Unreachable while re-observing (Allow is disabled then), and said in words if it ever is.
+    if (!built.ok) return void setFailure(built.problem);
+    setFailure(null);
+    setSending(true);
+    try {
+      await deliverInput(client, request, built.body);
+      pending.current = null;
+      onSettled(`Pasted into ${targetRef(request)}.`);
+    } catch (cause) {
+      const words = inputFailure(cause);
+      if (words.definitive) pending.current = null;
+      setFailure(words.text);
+      if (words.kind === 'changed') onRefresh?.();
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="flex min-w-0 flex-col gap-2" data-input-paste="">
+      <p className="m-0 text-ui text-fg">
+        Pastes <span className="mono">{pastedWords(request)}</span>. You type nothing.
+      </p>
+      {failure === null ? null : (
+        <p className="m-0 text-ui text-err" data-input-failure="" role="alert">
+          {failure}
+        </p>
+      )}
+      <div className="flex flex-wrap items-center justify-end gap-2" data-input-actions="">
+        {cancel}
+        <button
+          className="kt-btn min-h-[44px]"
+          data-input-allow=""
+          data-variant="primary"
+          disabled={off}
+          onClick={() => void allow()}
+          type="button"
+        >
+          {sending ? 'Pasting…' : 'Allow paste'}
+        </button>
+      </div>
+    </div>
   );
 }
 

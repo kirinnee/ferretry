@@ -149,6 +149,13 @@ describe('agent tool schemas', () => {
       { tool: 'secure.copy', name: 'token', source: { kind: 'command', argv: ['gh'] } },
       { tool: 'secure.list' },
       { tool: 'secure.discard', handle: 'sealed:token' },
+      { tool: 'secure.paste', handle: 'sealed:token', to: { kind: 'terminal', name: 'dev' }, prompt: 'the token' },
+      {
+        tool: 'secure.preapprove',
+        items: [
+          { from: { kind: 'command', program: 'gh' }, to: { kind: 'terminal', program: 'vercel' }, why: 'token' },
+        ],
+      },
     ];
 
     // Act

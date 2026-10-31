@@ -49,14 +49,17 @@ export function answered(error: unknown): never {
   throw error;
 }
 
-export function ownerOf(context: RouteContext): InputCaller {
+/** The owner a route was called by: the person at the machine or a paired device. Refuses an agent before any body is read. */
+export function ownerActorOf(context: RouteContext): Extract<InputActor, { readonly kind: 'host' | 'device' }> {
   const credential = context.credential;
-  const device = credential?.tokenClass === 'device';
-  if (!device && !isHumanAdminActor(context.actor))
+  if (credential?.tokenClass !== 'device' && !isHumanAdminActor(context.actor))
     throw new ApiError(403, 'only the owner answers an input request; an agent cannot', 'forbidden');
-  const actor: InputActor =
-    credential?.tokenClass === 'device' ? { kind: 'device', deviceId: credential.deviceId } : { kind: 'host' };
-  return { kind: 'owner', actor, carrier: device ? 'direct' : 'loopback' };
+  return credential?.tokenClass === 'device' ? { kind: 'device', deviceId: credential.deviceId } : { kind: 'host' };
+}
+
+export function ownerOf(context: RouteContext): InputCaller {
+  const actor = ownerActorOf(context);
+  return { kind: 'owner', actor, carrier: actor.kind === 'device' ? 'direct' : 'loopback' };
 }
 
 function sessionOf(context: RouteContext): string {

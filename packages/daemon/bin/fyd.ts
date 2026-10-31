@@ -244,6 +244,7 @@ import {
   FileLegacyWireUseStore,
   FileLoginIndexStore,
   FileModelCatalogCache,
+  FilePasteRuleStore,
   FileProjectCatalog,
   FileQuotaFailoverConfigStore,
   FileQuotaFailoverStateStore,
@@ -647,6 +648,7 @@ import {
   type AgentCopyPort,
   AgentFiles,
   type AgentInputPort,
+  type AgentPlanPort,
   AgentSendFailureNotifier,
   AgentToolService,
   ANALYTICS_BACKSTOP_MS,
@@ -720,6 +722,8 @@ import {
   type ConversationLinker,
   type ConversionCheckPort,
   type ConversionSummary as ConvertedConversationSummary,
+  CopyPlanAgendaAdapter,
+  CopyPlanService,
   CredentialAgentIdentities,
   CredentialUsageSource,
   canServeModel,
@@ -840,7 +844,9 @@ import {
   InputAuditAdapter,
   InputCardClosedObserver,
   InputLoginAdapter,
+  type InputPasteRules,
   InputRequestService,
+  type InputSealedPort,
   InstructionRefresh,
   type InterruptedLaunchOutcome,
   InterruptedLaunchReconciler,
@@ -923,6 +929,7 @@ import {
   type PaneLimit,
   PassTrigger,
   type PassTriggerTimers,
+  PasteRuleService,
   PinService,
   type PlannedAttachmentFile,
   type PlannedInitialAttachments,
@@ -990,7 +997,6 @@ import {
   readDoctorReport,
   readHarnessPreflight,
   readTranscriptPage,
-  searchTranscriptRecords,
   refuseExhaustedCandidates,
   refuseHeldStateHome,
   refuseOccupiedAddress,
@@ -1091,9 +1097,9 @@ import {
   SessionStopPending,
   type SessionTranscriptMessageTokenCodec,
   type SessionTranscriptPages,
-  type SessionTranscriptSearch,
   SessionTranscriptReader,
   SessionTranscriptResolver,
+  type SessionTranscriptSearch,
   type SessionTranscriptTail,
   SharedFleetBacklog,
   SignalRefused,
@@ -1117,6 +1123,7 @@ import {
   SurfaceControl,
   SystemCallsignIssuer,
   searchTranscript,
+  searchTranscriptRecords,
   secretsMatch,
   selectBrowserWorker,
   sendRecordView,
@@ -6051,6 +6058,7 @@ function createAgentToolsSubsystem(input: {
   /** The vault redactor every operator read is scrubbed by; a page's text goes through it too. */
   readonly redactor: Pick<SecretRedactor, 'batch'>;
   readonly copy: AgentCopyPort;
+  readonly plans: AgentPlanPort;
 }): MountedSubsystems['agentTools'] {
   const clock = { now: () => Date.now() };
   const control = new SurfaceControl(
@@ -6085,6 +6093,7 @@ function createAgentToolsSubsystem(input: {
       scrub: input.scrub,
       quarantinedUntil: input.quarantinedUntil,
       copy: input.copy,
+      plans: input.plans,
       redactor: input.redactor,
       binaryName: CLIENT_NAME,
       clock,
@@ -6124,6 +6133,9 @@ function createInputRequestService(input: {
   readonly redact: (text: string) => Promise<string>;
   /** Saved logins: what the card offers, what "Use" types and where "Save as" keeps a value. */
   readonly logins: InputLoginAdapter;
+  /** Secure copies a paste types from, and the owner's rules that approve pastes in advance. */
+  readonly sealed: InputSealedPort;
+  readonly rules: InputPasteRules;
 }): InputRequestService {
   const clock = { now: () => Date.now() };
   return new InputRequestService({
@@ -6201,6 +6213,8 @@ function createInputRequestService(input: {
     quarantine: input.quarantine,
     redact: input.redact,
     logins: input.logins,
+    sealed: input.sealed,
+    rules: input.rules,
     hostName: hostname(),
   });
 }
@@ -9966,6 +9980,33 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       });
       setInterval(sweepDeadlines, AGENDA_DEADLINE_SWEEP_MS).unref();
       setTimeout(sweepDeadlines, 30_000).unref();
+      // Secure copy (docs/secure-copy.md): a value an agent may name and never read. It lives in this process's
+      // memory only and is masked by the same registry as a value typed for the owner, from the moment it is read.
+      const secureCopies = new SecureCopyService({
+        clock: { now: () => Date.now() },
+        runner: new BunSecretChildRunner(),
+        folders: { folderOf: async sessionId => await sessionFolder(storage, sessionId) },
+        exposure: new TranscriptFileExposure(createTranscriptFileResolver(storage)),
+        masking: justTyped,
+        redact: async text => await secretRedactor.redact(text),
+      });
+      // The owner's pre-approval rules: routes, counts and expiries, never a value. Damage reads as no rules.
+      const pasteRules = new PasteRuleService({
+        store: new FilePasteRuleStore(join(paths.state, 'secure-copy'), stateFiles),
+        clock: { now: () => Date.now() },
+        ids: { ruleId: () => crypto.randomUUID().replaceAll('-', '') },
+        warn: message => void process.stderr.write(`secure copy: ${message}\n`),
+      });
+      void asActivity(activities, 'secure-copy-rules', async () => await pasteRules.load())();
+      const copyPlans = new CopyPlanService({
+        agenda: new CopyPlanAgendaAdapter(agenda),
+        rules: pasteRules,
+        tell: async (sessionId, agendaId, message) =>
+          void (await agendaReplies.add(sessionId, agendaId, message).catch(() => undefined)),
+        clock: { now: () => Date.now() },
+        ids: { planId: () => crypto.randomUUID().replaceAll('-', '') },
+      });
+      setInterval(() => copyPlans.sweep(), INPUT_REQUEST_SWEEP_MS).unref();
       // An agent stuck at a password prompt asks the owner through an agenda card (docs/input-requests.md). The value
       // lives only in this process's memory and in the one tmux write; the journal and the audit log carry names and flags.
       const inputRequestService = createInputRequestService({
@@ -9981,18 +10022,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // One of the two holders of the LoginVault (docs/secrets.md; the other is the redactor): the input bridge
         // types a saved login into the target the owner tapped "Use" for, and answers only what happened.
         logins: new InputLoginAdapter(loginDirectory, loginVault),
+        sealed: secureCopies,
+        rules: pasteRules,
       });
       inputRequests = inputRequestService;
-      // Secure copy (docs/secure-copy.md): a value an agent may name and never read. It lives in this process's
-      // memory only and is masked by the same registry as a value typed for the owner, from the moment it is read.
-      const secureCopies = new SecureCopyService({
-        clock: { now: () => Date.now() },
-        runner: new BunSecretChildRunner(),
-        folders: { folderOf: async sessionId => await sessionFolder(storage, sessionId) },
-        exposure: new TranscriptFileExposure(createTranscriptFileResolver(storage)),
-        masking: justTyped,
-        redact: async text => await secretRedactor.redact(text),
-      });
       setInterval(
         asActivity(activities, 'secure-copies', async () => {
           secureCopies.purge();
@@ -11483,6 +11516,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         browserLogin,
         browser: browserHost,
         inputRequests: inputRequestService,
+        secureCopy: {
+          copies: { list: sessionId => secureCopies.list(sessionId) },
+          rules: pasteRules,
+          plans: copyPlans,
+        },
         browserProxy: {
           tester: new BrowserProxyTester({
             saved: async () => (await declaredAccountModel())?.machine.browserProxy,
@@ -11501,7 +11539,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           input: inputRequestService,
           scrub: (sessionId, text) => inputRequestService.scrub(sessionId, text),
           quarantinedUntil: (sessionId, names) => inputRequestService.quarantinedUntil(sessionId, names),
-          copy: secureCopies,
+          copy: {
+            capture: async (sessionId, request) => await secureCopies.capture(sessionId, request),
+            list: sessionId => secureCopies.list(sessionId),
+            discard: (sessionId, name) => secureCopies.discard(sessionId, name),
+          },
+          plans: { propose: async (sessionId, items, expires) => await copyPlans.propose(sessionId, items, expires) },
           files: new AgentFiles({
             fs: new NodeAgentFilesystem(),
             folderOf: async sessionId => await sessionFolder(storage, sessionId),
