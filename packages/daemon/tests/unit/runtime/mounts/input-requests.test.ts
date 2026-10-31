@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import { padInputValue } from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
+import { finalised } from '../../../../src/lib/api/http.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { inputRequestRoutes } from '../../../../src/lib/runtime/mounts/input-requests.ts';
 import { bodyReads, jsonBody, request } from '../../api/support.ts';
@@ -240,10 +241,26 @@ describe('the owner request list — publication at the transport', () => {
 
     const answered = await dispatch.dispatch(request({ method: 'GET', path: '/v1/input-requests', headers: human }));
 
-    should(answered.status).equal(200);
-    should(answered.late).be.undefined();
-    should(String(answered.body)).not.containEql(CANARY);
-    should(String(answered.body)).not.containEql('pane-prompt-CANARY');
+    const sent = finalised(answered);
+    should(sent.status).equal(200);
+    should(String(sent.body)).not.containEql(CANARY);
+    should(String(sent.body)).not.containEql('pane-prompt-CANARY');
+  });
+
+  it('should mask the facts of a terminal a hold took after the dispatcher answered, before the carrier sent', async () => {
+    const { service, quarantine } = inputRequestService({
+      facts: { ...FACTS, foreground: { ...FACTS.foreground, comm: CANARY }, promptLine: 'pane-prompt-CANARY' },
+      names: ['dev', '000000000001'],
+    });
+    await service.raise(SESSION, RAISE);
+    const dispatch = new ApiDispatcher(new ApiRouter(inputRequestRoutes(service)), CREDENTIALS, GRANTED);
+
+    const answered = await dispatch.dispatch(request({ method: 'GET', path: '/v1/input-requests', headers: human }));
+    await quarantine.begin(SESSION, ['dev', '000000000001'], 'typing');
+
+    should(String(answered.body)).containEql(CANARY);
+    should(String(finalised(answered).body)).not.containEql(CANARY);
+    should(String(finalised(answered).body)).not.containEql('pane-prompt-CANARY');
   });
 
   it('should leave the facts of a terminal that is not quarantined as they are', async () => {

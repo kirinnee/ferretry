@@ -485,16 +485,30 @@ export class ApiDispatcher {
   }
 }
 
+/** How a route that threw is answered: a refusal it named keeps its own status; anything else is a bare 500. */
+const failed = (error: unknown): ApiResponse =>
+  error instanceof ApiError
+    ? errorResponse(error.status, error.message, error.code, error.extra)
+    : errorResponse(500, 'the daemon failed to handle this request', 'internal_error');
+
 async function run(route: ApiRoute, context: RouteContext): Promise<ApiResponse> {
-  let response: ApiResponse;
+  const policy = (response: ApiResponse): ApiResponse => (route.noStore === true ? noStore(response) : response);
+  let built: ApiResponse;
   try {
-    const built = await route.handle(context);
-    response = built.late === undefined ? built : built.late();
+    built = await route.handle(context);
   } catch (error) {
-    response =
-      error instanceof ApiError
-        ? errorResponse(error.status, error.message, error.code, error.extra)
-        : errorResponse(500, 'the daemon failed to handle this request', 'internal_error');
+    return policy(failed(error));
   }
-  return route.noStore === true ? noStore(response) : response;
+  const spell = built.late;
+  if (spell === undefined) return policy(built);
+  // The body is spelled again here, after the route's last await, and its last word travels on with the
+  // response: every carrier calls it (`finalised`) as the final synchronous step before the bytes leave.
+  const last = (): ApiResponse => {
+    try {
+      return policy(spell());
+    } catch (error) {
+      return policy(failed(error));
+    }
+  };
+  return { ...last(), late: last };
 }

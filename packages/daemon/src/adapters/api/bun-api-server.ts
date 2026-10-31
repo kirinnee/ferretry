@@ -9,6 +9,7 @@ import {
   type ApiSurface,
   admitPendingSocketFrame,
   errorResponse,
+  finalised,
   headersFrom,
   MAX_REQUEST_BODY_BYTES,
   queryFrom,
@@ -233,7 +234,8 @@ function wantsSocket(request: Request): boolean {
 }
 
 function toResponse(response: ApiResponse): Response {
-  return new Response(response.body, { status: response.status, headers: Object.fromEntries(response.headers) });
+  const { body, status, headers } = finalised(response);
+  return new Response(body, { status, headers: Object.fromEntries(headers) });
 }
 
 const CORS_METHODS = new Set(['DELETE', 'GET', 'PATCH', 'POST']);

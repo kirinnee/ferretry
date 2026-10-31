@@ -180,6 +180,14 @@ describe('the session tunnel envelope', () => {
       ]);
     });
 
+    it('should send what the answer last spells, not the body it was built with', () => {
+      const answer: ApiResponse = { ...response('{"shown":"first"}'), late: () => response('{"shown":"last"}') };
+
+      should(tunnelResponseMessages(6, answer)).deepEqual([
+        { t: 'res', id: 6, status: 200, headers: { 'content-type': 'application/json' }, body: '{"shown":"last"}' },
+      ]);
+    });
+
     it('should split an answer too large for one record into ordered parts that each fit, never truncating', () => {
       // Escapes and multi-byte characters cost more than one byte each on the wire, so the parts are
       // cut by their encoded size — and a surrogate pair is never cut in two.

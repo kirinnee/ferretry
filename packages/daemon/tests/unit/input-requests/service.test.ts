@@ -1755,6 +1755,28 @@ describe('the pane quarantine: a terminal a secret was typed into is kept from a
       sealed(request);
     });
 
+    // R8-4
+    it('should seal a card that finished projection first, when a hold begins while a later card in the batch is still being redacted', async () => {
+      const live = await raised({ names: NAMES });
+      await live.service.raise(SESSION, {
+        ...RAISE,
+        target: { kind: 'terminal', key: 'other' },
+        prompt: 'second-prompt',
+      });
+      let open!: () => void;
+      live.w.redactGate = new Promise<void>(resolve => (open = resolve));
+      live.w.redactOnly = 'second-prompt';
+
+      const pending = live.service.list(HOST);
+      await suspended(live.w);
+      live.quarantine.lockSession(SESSION);
+      open();
+      const listed = await pending;
+
+      should(listed.length).equal(2);
+      for (const request of listed) sealed(request);
+    });
+
     // An ended request keeps no observed facts at all, so this pins the invariant rather than a race.
     it('should show a cancelled card no terminal text, even when a hold began while its prompt was being redacted', async () => {
       const live = await raised({ names: NAMES });
@@ -1836,6 +1858,15 @@ describe('the pane quarantine: a terminal a secret was typed into is kept from a
 
       should(live.quarantine.unresolved(SESSION).length).equal(1);
       should(live.w.quarantineEvents.at(-1)?.unresolved).equal(true);
+      should(live.w.quarantineEvents.filter(event => event.unresolved !== true)).eql([]);
+      const restarted = build({
+        history: live.w.events,
+        quarantineHistory: live.w.quarantineEvents,
+        now: live.w.now + WINDOW + 1,
+      });
+      await restarted.service.restore();
+      should(restarted.service.quarantinedUntil(SESSION, ['dev'])).not.be.undefined();
+      should(restarted.service.quarantinedUntil(SESSION, ['000000000001'])).not.be.undefined();
       live.w.now += WINDOW + 1;
       should(live.service.quarantinedUntil(SESSION, ['dev'])).not.be.undefined();
       should(live.service.quarantinedUntil(SESSION, ['000000000001'])).not.be.undefined();

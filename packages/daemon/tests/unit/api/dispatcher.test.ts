@@ -11,6 +11,7 @@ import {
   type CapabilityGuard,
   CLIENT_HEADER,
   type CredentialMinimum,
+  finalised,
   jsonResponse,
   NO_GOVERNED_ROUTES_GUARD,
   NO_STEP_UP_WITNESS,
@@ -489,9 +490,28 @@ describe('ApiDispatcher error handling', () => {
 
     const response = await dispatcherFor(route).dispatch(request({ path: '/late' }));
 
-    should(jsonBody(response)).deepEqual({ shown: 'last' });
-    should(response.late).be.undefined();
-    should(response.headers.get('cache-control')).equal('no-store');
+    const sent = finalised(response);
+    should(jsonBody(sent)).deepEqual({ shown: 'last' });
+    should(sent.headers.get('cache-control')).equal('no-store');
+  });
+
+  it('should keep the last word on the response so a carrier can spell it again at its own hand-off', async () => {
+    let spelled = 0;
+    const route: ApiRoute = {
+      method: 'GET',
+      path: '/late',
+      minimum: 'none',
+      handle: async () => ({
+        ...jsonResponse({ shown: 'first' }),
+        late: () => jsonResponse({ shown: `spelling ${++spelled}` }),
+      }),
+    };
+
+    const response = await dispatcherFor(route).dispatch(request({ path: '/late' }));
+    await Promise.resolve();
+
+    should(jsonBody(finalised(response))).deepEqual({ shown: 'spelling 2' });
+    should(jsonBody(finalised(response))).deepEqual({ shown: 'spelling 3' });
   });
 
   it('should answer a refusal raised by a route last word like any other', async () => {
@@ -511,6 +531,7 @@ describe('ApiDispatcher error handling', () => {
 
     should(response.status).equal(409);
     should(response.body).not.containEql('first');
+    should(finalised(response).status).equal(409);
   });
 
   it('should handle a thrown non-Error just as safely', async () => {

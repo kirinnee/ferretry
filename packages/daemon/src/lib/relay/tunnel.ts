@@ -45,6 +45,7 @@ import {
   type ApiRequest,
   type ApiResponse,
   BodyTooLargeError,
+  finalised,
   headersFrom,
   queryFrom,
   type SessionDevice,
@@ -503,7 +504,8 @@ const RES_MORE_ENVELOPE = encodeTunnelMessage({ t: 'res-more', id: MAX_TUNNEL_RE
  * session list uncapped must not start refusing it. Past {@link MAX_TUNNEL_BODY_BYTES} the answer is a
  * `502` naming the size — never a truncated body a client would parse and believe.
  */
-export function tunnelResponseMessages(id: number, response: ApiResponse): readonly RelayTunnelDaemonMessage[] {
+export function tunnelResponseMessages(id: number, answer: ApiResponse): readonly RelayTunnelDaemonMessage[] {
+  const response = finalised(answer);
   const headers = Object.fromEntries(response.headers);
   const whole: RelayTunnelDaemonMessage = { t: 'res', id, status: response.status, headers, body: response.body };
   if (encodeTunnelMessage(whole).byteLength <= MAX_PLAINTEXT_BYTES) return [whole];
