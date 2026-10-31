@@ -165,6 +165,7 @@ const startRequest = (fields: {
   context: '',
   terms: [],
   brief: clip(fields.brief, MAX_BOARD_BRIEF_LENGTH),
+  howToTest: '',
   workflow: 'quick',
   parent: fields.parent,
   assignee: fields.assignee,

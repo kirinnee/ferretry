@@ -900,6 +900,34 @@ describe('everything else on a card', () => {
     should(nothing.code).equal('invalid');
   });
 
+  it('should keep How to test from the create, and record a rewrite as its own edit', async () => {
+    // Arrange
+    const { ports, service } = serviceWith([]);
+
+    // Act
+    const created = await service.create(create({ howToTest: '1. Open the Board' }), lead);
+    await service.act(
+      created.task.id,
+      action({ action: 'edit', howToTest: '1. Open the Board\n2. Tap the card' }),
+      lead,
+    );
+
+    // Assert
+    should(stored(ports)).match({ howToTest: '1. Open the Board\n2. Tap the card' });
+    should(lastEvent(ports)).match({ type: 'field-edited', field: 'howToTest' });
+  });
+
+  it('should let the assignee write How to test without owner standing', async () => {
+    // Arrange
+    const { ports, service } = serviceWith([card({ assignee: 'child' })]);
+
+    // Act
+    await service.act('F1', action({ action: 'edit', howToTest: '1. Run fy task show F1' }), child);
+
+    // Assert
+    should(stored(ports).howToTest).equal('1. Run fy task show F1');
+  });
+
   it('should claim and release files', async () => {
     // Arrange
     const { ports, service } = serviceWith([card()]);

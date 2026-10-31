@@ -22,6 +22,7 @@ import {
 import {
   type BoardCreateOptions,
   type BoardEditOptions,
+  type BoardEditTexts,
   type BoardLinkOptions,
   type BoardViewOptions,
   buildAssignAction,
@@ -188,13 +189,25 @@ export class BoardController {
 
   // ─── writing ─────────────────────────────────────────────────────────────────────────────────
 
-  private async resolveBrief(options: BoardCreateOptions | BoardEditOptions): Promise<string | undefined> {
-    const file = options.briefFile?.trim();
-    if (file !== undefined && file !== '') {
-      if (options.brief !== undefined) refuse('pass --brief or --brief-file, not both');
-      return await this.deps.files.readText(file);
+  /** A text given inline or as a file (`--brief` / `--brief-file`, `--how-to-test` / `--how-to-test-file`). */
+  private async resolveText(
+    text: string | undefined,
+    file: string | undefined,
+    flag: 'brief' | 'how-to-test',
+  ): Promise<string | undefined> {
+    const path = file?.trim();
+    if (path !== undefined && path !== '') {
+      if (text !== undefined) refuse(`pass --${flag} or --${flag}-file, not both`);
+      return await this.deps.files.readText(path);
     }
-    return options.brief;
+    return text;
+  }
+
+  private async resolveTexts(options: BoardCreateOptions | BoardEditOptions): Promise<BoardEditTexts> {
+    return {
+      brief: await this.resolveText(options.brief, options.briefFile, 'brief'),
+      howToTest: await this.resolveText(options.howToTest, options.howToTestFile, 'how-to-test'),
+    };
   }
 
   private async perform(
@@ -220,7 +233,7 @@ export class BoardController {
   async create(titleWords: readonly string[], options: TaskCreateFlags): Promise<void> {
     const as = this.as(options);
     const prLinks = createPrLinks(options);
-    const brief = (await this.resolveBrief(options)) ?? '';
+    const texts = await this.resolveTexts(options);
     const listing: BoardProjectsResponse = await this.gateway.projects(as);
     const target: BoardProject | undefined =
       options.project === undefined
@@ -229,7 +242,8 @@ export class BoardController {
     const assignee =
       options.assignee === undefined ? null : resolveSessionRef(options.assignee, await this.gateway.sessions());
     const request = buildBoardCreateRequest(options, titleWords, {
-      brief,
+      brief: texts.brief ?? '',
+      howToTest: texts.howToTest?.trim() ?? '',
       projectId: options.project === undefined ? undefined : target?.id,
       assignee,
     });
@@ -368,8 +382,8 @@ export class BoardController {
   }
 
   async edit(idText: string, options: TaskEditFlags) {
-    const brief = await this.resolveBrief(options);
-    await this.perform('edit', requireCardRef(idText), options, buildEditAction(options, brief));
+    const texts = await this.resolveTexts(options);
+    await this.perform('edit', requireCardRef(idText), options, buildEditAction(options, texts));
   }
 
   async refile(

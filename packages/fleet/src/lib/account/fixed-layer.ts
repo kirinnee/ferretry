@@ -466,7 +466,7 @@ export const NOTIFY_INSTRUCTION = (fy: string): string =>
  * the daemon). docs/board.md quotes this text verbatim.
  */
 export const BOARD_INSTRUCTION = (fy: string): string =>
-  `Board: all work is a card (&F412) on its project's board (new repo: \`${fy} project add .\`); agenda items are !A48. Before your first edit for a new ask, have one: \`${fy} task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<owner's words verbatim>"\` (${fy} new/start make one). Move it: \`${fy} task move <id> <lane> --reason "<why>"\`. Blocked on owner: \`${fy} agenda add --task <id>\`; a card: \`${fy} task depend\`; outside: \`${fy} task block\`. Dropped: \`${fy} task drop --reason\`; switched: \`${fy} task focus <id>\`. Owner finds a problem: \`${fy} task reopen <id> --to <lane> --ask "<their words>"\`. Never move what a PR or release moves; only the owner closes.`;
+  `Board: all work is a card (&F412); agenda items are !A48. New ask, first: \`${fy} task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>\` (repeatable; ${fy} new/start make one). Before To test: \`${fy} task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"\`. Move: \`${fy} task move <id> <lane> --reason "<why>"\`. Blocked: \`${fy} agenda add --task <id>\` (owner), \`${fy} task depend\` (card), \`${fy} task block\` (else). \`${fy} task drop --reason\`, \`${fy} task focus <id>\`. Owner's bug: \`${fy} task reopen <id> --to <lane> --ask "<their words>"\`. PRs/releases move cards; only the owner closes.`;
 
 /**
  * SUB-FERRET LIMITS (docs/pack-mode.md § Sub-ferret limits): a ferret another ferret started. The daemon
@@ -480,7 +480,7 @@ export const SUB_FERRET_ENV = 'FY_SUB_FERRET';
 export const SUB_FERRET_INSTRUCTION = (fy: string): string =>
   [
     `Sub-ferret: you were started by a lead ferret. Report to it with \`${fy} send <lead-callsign> "<message>"\`; you cannot raise agenda items, notify the owner or move cards.`,
-    `Link your PR to your card: \`${fy} task link <id> --pr <url>\` (or \`--branch\`); add progress with \`${fy} task note\`.`,
+    `Link your PR to your card: \`${fy} task link <id> --pr <url>\` (or \`--branch\`); add progress with \`${fy} task note\`. Your final report says how the owner tests it.`,
   ].join('\n');
 
 /** What a lead is told after the base instruction: the notify rule, then the board rules. */

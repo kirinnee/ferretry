@@ -41,11 +41,15 @@ describe('the premise and context blocks on the agenda card', () => {
     expect(premise).toContain('--fy-sit-ink: var(--accent-strong)');
     expect(context).toContain('--fy-sit-bg: var(--warn-bg)');
     expect(context).toContain('--fy-sit-ink: var(--warn)');
-    expect(rule('.fy-card .fy-card__sit-label')).toContain('color: var(--fy-sit-ink)');
+    // The board card's detail draws the same blocks, so the label rule names both hosts.
+    expect(rule(':is(.fy-card, .fy-board-detail) .fy-card__sit-label')).toContain('color: var(--fy-sit-ink)');
   });
 
   test('draw no left accent bar', () => {
-    const block = css.slice(css.indexOf('.fy-card__situation {'), css.indexOf('.fy-card .fy-card__points {'));
+    const block = css.slice(
+      css.indexOf('.fy-card__situation {'),
+      css.indexOf(':is(.fy-card, .fy-board-detail) .fy-card__points {'),
+    );
     expect(block).not.toMatch(/border-left|box-shadow:\s*inset/u);
   });
 });

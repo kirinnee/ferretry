@@ -157,21 +157,53 @@ describe('BoardDetail — reading', () => {
       }),
     });
     const sections = [...root.querySelectorAll('[data-section]')].map(section => section.getAttribute('data-section'));
-    expect(sections).toEqual([
-      'header',
-      'summary',
-      'ask',
-      'premise',
-      'context',
-      'terms',
-      'brief',
-      'links',
-      'depends',
-      'history',
-    ]);
-    expect(root.querySelector('[data-section="premise"]')?.tagName).toBe('SECTION');
+    expect(sections).toEqual(['header', 'ask', 'brief', 'terms', 'links', 'depends', 'history']);
+    expect(text(root, '[data-agenda-section="premise"]')).toBe('PremiseWhy');
+    expect(text(root, '[data-agenda-section="context"]')).toBe('ContextWhere');
+    expect(root.querySelector('[data-section="summary"]')).toBeNull();
+    expect(root.querySelector('[data-section="how-to-test"]')).toBeNull();
     expect(root.querySelector('[data-section="children"]')).toBeNull();
     expect(root.querySelector('[data-section="asks"]')).toBeNull();
+  });
+
+  it('reads like an agenda card: summary under the title, premise and context tinted, then the ask', async () => {
+    const { root } = await open({
+      task: card('F1', {
+        ...IMPLEMENT,
+        summary: 'Cards say how to test them',
+        premise: '- Cards are hard to read\n- Done has no steps',
+        context: 'Agenda v6 already reads well',
+      }),
+    });
+    const header = must(root.querySelector('[data-section="header"]'), 'the header');
+    expect(text(header, '[data-section="summary"]')).toBe('Cards say how to test them');
+    const situation = must(root.querySelector('[data-agenda-situation]'), 'the premise and context');
+    expect(
+      [...situation.querySelectorAll('.fy-card__sit-row')].map(row => row.getAttribute('data-agenda-section')),
+    ).toEqual(['premise', 'context']);
+    expect([...situation.querySelectorAll('[data-agenda-section="premise"] li')].map(li => li.textContent)).toEqual([
+      'Cards are hard to read',
+      'Done has no steps',
+    ]);
+    const ask = must(root.querySelector('[data-section="ask"]'), 'the ask');
+    expect(situation.compareDocumentPosition(ask) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(root.textContent).not.toContain('No summary yet');
+  });
+
+  it('marks each term where the card first uses it, and shows its meaning on a tap', async () => {
+    const { root } = await open({
+      task: card('F1', {
+        ...IMPLEMENT,
+        premise: 'The lane is wrong',
+        brief: 'Move the lane',
+        terms: [{ term: 'lane', meaning: 'A column of the board.' }],
+      }),
+    });
+    const marks = [...root.querySelectorAll('a[href^="#fy-term-"]')];
+    expect(marks.map(mark => mark.textContent)).toEqual(['lane']);
+    expect(marks[0]?.closest('[data-agenda-section="premise"]')).not.toBeNull();
+    await interact(() => (marks[0] as HTMLElement).click());
+    expect(text(root, '.fy-term-tip')).toContain('A column of the board.');
   });
 
   it('says what a card in each activity is doing', async () => {
@@ -365,6 +397,34 @@ describe('BoardDetail — the verdict', () => {
       'Not good → back to Implement, with a reason',
     );
     expect(root.querySelectorAll('[data-verdict] svg')).toHaveLength(2);
+  });
+
+  it('puts How to test as numbered steps right above Done and Not good', async () => {
+    const { root } = await open({
+      task: card('F1', {
+        ...tested,
+        howToTest: 'On the Mac, v4.157:\n\n1. Open the **Board**\n2. Tap &F1\n3. See the steps',
+        brief: 'The plan',
+      }),
+    });
+    const section = must(root.querySelector('[data-section="how-to-test"]'), 'How to test');
+    expect(text(section, '.fy-board-detail__heading')).toBe('How to test');
+    expect(text(section, '.fy-board-test__lead')).toBe('On the Mac, v4.157:');
+    expect([...section.querySelectorAll('.fy-board-test__n')].map(n => n.textContent)).toEqual(['1', '2', '3']);
+    expect(section.querySelector('.fy-board-test__step strong')?.textContent).toBe('Board');
+    const verdict = must(root.querySelector('[aria-label="Your verdict"]'), 'the verdict');
+    expect(section.nextElementSibling).toBe(verdict);
+    const brief = must(root.querySelector('[data-section="brief"]'), 'the brief');
+    expect(verdict.compareDocumentPosition(brief) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('lets the owner tick the steps off as they test, without moving the card', async () => {
+    const { root, actions } = await open({ task: card('F1', { ...tested, howToTest: '1. Open it\n2. Look' }) });
+    const box = must(root.querySelector<HTMLInputElement>('[data-test-tick="1"]'), 'the second box');
+    await interact(() => box.click());
+    expect(box.checked).toBe(true);
+    expect(root.querySelector('[data-test-tick="1"]')?.closest('li')?.hasAttribute('data-done')).toBe(true);
+    expect(actions.calls).toEqual([]);
   });
 
   it('closes the card with Works, with no words asked', async () => {

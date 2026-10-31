@@ -789,6 +789,7 @@ export const newCard = (request: BoardTaskCreateRequest, context: NewCardContext
     context: request.context,
     terms: request.terms,
     brief: request.brief,
+    howToTest: request.howToTest,
     owner: context.owner,
     assignee: request.assignee,
     parent: request.parent,
