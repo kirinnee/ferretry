@@ -424,7 +424,7 @@ function FieldShot({
       {shotBoxes(request, fields, shot).map(box => (
         <span
           aria-hidden="true"
-          className="absolute rounded-sm border-2 border-accent"
+          className="absolute rounded-control outline outline-2 outline-accent"
           data-input-shot-box={box.key}
           key={box.key}
           style={{ left: `${box.left}%`, top: `${box.top}%`, width: `${box.width}%`, height: `${box.height}%` }}
