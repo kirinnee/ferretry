@@ -45,7 +45,9 @@
  * file owns the stages:
  *
  * - **automatically**, when Codex says it could not get a device code at all ({@link observeCodexLine}
- *   moves to `device-unavailable` and the service relaunches);
+ *   moves to `device-unavailable` and the service relaunches); except on a host that shares
+ *   its loopback ports (`browserPorts` is not `random`), where the link's one fixed port could be held or
+ *   watched by another user, so the flow ends instead ({@link codexSharedHostEnding}) and the person chooses;
  * - **by choice**, when the person says the device code did not work ({@link decideCodexSubmit}).
  *
  * The method switches inside ONE flow, so the step-up its start was held behind is not asked twice.
@@ -231,6 +233,23 @@ function observeLinkLine(stage: Extract<CodexLoginStage, { stage: 'linking' }>, 
 /** A device-code flow that could not get a code moves to a link, which the service launches. */
 export function codexAutomaticLink(): CodexLoginStage {
   return { stage: 'linking', automatic: true };
+}
+
+/**
+ * How a flow ends when Codex could not get a device code and this host shares its loopback ports.
+ *
+ * On a host where `browserPorts` is not `random`, other local users are expected, and the link sign-in
+ * listens on one host-wide port (`localhost:1455`, then 1457) that any of them can hold or watch. So
+ * the daemon does NOT move to it by itself there: the device code stays the default and the link is
+ * something a person picks, knowing why. The reason and the remedy are the only place the person is told.
+ */
+export function codexSharedHostEnding(): CodexLoginFailure {
+  return {
+    stage: 'failed',
+    reason: `Codex could not get a device code, and the link sign-in listens on port ${CODEX_CALLBACK_PORTS.join(' or ')}, which every user on this shared host shares, so it was not started on its own`,
+    remedy:
+      'Ask for a device code again later, or choose the link sign-in yourself if you accept that another user on this host could block it.',
+  };
 }
 
 /**
