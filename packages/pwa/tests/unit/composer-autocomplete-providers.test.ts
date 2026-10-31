@@ -6,6 +6,7 @@ import {
   type ComposerTrigger,
   type ComposerTriggerMatch,
   composerSuggestionSwitches,
+  rankComposerCandidates,
 } from '../../src/components/composer-autocomplete.ts';
 import {
   type ComposerAgendaItem,
@@ -954,6 +955,33 @@ describe('composer task family', () => {
     expect(direct?.snapshotKey).not.toBe(before);
     expect(labels(direct?.initialCandidates?.(context('&', 'F')))).toEqual(['&F1', '&F2']);
     expect(labels(ladderProvider.initialCandidates?.(referenceContext(4, '')))).toEqual(['&F1', '&F2']);
+  });
+
+  it('offers every open human card of a busy project, any lane, assigned or not, and lets the engine show fifty', () => {
+    const busy = Array.from({ length: 60 }, (_, index) =>
+      task(`F${index + 1}`, {
+        lane: index % 3 === 0 ? 'Todo' : index % 3 === 1 ? 'In progress' : 'To test',
+        assignee: index % 2 === 0 ? null : 'zelda',
+        touchedAt: `2026-10-${String((index % 28) + 1).padStart(2, '0')}T00:00:00.000Z`,
+        agentAsked: index >= 55,
+      }),
+    );
+    const [, , sigil] = createDirectReferenceProviders({ daemon: daemonA, scope: scopeA, getTasks: () => busy });
+    const result = sigil?.initialCandidates?.(context('&', 'F'));
+    expect(result?.candidates).toHaveLength(55);
+    expect(result?.limit).toBe(50);
+    expect(labels(result)).not.toContain('&F56');
+    expect(rankComposerCandidates(result?.candidates ?? [], '', result?.limit).length).toBe(50);
+  });
+
+  it('finds a card by a word in its summary', () => {
+    const [, , sigil] = createDirectReferenceProviders({
+      daemon: daemonA,
+      scope: scopeA,
+      getTasks: () => [task('F1', { summary: 'relay fingerprint allowlist' }), task('F2')],
+    });
+    const result = sigil?.initialCandidates?.(context('&', 'allowlist'));
+    expect(rankComposerCandidates(result?.candidates ?? [], 'allowlist').map(row => row.label)).toEqual(['&F1']);
   });
 
   it('says id, title, lane and owner on each row, and inserts the canonical token', () => {

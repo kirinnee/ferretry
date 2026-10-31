@@ -225,6 +225,8 @@ export interface ComposerProviderResult {
   readonly candidates: readonly ComposerAutocompleteCandidate[];
   /** Files search only their final path segment; other providers omit this. */
   readonly filterQuery?: string;
+  /** How many ranked rows to show; absent: {@link MAX_AUTOCOMPLETE_RESULTS}. */
+  readonly limit?: number;
   readonly contextLabel?: string;
   readonly notice?: string;
 }
@@ -685,7 +687,7 @@ export function useComposerAutocomplete({
     const abort = new AbortController();
     const ready = (result: ComposerProviderResult) => {
       if (abort.signal.aborted) return;
-      const candidates = rankComposerCandidates(result.candidates, result.filterQuery ?? match.query);
+      const candidates = rankComposerCandidates(result.candidates, result.filterQuery ?? match.query, result.limit);
       setLoad({
         key: requestKey,
         status: 'ready',

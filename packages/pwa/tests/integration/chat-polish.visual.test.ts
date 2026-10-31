@@ -143,6 +143,26 @@ describe('chat polish', () => {
       await context.close();
     }
   });
+
+  it('lists the most relevant fifty open human cards of a busy project and lets the query narrow them', async () => {
+    const context = await newContext(true, 'light');
+    try {
+      const tab = await open(context, 'theme=studio-light&picker=1&many=1', '[data-agent-tasks-switch]');
+      expect(await tab.locator('[role="option"]').count()).toBe(50);
+      expect(await tab.getByText('&F51', { exact: true }).count()).toBe(0);
+      await tab.locator('[data-agent-tasks-switch]').click();
+      expect(await tab.locator('[role="option"]').count()).toBe(50);
+    } finally {
+      await context.close();
+    }
+    const narrowed = await newContext(true, 'light');
+    try {
+      const tab = await open(narrowed, 'theme=studio-light&picker=1&many=1&q=allowlist', '[data-agent-tasks-switch]');
+      expect(await tab.locator('[role="option"]').count()).toBe(10);
+    } finally {
+      await narrowed.close();
+    }
+  });
 });
 
 describe('chat polish, captured', () => {
@@ -155,6 +175,8 @@ describe('chat polish, captured', () => {
         ['chat-update', '&update=1'],
         ['picker', '&picker=1'],
         ['picker-on', '&picker=1&on=1'],
+        ['picker-many', '&picker=1&many=1'],
+        ['picker-many-on', '&picker=1&many=1&on=1'],
       ] as const;
       for (const phone of [false, true])
         for (const mode of ['light', 'dark'] as const)

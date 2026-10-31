@@ -229,22 +229,25 @@ with no card selected). Chat included: the host's own Tasks destination is only 
 route is unavailable (an older daemon without `/v1/board`, or a host with no router). A card id is unique on
 its machine only, so the destination always carries the daemon the reference was proved against.
 
-> **GAP — task proof reads this ferret's slice of the board, not the whole machine.** The proof set
-> behind `&F12` is ONE board read, `ferret = <session>` with `state = all`, made through the PWA's board
-> store and shared by the chat's task search, the `&` menu and this proof (no request per reference). A
-> card the machine's board holds that this session neither owns nor is assigned stays prose, and the
-> detail itself answers "no card" for an id the machine does not have. Closing it needs a machine-wide id
-> read in the session page.
+> **GAP — task proof reads this project's board, not the whole machine.** The proof set behind `&F12`
+> and the rows of the `&` / `@@@@` Tasks menu are ONE board read, `project = <the session's project>`
+> with `state = all` and agent cards included, made through the PWA's board store (no request per
+> reference). Every open human card on the project is offered whatever its lane or assignee; "human"
+> is the daemon's `origin`, falling back to the older owner/waiting guess only for a card with no
+> `origin`. The menu shows the most relevant 50 and the query (id, title or summary) narrows them. A
+> session with no project, or a daemon that cannot answer that read, falls back to this ferret's own
+> slice (`ferret = <session>`). The chat's task search keeps the ferret slice. A card on another
+> project stays prose, and the detail itself answers "no card" for an id the machine does not have.
 >
 > **Old references resolve through the same read.** A card imported from one of this session's old tasks
 > carries `legacyRef = <session>:<oldId>`. `&F12` in the transcript is proved when `F12` is a card on the
 > slice, or when it is the old id of one: it stays written as `&F12` and its click opens the card that
 > replaced it. A card on the slice wins over an old id that spells the same; the two cannot be told
 > apart by their text, which is the GAP — a session whose old `F12` and a new machine-board `F12` both
-> exist always means the new one. Because the lookup is the slice itself, it needs no
+> exist always means the new one. Because the lookup is the board read itself, it needs no
 > `GET /v1/board/tasks?legacyRef=` call per reference and nothing to batch or cache beyond the board
-> store's own cache; the ferret-slice limit above applies to old ids too, so an imported task whose card
-> another ferret now owns stays prose.
+> store's own cache; the project limit above applies to old ids too, so an imported task whose card
+> sits on another project stays prose.
 
 A reader with no resolver for a kind cannot prove it, so that kind stays prose there. A missing
 answer is refusal, never assumption: a fleet that has not been read yet is **not** a fleet with

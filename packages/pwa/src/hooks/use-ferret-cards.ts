@@ -6,12 +6,12 @@
  * empty, ready slice, never as an error.
  */
 
-import { useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { BoardPort } from '../lib/board-client.ts';
 import { NO_BOARD_FILTERS } from '../lib/board-model.ts';
 import { DaemonBoardStore } from '../lib/board-store.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
-import { type SessionCard, sessionCards } from '../lib/session-cards.ts';
+import { projectCards, type SessionCard, sessionCards } from '../lib/session-cards.ts';
 import { type BoardMachine, useBoard } from './use-board.ts';
 
 const refuse = (): Promise<never> => Promise.reject(new Error('this host has no board'));
@@ -63,4 +63,69 @@ export const useFerretCards = (
     }
     return { state: 'loading', error: null, cards };
   }, [status, statuses, cards, store, sessionId]);
+};
+
+export interface ProjectCards extends FerretCards {
+  /** The project read already in flight, or nothing once it settles: a menu awaits it rather than offer an empty list. */
+  readonly wait: () => Promise<void> | undefined;
+}
+
+/**
+ * EVERY CARD OF THE FERRET'S PROJECT, owned or not: what the `&` menu and the `&F12` proof read, so a card the
+ * owner asked for stays offered whoever holds it. `projectId` absent: nothing is read, and the state stays `loading`.
+ */
+export const useProjectCards = (
+  store: DaemonBoardStore | undefined,
+  connection: DaemonConnection,
+  sessionId: string | null,
+  projectId: string | null,
+): ProjectCards => {
+  const reading = store !== undefined && sessionId !== null && projectId !== null;
+  const machines = useMemo<readonly BoardMachine[]>(
+    () => (reading ? [{ connection, name: connection.daemonName ?? connection.daemonId }] : NO_MACHINES),
+    [reading, connection],
+  );
+  const filters = useMemo(
+    () => ({ ...NO_BOARD_FILTERS, project: projectId, agents: true, state: 'all' as const }),
+    [projectId],
+  );
+  const board = useBoard(store ?? IDLE_STORE, machines, filters, { beat: false });
+  const { model, status, machines: statuses } = board;
+  const daemonId = connection.daemonId;
+  const cards = useMemo(
+    () => (reading ? projectCards(model, daemonId, sessionId) : NO_CARDS),
+    [reading, model, daemonId, sessionId],
+  );
+  const state: FerretCardsState = !reading
+    ? 'loading'
+    : status === 'ready'
+      ? 'ready'
+      : status === 'error'
+        ? 'unavailable'
+        : 'loading';
+  const error = state === 'unavailable' ? (statuses[0]?.error ?? 'the board could not be read') : null;
+
+  const pending = useRef<{ readonly promise: Promise<void>; readonly settle: () => void } | null>(null);
+  useEffect(() => {
+    if (state !== 'loading' || !reading) {
+      pending.current?.settle();
+      pending.current = null;
+      return;
+    }
+    if (pending.current !== null) return;
+    let settle: () => void = () => undefined;
+    const promise = new Promise<void>(resolve => {
+      settle = resolve;
+    });
+    pending.current = { promise, settle };
+  }, [state, reading]);
+  useEffect(
+    () => () => {
+      pending.current?.settle();
+      pending.current = null;
+    },
+    [],
+  );
+  const wait = useCallback((): Promise<void> | undefined => pending.current?.promise, []);
+  return useMemo<ProjectCards>(() => ({ state, error, cards, wait }), [state, error, cards, wait]);
 };

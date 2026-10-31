@@ -762,6 +762,9 @@ const compareTasks = (left: ComposerReferenceTask, right: ComposerReferenceTask)
 
 const neverAgentTasks = (): boolean => false;
 
+/** A project holds dozens of open cards the owner may mean; the menu shows the best of them and the query narrows it. */
+const MAX_TASK_RESULTS = 50;
+
 const TASK_MENU_LABELS: ReadonlySet<string> = new Set(['Tasks', '& tasks']);
 
 /** Whether an open list is the task menu, the only one "Include agent tasks" applies to. */
@@ -793,7 +796,7 @@ const taskCandidates = (
         kind: 'task',
         label: reference,
         detail: [task.title, task.assignee ?? 'unassigned'].join(' · '),
-        keywords: [task.id, task.title, task.lane, task.assignee ?? '', task.legacyId ?? ''].join(' '),
+        keywords: [task.id, task.title, task.summary, task.lane, task.assignee ?? '', task.legacyId ?? ''].join(' '),
         group: 'Tasks',
         badge: task.lane,
         replacement: reference,
@@ -837,6 +840,7 @@ const tasksResult = (
 ): ComposerProviderResult => ({
   candidates: taskCandidates(scope, tasks, query, includeAgentTasks),
   filterQuery: query,
+  limit: MAX_TASK_RESULTS,
   contextLabel,
 });
 

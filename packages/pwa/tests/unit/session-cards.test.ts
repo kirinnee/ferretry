@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { sessionCards, resolveCardReference } from '../../src/lib/session-cards.ts';
-import { boardModelOf, card, laptop, phone } from './board-support.ts';
+import { NO_BOARD_FILTERS } from '../../src/lib/board-model.ts';
+import { projectCards, resolveCardReference, sessionCards } from '../../src/lib/session-cards.ts';
+import { boardModelOf, card, laptop, originCard, phone } from './board-support.ts';
 
 const SESSION = 'session-a';
 
@@ -77,5 +78,41 @@ describe('resolveCardReference', () => {
   test('falls back to the old id, case-insensitively, and gives up on a stranger', () => {
     expect(resolveCardReference(cards, 'f7')).toBe('F97');
     expect(resolveCardReference(cards, 'F404')).toBeNull();
+  });
+});
+
+describe('projectCards', () => {
+  test('keeps every card on this machine, whoever owns it', async () => {
+    const model = await boardModelOf([
+      card('F1', { owner: SESSION }),
+      card('F2', { owner: 'someone-else', assignee: 'another' }),
+      card('F3', { owner: 'someone-else' }),
+    ]);
+
+    expect(
+      projectCards(model, laptop.daemonId, SESSION)
+        .map(entry => entry.id)
+        .sort(),
+    ).toEqual(['F1', 'F2', 'F3']);
+    expect(projectCards(model, phone.daemonId, SESSION)).toEqual([]);
+  });
+
+  test('asks the daemon who a card was for, and only guesses for a daemon that does not say', async () => {
+    const model = await boardModelOf(
+      [
+        originCard('F1', 'human', null, { owner: SESSION }),
+        originCard('F2', 'agent', { id: 'F1' }, { owner: SESSION, createdBy: { kind: 'owner' } }),
+        card('F3', { owner: SESSION }),
+        card('F4', { owner: SESSION, createdBy: { kind: 'owner' } }),
+      ],
+      { ...NO_BOARD_FILTERS, agents: true },
+    );
+
+    const byId = new Map(projectCards(model, laptop.daemonId, SESSION).map(entry => [entry.id, entry]));
+
+    expect(byId.get('F1')?.agentAsked).toBe(false);
+    expect(byId.get('F2')?.agentAsked).toBe(true);
+    expect(byId.get('F3')?.agentAsked).toBe(true);
+    expect(byId.get('F4')?.agentAsked).toBe(false);
   });
 });
