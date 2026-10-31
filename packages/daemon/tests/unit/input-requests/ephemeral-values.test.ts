@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { INPUT_MAX_REDACTION_SECONDS } from '@ferretry/protocol';
+import { COPY_AFTER_MASK_SECONDS, COPY_MAX_LIFETIME_SECONDS, INPUT_MAX_REDACTION_SECONDS } from '@ferretry/protocol';
 import should from 'should';
 import { EphemeralValues } from '../../../src/lib/input-requests/ephemeral-values.ts';
 
@@ -99,5 +99,66 @@ describe('EphemeralValues.fragments', () => {
     should(values.fragments('s1', 'xa')).be.true();
     should(values.fragments('s1', 'xb')).be.false();
     should(values.fragments('s1', 'gone-val')).be.false();
+  });
+});
+
+describe('EphemeralValues for a secure copy', () => {
+  it("should mask a copy with its own marker until the time it names, past a typed value's cap", () => {
+    const values = build();
+    const lasting = (INPUT_MAX_REDACTION_SECONDS + 600) * 1000;
+    values.holdUntil('s1', 'ghp_SEALED', '[sealed:token]', clock.ms + lasting);
+
+    should(values.scrub('s1', 'token ghp_SEALED here')).equal('token [sealed:token] here');
+    should(values.scrubAll('ghp_SEALED')).equal('[sealed:token]');
+    clock.ms += lasting - 1;
+    should(values.scrub('s1', 'ghp_SEALED')).equal('[sealed:token]');
+    clock.ms += 1;
+    should(values.scrub('s1', 'ghp_SEALED')).equal('ghp_SEALED');
+    should(values.heldCount()).equal(0);
+  });
+
+  it('should cap a copy at its longest life plus the after-mask window', () => {
+    const values = build();
+    const cap = (COPY_MAX_LIFETIME_SECONDS + COPY_AFTER_MASK_SECONDS) * 1000;
+    values.holdUntil('s1', 'forever-value', '[sealed:x]', clock.ms + cap * 10);
+    clock.ms += cap;
+
+    should(values.scrub('s1', 'forever-value')).equal('forever-value');
+  });
+
+  it("should bring a copy's end forward, never push it back, and leave other holds alone", () => {
+    const values = build();
+    values.holdUntil('s1', 'copy-one', '[sealed:one]', clock.ms + 100_000);
+    values.holdUntil('s1', 'copy-two', '[sealed:two]', clock.ms + 100_000);
+    values.hold('s1', 'typed-value', 'A1', 60);
+    values.retime('s1', '[sealed:one]', clock.ms + 10_000);
+    values.retime('s1', '[sealed:two]', clock.ms + 1_000_000);
+    values.retime('s2', '[sealed:one]', clock.ms);
+    clock.ms += 10_000;
+
+    should(values.scrub('s1', 'copy-one copy-two typed-value')).equal('copy-one [sealed:two] [redacted:input A1]');
+    clock.ms += 90_000;
+    should(values.scrub('s1', 'copy-two')).equal('copy-two');
+  });
+
+  it('should hold nothing for an empty copy', () => {
+    const values = build();
+    values.holdUntil('s1', '', '[sealed:x]', clock.ms + 1000);
+
+    should(values.heldCount()).equal(0);
+  });
+});
+
+describe('EphemeralValues when a session ends', () => {
+  it('should let go of typed values at once, and keep a copy masked for its after-mask window only', () => {
+    const values = build();
+    values.hold('s1', 'typed-value', 'A1');
+    values.holdUntil('s1', 'sealed-value', '[sealed:t]', clock.ms + 3_600_000);
+
+    values.drop('s1');
+
+    should(values.scrubAll('typed-value sealed-value')).equal('typed-value [sealed:t]');
+    clock.ms += COPY_AFTER_MASK_SECONDS * 1000;
+    should(values.scrubAll('sealed-value')).equal('sealed-value');
   });
 });

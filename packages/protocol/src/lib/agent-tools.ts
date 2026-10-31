@@ -1,19 +1,6 @@
 import { z } from 'zod';
 import { AgendaIdSchema } from './agenda.ts';
 import {
-  BROWSER_MAX_FIND_CHARS,
-  BROWSER_MAX_SNAPSHOT_DEPTH,
-  BrowserCoordinateSchema,
-  BrowserModifierSchema,
-  BrowserMouseButtonSchema,
-  BrowserReadModeSchema,
-  BrowserRefSchema,
-  BrowserScreenshotFormatSchema,
-  refineBrowserRead,
-  refineBrowserScreenshot,
-  refineBrowserTarget,
-} from './browser-target.ts';
-import {
   BROWSER_CONSOLE_MAX_LIMIT,
   BROWSER_DIALOG_PROMPT_MAX_CHARS,
   BROWSER_NETWORK_FILTER_MAX_CHARS,
@@ -42,6 +29,19 @@ import {
   refineBrowserMouse,
   refineBrowserScroll,
 } from './browser-pointer.ts';
+import {
+  BROWSER_MAX_FIND_CHARS,
+  BROWSER_MAX_SNAPSHOT_DEPTH,
+  BrowserCoordinateSchema,
+  BrowserModifierSchema,
+  BrowserMouseButtonSchema,
+  BrowserReadModeSchema,
+  BrowserRefSchema,
+  BrowserScreenshotFormatSchema,
+  refineBrowserRead,
+  refineBrowserScreenshot,
+  refineBrowserTarget,
+} from './browser-target.ts';
 import { InstantSchema } from './common.ts';
 import type { AgentConfigToolName } from './config-files.ts';
 import {
@@ -55,6 +55,15 @@ import {
   InputSubmitModeSchema,
 } from './input-request.ts';
 import { LoginEntryIdSchema } from './login-entries.ts';
+import {
+  COPY_MAX_LIFETIME_SECONDS,
+  COPY_MAX_LIVE_PER_SESSION,
+  CopyCommandReportSchema,
+  CopyHandleSchema,
+  CopyMetaSchema,
+  CopyNameSchema,
+  CopySourceSchema,
+} from './secure-copy.ts';
 import { SurfaceKeySchema, SurfaceKindSchema, SurfaceNameSchema } from './surface-names.ts';
 
 export * from './surface-names.ts';
@@ -604,6 +613,15 @@ export const AgentToolCallSchema = z.discriminatedUnion('tool', [
     name: SurfaceKeySchema,
     message: AskOwnerMessageSchema.optional(),
   }),
+  z.strictObject({
+    tool: z.literal('secure.copy'),
+    /** The handle the copy is known by: `sealed:<name>`. */
+    name: CopyNameSchema,
+    source: CopySourceSchema,
+    expiresInSeconds: z.number().int().min(60).max(COPY_MAX_LIFETIME_SECONDS).optional(),
+  }),
+  z.strictObject({ tool: z.literal('secure.list') }),
+  z.strictObject({ tool: z.literal('secure.discard'), handle: CopyHandleSchema }),
 ]);
 export type AgentToolCall = z.infer<typeof AgentToolCallSchema>;
 export type AgentToolName = AgentToolCall['tool'];
@@ -620,6 +638,7 @@ const REPEATABLE_AGENT_TOOLS: ReadonlySet<string> = new Set<AgentToolName | Agen
   'terminal.read',
   'terminal.wait',
   'input.wait',
+  'secure.list',
   'browser.list',
   'browser.read',
   'browser.screenshot',
@@ -674,6 +693,9 @@ export const AGENT_TOOL_NAMES: readonly AgentToolName[] = [
   'browser.close',
   'browser.ask_owner',
   'browser.request_input',
+  'secure.copy',
+  'secure.list',
+  'secure.discard',
 ];
 
 /** One surface as a list call shows it. An unnamed surface is still listed, by id. */
@@ -713,6 +735,13 @@ export const AgentToolResultSchema = z.strictObject({
   surfaces: z.array(AgentSurfaceSchema).optional(),
   /** `*.request_input` and `input.wait` only: where the request stands. */
   input: InputAgentViewSchema.optional(),
+  /** `secure.*` only: what the agent may know about its copies (docs/secure-copy.md), never a value. */
+  copies: z
+    .array(CopyMetaSchema)
+    .max(COPY_MAX_LIVE_PER_SESSION * 3)
+    .optional(),
+  /** `secure.copy` from a command: how it ended and its masked stderr, never its stdout. */
+  command: CopyCommandReportSchema.optional(),
 });
 export type AgentToolResult = z.infer<typeof AgentToolResultSchema>;
 

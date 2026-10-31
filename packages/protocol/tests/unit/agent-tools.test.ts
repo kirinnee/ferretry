@@ -157,6 +157,9 @@ describe('agent tool schemas', () => {
         prompt: 'GitHub login',
         fields: [{ id: 'password', sensitivity: 'secret', ref: 'e7' }],
       },
+      { tool: 'secure.copy', name: 'token', source: { kind: 'command', argv: ['gh'] } },
+      { tool: 'secure.list' },
+      { tool: 'secure.discard', handle: 'sealed:token' },
     ];
 
     // Act

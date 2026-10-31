@@ -13,6 +13,7 @@ import {
   BROWSER_CPU_THROTTLE_MAX,
   BROWSER_EMULATED_PERMISSIONS,
   BROWSER_RESOURCE_TYPES,
+  COPY_MAX_LIFETIME_SECONDS,
   LESSON_RULE_MAX_CHARS,
   TERMINAL_KEYS,
 } from '@ferretry/protocol';
@@ -686,6 +687,40 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
       },
       ['name', 'prompt', 'fields'],
     ),
+  },
+  {
+    name: 'secure_copy',
+    tool: 'secure.copy',
+    description:
+      'Seal what a command prints (a new token) as sealed:<name> without seeing it: you get its length, never the value, and it is masked everywhere. Seal BEFORE reading it anywhere.',
+    inputSchema: object(
+      {
+        name: { type: 'string', description: 'e.g. vercel_token' },
+        source: {
+          type: 'object',
+          properties: {
+            kind: { const: 'command' },
+            argv: { type: 'array', items: { type: 'string' }, description: 'No shell, e.g. ["gh","auth","token"]' },
+            cwd: { type: 'string' },
+          },
+          required: ['kind', 'argv'],
+        },
+        expiresInSeconds: { type: 'integer', maximum: COPY_MAX_LIFETIME_SECONDS },
+      },
+      ['name', 'source'],
+    ),
+  },
+  {
+    name: 'secure_list',
+    tool: 'secure.list',
+    description: 'List your sealed copies, never a value.',
+    inputSchema: object({}),
+  },
+  {
+    name: 'secure_discard',
+    tool: 'secure.discard',
+    description: 'Let go of a sealed copy.',
+    inputSchema: object({ handle: { type: 'string' } }, ['handle']),
   },
 ];
 

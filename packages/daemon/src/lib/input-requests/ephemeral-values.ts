@@ -1,4 +1,9 @@
-import { INPUT_DEFAULT_REDACTION_SECONDS, INPUT_MAX_REDACTION_SECONDS } from '@ferretry/protocol';
+import {
+  COPY_AFTER_MASK_SECONDS,
+  COPY_MAX_LIFETIME_SECONDS,
+  INPUT_DEFAULT_REDACTION_SECONDS,
+  INPUT_MAX_REDACTION_SECONDS,
+} from '@ferretry/protocol';
 import { coverageOf, type TextRange } from '../secrets/policy.ts';
 import type { InputClock } from './ports.ts';
 
@@ -17,12 +22,17 @@ const MIN_MASKED_LENGTH = 1;
 const MAX_FRAGMENT_FLOOR = 3;
 
 /** The shortest piece of a value that counts as the value: three characters, fewer for a value too short to have three. */
+/** The longest a secure copy is masked for: its longest life, then the time it may still sit on a screen. */
+const MAX_COPY_MASK_MS = (COPY_MAX_LIFETIME_SECONDS + COPY_AFTER_MASK_SECONDS) * 1000;
+
 const fragmentFloor = (length: number): number => Math.min(MAX_FRAGMENT_FLOOR, Math.ceil(length / 2));
 
 interface Held {
   readonly value: string;
   readonly label: string;
   readonly until: number;
+  /** The whole replacement text, when it is not `[redacted:input <label>]` (a secure copy's `[sealed:<name>]`). */
+  readonly marker?: string;
 }
 
 export class EphemeralValues {
@@ -39,6 +49,31 @@ export class EphemeralValues {
       ...(this.held.get(sessionId) ?? []),
       { value, label, until: this.clock.now() + lasting * 1000 },
     ]);
+  }
+
+  /**
+   * Mask `value` from `sessionId`'s reads until `until` (epoch milliseconds) as `marker`: a secure copy, which
+   * lives longer than a typed value's window (docs/secure-copy.md). Capped at a copy's longest life and after-mask.
+   */
+  holdUntil(sessionId: string, value: string, marker: string, until: number): void {
+    if (value.length < MIN_MASKED_LENGTH) return;
+    this.purge();
+    const latest = this.clock.now() + MAX_COPY_MASK_MS;
+    this.held.set(sessionId, [
+      ...(this.held.get(sessionId) ?? []),
+      { value, label: marker, marker, until: Math.min(until, latest) },
+    ]);
+  }
+
+  /** Brings forward the end of every hold of `sessionId` masked as `marker` to `until`, never later than it was. */
+  retime(sessionId: string, marker: string, until: number): void {
+    const entries = this.held.get(sessionId);
+    if (entries === undefined) return;
+    this.held.set(
+      sessionId,
+      entries.map(entry => (entry.marker === marker ? { ...entry, until: Math.min(entry.until, until) } : entry)),
+    );
+    this.purge();
   }
 
   /** `text` with every held value of this session replaced, longest first so a value containing another is whole-masked. */
@@ -72,9 +107,17 @@ export class EphemeralValues {
     }
   }
 
-  /** Lets go of everything held for a session that ended. */
+  /**
+   * Lets go of everything typed for a session that ended. A secure copy's mask stays for its after-mask window
+   * (docs/secure-copy.md): the value may still be on a screen it was pasted to, and other sessions read screens too.
+   */
   drop(sessionId: string): void {
-    this.held.delete(sessionId);
+    const latest = this.clock.now() + COPY_AFTER_MASK_SECONDS * 1000;
+    const copies = (this.held.get(sessionId) ?? [])
+      .filter(entry => entry.marker !== undefined)
+      .map(entry => ({ ...entry, until: Math.min(entry.until, latest) }));
+    if (copies.length === 0) this.held.delete(sessionId);
+    else this.held.set(sessionId, copies);
   }
 
   /** How many values are held, for one session or all: a count, never a value, so a test can prove one was let go. */
@@ -108,5 +151,5 @@ export class EphemeralValues {
 function mask(entries: readonly Held[], text: string): string {
   return [...entries]
     .sort((a, b) => b.value.length - a.value.length)
-    .reduce((result, entry) => result.replaceAll(entry.value, `[redacted:input ${entry.label}]`), text);
+    .reduce((result, entry) => result.replaceAll(entry.value, entry.marker ?? `[redacted:input ${entry.label}]`), text);
 }
