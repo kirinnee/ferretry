@@ -9,7 +9,7 @@ Shell is the glue language of this repository: pipeline entry points, release or
 and policy enforcers are all bash. These conventions keep them readable, debuggable, and
 identical whether a developer or GitHub Actions runs them.
 
-Every `*.sh` file is shellcheck-clean and executable — both are pre-commit gates
+Every `*.sh` file (and `scripts/host/ferretry-loopback-firewall`, which has no extension because it installs as a command) is shellcheck-clean and executable — both are pre-commit gates
 ([Linting](../linting/index.md)).
 
 ## Required header
@@ -151,6 +151,7 @@ scripts/
 │   ├── test.sh         one tier (unit | int | sit) + coverage ledger checks
 │   ├── build.sh        bundle
 │   └── release.sh      semantic-release
+├── host/      # installed on a host by its admin (loopback firewall); never called from a workflow or Taskfile
 ├── local/     # developer helpers, called from Taskfiles
 ├── release/   # compile, shim, publish, smoke, installer, bump, changelog backup
 ├── test/      # e2e runner and test fixtures, called from Taskfiles and tests

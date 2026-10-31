@@ -21,6 +21,7 @@ type BoardTone = 'quiet' | 'ok' | 'warn' | 'err' | 'pend' | 'accent';
 export type BoardIconName =
   | 'active'
   | 'to-test'
+  | 'test-steps'
   | 'stale'
   | 'waiting-on-you'
   | 'waiting'
@@ -36,7 +37,7 @@ export type BoardIconName =
 
 export interface BoardSegment {
   /** Stable per kind, so a test and a style can name one. */
-  readonly key: 'ref' | 'people' | 'activity' | 'pr' | 'blocked' | 'subs' | 'shipped' | 'machine';
+  readonly key: 'ref' | 'people' | 'activity' | 'test' | 'pr' | 'blocked' | 'subs' | 'shipped' | 'machine';
   readonly text: string;
   /** Drawn before the text, or `null`. */
   readonly icon: BoardIconName | null;
@@ -147,6 +148,32 @@ const prSegment = (prs: readonly PrLink[]): BoardSegment | null => {
   return make('PR', null, 'quiet', 'A PR is linked');
 };
 
+/**
+ * Whether the card says how the owner tests it: a small marker when it does, and a quiet "no test steps" on a card
+ * waiting to be tested that does not, so the missing ones stand out to the lead.
+ */
+const testSegment = (task: Pick<BoardTaskView, 'howToTest'>, category: LaneCategory | null): BoardSegment | null => {
+  if (task.howToTest.trim() !== '') {
+    return {
+      key: 'test',
+      text: 'How to test',
+      icon: 'test-steps',
+      tone: 'accent',
+      title: 'The card says how to test it',
+      optional: false,
+    };
+  }
+  if (category !== 'verify') return null;
+  return {
+    key: 'test',
+    text: 'no test steps',
+    icon: null,
+    tone: 'quiet',
+    title: 'Nothing says how to test this yet',
+    optional: false,
+  };
+};
+
 /** How many of the children are finished: closed ones, of those not dropped. */
 export const subsDone = (task: Pick<BoardTaskView, 'rollup'>): number => task.rollup.byCategory.closed;
 
@@ -172,6 +199,10 @@ export const cardSegments = (task: BoardTaskView, context: SegmentContext): read
     },
     activitySegment(task, context.category, context.now),
   ];
+  // In a lane waiting to be tested the activity only repeats the lane, so whether there are test steps comes first
+  // there: a narrow column drops items from the right, and this is the one the lead needs to see.
+  const test = testSegment(task, context.category);
+  if (test !== null) segments.splice(context.category === 'verify' ? 1 : 2, 0, test);
   const pr = prSegment(task.links.prs);
   if (pr !== null) segments.push(pr);
   if (task.blockedBy.length > 0) {

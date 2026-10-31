@@ -71,8 +71,8 @@ unserved GET /v1/tunnel-service # CORRECT: dialled against the same relay DISCOV
 # ── unreached: the daemon serves, nothing in this repository dials ────────────────────────────
 
 # Machine feeds. Their callers are an orchestrator, a scraper and a human, none of which live here.
-unreached GET /usage # CORRECT: public usage feed for external readers
-unreached GET /metrics # CORRECT: Prometheus feed for external scrapers
+unreached GET /usage # CORRECT: opt-in (publicUsageFeed) usage feed for external readers
+unreached GET /metrics # CORRECT: opt-in (publicUsageFeed) Prometheus feed for external scrapers
 unreached POST /v1/sessions/:sessionId/notify # CORRECT: kept for older CLIs; the current CLI raises an info item through the agenda route instead, so only items notify
 unreached GET /v1/sessions/:sessionId/tasks # CORRECT: an empty compatibility stub kept one release for older clients (U18a); the PWA reads this ferret's cards from /v1/board and no longer dials it
 

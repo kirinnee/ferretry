@@ -1,8 +1,23 @@
-import { appendFile, mkdir, readFile } from 'node:fs/promises';
+import { appendFile, mkdir, open } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { ClockPort } from '../../../lib/ports.ts';
 import type { SendLedger, SendRecord, SendSettlement } from '../../../lib/session/send/types.ts';
+import { deepFreezeJson, type JsonValue } from '../../../lib/json.ts';
 import type { SessionId } from '../../../lib/session-id.ts';
+
+/** How many sessions' ledgers are kept read; the one read longest ago is let go first and read whole if asked again. */
+export const SEND_LEDGERS_KEPT = 256;
+
+/** What one session's ledger file said up to its last complete line, and which file that was. */
+interface ReadLedger {
+  /** Device and inode: a file put in its place is another file, read from its start. */
+  readonly file: string;
+  /** The bytes read so far, always just past a newline. */
+  offset: number;
+  size: number;
+  modifiedAtMs: number;
+  readonly records: Map<string, SendRecord>;
+}
 
 /**
  * The durable send ledger, as an append-only log beside the session it belongs to.
@@ -17,8 +32,21 @@ import type { SessionId } from '../../../lib/session-id.ts';
  * READ-MODIFY-WRITE IS SAFE HERE because every caller holds the session's own serial lock: the send
  * service takes it before accepting, revising or withdrawing. This class does not take one of its
  * own, which would be a second lock ordering to reason about for no benefit.
+ *
+ * READS ARE INCREMENTAL. The tracker, the service and every chat page's poll read the whole ledger, and a
+ * long-lived lead's was 5.9 MB, parsed line by line on every look. What was parsed is kept per session with
+ * the byte offset it reached, and a read parses only the lines appended since. The file stays the truth:
+ * every read opens it and checks it first, and reads it whole again when it is another file (a new inode),
+ * shorter than what was read, or rewritten in place (same size, new mtime). A complete last line without its
+ * newline is answered but not kept, so the next read still sees the line its newline completes. Records are
+ * frozen, because every reader shares them; nothing is kept on disk, so a restart starts from the file, and at most
+ * {@link SEND_LEDGERS_KEPT} sessions are kept at once.
  */
 export class FileSendLedger implements SendLedger {
+  private readonly read = new Map<SessionId, ReadLedger>();
+  /** One read of a session's file at a time, so two never move the same offset. */
+  private readonly reading = new Map<SessionId, Promise<unknown>>();
+
   constructor(
     private readonly sessionDirectory: (id: SessionId) => string,
     private readonly clock: ClockPort,
@@ -82,14 +110,64 @@ export class FileSendLedger implements SendLedger {
 
   /** Every send this session has a record of, keyed by id, with the latest line for each winning. */
   async all(id: SessionId): Promise<Map<string, SendRecord>> {
-    const records = new Map<string, SendRecord>();
-    const contents = await readFile(this.file(id), 'utf8').catch(() => undefined);
-    if (contents === undefined) return records;
-    for (const line of contents.split('\n')) {
-      const record = parseRecord(line);
-      if (record !== undefined) records.set(record.sendId, record);
+    const previous = this.reading.get(id) ?? Promise.resolve();
+    const result = previous.catch(() => undefined).then(async () => await this.caughtUp(id));
+    this.reading.set(id, result);
+    try {
+      return await result;
+    } finally {
+      if (this.reading.get(id) === result) this.reading.delete(id);
     }
-    return records;
+  }
+
+  /** Every record, from what was read before and the bytes appended since. A missing file is no sends. */
+  private async caughtUp(id: SessionId): Promise<Map<string, SendRecord>> {
+    let handle: Awaited<ReturnType<typeof open>>;
+    try {
+      handle = await open(this.file(id), 'r');
+    } catch {
+      this.read.delete(id);
+      return new Map();
+    }
+    try {
+      const information = await handle.stat();
+      const file = `${String(information.dev)}:${String(information.ino)}`;
+      const known = this.read.get(id);
+      const same =
+        known !== undefined &&
+        known.file === file &&
+        information.size >= known.offset &&
+        (information.size !== known.size || information.mtimeMs === known.modifiedAtMs);
+      const ledger: ReadLedger = same ? known : { file, offset: 0, size: 0, modifiedAtMs: 0, records: new Map() };
+      const unread = information.size - ledger.offset;
+      let tail: SendRecord | undefined;
+      if (unread > 0) {
+        const bytes = Buffer.alloc(unread);
+        const { bytesRead } = await handle.read(bytes, 0, unread, ledger.offset);
+        const read = bytes.subarray(0, bytesRead);
+        const end = read.lastIndexOf(0x0a) + 1;
+        for (const line of read.subarray(0, end).toString('utf8').split('\n')) {
+          const record = parseRecord(line);
+          if (record !== undefined) ledger.records.set(record.sendId, frozen(record));
+        }
+        ledger.offset += end;
+        tail = parseRecord(read.subarray(end).toString('utf8'));
+      }
+      ledger.size = information.size;
+      ledger.modifiedAtMs = information.mtimeMs;
+      // Most recently read last, so the first key is the one to let go.
+      this.read.delete(id);
+      this.read.set(id, ledger);
+      if (this.read.size > SEND_LEDGERS_KEPT) {
+        const oldest = this.read.keys().next().value;
+        if (oldest !== undefined) this.read.delete(oldest);
+      }
+      const records = new Map(ledger.records);
+      if (tail !== undefined) records.set(tail.sendId, frozen(tail));
+      return records;
+    } finally {
+      await handle.close();
+    }
   }
 
   private async append(id: SessionId, record: SendRecord, reason?: string): Promise<void> {
@@ -99,6 +177,9 @@ export class FileSendLedger implements SendLedger {
     await appendFile(file, `${line}\n`, { mode: 0o600 });
   }
 }
+
+const frozen = (record: SendRecord): SendRecord =>
+  deepFreezeJson(record as unknown as JsonValue) as unknown as SendRecord;
 
 /** One line of the ledger, or nothing at all: a half-written final line is a crash, not a record. */
 function parseRecord(line: string): SendRecord | undefined {

@@ -56,7 +56,10 @@ interface BoardProjectNames {
 }
 
 export interface SessionCardsPorts {
-  readonly board: Pick<BoardService, 'reserve' | 'spawn' | 'signalDone' | 'snapshot' | 'requireHandOver' | 'handOver'>;
+  readonly board: Pick<
+    BoardService,
+    'reserve' | 'spawn' | 'signalDone' | 'snapshot' | 'requireHandOver' | 'handOver' | 'trigger'
+  >;
   readonly lanes: LaneSetSource;
   readonly proposer: LaneProposer;
   /** Registers the repository of a session on the Unfiled board, so its card goes on that project's board. */
@@ -147,7 +150,7 @@ export const cardFooterLine = (
   bin: string,
   parent: TaskRef | null = null,
 ): string =>
-  `Your card is ${formatTaskRef({ id })} on the ${project === undefined ? "project's" : project} board${parent === null ? '' : `, under ${formatTaskRef(parent)}`}; move it as you work (\`${bin} task …\`).`;
+  `Your card is ${formatTaskRef({ id })} on the ${project === undefined ? "project's" : project} board${parent === null ? '' : `, under ${formatTaskRef(parent)}`}; the daemon moves it for you (\`${bin} task note\` adds progress).`;
 
 /** A card request the daemon fills for a start. */
 const startRequest = (fields: {
@@ -165,6 +168,7 @@ const startRequest = (fields: {
   context: '',
   terms: [],
   brief: clip(fields.brief, MAX_BOARD_BRIEF_LENGTH),
+  howToTest: '',
   workflow: 'quick',
   parent: fields.parent,
   assignee: fields.assignee,
@@ -315,7 +319,7 @@ export class SessionCards {
         );
       }
       for (const note of placed.notes) this.ports.diagnostics.warn(`${formatTaskRef(card)}: ${note}`);
-      return { card, project: placed.project, notes: placed.notes };
+      return { card: await this.workStarted(card, start.sessionId), project: placed.project, notes: placed.notes };
     } catch (error) {
       const note = `No card was made for ${start.sessionId}: ${said(error)}`;
       this.ports.diagnostics.warn(note);
@@ -326,7 +330,29 @@ export class SessionCards {
   /** The lead's existing card, assigned to the session just started; it keeps its owner and its parent. */
   private async handOver(delegation: Delegation, sessionId: string): Promise<OpenedCard> {
     const card = await this.ports.board.handOver(delegation.id, delegation.lead, sessionId);
-    return { card, project: await this.ports.projects.nameOf(card.projectId), notes: [] };
+    return {
+      card: await this.workStarted(card, sessionId),
+      project: await this.ports.projects.nameOf(card.projectId),
+      notes: [],
+    };
+  }
+
+  /**
+   * A start IS the work starting (`work.started`), so the card enters the lane that trigger names for its
+   * workflow (In progress, or Plan/Design for a plan-first card), whoever may move cards: a sub-ferret cannot,
+   * and a card left in the backlog while it is built tells the owner nothing. Best effort, like the card.
+   */
+  private async workStarted(card: BoardTask, sessionId: string): Promise<BoardTask> {
+    try {
+      const moved = await this.ports.board.trigger(card.id, 'work.started', {
+        sessionId,
+        reason: 'the session started on it',
+      });
+      return moved === null ? card : moved.task;
+    } catch (error) {
+      this.ports.diagnostics.warn(`could not move ${formatTaskRef(card)} to its working lane: ${said(error)}`);
+      return card;
+    }
   }
 
   /**

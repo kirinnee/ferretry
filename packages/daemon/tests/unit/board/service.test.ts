@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import {
+  type AgendaItem,
   BoardQuerySchema,
   type BoardTask,
   type BoardTaskActionRequestInput,
@@ -12,12 +13,15 @@ import {
 import should from 'should';
 import {
   actorOf,
+  AgendaCardLinks,
   type BoardCaller,
+  BoardIndex,
   BoardError,
   BoardService,
   BoardUnavailableError,
   DEPENDENCY_SECTION,
   LivenessActivityDeriver,
+  neighbourhoodOf,
   OWNER_MOVE_SOURCE,
   reopenMessage,
 } from '../../../src/lib/board/index.ts';
@@ -31,6 +35,7 @@ import {
   FakeReopen,
   FakeSessions,
   lanes,
+  MACHINE,
   MemoryBoardStore,
   NOW,
   OTHER_PROJECT,
@@ -895,6 +900,34 @@ describe('everything else on a card', () => {
     should(nothing.code).equal('invalid');
   });
 
+  it('should keep How to test from the create, and record a rewrite as its own edit', async () => {
+    // Arrange
+    const { ports, service } = serviceWith([]);
+
+    // Act
+    const created = await service.create(create({ howToTest: '1. Open the Board' }), lead);
+    await service.act(
+      created.task.id,
+      action({ action: 'edit', howToTest: '1. Open the Board\n2. Tap the card' }),
+      lead,
+    );
+
+    // Assert
+    should(stored(ports)).match({ howToTest: '1. Open the Board\n2. Tap the card' });
+    should(lastEvent(ports)).match({ type: 'field-edited', field: 'howToTest' });
+  });
+
+  it('should let the assignee write How to test without owner standing', async () => {
+    // Arrange
+    const { ports, service } = serviceWith([card({ assignee: 'child' })]);
+
+    // Act
+    await service.act('F1', action({ action: 'edit', howToTest: '1. Run fy task show F1' }), child);
+
+    // Assert
+    should(stored(ports).howToTest).equal('1. Run fy task show F1');
+  });
+
   it('should claim and release files', async () => {
     // Arrange
     const { ports, service } = serviceWith([card()]);
@@ -1351,6 +1384,63 @@ describe('reading the board', () => {
     should(found.laneSet).be.null();
     should(missing.code).equal('not-found');
     should(damaged.message).containEql('quarantined');
+  });
+
+  /**
+   * One card's read derived the whole board (every card's activity, every ferret's lineage) to show one card:
+   * ~140 ms for a 2.8 KB answer. Its neighbourhood alone gives it the same view; the agenda is still read for
+   * every ferret on the board, because an item about this card may sit in another card's ferret's agenda.
+   */
+  it('should derive one card from its neighbourhood alone and give it the view the whole board gives it', async () => {
+    // Arrange
+    const cards = [
+      card({ id: 'F0' }),
+      card({ id: 'F1', parent: { id: 'F0' } }),
+      card({ id: 'F2', parent: { id: 'F1' }, owner: 'child' }),
+      card({ id: 'F3', parent: { id: 'F1' }, dropped: { reason: 'superseded', at: NOW } }),
+      card({ id: 'F4', owner: 'stranger' }),
+    ];
+    const ask = { sessionId: 'stranger', id: 'A1' };
+    const agenda = new AgendaCardLinks(
+      {
+        open: async sessionId =>
+          sessionId === 'stranger'
+            ? ([{ id: 'A1', task: { id: 'F1' }, blockingNow: true }] as unknown as readonly AgendaItem[])
+            : [],
+      },
+      () => MACHINE,
+      { warn: () => undefined },
+    );
+    const derived: string[][] = [];
+    const deriver = new LivenessActivityDeriver({ sessions: new FakeSessions(), clock: { now: () => NOW } });
+    const activity = {
+      derive: async (inputs: Parameters<typeof deriver.derive>[0]) => {
+        derived.push(inputs.cards.map(each => each.id).sort());
+        return await deriver.derive(inputs);
+      },
+    };
+    const { service } = serviceWith(cards, { agenda, activity, lanes: new FakeLanes() });
+
+    // Act
+    const one = await service.task('F1');
+    const whole = await service.board(BoardQuerySchema.parse({ state: 'all' }));
+
+    // Assert
+    should(derived[0]).eql(['F0', 'F1', 'F2']);
+    should(one.task.waitingOnOwner).eql([ask]);
+    should(one.task.activity).equal('waiting');
+    should(one.task).eql(whole.cards.find(each => each.id === 'F1'));
+  });
+
+  it('should walk a loop in parent once when it gathers a neighbourhood', () => {
+    // Arrange
+    const looped = [card({ id: 'F1', parent: { id: 'F2' } }), card({ id: 'F2', parent: { id: 'F1' } })];
+
+    // Act
+    const around = neighbourhoodOf(looped[0] as BoardTask, new BoardIndex(looped, MACHINE));
+
+    // Assert
+    should(around.map(each => each.id).sort()).eql(['F1', 'F2']);
   });
 
   it('should hand the sweep every card, closed and dropped included, with every lane set, in one roster read', async () => {

@@ -208,8 +208,11 @@ export function machineView(
     agentControl: { ...model.machine.agentControl },
     browserMode: model.machine.browserMode,
     browserProxy: model.machine.browserProxy ?? null,
+    browserPorts: model.machine.browserPorts,
+    browserFirewallFailure: model.machine.browserFirewallFailure,
     autoResume: model.machine.autoResume,
     agendaMode: model.machine.agendaMode,
+    publicUsageFeed: model.machine.publicUsageFeed,
     lastAutoResume: facts.lastAutoResume ?? null,
     tools: HARNESSES.map(harness => {
       const command = facts.tools[harness];

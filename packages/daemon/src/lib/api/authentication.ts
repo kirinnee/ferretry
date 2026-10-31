@@ -37,12 +37,10 @@ export interface PairedDeviceDirectory {
   grants?(deviceId: string): CapabilityGrants | undefined;
 }
 
-/** What a request presented. Assembled by the dispatcher from headers and, for loopback WebSocket
- *  upgrades only, the query string. */
+/** What a request presented, read from its `Authorization` header and from nowhere else. A token in
+ *  a URL reaches argv, shell history and every proxy's access log, so no query parameter is read. */
 export interface PresentedToken {
   readonly bearer?: string;
-  /** A token supplied as a query parameter. Only ever populated for loopback peers. */
-  readonly query?: string;
 }
 
 export type Authentication =
@@ -87,7 +85,7 @@ export function bearerToken(authorization: string | undefined): string | undefin
 export function authenticate(credentials: ApiCredentials, presented: PresentedToken): Authentication {
   const admin = credentials.admin;
   const warden = credentials.warden;
-  const candidates = [presented.bearer, presented.query].filter((value): value is string => value !== undefined);
+  const candidates = presented.bearer === undefined ? [] : [presented.bearer];
   // Admin wins over warden: a token that is somehow both is never treated as scoped.
   if (admin !== '' && candidates.some(candidate => secretsMatch(candidate, admin)))
     return { kind: 'authenticated', tokenClass: 'admin' };

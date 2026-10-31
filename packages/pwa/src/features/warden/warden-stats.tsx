@@ -7,6 +7,7 @@ import type { WardenStatusView } from '@ferretry/protocol';
 import { useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
 import { AnalyticsMetricChart } from '../analytics/analytics-metric-chart.tsx';
+import { WardenActionStats } from './warden-action-stats.tsx';
 import { ActorMark } from './warden-chips.tsx';
 import {
   CHART_SERIES,
@@ -143,6 +144,7 @@ export function WardenStatsPanel({ status, now }: { readonly status: WardenStatu
           )}
         </div>
       )}
+      <WardenActionStats status={status} now={now} />
     </section>
   );
 }

@@ -9,6 +9,7 @@ import {
   DependsLine,
   DetailSection,
   HistorySection,
+  HowToTest,
   LinksSection,
   Prose,
   TermsTable,
@@ -86,17 +87,42 @@ describe('Avatar', () => {
   });
 });
 
+/** Assembled, never typed: `no-fy-render-in-docs.sh` refuses the literal opener in a tracked file. */
+const FENCE = '`'.repeat(3);
+const SQUARE = [
+  `${FENCE}fy-render`,
+  'type: svg',
+  'alt: A ten by ten square',
+  '---',
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>',
+  FENCE,
+].join('\n');
+
 describe('Prose', () => {
-  it('says the empty words for blank text and renders markdown otherwise', async () => {
-    const root = await show(
-      <>
-        <Prose empty="Nothing here." text="   " />
-        <Prose empty="unused" text="**bold** words" />
-      </>,
-    );
-    expect(root.querySelector('.fy-board-detail__quiet')?.textContent).toBe('Nothing here.');
+  it('renders markdown as the chat does, hypermedia blocks included', async () => {
+    const root = await show(<Prose text={`**bold** words\n\n${SQUARE}`} />);
     expect(root.textContent).toContain('bold words');
     expect(root.querySelector('strong')?.textContent).toBe('bold');
+    expect(root.querySelector('[data-fy-render-type="svg"]')).not.toBeNull();
+  });
+});
+
+describe('HowToTest', () => {
+  const prose = (value: string) => <Prose text={value} />;
+
+  it('draws a list as numbered steps, each with its own box', async () => {
+    const root = await show(<HowToTest renderProse={prose} text={'1. Open it\n2. Look'} />);
+    expect(root.querySelector('[data-test-steps]')?.getAttribute('data-test-steps')).toBe('2');
+    expect([...root.querySelectorAll('input[type="checkbox"]')].map(box => box.getAttribute('aria-label'))).toEqual([
+      'Step 1 checked',
+      'Step 2 checked',
+    ]);
+  });
+
+  it('draws text that is not a list whole, with no boxes', async () => {
+    const root = await show(<HowToTest renderProse={prose} text="Open it and look." />);
+    expect(root.textContent).toBe('Open it and look.');
+    expect(root.querySelector('input')).toBeNull();
   });
 });
 

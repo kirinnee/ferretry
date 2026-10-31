@@ -101,6 +101,36 @@ const MERMAID_LEFT_TO_RIGHT = [
   '  E --> F[Owner reads the diagram]',
 ].join('\n');
 
+/** A long top-down chain: much taller than a phone, and than 60% of a desktop window. */
+const MERMAID_TALL = [
+  'flowchart TD',
+  '  S1[Owner writes a message] --> S2[PWA signs the request]',
+  '  S2 --> S3[Relay carries it to the daemon]',
+  '  S3 --> S4[Daemon checks the grant]',
+  '  S4 --> S5[Daemon queues the turn]',
+  '  S5 --> S6[Fleet picks a ferret]',
+  '  S6 --> S7[Ferret reads the repository]',
+  '  S7 --> S8[Ferret runs the tools]',
+  '  S8 --> S9[Warden reviews each remedy]',
+  '  S9 --> S10[Reply streams back]',
+  '  S10 --> S11[PWA parses the blocks]',
+  '  S11 --> S12[Sandbox compiles the diagram]',
+  '  S12 --> S13[Owner reads the result]',
+].join('\n');
+
+/** A fan-out: one root, eight branches with long labels, so the picture is far wider than any column. */
+const MERMAID_WIDE = [
+  'flowchart TD',
+  '  R[Every kind of fy-render block] --> A[chart drawn by Chart.js]',
+  '  R --> B[map drawn by Leaflet tiles]',
+  '  R --> C[mermaid compiled in a sandbox]',
+  '  R --> D[lottie played in a frame]',
+  '  R --> E[html fragment sanitised]',
+  '  R --> F[svg shown as an image]',
+  '  R --> G[table of the results]',
+  '  R --> H[code with its language]',
+].join('\n');
+
 /** A jison parse error: the reachable Mermaid failure, and the ugliest wording. */
 const MERMAID_BROKEN = 'graph TD\n  A[Unclosed --> B{{{';
 
@@ -249,5 +279,7 @@ export const FY_RENDER_VISUAL_CASES: Record<string, string> = {
     MERMAID_THEME_FRONTMATTER,
   ),
   'mermaid-lr': fence('mermaid', 'How a message travels from the owner to the daemon and back', MERMAID_LEFT_TO_RIGHT),
+  'mermaid-tall': fence('mermaid', 'The path of one message through Ferretry', MERMAID_TALL),
+  'mermaid-wide': fence('mermaid', 'Every kind of fy-render block', MERMAID_WIDE),
   'mermaid-failure': fence('mermaid', 'A diagram that cannot be drawn', MERMAID_BROKEN),
 };

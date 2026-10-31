@@ -97,6 +97,7 @@ import {
 } from '@ferretry/relay';
 import { z } from 'zod';
 import { hostedAllowanceSentence } from './relay-allowance.ts';
+import { acceptEncodingHeader, decodeCompressedAnswer } from './relay-compression.ts';
 
 /** The one socket surface this session needs. Injected, so no suite opens a real one. */
 export interface RelayClientSocket {
@@ -831,9 +832,13 @@ export class RelayClientSession {
    * fabricated answer would be the whole failure this protocol exists to avoid.
    */
   async request(
-    message: Omit<Extract<RelayTunnelClientMessage, { t: 'req' }>, 't' | 'id'>,
+    asked: Omit<Extract<RelayTunnelClientMessage, { t: 'req' }>, 't' | 'id'>,
     signal?: AbortSignal,
   ): Promise<RelayTunnelAnswer> {
+    // A relayed answer is not a browser fetch, so this side asks for gzip itself and decodes it below.
+    // Only a `GET` is ever answered compressed, so nothing else carries the header.
+    const asking = asked.method === 'GET' ? acceptEncodingHeader() : {};
+    const message = Object.keys(asking).length === 0 ? asked : { ...asked, headers: { ...asking, ...asked.headers } };
     if (this.#failure !== undefined) throw this.#failure;
     signal?.throwIfAborted();
     if (this.#phase !== 'serving') {
@@ -926,7 +931,15 @@ export class RelayClientSession {
     // watching yet is an unhandled one — the caller still receives it through the `await` below.
     answer.catch(() => undefined);
     await this.#outbox;
-    return await answer;
+    const received = await answer;
+    try {
+      return await decodeCompressedAnswer(received);
+    } catch (cause) {
+      throw new RelaySessionError(
+        cause instanceof Error ? cause.message : 'the daemon sent a compressed answer this app could not read',
+        RELAY_CLOSE_CODES.protocolError,
+      );
+    }
   }
 
   /** End this session from this side, refusing everything still waiting on it. */

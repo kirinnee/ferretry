@@ -1,5 +1,5 @@
 /**
- * The Warden as a realistic week with both layers on — Jev, then an LLM investigation: seven days of
+ * The Warden as a realistic week with both layers on — Jev, then an LLM investigation: three weeks of
  * stats (a quiet day, a busy day, one day with no record), each with Jev's checks, Jev paused for the day
  * with its cap spent, Jev's hand-ons and cap skips in the list, two sessions being
  * watched, investigations running, queued and finished, and ~30 recent actions covering every outcome
@@ -11,11 +11,13 @@ import {
   DEFAULT_WARDEN_CONFIG,
   SPEEDUPS_PATH,
   type SpeedupsView,
+  type WardenActionTally,
   type WardenAgendaView,
   type WardenConfigView,
   type WardenDayStats,
   type WardenJevBefore,
   type WardenJevCheck,
+  type WardenReviveResults,
   type WardenStatusView,
 } from '@ferretry/protocol';
 
@@ -62,6 +64,119 @@ const day = (
     jev: { checks: jevDecisions, healthy, acted, handedOn: jevDecisions - healthy - acted, skippedForCap },
   };
 };
+
+const tally = (
+  action: WardenActionTally['action'],
+  outcome: WardenActionTally['outcome'],
+  triple: ActorTriple,
+): WardenActionTally => ({ action, outcome, ...counts(triple) });
+
+const results = (progressed: ActorTriple, stalled: ActorTriple): WardenReviveResults => ({
+  progressed: counts(progressed),
+  stalled: counts(stalled),
+});
+
+/** What the Warden did on each day, by action and who decided it: revives are the story, the rest is context. */
+const ACTIONS: Readonly<
+  Record<string, { readonly acts: readonly WardenActionTally[]; readonly revived?: WardenReviveResults }>
+> = {
+  '2026-07-18': {
+    acts: [tally('revive', 'done', [2, 0, 0]), tally('nudge', 'done', [0, 3, 0])],
+    revived: results([2, 0, 0], [0, 0, 0]),
+  },
+  '2026-07-19': { acts: [tally('nudge', 'done', [0, 2, 0])] },
+  '2026-07-20': {
+    acts: [tally('revive', 'done', [1, 1, 0]), tally('stop', 'done', [0, 0, 1])],
+    revived: results([1, 1, 0], [0, 0, 0]),
+  },
+  // 2026-07-21 has no record, and 2026-07-22 was a day the daemon did not yet tally: both draw a "?".
+  '2026-07-23': {
+    acts: [
+      tally('revive', 'done', [3, 2, 1]),
+      tally('revive', 'failed', [1, 0, 0]),
+      tally('failover', 'done', [1, 0, 0]),
+    ],
+    revived: results([3, 2, 1], [1, 0, 0]),
+  },
+  '2026-07-24': {
+    acts: [tally('resume', 'done', [0, 1, 2]), tally('nudge', 'done', [1, 4, 0])],
+    revived: results([0, 1, 1], [0, 0, 1]),
+  },
+  '2026-07-25': {
+    acts: [tally('revive', 'done', [4, 3, 1]), tally('stop', 'done', [0, 0, 1]), tally('escalate', 'done', [0, 1, 0])],
+    revived: results([3, 2, 1], [1, 1, 0]),
+  },
+  '2026-07-26': { acts: [tally('revive', 'done', [1, 0, 0])], revived: results([1, 0, 0], [0, 0, 0]) },
+  '2026-07-28': {
+    acts: [
+      tally('revive', 'done', [5, 6, 1]),
+      tally('resume', 'done', [0, 3, 1]),
+      tally('restart', 'done', [1, 0, 1]),
+      tally('stop', 'done', [1, 0, 2]),
+      tally('revive', 'held', [0, 0, 1]),
+    ],
+    revived: results([4, 7, 2], [1, 2, 0]),
+  },
+  '2026-07-29': {
+    acts: [tally('revive', 'done', [3, 5, 0]), tally('bless', 'done', [0, 4, 1]), tally('stop', 'done', [0, 0, 1])],
+    revived: results([3, 4, 0], [0, 1, 0]),
+  },
+  '2026-07-30': {
+    acts: [
+      tally('revive', 'done', [5, 4, 1]),
+      tally('resume', 'done', [0, 0, 1]),
+      tally('failover', 'done', [0, 1, 0]),
+      tally('stop', 'done', [1, 0, 1]),
+    ],
+    revived: results([5, 3, 2], [0, 1, 0]),
+  },
+  '2026-07-31': {
+    acts: [
+      tally('revive', 'done', [3, 5, 1]),
+      tally('revive', 'failed', [1, 0, 0]),
+      tally('nudge', 'done', [0, 2, 0]),
+      tally('stop', 'done', [1, 0, 1]),
+      tally('escalate', 'done', [0, 2, 1]),
+    ],
+    revived: results([2, 4, 1], [0, 1, 0]),
+  },
+};
+
+const withActions = (entry: WardenDayStats): WardenDayStats => {
+  const recorded = ACTIONS[entry.day];
+  if (recorded === undefined) return entry;
+  return {
+    ...entry,
+    acts: [...recorded.acts],
+    ...(recorded.revived === undefined ? {} : { reviveResults: recorded.revived }),
+  };
+};
+
+/** Earlier days of the month: enough to draw fourteen bars and a month's count. */
+const EARLIER_DAYS: readonly WardenDayStats[] = [
+  day('2026-07-18', 9, 9, 1, 0.06, 0.3, { moved: [2, 3, 0], cleared: [0, 5, 0], stopped: [0, 0, 0], asked: [0, 0, 0] }),
+  day('2026-07-19', 3, 3, 0, 0.02, 0, { moved: [0, 2, 0], cleared: [0, 1, 0], stopped: [0, 0, 0], asked: [0, 0, 0] }),
+  day('2026-07-20', 12, 11, 2, 0.08, 0.6, {
+    moved: [1, 1, 0],
+    cleared: [0, 8, 1],
+    stopped: [0, 0, 1],
+    asked: [0, 0, 0],
+  }),
+  // 2026-07-21 is missing on purpose, like 2026-07-27.
+  day('2026-07-22', 5, 5, 0, 0.03, 0, { moved: [0, 0, 0], cleared: [0, 4, 0], stopped: [0, 0, 0], asked: [0, 0, 0] }),
+  day('2026-07-23', 22, 21, 3, 0.15, 0.9, {
+    moved: [4, 2, 1],
+    cleared: [0, 12, 1],
+    stopped: [0, 0, 0],
+    asked: [0, 0, 0],
+  }),
+  day('2026-07-24', 17, 16, 2, 0.11, 0.6, {
+    moved: [1, 5, 2],
+    cleared: [0, 9, 0],
+    stopped: [0, 0, 0],
+    asked: [0, 0, 0],
+  }),
+].map(withActions);
 
 /** Jev's checks that settled nothing: what Recent actions lists for Jev beside its actions. */
 const JEV_CHECKS: readonly WardenJevCheck[] = [
@@ -166,6 +281,7 @@ const STATUS_WITHOUT_JEV: WardenStatusView = {
     savedUsd: 11.07,
   },
   history: [
+    ...EARLIER_DAYS,
     day('2026-07-25', 28, 26, 3, 0.21, 0.88, {
       moved: [4, 3, 1],
       cleared: [0, 14, 1],
@@ -207,7 +323,7 @@ const STATUS_WITHOUT_JEV: WardenStatusView = {
       },
       6,
     ),
-  ],
+  ].map(withActions),
   jevChecks: [...JEV_CHECKS],
   investigations: [
     {

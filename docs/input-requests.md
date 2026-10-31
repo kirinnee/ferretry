@@ -520,9 +520,7 @@ default**, revocable, and audited on every use. Until then every placement is a 
 - **An uncertain write is not a retry.** If the single write fails or throws the owner is told the
   value may have been typed, and must raise a new request. Typing it again could put the password in
   the wrong place twice.
-- **The value is briefly visible to `ps`.** Delivery is one `tmux send-keys -H` call, so the value's hex
-  is in that process's arguments for the instant it runs. It is the same limit the terminal's own
-  keystroke write has today.
+- **The value never appears in a process's arguments.** The guarded write (`tmux if-shell -F … send-keys -H`) is delivered on stdin to tmux, never in argv (#1115), so it is not readable from `/proc` or `ps`.
 - **A saved login is as safe as the vault's key.** The sealed document sits beside the vault under the same
   key file: it fails safe when one file is copied somewhere, and protects nothing against someone with this
   user account ([secrets](secrets.md)). An agent that reads the admin token can deliver a saved login into a

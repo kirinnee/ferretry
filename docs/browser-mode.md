@@ -88,3 +88,49 @@ that merely embeds a widget can be.
 - **Agents share what you sign in to.** The profile is the machine's agent profile; anything you sign in
   to there, your agents can use. Use an incognito page (its own throwaway cookies) for anything they
   should not.
+
+## Loopback ports
+
+The agent browser's DevTools port, the proxy sign-in relay and the sign-in window's screen share are
+listeners on this machine's loopback. By default (`browserPorts: random`) each gets a free port every
+time. On a host that other people also log in to, any of them can reach those ports, so a host admin can
+fence **fixed** ports per user with a firewall rule, and each user pins theirs in `machine.yaml`:
+
+```yaml
+browserPorts: per-user # random (default) | per-user | { cdp: 20004, relay: 20005, vnc: 20006 }
+```
+
+- `per-user` derives the ports from your user id: `base + (uid − 1000) × 4` for `cdp`, then `+1` for `relay`
+  and `+2` for `vnc`. The base is 20000 unless the admin's firewall file moves it. A uid below 1000, or a
+  port past 32767, is refused with a sentence; set explicit ports or ask for another base.
+- Explicit ports are three different numbers between 1024 and 65535.
+- It is read when the browser or the sign-in window starts, like Browser mode. `random` behaves exactly as
+  before.
+- `fy browser firewall entry` prints the one line to give your host admin for
+  `/etc/ferretry/loopback-firewall.conf` (`user <uid>`, or `user <uid> <cdp> <relay> <vnc>`). It says
+  "set browserPorts first" when you are on `random`.
+
+### The firewall is read, never trusted blindly
+
+While `browserPorts` is not `random`, the daemon reads the host's marker (`/run/ferretry/loopback-firewall.json`)
+when the browser starts and every five minutes, and shows one of these states. Several can hold at once; the
+first in this list wins.
+
+| State        | Means                                                                                      |
+| ------------ | ------------------------------------------------------------------------------------------ |
+| `failed`     | the last check connected to one of your ports as another user: the rule did not protect it |
+| `missing`    | no marker, or the last check did not find your rule                                        |
+| `stale`      | the marker does not list your user, or lists other ports for it                            |
+| `unverified` | no check for 15 minutes: the 5-minute firewall check is not running                        |
+| `applied`    | your ports are listed and a recent check agrees                                            |
+
+Anything but `applied` is a warning: a note on the Browser tab, a line in `fy daemon status`, a row in
+`fy doctor`, and a daemon notice each time the state **changes** (not every five minutes). Each says what to
+ask the host admin. It never stops the browser by itself.
+
+```yaml
+browserFirewallFailure: warn # warn (default) | refuse
+```
+
+With `refuse`, a browser start on a fixed port is declined, with one sentence naming the remedy, while your own
+user shows `failed`. A browser that is already running is not stopped. `unverified`, `missing` and `stale` only warn.

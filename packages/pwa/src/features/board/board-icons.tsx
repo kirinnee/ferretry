@@ -3,6 +3,7 @@
 import {
   Activity,
   Check,
+  ClipboardCheck,
   Clock,
   FlaskConical,
   GitMerge,
@@ -21,6 +22,7 @@ import type { BoardIconName } from '../../lib/board-present.ts';
 const ICONS: Readonly<Record<BoardIconName, typeof Activity>> = {
   active: Activity,
   'to-test': FlaskConical,
+  'test-steps': ClipboardCheck,
   stale: TriangleAlert,
   'waiting-on-you': OctagonPause,
   waiting: Hourglass,

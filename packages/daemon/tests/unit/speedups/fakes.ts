@@ -1,6 +1,8 @@
 import type {
   AuthorizedOutcome,
   CredentialPlacement,
+  JevJudgement,
+  JevQuestionSet,
   OutboundAuthorizerPort,
   OutboundHttpRequest,
   OutboundOutcome,
@@ -85,6 +87,12 @@ export class ScriptedTriageGuard implements TriageGuardPort {
   async decide(snapshot: TriageSnapshot): Promise<TriageDecision> {
     this.seen.push(snapshot);
     return this.decision;
+  }
+
+  /** A connection Test never judges: a call here is a test that reached the wrong method. */
+  async judge(set: JevQuestionSet): Promise<JevJudgement> {
+    this.seen.push(set.snapshot);
+    throw new Error('ScriptedTriageGuard does not judge');
   }
 }
 

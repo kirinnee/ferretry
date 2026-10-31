@@ -2495,3 +2495,45 @@ describe('daemon status — disk saturation', () => {
     should(reads).equal(1);
   });
 });
+
+describe('daemon status — the loopback firewall', () => {
+  const stale = {
+    state: 'stale' as const,
+    detail: 'the loopback firewall is stale: ask the host admin to add `user 1001`',
+  };
+  const applied = { state: 'applied' as const, detail: 'the loopback firewall is applied' };
+
+  it('should warn with the daemon’s remedy sentence and carry the reading into --json', async () => {
+    const reads: number[] = [];
+    const firewall = { read: async () => (reads.push(1), stale) };
+    const human = harness({ probes: [health()], overrides: { firewall } });
+    await human.controller.status({});
+    should(human.out.lines[0]).startWith('warn: ');
+    should(human.out.text).containEql('Loopback firewall: the loopback firewall is stale');
+    const json = harness({ probes: [health()], overrides: { firewall } });
+    await json.controller.status({ json: true });
+    should(JSON.parse(json.out.lines[0]?.replace(/^\w+: /u, '') ?? '')).match({ firewall: stale });
+    should(reads.length).equal(2);
+  });
+
+  it('should say an applied firewall plainly, without a warning', async () => {
+    const run = harness({ probes: [health()], overrides: { firewall: { read: async () => applied } } });
+    await run.controller.status({});
+    should(run.out.lines[0]).startWith('ok: ');
+    should(run.out.text).containEql('Loopback firewall: the loopback firewall is applied');
+  });
+
+  it('should leave the line out when the daemon gave no reading, and not ask a daemon that is not serving', async () => {
+    const reads: number[] = [];
+    const none = harness({ probes: [health()], overrides: { firewall: { read: async () => undefined } } });
+    await none.controller.status({});
+    should(none.out.text).not.containEql('Loopback firewall');
+    const stopped = harness({
+      probes: [undefined],
+      serviceFallback: stoppedReport,
+      overrides: { firewall: { read: async () => (reads.push(1), stale) } },
+    });
+    await stopped.controller.status({ json: true });
+    should(reads).deepEqual([]);
+  });
+});

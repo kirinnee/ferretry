@@ -19,7 +19,7 @@ export function bulletPoints(text: string): readonly string[] | null {
 }
 
 /** The fields that are read as a list of points, so a revision can mark single bullets rather than the whole. */
-const POINT_FIELDS: ReadonlySet<AgendaRevisableField> = new Set([
+export const POINT_FIELDS: ReadonlySet<AgendaRevisableField> = new Set([
   'premise',
   'decided',
   'stillOpen',
@@ -28,7 +28,7 @@ const POINT_FIELDS: ReadonlySet<AgendaRevisableField> = new Set([
 ]);
 
 /** How a field is named to a reader. */
-const FIELD_LABEL: Readonly<Record<AgendaRevisableField, string>> = {
+export const FIELD_LABEL: Readonly<Record<AgendaRevisableField, string>> = {
   subject: 'Question',
   why: 'Why it matters',
   context: 'Context',
