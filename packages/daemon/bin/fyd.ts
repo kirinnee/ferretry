@@ -9091,6 +9091,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // The Unfiled board's cards that belong on a project's board are refiled there: by a linked PR's repository,
       // else by the folder the card's ferret works in (registering its repository by `ProjectAdoption`'s rules).
       // ONE instance, so the watcher's tick and the boot run never overlap.
+      const boardLaneProposer = new InferredLaneProposer(laneSets, new GitProjectFacts());
       const unfiledRefiler = new UnfiledRefiler({
         board: boardWorld.board,
         sessions: new SessionBoardResolver(
@@ -9103,6 +9104,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           ),
           boardWorld.adoption,
         ),
+        // A target with no lanes gets the ones its folder suggests first, as the card's ferret: one agenda choice.
+        lanes: {
+          laneSet: async projectId => await laneSets.laneSet(projectId),
+          propose: async (projectId, sessionId) => await boardLaneProposer.propose(projectId, sessionId),
+        },
         projects: { projects: async () => await catalogs.projects() },
         copies: boardCopies,
         clock: { now: () => clock.now() },

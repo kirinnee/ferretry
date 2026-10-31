@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { mkdir } from 'node:fs/promises';
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import should from 'should';
 import { GitWorkingCopies } from '../../../src/adapters/board-github/git-working-copies.ts';
@@ -39,6 +39,30 @@ describe('the git working copies', () => {
       should(await copies.repositoryOf(repo)).be.null();
       await git(repo, 'checkout', '--quiet', '--detach');
       should(await copies.branchOf(repo)).be.null();
+    });
+  });
+
+  it('should resolve an ssh host alias through ssh, once per alias, and accept only GitHub behind it', async () => {
+    await withTempRoot(async root => {
+      const repo = await repository(root);
+      await git(repo, 'remote', 'add', 'origin', 'github-personal:kirinnee/ferretry.git');
+      const calls = join(root, 'calls');
+      const ssh = join(root, 'fake-ssh');
+      await writeFile(
+        ssh,
+        `#!/bin/sh
+echo "$*" >> '${calls}'
+if [ "$2" = github-personal ]; then echo 'user git'; echo 'hostname github.com'; else echo 'hostname gitlab.com'; fi
+`,
+      );
+      await chmod(ssh, 0o755);
+      const copies = new GitWorkingCopies('git', ssh);
+      should(await copies.repositoryOf(repo)).equal('kirinnee/ferretry');
+      should(await copies.repositoryOf(repo)).equal('kirinnee/ferretry');
+      should((await readFile(calls, 'utf8')).trim().split('\n')).deepEqual(['-G github-personal']);
+      await git(repo, 'remote', 'set-url', 'origin', 'work-alias:someone/thing.git');
+      should(await copies.repositoryOf(repo)).be.null();
+      should(await new GitWorkingCopies('git', join(root, 'no-such-ssh')).repositoryOf(repo)).be.null();
     });
   });
 
