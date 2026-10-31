@@ -7,8 +7,8 @@
  * of them; `POST` takes a {@link LaneSetActionRequestSchema} to propose, edit or confirm.
  */
 import { z } from 'zod';
-import { BoardProjectIdSchema } from './board-refs.ts';
 import { LaneSetSchema } from './board-lanes.ts';
+import { BoardProjectIdSchema } from './board-refs.ts';
 
 export const BoardProjectSchema = z.strictObject({
   id: BoardProjectIdSchema,

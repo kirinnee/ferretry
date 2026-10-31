@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { AgentToolCallSchema } from '../../src/lib/agent-tools.ts';
 import { BrowserActionSchema } from '../../src/lib/browser.ts';
 import * as pointer from '../../src/lib/browser-pointer.ts';
-import { AgentToolCallSchema } from '../../src/lib/agent-tools.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 
 const cases: SchemaCase[] = [

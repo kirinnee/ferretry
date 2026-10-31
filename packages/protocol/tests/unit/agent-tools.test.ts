@@ -67,6 +67,11 @@ const cases: SchemaCase[] = [
     schema: tools.AgentToolResultSchema,
     value: { summary: 'ok', output: 'x', matched: true, screenshotBase64: 'AAAA', surfaces: [] },
   },
+  {
+    name: 'browser input field',
+    schema: tools.BrowserInputFieldSchema,
+    value: { id: 'email', label: 'Email', sensitivity: 'plain', selector: '#email' },
+  },
   { name: 'driving', schema: tools.SurfaceDrivingSchema, value: driving },
   { name: 'controller', schema: tools.SurfaceControllerSchema, value: { by: 'local' } },
   { name: 'takeover', schema: tools.SurfaceTakeoverSchema, value: takeover },
@@ -145,6 +150,12 @@ describe('agent tool schemas', () => {
       { tool: 'browser.highlight', name: 'app', clear: true },
       { tool: 'browser.close', name: 'app' },
       { tool: 'browser.ask_owner', name: 'app' },
+      {
+        tool: 'browser.request_input',
+        name: 'app',
+        prompt: 'GitHub login',
+        fields: [{ id: 'password', sensitivity: 'secret', ref: 'e7' }],
+      },
     ];
 
     // Act

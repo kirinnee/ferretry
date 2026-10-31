@@ -5,7 +5,6 @@ import type { ConfigChangeFrame } from './config-changes.ts';
 import type { DaemonRestartPatience } from './daemon-restart.ts';
 import type { DaemonUpdateSettingsPatch, DaemonUpdateStartRequest, DaemonUpdateView } from './daemon-update.ts';
 import type { ForeignHistoryListing, ImportedConversationDetail } from './foreign-history.ts';
-import type { RestartCancelResult, RestartRequest, RestartResult, RestartStatus } from './session-restart.ts';
 import type { SessionHandoverReceipt, SessionHandoverRequestInput } from './handover.ts';
 import type { HarnessUpdateStartRequest, HarnessUpdateView } from './harness-update.ts';
 import type {
@@ -40,9 +39,10 @@ import type {
 } from './session.ts';
 import type { ForkSessionOutcome, ForkSessionRequest } from './session-fork.ts';
 import type { SessionLiveActivity, SessionTranscriptMoved } from './session-live.ts';
+import type { RestartCancelResult, RestartRequest, RestartResult, RestartStatus } from './session-restart.ts';
 import type { LogPageOptions, SessionLogPage, SessionTranscriptPage } from './session-transcript.ts';
-import type { TranscriptImageDownload } from './transcript-images.ts';
 import type { MachineSkillsInventory, SessionSkillsInventory, SkillFile } from './skills-inventory.ts';
+import type { TranscriptImageDownload } from './transcript-images.ts';
 import type { SessionHandoff } from './turn-handoff.ts';
 import type { VersionSkew } from './version-skew.ts';
 import type {

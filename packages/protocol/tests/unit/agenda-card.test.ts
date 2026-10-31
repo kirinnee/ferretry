@@ -7,13 +7,13 @@ import {
   agendaAnswerProblems,
 } from '../../src/lib/agenda.ts';
 import {
-  answerInDirection,
-  askForKind,
   agendaCanDiscuss,
   agendaCardAnswers,
   agendaCardKind,
   agendaInDiscussion,
   agendaTitle,
+  answerInDirection,
+  askForKind,
   clipAtWord,
   DISCUSS_LABEL,
   defaultAgendaAnswers,
