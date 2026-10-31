@@ -324,6 +324,13 @@ the target's key (`sudo@kirin-box` → `SUDO_KIRIN_BOX`, "sudo on kirin-box"; a 
   (`saved: { ok: false }`); the owner can save it from Settings.
 - **It is recorded as a change to the secret store**: a KEPT `secrets.changed` record (`login-save`) with
   the handle and the field, exactly as `fy secret set` is audited. Never the value.
+- **One change at a time, for the whole store.** Every saved login shares the same two files, and a change
+  reads both, seals and writes both back whole. Every change — a card's "Save as", a Settings edit, a rename,
+  a delete, `fy secret entry` — runs its read, merge and write in one store-wide queue (`LoginStoreLock`), so
+  two that overlap both land and every acknowledged secret stays masked. A per-entry or per-session lock would
+  not be enough: the files are shared.
+- **A username and a password from one card are kept together** (`LoginDirectory.saveFields`, one change), so a
+  login card never leaves an entry with half of what was typed. The one-field card saves the one field it has.
 
 ### The next time: one tap
 

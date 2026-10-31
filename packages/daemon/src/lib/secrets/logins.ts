@@ -27,6 +27,7 @@ import {
   type LoginEntryId,
   type LoginEntrySummary,
   type LoginFieldRole,
+  LOGIN_MATCH_MAX,
   MAX_LOGIN_ENTRIES,
   type PutLoginEntry,
   type TotpParameters,
@@ -129,7 +130,33 @@ class LoginDocuments {
 }
 
 /**
- * The management surface. Seals what it is given; opens nothing; returns names, labels and flags only.
+ * ONE CHANGE AT A TIME FOR THE WHOLE STORE. Every entry shares the same two files, and a change reads both,
+ * awaits sealing and writes both back whole: two changes that overlapped would each start from the same
+ * snapshot, and the later write would silently drop the earlier one's credential — and with it the only
+ * ciphertext that keeps that value masked. So every mutation, from every caller (a route, the CLI, a card's
+ * "Save as"), runs its read, merge and write inside this one queue. A per-entry or per-session lock is not
+ * enough: the files are shared. A failed change releases the queue for the next one.
+ */
+export class LoginStoreLock {
+  private tail: Promise<unknown> = Promise.resolve();
+
+  async run<T>(work: () => Promise<T>): Promise<T> {
+    const turn = this.tail.then(work);
+    this.tail = turn.catch(() => undefined);
+    return await turn;
+  }
+}
+
+/** The fields a card keeps in one saved login at once: the plain username, the secret password, or both. */
+export interface LoginFieldValues {
+  readonly username?: string;
+  readonly password?: string;
+}
+
+/**
+ * The management surface. Seals what it is given; opens nothing; returns names, labels and flags only. Every
+ * change runs under the store's {@link LoginStoreLock}; the composition root builds ONE directory, so every
+ * caller shares it.
  */
 export class LoginDirectory {
   private readonly documents: LoginDocuments;
@@ -140,6 +167,7 @@ export class LoginDirectory {
     cipher: SecretCipherPort,
     private readonly clock: ClockPort,
     private readonly newKey: () => string = randomLoginKey,
+    private readonly lock: LoginStoreLock = new LoginStoreLock(),
   ) {
     this.documents = new LoginDocuments(index, sealed, cipher);
   }
@@ -159,6 +187,37 @@ export class LoginDirectory {
    * there; a failure between the two leaves an unused sealed value, never a missing one.
    */
   async put(id: LoginEntryId, change: PutLoginEntry): Promise<LoginEntrySummary> {
+    return await this.lock.run(async () => await this.change(id, change));
+  }
+
+  /**
+   * Keeps typed values in a saved login in ONE change: a new entry labelled `label`, or the existing one (its
+   * label kept, `match` added to what it already matches). The read of what exists and the write that
+   * merges into it are one step under the store lock, so a Settings edit or another card cannot slip between
+   * them. The username and the password of one login card are kept together or not at all.
+   */
+  async saveFields(
+    id: LoginEntryId,
+    label: string,
+    match: string | undefined,
+    fields: LoginFieldValues,
+  ): Promise<LoginEntrySummary> {
+    return await this.lock.run(async () => {
+      const existing = (await this.documents.readIndex()).entries[id];
+      const matches = [...new Set([...(existing?.match ?? []), ...(match === undefined ? [] : [match])])].slice(
+        -LOGIN_MATCH_MAX,
+      );
+      return await this.change(id, {
+        ...(existing === undefined ? { label } : {}),
+        match: matches,
+        ...(fields.username === undefined ? {} : { username: fields.username }),
+        ...(fields.password === undefined ? {} : { password: fields.password }),
+      });
+    });
+  }
+
+  /** One change, read to write. Callers hold the store lock. */
+  private async change(id: LoginEntryId, change: PutLoginEntry): Promise<LoginEntrySummary> {
     const index = await this.documents.readIndex();
     const sealed = await this.documents.readSealed();
     const existing = index.entries[id];
@@ -194,6 +253,10 @@ export class LoginDirectory {
 
   /** A new handle for an entry. Its sealed values stay where they are, filed under the entry's key. */
   async rename(from: LoginEntryId, to: LoginEntryId): Promise<LoginEntrySummary> {
+    return await this.lock.run(async () => await this.move(from, to));
+  }
+
+  private async move(from: LoginEntryId, to: LoginEntryId): Promise<LoginEntrySummary> {
     const index = await this.documents.readIndex();
     const record = index.entries[from];
     if (record === undefined) throw new LoginEntryError('unknown_login', `there is no saved login ${from}`);
@@ -211,6 +274,10 @@ export class LoginDirectory {
    * first write leaves sealed values no entry names, which are still masked and never typed.
    */
   async remove(id: LoginEntryId): Promise<boolean> {
+    return await this.lock.run(async () => await this.drop(id));
+  }
+
+  private async drop(id: LoginEntryId): Promise<boolean> {
     const index = await this.documents.readIndex();
     const record = index.entries[id];
     if (record === undefined) return false;
