@@ -19,8 +19,8 @@ import { agentIn, CREDENTIALS, GRANTED, human } from './support.ts';
  * domain behind them is real; only the terminal and browser subsystems are fakes.
  */
 
-function served() {
-  const world = agentToolWorld();
+function served(extra?: Parameters<typeof agentToolWorld>[0]) {
+  const world = agentToolWorld(extra);
   const dispatch = new ApiDispatcher(
     new ApiRouter([...agentToolRoutes(world.service, world.identities), ...terminalRoutes(world.terminals)]),
     CREDENTIALS,
@@ -247,6 +247,26 @@ describe('a person’s tool routes', () => {
       personCall('/v1/sessions/s1/surfaces/browser/tools', { tool: 'login.hint', site: 'vercel.com' }),
     );
     should(wrong.status).equal(400);
+    should(jsonBody(wrong)).match({ error: 'this route takes browser tools; account.hint is not one' });
+  });
+
+  it('should treat the old login.propose name as account.propose on the agent route', async () => {
+    const filed: unknown[] = [];
+    const { world, dispatch } = served({
+      recipes: {
+        scrubbed: async entries => entries,
+        propose: async (...parameters) => {
+          filed.push(parameters);
+          return { id: 'rp_0000000000000001', login: 'VERCEL', state: 'pending', agendaItemId: 'A4' };
+        },
+      },
+    });
+    const answered = await dispatch.dispatch(
+      agentCall({ tool: 'login.propose', login: 'VERCEL', recipe: 'Open vercel.com', why: 'first sign-in' }),
+    );
+    should(answered.status).equal(200);
+    should(filed).deepEqual([['s1', 'VERCEL', 'Open vercel.com', 'first sign-in']]);
+    should(world.audit.entries.at(-1)?.detail).match({ tool: 'account.propose' });
   });
 
   it('should refuse a session id that cannot be one', async () => {

@@ -154,7 +154,7 @@ function method(
 ): LoginMethod | undefined {
   if (options.method === undefined && options.ssoName === undefined && options.via === undefined) return undefined;
   if (options.method !== undefined && namesPasskey(options.method))
-    throw new Error('passkeys are off: a account signs in with a password or a provider (google, github, ...)');
+    throw new Error('passkeys are off: an account signs in with a password or a provider (google, github, ...)');
   const kind = LoginMethodKindSchema.safeParse((options.method ?? current?.kind ?? 'password').trim().toLowerCase());
   if (!kind.success) throw new Error(`--method is one of ${LOGIN_METHODS.join(', ')}`);
   const via = options.via === false ? undefined : options.via === undefined ? current?.via : handle(options.via);
@@ -323,7 +323,7 @@ export class LoginEntryController {
     const entry = await this.#find(handleId);
     if (entry === undefined) throw new Error(`no account ${handleId} (see \`account ls\`)`);
     if (options.yes !== true) {
-      this.#needTerminal('removing a account asks first; pass --yes to skip the question');
+      this.#needTerminal('removing an account asks first; pass --yes to skip the question');
       const answer = await this.ports.prompt.ask(
         `Remove ${handleId} (${entry.label})? This cannot be undone. Type yes: `,
       );

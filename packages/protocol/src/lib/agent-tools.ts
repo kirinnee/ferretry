@@ -686,7 +686,7 @@ export const AgentToolCallSchema = z.preprocess(
     raw !== null &&
     'tool' in raw &&
     typeof raw.tool === 'string' &&
-    raw.tool in LEGACY_TOOL_NAMES
+    Object.hasOwn(LEGACY_TOOL_NAMES, raw.tool)
       ? { ...raw, tool: LEGACY_TOOL_NAMES[raw.tool] }
       : raw,
   AgentToolCallBodySchema,

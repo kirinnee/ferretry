@@ -191,7 +191,7 @@ export class InputController {
       this.ports.out.success(
         result.saved.ok
           ? `Saved as ${result.saved.entry}.`
-          : `Not saved as ${result.saved.entry}: ${result.saved.problem ?? 'no reason was given'}. It was typed all the same; add it under \`secret entry\` instead.`,
+          : `Not saved as ${result.saved.entry}: ${result.saved.problem ?? 'no reason was given'}. It was typed all the same; add it under \`account\` instead.`,
       );
     }
   }

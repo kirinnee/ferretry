@@ -663,7 +663,7 @@ the target's key (`sudo@kirin-box` → `SUDO_KIRIN_BOX`, "sudo on kirin-box"; a 
   the handle and the field, exactly as `fy secret set` is audited. Never the value.
 - **One change at a time, for the whole store.** Every saved login shares the same two files, and a change
   reads both, seals and writes both back whole. Every change — a card's "Save as", a Settings edit, a rename,
-  a delete, `fy account` (alias `fy account`) — runs its read, merge and write in one store-wide queue (`LoginStoreLock`), so
+  a delete, `fy account` (alias `fy secret entry`) — runs its read, merge and write in one store-wide queue (`LoginStoreLock`), so
   two that overlap both land and every acknowledged secret stays masked. A per-entry or per-session lock would
   not be enough: the files are shared.
 - **All or nothing, across a crash.** A change never overwrites a sealed value the index points at. New
@@ -714,7 +714,7 @@ explicit confirmation of this sentence (`LOGIN_TOTP_WARNING`), shown in the app 
 
 ### Managing them
 
-Settings › Secrets › Saved logins and `fy account ls|add|edit|rename|rm|recipe` (`fy account …` is a hidden alias for one release) list entries (never values),
+Settings › Secrets › Saved logins and `fy account ls|add|edit|rename|rm|recipe` (`fy secret entry …` is a hidden alias for one release) list entries (never values),
 add and edit the label, match, sign-in method (`--method`, `--via`, `--sso-name`), login domains (`--domain`)
 and username, replace a password, add or remove a 2FA seed, rename the handle and
 delete. Values are typed into a masked field or read from the TTY with echo off; never a flag.
@@ -797,12 +797,12 @@ default**, revocable, and audited on every use. Until then every placement is a 
 
 ## Phases
 
-| Phase | What                                                                                                     | State       |
-| ----- | -------------------------------------------------------------------------------------------------------- | ----------- |
-| P0    | This contract and the schemas                                                                            | done        |
-| P1    | Terminal secret and plain: service, agent tools, deliver and cancel, quarantine, `fy input`              | done        |
-| P2    | The app card, cards of several fields, `chain` steps                                                     | done        |
-| P3    | Saved logins (one tap), "Save as", 2FA codes, `fy account` (alias `fy account`), Settings › Saved logins | done        |
-| P4    | Pages: browser fields, field shot, page holds, passkeys off, captcha handover                            | done        |
-| P4b   | Login recipes: steps, daemon-observed facts, ferret proposals the owner approves                         | this change |
-| P5    | Multi-step chains, consumer configuration, a per-daemon remote cap                                       | later       |
+| Phase | What                                                                                                          | State       |
+| ----- | ------------------------------------------------------------------------------------------------------------- | ----------- |
+| P0    | This contract and the schemas                                                                                 | done        |
+| P1    | Terminal secret and plain: service, agent tools, deliver and cancel, quarantine, `fy input`                   | done        |
+| P2    | The app card, cards of several fields, `chain` steps                                                          | done        |
+| P3    | Saved logins (one tap), "Save as", 2FA codes, `fy account` (alias `fy secret entry`), Settings › Saved logins | done        |
+| P4    | Pages: browser fields, field shot, page holds, passkeys off, captcha handover                                 | done        |
+| P4b   | Login recipes: steps, daemon-observed facts, ferret proposals the owner approves                              | this change |
+| P5    | Multi-step chains, consumer configuration, a per-daemon remote cap                                            | later       |

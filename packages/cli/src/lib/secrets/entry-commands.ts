@@ -30,7 +30,7 @@ export function registerAccountCommands(program: Command, controller: LoginEntry
   );
 }
 
-/** `fy account …`: the old spelling of `fy account …`, kept for one release and hidden from `fy secret --help`. */
+/** `fy account …`: the old spelling of `fy account …`, i.e. `fy secret entry …`, kept for one release and hidden from `fy secret --help`. */
 export function registerLoginEntryCommands(secret: Command, controller: LoginEntryController): void {
   mountAccountCommands(
     secret
@@ -147,7 +147,7 @@ function mountAccountCommands(entry: Command, controller: LoginEntryController):
 
   entry
     .command('rm <id>')
-    .description('delete a account')
+    .description('delete an account')
     .option('-y, --yes', 'do not ask first')
     .action(async (id: string, options: { yes?: boolean }) => {
       await controller.remove(id, options);
