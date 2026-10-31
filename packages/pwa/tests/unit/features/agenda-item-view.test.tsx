@@ -191,11 +191,12 @@ describe('the question and its options', () => {
     expect(rows[1]?.querySelector('[data-agenda-recommended]')).toBeNull();
   });
 
-  test('puts at most three answers in ONE row, ← ↑ → with their arrows, named as the list names them', async () => {
+  test('puts at most three answers in ONE row, in the list’s order, ← ↑ → with their arrows, named as the list names them', async () => {
     await draw(spend);
     const chips = [...root().querySelectorAll('.fy-card .fy-qr__row > button')];
-    // In swipe order: the recommended answer is the ↑ swipe, as the card's answers say.
-    expect(chips.map(chip => chip.textContent)).toEqual(['←Switch', '↑Pause', '→Warn']);
+    // In the options list's order, wherever the recommendation sits; it keeps its outline in its place.
+    expect(chips.map(chip => chip.textContent)).toEqual(['←Pause', '↑Switch', '→Warn']);
+    expect(chips[0]?.hasAttribute('data-recommended')).toBe(true);
     expect(root().querySelectorAll('.fy-qr__row')).toHaveLength(1);
   });
 
@@ -270,6 +271,39 @@ describe('Not needed', () => {
     expect(spy.acted.map(action => action.kind)).toEqual(['dismiss', 'dismiss']);
     await interact(() => one<HTMLButtonElement>('[aria-label="Next item"]').click());
     expect([spy.next, spy.acted.length]).toEqual([1, 2]);
+  });
+
+  describe('the pull down over the card’s top bar', () => {
+    const pointer = (type: string, y: number, init: PointerEventInit = {}): PointerEvent =>
+      new PointerEvent(type, { bubbles: true, clientX: 200, clientY: y, pointerId: 3, pointerType: 'touch', ...init });
+    const pull = async (to: number, init: PointerEventInit = {}): Promise<void> => {
+      const top = one<HTMLElement>('[data-agenda-card-top]');
+      await interact(() => top.dispatchEvent(pointer('pointerdown', 100, init)));
+      await interact(() => top.dispatchEvent(pointer('pointerup', to, init)));
+    };
+
+    test('a clear pull down on touch is Not needed', async () => {
+      const spy = await draw(richItem);
+      await pull(300);
+      expect(spy.acted).toEqual([DISMISS_ACTION]);
+      expect([spy.next, spy.closed]).toEqual([0, 0]);
+    });
+
+    test('a short pull, a mouse, a bar that does not swipe and a pointer it never saw do nothing', async () => {
+      const spy = await draw(richItem);
+      await pull(140);
+      await pull(300, { pointerType: 'mouse' });
+      const top = one<HTMLElement>('[data-agenda-card-top]');
+      await interact(() => top.dispatchEvent(pointer('pointerdown', 100)));
+      await interact(() => top.dispatchEvent(pointer('pointerup', 300, { pointerId: 9 })));
+      await interact(() => top.dispatchEvent(pointer('pointercancel', 300)));
+      await interact(() => top.dispatchEvent(pointer('pointerup', 300)));
+      expect(spy.acted).toEqual([]);
+      await view?.unmount();
+      const still = await draw(richItem, { swipeable: false });
+      await pull(300);
+      expect(still.acted).toEqual([]);
+    });
   });
 
   test('is not offered where the item cannot be answered here', async () => {

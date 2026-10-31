@@ -151,8 +151,8 @@
 .fy-card__label {
   margin: 0;
   color: var(--muted);
-  font-size: 11px;
-  font-weight: 650;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-strong);
   letter-spacing: 0.06em;
   line-height: 1.6;
   text-transform: uppercase;
@@ -173,8 +173,8 @@
   padding: 2px 9px;
   background: var(--accent-soft);
   color: var(--accent);
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-strong);
 }
 .fy-card__tools {
   display: flex;
@@ -193,7 +193,7 @@
   background: transparent;
   color: var(--muted);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -215,15 +215,28 @@
   background: var(--surface-2, var(--bg));
   color: var(--fg);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
   text-overflow: ellipsis;
   cursor: pointer;
 }
-@media (pointer: coarse) {
-  .fy-card__dismiss,
-  .fy-card__version {
-    min-height: 36px;
-  }
+/* The pill and the picker are ONE size, finger or mouse: the app's 44px touch floor is an invisible hit area over
+   the pill, not a taller pill (a select is a native control and takes the tap whole). */
+.fy-card .fy-card__dismiss,
+.fy-card select.fy-card__version {
+  box-sizing: border-box;
+  height: 28px;
+  min-height: 0;
+  min-width: 0;
+  padding-block: 0;
+  line-height: 1;
+}
+.fy-card__dismiss {
+  position: relative;
+}
+.fy-card__dismiss::after {
+  position: absolute;
+  inset: -8px -2px;
+  content: '';
 }
 :is(.fy-card__dismiss, .fy-card__version, .fy-card__option-pick, .fy-card__fold-title):focus-visible {
   outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
@@ -270,8 +283,8 @@
 }
 
 .fy-card__question {
-  font-size: 15px;
-  font-weight: 650;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-strong);
   overflow-wrap: anywhere;
 }
 .fy-card__question :is(p, .md) {
@@ -295,7 +308,7 @@
 }
 .fy-card__option-name {
   min-width: 52px;
-  font-weight: 650;
+  font-weight: var(--weight-strong);
 }
 .fy-card__option-pick {
   border: var(--stroke, 1px) solid var(--border);
@@ -304,7 +317,7 @@
   background: var(--surface);
   color: var(--fg);
   font: inherit;
-  font-weight: 650;
+  font-weight: var(--weight-strong);
   cursor: pointer;
 }
 .fy-card__option-meaning {
@@ -321,8 +334,8 @@
 .fy-card__recommended {
   margin-left: 4px;
   color: var(--accent);
-  font-size: 11px;
-  font-weight: 600;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-strong);
   white-space: nowrap;
 }
 .fy-card__questions {
@@ -370,7 +383,7 @@
   display: contents;
 }
 .fy-card__term > dt {
-  font-weight: 600;
+  font-weight: var(--weight-strong);
 }
 .fy-card__term > dd {
   margin: 0;
@@ -411,7 +424,7 @@
   padding: 7px 9px;
   background: var(--fg);
   color: var(--bg);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.45;
 }
 .fy-term-tip :is(p, .md) {
@@ -429,7 +442,7 @@
   padding: 9px 6px;
   background: var(--surface);
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--text-base);
 }
 .fy-card .fy-qr__chip[data-recommended],
 .fy-card .fy-qr__chip[data-recommended][data-variant='primary'],
@@ -437,7 +450,7 @@
   border-color: var(--accent);
   background: var(--surface);
   color: var(--accent);
-  font-weight: 600;
+  font-weight: var(--weight-strong);
 }
 .fy-card .fy-qr__chip[data-agenda-send-answers] {
   border-color: var(--accent);
@@ -482,8 +495,8 @@
   align-items: baseline;
   gap: 6px;
   color: var(--muted);
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-strong);
 }
 .fy-hist__text {
   margin-top: 2px;
@@ -520,13 +533,13 @@
 }
 .fy-hist__time {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 400;
 }
 .fy-hist__sys {
   align-self: center;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 /* A phone's head: the pager is its own short row on the right, so the title gets the whole width under it. */

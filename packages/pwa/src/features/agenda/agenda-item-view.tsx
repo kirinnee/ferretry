@@ -23,8 +23,9 @@ import { useQuoteMenu } from '../../components/quote-menu.tsx';
 import { useDoneClose } from '../../hooks/use-done-close.ts';
 import { agendaCardHead } from '../../lib/agenda-card-head.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
+import { cardRow } from '../../lib/agenda-card-row.ts';
 import type { HistoryEvent } from '../../lib/agenda-history.ts';
-import { DISMISS_ACTION, type InboxAction, swipeMap } from '../../lib/agenda-inbox.ts';
+import { DISMISS_ACTION, type InboxAction } from '../../lib/agenda-inbox.ts';
 import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
@@ -109,7 +110,8 @@ export function AgendaItemView({
   const root = useRef<HTMLElement | null>(null);
   const quote = useQuoteMenu(root, quoteScope);
   const model = cardModel(item);
-  const map = swipeMap(item);
+  // The keys answer as the row's arrows say: the row is in the options list's order (`cardRow`).
+  const { map } = cardRow(item, model);
   const head = agendaCardHead(item);
   const status = agendaStatus(item, agendaAuthor(item, ferret), now);
   const doneClose = useDoneCloseFlow(useDoneClose(daemonId, item), label => onAct({ kind: 'resolve', label }));

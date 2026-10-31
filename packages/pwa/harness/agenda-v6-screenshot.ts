@@ -65,6 +65,9 @@ const server = Bun.serve({
       return new Response(html(url.searchParams.get('theme') ?? 'studio-dark'), {
         headers: { 'content-type': 'text/html' },
       });
+    // The stylesheet names its fonts relative to src/styles (`../assets/fonts/…`): serve them from there, so the
+    // pictures are drawn in the app's own typefaces rather than a fallback.
+    if (url.pathname.startsWith('/assets/fonts/')) return new Response(Bun.file(join(packageDir, 'src', url.pathname)));
     const built = Bun.file(join(buildDir, url.pathname));
     return new Response((await built.exists()) ? built : Bun.file(join(packageDir, 'public', url.pathname)));
   },
@@ -226,6 +229,16 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
 
   // The decision, as the mockup draws it.
   const choice = await open('A90');
+  const faces = await choice.evaluate(async () => {
+    await document.fonts.ready;
+    const family = getComputedStyle(document.querySelector('.fy-card') ?? document.body).fontFamily;
+    const loaded = [...document.fonts].filter(face => face.status === 'loaded').map(face => face.family);
+    return { family, loaded };
+  });
+  check(
+    faces.loaded.some(face => faces.family.includes(face.replaceAll('"', ''))),
+    `choice ${form} ${theme}: the card is drawn in a fallback font (${faces.family}; loaded: ${faces.loaded.join(', ')})`,
+  );
   await checkLayout(choice, `choice ${form} ${theme}`);
   check(
     (await choice.locator('.fy-card__top [data-agenda-dismiss]').count()) === 1,
@@ -235,6 +248,15 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
     ((await choice.locator('[data-agenda-version-picker]').textContent()) ?? '').includes('v2 of 2'),
     `choice ${form} ${theme}: the version picker does not say v2 of 2`,
   );
+  const heights = await choice.evaluate(() =>
+    ['.fy-card__top [data-agenda-dismiss]', '.fy-card__top [data-agenda-version-picker]'].map(selector =>
+      Math.round(document.querySelector(selector)?.getBoundingClientRect().height ?? -1),
+    ),
+  );
+  check(
+    heights[0] === heights[1],
+    `choice ${form} ${theme}: Not needed is ${heights[0]}px tall, the version picker ${heights[1]}px`,
+  );
   await shot(choice, 'choice', form, theme);
   // A term opened: its meaning shows under it, inside the card (the Terms list open too).
   await choice.locator('[data-agenda-section="terms"] > summary').click();
@@ -242,6 +264,14 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   await choice.waitForTimeout(150);
   const tip = choice.locator('[data-agenda-term-tip]');
   check((await tip.count()) === 1, `terms ${form} ${theme}: a tapped term shows no meaning`);
+  // A tap anywhere else closes it; then it is opened again for the picture.
+  const press = (target: ReturnType<Page['locator']>) => (form === 'phone' ? target.tap() : target.click());
+  await press(choice.locator('[data-agenda-question-line]'));
+  await choice.waitForTimeout(100);
+  check((await tip.count()) === 0, `terms ${form} ${theme}: a tap elsewhere leaves the meaning open`);
+  await press(choice.locator('.fy-card a[href^="#fy-term-"]').nth(1));
+  await choice.waitForTimeout(150);
+  check((await tip.count()) === 1, `terms ${form} ${theme}: a tapped term shows no meaning the second time`);
   await tip.scrollIntoViewIfNeeded();
   await shot(choice, 'terms', form, theme);
   // The conversation about it, at the bottom.
