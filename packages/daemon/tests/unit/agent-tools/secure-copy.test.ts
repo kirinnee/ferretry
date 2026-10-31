@@ -552,16 +552,17 @@ describe('copying from a page the agent opened', () => {
     should(held.message).containEql('Look at it in the browser view.');
   });
 
-  it("should mask the copied value in a page read as it leaves, whatever the page's own text says", async () => {
+  it('should mask the copied value anywhere in a page result as it leaves, the page address included', async () => {
     const w = pageWorld();
     await w.service.call(agent, { tool: 'browser.open', name: 'app' });
     await w.service.call(agent, FROM_PAGE);
     w.browser.readText = `Your new token: ${TOKEN}`;
+    w.browser.actedUrl = `https://github.com/settings/tokens?created=${TOKEN}`;
 
     const read = await w.service.call(agent, { tool: 'browser.read', name: 'app' });
 
     should(JSON.stringify(read)).not.containEql(TOKEN);
-    should(JSON.stringify(read)).containEql('[sealed:gh]');
+    should(read.summary).containEql('created=[sealed:gh]');
   });
 
   it("should refuse a copy inside the page's queue while the owner's value holds the page, reading nothing", async () => {

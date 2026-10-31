@@ -299,7 +299,9 @@ export class AgentToolService {
       // must not read the shared profile's sign-ins through a script while the owner has them off.
       if (call.tool === 'browser.eval' && !(await this.ports.policy.allows('scripts')))
         throw new AgentToolError('forbidden', pageScriptsRefusal(this.ports.binaryName));
-      result = this.remasked(caller, facts.surface, await this.dispatch(caller, call, facts));
+      // The surface is known only once the call has run: dispatch resolves it.
+      const dispatched = await this.dispatch(caller, call, facts);
+      result = this.remasked(caller, facts.surface, dispatched);
       await this.record(caller, call, facts, 'succeeded');
     } catch (error) {
       const refusal = await this.heldOrMasked(caller, call.tool, facts.surface, translate(error) ?? error);
