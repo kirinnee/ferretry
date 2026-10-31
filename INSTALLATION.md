@@ -60,6 +60,9 @@ curl -fsSL --connect-timeout 30 --max-time 600 https://github.com/kirinnee/ferre
 PATH="$HOME/.local/bin:$PATH" fy setup
 ```
 
+Sharing one Linux machine between several people, each with their own daemon? Follow
+[docs/multi-user-host.md](docs/multi-user-host.md) before the second person runs `fy setup`.
+
 ### What `fy setup` does
 
 | Flag      | Effect                                                                             |
