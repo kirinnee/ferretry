@@ -375,6 +375,25 @@ describe('the activity state', () => {
     ]);
   });
 
+  it('should orphan a card whose only child is an unassigned Todo card, but not one with an assigned or started child', () => {
+    // Arrange — the lead owns every card and is alive; the reviewer finished.
+    const roster = rosterOf([liveSession('lead'), liveSession('reviewer', { status: 'completed' })]);
+    const cards = [
+      aged(MINUTE, { id: 'F1', laneId: 'review', assignee: 'reviewer' }),
+      aged(MINUTE, { id: 'F2', parent: { id: 'F1' } }),
+      aged(MINUTE, { id: 'F3', laneId: 'review', assignee: 'reviewer' }),
+      aged(MINUTE, { id: 'F4', parent: { id: 'F3' }, assignee: 'lead' }),
+      aged(MINUTE, { id: 'F5', laneId: 'review', assignee: 'reviewer' }),
+      aged(MINUTE, { id: 'F6', parent: { id: 'F5' }, laneId: 'implement' }),
+    ];
+
+    // Act
+    const activity = derive(cards, roster);
+
+    // Assert
+    should(['F1', 'F3', 'F5'].map(id => activity.get(id)?.activity)).eql(['orphaned', 'idle', 'idle']);
+  });
+
   it('should read active before waiting', () => {
     // Arrange
     const cards = [aged(HOUR, { blocked: { on: 'external', reason: 'vendor', since: NOW } })];

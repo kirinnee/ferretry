@@ -409,7 +409,8 @@ card). The first state that applies wins:
 | `idle`     | none of the above                                                    |
 
 A lane without its own `staleAfter` uses the category default: backlog 3 days, active 2 hours, review 24 hours,
-shipped 3 days. Verify and closed never go stale.
+shipped 3 days. Verify and closed never go stale. An unassigned child card still in a backlog lane is nobody's work yet, so it
+never keeps its parent from being `orphaned`; an assigned or started child does.
 
 The **sweep** (`packages/daemon/src/lib/board/sweep.ts`) ticks on its own and does two things. It nudges the ferret
 of a stale card, at most once per card per `staleAfter`, never one that declared a wait, never for a waiting card.
