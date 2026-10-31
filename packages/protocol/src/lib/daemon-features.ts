@@ -77,6 +77,12 @@ export const DAEMON_FEATURES = {
    * where the machine reports it and otherwise says the machine needs an update.
    */
   loginBudget: 'login.budget.1',
+  /**
+   * One search over cards and agenda items (`GET /v1/search`, `POST /v1/search/related`, docs/work-search.md). A
+   * daemon without this name answers 404: the app keeps searching what it already loaded and the CLI files without
+   * the related check.
+   */
+  workSearch: 'work.search.1',
 } as const;
 
 export type DaemonFeature = (typeof DAEMON_FEATURES)[keyof typeof DAEMON_FEATURES];

@@ -618,6 +618,10 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   legacyTasks: { now: () => '2026-07-30T12:00:00.000Z' },
   board: boardSubsystem(),
   boardGitHub: { arm: () => () => undefined },
+  workSearch: {
+    search: async () => ({ hits: [], total: 0, indexed: { tasks: 0, agenda: 0 } }),
+    related: async () => ({ matches: [] }),
+  },
   analytics: analyticsSubsystem(),
   analyticsPricing: {
     view: async () => ({
@@ -861,6 +865,7 @@ describe('the mounted daemon surface', () => {
     const operatorRoutes =
       108 + // the session table and everything that is not the account model (three of them the agenda spellings of the agenda routes, kept beside them for the legacy window; six of them the send ledger: its read, one send, a retry under the same id, a cancel, an Enter for one typed and not sent, and the hand-off document behind a pointer; three the session's durable message queue: its read, an edit and a take-back of a message still waiting; one the Enter or erase for a person's own draft in the composer) (three socket-ticket counters gone: a device opens streams inside its session; the operator password's set and unlock routes gone: the passkey step-up replaced them)
       5 + // the project boards: the board query, one card, a new card, an action on a card (board-design.md §2), and a ferret's skip (§3.4)
+      2 + // the work search over cards and agenda items, and the related check before filing (docs/work-search.md)
       4 + // the credential sign-in family: start, then read, answer or cancel one flow
       5 + // the MCP sign-in family: its status read, start, finish, cancel and sign out (docs/mcp-oauth.md)
       3 + // every MCP server a ferret sees, for the machine and for one ferret, and checking one (docs/mcp-scopes.md)
@@ -1195,6 +1200,8 @@ describe('the mounted daemon surface', () => {
       'POST /v1/board/import',
       'GET /v1/board/tasks/:taskId',
       'POST /v1/board/tasks/:taskId',
+      'GET /v1/search',
+      'POST /v1/search/related',
       'GET /v1/analytics',
       'GET /v1/analytics/pricing',
       'PATCH /v1/analytics/pricing',

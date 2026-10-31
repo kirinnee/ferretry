@@ -37,6 +37,16 @@ async function plant(directory: string, name: string, text: string): Promise<voi
 
 const json = (value: unknown) => `${JSON.stringify(value)}\n`;
 
+/** The real filesystem with some members replaced (`undefined` removes an optional one). */
+const overriding = (files: FileSystemPort, members: Partial<Record<keyof FileSystemPort, unknown>>): FileSystemPort =>
+  new Proxy(files, {
+    get: (target, property, receiver) => {
+      if (Object.hasOwn(members, property)) return members[property as keyof FileSystemPort];
+      const value: unknown = Reflect.get(target, property, receiver);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+
 afterEach(async () => {
   for (const home of homes) await rm(home, { recursive: true, force: true });
   homes.clear();
@@ -235,5 +245,257 @@ describe('the file board store', () => {
     // Assert
     should(first).be.instanceOf(Error);
     should(second.cards).eql([]);
+  });
+});
+
+describe('the file board store, edited outside the daemon', () => {
+  it('should notice a card file changed by hand and read its new words', async () => {
+    // Arrange
+    const { tasks, store } = await fixture();
+    await store.write('F1', async () => ({ task: card({ title: 'Board store' }), result: undefined }));
+    await store.write('F2', async () => ({ task: card({ id: 'F2', title: 'Lane sets' }), result: undefined }));
+    const before = (await store.read()).cards.find(entry => entry.id === 'F2');
+
+    // Act
+    await writeFile(join(tasks, 'F1.json'), json(card({ title: 'Relay carrier', summary: 'edited by hand' })));
+    const changed = await store.noticeOutsideEdits();
+    const after = await store.read();
+
+    // Assert
+    should(changed).eql(['F1']);
+    should(after.cards.find(entry => entry.id === 'F1')).match({ title: 'Relay carrier', summary: 'edited by hand' });
+    // An untouched card keeps its object: nothing downstream re-derives it.
+    should(after.cards.find(entry => entry.id === 'F2')).equal(before);
+  });
+
+  it('should not count its own writes as outside edits', async () => {
+    // Arrange
+    const { store } = await fixture();
+    await store.write('F1', async () => ({ task: card(), result: undefined }));
+    await store.read();
+
+    // Act
+    await store.write('F1', async () => ({ task: card({ title: 'Renamed here' }), result: undefined }));
+
+    // Assert
+    should(await store.noticeOutsideEdits()).eql([]);
+  });
+
+  it('should pick up a card file added by hand, and drop one removed by hand', async () => {
+    // Arrange
+    const { tasks, store } = await fixture();
+    await store.write('F1', async () => ({ task: card(), result: undefined }));
+    await store.read();
+
+    // Act
+    await writeFile(join(tasks, 'F7.json'), json(card({ id: 'F7', title: 'Restored from backup' })));
+    await rm(join(tasks, 'F1.json'));
+    const changed = await store.noticeOutsideEdits();
+
+    // Assert
+    should([...changed].sort()).eql(['F1', 'F7']);
+    should((await store.read()).cards.map(entry => entry.id)).eql(['F7']);
+  });
+
+  it('should quarantine a hand edit that no longer parses, as a boot would', async () => {
+    // Arrange
+    const { tasks, store, warnings } = await fixture();
+    await store.write('F1', async () => ({ task: card(), result: undefined }));
+    await store.read();
+
+    // Act
+    await writeFile(join(tasks, 'F1.json'), '{ not json');
+    await store.noticeOutsideEdits();
+    const snapshot = await store.read();
+
+    // Assert
+    should(snapshot.cards).eql([]);
+    should(snapshot.quarantined.map(entry => entry.id)).eql(['F1']);
+    should(warnings.join('\n')).containEql('F1');
+  });
+
+  it('should scan when its directory says it changed', async () => {
+    // Arrange
+    const { tasks, store } = await fixture();
+    await store.write('F1', async () => ({ task: card(), result: undefined }));
+    await store.read();
+    let fire = () => undefined as void;
+    let watched = '';
+    store.watch((directory, listener) => {
+      watched = directory;
+      fire = listener;
+      return { close: () => undefined };
+    });
+
+    // Act
+    await writeFile(join(tasks, 'F1.json'), json(card({ title: 'Heard through the watch' })));
+    fire();
+    await store.noticeOutsideEdits();
+
+    // Assert
+    should(watched).equal(tasks);
+    should((await store.read()).cards[0]?.title).equal('Heard through the watch');
+  });
+});
+
+describe('the file board store, written while edited by hand', () => {
+  it('should decide a write on a hand edit the watch has not reported yet, never over it', async () => {
+    // Arrange
+    const { tasks, store } = await fixture();
+    await store.write('F1', async () => ({ task: card({ title: 'Board store' }), result: undefined }));
+    await store.read();
+    await writeFile(join(tasks, 'F1.json'), json(card({ title: 'Board store', summary: 'the owner edited this' })));
+
+    // Act: a daemon write lands before any scan
+    const seen = await store.write('F1', async current => ({
+      task: current === undefined ? null : { ...current, title: 'Renamed by an agent' },
+      result: current?.summary,
+    }));
+
+    // Assert
+    const onDisk = BoardTaskSchema.parse(JSON.parse(await readFile(join(tasks, 'F1.json'), 'utf8')));
+    should(seen).equal('the owner edited this');
+    should(onDisk).match({ title: 'Renamed by an agent', summary: 'the owner edited this' });
+  });
+
+  it('should refuse a write to a card whose hand edit no longer parses, and take it back once repaired', async () => {
+    // Arrange
+    const { tasks, store } = await fixture();
+    await store.write('F1', async () => ({ task: card(), result: undefined }));
+    await store.read();
+    await writeFile(join(tasks, 'F1.json'), '{ half a save');
+
+    // Act
+    const refused = await store
+      .write('F1', async () => ({ task: card(), result: undefined }))
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    await writeFile(join(tasks, 'F1.json'), json(card({ title: 'Saved properly' })));
+    await store.noticeOutsideEdits();
+    const snapshot = await store.read();
+
+    // Assert
+    should(refused).be.instanceOf(BoardUnavailableError);
+    should(snapshot.quarantined).eql([]);
+    should(snapshot.cards.map(entry => entry.title)).eql(['Saved properly']);
+  });
+
+  it('should coalesce edits that arrive during a scan into one more scan', async () => {
+    // Arrange
+    const { tasks, store } = await fixture();
+    await store.write('F1', async () => ({ task: card(), result: undefined }));
+    await store.read();
+    await writeFile(join(tasks, 'F1.json'), json(card({ title: 'First edit' })));
+
+    // Act
+    const [first, second] = await Promise.all([store.noticeOutsideEdits(), store.noticeOutsideEdits()]);
+
+    // Assert
+    should(first).eql(['F1']);
+    should(second).eql(first);
+    should((await store.read()).cards[0]?.title).equal('First edit');
+  });
+});
+
+describe('the file board store on a filesystem that cannot report identities', () => {
+  const plain = (files: FileSystemPort): FileSystemPort =>
+    overriding(files, { identity: undefined, readTextIdentified: undefined });
+
+  it('should still read and write, and notice nothing it cannot prove', async () => {
+    // Arrange
+    const { tasks, store, open } = await fixture(plain);
+    await store.write('F1', async () => ({ task: card({ title: 'Board store' }), result: undefined }));
+    await store.read();
+    await writeFile(join(tasks, 'F1.json'), json(card({ title: 'Edited by hand' })));
+
+    // Act
+    const changed = await store.noticeOutsideEdits();
+    await store.write('F1', async current => ({ task: current ?? null, result: undefined }));
+
+    // Assert
+    should(changed).eql([]);
+    should((await store.read()).cards[0]?.title).equal('Board store');
+    // A fresh store reads the files as they are, without identities to remember.
+    should((await open().read()).cards.map(entry => entry.title)).eql(['Board store']);
+  });
+
+  it('should notice nothing before the board was first read', async () => {
+    // Arrange
+    const { store } = await fixture();
+
+    // Act / Assert
+    should(await store.noticeOutsideEdits()).eql([]);
+  });
+
+  it('should report a scan the watch started that failed, and keep the board', async () => {
+    // Arrange
+    let broken = false;
+    const { store, warnings } = await fixture(files =>
+      overriding(files, {
+        listDirectory: async (path: string) => {
+          if (broken) throw new Error('the disk went away');
+          return await files.listDirectory(path);
+        },
+      }),
+    );
+    await store.write('F1', async () => ({ task: card(), result: undefined }));
+    await store.read();
+    let fire = () => undefined as void;
+    const close = store.watch((_directory, listener) => {
+      fire = listener;
+      return { close: () => undefined };
+    });
+
+    // Act
+    broken = true;
+    fire();
+    await Bun.sleep(10);
+    close();
+
+    // Assert
+    should(warnings.join('\n')).containEql('could not re-read its card files: the disk went away');
+    should((await store.read()).cards).have.length(1);
+  });
+});
+
+describe('the file board store, racing a hand edit', () => {
+  it('should keep a card whose file is back by the time the scan would drop it', async () => {
+    // Arrange: the listing misses F1 (it was being replaced), but the file is there when the scan looks again
+    let hide = false;
+    const { store } = await fixture(files =>
+      overriding(files, {
+        listDirectory: async (path: string) =>
+          (await files.listDirectory(path)).filter(entry => !hide || entry.name !== 'F1.json'),
+      }),
+    );
+    await store.write('F1', async () => ({ task: card(), result: undefined }));
+    await store.read();
+
+    // Act
+    hide = true;
+    const changed = await store.noticeOutsideEdits();
+
+    // Assert
+    should(changed).eql([]);
+    should((await store.read()).cards.map(entry => entry.id)).eql(['F1']);
+  });
+
+  it('should write a card whose file was deleted by hand back from what it holds', async () => {
+    // Arrange
+    const { tasks, store } = await fixture();
+    await store.write('F1', async () => ({ task: card({ title: 'Board store' }), result: undefined }));
+    await store.read();
+    await rm(join(tasks, 'F1.json'));
+
+    // Act
+    const seen = await store.write('F1', async current => ({ task: current ?? null, result: current?.title }));
+
+    // Assert
+    should(seen).equal('Board store');
+    should(BoardTaskSchema.parse(JSON.parse(await readFile(join(tasks, 'F1.json'), 'utf8'))).title).equal(
+      'Board store',
+    );
   });
 });
