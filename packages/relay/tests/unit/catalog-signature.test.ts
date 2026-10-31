@@ -219,3 +219,31 @@ describe('catalog files', () => {
     should((await verifySharedCatalogFile(relayCrypto, swapped)).ok).be.false();
   });
 });
+
+describe('documents with no one canonical spelling', () => {
+  /** A lone surrogate: JSON.parse can produce one, and RFC 8785 has no spelling for it. */
+  const lone = String.fromCharCode(0xd800);
+
+  it('should neither sign nor verify a manifest that has none, and say why', async () => {
+    const { signedManifest } = await signed();
+    const identity = await newDaemonIdentity();
+    const broken = { ...signedManifest.manifest, publisher: identity.daemonId, description: `a${lone}` };
+    should(await signCatalogManifest(relayCrypto, identity, broken)).match({ ok: false, refusal: 'not_canonical' });
+    should(
+      await verifySignedCatalogManifest(relayCrypto, {
+        ...signedManifest,
+        manifest: { ...signedManifest.manifest, description: `a${lone}` },
+      }),
+    ).match({ ok: false, refusal: 'not_canonical' });
+  });
+
+  it('should not verify an item that has none', async () => {
+    const { signedManifest, item } = await signed();
+    const broken = skill(item.publisher, `# pdf${lone}`);
+    should(await catalogItemDigest(relayCrypto, broken)).be.null();
+    should(await verifyCatalogItem(relayCrypto, signedManifest.manifest, broken)).match({
+      ok: false,
+      refusal: 'not_canonical',
+    });
+  });
+});

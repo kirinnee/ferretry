@@ -104,3 +104,14 @@ describe('canonicalJson (RFC 8785)', () => {
     expect(text(JSON.parse('{"b":1.0,"a":"\\u00e9"}'))).toBe(text({ a: 'é', b: 1 }));
   });
 });
+
+describe('canonicalJson and failures that are not about JSON', () => {
+  it('lets an error it did not raise through, rather than calling it a JSON problem', () => {
+    const hostile = {
+      get boom(): never {
+        throw new Error('a getter threw');
+      },
+    };
+    expect(() => canonicalJson(hostile)).toThrow('a getter threw');
+  });
+});

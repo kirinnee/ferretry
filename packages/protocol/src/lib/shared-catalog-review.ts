@@ -55,21 +55,14 @@ export type CatalogInstallWarning = z.infer<typeof CatalogInstallWarningSchema>;
 
 // ── Every file and every command ─────────────────────────────────────────────────────────────────
 
-/** `SKILL.md` first, then every other file by path, each in full. */
+/** `SKILL.md` first, then every other file by path, each in full. Paths are unique (the schema says so). */
 const skillEntries = (files: readonly { readonly path: string; readonly content: string }[]): CatalogReviewEntry[] =>
-  files
-    .toSorted((left, right) =>
-      left.path === CATALOG_SKILL_ENTRY_FILE
-        ? -1
-        : right.path === CATALOG_SKILL_ENTRY_FILE
-          ? 1
-          : left.path < right.path
-            ? -1
-            : left.path > right.path
-              ? 1
-              : 0,
-    )
-    .map(file => ({ label: `Skill file ${file.path}`, text: file.content, document: true }));
+  [
+    ...files.filter(file => file.path === CATALOG_SKILL_ENTRY_FILE),
+    ...files
+      .filter(file => file.path !== CATALOG_SKILL_ENTRY_FILE)
+      .toSorted((left, right) => (left.path < right.path ? -1 : 1)),
+  ].map(file => ({ label: `Skill file ${file.path}`, text: file.content, document: true }));
 
 const mcpEntries = (setup: CatalogMcpSetup): CatalogReviewEntry[] => {
   if (setup.transport === 'url') {

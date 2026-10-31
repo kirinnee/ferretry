@@ -150,3 +150,40 @@ describe('catalogItemReview', () => {
     expect(review.map(entry => entry.label)).toEqual(['Reaches', 'Signs in', 'Sign-in client']);
   });
 });
+
+describe('the cases a review rarely meets', () => {
+  it('lists only the address of a server that needs no sign-in', () => {
+    expect(catalogItemReview(mcp({ transport: 'url', url: 'https://mcp.example.com' }))).toEqual([
+      { label: 'Reaches', text: 'https://mcp.example.com', document: false },
+    ]);
+  });
+
+  it('says an artifact is opened, and warns about nothing it cannot run', () => {
+    const artifact = SharedCatalogItemSchema.parse({
+      ...head,
+      kind: 'artifact',
+      artifact: { objectId: '0'.repeat(32), mediaType: 'application/pdf', size: 2048 },
+    });
+    expect(catalogItemReview(artifact)).toEqual([
+      { label: 'Opens', text: 'A application/pdf file of 2048 bytes', document: false },
+    ]);
+    expect(catalogItemWarnings(artifact)).toEqual([]);
+  });
+
+  it('flags nothing for a launcher with no package, or a package manager that is not fetching one', () => {
+    for (const line of [
+      'npx -y',
+      'npx --',
+      'yarn install',
+      'bun run server.ts',
+      'pnpm install',
+      'uv sync',
+      'pipx install x',
+      'npx -- foo@1.0.0',
+    ]) {
+      const [program = '', ...args] = line.split(' ');
+      expect([line, unpinnedPackage(program, args)]).toEqual([line, null]);
+    }
+    expect(unpinnedPackage('npx', ['--', 'foo'])).toEqual({ launcher: 'npx', target: 'foo' });
+  });
+});
