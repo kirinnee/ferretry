@@ -7,6 +7,7 @@ import type {
   TaskLinkFlags,
   TaskListShimFlags,
 } from '../../lib/board/board-controllers';
+import { laneGuide } from '../../lib/board/lane-guide';
 import { TASK_TITLE_GUIDANCE } from '../../lib/tasks/task-title';
 
 /** Everything the task command group is wired from; the composition root owns the concrete instances. */
@@ -92,6 +93,7 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
     .argument('<id>', ID_HELP)
     .argument('<lane>', "the lane's id or name (see `fy board lanes show`)")
     .option('--reason <why>', 'why it moved; required for a move back')
+    .addHelpText('after', `\n${laneGuide(program.name())}`)
     .action(async (id: string, lane: string, options: SessionOptions & { reason?: string }) => {
       await board.move(id, lane, options);
     });

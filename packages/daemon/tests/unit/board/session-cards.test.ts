@@ -46,6 +46,8 @@ interface Options {
   readonly proposed?: LaneSet | 'fail';
   readonly world?: Partial<ServiceWorld>;
   readonly adoption?: SessionCardsPorts['adoption'];
+  /** The board refuses to move a card on the session's start. */
+  readonly failTrigger?: boolean;
 }
 
 const build = (options: Options = {}) => {
@@ -64,7 +66,21 @@ const build = (options: Options = {}) => {
     focus,
     ...options.world,
   });
-  const board = new BoardService(ports);
+  const service = new BoardService(ports);
+  const board: SessionCardsPorts['board'] =
+    options.failTrigger === true
+      ? {
+          reserve: service.reserve.bind(service),
+          spawn: service.spawn.bind(service),
+          signalDone: service.signalDone.bind(service),
+          snapshot: service.snapshot.bind(service),
+          requireHandOver: service.requireHandOver.bind(service),
+          handOver: service.handOver.bind(service),
+          trigger: async () => {
+            throw new Error('the board store is read-only');
+          },
+        }
+      : service;
   const proposals: Array<readonly [BoardProjectId, string]> = [];
   const warnings: string[] = [];
   const cardsPorts: SessionCardsPorts = {
@@ -105,19 +121,19 @@ describe('what a start card is called and asks', () => {
   it('should name the card and its board in the footer line', () => {
     // Act / Assert
     should(cardFooterLine('F413', 'Ferretry', 'fy')).equal(
-      'Your card is &F413 on the Ferretry board; move it as you work (`fy task …`).',
+      'Your card is &F413 on the Ferretry board; the daemon moves it for you (`fy task note` adds progress).',
     );
     should(cardFooterLine('F413', 'Ferretry', 'fy', { id: 'F85' })).equal(
-      'Your card is &F413 on the Ferretry board, under &F85; move it as you work (`fy task …`).',
+      'Your card is &F413 on the Ferretry board, under &F85; the daemon moves it for you (`fy task note` adds progress).',
     );
     should(cardFooterLine('F413', undefined, 'ferret')).equal(
-      "Your card is &F413 on the project's board; move it as you work (`ferret task …`).",
+      "Your card is &F413 on the project's board; the daemon moves it for you (`ferret task note` adds progress).",
     );
   });
 });
 
 describe('a session started with a brief', () => {
-  it('should get its own card in the first backlog lane, asked by the owner, and be focused on it', async () => {
+  it('should get its own card, asked by the owner, focused, and already in the lane work starts in', async () => {
     // Arrange
     const { subject, ports, focus } = build();
 
@@ -134,11 +150,48 @@ describe('a session started with a brief', () => {
       owner: 'worker',
       assignee: null,
       parent: null,
-      laneId: 'todo',
+      laneId: 'implement',
       projectId: PROJECT,
       workflow: 'quick',
     });
+    should(opened.card).match({ id: 'F1', laneId: 'implement' });
+    should(stored(ports, 'F1').history.at(-1)).match({
+      type: 'moved',
+      from: 'todo',
+      to: 'implement',
+      auto: true,
+      trigger: 'work.started',
+      actor: { kind: 'daemon', sessionId: 'worker' },
+    });
     should(focus.focused.get('worker')).deepEqual({ id: 'F1' });
+  });
+
+  it('should keep the card in its first lane, say so, and still start when the move cannot be made', async () => {
+    // Arrange
+    const { subject, ports, warnings } = build({ failTrigger: true });
+
+    // Act
+    const opened = await subject.open({ sessionId: 'worker', brief: 'Move the theme switch' });
+
+    // Assert
+    should(opened.card).match({ id: 'F1', laneId: 'todo' });
+    should(stored(ports, 'F1').laneId).equal('todo');
+    should(warnings).deepEqual(['could not move &F1 to its working lane: the board store is read-only']);
+  });
+
+  it('should not pull a card back that is already past the lane work starts in', async () => {
+    // Arrange
+    const { subject, ports } = build({
+      cards: [card({ id: 'F9', owner: 'lead', workflow: 'quick', laneId: 'merged' })],
+    });
+    const { delegation } = await subject.delegate('lead', { brief: 'Build it', card: 'F9' }, true);
+
+    // Act
+    const opened = await subject.open({ sessionId: 'child', brief: 'Build it', parent: 'lead', delegation });
+
+    // Assert
+    should(opened.card).match({ id: 'F9', laneId: 'merged' });
+    should(stored(ports, 'F9').history.some(event => event.type === 'moved')).be.false();
   });
 
   it('should say a ferret asked when a ferret started it', async () => {
@@ -349,7 +402,16 @@ describe('a session started with a brief', () => {
       should(refusal).be.undefined();
       should(delegation).match({ id: 'F9', existing: true, parent: { id: 'F1' }, project: 'Ferretry' });
       should(opened.card).match({ id: 'F9', owner: 'lead', assignee: 'child', title: 'Something else' });
-      should(stored(ports, 'F9').history.at(-1)).match({ type: 'assigned', to: 'child' });
+      should(stored(ports, 'F9').history.find(event => event.type === 'assigned')).match({ to: 'child' });
+      should(stored(ports, 'F9').history.at(-1)).match({
+        type: 'moved',
+        from: 'todo',
+        to: 'plan',
+        auto: true,
+        trigger: 'work.started',
+        actor: { kind: 'daemon', sessionId: 'child' },
+      });
+      should(opened.card).match({ laneId: 'plan' });
       should([...ports.store.cards.keys()].sort()).deepEqual(['F1', 'F9']);
       should(focus.focused.get('child')).deepEqual({ id: 'F9' });
       should(focus.anchors.get('child')).deepEqual({ id: 'F9' });

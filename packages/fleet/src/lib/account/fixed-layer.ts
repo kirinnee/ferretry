@@ -309,9 +309,9 @@ export const HYPERMEDIA_ENV = 'FY_HYPERMEDIA';
  */
 export const HYPERMEDIA_INSTRUCTION = (fy: string): string =>
   [
-    'Hypermedia: when you teach, explain, compare or walk through anything not straightforward — a flow, architecture, state machine, layout or change over time — show it in your reply as well as saying it. Do not overdo it: a simple answer stays plain text; one picture beats several.',
-    'Always inline: never publish an artifact, page, gist or link to explain something unless the owner asks for one.',
-    'Tell it as a short story the reader can drive: step-through Next buttons, sliders, toggles, tap to reveal, animated diagrams. One idea per step, short labels, gentle motion that honours prefers-reduced-motion.',
+    'Hypermedia: when you teach, explain, compare or walk through anything not straightforward — a flow, architecture, state machine, layout or change over time — show it in your reply as well as saying it. Do not overdo it: simple answers stay plain text.',
+    'Always inline: never publish an artifact, page, gist or link to explain, unless asked.',
+    'Make it a short story the reader drives: step-through Next buttons, sliders, tap to reveal. One idea per step, short labels, gentle motion (honour prefers-reduced-motion).',
     'Write a fenced block whose info string is exactly fy-render: line 1 `type: <type>`, line 2 `alt: <one-line description>`, then a line `---`, then the payload.',
     '- mermaid: Mermaid source (flowchart TB, sequenceDiagram, …): top-down, short labels; auto-themed, so no %%{init}%% or colours.',
     '- svg: one self-contained <svg>…</svg> (CSS animation welcome); no script, foreignObject or external links.',
@@ -326,7 +326,7 @@ export const HYPERMEDIA_INSTRUCTION = (fy: string): string =>
     'flowchart TB',
     '  Phone --> Relay --> Daemon',
     '```',
-    "It renders inline in the reader's chat. Chat only: never write fy-render into files, docs, commits or PRs.",
+    'Renders inline in chat. Chat only: never write fy-render into files, docs, commits or PRs.',
   ].join('\n');
 
 /**
@@ -466,7 +466,7 @@ export const NOTIFY_INSTRUCTION = (fy: string): string =>
  * the daemon). docs/board.md quotes this text verbatim.
  */
 export const BOARD_INSTRUCTION = (fy: string): string =>
-  `Board: all work is a card (&F412); agenda items are !A48. New ask, first: \`${fy} task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>\` (repeatable; ${fy} new/start make one). Before To test: \`${fy} task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"\`. Move: \`${fy} task move <id> <lane> --reason "<why>"\`. Blocked: \`${fy} agenda add --task <id>\` (owner), \`${fy} task depend\` (card), \`${fy} task block\` (else). \`${fy} task drop --reason\`, \`${fy} task focus <id>\`. Owner's bug: \`${fy} task reopen <id> --to <lane> --ask "<their words>"\`. PRs/releases move cards; only the owner closes.`;
+  `Board: all work is a card (&F412); agenda items are !A48. New ask, first: \`${fy} task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>\` (${fy} new/start make one). Before To test: \`${fy} task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"\`. Lane by the work (\`${fy} board lanes show\`): plan → plan lane (owner OKs leaving), build → active: \`${fy} task move <id> <lane> --reason "<why>"\`. Blocked is no lane: \`${fy} agenda add --task <id>\` (owner), \`${fy} task depend\` (card), \`${fy} task block\` (else). \`${fy} task drop --reason\`, \`${fy} task focus <id>\`. Owner's bug: \`${fy} task reopen <id> --to <lane> --ask "<their words>"\`. Starts, PRs, merges, releases, \`${fy} signal done\` self-move; owner closes.`;
 
 /**
  * SUB-FERRET LIMITS (docs/pack-mode.md § Sub-ferret limits): a ferret another ferret started. The daemon
@@ -480,7 +480,7 @@ export const SUB_FERRET_ENV = 'FY_SUB_FERRET';
 export const SUB_FERRET_INSTRUCTION = (fy: string): string =>
   [
     `Sub-ferret: you were started by a lead ferret. Report to it with \`${fy} send <lead-callsign> "<message>"\`; you cannot raise agenda items, notify the owner or move cards.`,
-    `Link your PR to your card: \`${fy} task link <id> --pr <url>\` (or \`--branch\`); add progress with \`${fy} task note\`. Your final report says how the owner tests it.`,
+    `Link your PR to your card: \`${fy} task link <id> --pr <url>\` (or \`--branch\`); add progress with \`${fy} task note\`. Your card moves itself: start, PR, merge, \`${fy} signal done\`. Your final report says how the owner tests it.`,
   ].join('\n');
 
 /** What a lead is told after the base instruction: the notify rule, then the board rules. */
