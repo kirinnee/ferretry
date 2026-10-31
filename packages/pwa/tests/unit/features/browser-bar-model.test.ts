@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import type { BrowserStatus } from '@ferretry/protocol';
 import {
   browserChip,
+  compactAddress,
   type BrowserBarControl,
   type BrowserChipInput,
 } from '../../../src/features/browser/browser-bar-model.ts';
@@ -51,10 +52,10 @@ describe('browserChip — the one chip the bar shows', () => {
     expect(browserChip(input({ engine: 'preview', control: { ...nobody, takenOver: true } })).kind).toBe('preview');
   });
 
-  it('says an agent is typing, by name', () => {
+  it('says a ferret is typing, naming it only in the detail', () => {
     const chip = browserChip(input({ control: { ...nobody, driver: { name: 'Hadi' } } }));
 
-    expect(chip).toMatchObject({ kind: 'agent', label: 'Hadi typing', attention: false });
+    expect(chip).toMatchObject({ kind: 'agent', label: 'Ferret', attention: false });
     expect(chip.summary).toBe('Hadi is typing here.');
   });
 
@@ -128,5 +129,15 @@ describe('browserChip — the one chip the bar shows', () => {
     expect(browserChip({ ...everything, control: nobody, challenge: null, errors: [], status: running() }).kind).toBe(
       'disconnected',
     );
+  });
+});
+
+describe('compactAddress — the address at rest', () => {
+  it('drops the scheme and a bare trailing slash, and leaves anything else alone', () => {
+    expect(compactAddress('https://example.invalid/claims/new')).toBe('example.invalid/claims/new');
+    expect(compactAddress('HTTP://shop.example/')).toBe('shop.example');
+    expect(compactAddress('https://a.example/?q=1')).toBe('a.example/?q=1');
+    expect(compactAddress('ferret docs')).toBe('ferret docs');
+    expect(compactAddress('')).toBe('');
   });
 });

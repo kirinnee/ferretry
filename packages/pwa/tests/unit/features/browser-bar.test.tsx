@@ -62,6 +62,19 @@ describe('BrowserBar', () => {
     await view.unmount();
   });
 
+  it('shows the address without its scheme at rest and the whole address while it is being edited', async () => {
+    const view = await mount(<BrowserBar {...bar({ address: 'https://example.test/claims/new' })} />);
+    const input = find(view.container, 'input') as HTMLInputElement;
+
+    expect(input.value).toBe('example.test/claims/new');
+    expect(input.title).toBe('https://example.test/claims/new');
+    await interact(() => input.focus());
+    expect(input.value).toBe('https://example.test/claims/new');
+    await interact(() => input.blur());
+    expect(input.value).toBe('example.test/claims/new');
+    await view.unmount();
+  });
+
   it('keeps a held notice in the bar, and opens its detail from the chip only', async () => {
     const view = await mount(<BrowserBar {...bar({ chip: ask })} />);
     const chip = find(view.container, '[data-browser-chip="ask"]');

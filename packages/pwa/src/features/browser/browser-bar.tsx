@@ -17,7 +17,7 @@ import { ChevronDown, Globe2, MoreVertical, Search } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 
 import { Button } from '../../shell/primitives.tsx';
-import type { BrowserChip } from './browser-bar-model.ts';
+import { compactAddress, type BrowserChip } from './browser-bar-model.ts';
 
 type Open = 'chip' | 'pages' | 'menu' | null;
 
@@ -77,6 +77,7 @@ export function BrowserBar({
   resetKey,
 }: BrowserBarProps) {
   const [open, setOpen] = useState<Open>(null);
+  const [editing, setEditing] = useState(false);
   const barRef = useRef<HTMLElement | null>(null);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `resetKey` is the trigger — the host re-scoped, so every popover closes
@@ -157,10 +158,16 @@ export function BrowserBar({
           <span className="sr-only">URL or DuckDuckGo search</span>
           <Search size={13} aria-hidden="true" className="hidden shrink-0 text-muted sm:block" />
           <input
-            value={address}
+            value={editing ? address : compactAddress(address)}
             onChange={event => onAddressChange(event.target.value)}
-            onFocus={onAddressFocus}
-            onBlur={onAddressBlur}
+            onFocus={() => {
+              setEditing(true);
+              onAddressFocus();
+            }}
+            onBlur={() => {
+              setEditing(false);
+              onAddressBlur();
+            }}
             placeholder="URL or search"
             title={address}
             inputMode="url"
@@ -189,7 +196,7 @@ export function BrowserBar({
           data-browser-trigger="chip"
           data-attention={chip.attention ? '' : undefined}
           data-tone={chip.tone}
-          className="kt-badge inline-flex min-h-[32px] max-w-[5.5rem] items-center gap-1 px-1.5 min-[420px]:max-w-[7.25rem] sm:max-w-[10rem]"
+          className="kt-badge inline-flex min-h-[32px] items-center gap-1 px-1.5 sm:max-w-[10rem]"
         >
           <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-current" />
           <span className="min-w-0 truncate">{chip.label}</span>

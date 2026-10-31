@@ -103,11 +103,14 @@ export const browserChip = ({
     );
   if (connection === 'disconnected')
     return chip('disconnected', 'err', 'Offline', 'The display disconnected — reconnecting…', true);
-  if (control.driver !== null)
-    return chip('agent', 'accent', `${control.driver.name} typing`, `${control.driver.name} is typing here.`);
+  if (control.driver !== null) return chip('agent', 'accent', 'Ferret', `${control.driver.name} is typing here.`);
   if (busy || page?.pageState === 'loading')
     return chip('working', 'pend', 'Working', busy ? 'Working…' : 'Loading page…');
   if (connection !== 'connected' || status === null)
     return chip('connecting', 'pend', 'Connecting', 'Connecting to the browser…');
   return chip('live', 'ok', 'Live', 'Live display.');
 };
+
+/** What the address shows at rest: the host and path without the scheme. The full address returns on focus. */
+export const compactAddress = (address: string): string =>
+  address.replace(/^https?:\/\//i, '').replace(/^([^/?#]*)\/$/, '$1');

@@ -385,7 +385,7 @@ describe('the unified browser surface', () => {
     expect(back.hasAttribute('disabled')).toBe(false);
     await click(back);
     expect(previewHref(view.container)).toBe('https://example.test/a');
-    expect(addressField(view.container).value).toBe('https://example.test/a');
+    expect(addressField(view.container).value).toBe('example.test/a');
 
     const forward = labelled(view.container, 'Forward in preview');
     expect(forward.hasAttribute('disabled')).toBe(false);
@@ -433,7 +433,7 @@ describe('the unified browser surface', () => {
     // Once the reader is done editing, the next real move refills the bar.
     await interact(() => input.blur());
     await view.render(surface({ destination: link('https://docs.example.test/three'), dependencies }));
-    expect(addressField(view.container).value).toBe('https://docs.example.test/three');
+    expect(addressField(view.container).value).toBe('docs.example.test/three');
     await view.unmount();
   });
 
@@ -500,7 +500,7 @@ describe('the unified browser surface', () => {
     expect(labelled(view.container, 'Forward in real browser').hasAttribute('disabled')).toBe(false);
 
     await remote.publish(runningStatus({ canGoBack: true, canGoForward: false }));
-    expect(addressField(view.container).value).toBe('https://example.test/');
+    expect(addressField(view.container).value).toBe('example.test');
     expect(labelled(view.container, 'Back in real browser').hasAttribute('disabled')).toBe(false);
     expect(labelled(view.container, 'Forward in real browser').hasAttribute('disabled')).toBe(true);
 
@@ -674,7 +674,7 @@ describe('the unified browser surface', () => {
     const { remote, dependencies } = engines();
     const view = await mount(surface({ dependencies }));
     await remote.publish(runningStatus({ url: 'https://daemon-a-page.test/' }));
-    expect(addressField(view.container).value).toBe('https://daemon-a-page.test/');
+    expect(addressField(view.container).value).toBe('daemon-a-page.test');
 
     await view.render(surface({ daemon: daemonB, scope: scopeB, dependencies }));
 
@@ -857,7 +857,7 @@ describe('the unified browser surface', () => {
 
     const view = await mount(surface({ dependencies, onOpenLoginWindow: opener }));
     await remote.publish(runningStatus({ url: 'https://old-grant.test/' }));
-    expect(addressField(view.container).value).toBe('https://old-grant.test/');
+    expect(addressField(view.container).value).toBe('old-grant.test');
 
     const menu = await openMenu(view.container);
     await click(named(menu, 'Preview'));
@@ -937,7 +937,7 @@ describe('the unified browser surface', () => {
     const { remote, dependencies } = engines();
     const view = await mount(surface({ dependencies }));
     await remote.publish(runningStatus({ url: 'https://old-grant.test/', title: 'Old grant' }));
-    expect(addressField(view.container).value).toBe('https://old-grant.test/');
+    expect(addressField(view.container).value).toBe('old-grant.test');
 
     // A re-paired base URL is the same liveness boundary as a rotated token:
     // the page behind the old origin is not this pairing's page.
@@ -966,7 +966,7 @@ describe('the unified browser surface', () => {
     // surface never reaches this line at all.
     expect(churning.publishes()).toBe(3);
     expect(churning.renders()).toBe(3);
-    expect(addressField(view.container).value).toBe('https://example.test/');
+    expect(addressField(view.container).value).toBe('example.test');
 
     // The queued resume still ran, exactly once, through the pane's dispatcher.
     expect(churning.dispatched.map(entry => entry.action)).toEqual([{ action: 'open' }]);
