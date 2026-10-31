@@ -245,6 +245,20 @@ describe('whether a pasted key is for the account it is being saved to', () => {
       { issuer: 'Оkta' },
       { issuer: 'Оkta' },
     ],
+    [
+      'the provider with a combining mark that stays a mark',
+      { label: 'ClickUp' },
+      [okta],
+      { issuer: 'O\u0336kta' },
+      { issuer: 'O\u0336kta' },
+    ],
+    [
+      'the provider with a combining accent',
+      { label: 'ClickUp' },
+      [okta],
+      { issuer: 'Okt\u0301a' },
+      { issuer: 'Okt\u0301a' },
+    ],
     ['a fragment of the provider', { label: 'ClickUp' }, [okta], { issuer: 'kta' }, { issuer: 'kta' }],
     ['the top-level domain of the provider', { label: 'ClickUp' }, [okta], { issuer: 'com' }, { issuer: 'com' }],
     [

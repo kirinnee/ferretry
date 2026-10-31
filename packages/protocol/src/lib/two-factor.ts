@@ -217,8 +217,8 @@ const wordsOf = (text: string): readonly string[] =>
 const isWordRun = (part: readonly string[], whole: readonly string[]): boolean =>
   part.length > 0 && whole.some((_, start) => part.every((word, offset) => whole[start + offset] === word));
 
-/** A letter or digit outside ASCII: a look-alike (`Оkta`, Cyrillic О) may hide in one. */
-const NON_ASCII_LETTER = /[^\p{ASCII}](?<=[\p{L}\p{N}])/u;
+/** A letter, digit or combining mark outside ASCII: a look-alike (`Оkta`, Cyrillic О; `O\u0336kta`) may hide in one. */
+const NON_ASCII_LETTER = /[^\p{ASCII}](?<=[\p{L}\p{N}\p{M}])/u;
 
 /**
  * Whether an issuer names this account. An ASCII issuer must be the registrable label of a host one of its sign-ins
