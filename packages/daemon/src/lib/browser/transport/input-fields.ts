@@ -545,53 +545,69 @@ export function inputFieldSelector(field: FieldAttributes): string {
 }
 
 /** A candidate is the field the card showed: the same frame origin, tag and attributes, and the owner can see it. */
-const isSameField = (want: InputBrowserFieldFacts, got: InputBrowserFieldFacts | undefined): boolean =>
-  got !== undefined && got.visible && got.frameOrigin === want.frameOrigin && sameAttributes(got.field, want.field);
+const isSameField = (want: InputBrowserFieldFacts, got: InputBrowserFieldFacts): boolean =>
+  got.visible && got.frameOrigin === want.frameOrigin && sameAttributes(got.field, want.field);
 
-/** A candidate looked at for a re-find; one whose identity cannot be proved is no candidate. */
-async function candidateOf(
+/** The same node: a field fact names one node by its target and backend node id. */
+const sameNodeAs = (left: InputBrowserFieldFacts, right: InputBrowserFieldFacts): boolean =>
+  left.frameId === right.frameId && left.backendNodeId === right.backendNodeId;
+
+/**
+ * Every visible element of the page that is the field the card showed, found by its tag and attributes. Strict
+ * against the page itself: more than {@link INPUT_REFIND_MAX_CANDIDATES} elements, one whose identity cannot be
+ * proved or that went away while it was looked at, or one node met twice, makes the whole search `ambiguous`,
+ * so a page that mutates while it is searched never narrows the field down to one.
+ */
+async function lookAlikes(
   subject: InputSubject,
-  fieldId: string,
-  element: InputLocator,
-): Promise<InputBrowserFieldFacts | undefined> {
-  return await observeLocated(subject, fieldId, element).catch(() => undefined);
+  want: InputBrowserFieldFacts,
+): Promise<InputBrowserFieldFacts[] | 'ambiguous'> {
+  const alike = subject.page.locator(inputFieldSelector(want.field));
+  const count = await alike.count().catch(() => 0);
+  if (count > INPUT_REFIND_MAX_CANDIDATES) return 'ambiguous';
+  const matches: InputBrowserFieldFacts[] = [];
+  const seen: InputBrowserFieldFacts[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const found = await observeLocated(subject, want.fieldId, alike.nth(index)).catch(() => undefined);
+    if (found === undefined || seen.some(other => sameNodeAs(other, found))) return 'ambiguous';
+    seen.push(found);
+    if (isSameField(want, found)) matches.push(found);
+  }
+  return matches;
 }
 
-/** One field of a re-find: the agent's pointer when it still names exactly that field, else the page's one look-alike. */
+/**
+ * One field of a re-find, in order: the node the owner approved, when it is still there and still that field; the
+ * agent's pointer, when it names exactly one element that is that field; the page's ONE look-alike.
+ */
 async function refindField(
   subject: InputSubject,
   want: InputBrowserFieldFacts,
   pointer: BrowserInputFieldPointer | undefined,
 ): Promise<InputBrowserFieldFacts | 'missing' | 'ambiguous'> {
+  const matches = await lookAlikes(subject, want);
+  const approved = matches === 'ambiguous' ? undefined : matches.find(found => sameNodeAs(found, want));
+  if (approved !== undefined) return approved;
   if (pointer !== undefined) {
     const named = subject.page.locator(browserSelectorOf(pointer.target as BrowserElementTarget));
     if ((await named.count().catch(() => 0)) === 1) {
-      const found = await candidateOf(subject, want.fieldId, named.first());
-      if (isSameField(want, found)) return found as InputBrowserFieldFacts;
+      const found = await observeLocated(subject, want.fieldId, named.first()).catch(() => undefined);
+      if (found !== undefined && isSameField(want, found)) return found;
     }
   }
-  const alike = subject.page.locator(inputFieldSelector(want.field));
-  const count = await alike.count().catch(() => 0);
-  if (count === 0) return 'missing';
-  if (count > INPUT_REFIND_MAX_CANDIDATES) return 'ambiguous';
-  const matches: InputBrowserFieldFacts[] = [];
-  for (let index = 0; index < count; index += 1) {
-    const found = await candidateOf(subject, want.fieldId, alike.nth(index));
-    if (found !== undefined && isSameField(want, found)) matches.push(found);
-  }
+  if (matches === 'ambiguous') return 'ambiguous';
   const [only, ...more] = matches;
   if (only === undefined) return 'missing';
-  return more.some(other => other.frameId !== only.frameId || other.backendNodeId !== only.backendNodeId)
-    ? 'ambiguous'
-    : only;
+  return more.length > 0 ? 'ambiguous' : only;
 }
 
 /**
  * THE FIELDS A CARD SHOWED, FOUND AGAIN after the page changed under it: a re-render replaced the node (a new
  * backend node id, so the agent's ref is stale), a countdown moved the box, or a reload made a new document.
  *
- * Each field is the agent's pointer when it names exactly one element that is still that field, else the ONE
- * visible element of the page with the same tag and attributes in a frame of the same origin. Every candidate is
+ * Each field is the node the owner approved when it is still there, else the agent's pointer when it names exactly
+ * one element that is still that field, else the ONE visible element of the page's main frame (or an open shadow
+ * root) with the same tag and attributes. Every candidate is
  * looked at exactly as {@link observeInputFields} looks — the node Playwright holds, described by the session that
  * holds it — so the identity is proved the same way. None is `missing`; several, or two fields landing on one
  * node, is `ambiguous`; nothing is chosen then. It never types: the card is redrawn and the owner sends again.

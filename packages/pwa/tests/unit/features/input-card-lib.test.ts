@@ -245,6 +245,12 @@ describe('inputFailure', () => {
       text: 'The page changed. Check the picture and send again.',
     });
     expect(terminal.text).toBe('The terminal redrew its prompt. Check it and send again.');
+    expect(inputFailure({ status: 409, code: INPUT_ERROR_CODES.targetRebound }, 'secret').text).toBe(
+      'The secret store changed. Check the card and send again.',
+    );
+    expect(inputFailure({ status: 409, code: INPUT_ERROR_CODES.targetRebound }).text).toBe(
+      'The page changed. Check the picture and send again.',
+    );
   });
 
   it('says in plain words why a request that kept changing ended, never "check failures" (#B100)', () => {

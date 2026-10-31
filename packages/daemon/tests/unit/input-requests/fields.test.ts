@@ -841,6 +841,21 @@ describe('when the page changes under the card (#B100)', () => {
     should(told.at(-1)).containEql('was answered and typed');
   });
 
+  it("should flag a card redrawn onto a new document amber, above the field's own flag", async () => {
+    const { service, request, setFacts } = await raisedLogin();
+    setFacts({ ...RERENDERED, navigationId: 'loader-2' });
+
+    const error = await refused(service.deliver(SESSION, request.id, both(request.observedDigest ?? ''), HOST));
+    const [card] = await service.list(HOST);
+
+    should(error.reason).equal('target_rebound');
+    should(card?.fields.map(field => field.risk?.level)).eql(['red', 'amber']);
+    should(card?.fields[1]?.risk?.reason).equal(
+      'The page loaded a new document since you were asked, so check its address and the picture before you send.',
+    );
+    should(request.fields[1]?.risk?.level).equal('green');
+  });
+
   it('should find a field whose ref went stale by looking for it again, and redraw the card', async () => {
     const { service, request, setFacts, setRefound, refinds } = await raisedLogin();
     setFacts(undefined);
@@ -928,7 +943,7 @@ describe('when the page changes under the card (#B100)', () => {
         (await refused(service.deliver(SESSION, request.id, both(request.observedDigest ?? ''), HOST))).reason,
       );
 
-    should(reasons).eql(['target_changed', 'target_changed', 'target_unsettled']);
+    should(reasons).eql(['target_changed', 'target_changed', 'target_changed']);
     should(await service.list(HOST)).eql([]);
     should(closed.length).equal(1);
     should(writes).eql([]);

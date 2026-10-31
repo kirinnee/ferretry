@@ -133,6 +133,8 @@ interface Held {
   rebinds: number;
   /** Which target the card is for (`rebind.ts`): a sighting with this binding may redraw the card. Absent: none may. */
   binding?: string;
+  /** The document a page's card was raised on: a card redrawn onto another one says so. */
+  readonly raisedOn?: string;
   /** The target's key for saved logins (`sudo@kirin-box`), from what the DAEMON saw; never from the agent. */
   matchKey?: string;
   /** The saved login the ferret said it expects: shown to the owner as a hint, never made the one-tap choice. */
@@ -302,6 +304,7 @@ export class InputRequestService {
       checkFailures: 0,
       rebinds: 0,
       binding: bindingOf(seen.facts),
+      ...(seen.facts.kind === 'browser' ? { raisedOn: seen.facts.navigationId } : {}),
       ...(matchKey === undefined ? {} : { matchKey }),
       ...(raise.secretHint === undefined ? {} : { hint: raise.secretHint }),
       deliveries: new Map(),
@@ -1139,12 +1142,14 @@ export class InputRequestService {
   }
 
   /**
-   * The target the card is for, looked for again (`InputTargetPort.refind`): a page looks for the same field, a
-   * terminal is looked at again. A sighting that is already the same target needs no second look.
+   * The target the card is for, looked for again (`InputTargetPort.refind`): a page looks for the same field (the
+   * approved node first, then exactly one), a terminal is looked at again. A terminal sighting that is already the
+   * same target needs no second look; a page's always gets one, because a pointer's first match is not "exactly one".
    */
   private async refound(held: Held, looked: ObserveResult): Promise<ObserveResult> {
     const { request, binding } = held;
-    if (binding !== undefined && looked.ok && mayRebind(binding, looked.facts)) return looked;
+    if (request.target.kind !== 'browser' && binding !== undefined && looked.ok && mayRebind(binding, looked.facts))
+      return looked;
     if (request.observed === undefined || this.deps.target.refind === undefined) return looked;
     return await this.deps.target.refind(
       request.sessionId,
@@ -1167,12 +1172,15 @@ export class InputRequestService {
   private async redrawOrRefuse(held: Held, again: ObserveResult, code: InputReason): Promise<never> {
     const { request, binding } = held;
     if (binding === undefined || !again.ok || !mayRebind(binding, again.facts)) {
-      throw (await this.checkFailed(held, code))
-        ? targetUnsettled(request.target.kind)
-        : targetChanged(request.target.kind);
+      await this.checkFailed(held, code);
+      throw targetChanged(request.target.kind);
     }
     if (held.rebinds >= INPUT_MAX_REBINDS) {
-      await this.finish(held, 'refused', 'check_failures', undefined, { closeCard: true, tellAgent: true });
+      await this.finish(held, 'refused', 'check_failures', undefined, {
+        closeCard: true,
+        tellAgent: true,
+        unsettled: true,
+      });
       throw targetUnsettled(request.target.kind);
     }
     await this.rebind(held, again);
@@ -1189,7 +1197,12 @@ export class InputRequestService {
     held.names = [...new Set([...held.names, request.target.key, ...(seen.names ?? [])])];
     const matchKey = targetMatchKey(seen.facts, this.deps.hostName ?? '');
     if (matchKey !== undefined) held.matchKey = matchKey;
-    const fields = withRisk(request.fields, seen.facts);
+    // A card redrawn onto another document than the one it was raised on says so, above any other flag but red.
+    const moved =
+      seen.facts.kind === 'browser' && held.raisedOn !== undefined && seen.facts.navigationId !== held.raisedOn;
+    const fields = withRisk(request.fields, seen.facts).map(field =>
+      moved ? { ...field, risk: worstRisk([NEW_DOCUMENT_FLAG, field.risk]) as InputRisk } : field,
+    );
     // The new picture is taken before the owner is asked again, exactly as at raise.
     const shot =
       seen.facts.kind === 'browser'
@@ -1212,16 +1225,14 @@ export class InputRequestService {
     await this.record(held.request, 'input.rebound', { kind: 'daemon' }, this.auditOf(held.request));
   }
 
-  /** A check failed: nothing was typed. Three failures end the request (and answer true); fewer leave it pending. */
-  private async checkFailed(held: Held, reason: InputReason): Promise<boolean> {
+  /** A check failed: nothing was typed. Three failures end the request; fewer leave it pending. */
+  private async checkFailed(held: Held, reason: InputReason): Promise<void> {
     held.checkFailures += 1;
     held.request = { ...held.request, state: 'pending' };
-    if (held.checkFailures >= INPUT_MAX_CHECK_FAILURES) {
+    if (held.checkFailures >= INPUT_MAX_CHECK_FAILURES)
       await this.finish(held, 'refused', 'check_failures', undefined, { closeCard: true, tellAgent: true });
-      return true;
-    }
-    await this.record(held.request, 'input.refused', { kind: 'daemon' }, { ...this.auditOf(held.request), reason });
-    return false;
+    else
+      await this.record(held.request, 'input.refused', { kind: 'daemon' }, { ...this.auditOf(held.request), reason });
   }
 
   private async finish(
@@ -1240,6 +1251,8 @@ export class InputRequestService {
       saved?: boolean;
       /** The value was a secure copy, pasted. */
       sealed?: boolean;
+      /** It ended because the target kept changing under the card, not because it became another target. */
+      unsettled?: boolean;
     },
   ): Promise<void> {
     const at = instant(this.deps.clock.now());
@@ -1291,12 +1304,16 @@ export class InputRequestService {
         : {}),
     });
     if (options.closeCard)
-      await this.deps.agenda.close(request.sessionId, request.agendaItemId, noteOf(state, reason, request.target.kind));
+      await this.deps.agenda.close(
+        request.sessionId,
+        request.agendaItemId,
+        noteOf(state, reason, request.target.kind, options.unsettled === true),
+      );
     if (options.tellAgent)
       await this.deps.notifier.tell(
         request.sessionId,
         request.agendaItemId,
-        tellOf(request, state, reason, options.uncertain === true),
+        tellOf(request, state, reason, options.uncertain === true, options.unsettled === true),
       );
     for (const wake of held.waiters) wake();
     held.waiters.clear();
@@ -1529,6 +1546,11 @@ function typedValues(request: InputRequest, body: InputDeliverBody): Map<string,
 }
 
 const PLAIN_FLAG = 'Not secret: the ferret can see this value.';
+/** A page card redrawn onto a new document: the field looks the same, but the page may not be the one you were asked on. */
+const NEW_DOCUMENT_FLAG: InputRisk = {
+  level: 'amber',
+  reason: 'The page loaded a new document since you were asked, so check its address and the picture before you send.',
+};
 const PRIVATE_FLAG = 'This code will show on screen while the terminal is hidden from the ferret for 2 minutes.';
 
 /**
@@ -1675,29 +1697,44 @@ function maskedFacts(facts: InputTargetFacts): InputTargetFacts {
   };
 }
 
-function noteOf(state: string, reason: InputReason | undefined, kind: InputTarget['kind']): string {
+/**
+ * How a card closes, in plain words. A target that kept changing under the card and one that became ANOTHER target
+ * end with the same reason but are told apart: only the first invites the ferret to simply ask again.
+ */
+function noteOf(state: string, reason: InputReason | undefined, kind: InputTarget['kind'], unsettled: boolean): string {
   if (reason === 'check_failures')
-    return `The ${surfaceWord(kind)} kept changing, so nothing was typed. Ask the ferret to request again.`;
+    return unsettled
+      ? `The ${surfaceWord(kind)} kept changing, so nothing was typed. Ask the ferret to request again.`
+      : `The ${surfaceWord(kind)} is no longer what you approved, so nothing was typed. Look at it before the ferret asks again.`;
   return reason === undefined ? `Input request ${state}.` : `Input request ${state}: ${reason.replaceAll('_', ' ')}.`;
 }
 
 /** Why a request ended, in the words the ferret is told: never a bare wire code. */
-function reasonWords(reason: InputReason, kind: InputTarget['kind']): string {
-  return reason === 'check_failures' ? `the ${surfaceWord(kind)} kept changing` : reason.replaceAll('_', ' ');
+function reasonWords(reason: InputReason, kind: InputTarget['kind'], unsettled: boolean): string {
+  if (reason !== 'check_failures') return reason.replaceAll('_', ' ');
+  return unsettled
+    ? `the ${surfaceWord(kind)} kept changing`
+    : `the ${surfaceWord(kind)} is no longer what the owner approved`;
 }
 
-function tellOf(request: InputRequest, state: string, reason: InputReason | undefined, uncertain: boolean): string {
+function tellOf(
+  request: InputRequest,
+  state: string,
+  reason: InputReason | undefined,
+  uncertain: boolean,
+  unsettled: boolean,
+): string {
   const { kind, key } = request.target;
   const surface = surfaceWord(kind);
   const tool = `${kind}_request_input`;
-  if (kind === 'secret') return storeTellOf(request, state, reason, uncertain);
+  if (kind === 'secret') return storeTellOf(request, state, reason, uncertain, unsettled);
   if (uncertain)
     return `${request.agendaItemId} was interrupted while the owner's value was going into %${kind}:${key}; it may be partly or fully typed there. Read the ${surface} before you act once its quarantine allows; if you still need a value, raise a fresh ${tool}, or ask the owner to take over the ${surface}.`;
   if (state === 'delivered' && request.source !== undefined)
     return `${request.agendaItemId}: ${copyHandle(request.source.name)} was pasted into %${kind}:${key}. Read the ${surface} to continue once its quarantine allows.`;
   if (state === 'delivered')
     return `${request.agendaItemId} was answered and typed into %${kind}:${key}. Read the ${surface} to continue.`;
-  return `${request.agendaItemId} ended without a value (${state}${reason === undefined ? '' : `: ${reasonWords(reason, kind)}`}). If you still need a value, raise a fresh ${tool}, or ask the owner to take over the ${surface}.`;
+  return `${request.agendaItemId} ended without a value (${state}${reason === undefined ? '' : `: ${reasonWords(reason, kind, unsettled)}`}). If you still need a value, raise a fresh ${tool}, or ask the owner to take over the ${surface}.`;
 }
 
 /** What the agent is told about a paste into the secret store: it never reads the store, so it is told whether the name now holds the copy. */
@@ -1706,6 +1743,7 @@ function storeTellOf(
   state: string,
   reason: InputReason | undefined,
   uncertain: boolean,
+  unsettled: boolean,
 ): string {
   const { key } = request.target;
   const handle = copyHandle(request.source?.name ?? '');
@@ -1713,5 +1751,5 @@ function storeTellOf(
     return `${request.agendaItemId} was interrupted while ${handle} was being saved as the secret ${key}; it may or may not hold it now. Ask the owner to check the secret in Settings before you use \${secret:${key}}.`;
   if (state === 'delivered')
     return `${request.agendaItemId}: ${handle} was saved as the secret ${key}. Use it as \${secret:${key}}; you can never read it.`;
-  return `${request.agendaItemId} ended without saving ${handle} (${state}${reason === undefined ? '' : `: ${reasonWords(reason, request.target.kind)}`}). If you still need it saved, call secure_paste again or ask the owner.`;
+  return `${request.agendaItemId} ended without saving ${handle} (${state}${reason === undefined ? '' : `: ${reasonWords(reason, request.target.kind, unsettled)}`}). If you still need it saved, call secure_paste again or ask the owner.`;
 }

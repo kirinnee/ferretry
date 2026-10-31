@@ -570,18 +570,15 @@ describe('InputRequestService.deliver', () => {
     for (let n = 0; n < 3; n += 1) errors.push(await refused(service.deliver(SESSION, id, bodyFor(digest), HOST)));
     const after = await refused(service.deliver(SESSION, id, bodyFor(digest), HOST));
 
-    should(errors.map(error => error.reason)).eql(['target_changed', 'target_changed', 'target_unsettled']);
-    should(errors[2]?.code).equal('gone');
-    should(errors[2]?.message).equal(
-      'the terminal kept changing, so nothing was typed and this request ended; ask the ferret to request again',
-    );
+    // Another target, three times: it never says "kept changing", which would invite a fresh request on it.
+    should(errors.map(error => error.reason)).eql(['target_changed', 'target_changed', 'target_changed']);
     should(after.code).equal('gone');
     should(w.events.at(-1)?.type).equal('surface.input_refused');
     should(w.audits.at(-1)?.detail.reason).equal('check_failures');
     should(w.closed.at(-1)?.note).equal(
-      'The terminal kept changing, so nothing was typed. Ask the ferret to request again.',
+      'The terminal is no longer what you approved, so nothing was typed. Look at it before the ferret asks again.',
     );
-    should(w.told.at(-1)?.message).containEql('(refused: the terminal kept changing)');
+    should(w.told.at(-1)?.message).containEql('(refused: the terminal is no longer what the owner approved)');
     should(w.told.at(-1)?.message).not.containEql('check failures');
     should(w.writes.length).equal(0);
   });
@@ -988,7 +985,7 @@ describe('R7: the agent is never sent to chat for a value', () => {
       w.facts = ANOTHER_PROGRAM;
       for (let n = 0; n < 4; n += 1) await refused(service.deliver(SESSION, id, bodyFor(digest), HOST));
 
-      should(w.told.at(-1)?.message).containEql('kept changing');
+      should(w.told.at(-1)?.message).containEql('no longer what the owner approved');
       guided(w.told.at(-1)?.message);
     });
   }

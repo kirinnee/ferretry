@@ -176,9 +176,12 @@ same password prompt a row lower. Before this rule the request kept the digest i
 one such change every Send failed the same way and the third ended the request as `check_failures`.
 
 Now a Send whose look does not match **looks again** (`InputTargetPort.refind`). A page looks for the same
-field: the agent's pointer when it names exactly one element that is still that field, else the **one** visible
-element of the page with the same tag and attributes in a frame of the same origin, looked at exactly as the
-first look (the node Playwright holds, described by the session that holds it). A terminal is looked at again.
+field: the node the owner approved when it is still there, else the agent's pointer when it names exactly one
+element that is still that field, else the **one** visible element of the page's main frame (or an open shadow
+root) with the same tag and attributes. Every candidate is looked at exactly as the first look (the node Playwright
+holds, described by the session that holds it); one that cannot be proved, or a page that changes while it is
+searched, makes the search ambiguous. A field inside a frame is found again only through the pointer. A terminal
+is looked at again.
 What it finds is then compared on its **binding**, the part of the facts that names the target itself
 (`lib/input-requests/rebind.ts`):
 
@@ -193,16 +196,22 @@ What it finds is then compared on its **binding**, the part of the facts that na
   is typed, a new digest, the risk worked out again — the request stays pending, nothing is typed and **nothing
   is counted**. Send answers 409 `target_rebound` and the card says "The page changed. Check the picture and
   send again." (a terminal: "The terminal redrew its prompt."). The owner always approves the target the value
-  goes into: a re-bind never types. It is audited as `input.rebound`.
+  goes into: a re-bind never types. It is audited as `input.rebound`. A page card redrawn onto ANOTHER document
+  than the one it was raised on (a reload, or a navigation within the same origin) is flagged amber: "The page
+  loaded a new document since you were asked, so check its address and the picture before you send."
 - **Anything else** is a failed check, counted as before: another origin or page, an http page, a field in
   another site's frame, a password field that became a text field, a hidden field, no such field, **several
   look-alikes** (none is chosen), another program or prompt, echo turned on.
 
 A card older than the request (the owner's client still holds the digest from before a redraw) is answered
-`target_rebound` and not counted: nothing is wrong with the target. A target that is redrawn more than
-`INPUT_MAX_REBINDS` (5) times, or fails three checks, ends the request with `check_failures` and Send answers
-410 `target_unsettled`. The owner reads why in plain words: "The page kept changing, so nothing was typed. Ask
-the ferret to request again."
+`target_rebound` and not counted: nothing is wrong with the target. Both endings are `check_failures`, told apart
+in plain words:
+
+- redrawn more than `INPUT_MAX_REBINDS` (5) times: Send answers 410 `target_unsettled`, and the card closes with
+  "The page kept changing, so nothing was typed. Ask the ferret to request again."
+- three failed checks (another target): Send answers 409 `target_changed` as each one did, and the card closes
+  with "The page is no longer what you approved, so nothing was typed. Look at it before the ferret asks again."
+  It never invites a fresh request on a target that turned into another one.
 
 The guarded write is unchanged: `inputType` still writes only to the exact nodes the (redrawn) card showed and
 refuses anything different, and a write refused at the last moment redraws the card but is never retried within

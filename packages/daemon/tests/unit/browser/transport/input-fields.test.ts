@@ -1468,13 +1468,38 @@ describe('refindInputFields (#B100)', () => {
     should(again.ok && again.facts.fields[0]?.backendNodeId).equal(21);
   });
 
-  it('should pass over a look-alike Playwright cannot take a hold on', async () => {
+  it('should call the search ambiguous when a look-alike cannot be held: the page is changing under it', async () => {
     const { world, code } = codeWorld();
     const before = await look(world);
     world.rerender(code, 77);
     world.extra(78, [...code.attributes], { handleFails: true });
 
-    const again = await refindInputFields(world.subject, before, [pointer]);
+    should(await refindInputFields(world.subject, before, [pointer])).eql({ ok: false, ambiguous: 'code' });
+  });
+
+  it('should keep the node the owner approved while it is still there, whatever the pointer now names', async () => {
+    const world = new FakeWorld();
+    world.element('#otp', 21, ['type', 'text', 'name', 'otp']);
+    const selector = { id: 'code', target: { kind: 'selector' as const, selector: '#otp' } };
+    const first = await observeInputFields(world.subject, [selector]);
+    if (!first.ok) throw new Error('not observed');
+    world.pointers.set('#otp', world.extra(30, ['type', 'text', 'name', 'otp']));
+
+    const again = await refindInputFields(world.subject, first.facts, [selector]);
+
+    should(again.ok && again.facts.fields[0]?.backendNodeId).equal(21);
+  });
+
+  it('should follow a selector to the re-rendered node, even beside a look-alike, once the approved node is gone', async () => {
+    const world = new FakeWorld();
+    const code = world.element('#otp', 21, ['type', 'text', 'name', 'otp']);
+    const selector = { id: 'code', target: { kind: 'selector' as const, selector: '#otp' } };
+    const first = await observeInputFields(world.subject, [selector]);
+    if (!first.ok) throw new Error('not observed');
+    world.rerender(code, 77);
+    world.extra(78, ['type', 'text', 'name', 'otp']);
+
+    const again = await refindInputFields(world.subject, first.facts, [selector]);
 
     should(again.ok && again.facts.fields[0]?.backendNodeId).equal(77);
   });

@@ -9,9 +9,10 @@ import type { BrowserElementTarget, InputTargetFacts } from '@ferretry/protocol'
  *   origin and document, and per field the frame, the node, the attributes, the box. The browser decides all
  *   of it; the agent's pointer (a ref or a selector) only says where to look.
  * - {@link BrowserInputFieldsPort.inputRefind}: the fields a card showed, found AGAIN after the page changed under it
- *   (a re-render replaced the node, a reload made a new document): the agent's pointer first, else the one visible
- *   field of the page with the same tag and attributes in a frame of the same origin. It is looked at exactly as
- *   `inputObserve` looks, so its identity is the node Playwright holds; it never types.
+ *   (a re-render replaced the node, a reload made a new document): the approved node if it is still there, else the
+ *   agent's pointer when it names exactly one such field, else the one visible look-alike with the same tag and
+ *   attributes in the page's main frame. It is looked at exactly as `inputObserve` looks, so its identity is the node
+ *   Playwright holds; it never types.
  * - {@link BrowserInputFieldsPort.inputShot}: a picture of the part of the page the fields are in, for the
  *   owner's card, taken BEFORE anything is typed.
  * - {@link BrowserInputFieldsPort.inputType}: the one write. It checks the page against `expected` first (the
@@ -75,9 +76,10 @@ export interface BrowserInputFieldsPort {
   inputDocument(pageId: string): Promise<BrowserInputDocument>;
   inputObserve(pageId: string, fields: readonly BrowserInputFieldPointer[]): Promise<BrowserInputObservation>;
   /**
-   * The fields `expected` describes, found again in the page as it is now. Each field: the agent's pointer when it
-   * names exactly one element that is still that field (same frame origin, tag and attributes, visible); else the
-   * one visible element of the page with that tag and those attributes. None is `missing`, several is `ambiguous`.
+   * The fields `expected` describes, found again in the page as it is now. Each field: the node the card showed, if
+   * it is still that field (same frame origin, tag and attributes, visible); else the agent's pointer when it names
+   * exactly one such element; else the one visible look-alike. None is `missing`; several, or a search the page
+   * disturbed, is `ambiguous`.
    */
   inputRefind(
     pageId: string,
