@@ -66,7 +66,11 @@ export class DownloadStage {
   private readonly entries = new Map<string, Entry>();
   private serial = 0;
 
-  constructor(private readonly options: DownloadStageOptions) {}
+  private readonly options: DownloadStageOptions;
+
+  constructor(options: DownloadStageOptions) {
+    this.options = options;
+  }
 
   /** Begins staging one download a page started. Never throws: a failure is the entry's `failed` state. */
   accept(pageId: string, download: StageableDownload): void {

@@ -33,14 +33,16 @@ export const STAGED_FILE_TTL_MS = 15 * 60_000;
 /** Where a download is saved when the agent names no place. */
 export const DEFAULT_SAVE_FOLDER = 'downloads';
 
+type AgentFileErrorCode = 'bad_request' | 'not_found' | 'forbidden' | 'conflict' | 'unavailable';
+
 /** Why a file tool could not do what was asked, in a code the agent-tool path maps to its own. */
 export class AgentFileError extends Error {
-  constructor(
-    readonly code: 'bad_request' | 'not_found' | 'forbidden' | 'conflict' | 'unavailable',
-    message: string,
-  ) {
+  readonly code: AgentFileErrorCode;
+
+  constructor(code: AgentFileErrorCode, message: string) {
     super(message);
     this.name = 'AgentFileError';
+    this.code = code;
   }
 }
 
