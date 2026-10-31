@@ -383,7 +383,7 @@ import {
 import { FileConversationFiles } from '../src/adapters/migrate/file-conversation-files.ts';
 import { FileMigrationReportStore } from '../src/adapters/migrate/file-migration-report.ts';
 import { AutoTitlingSendChannel, FileNameClaimStore, FileSystemCallsignCounters } from '../src/adapters/names/index.ts';
-import { FileNotificationDeliveryLedger } from '../src/adapters/notifications/index.ts';
+import { FileNotificationDeliveryLedger, NotificationHealthMonitor } from '../src/adapters/notifications/index.ts';
 import {
   bunProbeSpawn,
   CliPackProbe,
@@ -954,6 +954,7 @@ import {
   NO_IO_PRESSURE,
   NO_STACK_SAMPLER,
   NO_WATCHDOG,
+  type NotificationHealthReading,
   NotificationService,
   needsRolloutFormatProbe,
   type ObservedSession,
@@ -9898,8 +9899,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         new AccountModelConversationListPolicy(declaredAccountModel),
       );
       const wardenPaths = createWardenPaths(paths.home);
+      // A push that cannot be made says so in this log and in `fy doctor`: until v4.116.0's silent outage,
+      // nothing anywhere said that no push had been made for days.
+      const notificationLedger = new FileNotificationDeliveryLedger(paths, stateFiles, {
+        warn: message => void process.stderr.write(`notifications: ${message}\n`),
+      });
+      const notificationHealth = new NotificationHealthMonitor(clock, line => void process.stderr.write(`${line}\n`));
       const notifications = new NotificationService({
-        ledger: new FileNotificationDeliveryLedger(paths, stateFiles),
+        ledger: notificationLedger,
         sessions: {
           describe: async id => {
             const view = await sessions.get(id);
@@ -9915,7 +9922,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         push,
         serial: new KeyedSerialExecutor(),
         clock,
-        diagnostics: { warn: message => void process.stderr.write(`notifications: ${message}\n`) },
+        diagnostics: notificationHealth,
       });
       // ONE agenda service for this opened store, shared by the route a person answers on and by
       // the warden sweep that raises and clears its own escalations. Two would each hold their own
@@ -11533,6 +11540,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               tmuxRelease: await new TmuxReleaseReader(tmuxExecutable, tmux).read(),
               loopbackFirewall: await loopbackFirewall(),
               userSlice: await userSlice(),
+              notifications: {
+                enrolled: await notifications.enrolledDevices().catch(() => 0),
+                ledger: await notificationLedger.inspect(),
+                ...notificationHealth.snapshot(),
+              },
             });
           },
         },
@@ -13642,6 +13654,27 @@ export function discoverableRelayUrl(sources: readonly RelayCarrierSource[]): st
  * its own and "another daemon is already serving that address" and "something unidentified holds it"
  * need different things done about them.
  */
+/**
+ * What `fy doctor` can tell about this host's pushes WITHOUT a running daemon: the ledger as it reads
+ * and the devices enrolled. What only a running daemon knows (a push that failed since it started) is
+ * on its `GET /v1/doctor`, the app's doctor page. Absent when even that cannot be read.
+ */
+async function offlineNotificationHealth(
+  stateHome: string,
+  userHome: string,
+): Promise<NotificationHealthReading | undefined> {
+  try {
+    const paths = createFoundationPaths(resolveStateHome({ fyHome: stateHome, homeDirectory: userHome }));
+    const files = new StateFileSystem(paths);
+    return {
+      enrolled: (await new StatePushRepository(paths, files).list()).length,
+      ledger: await new FileNotificationDeliveryLedger(paths, files).inspect(),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 export async function checkConfiguration(
   world: DaemonWorld,
   say: (text: string) => void = text => void writeSync(1, `${text}\n`),
@@ -13687,6 +13720,7 @@ export async function checkConfiguration(
         return undefined;
       }
     })(),
+    notifications: await offlineNotificationHealth(world.stateHome.path, world.userHome),
   });
   for (const line of renderDoctorReport(doctor)) say(line);
   /**

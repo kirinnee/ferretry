@@ -225,9 +225,16 @@ rules: written only when every session succeeded, a failed session keeps its old
 never stops the daemon starting. [agenda.md § On disk](agenda.md#on-disk) has the rest. Records in
 `notifications.jsonl` are not rewritten: both key spellings (`attention:`, `agenda:`) are read as one, so an item
 notified before the upgrade is never notified again. A record written before v4.116.0 names its item `attentionId`;
-it is read as `agendaId`. The ledger fails closed on any line it cannot read, so refusing that spelling silenced
-every push from v4.116.0 until it was read again, and a push that cannot be made now says so in the daemon log
-(`notifications: push <key> was not made — <reason>`).
+it is read as `agendaId`. Refusing that spelling silenced every push from v4.116.0, because the ledger then failed
+closed on any line it could not read and the failure was swallowed.
+
+**A push that cannot be made is never silent.** A ledger line this daemon cannot read — malformed, of an unknown
+shape, or out of phase — is skipped and counted, and every other line still decides; the cost is at worst one repeat
+push for the identity that line named. The count is said in the daemon log whenever it changes
+(`notifications: …notifications.jsonl: N unreadable lines skipped (first: line L, <why>)`). Every push that fails
+is said too (`notifications: push <key> failed — <reason>`), and `fy doctor` (also the app's doctor page) has a
+`notifications` row that fails while the newest push failed, while no device is enrolled, or while the newest
+recorded push errored or reached no device, plus a `notification log` note for skipped lines.
 
 ## Every automatic push, and why it stays or goes
 

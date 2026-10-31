@@ -6208,6 +6208,10 @@ describe('daemon boot lifecycle', () => {
       should(postures[2]).containEql('off.example');
       should(resolvedLines.join('\n')).not.match(/dials no relay|NO other device|nothing off this host can reach/u);
       should(resolvedLines.join('\n')).match(/reachable off this host/u);
+      // Whether this host can buzz a phone is read from its own files, without a running daemon.
+      should(
+        resolvedLines.some(line => /^missing\s+notifications\s+no device is enrolled for push/u.test(line)),
+      ).be.true();
       // THE PAIRING LINE DOES NOT READ THE CARRIER ABOVE IT, and this asserts the declared gap rather
       // than a capability. This daemon binds loopback, so its advertisement is `local-only`, and it
       // dials a rendezvous of its own — which `docs/relay-protocol.md` §14 could carry a redemption
