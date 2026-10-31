@@ -12,6 +12,8 @@ export interface WardenSurfaceProps {
 export interface WardenPageSlots {
   /** The whole page body: status line, groups and histories, bound to one daemon. */
   readonly Overview: ComponentType<WardenSurfaceProps>;
+  /** The daemons' numbers added up, drawn above the sections while the page shows All. Absent: no line. */
+  readonly Totals?: ComponentType<{ readonly machines: readonly WardenMachine[] }>;
 }
 
 export interface WardenPageProps extends WardenSurfaceProps {
@@ -30,7 +32,7 @@ export interface WardenPageProps extends WardenSurfaceProps {
  * Settings live in Settings › Warden, not here.
  */
 export function WardenPage({ connection, slots, machines, remembered = null, onRemember }: WardenPageProps) {
-  const { Overview } = slots;
+  const { Overview, Totals } = slots;
   const scope = machines === undefined ? undefined : resolveWardenScope(machines, remembered);
   return (
     <main
@@ -40,6 +42,9 @@ export function WardenPage({ connection, slots, machines, remembered = null, onR
     >
       {scope?.offerFilter === true && machines !== undefined ? (
         <WardenDaemonFilter machines={machines} selected={scope.selected} onChoose={id => onRemember?.(id)} />
+      ) : null}
+      {scope?.offerFilter === true && scope.selected === null && Totals !== undefined ? (
+        <Totals machines={scope.shown} />
       ) : null}
       {scope?.offerFilter === true ? (
         scope.shown.map(machine => (

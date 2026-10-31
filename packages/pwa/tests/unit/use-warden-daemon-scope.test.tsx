@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 import { useWardenDaemonScope } from '../../src/hooks/use-warden-daemon-scope.ts';
-import { DaemonControlsStore } from '../../src/lib/controls.ts';
+import { CONTROLS_VERSION, DaemonControlsStore } from '../../src/lib/controls.ts';
 import { interact, type Mounted, mount } from '../support/dom.ts';
 
 let view: Mounted | null = null;
@@ -40,5 +41,14 @@ describe('useWardenDaemonScope', () => {
     await interact(() => latest?.remember(null));
     expect(view.container.textContent).toBe('all');
     expect(controls.snapshot().device.wardenDaemon).toBeNull();
+  });
+
+  test('renders the remembered daemon on the server, where there is no subscription', () => {
+    const controls = new DaemonControlsStore({
+      getItem: () => JSON.stringify({ v: CONTROLS_VERSION, device: { wardenDaemon: 'daemon-ec2' } }),
+      setItem: () => {},
+    });
+    const Probe = () => <p>{useWardenDaemonScope(controls).remembered ?? 'all'}</p>;
+    expect(renderToStaticMarkup(<Probe />)).toBe('<p>daemon-ec2</p>');
   });
 });

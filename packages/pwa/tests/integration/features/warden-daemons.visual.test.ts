@@ -116,6 +116,12 @@ describe('the Warden page across paired daemons', () => {
             'Liftoff MBP',
           ]);
           expect(await sections(tab)).toEqual(['daemon-ec2', 'daemon-mbp']);
+          expect(await tab.locator('[data-warden-combined]').textContent()).toBe(
+            'All daemons today Flagged 9 Moved 8 Cleared 3 Stopped 0 Asked you 0 ',
+          );
+          const investigator = tab.locator('[data-warden-investigation] .truncate').first();
+          expect(await investigator.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+          expect(await investigator.evaluate(node => node.clientWidth)).toBeGreaterThan(40);
           expect(await tab.getByRole('region', { name: 'Warden on Liftoff EC2' }).count()).toBe(1);
           expect(await tab.getByRole('region', { name: 'Warden on Liftoff MBP' }).count()).toBe(1);
           const heads = await tab.locator('h2').allTextContents();
@@ -131,6 +137,7 @@ describe('the Warden page across paired daemons', () => {
 
           await select.selectOption('daemon-mbp');
           expect(await sections(tab)).toEqual(['daemon-mbp']);
+          expect(await tab.locator('[data-warden-combined]').count()).toBe(0);
           expect(await tab.getByRole('region', { name: 'Warden on Liftoff EC2' }).count()).toBe(0);
           await shoot(tab, `warden-daemons-mbp-${viewport.name}-${mode}`);
 

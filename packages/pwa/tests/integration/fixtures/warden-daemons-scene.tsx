@@ -13,10 +13,12 @@
 import type { WardenAgendaView, WardenStatusView } from '@ferretry/protocol';
 import { createRoot } from 'react-dom/client';
 
+import { WardenCombinedTotals } from '../../../src/features/warden/warden-combined-totals.tsx';
 import { WardenOverview } from '../../../src/features/warden/warden-overview.tsx';
+import { combinedTodayTotals } from '../../../src/features/warden/warden-stats-model.ts';
 import { useWardenDaemonScope } from '../../../src/hooks/use-warden-daemon-scope.ts';
 import { DaemonControlsStore } from '../../../src/lib/controls.ts';
-import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
+import { type DaemonConnection, daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { WardenPage, type WardenSurfaceProps } from '../../../src/lib/pages/warden-page.tsx';
 import { sessionView } from '../../support/sessions.ts';
 import {
@@ -122,6 +124,17 @@ function Overview({ connection, machineName }: WardenSurfaceProps) {
   );
 }
 
+function Totals({ machines: shown }: { readonly machines: readonly { readonly connection: DaemonConnection }[] }) {
+  return (
+    <WardenCombinedTotals
+      totals={combinedTodayTotals(
+        shown.map(machine => STATUS.get(machine.connection.daemonId)),
+        NOW,
+      )}
+    />
+  );
+}
+
 const controls = new DaemonControlsStore();
 const machines = [
   { connection: EC2, name: 'Liftoff EC2' },
@@ -134,7 +147,7 @@ function Scene() {
     <div className="warden-scene">
       <WardenPage
         connection={EC2}
-        slots={{ Overview }}
+        slots={{ Overview, Totals }}
         machines={machines}
         remembered={remembered}
         onRemember={remember}

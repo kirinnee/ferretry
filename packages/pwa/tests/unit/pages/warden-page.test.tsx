@@ -107,6 +107,35 @@ describe('WardenPage across daemons', () => {
     await view.unmount();
   });
 
+  it('should draw the combined totals above the sections under All only', async () => {
+    const Totals = ({ machines: shown }: { readonly machines: readonly (typeof machines)[number][] }) => (
+      <div data-totals={shown.map(machine => machine.name).join('+')} />
+    );
+    const totalsOf = (view: Mounted) => view.container.querySelector('[data-totals]')?.getAttribute('data-totals');
+    const all = await mount(
+      <WardenPage
+        connection={ec2}
+        slots={{ Overview, Totals }}
+        machines={machines}
+        remembered={null}
+        onRemember={() => {}}
+      />,
+    );
+    expect(totalsOf(all)).toBe('Liftoff EC2+Liftoff MBP');
+    await all.unmount();
+    const one = await mount(
+      <WardenPage
+        connection={ec2}
+        slots={{ Overview, Totals }}
+        machines={machines}
+        remembered="daemon-mbp"
+        onRemember={() => {}}
+      />,
+    );
+    expect(totalsOf(one)).toBeUndefined();
+    await one.unmount();
+  });
+
   it('should offer no filter and no machine name for a single paired daemon', async () => {
     const view = await mount(
       <WardenPage
