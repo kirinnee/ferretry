@@ -1,3 +1,9 @@
+## [4.180.0](https://github.com/kirinnee/ferretry/compare/v4.179.0...v4.180.0) (2026-10-31)
+
+### Features
+
+* **protocol:** add the catalog members contract (catalogs phase 2a) ([#1182](https://github.com/kirinnee/ferretry/issues/1182)) ([a5f2be6](https://github.com/kirinnee/ferretry/commit/a5f2be6ab837cc641547d0da23c18aad244975c3))
+
 ## [4.179.0](https://github.com/kirinnee/ferretry/compare/v4.178.0...v4.179.0) (2026-10-31)
 
 ### Features

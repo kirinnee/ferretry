@@ -1,3 +1,9 @@
+## [4.179.0](https://github.com/kirinnee/ferretry/compare/v4.178.0...v4.179.0) (2026-10-31)
+
+### Features
+
+* **logins:** sign-in method, login domains and a login hint; never passkeys ([#1181](https://github.com/kirinnee/ferretry/issues/1181)) ([96a1d24](https://github.com/kirinnee/ferretry/commit/96a1d24d26fe40af4a903b74034b161e716090c4))
+
 ## [4.178.0](https://github.com/kirinnee/ferretry/compare/v4.177.2...v4.178.0) (2026-10-31)
 
 ### Features
