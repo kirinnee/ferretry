@@ -242,18 +242,34 @@ export class CliConversionCheck implements ConversionCheckPort {
   }
 }
 
-/** `<cli> --version`, read once per executable. */
+/**
+ * `<cli> --version`, read once per executable.
+ *
+ * It runs in a private directory made for the one call: the CLI reads its working directory (a
+ * `bunfig.toml`, a project `.claude`) and its home (`~/.claude`, `~/.codex`) before it prints a thing,
+ * and the shared temporary folder is a place another user on this host may have planted either.
+ * `mkdtemp` makes the directory `0700` and gives it a name nobody can guess ahead of time.
+ */
 export class CliHarnessVersion implements HarnessVersionPort {
-  constructor(private readonly spawn: CheckSpawn = bunCheckSpawn) {}
+  constructor(
+    private readonly spawn: CheckSpawn = bunCheckSpawn,
+    private readonly temporaryRoot: string = tmpdir(),
+  ) {}
 
   async version(executable: string): Promise<string | undefined> {
-    const run = await this.spawn({
-      cmd: [executable, '--version'],
-      cwd: tmpdir(),
-      env: { PATH: [dirname(executable), process.env.PATH ?? '/usr/bin:/bin'].join(delimiter), HOME: tmpdir() },
-      timeoutMs: 20_000,
-    }).catch(() => undefined);
-    const line = run?.exitCode === 0 ? run.output.trim().split('\n')[0]?.trim() : undefined;
-    return line === undefined || line === '' ? undefined : line;
+    const root = await mkdtemp(join(this.temporaryRoot, 'fy-cli-version-')).catch(() => undefined);
+    if (root === undefined) return undefined;
+    try {
+      const run = await this.spawn({
+        cmd: [executable, '--version'],
+        cwd: root,
+        env: { PATH: [dirname(executable), process.env.PATH ?? '/usr/bin:/bin'].join(delimiter), HOME: root },
+        timeoutMs: 20_000,
+      }).catch(() => undefined);
+      const line = run?.exitCode === 0 ? run.output.trim().split('\n')[0]?.trim() : undefined;
+      return line === undefined || line === '' ? undefined : line;
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   }
 }
