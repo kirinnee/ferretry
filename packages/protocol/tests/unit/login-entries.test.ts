@@ -115,6 +115,25 @@ describe('what an input card offers', () => {
     expect(InputSavedSchema.safeParse({ ...saved, offers: [{ ...saved.offers[0], value: 'x' }] }).success).toBe(false);
   });
 
+  it('should take an older daemon’s offers, and a newer one’s primary only on one matched sign-in that says why', () => {
+    // Arrange
+    const older = { id: 'CLICKUP_A', label: 'ClickUp (a)', fills: 'password', matched: true };
+    const primary = { ...older, signIn: 'si_0123456789abcdef', primary: true, why: 'project', project: 'ferretry' };
+    const other = { ...older, id: 'CLICKUP_B', signIn: 'si_fedcba9876543210' };
+    const card = (offers: object[]) => InputSavedSchema.safeParse({ offers }).success;
+
+    // Act / Assert
+    expect(card([older, { ...older, id: 'CLICKUP_B' }])).toBe(true);
+    expect(card([primary, other])).toBe(true);
+    expect(card([primary, { ...other, primary: true, why: 'site' }])).toBe(false);
+    expect(card([{ ...primary, matched: false }])).toBe(false);
+    expect(card([{ ...primary, why: undefined }])).toBe(false);
+    expect(card([{ ...other, why: 'site' }])).toBe(false);
+    expect(card([{ ...primary, signIn: undefined }])).toBe(false);
+    expect(card([{ ...primary, why: 'site' }])).toBe(false);
+    expect(card([{ ...primary, why: 'ferret', project: undefined }])).toBe(true);
+  });
+
   it('should fill the password for a secret, the code for a private value and the username for plain', () => {
     expect(fillRoleFor('secret')).toBe('password');
     expect(fillRoleFor('private')).toBe('totp');

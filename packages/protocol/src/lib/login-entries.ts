@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SignInIdSchema } from './account-ids.ts';
 import { InstantSchema } from './common.ts';
 import {
   LoginObservedSchema,
@@ -53,7 +54,8 @@ export const MAX_LOGIN_ENTRIES = 256;
 export const LOGIN_PASSWORD_MIN_LENGTH = MIN_SECRET_VALUE_LENGTH;
 export const LOGIN_PASSWORD_MAX_LENGTH = 1_024;
 
-const oneLine = (maximum: number) =>
+/** A one-line text field: trimmed, at most `maximum` characters, no control or format characters. */
+export const oneLine = (maximum: number) =>
   z
     .string()
     .trim()
@@ -164,6 +166,28 @@ export const namesPasskey = (text: string): boolean => PASSKEY_WORDS.test(text);
 
 const PASSKEYS_OFF = 'passkeys are off: a saved login signs in with a password or a provider';
 
+/**
+ * What is wrong with a method, as issues: an SSO method names its provider, only SSO does, and a password sign-in
+ * goes via nothing. `link` is the provider it goes via, however the caller spells it (a handle here, an account key
+ * in the stored sign-in of accounts.ts), so both shapes keep one rule.
+ */
+export function loginMethodIssues(
+  kind: LoginMethodKind,
+  name: string | undefined,
+  link: string | undefined,
+  linkPath: string,
+): readonly { readonly path: string[]; readonly message: string }[] {
+  return [
+    ...(kind === 'sso' && name === undefined
+      ? [{ path: ['name'], message: 'name the SSO provider, as its button says it' }]
+      : []),
+    ...(kind !== 'sso' && name !== undefined ? [{ path: ['name'], message: 'only other SSO takes a name' }] : []),
+    ...(kind === 'password' && link !== undefined
+      ? [{ path: [linkPath], message: 'a password sign-in is not via another login' }]
+      : []),
+  ];
+}
+
 export const LoginMethodSchema = z
   .strictObject({
     kind: LoginMethodKindSchema,
@@ -173,12 +197,8 @@ export const LoginMethodSchema = z
     via: LoginEntryIdSchema.optional(),
   })
   .superRefine((method, context) => {
-    if (method.kind === 'sso' && method.name === undefined)
-      context.addIssue({ code: 'custom', path: ['name'], message: 'name the SSO provider, as its button says it' });
-    if (method.kind !== 'sso' && method.name !== undefined)
-      context.addIssue({ code: 'custom', path: ['name'], message: 'only other SSO takes a name' });
-    if (method.kind === 'password' && method.via !== undefined)
-      context.addIssue({ code: 'custom', path: ['via'], message: 'a password sign-in is not via another login' });
+    for (const issue of loginMethodIssues(method.kind, method.name, method.via, 'via'))
+      context.addIssue({ code: 'custom', ...issue });
   });
 export type LoginMethod = z.infer<typeof LoginMethodSchema>;
 
@@ -299,19 +319,51 @@ export const RemovedLoginEntrySchema = z.strictObject({ id: LoginEntryIdSchema, 
 export type RemovedLoginEntry = z.infer<typeof RemovedLoginEntrySchema>;
 
 /**
+ * Why a card's primary offer is first (accounts.ts `chosenSignIn`): the ferret named it, a project, folder or
+ * site default chose it, or it is the only account that signs in here. Absent on every other offer.
+ */
+export const SIGN_IN_CHOICE_REASONS = ['ferret', 'project', 'folder', 'site', 'only'] as const;
+export const SignInChoiceReasonSchema = z.enum(SIGN_IN_CHOICE_REASONS);
+export type SignInChoiceReason = z.infer<typeof SignInChoiceReasonSchema>;
+
+/** The longest project name a card's "Default for <project>" carries. */
+export const SIGN_IN_PROJECT_MAX_LENGTH = 128;
+
+/**
  * One saved login an input card may offer. `fills` is the field it would type (the password for a
  * `secret`, the code for a `code` or `private`, the username for a `plain`). `matched` is the DAEMON's decision that
  * the entry is for this target: only a matched entry is the card's one-tap primary; the rest stay
  * selectable by hand. `hinted` says the ferret named it, which never makes it matched.
+ *
+ * A daemon that keeps accounts and sign-ins (`accounts.signins.1`) adds four fields, all optional so an older
+ * daemon's card still parses: `id` is then the ACCOUNT's handle and `signIn` the sign-in it would use here
+ * (absent: an account hand-picked with no sign-in here); `primary` marks the one-tap choice, at most one and only
+ * ever a matched one, with `why` it is first (and `project`, the project a "Default for ferretry" names). With
+ * `primary` absent from every offer, nothing is the one-tap choice: the owner picks.
  */
-export const InputSavedOfferSchema = z.strictObject({
-  id: LoginEntryIdSchema,
-  label: oneLine(LOGIN_LABEL_MAX_LENGTH),
-  username: oneLine(LOGIN_USERNAME_MAX_LENGTH).optional(),
-  fills: LoginFieldRoleSchema,
-  matched: z.boolean(),
-  hinted: z.boolean().optional(),
-});
+export const InputSavedOfferSchema = z
+  .strictObject({
+    id: LoginEntryIdSchema,
+    label: oneLine(LOGIN_LABEL_MAX_LENGTH),
+    username: oneLine(LOGIN_USERNAME_MAX_LENGTH).optional(),
+    fills: LoginFieldRoleSchema,
+    matched: z.boolean(),
+    hinted: z.boolean().optional(),
+    signIn: SignInIdSchema.optional(),
+    primary: z.literal(true).optional(),
+    why: SignInChoiceReasonSchema.optional(),
+    project: oneLine(SIGN_IN_PROJECT_MAX_LENGTH).optional(),
+  })
+  .superRefine((offer, context) => {
+    if (offer.primary === true && !offer.matched)
+      context.addIssue({ code: 'custom', path: ['primary'], message: 'only a matched offer is the one-tap choice' });
+    if (offer.primary === true && offer.signIn === undefined)
+      context.addIssue({ code: 'custom', path: ['signIn'], message: 'the one-tap choice names the sign-in it uses' });
+    if ((offer.primary === true) !== (offer.why !== undefined))
+      context.addIssue({ code: 'custom', path: ['why'], message: 'the one-tap choice, and only it, says why' });
+    if (offer.project !== undefined && offer.why !== 'project')
+      context.addIssue({ code: 'custom', path: ['project'], message: 'a project is named only by a project default' });
+  });
 export type InputSavedOffer = z.infer<typeof InputSavedOfferSchema>;
 
 /** A saved login named by another: its handle and its label, never what it holds. */
@@ -340,7 +392,11 @@ export const InputSavedSchema = z.strictObject({
   suggest: z.strictObject({ id: LoginEntryIdSchema, label: oneLine(LOGIN_LABEL_MAX_LENGTH) }).optional(),
   /** Which field a typed value would be saved as; absent when this kind of value is never saved (a code). */
   saves: LoginFieldRoleSchema.optional(),
-  offers: z.array(InputSavedOfferSchema).max(MAX_LOGIN_ENTRIES).readonly(),
+  offers: z
+    .array(InputSavedOfferSchema)
+    .max(MAX_LOGIN_ENTRIES)
+    .readonly()
+    .refine(offers => offers.filter(offer => offer.primary === true).length <= 1, 'at most one offer is the primary'),
   /** The matched entry signs in through a provider: what the card says about it. */
   signIn: InputSignInSchema.optional(),
 });

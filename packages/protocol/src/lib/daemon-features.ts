@@ -83,12 +83,29 @@ export const DAEMON_FEATURES = {
    * the related check.
    */
   workSearch: 'work.search.1',
+  /**
+   * Accounts and sign-ins (docs/input-requests.md, "Accounts and sign-ins"): `/v1/accounts*`, a card offer's
+   * `signIn`/`primary`/`why` and a `si_` `secretHint` that orders the card. A daemon without this name keeps saved
+   * logins (`/v1/secrets/logins*`), has no such routes and never sends those offer fields, so the app keeps today's
+   * surface there and sends no sign-in id.
+   * NAMED BUT NOT YET REPORTED ({@link NOT_YET_REPORTED}): the store lands in a later change.
+   */
+  accountsSignIns: 'accounts.signins.1',
 } as const;
 
 export type DaemonFeature = (typeof DAEMON_FEATURES)[keyof typeof DAEMON_FEATURES];
 
+/**
+ * Names whose app-side half may land first: the app can already gate on them, but no daemon of this build reports
+ * them, because the daemon-side half is not built yet. Removing a name from here is how the daemon starts to offer it.
+ */
+const NOT_YET_REPORTED: ReadonlySet<DaemonFeature> = new Set<DaemonFeature>([DAEMON_FEATURES.accountsSignIns]);
+
 /** The names a daemon of this build reports, in a stable order. */
-export const daemonFeatureList = (): readonly DaemonFeature[] => Object.values(DAEMON_FEATURES).sort();
+export const daemonFeatureList = (): readonly DaemonFeature[] =>
+  Object.values(DAEMON_FEATURES)
+    .filter(feature => !NOT_YET_REPORTED.has(feature))
+    .sort();
 
 /**
  * Whether a daemon's health report offers a feature. A report with no list at all — a daemon from

@@ -1,3 +1,4 @@
+export * from './accounts.ts';
 export * from './address.ts';
 export * from './advertisement.ts';
 export * from './agenda.ts';

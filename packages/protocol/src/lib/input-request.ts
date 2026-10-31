@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SignInIdSchema } from './account-ids.ts';
 import { AgendaIdSchema } from './agenda.ts';
 import { BrowserChallengeProviderSchema, BrowserRefSchema } from './browser-target.ts';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
@@ -226,8 +227,12 @@ export const InputRaiseSchema = z
     /**
      * The saved login the ferret expects to be used. A HINT only: the daemon decides what matches the target,
      * a hint never makes an entry the one-tap choice, and the answer is the same whether such an entry exists.
+     * An account handle, or a sign-in (`si_…`). A daemon from before sign-ins refuses a `si_` hint, and one that
+     * does not yet keep them (no `accounts.signins.1`) names no sign-in, so the hint orders nothing: a client sends
+     * one only where the daemon reports the feature. Either way a hint can only choose among the sign-ins the daemon
+     * itself matched (accounts.ts `chosenSignIn`).
      */
-    secretHint: LoginEntryIdSchema.optional(),
+    secretHint: z.union([LoginEntryIdSchema, SignInIdSchema]).optional(),
     /**
      * The value comes from a secure copy the agent holds (`sealed:<name>`, docs/secure-copy.md), not from the
      * owner's keyboard: the owner only allows it. The daemon treats every field as `secret` whatever it says.
