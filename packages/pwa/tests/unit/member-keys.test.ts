@@ -142,6 +142,17 @@ describe('the member key store', () => {
     should(await store.markRefused('fy_daemon_other', 'x')).be.false();
   });
 
+  it('should take the refused mark off and keep the key', async () => {
+    const store = new IndexedDbMemberKeyStore(new ScriptedIndexedDb());
+    await store.save(await testSubscription(DAEMON));
+    await store.markRefused(DAEMON, '2026-10-31T11:00:00.000Z');
+    should(await store.clearRefused(DAEMON)).be.true();
+    const back = await store.load(DAEMON);
+    should(back?.status).equal('active');
+    should(back?.refusedAt).be.undefined();
+    should(await store.clearRefused('fy_daemon_other')).be.false();
+  });
+
   it('should relabel a publisher and report an unknown one', async () => {
     const store = new IndexedDbMemberKeyStore(new ScriptedIndexedDb());
     await store.save(await testSubscription(DAEMON));

@@ -410,7 +410,7 @@ function OpenedFile({
         </p>
         {sharedBy === undefined ? null : (
           <p className="m-0 break-words text-meta text-muted" data-catalog-shared-by="">
-            You call this publisher: {sharedBy}
+            You call this publisher: {revealHidden(sharedBy)}
           </p>
         )}
       </div>

@@ -87,6 +87,14 @@ describe('passkeyHeading and publisherLine', () => {
     });
   });
 
+  it('should mark hidden characters in a name the publisher chose, in the heading and the line', async () => {
+    const hidden = 'Stu\u202Edio';
+    should(passkeyHeading(hidden, hidden)).not.containEql('\u202E');
+    const line = publisherLine(await testSubscription('fy_daemon_x', { ownLabel: hidden, daemonName: hidden }));
+    should(line.label).not.containEql('\u202E');
+    should(line.publisherName).not.containEql('\u202E');
+  });
+
   it('should say a refused subscription is refused', async () => {
     const line = publisherLine(await testSubscription('fy_daemon_x', { status: 'refused' }));
     should(line.refused).be.true();

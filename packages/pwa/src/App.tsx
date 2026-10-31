@@ -643,19 +643,45 @@ function ConnectionPicker() {
   );
 }
 
-/** /join: the share link's page. The fragment is read once and leaves the address bar at once. */
+/**
+ * /join: the share link's page. Each fragment is read once and leaves the address bar at once.
+ *
+ * A second link opened in the same tab does not reload the page, so it is read here too: from the router
+ * (the paste field navigates to /join#…) and from `hashchange` (a link typed or pasted into the bar). The
+ * join flow then starts over for the new link, so a live code never lingers in the address bar or history.
+ */
 function JoinRoute() {
   const store = useAppStore();
-  const { navigate } = useRouter();
-  const [fragment] = useState(() => window.location.hash);
-  // `replaceState`, not `pushState`: Back must not restore the one-time code. Done after the first paint
-  // holds it, so a double render in development cannot read an address already emptied.
-  useEffect(takeArrivalFromLocation, []);
+  const { navigate, entryKey } = useRouter();
+  const [link, setLink] = useState(() => ({ fragment: window.location.hash, nonce: 0 }));
+  const arrived = useRef(false);
+  const read = useCallback((): void => {
+    const fragment = window.location.hash;
+    if (fragment === '') return;
+    // `replaceState`, not `pushState`: Back must not restore the one-time code.
+    takeArrivalFromLocation();
+    setLink(held => ({ fragment, nonce: held.nonce + 1 }));
+  }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `entryKey` is the trigger; a second link navigates to the same path
+  useEffect(() => {
+    if (!arrived.current) {
+      // The first link is already held by the state above; it only has to leave the address.
+      arrived.current = true;
+      if (window.location.hash !== '') takeArrivalFromLocation();
+      return;
+    }
+    read();
+  }, [read, entryKey]);
+  useEffect(() => {
+    window.addEventListener('hashchange', read);
+    return () => window.removeEventListener('hashchange', read);
+  }, [read]);
   const now = useCallback(() => new Date(), []);
   return (
     <JoinScreen
+      key={link.nonce}
       members={store.members}
-      fragment={fragment}
+      fragment={link.fragment}
       now={now}
       onShared={() => navigate(sharedPath())}
       onHome={() => navigate(connectionPickerPath())}

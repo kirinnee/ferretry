@@ -3,7 +3,7 @@
  * which. Pure; no network, no clock of its own. A refusal is always a sentence with the next step.
  */
 
-import type { SharedRedeemResponse } from '@ferretry/protocol';
+import { revealHidden, type SharedRedeemResponse } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { MemberRefusedError, MemberUnreachableError } from '../../lib/member-client.ts';
 import { fingerprintHead, type MemberSubscription } from '../../lib/member-keys.ts';
@@ -12,8 +12,10 @@ import { PasskeyCeremonyError, passkeySentence } from '../../lib/passkeys.ts';
 export const JOIN_REFUSED_SENTENCE = 'This link did not work: it may be used, expired or ended. Ask for a new one.';
 export const NOT_A_SHARE_LINK = 'This is not a share link. Ask the person who sent it for a new one.';
 export const REFUSED_TITLE = 'Access refused';
-export const REFUSED_SENTENCE = 'This publisher no longer accepts this browser. Nothing was deleted here.';
-export const REFUSED_JOIN_AGAIN = 'Join again with a new link';
+export const REFUSED_SENTENCE =
+  'This machine refused this browser just now. It may have revoked access, or the connection may have been interrupted. Nothing was deleted here.';
+export const STILL_REFUSED_SENTENCE = 'It refused again. If you were taken off, ask the owner for a new link.';
+export const REFUSED_JOIN_AGAIN = 'Join with a new link';
 export const REFUSED_JOIN_AGAIN_NOTE = 'Ask the owner for a new link, then open it here.';
 export const FORGET_CATALOG = 'Forget this catalog';
 export const FORGET_NOTE = 'This removes the key from this browser. You can join again later with a new link.';
@@ -62,7 +64,7 @@ export function passkeyWindow(endsAt: string, now: Date): PasskeyWindow {
 }
 
 export const passkeyHeading = (memberLabel: string, publisherLabel: string): string =>
-  `Add a passkey for ${memberLabel} on ${publisherLabel}`;
+  `Add a passkey for ${revealHidden(memberLabel)} on ${revealHidden(publisherLabel)}`;
 
 export const PASSKEY_EXPLAIN = 'A passkey is how you unlock these catalogs next time.';
 export const PASSKEY_BUTTON = 'Add a passkey';
@@ -79,8 +81,8 @@ export interface PublisherLine {
 
 export function publisherLine(subscription: MemberSubscription): PublisherLine {
   return {
-    label: subscription.ownLabel,
-    publisherName: subscription.daemonName,
+    label: revealHidden(subscription.ownLabel),
+    publisherName: revealHidden(subscription.daemonName),
     fingerprint: fingerprintHead(subscription.daemonId),
     fingerprintFull: subscription.daemonId,
     refused: subscription.status === 'refused',

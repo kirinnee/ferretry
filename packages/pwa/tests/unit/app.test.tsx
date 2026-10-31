@@ -1494,6 +1494,22 @@ describe('AppShell', () => {
     await view.unmount();
   });
 
+  it('reads a second share link opened in the same tab, starts over for it, and clears it from the address', async () => {
+    const { view } = await renderShell(`/join${FAKE_FRAGMENT}`, [alpha.daemonId]);
+    await settle();
+    expect(view.container.querySelector('[data-join-button]')).not.toBeNull();
+    expect(window.location.hash).toBe('');
+
+    window.history.pushState({}, '', '/join#v1;this-is-not-a-share-link');
+    await interact(() => window.dispatchEvent(new HashChangeEvent('hashchange')));
+    await settle();
+
+    expect(window.location.hash).toBe('');
+    expect(view.container.querySelector('[data-join-button]')).toBeNull();
+    expect(view.container.querySelector('[data-join-facts]')).toBeNull();
+    await view.unmount();
+  });
+
   it('shows Join, not first-run setup, for a browser with no machine at all', async () => {
     const { view } = await renderShell(`/join${FAKE_FRAGMENT}`);
     await settle();

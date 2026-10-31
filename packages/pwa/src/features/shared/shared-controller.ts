@@ -55,6 +55,15 @@ import {
 /** An item that did not verify against its signed manifest: its sentence is shown, the item never is. */
 class ItemNotVerifiedError extends Error {}
 
+export const ITEM_NOT_THE_LISTED_ONE = 'This item is not the one the catalog lists, so it was not opened.';
+
+export interface OpenedItemValue {
+  readonly item: SharedCatalogItem;
+  readonly opened: OpenedCatalogFile;
+  /** The manifest line the item verified against: everything shown is built from this and the item, never from the tap. */
+  readonly entry: SharedCatalogManifestEntry;
+}
+
 export interface SharedControllerPorts {
   readonly keys: MemberKeyStore;
   readonly mint: () => Promise<MintedMemberKeys>;
@@ -230,7 +239,7 @@ export class SharedController {
     subscription: MemberSubscription,
     view: SharedCatalogView,
     entry: SharedCatalogManifestEntry,
-  ): Promise<Attempt<{ readonly item: SharedCatalogItem; readonly opened: OpenedCatalogFile }>> {
+  ): Promise<Attempt<OpenedItemValue>> {
     const { signed, manifest } = view;
     if (signed === undefined || manifest === undefined) {
       return { kind: 'failed', problem: { kind: 'gone', sentence: NOT_SHOWN_SENTENCE } };
@@ -239,8 +248,12 @@ export class SharedController {
       const item = await readSharedItem(client, view.catalogId, entry.itemId, entry.version);
       const checked = await verifyCatalogItem(this.#ports.crypto, manifest, item);
       if (!checked.ok) throw new ItemNotVerifiedError(checked.reason);
+      if (checked.value.itemId !== entry.itemId || item.itemVersion !== entry.version) {
+        throw new ItemNotVerifiedError(ITEM_NOT_THE_LISTED_ONE);
+      }
       return {
         item,
+        entry: checked.value,
         opened: {
           manifest,
           file: {
@@ -253,6 +266,15 @@ export class SharedController {
         },
       };
     });
+  }
+
+  /** Asks the publisher once more with the key this browser kept; if it answers, the refused mark comes off. */
+  async tryAgain(subscription: MemberSubscription): Promise<Attempt<void>> {
+    const attempt = await this.#attempt(subscription, async client => {
+      await readMe(client);
+    });
+    if (attempt.kind === 'ok') await this.#ports.keys.clearRefused(subscription.daemonId);
+    return attempt;
   }
 
   /** Leaves the publisher. The answer is a 200; this browser's key and record are then the person's to drop. */

@@ -16,6 +16,7 @@ import type { DaemonIdentity } from '@ferretry/relay';
 import should from 'should';
 import type { z } from 'zod';
 import {
+  ITEM_NOT_THE_LISTED_ONE,
   type SharedBrowse,
   SharedController,
   type SharedControllerPorts,
@@ -29,7 +30,7 @@ import { MemberRefusedError, MemberUnreachableError, type MemberClient } from '.
 import { MemberKeyUnsupportedError, type MemberSubscription } from '../../../../src/lib/member-keys.ts';
 import type { CredentialsPort } from '../../../../src/lib/passkeys.ts';
 import type { JoinResult } from '../../../../src/lib/relay-join.ts';
-import { crypto, newIdentity, SKILL_ITEM_ID, signedFile, skillItem } from '../../../support/catalog-files.ts';
+import { crypto, mcpItem, newIdentity, SKILL_ITEM_ID, signedFile, skillItem } from '../../../support/catalog-files.ts';
 import { MemoryMemberKeyStore, testMemberKeys, testSubscription } from '../../../support/member-keys.ts';
 
 const NOW = new Date('2026-10-31T10:00:00.000Z');
@@ -278,6 +279,18 @@ describe('join', () => {
   });
 });
 
+const me = (catalogId: string) => ({
+  memberId: 'mbr_AAAAAAAAAAAAAAAAAAAAAA',
+  keyId: 'mk_AAAAAAAAAAAAAAAAAAAAAA',
+  label: 'Alice',
+  daemonId: publisher.daemonId,
+  daemonName: 'Studio',
+  catalogs: [{ catalogId, name: "Kirin's catalog", revision: 1 }],
+  carriers: [],
+  unlockExpiresAt: '2026-11-30T10:00:00.000Z',
+  passkeys: 1,
+});
+
 describe('passkey and unlock', () => {
   it('should create the passkey and register it', async () => {
     const sub = await testSubscription(publisher.daemonId);
@@ -323,6 +336,41 @@ describe('passkey and unlock', () => {
     should(keys.subscriptions.get(publisher.daemonId)).match({ status: 'refused', refusedAt: NOW.toISOString() });
     await Promise.resolve();
     should(clients[0]?.closed).equal(1);
+  });
+
+  it('should ask once more with the kept key and take the refused mark off when the publisher answers', async () => {
+    const sub = await testSubscription(publisher.daemonId, { status: 'refused' });
+    const { controller, keys, clients } = rig({ 'GET /v1/shared/me': () => me(`cat_${'a'.repeat(22)}`) });
+    keys.subscriptions.set(sub.daemonId, sub);
+    should((await controller.tryAgain(sub)).kind).equal('ok');
+    should(clients[0]?.seen).deepEqual(['GET /v1/shared/me']);
+    should(keys.subscriptions.get(publisher.daemonId)?.status).equal('active');
+    should(keys.forgotten).be.empty();
+  });
+
+  it('should leave the mark on, and delete nothing, when the publisher still refuses the key', async () => {
+    const sub = await testSubscription(publisher.daemonId, { status: 'refused' });
+    const { controller, keys } = rig({
+      'GET /v1/shared/me': () => {
+        throw new MemberRefusedError();
+      },
+    });
+    keys.subscriptions.set(sub.daemonId, sub);
+    should((await controller.tryAgain(sub)).kind).equal('refused');
+    should(keys.subscriptions.get(publisher.daemonId)?.status).equal('refused');
+    should(keys.forgotten).be.empty();
+  });
+
+  it('should keep the mark when the publisher cannot be reached, and say why', async () => {
+    const sub = await testSubscription(publisher.daemonId, { status: 'refused' });
+    const { controller, keys } = rig({
+      'GET /v1/shared/me': () => {
+        throw new MemberUnreachableError(1);
+      },
+    });
+    keys.subscriptions.set(sub.daemonId, sub);
+    should((await controller.tryAgain(sub)).kind).equal('failed');
+    should(keys.subscriptions.get(publisher.daemonId)?.status).equal('refused');
   });
 
   it('should unlock with the passkey and return when it ends', async () => {
@@ -372,18 +420,6 @@ describe('redeem', () => {
 });
 
 describe('browse and openItem', () => {
-  const me = (catalogId: string) => ({
-    memberId: 'mbr_AAAAAAAAAAAAAAAAAAAAAA',
-    keyId: 'mk_AAAAAAAAAAAAAAAAAAAAAA',
-    label: 'Alice',
-    daemonId: publisher.daemonId,
-    daemonName: 'Studio',
-    catalogs: [{ catalogId, name: "Kirin's catalog", revision: 1 }],
-    carriers: [],
-    unlockExpiresAt: '2026-11-30T10:00:00.000Z',
-    passkeys: 1,
-  });
-
   const browsed = async (signedOf: () => unknown, sub?: MemberSubscription) => {
     const file = await signedFile(publisher, [item]);
     const subscription = sub ?? (await testSubscription(publisher.daemonId));
@@ -452,6 +488,32 @@ describe('browse and openItem', () => {
     if (view === undefined || entry === undefined) throw new Error('catalog was not shown');
     const opened = await controller.openItem(subscription, view, entry);
     should(opened).match({ kind: 'failed', problem: { kind: 'gone' } });
+  });
+
+  it('should not open another listed item that was served under the tapped item', async () => {
+    const other = mcpItem(publisher.daemonId);
+    const file = await signedFile(publisher, [item, other]);
+    const subscription = await testSubscription(publisher.daemonId);
+    const { controller } = rig({
+      'GET /v1/shared/me': () => me(item.catalogId),
+      [`GET /v1/shared/catalogs/${item.catalogId}/manifest`]: () => file.signedManifest,
+      [`GET /v1/shared/catalogs/${item.catalogId}/items/${SKILL_ITEM_ID}/1`]: () => other,
+    });
+    const browse = await controller.browse(subscription);
+    const view = (browse as { value: SharedBrowse }).value.catalogs[0];
+    const tapped = view?.manifest?.items.find(entry => entry.itemId === SKILL_ITEM_ID);
+    if (view === undefined || tapped === undefined) throw new Error('catalog was not shown');
+    const opened = await controller.openItem(subscription, view, tapped);
+    should(opened).match({ kind: 'failed', problem: { kind: 'gone', sentence: ITEM_NOT_THE_LISTED_ONE } });
+  });
+
+  it('should show the verified manifest line, not the one that was tapped', async () => {
+    const { controller, result, subscription } = await browsed(() => undefined);
+    const view = (result as { value: SharedBrowse }).value.catalogs[0];
+    const listed = view?.manifest?.items[0];
+    if (view === undefined || listed === undefined) throw new Error('catalog was not shown');
+    const opened = await controller.openItem(subscription, view, { ...listed });
+    should((opened as { value: { entry: unknown } }).value.entry).eql(listed);
   });
 
   it('should refuse to open an item of a catalog that was not shown', async () => {

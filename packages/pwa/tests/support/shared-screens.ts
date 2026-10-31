@@ -38,6 +38,7 @@ const NAMES = [
   'leave',
   'forget',
   'rename',
+  'tryAgain',
 ] as const;
 
 export type Members = Pick<SharedController, (typeof NAMES)[number]>;

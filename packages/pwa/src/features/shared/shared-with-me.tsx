@@ -13,7 +13,7 @@ import { Button } from '../../shell/primitives.tsx';
 import { FailureLine } from '../catalogs/catalog-parts.tsx';
 import type { InstallHost } from '../catalogs/install-from-file-sheet.tsx';
 import { AccessRefused } from './access-refused.tsx';
-import type { SharedCatalogView, SharedController } from './shared-controller.ts';
+import type { Attempt, SharedCatalogView, SharedController } from './shared-controller.ts';
 import {
   LEAVE,
   LEAVE_NOTE,
@@ -43,12 +43,18 @@ import {
   RENAME,
   SAVE_NAME,
   TRY_AGAIN,
+  WITHDRAWN_INSTALLED,
+  withdrawnSummary,
   WORKING,
 } from './shared-screens-model.ts';
+import { useInstalledFromPublisher } from './shared-installs.ts';
 import { Fingerprint, SharedPage } from './shared-parts.tsx';
 import { type InstallMachine, type OpenedSharedItem, SharedItemSheet } from './shared-item-sheet.tsx';
 
-type SharedPort = Pick<SharedController, 'list' | 'browse' | 'unlock' | 'openItem' | 'leave' | 'forget' | 'rename'>;
+type SharedPort = Pick<
+  SharedController,
+  'list' | 'browse' | 'unlock' | 'openItem' | 'leave' | 'forget' | 'rename' | 'tryAgain'
+>;
 
 interface SharedWithMeProps {
   readonly members: SharedPort;
@@ -137,6 +143,7 @@ function PublisherCard({
     setState({ kind: 'loading' });
     setState(cardState(await members.browse(sub)));
   }, [members, sub]);
+  const installed = useInstalledFromPublisher(sub.daemonId, machines, installHost);
   const refused = isRefused(sub);
   useEffect(() => {
     if (!refused) void load();
@@ -168,7 +175,7 @@ function PublisherCard({
       <header className="flex min-w-0 flex-col gap-xs">
         {renaming ? (
           <RenameForm
-            current={line.label}
+            current={sub.ownLabel}
             onSave={async next => {
               const saved = await members.rename(sub.daemonId, next);
               if (saved) {
@@ -199,9 +206,15 @@ function PublisherCard({
         machines={machines}
         {...(installHost === undefined ? {} : { installHost })}
         busy={busy}
+        installed={installed}
         onUnlock={() => void unlock()}
         onAgain={() => void load()}
         onRefused={() => setState({ kind: 'refused' })}
+        onTryAgain={async () => {
+          const attempt = await members.tryAgain(sub);
+          if (attempt.kind === 'ok') onChanged();
+          return attempt;
+        }}
         onForget={async () => {
           await members.forget(sub.daemonId);
           onChanged();
@@ -312,10 +325,12 @@ function CardBody({
   machines,
   installHost,
   busy,
+  installed,
   label,
   onUnlock,
   onAgain,
   onRefused,
+  onTryAgain,
   onForget,
 }: {
   readonly state: CardState;
@@ -324,10 +339,12 @@ function CardBody({
   readonly machines: readonly InstallMachine[];
   readonly installHost?: InstallHost;
   readonly busy: boolean;
+  readonly installed: ReadonlyMap<string, string>;
   readonly label: string;
   readonly onUnlock: () => void;
   readonly onAgain: () => void;
   readonly onRefused: () => void;
+  readonly onTryAgain: () => Promise<Attempt<void>>;
   readonly onForget: () => Promise<void>;
 }) {
   switch (state.kind) {
@@ -338,7 +355,7 @@ function CardBody({
         </p>
       );
     case 'refused':
-      return <AccessRefused label={label} level={3} onForget={onForget} />;
+      return <AccessRefused label={label} level={3} onTryAgain={onTryAgain} onForget={onForget} />;
     case 'locked':
       return (
         <div className="flex min-w-0 flex-col items-start gap-xs" data-shared-locked="">
@@ -381,7 +398,9 @@ function CardBody({
                 data-shared-catalog={block.catalogId}
               >
                 <h3 className="m-0 break-words text-cell font-semibold text-fg">{block.name}</h3>
-                {block.items.length === 0 ? <p className="m-0 text-cell text-muted">{NO_ITEMS}</p> : null}
+                {block.items.length === 0 && block.withdrawn.length === 0 ? (
+                  <p className="m-0 text-cell text-muted">{NO_ITEMS}</p>
+                ) : null}
                 <ul className="m-0 flex list-none flex-col gap-xs p-0" aria-label={`Items in ${block.name}`}>
                   {block.items.map(item => (
                     <li key={item.entry.itemId} className="min-w-0">
@@ -399,12 +418,38 @@ function CardBody({
                     </li>
                   ))}
                 </ul>
+                <WithdrawnNote withdrawn={block.withdrawn} installed={installed} />
               </section>
             ),
           )}
         </div>
       );
   }
+}
+
+function WithdrawnNote({
+  withdrawn,
+  installed,
+}: {
+  readonly withdrawn: readonly { readonly itemId: string }[];
+  readonly installed: ReadonlyMap<string, string>;
+}) {
+  const summary = withdrawnSummary(withdrawn, installed);
+  if (summary.installed.length === 0 && summary.rest === null) return null;
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5" data-shared-withdrawn="">
+      {summary.installed.map(item => (
+        <p
+          key={item.itemId}
+          className="m-0 break-words text-meta text-muted"
+          data-shared-withdrawn-installed={item.itemId}
+        >
+          {item.name} · {WITHDRAWN_INSTALLED}
+        </p>
+      ))}
+      {summary.rest === null ? null : <p className="m-0 text-meta text-muted">{summary.rest}</p>}
+    </div>
+  );
 }
 
 function ItemButton({
@@ -438,7 +483,7 @@ function ItemButton({
     setOpening(false);
     if (attempt.kind === 'refused') onRefused();
     else if (attempt.kind === 'failed') setFailure(attempt.problem.sentence);
-    else setShown({ ...attempt.value, entry });
+    else setShown(attempt.value);
   };
   return (
     <>

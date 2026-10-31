@@ -7,9 +7,11 @@ import {
   REFUSED_JOIN_AGAIN_NOTE,
   REFUSED_SENTENCE,
   REFUSED_TITLE,
+  STILL_REFUSED_SENTENCE,
 } from '../../../../src/features/shared/shared-model.ts';
 import { click, settle } from '../../../support/dom-form.ts';
 import { mount } from '../../../support/dom.ts';
+import { failedAttempt } from '../../../support/shared-screens.ts';
 
 const q = (selector: string): HTMLElement | null => document.querySelector<HTMLElement>(selector);
 
@@ -77,6 +79,7 @@ describe('AccessRefused', () => {
       <AccessRefused
         label="Studio"
         level={2}
+        onTryAgain={async () => ({ kind: 'ok', value: undefined })}
         onForget={async () => {
           forgotten.push('forgotten');
         }}
@@ -101,8 +104,62 @@ describe('AccessRefused', () => {
     await view.unmount();
   });
 
+  it('offers Try again first, then a new link, and Forget last', async () => {
+    const view = await mount(
+      <AccessRefused
+        label="Studio"
+        level={3}
+        onTryAgain={async () => ({ kind: 'ok', value: undefined })}
+        onForget={async () => undefined}
+      />,
+    );
+    const order = [...document.querySelectorAll('[data-access-refused] button')].map(button =>
+      ['data-refused-try-again', 'data-join-again', 'data-refused-forget'].find(name => button.hasAttribute(name)),
+    );
+    expect(order).toEqual(['data-refused-try-again', 'data-join-again', 'data-refused-forget']);
+    await view.unmount();
+  });
+
+  it('says it was refused again, and keeps every choice, when Try again is refused', async () => {
+    const view = await mount(
+      <AccessRefused
+        label="Studio"
+        level={3}
+        onTryAgain={async () => ({ kind: 'refused' })}
+        onForget={async () => undefined}
+      />,
+    );
+    await click(q('[data-refused-try-again]'));
+    await settle();
+    expect(q('[data-access-refused]')?.textContent).toContain(STILL_REFUSED_SENTENCE);
+    expect(q('[data-refused-forget]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('says why when the publisher could not be reached', async () => {
+    const view = await mount(
+      <AccessRefused
+        label="Studio"
+        level={3}
+        onTryAgain={async () => failedAttempt('unreachable', 'Could not reach it.')}
+        onForget={async () => undefined}
+      />,
+    );
+    await click(q('[data-refused-try-again]'));
+    await settle();
+    expect(q('[data-access-refused]')?.textContent).toContain('Could not reach it.');
+    await view.unmount();
+  });
+
   it('sits one heading level down in a list of publishers', async () => {
-    const view = await mount(<AccessRefused label="Studio" level={3} onForget={async () => undefined} />);
+    const view = await mount(
+      <AccessRefused
+        label="Studio"
+        level={3}
+        onTryAgain={async () => ({ kind: 'ok', value: undefined })}
+        onForget={async () => undefined}
+      />,
+    );
     expect(q('[data-access-refused] h3')?.textContent).toBe(REFUSED_TITLE);
     await view.unmount();
   });

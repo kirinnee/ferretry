@@ -580,18 +580,31 @@ fragment, the same page the phone's camera opens, so there is one way in. A link
 is not a catalog share link. **Install from a file…** now lives under **More**, for offline swaps. There is no in-app
 QR scanner; the camera app already opens the link.
 
+**A second link in the same tab is read, not left behind.** The join page re-reads the address when it changes (the
+paste field's navigation, or a pasted `hashchange`), strips the fragment with `replaceState` at once so the code is
+not left in the address bar or history, and starts the join flow over for the new link. The router's own state is
+dropped by that `replaceState`, the same as the pairing link.
+
 **Member, at `/join`.** The page is routed by its **path**, never by the fragment shape, because a share fragment also
 matches a pairing fragment. The browser makes a non-extractable Ed25519 member key and an X25519 box key **for that
 publisher**, proves the publisher against the link's fingerprint before sending anything, sends one `join`, and
 keeps the keys only after `joined` (IndexedDB `ferretry-member-keys`, keyed by the verified daemon id). It then asks
 for the one passkey inside the 10-minute window, with a countdown said before it ends, and unlocks. A key the
 publisher refuses (`4403`, or `401` on an open session) is **marked, never deleted**: the person sees "Access refused"
-and chooses **Join again with a new link** or **Forget this catalog**. Leaving answers `200` and is never shown as a
+and chooses **Try again** (asks once more with the kept key, and takes the mark off if the publisher answers; one
+refusal can be a dropped connection, and a forged `4403` must not nudge anyone to delete a key), **Join with a new
+link**, or last **Forget this catalog**. Leaving answers `200` and is never shown as a
 refusal. A browser that already has a key opens a member session and redeems the code (`share_other_member` and
 `share_new_member` have their own sentences).
 
 **Shared with me (online only).** Each publisher shows the person's own label and the first 20 characters of its
-fingerprint. Every manifest and item is verified before it is shown. An item opens in the phase 1c review, and
+fingerprint. Every manifest and item is verified before it is shown. **An item that opens must be the one the list names**: after the item verifies, its id
+and version have to equal the entry the person tapped, otherwise it is refused ("This item is not the one the catalog
+lists, so it was not opened.") and nothing from it is shown. **Withdrawn items are said, not hidden**: each catalog
+block counts them ("2 items were withdrawn by the publisher") and offers none. An item a paired machine installed that is
+now withdrawn is matched by item id against that machine's install records and named from the record (the list names
+withdrawn items by id only): "Withdrawn by the publisher · it keeps working; no more updates". With no machine to read,
+only the count shows. A name the publisher chose is shown with hidden and format characters marked. An item opens in the phase 1c review, and
 **Install on a machine** hands the signed manifest and item to the member's **own** daemon's install preview, which
 verifies them again. The offline library is phase 3 and is not built.
 

@@ -7,11 +7,13 @@ import {
   ONLINE_ONLY,
   REFUSED_SENTENCE,
   REFUSED_TITLE,
+  STILL_REFUSED_SENTENCE,
   UNLOCK_NOTE,
 } from '../../../../src/features/shared/shared-model.ts';
 import { NAME_NOT_SAVED, NAME_PROBLEM, NOT_PAIRED_NOTE } from '../../../../src/features/shared/shared-screens-model.ts';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { fingerprintHead, type MemberSubscription } from '../../../../src/lib/member-keys.ts';
+import { installRecord } from '../../../support/catalog-views.ts';
 import { testSubscription } from '../../../support/member-keys.ts';
 import { click, settle, typeInto } from '../../../support/dom-form.ts';
 import { mount } from '../../../support/dom.ts';
@@ -212,6 +214,34 @@ describe('Access refused', () => {
     await view.unmount();
   });
 
+  it('tries again with the kept key, and reads the list again when the publisher answers', async () => {
+    let answered = false;
+    const { view, calls } = await open({
+      list: async () => [
+        await testSubscription(studioId, { ownLabel: 'Studio', status: answered ? 'active' : 'refused' }),
+      ],
+      browse: browseOk,
+      tryAgain: async () => {
+        answered = true;
+        return okAttempt(undefined);
+      },
+    });
+    await click(q('[data-refused-try-again]'));
+    await settle();
+    expect(calls).toContain('tryAgain');
+    expect(q('[data-access-refused]')).toBeNull();
+    expect(calls).toContain('browse');
+    await view.unmount();
+  });
+
+  it('stays refused, with the refusal said again, when the publisher still refuses', async () => {
+    const { view } = await open({ list: refusedList, tryAgain: async () => refusedAttempt() });
+    await click(q('[data-refused-try-again]'));
+    await settle();
+    expect(q('[data-access-refused]')?.textContent).toContain(STILL_REFUSED_SENTENCE);
+    await view.unmount();
+  });
+
   it('forgets only when the person confirms, then the list is read again', async () => {
     let gone = false;
     const { view, calls } = await open({
@@ -338,8 +368,63 @@ describe('leaving a publisher', () => {
   });
 });
 
+describe('withdrawn items', () => {
+  const withdrawnBrowse = (itemIds: readonly string[]) => {
+    const manifest = shared.view.manifest;
+    if (manifest === undefined) throw new Error('no manifest');
+    const view = {
+      ...shared.view,
+      manifest: { ...manifest, withdrawn: itemIds.map(itemId => ({ itemId, at: '2026-10-20T10:00:00.000Z' })) },
+    };
+    return async () => okAttempt({ ...shared.browse, catalogs: [view] });
+  };
+  const GONE = `item_${'w'.repeat(22)}`;
+  const GONE_TOO = `item_${'x'.repeat(22)}`;
+
+  it('says how many were withdrawn, and offers none of them', async () => {
+    const { view } = await open({ list: async () => [studio], browse: withdrawnBrowse([GONE, GONE_TOO]) });
+    expect(q('[data-shared-withdrawn]')?.textContent).toContain('2 items were withdrawn by the publisher.');
+    expect(all('[data-shared-item]').map(item => item.getAttribute('data-shared-item'))).not.toContain(GONE);
+    await view.unmount();
+  });
+
+  it('shows nothing about withdrawals when there are none', async () => {
+    const { view } = await open({ list: async () => [studio], browse: browseOk });
+    expect(q('[data-shared-withdrawn]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('names a withdrawn item a paired machine installed, from that machine’s own record', async () => {
+    const record = installRecord('skill', 'pdf-tools');
+    const client = {
+      request: async () => ({
+        installs: [{ ...record, provenance: { ...record.provenance, publisher: studioId, itemId: GONE } }],
+      }),
+    };
+    const fake = fakeMembers({ list: async () => [studio], browse: withdrawnBrowse([GONE, GONE_TOO]) });
+    const view = await mount(
+      <SharedWithMe
+        members={fake.members}
+        machines={[{ connection: alpha, name: 'Studio laptop' }]}
+        installHost={{ createClient: async () => client as never }}
+        onHome={() => undefined}
+      />,
+    );
+    await settle();
+    expect(q(`[data-shared-withdrawn-installed="${GONE}"]`)?.textContent).toBe(
+      'pdf-tools · Withdrawn by the publisher · it keeps working; no more updates',
+    );
+    expect(q('[data-shared-withdrawn]')?.textContent).toContain('1 item was withdrawn by the publisher.');
+    await view.unmount();
+  });
+});
+
 describe('opening an item', () => {
-  const opened = async () => okAttempt({ item: shared.skill, opened: shared.opened });
+  const opened = async () => {
+    const entry = shared.entries.find(candidate => candidate.itemId === shared.skill.itemId);
+    if (entry === undefined) throw new Error('no entry');
+    return okAttempt({ item: shared.skill, opened: shared.opened, entry });
+  };
 
   it('shows the full review of what the publisher signed, and closes it', async () => {
     const { view, calls } = await open({ list: async () => [studio], browse: browseOk, openItem: opened });

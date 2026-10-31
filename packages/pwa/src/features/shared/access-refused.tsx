@@ -1,13 +1,16 @@
 /**
  * "Access refused": the publisher no longer accepts this browser's key.
  *
- * The key is still here. Nothing is deleted until the person taps Forget and confirms, and joining
- * again needs a new link from the owner, which this screen says and does not fetch.
+ * The key is still here. "Try again" asks once more with it, because one refusal can be a dropped
+ * connection. Nothing is deleted until the person taps Forget and confirms, and joining again needs a
+ * new link from the owner, which this screen says and does not fetch.
  */
 
 import { CircleAlert } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '../../shell/primitives.tsx';
+import { FailureLine } from '../catalogs/catalog-parts.tsx';
+import type { Attempt } from './shared-controller.ts';
 import {
   FORGET_CATALOG,
   FORGET_NOTE,
@@ -15,8 +18,9 @@ import {
   REFUSED_JOIN_AGAIN_NOTE,
   REFUSED_SENTENCE,
   REFUSED_TITLE,
+  STILL_REFUSED_SENTENCE,
 } from './shared-model.ts';
-import { CONFIRM_FORGET, CONFIRM_FORGET_YES, KEEP } from './shared-screens-model.ts';
+import { CONFIRM_FORGET, CONFIRM_FORGET_YES, KEEP, TRY_AGAIN, WORKING } from './shared-screens-model.ts';
 
 /** "Join again with a new link": says what to do. Joining needs a link only the owner can make, so it fetches nothing. */
 export function JoinAgain() {
@@ -38,16 +42,31 @@ export function JoinAgain() {
 export function AccessRefused({
   label,
   level,
+  onTryAgain,
   onForget,
 }: {
   /** The person's own name for the publisher. */
   readonly label: string;
   /** The heading level, so the title sits right under whatever heading the page already has. */
   readonly level: 2 | 3;
+  /** Asks the publisher once more with the kept key. */
+  readonly onTryAgain: () => Promise<Attempt<void>>;
   readonly onForget: () => Promise<void>;
 }) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [again, setAgain] = useState<string | null>(null);
+  const tryAgain = async (): Promise<void> => {
+    setBusy(true);
+    setAgain(null);
+    try {
+      const attempt = await onTryAgain();
+      if (attempt.kind === 'refused') setAgain(STILL_REFUSED_SENTENCE);
+      else if (attempt.kind === 'failed') setAgain(attempt.problem.sentence);
+    } finally {
+      setBusy(false);
+    }
+  };
   const Heading = level === 2 ? 'h2' : 'h3';
   const forget = async (): Promise<void> => {
     setBusy(true);
@@ -68,6 +87,18 @@ export function AccessRefused({
         {REFUSED_TITLE}
       </Heading>
       <p className="m-0 break-words text-cell">{REFUSED_SENTENCE}</p>
+      <div className="flex min-w-0 flex-col items-start gap-xs">
+        <Button
+          type="button"
+          variant="primary"
+          disabled={busy}
+          onClick={() => void tryAgain()}
+          data-refused-try-again=""
+        >
+          {busy ? WORKING : TRY_AGAIN}
+        </Button>
+        {again === null ? null : <FailureLine sentence={again} />}
+      </div>
       <JoinAgain />
       <div className="flex min-w-0 flex-col items-start gap-xs">
         <p className="m-0 text-cell">{FORGET_NOTE}</p>

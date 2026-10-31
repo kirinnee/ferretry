@@ -12,14 +12,12 @@ import {
   catalogItemReview,
   catalogItemWarnings,
   revealHidden,
-  type SharedCatalogItem,
-  type SharedCatalogManifestEntry,
 } from '@ferretry/protocol';
 import { useId, useMemo, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import type { OpenedItemValue } from './shared-controller.ts';
 import { Button } from '../../shell/primitives.tsx';
 import { CatalogSheet } from '../catalogs/catalog-parts.tsx';
-import type { OpenedCatalogFile } from '../catalogs/catalog-install-model.ts';
 import { MarkedText, ReviewBody, WarningList } from '../catalogs/catalog-review-view.tsx';
 import { InstallFromFileSheet, type InstallHost } from '../catalogs/install-from-file-sheet.tsx';
 import { INSTALL_ON_LABEL, INSTALL_ON_MACHINE, kindLabel, NOT_PAIRED_NOTE } from './shared-screens-model.ts';
@@ -30,11 +28,7 @@ export interface InstallMachine {
   readonly name: string;
 }
 
-export interface OpenedSharedItem {
-  readonly item: SharedCatalogItem;
-  readonly opened: OpenedCatalogFile;
-  readonly entry: SharedCatalogManifestEntry;
-}
+export type OpenedSharedItem = OpenedItemValue;
 
 export function SharedItemSheet({
   shown,
@@ -72,7 +66,7 @@ export function SharedItemSheet({
     <CatalogSheet
       name="shared-item"
       title={revealHidden(entry.name)}
-      subtitle={`${kindLabel(entry.kind)} · version ${entry.version} · from ${publisherLabel}`}
+      subtitle={`${kindLabel(entry.kind)} · version ${entry.version} · from ${revealHidden(publisherLabel)}`}
       closeLabel={`Close ${revealHidden(entry.name)}`}
       onClose={onClose}
     >

@@ -14,6 +14,8 @@ import {
   shareHost,
   UNLOCK_THEN_LINK,
   windowAnnouncement,
+  withdrawnSummary,
+  WITHDRAWN_INSTALLED,
 } from '../../../../src/features/shared/shared-screens-model.ts';
 import {
   JOIN_REFUSED_SENTENCE,
@@ -157,5 +159,30 @@ describe('opening a link with a key already here', () => {
   it('keeps the locked sentence in step with the one the controller says', () => {
     const locked = new FyHttpError('locked', 403, 'member_locked');
     expect(redeemRefusal(locked, 'https://app.example.test')).toBe(REDEEM_LOCKED_SENTENCE);
+  });
+});
+
+describe('withdrawnSummary', () => {
+  it('counts the withdrawn items nobody installed here, in plain words', () => {
+    expect(withdrawnSummary([{ itemId: 'a' }], new Map()).rest).toBe(
+      '1 item was withdrawn by the publisher. It cannot be installed.',
+    );
+    expect(withdrawnSummary([{ itemId: 'a' }, { itemId: 'b' }], new Map()).rest).toBe(
+      '2 items were withdrawn by the publisher. They cannot be installed.',
+    );
+  });
+  it('says nothing when nothing was withdrawn', () => {
+    expect(withdrawnSummary([], new Map())).toEqual({ installed: [], rest: null });
+  });
+  it('matches an installed item by id, names it from the record and marks hidden characters', () => {
+    const summary = withdrawnSummary([{ itemId: 'a' }, { itemId: 'b' }], new Map([['a', 'pdf\u202Etools']]));
+    expect(summary.installed).toHaveLength(1);
+    expect(summary.installed[0]?.itemId).toBe('a');
+    expect(summary.installed[0]?.name).not.toContain('\u202E');
+    expect(summary.rest).toBe('1 item was withdrawn by the publisher. It cannot be installed.');
+    expect(WITHDRAWN_INSTALLED).toBe('Withdrawn by the publisher · it keeps working; no more updates');
+  });
+  it('never invents a name for an item it knows only by id', () => {
+    expect(withdrawnSummary([{ itemId: 'zzz' }], new Map([['other', 'x']])).installed).toEqual([]);
   });
 });

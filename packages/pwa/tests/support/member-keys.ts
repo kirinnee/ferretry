@@ -39,6 +39,14 @@ export class MemoryMemberKeyStore implements MemberKeyStore {
     return true;
   }
 
+  async clearRefused(daemonId: string): Promise<boolean> {
+    const found = this.subscriptions.get(daemonId);
+    if (found === undefined) return false;
+    const { refusedAt: _refusedAt, ...rest } = found;
+    this.subscriptions.set(daemonId, { ...rest, status: 'active' });
+    return true;
+  }
+
   async rename(daemonId: string, ownLabel: string): Promise<boolean> {
     const found = this.subscriptions.get(daemonId);
     if (found === undefined) return false;

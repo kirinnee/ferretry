@@ -118,6 +118,8 @@ export interface MemberKeyStore {
   save(subscription: MemberSubscription): Promise<void>;
   /** Keeps the record and says the publisher refused the key. `false` when there is no such record. */
   markRefused(daemonId: string, at: string): Promise<boolean>;
+  /** Takes the refused mark off: the publisher answered this key again. The key itself is untouched. */
+  clearRefused(daemonId: string): Promise<boolean>;
   rename(daemonId: string, ownLabel: string): Promise<boolean>;
   /** The ONLY removal: the person's own tap. */
   forget(daemonId: string): Promise<void>;
@@ -185,6 +187,14 @@ export class IndexedDbMemberKeyStore implements MemberKeyStore {
     const found = await this.load(daemonId);
     if (found === undefined) return false;
     await this.save({ ...found, status: 'refused', refusedAt: at });
+    return true;
+  }
+
+  async clearRefused(daemonId: string): Promise<boolean> {
+    const found = await this.load(daemonId);
+    if (found === undefined) return false;
+    const { refusedAt: _refusedAt, ...rest } = found;
+    await this.save({ ...rest, status: 'active' });
     return true;
   }
 

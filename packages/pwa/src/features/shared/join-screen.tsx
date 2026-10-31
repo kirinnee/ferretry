@@ -8,7 +8,7 @@
 
 import { ShieldCheck } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import type { ShareLinkSeed } from '@ferretry/protocol';
+import { revealHidden, type ShareLinkSeed } from '@ferretry/protocol';
 import type { MemberSubscription } from '../../lib/member-keys.ts';
 import { Button } from '../../shell/primitives.tsx';
 import { FailureLine } from '../catalogs/catalog-parts.tsx';
@@ -46,7 +46,7 @@ import {
 import { Fingerprint, SharedPage } from './shared-parts.tsx';
 import { secondTicker, type Ticker, useClock } from './use-clock.ts';
 
-type JoinPort = Pick<SharedController, 'begin' | 'join' | 'addPasskey' | 'unlock' | 'redeem' | 'forget'>;
+type JoinPort = Pick<SharedController, 'begin' | 'join' | 'addPasskey' | 'unlock' | 'redeem' | 'forget' | 'tryAgain'>;
 
 interface JoinScreenProps {
   readonly members: JoinPort;
@@ -306,7 +306,7 @@ export function JoinScreen({ members, fragment, now, ticker = secondTicker, onSh
       const { seed, sub } = phase;
       const { result } = phase;
       return (
-        <SharedPage title={`You are already in ${sub.ownLabel}`}>
+        <SharedPage title={`You are already in ${revealHidden(sub.ownLabel)}`}>
           {result === undefined ? (
             <>
               {phase.unlock === 'needed' ? (
@@ -364,10 +364,15 @@ export function JoinScreen({ members, fragment, now, ticker = secondTicker, onSh
     }
     case 'refused':
       return (
-        <SharedPage title={phase.sub.ownLabel}>
+        <SharedPage title={revealHidden(phase.sub.ownLabel)}>
           <AccessRefused
-            label={phase.sub.ownLabel}
+            label={revealHidden(phase.sub.ownLabel)}
             level={2}
+            onTryAgain={async () => {
+              const attempt = await members.tryAgain(phase.sub);
+              if (attempt.kind === 'ok') onShared(phase.sub.daemonId);
+              return attempt;
+            }}
             onForget={async () => {
               await members.forget(phase.sub.daemonId);
               onHome();

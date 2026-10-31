@@ -10,6 +10,7 @@ import type { SharedCatalogManifestEntry, ShareLinkSeed } from '@ferretry/protoc
 import { revealHidden } from '@ferretry/protocol';
 import { fingerprintHead, type MemberSubscription } from '../../lib/member-keys.ts';
 import type { Attempt, RedeemOutcome, SharedBrowse, SharedCatalogView } from './shared-controller.ts';
+import { plural } from '../catalogs/catalog-review-model.ts';
 import {
   JOIN_REFUSED_SENTENCE,
   type PasskeyWindow,
@@ -110,6 +111,34 @@ export function itemLine(entry: SharedCatalogManifestEntry): ItemLine {
   };
 }
 
+export const WITHDRAWN_INSTALLED = 'Withdrawn by the publisher · it keeps working; no more updates';
+
+/** What a catalog says of the items its publisher took out. The signed list keeps their ids, never their names. */
+export interface WithdrawnSummary {
+  /** Items one of this person's machines installed: named from the machine's own record. */
+  readonly installed: readonly { readonly itemId: string; readonly name: string }[];
+  /** How many more were withdrawn, said once, or `null`. */
+  readonly rest: string | null;
+}
+
+export function withdrawnSummary(
+  withdrawn: readonly { readonly itemId: string }[],
+  installed: ReadonlyMap<string, string>,
+): WithdrawnSummary {
+  const mine = withdrawn.flatMap(entry => {
+    const name = installed.get(entry.itemId);
+    return name === undefined ? [] : [{ itemId: entry.itemId, name: revealHidden(name) }];
+  });
+  const others = withdrawn.length - mine.length;
+  return {
+    installed: mine,
+    rest:
+      others === 0
+        ? null
+        : `${plural(others, 'item')} ${others === 1 ? 'was' : 'were'} withdrawn by the publisher. ${others === 1 ? 'It' : 'They'} cannot be installed.`,
+  };
+}
+
 type CatalogBlock =
   | { readonly kind: 'problem'; readonly catalogId: string; readonly name: string; readonly sentence: string }
   | {
@@ -118,6 +147,7 @@ type CatalogBlock =
       readonly name: string;
       readonly view: SharedCatalogView;
       readonly items: readonly ItemLine[];
+      readonly withdrawn: readonly { readonly itemId: string }[];
     };
 
 /** A catalog that did not verify shows only its problem. One that did shows its items and nothing else. */
@@ -130,7 +160,14 @@ export function catalogBlock(view: SharedCatalogView): CatalogBlock {
       name,
       sentence: view.problem ?? '',
     };
-  return { kind: 'ok', catalogId: view.catalogId, name, view, items: view.manifest.items.map(itemLine) };
+  return {
+    kind: 'ok',
+    catalogId: view.catalogId,
+    name,
+    view,
+    items: view.manifest.items.map(itemLine),
+    withdrawn: view.manifest.withdrawn,
+  };
 }
 
 /** What one publisher's card shows, from the answer to "what is shared with me". */
