@@ -43,7 +43,7 @@ const NAME = {
 const NEW_NAME = {
   type: 'string',
   pattern: '^[a-z][a-z0-9-]{0,31}$',
-  description: 'A short name you choose, e.g. "dev" or "app": a lowercase letter, then letters, digits or dashes.',
+  description: 'A short name you choose, e.g. "dev" or "app".',
 };
 const ASK_OWNER = {
   type: ['boolean', 'string'],
@@ -710,11 +710,14 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
   {
     name: 'secure_paste',
     tool: 'secure.paste',
-    description: 'Paste sealed:<name> into your terminal once allowed; then input_wait.',
+    description: 'Paste sealed:<name> into your terminal, or save it as a secret, once allowed; then input_wait.',
     inputSchema: object(
       {
         handle: { type: 'string' },
-        to: { type: 'object', description: '{"kind":"terminal","name":"dev"}' },
+        to: {
+          type: 'object',
+          description: '{"kind":"terminal","name":"dev"} or {"kind":"secret","name":"VERCEL_TOKEN"}',
+        },
         prompt: { type: 'string' },
       },
       ['handle', 'to', 'prompt'],

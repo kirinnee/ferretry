@@ -23,6 +23,7 @@ import {
   PasteRuleSchema,
 } from '@ferretry/protocol';
 import { z } from 'zod';
+import { targetRef } from './input-card.ts';
 
 export type CopyClient = Pick<IFyApiClient, 'request'>;
 
@@ -89,10 +90,12 @@ export function pasteRoute(request: InputRequest): { readonly from: string; read
   const facts = request.observed;
   const to =
     facts === undefined
-      ? `%${request.target.kind}:${request.target.key}`
+      ? targetRef(request)
       : facts.kind === 'terminal'
         ? `${facts.foreground.comm} in %terminal:${request.target.key}`
-        : `a field on ${facts.origin}`;
+        : facts.kind === 'secret'
+          ? `the secret ${facts.name}${facts.exists ? ' (replacing its value)' : ' (new)'}`
+          : `a field on ${facts.origin}`;
   return { from, to };
 }
 

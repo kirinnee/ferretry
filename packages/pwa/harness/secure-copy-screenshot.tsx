@@ -2,13 +2,14 @@
  * Screenshots of secure copy's three owner screens (docs/secure-copy.md), at a 390px phone and a 1440px desktop,
  * in the light and dark studio themes. Review evidence; nothing compares the PNGs.
  *
- *   bun harness/secure-copy-screenshot.tsx [out-dir] [states]   # writes secure-copy-{paste,plan,rules}-*.png
+ *   bun harness/secure-copy-screenshot.tsx [out-dir] [states]   # writes secure-copy-{paste,store,plan,rules}-*.png
  *
- * `states` is a comma list (paste,plan,rules) when only some are wanted.
+ * `states` is a comma list (paste,store,plan,rules) when only some are wanted.
  *
  * Fake fixtures only: no real account, no real daemon, no value (a paste card never holds one). "paste" is the
  * input card a paste raises: a token sealed from `vercel tokens create`, going into the `vercel` program reading
- * %terminal:dev, with the daemon's risk flag. "plan" is the card a ferret raises before it starts, two planned
+ * %terminal:dev, with the daemon's risk flag. "store" is the same copy saved as the secret VERCEL_TOKEN, which
+ * already holds a value, so the card warns it replaces it. "plan" is the card a ferret raises before it starts, two planned
  * pastes with one ticked off. "rules" is Settings › Secrets › Pastes approved in advance, with the add form open.
  * Every width asserts no sideways scroll and the touch floor on every button of the phone.
  */
@@ -67,6 +68,18 @@ const paste = fakeRequest({
   },
 });
 
+// The daemon's own sentence for a paste replacing a secret (service.ts riskOf).
+const REPLACES = { level: 'amber', reason: 'This replaces the value the secret holds now; the old value is gone for good.' } as const;
+const store = fakeRequest({
+  prompt: 'The new deploy token, kept for the deploy script',
+  sensitivity: 'secret',
+  target: { kind: 'secret', key: 'VERCEL_TOKEN' as never },
+  fields: [field('secret', { label: 'Token', risk: REPLACES })],
+  risk: REPLACES,
+  source: { kind: 'sealed', name: 'vercel_token', from: { kind: 'command', program: 'vercel' } },
+  observed: { kind: 'secret', name: 'VERCEL_TOKEN', exists: true },
+} as Parameters<typeof fakeRequest>[0]);
+
 const plan = {
   id: 'b'.repeat(32),
   sessionId: 'sess-1',
@@ -97,6 +110,15 @@ const pasteItem = {
   raisedBy: 'agent', raisedBySession: paste.sessionId, raisedByName: 'Hadi',
 } as never;
 
+const storeItem = {
+  ...(pasteItem as object),
+  sourceRef: store.id,
+  subject: 'Allow pasting sealed:vercel_token (64 characters from vercel) into the secret VERCEL_TOKEN, replacing its value. You type nothing.',
+  why: 'Allow pasting sealed:vercel_token (64 characters from vercel) into the secret VERCEL_TOKEN, replacing its value. You type nothing.',
+  context: 'The agent says: The new deploy token, kept for the deploy script',
+  input: { requestId: store.id },
+} as never;
+
 const planItem = {
   id: 'A8', source: 'question', sourceRef: plan.id, sourceSeq: 2, kind: 'permission', copyPlan: { planId: plan.id },
   title: 'Asks to approve pastes in advance',
@@ -122,6 +144,10 @@ createRoot(root).render(
         <CopyRulesCard rules={rules} onAdd={quiet} onRemove={quiet} />
       ) : view === 'plan' ? (
         itemView(planItem, { planForm: <CopyPlanCard agentName="Hadi" onAnswer={async () => 'Allowed 1 of 2, each once.'} plan={plan} /> })
+      ) : view === 'store' ? (
+        itemView(storeItem, {
+          inputForm: <InputCard agentName="Hadi" client={client} embedded fields={fieldsOf(store)} now={NOW} onDone={() => undefined} request={store} />,
+        })
       ) : (
         itemView(pasteItem, {
           inputForm: <InputCard agentName="Hadi" client={client} embedded fields={fieldsOf(paste)} now={NOW} onDone={() => undefined} request={paste} />,
@@ -157,7 +183,9 @@ run('./node_modules/.bin/tailwindcss', [
 ]);
 
 const wanted = process.argv[3]?.split(',');
-const STATES = (['paste', 'plan', 'rules'] as const).filter(state => wanted === undefined || wanted.includes(state));
+const STATES = (['paste', 'store', 'plan', 'rules'] as const).filter(
+  state => wanted === undefined || wanted.includes(state),
+);
 
 const server = Bun.serve({
   hostname: '127.0.0.1',

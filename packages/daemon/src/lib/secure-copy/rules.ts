@@ -258,7 +258,7 @@ function toMatches(rule: PasteRule, facts: InputTargetFacts): boolean {
     case 'browser':
       return facts.kind === 'browser' && facts.origin === rule.to.origin;
     case 'secret':
-      // The secret store is not a surface: a paste into it is matched by its own, exact-name rule (SC2b).
-      return false;
+      // Only the EXACT name the owner approved: a rule can never write a secret it does not name.
+      return facts.kind === 'secret' && facts.name === rule.to.name;
   }
 }

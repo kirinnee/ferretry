@@ -180,6 +180,18 @@ describe('agent tool schemas', () => {
     ]);
   });
 
+  it('should paste into a terminal by its name or into the secret store by a secret name, nowhere else', () => {
+    const paste = (to: unknown) => ({ tool: 'secure.paste', handle: 'sealed:token', to, prompt: 'the token' });
+
+    should(tools.AgentToolCallSchema.safeParse(paste({ kind: 'secret', name: 'VERCEL_TOKEN' })).success).be.true();
+    for (const to of [
+      { kind: 'secret', name: 'vercel_token' },
+      { kind: 'secret', name: 'VERCEL_TOKEN', exists: true },
+      { kind: 'vault', name: 'VERCEL_TOKEN' },
+    ])
+      should(tools.AgentToolCallSchema.safeParse(paste(to)).success).be.false();
+  });
+
   it('should take a page script as a bounded function, with at most one element, and refuse everything else', () => {
     // Arrange
     const accepted: AgentToolCall[] = [

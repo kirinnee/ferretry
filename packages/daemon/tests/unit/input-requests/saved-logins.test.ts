@@ -103,6 +103,7 @@ function harness(
     },
     audit: {
       record: async entry => void sinks.push(JSON.stringify(entry)),
+      stored: async () => undefined,
       saved: async entry => {
         saves.push(entry);
         sinks.push(JSON.stringify(entry));

@@ -56,6 +56,7 @@ function hostPart(word: string | undefined): string | undefined {
 /** The target's key, or `undefined` when what was seen cannot be named as one a saved login could match. */
 export function targetMatchKey(facts: InputTargetFacts, hostName: string): string | undefined {
   let key: string | undefined;
+  if (facts.kind === 'secret') return undefined;
   if (facts.kind === 'terminal') {
     const program = facts.foreground.comm.trim().toLowerCase();
     const host = REMOTE_PROGRAMS.has(program) ? remoteHostOf(facts.foreground.argv) : shortHost(hostName);

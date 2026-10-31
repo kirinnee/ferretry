@@ -17,7 +17,9 @@ const compact = (value: string, width: number): string => {
 
 /** How a target is cited: the same `%terminal:dev` an owner types and reads everywhere. */
 export function inputTargetReference(request: InputRequest): string {
-  return `%${request.target.kind}:${request.target.key}`;
+  return request.target.kind === 'secret'
+    ? `the secret ${request.target.key}`
+    : `%${request.target.kind}:${request.target.key}`;
 }
 
 function remaining(request: InputRequest, now: number): string {
@@ -59,6 +61,10 @@ export function renderInputFacts(request: InputRequest): string[] {
     );
   }
   const observed = request.observed;
+  if (observed?.kind === 'secret')
+    lines.push(
+      observed.exists ? `it REPLACES the value ${observed.name} holds now` : `it adds the new secret ${observed.name}`,
+    );
   if (observed?.kind === 'terminal') {
     lines.push(
       `reading the terminal now: ${showUntrusted(observed.foreground.comm)}${observed.recognisedConsumer ? '' : ' (not a program known to ask for secrets)'}`,

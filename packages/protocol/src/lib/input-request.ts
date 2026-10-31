@@ -3,8 +3,9 @@ import { AgendaIdSchema } from './agenda.ts';
 import { BrowserChallengeProviderSchema, BrowserRefSchema } from './browser-target.ts';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 import { InputSavedSchema, LOGIN_LABEL_MAX_LENGTH, LoginEntryIdSchema } from './login-entries.ts';
+import { SecretNameSchema } from './secrets.ts';
 import { CopyNameSchema, CopyOriginSchema } from './secure-copy.ts';
-import { SurfaceKeySchema, SurfaceKindSchema } from './surface-names.ts';
+import { SurfaceKeySchema } from './surface-names.ts';
 
 /**
  * THE INPUT REQUEST: the contract between an agent stuck at a password, sudo, one-time-code or 2FA prompt
@@ -80,8 +81,17 @@ export type InputSubmitMode = z.infer<typeof InputSubmitModeSchema>;
 export const InputTargetSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('terminal'), key: SurfaceKeySchema }),
   z.strictObject({ kind: z.literal('browser'), key: SurfaceKeySchema }),
+  /**
+   * The secret store, under a name (docs/secure-copy.md): only a paste of a secure copy goes here, and what the
+   * daemon observes is whether the name already holds a value.
+   */
+  z.strictObject({ kind: z.literal('secret'), key: SecretNameSchema }),
 ]);
 export type InputTarget = z.infer<typeof InputTargetSchema>;
+
+/** The kinds of place a value can go: a terminal, a page, or the secret store. */
+export const InputTargetKindSchema = z.enum(['terminal', 'browser', 'secret']);
+export type InputTargetKind = z.infer<typeof InputTargetKindSchema>;
 
 /** The most fields one card holds: a login's username, password and code, and one spare. */
 export const INPUT_MAX_FIELDS = 4;
@@ -297,7 +307,19 @@ const BrowserFactsSchema = z.strictObject({
  * RAM and re-observed on restart; the card draws it large and the agent's `prompt` small, which is the
  * defence against a fake prompt.
  */
-export const InputTargetFactsSchema = z.discriminatedUnion('kind', [TerminalFactsSchema, BrowserFactsSchema]);
+/** The secret store under one name: whether it already holds a value, as the vault said when the daemon looked. */
+const SecretStoreFactsSchema = z.strictObject({
+  kind: z.literal('secret'),
+  name: SecretNameSchema,
+  /** The name already holds a value: the paste REPLACES it. */
+  exists: z.boolean(),
+});
+
+export const InputTargetFactsSchema = z.discriminatedUnion('kind', [
+  TerminalFactsSchema,
+  BrowserFactsSchema,
+  SecretStoreFactsSchema,
+]);
 export type InputTargetFacts = z.infer<typeof InputTargetFactsSchema>;
 
 /** Where a request stands. Only `pending` may become `delivering`; the rest are final. */
@@ -599,7 +621,7 @@ export const InputEventSchema = z.strictObject({
   requestId: InputRequestIdSchema,
   agendaItemId: AgendaIdSchema,
   sessionId: boundedLine(128),
-  target: z.strictObject({ kind: SurfaceKindSchema, key: SurfaceKeySchema }),
+  target: z.strictObject({ kind: InputTargetKindSchema, key: SurfaceKeySchema }),
   sensitivity: InputSensitivitySchema,
   /** Who presses Enter, so a restart can rebuild a pending request. */
   submit: InputSubmitModeSchema.optional(),
@@ -664,7 +686,7 @@ export type InputAuditEvent = z.infer<typeof InputAuditEventSchema>;
  * `secret`), the prompt text or a URL path. `consumer` is a program name or an origin's host.
  */
 export const InputAuditDetailSchema = z.strictObject({
-  targetKind: SurfaceKindSchema,
+  targetKind: InputTargetKindSchema,
   /** A paste: the secure copy pasted, by name. */
   copy: CopyNameSchema.optional(),
   /** A paste the owner approved in advance: the rule it was delivered under. */

@@ -109,6 +109,18 @@ describe('secure copy words', () => {
     const page = request({ source: { kind: 'sealed', name: 't', from: { kind: 'browser' } } });
     expect(pasteRoute(page)?.from).toBe('a page');
   });
+
+  it('draws a paste saved as a secret by its name, saying whether it replaces one', () => {
+    const into = (exists: boolean | undefined) =>
+      request({
+        target: { kind: 'secret', key: 'VERCEL_TOKEN' } as never,
+        source: { kind: 'sealed', name: 't', from: { kind: 'command', program: 'gh' } },
+        observed: exists === undefined ? undefined : ({ kind: 'secret', name: 'VERCEL_TOKEN', exists } as never),
+      });
+    expect(pasteRoute(into(false))?.to).toBe('the secret VERCEL_TOKEN (new)');
+    expect(pasteRoute(into(true))?.to).toBe('the secret VERCEL_TOKEN (replacing its value)');
+    expect(pasteRoute(into(undefined))?.to).toBe('the secret VERCEL_TOKEN');
+  });
 });
 
 describe('the add-rule form', () => {

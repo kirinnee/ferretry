@@ -9,16 +9,23 @@ import type {
 } from './ports.ts';
 
 /**
- * Sends each request to the adapter for its kind of surface: a terminal's (one value, one write) or a page's.
+ * Sends each request to the adapter for its kind of target: a terminal's (one value, one write), a page's, or the
+ * secret store's (a paste saved as a secret).
  * A page target with no browser adapter wired cannot take a request, and says so as `unsupported`.
  */
 export class InputTargetRouter implements InputTargetPort {
   constructor(
     private readonly terminal: TerminalInputTargetPort,
     private readonly browser?: InputTargetPort,
+    /** The secret store, for a paste saved as a secret (docs/secure-copy.md). */
+    private readonly store?: InputTargetPort,
   ) {}
 
   async observe(sessionId: string, target: InputTarget, fields: readonly InputTargetField[]): Promise<ObserveResult> {
+    if (target.kind === 'secret')
+      return this.store === undefined
+        ? { ok: false, reason: 'unsupported' }
+        : await this.store.observe(sessionId, target, fields);
     if (target.kind === 'browser') {
       return this.browser === undefined
         ? { ok: false, reason: 'unsupported' }
@@ -34,6 +41,10 @@ export class InputTargetRouter implements InputTargetPort {
     submit: boolean,
     expected: InputTargetFacts,
   ): Promise<TypeResult> {
+    if (target.kind === 'secret')
+      return this.store === undefined
+        ? 'target_gone'
+        : await this.store.type(sessionId, target, values, submit, expected);
     if (target.kind === 'browser')
       return this.browser === undefined
         ? 'target_gone'

@@ -199,7 +199,7 @@ export function InputCard({
               <span className="mono text-row" data-input-program="">
                 {facts.program}
               </span>{' '}
-              is asking
+              {facts.verb ?? 'is asking'}
               <span className="font-normal text-muted" data-input-echo="">
                 {' '}
                 · {facts.echo}
