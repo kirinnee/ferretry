@@ -26,7 +26,7 @@
 import type { PushNotificationPayload } from '@ferretry/protocol';
 import type { DaemonId } from './daemon-connection.ts';
 import { notificationBrand } from './notify.ts';
-import { daemonSessionPath, daemonSessionsPath } from './pages/routes.ts';
+import { daemonSessionPath, daemonHomePath } from './pages/routes.ts';
 
 /** The path every per-machine push registration lives under. Never a page the app serves. */
 export const PUSH_SCOPE_ROOT = '/push/';
@@ -71,7 +71,7 @@ export const pushMachineOf = (scope: string, scriptUrl: string): PushMachine | n
 export const isPushScope = (scope: string): boolean => pushMachineOf(scope, scope) !== null;
 
 /** The pages one machine may open: its own sessions page and everything under it. */
-const machinePath = (machine: PushMachine): string => daemonSessionsPath(machine.daemonId as DaemonId);
+const machinePath = (machine: PushMachine): string => daemonHomePath(machine.daemonId as DaemonId);
 
 const withinMachine = (pathname: string, machine: PushMachine): boolean => {
   const root = machinePath(machine);

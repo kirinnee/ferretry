@@ -131,7 +131,7 @@ describe('RouterProvider', () => {
     window.dispatchEvent(new PopStateEvent('popstate'));
 
     expect(view.container.textContent).toBe('');
-    expect(rendered).toContain('sessions');
+    expect(rendered).toContain('home');
   });
 
   it('fails closed when a consumer is mounted without the app-root provider', async () => {
@@ -406,7 +406,7 @@ describe('RouterProvider history entries', () => {
       expect(browser.entries).toHaveLength(2);
       expect(browser.current.url.href).toBe('https://pwa.example.test/d/daemon-a?from=chat#top');
       expect(browser.current.state).toEqual({ fyEntry: 'entry-1', fyIndex: index + 1 });
-      expect(kindOf(view)).toBe('sessions');
+      expect(kindOf(view)).toBe('home');
     } finally {
       await view.unmount();
     }
@@ -426,7 +426,7 @@ describe('RouterProvider history entries', () => {
       expect(browser.backCalls).toBe(1);
       expect(browser.entries).toHaveLength(2);
       expect(entryOf(view)).toBe('entry-1');
-      expect(kindOf(view)).toBe('sessions');
+      expect(kindOf(view)).toBe('home');
     } finally {
       await view.unmount();
     }
@@ -626,7 +626,7 @@ describe('useOptionalRouter', () => {
     try {
       // Assert
       expect(outside.container.textContent).toBe('none');
-      expect(inside.container.textContent).toBe('sessions');
+      expect(inside.container.textContent).toBe('home');
     } finally {
       await outside.unmount();
       await inside.unmount();

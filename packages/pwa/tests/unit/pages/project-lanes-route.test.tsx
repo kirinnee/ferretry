@@ -58,6 +58,7 @@ describe('the project lanes page slot', () => {
   const slots = (extra: Partial<PageHostSlots>): PageHostSlots => ({
     ConnectionPicker: unused,
     Setup: unused,
+    Home: unused,
     Sessions: unused,
     NewSession: unused,
     SessionChat: unused,

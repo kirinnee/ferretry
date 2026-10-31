@@ -16,7 +16,7 @@ import type { FleetSnapshot } from './fleet-store.ts';
 import type { DeviceNotificationFilterPreferences } from './notification-filter.ts';
 import { shouldShowNotification } from './notification-filter.ts';
 import type { NotificationPreferences } from './notification-preferences.ts';
-import { daemonSessionPath, daemonSessionsPath } from './pages/routes.ts';
+import { daemonSessionPath, daemonHomePath } from './pages/routes.ts';
 
 export type NotifyKind = PushNotificationKind;
 
@@ -218,7 +218,7 @@ export const summaryNotification = (
   title: 'ferretry',
   body: `${count} sessions need you.`,
   tag: `fy-summary:${encodeURIComponent(daemonId)}`,
-  url: daemonSessionsPath(daemonId),
+  url: daemonHomePath(daemonId),
   eventKey,
   count: 1,
 });

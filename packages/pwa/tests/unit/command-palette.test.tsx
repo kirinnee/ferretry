@@ -278,7 +278,7 @@ describe('the keyboard', () => {
 
     await interact(() => pressKey(input(), 'Enter'));
 
-    expect(harness.navigated).toEqual(['/d/alpha']);
+    expect(harness.navigated).toEqual(['/d/alpha/sessions']);
     expect(harness.closed()).toBe(1);
   });
 

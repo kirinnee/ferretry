@@ -9,6 +9,7 @@ import {
   daemonBoardCardPath,
   daemonBoardForFerretPath,
   daemonBoardPath,
+  daemonHomePath,
   daemonImportedHistoryPath,
   daemonLearningPath,
   daemonMachineSetupPath,
@@ -35,6 +36,7 @@ describe('route path builders', () => {
     // Act
     const actual = [
       connectionPickerPath(),
+      daemonHomePath(daemonA),
       daemonSessionsPath(daemonA),
       daemonNewSessionPath(daemonA),
       daemonProjectsPath(daemonA),
@@ -52,6 +54,7 @@ describe('route path builders', () => {
     should(actual).deepEqual([
       '/',
       '/d/daemon%2Fa',
+      '/d/daemon%2Fa/sessions',
       '/d/daemon%2Fa/new',
       '/d/daemon%2Fa/projects',
       '/d/daemon%2Fa/projects/11111111-1111-4111-8111-111111111111',
@@ -102,6 +105,7 @@ describe('route parsing', () => {
     // Act
     const actual = [
       parseRoute('/d/daemon%2Fa'),
+      parseRoute('/d/daemon%2Fa/sessions'),
       parseRoute('/d/daemon%2Fa/new'),
       parseRoute('/d/daemon%2Fa/projects'),
       parseRoute('/d/daemon%2Fa/projects/11111111-1111-4111-8111-111111111111'),
@@ -116,6 +120,7 @@ describe('route parsing', () => {
 
     // Assert
     should(actual).deepEqual([
+      { kind: 'home', daemonId: daemonA },
       { kind: 'sessions', daemonId: daemonA },
       { kind: 'new-session', daemonId: daemonA },
       { kind: 'projects', daemonId: daemonA },
@@ -130,7 +135,7 @@ describe('route parsing', () => {
     ]);
   });
 
-  it('should preserve the daemon sessions fallback for unknown or incomplete daemon paths', () => {
+  it('should preserve the machine home fallback for unknown or incomplete daemon paths', () => {
     // Act
     const actual = [
       parseRoute('/d/daemon-b/unknown'),
@@ -141,7 +146,7 @@ describe('route parsing', () => {
       parseRoute('/d/daemon-b/tasks/extra'),
       // THE RETIRED ACCOUNTS ADDRESS, asserted rather than merely deleted. Accounts is Fleet's child
       // panel inside one daemon's settings now, and a panel has no pathname — so an old bookmark is
-      // an unknown daemon path like any other and lands on that daemon's sessions. It is emphatically
+      // an unknown daemon path like any other and lands on that machine's home. It is emphatically
       // NOT redirected: there is no second way in, and `legacy-tasks-redirect` is the one
       // compatibility shim this router has.
       parseRoute('/d/daemon-b/accounts'),
@@ -149,13 +154,13 @@ describe('route parsing', () => {
 
     // Assert
     should(actual).deepEqual([
-      { kind: 'sessions', daemonId: daemonB },
-      { kind: 'sessions', daemonId: daemonB },
-      { kind: 'sessions', daemonId: daemonB },
-      { kind: 'sessions', daemonId: daemonB },
-      { kind: 'sessions', daemonId: daemonB },
-      { kind: 'sessions', daemonId: daemonB },
-      { kind: 'sessions', daemonId: daemonB },
+      { kind: 'home', daemonId: daemonB },
+      { kind: 'home', daemonId: daemonB },
+      { kind: 'home', daemonId: daemonB },
+      { kind: 'home', daemonId: daemonB },
+      { kind: 'home', daemonId: daemonB },
+      { kind: 'home', daemonId: daemonB },
+      { kind: 'home', daemonId: daemonB },
     ]);
   });
 
@@ -283,6 +288,7 @@ describe('route identity', () => {
       parseRoute('/'),
       parseRoute('/setup'),
       parseRoute('/d/daemon-b'),
+      parseRoute('/d/daemon-b/sessions'),
       parseRoute('/d/daemon-b/new'),
       parseRoute('/d/daemon-b/projects/22222222-2222-4222-8222-222222222222'),
       daemonBSession,
@@ -303,7 +309,8 @@ describe('route identity', () => {
     should(actual).deepEqual([
       ['/', 'connection-picker'],
       ['/setup', 'setup'],
-      ['/d/daemon-b', 'sessions:"daemon-b"'],
+      ['/d/daemon-b', 'home:"daemon-b"'],
+      ['/d/daemon-b/sessions', 'sessions:"daemon-b"'],
       ['/d/daemon-b/new', 'new-session:"daemon-b"'],
       [
         '/d/daemon-b/projects/22222222-2222-4222-8222-222222222222',
@@ -330,7 +337,7 @@ describe('the Analytics Query address', () => {
       daemonId: daemonId('daemon-b'),
       view: 'query',
     });
-    should(parseRoute('/d/daemon-b/analytics/elsewhere').kind).equal('sessions');
+    should(parseRoute('/d/daemon-b/analytics/elsewhere').kind).equal('home');
     should(daemonAnalyticsQueryPath(daemonId('daemon-b'))).equal('/d/daemon-b/analytics/query');
     should(daemonAnalyticsQueryPath(daemonId('daemon-b'), '  ')).equal('/d/daemon-b/analytics/query');
     should(daemonAnalyticsQueryPath(daemonId('daemon-b'), ' sum(cost_usd) by (model) [7d] ')).equal(

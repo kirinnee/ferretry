@@ -31,6 +31,7 @@ export interface PageHostSlots {
   readonly ConnectionPicker: ComponentType;
   /** First-run setup. Connection-free: it exists precisely because there is none yet. */
   readonly Setup: ComponentType;
+  readonly Home: ComponentType<DaemonPageProps>;
   readonly Sessions: ComponentType<DaemonPageProps>;
   readonly NewSession: ComponentType<DaemonPageProps>;
   readonly Projects?: ComponentType<DaemonPageProps>;
@@ -78,6 +79,8 @@ export function PageHost({ route, connection, slots }: PageHostProps) {
 
   const matchedConnection = requireRouteConnection(route.daemonId, connection);
   switch (route.kind) {
+    case 'home':
+      return <slots.Home connection={matchedConnection} />;
     case 'sessions':
       return <slots.Sessions connection={matchedConnection} />;
     case 'new-session':

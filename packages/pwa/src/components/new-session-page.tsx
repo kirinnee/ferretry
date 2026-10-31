@@ -19,7 +19,7 @@ import {
   type NewSessionDraft,
   submitNewSession,
 } from '../lib/pages/new-session.ts';
-import { daemonSessionPath, daemonSessionsPath, daemonSettingsPath } from '../lib/pages/routes.ts';
+import { daemonSessionPath, daemonHomePath, daemonSettingsPath } from '../lib/pages/routes.ts';
 import type { DaemonProjectsStore } from '../lib/projects-store.ts';
 import type { DaemonUsageSlice, DaemonUsageStore } from '../lib/usage-store.ts';
 import { Button, Card, PanelBody, Textarea } from '../shell/primitives.tsx';
@@ -305,7 +305,7 @@ export function NewSessionPage({
 
   const update = (field: TextDraftField, value: string): void => setDraft(current => ({ ...current, [field]: value }));
   const canSubmit = canSubmitNewSession(draft, connection, submitting);
-  const sessionsPath = daemonSessionsPath(connection.daemonId);
+  const homePath = daemonHomePath(connection.daemonId);
   const chosen = chosenForDraft(chosenRuntime, connection, draft.agent);
   const models = modelSuggestions(chosen);
   const blocker = createBlocker(draft, submitting, noRunnableAccount);
@@ -351,7 +351,7 @@ export function NewSessionPage({
       className="mx-auto flex h-full min-h-0 w-full max-w-[720px] flex-1 flex-col overflow-y-auto px-3 pb-3 sm:px-0"
     >
       <div className="mb-3 mt-3 flex items-center gap-2.5">
-        <button className="text-meta text-muted hover:text-fg" onClick={() => onBack(sessionsPath)} type="button">
+        <button className="text-meta text-muted hover:text-fg" onClick={() => onBack(homePath)} type="button">
           ← Sessions
         </button>
         <h1 className="m-0 text-title font-semibold tracking-tight" id="new-session-heading">
@@ -621,7 +621,7 @@ export function NewSessionPage({
                 {blocker}
               </p>
             )}
-            <Button onClick={() => onNavigate(sessionsPath)} type="button" variant="ghost">
+            <Button onClick={() => onNavigate(homePath)} type="button" variant="ghost">
               Cancel
             </Button>
             <Button

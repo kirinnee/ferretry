@@ -46,7 +46,7 @@ import {
   daemonAnalyticsPath,
   daemonNewSessionPath,
   daemonProjectsPath,
-  daemonSessionsPath,
+  daemonHomePath,
   daemonSettingsPath,
 } from '../lib/pages/routes.ts';
 import { type WorkspaceRailPreferenceStore, workspaceRailPreferences } from '../lib/workspace-rail-preferences.ts';
@@ -211,7 +211,7 @@ const machineMenuItems = ({
     ...(machine.updateAvailable === true
       ? { icon: <span aria-hidden="true" className="kt-dot bg-accent" data-machine-menu-update="" /> }
       : {}),
-    onSelect: () => onNavigate(daemonSessionsPath(machine.daemonId)),
+    onSelect: () => onNavigate(daemonHomePath(machine.daemonId)),
   })),
   ...(onPairPhone === undefined
     ? []

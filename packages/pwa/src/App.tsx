@@ -17,6 +17,8 @@ import { composerSuggestionSwitches } from './components/composer-autocomplete.t
 import { ImportedHistoryPage } from './components/imported-history-page.tsx';
 import type { SendCancel, SendRetry, SendSubmit } from './components/ledger-message.tsx';
 import { liveStreamState } from './components/live-stream-indicator.tsx';
+import { MachineHome } from './components/machine-home.tsx';
+import { machineHealth } from './components/machine-home-model.ts';
 import { NewSessionPage } from './components/new-session-page.tsx';
 import { QueueActionsContext } from './components/queue-actions-context.tsx';
 import { QueuePage } from './components/queue-page.tsx';
@@ -170,9 +172,11 @@ import {
   useServiceWorkerUpdate,
   workerUrl,
 } from './hooks/use-service-worker-update.ts';
+import { useSpendToday } from './hooks/use-spend-today.ts';
 import { useSttSettings } from './hooks/use-stt-settings.ts';
 import { useTheme } from './hooks/use-theme.ts';
 import { useWardenDaemonScope } from './hooks/use-warden-daemon-scope.ts';
+import { useWardenStatus } from './hooks/use-warden-status.ts';
 import { agendaClearPort } from './lib/agenda-clear-agents.ts';
 import { agendaTargetFromSearch } from './lib/agenda-inbox.ts';
 import { inboxSourceFromSearch } from './lib/agenda-inbox-list.ts';
@@ -214,10 +218,10 @@ import {
   connectionPickerPath,
   daemonAgendaPath,
   daemonBoardForFerretPath,
+  daemonHomePath,
   daemonLearningPath,
   daemonProjectPath,
   daemonQueuePath,
-  daemonSessionsPath,
   daemonSettingsPath,
   daemonWardenPath,
   type PageRoute,
@@ -462,45 +466,43 @@ const usePairedMachineNotifications = (onChanged?: () => void) => {
 const pageCrumbs = (route: PageRoute): readonly Crumb[] => {
   if (route.kind === 'connection-picker') return [{ label: 'Daemons' }];
   if (route.kind === 'setup') return [{ label: 'Set up' }];
-  const sessions = daemonSessionsPath(route.daemonId);
+  const home = daemonHomePath(route.daemonId);
   switch (route.kind) {
+    case 'home':
+      return [{ label: 'Home' }];
     case 'sessions':
-      return [{ label: 'Sessions' }];
+      return [{ href: home, label: 'Home' }, { label: 'Sessions' }];
     case 'new-session':
-      return [{ href: sessions, label: 'Sessions' }, { label: 'New' }];
+      return [{ href: home, label: 'Home' }, { label: 'New' }];
     case 'projects':
-      return [{ href: sessions, label: 'Sessions' }, { label: 'Projects' }];
+      return [{ href: home, label: 'Home' }, { label: 'Projects' }];
     case 'project-detail':
-      return [
-        { href: sessions, label: 'Sessions' },
-        { href: `${sessions}/projects`, label: 'Projects' },
-        { label: 'Project' },
-      ];
+      return [{ href: home, label: 'Home' }, { href: `${home}/projects`, label: 'Projects' }, { label: 'Project' }];
     case 'project-lanes':
       return [
-        { href: sessions, label: 'Sessions' },
-        { href: `${sessions}/projects`, label: 'Projects' },
+        { href: home, label: 'Home' },
+        { href: `${home}/projects`, label: 'Projects' },
         { href: daemonProjectPath(route.daemonId, route.projectId), label: 'Project' },
         { label: 'Lanes' },
       ];
     case 'session':
-      return [{ href: sessions, label: 'Sessions' }, { label: route.sessionId }];
+      return [{ href: home, label: 'Home' }, { label: route.sessionId }];
     case 'attention':
-      return [{ href: sessions, label: 'Sessions' }, { label: 'Inbox' }];
+      return [{ href: home, label: 'Home' }, { label: 'Inbox' }];
     case 'board':
-      return [{ href: sessions, label: 'Sessions' }, { label: 'Board' }];
+      return [{ href: home, label: 'Home' }, { label: 'Board' }];
     case 'queue':
-      return [{ href: sessions, label: 'Sessions' }, { label: 'Queue' }];
+      return [{ href: home, label: 'Home' }, { label: 'Queue' }];
     case 'settings':
-      return [{ href: sessions, label: 'Sessions' }, { label: 'Settings' }];
+      return [{ href: home, label: 'Home' }, { label: 'Settings' }];
     case 'warden':
-      return [{ href: sessions, label: 'Sessions' }, { label: 'Warden' }];
+      return [{ href: home, label: 'Home' }, { label: 'Warden' }];
     case 'analytics':
-      return [{ href: sessions, label: 'Sessions' }, { label: 'Analytics' }];
+      return [{ href: home, label: 'Home' }, { label: 'Analytics' }];
     case 'learning':
-      return [{ href: sessions, label: 'Sessions' }, { label: 'Learning' }];
+      return [{ href: home, label: 'Home' }, { label: 'Learning' }];
     case 'imported-history':
-      return [{ href: sessions, label: 'Sessions' }, { label: 'Imported history' }];
+      return [{ href: home, label: 'Home' }, { label: 'Imported history' }];
     case 'machine-setup':
       return [{ href: daemonSettingsPath(route.daemonId), label: 'Settings' }, { label: 'Set up a machine' }];
   }
@@ -606,7 +608,7 @@ function ConnectionPicker() {
       }}
       onSelect={daemonId => {
         store.connections.select(daemonId);
-        navigate(daemonSessionsPath(daemonId));
+        navigate(daemonHomePath(daemonId));
       }}
       onRemove={daemonId => {
         store.connections.remove(daemonId);
@@ -742,13 +744,61 @@ function SetupGuide() {
           }}
           onSelect={daemonId => {
             store.connections.select(daemonId);
-            navigate(daemonSessionsPath(daemonId));
+            navigate(daemonHomePath(daemonId));
           }}
           onRemove={daemonId => {
             store.connections.remove(daemonId);
           }}
         />
       )}
+    />
+  );
+}
+
+/** The clock the home's ages read: coarse, since an age on this page is minutes or hours. */
+function useCoarseNow(intervalMs: number): number {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(timer);
+  }, [intervalMs]);
+  return now;
+}
+
+function HomeRoute({ connection }: DaemonPageProps) {
+  const store = useAppStore();
+  useRenderTiming(store.performance, 'fleet');
+  const { navigate } = useRouter();
+  const { connections } = useConnectionSnapshot();
+  const record = connections.find(candidate => candidate.daemonId === connection.daemonId);
+  const machineName = record === undefined ? daemonDisplayName(connection) : distinctDaemonName(record, connections);
+  const fleet = useSyncExternalStore(
+    listener => store.fleet.subscribe(listener),
+    () => store.fleet.getSnapshot(),
+  );
+  const sessions = fleet.daemons.get(connection.daemonId)?.sessions ?? null;
+  const boardMachines = useMemo<readonly BoardMachine[]>(
+    () => [{ connection, name: machineName }],
+    [connection, machineName],
+  );
+  const board = useBoard(store.board, boardMachines, NO_BOARD_FILTERS);
+  const readWardenStatus = useCallback(
+    async (daemon: DaemonConnection) => await (await store.clients.client(daemon)).wardenStatus(),
+    [store.clients],
+  );
+  const warden = useWardenStatus(connection, readWardenStatus);
+  const spendTodayUsd = useSpendToday(connection, useDaemonFetch());
+  const now = useCoarseNow(30_000);
+  return (
+    <MachineHome
+      daemonId={connection.daemonId}
+      health={machineHealth(warden, now)}
+      machineName={machineName}
+      now={now}
+      onNavigate={navigate}
+      sessions={sessions}
+      spendTodayUsd={spendTodayUsd}
+      toTest={board.status === 'ready' ? board.model.counts.toTest : null}
     />
   );
 }
@@ -1705,7 +1755,7 @@ function SessionRoute({
         </QueueActionsContext.Provider>
       ) : (
         <main className="mx-auto flex h-full w-full max-w-[980px] flex-col gap-3 overflow-y-auto py-3">
-          <button type="button" className="kt-btn self-start" onClick={() => back(daemonSessionsPath(scope.daemonId))}>
+          <button type="button" className="kt-btn self-start" onClick={() => back(daemonHomePath(scope.daemonId))}>
             ← Sessions
           </button>
           <section className="kt-panel p-panel" aria-labelledby="session-route-heading">
@@ -2254,6 +2304,7 @@ function ProjectLanesRoute({ connection, projectId }: ProjectDetailPageProps) {
 const PAGE_SLOTS: PageHostSlots = {
   ConnectionPicker,
   Setup: SetupGuide,
+  Home: HomeRoute,
   Sessions: SessionsRoute,
   NewSession: NewSessionRoute,
   Projects: ProjectsRoute,
@@ -2476,7 +2527,7 @@ export function AppShell() {
     // A notification tap the app was started for (`useNotificationOpen`, whose effect runs first) has
     // already moved it off the picker: that is where the reader asked to go, and it wins.
     if (parseRoute(window.location.pathname).kind !== 'connection-picker') return;
-    navigate(daemonSessionsPath(shortcut), { replace: true });
+    navigate(daemonHomePath(shortcut), { replace: true });
   }, [navigate, shortcut]);
   const effectiveRoute: PageRoute = pageRoute.kind === 'connection-picker' && setupJourney ? SETUP_ROUTE : pageRoute;
 

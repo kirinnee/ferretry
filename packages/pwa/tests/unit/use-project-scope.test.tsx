@@ -40,7 +40,7 @@ interface FakeNavigation extends ScopeNavigation {
   go(url: string, state?: unknown): void;
 }
 
-const fakeNavigation = (initial = '/d/daemon%2Flaptop', initialState: unknown = null): FakeNavigation => {
+const fakeNavigation = (initial = '/d/daemon%2Flaptop/sessions', initialState: unknown = null): FakeNavigation => {
   let current = new URL(initial, 'https://pwa.example.test');
   let state = initialState;
   const entries: { state: unknown; url: string; kind: 'push' | 'replace' }[] = [];
@@ -92,8 +92,10 @@ describe('parseRouteScope', () => {
 
 describe('projectScopePath', () => {
   it('addresses the daemon dashboard, with or without a scope', () => {
-    expect(projectScopePath(laptop, null)).toBe('/d/daemon%2Flaptop');
-    expect(projectScopePath(laptop, '/home/k/ferretry')).toBe('/d/daemon%2Flaptop?project=%2Fhome%2Fk%2Fferretry');
+    expect(projectScopePath(laptop, null)).toBe('/d/daemon%2Flaptop/sessions');
+    expect(projectScopePath(laptop, '/home/k/ferretry')).toBe(
+      '/d/daemon%2Flaptop/sessions?project=%2Fhome%2Fk%2Fferretry',
+    );
   });
 });
 
@@ -107,16 +109,16 @@ describe('resolveScopePrecedence', () => {
   });
 
   it('leaves the persisted value alone when the URL says nothing', () => {
-    expect(resolveScopePrecedence(at('/d/daemon%2Flaptop'))).toEqual({ apply: false });
+    expect(resolveScopePrecedence(at('/d/daemon%2Flaptop/sessions'))).toEqual({ apply: false });
   });
 
   it('reads a deep link and an explicit deep-link clear from the URL', () => {
-    expect(resolveScopePrecedence(at('/d/daemon%2Flaptop', '?project=%2Frepo'))).toEqual({
+    expect(resolveScopePrecedence(at('/d/daemon%2Flaptop/sessions', '?project=%2Frepo'))).toEqual({
       apply: true,
       daemonId: laptop,
       scope: '/repo',
     });
-    expect(resolveScopePrecedence(at('/d/daemon%2Flaptop', '?project='))).toEqual({
+    expect(resolveScopePrecedence(at('/d/daemon%2Flaptop/sessions', '?project='))).toEqual({
       apply: true,
       daemonId: laptop,
       scope: null,
@@ -125,34 +127,42 @@ describe('resolveScopePrecedence', () => {
 
   it('lets the own history entry win, including its explicit null', () => {
     expect(
-      resolveScopePrecedence(at('/d/daemon%2Flaptop', '?project=%2Fstale', projectScopeState(laptop, '/repo'))),
+      resolveScopePrecedence(
+        at('/d/daemon%2Flaptop/sessions', '?project=%2Fstale', projectScopeState(laptop, '/repo')),
+      ),
     ).toEqual({ apply: true, daemonId: laptop, scope: '/repo' });
     expect(
-      resolveScopePrecedence(at('/d/daemon%2Flaptop', '?project=%2Fstale', projectScopeState(laptop, null))),
+      resolveScopePrecedence(at('/d/daemon%2Flaptop/sessions', '?project=%2Fstale', projectScopeState(laptop, null))),
     ).toEqual({ apply: true, daemonId: laptop, scope: null });
   });
 
   it('treats a blank or non-string stored scope as no scope', () => {
     expect(
-      resolveScopePrecedence(at('/d/daemon%2Flaptop', '', { projectScope: '', projectScopeDaemonId: laptop })),
+      resolveScopePrecedence(at('/d/daemon%2Flaptop/sessions', '', { projectScope: '', projectScopeDaemonId: laptop })),
     ).toEqual({ apply: true, daemonId: laptop, scope: null });
     expect(
-      resolveScopePrecedence(at('/d/daemon%2Flaptop', '', { projectScope: 7, projectScopeDaemonId: laptop })),
+      resolveScopePrecedence(at('/d/daemon%2Flaptop/sessions', '', { projectScope: 7, projectScopeDaemonId: laptop })),
     ).toEqual({ apply: true, daemonId: laptop, scope: null });
   });
 
   it('refuses a history entry written by another daemon and falls back to the URL', () => {
     expect(
-      resolveScopePrecedence(at('/d/daemon%2Flaptop', '?project=%2Frepo', projectScopeState(workstation, '/other'))),
+      resolveScopePrecedence(
+        at('/d/daemon%2Flaptop/sessions', '?project=%2Frepo', projectScopeState(workstation, '/other')),
+      ),
     ).toEqual({ apply: true, daemonId: laptop, scope: '/repo' });
     // With no URL channel either, the persisted value stands untouched.
-    expect(resolveScopePrecedence(at('/d/daemon%2Flaptop', '', projectScopeState(workstation, '/other')))).toEqual({
+    expect(
+      resolveScopePrecedence(at('/d/daemon%2Flaptop/sessions', '', projectScopeState(workstation, '/other'))),
+    ).toEqual({
       apply: false,
     });
   });
 
   it('ignores a history entry that is not a scope record at all', () => {
-    expect(resolveScopePrecedence(at('/d/daemon%2Flaptop', '?project=%2Frepo', { pageKey: 'sessions' }))).toEqual({
+    expect(
+      resolveScopePrecedence(at('/d/daemon%2Flaptop/sessions', '?project=%2Frepo', { pageKey: 'sessions' })),
+    ).toEqual({
       apply: true,
       daemonId: laptop,
       scope: '/repo',
@@ -163,7 +173,7 @@ describe('resolveScopePrecedence', () => {
 describe('applyScopeFromLocation', () => {
   it('normalises the scope it writes and names the URL’s daemon', () => {
     const controls = controlsStore();
-    const navigation = fakeNavigation('/d/daemon%2Flaptop?project=%2Fhome%2Fk%2Fferretry%2F');
+    const navigation = fakeNavigation('/d/daemon%2Flaptop/sessions?project=%2Fhome%2Fk%2Fferretry%2F');
 
     expect(applyScopeFromLocation(controls, navigation)).toBe(true);
     expect(controls.controls(laptop).projectScope).toBe('/home/k/ferretry');
@@ -173,7 +183,7 @@ describe('applyScopeFromLocation', () => {
   it('writes nothing when the location has no verdict', () => {
     const controls = controlsStore();
     controls.setControls(laptop, { projectScope: '/repo' });
-    expect(applyScopeFromLocation(controls, fakeNavigation('/d/daemon%2Flaptop'))).toBe(false);
+    expect(applyScopeFromLocation(controls, fakeNavigation('/d/daemon%2Flaptop/sessions'))).toBe(false);
     expect(controls.controls(laptop).projectScope).toBe('/repo');
   });
 });
@@ -188,7 +198,7 @@ describe('enterProjectScope / exitProjectScope', () => {
     expect(navigation.entries).toEqual([
       {
         kind: 'push',
-        url: '/d/daemon%2Flaptop?project=%2Fhome%2Fk%2Fferretry',
+        url: '/d/daemon%2Flaptop/sessions?project=%2Fhome%2Fk%2Fferretry',
         state: { projectScope: '/home/k/ferretry', projectScopeDaemonId: laptop },
       },
     ]);
@@ -210,17 +220,17 @@ describe('enterProjectScope / exitProjectScope', () => {
     const navigation = fakeNavigation('/d/daemon%2Flaptop/session/sess-1');
 
     expect(enterProjectScope(controls, laptop, '/repo', navigation)).toBe(true);
-    expect(navigation.entries[0]?.url).toBe('/d/daemon%2Flaptop?project=%2Frepo');
+    expect(navigation.entries[0]?.url).toBe('/d/daemon%2Flaptop/sessions?project=%2Frepo');
   });
 
   it('scopes a daemon whose dashboard is not the one on screen', () => {
     const controls = controlsStore();
-    const navigation = fakeNavigation('/d/daemon%2Flaptop');
+    const navigation = fakeNavigation('/d/daemon%2Flaptop/sessions');
 
     expect(enterProjectScope(controls, workstation, '/repo', navigation)).toBe(true);
     expect(controls.controls(workstation).projectScope).toBe('/repo');
     expect(controls.controls(laptop).projectScope).toBeNull();
-    expect(navigation.entries[0]?.url).toBe('/d/daemon%2Fworkstation?project=%2Frepo');
+    expect(navigation.entries[0]?.url).toBe('/d/daemon%2Fworkstation/sessions?project=%2Frepo');
   });
 
   it('clears with an entry whose stored scope is an explicit null', () => {
@@ -232,7 +242,7 @@ describe('enterProjectScope / exitProjectScope', () => {
     expect(controls.controls(laptop).projectScope).toBeNull();
     expect(navigation.entries[1]).toEqual({
       kind: 'push',
-      url: '/d/daemon%2Flaptop',
+      url: '/d/daemon%2Flaptop/sessions',
       state: { projectScope: null, projectScopeDaemonId: laptop },
     });
   });
@@ -248,7 +258,7 @@ describe('enterProjectScope / exitProjectScope', () => {
     const controls = controlsStore();
     const navigation = fakeNavigation('/d/daemon%2Flaptop/session/sess-1');
     expect(exitProjectScope(controls, laptop, navigation)).toBe(true);
-    expect(navigation.entries[0]?.url).toBe('/d/daemon%2Flaptop');
+    expect(navigation.entries[0]?.url).toBe('/d/daemon%2Flaptop/sessions');
   });
 
   it('set → clear → Back → Forward restores null rather than the stale scope', () => {
@@ -295,39 +305,43 @@ function ScopeHost({
 describe('useProjectScope', () => {
   it('applies the address on mount and on every popstate, then stops listening', async () => {
     const controls = controlsStore();
-    const navigation = fakeNavigation('/d/daemon%2Flaptop?project=%2Frepo');
+    const navigation = fakeNavigation('/d/daemon%2Flaptop/sessions?project=%2Frepo');
     const { container, unmount } = await mount(<ScopeHost controls={controls} navigation={navigation} />);
 
     expect(container.textContent).toBe('/repo');
 
     await interact(() => {
-      navigation.go('/d/daemon%2Flaptop?project=%2Fother');
+      navigation.go('/d/daemon%2Flaptop/sessions?project=%2Fother');
       navigation.announce();
     });
     expect(controls.controls(laptop).projectScope).toBe('/other');
 
     await unmount();
-    navigation.go('/d/daemon%2Flaptop?project=%2Fthird');
+    navigation.go('/d/daemon%2Flaptop/sessions?project=%2Fthird');
     navigation.announce();
     expect(controls.controls(laptop).projectScope).toBe('/other');
   });
 
   it('replaces the address once the fleet view has recovered a missing folder', async () => {
     const controls = controlsStore();
-    const navigation = fakeNavigation('/d/daemon%2Flaptop?project=%2Fgone');
+    const navigation = fakeNavigation('/d/daemon%2Flaptop/sessions?project=%2Fgone');
     const { render, unmount } = await mount(<ScopeHost controls={controls} navigation={navigation} />);
     expect(navigation.entries).toHaveLength(0);
 
     await render(<ScopeHost controls={controls} navigation={navigation} scopeRecovered />);
     expect(navigation.entries).toEqual([
-      { kind: 'replace', url: '/d/daemon%2Flaptop', state: { projectScope: null, projectScopeDaemonId: laptop } },
+      {
+        kind: 'replace',
+        url: '/d/daemon%2Flaptop/sessions',
+        state: { projectScope: null, projectScopeDaemonId: laptop },
+      },
     ]);
     await unmount();
   });
 
   it('does not rewrite another daemon’s address on recovery', async () => {
     const controls = controlsStore();
-    const navigation = fakeNavigation('/d/daemon%2Fworkstation?project=%2Fgone');
+    const navigation = fakeNavigation('/d/daemon%2Fworkstation/sessions?project=%2Fgone');
     const { unmount } = await mount(<ScopeHost controls={controls} navigation={navigation} scopeRecovered />);
     expect(navigation.entries).toHaveLength(0);
     await unmount();
@@ -347,7 +361,7 @@ describe('browserScopeNavigation', () => {
 
     navigation.push(projectScopeState(laptop, '/repo'), projectScopePath(laptop, '/repo'));
     expect(navigation.snapshot()).toMatchObject({
-      pathname: '/d/daemon%2Flaptop',
+      pathname: '/d/daemon%2Flaptop/sessions',
       search: '?project=%2Frepo',
       state: { projectScope: '/repo', projectScopeDaemonId: laptop },
     });
