@@ -364,6 +364,11 @@ export const AgendaBriefShape = {
   steps: z.array(prose(MAX_AGENDA_STEP_LENGTH)).min(1).max(MAX_AGENDA_STEPS).optional(),
   /** Instructions that are not a list, as one Markdown document. */
   body: prose(MAX_AGENDA_BODY_LENGTH).optional(),
+  /**
+   * The ferret's answer to the owner's QUESTION about the item, shown above the item's own options, which stay live:
+   * the ask is still waiting for the owner's own answer, and this block never closes it.
+   */
+  questionAnswer: prose(MAX_AGENDA_BODY_LENGTH).optional(),
 };
 
 /** The structured fields of an item, alone. */
@@ -388,6 +393,7 @@ export const agendaBriefOf = (value: AgendaBrief): AgendaBrief => ({
   ...(value.links === undefined ? {} : { links: value.links }),
   ...(value.steps === undefined ? {} : { steps: value.steps }),
   ...(value.body === undefined ? {} : { body: value.body }),
+  ...(value.questionAnswer === undefined ? {} : { questionAnswer: value.questionAnswer }),
 });
 
 /** Every option label an item offers: its ask's options, each question's options and its `choose` answers. */
@@ -571,6 +577,7 @@ export const AgendaRevisableFieldSchema = z.enum([
   'links',
   'steps',
   'body',
+  'questionAnswer',
 ]);
 export type AgendaRevisableField = z.infer<typeof AgendaRevisableFieldSchema>;
 

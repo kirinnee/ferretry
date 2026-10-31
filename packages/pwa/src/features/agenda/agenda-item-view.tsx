@@ -76,6 +76,11 @@ export interface AgendaItemViewProps {
    * row's place, and the arrow keys answer nothing.
    */
   readonly settled?: ReactNode;
+  /**
+   * Where a question the owner replied to stands (`agenda-settled.tsx`): drawn above the answer row, which stays
+   * live — the reply does not answer the question, so its own options stay answerable.
+   */
+  readonly parkedNote?: ReactNode;
   /** The form an `input` item is answered with (`InputCardHost`): drawn in the card, in the answer row's place. */
   readonly inputForm?: ReactNode;
   /** A ferret's paste plan (`CopyPlanHost`): drawn in the card, in the answer row's place. */
@@ -134,6 +139,7 @@ export function AgendaItemView({
   closeLabel = 'Back to the chat',
   quoteScope = null,
   settled,
+  parkedNote,
   inputForm,
   planForm,
   daemonId,
@@ -266,6 +272,7 @@ export function AgendaItemView({
             {...(onProgress === undefined ? {} : { onProgress })}
             {...(doneClose === undefined ? {} : { doneClose })}
             {...(settled === undefined ? {} : { settled })}
+            {...(parkedNote === undefined ? {} : { parkedNote })}
             {...(inputForm === undefined ? {} : { inputForm })}
             {...(planForm === undefined ? {} : { planForm })}
             {...(quoteScope === null ? {} : { onRequestChanges: requestChanges })}

@@ -52,6 +52,8 @@ export interface AgendaItemCardProps {
   readonly doneClose?: DoneCloseView | undefined;
   /** Why it cannot be answered here (parked, resolved): drawn in the answer row's place, and Not needed is gone. */
   readonly settled?: ReactNode;
+  /** Where a replied question stands: drawn above its answer row, which stays live (the reply is not its answer). */
+  readonly parkedNote?: ReactNode;
   /** The form an `input` item is answered with (`InputCardHost`): drawn in the answer row's place. */
   readonly inputForm?: ReactNode;
   /** A ferret's paste plan (`CopyPlanHost`): drawn in the answer row's place, its Allow and Decline are the answer. */
@@ -253,6 +255,7 @@ export function AgendaItemCard({
   onProgress,
   doneClose,
   settled,
+  parkedNote,
   inputForm,
   planForm,
   onRequestChanges,
@@ -315,6 +318,7 @@ export function AgendaItemCard({
   const recommendedOption = listed.find(option => option.recommended);
   const kind = meta.kind;
   const body = item.body?.trim() ? item.body : null;
+  const questionAnswer = item.questionAnswer?.trim() ? item.questionAnswer : null;
   const steps = item.steps ?? [];
   // What the segment already says is not said again below it: an approval's effect, a review's links, a to-do's steps.
   const effectInNeed = shape === 'approval' && item.impact !== undefined;
@@ -383,6 +387,12 @@ export function AgendaItemCard({
       {latest ? <AgendaConfigChange item={item} /> : null}
       <TermLayer renderProse={renderProse} terms={terms}>
         <Situation context={context} premise={premise} renderProse={renderProse} />
+        {questionAnswer === null ? null : (
+          <div className="fy-card__answered" data-agenda-question-answer="">
+            <h5 className="fy-card__label">Answer to your question</h5>
+            <PointForm renderProse={renderProse} text={mark(questionAnswer)} />
+          </div>
+        )}
         <AgendaNeed shape={shape} {...(answerable ? {} : { lead: '' })}>
           {askLine === '' || shape === 'answers' || shape === 'input' ? null : (
             <div className="fy-card__question" data-agenda-question-line="">
@@ -512,9 +522,17 @@ export function AgendaItemCard({
           {planForm}
         </div>
       ) : docked ? null : (
-        replies
+        <>
+          {parkedNote}
+          {replies}
+        </>
       )}
-      {docked ? createPortal(replies, answerDock) : null}
+      {docked ? (
+        <>
+          {parkedNote}
+          {createPortal(replies, answerDock)}
+        </>
+      ) : null}
     </article>
   );
 }

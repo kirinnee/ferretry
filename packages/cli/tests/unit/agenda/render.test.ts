@@ -299,6 +299,39 @@ describe('attention history', () => {
     should(actual).containEql('· dismissed by human at');
   });
 
+  it('should say a ferret closing a question the owner never answered withdrew it', () => {
+    // Act
+    const withdrawn = renderAgendaHistory(
+      snapshot([], {
+        resolved: [
+          resolvedItem('A1', 'which region', {
+            resolvedBy: 'agent',
+            resolvedByName: 'sol',
+            ask: { kind: 'permission' },
+            resolutionNote: 'The owner answered in chat',
+          }),
+        ],
+      }),
+    );
+    const answered = renderAgendaHistory(
+      snapshot([], {
+        resolved: [
+          resolvedItem('A2', 'deploy?', {
+            ask: { kind: 'permission' },
+            response: { kind: 'permission', decision: 'approve' },
+          }),
+        ],
+      }),
+    );
+    const info = renderAgendaHistory(snapshot([], { resolved: [resolvedItem('A3', 'fyi', { resolvedBy: 'agent' })] }));
+
+    // Assert
+    should(withdrawn).containEql('· withdrawn by agent');
+    should(withdrawn).containEql('The owner answered in chat');
+    should(answered).containEql('· resolved by human');
+    should(info).containEql('· resolved by agent');
+  });
+
   it('should name an owner reply as a reply, not a resolution', () => {
     // Act
     const actual = renderAgendaHistory(

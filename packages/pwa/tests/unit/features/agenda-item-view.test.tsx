@@ -845,3 +845,40 @@ describe('a paste plan', () => {
     expect(root().querySelector('[data-agenda-plan-form]')).toBeNull();
   });
 });
+
+describe('a question the owner replied to', () => {
+  const asked = agendaItem('A163', {
+    subject: 'Which database should keep the board’s finished items?',
+    ask: choices('SQLite', 'Postgres'),
+    questionAnswer: 'WAL is the write-ahead log: SQLite appends to it before changing the file.',
+    parked: { reason: 'replied', at: '2026-08-01T11:50:00.000Z' },
+  } as unknown as Partial<AgendaItem>);
+
+  test('shows the ferret’s answer above its own options, which stay live, with no Got it', async () => {
+    const spy = await draw(asked, { parkedNote: <p data-parked-note="">Replied — waiting on Zoe</p> });
+    const answer = one('.fy-card [data-agenda-question-answer]');
+    expect(answer.textContent).toContain('Answer to your question');
+    expect(answer.textContent).toContain('WAL is the write-ahead log');
+    const need = one('[data-agenda-need]');
+    expect(answer.compareDocumentPosition(need) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(one('[data-parked-note]').textContent).toBe('Replied — waiting on Zoe');
+    const buttons = [...root().querySelectorAll<HTMLButtonElement>('[data-agenda-quick-replies] button')];
+    expect(buttons.map(button => button.textContent)).toEqual(
+      expect.arrayContaining([expect.stringContaining('SQLite')]),
+    );
+    expect(buttons.some(button => /got it/i.test(button.textContent ?? ''))).toBe(false);
+    await interact(() =>
+      must(
+        buttons.find(button => /SQLite/.test(button.textContent ?? '')),
+        'SQLite',
+      ).click(),
+    );
+    expect(spy.acted).toHaveLength(1);
+  });
+
+  test('draws no answer block when the ferret has not answered yet', async () => {
+    const { questionAnswer: _gone, ...bare } = asked as AgendaItem & { questionAnswer?: string };
+    await draw(bare as AgendaItem);
+    expect(root().querySelector('[data-agenda-question-answer]')).toBeNull();
+  });
+});

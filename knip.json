@@ -44,6 +44,7 @@
         "harness/sharing-capability-screenshot.tsx",
         "harness/catalogs-screenshot.tsx",
         "harness/screenshot.ts",
+        "harness/agenda-question-answer-screenshot.tsx",
         "harness/agenda-cards-screenshot.ts",
         "harness/agenda-cards-page.tsx",
         "harness/board-screenshot.ts",
