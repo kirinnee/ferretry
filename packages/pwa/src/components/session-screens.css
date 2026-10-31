@@ -1268,29 +1268,57 @@ button.fy-receipt {
 /* THE PILL'S OWN ROW. It sits under the scroller in the host's column, never over it: it used to float
    across the scroller's bottom edge, so the last row of a table or a code block in the newest message sat
    hidden under it (owner, 2026-10-31: "jump to latest clips the table"). A row of its own takes its height
-   from the scroller while it shows, so nothing the reader is looking at can be behind it. */
+   from the scroller, so nothing the reader is looking at can be behind it.
+
+   THE ROW NEVER CHANGES SIZE. It used to appear with the pill and collapse without it, so approaching the
+   bottom resized the scroller, which moved scrollTop, which the follow model read as the reader scrolling up:
+   detach, pill back, row back, repeat (owner: "scrolling to the bottom will trigger a strong flicker"). While
+   the pill is hidden an invisible twin (`.fy-jump-latest-reserve`) holds exactly its box. */
 .fy-jump-latest-shell {
   display: flex;
   flex: none;
   justify-content: center;
   padding: var(--flow-2) var(--flow-4);
 }
+.fy-jump-latest,
+.fy-jump-latest-reserve {
+  /* The ↓ glyph and the words sit on one baseline, and the pill never wraps on a phone. */
+  align-items: center;
+  border: var(--stroke-control) solid transparent;
+  box-sizing: border-box;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 6px;
+  min-height: var(--target-floor, 0px);
+  padding: 8px 12px;
+  white-space: nowrap;
+}
 .fy-jump-latest {
+  animation: fy-jump-latest-in 140ms ease-out;
   background: var(--fy-accent);
-  border: var(--stroke-control) solid color-mix(in srgb, var(--fy-accent) 75%, var(--fy-border));
+  border-color: color-mix(in srgb, var(--fy-accent) 75%, var(--fy-border));
   border-radius: var(--radius-control);
   box-shadow: var(--shadow-panel);
   color: var(--accent-fg);
   cursor: pointer;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 8px 12px;
   pointer-events: auto;
-  /* The ↓ glyph and the words sit on one baseline, and the pill never wraps on a phone. */
-  align-items: center;
-  display: inline-flex;
-  gap: 6px;
-  white-space: nowrap;
+}
+.fy-jump-latest-reserve {
+  visibility: hidden;
+}
+@keyframes fy-jump-latest-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fy-jump-latest {
+    animation: none;
+  }
 }
 /* THE TOP OF THE TRANSCRIPT: older messages loading, a button to load them, or the conversation's start.
    One height in every state, so a change of state never moves the messages under the reader. */

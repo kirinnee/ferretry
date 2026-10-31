@@ -127,11 +127,11 @@ describe('jump to latest beside the newest message', () => {
             await tab.waitForSelector('.fy-transcript-content > :last-child');
             await framesSettled(tab);
 
-            // The reader wheels up a little: still within sight of the newest message, but detached.
+            // The reader wheels up a little: still within sight of the newest message, but detached and far enough for the pill.
             const scroller = await tab.locator('.fy-transcript').boundingBox();
             if (scroller === null) throw new Error('no transcript on screen');
             await tab.mouse.move(scroller.x + scroller.width / 2, scroller.y + scroller.height / 2);
-            await tab.mouse.wheel(0, -40);
+            await tab.mouse.wheel(0, -120);
             await tab.waitForSelector('.fy-jump-latest');
             await framesSettled(tab);
 

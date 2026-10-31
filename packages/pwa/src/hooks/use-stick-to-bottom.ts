@@ -23,6 +23,7 @@ import { type ChatScroll, type ChatScrollSlot, restorableTop } from '../lib/scro
 import {
   followPinBlocked,
   gapFromBottom,
+  jumpPillShown,
   scrollIsByReader,
   scrollVerdict,
   TRANSCRIPT_SCROLL_KEYS,
@@ -60,6 +61,11 @@ export interface StickToBottom {
   readonly gap: MutableRefObject<number>;
   /** True once the reader has scrolled away — the cue to show "jump to latest". */
   readonly detached: boolean;
+  /**
+   * Should "jump to latest" show: detached AND far enough from the bottom (with hysteresis, so drift near the
+   * tail never toggles it). A host renders the pill from this and keeps its box the same either way.
+   */
+  readonly jumpShown: boolean;
   readonly onScroll: () => void;
   readonly jumpToLatest: () => void;
   /** Move the viewport for a reason of the host's own (a prepend), recorded so it is never read as the reader. */
@@ -86,6 +92,9 @@ export function useStickToBottom({ resetKey, contentKeys, onFollow, memory }: St
   const openKey = useRef(resetKey);
   const following = useRef(opening.current === null);
   const [detached, setDetached] = useState(opening.current !== null);
+  const [jumpShown, setJumpShown] = useState(opening.current !== null);
+  const jumpShownNow = useRef(jumpShown);
+  jumpShownNow.current = jumpShown;
   /** scrollTop last OBSERVED or SET, so this end's own pins are never read as the reader moving. */
   const lastScrollTop = useRef(0);
   const prevScrollHeight = useRef(0);
@@ -120,6 +129,12 @@ export function useStickToBottom({ resetKey, contentKeys, onFollow, memory }: St
     prevClientHeight.current = element.clientHeight;
   }, []);
 
+  /** Re-decides the pill from where the reader is; a state write only when the answer changes. */
+  const showJump = useCallback((detachedNow: boolean, distance: number) => {
+    const next = jumpPillShown(jumpShownNow.current, detachedNow, distance);
+    if (next !== jumpShownNow.current) setJumpShown(next);
+  }, []);
+
   const pin = useCallback(() => {
     const element = viewportRef.current;
     if (element === null || pinBlockedNow(element, pointerHeld.current)) return;
@@ -131,11 +146,12 @@ export function useStickToBottom({ resetKey, contentKeys, onFollow, memory }: St
     following.current = true;
     pendingRestore.current = null;
     setDetached(false);
+    showJump(false, 0);
     onFollowRef.current?.();
     pin();
     const element = viewportRef.current;
     if (element !== null) record(element);
-  }, [pin, record]);
+  }, [pin, record, showJump]);
 
   /**
    * Puts a saved reading position back once the content can hold it. `final` takes the nearest offset
@@ -171,6 +187,7 @@ export function useStickToBottom({ resetKey, contentKeys, onFollow, memory }: St
     if (saved !== null && saved !== undefined) {
       following.current = false;
       setDetached(true);
+      setJumpShown(true);
       pendingRestore.current = saved.top;
       restore(false);
       const deadline = setTimeout(() => restore(true), READING_RESTORE_PATIENCE_MS);
@@ -279,6 +296,7 @@ export function useStickToBottom({ resetKey, contentKeys, onFollow, memory }: St
       else {
         restore(false);
         gap.current = gapFromBottom(element);
+        showJump(true, gap.current);
       }
       prevScrollHeight.current = element.scrollHeight;
       prevClientHeight.current = element.clientHeight;
@@ -286,7 +304,7 @@ export function useStickToBottom({ resetKey, contentKeys, onFollow, memory }: St
     observer.observe(element);
     if (contentRef.current !== null) observer.observe(contentRef.current);
     return () => observer.disconnect();
-  }, [pin, restore]);
+  }, [pin, restore, showJump]);
 
   const onScroll = useCallback((): void => {
     const element = viewportRef.current;
@@ -312,8 +330,9 @@ export function useStickToBottom({ resetKey, contentKeys, onFollow, memory }: St
     }
     remember(element);
     gap.current = gapFromBottom(element);
+    showJump(!following.current, gap.current);
     record(element);
-  }, [follow, record, remember]);
+  }, [follow, record, remember, showJump]);
 
   const scrollTo = useCallback((top: number): void => {
     const element = viewportRef.current;
@@ -322,5 +341,5 @@ export function useStickToBottom({ resetKey, contentKeys, onFollow, memory }: St
     lastScrollTop.current = element.scrollTop;
   }, []);
 
-  return { viewportRef, contentRef, following, gap, detached, onScroll, jumpToLatest: follow, scrollTo };
+  return { viewportRef, contentRef, following, gap, detached, jumpShown, onScroll, jumpToLatest: follow, scrollTo };
 }

@@ -110,7 +110,7 @@ export const TerminalSnapshotView = ({
   // reader's: a terminal line is routinely wider than the pane, and resetting `scrollLeft` yanked
   // anyone reading the right-hand end of a line back to column 0 every poll. The pin is a layout
   // effect on the new text, so it reaches the height the new capture actually laid out to.
-  const { viewportRef, contentRef, detached, onScroll, jumpToLatest } = useStickToBottom({
+  const { viewportRef, contentRef, jumpShown, onScroll, jumpToLatest } = useStickToBottom({
     resetKey: key,
     contentKeys: [text],
   });
@@ -285,7 +285,7 @@ export const TerminalSnapshotView = ({
             {links.sheet}
           </div>
         </div>
-        {detached ? <JumpToLatest onJump={jumpToLatest} /> : null}
+        <JumpToLatest onJump={jumpToLatest} shown={jumpShown} />
       </div>
     </div>
   );

@@ -5,6 +5,7 @@
  *
  *   ?theme=<family>-<mode>
  *   ?last=table|code|diagram   what the newest message ends in (default table)
+ *   ?busy=1                    a turn is running: the live 'Wrangling…' row under the messages, its clock ticking
  */
 
 import { createRoot } from 'react-dom/client';
@@ -56,11 +57,22 @@ const entries: readonly TranscriptEntry[] = [
   { id: 'last', kind: 'assistant', text: LAST },
 ];
 
+const busy = params.get('busy') === '1';
+const startedAt = new Date(Date.now() - 3_000).toISOString();
+
 function Scene() {
   return (
     <div className="kt-chat-surface scene-chat">
       <div className="scene-messages">
-        <Transcript agentName="Lizzette" daemonId="d" entries={entries} sessionId="s" />
+        <Transcript
+          activityFallback={busy ? 'Wrangling…' : null}
+          agentName="Lizzette"
+          busy={busy}
+          daemonId="d"
+          entries={entries}
+          sessionId="s"
+          turnStartedAt={busy ? startedAt : null}
+        />
       </div>
       <div className="scene-composer">Message Lizzette</div>
     </div>
