@@ -1506,6 +1506,63 @@ describe('daemon boot lifecycle', () => {
     );
   });
 
+  it('should turn Sharing on, once and on the record, for a device that held everything before Sharing existed', async () => {
+    // The one-time repair runs on the REAL boot path, after the daemon-wide grants are read (a repair wired before
+    // them would see "undetermined" on every boot and never run). A first boot makes the identity; the second boot
+    // starts on a devices.json exactly as v4.172.x wrote it: a full phone and a limited tablet, seven capabilities.
+    // Arrange
+    const home = await tempDirectory('fyd-sharing-repair');
+    const boot = async (said: ReturnType<typeof recordingNotices>) => {
+      const cleanups: Array<() => void | Promise<void>> = [];
+      let release = (): void => {};
+      const world = {
+        ...(await worldAt(home, OS_CHOSEN_PORT, async () => {
+          await new Promise<void>(resolve => {
+            release = resolve;
+          });
+        })),
+        notices: said.port,
+      };
+      const exit = start(world, cleanups);
+      const port = await recordedPort(home);
+      await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
+      release();
+      const code = await exit;
+      await runCleanups(cleanups);
+      return code;
+    };
+    should(await boot(recordingNotices())).equal(0);
+    const devicesPath = join(home, 'state', 'devices.json');
+    const { daemonId } = JSON.parse(await readFile(devicesPath, 'utf8')) as { daemonId: string };
+    const fixture = await readFile(join(import.meta.dir, '../../fixtures/pairing/devices-v4.172.json'), 'utf8');
+    await writeFile(devicesPath, fixture.replaceAll('__DAEMON_ID__', daemonId), { mode: 0o600 });
+
+    // Act
+    const said = recordingNotices();
+    const code = await boot(said);
+
+    // Assert
+    should(code).equal(0);
+    const stored = JSON.parse(await readFile(devicesPath, 'utf8')) as {
+      devices: { id: string; grants: Record<string, { use: boolean; configure: boolean }> }[];
+    };
+    const grantsOf = (id: string) => stored.devices.find(device => device.id === id)?.grants;
+    should(grantsOf('fy_device_id_aaaaaaaaaaaaaaaaaaaaaa')?.sharing).deepEqual({ use: true, configure: true });
+    should(grantsOf('fy_device_id_bbbbbbbbbbbbbbbbbbbbbb')?.sharing).deepEqual({ use: false, configure: false });
+    const journal = await readFile(join(home, 'state', 'grant-audit.jsonl'), 'utf8');
+    should(journal).match(/"actor":"daemon:sharing-follows-pairing"/u);
+    should(journal).match(/fy_device_id_aaaaaaaaaaaaaaaaaaaaaa\/sharing\.use=on/u);
+    should(said.stated.filter(line => line.startsWith('Sharing was turned on for 1 paired device'))).have.length(1);
+
+    // A third boot changes nothing and says nothing: the record marks the phone as done.
+    const again = recordingNotices();
+    should(await boot(again)).equal(0);
+    should(again.stated.filter(line => line.startsWith('Sharing was'))).be.empty();
+    should(
+      (await readFile(join(home, 'state', 'grant-audit.jsonl'), 'utf8')).match(/sharing-follows-pairing/gu),
+    ).have.length(1);
+  });
+
   it('should delete a stale operator-password verifier at boot and say so once', async () => {
     // The passkey step-up replaced the operator password with no compatibility path, so a verifier an
     // older daemon left behind gates nothing. Left in place it would read as a lock to anyone who found

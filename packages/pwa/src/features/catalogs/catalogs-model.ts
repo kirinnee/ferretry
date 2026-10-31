@@ -48,8 +48,8 @@ export const SHARING_GRANT_COMMAND = sharingGrantCommand();
 
 export const SHARING_OFF_LINES: readonly string[] = [
   'This device may not make or export catalogs yet.',
-  'Devices paired before this release start with Sharing off.',
-  'To turn it on, run this on the machine itself:',
+  'A device that has Sharing on and may manage devices can turn it on for this one in Settings › Devices.',
+  'Or run this on the machine itself:',
 ];
 
 // ── Refusals ─────────────────────────────────────────────────────────────────────────────────────

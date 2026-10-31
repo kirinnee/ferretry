@@ -1282,6 +1282,8 @@ import {
   withOutdated,
   withRevive,
   xvfbMissingMessage,
+  repairSharingFromPairing,
+  type SharingRepairOutcome,
 } from '../src/lib/index.ts';
 import {
   admitChild,
@@ -1729,6 +1731,12 @@ export interface DaemonWorld {
     readonly unlockNotice?: string | undefined;
     /** Bearer-token grants a pre-device-key `devices.json` held and this boot dropped. */
     readonly droppedBearerGrants: number;
+    /**
+     * The one-time Sharing repair for old full devices (docs/grants.md). A FUNCTION, not a result: it needs the
+     * daemon-wide grants, which are read later in the boot, so `start` runs it right after they are and before
+     * anything is served. It never throws: a failure is an outcome, said at boot.
+     */
+    readonly repairSharing?: () => Promise<SharingRepairOutcome>;
   }>;
   /**
    * The DIRECT carrier: the socket route a browser that can reach this address opens its sessions on.
@@ -7156,6 +7164,37 @@ export interface WorldSeams {
  */
 const STARTED_SAMPLE_INTERVAL = process.env.BUN_JSC_sampleInterval;
 
+/** The boot sentences for what the one-time Sharing repair did (docs/grants.md), one per outcome. */
+export function sharingRepairNotices(repair: SharingRepairOutcome | undefined): readonly string[] {
+  if (repair === undefined) return [];
+  const turnOn = `Turn it on per device in the app (Settings › Devices) or with \`${CLIENT_NAME} device grant <device> sharing --use\``;
+  if (repair.kind === 'skipped') {
+    const why: Readonly<Record<typeof repair.reason, string>> = {
+      'grants-undetermined': 'the capability grants could not be read',
+      'journal-too-large': 'the grant journal is too large to read whole',
+      'journal-unreadable': 'the grant journal could not be read whole',
+      failed: 'the repair failed before it changed anything',
+    };
+    return [`Sharing was not turned on for devices paired before it existed: ${why[repair.reason]}. ${turnOn}`];
+  }
+  const plural = (count: number) => (count === 1 ? 'device' : 'devices');
+  return [
+    ...(repair.deviceIds.length === 0
+      ? []
+      : [
+          `Sharing was turned on for ${repair.deviceIds.length} paired ${plural(repair.deviceIds.length)} that held every other capability from before Sharing existed; recorded in \`${CLIENT_NAME} daemon config history\``,
+        ]),
+    ...(repair.unrecorded.length === 0
+      ? []
+      : [`Sharing was turned on for ${repair.unrecorded.join(', ')}, but the grant journal could not record it`]),
+    ...(repair.failed.length === 0
+      ? []
+      : [
+          `Sharing could not be turned on for ${repair.failed.join(', ')}: the device record could not be written. ${turnOn}`,
+        ]),
+  ];
+}
+
 export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWorld {
   const userHome = seams.userHome;
   if (typeof userHome !== 'string' || !isAbsolute(userHome))
@@ -8971,7 +9010,19 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       );
       // Read back before anything is served, so a device unlocked before the restart is not asked again.
       const unlockNotice = await stepUp.restore();
+      // The one-time Sharing repair for old full devices (docs/grants.md), run by `start` once the daemon-wide
+      // grants are read. A repair must never stop the daemon starting: a failure is an outcome, said at boot.
+      // `grants` is the one daemon-wide grant service `start` refreshes before calling this (`subsystems.grants`).
+      const repairSharing = async (): Promise<SharingRepairOutcome> =>
+        await repairSharingFromPairing({
+          devices: pairingService,
+          daemonWide: () => grants.enforced(),
+          journal: new JournalGrantAudit(paths.grantAudit, stateFiles),
+          audit: new JournalGrantAudit(paths.grantAudit, stateFiles),
+          clock: new SystemGrantClock(),
+        }).catch((): SharingRepairOutcome => ({ kind: 'skipped', reason: 'failed' }));
       return {
+        repairSharing,
         credentials,
         push,
         stepUp,
@@ -13096,6 +13147,9 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   progress.enter('reading capability grants');
   await subsystems.grants.refresh();
   world.notices.step('capability grants read');
+  // Now that the daemon-wide grants are known, and before anything is served (the surface still answers 503).
+  const repair = await pairing.repairSharing?.();
+  for (const notice of sharingRepairNotices(repair)) world.notices.state(notice);
   // The operator password is gone; a passkey step-up from the paired device replaced it. A verifier an
   // older daemon left behind gates nothing now, so it is deleted rather than left looking like a lock —
   // and said ONCE, so an operator who remembers setting a password learns where it went.

@@ -268,6 +268,51 @@ describe('reading the grant journal back', () => {
   });
 });
 
+describe('reading the whole grant journal, for the Sharing repair', () => {
+  const line = (at: string, actor: string, changes: readonly string[]) =>
+    `${JSON.stringify({ kind: 'grant.changed', at, actor, changes })}\n`;
+
+  function journal(text: string | undefined, readable = true) {
+    const bytes = new TextEncoder().encode(text ?? '');
+    const port = {
+      information: async () => (text === undefined ? undefined : { size: bytes.byteLength }),
+      readSlice: async (_path: string, offset: number, length: number) =>
+        readable ? bytes.slice(offset, offset + length) : undefined,
+    } as unknown as FileSystemPort;
+    return new JournalGrantAudit(paths.grantAudit, port);
+  }
+
+  it('should read every record from the start, not a tail window', async () => {
+    const filler = Array.from({ length: 2_000 }, (_unused, index) =>
+      line('2026-08-05T09:00:00.000Z', `device:filler-${String(index).padStart(40, '0')}`, ['fleet.use=off']),
+    ).join('');
+    const first = line('2026-08-01T00:00:00.000Z', 'admin-cli', ['fy_device_id_x/sharing.use=off']);
+
+    const read = await journal(`${first}${filler}`).readAll(8 * 1024 * 1024);
+
+    should(read.kind).equal('read');
+    if (read.kind === 'read') {
+      should(read.entries).have.length(2_001);
+      should(read.entries[0]?.changes).deepEqual(['fy_device_id_x/sharing.use=off']);
+      should(read.unreadable).equal(0);
+    }
+  });
+
+  it('should answer too-large past the bound, an absent journal as empty, and count damage', async () => {
+    const text = `${line('2026-08-05T09:00:00.000Z', 'admin-cli', ['fleet.use=off'])}{"kind":"grant.changed","at":"20\n`;
+
+    should(await journal(text).readAll(10)).deepEqual({ kind: 'too-large' });
+    should(await journal(undefined).readAll(100)).deepEqual({ kind: 'read', entries: [], unreadable: 0 });
+    const damaged = await journal(text).readAll(10_000);
+    should(damaged.kind === 'read' ? damaged.unreadable : -1).equal(1);
+  });
+
+  it('should never read a journal that exists but will not come back as an empty one', async () => {
+    // An empty answer would let the repair widen a device whose Sharing somebody set by hand.
+    should(await journal('something\n', false).readAll(100)).deepEqual({ kind: 'read', entries: [], unreadable: 1 });
+  });
+});
+
 describe('the journal kind', () => {
   const SECURITY_PATH = '/state/state/security-audit.jsonl';
 
