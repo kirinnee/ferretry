@@ -2,7 +2,12 @@ import { describe, expect, it } from 'bun:test';
 import type { WorkHit } from '@ferretry/protocol';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { DaemonResponseError } from '../../src/lib/runtime-models.ts';
-import { fetchWorkSearch, isWorkSearchWords, workHitDescription } from '../../src/lib/work-search.ts';
+import {
+  fetchWorkSearch,
+  isWorkSearchWords,
+  workHitDescription,
+  workSearchPortFor,
+} from '../../src/lib/work-search.ts';
 
 const daemon = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
 
@@ -47,6 +52,15 @@ describe('the work search client', () => {
     expect(refused).rejects.toBeInstanceOf(DaemonResponseError);
     const malformed = fetchWorkSearch(daemon, { q: 'relay' }, async () => json({ hits: 'many' }));
     expect(malformed).rejects.toThrow();
+  });
+});
+
+describe('which machines get a search port', () => {
+  it('hands one out only for a machine whose health said it can search', () => {
+    const fetcher = async () => json({});
+    expect(workSearchPortFor(true, daemon, fetcher)).toBeDefined();
+    expect(workSearchPortFor(false, daemon, fetcher)).toBeUndefined();
+    expect(workSearchPortFor(undefined, daemon, fetcher)).toBeUndefined();
   });
 });
 

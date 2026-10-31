@@ -115,7 +115,7 @@ import type { DaemonAccountPickerStore } from '../account-picker-store.ts';
 import type { DaemonAgendaClient } from '../agenda-client.ts';
 import type { AgendaLoadStatus } from '../agenda-store.ts';
 import { sessionAgendaSummary } from '../agenda-wire.ts';
-import { useAgendaWire } from '../agenda-wire-react.tsx';
+import { useAgendaWire, useWorkSearchOffered } from '../agenda-wire-react.tsx';
 import { agentReferenceIdentityKey } from '../agent-references.ts';
 import { withReferencePrefix } from '../answer-chip.ts';
 import type { DaemonBoardStore } from '../board-store.ts';
@@ -140,7 +140,6 @@ import { useDaemonClient, useDaemonFetch } from '../store.tsx';
 import type { SttSettings } from '../stt/stt-settings.ts';
 import { terminalIdForSurfaceKey } from '../surface-references.ts';
 import type { DaemonUsageStore } from '../usage-store.ts';
-import { useDaemonHealth } from '../use-daemon-health.ts';
 import { workSearchPortFor } from '../work-search.ts';
 import { WorkspaceLayoutStore } from '../workspace-layout-store.ts';
 import { type WorkspaceRailPreferenceStore, workspaceRailPreferences } from '../workspace-rail-preferences.ts';
@@ -568,10 +567,10 @@ export function SessionChatPage({
   // until a catalog has actually been read — unread, never "no skills".
   // The carrier router: the `@file` proof and the skills read both reach a relay-only daemon.
   const referenceFetch = useDaemonFetch();
-  const health = useDaemonHealth(connection);
+  const workSearchOffered = useWorkSearchOffered(connection.daemonId);
   const workSearch = useMemo(
-    () => workSearchPortFor(health, connection, referenceFetch),
-    [health, connection, referenceFetch],
+    () => workSearchPortFor(workSearchOffered, connection, referenceFetch),
+    [workSearchOffered, connection, referenceFetch],
   );
   // The model catalog is read through the same routed fetch: a paired device has no bearer value.
   const routedRuntimeCatalogs = useMemo<RuntimeModelCatalogSource>(
