@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { dirname } from 'node:path';
 import should from 'should';
 import { InvalidDaemonEnvironmentError, managerForPlatform, resolveDaemonLayout } from '../../../src/lib/daemon/layout';
 import { environment, HOME, layout } from './fixtures';
@@ -226,7 +227,9 @@ describe('daemon layout', () => {
         // lifecycle command; the per-user 0700 directory cannot. Only the target claim moves: the rest
         // sit beside the artifacts they protect, in the user's own home.
         should(actual.lifecycleLocks[0]).equal(expected);
-        should(actual.lifecycleLocks.filter(lock => lock.startsWith('/tmp/'))).deepEqual([]);
+        should(dirname(actual.lifecycleLocks[0] ?? ''))
+          .equal('/run/user/1000')
+          .and.not.equal('/tmp');
         should(actual.lifecycleLocks.slice(1)).deepEqual(layout({ platform }).lifecycleLocks.slice(1));
       },
     );
