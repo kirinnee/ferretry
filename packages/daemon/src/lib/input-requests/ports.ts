@@ -24,12 +24,25 @@ import type {
  * the one write; every other port is told ids, names, states and flags.
  */
 
+/**
+ * Whether a process runs a code program (`CODE_PROGRAMS`) from an executable this account cannot replace: decided from
+ * the real file, never from the name `ps` shows (adapters/system/executable-code-programs.ts).
+ */
+export interface CodeProgramPort {
+  codeProgram(pid: number): Promise<boolean>;
+}
+
 export type ObserveResult =
   | {
       readonly ok: true;
       readonly facts: InputTargetFacts;
       /** Every name the surface is known by (its key and its id), so a quarantine holds whichever a reader uses. */
       readonly names?: readonly string[];
+      /**
+       * The terminal's foreground runs a code program (`CODE_PROGRAMS`) from an executable this account cannot
+       * replace: the only way an echo-off prompt may stay a one-time code. The daemon's own, never on the wire.
+       */
+      readonly codeProgram?: true;
     }
   | { readonly ok: false; readonly reason: 'target_gone' | 'unsupported' };
 

@@ -3,7 +3,7 @@ import { hexInputChunks, terminalPaneTarget } from '../terminal/runtime-policy.t
 import type { TmuxCommandPort } from '../tmux/contracts.ts';
 import { PANE_PROOF_FORMAT, parsePaneSighting } from '../tmux/pane-proof.ts';
 import { digestFacts, digestLine } from './digest.ts';
-import type { ObserveResult, TerminalInputTargetPort, TypeResult } from './ports.ts';
+import type { CodeProgramPort, ObserveResult, TerminalInputTargetPort, TypeResult } from './ports.ts';
 import { recognisedConsumer } from './recognised.ts';
 import type { ProgramRunner, TerminalModes } from './terminal-modes.ts';
 
@@ -44,6 +44,7 @@ type Sight =
       readonly facts: InputTargetFacts;
       readonly guard: WriteGuard;
       readonly names: readonly string[];
+      readonly codeProgram?: boolean;
     }
   | { readonly ok: false; readonly reason: 'target_gone' };
 
@@ -103,6 +104,8 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
     private readonly terminals: TerminalLocator,
     private readonly modes: TerminalModes,
     private readonly run: ProgramRunner,
+    /** Whether the foreground runs a code program this account cannot replace; absent: none ever does. */
+    private readonly programs?: CodeProgramPort,
   ) {}
 
   /**
@@ -129,7 +132,14 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
   async observe(sessionId: string, target: InputTarget): Promise<ObserveResult> {
     if (target.kind !== 'terminal') return { ok: false, reason: 'unsupported' };
     const sight = await this.look(sessionId, target.key);
-    return sight.ok ? { ok: true, facts: sight.facts, names: sight.names } : sight;
+    return sight.ok
+      ? {
+          ok: true,
+          facts: sight.facts,
+          names: sight.names,
+          ...(sight.codeProgram ? { codeProgram: true as const } : {}),
+        }
+      : sight;
   }
 
   private async describe(pane: string): Promise<Described | undefined> {
@@ -180,6 +190,7 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
     const echo = await this.modes.echo(first.tty);
     const canonical = await this.modes.canonical?.(first.tty);
     const trusted = (await this.modes.trusted?.(foreground.pid)) === true;
+    const codeProgram = (await this.programs?.codeProgram(foreground.pid).catch(() => false)) === true;
     const last = await this.describe(pane);
     if (
       last === undefined ||
@@ -209,6 +220,7 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
       ok: true,
       facts,
       guard: { panePid: sighting.pid, command: last.command, cursorRow },
+      codeProgram,
       names: [...new Set([key, located.name, located.id].filter((name): name is string => name !== undefined))],
     };
   }

@@ -151,14 +151,17 @@ one-time.
     passphrase, passwd, Passwort, Kennwort, contraseña, mot de passe, credential, secret, "pw:", PIN), whatever else
     the line says;
   - the terminal reads with typing hidden, unless its program asks for 2FA codes (ssh, scp, sftp, mosh, the aws,
-    gcloud, az and vault CLIs) and the prompt line the daemon read from the pane asks for a code (verification code,
+    gcloud, az and vault CLIs), proved from the file it RUNS (`/proc/<pid>/exe` on Linux, the path `ps` shows on
+    macOS) and only when no part of that file's path is owned by this account or open to anyone (the secure-copy
+    rule: a name in `ps` can be rewritten and a shell copied to `~/bin/ssh`), and the prompt line the daemon read from the pane asks for a code (verification code,
     one-time, OTP, 2FA, authenticator, "code:") and says none of password, passphrase, PIN, token or secret; a
     shell's `read -s` is never a code;
   - the ferret's own prompt, or the field's label or id, says password, passphrase or PIN.
 
   Every line and word is matched after NFKC normalisation with combining marks and invisible characters removed
-  ("pàss​word" reads "password"), and a word mixing Latin with Cyrillic or Greek letters ("Pаssword") counts as a
-  password word.
+  ("pàss​word" reads "password"); a word mixing ASCII letters with any other letter ("Pаssword", "Pɑssword",
+  "ᴘᴀssword", Armenian "Passwօrd") counts as a password word; and a password word spelled with spaces, dots, dashes or
+  underscores between its letters ("Pass-word", "P a s s w o r d") is still one.
 
   Then the field is hidden on the card, fully locked, masked, blocks the ferret's typing, and is `secret` in the
   journal and audit. The card says "Treated as a secret: this is a password field." This is decided at raise and

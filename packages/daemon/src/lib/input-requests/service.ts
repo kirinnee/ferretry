@@ -71,7 +71,16 @@ import type {
 } from './ports.ts';
 import type { QuarantineHold, QuarantineRegistry } from './quarantine.ts';
 import { bindingOf, mayRebind } from './rebind.ts';
-import { heldFromView, lockFor, longerLock, lookAlike, matchable, passwordTarget, probeable } from './lock.ts';
+import {
+  heldFromView,
+  lockFor,
+  longerLock,
+  lookAlike,
+  matchable,
+  passwordTarget,
+  probeable,
+  spellsPassword,
+} from './lock.ts';
 import type { LoginObserver } from './login-observer.ts';
 import { savedForFields, targetMatchKey } from './saved-logins.ts';
 import { SessionLock } from './session-lock.ts';
@@ -280,7 +289,7 @@ export class InputRequestService {
     const requestId = this.deps.ids.requestId();
     // A code aimed at a password is a secret (observedAs): what the card, the lock, the mask and the journal all use.
     const upgraded = new Set<string>();
-    const fields = observedAs(raised.map(cardField), seen.facts, upgraded, raise.prompt);
+    const fields = observedAs(raised.map(cardField), seen.facts, upgraded, raise.prompt, seen.codeProgram === true);
     const sensitivity = strongestSensitivity(fields);
     // A page is pictured now, before the owner is asked and long before anything is typed into it.
     const shot =
@@ -845,7 +854,7 @@ export class InputRequestService {
     held.binding = bindingOf(seen.facts);
     const matchKey = targetMatchKey(seen.facts, this.deps.hostName ?? '');
     if (matchKey !== undefined) held.matchKey = matchKey;
-    const fields = observedAs(request.fields, seen.facts, held.upgraded, request.prompt);
+    const fields = observedAs(request.fields, seen.facts, held.upgraded, request.prompt, seen.codeProgram === true);
     held.request = {
       ...request,
       fields,
@@ -966,7 +975,7 @@ export class InputRequestService {
       if (seen.facts.kind === 'browser') held.navigation = seen.facts.navigationId;
       // Checked again at the write, AFTER any saved value was opened (so a saved login still fills the role the owner
       // chose): a code field now going into a password is held, masked and recorded as a secret. Never back.
-      const fields = observedAs(request.fields, seen.facts, held.upgraded, request.prompt);
+      const fields = observedAs(request.fields, seen.facts, held.upgraded, request.prompt, seen.codeProgram === true);
       held.request = { ...held.request, fields, sensitivity: strongestSensitivity(fields) };
       // The secret store is no surface anybody reads, so there is nothing to hold from view. The lock is looked at
       // again from the facts just seen, and the longer of that and the card's is kept: a card never shortens.
@@ -1365,8 +1374,8 @@ export class InputRequestService {
     // A card redrawn onto another document than the one it was raised on says so, above any other flag but red.
     const moved =
       seen.facts.kind === 'browser' && held.raisedOn !== undefined && seen.facts.navigationId !== held.raisedOn;
-    const fields = observedAs(request.fields, seen.facts, held.upgraded, request.prompt).map(field =>
-      moved ? { ...field, risk: worstRisk([NEW_DOCUMENT_FLAG, field.risk]) as InputRisk } : field,
+    const fields = observedAs(request.fields, seen.facts, held.upgraded, request.prompt, seen.codeProgram === true).map(
+      field => (moved ? { ...field, risk: worstRisk([NEW_DOCUMENT_FLAG, field.risk]) as InputRisk } : field),
     );
     // The new picture is taken before the owner is asked again, exactly as at raise.
     const shot =
@@ -1678,12 +1687,16 @@ function observedAs(
   facts: InputTargetFacts,
   upgraded: Set<string>,
   prompt: string,
+  /** The daemon saw a code program this account cannot replace in the foreground (`ObserveResult.codeProgram`). */
+  codeProgram: boolean,
 ): InputRequestField[] {
   return fields.map(field => {
     // The ferret's own words (its prompt, the field's label or id) may only ever RAISE a code to a secret.
     // Matched as normalised text, and a look-alike spelling counts, as for the pane's own words (lock.ts).
-    const said = [prompt, field.label, field.id].some(word => PASSWORD_WORDS.test(matchable(word)) || lookAlike(word));
-    if (field.sensitivity === 'code' && (said || passwordTarget(facts, field.id))) upgraded.add(field.id);
+    const said = [prompt, field.label, field.id].some(
+      word => PASSWORD_WORDS.test(matchable(word)) || spellsPassword(word) || lookAlike(word),
+    );
+    if (field.sensitivity === 'code' && (said || passwordTarget(facts, field.id, codeProgram))) upgraded.add(field.id);
     if (!upgraded.has(field.id)) return { ...field, risk: riskOf(field, facts) };
     const secret = { ...field, sensitivity: 'secret' as const };
     return { ...secret, risk: { level: AMBER_AT_LEAST[riskOf(secret, facts).level], reason: UPGRADED_FLAG } };

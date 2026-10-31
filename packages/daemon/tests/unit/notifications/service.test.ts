@@ -610,6 +610,35 @@ describe('NotificationService high priority', () => {
     should(world.push.dispatches[3]?.payload).not.have.property('urgency');
   });
 
+  it('should give a high slot back when the push reached no device, so it is spent only on a push that went out', async () => {
+    // Arrange — a ferret's three high slots; the first three pushes reach nobody (no device, a throw, zero accepted).
+    const push = new Push();
+    const world = fixture({ subjectOf: () => 'one-time-code', push });
+    const card = (n: number) => AgendaItemSchema.parse({ ...due, id: `A${String(n)}` });
+    const outcomes: (() => Promise<PushDeliveryResult>)[] = [
+      async () => ({ delivered: 0, failed: 0 }),
+      async () => {
+        throw new Error('the push service is down');
+      },
+      async () => ({ delivered: 0, failed: 1 }),
+    ];
+    push.notifyHook = async () => await (outcomes.shift() ?? (async () => ({ delivered: 1, failed: 0 })))();
+
+    // Act — three pushes that reached nobody, then three that did, then one more.
+    for (let n = 1; n <= 7; n += 1) await world.service.deadline(SESSION, card(n), snapshot);
+
+    // Assert — the failed three spent nothing, so the next three are still high; the seventh is capped.
+    should(push.dispatches.map(dispatch => dispatch.urgency ?? 'normal')).eql([
+      'high',
+      'high',
+      'high',
+      'high',
+      'high',
+      'high',
+      'normal',
+    ]);
+  });
+
   it('should send at most twelve high pushes a rolling hour across the daemon', async () => {
     // Arrange — thirteen ferrets, one code card each.
     const sessions = new Sessions();
