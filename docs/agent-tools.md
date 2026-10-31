@@ -307,6 +307,9 @@ call.
    daemon hashes the credential presented on `x-fy-session-capability` and finds the one LIVE session
    whose stored hash matches (constant-time). The call schema is strict, so a body `sessionId` is
    refused; `x-ferretry-session-id` is not read. Surfaces are looked up in that session's listing only.
+   The credential (`FY_SESSION_BOARD_CAPABILITY`) is re-issued for every pane launch — the first one
+   and every revive — and the previous one stops working at that moment, so a leaked copy dies with its
+   pane; a daemon restart that leaves panes running does not change it.
 2. **No host authority.** The agent route is `none` + `privilegedOnly`: it is served only over a
    privileged loopback carrier (never a paired device or the relay), and the session credential is the
    whole of its authority — it neither needs nor reads the admin token. `fy mcp serve` and an agent's
