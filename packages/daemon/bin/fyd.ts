@@ -1579,6 +1579,15 @@ export interface DaemonWorld {
    *  documents have been read — which is why it resolves rather than returns. */
   readonly createUsageFeed: (config: DaemonConfig) => Promise<UsageFeedPort>;
   /**
+   * Whether `GET /usage` and `GET /metrics` answer a caller with no credential: the machine's
+   * `publicUsageFeed` setting, asked at every request.
+   *
+   * It reads the configuration service's last load, which is memory and never the YAML, and an
+   * empty or not-yet-loaded configuration is the default — off — so the feed can only become reachable
+   * once a load has judged the setting, and a held (unconfirmed) switch-on is not the one in effect.
+   */
+  readonly publicUsageFeed: () => boolean;
+  /**
    * Opens this daemon's durable identity and device grants before any remote route is served.
    *
    * IT OPENS PUSH ENROLMENT WITH THEM, in one call, because the two share a lifetime rather than merely
@@ -8446,6 +8455,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     createResumeLauncher,
     createSessionLaunch,
     createSessionResume,
+    publicUsageFeed: () => configFiles.current().evaluation.effective.model.machine.publicUsageFeed,
     createUsageFeed: async config => {
       housekeepingEnabled = config.housekeeping.enabled;
       usageCollector = config.usage.url !== undefined;
@@ -12039,6 +12049,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     },
     usage,
     clock: world.clock,
+    publicUsageFeed: world.publicUsageFeed,
     startedAtMs,
     liveness,
   };

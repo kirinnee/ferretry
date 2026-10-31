@@ -212,6 +212,7 @@ export function machineView(
     browserFirewallFailure: model.machine.browserFirewallFailure,
     autoResume: model.machine.autoResume,
     agendaMode: model.machine.agendaMode,
+    publicUsageFeed: model.machine.publicUsageFeed,
     lastAutoResume: facts.lastAutoResume ?? null,
     tools: HARNESSES.map(harness => {
       const command = facts.tools[harness];

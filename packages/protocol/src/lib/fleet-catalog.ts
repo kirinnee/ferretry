@@ -197,6 +197,12 @@ export const FleetMachineViewSchema = z.strictObject({
    * Optional only so a newer app can read an older daemon, which has no such default (and starts every ferret off).
    */
   agendaMode: z.boolean().optional(),
+  /**
+   * "Public usage feed" (docs/multi-user-host.md): whether `GET /usage` and `GET /metrics` answer a caller with no
+   * credential. Optional only so a newer app can read an older daemon, which has no such setting (and always
+   * served both).
+   */
+  publicUsageFeed: z.boolean().optional(),
   /** What the last auto-resume pass did, or `null` when none has run. Left out by an older daemon. */
   lastAutoResume: AutoResumeSummarySchema.nullable().optional(),
   tools: z.array(FleetMachineToolSchema).readonly(),
@@ -783,6 +789,8 @@ export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
     autoResume: z.boolean().optional(),
     /** Left out by a client that predates it, and then left as it is. */
     agendaMode: z.boolean().optional(),
+    /** Left out by a client that predates it, and then left as it is. */
+    publicUsageFeed: z.boolean().optional(),
   }),
   z.strictObject({
     kind: z.literal('setup.import'),

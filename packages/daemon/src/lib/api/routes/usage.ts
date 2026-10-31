@@ -61,23 +61,30 @@ function versionedDocument(snapshot: UsageSnapshot | undefined): VersionedUsageF
 }
 
 /**
- * `/usage` is public and `/v1/usage` is token-scoped, serving the same body.
+ * `/v1/usage` is token-scoped, and `/usage` and `/metrics` serve the same readings to anyone, but only while
+ * the machine has opted in (`publicUsageFeed` in `machine.yaml`, off by default).
  *
- * The public one exists because the feed's external consumers are separate processes on this host
- * that hold no daemon token; the percentages it carries are operational telemetry, not secrets. The
- * `/v1` one is the surface the CLI and the recommender use, and it stays behind a token so the
- * versioned API has one consistent authorization story.
+ * The public pair exists for external consumers that hold no daemon token — a Prometheus scrape, a script
+ * on this host. What they carry is account labels and quota percentages, which another user of a shared
+ * host has no business reading, so a machine serves them only when its owner has said so. While
+ * `publicFeed` answers false the two paths are not in the route table (`RoutePattern.available`), so they
+ * answer exactly as paths this daemon never had and do not reveal that they exist. The `/v1` one is the
+ * surface the CLI, the app and the recommender use, and it stays behind a token either way.
  *
  * ONLY `/v1/usage` IS A WATCHER. The PWA polls it while a quota is on screen, so it may let the
  * environment logins' provider quotas be read (at most once a minute each). `/usage` and `/metrics`
  * are scraped on somebody else's timer, so they read the cached readings and ask no provider anything.
  */
-export function usageRoutes(feed: UsageFeedPort, clock: MillisecondClockPort): readonly ApiRoute[] {
+export function usageRoutes(
+  feed: UsageFeedPort,
+  clock: MillisecondClockPort,
+  publicFeed: () => boolean,
+): readonly ApiRoute[] {
   const scraped = unattendedUsageFeed(feed);
   const publicUsage = async () => jsonResponse(document(await currentSnapshot(scraped)));
   const versionedUsage = async () => jsonResponse(versionedDocument(await currentSnapshot(feed)));
   return [
-    { method: 'GET', path: '/usage', minimum: 'none', noStore: true, handle: publicUsage },
+    { method: 'GET', path: '/usage', minimum: 'none', noStore: true, available: publicFeed, handle: publicUsage },
     {
       method: 'GET',
       path: '/v1/usage',
@@ -90,6 +97,7 @@ export function usageRoutes(feed: UsageFeedPort, clock: MillisecondClockPort): r
       path: '/metrics',
       minimum: 'none',
       noStore: true,
+      available: publicFeed,
       handle: async () =>
         textResponse(renderUsageMetrics(await currentSnapshot(scraped), clock.now()), 200, PROMETHEUS_CONTENT_TYPE),
     },

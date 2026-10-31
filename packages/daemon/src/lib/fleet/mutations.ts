@@ -745,6 +745,18 @@ function putMachineSettings(
     consequences.push('Applies to ferrets started after this; ferrets that already exist keep their own switch.');
   }
 
+  // A client that predates the public usage feed leaves it out, and leaves it as it is.
+  const publicUsageFeed = change.publicUsageFeed ?? model.machine.publicUsageFeed;
+  if (publicUsageFeed !== model.machine.publicUsageFeed) {
+    draft.machine.publicUsageFeed = publicUsageFeed;
+    parts.push(`the public usage feed ${publicUsageFeed ? 'on' : 'off'}`);
+    consequences.push(
+      publicUsageFeed
+        ? 'Applies at once: any process on this host, and anything that reaches the daemon, can read quota percentages and account labels at /usage and /metrics without a credential.'
+        : 'Applies at once: /usage and /metrics answer as paths the daemon does not have.',
+    );
+  }
+
   if (parts.length === 0) return 'Keep machine settings the same';
   return `Set ${parts.join('; ')}`;
 }

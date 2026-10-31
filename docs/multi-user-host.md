@@ -17,7 +17,7 @@ every boot), with its own daemon, port, identity, tokens and tmux server. In det
 | Thing                                                | Why another user cannot reach it                                                                                                                                                                                                                                                                          |
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Admin token, secrets vault, devices, daemon identity | `0600` files inside the `0700` state home, written atomically. On every boot the daemon puts `0600` back on an existing token, and refuses to start if it is a link, not a regular file, or not yours                                                                                                     |
-| Daemon HTTP API                                      | Every route needs a credential except health, `/usage` and `/metrics`. Arriving from loopback grants no owner rights by itself                                                                                                                                                                            |
+| Daemon HTTP API                                      | Every route needs a credential except health. `/usage` and `/metrics` answer 404 unless the owner turns on `publicUsageFeed`. Arriving from loopback grants no owner rights by itself                                                                                                                     |
 | Port                                                 | The first boot takes the first free port from 7431 to 7446 and records it, so the second user gets 7432 automatically. `fy` will not send its token to a port another uid holds                                                                                                                           |
 | tmux                                                 | A private socket `<FY_HOME>/tmux.sock` (`srwx------`). Pane environment and typed keys go to tmux on stdin, never in a process's arguments                                                                                                                                                                |
 | Agent browser                                        | Its own profile under `<FY_HOME>/browser`. Its X display (window mode, login window) needs a cookie only its owner holds. Its debugging, proxy-relay and VNC ports are fixed per user and fenced by the host's loopback firewall (step 8), and the daemon proves each listener is its own before using it |
@@ -168,8 +168,13 @@ link instead`). Then only one person on the box can be mid-sign-in at a time, an
 - **An authenticated browser proxy** (docs/browser-proxy.md) is reached through an unauthenticated
   loopback relay while the browser runs. With step 8 its fixed relay port is fenced like the debugging
   port; without it another user could use the proxy's credentials.
-- **`/usage` and `/metrics` are public on loopback.** Another user can read quota percentages and
-  account labels.
+- **`/usage` and `/metrics` are public only if the owner turns them on.** They are off by default: both
+  answer 404, exactly like a path the daemon does not have, for every caller and every verb, so another
+  user cannot even tell they exist. `publicUsageFeed: true` in `machine.yaml` switches them on, and
+  switching it on is a loosening the owner confirms. While it is on, any process on the host (and anything
+  else that reaches the daemon) can read quota percentages and account labels with no credential. Turn it on
+  only for a scraper that cannot hold a token, such as an external Prometheus or Alloy job. `GET /v1/usage`
+  carries the same readings behind a token and does not depend on the key.
 - **Loopback callers are not rate-limited**, so another user can slow a daemon down. They still can't
   authenticate.
 - **`fy daemon` lifecycle commands use a lock at a fixed name in `/tmp`.** Another user can make those

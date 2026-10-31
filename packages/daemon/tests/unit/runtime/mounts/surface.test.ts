@@ -67,7 +67,13 @@ import {
  * never mounted. A route missing from this table is a capability the product does not have.
  */
 
-const base = { credentials: CREDENTIALS, usage: emptyFeed, clock: fixedClock(1_700_000_000_000), startedAtMs: 0 };
+const base = {
+  credentials: CREDENTIALS,
+  usage: emptyFeed,
+  clock: fixedClock(1_700_000_000_000),
+  startedAtMs: 0,
+  publicUsageFeed: () => true,
+};
 
 const pairingSubsystem = (): PairingSubsystem => ({
   mint: () => {

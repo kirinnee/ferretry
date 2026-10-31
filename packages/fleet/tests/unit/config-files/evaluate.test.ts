@@ -263,6 +263,11 @@ describe('evaluateConfigFiles: loosening waits', () => {
     ['warden.yaml', WARDEN_ON, 'the Warden may now spend on AI investigations'],
     ['machine.yaml', MACHINE_FERRETRY, 'agents may now control Ferretry settings'],
     ['machine.yaml', 'agentPermissions: skip\n', 'agents now skip every permission prompt'],
+    [
+      'machine.yaml',
+      'publicUsageFeed: true\n',
+      'any process on this host can now read quota percentages and account labels without a credential',
+    ],
     ['learning.yaml', 'maxMinersPerRun: 9\n', 'the lesson miners one run may start goes up from 2 to 9'],
     ['learning.yaml', 'intervalMinutes: 5\n', 'the minutes between lesson runs goes down from 60 to 5'],
     ['voice.yaml', 'postProcessing:\n  provider: groq\n', 'dictated text now goes to groq to be cleaned up'],

@@ -418,6 +418,7 @@ describe('machineView', () => {
       browserProxy: null,
       autoResume: true,
       agendaMode: true,
+      publicUsageFeed: false,
       lastAutoResume: null,
       tools: [
         { harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/local/bin/claude' },
@@ -461,6 +462,17 @@ describe('machineView', () => {
     should(on.agendaMode).equal(true);
     should(off.agendaMode).equal(false);
     FleetMachineViewSchema.parse(off);
+  });
+
+  it('should carry the public usage feed switch, off unless the owner turned it on', () => {
+    // Act
+    const off = machineView(modelOf({}), factsOf({}), OPEN);
+    const on = machineView(modelOf({ machine: { publicUsageFeed: true } }), factsOf({}), OPEN);
+
+    // Assert
+    should(off.publicUsageFeed).equal(false);
+    should(on.publicUsageFeed).equal(true);
+    FleetMachineViewSchema.parse(on);
   });
 
   it('should carry auto-resume and what the last pass did', () => {
