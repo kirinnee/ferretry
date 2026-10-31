@@ -202,6 +202,13 @@ describe('whether a pasted key is for the account it is being saved to', () => {
       { issuer: 'GitHub', accountName: 'anyone' },
     ],
     ['the key is bare', GITHUB, [github], {}],
+    ['a non-Latin issuer is the label exactly', { label: '株式会社' }, [], { issuer: '株式会社' }],
+    [
+      'the issuer is the registrable label of an ssh destination',
+      { label: 'Build box' },
+      [{ kind: 'terminal', tool: 'ssh', host: 'kirin-box', dest: 'build.example.com' }],
+      { issuer: 'Example' },
+    ],
   ])('should find nothing amiss when %s', (_name, account, places, key) => {
     expect(factorMismatch(account, places as Place[], key)).toBeUndefined();
   });
@@ -231,6 +238,37 @@ describe('whether a pasted key is for the account it is being saved to', () => {
       { issuer: '株式会社' },
     ],
     ['the issuer is only the top-level domain', GITHUB, [github], { issuer: 'com' }, { issuer: 'com' }],
+    [
+      'a Cyrillic look-alike of the provider (L3)',
+      { label: 'ClickUp' },
+      [okta],
+      { issuer: 'Оkta' },
+      { issuer: 'Оkta' },
+    ],
+    ['a fragment of the provider', { label: 'ClickUp' }, [okta], { issuer: 'kta' }, { issuer: 'kta' }],
+    ['the top-level domain of the provider', { label: 'ClickUp' }, [okta], { issuer: 'com' }, { issuer: 'com' }],
+    [
+      'a fragment of a host label that is not the registrable one',
+      { label: 'ClickUp' },
+      [okta],
+      { issuer: 'pan' },
+      { issuer: 'pan' },
+    ],
+    [
+      'a host label that is not the registrable one',
+      { label: 'ClickUp' },
+      [okta],
+      { issuer: 'Company' },
+      { issuer: 'Company' },
+    ],
+    ['part of a word of the label', { label: 'GitHub work' }, [], { issuer: 'Hub' }, { issuer: 'Hub' }],
+    [
+      'a non-Latin issuer that is only part of the label',
+      { label: '株式会社 GitHub' },
+      [],
+      { issuer: '株式会社' },
+      { issuer: '株式会社' },
+    ],
     [
       'the account name is a username plus more',
       GITHUB,

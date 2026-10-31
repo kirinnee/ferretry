@@ -898,6 +898,8 @@ into a guessed key. This is folded into the `v: 2` index directly; there is no `
 - **A ferret** (`account_hint`): each key's id, kind and label, **nothing else**. A `totp` key reads the same
   whether Ferretry holds its seed or the owner does, so two accounts that differ only by a seed give
   byte-identical hints. The hint line reads `2FA: 'Okta Verify on Pixel' (push) [tf_…], 'Phone ••42' (sms) [tf_…]`.
+  A ferret can still tell which accounts have a `totp` key, and right after the migration every such key holds a
+  seed. The design allows that (a ferret may know which 2FA kinds an account has); it never learns more.
 
 **A code card's title** comes from the keys (`factorAskWords`), in the owner's words: "Code sent to ••42 (SMS)",
 "Code from Authenticator app", "One-time code: SMS ••42 or Authenticator app", or, with no key known, "One-time

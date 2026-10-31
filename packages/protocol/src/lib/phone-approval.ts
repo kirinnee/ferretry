@@ -5,6 +5,8 @@ import { AgendaPhoneApprovalRefSchema, MAX_AGENDA_SUBJECT_LENGTH } from './agend
 import { InstantSchema } from './common.ts';
 import { InputFieldElementSchema } from './input-request.ts';
 import { LOGIN_USERNAME_MAX_LENGTH, LoginEntryIdSchema, oneLine } from './login-entries.ts';
+import { AgentNameSchema } from './session.ts';
+import { AppOriginSchema } from './step-up.ts';
 import { SurfaceKeySchema } from './surface-names.ts';
 
 /**
@@ -122,6 +124,15 @@ export type PhoneApprovalNumberMissing = z.infer<typeof PhoneApprovalNumberMissi
 export const PhoneApprovalStateSchema = z.enum(['waiting', 'moved-on', 'timed-out', 'refused', 'gone']);
 export type PhoneApprovalState = z.infer<typeof PhoneApprovalStateSchema>;
 
+/**
+ * The origin of a page an approval waits on: https and an origin only (scheme, host, port), so no `javascript:` or
+ * `data:` text, and no path a ferret chose, can reach the card. A push number is only ever read on an https page.
+ */
+export const PhoneApprovalOriginSchema = AppOriginSchema.refine(
+  origin => origin.startsWith('https://'),
+  'an https origin',
+);
+
 /** The push key a card names, as the owner labelled it. */
 export const PhoneApprovalFactorSchema = z.strictObject({
   id: TwoFactorIdSchema,
@@ -135,11 +146,11 @@ export const PhoneApprovalSchema = z
     id: PhoneApprovalIdSchema,
     /** From the asking ferret's session credential, never from a body. */
     sessionId: oneLine(128),
-    /** The asking ferret's name, as the daemon knows its session ("Asked 14:02 by lizzette"). */
-    agentName: oneLine(128),
+    /** The asking ferret's name, as the daemon knows its session ("Asked 14:02 by lizzette"): a callsign, no more. */
+    agentName: AgentNameSchema,
     surface: z.enum(['browser', 'terminal']),
-    /** The page's origin, as the browser reports it at the raise and at every read. A page only. */
-    origin: oneLine(256).optional(),
+    /** The page's origin, as the browser reports it at the raise and at every read. A page only, and https only. */
+    origin: PhoneApprovalOriginSchema.optional(),
     /** The sign-in the daemon matched there, its account, and the provider it goes via. */
     signIn: SignInIdSchema.optional(),
     account: AccountRefSchema.optional(),

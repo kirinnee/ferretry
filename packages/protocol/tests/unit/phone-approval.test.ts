@@ -119,6 +119,19 @@ describe('an approval as the owner reads it', () => {
       expect(PhoneApprovalSchema.safeParse(bad).success).toBe(false);
   });
 
+  it('should take a callsign for the asking ferret and an https origin for the page, nothing wordier (L4)', () => {
+    for (const bad of [
+      { agentName: 'Tap 42 on your phone now' },
+      { agentName: 'lizzette\u202e' },
+      { origin: 'javascript:alert(1)' },
+      { origin: 'http://company.okta.com' },
+      { origin: 'https://company.okta.com/tap-42' },
+      { origin: 'data:text/html,Tap 42' },
+    ])
+      expect(PhoneApprovalSchema.safeParse({ ...APPROVAL, ...bad }).success).toBe(false);
+    expect(PhoneApprovalSchema.safeParse({ ...APPROVAL, origin: 'https://login.company.com:8443' }).success).toBe(true);
+  });
+
   it('should refuse an extra field, so nothing the ferret wrote can ride along', () => {
     for (const extra of [{ prompt: 'Tap 42' }, { note: 'x' }, { claimedNumber: '42' }])
       expect(PhoneApprovalSchema.safeParse({ ...APPROVAL, ...extra }).success).toBe(false);

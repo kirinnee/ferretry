@@ -1,4 +1,4 @@
-import type { StepUpAct } from '@ferretry/protocol';
+import type { EveryCallerStepUpAct, MachineSkippableStepUpAct } from '@ferretry/protocol';
 import type { ApiActor } from './actor.ts';
 import type { AuthenticatedCredential } from './authentication.ts';
 import type { CallerGovernance, CapabilityDemand, CapabilityPresentation } from './capability.ts';
@@ -116,7 +116,18 @@ export interface RouteContext {
    * requests racing on one proof exactly one is answered `true`, so one confirmation buys one act. A
    * caller with no proven device holds none. The proof is not refunded when the act then refuses.
    */
-  readonly claimFreshStepUp?: (act?: StepUpAct) => boolean;
+  readonly claimFreshStepUp?: ClaimFreshStepUp;
+}
+
+/**
+ * Takes a FRESH proof for an act ({@link RouteContext.claimFreshStepUp}). An act the machine may skip is asked the short
+ * way, by a route that first checks `governance.governed`. An act asked of EVERY caller (`STEP_UP_ACTS_EVERY_CALLER`)
+ * must name the one subject its proof is bound to, so `claimFreshStepUp('add-2fa-key')` does not compile, and its
+ * route must not read `governance` at all: the machine's admin token, which every ferret holds, proves nothing.
+ */
+export interface ClaimFreshStepUp {
+  (act?: MachineSkippableStepUpAct): boolean;
+  (act: EveryCallerStepUpAct, subject: string): boolean;
 }
 
 /**

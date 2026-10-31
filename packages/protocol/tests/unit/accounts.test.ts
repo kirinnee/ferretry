@@ -7,6 +7,7 @@ import {
   addTwoFactorKeySubject,
   automaticKeysInOfferOrder,
   MAX_FACTORS_PER_ACCOUNT,
+  SealedNameSchema,
   sealedNamesOf,
   TwoFactorKeyHintSchema,
   TwoFactorKeyRecordSchema,
@@ -986,6 +987,54 @@ describe('2FA keys as the owner reads them', () => {
       `${KEY(1)}_TOTP_00000001`,
       `${KEY(1)}_TOTP_00000002`,
     ]);
+  });
+
+  it('should list, and check, every field of an account that holds a seal: one walk cannot miss what the other sees (L5)', () => {
+    // Arrange — an account with every kind of key and every field filled, its seals found by shape, not by name
+    const full = account(1, {
+      username: 'kirin',
+      seals: { password: `${KEY(1)}_PASSWORD_00000001` },
+      factors: [
+        totpKey(TF(1), {
+          label: 'App',
+          seal: `${KEY(1)}_TOTP_00000001`,
+          params: PARAMS,
+          issuer: 'GitHub',
+          accountName: 'kirin',
+          verified: { worked: true, at: AT },
+        }),
+        totpKey(TF(2), { label: 'Backup', seal: `${KEY(1)}_TOTP_00000002`, params: PARAMS }),
+        totpKey(TF(3), { label: 'Typed' }),
+        otherKey(TF(4), 'sms', 'Phone', { endsWith: '42' }),
+        otherKey(TF(5), 'email', 'Inbox', { to: 'kirin@example.com' }),
+        otherKey(TF(6), 'push', 'Okta', { app: 'okta-verify' }),
+        otherKey(TF(7), 'security-key', 'YubiKey'),
+      ],
+      apartFrom: [KEY(2)],
+    });
+    const parsed = AccountIndexDocumentSchema.parse(index({ A: full, B: account(2) }, {}));
+    const sealShaped: { path: (string | number)[]; seal: string }[] = [];
+    const walk = (node: unknown, path: (string | number)[]): void => {
+      if (typeof node === 'string' && SealedNameSchema.safeParse(node).success) sealShaped.push({ path, seal: node });
+      else if (node !== null && typeof node === 'object')
+        for (const [key, child] of Object.entries(node))
+          walk(child, [...path, Array.isArray(node) ? Number(key) : key]);
+    };
+    walk(parsed.accounts.A, []);
+
+    // Act / Assert — the sweep's list is exactly the seals there are
+    expect(sealedNamesOf(parsed.accounts.A ?? { seals: {} }).toSorted()).toEqual(
+      sealShaped.map(({ seal }) => seal).toSorted(),
+    );
+    expect(sealShaped).toHaveLength(3);
+    // ...and each of them is checked: pointed at another account's secret, the index is damaged
+    for (const { path, seal } of sealShaped) {
+      const moved = structuredClone(full) as Record<string, unknown>;
+      let at: Record<string | number, unknown> = moved;
+      for (const step of path.slice(0, -1)) at = at[step] as Record<string | number, unknown>;
+      at[path.at(-1) as string | number] = seal.replace(KEY(1), KEY(2));
+      expect(AccountIndexDocumentSchema.safeParse(index({ A: moved, B: account(2) }, {})).success).toBe(false);
+    }
   });
 });
 

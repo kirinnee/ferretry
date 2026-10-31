@@ -386,6 +386,10 @@ export type AccountRecord = z.infer<typeof AccountRecordSchema>;
 /**
  * EVERY SEALED NAME AN ACCOUNT POINTS AT: its password's and each 2FA key's seed. The one list a sweep of the sealed
  * document keeps and a masker opens: a sweep that missed the keys' seals would delete every saved seed.
+ *
+ * The daemon's `referenced()` (and anything else that asks "which seals are in use") MUST be built from this, never
+ * from a walk of its own. A new field that holds a seal goes here AND in {@link accountIndexProblems}' `claim`; a
+ * structural test in accounts.test.ts fails if either misses one.
  */
 export function sealedNamesOf(account: Pick<AccountRecord, 'seals' | 'factors'>): readonly string[] {
   return [
@@ -460,7 +464,7 @@ export function accountIndexProblems(document: {
   const sealOwner = new Map<string, string>();
   const factorOwner = new Map<string, string>();
   // A seal is the account's own, for its own field, and nobody else's: a hand-edit cannot point one account (or a
-  // 2FA key) at another's secret, or a 2FA key at a password.
+  // 2FA key) at another's secret, or a 2FA key at a password. Every field {@link sealedNamesOf} lists is claimed here.
   const claim = (seal: string, handle: string, key: string, field: 'PASSWORD' | 'TOTP', path: AccountIndexPath) => {
     if (!seal.startsWith(`${key}_${field}_`))
       problems.push({

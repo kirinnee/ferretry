@@ -189,29 +189,63 @@ export interface FactorMismatch {
   readonly accountName?: string;
 }
 
-/** The labels of every host a sign-in names, but the last (`company.okta.com` → `company`, `okta`). */
-function hostLabels(places: readonly Place[]): readonly string[] {
+/**
+ * The registrable label of every host a sign-in names: the one before the top-level domain (`github.com` → `github`,
+ * `company.okta.com` → `okta`, a terminal's `ssh@build.example.com` → `example`). Never another label of the host:
+ * `company` or `com` would let a fragment through.
+ */
+function registrableLabels(places: readonly Place[]): readonly string[] {
   const labels: string[] = [];
   for (const key of places.flatMap(place => placeHosts(place))) {
     const host = (key.includes('@') ? key.slice(key.indexOf('@') + 1) : key).replace(/:[0-9]+$/u, '');
     const parts = host.split('.');
-    labels.push(...(parts.length > 1 ? parts.slice(0, -1) : parts).map(comparable));
+    const label = parts.length > 1 ? parts[parts.length - 2] : parts[0];
+    if (label !== undefined && label !== '') labels.push(label.toLowerCase());
   }
-  return labels.filter(label => label !== '');
+  return labels;
 }
 
-/** The shortest issuer that may match by being PART of a name: shorter, it must be the whole name. */
-const CONTAINED_MIN_LENGTH = 3;
+/** A name as whole words, case-folded (`GitHub (kirinnee)` → `github`, `kirinnee`). */
+const wordsOf = (text: string): readonly string[] =>
+  text
+    .normalize('NFKC')
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(word => word !== '');
+
+/** Whether `part` is a run of whole words in `whole`. */
+const isWordRun = (part: readonly string[], whole: readonly string[]): boolean =>
+  part.length > 0 && whole.some((_, start) => part.every((word, offset) => whole[start + offset] === word));
+
+/** A letter or digit outside ASCII: a look-alike (`Оkta`, Cyrillic О) may hide in one. */
+const NON_ASCII_LETTER = /[^\p{ASCII}](?<=[\p{L}\p{N}])/u;
 
 /**
- * WHETHER A PASTED KEY SAYS IT IS FOR ANOTHER ACCOUNT. The issuer, compared case-folded on its letters and digits,
- * must be the account's label, a part of it, or a label of a host one of its sign-ins names (`github.com` →
- * `github`, `company.okta.com` → `okta`). The account name must be the username (trimmed, case-folded), or an email
- * whose local part is the username. A bare key says neither, so it is never a mismatch; an issuer with no letters or
- * digits cannot be checked, so it is one.
+ * Whether an issuer names this account. An ASCII issuer must be the registrable label of a host one of its sign-ins
+ * names, or a run of whole words of the account's label (`git hub` fits "Git-Hub work"; `kta`, `pan` and `com` fit
+ * nothing). An issuer with a letter or digit outside ASCII must be the label or a registrable label EXACTLY, case-
+ * folded, so a look-alike never passes by losing the letters it swapped.
+ */
+function issuerFits(issuer: string, account: FactorMismatchAccount, places: readonly Place[]): boolean {
+  const hosts = registrableLabels(places);
+  const folded = issuer.normalize('NFKC').trim().toLowerCase();
+  if (NON_ASCII_LETTER.test(folded))
+    return folded === account.label.normalize('NFKC').trim().toLowerCase() || hosts.includes(folded);
+  const words = wordsOf(issuer);
+  const label = wordsOf(account.label);
+  return (
+    hosts.includes(words.join('')) || isWordRun(words, label) || (words.length > 0 && words.join('') === label.join(''))
+  );
+}
+
+/**
+ * WHETHER A PASTED KEY SAYS IT IS FOR ANOTHER ACCOUNT. The issuer must name this account ({@link issuerFits}: the
+ * registrable label of a host its sign-ins name, or whole words of its label; exactly, when it has letters outside
+ * ASCII). The account name must be the username (trimmed, case-folded), or an email whose local part is the
+ * username. A bare key says neither, so it is never a mismatch; an issuer with no letters or digits is one.
  *
  * `undefined`: nothing differs. The daemon refuses a save with a mismatch unless the owner ticked "save it here
- * anyway", so a bug in the app cannot skip the warning.
+ * anyway", so a bug in the app cannot skip the warning. The warning is advice: the passkey is still the act.
  */
 export function factorMismatch(
   account: FactorMismatchAccount,
@@ -219,14 +253,7 @@ export function factorMismatch(
   parsed: Pick<ParsedTotpKey, 'issuer' | 'accountName'>,
 ): FactorMismatch | undefined {
   const mismatch: { issuer?: string; accountName?: string } = {};
-  if (parsed.issuer !== undefined) {
-    const issuer = comparable(parsed.issuer);
-    const names = [comparable(account.label), ...hostLabels(places)];
-    const fits =
-      issuer !== '' &&
-      names.some(name => name === issuer || (issuer.length >= CONTAINED_MIN_LENGTH && name.includes(issuer)));
-    if (!fits) mismatch.issuer = parsed.issuer;
-  }
+  if (parsed.issuer !== undefined && !issuerFits(parsed.issuer, account, places)) mismatch.issuer = parsed.issuer;
   if (parsed.accountName !== undefined && account.username !== undefined) {
     const named = parsed.accountName.normalize('NFKC').trim().toLowerCase();
     const username = account.username.normalize('NFKC').trim().toLowerCase();
