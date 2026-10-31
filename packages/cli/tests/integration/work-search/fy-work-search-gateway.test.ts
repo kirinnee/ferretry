@@ -3,6 +3,7 @@ import { FyHttpError } from '@ferretry/protocol/client';
 import type { IFyApiClient } from '@ferretry/protocol';
 import should from 'should';
 import { FyWorkSearchGateway } from '../../../src/adapters/work-search/fy-work-search-gateway';
+import { listing, FERRETRY_ID } from '../../unit/board/fixtures';
 import { agendaHit, response, taskHit } from '../../unit/work-search/fixtures';
 
 const client = (answer: unknown) => {
@@ -40,6 +41,28 @@ describe('the work-search gateway', () => {
 
     should(calls[0]?.path).equal('/v1/search?q=x');
     should(headersOf(calls[0]?.init)).not.have.property('x-ferretry-session-id');
+  });
+
+  it('should carry the project and the limit, and read the project list and the session directory', async () => {
+    const { client: fake, calls } = client(response([]));
+
+    await new FyWorkSearchGateway(fake).search(
+      { q: 'x', open: false, project: FERRETRY_ID as never, limit: 3 },
+      undefined,
+    );
+    should(calls[0]?.path).equal(`/v1/search?q=x&project=${FERRETRY_ID}&limit=3`);
+
+    const projects = client(listing());
+    await new FyWorkSearchGateway(projects.client).projects('session-7');
+    should(projects.calls[0]?.path).equal('/v1/board/projects');
+    should(headersOf(projects.calls[0]?.init)).containEql({ 'x-ferretry-session-id': 'session-7' });
+
+    const listed = {
+      request: fake.request,
+      list: (() =>
+        Promise.resolve([{ config: { id: 's1', teammate: 'adrienne' } }])) as unknown as IFyApiClient['list'],
+    };
+    should(await new FyWorkSearchGateway(listed).sessions()).deepEqual([{ id: 's1', callsign: 'adrienne' }]);
   });
 
   it('should post the related check as JSON', async () => {

@@ -855,6 +855,16 @@ describe('McpServer — the search tool', () => {
     should(lines[2]).equal('(2 of 5 shown; narrow it with kind or open)');
   });
 
+  it('should list every hit with no truncation note when the daemon sent them all', async () => {
+    const { request } = harness(undefined, { search: async () => response([taskHit()]) });
+
+    const answer = (await request('tools/call', toolCall('search_work', { query: 'search' }))) as {
+      result: { content: { text: string }[] };
+    };
+
+    should(answer.result.content[0]?.text.split('\n')).have.length(1);
+  });
+
   it('should say so when nothing matches, and leave kind and open out of the query when not given', async () => {
     // Arrange
     const { request, searchCalls } = harness();
