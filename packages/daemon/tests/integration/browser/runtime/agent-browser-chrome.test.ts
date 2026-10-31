@@ -287,7 +287,15 @@ describe('the machine agent browser, in a real Chrome', () => {
     const id = /^(r\d+)/mu.exec(listed.output ?? '')?.[1] ?? '';
     const shown = await call({ tool: 'browser.network', name: 'life', action: 'get', id });
     await call({ tool: 'browser.click', name: 'life', selector: '#pop' });
-    const tabs = await call({ tool: 'browser.tabs', action: 'list' });
+    let tabs = await call({ tool: 'browser.tabs', action: 'list' });
+    await waitFor(
+      async () => {
+        tabs = await call({ tool: 'browser.tabs', action: 'list' });
+        return (tabs.summary ?? '').includes('Popups with no name yet');
+      },
+      'the popup to show up in browser.tabs',
+      { within: 10_000, every: 100 },
+    );
     const emulated = await call({ tool: 'browser.emulate', name: 'life', viewport: { width: 390, height: 844 } });
     const reset = await call({ tool: 'browser.emulate', name: 'life', reset: true });
 
