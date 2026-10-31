@@ -177,6 +177,7 @@ const OPEN = [
     owner: DENISHA,
     assignee: MARGOT,
     summary: 'Check the settings page after pairing.',
+    howToTest: '1. Pair a phone\n2. Open Settings › Devices\n3. See no token',
     links: links([
       pr(918, {
         state: 'merged',

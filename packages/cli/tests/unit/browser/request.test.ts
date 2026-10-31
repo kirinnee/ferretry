@@ -3,7 +3,7 @@ import should from 'should';
 import { BROWSER_LOGIN_PATH, browserRequest, sessionBrowserPath } from '../../../src/lib/browser/request';
 import { type BrowserCommand, BrowserCommandError } from '../../../src/lib/browser/types';
 
-type SessionCommand = Exclude<BrowserCommand, { command: 'login' | 'proxy' }>;
+type SessionCommand = Exclude<BrowserCommand, { command: 'login' | 'proxy' | 'firewall' }>;
 
 const SESSION_PATH = '/v1/sessions/sess-1/browser';
 

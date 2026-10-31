@@ -89,6 +89,12 @@ export interface DaemonApiDependencies {
   readonly credentials: ApiCredentials;
   readonly usage: UsageFeedPort;
   readonly clock: MillisecondClockPort;
+  /**
+   * Whether the machine serves `GET /usage` and `GET /metrics` to a caller with no credential, read at every
+   * request from the configuration in effect. Required, so a wiring that forgets it fails to compile instead
+   * of choosing a default for the machine.
+   */
+  readonly publicUsageFeed: () => boolean;
   /** Epoch milliseconds at which this daemon process started, for the liveness answer. */
   readonly startedAtMs: number;
   /** Boot progress and event-loop lag for the liveness answer; absent in route tests. */
@@ -104,7 +110,7 @@ export interface DaemonApiDependencies {
 export function daemonApiRoutes(dependencies: DaemonApiDependencies): readonly ApiRoute[] {
   return [
     ...healthRoutes(dependencies.clock, dependencies.startedAtMs, dependencies.liveness),
-    ...usageRoutes(dependencies.usage, dependencies.clock),
+    ...usageRoutes(dependencies.usage, dependencies.clock, dependencies.publicUsageFeed),
   ];
 }
 

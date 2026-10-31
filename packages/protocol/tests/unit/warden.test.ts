@@ -34,6 +34,9 @@ const dayStats = {
   asked: { auto: 1, jev: 0, llm: 0 },
 };
 
+const actionTally = { action: 'revive', outcome: 'done', auto: 2, jev: 1, llm: 0 };
+const reviveResults = { progressed: { auto: 2, jev: 1, llm: 0 }, stalled: { auto: 0, jev: 0, llm: 1 } };
+
 const jevCheck = {
   at: INSTANT,
   sessionId: 'session-1',
@@ -45,6 +48,14 @@ const jevCheck = {
   confidence: 0.21,
   costUsd: 0.0004,
 };
+
+/** The decision tree's path to a hand-on: two facts, then Jev's one answer below the bar. */
+const jevPath = [
+  { node: 'running', kind: 'fact', answer: 'yes' },
+  { node: 'output_changed', kind: 'fact', answer: 'no' },
+  { node: 'waiting_on_real', kind: 'judgement', answer: 'no', confidence: 0.21 },
+  { node: 'dialog_on_screen', kind: 'fact', answer: 'no' },
+];
 
 const jevBefore = {
   verdict: 'handed_on',
@@ -190,13 +201,33 @@ const wardenCases: SchemaCase[] = [
   { name: 'actor counts', schema: warden.WardenActorCountsSchema, value: dayStats.moved },
   { name: 'day stats', schema: warden.WardenDayStatsSchema, value: dayStats },
   { name: 'day stats with Jev checks', schema: warden.WardenDayStatsSchema, value: { ...dayStats, jev: jevDay } },
+  { name: 'stat action', schema: warden.WardenStatActionSchema, value: 'escalate' },
+  { name: 'action tally', schema: warden.WardenActionTallySchema, value: actionTally },
+  { name: 'revive results', schema: warden.WardenReviveResultsSchema, value: reviveResults },
+  {
+    name: 'day stats with action tallies',
+    schema: warden.WardenDayStatsSchema,
+    value: { ...dayStats, acts: [actionTally], reviveResults },
+  },
   { name: 'jev day stats', schema: warden.WardenJevDayStatsSchema, value: jevDay },
   { name: 'jev check verdict', schema: warden.WardenJevCheckVerdictSchema, value: 'skipped' },
   { name: 'jev check why', schema: warden.WardenJevCheckWhySchema, value: 'jev_cap' },
   { name: 'jev check route', schema: warden.WardenJevCheckRouteSchema, value: 'owner' },
   { name: 'jev check', schema: warden.WardenJevCheckSchema, value: jevCheck },
+  {
+    name: 'jev check with its tree path',
+    schema: warden.WardenJevCheckSchema,
+    value: { ...jevCheck, path: jevPath, node: 'waiting_on_real' },
+  },
+  { name: 'jev path step', schema: warden.WardenJevPathStepSchema, value: jevPath[2] },
+  { name: 'jev path', schema: warden.WardenJevPathSchema, value: jevPath },
   { name: 'jev before why', schema: warden.WardenJevBeforeWhySchema, value: 'owner_request' },
   { name: 'jev before', schema: warden.WardenJevBeforeSchema, value: jevBefore },
+  {
+    name: 'jev before with its tree path',
+    schema: warden.WardenJevBeforeSchema,
+    value: { ...jevBefore, path: jevPath, node: 'waiting_on_real' },
+  },
   {
     name: 'blessing',
     schema: warden.WardenBlessingViewSchema,
@@ -296,6 +327,21 @@ describe('warden schemas', () => {
         value: { sessionId: 's', note: 'x'.repeat(501) },
       },
       { name: 'malformed day', schema: warden.WardenSpendDaySchema, value: '16/10/2026' },
+      {
+        name: 'a path answer that is not yes or no',
+        schema: warden.WardenJevPathStepSchema,
+        value: { node: 'running', kind: 'fact', answer: 'maybe' },
+      },
+      {
+        name: 'a confidence beyond certain',
+        schema: warden.WardenJevPathStepSchema,
+        value: { node: 'waiting_on_real', kind: 'judgement', answer: 'yes', confidence: 1.2 },
+      },
+      {
+        name: 'a path deeper than any tree',
+        schema: warden.WardenJevPathSchema,
+        value: Array.from({ length: warden.WARDEN_JEV_PATH_MAX + 1 }, () => jevPath[0]),
+      },
       { name: 'legacy triage in a patch', schema: warden.WardenConfigPatchSchema, value: { triage: 'jev' } },
       { name: 'unknown layer', schema: warden.WardenConfigPatchSchema, value: { layers: { rules: false } } },
       {

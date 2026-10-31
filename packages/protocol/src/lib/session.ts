@@ -192,7 +192,15 @@ export const SendRecordSchema = z.object({
 });
 export type SendRecord = z.infer<typeof SendRecordSchema>;
 
-export const SendListResponseSchema = z.object({ sends: z.array(SendRecordSchema) });
+/**
+ * One page of a session's sends, newest first: without a cursor, the newest ones and every open one however old.
+ * `nextCursor` is where the next, older page starts (`?before=`); absent from a daemon that answered the whole
+ * ledger, and `null` once the oldest send is on the page.
+ */
+export const SendListResponseSchema = z.object({
+  sends: z.array(SendRecordSchema),
+  nextCursor: z.string().nullable().optional(),
+});
 export type SendListResponse = z.infer<typeof SendListResponseSchema>;
 
 /**

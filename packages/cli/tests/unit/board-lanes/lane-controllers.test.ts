@@ -109,6 +109,16 @@ describe('rendering lanes', () => {
       .and.match(/plan\tPlan\/Design\t\(active, owner-gated\)/u);
   });
 
+  it('should say when a card belongs in each lane, from its category and what enters it', () => {
+    const text = renderLaneSet(laneSet({ confirmedBy: 'owner' }), 'Ferretry');
+    should(text)
+      .match(/todo\tTodo\t\(backlog\)\tuse when: not started yet/u)
+      .and.match(/plan\tPlan\/Design\t\(active, owner-gated\)\tuse when: you are planning or designing it/u)
+      .and.match(
+        /implement\tIn progress\t\(active\)\tuse when: you are building it now; moves in when a session starts on it/u,
+      );
+  });
+
   it('should explain each agenda outcome', () => {
     const base = { laneSet: laneSet() };
     should(renderLaneChange({ ...base, agenda: 'not-needed' }, 'Ferretry')).match(/No question for the owner/u);

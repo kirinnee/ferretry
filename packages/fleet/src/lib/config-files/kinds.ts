@@ -218,6 +218,11 @@ function machineLoosening(before: MachineFileValue, after: MachineFileValue): re
       ? ['agents now skip every permission prompt']
       : []),
     ...browserProxyLoosening(before.machine.browserProxy, after.machine.browserProxy),
+    ...switchedOn(
+      before.machine.publicUsageFeed,
+      after.machine.publicUsageFeed,
+      'any process on this host can now read quota percentages and account labels without a credential',
+    ),
   ];
 }
 

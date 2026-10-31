@@ -33,9 +33,9 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
 import should from 'should';
+import { THEME_FAMILIES } from '../../src/lib/theme-preferences.ts';
 import { fakeTilePng } from '../support/fake-tile.ts';
 import { FY_RENDER_VISUAL_CASES } from './fixtures/fy-render-visual-cases.ts';
-import { THEME_FAMILIES } from '../../src/lib/theme-preferences.ts';
 import { sharedChromium } from './support/chromium.ts';
 import { fyRenderIntegrationFixture } from './support/fy-render-integration-fixture.ts';
 
@@ -262,6 +262,25 @@ const openScene = async (
 const overflow = async (page: Page): Promise<number> =>
   await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
+/** How many controls sit ON a picture: tool boxes that intersect their own figure's pan box. Always 0. */
+const controlsOverPicture = async (page: Page): Promise<number> =>
+  await page.evaluate(() => {
+    let over = 0;
+    for (const pan of document.querySelectorAll('.fy-render-pan')) {
+      const picture = pan.getBoundingClientRect();
+      for (const tool of pan.closest('figure')?.querySelectorAll('.fy-render-tool') ?? []) {
+        const box = tool.getBoundingClientRect();
+        const apart =
+          box.right <= picture.left ||
+          box.left >= picture.right ||
+          box.bottom <= picture.top ||
+          box.top >= picture.bottom;
+        if (!apart) over += 1;
+      }
+    }
+    return over;
+  });
+
 /** The corner tools' computed opacity — `0` until hover, focus or a long press. */
 const toolsOpacity = async (page: Page): Promise<number> =>
   await page.evaluate(() => {
@@ -358,69 +377,74 @@ describe('fy-render component evidence — the served stylesheet', () => {
 
 describe('fy-render component evidence — Mermaid', () => {
   for (const viewport of VIEWPORTS) {
-    test(`should draw a diagram by itself, inline, with no chrome at ${viewport.name}`, async () => {
-      // Arrange
-      const scene = await openScene('mermaid', viewport);
-      const { page, shot } = scene;
+    for (const theme of ['light', 'dark'] as const) {
+      const tag = theme === 'dark' ? '-dark' : '';
+      test(`should draw a diagram by itself, inline, with no chrome at ${viewport.name} in ${theme}`, async () => {
+        // Arrange
+        const scene = await openScene('mermaid', viewport, { theme });
+        const { page, shot } = scene;
 
-      try {
-        // Assert — nothing to press: it renders, and the frame that compiled it is gone.
-        should(await page.getByRole('button', { name: /Render/ }).count()).equal(0);
-        await waitForMermaidDiagram(page);
-        const diagram = await page.locator('img[data-fy-render-diagram="true"]').boundingBox();
-        await shot('mermaid-01-inline', { diagramBox: diagram, overflow: await overflow(page) });
-        should(await page.locator('iframe').count()).equal(0);
-        should(await page.locator('figcaption').count()).equal(0);
-        should(await page.locator('[role="status"]').count()).equal(0);
-        should(await page.locator('img[data-fy-render-diagram="true"]').getAttribute('alt')).equal(
-          'How an fy-render block reaches the reader',
-        );
-        should(await overflow(page)).equal(0);
-        should(diagram?.width ?? 0).be.above(0);
-        // The picture may be wider than the column (it pans in its own box); the BOX never is.
-        const scrollBox = await page.locator('.fy-render-diagram').boundingBox();
-        should(scrollBox?.width ?? 0).be.belowOrEqual(viewport.width);
-        // No surface, no border: the figure paints nothing of its own.
-        const figure = await page.evaluate(() => {
-          const element = document.querySelector('figure.fy-render');
-          return element === null
-            ? null
-            : {
-                background: getComputedStyle(element).backgroundColor,
-                border: getComputedStyle(element).borderTopWidth,
-              };
-        });
-        should(figure).eql({ background: 'rgba(0, 0, 0, 0)', border: '0px' });
+        try {
+          // Assert — nothing to press: it renders, and the frame that compiled it is gone.
+          should(await page.getByRole('button', { name: /Render/ }).count()).equal(0);
+          await waitForMermaidDiagram(page);
+          const diagram = await page.locator('img[data-fy-render-diagram="true"]').boundingBox();
+          await shot(`mermaid-01-inline${tag}`, { diagramBox: diagram, overflow: await overflow(page) });
+          should(await page.locator('iframe').count()).equal(0);
+          should(await page.locator('figcaption').count()).equal(0);
+          should(await page.locator('[role="status"]').count()).equal(0);
+          should(await page.locator('img[data-fy-render-diagram="true"]').getAttribute('alt')).equal(
+            'How an fy-render block reaches the reader',
+          );
+          should(await overflow(page)).equal(0);
+          should(diagram?.width ?? 0).be.above(0);
+          // The picture may be wider than the column (it pans in its own box); the BOX never is.
+          const scrollBox = await page.locator('.fy-render-viewport').first().boundingBox();
+          should(scrollBox?.width ?? 0).be.belowOrEqual(viewport.width);
+          // No surface, no border: the figure paints nothing of its own.
+          const figure = await page.evaluate(() => {
+            const element = document.querySelector('figure.fy-render');
+            return element === null
+              ? null
+              : {
+                  background: getComputedStyle(element).backgroundColor,
+                  border: getComputedStyle(element).borderTopWidth,
+                };
+          });
+          should(figure).eql({ background: 'rgba(0, 0, 0, 0)', border: '0px' });
 
-        // Assert — the tools are there but invisible until asked for.
-        should(await toolsOpacity(page)).equal(0);
-        if (viewport.width > 480) {
-          await page.locator('figure.fy-render').hover();
-        } else {
-          // A long press on touch: a press held still.
-          await page.locator('figure.fy-render').dispatchEvent('pointerdown', { pointerType: 'touch' });
+          // Assert — the tools are there but invisible until asked for.
+          should(await toolsOpacity(page)).equal(0);
+          if (viewport.width > 480) {
+            await page.locator('figure.fy-render').hover();
+          } else {
+            // A long press on touch: a press held still.
+            await page.locator('figure.fy-render').dispatchEvent('pointerdown', { pointerType: 'touch' });
+          }
+          await waitForToolsShown(page);
+          should(await toolsOpacity(page)).equal(1);
+          should(await controlsOverPicture(page)).equal(0);
+          await shot(`mermaid-02-tools${tag}`, { tools: await page.locator('.fy-render-tool').count() });
+
+          // Act / Assert — Source, then Fullscreen and Exit.
+          await page.getByRole('button', { name: 'Mermaid source' }).click();
+          await page.waitForSelector('[data-fy-render-source="true"]');
+          await shot(`mermaid-03-source${tag}`, { overflow: await overflow(page) });
+          should(await overflow(page)).equal(0);
+          await page.getByRole('button', { name: 'Mermaid source' }).click();
+          await page.getByRole('button', { name: 'Fullscreen' }).click();
+          await page.waitForSelector('[role="dialog"]');
+          await forCapture(page, 200);
+          should(await controlsOverPicture(page)).equal(0);
+          await shot(`mermaid-04-fullscreen${tag}`, { overflow: await overflow(page) });
+          should(await overflow(page)).equal(0);
+          await page.getByRole('button', { name: 'Exit fullscreen' }).click();
+          should(await page.locator('[role="dialog"]').count()).equal(0);
+        } finally {
+          await scene.close();
         }
-        await waitForToolsShown(page);
-        should(await toolsOpacity(page)).equal(1);
-        await shot('mermaid-02-tools', { tools: await page.locator('.fy-render-tool').count() });
-
-        // Act / Assert — Source, then Fullscreen and Exit.
-        await page.getByRole('button', { name: 'Mermaid source' }).click();
-        await page.waitForSelector('[data-fy-render-source="true"]');
-        await shot('mermaid-03-source', { overflow: await overflow(page) });
-        should(await overflow(page)).equal(0);
-        await page.getByRole('button', { name: 'Mermaid source' }).click();
-        await page.getByRole('button', { name: 'Fullscreen' }).click();
-        await page.waitForSelector('[role="dialog"]');
-        await forCapture(page, 200);
-        await shot('mermaid-04-fullscreen', { overflow: await overflow(page) });
-        should(await overflow(page)).equal(0);
-        await page.getByRole('button', { name: 'Exit fullscreen' }).click();
-        should(await page.locator('[role="dialog"]').count()).equal(0);
-      } finally {
-        await scene.close();
-      }
-    }, 120_000);
+      }, 120_000);
+    }
   }
 
   test('should fall back to the ordinary code block, quietly, when Mermaid refuses the source', async () => {
@@ -583,17 +607,22 @@ describe('fy-render component evidence — layout and focus', () => {
 
         // Assert — 44px on a coarse pointer, small on a fine one, and inside the stage.
         const stage = await page.locator('.fy-render-stage').boundingBox();
-        const buttons = page.locator('.fy-render-tool');
-        should(await buttons.count()).equal(2);
+        const toolbar = page.locator('.fy-render-tools .fy-render-tool');
+        const zoom = page.locator('.fy-render-zoom .fy-render-tool');
+        should(await toolbar.count()).equal(2);
+        should(await zoom.count()).equal(3);
         const boxes = [];
-        for (let index = 0; index < 2; index += 1) {
-          const box = await buttons.nth(index).boundingBox();
-          boxes.push(box);
-          if (coarse) should(box?.height ?? 0).be.aboveOrEqual(44);
-          else should(box?.height ?? 0).be.below(44);
-          should((box?.x ?? 0) + (box?.width ?? 0)).be.belowOrEqual((stage?.x ?? 0) + (stage?.width ?? 0) + 1);
-          should(box?.y ?? 0).be.aboveOrEqual(stage?.y ?? 0);
+        for (const buttons of [toolbar, zoom]) {
+          for (let index = 0; index < (await buttons.count()); index += 1) {
+            const box = await buttons.nth(index).boundingBox();
+            boxes.push(box);
+            if (coarse) should(box?.height ?? 0).be.aboveOrEqual(44);
+            else should(box?.height ?? 0).be.below(44);
+            should((box?.x ?? 0) + (box?.width ?? 0)).be.belowOrEqual((stage?.x ?? 0) + (stage?.width ?? 0) + 1);
+            should(box?.y ?? 0).be.aboveOrEqual(stage?.y ?? 0);
+          }
         }
+        should(await controlsOverPicture(page)).equal(0);
         await shot('layout-01-tools', { boxes, coarse, overflow: await overflow(page), stage });
         should(await overflow(page)).equal(0);
       } finally {
@@ -1133,29 +1162,38 @@ describe('fy-render component evidence — Mermaid in the theme', () => {
 });
 
 describe('fy-render component evidence — Mermaid on a phone', () => {
-  /** What the browser really laid out for the diagram: its natural size, shown width, and the scroll box around it. */
+  /** What the browser really laid out for the diagram: the pan box, the picture in it, and the text size it shows. */
   const laidOut = async (page: Page) =>
     await page.evaluate(() => {
       const img = document.querySelector('img[data-fy-render-diagram="true"]') as HTMLImageElement;
-      const box = img.parentElement as HTMLElement;
+      const pan = img.closest('.fy-render-pan') as HTMLElement;
       const src = decodeURIComponent(img.getAttribute('src')?.replace('data:image/svg+xml,', '') ?? '');
       const view = /viewBox="\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)"/u.exec(src);
       const natural = { height: Number(view?.[2] ?? 0), width: Number(view?.[1] ?? 0) };
-      const shown = img.getBoundingClientRect().width;
+      const shown = img.getBoundingClientRect();
+      const box = pan.getBoundingClientRect();
+      const column = (pan.closest('.fy-render') as HTMLElement).getBoundingClientRect();
       return {
-        bodyPx: Number.parseFloat(getComputedStyle(document.querySelector('figure.fy-render') as Element).fontSize),
-        boxClient: box.clientWidth,
-        boxScroll: box.scrollWidth,
+        box: { height: box.height, width: box.width },
+        column: column.width,
+        fit: pan.getAttribute('data-fy-render-fit'),
+        inside:
+          shown.left >= box.left - 1 &&
+          shown.top >= box.top - 1 &&
+          shown.right <= box.right + 1 &&
+          shown.bottom <= box.bottom + 1,
         natural,
-        scrolls: box.getAttribute('data-fy-render-scrolls') === 'true',
-        shown,
-        textPx: natural.width > 0 ? (shown / natural.width) * 16 : 0,
+        pannable: pan.getAttribute('data-fy-render-pannable') === 'true',
+        scale: Number(pan.getAttribute('data-fy-render-scale')),
+        shown: { height: shown.height, width: shown.width },
+        textPx: natural.width > 0 ? (shown.width / natural.width) * 16 : 0,
+        windowHeight: window.innerHeight,
       };
     });
 
   for (const theme of ['light', 'dark'] as const) {
     for (const viewport of VIEWPORTS) {
-      test(`should draw a left-to-right flowchart readably, ${theme}, at ${viewport.name}`, async () => {
+      test(`should draw a left-to-right flowchart whole or legible, ${theme}, at ${viewport.name}`, async () => {
         // Arrange
         const scene = await openScene('mermaid-lr', viewport, { theme });
         const { page, shot } = scene;
@@ -1166,21 +1204,15 @@ describe('fy-render component evidence — Mermaid on a phone', () => {
           const actual = await laidOut(page);
           await shot(`mermaid-08-left-to-right-${theme}`, { laidOut: actual, overflow: await overflow(page) });
 
-          // Assert — the page never scrolls sideways, and the text is never under 12px nor over 1.25× the body.
+          // Assert — the page never scrolls sideways, the box is never wider than the column nor taller than 60%
+          // of the window, and either the whole picture is in view or its text is at the legible floor.
           should(await overflow(page)).equal(0);
-          should(actual.textPx).be.aboveOrEqual(11.9);
-          should(actual.textPx).be.belowOrEqual(actual.bodyPx * 1.25 + 0.5);
-          if (viewport.width <= 480) {
-            // A phone column: declared top-down before it was compiled, so the picture is taller than wide.
-            should(actual.natural.height).be.above(actual.natural.width);
-            should(actual.shown).be.belowOrEqual(viewport.width);
-          } else {
-            // A desktop column keeps the author's left-to-right. This one is wider than the column even at the
-            // smallest readable size, so it scrolls in its own box (checked below) rather than shrinking to 8px.
-            should(actual.natural.width).be.above(actual.natural.height);
-            should(actual.scrolls).be.true();
-          }
-          if (actual.scrolls) should(actual.boxScroll).be.above(actual.boxClient);
+          should(actual.box.width).be.belowOrEqual(actual.column + 1);
+          should(actual.box.height).be.belowOrEqual(actual.windowHeight * 0.6 + 1);
+          if (actual.fit === 'whole') should(actual.inside).be.true();
+          else should(actual.textPx).be.aboveOrEqual(9.9);
+          if (viewport.width <= 480) should(actual.natural.height).be.above(actual.natural.width);
+          else should(actual.natural.width).be.above(actual.natural.height);
         } finally {
           await scene.close();
         }
@@ -1226,4 +1258,154 @@ describe('fy-render component evidence — Mermaid on a phone', () => {
       await scene.close();
     }
   }, 120_000);
+});
+
+describe('fy-render component evidence — diagrams fit, zoom and pan', () => {
+  const pan = (page: Page) => page.locator('.fy-render-pan').first();
+  const measure = async (page: Page) =>
+    await page.evaluate(() => {
+      const box = (document.querySelector('.fy-render-pan') as HTMLElement).getBoundingClientRect();
+      const img = document.querySelector('img[data-fy-render-diagram="true"]') as HTMLImageElement;
+      const shown = img.getBoundingClientRect();
+      return {
+        box: { height: box.height, width: box.width },
+        fit: (document.querySelector('.fy-render-pan') as HTMLElement).getAttribute('data-fy-render-fit'),
+        inside:
+          shown.left >= box.left - 1 &&
+          shown.top >= box.top - 1 &&
+          shown.right <= box.right + 1 &&
+          shown.bottom <= box.bottom + 1,
+        left: shown.left,
+        boxCentre: box.left + box.width / 2,
+        boxTop: box.top,
+        centre: shown.left + shown.width / 2,
+        fadeMask: getComputedStyle(document.querySelector('.fy-render-plane') as HTMLElement).maskImage,
+        more: (document.querySelector('.fy-render-pan') as HTMLElement).getAttribute('data-fy-render-more'),
+        scale: Number((document.querySelector('.fy-render-pan') as HTMLElement).getAttribute('data-fy-render-scale')),
+        top: shown.top,
+        windowHeight: window.innerHeight,
+      };
+    });
+  /** Waits out the 140 ms resize ease, so a measurement reads the settled picture. */
+  const settle = async (page: Page): Promise<void> => {
+    await page.waitForFunction(
+      () => document.getAnimations().filter(each => each.playState === 'running').length === 0,
+      undefined,
+      { timeout: 10_000 },
+    );
+  };
+
+  for (const which of ['mermaid-tall', 'mermaid-wide'] as const) {
+    for (const theme of ['light', 'dark'] as const) {
+      for (const viewport of VIEWPORTS) {
+        test(`should fit, zoom, pan and go fullscreen: ${which}, ${theme}, at ${viewport.name}`, async () => {
+          // Arrange
+          const scene = await openScene(which, viewport, { theme });
+          const { page, shot } = scene;
+
+          try {
+            await waitForMermaidDiagram(page);
+            await settle(page);
+
+            // Assert — at rest: the page does not scroll sideways, the box is at most 60% of the window, and the
+            // picture is either wholly in the box or at the legible floor.
+            const rest = await measure(page);
+            should(await overflow(page)).equal(0);
+            should(rest.box.height).be.belowOrEqual(rest.windowHeight * 0.6 + 1);
+            if (rest.fit === 'whole') should(rest.inside).be.true();
+            if (which === 'mermaid-wide' && rest.fit !== 'whole') {
+              // A tree wider than the column starts on its root (top-middle), is as tall as its scaled picture,
+              // and fades the sides that have more to drag to.
+              should(Math.abs(rest.centre - rest.boxCentre)).be.belowOrEqual(2);
+              should(rest.top).be.approximately(rest.boxTop, 1);
+              should(rest.more).equal('left right');
+              should(rest.fadeMask).not.equal('none');
+            }
+            await pan(page).hover();
+            should(await controlsOverPicture(page)).equal(0);
+            await shot(`${which}-1-rest-${theme}`, { rest });
+
+            // Act — zoom in three steps with the labelled button.
+            const zoomIn = page.getByRole('button', { name: 'Zoom in' }).first();
+            for (let step = 0; step < 3; step += 1) await zoomIn.click();
+            await settle(page);
+
+            // Assert — bigger, the box did not move, and the page did not grow.
+            const zoomed = await measure(page);
+            should(zoomed.scale).be.above(rest.scale * 1.9);
+            should(zoomed.box).deepEqual(rest.box);
+            should(await overflow(page)).equal(0);
+            should(await controlsOverPicture(page)).equal(0);
+            await shot(`${which}-2-zoomed-${theme}`, { zoomed });
+
+            // Act — drag the picture.
+            const at = await pan(page).boundingBox();
+            if (at === null) throw new Error('the pan box has no layout');
+            await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2);
+            await page.mouse.down();
+            await page.mouse.move(at.x + at.width / 2 - 70, at.y + at.height / 2 - 70, { steps: 6 });
+            await page.mouse.up();
+            await settle(page);
+
+            // Assert — it moved, and it is still inside its box's reach (never dragged away).
+            const dragged = await measure(page);
+            should(dragged.left !== zoomed.left || dragged.top !== zoomed.top).be.true();
+
+            // Act — a plain wheel is the page's; Ctrl+wheel is the picture's.
+            const plain = await page.evaluate(() => {
+              const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 60 });
+              (document.querySelector('.fy-render-pan') as HTMLElement).dispatchEvent(event);
+              return event.defaultPrevented;
+            });
+            should(plain).be.false();
+            const ctrl = await page.evaluate(() => {
+              const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, ctrlKey: true, deltaY: -60 });
+              (document.querySelector('.fy-render-pan') as HTMLElement).dispatchEvent(event);
+              return event.defaultPrevented;
+            });
+            should(ctrl).be.true();
+
+            // Act — Reset returns to the resting view.
+            await page.getByRole('button', { name: 'Reset zoom' }).first().click();
+            await settle(page);
+            should((await measure(page)).scale).be.approximately(rest.scale, 0.002);
+
+            // Act — fullscreen.
+            await page.getByRole('button', { name: 'Fullscreen' }).first().click();
+            await page.waitForSelector('[data-fy-render-viewport="fullscreen"]');
+            await settle(page);
+
+            // Assert — the box is the window, not 60% of it, and the picture is whole inside it at rest.
+            const full = await measure(page);
+            await pan(page).hover();
+            should(await controlsOverPicture(page)).equal(0);
+            await shot(`${which}-3-fullscreen-${theme}`, { full });
+            should(full.box.height).be.above(full.windowHeight * 0.7);
+
+            should(full.inside).be.true();
+            // Act — zoom in fullscreen, then leave.
+            await page.getByRole('button', { name: 'Zoom in' }).first().click();
+            await page.getByRole('button', { name: 'Zoom in' }).first().click();
+            await settle(page);
+            should(await controlsOverPicture(page)).equal(0);
+            await shot(`${which}-4-fullscreen-zoomed-${theme}`);
+            await page.getByRole('button', { name: 'Exit fullscreen' }).first().click();
+            await page.waitForSelector('[data-fy-render-viewport="inline"]');
+            await page.waitForFunction(
+              expected =>
+                Math.abs(
+                  Number(document.querySelector('.fy-render-pan')?.getAttribute('data-fy-render-scale')) - expected,
+                ) < 0.002,
+              rest.scale,
+              { timeout: 10_000 },
+            );
+            await settle(page);
+            should((await measure(page)).scale).be.approximately(rest.scale, 0.002);
+          } finally {
+            await scene.close();
+          }
+        }, 180_000);
+      }
+    }
+  }
 });

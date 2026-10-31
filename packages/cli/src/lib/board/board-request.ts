@@ -20,6 +20,7 @@ import {
   TaskKindSchema,
   type TaskRef,
   TaskWorkflowSchema,
+  toBullets,
 } from '@ferretry/protocol';
 import type { z } from 'zod';
 import { refuse } from '../tasks/errors';
@@ -75,11 +76,13 @@ export interface BoardCreateOptions {
   readonly summary?: string;
   readonly ask?: string;
   readonly askSource?: string;
-  readonly premise?: string;
-  readonly context?: string;
+  readonly premise?: string | readonly string[];
+  readonly context?: string | readonly string[];
   readonly term?: readonly string[];
   readonly brief?: string;
   readonly briefFile?: string;
+  readonly howToTest?: string;
+  readonly howToTestFile?: string;
   readonly workflow?: string;
   readonly dependsOn?: readonly string[];
   readonly parent?: string;
@@ -92,15 +95,30 @@ export interface BoardCreateOptions {
   readonly lane?: string;
 }
 
-/** What the controller resolved before the pure part runs: the brief text, the board and the assignee id. */
+/** What the controller resolved before the pure part runs: the brief and test texts, the board and the assignee id. */
 export interface BoardCreateResolved {
   readonly brief: string;
+  /** Absent: none was given. */
+  readonly howToTest?: string;
   readonly projectId: string | undefined;
   readonly assignee: string | null;
 }
 
 const trimmedAll = (values: readonly string[] | undefined): string[] =>
   (values ?? []).map(value => value.trim()).filter(value => value.length > 0);
+
+/**
+ * `--premise` / `--context` as the card stores them: one flag is its text, several are one bullet each. Absent
+ * (never passed) is `undefined`; passed but blank is `''`, so an edit can clear the field.
+ */
+const points = (value: string | readonly string[] | undefined): string | undefined => {
+  if (value === undefined) return undefined;
+  const given = typeof value === 'string' ? [value] : value;
+  if (given.length === 0) return undefined;
+  const kept = trimmedAll(given);
+  if (kept.length === 0) return '';
+  return kept.length === 1 ? (kept[0] as string) : toBullets(kept);
+};
 
 const requirePrUrl = (value: string): string =>
   prUrlParts(value) === null ? refuse(`--pr takes a GitHub pull request URL, got "${value}"`) : value;
@@ -139,10 +157,11 @@ export function buildBoardCreateRequest(
     title,
     summary: present(options.summary) ?? '',
     ask: { text: askText, source: askSource },
-    premise: options.premise?.trim() ?? '',
-    context: options.context?.trim() ?? '',
+    premise: points(options.premise) ?? '',
+    context: points(options.context) ?? '',
     terms: parseTerms(options.term ?? []),
     brief: resolved.brief,
+    howToTest: resolved.howToTest ?? '',
     workflow,
     ...(resolved.projectId === undefined ? {} : { projectId: resolved.projectId }),
     ...(lane === undefined ? {} : { laneId: lane }),
@@ -299,26 +318,39 @@ export const buildFileAction = (
 export interface BoardEditOptions {
   readonly title?: string;
   readonly summary?: string;
-  readonly premise?: string;
-  readonly context?: string;
+  readonly premise?: string | readonly string[];
+  readonly context?: string | readonly string[];
   readonly term?: readonly string[];
   readonly brief?: string;
   readonly briefFile?: string;
+  readonly howToTest?: string;
+  readonly howToTestFile?: string;
 }
 
-/** `brief` arrives already read, because `--brief-file` is IO. Terms replace the whole glossary. */
-export function buildEditAction(options: BoardEditOptions, brief: string | undefined): BoardTaskActionRequest {
+/** The texts `--brief-file` and `--how-to-test-file` stand for, already read, because reading a file is IO. */
+export interface BoardEditTexts {
+  readonly brief?: string | undefined;
+  readonly howToTest?: string | undefined;
+}
+
+/** Terms replace the whole glossary. */
+export function buildEditAction(options: BoardEditOptions, texts: BoardEditTexts = {}): BoardTaskActionRequest {
   const terms = (options.term ?? []).length > 0 ? parseTerms(options.term ?? []) : undefined;
+  const premise = points(options.premise);
+  const context = points(options.context);
   const fields = {
     ...(options.title === undefined ? {} : { title: options.title.trim() }),
     ...(options.summary === undefined ? {} : { summary: options.summary.trim() }),
-    ...(options.premise === undefined ? {} : { premise: options.premise.trim() }),
-    ...(options.context === undefined ? {} : { context: options.context.trim() }),
+    ...(premise === undefined ? {} : { premise }),
+    ...(context === undefined ? {} : { context }),
     ...(terms === undefined ? {} : { terms }),
-    ...(brief === undefined ? {} : { brief }),
+    ...(texts.brief === undefined ? {} : { brief: texts.brief }),
+    ...(texts.howToTest === undefined ? {} : { howToTest: texts.howToTest.trim() }),
   };
   if (Object.keys(fields).length === 0) {
-    refuse('nothing to edit: pass --title, --summary, --premise, --context, --term, --brief or --brief-file');
+    refuse(
+      'nothing to edit: pass --title, --summary, --premise, --context, --term, --brief, --brief-file, --how-to-test or --how-to-test-file',
+    );
   }
   if ('title' in fields && fields.title !== undefined) {
     const problem = taskTitleIssue(fields.title);

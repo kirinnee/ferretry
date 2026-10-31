@@ -46,6 +46,17 @@ describe('setUpFerretrySkill', () => {
     should(one.replaceAll('aaa', 'bbb')).equal(other);
   });
 
+  it('should tell an agent that machine.yaml holds the browser ports, and what each word means', () => {
+    // Act
+    const actual = setUpFerretrySkill('fy');
+
+    // Assert
+    should(actual).containEql('`browserPorts`');
+    should(actual).containEql('`browserFirewallFailure`');
+    should(actual).containEql('`per-user`');
+    should(actual).containEql('loopback firewall');
+  });
+
   it('should state the two rules that matter: no secret value in a file, and check after every edit', () => {
     // Act
     const actual = setUpFerretrySkill('fy');

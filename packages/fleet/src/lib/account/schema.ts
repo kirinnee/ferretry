@@ -24,6 +24,8 @@
  */
 import {
   BrowserModeSchema,
+  BrowserFirewallFailureSchema,
+  BrowserPortsSettingSchema,
   BrowserProxySettingSchema,
   CONFIG_COMPONENT_KINDS,
   isLoopbackHost,
@@ -191,6 +193,19 @@ export const MACHINE_SHAPE = {
    */
   browserProxy: BrowserProxySettingSchema.optional(),
   /**
+   * "Browser ports" (docs/config-files.md): `random` (the default), `per-user` (ports derived from this user's uid,
+   * fenced by the host admin's loopback firewall) or three explicit `{ cdp, relay, vnc }` ports. Read when the
+   * browser or the login window STARTS. Not a loosening: it changes which loopback ports are used, not what an
+   * agent may do.
+   */
+  browserPorts: BrowserPortsSettingSchema.default('random'),
+  /**
+   * "When the loopback firewall check fails" (docs/browser-mode.md#loopback-ports): `warn` (the default) says so;
+   * `refuse` also declines to START the browser on a fixed port while this account's own check shows `failed`.
+   * A browser already running is left alone. Not a loosening: it can only make a start stricter.
+   */
+  browserFirewallFailure: BrowserFirewallFailureSchema.default('warn'),
+  /**
    * "Auto-resume after restart": when the daemon boots and finds ferrets that were running when the host
    * went down, it resumes them with their conversation intact. On by default; sessions the owner stopped
    * stay stopped. Read when the daemon starts.
@@ -216,6 +231,15 @@ export const MACHINE_SHAPE = {
    * loosening either way: it changes what a ferret is told, never what it may do or spend. Read at every start.
    */
   agendaMode: z.boolean().default(true),
+  /**
+   * "Public usage feed" (docs/multi-user-host.md): whether the daemon also answers `GET /usage` and `GET /metrics`
+   * to a caller with no credential. Off by default, and while it is off both paths answer exactly as a path the
+   * daemon does not have, so another user on the host cannot read quota percentages and account labels or even
+   * learn the feeds exist; `GET /v1/usage` stays behind a token either way. Turn it on only for an external
+   * reader that holds no daemon token (a Prometheus scrape, a script on this host). A loosening: switching it on
+   * is held for the owner. Read at every request, from the configuration in effect.
+   */
+  publicUsageFeed: z.boolean().default(false),
 };
 
 export const MachineSchema = z.strictObject(MACHINE_SHAPE).prefault({});

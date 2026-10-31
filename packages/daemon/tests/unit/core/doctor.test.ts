@@ -356,3 +356,92 @@ describe('doctor tmux release row', () => {
     should(row(withTmux({ program: 'tmux 3.8' }))?.status).equal('present');
   });
 });
+
+describe('doctor loopback firewall row', () => {
+  const withFirewall = (
+    loopbackFirewall: { state: 'applied' | 'missing' | 'stale' | 'unverified' | 'failed'; detail: string } | undefined,
+  ) =>
+    readDoctorReport({
+      platform: 'linux',
+      harnesses,
+      directorySyscalls: true,
+      executables: { resolve: name => `/bin/${name}` },
+      ...(loopbackFirewall === undefined ? {} : { loopbackFirewall }),
+    });
+  const row = (result: DoctorReport) => result.checks.find(check => check.name === 'loopback firewall');
+  const remedy = 'the loopback firewall is missing: ask the host admin to add `user 1001` to the conf';
+
+  it('should leave the row out while the browser ports are random', () => {
+    should(row(withFirewall(undefined))).be.undefined();
+  });
+
+  it('should pass an applied firewall', () => {
+    should(row(withFirewall({ state: 'applied', detail: 'applied' }))).containEql({ status: 'present' });
+  });
+
+  it('should warn with the remedy when the marker is missing, without making the host not ready', () => {
+    // Act
+    const result = withFirewall({ state: 'missing', detail: remedy });
+
+    // Assert
+    should(row(result)).containEql({ requirement: 'capability', status: 'missing', impact: remedy });
+    should(row(result)?.summary).match(
+      /no firewall rule for this account in the marker at \/run\/ferretry\/loopback-firewall\.json/u,
+    );
+    should(result.ready).be.true();
+  });
+
+  it('should say the marker does not list this account when it is stale', () => {
+    should(row(withFirewall({ state: 'stale', detail: remedy }))?.summary).equal(
+      'the marker does not list this account’s ports',
+    );
+  });
+
+  it('should say the check reached this account’s ports when it failed, and that the check is not running when unverified', () => {
+    // Act + Assert
+    should(row(withFirewall({ state: 'failed', detail: remedy }))).containEql({
+      status: 'missing',
+      summary: 'the last check reached this account’s ports from another user',
+    });
+    const unverified = withFirewall({ state: 'unverified', detail: remedy });
+    should(row(unverified)?.summary).equal('the 5-minute firewall check is not running');
+    should(unverified.ready).be.true();
+  });
+});
+
+describe('doctor report, shared-host slice rows', () => {
+  const withSlice = (userSlice?: {
+    uid: number;
+    user: string;
+    memoryMax?: string;
+    tasksMax?: string;
+    linger?: boolean;
+  }) =>
+    readDoctorReport({
+      platform: 'linux',
+      harnesses,
+      directorySyscalls: true,
+      executables: { resolve: name => (name === 'tmux' || name === 'bash' ? `/bin/${name}` : undefined) },
+      ...(userSlice === undefined ? {} : { userSlice }),
+    });
+
+  it('should leave the rows out when nothing was read, so a single-user host hears nothing', () => {
+    should(withSlice().checks.some(check => check.name === 'user slice limits' || check.name === 'linger')).be.false();
+  });
+
+  it('should warn about an uncapped slice and linger off without making the report not ready', () => {
+    const result = withSlice({ uid: 1001, user: 'alice', memoryMax: 'max', tasksMax: 'max', linger: false });
+    const rendered = renderDoctorReport(result).join('\n');
+
+    should(
+      result.checks
+        .filter(check => check.status === 'missing' && check.requirement === 'optional')
+        .map(check => check.name),
+    )
+      .containEql('user slice limits')
+      .and.containEql('linger');
+    should(rendered).match(/note\s+user slice limits\s+user-1001\.slice has no MemoryMax or TasksMax/u);
+    should(rendered).match(/sudo loginctl enable-linger alice/u);
+    should(result.ready).be.true();
+  });
+});

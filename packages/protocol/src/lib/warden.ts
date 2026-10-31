@@ -812,6 +812,43 @@ export const WardenActorCountsSchema = z.object({
 });
 export type WardenActorCounts = z.infer<typeof WardenActorCountsSchema>;
 
+// ── Every action, by who decided ──────────────────────────────────────────────────────────────────
+
+/**
+ * What the action stats count: every {@link WardenActionKindSchema} plus `escalate`, a flag handed to
+ * the owner that no held action records (a `NEEDS_HUMAN` verdict, Jev's hand-on, a failed investigation).
+ * A revive is the Warden bringing a dead ferret back: `revive` (a rule) and `resume` (a verdict) both are.
+ */
+export const WardenStatActionSchema = z.enum([...WardenActionKindSchema.options, 'escalate']);
+export type WardenStatActionKind = z.infer<typeof WardenStatActionSchema>;
+
+/** The actions that bring a dead or stopped ferret back — what the stats call a revive. */
+export const WARDEN_REVIVE_ACTIONS: readonly WardenStatActionKind[] = ['revive', 'resume'];
+
+/**
+ * How many times one action had one outcome, split by who decided it (`auto` is a rule, `jev` Jev, `llm`
+ * an investigation's verdict, `owner` the owner). One entry per (action, outcome) pair that happened.
+ */
+export const WardenActionTallySchema = WardenActorCountsSchema.extend({
+  action: WardenStatActionSchema,
+  outcome: WardenActionOutcomeSchema,
+});
+export type WardenActionTally = z.infer<typeof WardenActionTallySchema>;
+
+/**
+ * What became of the ferrets the Warden brought back, by who decided it: `progressed` the ferret did
+ * real work again within {@link WARDEN_REVIVE_PROGRESS_MINUTES}; `stalled` it did not, or it ended again.
+ * A revive still inside its window is in neither.
+ */
+export const WardenReviveResultsSchema = z.object({
+  progressed: WardenActorCountsSchema,
+  stalled: WardenActorCountsSchema,
+});
+export type WardenReviveResults = z.infer<typeof WardenReviveResultsSchema>;
+
+/** How long a revived ferret has to show progress before the revive counts as not having taken. */
+export const WARDEN_REVIVE_PROGRESS_MINUTES = 10;
+
 // ── Jev's checks ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -857,6 +894,26 @@ export type WardenJevCheckWhy = z.infer<typeof WardenJevCheckWhySchema>;
 export const WardenJevCheckRouteSchema = z.enum(['investigation', 'owner']);
 export type WardenJevCheckRoute = z.infer<typeof WardenJevCheckRouteSchema>;
 
+/** How many steps a Jev path can hold: the decision tree is at most five questions deep, with room to grow. */
+export const WARDEN_JEV_PATH_MAX = 12;
+
+/**
+ * One question on the path Jev's decision tree took (`daemon/src/lib/warden/jev-tree.ts`): the node, who
+ * answered it — the daemon from what it observes (`fact`), or Jev (`judgement`) — the yes or no, and, for
+ * Jev's own answers, how sure it was. No text: the node id names the question.
+ */
+export const WardenJevPathStepSchema = z.object({
+  node: z.string().min(1).max(64),
+  kind: z.enum(['fact', 'judgement']),
+  answer: z.enum(['yes', 'no']),
+  /** Jev's confidence in `answer`. Judgements only: a fact is observed, not guessed. */
+  confidence: z.number().min(0).max(1).optional(),
+});
+export type WardenJevPathStep = z.infer<typeof WardenJevPathStepSchema>;
+
+/** The path of one check, root first. */
+export const WardenJevPathSchema = z.array(WardenJevPathStepSchema).max(WARDEN_JEV_PATH_MAX);
+
 /**
  * One of Jev's checks, as the Warden keeps it beside its reports: the ferret, the flag, what Jev made of
  * it, how sure it was and what the call cost. Deliberately no text — no reason, no transcript, no screen —
@@ -879,6 +936,10 @@ export const WardenJevCheckSchema = z.object({
   confidence: z.number().min(0).max(1),
   /** What the call cost, in US dollars; `0` when there was none. */
   costUsd: NonNegativeFiniteSchema,
+  /** The decision tree's path to the answer, root first. Absent when nothing was walked, or from an older daemon. */
+  path: WardenJevPathSchema.optional(),
+  /** `not_sure_enough`: the node whose answer was below the bar — the question the owner is asked. */
+  node: z.string().min(1).max(64).optional(),
 });
 export type WardenJevCheck = z.infer<typeof WardenJevCheckSchema>;
 
@@ -928,6 +989,10 @@ export const WardenJevBeforeSchema = z.object({
   at: InstantSchema.optional(),
   confidence: z.number().min(0).max(1).optional(),
   costUsd: NonNegativeFiniteSchema.optional(),
+  /** The decision tree's path, as the check recorded it. */
+  path: WardenJevPathSchema.optional(),
+  /** The node Jev was not sure enough of. */
+  node: z.string().min(1).max(64).optional(),
 });
 export type WardenJevBefore = z.infer<typeof WardenJevBeforeSchema>;
 
@@ -952,11 +1017,15 @@ export const WardenDayStatsSchema = z.object({
   asked: WardenActorCountsSchema,
   /** Jev's checks this day. Absent from an older daemon, which kept only `jevDecisions`. */
   jev: WardenJevDayStatsSchema.optional(),
+  /** Every action this day by outcome and decider (revives, nudges, restarts …). Absent from an older daemon. */
+  acts: z.array(WardenActionTallySchema).optional(),
+  /** What became of the revives this day. Absent from an older daemon. */
+  reviveResults: WardenReviveResultsSchema.optional(),
 });
 export type WardenDayStats = z.infer<typeof WardenDayStatsSchema>;
 
 /** How many days of {@link WardenDayStats} the status carries, today included. */
-export const WARDEN_HISTORY_DAYS = 7;
+export const WARDEN_HISTORY_DAYS = 30;
 
 // ── Investigator names ──────────────────────────────────────────────────────────────────────────
 
@@ -1020,6 +1089,10 @@ export const WardenStatusViewSchema = z.object({
    * kept a record for: a day it did not is missing, never a zero. Absent from an older daemon.
    */
   history: z.array(WardenDayStatsSchema).optional(),
+  /** The actions of every day in `history` added up. Absent from an older daemon. */
+  actionTotals: z.array(WardenActionTallySchema).optional(),
+  /** The revive results of every day in `history` added up. Absent from an older daemon. */
+  reviveTotals: WardenReviveResultsSchema.optional(),
   /** Jev's most recent checks, newest first, from the record kept beside the reports. Absent from an older daemon. */
   jevChecks: z.array(WardenJevCheckSchema).optional(),
 });

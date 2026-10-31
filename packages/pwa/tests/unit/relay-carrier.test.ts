@@ -49,6 +49,9 @@ import {
   testDevice,
 } from '../support/relay.ts';
 
+/** A browser that can decode a gzip body asks for one on every GET (§14, "A compressed answer"). */
+const GZIP = { 'accept-encoding': 'gzip' } as const;
+
 const DAEMON_URL = 'https://studio.example';
 const RELAY: RelayCarrier = { kind: 'relay', relayUrl: 'https://relay.example', operator: 'hosted' };
 const DEVICE_ID = 'fy_device_id_routerTestDevice00000001';
@@ -526,7 +529,9 @@ describe('the carrier router', () => {
     should(await (await router.fetch(`${DAEMON_URL}/v1/projects?page=2`)).text()).equal('direct');
     should(carriers.hosts()).eql([DIRECT_HOST]);
     should(router.choice(daemon.daemonId)?.reason).equal('Connected over direct.');
-    should(auto.requests).eql([{ t: 'req', id: 1, method: 'GET', path: '/v1/projects', query: [['page', '2']] }]);
+    should(auto.requests).eql([
+      { t: 'req', id: 1, method: 'GET', path: '/v1/projects', query: [['page', '2']], headers: GZIP },
+    ]);
   });
 
   it('should carry an upload on a session of its own, so the polls beside it never wait behind it', async () => {
@@ -552,7 +557,7 @@ describe('the carrier router', () => {
 
     // Assert
     should(await answer.text()).equal('this machine');
-    should(auto.requests).eql([{ t: 'req', id: 1, method: 'GET', path: '/v1/machine' }]);
+    should(auto.requests).eql([{ t: 'req', id: 1, method: 'GET', path: '/v1/machine', headers: GZIP }]);
   });
 
   it('should never hand a request for an unpaired daemon to the paired one that shares its address', async () => {
@@ -610,8 +615,8 @@ describe('the carrier router', () => {
     present = false;
     await router.fetch(`${DAEMON_URL}/v1/projects`);
     should(auto.requests).eql([
-      { t: 'req', id: 1, method: 'GET', path: '/v1/projects', presence: true },
-      { t: 'req', id: 2, method: 'GET', path: '/v1/projects' },
+      { t: 'req', id: 1, method: 'GET', path: '/v1/projects', presence: true, headers: GZIP },
+      { t: 'req', id: 2, method: 'GET', path: '/v1/projects', headers: GZIP },
     ]);
   });
 

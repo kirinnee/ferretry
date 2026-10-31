@@ -75,15 +75,19 @@ describe('authenticate', () => {
     // shaped exactly like an old device token is a stranger here.
     const oldToken = `fy_device_${'d'.repeat(43)}`;
     should(authenticate(credentials, { bearer: oldToken })).deepEqual({ kind: 'anonymous' });
-    should(authenticate(credentials, { query: oldToken })).deepEqual({ kind: 'anonymous' });
   });
 
-  it('should accept a query token, which is how a WebSocket upgrade authenticates', () => {
-    // Arrange / Act
-    const result = authenticate(credentials, { query: 'admin-secret' });
+  it('should read a token from the bearer alone, never from a query parameter', () => {
+    // A token in a URL reaches argv, shell history and every proxy's access log. A caller that still
+    // hands one over — whatever field it uses — is a stranger.
+    // Arrange
+    const queried = { query: 'admin-secret' } as unknown as Parameters<typeof authenticate>[1];
+
+    // Act
+    const result = authenticate(credentials, queried);
 
     // Assert
-    should(result).deepEqual({ kind: 'authenticated', tokenClass: 'admin' });
+    should(result).deepEqual({ kind: 'anonymous' });
   });
 
   it('should reject an unknown token', () => {

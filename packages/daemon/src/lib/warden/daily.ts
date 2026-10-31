@@ -26,6 +26,7 @@ import {
   wardenActionOutcome,
   type WardenOutcome,
 } from '@ferretry/protocol';
+import { tallyAction } from './action-tally.ts';
 import type { WardenEscalationReasonKind } from './escalation.ts';
 import { countJevCheck, jevCheckDay } from './jev-checks.ts';
 import type { WardenRuntimeState } from './state.ts';
@@ -33,7 +34,7 @@ import { instantMs } from './time.ts';
 import { triageDayFor, utcDay, type WardenTriageDay } from './triage.ts';
 
 /** How many UTC days the state keeps, today included. The status shows the last {@link WARDEN_HISTORY_DAYS}. */
-export const WARDEN_DAILY_KEEP_DAYS = 14;
+export const WARDEN_DAILY_KEEP_DAYS = 30;
 
 const NO_COUNTS: WardenActorCounts = { auto: 0, jev: 0, llm: 0 };
 
@@ -56,12 +57,12 @@ function bumped(counts: WardenActorCounts, actor: WardenActor): WardenActorCount
 }
 
 /** Replace (or add) one day, keeping the days oldest first and at most {@link WARDEN_DAILY_KEEP_DAYS}. */
-function withDay(days: readonly WardenDayStats[], next: WardenDayStats): readonly WardenDayStats[] {
+export function withDay(days: readonly WardenDayStats[], next: WardenDayStats): readonly WardenDayStats[] {
   const others = days.filter(entry => entry.day !== next.day);
   return [...others, next].toSorted((a, b) => a.day.localeCompare(b.day)).slice(-WARDEN_DAILY_KEEP_DAYS);
 }
 
-function dayOf(days: readonly WardenDayStats[] | undefined, day: string): WardenDayStats {
+export function dayOf(days: readonly WardenDayStats[] | undefined, day: string): WardenDayStats {
   return days?.find(entry => entry.day === day) ?? emptyWardenDay(day);
 }
 
@@ -70,18 +71,21 @@ function count(day: WardenDayStats, outcome: WardenOutcome, actor: WardenActor):
 }
 
 /**
- * Count one recorded action on the day it happened, under who acted and what became of the flag.
- * A failed attempt and a closed leftover browser count as none of the outcomes
- * ({@link wardenActionOutcome}) and leave the state as it was.
+ * Count one recorded action on the day it happened, under who acted. Every action is tallied by what it
+ * was and how it ended (`action-tally.ts`), a failed attempt and a held act included. It also counts toward
+ * what became of the flag unless it counts as none of the outcomes ({@link wardenActionOutcome}): a failed
+ * attempt and a closed leftover browser change no flag.
  */
 export function recordWardenOutcome(state: WardenRuntimeState, action: WardenAction): WardenRuntimeState {
-  const outcome = wardenActionOutcome(action);
   const at = instantMs(action.at);
-  if (outcome === undefined || at === undefined) return state;
-  const day = utcDay(at);
+  if (at === undefined) return state;
+  const actor = wardenActionActor(action);
+  const outcome = wardenActionOutcome(action);
+  const stored = dayOf(state.daily, utcDay(at));
+  const tallied: WardenDayStats = { ...stored, acts: tallyAction(stored.acts, action.action, action.outcome, actor) };
   return {
     ...state,
-    daily: withDay(state.daily ?? [], count(dayOf(state.daily, day), outcome, wardenActionActor(action))),
+    daily: withDay(state.daily ?? [], outcome === undefined ? tallied : count(tallied, outcome, actor)),
   };
 }
 
@@ -113,7 +117,12 @@ export function recordWardenAsk(state: WardenRuntimeState, at: string, actor: Wa
   const ms = instantMs(at);
   if (ms === undefined) return state;
   const day = utcDay(ms);
-  return { ...state, daily: withDay(state.daily ?? [], count(dayOf(state.daily, day), 'asked', actor)) };
+  const stored = dayOf(state.daily, day);
+  const asked: WardenDayStats = {
+    ...count(stored, 'asked', actor),
+    acts: tallyAction(stored.acts, 'escalate', 'done', actor),
+  };
+  return { ...state, daily: withDay(state.daily ?? [], asked) };
 }
 
 /** Count one of Jev's checks into the day it was made (`jev-checks.ts`). */

@@ -492,6 +492,13 @@ everything between the person and that answer must end, and must say so when it 
   own deadline too.
 - **A read takes a look, bounded.** `GET …/sends` asks the tracker to look first, but waits at most
   `SEND_READ_LOOK_BUDGET_MS`; a slow look finishes by itself. A look that throws schedules the next.
+- **A read is a page, not the ledger.** The ledger keeps every send a session ever had (2,139 sends and
+  2.3 MB per answer for one long-lived lead), so `GET …/sends` answers the newest 100 sends, newest first,
+  plus **every open send however old** (any fate but delivered or cancelled, and anything held; never a
+  withdrawn one). `nextCursor` names where the older sends start: `?before=<nextCursor>&limit=<1–1000>`
+  pages back, and a reader merges pages by `sendId`. An older daemon answers the whole ledger with no
+  `nextCursor`, which reads the same. Behind the route, `FileSendLedger` parses only the lines appended
+  since its last read, and reads the file whole again when it was replaced, shortened or rewritten in place.
 
 ## What a person can do
 
