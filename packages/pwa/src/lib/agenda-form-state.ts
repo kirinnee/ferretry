@@ -31,6 +31,7 @@ export const toggled = (current: readonly string[], value: string, many: boolean
 export class AgendaFormStore {
   readonly #picks = new Map<string, FormPicks>();
   readonly #asked = new Map<string, string>();
+  readonly #changes = new Map<string, number>();
   readonly #listeners = new Set<() => void>();
 
   /** The picks of this form; the recommendation until the owner changes one. */
@@ -45,7 +46,13 @@ export class AgendaFormStore {
   set(key: string, fields: readonly AgendaFormField[], field: string, next: readonly string[]): void {
     this.#picks.set(key, withPick(this.picks(key, fields), field, next));
     this.#asked.delete(key);
+    this.#changes.set(key, this.changes(key) + 1);
     this.#emit();
+  }
+
+  /** How many times the owner has changed a pick on this form: the composer clears a stale "not answered" line on it. */
+  changes(key: string): number {
+    return this.#changes.get(key) ?? 0;
   }
 
   /** What the owner was last asked about when Send found required fields empty; sending again as asked goes through. */
@@ -60,6 +67,7 @@ export class AgendaFormStore {
   forget(key: string): void {
     this.#picks.delete(key);
     this.#asked.delete(key);
+    this.#changes.delete(key);
     this.#emit();
   }
 
@@ -75,6 +83,14 @@ export class AgendaFormStore {
 
 /** The page's one store of form picks. */
 export const agendaForms = new AgendaFormStore();
+
+/** How often the picks of the form `key` names have been changed, redrawn when one is. */
+export const useFormChanges = (key: string): number =>
+  useSyncExternalStore(
+    agendaForms.subscribe,
+    () => agendaForms.changes(key),
+    () => 0,
+  );
 
 /** The picks of the form `key` names, redrawn when one changes. */
 export const useFormPicks = (key: string, fields: readonly AgendaFormField[]): FormPicks =>

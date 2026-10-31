@@ -211,7 +211,7 @@ const AnswerReviewResponseSchema = z.discriminatedUnion('verdict', [
 /** One answered form field: the field's id and its value — the picked label(s), Yes or No, or the typed text. */
 export const AgendaFormAnswerSchema = z.strictObject({
   id: z.string().trim().min(1).max(MAX_AGENDA_FIELD_ID_LENGTH),
-  value: z.union([
+  picked: z.union([
     z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH),
     z.array(singleLine(MAX_AGENDA_ASK_OPTION_LENGTH)).min(1).max(MAX_AGENDA_ASK_OPTIONS),
   ]),

@@ -27,10 +27,10 @@ export const formAnswersFrom = (
   typed: string,
 ): readonly AgendaFormAnswer[] =>
   fields.flatMap((field): AgendaFormAnswer[] => {
-    if (field.type === 'text') return typed.trim() === '' ? [] : [{ id: field.id, value: typed.trim() }];
+    if (field.type === 'text') return typed.trim() === '' ? [] : [{ id: field.id, picked: typed.trim() }];
     const values = picks[field.id] ?? [];
     if (values.length === 0) return [];
-    return [{ id: field.id, value: field.type === 'many' ? [...values] : (values[0] as string) }];
+    return [{ id: field.id, picked: field.type === 'many' ? [...values] : (values[0] as string) }];
   });
 
 export type FormSendPlan =

@@ -2266,6 +2266,7 @@ function AgendaRoute({ connection }: DaemonPageProps) {
             connection={target}
             disabled={TERMINAL_STATUSES.has(card.view.state.status)}
             answerForm={answerForm}
+            formKey={card.key}
             enterKeyPreference={controls.composerEnterKey}
             itemId={card.item.id}
             key={card.key}

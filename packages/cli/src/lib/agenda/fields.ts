@@ -43,7 +43,9 @@ export interface FieldInput {
 function typeOf(raw: string, where: string): AgendaFieldType {
   const type = TYPES.get(raw.trim().toLowerCase());
   if (type === undefined) {
-    throw new Error(`${where}: unknown field type "${raw.trim()}" — use one, many, yesno or text`);
+    throw new Error(
+      `${where}: unknown field type "${raw.trim()}" — use one, many, yesno or text (a form never collects a password or secret: use an input request)`,
+    );
   }
   return type;
 }

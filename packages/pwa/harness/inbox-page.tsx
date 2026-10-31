@@ -431,6 +431,7 @@ function Inbox({
                   compact={phone}
                   key={open.key}
                   {...(answerForm === undefined ? {} : { answerForm })}
+                  formKey={open.key}
                   connection={MACHINE}
                   itemId={open.item.id}
                   view={open.view}

@@ -158,6 +158,14 @@ for (const scheme of ['light', 'dark'] as const) {
     await page.locator('[data-inbox-composer] [data-live-editor]').click();
     await page.keyboard.type(TYPED);
     await page.waitForTimeout(150);
+    check(
+      (await page.locator('.fy-composer-error').count()) === 0,
+      `${label}: the ask line stays after the alerts are ticked`,
+    );
+    check(
+      (await page.locator('.fy-attn-deck__top').innerText()).split('Four things I need').length === 2,
+      `${label}: the card says its ask more than once`,
+    );
     await shoot(page, 'filled', viewport.name, scheme);
 
     // sent: one Send, the form leaves into the undo window.
@@ -171,17 +179,17 @@ for (const scheme of ['light', 'dark'] as const) {
       timeout: 9_000,
     });
     const action = (await page.evaluate(() => (window as unknown as { __committed: unknown[] }).__committed[0])) as {
-      response?: { kind: string; answers: { id: string; value: unknown }[] };
+      response?: { kind: string; answers: { id: string; picked: unknown }[] };
     };
     check(
       JSON.stringify(action.response) ===
         JSON.stringify({
           kind: 'form',
           answers: [
-            { id: '1', value: 'Asia' },
-            { id: '2', value: ['Relay down', 'High latency'] },
-            { id: '3', value: 'Yes' },
-            { id: '4', value: TYPED },
+            { id: '1', picked: 'Asia' },
+            { id: '2', picked: ['Relay down', 'High latency'] },
+            { id: '3', picked: 'Yes' },
+            { id: '4', picked: TYPED },
           ],
         }),
       `${label}: the sent answer is ${JSON.stringify(action.response)}`,

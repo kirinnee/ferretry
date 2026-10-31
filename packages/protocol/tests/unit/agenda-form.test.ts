@@ -93,8 +93,8 @@ describe('a form card on the agenda', () => {
     const answer = {
       kind: 'form',
       answers: [
-        { id: '1', value: 'EU' },
-        { id: '2', value: ['Failures'] },
+        { id: '1', picked: 'EU' },
+        { id: '2', picked: ['Failures'] },
       ],
     };
 
@@ -115,10 +115,10 @@ describe('a form card on the agenda', () => {
 
 describe('a filled-in form', () => {
   const answers = [
-    { id: '1', value: 'EU' },
-    { id: '2', value: ['Failures', 'Slow builds'] },
-    { id: '3', value: 'Yes' },
-    { id: '4', value: 'Ship after 6pm' },
+    { id: '1', picked: 'EU' },
+    { id: '2', picked: ['Failures', 'Slow builds'] },
+    { id: '3', picked: 'Yes' },
+    { id: '4', picked: 'Ship after 6pm' },
   ];
 
   it('should read as numbered lines in the form’s order', () => {
@@ -148,14 +148,29 @@ describe('a filled-in form', () => {
 
   it('should accept answers that fit and name each problem when they do not', () => {
     should(formAnswerProblems(FIELDS, answers)).deepEqual([]);
-    should(formAnswerProblems(FIELDS, [{ id: '9', value: 'x' }])[0]).containEql('no field "9"');
-    should(formAnswerProblems(FIELDS, [{ id: '1', value: 'Asia' }])[0]).containEql('not an option');
-    should(formAnswerProblems(FIELDS, [{ id: '1', value: ['EU', 'US'] }])[0]).containEql('exactly one');
+    should(formAnswerProblems(FIELDS, [{ id: '9', picked: 'x' }])[0]).containEql('no field "9"');
+    should(formAnswerProblems(FIELDS, [{ id: '1', picked: 'Asia' }])[0]).containEql('not an option');
+    should(formAnswerProblems(FIELDS, [{ id: '1', picked: ['EU', 'US'] }])[0]).containEql('exactly one');
     should(
       formAnswerProblems(FIELDS, [
-        { id: '1', value: 'EU' },
-        { id: '1', value: 'US' },
+        { id: '1', picked: 'EU' },
+        { id: '1', picked: 'US' },
       ])[0],
     ).containEql('twice');
+  });
+});
+
+describe('a form never asks for a secret', () => {
+  it('should have no field kind that collects a password or secret', () => {
+    for (const type of ['secret', 'password', 'token', 'masked']) {
+      should(AgendaFormFieldSchema.safeParse({ id: 's', type, label: 'Your password?' }).success).equal(false);
+    }
+  });
+
+  it('should keep a form answer to the field id and what was picked or typed', () => {
+    should(AgendaResponseSchema.safeParse({ kind: 'form', answers: [{ id: '1', value: 'EU' }] }).success).equal(false);
+    should(
+      AgendaResponseSchema.safeParse({ kind: 'form', answers: [{ id: '1', picked: 'EU', secret: 'x' }] }).success,
+    ).equal(false);
   });
 });

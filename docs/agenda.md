@@ -386,8 +386,9 @@ the whole list.
 
 - **One Send.** The card's fields and the reply box are one answer. Send combines them — "1. Region: EU · 2. Alerts: Page, Mail · 3. Restart: Yes · 4. <typed text>" — and delivers that to the ferret as the answer to the item. A form that has no `text`
   field sends the typed words as a note instead.
-- **Recorded by field id.** The answer is stored on the item as `{ kind: "form", answers: [{ id, value }] }` (a pick-many's
-  value is a list), so the ferret reads `fy agenda show <id> --json` instead of parsing prose.
+- **No secrets.** There is no secret field kind and a form answer is plain text on the item, so a password, token or code is never asked here: it goes through an input request ([input-requests.md](input-requests.md)), which the agent never reads.
+- **Recorded by field id.** The answer is stored on the item as `{ kind: "form", answers: [{ id, picked }] }` (a pick-many's
+  picked is a list), so the ferret reads `fy agenda show <id> --json` instead of parsing prose.
 - **Empty required fields are asked about once.** The first Send says which fields are unanswered and that Send again sends
   it as it is; the next Send goes through. Nothing filled in at all is not sent.
 - **No swipes** except ↓ Not needed. Recommended values start picked and say "Recommended".

@@ -91,7 +91,7 @@ export const describeResponse = (response: AgendaResponse): string => {
   if (response.kind === 'answer-review')
     return response.verdict === 'good' ? 'Answer accepted' : `Clarification requested: ${response.clarification}`;
   if (response.kind === 'form')
-    return `Form answered: ${response.answers.map(each => `${each.id}: ${typeof each.value === 'string' ? each.value : each.value.join(', ')}`).join(' · ')}`;
+    return `Form answered: ${response.answers.map(each => `${each.id}: ${typeof each.picked === 'string' ? each.picked : each.picked.join(', ')}`).join(' · ')}`;
   return `Answered: ${response.answer}`;
 };
 

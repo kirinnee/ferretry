@@ -921,6 +921,12 @@ describe('a form card', () => {
     expect(root().textContent).toContain('Recommended');
   });
 
+  test('says its ask once: the header has it, the box does not repeat it', async () => {
+    await draw(form, { formKey: 'view-test' });
+    expect(root().querySelector('[data-agenda-question-line]')).toBeNull();
+    expect(root().querySelector('[data-agenda-need="form"]')).not.toBeNull();
+  });
+
   test('has no answer buttons to swipe, but Not needed is still there', async () => {
     await draw(form, { formKey: 'view-test' });
     expect(root().querySelector('[data-agenda-quick-replies] button')).toBeNull();

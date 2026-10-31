@@ -3873,8 +3873,8 @@ describe('Agenda state machine answer shapes', () => {
       const response: AgendaResponse = {
         kind: 'form',
         answers: [
-          { id: '1', value: 'EU' },
-          { id: '2', value: 'Yes' },
+          { id: '1', picked: 'EU' },
+          { id: '2', picked: 'Yes' },
         ],
       };
 
@@ -3887,7 +3887,7 @@ describe('Agenda state machine answer shapes', () => {
     it('should refuse an answer to a field the form does not have, or a value that is not an option', () => {
       const board = form();
 
-      for (const answers of [[{ id: '9', value: 'x' }], [{ id: '1', value: 'Asia' }]]) {
+      for (const answers of [[{ id: '9', picked: 'x' }], [{ id: '1', picked: 'Asia' }]]) {
         should(failed(answer(board, { kind: 'form', answers })).error.code).equal('invalid');
       }
     });
@@ -3895,7 +3895,7 @@ describe('Agenda state machine answer shapes', () => {
     it('should refuse a form answer to any other kind of card', () => {
       const permission = raised();
 
-      should(failed(answer(permission, { kind: 'form', answers: [{ id: '1', value: 'EU' }] })).error.code).equal(
+      should(failed(answer(permission, { kind: 'form', answers: [{ id: '1', picked: 'EU' }] })).error.code).equal(
         'invalid',
       );
     });

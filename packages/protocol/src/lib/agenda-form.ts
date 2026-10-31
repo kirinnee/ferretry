@@ -29,7 +29,7 @@ export const formFieldRequired = (field: Pick<AgendaFormField, 'type' | 'require
 
 /** The value a field is answered with, as a list: a pick-many holds several, every other field one. */
 export const formValues = (answer: AgendaFormAnswer | undefined): readonly string[] =>
-  answer === undefined ? [] : typeof answer.value === 'string' ? [answer.value] : answer.value;
+  answer === undefined ? [] : typeof answer.picked === 'string' ? [answer.picked] : answer.picked;
 
 /** The answer to one field, if the owner gave one. */
 export const formAnswerOf = (
@@ -83,7 +83,7 @@ export const formAnswerProblems = (
     seen.add(answer.id);
     const values = formValues(answer);
     if (field.type === 'text') {
-      if (typeof answer.value !== 'string') problems.push(`field "${field.id}" takes typed text, not a list`);
+      if (typeof answer.picked !== 'string') problems.push(`field "${field.id}" takes typed text, not a list`);
       continue;
     }
     if (field.type !== 'many' && values.length !== 1) problems.push(`field "${field.id}" takes exactly one answer`);

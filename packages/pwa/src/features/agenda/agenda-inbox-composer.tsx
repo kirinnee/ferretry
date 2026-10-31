@@ -17,6 +17,7 @@ import type { AgendaId, SessionView } from '@ferretry/protocol';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Composer, type ComposerProps } from '../../components/composer.tsx';
 import { useOptionalSessionQuota } from '../../hooks/use-usage.ts';
+import { useFormChanges } from '../../lib/agenda-form-state.ts';
 import { withFormSend } from '../../lib/agenda-form-send.ts';
 import { withReferencePrefix } from '../../lib/answer-chip.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
@@ -44,6 +45,8 @@ export interface AgendaInboxComposerProps {
   readonly disabled?: boolean;
   /** The open item is a form: Send runs this instead of chatting, even with an empty box. */
   readonly answerForm?: (() => void) | undefined;
+  /** The open form's picks key: a changed pick clears the "not answered yet" line under the box. */
+  readonly formKey?: string | undefined;
   readonly autocompleteFetcher?: ComposerProps['autocompleteFetcher'];
   readonly enterKeyPreference?: ComposerProps['enterKeyPreference'];
   readonly phoneEnterKeyPreference?: ComposerProps['phoneEnterKeyPreference'];
@@ -58,6 +61,7 @@ export function AgendaInboxComposer({
   compact,
   disabled = false,
   answerForm,
+  formKey,
   autocompleteFetcher,
   enterKeyPreference = null,
   phoneEnterKeyPreference = null,
@@ -77,6 +81,7 @@ export function AgendaInboxComposer({
     };
   }, [clientFor, connection]);
   const api = client?.daemonId === connection.daemonId ? client.api : null;
+  const changes = useFormChanges(formKey ?? '');
   const answer = useRef(answerForm);
   answer.current = answerForm;
   const forForm = answerForm !== undefined;
@@ -89,6 +94,7 @@ export function AgendaInboxComposer({
   return (
     <Composer
       allowEmptySend={forForm}
+      {...(forForm ? { clearErrorOn: changes } : {})}
       api={about}
       compact={compact}
       daemon={connection}

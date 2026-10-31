@@ -3,6 +3,7 @@ import type { AgendaId } from '@ferretry/protocol';
 import { Composer } from '../../../src/components/composer.tsx';
 import { LiveMarkdownEditor } from '../../../src/components/live-markdown-editor.tsx';
 import { AgendaInboxComposer } from '../../../src/features/agenda/agenda-inbox-composer.tsx';
+import { agendaForms } from '../../../src/lib/agenda-form-state.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import '../../support/dom.ts';
 import { render, run, runAsync } from '../../support/react.ts';
@@ -97,5 +98,34 @@ describe('the open Inbox item’s composer', () => {
     expect(answered).toBe(1);
     expect(sent).toEqual([]);
     run(() => view.unmount());
+  });
+
+  test('a form’s “not answered yet” line goes once a pick changes', async () => {
+    const api = { send: async () => ({}) as never };
+    const view = render(
+      <AgendaInboxComposer
+        answerForm={() => {
+          throw new Error('Not answered yet: 2. Alerts. Press Send again to send it as it is.');
+        }}
+        clientFor={async () => api}
+        compact
+        connection={daemon}
+        formKey="form-key"
+        itemId={'A7' as AgendaId}
+        view={sessionView('sess-2', { config: { teammate: 'kai', name: 'Release train' } })}
+      />,
+    );
+    await runAsync(async () => {
+      await Promise.resolve();
+    });
+    await runAsync(async () => {
+      view.root.findByType('form').props.onSubmit({ preventDefault() {} });
+    });
+    const alerts = () => view.root.findAll(node => node.type === 'p' && node.props.role === 'alert');
+    expect(alerts()).toHaveLength(1);
+    run(() => agendaForms.set('form-key', [], '2', ['Page']));
+    expect(alerts()).toHaveLength(0);
+    run(() => view.unmount());
+    agendaForms.forget('form-key');
   });
 });

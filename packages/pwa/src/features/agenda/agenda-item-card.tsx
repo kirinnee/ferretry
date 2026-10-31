@@ -281,7 +281,7 @@ export function AgendaItemCard({
   const read = forConfirmation(item);
   const model = cardModel(item);
   const meta = agendaTypeMeta(item);
-  // The segment LEADS WITH THE ASK, whatever the header above it says: the lone question, else the item's one-line
+  // The segment LEADS WITH THE ASK, whatever the header above it says (a form's is its header's, said once): the lone question, else the item's one-line
   // ask — what is being chosen, approved, done or read. Several questions are their own numbered list instead.
   const askLine = singleAgendaQuestion(item)?.question.trim() || item.subject.trim();
   const terms = item.terms ?? [];
@@ -409,7 +409,7 @@ export function AgendaItemCard({
           shape={shape}
           {...(!answerable ? { lead: '' } : shape === 'form' && formKey === undefined ? { lead: FORM_ELSEWHERE } : {})}
         >
-          {askLine === '' || shape === 'answers' || shape === 'input' ? null : (
+          {askLine === '' || shape === 'answers' || shape === 'input' || shape === 'form' ? null : (
             <div className="fy-card__question" data-agenda-question-line="">
               {renderProse(mark(askLine))}
             </div>

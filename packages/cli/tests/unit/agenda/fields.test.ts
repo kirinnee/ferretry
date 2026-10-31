@@ -64,7 +64,7 @@ describe('a form card from the CLI', () => {
   it('should say a filled-in form by its answers', () => {
     const fields = fieldsFrom(['1|one|Which region?|EU|US'], undefined) ?? [];
 
-    should(describeAnswer({ kind: 'form', answers: [{ id: '1', value: 'EU' }] }, fields)).equal(
+    should(describeAnswer({ kind: 'form', answers: [{ id: '1', picked: 'EU' }] }, fields)).equal(
       'form answered: 1. Which region: EU',
     );
   });

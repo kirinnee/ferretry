@@ -46,7 +46,10 @@ describe('form picks', () => {
     store.markAsked('a', '3');
     store.set('a', FIELDS, '3', ['Yes']);
     expect(store.asked('a')).toBeUndefined();
+    expect(store.changes('a')).toBe(2);
+    expect(store.changes('b')).toBe(0);
     store.forget('a');
+    expect(store.changes('a')).toBe(0);
     expect(store.picks('a', FIELDS)).toEqual({ '1': ['EU'] });
     expect(seen).toBeGreaterThanOrEqual(3);
   });
@@ -56,11 +59,22 @@ describe('planning the one Send of a form', () => {
   test('answers in the form’s order: pick-many as a list, the typed words as the text field', () => {
     const answers = formAnswersFrom(FIELDS, { '1': ['EU'], '2': ['Page', 'Mail'], '3': ['Yes'] }, '  ship it ');
     expect(answers).toEqual([
-      { id: '1', value: 'EU' },
-      { id: '2', value: ['Page', 'Mail'] },
-      { id: '3', value: 'Yes' },
-      { id: '4', value: 'ship it' },
+      { id: '1', picked: 'EU' },
+      { id: '2', picked: ['Page', 'Mail'] },
+      { id: '3', picked: 'Yes' },
+      { id: '4', picked: 'ship it' },
     ]);
+  });
+
+  test('a pick-many with something ticked is answered, so the ask never names it', () => {
+    const picks = { '1': ['EU'], '2': ['Page', 'Mail'], '3': ['Yes'] };
+    const plan = planFormSend(item, picks, '', undefined);
+    expect(plan.kind).toBe('send');
+    const alone = planFormSend({ fields: [FIELDS[1] as AgendaFormField] }, { '2': ['Mail'] }, '', undefined);
+    expect(alone.kind).toBe('send');
+    const none = planFormSend(item, { '1': ['EU'], '3': ['Yes'] }, '', undefined);
+    if (none.kind !== 'ask') throw new Error('expected an ask');
+    expect(none.message).toContain('2. Alerts');
   });
 
   test('says there is nothing to send when nothing is filled in', () => {
@@ -93,9 +107,9 @@ describe('planning the one Send of a form', () => {
         response: {
           kind: 'form',
           answers: [
-            { id: '1', value: 'EU' },
-            { id: '2', value: ['Page'] },
-            { id: '3', value: 'No' },
+            { id: '1', picked: 'EU' },
+            { id: '2', picked: ['Page'] },
+            { id: '3', picked: 'No' },
           ],
         },
         note: 'also this',
@@ -114,7 +128,7 @@ describe('sendForm', () => {
     expect(scheduled).toHaveLength(1);
     expect(scheduled[0]).toMatchObject({
       kind: 'respond',
-      response: { kind: 'form', answers: [{ id: '1', value: 'EU' }] },
+      response: { kind: 'form', answers: [{ id: '1', picked: 'EU' }] },
     });
     expect(agendaForms.asked('k')).toBeUndefined();
   });

@@ -73,9 +73,9 @@ describe('Attention in a conversation', () => {
       response: {
         kind: 'form',
         answers: [
-          { id: '1', value: 'EU' },
-          { id: '2', value: 'Yes' },
-          { id: '3', value: 'Ship after 6pm' },
+          { id: '1', picked: 'EU' },
+          { id: '2', picked: 'Yes' },
+          { id: '3', picked: 'Ship after 6pm' },
         ],
       },
     });
