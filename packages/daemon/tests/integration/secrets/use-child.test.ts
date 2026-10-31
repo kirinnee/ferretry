@@ -352,6 +352,24 @@ describe('the child runner, finding the program it runs', () => {
     });
   });
 
+  it('should keep the name of a program that is itself a link, as the kernel does, so a script sees its own name', async () => {
+    // Arrange — bin/foo-start links to libexec/toolbox, which acts on the name it was started by.
+    const folder = await tempDirectory('runner-link-name');
+    await mkdir(join(folder, 'libexec'));
+    await mkdir(join(folder, 'bin'));
+    await writeFile(join(folder, 'libexec', 'toolbox'), '#!/bin/sh\necho "$0"\n');
+    await chmod(join(folder, 'libexec', 'toolbox'), 0o755);
+    await symlink(join(folder, 'libexec', 'toolbox'), join(folder, 'bin', 'foo-start'));
+    const runner = new BunSecretChildRunner(() => ({ PATH: '/nonexistent' }));
+
+    // Act
+    const result = await runner.run(spec(['./bin/foo-start'], folder));
+
+    // Assert
+    const link = join(folder, 'bin', 'foo-start');
+    should(result).match({ outcome: 'exited', stdout: `${link}\n`, program: link });
+  });
+
   it('should report a name too long to look up as a spawn failure, not throw', async () => {
     // Arrange
     const { folder } = await folderWithProgram('runner-long');

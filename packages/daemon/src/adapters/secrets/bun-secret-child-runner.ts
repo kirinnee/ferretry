@@ -1,5 +1,5 @@
 import { lstat, realpath } from 'node:fs/promises';
-import { dirname, isAbsolute } from 'node:path';
+import { basename, dirname, isAbsolute } from 'node:path';
 import type { SecretChildOutcome, SecretChildRunner, SecretChildSpec } from '../../lib/index.ts';
 
 /**
@@ -107,7 +107,7 @@ export class BunSecretChildRunner implements SecretChildRunner {
     let replaceable: boolean;
     try {
       file = program.includes('/')
-        ? await realpath(isAbsolute(program) ? program : `${await realpath(spec.cwd)}/${program}`)
+        ? await physical(isAbsolute(program) ? program : `${await realpath(spec.cwd)}/${program}`)
         : Bun.which(program, { PATH: env.PATH ?? '', cwd: spec.cwd });
       replaceable = file !== null && (await replaceableBy(this.account(), file));
     } catch {
@@ -162,6 +162,14 @@ export class BunSecretChildRunner implements SecretChildRunner {
       clearTimeout(timeout);
     }
   }
+}
+
+/**
+ * A path as the kernel takes it: its folder walked on the disk (every `..` and symlink on the way), its last name
+ * kept. A program that is itself a link keeps the link's name, so a script that reads its own `$0` still sees it.
+ */
+async function physical(path: string): Promise<string> {
+  return `${await realpath(dirname(path))}/${basename(path)}`;
 }
 
 /**
