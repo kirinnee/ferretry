@@ -9,3 +9,4 @@ export * from './inventory.ts';
 export * from './session-planner.ts';
 export * from './session-shape.ts';
 export * from './team.ts';
+export * from './user-slice.ts';

@@ -57,12 +57,18 @@ Run steps 1–4 as an administrator (with `sudo`), and steps 5–7 as the new us
    sudo loginctl enable-linger alice
    ```
 
+   `fy doctor` (as that user) warns while linger is off, once `browserPorts` is set to anything but `random`.
+
 4. **Cap what their fleet can use**, so one user's agents cannot starve the box. These are
    persistent drop-ins on the user's systemd slice; pick numbers for your machine.
 
    ```bash
    sudo systemctl set-property user-$(id -u alice).slice MemoryMax=12G TasksMax=4096 CPUWeight=100
    ```
+
+   Once `browserPorts` is set to anything but `random`, `fy doctor` warns, as that user and without root, while
+   the user's slice has no `MemoryMax` or no `TasksMax` (it reads `memory.max` and `pids.max` under
+   `/sys/fs/cgroup/user.slice/user-<uid>.slice`). It says nothing on a host without systemd or cgroup v2.
 
 5. **Install Nix tooling as the user.** The multi-user Nix daemon is shared and safe to share: users
    don't need to be in `trusted-users`. Ferretry writes nothing outside the user's home and the store.

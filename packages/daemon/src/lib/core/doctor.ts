@@ -11,6 +11,7 @@ import {
   harnessAbsenceImpact,
   harnessLocationLine,
 } from './harness-readiness.ts';
+import { type UserSliceReading, userSliceChecks } from './user-slice.ts';
 
 export interface DoctorExecutableResolver {
   resolve(name: string): string | undefined;
@@ -33,6 +34,12 @@ export interface DoctorReportInput {
    * (nothing to fence) — the row is then left out. Never makes the report not ready.
    */
   readonly loopbackFirewall?: LoopbackFirewallState;
+  /**
+   * This user's systemd slice limits and linger, read only on a host that looks shared. Absent on a
+   * single-user host and wherever there is no systemd to ask — the rows are then left out. Never makes
+   * the report not ready.
+   */
+  readonly userSlice?: UserSliceReading;
 }
 
 const present = (
@@ -244,6 +251,7 @@ export function readDoctorReport(input: DoctorReportInput): DoctorReport {
     binary(input, 'tmux', 'required', 'Sessions cannot start or be managed.'),
     ...tmuxRelease(input.tmuxRelease),
     ...loopbackFirewall(input.loopbackFirewall),
+    ...userSliceChecks(input.userSlice),
     binary(input, 'bash', 'required', 'Generated fleet wrappers cannot run.'),
     binary(input, 'git', 'capability', 'Worktrees, project inspection, and repository features are unavailable.'),
     input.platform === 'darwin'

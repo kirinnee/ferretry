@@ -496,6 +496,7 @@ import { FileMcpProjectFiles } from '../src/adapters/session-mcp/project-files.t
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import { BunDetachedLauncher } from '../src/adapters/system/detached-launcher.ts';
 import { ProcIoPressure } from '../src/adapters/system/proc-io-pressure.ts';
+import { SystemdUserSliceReader } from '../src/adapters/system/user-slice-reader.ts';
 import {
   ManagedTerminalService,
   systemLoginShell,
@@ -971,6 +972,7 @@ import {
   type RunOverrides,
   readDaemonRelayIdentity,
   readDoctorReport,
+  readUserSlice,
   firewallRefusal,
   LOOPBACK_FIREWALL_CHECK_MS,
   LoopbackFirewallWatch,
@@ -7292,6 +7294,17 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       new FileLoopbackMarkerReader(),
       () => Date.now(),
     );
+  /**
+   * This user's systemd slice limits and linger, for the doctor's shared-host rows. Asked only on Linux with
+   * `browserPorts` set to something but `random`, so a single-user host never reads it. A reading for
+   * warnings, never a gate.
+   */
+  const userSlice = async () =>
+    await readUserSlice(
+      process.platform,
+      async () => (await declaredAccountModel())?.machine.browserPorts ?? 'random',
+      new SystemdUserSliceReader({ uid: process.getuid?.() ?? 0, user: userInfo().username }),
+    );
   /** Each change of that reading is said once (a daemon notice), at a browser start and on the five-minute tick. */
   const loopbackFirewallWatch = new LoopbackFirewallWatch(loopbackFirewall, message => bootNotices.state(message));
   /**
@@ -10957,6 +10970,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               directorySyscalls,
               tmuxRelease: await new TmuxReleaseReader(tmuxExecutable, tmux).read(),
               loopbackFirewall: await loopbackFirewall(),
+              userSlice: await userSlice(),
             });
           },
         },
