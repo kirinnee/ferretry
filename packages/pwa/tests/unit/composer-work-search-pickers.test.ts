@@ -126,3 +126,34 @@ describe("the composer pickers over the daemon's work search", () => {
     expect((await ladder(failing).candidates(context('@', 'relay', 3))).candidates).toEqual(expected);
   });
 });
+
+describe('abandoning a picker search', () => {
+  it('rejects at once when the menu was already closed before the wait began', async () => {
+    const { port, asked } = fakePort([card('F77')]);
+    const controller = new AbortController();
+    controller.abort(new Error('closed'));
+    const stale = { ...context('@', 'relay', 4), signal: controller.signal };
+    await expect(ladder(port).candidates(stale)).rejects.toThrow('closed');
+    expect(asked).toEqual([]);
+  });
+
+  it('rejects at once when the menu closes just before the pause would begin', async () => {
+    const { port, asked } = fakePort([card('F77')]);
+    const controller = new AbortController();
+    const pending = ladder(port).candidates({ ...context('@', 'relay', 4), signal: controller.signal });
+    controller.abort(new Error('closed'));
+    await expect(pending).rejects.toThrow('closed');
+    expect(asked).toEqual([]);
+  });
+
+  it('stops waiting, and never asks, when the menu closes during the pause', async () => {
+    const { port, asked } = fakePort([card('F77')]);
+    const controller = new AbortController();
+    const pending = ladder(port).candidates({ ...context('@', 'relay', 4), signal: controller.signal });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    controller.abort(new Error('closed'));
+    await expect(pending).rejects.toThrow('closed');
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(asked).toEqual([]);
+  });
+});
