@@ -196,7 +196,7 @@ export function AddToCatalogSheet({
         </p>
       ) : read.kind === 'failed' ? (
         read.refusal.sharingOff ? (
-          <SharingOffPanel />
+          <SharingOffPanel connection={connection} createClient={createClient} />
         ) : (
           <FailureLine sentence={read.refusal.sentence} again onAgain={() => void start()} againLabel="Try again" />
         )
@@ -273,7 +273,7 @@ export function AddToCatalogSheet({
             </Button>
           )}
           {failure === null ? null : failure.sharingOff ? (
-            <SharingOffPanel />
+            <SharingOffPanel connection={connection} createClient={createClient} />
           ) : (
             <FailureLine
               sentence={failure.sentence}

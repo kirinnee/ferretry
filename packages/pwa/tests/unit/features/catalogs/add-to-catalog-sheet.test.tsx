@@ -41,6 +41,25 @@ describe('parts', () => {
     await view.unmount();
   });
 
+  it('puts this device’s own id in the command', async () => {
+    const id = `fy_device_id_${'b'.repeat(22)}`;
+    const fake = fakeClient({ 'GET /v1/pair/devices': () => ({ devices: [], hostLocal: false, thisDeviceId: id }) });
+    const view = await mount(<SharingOffPanel connection={connection} createClient={fake.factory} />);
+    await settle();
+    expect(view.container.querySelector('[data-sharing-off]')?.textContent).toContain(
+      `fy device grant ${id} sharing --use`,
+    );
+    await view.unmount();
+  });
+
+  it('keeps the placeholder when the device cannot be read', async () => {
+    const fake = fakeClient({});
+    const view = await mount(<SharingOffPanel connection={connection} createClient={fake.factory} />);
+    await settle();
+    expect(view.container.querySelector('[data-sharing-off]')?.textContent).toContain('<device>');
+    await view.unmount();
+  });
+
   it('shows a failure with no button unless one is asked for', async () => {
     const view = await mount(<FailureLine sentence="Nope." />);
     expect(view.container.textContent).toContain('Nope.');

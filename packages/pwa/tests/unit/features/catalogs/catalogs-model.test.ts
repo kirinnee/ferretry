@@ -13,6 +13,7 @@ import {
   previewPlan,
   SHARING_GRANT_COMMAND,
   SHARING_OFF_LINES,
+  sharingGrantCommand,
 } from '../../../../src/features/catalogs/catalogs-model.ts';
 import { itemPreview, ownedCatalog } from '../../../support/catalog-views.ts';
 
@@ -21,6 +22,17 @@ describe('sharing', () => {
     should(SHARING_GRANT_COMMAND).match(/sharing/u);
     should(SHARING_GRANT_COMMAND).match(/--use/u);
     should(SHARING_OFF_LINES.join(' ')).match(/before this release/u);
+  });
+});
+
+describe('sharingGrantCommand', () => {
+  const id = `fy_device_id_${'a'.repeat(22)}`;
+  it('uses this device id, so the command can be pasted as it is', () => {
+    should(sharingGrantCommand(id)).equal(`fy device grant ${id} sharing --use`);
+  });
+  it('keeps the placeholder when the id is missing or is not a device id', () => {
+    should(sharingGrantCommand(null)).containEql('<device>');
+    should(sharingGrantCommand('Ernest; rm -rf ~')).containEql('<device>');
   });
 });
 

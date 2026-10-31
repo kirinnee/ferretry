@@ -4,10 +4,14 @@
  */
 
 import { CircleAlert, Lock } from 'lucide-react';
-import { type ReactNode, useId } from 'react';
+import { type ReactNode, useEffect, useId, useState } from 'react';
+import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { useDaemonClient } from '../../lib/store.tsx';
+import { readPairedDevices } from '../settings/add-device-api.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { Button } from '../../shell/primitives.tsx';
-import { SHARING_GRANT_COMMAND, SHARING_OFF_LINES, SHARING_OFF_TITLE } from './catalogs-model.ts';
+import type { CatalogClientFactory } from './catalogs-api.ts';
+import { SHARING_OFF_LINES, SHARING_OFF_TITLE, sharingGrantCommand } from './catalogs-model.ts';
 
 /** A titled bottom sheet whose body scrolls. */
 export function CatalogSheet({
@@ -49,8 +53,34 @@ export function CatalogSheet({
   );
 }
 
-/** Says Sharing is off for this device, and the one command that turns it on. */
-export function SharingOffPanel() {
+/** Says Sharing is off for this device, and the one command that turns it on, with this device's own id. */
+export function SharingOffPanel({
+  connection,
+  createClient: injected,
+}: {
+  readonly connection?: DaemonConnection;
+  readonly createClient?: CatalogClientFactory;
+}) {
+  const routed = useDaemonClient();
+  const createClient = injected ?? routed;
+  const [deviceId, setDeviceId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (connection === undefined) return;
+    let live = true;
+    void createClient(connection)
+      .then(async client => await readPairedDevices(client))
+      .then(view => {
+        if (live) setDeviceId(view.thisDeviceId ?? null);
+      })
+      .catch(() => {
+        if (live) setDeviceId(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [connection, createClient]);
+
   return (
     <section
       className="flex min-w-0 flex-col gap-xs rounded-control border border-warn-border bg-warn-bg p-control-x py-2 text-warn"
@@ -67,7 +97,7 @@ export function SharingOffPanel() {
         </p>
       ))}
       <code className="block break-all rounded-control bg-surface-2 p-xs font-mono text-2xs text-fg">
-        {SHARING_GRANT_COMMAND}
+        {sharingGrantCommand(deviceId)}
       </code>
     </section>
   );

@@ -107,7 +107,7 @@ export function CatalogsSurface({
         </p>
       ) : read.kind === 'failed' ? (
         read.refusal.sharingOff ? (
-          <SharingOffPanel />
+          <SharingOffPanel connection={connection} createClient={createClient} />
         ) : (
           <FailureLine sentence={read.refusal.sentence} again onAgain={reload} againLabel="Try again" />
         )
@@ -245,7 +245,11 @@ function CatalogDetail({
           <p className="m-0 whitespace-pre-wrap break-words text-cell text-muted">{catalog.description}</p>
         )}
       </div>
-      {failure === null ? null : failure.sharingOff ? <SharingOffPanel /> : <FailureLine sentence={failure.sentence} />}
+      {failure === null ? null : failure.sharingOff ? (
+        <SharingOffPanel connection={connection} createClient={createClient} />
+      ) : (
+        <FailureLine sentence={failure.sentence} />
+      )}
       {note === null ? null : (
         <p className="m-0 flex items-start gap-2 break-words text-cell text-ok" role="status" data-catalog-note="">
           <CircleCheck size={16} aria-hidden="true" className="mt-0.5 shrink-0" />

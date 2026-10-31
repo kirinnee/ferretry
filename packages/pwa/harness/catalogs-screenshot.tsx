@@ -127,10 +127,12 @@ const INSTALL_SKILL = {
 const params = new URLSearchParams(location.search);
 const view = params.get('view');
 
+const THIS_DEVICE = 'fy_device_id_' + 'Pq3xK9mT2vLw8RnYb5cHdA';
 const catalogClient = {
   request: async (path, schema, init) => {
     const method = init?.method ?? 'GET';
     const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
+    if (path === '/v1/pair/devices') return { devices: [], hostLocal: false, thisDeviceId: THIS_DEVICE };
     if (view === 'sharing-off' && path.startsWith('/v1/catalogs')) throw new FyHttpError('This device may not use Sharing.', 403, 'grant_device_not_granted');
     if (method === 'GET' && path.startsWith('/v1/catalogs')) return schema.parse({ publisher: PUBLISHER, catalogs: CATALOGS });
     if (method === 'POST' && path.endsWith('/items/preview')) return schema.parse(view === 'add-mcp' ? MCP_PREVIEW : SKILL_PREVIEW);
@@ -214,6 +216,9 @@ const server = Bun.serve({
       return new Response(html(url.searchParams.get('theme') ?? 'studio-dark'), {
         headers: { 'content-type': 'text/html' },
       });
+    // The stylesheet names its fonts as `../assets/fonts/…`: serve them from src, so the pictures are drawn in the
+    // app's own typefaces and not a fallback.
+    if (url.pathname.startsWith('/assets/fonts/')) return new Response(Bun.file(join(packageDir, 'src', url.pathname)));
     return new Response(Bun.file(join(outDir, url.pathname)));
   },
 });
@@ -233,6 +238,13 @@ const VIEWPORTS = {
 const HIDDEN_ANYWHERE = new RegExp(`[${HIDDEN_CHARACTER_SOURCE}]`, 'u');
 
 const shot = async (page: Page, name: string, theme: string, vp: string, crop?: string): Promise<void> => {
+  const faces = await page.evaluate(async () => {
+    await document.fonts.ready;
+    const family = getComputedStyle(document.body).fontFamily;
+    return { family, loaded: [...document.fonts].filter(face => face.status === 'loaded').map(face => face.family) };
+  });
+  if (!faces.loaded.some(face => faces.family.includes(face.replaceAll('"', ''))))
+    fail(`${name} ${theme} ${vp} is drawn in a fallback font (${faces.family}; loaded: ${faces.loaded.join(', ')})`);
   const text = await page.evaluate(() => document.body.textContent ?? '');
   if (HIDDEN_ANYWHERE.test(text)) fail(`${name} ${theme} ${vp} shows a hidden character instead of its marker`);
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);

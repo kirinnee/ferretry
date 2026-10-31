@@ -11,6 +11,7 @@ import {
   CatalogLabelSchema,
   type OwnedCatalog,
   type OwnedCatalogItem,
+  PairedDeviceIdSchema,
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { deviceGrantCommand, grantRefusalNotice } from '../../lib/grants.ts';
@@ -30,8 +31,20 @@ export const CATALOG_NOT_SHARED_YET =
 
 export const SHARING_OFF_TITLE = 'Sharing is off for this device';
 
-/** The command that turns Sharing on for one device. `<device>` is a placeholder on purpose. */
-export const SHARING_GRANT_COMMAND = deviceGrantCommand('sharing', 'use');
+/**
+ * The command that turns Sharing on for one device.
+ *
+ * With this device's own id the owner can paste it as it is. A daemon-issued id is safe to put in a
+ * command line; a device NAME is not, so a name is never used. Without a valid id it stays `<device>`.
+ */
+export const sharingGrantCommand = (deviceId: string | null = null): string => {
+  const command = deviceGrantCommand('sharing', 'use');
+  return deviceId !== null && PairedDeviceIdSchema.safeParse(deviceId).success
+    ? command.replace('<device>', deviceId)
+    : command;
+};
+
+export const SHARING_GRANT_COMMAND = sharingGrantCommand();
 
 export const SHARING_OFF_LINES: readonly string[] = [
   'This device may not make or export catalogs yet.',
