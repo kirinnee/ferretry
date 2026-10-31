@@ -791,6 +791,10 @@ class RecordingLoginRuntime implements BrowserLoginRuntime {
     return ':77';
   }
 
+  authority(): string | undefined {
+    return undefined;
+  }
+
   chromeExecutable(): string {
     return '/usr/bin/google-chrome';
   }

@@ -135,6 +135,7 @@ function runtime(
     hostname: 'host',
     sshUser: 'person',
     display: async () => ':99',
+    authority: () => '/state/x11/xauthority',
     chromeExecutable: () => '/chrome',
     x11vncExecutable: () => '/x11vnc',
     timeoutExecutable: () => '/timeout',
@@ -205,6 +206,34 @@ describe('BrowserLoginWindowService', () => {
     should(closed).deepEqual({ state: 'closed', profilePrimed: true });
     should(events.slice(-3)).deepEqual(['terminate:vnc', 'terminate:chrome', 'remove:/run/password']);
     should(profile.calls).deepEqual(['acquire', 'version', 'pid:300', 'primed', 'primed', 'pid:none', 'release']);
+  });
+
+  it("should hand the display's cookie file to both Chrome and x11vnc, and nothing of the host's own", async () => {
+    // Arrange
+    const environments: Readonly<Record<string, string | undefined>>[] = [];
+    const base = runtime([]);
+    const subject = new BrowserLoginWindowService({
+      profile: new FakeProfile(),
+      runtime: {
+        ...base,
+        environmentSource: { PATH: '/bin', XAUTHORITY: '/home/operator/.Xauthority' },
+        spawn: (argv, environment) => {
+          environments.push(environment);
+          return base.spawn(argv, environment);
+        },
+      },
+      password: () => 'abcdefgh',
+    });
+
+    // Act
+    await subject.start({ minutes: 2 });
+
+    // Assert
+    // Chrome, then the VNC supervisor: both are X clients, and the private display refuses a client without it.
+    should(environments).have.length(2);
+    for (const environment of environments) {
+      should(environment).match({ DISPLAY: ':99', XAUTHORITY: '/state/x11/xauthority' });
+    }
   });
 
   it('should refuse non-Linux login and accurately tear down a failed opening', async () => {

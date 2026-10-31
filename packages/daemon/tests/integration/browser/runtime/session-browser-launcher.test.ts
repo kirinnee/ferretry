@@ -56,7 +56,7 @@ async function fakeChrome(
     file,
     `#!/bin/sh
 if [ "$1" = "--version" ]; then echo 'Google Chrome ${options.version ?? '150.0'}'; exit 0; fi
-${options.recordArguments ? `printf '%s\\n' "$@" > "${file}.args"\n` : ''}${options.recordArguments ? `printf '%s\\n' "\${DISPLAY-unset}" > "${file}.display"\n` : ''}port=$(printf '%s\\n' "$@" | sed -n 's/--remote-debugging-port=//p')
+${options.recordArguments ? `printf '%s\\n' "$@" > "${file}.args"\n` : ''}${options.recordArguments ? `printf '%s\\n' "\${DISPLAY-unset}" > "${file}.display"\nprintf '%s\\n' "\${XAUTHORITY-unset}" > "${file}.xauthority"\n` : ''}port=$(printf '%s\\n' "$@" | sed -n 's/--remote-debugging-port=//p')
 exec node -e "${trap}require('http').createServer((q,s)=>{s.writeHead(200,{'content-type':'application/json'});s.end('{}')}).listen(process.argv[1],'127.0.0.1')" "$port"
 `,
   );
@@ -288,6 +288,7 @@ describe('NodeSessionBrowserLauncher', () => {
         this.taken += 1;
         return name;
       },
+      authority: () => '/state/x11/xauthority-test',
       close: async () => undefined,
     });
 
@@ -308,6 +309,8 @@ describe('NodeSessionBrowserLauncher', () => {
       should(started).not.match(/automation/i);
       should(started).containEql('--remote-debugging-address=127.0.0.1');
       should((await readFile(`${chrome}.display`, 'utf8')).trim()).equal(':42');
+      // The private display refuses a client without its cookie, so the window's Chrome carries the file.
+      should((await readFile(`${chrome}.xauthority`, 'utf8')).trim()).equal('/state/x11/xauthority-test');
       should(xvfb.taken).equal(1);
     });
 
@@ -330,6 +333,7 @@ describe('NodeSessionBrowserLauncher', () => {
       should(started).not.containEql('--ozone-platform=x11');
       for (const flag of keptPainting) should(started).containEql(flag);
       should((await readFile(`${chrome}.display`, 'utf8')).trim()).equal('unset');
+      should((await readFile(`${chrome}.xauthority`, 'utf8')).trim()).equal('unset');
       should(xvfb.taken).equal(0);
     });
 
@@ -348,6 +352,7 @@ describe('NodeSessionBrowserLauncher', () => {
         should(started).containEql('--headless=new');
         should(started).not.containEql('--disable-renderer-backgrounding');
         should((await readFile(`${chrome}.display`, 'utf8')).trim()).equal('unset');
+        should((await readFile(`${chrome}.xauthority`, 'utf8')).trim()).equal('unset');
         should(xvfb.taken).equal(0);
         await browser.close();
       }
@@ -359,6 +364,7 @@ describe('NodeSessionBrowserLauncher', () => {
         display: async (): Promise<string> => {
           throw new Error('Browser mode is Real window, which needs Xvfb on Linux and this host has none');
         },
+        authority: () => undefined,
         close: async () => undefined,
       };
       const withoutXvfb = await modeLauncher({ mode: async () => 'window', display: missing, platform: 'linux' });
