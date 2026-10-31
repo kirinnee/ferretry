@@ -89,7 +89,6 @@ export function stepUpRoutes(service: StepUpService): readonly ApiRoute[] {
     {
       method: 'GET',
       path: '/v1/passkeys',
-      neverCompress: true,
       minimum: 'operator',
       noStore: true,
       // The panel that offers the first passkey must load on a machine that asks for one on opening.

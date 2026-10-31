@@ -67,7 +67,6 @@ export function fleetCredentialRoutes(subsystem: FleetCredentialsSubsystem): rea
     {
       method: 'GET',
       path: '/v1/fleet/credentials',
-      neverCompress: true,
       minimum: 'operator',
       capability: { capability: 'fleet', axis: 'use' },
       noStore: true,

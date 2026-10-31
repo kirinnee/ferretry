@@ -1776,9 +1776,10 @@ list reads each running session's transcript tail, so no version is cheaper than
 that skipped the build could answer `304` for a list that had moved. What a large, changing list costs
 on the wire is what the next paragraph removes.
 
-**A compressed answer** (`gzip`). A caller that sends `accept-encoding: gzip` in a `req`'s `headers`
+**A compressed answer** (`gzip`). Only a caller that sends `accept-encoding: gzip` in a `req`'s `headers`
 may be answered with the gzip bytes of the body the route would have sent, as unpadded base64url in
-`body`, under two response headers:
+`body`, under two response headers. **A request that names no `accept-encoding` — every app and every
+relay client that predates this — is never answered compressed, by any route.** The framing:
 
 ```json
 {
@@ -1813,19 +1814,25 @@ The rules, each of which is a reason it can be trusted:
   the digest of the plain body, so a client that learned it over one encoding revalidates over the
   other, and a `304` is decided before anything is compressed. The 32 MiB bound is on the body as it
   travels, which is the base64url text.
-- **Only an answer worth compressing is.** `GET`, `200`, `application/json`, at least 8 KiB. An error, a
-  `304`, a text answer and everything a `POST` returns are never compressed, and a route that cannot
-  gain from compression sends the answer it always did. A response that varies by encoding carries
-  `Vary: Accept-Encoding`.
-- **A credential is never compressed (BREACH).** Compress-then-encrypt makes a record's length depend on
-  its content, so an answer that carries a secret beside text a caller can influence lets an observer of
-  sizes recover the secret a byte at a time. Every credential this daemon mints is the answer to a
-  `POST` (a pairing code, a device token, a socket ticket, a secret write), which is never compressed.
-  A `GET` that reads credential-adjacent state — passkeys, secrets, the security settings, pairing
-  codes and devices, fleet credentials and MCP authorisation, the tunnel, push subscriptions, the browser
-  sign-in window and state — and the two routes that return working-tree or attachment bytes are
-  marked `neverCompress` on the route, and `tests/unit/runtime/mounts/surface.test.ts` pins the exact
-  set, so a new route has to choose. A terminal or event stream is never compressed either: see below.
+- **Only an answer worth compressing is.** A route that opted in (below), `GET`, `200`,
+  `application/json`, at least 8 KiB. An error, a `304`, a text answer and everything a `POST` returns are
+  never compressed, and a route that cannot gain from compression sends the answer it always did. A
+  response that varies by encoding carries `Vary: Accept-Encoding`.
+- **Nothing is compressed unless its route was audited and opted in (BREACH).** Compress-then-encrypt
+  makes a record's length depend on its content, so an answer that carries a secret, a token or the
+  digest of one, a pairing code or input-request material beside text a caller can influence lets an
+  observer of sizes recover it a byte at a time. A list of routes that must NOT be compressed is wrong
+  the day someone adds a route and forgets it, so the default is off and the set that is on is the
+  short, audited one: `GET /v1/sessions` (the fleet list: names, states, context counters and the
+  hashes of launch-instruction sections, which authorise nothing) and `GET /v1/board` (the board list:
+  work-item titles, states and the people's own work text). Every other route — passkeys, secrets, the
+  security settings, pairing codes and devices, fleet credentials and MCP authorisation, the tunnel,
+  push subscriptions, the browser sign-in window and state, file, diff and attachment bytes, session
+  transcripts, messages, logs and any input request — answers plain, and so does any route added
+  later. The route flag is `compress: true`; `tests/unit/runtime/mounts/surface.test.ts` pins the exact
+  set, so enlarging it is a visible change that has to say what its body can hold. Every credential this
+  daemon mints is also the answer to a `POST`, which is never compressed whatever the route says. A
+  terminal or event stream is never compressed either: see below.
 
 **A live feed starts where the reader already is**, to spend fewer bytes in the same way. A session view carries
 `journalSequence`, the journal's last sequence read just before its documents, and a reader that has

@@ -472,7 +472,7 @@ export class ApiDispatcher {
     if (authorized.kind === 'refused') return authorized.response;
     if (authorized.route.legacy === true) this.#countLegacyUse(authorized.route, request);
     const response = await run(authorized.route, authorized.context);
-    return await compressed(request, response, this.compressor, authorized.route.neverCompress === true);
+    return await compressed(request, response, this.compressor, authorized.route.compress === true);
   }
 
   /** Counted only once the caller is authorized, so a probe of an older route is not "a client still uses it". */

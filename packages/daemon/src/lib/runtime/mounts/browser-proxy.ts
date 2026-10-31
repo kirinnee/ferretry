@@ -28,7 +28,6 @@ export function browserProxyRoutes(subsystem: BrowserProxySubsystem): readonly A
     {
       method: 'GET',
       path: '/v1/browser/state',
-      neverCompress: true,
       minimum: 'operator',
       capability: { capability: 'browser', axis: 'use' },
       noStore: true,

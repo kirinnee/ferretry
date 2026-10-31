@@ -31,7 +31,6 @@ export function tunnelRoutes(tunnel: TunnelSwitchPort): readonly ApiRoute[] {
     {
       method: 'GET',
       path: '/v1/tunnel',
-      neverCompress: true,
       minimum: 'authenticated',
       // The answer is live state — provisioning, connecting, up — and a cached copy is a wrong one.
       noStore: true,

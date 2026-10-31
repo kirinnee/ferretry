@@ -33,7 +33,6 @@ export function securityRoutes(service: SecuritySettingsService): readonly ApiRo
     {
       method: 'GET',
       path: '/v1/security',
-      neverCompress: true,
       minimum: 'operator',
       noStore: true,
       // How strict the machine is, readable before a confirmation on opening, so the app can say why.

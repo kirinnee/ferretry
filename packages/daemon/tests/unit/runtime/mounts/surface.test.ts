@@ -1227,37 +1227,23 @@ describe('the mounted daemon surface', () => {
     should(firstLiteral).be.below(firstPattern);
   });
 
-  it('should name every GET route whose answer is never compressed, so a new credential route must choose', () => {
-    // BREACH: a compressed answer's length depends on its content, so an answer that can carry a credential
-    // is never gzipped (`lib/api/compression.ts`). The set is an inventory, not a count: adding a route
-    // that returns credential-adjacent state fails here until its author decides and lists it.
+  it('should compress only the audited GET routes, so every other answer — and every new one — stays plain', () => {
+    // BREACH: a compressed answer's length depends on its content, so an answer that can carry a secret, a
+    // token, a digest of one, a pairing code or input-request material is never gzipped
+    // (`lib/api/compression.ts`). Compression is OPT-IN: this is the whole set, so adding a route to it fails
+    // here until its author has audited the body and listed it, and a route nobody audited is never compressed.
     // Arrange
     const routes = mountedDaemonRoutes(base, subsystems());
 
     // Act
-    const never = routes
-      .filter(route => route.method === 'GET' && route.neverCompress === true)
+    const compressed = routes
+      .filter(route => route.method === 'GET' && route.compress === true)
       .map(route => route.path)
       .sort();
 
-    // Assert
-    should(never).eql([
-      '/v1/browser/login',
-      '/v1/browser/state',
-      '/v1/fleet/credentials',
-      '/v1/fleet/mcp-auth',
-      '/v1/pair/code/:pairingId',
-      '/v1/pair/devices',
-      '/v1/passkeys',
-      '/v1/push/subscriptions',
-      '/v1/secrets',
-      '/v1/security',
-      '/v1/sessions/:sessionId/attachments/:attachmentId',
-      '/v1/sessions/:sessionId/fs/diff',
-      '/v1/sessions/:sessionId/fs/file',
-      '/v1/tunnel',
-    ]);
-    should(routes.filter(route => route.method !== 'GET' && route.neverCompress === true)).eql([]);
+    // Assert — the fleet list and the board list: names, states, work text and launch-instruction hashes.
+    should(compressed).eql(['/v1/board', '/v1/sessions']);
+    should(routes.filter(route => route.method !== 'GET' && route.compress === true)).eql([]);
   });
 
   it('should dispatch a base feed and a subsystem route through the same dispatcher', async () => {

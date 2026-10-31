@@ -139,7 +139,6 @@ export function pushRoutes(subsystem: PushSubscriptionSubsystem, guard: Capabili
       /** Every device's enrolments for a caller that may manage devices; otherwise the caller's own. */
       method: 'GET',
       path: '/v1/push/subscriptions',
-      neverCompress: true,
       minimum: 'operator',
       noStore: true,
       handle: async context => {

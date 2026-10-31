@@ -223,7 +223,13 @@ describe('BunApiServer', () => {
     const big = {
       rows: Array.from({ length: 400 }, (_, index) => ({ index, name: `session-${index}`, state: 'running' })),
     };
-    const route: ApiRoute = { method: 'GET', path: '/big', minimum: 'none', handle: async () => jsonResponse(big) };
+    const route: ApiRoute = {
+      method: 'GET',
+      path: '/big',
+      minimum: 'none',
+      compress: true,
+      handle: async () => jsonResponse(big),
+    };
     const http = new ApiDispatcher(
       new ApiRouter([route]),
       CREDENTIALS,

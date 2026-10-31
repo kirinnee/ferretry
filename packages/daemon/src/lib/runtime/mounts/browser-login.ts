@@ -179,7 +179,6 @@ export function browserLoginRoutes(window: BrowserLoginLifecycle, browser?: Brow
     {
       method: 'GET',
       path: '/v1/browser/login',
-      neverCompress: true,
       minimum: 'operator',
       capability: { capability: 'browser', axis: 'use' },
       noStore: true,

@@ -10,17 +10,20 @@ import type { ApiRequest, ApiResponse } from './http.ts';
  * header (`docs/relay-protocol.md` §14, "A compressed answer"). Compression therefore happens BEFORE
  * any sealing: the bytes a relay's channel encrypts are already the compressed ones.
  *
- * THE RULE: AN ANSWER THAT CAN CARRY A CREDENTIAL IS NEVER COMPRESSED. Compression before encryption
- * makes a record's length depend on its content, and a response that mixes a secret with anything a
+ * THE RULE: AN ANSWER IS NEVER COMPRESSED UNLESS ITS ROUTE WAS AUDITED AND SAYS SO (`compress: true`).
+ * Compression before encryption makes a record's length depend on its content, and a response that
+ * mixes a secret — a token, a digest of one, a pairing code, input-request material — with anything a
  * caller can influence is the BREACH shape: an observer who sees sizes and can steer the reflected
- * text learns the secret a byte at a time. The defences stack, and each stands alone:
+ * text learns the secret a byte at a time. The default is therefore off, because a list of routes that
+ * must not be compressed is wrong the day a route is added and nobody remembers to add it to the list.
+ * The defences stack, and each stands alone:
  *
- * - only `GET` answers are compressed — every credential this daemon mints (a pairing code, a device
- *   token, a socket ticket, a secret write) is the answer to a `POST`;
+ * - only a route that opted in is compressed, and the set of them is pinned in the route table's own
+ *   tests, so adding one is a visible, reviewed change;
+ * - only `GET` answers — every credential this daemon mints (a pairing code, a device token, a socket
+ *   ticket, a secret write) is the answer to a `POST`;
  * - only `200` JSON over {@link COMPRESS_MIN_BYTES}, so a short answer — which is what a credential
- *   always is — is never touched;
- * - a route that reads credential-adjacent state says so with `neverCompress`, and that is checked in
- *   the route table's own tests rather than remembered.
+ *   always is — is never touched.
  *
  * Terminal output is a separate case with a separate answer, in §14: a stream is never compressed.
  */
@@ -61,9 +64,9 @@ function addVary(headers: ReadonlyMap<string, string>): Map<string, string> {
 }
 
 /** Whether this answer is one the policy would compress for SOME caller: the part a cache must key on. */
-function eligible(request: ApiRequest, response: ApiResponse, neverCompress: boolean): boolean {
+function eligible(request: ApiRequest, response: ApiResponse, optedIn: boolean): boolean {
   return (
-    !neverCompress &&
+    optedIn &&
     request.method === 'GET' &&
     response.status === 200 &&
     !response.headers.has('content-encoding') &&
@@ -84,9 +87,9 @@ export async function compressed(
   request: ApiRequest,
   response: ApiResponse,
   compressor: ResponseCompressor | undefined,
-  neverCompress: boolean,
+  optedIn: boolean,
 ): Promise<ApiResponse> {
-  if (compressor === undefined || !eligible(request, response, neverCompress)) return response;
+  if (compressor === undefined || !eligible(request, response, optedIn)) return response;
   const headers = addVary(response.headers);
   if (request.headers.has('range') || !acceptsGzip(request.headers.get('accept-encoding')))
     return { ...response, headers };

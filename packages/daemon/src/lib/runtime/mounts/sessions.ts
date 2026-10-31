@@ -123,6 +123,7 @@ export function sessionRoutes(subsystem: SessionDirectorySubsystem): readonly Ap
       path: '/v1/sessions',
       minimum: 'operator',
       noStore: true,
+      compress: true,
       handle: async context => await list(subsystem, context),
     },
     {

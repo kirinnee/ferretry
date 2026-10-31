@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import { gunzipSync } from 'node:zlib';
+import { fromBase64Url } from '@ferretry/relay';
 import should from 'should';
 import { NodeGzip } from '../../../src/adapters/api/node-gzip.ts';
 import {
@@ -14,6 +15,7 @@ import {
   NO_GOVERNED_ROUTES_GUARD,
   type ResponseCompressor,
 } from '../../../src/lib/api/index.ts';
+import { tunnelApiRequest, tunnelResponseMessages } from '../../../src/lib/relay/tunnel.ts';
 import { request } from './support.ts';
 
 const credentials = { admin: 'admin-secret', warden: 'warden-secret', devices: { has: () => true } };
@@ -54,8 +56,9 @@ function dispatcherFor(compressor: ResponseCompressor | undefined, ...routes: re
   );
 }
 
+/** An audited route: it opted in, so what these tests vary is everything else about the answer. */
 const big = (path: string, flags: Partial<ApiRoute> = {}, method = 'GET'): ApiRoute =>
-  route(path, async () => jsonResponse(BIG), flags, method);
+  route(path, async () => jsonResponse(BIG), { compress: true, ...flags }, method);
 
 describe('which Accept-Encoding admits gzip', () => {
   it('should admit a named gzip and a wildcard, and refuse everything else', () => {
@@ -116,10 +119,14 @@ describe('response compression at the dispatcher', () => {
     // Arrange
     const dispatcher = dispatcherFor(
       countingCompressor(),
-      route('/v1/list', async () => ({
-        ...jsonResponse(BIG),
-        headers: new Map([...jsonResponse(BIG).headers, ['vary', 'Origin']]),
-      })),
+      route(
+        '/v1/list',
+        async () => ({
+          ...jsonResponse(BIG),
+          headers: new Map([...jsonResponse(BIG).headers, ['vary', 'Origin']]),
+        }),
+        { compress: true },
+      ),
     );
 
     // Act
@@ -151,14 +158,17 @@ describe('response compression at the dispatcher', () => {
     should(compressor.calls).have.length(0);
   });
 
-  it('should never compress an answer a route declares credential-adjacent', async () => {
-    // Arrange
+  it('should never compress an answer whose route has not opted in, however large and however asked', async () => {
+    // Arrange — a route nobody audited, which is what every route added later is until its author says otherwise.
     const compressor = countingCompressor();
-    const dispatcher = dispatcherFor(compressor, big('/v1/secrets', { neverCompress: true }));
+    const dispatcher = dispatcherFor(
+      compressor,
+      route('/v1/unaudited', async () => jsonResponse(BIG)),
+    );
 
     // Act
     const response = await dispatcher.dispatch(
-      request({ path: '/v1/secrets', headers: { ...ADMIN, 'accept-encoding': 'gzip' } }),
+      request({ path: '/v1/unaudited', headers: { ...ADMIN, 'accept-encoding': 'gzip' } }),
     );
 
     // Assert — not merely unsent: the compressor was never handed the text.
@@ -241,6 +251,63 @@ describe('response compression at the dispatcher', () => {
     // Assert
     should(response.gzip).be.undefined();
     should(response.headers.get('vary')).be.undefined();
+  });
+});
+
+describe('a relayed answer is compressed only for a client that asked', () => {
+  const DEVICE = { deviceId: `fy_device_id_${'a'.repeat(22)}`, appSession: 'AQEBAQEBAQEBAQEBAQEBAQ' } as const;
+
+  /** A relayed `req` through the tunnel's own request constructor and the dispatcher, then back out as `res` records. */
+  async function relayed(headers: Record<string, string> | undefined) {
+    const compressor = countingCompressor();
+    const dispatcher = dispatcherFor(compressor, big('/v1/list'));
+    const asked = tunnelApiRequest(
+      { method: 'GET', path: '/v1/list', ...(headers === undefined ? {} : { headers }) },
+      DEVICE,
+      's1',
+    );
+    const response = await dispatcher.dispatch(asked);
+    const [message, ...rest] = tunnelResponseMessages(1, response);
+    return {
+      compressor,
+      message: message as { readonly headers?: Record<string, string>; readonly body?: string },
+      rest,
+    };
+  }
+
+  it('should send an older client that never asks for an encoding the plain body and no encoding header', async () => {
+    // Act — an app that predates compression sends no accept-encoding at all.
+    const { compressor, message, rest } = await relayed(undefined);
+
+    // Assert
+    should(rest).have.length(0);
+    should(message.body).equal(BIG_TEXT);
+    should(message.headers?.['content-encoding']).be.undefined();
+    should(message.headers?.['content-transfer-encoding']).be.undefined();
+    should(compressor.calls).have.length(0);
+  });
+
+  it('should send the plain body to a client that refuses gzip, and to one that asks for nothing it can name', async () => {
+    for (const refusing of ['identity', 'gzip;q=0', 'br, deflate']) {
+      // Act
+      const { compressor, message } = await relayed({ 'accept-encoding': refusing });
+
+      // Assert
+      should(message.body).equal(BIG_TEXT);
+      should(message.headers?.['content-encoding']).be.undefined();
+      should(compressor.calls).have.length(0);
+    }
+  });
+
+  it('should send gzip as base64url under the two headers to a client that asks, and it decodes to the plain body', async () => {
+    // Act
+    const { message, rest } = await relayed({ 'accept-encoding': 'gzip' });
+
+    // Assert
+    should(rest).have.length(0);
+    should(message.headers?.['content-encoding']).equal('gzip');
+    should(message.headers?.['content-transfer-encoding']).equal('base64url');
+    should(gunzipSync(fromBase64Url(message.body ?? '') ?? new Uint8Array()).toString('utf8')).equal(BIG_TEXT);
   });
 });
 
