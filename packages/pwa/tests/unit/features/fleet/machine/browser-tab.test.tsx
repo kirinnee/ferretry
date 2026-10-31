@@ -351,12 +351,29 @@ describe('BrowserTab › Test proxy', () => {
     });
   });
 
-  it('is disabled while the typed address is not a valid proxy, enabled once it is', async () => {
-    await withTab({ machine: machineView({ browserProxy: null }) }, async ({ q }) => {
+  it('stays pressable while the typed proxy is not valid, and says what to fix instead of asking the machine', async () => {
+    await withTab({ machine: machineView({ browserProxy: null }) }, async ({ q, calls }) => {
       await typeInto(q('[data-browser-proxy-url]'), 'ftp://proxy.example');
-      expect(button(q).disabled).toBe(true);
-      await typeInto(q('[data-browser-proxy-url]'), 'http://proxy.example:8080');
       expect(button(q).disabled).toBe(false);
+      await click(button(q), 'test');
+      expect(q('[data-browser-proxy-test-refusal]')?.textContent).toContain('starts with http://');
+      expect(testCalls(calls)).toHaveLength(0);
+      await typeInto(q('[data-browser-proxy-url]'), 'http://proxy.example:8080');
+      expect(q('[data-browser-proxy-test-refusal]')).toBeNull();
+    });
+  });
+
+  it('explains that the boxes take secret NAMES when a real user name or password was typed there', async () => {
+    await withTab({ machine: machineView({ browserProxy: null }) }, async ({ q, calls }) => {
+      await typeInto(q('[data-browser-proxy-url]'), 'socks5://proxy.example:1080');
+      await typeInto(q('[data-browser-proxy-username]'), 'amy');
+      await typeInto(q('[data-browser-proxy-password]'), 'hunter2!');
+      expect(button(q).disabled).toBe(false);
+      await click(button(q), 'test');
+      const sentence = q('[data-browser-proxy-test-refusal]')?.textContent ?? '';
+      expect(sentence).toContain('takes the NAME of a stored secret');
+      expect(sentence).toContain('fy secret set');
+      expect(testCalls(calls)).toHaveLength(0);
     });
   });
 
