@@ -408,3 +408,40 @@ describe('doctor loopback firewall row', () => {
     should(unverified.ready).be.true();
   });
 });
+
+describe('doctor report, shared-host slice rows', () => {
+  const withSlice = (userSlice?: {
+    uid: number;
+    user: string;
+    memoryMax?: string;
+    tasksMax?: string;
+    linger?: boolean;
+  }) =>
+    readDoctorReport({
+      platform: 'linux',
+      harnesses,
+      directorySyscalls: true,
+      executables: { resolve: name => (name === 'tmux' || name === 'bash' ? `/bin/${name}` : undefined) },
+      ...(userSlice === undefined ? {} : { userSlice }),
+    });
+
+  it('should leave the rows out when nothing was read, so a single-user host hears nothing', () => {
+    should(withSlice().checks.some(check => check.name === 'user slice limits' || check.name === 'linger')).be.false();
+  });
+
+  it('should warn about an uncapped slice and linger off without making the report not ready', () => {
+    const result = withSlice({ uid: 1001, user: 'alice', memoryMax: 'max', tasksMax: 'max', linger: false });
+    const rendered = renderDoctorReport(result).join('\n');
+
+    should(
+      result.checks
+        .filter(check => check.status === 'missing' && check.requirement === 'optional')
+        .map(check => check.name),
+    )
+      .containEql('user slice limits')
+      .and.containEql('linger');
+    should(rendered).match(/note\s+user slice limits\s+user-1001\.slice has no MemoryMax or TasksMax/u);
+    should(rendered).match(/sudo loginctl enable-linger alice/u);
+    should(result.ready).be.true();
+  });
+});
