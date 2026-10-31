@@ -865,6 +865,7 @@ import {
   type LivenessTarget,
   LocalModelsService,
   LoginDirectory,
+  type LoginSweep,
   LoginVault,
   type LogLevel,
   type LoopBlockedClockPort,
@@ -1397,6 +1398,13 @@ export interface DaemonWorld {
      * A world field so a test can boot without touching a real directory; absent means nothing is swept.
      */
     readonly sweepPairingRedirects?: (stateHome: string) => Promise<number>;
+    /**
+     * Removes saved-login ciphertext no committed index points at (what a change left when the daemon stopped
+     * between staging and commit). ONLY ever called by `start` once `storage.open()` holds the state home's
+     * lock: never while building the world, and never by `--check` or `--print-config`, which could otherwise
+     * sweep a LIVE daemon's staged ciphertext from under it. Absent means nothing is swept.
+     */
+    readonly sweepSavedLogins?: () => Promise<LoginSweep>;
   };
   readonly config: DaemonConfigStore;
   /** What this invocation said on the command line, overriding the document for this run only. */
@@ -7191,9 +7199,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   const loginSealed = new FileSecretDocumentStore(paths, stateFiles, LOGIN_SECRETS_DOCUMENT);
   const loginDirectory = new LoginDirectory(loginIndex, loginSealed, secretCipher, clock);
   const loginVault = new LoginVault(loginIndex, loginSealed, secretCipher);
-  // A change that stopped between staging new ciphertext and committing the index left sealed values no entry
-  // points at; they stay masked until this sweep, which runs under the store lock before any change can.
-  void loginDirectory.sweepUnreferenced().catch(() => undefined);
   // Copying secrets to another machine signs and checks offers with THIS daemon's identity — the key its
   // daemon id fingerprints — read per clone, so a daemon whose identity cannot be read refuses the copy
   // and serves everything else.
@@ -8398,6 +8403,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         stackSamplerEnabled(process.env[STACK_SAMPLER_VARIABLE]) ? await JscStackSampler.start() : undefined,
       ioPressure,
       sweepPairingRedirects: stateHome => sweepPairingRedirects(stateHome, Date.now()),
+      sweepSavedLogins: async () => await loginDirectory.sweepUnreferenced(),
     },
     // An operator's own document when they named one, and the state home's otherwise. The confined
     // filesystem port refuses every path outside the home, which is right for the daemon's own state
@@ -12001,6 +12007,16 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   world.notices.step('state home opened', opened.paths.home);
   // A page left by a `fy pair --open` that was killed holds a dead code; the daemon owns the home now, so it clears it.
   await world.boot.sweepPairingRedirects?.(opened.paths.home);
+  // Saved-login ciphertext a stopped change left behind, swept only NOW: this process holds the state home's
+  // lock, so no other daemon can be mid-change on these files. Masked until swept; a damaged index sweeps nothing.
+  const loginSweep = await world.boot.sweepSavedLogins?.().catch((error: unknown) => ({
+    swept: 0,
+    damaged: error instanceof Error ? error.message : 'the saved logins could not be read',
+  }));
+  if (loginSweep?.damaged !== undefined)
+    world.notices.state(`saved logins kept as they are: ${loginSweep.damaged}; nothing was swept`);
+  else if (loginSweep !== undefined && loginSweep.swept > 0)
+    world.notices.step('saved logins tidied', `removed ${loginSweep.swept} sealed value(s) no saved login points at`);
 
   progress.enter('loading configuration');
   const peeked = await world.config.peek();

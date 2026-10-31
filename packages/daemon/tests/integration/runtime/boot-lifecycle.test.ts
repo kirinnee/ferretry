@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { afterEach, beforeEach, describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
@@ -5465,6 +5466,113 @@ describe('daemon boot lifecycle', () => {
     should(said.stated).have.length(1);
     should(said.stated[0]).match(/state home/u);
     should(said.stated[0]).match(/daemon\.lock/u);
+  });
+
+  it('should never sweep saved logins when another owner holds the home lock, nor while building the world or checking (review F5)', async () => {
+    // Arrange: a live incumbent holds the home; a second invocation must not touch its saved-login ciphertext.
+    const home = await tempDirectory('fyd-login-sweep-locked');
+    await seedHome(home, OS_CHOSEN_PORT);
+    const incumbent = await buildIntegrationWorld().storage.open();
+    const swept: string[] = [];
+    const spying = (label: string): DaemonWorld => {
+      const world = buildIntegrationWorld();
+      return {
+        ...world,
+        notices: recordingNotices().port,
+        untilShutdown: async () => {},
+        boot: {
+          ...world.boot,
+          sweepSavedLogins: async () => {
+            swept.push(label);
+            return { swept: 0 };
+          },
+        },
+      };
+    };
+    const cleanups: Array<() => void | Promise<void>> = [];
+
+    // Act
+    const code = await start(spying('start'), cleanups);
+    await checkConfiguration(spying('check'), () => undefined);
+    await incumbent.storage.close();
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(EXIT_ALREADY_RUNNING);
+    should(swept).deepEqual([]);
+  });
+
+  it('should sweep saved logins only once this boot holds the home lock, and await it before serving (review F5)', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-login-sweep-boot');
+    const cleanups: Array<() => void | Promise<void>> = [];
+    let release = (): void => {};
+    const said = recordingNotices();
+    const base = await worldAt(home, OS_CHOSEN_PORT, async () => {
+      await new Promise<void>(resolve => {
+        release = resolve;
+      });
+    });
+    const seen: { lockHeld: boolean; at: number }[] = [];
+    const world: DaemonWorld = {
+      ...base,
+      notices: said.port,
+      boot: {
+        ...base.boot,
+        sweepSavedLogins: async () => {
+          seen.push({ lockHeld: existsSync(join(home, 'daemon.lock')), at: Date.now() });
+          return { swept: 2 };
+        },
+      },
+    };
+
+    // Act
+    const exit = start(world, cleanups);
+    const port = await recordedPort(home);
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    should(seen).have.length(1);
+    should(seen[0]?.lockHeld).be.true();
+    should(said.steps.filter(step => step.startsWith('saved logins tidied'))).have.length(1);
+  });
+
+  it('should keep every saved-login value and say so when the index is damaged at boot (review F6)', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-login-sweep-damaged');
+    const cleanups: Array<() => void | Promise<void>> = [];
+    let release = (): void => {};
+    const said = recordingNotices();
+    const base = await worldAt(home, OS_CHOSEN_PORT, async () => {
+      await new Promise<void>(resolve => {
+        release = resolve;
+      });
+    });
+    const world: DaemonWorld = {
+      ...base,
+      notices: said.port,
+      boot: {
+        ...base.boot,
+        sweepSavedLogins: async () => ({ swept: 0, damaged: 'the index names 1 sealed value(s) that are not there' }),
+      },
+    };
+
+    // Act
+    const exit = start(world, cleanups);
+    const port = await recordedPort(home);
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert: the boot goes on, and the operator is told nothing was swept and why.
+    should(code).equal(0);
+    should(said.stated.filter(line => line.startsWith('saved logins kept as they are'))).have.length(1);
+    should(said.steps.filter(step => step.startsWith('saved logins tidied'))).be.empty();
   });
 
   it('should refuse a recorded address held by another of these daemons, and name it', async () => {
