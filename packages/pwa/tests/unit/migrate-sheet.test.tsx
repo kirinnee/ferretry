@@ -6,6 +6,7 @@ import { FyHttpError } from '@ferretry/protocol/client';
 import type { ReactElement } from 'react';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import {
+  askToStopJobsWithDaemon,
   type MigrateSession,
   MigrateSheet,
   type MigrateSheetProps,
@@ -146,6 +147,34 @@ describe('migrateSessionWithDaemon', () => {
       ['client', 'daemon-a'],
       ['same-session', 'codex-auto-atomi', 'gpt-5.6-sol[1m]', true, 'request-7'],
     ]);
+  });
+});
+
+describe('askToStopJobsWithDaemon', () => {
+  it('rejects a cross-daemon scope before constructing a typed client', async () => {
+    await expect(
+      askToStopJobsWithDaemon(daemonA, scopeB, async () => {
+        throw new Error('no client may be built for a crossed scope');
+      }),
+    ).rejects.toThrow('the ask must belong to the requested daemon');
+  });
+
+  it('asks the paired daemon about the scoped session', async () => {
+    const calls: unknown[] = [];
+    const answer = { messageId: 'migrate-jobs-1', jobs: [{ pid: 1, command: 'sleep 9' }], alreadyAsked: false };
+
+    const result = await askToStopJobsWithDaemon(daemonA, scopeA, async connection => {
+      calls.push(connection.daemonId);
+      return {
+        askToStopJobs: async (sessionId: string) => {
+          calls.push(sessionId);
+          return answer;
+        },
+      };
+    });
+
+    expect(result).toEqual(answer);
+    expect(calls).toEqual(['daemon-a', 'same-session']);
   });
 });
 
@@ -1187,6 +1216,37 @@ describe('MigrateSheet asking the agent to stop its background jobs', () => {
     await press(view.root, 'Ask the agent to stop its background jobs');
 
     expect(text(view.root.findByProps({ role: 'status' }))).toContain('None of them is running any more');
+  });
+
+  it('shows the ask in flight and refuses a second press until it answers', async () => {
+    let release!: () => void;
+    let asks = 0;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const view = await refuse({
+      migrateSession: async () => {
+        throw refusedBy(OWNER_CASE);
+      },
+      askToStopJobs: async () => {
+        asks += 1;
+        await gate;
+        return asked;
+      },
+    });
+
+    run(() => button(view.root, 'Ask the agent to stop its background jobs').props.onClick());
+    const pending = button(view.root, 'Asking the agent…');
+    expect(pending.props.disabled).toBe(true);
+    expect(pending.findAll(node => String(node.props.className ?? '').includes('animate-spin'))).not.toHaveLength(0);
+    run(() => pending.props.onClick());
+
+    await runAsync(async () => {
+      release();
+      await gate;
+    });
+    expect(asks).toBe(1);
+    expect(text(view.root.findByProps({ role: 'status' }))).toContain('Asked.');
   });
 
   it('reports a failed ask and keeps the button to try again', async () => {

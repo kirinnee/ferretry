@@ -2,8 +2,8 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import type { ProcessObservation } from '../../../src/lib/migrate/inflight-report.ts';
 import {
-  MigrationPreflight,
   type MigrateTargetView,
+  MigrationPreflight,
   type PaneSnapshotPort,
 } from '../../../src/lib/migrate/preflight-service.ts';
 import type { ProcessInventoryPort } from '../../../src/lib/migrate/process-inventory-port.ts';
@@ -202,5 +202,38 @@ describe('MigrationPreflight', () => {
     should(preflight.handoff(report, '/state/report.md', 'interactive')).be.undefined();
     const busy = await preflight.inspect(view({ status: 'tool_running' }));
     should(preflight.handoff(busy, '/state/report.md', 'interactive')).containEql('read /state/report.md');
+  });
+});
+
+describe('the agent’s own jobs a refusal names', () => {
+  it('should hand back only the blocking processes the agent started from its tool shell', async () => {
+    // Arrange
+    const preflight = new MigrationPreflight(
+      new StubInventory({
+        kind: 'observed',
+        processes: [
+          {
+            pid: 40,
+            argv: '/usr/bin/zsh -c eval ./merge.sh',
+            startedSecondsAgo: 240,
+            verdict: 'unknown',
+            toolShell: 40,
+          },
+          { pid: 41, argv: 'bash ./merge.sh', verdict: 'unknown', toolShell: 40 },
+          { pid: 42, argv: 'sleep 5', startedSecondsAgo: 5, verdict: 'safe_to_kill', toolShell: 40 },
+          { pid: 43, argv: 'some-vendor-tool --watch', startedSecondsAgo: 60, verdict: 'unknown' },
+        ],
+      }),
+      new StubPanes(''),
+    );
+
+    // Act
+    const jobs = preflight.agentJobs(await preflight.inspect(view()));
+
+    // Assert — the safe one and the one the agent did not start from its shell are not asked about.
+    should(jobs).deepEqual([
+      { pid: 40, command: '/usr/bin/zsh -c eval ./merge.sh', age: '4m' },
+      { pid: 41, command: 'bash ./merge.sh' },
+    ]);
   });
 });
