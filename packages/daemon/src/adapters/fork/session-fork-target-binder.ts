@@ -651,8 +651,18 @@ export class SessionForkTargetBinder implements SessionForkTargetBinderPort {
     if (recorded !== undefined) this.assertOwnTranscript(id, plan, shape, recorded, fields(document).command);
   }
 
-  /** The record hash and the private environment must prove the same fresh credential. */
+  /**
+   * The record hash and the private environment must prove the same fresh credential — while the
+   * target is still `created`.
+   *
+   * That is the tear this check exists for: a creation that died between its two credential writes.
+   * Once the target has been started, every pane launch re-issues the credential, plaintext first
+   * and hash last, so a disagreement there is a rotation that died before the pane it was for — and
+   * the next launch rotates again and heals it. Refusing it would wedge a fork whose start a crash
+   * interrupted behind a pair nothing will ever launch.
+   */
   private async assertCredential(id: SessionId, record: SessionLifecycleRecord): Promise<void> {
+    if (record.state.status !== 'created') return;
     const expected = record.config.sessionCapabilityHash;
     let environment: Readonly<Record<string, string>>;
     try {

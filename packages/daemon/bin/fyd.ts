@@ -1211,6 +1211,7 @@ import {
   LeaseClaimingLaunchWrapper,
   LeaseReleasingSessionExits,
 } from '../src/lib/session/conversation-lease.ts';
+import { SessionCredentialRotation } from '../src/lib/session/lifecycle/credential-rotation.ts';
 import { LaunchEnvironmentStore, type LaunchSwitchDefaults } from '../src/lib/session/lifecycle/launch-environment.ts';
 import { sessionTmuxName } from '../src/lib/session/lifecycle/policy.ts';
 import { SessionPackService } from '../src/lib/session/pack/index.ts';
@@ -7473,6 +7474,22 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    */
   const sessionCredentials = new NodeSessionCredentialIssuer();
   const sessionEnvironments = new FileSessionEnvironmentStore(id => createSessionPaths(paths, id).directory);
+  /**
+   * Re-issues a session's credential for every pane launched for it — the first launch and every
+   * revive — over the SAME issuer and the SAME stored environment creation uses, so a leaked copy dies
+   * with the pane it leaked from. The hash lands through a locked merge over the configuration, so a
+   * concurrent writer of another field is never reverted.
+   */
+  const sessionCredentialRotation = (storage: DaemonStorage): SessionCredentialRotation =>
+    new SessionCredentialRotation({
+      credentials: sessionCredentials,
+      environment: sessionEnvironments,
+      hashes: {
+        record: async (id, sessionCapabilityHash) => {
+          await storage.updateConfig(id, current => ({ ...(jsonObject(current) ?? {}), sessionCapabilityHash }));
+        },
+      },
+    });
   // What a pane is LAUNCHED with: the stored environment over the per-ferret switches its record implies
   // (`LaunchEnvironmentStore`). The defaults are assigned once Pack mode's hooks exist below; a launch
   // before then derives nothing, as every launch did before.
@@ -7928,6 +7945,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // the two are separate records.
         credentials: sessionCredentials,
         environment: sessionEnvironments,
+        rotation: sessionCredentialRotation(storage),
         leases: conversationLeases(storage),
         // A caller that has already minted the id hands it over, so the plan and the record cannot
         // disagree about which session they describe.
@@ -8056,6 +8074,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       sessionMedia,
       // The binary the wrappers' instructions name, so a revive records what its pane was told.
       CLIENT_NAME,
+      // A replacement pane is a new launch, so it gets a credential the replaced pane never held.
+      sessionCredentialRotation(storage),
     );
   };
   /**
