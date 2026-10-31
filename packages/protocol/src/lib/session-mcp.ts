@@ -161,10 +161,10 @@ export type SessionMcpListing = z.infer<typeof SessionMcpListingSchema>;
 // ── The one rule both ends run ──────────────────────────────────────────────────────────────────
 
 /** Prefixes real providers put on their keys. */
-const KEY_PREFIXES =
+export const RAW_KEY_PREFIXES =
   /^(?:sk-|sk_live_|sk_test_|rk_live_|AKIA|ASIA|ghp_|gho_|ghs_|ghu_|github_pat_|glpat-|xox[abposr]-|AIza|hf_|pk_live_)/u;
 /** A name that announces a credential. */
-const SECRET_NAME = /(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH)/u;
+const SECRET_SOUNDING_NAME = /(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH)/u;
 /** A reference: Ferretry's secret store, or the environment. */
 const SECRET_REFERENCE = /^\$\{secret:[A-Za-z0-9_.-]+\}$/u;
 const ENV_REFERENCE = /^\$\{[A-Z_][A-Z0-9_]*(?::-[^}]*)?\}$/u;
@@ -185,7 +185,8 @@ export const mcpEnvRefusal = (scope: SessionMcpScope, name: string, value: strin
       : null;
   if (ENV_REFERENCE.test(trimmed)) return null;
   const looksRaw =
-    KEY_PREFIXES.test(trimmed) || (SECRET_NAME.test(name) && trimmed.length >= 16 && !/[\s/]/u.test(trimmed));
+    RAW_KEY_PREFIXES.test(trimmed) ||
+    (SECRET_SOUNDING_NAME.test(name) && trimmed.length >= 16 && !/[\s/]/u.test(trimmed));
   if (!looksRaw) return null;
   return scope === 'project'
     ? `${name} looks like a raw secret, and .mcp.json is shared with everyone on the repo. Use \${${name}} instead, or add the server to This login with \${secret:${name}}.`
@@ -203,7 +204,7 @@ export const mcpServerRefusal = (scope: SessionMcpScope, server: SessionMcpServe
     if (refusal !== null) return refusal;
   }
   for (const argument of server.args)
-    if (KEY_PREFIXES.test(argument.trim()))
+    if (RAW_KEY_PREFIXES.test(argument.trim()))
       return 'An argument looks like a raw secret. Put it in an environment variable that references the secret instead.';
   return null;
 };
