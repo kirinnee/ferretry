@@ -161,6 +161,7 @@ class FakeBrowser {
       ...this.act('pdf', pageId),
       staged: { path: '/stage/pdf-1', name: 'page.pdf', size: 5 },
     }),
+    evaluate: async pageId => ({ ...this.act('evaluate', pageId), text: '"ok"' }),
     back: async pageId => this.state(pageId),
     forward: async pageId => this.state(pageId),
     reload: async pageId => this.state(pageId),

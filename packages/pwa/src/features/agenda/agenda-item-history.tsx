@@ -1,102 +1,55 @@
 /**
- * THE HISTORY AT THE FOOT OF AN ITEM VIEW — THE CONVERSATION about it: what the owner said and what the ferret said,
- * as the chat's own bubbles (no tool calls, no thinking), oldest first, with the item's own events (raised, edited) as
- * small dividers between them. What an edit changed is in the Revisions view below. Nothing here is a second source:
- * `itemHistory` reads the item's revisions and the chat.
- *
- * It is never folded: every event is drawn, in order, as the conversation it replaces.
+ * THE HISTORY UNDER AN OPEN AGENDA CARD — the conversation about the item, read like the chat: oldest first, the
+ * latest at the bottom, just above the composer. ONLY THE OWNER'S messages are bubbles (right-aligned, like the
+ * chat's own); the ferret's text is plain, under its name and the time, with no tool calls and no thinking — the
+ * relevance rule that decides what is here is `itemHistory`'s. An edit is one quiet centred line: "Card updated to
+ * v2". Never folded.
  */
 
 import { Check } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { AGENDA_KIND_LABEL } from '../../components/agenda-message.tsx';
-import { TranscriptRow } from '../../components/transcript-row.tsx';
 import type { HistoryEvent } from '../../lib/agenda-history.ts';
-import { revisionAuthor, revisionStamp } from '../../lib/agenda-revisions.ts';
+import { revisionStamp } from '../../lib/agenda-revisions.ts';
 
 const stampOf = (at: number, now: number): string => (at === 0 ? '' : revisionStamp(new Date(at).toISOString(), now));
 
 function When({ at, now }: { readonly at: number; readonly now: number }) {
   const stamp = stampOf(at, now);
-  return stamp === '' ? null : <time dateTime={new Date(at).toISOString()}>{stamp}</time>;
-}
-
-/** Who an event is credited to: the ferret by its name, the owner as "You". */
-const doer = (by: 'human' | 'agent' | 'daemon', ferret: string): string =>
-  by === 'agent' ? ferret : revisionAuthor(by);
-
-/** An event of the item itself — raised, edited — as a small divider between the bubbles. */
-function Divider({ kind, at, now, children }: DividerProps) {
-  return (
-    <li className="fy-item-history__divider" data-history={kind}>
-      <span className="fy-item-history__divider-text">
-        {children}
-        <When at={at} now={now} />
-      </span>
-    </li>
+  return stamp === '' ? null : (
+    <time className="fy-hist__time" dateTime={new Date(at).toISOString()}>
+      {stamp}
+    </time>
   );
 }
 
-interface DividerProps {
-  readonly kind: 'raised' | 'revision';
-  readonly at: number;
-  readonly now: number;
-  readonly children: ReactNode;
-}
-
-function HistoryRow({ event, now, ferret }: HistoryRowProps) {
-  if (event.kind === 'raised') {
-    return (
-      <Divider at={event.at} kind="raised" now={now}>
-        <span>Raised by {event.by === 'human' ? 'you' : doer(event.by, ferret)}</span>
-      </Divider>
-    );
-  }
+function HistoryRow({ event, now, ferret, renderProse }: HistoryRowProps) {
   if (event.kind === 'revision') {
-    const { entry } = event;
     return (
-      <Divider at={event.at} kind="revision" now={now}>
-        <span>
-          {doer(entry.by, ferret)} edited {entry.changed.map(change => change.label.toLowerCase()).join(', ')}
-        </span>
-      </Divider>
-    );
-  }
-  // What was said in the conversation is drawn by the chat's own row: the same bubble, clock, pictures and
-  // references as in the chat, so the item reads like the conversation it replaces.
-  if (event.kind === 'ferret') {
-    return (
-      <li className="fy-item-history__event fy-item-history__chat" data-history="ferret">
-        <TranscriptRow entry={{ ...event.entry, label: ferret }} />
+      <li className="fy-hist__sys" data-history="revision">
+        Card updated to v{event.version}
       </li>
     );
   }
-  if (event.kind === 'owner-text') {
+  if (event.kind === 'owner') {
+    const chosen = event.form === 'answer' || event.form === 'done';
     return (
-      <li className="fy-item-history__event fy-item-history__chat" data-history="owner">
-        <TranscriptRow entry={event.entry} />
-      </li>
-    );
-  }
-  const { part } = event;
-  const chosen = part.kind === 'answer' || part.kind === 'done';
-  return (
-    <li className="fy-item-history__event" data-history="owner" data-history-kind={part.kind}>
-      <p className="fy-item-history__head m-0">
-        <When at={event.at} now={now} />
-        <span>You · {AGENDA_KIND_LABEL[part.kind]}</span>
-      </p>
-      {part.text === '' ? null : chosen ? (
-        <p className="fy-item-history__bubble m-0">
-          <span className="fy-item-history__choice">
-            <Check aria-hidden="true" size={14} strokeWidth={2.5} />
-            {part.text}
-          </span>
+      <li className="fy-hist__me" data-history="owner" data-history-kind={event.form}>
+        <p className="fy-hist__said m-0">
+          {chosen ? <Check aria-hidden="true" className="fy-hist__check" size={14} strokeWidth={2.5} /> : null}
+          {event.text}
         </p>
-      ) : (
-        <p className="fy-item-history__bubble m-0">{part.text}</p>
-      )}
-      {part.note === undefined ? null : <p className="fy-item-history__note m-0">Note: {part.note}</p>}
+        {event.note === undefined ? null : <p className="fy-hist__note m-0">{event.note}</p>}
+        <When at={event.at} now={now} />
+      </li>
+    );
+  }
+  return (
+    <li className="fy-hist__ag" data-history="ferret">
+      <p className="fy-hist__who m-0">
+        <span>{ferret}</span>
+        <When at={event.at} now={now} />
+      </p>
+      <div className="fy-hist__text">{renderProse(event.text)}</div>
     </li>
   );
 }
@@ -105,24 +58,26 @@ interface HistoryRowProps {
   readonly event: HistoryEvent;
   readonly now: number;
   readonly ferret: string;
+  readonly renderProse: (text: string) => ReactNode;
 }
 
 export function AgendaItemHistory({
   events,
   now,
   ferret,
+  renderProse,
 }: {
   readonly events: readonly HistoryEvent[];
   readonly now: number;
   readonly ferret: string;
+  readonly renderProse: (text: string) => ReactNode;
 }) {
   if (events.length === 0) return null;
   return (
-    <section aria-label="History" className="fy-item-history" data-agenda-history="">
-      <h3 className="fy-item-history__title m-0">History</h3>
-      <ol className="fy-item-history__list">
+    <section aria-label="History" className="fy-hist" data-agenda-history="">
+      <ol className="fy-hist__list">
         {events.map(event => (
-          <HistoryRow event={event} ferret={ferret} key={event.key} now={now} />
+          <HistoryRow event={event} ferret={ferret} key={event.key} now={now} renderProse={renderProse} />
         ))}
       </ol>
     </section>

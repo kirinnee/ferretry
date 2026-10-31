@@ -344,6 +344,15 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     subject: 'sessionId',
     detail: { action: 'send' },
   },
+  // A refused migration's "ask the agent to stop its background jobs" puts Ferretry's words in the agent's
+  // queue: it prompts the agent as a send does, so it is recorded the same way.
+  {
+    method: 'POST',
+    path: '/v1/sessions/:sessionId/migrate/ask-to-stop-jobs',
+    event: 'agent.prompted',
+    subject: 'sessionId',
+    detail: { action: 'ask-to-stop-jobs' },
+  },
   {
     method: 'POST',
     path: '/v1/sessions/:sessionId/sends/:sendId/retry',

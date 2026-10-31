@@ -8,6 +8,7 @@
     ".": "./src/lib/index.ts",
     "./client": "./src/adapters/fy-api-client.ts",
     "./process-incarnation": "./src/adapters/process-incarnation.ts",
+    "./pairing-redirect-sweep": "./src/adapters/pairing-redirect-sweep.ts",
     "./io-pressure": "./src/lib/io-pressure.ts",
     "./session-base": "./src/lib/session-base.ts",
     "./conversation-import": "./src/lib/conversation-import.ts",

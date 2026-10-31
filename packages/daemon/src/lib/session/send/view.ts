@@ -28,6 +28,7 @@ export function sendRecordView(record: SendRecord): SendRecordView {
     ...optional('from', record.from),
     ...optional('fromName', record.fromName),
     ...optional('senderKind', record.senderKind),
+    ...optional('by', record.by),
     ...optional('replyExpected', record.replyExpected),
     ...optional('held', record.held),
     ...optional('fateAt', record.fateAt),

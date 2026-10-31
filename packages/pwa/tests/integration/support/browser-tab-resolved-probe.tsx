@@ -16,7 +16,7 @@ const machine: FleetMachineView = {
   setUp: true,
   agentPermissions: 'auto',
   defaultRuntime: 'claude-default',
-  agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
+  agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
   browserMode: 'headless',
   browserProxy: {
     url: 'http://proxy.example.test:8080',
@@ -42,6 +42,19 @@ const states: Readonly<Record<string, BrowserStateView>> = {
   },
   stopped: { state: 'stopped' },
   'running-direct': { state: 'running', startedAt: '2026-10-30T08:00:00.000Z' },
+};
+
+const typeInto = async (field: HTMLInputElement, value: string): Promise<void> => {
+  await interact(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(field, value);
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+};
+
+const click = async (element: Element): Promise<void> => {
+  await interact(() => {
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  });
 };
 
 const settle = async (): Promise<void> => {
@@ -77,5 +90,76 @@ for (const [name, view] of Object.entries(states)) {
   out[name] = { tab: shown.container.innerHTML, status: section.outerHTML };
   await shown.unmount();
 }
+// The credential form through the real controls: nothing saved, what is saved, a short value, and a mistyped secret name.
+const SUMMARY = {
+  createdAt: '2026-10-31T01:00:00.000Z',
+  updatedAt: '2026-10-31T01:00:00.000Z',
+};
+const formClientFor = (stored: readonly string[]): FleetClient => ({
+  request: async <T,>(path: string, schema: z.ZodType<T>, init?: RequestInit): Promise<T> => {
+    if (path === BROWSER_STATE_PATH) return schema.parse({ state: 'stopped' });
+    if (path === '/v1/secrets') {
+      return schema.parse(
+        init?.method === 'POST'
+          ? { ...SUMMARY, name: JSON.parse(String(init.body)).name }
+          : { v: 1, health: 'ready', secrets: stored.map(name => ({ ...SUMMARY, name })), references: [] },
+      );
+    }
+    throw new Error(`the picture asks nothing of ${path}`);
+  },
+});
+const form = async (
+  name: string,
+  saved: FleetMachineView,
+  stored: readonly string[],
+  steps: (root: HTMLElement) => Promise<void>,
+): Promise<void> => {
+  const shown = await mount(
+    <BrowserTab
+      connection={connection}
+      machineName="studio"
+      machine={saved}
+      online
+      checking={false}
+      onRetry={() => undefined}
+      createClient={async () => formClientFor(stored)}
+    />,
+  );
+  await settle();
+  await steps(shown.container);
+  await settle();
+  const proxy = must(shown.container.querySelector('[data-setup-section="browser-proxy"]'), 'the proxy section');
+  out[name] = { tab: shown.container.innerHTML, status: proxy.outerHTML };
+  await shown.unmount();
+};
+const input = (root: HTMLElement, selector: string): HTMLInputElement =>
+  must(root.querySelector<HTMLInputElement>(selector), selector);
+const press = async (root: HTMLElement, selector: string): Promise<void> =>
+  click(must(root.querySelector(selector), selector));
+const ADDRESS = 'socks5://proxy.example.test:1080';
+const NONE: FleetMachineView = { ...machine, browserProxy: null };
+await form('form-empty', NONE, [], async root => {
+  await typeInto(input(root, '[data-browser-proxy-url]'), ADDRESS);
+});
+await form('form-stored', machine, ['PROXY_USER', 'PROXY_PASSWORD'], async root => {
+  must(root.querySelector('[data-browser-proxy-credential-stored="username"]'), 'the stored username');
+  must(root.querySelector('[data-browser-proxy-credential-stored="password"]'), 'the stored password');
+});
+await form('form-short', NONE, [], async root => {
+  await typeInto(input(root, '[data-browser-proxy-url]'), ADDRESS);
+  await typeInto(input(root, '[data-browser-proxy-credential-value="username"]'), 'amy');
+  await typeInto(input(root, '[data-browser-proxy-credential-value="password"]'), 'correct-horse');
+  await press(root, '[data-browser-proxy-test]');
+  await settle();
+  must(root.querySelector('[data-browser-proxy-credential-problem="username"]'), 'the short-value error');
+});
+await form('invalid-form', NONE, [], async root => {
+  await typeInto(input(root, '[data-browser-proxy-url]'), ADDRESS);
+  await press(root, '[data-browser-proxy-expert]');
+  await typeInto(input(root, '[data-browser-proxy-username]'), 'amy.example');
+  await typeInto(input(root, '[data-browser-proxy-password]'), 'correct-horse');
+  await press(root, '[data-browser-proxy-test]');
+  must(root.querySelector('[data-browser-proxy-test-refusal]'), 'the invalid-form message');
+});
 console.log(JSON.stringify(out));
 process.exit(0);

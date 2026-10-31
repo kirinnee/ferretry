@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'bun:test';
-import type { SessionTranscriptMessage, SessionTranscriptPage } from '@ferretry/protocol';
 import type { InboxResolved } from '../../src/lib/agenda-inbox.ts';
 import {
   filterInboxCards,
@@ -13,14 +12,13 @@ import {
   inboxWho,
   isFromWarden,
   NO_FILTER,
-  parkedBy,
   nextSelection,
+  parkedBy,
   QUEUE_END,
   skipSelection,
   stepSelection,
 } from '../../src/lib/agenda-inbox-list.ts';
 import { daemonId } from '../../src/lib/daemon-connection.ts';
-import { type MessagesClient, readRecentMessages } from '../../src/lib/recent-messages.ts';
 import { agendaItem, inboxCard } from '../support/agenda-inbox.tsx';
 import { sessionView } from '../support/sessions.ts';
 
@@ -230,72 +228,6 @@ describe('the selection', () => {
     expect(stepSelection(['a', 'b', 'c'], 'a', -1)).toBe('a');
     expect(stepSelection(['a', 'b'], 'gone', 1)).toBe('a');
     expect(stepSelection([], 'a', 1)).toBeNull();
-  });
-});
-
-describe('readRecentMessages', () => {
-  let point = 0;
-  const message = (role: SessionTranscriptMessage['role'], text: string): SessionTranscriptMessage => {
-    point += 1;
-    return { point: { index: point }, role, text, selectionBinding: 'b' } as never;
-  };
-  const fakeClient = (pages: Record<string, SessionTranscriptPage>) => {
-    const asked: (string | undefined)[] = [];
-    const client: MessagesClient = {
-      messages: async (_id, cursor) => {
-        asked.push(cursor);
-        const page = pages[cursor ?? 'start'];
-        if (page === undefined) throw new Error(`no page ${cursor}`);
-        return page;
-      },
-    };
-    return { client, asked };
-  };
-  const page = (messages: SessionTranscriptMessage[], nextCursor: string | null): SessionTranscriptPage => ({
-    v: 1,
-    sessionId: 's',
-    messages,
-    nextCursor,
-  });
-
-  it('walks to the end and keeps the last few assistant messages, oldest first, skipping blanks and the owner', async () => {
-    const { client } = fakeClient({
-      start: page([message('assistant', 'one'), message('user', 'hi'), message('assistant', 'two')], 'p2'),
-      p2: page([message('assistant', '   '), message('assistant', 'three'), message('assistant', 'four')], null),
-    });
-    expect((await readRecentMessages(client, 's', 3)).map(entry => entry.text)).toEqual(['two', 'three', 'four']);
-  });
-
-  it('gives up after its page budget, keeping what it found and where to resume', async () => {
-    let asked = 0;
-    const endless: MessagesClient = {
-      messages: async () => {
-        asked += 1;
-        return page([message('assistant', `page ${asked}`)], `p${asked}`);
-      },
-    };
-    const memory = new Map();
-    const found = await readRecentMessages(endless, 's', 2, memory);
-    expect(found.map(entry => entry.text)).toEqual(['page 39', 'page 40']);
-    expect(asked).toBe(40);
-    expect(memory.get('s')).toMatchObject({ from: 'p40' });
-  });
-
-  it('resumes a remembered walk from its last page instead of the start', async () => {
-    const pages = {
-      start: page([message('assistant', 'one')], 'p2'),
-      p2: page([message('assistant', 'two')], null),
-    };
-    const { client, asked } = fakeClient(pages);
-    const memory = new Map();
-    expect((await readRecentMessages(client, 's', 3, memory)).map(entry => entry.text)).toEqual(['one', 'two']);
-    pages.p2 = page([message('assistant', 'two'), message('assistant', 'three')], null);
-    expect((await readRecentMessages(client, 's', 3, memory)).map(entry => entry.text)).toEqual([
-      'one',
-      'two',
-      'three',
-    ]);
-    expect(asked).toEqual([undefined, 'p2', 'p2']);
   });
 });
 

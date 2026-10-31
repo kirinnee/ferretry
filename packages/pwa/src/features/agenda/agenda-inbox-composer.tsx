@@ -17,6 +17,13 @@ import { useOptionalSessionQuota } from '../../hooks/use-usage.ts';
 import { withReferencePrefix } from '../../lib/answer-chip.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonUsageStore } from '../../lib/usage-store.ts';
+import { sessionsBarNames } from '../../shell/sessions-bar-model.ts';
+
+/** The ferret the reply goes to, as the sidebar names it. */
+const ferretName = (view: SessionView): string => {
+  const names = sessionsBarNames(view);
+  return names.ferret ?? names.title;
+};
 
 export interface AgendaInboxComposerProps {
   readonly connection: DaemonConnection;
@@ -73,7 +80,7 @@ export function AgendaInboxComposer({
       disabled={disabled}
       enterKeyPreference={enterKeyPreference}
       phoneEnterKeyPreference={phoneEnterKeyPreference}
-      placeholder="Reply about this item"
+      placeholder={`Reply to ${ferretName(view)}…`}
       quota={quota}
       sessionId={view.config.id}
       {...(autocompleteFetcher === undefined ? {} : { autocompleteFetcher })}

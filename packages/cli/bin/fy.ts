@@ -12,6 +12,7 @@ import {
   type SessionView,
 } from '@ferretry/protocol';
 import { FyApiClient } from '@ferretry/protocol/client';
+import { sweepPairingRedirects } from '@ferretry/protocol/pairing-redirect-sweep';
 import chalk from 'chalk';
 import { Command } from 'commander';
 import type { z } from 'zod';
@@ -38,6 +39,10 @@ import { type HealthApiClient, ProtocolDaemonHealth } from '../src/adapters/daem
 import { ProcIoPressureReader } from '../src/adapters/daemon/io-pressure';
 import { FileDaemonLifecycleLock } from '../src/adapters/daemon/lifecycle-lock';
 import { TailDaemonLog } from '../src/adapters/daemon/log-stream';
+import {
+  assertOwnLoopbackListener,
+  type LoopbackListenerGuardPorts,
+} from '../src/adapters/daemon/loopback-listener-guard';
 import { NixStoreGcRoot } from '../src/adapters/daemon/nix-gc-root';
 import { BunDaemonProcess } from '../src/adapters/daemon/process';
 import { HostProcessIncarnations } from '../src/adapters/daemon/process-incarnation';
@@ -47,7 +52,7 @@ import { FileDaemonRestartMarker, restartMarkerPath } from '../src/adapters/daem
 import { FileRetiredArtifacts } from '../src/adapters/daemon/retired-artifacts';
 import { FileServiceStore } from '../src/adapters/daemon/service-files';
 import { TmuxSessionTerminalServer } from '../src/adapters/daemon/session-terminals';
-import { PlatformSyscallTracer } from '../src/adapters/daemon/syscall-tracer';
+import { bunTracerHost, PlatformSyscallTracer } from '../src/adapters/daemon/syscall-tracer';
 import { serveMcpOverStdio } from '../src/adapters/mcp/stdio';
 import { desktopBrowserOpener } from '../src/adapters/pair/browser-opener';
 import { QrCodeTerminal } from '../src/adapters/pair/qr-terminal';
@@ -356,6 +361,8 @@ async function daemonBaseUrl(environment: Record<string, string | undefined>, st
 export async function daemonConnection(
   environment: Record<string, string | undefined>,
   homeDirectory: string,
+  /** Whose program holds the port; the host's own socket tables unless a test says otherwise. */
+  listeners?: LoopbackListenerGuardPorts,
 ): Promise<{
   baseUrl: string;
   token: string;
@@ -369,6 +376,9 @@ export async function daemonConnection(
       `FY_TOKEN is required when the daemon is not on this machine (${baseUrl}); local daemon credentials are never sent remotely. Set FY_TOKEN to that daemon's own token.`,
     );
   }
+  // The local token goes only to a listener this user owns: on a shared host a stopped daemon's port is
+  // anybody's to bind, and the admin token is the whole machine (`lib/daemon/listener-owner.ts`).
+  if (explicitToken === '') await assertOwnLoopbackListener(baseUrl, 'the daemon admin token', listeners);
   const token = explicitToken === '' ? await readDaemonToken(`${stateHome}/api-token`) : explicitToken;
   return { baseUrl, token, version: assertSemver(pkg.version) };
 }
@@ -455,7 +465,7 @@ function lazyDaemonClient(client: () => Promise<IFyApiClient>): SharedDaemonClie
     analytics: async (query?: string): Promise<AnalyticsResponse> => (await client()).analytics(query),
     harnessUpdate: async () => (await client()).harnessUpdate(),
     startHarnessUpdate: async request => (await client()).startHarnessUpdate(request),
-    list: async (): Promise<SessionView[]> => (await client()).list(),
+    list: async (): Promise<readonly SessionView[]> => (await client()).list(),
     get: async (id: string, signal?: AbortSignal): Promise<SessionView> => (await client()).get(id, signal),
     stop: async (id: string, reason?: string): Promise<SessionView> => (await client()).stop(id, reason),
     migrate: async (id, agent, model, allowContextDowngrade, requestId, forceInflight, conversation) =>
@@ -765,6 +775,7 @@ function buildDaemonController(world: CliWorld, client: SharedDaemonClient): Dae
 
 /** `fy pair`, and the QR `fy setup` offers at a terminal: one construction, so the two cannot differ. */
 function buildPairController(world: CliWorld, client: SharedDaemonClient): PairController {
+  const stateHome = resolveDaemonStateHome(world.homeDirectory, world.environment.FY_HOME, PRODUCT_NAME);
   return new PairController({
     gateway: new ProtocolPairingGateway(client),
     screen: new PlainScreen(),
@@ -773,7 +784,8 @@ function buildPairController(world: CliWorld, client: SharedDaemonClient): PairC
     clock: new SystemMillisecondClock(),
     qr: new QrCodeTerminal(),
     terminal: new ProcessTerminalSize(),
-    browser: desktopBrowserOpener(),
+    browser: desktopBrowserOpener(stateHome),
+    redirectSweeper: { sweep: async () => void (await sweepPairingRedirects(stateHome, Date.now())) },
     binaryName: BINARY_NAME,
   });
 }
@@ -1192,7 +1204,9 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       () =>
         new ProfileController({
           gateway: new ProtocolProfileGateway(client),
-          tracer: new PlatformSyscallTracer(),
+          tracer: new PlatformSyscallTracer(
+            bunTracerHost(resolveDaemonStateHome(world.homeDirectory, world.environment.FY_HOME, PRODUCT_NAME)),
+          ),
           out: world.io,
           progress: world.progress,
           sleep: async ms => await Bun.sleep(ms),

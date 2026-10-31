@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import {
+  type AskToStopJobsResult,
   type CapabilityGrants,
   type ComposerDraftRequest,
   type ComposerDraftResult,
@@ -1469,6 +1470,18 @@ export class FakeSessionMigrate implements SessionMigrateSubsystem {
         budgetTokens: 154800,
       },
     };
+  }
+
+  /** Every session the agent was asked to stop its jobs in, in order. */
+  readonly jobAsks: string[] = [];
+
+  async askToStopJobs(sessionId: string): Promise<AskToStopJobsResult> {
+    this.jobAsks.push(sessionId);
+    const refusal = this.refusals[sessionId];
+    if (refusal !== undefined) throw refusal;
+    if (!this.known.includes(sessionId)) throw new SessionMigrateError('not_found', `no session ${sessionId}`);
+    const jobs = [{ pid: 4242, command: 'bash /tmp/merge-all.sh 765', age: '3m' }];
+    return { messageId: 'migrate-jobs-4242', jobs, alreadyAsked: this.jobAsks.length > 1 };
   }
 }
 

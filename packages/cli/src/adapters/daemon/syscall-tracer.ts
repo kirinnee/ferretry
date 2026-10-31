@@ -1,6 +1,6 @@
-import { readFile, rm } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
 import type { ISyscallTracer, SyscallTraceOutcome } from '../../lib/daemon/profile/controller.ts';
 import { parseFsUsageTrace, parseStraceTrace } from '../../lib/daemon/profile/syscall-trace.ts';
 
@@ -21,15 +21,24 @@ export interface TracerHost {
     argv: readonly string[],
     seconds: number,
   ) => Promise<{ code: number; stdout: string; stderr: string }>;
-  readonly scratchFile: () => string;
+  /**
+   * Makes the file the tracer will write, inside a directory made for this one trace that nobody but
+   * this user can open, and answers its path. The trace names every file and argument of the daemon, and
+   * under `sudo` it is written by root, so it must never be at a name another user could have planted.
+   */
+  readonly scratchFile: () => Promise<string>;
   readonly readText: (path: string) => Promise<string>;
+  /** Deletes the file `scratchFile` made, and the private directory it lives in. */
   readonly remove: (path: string) => Promise<void>;
 }
 
 /** Linux's ptrace policy: `0` lets a user trace any of their own processes. */
 const PTRACE_SCOPE = '/proc/sys/kernel/yama/ptrace_scope';
 
-export const bunTracerHost = (): TracerHost => ({
+/** Where traces are written: under the user's own state home, never the shared temporary folder. */
+const TRACE_DIRECTORY = 'trace';
+
+export const bunTracerHost = (stateHome: string): TracerHost => ({
   platform: process.platform,
   home: homedir(),
   mayPtrace: async () => {
@@ -54,9 +63,18 @@ export const bunTracerHost = (): TracerHost => ({
       clearTimeout(stop);
     }
   },
-  scratchFile: () => join(tmpdir(), `fy-trace-${String(process.pid)}-${String(Date.now())}.txt`),
+  scratchFile: async () => {
+    const parent = join(stateHome, TRACE_DIRECTORY);
+    // `mkdtemp` makes the directory `0700` and gives it a name no one can predict; the `0600` file
+    // inside is made before `strace` runs, so under `sudo` root opens a file this user owns, in a
+    // directory no one else can reach, instead of creating one at a name someone else chose.
+    await mkdir(parent, { recursive: true, mode: 0o700 });
+    const file = join(await mkdtemp(join(parent, 'fy-trace-')), 'trace.txt');
+    await writeFile(file, '', { mode: 0o600 });
+    return file;
+  },
   readText: async path => await readFile(path, 'utf8'),
-  remove: async path => await rm(path, { force: true }),
+  remove: async path => await rm(dirname(path), { recursive: true, force: true }),
 });
 
 /**
@@ -73,7 +91,7 @@ export const bunTracerHost = (): TracerHost => ({
 export class PlatformSyscallTracer implements ISyscallTracer {
   #sudo = false;
 
-  constructor(private readonly host: TracerHost = bunTracerHost()) {}
+  constructor(private readonly host: TracerHost) {}
 
   async prepare(): Promise<SyscallTraceOutcome | undefined> {
     const host = this.host;
@@ -105,7 +123,8 @@ export class PlatformSyscallTracer implements ISyscallTracer {
         return unavailable(`fs_usage recorded nothing (${firstLine(result.stderr, result.code)})`);
       return { kind: 'traced', trace: parseFsUsageTrace(result.stdout, seconds, roots) };
     }
-    const file = host.scratchFile();
+    const file = await host.scratchFile().catch(() => undefined);
+    if (file === undefined) return unavailable('there was nowhere private to write the trace');
     try {
       const result = await host.traceFor(
         [...sudo, 'strace', '-f', '-qq', '-s', '256', '-e', 'trace=%file,execve', '-o', file, '-p', String(pid)],

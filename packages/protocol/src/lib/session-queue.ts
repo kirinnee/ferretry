@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { InstantSchema, PositiveIntegerSchema } from './common.ts';
-import { SendSenderKindSchema } from './session.ts';
+import { QueueAuthorSchema, SendSenderKindSchema } from './session.ts';
 
 /**
  * ONE DURABLE QUEUE PER SESSION: every message to a ferret — the owner's, another ferret's, the daemon's —
@@ -49,25 +49,6 @@ export const QueueWaitReasonSchema = z.enum([
   'stopped',
 ]);
 export type QueueWaitReason = z.infer<typeof QueueWaitReasonSchema>;
-
-/**
- * WHO A MESSAGE IS FROM, AS DATA. The owner (2026-10-30): "there should not be any append or prepend on any
- * feature". Who sent a message and which feature it came from are never text in its body: the app reads
- * them from here and shows a sender chip — "Ferretry · Board", a ferret's name, nothing for the owner.
- */
-export const QueueAuthorSchema = z.strictObject({
-  kind: z.enum(['owner', 'ferret', 'ferretry']),
-  /** A ferret's name (its callsign), for a ferret's message. */
-  name: z.string().min(1).optional(),
-  /** The part of Ferretry that sent it: Board, Warden, Agenda, Monitor, Lessons, Instructions. */
-  feature: z.string().min(1).optional(),
-  /**
-   * What the message is about, by name, for a row that says so instead of showing the words: the always-on
-   * instruction sections an `Instructions` message restates ("Board", "Notify"…).
-   */
-  sections: z.array(z.string().min(1).max(64)).min(1).max(16).optional(),
-});
-export type QueueAuthor = z.infer<typeof QueueAuthorSchema>;
 
 /** The caller's own id for a message, the idempotency key a retried request is answered from. */
 export const QueuedMessageIdSchema = z.string().min(1).max(128);

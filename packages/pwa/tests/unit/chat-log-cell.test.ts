@@ -28,7 +28,7 @@ describe('every layer of the chat log shares its one cell', () => {
 
   it.each([
     ['the message list', 'styles/index.css', '.fy-chat-log__messages'],
-    ['an open item', 'features/agenda/agenda.css', '.fy-item-view'],
+    ['an open item', 'features/agenda/agenda-item-card.css', '.fy-item-view'],
     ['the drawer scrim', 'features/agenda/agenda-chat.css', '.fy-chat-log > .fy-agenda-scrim'],
   ])('%s names the cell', (_name, file, selector) => {
     expect(rule(read(file), selector)).toContain('grid-area: 1 / 1;');

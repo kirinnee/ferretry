@@ -658,6 +658,11 @@ command says so at the moment somebody might be tempted to do that instead.
   than it, rendered and scrubbed exactly as `/logs` is, so whoever may read the tail may scroll back
   through the rest. Its `start` is a byte offset into the transcript and its `file` an opaque digest of
   the file's path and identity — positions, never content, and never the path itself.
+- **The log search route (`GET /v1/sessions/:id/log-search`) reads the same transcript as `/logs`, at
+  the same `operator` minimum, and widens nothing.** It searches every record, not just a tail, so it
+  answers no more than scrolling all the way back already shows. A match is decided on the SCRUBBED
+  text and its snippet is cut from it, so the search cannot be used to ask whether a secret value
+  appears in the transcript, and no snippet carries one.
 - ~~Web Push enrolment is governed by `pairing`.~~ **Closed by B5.** A device enrolling **itself** — reading
   the key, enrolling, listing and un-enrolling its own enrolments — needs no capability and no step-up,
   because it grants nothing: it lets this daemon reach the device that asked, and only it. A default

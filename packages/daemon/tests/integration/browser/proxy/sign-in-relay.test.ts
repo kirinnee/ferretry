@@ -202,4 +202,47 @@ describe('ProxySignInRelay', () => {
     should(reply).startWith('HTTP/1.1 502');
     should(reply).containEql('could not be reached');
   });
+
+  describe('on a port it is given', () => {
+    const UPSTREAM = { scheme: 'http', host: '127.0.0.1', port: 1 } as const;
+    const CREDENTIALS = { username: 'user', password: 'pass' };
+
+    it('should refuse a port somebody already holds, naming the port and its holder', async () => {
+      // Arrange: a program of this test's own takes the port first.
+      const taken = await listen(createServer());
+
+      // Act
+      const started = ProxySignInRelay.start(UPSTREAM, CREDENTIALS, 50, { port: taken, holder: async () => 1_002 });
+
+      // Assert
+      await should(started).be.rejectedWith(
+        `port ${String(taken)} is held by another program (uid 1002), not this browser — someone may be squatting it; pick another port base or free it`,
+      );
+    });
+
+    it("should read the holder from this host's socket table by default", async () => {
+      // Arrange
+      const taken = await listen(createServer());
+      const holder = process.platform === 'linux' ? ` \\(uid ${String(process.getuid?.())}\\)` : '';
+
+      // Act
+      const started = ProxySignInRelay.start(UPSTREAM, CREDENTIALS, 50, { port: taken });
+
+      // Assert
+      await should(started).be.rejectedWith(
+        new RegExp(`^port ${String(taken)} is held by another program${holder}, not this browser`, 'u'),
+      );
+    });
+
+    it('should pass on a bind failure that is not a taken port', async () => {
+      // Arrange / Act
+      const failure = await ProxySignInRelay.start(UPSTREAM, CREDENTIALS, 50, { port: 70_000 }).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+      // Assert
+      should(failure).be.instanceOf(RangeError);
+    });
+  });
 });

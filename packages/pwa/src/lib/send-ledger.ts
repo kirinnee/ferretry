@@ -76,6 +76,8 @@ export interface LedgerSendRecord {
   readonly from?: string;
   readonly fromName?: string;
   readonly senderKind?: SendSenderKind;
+  /** Who sent it, as data, for a send that never went through the queue (an interactive ferret's board nudge). */
+  readonly by?: LedgerSender;
   readonly replyExpected?: true;
   readonly held?: true;
   readonly withdrawn?: true;
@@ -377,6 +379,21 @@ const optional = <K extends string, V>(name: K, value: V | undefined): Partial<R
  * keeps the message visible and claims nothing; reading it as `delivered` would
  * silently assert that an unverified message reached the agent.
  */
+/** Who a send is from, as the daemon says it: the part of this row the sender chip and the system rows read. */
+export interface LedgerSender {
+  readonly kind: 'owner' | 'ferret' | 'ferretry';
+  readonly name?: string;
+  readonly feature?: string;
+}
+
+const parseLedgerSender = (raw: unknown): LedgerSender | undefined => {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const row = raw as Record<string, unknown>;
+  const kind = literal(row['kind'], ['owner', 'ferret', 'ferretry'] as const);
+  if (kind === undefined) return undefined;
+  return { kind, ...optional('name', str(row['name'])), ...optional('feature', str(row['feature'])) };
+};
+
 export const parseLedgerSendRecord = (raw: unknown): LedgerSendRecord | null => {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const row = raw as Record<string, unknown>;
@@ -397,6 +414,7 @@ export const parseLedgerSendRecord = (raw: unknown): LedgerSendRecord | null => 
     ...optional('from', str(row['from'])),
     ...optional('fromName', str(row['fromName'])),
     ...optional('senderKind', literal(row['senderKind'], [...SENDERS] as SendSenderKind[])),
+    ...optional('by', parseLedgerSender(row['by'])),
     ...(row['replyExpected'] === true ? { replyExpected: true as const } : {}),
     ...(row['held'] === true ? { held: true as const } : {}),
     ...(row['withdrawn'] === true ? { withdrawn: true as const } : {}),

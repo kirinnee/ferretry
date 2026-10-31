@@ -33,6 +33,11 @@ const HEALTH = {
 } as const;
 
 describe('daemon features', () => {
+  it('should name the tail read of a transcript, so an app that ships first falls back to the forward walk', () => {
+    should(DAEMON_FEATURES.messagesTail).equal('messages.tail.1');
+    should(daemonFeatureList()).containEql('messages.tail.1');
+  });
+
   it('should offer a feature only when the daemon listed it', () => {
     // Arrange
     const listed = { features: [DAEMON_FEATURES.packIdea4000] };

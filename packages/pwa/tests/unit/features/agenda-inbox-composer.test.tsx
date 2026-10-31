@@ -5,8 +5,8 @@ import { LiveMarkdownEditor } from '../../../src/components/live-markdown-editor
 import { AgendaInboxComposer } from '../../../src/features/agenda/agenda-inbox-composer.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import '../../support/dom.ts';
-import { sessionView } from '../../support/sessions.ts';
 import { render, run, runAsync } from '../../support/react.ts';
+import { sessionView } from '../../support/sessions.ts';
 
 const daemon = daemonConnection({ daemonId: 'laptop', baseUrl: 'https://laptop.example.test', deviceId: 'device' });
 
@@ -35,7 +35,7 @@ describe('the open Inbox item’s composer', () => {
     });
     const composer = view.root.findByType(Composer);
     expect(composer.props.sessionId).toBe('sess-2');
-    expect(composer.props.placeholder).toBe('Reply about this item');
+    expect(composer.props.placeholder).toBe('Reply to Kai…');
     const field = () => view.root.find(node => node.type === 'textarea' || node.type === LiveMarkdownEditor);
     run(() =>
       field().props.onChange({ currentTarget: { value: 'only after lunch', selectionStart: 16, selectionEnd: 16 } }),

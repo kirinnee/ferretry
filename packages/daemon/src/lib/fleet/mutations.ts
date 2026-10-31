@@ -614,12 +614,13 @@ function removeCredential(
   return parts.length === 0 ? `Remove login ${change.id}` : `Remove login ${change.id}, ${listed(parts)}`;
 }
 
-/** The four things "What agents may control" names, in the order a summary lists them. */
+/** The five things "What agents may control" names, in the order a summary lists them. */
 const AGENT_CONTROL_KINDS: readonly (keyof FleetAgentControl)[] = [
   'terminals',
   'browsers',
   'files',
   'ferretrySettings',
+  'pageScripts',
 ];
 
 /**
@@ -663,10 +664,11 @@ function putMachineSettings(
     );
   }
 
-  // A client that predates Ferretry settings leaves it out, and leaves it as it is.
+  // A client that predates Ferretry settings or Page scripts leaves them out, and leaves them as they are.
   const agentControl: FleetAgentControl = {
     ...change.agentControl,
     ferretrySettings: change.agentControl.ferretrySettings ?? model.machine.agentControl.ferretrySettings,
+    pageScripts: change.agentControl.pageScripts ?? model.machine.agentControl.pageScripts,
   };
   const movedControls = AGENT_CONTROL_KINDS.filter(kind => agentControl[kind] !== model.machine.agentControl[kind]);
   if (movedControls.length > 0) {

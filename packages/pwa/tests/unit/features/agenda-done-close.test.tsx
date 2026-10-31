@@ -4,16 +4,16 @@ import { AgendaItemView } from '../../../src/features/agenda/agenda-item-view.ts
 import { AgendaQuickReplies } from '../../../src/features/agenda/agenda-quick-replies.tsx';
 import { useDoneCloseFlow } from '../../../src/features/agenda/use-done-close-flow.ts';
 import { useDoneClose } from '../../../src/hooks/use-done-close.ts';
-import { AgendaWireDirectory } from '../../../src/lib/agenda-wire.ts';
-import { itemOptions } from '../../../src/lib/agenda-options.ts';
 import { cardModel } from '../../../src/lib/agenda-card-model.ts';
-import { type InboxAction, swipeMap } from '../../../src/lib/agenda-inbox.ts';
 import type { DoneCloseResult, DoneCloseSource } from '../../../src/lib/agenda-done-close.ts';
+import { type InboxAction, swipeMap } from '../../../src/lib/agenda-inbox.ts';
+import { itemOptions } from '../../../src/lib/agenda-options.ts';
+import { AgendaWireDirectory } from '../../../src/lib/agenda-wire.ts';
 import { DaemonBoardStore } from '../../../src/lib/board-store.ts';
 import { type AppStore, StoreProvider } from '../../../src/lib/store.tsx';
 import { agendaItem, choices } from '../../support/agenda-inbox.tsx';
-import { healthOf } from '../../support/health.ts';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
+import { healthOf } from '../../support/health.ts';
 import { card, deferred, fakeEnvironment, fakePort, flush, laneSetFor, laptop } from '../board-support.ts';
 
 let view: Mounted | null = null;
@@ -247,7 +247,7 @@ const hostFlow = (
         map={swipeMap(item)}
         model={cardModel(item)}
         onAct={() => undefined}
-        onSkip={() => undefined}
+        onDown={() => undefined}
         options={itemOptions(item)}
         swipeable
         {...(flow === undefined ? {} : { doneClose: flow })}
@@ -358,7 +358,7 @@ describe('where Done · closes sits among the answers', () => {
           map={swipeMap(item)}
           model={cardModel(item)}
           onAct={() => undefined}
-          onSkip={() => undefined}
+          onDown={() => undefined}
           options={itemOptions(item)}
           swipeable
           {...(flow === undefined ? {} : { doneClose: flow })}
@@ -381,22 +381,22 @@ describe('where Done · closes sits among the answers', () => {
     expect(theChip().closest('fieldset')?.getAttribute('aria-label')).toBe('Quick replies');
   });
 
-  test('goes under two answers in words: the row keeps one line with "Not needed" on a phone', async () => {
+  test('takes the free → slot beside two answers in words: Not needed is no longer in the row', async () => {
     await place(agendaItem('A4', { ask: choices('Yes', 'No') } as Partial<AgendaItem>));
     expect(root().querySelectorAll('[data-agenda-answer]').length).toBe(2);
-    expect(theChip().closest('fieldset')?.getAttribute('aria-label')).not.toBe('Quick replies');
+    expect(theChip().closest('fieldset')?.getAttribute('aria-label')).toBe('Quick replies');
   });
 
-  test('goes in the extra row when all three swipe slots are taken', async () => {
+  test('goes under the row when all three swipe slots are taken', async () => {
     await place(agendaItem('A2', { ask: choices('One', 'Two', 'Three') } as Partial<AgendaItem>));
-    expect(theChip().closest('fieldset')?.getAttribute('aria-label')).toBe('More choices');
+    expect(theChip().closest('[data-agenda-more-row]')).not.toBeNull();
     expect(theChip().hasAttribute('data-agenda-answer')).toBe(false);
   });
 
-  test('goes in the extra row beside the extra answers', async () => {
+  test('goes under the row alone for an old choice of four: options past three are the card list’s', async () => {
     await place(agendaItem('A3', { ask: choices('One', 'Two', 'Three', 'Four') } as Partial<AgendaItem>));
     const more = must(root().querySelector('[data-agenda-more-row]'), 'the more row');
     expect(more.querySelector('[data-agenda-done-close]')).not.toBeNull();
-    expect(more.querySelectorAll('button').length).toBe(2);
+    expect(more.querySelectorAll('button').length).toBe(1);
   });
 });

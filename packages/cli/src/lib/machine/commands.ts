@@ -28,6 +28,8 @@ const AGENT_CONTROL_FIELDS = {
   files: 'files',
   // The `config.*` tools: an agent editing this machine's configuration files (docs/config-files.md).
   settings: 'ferretrySettings',
+  // `browser.eval`: an agent's own JavaScript in a page it drives. Turning it on waits for the owner.
+  scripts: 'pageScripts',
 } as const satisfies Record<string, keyof FleetAgentControl>;
 type AgentControlWord = keyof typeof AGENT_CONTROL_FIELDS;
 
@@ -219,7 +221,7 @@ export function registerMachineCommands(program: Command, deps: AccountCommandDe
     machine
       .command('set')
       .description(
-        'change a machine setting: agent-permissions auto|skip, default-runtime <name>|automatic, agent-control terminals|browsers|files|settings on|off, auto-resume on|off, agenda-mode on|off',
+        'change a machine setting: agent-permissions auto|skip, default-runtime <name>|automatic, agent-control terminals|browsers|files|settings|scripts on|off, auto-resume on|off, agenda-mode on|off',
       )
       .argument('<setting>', 'agent-permissions, default-runtime, agent-control, auto-resume, or agenda-mode')
       .argument('<value...>', 'the new value — two words for agent-control'),

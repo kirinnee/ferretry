@@ -1,11 +1,11 @@
 /**
  * THE STRUCTURED PART OF AN AGENDA ITEM, as sections in ONE fixed order, each only when the item has it:
- * What's going on (premise) · Why it matters (context) · the questions · Decided so far · Still open · Options · Impact ·
+ * Premise · Context · the questions · Decided so far · Still open · Options · Impact ·
  * Terms · Steps · More detail · Links. Every surface draws the same ones (the inbox card, the in-ferret sheet
  * and the board page), so a reader learns one layout.
  *
  * PREMISE AND CONTEXT ARE TWO THINGS. The premise is the situation the item comes out of — what is going
- * on, in point form, so a cold reader starts there. The context is why it matters now. They have their own
+ * on, in point form, so a cold reader starts there. The context is the facts around it. They have their own
  * headings so they are never read as one block — no tinted boxes, no stripes: a bold sentence-case heading
  * in the ink colour, and room.
  *
@@ -87,7 +87,7 @@ function NewMarker({ word }: { readonly word: 'new' | 'changed' }) {
 /** The one plain line under a card's heading, and what is left of the context once it is said. */
 export interface CardLede {
   readonly line: string | null;
-  /** What "Why it matters" still draws: the context less its lead point, or `null` when nothing is left. */
+  /** What the Context section still draws: the context less its lead point, or `null` when nothing is left. */
   readonly context: string | null;
 }
 
@@ -97,9 +97,9 @@ export interface CardLede {
  */
 const SUGGESTED_PICKS = /^\s*(?:[-*•]\s*)?my picks?\b/iu;
 
-export const contextHeading = (context: string, fold: boolean): string => {
+export const contextHeading = (context: string): string => {
   if (SUGGESTED_PICKS.test(context)) return 'Suggested answers';
-  return fold ? 'Context' : 'Why it matters';
+  return 'Context';
 };
 
 /**
@@ -122,7 +122,7 @@ export const cardLede = (item: Pick<AgendaItem, 'context'>, why: string | null):
 };
 
 /** The picks a several-question item collects before "Send answers". */
-interface QuestionAnswers {
+export interface QuestionAnswers {
   readonly answers: readonly string[];
   readonly onAnswer: (index: number, answer: string) => void;
   readonly disabled: boolean;
@@ -203,7 +203,7 @@ const REFERENCE_TARGET = /^(?:[#!][A-Za-z]?\d+|@\S+|[%][a-z]+:\S+|&\S+|[$/][A-Za
 const PATH_TARGET = /^(?:\.{0,2}\/|~\/)\S+$/u;
 
 /** One link: a URL opens outside, a reference or a file goes through the reference surface. */
-function AgendaLinkRow({ link, renderProse }: { readonly link: AgendaLink; readonly renderProse: AgendaProse }) {
+export function AgendaLinkRow({ link, renderProse }: { readonly link: AgendaLink; readonly renderProse: AgendaProse }) {
   const target = link.target.trim();
   const label = link.label?.trim() || target;
   if (/^https?:\/\//iu.test(target)) {
@@ -344,7 +344,7 @@ function QuestionReason({
   );
 }
 
-function Question({
+export function Question({
   question,
   index,
   numbered,
@@ -408,7 +408,7 @@ function Situation({
           data-agenda-section="premise"
         >
           <h4 className="fy-attn-situation__heading">
-            What’s going on
+            Premise
             {changed('premise') ? <NewMarker word="changed" /> : null}
           </h4>
           <PointForm
@@ -426,7 +426,7 @@ function Situation({
           data-agenda-section="context"
         >
           <h4 className="fy-attn-situation__heading">
-            {SUGGESTED_PICKS.test(context) ? 'Suggested answers' : 'Why now'}
+            {SUGGESTED_PICKS.test(context) ? 'Suggested answers' : 'Context'}
             {changed('context', 'why') ? <NewMarker word="changed" /> : null}
           </h4>
           <PointForm
@@ -611,7 +611,7 @@ export function AgendaBriefSections({
       {fold ? null : questionsBlock}
       {early}
       {premise === null || situated ? null : (
-        <Section changed={changedWhole('premise')} fold={fold} name="premise" open={open} title="What's going on">
+        <Section changed={changedWhole('premise')} fold={fold} name="premise" open={open} title="Premise">
           <PointForm
             className="fy-attn-prose"
             renderProse={renderProse}
@@ -626,7 +626,7 @@ export function AgendaBriefSections({
           fold={fold}
           name="context"
           open={open}
-          title={contextHeading(context, fold)}
+          title={contextHeading(context)}
         >
           <PointForm
             className="fy-attn-prose"

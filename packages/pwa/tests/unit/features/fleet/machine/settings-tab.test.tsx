@@ -279,7 +279,13 @@ describe('MachineSettingsTab', () => {
               kind: 'machine.settings',
               agentPermissions: 'auto',
               defaultRuntime: 'claude-review',
-              agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
+              agentControl: {
+                terminals: true,
+                browsers: true,
+                files: true,
+                ferretrySettings: false,
+                pageScripts: false,
+              },
             },
           });
           expect(retried.count).toBe(1);
@@ -336,10 +342,56 @@ describe('MachineSettingsTab', () => {
               kind: 'machine.settings',
               agentPermissions: 'auto',
               defaultRuntime: 'claude-default',
-              agentControl: { terminals: false, browsers: true, files: true, ferretrySettings: false },
+              agentControl: {
+                terminals: false,
+                browsers: true,
+                files: true,
+                ferretrySettings: false,
+                pageScripts: false,
+              },
             },
           });
           expect(retried.count).toBe(1);
+        },
+      );
+    });
+
+    it('offers Page scripts off by default, saying plainly it can read sign-ins, and sends it when turned on', async () => {
+      await withTab(
+        {
+          answers: {
+            '/v1/fleet/proposals': STAGED,
+            [APPLY_PATH]: OUTCOME,
+          },
+        },
+        async ({ q, calls }) => {
+          const row = must(q('[data-setup-choice="pageScripts"]'), 'the Page scripts row');
+          expect(row.querySelector('input')).toHaveProperty('checked', false);
+          expect(row.textContent).toContain('Page scripts');
+          expect(row.textContent).toContain('your sign-ins');
+          expect(row.textContent).toContain('shared agent profile');
+
+          await click(q('[data-setup-choice="pageScripts"] input'), 'page scripts checkbox');
+          await click(q('[data-change-submit]'), 'save agent control');
+
+          const staged = must(
+            calls.find(call => call.path === '/v1/fleet/proposals'),
+            'the staged change call',
+          );
+          expect(staged.body).toEqual({
+            change: {
+              kind: 'machine.settings',
+              agentPermissions: 'auto',
+              defaultRuntime: 'claude-default',
+              agentControl: {
+                terminals: true,
+                browsers: true,
+                files: true,
+                ferretrySettings: false,
+                pageScripts: true,
+              },
+            },
+          });
         },
       );
     });
@@ -370,7 +422,9 @@ describe('MachineSettingsTab', () => {
           'the staged change call',
         );
         expect(staged.body).toMatchObject({
-          change: { agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: true } },
+          change: {
+            agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: true, pageScripts: false },
+          },
         });
       });
     });

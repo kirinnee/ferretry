@@ -671,6 +671,9 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     filesOnPage: async () => {
       throw new Error('not exercised by the surface inventory');
     },
+    scriptOnPage: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
     closePage: async () => {
       throw new Error('not exercised by the surface inventory');
     },
@@ -847,12 +850,14 @@ describe('the mounted daemon surface', () => {
       3 + // restarting the ferrets with out-of-date instructions: the restart, the status and clearing the queue (docs/launch-settings.md)
       1 + // a Restart's stale-settings read: would a relaunch change what this session runs on
       1 + // a cross-harness move's preview: what converting the conversation would carry (docs/migration-cross-harness.md)
+      1 + // a refused migration's remedy: ask the agent to stop its own background jobs (docs/ferret-messages.md)
       3 + // existing conversations kept as ferrets: the listing, one conversation's preview and the adoption
       3 + // the model catalogs: the list, a check for a newer published one, and a read of the models Ollama has installed (docs/model-catalog.md)
       9 + // lessons: the default's write, Apply's preview and write, the per-ferret switch and its list, and the scan's estimate, start, read and cancel (a ferret's own door is `none`)
       2 + // the performance profile: start one, and read it back by id (`fy daemon profile`)
       1 + // one transcript image by its handle: the log's `[fy-image …]` marker, governed exactly like `logs` (docs/grants.md)
       1 + // one page of the chat's transcript, the tail or the page before a byte, governed exactly like `logs` (docs/grants.md)
+      1 + // a search of the chat's whole transcript, scrubbed like `logs` and governed exactly like it (docs/grants.md)
       1 + // handing a web address to this computer's own browser (loopback caller only)
       3 + // the skills inventory: the machine listing, one session's listing, and the Open read of a listed SKILL.md
       3 + // a ferret's processes: the list, one process's output, and Stop
@@ -1039,6 +1044,7 @@ describe('the mounted daemon surface', () => {
       'GET /v1/sessions/:sessionId/relaunch-settings',
       'POST /v1/sessions/:sessionId/conversion-preview',
       'POST /v1/sessions/:sessionId/migrate',
+      'POST /v1/sessions/:sessionId/migrate/ask-to-stop-jobs',
       'POST /v1/restarts',
       'GET /v1/restarts',
       'DELETE /v1/restarts',
@@ -1202,6 +1208,7 @@ describe('the mounted daemon surface', () => {
       'GET /v1/sessions/:sessionId/snapshot',
       'GET /v1/sessions/:sessionId/logs',
       'GET /v1/sessions/:sessionId/log-page',
+      'GET /v1/sessions/:sessionId/log-search',
       'GET /v1/sessions/:sessionId/messages',
       'GET /v1/sessions/:sessionId/transcript-images/:handle',
       // The attach proof. It sits with the operator reads but authorizes a local process action

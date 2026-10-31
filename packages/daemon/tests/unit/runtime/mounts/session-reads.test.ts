@@ -10,6 +10,7 @@ import {
   type PaneCapture,
   type PaneScope,
   type SessionTranscriptPages,
+  type SessionTranscriptSearch,
   type StoredSessionEvent,
   type TranscriptTailResult,
 } from '../../../../src/lib/session/reads/index.ts';
@@ -23,6 +24,7 @@ import {
 import { jsonBody, request } from '../../api/support.ts';
 import type { TranscriptImageReader } from '../../../../src/lib/session/transcript/image-reader.ts';
 import { claudeText, claudeUserImage, MemoryTranscript, pngBase64 } from '../../../support/transcript-images.ts';
+import type { TranscriptEvent } from '../../../../src/lib/transcript/types.ts';
 import { CREDENTIALS, human, sessionDirectory, sessionView } from './support.ts';
 
 /**
@@ -83,6 +85,7 @@ function fixture(
     readonly redactor?: OperatorReadRedactor;
     readonly images?: TranscriptImageReader;
     readonly pages?: SessionTranscriptPages;
+    readonly search?: SessionTranscriptSearch;
   } = {},
 ) {
   const reads = new OperatorReadService(
@@ -106,6 +109,7 @@ function fixture(
     { read: async () => options.storedSnapshot ?? { kind: 'absent' } },
     options.redactor,
     options.pages,
+    options.search,
   );
   const dispatcher = new ApiDispatcher(
     new ApiRouter([
@@ -578,6 +582,78 @@ describe('the session addressable-message route', () => {
     should(second.body).containEql('"byteOffset":20');
   });
 
+  it('should read from the tail with ?tail=1 and page back over the previousCursor it handed back', async () => {
+    // Arrange
+    const dispatch = fixture({ rows: [addressable(10), addressable(20), addressable(30)] });
+
+    // Act
+    const newest = await dispatch({
+      path: '/v1/sessions/s1/messages',
+      query: [
+        ['tail', '1'],
+        ['limit', '1'],
+      ],
+      headers: human,
+    });
+    const previous = jsonBody(newest).previousCursor;
+    should(previous).be.a.String();
+    const older = await dispatch({
+      path: '/v1/sessions/s1/messages',
+      query: [
+        ['through', String(previous)],
+        ['limit', '2'],
+      ],
+      headers: human,
+    });
+
+    // Assert — the token survives the query string verbatim, and the pages meet without a gap or an overlap.
+    should(newest.body).containEql('"byteOffset":30').and.not.containEql('"byteOffset":20');
+    should(older.status).equal(200);
+    should(older.body).containEql('"byteOffset":10').and.containEql('"byteOffset":20');
+    should(older.body).not.containEql('"byteOffset":30');
+    should(jsonBody(older)).have.property('previousCursor', null);
+  });
+
+  it('should leave previousCursor off a forward read', async () => {
+    // Arrange
+    const dispatch = fixture({ rows: [addressable(10)] });
+
+    // Act
+    const response = await dispatch({ path: '/v1/sessions/s1/messages', headers: human });
+
+    // Assert
+    should(jsonBody(response)).not.have.property('previousCursor');
+  });
+
+  it('should refuse tail and through together, and either beside a cursor, as a bad request', async () => {
+    // Arrange
+    const dispatch = fixture({ rows: [addressable(10), addressable(20)] });
+    const first = await dispatch({ path: '/v1/sessions/s1/messages', query: [['limit', '1']], headers: human });
+    const token = String(jsonBody(first).nextCursor);
+
+    // Act
+    const both = await dispatch({
+      path: '/v1/sessions/s1/messages',
+      query: [
+        ['tail', '1'],
+        ['through', token],
+      ],
+      headers: human,
+    });
+    const beside = await dispatch({
+      path: '/v1/sessions/s1/messages',
+      query: [
+        ['tail', '1'],
+        ['cursor', token],
+      ],
+      headers: human,
+    });
+    const blank = await dispatch({ path: '/v1/sessions/s1/messages', query: [['through', '']], headers: human });
+
+    // Assert
+    should([both.status, beside.status, blank.status]).eql([400, 400, 400]);
+  });
+
   it('should answer 404 for a session the daemon does not hold', async () => {
     // Arrange
     const dispatch = fixture();
@@ -955,6 +1031,7 @@ describe('the session log page route', () => {
       log: '[09:08:07] user/message: older',
       start: 40,
       file: 'file-token',
+      offsets: [40],
     });
     should(calls).eql([{ limit: 50, before: 900, from: 10 }]);
     should(response.headers.get('cache-control')).equal('no-store');
@@ -1047,6 +1124,216 @@ describe('the session log page route', () => {
 
     // Act
     const response = await dispatch({ path: '/v1/sessions/s1/log-page', headers: wardenToken });
+
+    // Assert
+    should(response.status).equal(403);
+  });
+});
+
+describe('the session log search route', () => {
+  const SECRET = 'sk-live-0123456789';
+  const event = (overrides: Partial<TranscriptEvent> & { readonly text?: string }): TranscriptEvent =>
+    ({
+      kind: 'message',
+      harness: 'claude',
+      role: 'assistant',
+      text: 'the parser handles it',
+      timestamp: INSTANT,
+      byteOffset: 300,
+      ...overrides,
+    }) as TranscriptEvent;
+  const TRANSCRIPT: readonly TranscriptEvent[] = [
+    event({ role: 'user', text: 'Does the PARSER cope?', byteOffset: 100 }),
+    event({ role: 'user', text: 'the parser, said the harness', inputSource: 'harness', byteOffset: 150 }),
+    event({ kind: 'reasoning', text: 'the parser is fine', format: 'thinking', byteOffset: 200 } as never),
+    event({
+      kind: 'tool-call',
+      role: 'assistant',
+      call: { id: 't', name: 'Bash', input: { command: 'rg parser' } },
+      byteOffset: 220,
+    } as never),
+    event({
+      kind: 'tool-result',
+      role: 'tool',
+      result: { callId: 't', content: 'parser.ts', text: 'parser.ts', isError: false },
+      byteOffset: 240,
+    } as never),
+    event({ kind: 'usage', role: 'system', usage: { inputTokens: 1 }, byteOffset: 260 } as never),
+    event({ text: 'the parser handles it', byteOffset: 300 }),
+    event({ text: `the key is ${SECRET} parser`, byteOffset: 400 }),
+    event({ text: `only ${SECRET}`, byteOffset: 500 }),
+  ];
+  /** A search port over `TRANSCRIPT`, judging every event with the service's own `accept`. */
+  const searching = (calls: unknown[] = [], truncated = false): SessionTranscriptSearch => ({
+    search: async (_sessionId, query) => {
+      calls.push({ needle: query.needle, limit: query.limit });
+      return { kind: 'read', events: TRANSCRIPT.filter(query.accept), truncated, file: 'file-token' };
+    },
+  });
+  const masking: OperatorReadRedactor = {
+    redact: async text => text.split(SECRET).join('[redacted:KEY]'),
+    batch: async work => work({ text: text => text.split(SECRET).join('[redacted:KEY]'), data: value => value }),
+  };
+  const offsets = (response: ApiResponse): unknown =>
+    (jsonBody(response) as { matches: { offset: number }[] }).matches.map(match => match.offset);
+
+  it('should find a message anywhere in the transcript, case-insensitively, oldest first, with a snippet', async () => {
+    // Arrange
+    const calls: unknown[] = [];
+    const dispatch = fixture({ search: searching(calls) });
+
+    // Act
+    const response = await dispatch({ path: '/v1/sessions/s1/log-search', query: [['q', ' Parser ']], headers: human });
+
+    // Assert
+    should(response.status).equal(200);
+    const body = jsonBody(response) as { matches: unknown[]; query: string; file: string; truncated: boolean };
+    should(body.query).equal('Parser');
+    should(body.file).equal('file-token');
+    should(body.truncated).be.false();
+    should(offsets(response)).eql([100, 150, 300, 400]);
+    should(body.matches[0]).eql({
+      offset: 100,
+      role: 'user',
+      kind: 'message',
+      snippet: 'Does the PARSER cope?',
+      at: INSTANT,
+    });
+    should(calls).eql([{ needle: 'parser', limit: 500 }]);
+    should(response.headers.get('cache-control')).equal('no-store');
+  });
+
+  it('should search only the owner’s own words, or only the agent’s', async () => {
+    // Arrange
+    const dispatch = fixture({ search: searching() });
+
+    // Act
+    const mine = await dispatch({
+      path: '/v1/sessions/s1/log-search',
+      query: [
+        ['q', 'parser'],
+        ['who', 'me'],
+      ],
+      headers: human,
+    });
+    const agent = await dispatch({
+      path: '/v1/sessions/s1/log-search',
+      query: [
+        ['q', 'parser'],
+        ['who', 'agent'],
+      ],
+      headers: human,
+    });
+
+    // Assert
+    should(offsets(mine)).eql([100]);
+    should(offsets(agent)).eql([300, 400]);
+  });
+
+  it('should search tool calls, results and thinking only when asked', async () => {
+    // Arrange
+    const dispatch = fixture({ search: searching() });
+
+    // Act
+    const response = await dispatch({
+      path: '/v1/sessions/s1/log-search',
+      query: [
+        ['q', 'parser'],
+        ['tools', '1'],
+        ['limit', '20'],
+      ],
+      headers: human,
+    });
+
+    // Assert
+    should(offsets(response)).eql([100, 150, 200, 220, 240, 300, 400]);
+  });
+
+  it('should keep secrets masked: never matched on, never in a snippet', async () => {
+    // Arrange
+    const dispatch = fixture({ search: searching(), redactor: masking });
+
+    // Act
+    const parser = await dispatch({ path: '/v1/sessions/s1/log-search', query: [['q', 'parser']], headers: human });
+    const secret = await dispatch({ path: '/v1/sessions/s1/log-search', query: [['q', SECRET]], headers: human });
+
+    // Assert
+    should(JSON.stringify(jsonBody(parser))).not.containEql(SECRET);
+    should(JSON.stringify(jsonBody(parser))).containEql('the key is [redacted:KEY] parser');
+    should(offsets(secret)).eql([]);
+  });
+
+  it('should answer a query nothing says with no matches', async () => {
+    // Arrange
+    const dispatch = fixture({ search: searching() });
+
+    // Act
+    const response = await dispatch({ path: '/v1/sessions/s1/log-search', query: [['q', 'quokka']], headers: human });
+
+    // Assert
+    should(response.status).equal(200);
+    should(offsets(response)).eql([]);
+  });
+
+  it('should say a search that stopped at its limit', async () => {
+    // Arrange
+    const dispatch = fixture({ search: searching([], true) });
+
+    // Act
+    const response = await dispatch({ path: '/v1/sessions/s1/log-search', query: [['q', 'parser']], headers: human });
+
+    // Assert
+    should((jsonBody(response) as { truncated: boolean }).truncated).be.true();
+  });
+
+  it('should refuse an empty or overlong query, an unknown who, and a tools flag that is not 0 or 1', async () => {
+    // Arrange
+    const dispatch = fixture({ search: searching() });
+    const asked = async (query: [string, string][]) =>
+      await dispatch({ path: '/v1/sessions/s1/log-search', query, headers: human });
+
+    // Act
+    const responses = [
+      await asked([['q', '   ']]),
+      await asked([]),
+      await asked([['q', 'x'.repeat(201)]]),
+      await asked([
+        ['q', 'parser'],
+        ['who', 'everybody'],
+      ]),
+      await asked([
+        ['q', 'parser'],
+        ['tools', 'yes'],
+      ]),
+    ];
+
+    // Assert
+    for (const response of responses) {
+      should(response.status).equal(400);
+      should(jsonBody(response)).have.property('code', 'invalid_query');
+    }
+  });
+
+  it('should refuse a transcript it cannot prove or read, or a daemon with no search wired', async () => {
+    // Arrange
+    const unresolved = fixture({ search: { search: async () => ({ kind: 'unresolved' }) } });
+    const unwired = fixture();
+
+    // Act
+    const proved = await unresolved({ path: '/v1/sessions/s1/log-search', query: [['q', 'x']], headers: human });
+    const wired = await unwired({ path: '/v1/sessions/s1/log-search', query: [['q', 'x']], headers: human });
+
+    // Assert
+    should(jsonBody(proved)).have.property('code', 'no_transcript');
+    should(jsonBody(wired)).have.property('code', 'transcript_unreadable');
+  });
+
+  it('should keep the warden off it', async () => {
+    // Arrange
+    const dispatch = fixture({ search: searching() });
+
+    // Act
+    const response = await dispatch({ path: '/v1/sessions/s1/log-search', query: [['q', 'x']], headers: wardenToken });
 
     // Assert
     should(response.status).equal(403);

@@ -1367,6 +1367,23 @@ describe('SessionForkTargetBinder', () => {
         should(refused.message).match(/private credential does not match the hash in its session record/u);
     });
 
+    it('should not refuse a started target whose credential a later launch is re-issuing', async () => {
+      // Arrange: past `created`, every pane launch re-issues the credential plaintext-first, so a
+      // plaintext its record does not hash yet is a rotation that died before its pane — the next
+      // launch heals it, and refusing would wedge the fork behind a pair nothing will ever launch.
+      const subject = await harness('credential-rotating');
+      await drive(subject);
+      const rotating = bindWith(subject, {
+        environment: { read: async () => ({ [SESSION_BOARD_CAPABILITY_VARIABLE]: 'the-next-pane-capability' }) },
+      });
+
+      // Act
+      const actual = await rotating.lifecycle.view();
+
+      // Assert
+      should(actual.state.status).equal('running');
+    });
+
     it('should refuse to persist a plan beneath a target that has no session record', async () => {
       // Arrange: a receipt that claims creation although nothing was ever created.
       const subject = await harness('no-record');

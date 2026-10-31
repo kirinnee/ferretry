@@ -119,12 +119,12 @@ describe('whats new, on a phone', () => {
     if (directory !== '') await rm(directory, { force: true, recursive: true });
   });
 
-  const phone = async (spec: (typeof PHONES)[number], search = '') => {
+  const phone = async (spec: (typeof PHONES)[number], search = '', motion: 'reduce' | 'no-preference' = 'reduce') => {
     const origin = server?.url.origin ?? '';
     const context = await browser.newContext({
       viewport: { width: spec.width, height: spec.height },
       colorScheme: spec.colorScheme,
-      reducedMotion: 'reduce',
+      reducedMotion: motion,
       deviceScaleFactor: 2,
       isMobile: true,
       hasTouch: true,
@@ -233,6 +233,67 @@ describe('whats new, on a phone', () => {
             await shoot(tab, `${spec.name}-9-tabs-scrolled`);
           }
           expect(await rightEdge()).toBeLessThanOrEqual(1);
+        } finally {
+          await context.close();
+        }
+      }, 120_000);
+
+      it('opens from the pull-down finder with a real touch and stays open', async () => {
+        const { context, tab, settings } = await phone(spec, '', 'no-preference');
+        try {
+          await tab.goto(settings);
+          const cdp = await context.newCDPSession(tab);
+          const touch = async (type: 'touchStart' | 'touchMove' | 'touchEnd', x: number, y: number) =>
+            await cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
+          await touch('touchStart', spec.width / 2, 120);
+          for (let y = 120; y <= 320; y += 20) {
+            await touch('touchMove', spec.width / 2, y);
+            await tab.waitForTimeout(16);
+          }
+          await touch('touchEnd', spec.width / 2, 320);
+          await tab.waitForSelector('[placeholder^="Search places"]');
+          await tab.tap('[placeholder^="Search places"]');
+          await tab.keyboard.type('what');
+          await tab.waitForSelector('text=What’s new');
+          await shoot(tab, `${spec.name}-6-pull-finder`);
+          const box = await tab.locator('text=What’s new').first().boundingBox();
+          if (box === null) throw new Error('no What’s new row');
+          const x = box.x + box.width / 2;
+          const y = box.y + box.height / 2;
+          await tab.evaluate(() => {
+            const w = globalThis as unknown as { __seen: boolean[] };
+            w.__seen = [];
+            const tick = () => {
+              w.__seen.push(document.querySelector('[data-whats-new-body]') !== null);
+              requestAnimationFrame(tick);
+            };
+            tick();
+          });
+          await touch('touchStart', x, y);
+          await tab.waitForTimeout(60);
+          await touch('touchEnd', x, y);
+          // WebKit synthesizes the click from the touch AFTER touchend, hit-testing whatever is under the
+          // finger by then. Chromium drops that click when the pressed row has already left the document,
+          // so replay it by hand: it must not be able to dismiss the sheet it landed on.
+          await tab.evaluate(
+            ([px, py]) => {
+              document
+                .elementFromPoint(px as number, py as number)
+                ?.dispatchEvent(
+                  new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1, clientX: px, clientY: py }),
+                );
+            },
+            [x, y],
+          );
+          await tab.waitForTimeout(1500);
+          const seen = await tab.evaluate(() => (globalThis as unknown as { __seen: boolean[] }).__seen);
+          const firstOpen = seen.indexOf(true);
+          expect(firstOpen).toBeGreaterThanOrEqual(0);
+          expect(seen.slice(firstOpen).every(Boolean)).toBe(true);
+          const opened = await sheetState(tab);
+          expect(opened.first).toBe(newestVersion);
+          expect(opened.onScreen).toBe(true);
+          await shoot(tab, `${spec.name}-7-pull-open`);
         } finally {
           await context.close();
         }

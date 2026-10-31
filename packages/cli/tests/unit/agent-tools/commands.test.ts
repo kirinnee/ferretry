@@ -148,6 +148,24 @@ describe('fy browser page', () => {
     ]);
   });
 
+  it('should run a page script, with its element and timeout when given', async () => {
+    // Arrange
+    const { calls, run } = harness();
+
+    // Act
+    await run('browser', 'page', 'eval', 'app', '() => document.title');
+    await run('browser', 'page', 'eval', 'app', '(el) => el.value', '--of', 'e4', '--timeout', '2000');
+
+    // Assert
+    should(calls).deepEqual([
+      { kind: 'call', call: { tool: 'browser.eval', name: 'app', function: '() => document.title' } },
+      {
+        kind: 'call',
+        call: { tool: 'browser.eval', name: 'app', function: '(el) => el.value', ref: 'e4', timeoutMs: 2000 },
+      },
+    ]);
+  });
+
   it('should take a ref, a point or a selector wherever a page act names its target', async () => {
     // Arrange
     const { calls, run } = harness();
