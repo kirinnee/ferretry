@@ -260,3 +260,15 @@ describe('AgentFiles.save — where a download or a PDF may land', () => {
     ).be.false();
   });
 });
+
+describe('NodeAgentFilesystem.lstat', () => {
+  it('should report a missing entry as nothing, but let any other failure through', async () => {
+    const disk = new NodeAgentFilesystem();
+
+    should(await disk.lstat(join(folder, 'nope'))).be.undefined();
+    await disk.lstat(join(folder, 'x'.repeat(300))).then(
+      () => should.fail(undefined, undefined, 'a name that long should not be looked up'),
+      (error: unknown) => should(error).be.instanceOf(Error),
+    );
+  });
+});
