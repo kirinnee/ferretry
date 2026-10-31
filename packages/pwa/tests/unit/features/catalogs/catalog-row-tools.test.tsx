@@ -3,13 +3,14 @@ import { FyHttpError } from '@ferretry/protocol/client';
 import {
   CatalogRowTools,
   type CatalogRowsHost,
-  InstallFromFileButton,
+  AddCatalogEntry,
   useCatalogInstalls,
 } from '../../../../src/features/catalogs/catalog-row-tools.tsx';
 import { type AppStore, StoreProvider } from '../../../../src/lib/store.tsx';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { fakeClient } from '../../../support/catalog-client.ts';
 import { INSTALL_ID, installRecord, ownedCatalog } from '../../../support/catalog-views.ts';
+import { chooseInstallFromFile } from '../../../support/catalog-add.ts';
 import { click, settle } from '../../../support/dom-form.ts';
 import { mount } from '../../../support/dom.ts';
 
@@ -112,7 +113,7 @@ describe('CatalogRowTools', () => {
   });
 });
 
-describe('InstallFromFileButton', () => {
+describe('AddCatalogEntry', () => {
   it('opens and closes the install sheet', async () => {
     const fake = fakeClient({});
     const store = {
@@ -120,10 +121,10 @@ describe('InstallFromFileButton', () => {
     } as unknown as AppStore;
     const view = await mount(
       <StoreProvider store={store}>
-        <InstallFromFileButton host={{ connection, createClient: fake.factory }} />
+        <AddCatalogEntry host={{ connection, createClient: fake.factory }} />
       </StoreProvider>,
     );
-    await tap('[data-catalog-install-from-file]');
+    await chooseInstallFromFile();
     expect(q('[data-catalog-sheet="install"]')).not.toBeNull();
     await view.unmount();
   });

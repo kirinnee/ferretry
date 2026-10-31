@@ -2446,7 +2446,7 @@ and says so.
 `join` and `member`, on the direct carrier and the relay alike. The publisher half is built: the join
 gate (`catalog-members/join.ts`), the member route table (`catalog-members/shared-routes.ts`, mounted
 as `MemberDispatcher`), member passkeys and unlocks (`catalog-members/passkeys.ts`), and closing a revoked
-member's live sessions. The browser half is phase 2c; the end-to-end test is 2d.
+member's live sessions. The browser half is built in phase 2c (`join` and `member` modes of the client session); the end-to-end test is 2d.
 
 A catalog **member** is a person a publisher shared catalogs with ([catalogs.md](catalogs.md) § Members),
 not a paired device. Their browser reaches the publisher through exactly the carriers a device uses —

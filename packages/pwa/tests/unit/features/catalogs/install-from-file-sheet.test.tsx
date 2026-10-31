@@ -603,3 +603,47 @@ describe('what the file supplies', () => {
     await view.unmount();
   });
 });
+
+describe('an item a member already opened', () => {
+  async function openShared(handlers: Parameters<typeof fakeClient>[0]) {
+    const fake = fakeClient({ ...baseHandlers, ...handlers });
+    const opened = await openCatalogFile(fileText, crypto);
+    if (!opened.ok) throw new Error(opened.sentence);
+    const view = await mount(
+      <InstallFromFileSheet
+        connection={connection}
+        source={{ opened: opened.opened, itemId: MCP_ID, publisherLabel: 'Studio' }}
+        onClose={() => undefined}
+        host={{ createClient: fake.factory, crypto, projects: PROJECTS }}
+      />,
+    );
+    await settle();
+    return { fake, view };
+  }
+
+  it('skips the file chooser, lists only that item and says who shared it', async () => {
+    const { view } = await openShared({});
+    expect(q('[data-catalog-sheet="install"] h3')?.textContent).toBe('Install on a machine');
+    expect(q('[data-catalog-file-input]')).toBeNull();
+    expect(q('[data-catalog-pick-file]')).toBeNull();
+    expect(q(`[data-catalog-file-item="${MCP_ID}"]`)).not.toBeNull();
+    expect(q(`[data-catalog-file-item="${SKILL_ID}"]`)).toBeNull();
+    expect(q('[data-catalog-shared-by]')?.textContent).toBe('Shared with you as Studio.');
+    expect(text()).not.toContain('withdrawn');
+    await view.unmount();
+  });
+
+  it('goes through the same review and confirm on the member’s own machine before anything is installed', async () => {
+    const { fake, view } = await openShared({
+      [RUNTIME_PREVIEW]: () => agreeingPreview({ secrets: [] }),
+      [RUNTIME_APPLY]: () => ({ install: installRecord('mcp', 'acme-mcp'), notes: [] }),
+    });
+    await pickRuntime();
+    await tap('[data-catalog-preview]');
+    expect(q('[data-catalog-confirm]')).not.toBeNull();
+    expect(fake.calls.some(call => `${call.method} ${call.path}` === RUNTIME_APPLY)).toBe(false);
+    await tap('[data-catalog-install]');
+    expect(fake.calls.some(call => `${call.method} ${call.path}` === RUNTIME_APPLY)).toBe(true);
+    await view.unmount();
+  });
+});

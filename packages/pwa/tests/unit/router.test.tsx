@@ -15,7 +15,7 @@ import { interact, type Mounted, mount } from '../support/dom.ts';
 function RouterProbe() {
   const { route, navigate } = useRouter();
   const daemonId =
-    route.kind === 'connection-picker' || route.kind === 'setup'
+    route.kind === 'connection-picker' || route.kind === 'setup' || route.kind === 'join' || route.kind === 'shared'
       ? 'none'
       : route.kind === 'legacy-tasks-redirect' || route.kind === 'legacy-attention-redirect'
         ? route.to.daemonId

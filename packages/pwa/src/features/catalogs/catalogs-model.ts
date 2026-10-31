@@ -26,8 +26,7 @@ export const PUBLISH_COPY_NOTE = 'This freezes a new version. Copies people alre
 
 export const EXPORT_NOTE = 'The file is signed by this machine. Anyone you send it to can check that, offline.';
 
-export const CATALOG_NOT_SHARED_YET =
-  'A catalog is only a file for now. Nothing is sent anywhere until you send the file.';
+export const CATALOGS_INTRO = 'Add a catalog someone shared with you. Or share one of yours.';
 
 export const SHARING_OFF_TITLE = 'Sharing is off for this device';
 

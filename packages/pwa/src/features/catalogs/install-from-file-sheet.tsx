@@ -63,7 +63,16 @@ export interface InstallHost {
   readonly projects?: readonly { readonly name: string; readonly path: string }[];
 }
 
+/** An item a member already opened and verified from a publisher: the file chooser is skipped. */
+interface InstallSource {
+  readonly opened: OpenedCatalogFile;
+  readonly itemId: string;
+  /** The person's own name for the publisher. */
+  readonly publisherLabel: string;
+}
+
 export interface InstallFromFileSheetProps {
+  readonly source?: InstallSource;
   readonly connection: DaemonConnection;
   readonly onClose: () => void;
   readonly host?: InstallHost;
@@ -90,6 +99,7 @@ function InstallSheetBody({
   onClose,
   host,
   projects,
+  source,
 }: InstallFromFileSheetProps & { readonly projects: readonly Project[] }) {
   const routed = useDaemonClient();
   const createClient: CatalogClientFactory = host?.createClient ?? routed;
@@ -97,9 +107,9 @@ function InstallSheetBody({
   const fileId = useId();
   const input = useRef<HTMLInputElement>(null);
 
-  const [opened, setOpened] = useState<OpenedCatalogFile | null>(null);
+  const [opened, setOpened] = useState<OpenedCatalogFile | null>(source?.opened ?? null);
   const [fileProblem, setFileProblem] = useState<string | null>(null);
-  const [itemId, setItemId] = useState<string | null>(null);
+  const [itemId, setItemId] = useState<string | null>(source?.itemId ?? null);
   const [draft, setDraft] = useState<TargetDraft>({});
   const [runtimes, setRuntimes] = useState<TargetOptions['runtimes']>([]);
   const [allowOlder, setAllowOlder] = useState(false);
@@ -253,36 +263,45 @@ function InstallSheetBody({
     );
 
   return (
-    <CatalogSheet name="install" title="Install from a file" closeLabel="Close Install from a file" onClose={onClose}>
-      <div className="flex min-w-0 flex-col gap-1">
-        <label htmlFor={fileId} className="text-meta font-semibold text-muted">
-          Catalog file
-        </label>
-        <input
-          ref={input}
-          id={fileId}
-          type="file"
-          accept=".json,application/json"
-          className="sr-only"
-          disabled={busy}
-          onChange={event => void openFile(event.target.files?.[0])}
-          data-catalog-file-input=""
-        />
-        <Button
-          type="button"
-          variant="outline"
-          disabled={busy}
-          onClick={() => input.current?.click()}
-          data-catalog-pick-file=""
-        >
-          <FileUp size={16} aria-hidden="true" />
-          {opened === null ? 'Choose a .catalog.json file' : 'Choose another file'}
-        </Button>
-        <p className="m-0 text-meta text-faint">{FILE_LIMIT_NOTE}</p>
-      </div>
+    <CatalogSheet
+      name="install"
+      title={source === undefined ? 'Install from a file' : 'Install on a machine'}
+      closeLabel={source === undefined ? 'Close Install from a file' : 'Close Install on a machine'}
+      onClose={onClose}
+    >
+      {source === undefined ? (
+        <div className="flex min-w-0 flex-col gap-1">
+          <label htmlFor={fileId} className="text-meta font-semibold text-muted">
+            Catalog file
+          </label>
+          <input
+            ref={input}
+            id={fileId}
+            type="file"
+            accept=".json,application/json"
+            className="sr-only"
+            disabled={busy}
+            onChange={event => void openFile(event.target.files?.[0])}
+            data-catalog-file-input=""
+          />
+          <Button
+            type="button"
+            variant="outline"
+            disabled={busy}
+            onClick={() => input.current?.click()}
+            data-catalog-pick-file=""
+          >
+            <FileUp size={16} aria-hidden="true" />
+            {opened === null ? 'Choose a .catalog.json file' : 'Choose another file'}
+          </Button>
+          <p className="m-0 text-meta text-faint">{FILE_LIMIT_NOTE}</p>
+        </div>
+      ) : null}
       {fileProblem === null ? null : <FailureLine sentence={fileProblem} />}
       {opened === null ? null : (
         <OpenedFile
+          only={source?.itemId}
+          sharedBy={source?.publisherLabel}
           opened={opened}
           itemId={itemId}
           onItem={next => {
@@ -346,6 +365,8 @@ function InstallSheetBody({
 }
 
 function OpenedFile({
+  only,
+  sharedBy,
   opened,
   itemId,
   onItem,
@@ -356,6 +377,10 @@ function OpenedFile({
   busy,
   onPreview,
 }: {
+  /** The one item to list, when the item was already chosen. */
+  readonly only: string | undefined;
+  /** The person's own name for the publisher, when the item came from one. */
+  readonly sharedBy: string | undefined;
   readonly opened: OpenedCatalogFile;
   readonly itemId: string | null;
   readonly onItem: (itemId: string) => void;
@@ -366,8 +391,8 @@ function OpenedFile({
   readonly busy: boolean;
   readonly onPreview: () => void;
 }) {
-  const rows = fileItemRows(opened);
-  const withdrawn = withdrawnNote(opened);
+  const rows = fileItemRows(opened).filter(row => only === undefined || row.entry.itemId === only);
+  const withdrawn = only === undefined ? withdrawnNote(opened) : null;
   const legend = useId();
   return (
     <section className="flex min-w-0 flex-col gap-sm" aria-label="This file" data-catalog-file="">
@@ -383,6 +408,11 @@ function OpenedFile({
             full={opened.manifest.publisher}
           />
         </p>
+        {sharedBy === undefined ? null : (
+          <p className="m-0 break-words text-meta text-muted" data-catalog-shared-by="">
+            Shared with you as {sharedBy}.
+          </p>
+        )}
       </div>
       <fieldset className="m-0 flex min-w-0 flex-col gap-xs border-0 p-0" aria-labelledby={legend}>
         <legend id={legend} className="p-0 text-meta font-semibold text-muted">

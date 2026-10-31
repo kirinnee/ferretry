@@ -29,6 +29,7 @@ import {
 } from '../../../../src/features/context-rail/context-rail-ports.ts';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { type AppStore, StoreProvider } from '../../../../src/lib/store.tsx';
+import { chooseInstallFromFile } from '../../../support/catalog-add.ts';
 import { fakeClient } from '../../../support/catalog-client.ts';
 import { installRecord, ownedCatalog } from '../../../support/catalog-views.ts';
 import { interact, type Mounted, must } from '../../../support/dom.ts';
@@ -638,13 +639,13 @@ describe('ContextRailBody — catalogs', () => {
       </StoreProvider>,
     );
     await settle();
-    await click(root, '[data-catalog-install-from-file]');
+    await chooseInstallFromFile(root);
     expect(root.ownerDocument.querySelector('[data-catalog-sheet="install"]')).not.toBeNull();
   });
 
   it('shows no catalog tools at all when the host names no machine', async () => {
     const { root } = await body({ tab: 'skills' });
     expect(root.querySelector('[data-catalog-row-tools]')).toBeNull();
-    expect(root.querySelector('[data-catalog-install-from-file]')).toBeNull();
+    expect(root.querySelector('[data-catalog-add-entry]')).toBeNull();
   });
 });

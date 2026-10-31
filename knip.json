@@ -43,6 +43,8 @@
         "tests/integration/support/browser-tab-resolved-probe.tsx",
         "harness/sharing-capability-screenshot.tsx",
         "harness/catalogs-screenshot.tsx",
+        "harness/catalogs-share-screenshot.tsx",
+        "harness/shared-screenshot.tsx",
         "harness/screenshot.ts",
         "harness/agenda-cards-screenshot.ts",
         "harness/agenda-cards-page.tsx",

@@ -39,6 +39,7 @@
 import {
   type DeviceKeyRotation,
   MAX_TUNNEL_BODY_BYTES,
+  type MemberJoinedResponse,
   OLDER_APP_SENTENCE,
   OLDER_DAEMON_SENTENCE,
   type PairingResponse,
@@ -70,7 +71,11 @@ import {
   HEARTBEAT_REQUEST,
   HEARTBEAT_RESPONSE,
   MAX_PLAINTEXT_BYTES,
+  MemberJoinOutcomeSchema,
   maySend,
+  memberAuthMessage,
+  memberJoinMessage,
+  memberRenewMessage,
   newReceiveWindow,
   newSendWindow,
   openChannel,
@@ -271,6 +276,8 @@ export const RelayTunnelDaemonMessageSchema = z.union([
     }),
     StreamCloseSchema,
   ]),
+  // A join's sealed outcome is the member API's own record, padded to one size (`padJoinOutcome`).
+  ...MemberJoinOutcomeSchema.options,
   DataTextSchema,
   DataBytesSchema,
 ]);
@@ -291,6 +298,22 @@ export type RelayTunnelClientMessage =
       readonly code: string;
       readonly deviceName: string;
       readonly deviceKey: string;
+      readonly proof: string;
+    }
+  | {
+      readonly t: 'join';
+      readonly protocol: typeof SESSION_PROTOCOL_ID;
+      readonly code: string;
+      readonly clientName: string;
+      readonly memberKey: string;
+      readonly boxKey: string;
+      readonly proof: string;
+    }
+  | {
+      readonly t: 'member';
+      readonly protocol: typeof SESSION_PROTOCOL_ID;
+      readonly keyId: string;
+      readonly appSession: string;
       readonly proof: string;
     }
   | {
@@ -386,6 +409,21 @@ export type RelaySessionMode =
       readonly publicKey: string;
       readonly key: PrivateKeyHandle;
     }
+  /**
+   * A join session: one share code redeemed, one sealed outcome (`joined` or the generic `join-refused`),
+   * then the session closes. Carries the MEMBER key being registered, never a device key.
+   */
+  | {
+      readonly kind: 'join';
+      readonly code: string;
+      readonly clientName: string;
+      /** The member Ed25519 SPKI and the X25519 box key being registered, as base64url text. */
+      readonly memberKey: string;
+      readonly boxKey: string;
+      readonly key: PrivateKeyHandle;
+    }
+  /** A member request session: the member route table (`/v1/shared/*`) and nothing else. */
+  | { readonly kind: 'member'; readonly member: SessionMemberClaim }
   /** A stream session: exactly one protocol-switching stream, opened by the credential record itself. */
   | {
       readonly kind: 'stream';
@@ -399,6 +437,13 @@ export interface SessionDeviceClaim {
   readonly deviceId: string;
   readonly key: PrivateKeyHandle;
   /** Random per page load; a step-up the daemon grants belongs to one of these. */
+  readonly appSession: string;
+}
+
+/** Which member key proves this session, the key that proves it, and the running copy of the app it is. */
+export interface SessionMemberClaim {
+  readonly keyId: string;
+  readonly key: PrivateKeyHandle;
   readonly appSession: string;
 }
 
@@ -448,6 +493,26 @@ export class RelayPairingRefusedError extends Error {
     // The remedy is the direct route's own, because the cause is deliberately unknowable here.
     super('this pairing code is wrong, expired or already spent');
     this.name = 'RelayPairingRefusedError';
+  }
+}
+
+/** What a join session produced, once the sealed outcome has been latched. */
+export type RelayJoinOutcome = { readonly kind: 'joined'; readonly response: MemberJoinedResponse };
+
+/** The one reason a join is refused with. One sentence for every cause: a used, expired, ended or unknown link. */
+export const JOIN_REFUSED_REASON = 'join_refused' as const;
+
+/**
+ * The publisher refused this join, inside the channel — a RESULT, not a transport failure.
+ *
+ * Final for this attempt, like {@link RelayPairingRefusedError}: another carrier would only spend another
+ * attempt to be told the same thing, and the cause is deliberately unknowable here.
+ */
+export class RelayJoinRefusedError extends Error {
+  readonly reason = JOIN_REFUSED_REASON;
+  constructor() {
+    super('this share link is wrong, expired, used up or ended');
+    this.name = 'RelayJoinRefusedError';
   }
 }
 
@@ -531,6 +596,28 @@ const credentialRecord = async (
   mode: RelaySessionMode,
   transcript: Uint8Array,
 ): Promise<RelayTunnelClientMessage> => {
+  if (mode.kind === 'join')
+    return {
+      t: 'join',
+      protocol: SESSION_PROTOCOL_ID,
+      code: mode.code,
+      clientName: mode.clientName,
+      memberKey: mode.memberKey,
+      boxKey: mode.boxKey,
+      proof: await signDeviceProof(crypto, mode.key, memberJoinMessage(transcript, mode.memberKey, mode.boxKey)),
+    };
+  if (mode.kind === 'member')
+    return {
+      t: 'member',
+      protocol: SESSION_PROTOCOL_ID,
+      keyId: mode.member.keyId,
+      appSession: mode.member.appSession,
+      proof: await signDeviceProof(
+        crypto,
+        mode.member.key,
+        memberAuthMessage(transcript, mode.member.keyId, mode.member.appSession),
+      ),
+    };
   if (mode.kind === 'pair')
     return {
       t: 'pair',
@@ -650,6 +737,9 @@ export class RelayClientSession {
   #settlePairing: ((outcome: RelayPairingOutcome) => void) | undefined;
   #refusePairing: ((reason: Error) => void) | undefined;
   readonly #pairing: Promise<RelayPairingOutcome>;
+  #settleJoin: ((outcome: RelayJoinOutcome) => void) | undefined;
+  #refuseJoin: ((reason: Error) => void) | undefined;
+  readonly #joining: Promise<RelayJoinOutcome>;
   /**
    * How the stream ended, once it has. `undefined` while it is still running.
    *
@@ -693,6 +783,11 @@ export class RelayClientSession {
     // always awaits `ready()`, and this keeps a refusal that arrives first quiet.
     this.#ready.catch(() => undefined);
     this.#pairing.catch(() => undefined);
+    this.#joining = new Promise<RelayJoinOutcome>((resolve, reject) => {
+      this.#settleJoin = resolve;
+      this.#refuseJoin = reject;
+    });
+    this.#joining.catch(() => undefined);
   }
 
   /**
@@ -717,6 +812,16 @@ export class RelayClientSession {
    */
   paired(): Promise<RelayPairingOutcome> {
     return this.#pairing;
+  }
+
+  /**
+   * The sealed outcome of a join session.
+   *
+   * Rejects with `RelayJoinRefusedError` when the publisher refused inside the channel, and with a
+   * `RelaySessionError` when nothing reached it at all: the two facts a client keeps apart.
+   */
+  joined(): Promise<RelayJoinOutcome> {
+    return this.#joining;
   }
 
   /** True only while the session is keyed, authenticated and has not been refused. */
@@ -968,7 +1073,7 @@ export class RelayClientSession {
     // record whose arrival a close could destroy the meaning of: its answers are per-request and a
     // close genuinely ends it, so deferring there would delay every ordinary teardown by a microtask
     // to protect nothing. The hazard §14 legislates against is specific to pairing and streams.
-    if (this.#receiving > 0 && this.deps.mode.kind !== 'auth') {
+    if (this.#receiving > 0 && this.deps.mode.kind !== 'auth' && this.deps.mode.kind !== 'member') {
       this.#deferredClose ??= { code, reason };
       return;
     }
@@ -1281,8 +1386,11 @@ export class RelayClientSession {
     const mode = this.deps.mode;
     // Unreachable rather than refused: only a serving or streaming session reads a `renew`, and both
     // are keyed and hold a device. The guard is the type system's, so nothing below assumes it.
-    if (transcript === undefined || mode.kind === 'pair') return;
-    const proof = await signDeviceProof(this.deps.crypto, mode.device.key, deviceRenewMessage(transcript, nonce));
+    if (transcript === undefined || mode.kind === 'pair' || mode.kind === 'join') return;
+    const proof =
+      mode.kind === 'member'
+        ? await signDeviceProof(this.deps.crypto, mode.member.key, memberRenewMessage(transcript, nonce))
+        : await signDeviceProof(this.deps.crypto, mode.device.key, deviceRenewMessage(transcript, nonce));
     if (this.#done()) return;
     this.#sendRecord({ t: 'renewed', protocol: SESSION_PROTOCOL_ID, proof });
   }
@@ -1332,7 +1440,21 @@ export class RelayClientSession {
    */
   #onAcceptance(message: RelayTunnelDaemonMessage): void {
     const mode = this.deps.mode.kind;
-    if (mode === 'auth') {
+    if (mode === 'join') {
+      if (message.t === 'joined') {
+        this.#conclude();
+        this.#settleJoin?.({ kind: 'joined', response: message.response });
+        return;
+      }
+      if (message.t === 'join-refused') {
+        this.#conclude();
+        this.#refuseJoin?.(new RelayJoinRefusedError());
+        return;
+      }
+      this.#fail(RELAY_CLOSE_CODES.protocolError, 'the publisher did not answer this join');
+      return;
+    }
+    if (mode === 'auth' || mode === 'member') {
       if (message.t !== 'authenticated') {
         this.#fail(RELAY_CLOSE_CODES.protocolError, 'the daemon did not accept this device before answering');
         return;
@@ -1621,6 +1743,7 @@ export class RelayClientSession {
     // A pairing session's caller is waiting on `paired()`, not on `ready()`. Settling only the one
     // it is not holding would leave it waiting forever on a session that is already over.
     this.#refusePairing?.(failure);
+    this.#refuseJoin?.(failure);
     // A stream that dies without a sealed close still ENDED, and its consumer is entitled to know
     // in the same shape as an orderly close. `1006` is the browser's own word for "abnormally, with
     // no close frame", which is exactly what this is.

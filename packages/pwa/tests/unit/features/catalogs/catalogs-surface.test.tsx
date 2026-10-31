@@ -4,6 +4,7 @@ import { CatalogsSurface } from '../../../../src/features/catalogs/catalogs-surf
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { fakeClient } from '../../../support/catalog-client.ts';
 import { CATALOG, DIGEST, ITEM, itemPreview, ownedCatalog } from '../../../support/catalog-views.ts';
+import { chooseInstallFromFile } from '../../../support/catalog-add.ts';
 import { click, settle, typeInto } from '../../../support/dom-form.ts';
 import { mount } from '../../../support/dom.ts';
 
@@ -94,7 +95,8 @@ describe('CatalogsSurface list', () => {
       },
     });
     expect(q('[data-sharing-off]')).not.toBeNull();
-    expect(q('[data-catalogs-install-from-file]')).toBeNull();
+    expect(q('[data-catalog-more]')).toBeNull();
+    expect(q('[data-catalog-link-input]')).not.toBeNull();
     await view.unmount();
   });
 
@@ -115,7 +117,7 @@ describe('CatalogsSurface list', () => {
 
   it('opens the install sheet', async () => {
     const { view } = await open({ 'GET /v1/catalogs': () => ({ catalogs: [] }) });
-    await tap('[data-catalogs-install-from-file]');
+    await chooseInstallFromFile();
     expect(q('[data-catalog-sheet]')).not.toBeNull();
     await view.unmount();
   });
@@ -292,6 +294,27 @@ describe('CatalogsSurface detail', () => {
     expect(q('[data-catalog-landed]')?.textContent).toContain('version 2');
     await tap('[data-catalog-done]');
     expect(q('[data-catalog-sheet]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('opens People and codes from the list and comes back', async () => {
+    const { view } = await open(
+      both({ 'GET /v1/catalog-members': () => ({ members: [] }), 'GET /v1/catalog-shares': () => ({ shares: [] }) }),
+    );
+    await tap('[data-catalogs-people]');
+    expect(q('[data-catalog-members]')).not.toBeNull();
+    await tap('[data-members-back]');
+    expect(q('[data-catalogs-list]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('opens the share sheet from a catalog and closes it', async () => {
+    const { view } = await open(both({ 'GET /v1/catalog-members': () => ({ members: [] }) }));
+    await tap('[data-catalog-open]');
+    await tap('[data-catalog-share]');
+    expect(q('[data-catalog-sheet="share"]')).not.toBeNull();
+    await tap('[aria-label="Close the share sheet"]');
+    expect(q('[data-catalog-sheet="share"]')).toBeNull();
     await view.unmount();
   });
 

@@ -292,3 +292,7 @@ packages/pwa/src/lib/item-conversation.ts # the Inbox item's History read, used 
 packages/pwa/src/lib/board-side-view.ts # the in-ferret Tasks tab's Kanban/List choice, reached from chat-tasks.tsx ← session-chat-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/features/queue-view/queue-action.ts # the Find/Cmd-K Message queue destination, used by App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/lib/queue-view.ts # the queue page's row and group model, used by queue-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
+
+# The member app (catalogs 2c), imported only from the .tsx app tree that the gate does not root.
+packages/pwa/src/features/shared/shared-screens-model.ts # the member screens' sentences and rules, used by join-screen.tsx and shared-with-me.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
+packages/pwa/src/features/shared/use-clock.ts # the join screen's passkey countdown clock, used by join-screen.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots

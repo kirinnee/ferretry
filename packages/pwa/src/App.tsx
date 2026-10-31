@@ -87,6 +87,9 @@ import { usePackSessionActions } from './features/pack/pack-session-actions.tsx'
 import { PACK_SETTINGS_TAB } from './features/pack/pack-settings.tsx';
 import { DeviceRefusedNotice } from './features/pairing/device-refused-notice.tsx';
 import { PairingScreen } from './features/pairing/pairing-screen.tsx';
+import { JoinScreen } from './features/shared/join-screen.tsx';
+import { SharedEntry } from './features/shared/shared-entry.tsx';
+import { SharedWithMe } from './features/shared/shared-with-me.tsx';
 import { ProjectDetailPage } from './features/projects/project-detail.tsx';
 import { LaneEditorPage } from './features/projects/lane-editor.tsx';
 import { ProjectsPage } from './features/projects/projects-page.tsx';
@@ -215,10 +218,12 @@ import {
   daemonBoardForFerretPath,
   daemonSettingsPath,
   daemonWardenPath,
+  isDaemonless,
   type PageRoute,
   parseRoute,
   routePageKey,
   setupPath,
+  sharedPath,
 } from './lib/pages/routes.ts';
 import { SessionChatPage } from './lib/pages/session-chat-page.tsx';
 import { WardenPage } from './lib/pages/warden-page.tsx';
@@ -460,6 +465,8 @@ const usePairedMachineNotifications = (onChanged?: () => void) => {
 const pageCrumbs = (route: PageRoute): readonly Crumb[] => {
   if (route.kind === 'connection-picker') return [{ label: 'Daemons' }];
   if (route.kind === 'setup') return [{ label: 'Set up' }];
+  if (route.kind === 'join') return [{ label: 'Join' }];
+  if (route.kind === 'shared') return [{ label: 'Shared with me' }];
   const sessions = daemonSessionsPath(route.daemonId);
   switch (route.kind) {
     case 'sessions':
@@ -546,8 +553,14 @@ export const browserQrScan = (): QrScanHost | null => {
   return host.supported ? host : null;
 };
 
-/** The pairing link this tab was opened with, if it was opened with one. */
-const arrivalFromLocation = (): PairingArrival => pairingArrival(window.location.href);
+/**
+ * The pairing link this tab was opened with, if it was opened with one.
+ *
+ * A share link carries the same `#v1;url=…;fp=…` fragment grammar as a pairing link, so the PATH decides:
+ * `/join` is never a pairing arrival, however its fragment reads.
+ */
+const arrivalFromLocation = (): PairingArrival =>
+  parseRoute(window.location.pathname).kind === 'join' ? { kind: 'none' } : pairingArrival(window.location.href);
 
 /**
  * The one-time code leaves the address bar as soon as a screen holds it, so it
@@ -587,44 +600,83 @@ function ConnectionPicker() {
   const scanHost = useMemo(browserQrScan, []);
   const takeArrival = useCallback(takeArrivalFromLocation, []);
   return (
-    <PairingScreen
-      arrival={arrival}
-      scanHost={scanHost}
-      onArrivalTaken={takeArrival}
-      connections={snapshot.connections}
-      selectedDaemonId={snapshot.selectedDaemonId}
-      onPair={async (seed, deviceName) => {
-        const connection = await store.pair(seed, deviceName);
-        // A machine that is not set up opens its first run straight away; anything else, its sessions.
-        navigate(
-          await landingAfterPairing(store.connections.select(connection.daemonId), daemon =>
-            store.clients.client(daemon),
-          ),
-        );
-      }}
-      onSelect={daemonId => {
-        store.connections.select(daemonId);
-        navigate(daemonSessionsPath(daemonId));
-      }}
-      onRemove={daemonId => {
-        store.connections.remove(daemonId);
-      }}
-      /*
-       * ADDING A MACHINE REPLAYS THE WHOLE THING.
-       *
-       * Somebody here has a working pairing, so their stored progress says
-       * "finished" — for a DIFFERENT host. Every new machine is a first-time
-       * setup for that machine: it needs the install, the daemon, the carrier
-       * choice and the pairing again, and resuming the last screen of a journey
-       * they completed for a laptop is the one thing that cannot help them. So
-       * the place is forgotten first, and the setup route opens on its question.
-       */
-      onOpenSetup={() => {
-        resetOnboardingProgress();
-        navigate(setupPath());
-      }}
+    <>
+      <PairingScreen
+        arrival={arrival}
+        scanHost={scanHost}
+        onArrivalTaken={takeArrival}
+        connections={snapshot.connections}
+        selectedDaemonId={snapshot.selectedDaemonId}
+        onPair={async (seed, deviceName) => {
+          const connection = await store.pair(seed, deviceName);
+          // A machine that is not set up opens its first run straight away; anything else, its sessions.
+          navigate(
+            await landingAfterPairing(store.connections.select(connection.daemonId), daemon =>
+              store.clients.client(daemon),
+            ),
+          );
+        }}
+        onSelect={daemonId => {
+          store.connections.select(daemonId);
+          navigate(daemonSessionsPath(daemonId));
+        }}
+        onRemove={daemonId => {
+          store.connections.remove(daemonId);
+        }}
+        /*
+         * ADDING A MACHINE REPLAYS THE WHOLE THING.
+         *
+         * Somebody here has a working pairing, so their stored progress says
+         * "finished" — for a DIFFERENT host. Every new machine is a first-time
+         * setup for that machine: it needs the install, the daemon, the carrier
+         * choice and the pairing again, and resuming the last screen of a journey
+         * they completed for a laptop is the one thing that cannot help them. So
+         * the place is forgotten first, and the setup route opens on its question.
+         */
+        onOpenSetup={() => {
+          resetOnboardingProgress();
+          navigate(setupPath());
+        }}
+      />
+      <SharedEntry members={store.members} onOpen={() => navigate(sharedPath())} />
+    </>
+  );
+}
+
+/** /join: the share link's page. The fragment is read once and leaves the address bar at once. */
+function JoinRoute() {
+  const store = useAppStore();
+  const { navigate } = useRouter();
+  const [fragment] = useState(() => window.location.hash);
+  // `replaceState`, not `pushState`: Back must not restore the one-time code. Done after the first paint
+  // holds it, so a double render in development cannot read an address already emptied.
+  useEffect(takeArrivalFromLocation, []);
+  const now = useCallback(() => new Date(), []);
+  return (
+    <JoinScreen
+      members={store.members}
+      fragment={fragment}
+      now={now}
+      onShared={() => navigate(sharedPath())}
+      onHome={() => navigate(connectionPickerPath())}
     />
   );
+}
+
+/** /shared: what other people share with this browser, and the machines it can install them on. */
+function SharedRoute() {
+  const store = useAppStore();
+  const { connections } = useConnectionSnapshot();
+  const { navigate } = useRouter();
+  const machines = useMemo(
+    () =>
+      connections.map(record => ({
+        connection: record,
+        name: distinctDaemonName(record, connections),
+      })),
+    [connections],
+  );
+  return <SharedWithMe members={store.members} machines={machines} onHome={() => navigate(connectionPickerPath())} />;
 }
 
 /**
@@ -703,51 +755,54 @@ function SetupGuide() {
     };
   }, [store]);
   return (
-    <OnboardingPage
-      progress={progress}
-      write={clipboardWriter}
-      channel={channel}
-      fleetReady={selected !== null}
-      fallback={fallback}
-      /*
-       * THE ORIGIN IS A RUNTIME FACT, NEVER A BUILD CONSTANT. A hand-off link
-       * is built from the address this page was actually served from — there is
-       * no hosted address in this bundle, and anyone may deploy it themselves.
-       */
-      href={window.location.href}
-      share={browserSetupShare()}
-      onOpenFleet={() => {
-        // The selected daemon IS the one just paired: adding a connection
-        // selects it. Never a hardcoded prefix — the app's own route helper.
-        // A machine that is not set up opens its first run instead of its sessions.
-        if (selected !== null)
-          void landingAfterPairing(store.connections.select(selected), daemon => store.clients.client(daemon)).then(
-            navigate,
-          );
-      }}
-      renderPairing={({ onPaired, onStatedFailure }) => (
-        <PairingScreen
-          embedded
-          onStatedFailure={onStatedFailure}
-          arrival={arrival}
-          scanHost={scanHost}
-          onArrivalTaken={takeArrival}
-          connections={snapshot.connections}
-          selectedDaemonId={selected}
-          onPair={async (seed, deviceName) => {
-            await store.pair(seed, deviceName);
-            onPaired();
-          }}
-          onSelect={daemonId => {
-            store.connections.select(daemonId);
-            navigate(daemonSessionsPath(daemonId));
-          }}
-          onRemove={daemonId => {
-            store.connections.remove(daemonId);
-          }}
-        />
-      )}
-    />
+    <>
+      <OnboardingPage
+        progress={progress}
+        write={clipboardWriter}
+        channel={channel}
+        fleetReady={selected !== null}
+        fallback={fallback}
+        /*
+         * THE ORIGIN IS A RUNTIME FACT, NEVER A BUILD CONSTANT. A hand-off link
+         * is built from the address this page was actually served from — there is
+         * no hosted address in this bundle, and anyone may deploy it themselves.
+         */
+        href={window.location.href}
+        share={browserSetupShare()}
+        onOpenFleet={() => {
+          // The selected daemon IS the one just paired: adding a connection
+          // selects it. Never a hardcoded prefix — the app's own route helper.
+          // A machine that is not set up opens its first run instead of its sessions.
+          if (selected !== null)
+            void landingAfterPairing(store.connections.select(selected), daemon => store.clients.client(daemon)).then(
+              navigate,
+            );
+        }}
+        renderPairing={({ onPaired, onStatedFailure }) => (
+          <PairingScreen
+            embedded
+            onStatedFailure={onStatedFailure}
+            arrival={arrival}
+            scanHost={scanHost}
+            onArrivalTaken={takeArrival}
+            connections={snapshot.connections}
+            selectedDaemonId={selected}
+            onPair={async (seed, deviceName) => {
+              await store.pair(seed, deviceName);
+              onPaired();
+            }}
+            onSelect={daemonId => {
+              store.connections.select(daemonId);
+              navigate(daemonSessionsPath(daemonId));
+            }}
+            onRemove={daemonId => {
+              store.connections.remove(daemonId);
+            }}
+          />
+        )}
+      />
+      <SharedEntry members={store.members} onOpen={() => navigate(sharedPath())} />
+    </>
   );
 }
 
@@ -2232,6 +2287,8 @@ function ProjectLanesRoute({ connection, projectId }: ProjectDetailPageProps) {
 const PAGE_SLOTS: PageHostSlots = {
   ConnectionPicker,
   Setup: SetupGuide,
+  Join: JoinRoute,
+  Shared: SharedRoute,
   Sessions: SessionsRoute,
   NewSession: NewSessionRoute,
   Projects: ProjectsRoute,
@@ -2289,10 +2346,9 @@ export function AppShell() {
   const { route, navigate, entryKey } = useRouter();
   const pageRoute: PageRoute =
     route.kind === 'legacy-tasks-redirect' || route.kind === 'legacy-attention-redirect' ? route.to : route;
-  const connection =
-    pageRoute.kind === 'connection-picker' || pageRoute.kind === 'setup'
-      ? undefined
-      : connectionSnapshot.connections.find(candidate => candidate.daemonId === pageRoute.daemonId);
+  const connection = isDaemonless(pageRoute)
+    ? undefined
+    : connectionSnapshot.connections.find(candidate => candidate.daemonId === pageRoute.daemonId);
   // The machine on screen tells this browser when its configuration moves, so no screen showing it
   // needs a reload to see a change made anywhere else. See `useConfigChangeFeed`.
   useConfigChangeFeed(store, connection);
@@ -2373,10 +2429,7 @@ export function AppShell() {
    * picker, which name none — the one just paired or chosen. Every other machine's background reads wait
    * for it, and the machine list shows them locked, rather than raising a prompt over this machine's page.
    */
-  const onScreen =
-    pageRoute.kind === 'connection-picker' || pageRoute.kind === 'setup'
-      ? connectionSnapshot.selectedDaemonId
-      : pageRoute.daemonId;
+  const onScreen = isDaemonless(pageRoute) ? connectionSnapshot.selectedDaemonId : pageRoute.daemonId;
   useEffect(() => {
     store.stepUp.focus(onScreen);
     store.unlockGate.focus(onScreen);
@@ -2692,6 +2745,18 @@ export function AppShell() {
     content = (
       <div className="kt-shell overflow-y-auto">
         <SetupGuide />
+      </div>
+    );
+  } else if (effectiveRoute.kind === 'join') {
+    content = (
+      <div className="kt-shell overflow-y-auto">
+        <JoinRoute />
+      </div>
+    );
+  } else if (effectiveRoute.kind === 'shared') {
+    content = (
+      <div className="kt-shell overflow-y-auto">
+        <SharedRoute />
       </div>
     );
   } else if (effectiveRoute.kind === 'connection-picker') {
