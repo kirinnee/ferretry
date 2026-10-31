@@ -371,11 +371,14 @@ export class BrowserSessionService implements BrowserSubsystem {
     sessionId: string,
     key: string,
     work: (copy: BrowserCopyPort, pageId: string) => Promise<T>,
+    guard?: BrowserActGuard,
   ): Promise<T> {
     await this.requireSession(sessionId);
     const run = this.requireRunning();
     const page = this.requirePage(run, sessionId, key);
     return await this.exclusive(page.id, async () => {
+      // The same in-queue check an agent's act gets: a takeover or a hold that landed while the copy waited wins.
+      await guard?.(this.guardPage(run, page.id));
       this.touch(run);
       return await work(run.driver, page.id);
     });

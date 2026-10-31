@@ -143,6 +143,15 @@ describe('reading a page element for a secure copy', () => {
     should(reads).eql(cases.map(() => ({ ok: false, reason: 'empty' })));
   });
 
+  it('should answer changed, and no value, when the page moved to another document while it was read', async () => {
+    const { subject } = page();
+    const documents = ['loader-7', 'loader-8'];
+
+    const read = await readCopyElement(subject, async () => ({ navigationId: documents.shift() ?? '' }), REF, 'text');
+
+    should(read).eql({ ok: false, reason: 'changed' });
+  });
+
   it('should cut a huge value one character over the cap, so the daemon refuses it without carrying it all', async () => {
     const { subject } = page({ element: { innerText: 'x'.repeat(COPY_VALUE_MAX_BYTES * 4) } });
 

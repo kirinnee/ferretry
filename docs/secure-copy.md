@@ -38,11 +38,11 @@ a field for the value; a protocol test walks every schema to keep it that way.
 
 ## Capturing
 
-| Source      | What the daemon does                                                                                                                                                                                                                                                                                              | State |
-| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
-| `command`   | Runs `argv` with **no shell**, in the session's folder (or `cwd`), through the secret store's child runner: an allowlisted environment (no admin token, none of the daemon's own secrets), stdin closed, a timeout (30 s, 60 s at most) and a byte cap. Stdout, trimmed unless `trim: false`, is the value.       | live  |
-| `browser`   | Reads one element of a page the agent opened or was handed (not one taken over), by `ref` or `selector`, in the page's own queue: its text, a field's value or one attribute. White space around it is dropped. Its origin is the FRAME's the element is in, and the browser names the document it was read from. | live  |
-| `clipboard` | Reads the agent browser's clipboard for that page's origin, after the agent pressed the page's own Copy button. Never this computer's system clipboard, so only in a headless browser.                                                                                                                            | SC3c  |
+| Source      | What the daemon does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | State |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----- |
+| `command`   | Runs `argv` with **no shell**, in the session's folder (or `cwd`), through the secret store's child runner: an allowlisted environment (no admin token, none of the daemon's own secrets), stdin closed, a timeout (30 s, 60 s at most) and a byte cap. Stdout, trimmed unless `trim: false`, is the value.                                                                                                                                                                                                                                                                          | live  |
+| `browser`   | Reads one element of a page the agent opened or was handed (not one taken over), by `ref` or `selector`, in the page's own queue: its text, a field's value or one attribute. White space around it is dropped. Its origin is the FRAME's the element is in, and the browser names the document it was read from (a page that navigated mid-read copies nothing). Inside the queue it is checked like a page read first (a takeover, a pending value, the owner's hold refuse it), and masked and held before the queue moves on. A field's value is `editable`: no rule matches it. | live  |
+| `clipboard` | Reads the agent browser's clipboard for that page's origin, after the agent pressed the page's own Copy button. Never this computer's system clipboard, so only in a headless browser.                                                                                                                                                                                                                                                                                                                                                                                               | SC3c  |
 
 A capture is refused, and nothing is held, when the command fails, times out, prints nothing, prints fewer
 than 4 characters (too short to mask without masking it everywhere by chance), or prints more than 16 KiB on
@@ -76,7 +76,10 @@ run the 10 minutes from then. That masks it in:
 
 - the agent's `terminal.read` and `terminal.wait`, and the live terminal viewer;
 - the owner's screen, transcript, journal and process reads;
-- a command copy's own stderr.
+- a command copy's own stderr;
+- a page read, as the page snapshot lays it out: the value's white space collapsed, each of its lines long enough
+  to mask on its own (a list of recovery codes, a key's lines), and each escaped as a JSON or YAML string would. A
+  page result passes the mask once more as it leaves, so a read that ran while a copy sealed is masked too.
 
 - **The page a copy was read from is not pictured** while it still shows that document: `browser.screenshot`,
   `browser.pdf` and `browser.highlight` are refused there (no mask can be drawn on pixels), through the same page
@@ -85,7 +88,11 @@ run the 10 minutes from then. That masks it in:
   copy's mask ending) lifts it. A page whose document cannot be told is treated as still showing it.
 - A screenshot of ANOTHER page that shows a held value is the next phase (SC3c): it will be **withheld**, not
   pixel-masked. **GAP until then:** a page can draw the value where masking cannot see it (a canvas, an image),
-  and another page that shows it can be pictured.
+  another page that shows it can be pictured, and reloading the source page (a new document) lifts its hold while
+  it may show the value again.
+- **GAP: page scripts.** With scripts on, the agent can write any text into a page with `browser.eval`, so a rule
+  for a page's origin trusts what that page shows, which the agent may have put there. A field's value is never
+  matched by a rule for that reason; other text is, so keep page scripts off where a rule names a page.
 
 ### A value the agent had already seen
 
@@ -96,8 +103,9 @@ Masking cannot take back what the agent already read. So a capture says, honestl
   protected**: the agent is told so in plain words and should tell the owner to rotate it. `clean` means
   it was not found in what was read; `unknown` means the transcript could not be read.
 - **`exposure.pageReadBeforeCapture`**: the agent read, screenshotted or evaluated that very document of the
-  page before the copy (the daemon records the document after each such read), so the value may be in its
-  context already.
+  page before the copy, so the value may be in its context already. The daemon records the document INSIDE the
+  page's queue, before each such act (whether it then succeeds or not), and the copy asks after its own read, so
+  a read queued ahead of the copy counts.
 
 The agent instruction teaches the rule that makes this work: **capture before you read**.
 

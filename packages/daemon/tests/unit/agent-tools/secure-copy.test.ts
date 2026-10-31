@@ -434,7 +434,7 @@ describe('a person and secure.copy', () => {
 
 describe('copying from a page the agent opened', () => {
   /** The copy service and the page records over a fake page whose document the case moves on. */
-  function pageWorld() {
+  function pageWorld(options: { readonly heldByOwner?: boolean } = {}) {
     const clock = new ManualClock();
     const masking = new EphemeralValues(clock);
     const records = new PageCopyRecords(clock);
@@ -451,16 +451,20 @@ describe('copying from a page the agent opened', () => {
       masking,
       redact: async text => text,
       pages: {
-        read: async (_sessionId, key) => {
+        // As the page's queue runs it: the guard, the read, the seal.
+        read: async (_sessionId, key, _target, _part, _attribute, queue) => {
+          await queue.guard?.({ document: async () => page.document });
           page.asked.push(key);
-          return {
-            ok: true,
+          const found = {
+            ok: true as const,
             value: TOKEN,
             pageId: 'page-1',
             origin: 'https://github.com',
             frameOrigin: 'https://github.com',
             navigationId: page.document,
           };
+          queue.seal(found);
+          return found;
         },
       },
       pageHolds: records,
@@ -473,6 +477,10 @@ describe('copying from a page the agent opened', () => {
       pendingOn: () => undefined,
       exclusive: async (_sessionId, work) => await work(),
       pageDocument: async () => page.document,
+      // The owner's value was just typed into the page: its text is not read while it shows that document.
+      ...(options.heldByOwner === true
+        ? { pageHeld: () => ({ until: Date.parse('2026-10-31T12:02:00.000Z'), documents: ['loader-1'] }) }
+        : {}),
     };
     const tools = agentToolWorld({
       copy: copies,
@@ -542,6 +550,39 @@ describe('copying from a page the agent opened', () => {
 
     should(held.code).equal('conflict');
     should(held.message).containEql('Look at it in the browser view.');
+  });
+
+  it("should mask the copied value in a page read as it leaves, whatever the page's own text says", async () => {
+    const w = pageWorld();
+    await w.service.call(agent, { tool: 'browser.open', name: 'app' });
+    await w.service.call(agent, FROM_PAGE);
+    w.browser.readText = `Your new token: ${TOKEN}`;
+
+    const read = await w.service.call(agent, { tool: 'browser.read', name: 'app' });
+
+    should(JSON.stringify(read)).not.containEql(TOKEN);
+    should(JSON.stringify(read)).containEql('[sealed:gh]');
+  });
+
+  it("should refuse a copy inside the page's queue while the owner's value holds the page, reading nothing", async () => {
+    const w = pageWorld({ heldByOwner: true });
+    await w.service.call(agent, { tool: 'browser.open', name: 'app' });
+
+    const refusal = await refused(w.service.call(agent, FROM_PAGE));
+
+    should(refusal.code).equal('conflict');
+    should(w.page.asked).eql([]);
+    should(w.copies.list('s1')).eql([]);
+  });
+
+  it('should not count the copy itself as the agent reading the page', async () => {
+    const w = pageWorld();
+    await w.service.call(agent, { tool: 'browser.open', name: 'app' });
+
+    const result = await w.service.call(agent, FROM_PAGE);
+
+    should(result.copies?.[0]?.exposure.pageReadBeforeCapture).be.false();
+    should(w.records.seen('s1', ['app'])).eql([]);
   });
 
   it('should say the agent read the very document it then copied from', async () => {

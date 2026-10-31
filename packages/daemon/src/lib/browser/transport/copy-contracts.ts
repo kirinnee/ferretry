@@ -26,7 +26,7 @@ export type BrowserCopyRead =
       /** The document the value was read from: it changes with every navigation. */
       readonly navigationId: string;
     }
-  | { readonly ok: false; readonly reason: 'missing' | 'empty' };
+  | { readonly ok: false; readonly reason: 'missing' | 'empty' | 'changed' };
 
 export interface BrowserCopyPort {
   copyRead(

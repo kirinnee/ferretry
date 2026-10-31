@@ -10147,7 +10147,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       setInterval(
         asActivity(activities, 'secure-copies', async () => {
           secureCopies.purge();
-          for (const sessionId of secureCopies.sessions()) {
+          // Every session with a copy or a page record (one that read pages and never copied too); dropping its copies
+          // drops its page records.
+          for (const sessionId of new Set([...secureCopies.sessions(), ...copyPageRecords.sessions()])) {
             const id = tryParseSessionId(sessionId);
             const state =
               id === undefined || storage.findSession(id) === undefined

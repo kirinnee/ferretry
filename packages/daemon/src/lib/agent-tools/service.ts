@@ -299,7 +299,7 @@ export class AgentToolService {
       // must not read the shared profile's sign-ins through a script while the owner has them off.
       if (call.tool === 'browser.eval' && !(await this.ports.policy.allows('scripts')))
         throw new AgentToolError('forbidden', pageScriptsRefusal(this.ports.binaryName));
-      result = await this.dispatch(caller, call, facts);
+      result = this.remasked(caller, facts.surface, await this.dispatch(caller, call, facts));
       await this.record(caller, call, facts, 'succeeded');
     } catch (error) {
       const refusal = await this.heldOrMasked(caller, call.tool, facts.surface, translate(error) ?? error);
@@ -521,20 +521,26 @@ export class AgentToolService {
         const result = await this.act(caller, call, surface, facts);
         // A hold that began while the page was being read wins: what the read saw may hold the value.
         if (surface.surface === 'browser') await this.assertPageReadable(caller, call.tool, surface);
-        if (surface.surface === 'browser') await this.sawPage(caller, call.tool, surface);
         await this.drove(caller, call, surface);
         return result;
       }
     }
   }
 
-  /** An agent read, pictured or evaluated a page: a copy later read from that same document says the agent saw it. */
-  private async sawPage(caller: AgentToolCaller, tool: string, surface: ResolvedSurface): Promise<void> {
+  /**
+   * An agent is about to read, picture or evaluate a page: recorded INSIDE the page's queue, before the act, with
+   * the document it will see, so a copy queued behind it (asked afterwards) knows the agent may hold the value.
+   * Recorded whether the act then succeeds or not: an error can carry the page's words too.
+   */
+  private async sawPage(
+    caller: AgentToolCaller,
+    tool: string,
+    surface: ResolvedSurface,
+    page: { document(): Promise<string | undefined> },
+  ): Promise<void> {
     const pages = this.ports.copyPages;
     if (caller.kind !== 'agent' || pages === undefined || (!PAGE_TEXT.has(tool) && !PAGE_PICTURES.has(tool))) return;
-    const document = await this.ports.input
-      ?.pageDocument?.(caller.sessionId, surface.name ?? surface.id)
-      .catch(() => undefined);
+    const document = await page.document().catch(() => undefined);
     if (document !== undefined) pages.saw(caller.sessionId, [surface.name, surface.id], document);
   }
 
@@ -982,7 +988,13 @@ export class AgentToolService {
    * one is the boundary, because a request can be raised or a value typed while the act waits. It reads the page's
    * document from the browser it runs on, never by queueing behind itself.
    */
-  private browserGuard(caller: AgentToolCaller, surface: ResolvedSurface, tool?: string): BrowserActGuard | undefined {
+  private browserGuard(
+    caller: AgentToolCaller,
+    surface: ResolvedSurface,
+    tool?: string,
+    /** Whether the act reads the page for the AGENT (a copy's own read does not: the agent never sees it). */
+    reads = true,
+  ): BrowserActGuard | undefined {
     const gated =
       (this.ports.input !== undefined || this.ports.copyPages !== undefined) &&
       tool !== undefined &&
@@ -991,6 +1003,7 @@ export class AgentToolService {
     return async page => {
       if (caller.kind === 'agent') await this.assertFree(caller.sessionId, surface);
       if (gated) await this.guardPage(caller, tool, surface, async () => await page.document());
+      if (reads && tool !== undefined) await this.sawPage(caller, tool, surface, page);
     };
   }
 
@@ -1205,6 +1218,20 @@ export class AgentToolService {
   }
 
   /**
+   * A page's result passes the held-value mask once more on its way out: a value sealed by a copy while this read
+   * waited for, or ran in, the page's queue is masked in it too. A picture's bytes carry no text and are left alone.
+   */
+  private remasked(
+    caller: AgentToolCaller,
+    surface: ResolvedSurface | undefined,
+    result: AgentToolResult,
+  ): AgentToolResult {
+    const scrub = this.ports.scrub;
+    if (caller.kind !== 'agent' || surface?.surface !== 'browser' || scrub === undefined) return result;
+    return masked(result, text => scrub(caller.sessionId, text)) as AgentToolResult;
+  }
+
+  /**
    * A copy's capture. A page or its clipboard must be one of the agent's own pages (opened or handed, not taken
    * over), named by the key it is known by, and the copy is told which of the page's documents the agent has
    * already read: masking cannot take that back, so the copy says so.
@@ -1223,10 +1250,15 @@ export class AgentToolService {
     facts.surface = surface;
     await this.assertAgentMay(sessionId, surface);
     const key = surface.name ?? surface.id;
+    // Read as the page READ it is: inside the queue, a takeover, a pending value or the owner's hold refuses it.
+    const guard = this.browserGuard(caller, surface, 'browser.read', false);
     return await copy.capture(
       sessionId,
       { name: call.name, source: { ...call.source, key }, ...options },
-      { seenDocuments: this.ports.copyPages?.seen(caller.sessionId, [surface.name, surface.id]) ?? [] },
+      {
+        seen: () => this.ports.copyPages?.seen(caller.sessionId, [surface.name, surface.id]) ?? [],
+        ...(guard === undefined ? {} : { guard }),
+      },
     );
   }
 
@@ -2005,3 +2037,14 @@ const liveCopies = (count: number): string =>
 /** A copy's name as a call wrote it: `sealed:vercel` and `vercel` are one copy, whether or not the wire parsed it. */
 const bareCopyName = (handle: string): string =>
   handle.startsWith(COPY_HANDLE_PREFIX) ? handle.slice(COPY_HANDLE_PREFIX.length) : handle;
+
+/** Every string in a result, masked; a picture's base64 bytes are not text and pass as they are. */
+function masked(value: unknown, scrub: (text: string) => string): unknown {
+  if (typeof value === 'string') return scrub(value);
+  if (Array.isArray(value)) return value.map(item => masked(item, scrub));
+  // Only plain objects are walked: anything else (bytes, a class) is passed as it is.
+  if (value === null || typeof value !== 'object' || Object.getPrototypeOf(value) !== Object.prototype) return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [key, key === 'screenshotBase64' ? item : masked(item, scrub)]),
+  );
+}

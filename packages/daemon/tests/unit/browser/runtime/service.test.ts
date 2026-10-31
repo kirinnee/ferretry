@@ -905,11 +905,22 @@ describe('the machine agent browser — a page’s lifecycle', () => {
       copy.copyRead(pageId, { kind: 'ref', ref: 'e1' }, 'text'),
     );
     const refused = await failure(service.copyOnPage('s1', other.id, async () => 'reached'));
+    const guarded = await failure(
+      service.copyOnPage(
+        's1',
+        'app',
+        async () => 'reached',
+        async page => {
+          if ((await page.document()) !== undefined) throw new BrowserSessionError('conflict', 'held');
+        },
+      ),
+    );
 
     // Assert
     should(read).eql({ ok: false, reason: 'empty' });
     should(tabs.calls).containEql(`copyRead:${app.id}`);
     should(refused.code).equal('not_found');
+    should(guarded.code).equal('conflict');
   });
 
   it('should let a guard read, from inside the page queue, which document the page shows, or nothing when it cannot', async () => {

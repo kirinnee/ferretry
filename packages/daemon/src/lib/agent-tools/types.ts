@@ -113,7 +113,12 @@ export interface AgentCopyPort {
   capture(
     sessionId: string,
     request: CopyCapture,
-    context?: { readonly seenDocuments?: readonly string[] },
+    context?: {
+      /** The page's documents the agent has read, asked after the copy's read. */
+      readonly seen?: () => readonly string[];
+      /** Run inside the page's queue before the read: a takeover or a hold that landed meanwhile refuses it. */
+      readonly guard?: (page: { document(): Promise<string | undefined> }) => Promise<void>;
+    },
   ): Promise<{ readonly copy: CopyMeta; readonly command?: CopyCommandReport }>;
   list(sessionId: string): readonly CopyMeta[];
   discard(sessionId: string, name: CopyName): CopyMeta;

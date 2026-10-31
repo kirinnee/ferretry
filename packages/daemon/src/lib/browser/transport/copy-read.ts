@@ -28,9 +28,10 @@ const COPY_PROBE_TIMEOUT_MS = 1_000;
 /**
  * Reads one element's text, a field's value or one attribute, for a secure copy (copy-contracts.ts). Where it
  * was read is the browser's own answer: the page's and the frame's origin and `navigationId` (from `document`,
- * the same loader id the input bridge holds a page by), read BEFORE the value so a navigation in between is a
- * different document, not this one. A value is cut at one character over the cap: enough for the daemon to
- * refuse it as too long, never the whole of a huge one.
+ * the same loader id the input bridge holds a page by), read before AND after the value: a page that navigated
+ * in between answers `changed` and nothing, so a value is never filed under a document it was not read from. A
+ * value is cut at one character over the cap: enough for the daemon to refuse it as too long, never the whole
+ * of a huge one.
  */
 export async function readCopyElement(
   page: CopyablePage,
@@ -60,6 +61,7 @@ export async function readCopyElement(
       limit: COPY_VALUE_MAX_BYTES + 1,
     });
     if (typeof value !== 'string' || value === '') return { ok: false, reason: 'empty' };
+    if ((await document()).navigationId !== navigationId) return { ok: false, reason: 'changed' };
     return { ok: true, value, origin, frameOrigin, navigationId };
   } finally {
     await handle.dispose().catch(() => undefined);

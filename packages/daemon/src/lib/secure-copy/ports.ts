@@ -47,7 +47,20 @@ export type CopyPageRead =
       readonly frameOrigin: string;
       readonly navigationId: string;
     }
-  | { readonly ok: false; readonly reason: 'missing' | 'empty' };
+  | { readonly ok: false; readonly reason: 'missing' | 'empty' | 'changed' };
+
+/** Checks run INSIDE the page's queue before the read, given the page's current document: a refusal throws. */
+export type CopyPageGuard = (page: { document(): Promise<string | undefined> }) => Promise<void>;
+
+/**
+ * What a page read does inside the page's own queue, so nothing queued behind it runs first: the guard before the
+ * read, and `seal` right after a read that found a value, before the queue moves on (the value is masked and the
+ * page held there, so an act queued behind the copy already meets both).
+ */
+export interface CopyPageQueue {
+  readonly guard?: CopyPageGuard;
+  seal(read: Extract<CopyPageRead, { readonly ok: true }>): void;
+}
 
 /** The agent browser, as a page copy needs it. The page is the session's own; the agent tools checked it may act there. */
 export interface CopyPagePort {
@@ -56,13 +69,22 @@ export interface CopyPagePort {
     key: string,
     target: BrowserElementTarget,
     part: CopyElementPart,
-    attribute?: string,
+    attribute: string | undefined,
+    queue: CopyPageQueue,
   ): Promise<CopyPageRead>;
 }
 
 /** Where pictures of a page wait while it shows the document a value was copied from (`PageCopyRecords`). */
 export interface CopyPageHolds {
-  hold(sessionId: string, names: readonly (string | undefined)[], navigationId: string, until: number): void;
+  hold(
+    sessionId: string,
+    copy: string,
+    names: readonly (string | undefined)[],
+    navigationId: string,
+    until: number,
+  ): void;
+  /** A copy's mask now ends sooner (it was discarded): its holds end with it. */
+  retime(sessionId: string, copy: string, until: number): void;
   drop(sessionId: string): void;
 }
 

@@ -75,7 +75,7 @@ const COPY_READ_LIMITS = { origin: 256, navigationId: 128 } as const;
  */
 function parseCopyRead(raw: unknown): BrowserCopyRead {
   const read = (raw ?? {}) as Record<string, unknown>;
-  if (read.ok === false && (read.reason === 'missing' || read.reason === 'empty'))
+  if (read.ok === false && (read.reason === 'missing' || read.reason === 'empty' || read.reason === 'changed'))
     return { ok: false, reason: read.reason };
   const bounded = (value: unknown, limit: number): value is string =>
     typeof value === 'string' && value !== '' && value.length <= limit;
