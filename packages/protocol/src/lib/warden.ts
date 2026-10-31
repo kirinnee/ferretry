@@ -373,6 +373,11 @@ export const WardenAnomalyKindSchema = z.enum([
    * (`board-design.md` §3.3). Its `sessionId` is that ferret, its `task` the card.
    */
   'orphaned_card',
+  /**
+   * A sub-ferret whose parent's last message it has not answered, with its turn ended this long
+   * (`report-overdue.ts`). Its `sessionId` is the sub-ferret.
+   */
+  'report_overdue',
 ]);
 export type WardenAnomalyKind = z.infer<typeof WardenAnomalyKindSchema>;
 

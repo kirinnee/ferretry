@@ -124,6 +124,14 @@ import {
   wardenConfigWarnings,
   wardenDetectOptions,
 } from './config.ts';
+import {
+  recordWardenAsk,
+  recordWardenJevCheck,
+  recordWardenOutcome,
+  wardenAskActor,
+  wardenHistory,
+  withDailyRollup,
+} from './daily.ts';
 import type { WardenAnomaly, WardenDetectResult } from './detect.ts';
 import { detectAnomalies, fingerprintAnomalies, isWardenScannableStatus } from './detect.ts';
 import {
@@ -149,14 +157,7 @@ import {
   type WardenFailoverState,
 } from './failover.ts';
 import { blessingViews, investigationList, retainRecords, WARDEN_STATUS_LIST_LIMIT } from './feed.ts';
-import {
-  recordWardenAsk,
-  recordWardenJevCheck,
-  recordWardenOutcome,
-  wardenAskActor,
-  wardenHistory,
-  withDailyRollup,
-} from './daily.ts';
+import { type WardenFocusCard, wardenResumeMessage } from './focus-card.ts';
 import {
   capSkipKey,
   JEV_CHECKS_SHOWN,
@@ -169,9 +170,10 @@ import {
   rememberJevBefore,
   type WardenJevCheckLog,
 } from './jev-checks.ts';
-import { type WardenFocusCard, wardenResumeMessage } from './focus-card.ts';
 import { JEV_JUDGEMENT_QUESTIONS, jevFactScalars, jevFactsOf, reachableJudgements, treeResponse } from './jev-tree.ts';
 import { leftoverBrowserCandidates } from './leftovers.ts';
+import { REFLEX_NUDGE_MESSAGE } from './liveness.ts';
+import type { ReflexEvent } from './liveness-monitor.ts';
 import {
   detectOrphanedCards,
   type OrphanTold,
@@ -180,8 +182,6 @@ import {
   type WardenCardNotice,
 } from './orphans.ts';
 import { wardenOwnerRoutes } from './owner-routes.ts';
-import { REFLEX_NUDGE_MESSAGE } from './liveness.ts';
-import type { ReflexEvent } from './liveness-monitor.ts';
 import { buildAssignedWardenPrompt, buildWardenSweepPrompt, type WardenPromptSettings } from './prompt.ts';
 import {
   buildWardenSpawnProvenance,
@@ -199,17 +199,26 @@ import {
   wardenActDetail,
   wardenNudgeMessage,
 } from './remedy.ts';
+import {
+  detectOverdueReports,
+  type ExchangeSend,
+  type OverdueTold,
+  overdueCandidates,
+  type ParentExchange,
+  parentExchangeOf,
+  planOverdueReports,
+} from './report-overdue.ts';
 import type { WardenReviveService } from './revive-service.ts';
 import { resolveReviveWatch, watchRevive } from './revive-watch.ts';
 import {
-  parseWardenRuntimeState,
   jevHandoffKey,
+  parseWardenRuntimeState,
   recordJevHandoff,
-  type WardenJevHandoff,
   recordSweepFingerprint,
   spawnSuppressionKey,
   WARDEN_HISTORY_LIMIT,
   type WardenAssignmentRecord,
+  type WardenJevHandoff,
   type WardenQueueEntryMeta,
   type WardenRuntimeState,
   wardenMayStop,
@@ -222,14 +231,14 @@ import {
   forgetPassedOn,
   guardBackingOff,
   guardHealthAfter,
+  HOURLY_CAP_SHARE,
+  jevActsFor,
+  jevJudges,
+  jevWithinBudget,
   newFlagCount,
   passedOnKey,
   prunePassedOn,
   recordGuardDecision,
-  jevActsFor,
-  jevJudges,
-  jevWithinBudget,
-  HOURLY_CAP_SHARE,
   recordJevAction,
   redactTriageSnapshot,
   retractJevAction,
@@ -402,6 +411,12 @@ export interface WardenInvestigationCostReader {
  * The project boards, as the Warden reads them (`board-design.md` §3.4): the cards it reports orphaned, and
  * the card a ferret it starts again is told to carry on with. Every method is total.
  */
+/** The send ledgers, read-only: what a sub-ferret and its parent last sent each other (`report-overdue.ts`). */
+export interface WardenExchangeReader {
+  /** Every send a session was sent, the latest line of each. */
+  sends(sessionId: string): Promise<readonly ExchangeSend[]>;
+}
+
 export interface WardenBoardPort {
   /** Every card as the board derives it; `undefined` when the board could not be read. */
   read(): Promise<WardenBoardRead | undefined>;
@@ -440,6 +455,8 @@ export interface WardenSweepPorts {
   readonly revive?: WardenReviveService;
   /** The project boards. Absent: no card is reported orphaned, and a resumed ferret is told no card. */
   readonly board?: WardenBoardPort;
+  /** The send ledgers. Absent: no sub-ferret is reported overdue. */
+  readonly exchanges?: WardenExchangeReader;
   /** Jev's checks, one record each, kept beside the reports (`jev-checks.ts`). */
   readonly jevChecks: WardenJevCheckLog;
   /** Wall-clock milliseconds. */
@@ -1038,7 +1055,10 @@ export class WardenSweepService {
     // own. A card left for a week must not hold the recovery edge of every unrelated anomaly closed.
     const board = await this.readBoard();
     const orphans = board === undefined ? [] : detectOrphanedCards(board, fleet, nowMs);
-    const flagged = [...detected.anomalies, ...orphans];
+    // OVERDUE REPORTS, likewise beside them and never to Jev or an investigation: the rule is facts and its
+    // remedy a message (`report-overdue.ts`).
+    const overdue = await this.detectOverdue(fleet, nowMs);
+    const flagged = [...detected.anomalies, ...orphans, ...overdue.anomalies];
 
     let state = parseWardenRuntimeState(await this.ports.state.read());
     const today = triageDayFor(state.triageDay, nowMs);
@@ -1080,7 +1100,7 @@ export class WardenSweepService {
       force: options.force,
     });
     const priced = await this.priceInvestigations(escalated.state, fleet, at);
-    const final =
+    const told =
       board === undefined
         ? priced
         : await this.escalateOrphans({
@@ -1092,6 +1112,7 @@ export class WardenSweepService {
             at,
             force: options.force,
           });
+    const final = await this.escalateOverdue({ ...overdue, fleet, state: told, config, at, force: options.force });
     await this.ports.state.write(final);
 
     // LAST, and deliberately so. Everything above — detection, the report
@@ -1109,7 +1130,7 @@ export class WardenSweepService {
 
     return {
       sweptAt: at,
-      anomalies: [...anomalies, ...orphaned].map(wireAnomaly),
+      anomalies: [...anomalies, ...orphaned, ...overdue.anomalies].map(wireAnomaly),
       ...escalated.outcome,
       ...(assigned.spawned.length === 0 ? {} : { assignedWardens: [...assigned.spawned] }),
     };
@@ -2310,6 +2331,81 @@ export class WardenSweepService {
     }
     const { orphans: _previous, ...rest } = input.state;
     return Object.keys(memory).length === 0 ? rest : { ...rest, orphans: memory };
+  }
+
+  /**
+   * The sub-ferrets whose parent spoke last and whose turn has long ended (`report-overdue.ts`). Only the
+   * candidates' ledgers are read; one that cannot be read proves nothing this sweep.
+   */
+  private async detectOverdue(
+    fleet: readonly WardenFleetSession[],
+    nowMs: number,
+  ): Promise<{
+    readonly anomalies: readonly WardenAnomaly[];
+    readonly exchanges: ReadonlyMap<string, ParentExchange>;
+  }> {
+    const reader = this.ports.exchanges;
+    if (reader === undefined) return { anomalies: [], exchanges: new Map() };
+    const candidates = overdueCandidates(fleet, nowMs);
+    const exchanges = new Map<string, ParentExchange>();
+    for (const { child, parent } of candidates) {
+      const [childSends, parentSends] = await Promise.all([
+        reader.sends(child.config.id).catch(() => undefined),
+        reader.sends(parent.config.id).catch(() => undefined),
+      ]);
+      if (childSends === undefined || parentSends === undefined) continue;
+      exchanges.set(child.config.id, parentExchangeOf(childSends, parentSends, child.config.id, parent.config.id));
+    }
+    return { anomalies: detectOverdueReports(candidates, exchanges, nowMs), exchanges };
+  }
+
+  /**
+   * Nudge each overdue sub-ferret once, then tell its parent (`report-overdue.ts`). A message that could not
+   * be typed is journalled and not remembered, so the next sweep tries again.
+   */
+  private async escalateOverdue(input: {
+    readonly anomalies: readonly WardenAnomaly[];
+    readonly exchanges: ReadonlyMap<string, ParentExchange>;
+    readonly fleet: readonly WardenFleetSession[];
+    readonly state: WardenRuntimeState;
+    readonly config: WardenConfig;
+    readonly at: string;
+    readonly force: boolean;
+  }): Promise<WardenRuntimeState> {
+    const plan = planOverdueReports({
+      overdue: input.anomalies,
+      exchanges: input.exchanges,
+      fleet: input.fleet,
+      memory: input.state.overdue ?? {},
+      enabled: input.force || input.config.enabled,
+      mayNudge: input.config.mayActAlone.nudge,
+      clientName: this.settings.clientName,
+      nowMs: Date.parse(input.at),
+    });
+    const memory: Record<string, OverdueTold> = { ...plan.memory };
+    for (const tell of plan.tell) {
+      const typed = await this.ports.remedies.nudge(tell.sessionId, tell.message).then(
+        () => true,
+        () => false,
+      );
+      const child = tell.kind === 'nudge' ? tell.sessionId : tell.child;
+      if (!typed) {
+        this.ports.journal.record('fleet.warden_overdue_failed', {
+          sessionId: child,
+          via: tell.kind,
+          to: tell.sessionId,
+        });
+        continue;
+      }
+      const previous = memory[child]?.asked === tell.asked ? memory[child] : undefined;
+      memory[child] =
+        tell.kind === 'nudge'
+          ? { ...previous, asked: tell.asked, nudgedAt: input.at }
+          : { ...previous, asked: tell.asked, toldParentAt: input.at };
+      this.ports.journal.record('fleet.warden_overdue_told', { sessionId: child, via: tell.kind, to: tell.sessionId });
+    }
+    const { overdue: _previous, ...rest } = input.state;
+    return Object.keys(memory).length === 0 ? rest : { ...rest, overdue: memory };
   }
 
   /**

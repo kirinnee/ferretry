@@ -1207,6 +1207,7 @@ import {
   WATCHDOG_VARIABLE,
   type WardenBoardPort,
   WardenCallsignTakenError,
+  type WardenExchangeReader,
   type WardenFleetSession,
   type WardenJournal,
   WardenLivenessMonitor,
@@ -4191,6 +4192,8 @@ interface WardenParts {
   readonly guard: (settings: WardenGuardConfig) => TriageGuardPort;
   /** What a verdict may do: the same send, resume, stop and migrate every other caller uses. */
   readonly sends: Pick<SessionSendService, 'send'>;
+  /** The send ledgers, read-only: who last messaged whom (`warden/report-overdue.ts`). */
+  readonly exchanges: WardenExchangeReader;
   readonly resume: Pick<SessionResumeService, 'resume'>;
   readonly migrate: SessionMigrateSubsystem;
   /** Analytics, for pricing a finished warden from its own transcript. */
@@ -4302,6 +4305,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
     {
       revive,
       board: parts.board,
+      exchanges: parts.exchanges,
       guard: parts.guard,
       // The tail and the screen as an operator would read them — already masked by the vault redactor.
       // A ferret whose transcript or pane cannot be read is simply shown with less evidence.
@@ -11824,6 +11828,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               usdPerMillionInputTokens: settings.usdPerMillionInputTokens,
             }),
           sends: producerSends('Warden'),
+          exchanges: { sends: async sessionId => await sendLedger.list(parseSessionId(sessionId)) },
           resume,
           revive: {
             events: {

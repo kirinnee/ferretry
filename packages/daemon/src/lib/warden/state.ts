@@ -22,6 +22,7 @@
 import {
   SessionStatusSchema,
   TaskRefSchema,
+  WARDEN_INVESTIGATOR_MAX_SEQUENCE,
   type WardenAction,
   WardenActionSchema,
   WardenActorSchema,
@@ -34,9 +35,8 @@ import {
   WardenJevActsSchema,
   type WardenJevBefore,
   WardenJevBeforeSchema,
-  type WardenJevPathStep,
   WardenJevPathSchema,
-  WARDEN_INVESTIGATOR_MAX_SEQUENCE,
+  type WardenJevPathStep,
   WardenVerdictKindSchema,
 } from '@ferretry/protocol';
 import { z } from 'zod';
@@ -45,8 +45,9 @@ import type { Blessing, BlessingStore, ClearStreak, ClearStreakStore } from './b
 import type { WardenAnomaly, WardenAnomalyKind } from './detect.ts';
 import type { WardenFailoverState } from './failover.ts';
 import type { OrphanMemory } from './orphans.ts';
-import type { ReviveState } from './revive.ts';
 import { WardenFailoverPolicySchema, WardenSelectionReasonSchema } from './provenance.ts';
+import type { OverdueMemory } from './report-overdue.ts';
+import type { ReviveState } from './revive.ts';
 import type { ReviveWatch } from './revive-watch.ts';
 import type { WardenCostAverage, WardenGuardHealth, WardenInvestigationRecord, WardenTriageDay } from './triage.ts';
 
@@ -74,6 +75,7 @@ export const WARDEN_ANOMALY_KINDS = [
   'provider_unavailable',
   'owner_request',
   'orphaned_card',
+  'report_overdue',
 ] as const satisfies readonly WardenAnomalyKind[];
 
 const AnomalyKindSchema = z.enum(WARDEN_ANOMALY_KINDS);
@@ -408,6 +410,11 @@ export interface WardenRuntimeState {
    * card stays orphaned by the same ferret: what stops it telling them again every sweep.
    */
   readonly orphans?: OrphanMemory;
+  /**
+   * The sub-ferrets the Warden nudged or whose parent it told about an unanswered message
+   * (`report-overdue.ts`), keyed by session id, kept while each lives: what stops it repeating either.
+   */
+  readonly overdue?: OverdueMemory;
 }
 
 /**
@@ -477,6 +484,9 @@ const RuntimeStateSchema = z.object({
         at: Instant,
       }),
     )
+    .optional(),
+  overdue: z
+    .record(z.string(), z.object({ asked: Instant, nudgedAt: Instant.optional(), toldParentAt: Instant.optional() }))
     .optional(),
 });
 

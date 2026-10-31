@@ -398,6 +398,7 @@ const PREDICATE: Readonly<Record<WardenAnomalyKind, string>> = {
   provider_unavailable: 'can’t reach its provider',
   owner_request: 'was not investigated',
   orphaned_card: 'left a card with nobody on it',
+  report_overdue: 'has not answered its parent',
 };
 
 /** Why a layer is not running, in words. */
