@@ -129,34 +129,34 @@ describe('the quick replies, lettered', () => {
   const buttons = (): HTMLButtonElement[] => [...root().querySelectorAll<HTMLButtonElement>('[data-agenda-option]')];
   const said = (): string[] => buttons().map(button => button.querySelector('.fy-qr__label')?.textContent ?? '');
 
-  test('one row of letters by direction (← ↑ →), each named by its full label, the recommended one marked', async () => {
+  test('one row of letters in the list’s order (← ↑ →), each named by its full label, the recommended one marked', async () => {
     await draw(jaeda);
     expect(root().querySelectorAll('fieldset')).toHaveLength(1);
     expect(buttons().map(button => button.dataset.agendaAnswer)).toEqual(['left', 'up', 'right']);
-    expect(said()).toEqual(['B', 'A', 'C']);
+    expect(said()).toEqual(['A', 'B', 'C']);
     expect(buttons().map(button => button.dataset.agendaOption)).toEqual([
-      'Retry with backoff',
       'Lock the session row',
+      'Retry with backoff',
       'Do nothing at all',
     ]);
     expect(buttons().map(button => button.title)).toEqual([
-      'Retry with backoff',
       'Lock the session row',
+      'Retry with backoff',
       'Do nothing at all',
     ]);
-    expect(buttons()[1]?.getAttribute('aria-label')).toBe('Lock the session row, recommended, or swipe up');
-    expect(buttons()[1]?.hasAttribute('data-recommended')).toBe(true);
-    expect(buttons()[0]?.hasAttribute('data-recommended')).toBe(false);
+    expect(buttons()[0]?.getAttribute('aria-label')).toBe('Lock the session row, recommended, or swipe left');
+    expect(buttons()[0]?.hasAttribute('data-recommended')).toBe(true);
+    expect(buttons()[1]?.hasAttribute('data-recommended')).toBe(false);
   });
 
   test('a row reads one way: one label that is not a single word letters the whole row', async () => {
     await draw(agendaItem('A60', { ask: choices('Looks good', 'Needs a different approach') } as Partial<AgendaItem>));
-    expect(said()).toEqual(['B', 'A']);
+    expect(said()).toEqual(['A', 'B']);
     await view?.unmount();
     await draw(agendaItem('A63', { ask: choices('Looks good', 'Skip') } as Partial<AgendaItem>));
-    expect(said()).toEqual(['B', 'A']);
+    expect(said()).toEqual(['A', 'B']);
     await draw(agendaItem('A64', { ask: choices('Ship', 'Skip') } as Partial<AgendaItem>));
-    expect(said()).toEqual(['Skip', 'Ship']);
+    expect(said()).toEqual(['Ship', 'Skip']);
   });
 
   test('an old choice past the third option keeps ONE row of three: the fourth is the card list’s', async () => {
@@ -164,7 +164,7 @@ describe('the quick replies, lettered', () => {
       ask: choices('Now and here', 'Later on today', 'Never ever again', 'Maybe some day'),
     });
     await draw(many);
-    expect(said()).toEqual(['B', 'A', 'C']);
+    expect(said()).toEqual(['A', 'B', 'C']);
     expect(root().querySelector('[data-agenda-more-row]')).toBeNull();
     expect(root().querySelector('[aria-haspopup="menu"]')).toBeNull();
   });

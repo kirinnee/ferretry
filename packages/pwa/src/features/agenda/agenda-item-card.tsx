@@ -21,8 +21,7 @@ import { type ReactNode, useState } from 'react';
 import { optionAction } from '../../lib/agenda-answers.ts';
 import { agendaCardHead } from '../../lib/agenda-card-head.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
-import { cardRow } from '../../lib/agenda-card-row.ts';
-import { DISMISS_ACTION, type InboxAction, questionAnswersAction } from '../../lib/agenda-inbox.ts';
+import { DISMISS_ACTION, type InboxAction, questionAnswersAction, swipeMap } from '../../lib/agenda-inbox.ts';
 import { cardLettered, itemOptions, letteredOptions } from '../../lib/agenda-options.ts';
 import { itemAtVersion, revisionStamp, shortAgo, versionCount } from '../../lib/agenda-revisions.ts';
 import { AgendaLinkRow, PointForm, Question } from './agenda-brief.tsx';
@@ -242,8 +241,6 @@ export function AgendaItemCard({
   const item = latest ? current : itemAtVersion(current, shown);
   const read = forConfirmation(item);
   const model = cardModel(item);
-  // The answer row reads in the options list's order, its swipes pointed to match (`cardRow`).
-  const row = cardRow(item, model);
   const meta = agendaTypeMeta(item);
   const { question } = agendaCardHead(item);
   const terms = item.terms ?? [];
@@ -471,8 +468,8 @@ export function AgendaItemCard({
         <AgendaQuickReplies
           busy={busy}
           error={error}
-          map={row.map}
-          model={{ ...model, answers: row.answers }}
+          map={swipeMap(item)}
+          model={model}
           onAct={onAct}
           options={options}
           swipeable={swipeable}

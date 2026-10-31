@@ -510,10 +510,10 @@ describe('AgendaInboxPage on a phone', () => {
     await mounted.unmount();
   });
 
-  it('puts the primary answer on ↑ and ↓ on skip, says so to a screen reader, and draws no hint line', async () => {
+  it('puts the second option on ↑ (the options list’s order) and ↓ on skip, says so to a screen reader, and draws no hint line', async () => {
     const mounted = await mount(page(fakeInbox(), [threeWay, twoWay], { phone: true, initialOpen: threeWay.key }));
     const said = mounted.container.querySelector('.fy-attn-deck__top [data-agenda-frame]')?.textContent ?? '';
-    expect(said).toContain('Arrow up: Rebase now.');
+    expect(said).toContain('Arrow up: Wait.');
     expect(said).toContain('Arrow down: skip.');
     expect(mounted.container.textContent).not.toContain('more after this one');
     await mounted.unmount();

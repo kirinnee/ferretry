@@ -345,11 +345,13 @@ its card, `&F12`), and the machine. A row whose item is about a different card t
   composer** under it. A message typed there goes to the ferret's chat about the item (`!A5 …`, delivered as
   `[re !A5 …]`), the chat's own path; a quick reply carries what is typed as its note. "Open chat" goes to the
   conversation at the item, and so does a modified click on a row.
-- **The open items are a deck**, on a phone and a wide screen alike. Swipe — from the item's head, its
-  who-and-what line or its quick replies; the body scrolls — or press the arrow keys:
-  - **↑** sends the **primary** answer (the recommended one, the right-hand answer on the card);
-  - **←** and **→** send the others (→ takes what ↑ gave on the card, else it is the primary again);
-  - **↓ skips** to the next item: nothing is sent and the item stays open.
+- **The open items are a deck**, on a phone and a wide screen alike. Swipe — from the item's head or its
+  who-and-what line; the body scrolls — or press the arrow keys:
+  - **← ↑ →** send the card's answers, which mean the same everywhere (the deck, the card, the item view, what the
+    CLI prints): a row of options is in the **options list's order** — the first ←, the second ↑, the third →
+    (two options: ← and →) — wherever the recommendation sits;
+  - **↓ on the deck skips** to the next item: nothing is sent and the item stays open. On the card itself (its top
+    bar or its answer row) ↓ is **Not needed**.
 
   A held drag is stamped with what letting go would do (there is no hint line under the card). Every answer
   goes into the same undo window as a tap. Reduced motion (the OS preference or Settings › Appearance › Motion) drops

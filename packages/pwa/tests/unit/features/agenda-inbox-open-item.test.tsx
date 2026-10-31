@@ -121,11 +121,11 @@ describe('the open Inbox item', () => {
     await none.unmount();
   });
 
-  it('answers the recommended reply on a swipe up from its who-and-what line, into the undo window', async () => {
+  it('answers the middle reply — the second option — on a swipe up from its who-and-what line, into the undo window', async () => {
     const fake = fakeInbox();
     const mounted = await mount(page(fake, [shipIt, rebase], { initialOpen: rebase.key }));
     await swipeFrom(whoLine(mounted), 0, -200);
-    expect(pending(fake)).toEqual(['Rebase now']);
+    expect(pending(fake)).toEqual(['Wait']);
     expect(fake.commits).toEqual([]);
     await mounted.unmount();
   });
@@ -140,11 +140,11 @@ describe('the open Inbox item', () => {
     await mounted.unmount();
   });
 
-  it('stamps what a drag would do while it is held: ↑ the primary, ↓ Skip', async () => {
+  it('stamps what a drag would do while it is held: ← the first option, ↓ Skip', async () => {
     const mounted = await mount(page(fakeInbox(), [shipIt], { initialOpen: shipIt.key }));
-    await swipeFrom(whoLine(mounted), 0, -200, false);
+    await swipeFrom(whoLine(mounted), -200, 0, false);
     const up = must(mounted.container.querySelector('.fy-attn-deck__top[data-swipe-direction]'), 'the card mid-drag');
-    expect(up.getAttribute('data-swipe-direction')).toBe('up');
+    expect(up.getAttribute('data-swipe-direction')).toBe('left');
     expect(up.getAttribute('data-swipe-answer')).toBe('Ship');
     await interact(() => whoLine(mounted).dispatchEvent(pointer('pointercancel', 100, 100)));
     await swipeFrom(whoLine(mounted), 0, 200, false);
@@ -282,8 +282,8 @@ describe('the deck that skips', () => {
     );
     const frame = must(mounted.container.querySelector<HTMLElement>('[data-agenda-frame]'), 'the frame');
     expect(frame.textContent).toContain('Arrow down: skip.');
-    // The card's own row: the recommended (here the first) option in the middle, on ↑.
-    expect(frame.textContent).toContain('Arrow up: Ship.');
+    // The card's own row, in the options list's order: the first option on ←.
+    expect(frame.textContent).toContain('Arrow left: Ship.');
     await key(frame, 'ArrowDown');
     expect(skipped).toEqual(['A1']);
     expect(mounted.container.querySelector('.fy-attn-deck__leaving')?.getAttribute('data-direction')).toBe('down');

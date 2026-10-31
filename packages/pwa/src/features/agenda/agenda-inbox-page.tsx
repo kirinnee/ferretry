@@ -15,12 +15,12 @@
  *   modified click opens the chat, and the open item has "Open chat". A tapped notification opens the chat and
  *   clears itself.
  * - THE OPEN ITEMS ARE A DECK, on a phone and a wide screen alike: SWIPE (or press) in the direction of an answer —
- *   the card's own row: ← left, ↑ the middle (the recommended), → right — and ↓ to SKIP to the next without
- *   answering; the item stays open. On touch the item's head and quick-reply row swipe on their own, exactly as in
- *   the chat; the who-and-what line is the deck's. A swipe goes into the same undo window as a tap; reduced motion
- *   drops the fly-off. NO TEACHING TEXT: no hint line, no banner naming the answer mid-drag, no key caption. A phone
- *   also gets "Answer quickly", the deck from the top; a wide screen walks the rows with j/k (or ↑/↓) and Enter
- *   opens one.
+ *   the card's own row, in the options list's order: ← the first, ↑ the second, → the third — and ↓ to SKIP to the
+ *   next without answering; the item stays open. On touch the card's top bar and answer row swipe on their own,
+ *   exactly as in the chat; the item's head and the who-and-what line are the deck's. A swipe goes into the same
+ *   undo window as a tap; reduced motion drops the fly-off. NO TEACHING TEXT: no hint line, no banner naming the
+ *   answer mid-drag, no key caption. A phone also gets "Answer quickly", the deck from the top; a wide screen walks
+ *   the rows with j/k (or ↑/↓) and Enter opens one.
  * - FILTERS: Open / Snoozed (n) / Replied (n) / Resolved — a snoozed or replied item is parked: off the open list and the
  *   badge until it wakes, is unsnoozed, or the ferret re-opens it — a machine filter (once there is more than one machine), Find, and — from
  *   `/inbox?from=warden` — a "From Warden" chip that keeps only what the Warden raised, with a way to clear it.

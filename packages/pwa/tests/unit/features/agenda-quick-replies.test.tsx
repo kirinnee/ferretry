@@ -80,12 +80,12 @@ describe('the quick replies', () => {
     expect(one('[data-agenda-quick-replies]')).toBeDefined();
     expect(one('fieldset').getAttribute('aria-label')).toBe('Quick replies');
     expect(root().querySelector('textarea, input')).toBeNull();
-    expect(answer('SQLite').dataset.agendaAnswer).toBe('up');
-    expect(answer('Postgres').dataset.agendaAnswer).toBe('left');
+    expect(answer('SQLite').dataset.agendaAnswer).toBe('left');
+    expect(answer('Postgres').dataset.agendaAnswer).toBe('right');
     expect(answer('SQLite').hasAttribute('data-recommended')).toBe(true);
-    expect(answer('SQLite').getAttribute('aria-label')).toBe('SQLite, recommended, or swipe up');
+    expect(answer('SQLite').getAttribute('aria-label')).toBe('SQLite, recommended, or swipe left');
     expect(answer('SQLite').querySelector('.lucide-check')).toBeNull();
-    expect(answer('Postgres').getAttribute('aria-label')).toBe('Postgres, or swipe left');
+    expect(answer('Postgres').getAttribute('aria-label')).toBe('Postgres, or swipe right');
     expect(answer('Postgres').hasAttribute('data-recommended')).toBe(false);
   });
 
@@ -102,27 +102,27 @@ describe('the quick replies', () => {
     expect(spy.acted).toEqual([]);
   });
 
-  test('puts the recommended option on ↑ even when it is the last of three', async () => {
+  test('keeps the recommended option in its place in the list: the last of three is →', async () => {
     const spy = await draw(
       agendaItem('A9', {
         ask: choices('Yes', 'No', 'Later'),
         recommendation: { decision: 'Later' },
       } as Partial<AgendaItem>),
     );
-    expect(answer('Later').dataset.agendaAnswer).toBe('up');
+    expect(answer('Later').dataset.agendaAnswer).toBe('right');
     expect(answer('Later').hasAttribute('data-recommended')).toBe(true);
     await interact(() => answer('Later').click());
     expect(spy.acted).toHaveLength(1);
   });
 
-  test('lays the buttons out by direction: ← left, ↑ middle, → right, the slot left blank when there is no answer', async () => {
+  test('lays the buttons out by direction in the list’s order: ← first, ↑ second, → third; two take ← and →', async () => {
     await draw(chosen);
     expect(one('fieldset').hasAttribute('data-slots')).toBe(true);
     expect([...root().querySelectorAll<HTMLElement>('.fy-qr__chip')].map(chip => chip.dataset.agendaAnswer)).toEqual([
       'left',
-      'up',
+      'right',
     ]);
-    expect(root().querySelector('[data-agenda-answer="right"]')).toBeNull();
+    expect(root().querySelector('[data-agenda-answer="up"]')).toBeNull();
     await draw(
       agendaItem('A12', {
         ask: choices('Now', 'Later', 'Never'),
@@ -134,9 +134,9 @@ describe('the quick replies', () => {
       'up',
       'right',
     ]);
-    expect(answer('Never').dataset.agendaAnswer).toBe('up');
     expect(answer('Now').dataset.agendaAnswer).toBe('left');
-    expect(answer('Later').dataset.agendaAnswer).toBe('right');
+    expect(answer('Later').dataset.agendaAnswer).toBe('up');
+    expect(answer('Never').dataset.agendaAnswer).toBe('right');
   });
 
   test('draws three answers at most, in ONE row: the options past them are chosen from the card’s list', async () => {
@@ -146,7 +146,7 @@ describe('the quick replies', () => {
     } as Partial<AgendaItem>);
     await draw(many);
     expect(root().querySelectorAll('[data-agenda-answer]')).toHaveLength(3);
-    expect(answer('Maybe').dataset.agendaAnswer).toBe('up');
+    expect(answer('Maybe').hasAttribute('data-recommended')).toBe(true);
     expect(root().querySelectorAll('fieldset')).toHaveLength(1);
     expect(root().querySelector('[data-agenda-more-row]')).toBeNull();
     expect(root().querySelector('[aria-haspopup="menu"]')).toBeNull();
@@ -160,8 +160,8 @@ describe('the quick replies', () => {
   test('lays the answers out ← ↑ → with their arrows, and no hole for an empty slot', async () => {
     await draw(agendaItem('A10', { ask: choices('Now', 'Later') } as Partial<AgendaItem>));
     const kids = [...one('fieldset.fy-qr__row').children] as HTMLElement[];
-    expect(kids.map(kid => kid.dataset.agendaAnswer)).toEqual(['left', 'up']);
-    expect(kids.map(kid => kid.querySelector('.fy-qr__arrow')?.textContent)).toEqual(['←', '↑']);
+    expect(kids.map(kid => kid.dataset.agendaAnswer)).toEqual(['left', 'right']);
+    expect(kids.map(kid => kid.querySelector('.fy-qr__arrow')?.textContent)).toEqual(['←', '→']);
   });
 
   test('has no arrows on a mouse', async () => {
@@ -229,11 +229,11 @@ describe('several questions', () => {
 });
 
 describe('the swipe over the chips', () => {
-  test('a long drag up sends the middle (recommended) answer', async () => {
-    const spy = await draw(chosen);
+  test('a long drag up sends the middle answer — the second option', async () => {
+    const spy = await draw(agendaItem('A12', { ask: choices('Now', 'Later', 'Never') } as Partial<AgendaItem>));
     await drag({ x: 200, y: 0 });
     expect(spy.acted).toHaveLength(1);
-    expect(spy.acted[0]).toMatchObject({ response: { choice: 'SQLite' } });
+    expect(spy.acted[0]).toMatchObject({ response: { choice: 'Later' } });
   });
 
   test('a long drag to the right sends the right answer when there is one', async () => {
@@ -244,19 +244,19 @@ describe('the swipe over the chips', () => {
       } as Partial<AgendaItem>),
     );
     await drag({ x: 400, y: 200 });
-    expect(spy.acted[0]).toMatchObject({ response: { choice: 'Later' } });
+    expect(spy.acted[0]).toMatchObject({ response: { choice: 'Never' } });
   });
 
   test('a long drag to the left sends the left answer', async () => {
     const spy = await draw(chosen);
     await drag({ x: 0, y: 200 });
-    expect(spy.acted[0]).toMatchObject({ response: { choice: 'Postgres' } });
+    expect(spy.acted[0]).toMatchObject({ response: { choice: 'SQLite' } });
   });
 
   test('a short drag, or one toward nothing, sends nothing, and the click after it is swallowed', async () => {
     const spy = await draw(chosen);
     await drag({ x: 240, y: 200 });
-    await drag({ x: 400, y: 200 });
+    await drag({ x: 200, y: 0 });
     expect(spy.acted).toEqual([]);
     await interact(() => answer('SQLite').click());
     expect(spy.acted).toEqual([]);
