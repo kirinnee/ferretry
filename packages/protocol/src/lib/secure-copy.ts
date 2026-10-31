@@ -141,6 +141,11 @@ export const CopyOriginSchema = z.strictObject({
    * file or its folder is writable. A pre-approval rule never matches such a program; the owner is asked.
    */
   replaceable: z.literal(true).optional(),
+  /**
+   * A page copy of a form field's VALUE: whatever was typed into it, by the agent too, so it says nothing about
+   * the page that holds it. A pre-approval rule never matches it; the owner is asked.
+   */
+  editable: z.literal(true).optional(),
   /** The surface it was read from, for a page or clipboard copy. */
   surface: SurfaceKeySchema.optional(),
 });

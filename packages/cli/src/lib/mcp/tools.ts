@@ -218,7 +218,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'browser_open',
     tool: 'browser.open',
     description:
-      'Open a browser page with a name, optionally at a URL. The person sees it live as %browser:<name>. Pages share this machine’s agent sign-ins and cookies; pass "incognito": true for a throwaway page with its own cookies, shared with nothing.',
+      'Open a browser page with a name, optionally at a URL. The person sees it live as %browser:<name>. Pages share this machine’s agent sign-ins and cookies; pass "incognito": true for a throwaway page with its own cookies.',
     inputSchema: object(
       {
         name: NEW_NAME,
@@ -384,7 +384,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'browser_network',
     tool: 'browser.network',
     description:
-      'list: the page’s recent requests (method, url, status, type, size, time), each with an id. get: one request by id, with safe response headers and a text body. Cookies and credentials are never shown.',
+      'list: the page’s recent requests, each with an id. get: one request by id, with safe response headers and a text body. Cookies and credentials are never shown.',
     inputSchema: object(
       {
         name: NAME,
@@ -691,11 +691,14 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'secure_copy',
     tool: 'secure.copy',
     description:
-      "Seal a command's stdout (a token) as sealed:<name>; you see its length, never the value. Seal before reading it.",
+      "Seal a command's stdout or a page element (a token) as sealed:<name>; you see its length, never the value. Seal before reading it.",
     inputSchema: object(
       {
         name: { type: 'string' },
-        source: { type: 'object', description: '{"kind":"command","argv":["gh","auth","token"]}' },
+        source: {
+          type: 'object',
+          description: '{"kind":"command","argv":["gh","auth","token"]} or {"kind":"browser","key":"app","ref":"e3"}',
+        },
       },
       ['name', 'source'],
     ),
@@ -793,7 +796,7 @@ export const MCP_LESSON_TOOLS: readonly (McpToolDefinition & { readonly lessonTo
     name: 'lessons_suggest',
     lessonTool: 'lessons.suggest',
     description:
-      'File a lesson for the owner to review: a correction they made, or a durable fact about how they want work done. Use scope "repo" for a fact about this project, "global" for one every ferret should follow. File each lesson once; a duplicate merges into the existing one.',
+      'File a lesson for the owner to review: a correction they made, or a durable fact about how they want work done. Use scope "repo" for a fact about this project, "global" for one every ferret should follow. A duplicate merges into the existing one.',
     inputSchema: object(
       {
         rule: {

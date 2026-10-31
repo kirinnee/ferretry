@@ -195,6 +195,10 @@ describe('NodeSessionBrowserLauncher', () => {
     const worker = {
       unexpectedExit: new Promise<number>(() => undefined),
       close: async () => undefined,
+      copyRead: async (pageId: string, _target: unknown, part: string, attribute?: string) => {
+        calls.push(`copy:${pageId}:${part}:${attribute ?? ''}`);
+        return { ok: false, reason: 'empty' };
+      },
       inputDocument: async (pageId: string) => {
         calls.push(`document:${pageId}`);
         return { navigationId: 'loader-1' };
@@ -227,7 +231,11 @@ describe('NodeSessionBrowserLauncher', () => {
     should(await browser.inputObserve('p1', [])).eql({ ok: false, missing: 'password' });
     should((await browser.inputShot('p1', facts)).clip).eql({ x: 0, y: 0, w: 1, h: 1 });
     should(await browser.inputType('p1', facts, [{ field: 'password', text: 'x' }], true)).equal('typed');
-    should(calls).eql(['document:p1', 'observe:p1:0', 'shot:p1', 'type:p1:1:true']);
+    should(await browser.copyRead('p1', { kind: 'ref', ref: 'e1' }, 'attribute', 'title')).eql({
+      ok: false,
+      reason: 'empty',
+    });
+    should(calls).eql(['document:p1', 'observe:p1:0', 'shot:p1', 'type:p1:1:true', 'copy:p1:attribute:title']);
     await browser.close();
   });
 
