@@ -1249,6 +1249,58 @@ describe('MigrateSheet asking the agent to stop its background jobs', () => {
     expect(text(view.root.findByProps({ role: 'status' }))).toContain('Asked.');
   });
 
+  it('names the daemon update when an older daemon refused on processes it could not mark', async () => {
+    const unmarked = { ...SCRIPT_JOB, backgroundJob: undefined, pid: undefined };
+    const view = await refuse({
+      migrateSession: async () => {
+        throw new FyHttpError(
+          'refused',
+          409,
+          'migration_refused',
+          {
+            error: 'refused',
+            code: 'migration_refused',
+            inflight: { status: 'waiting', turn: 3, blockedBy: 'unknown', items: [unmarked], restartsWithCli: 1 },
+          },
+          '4.152.0',
+        );
+      },
+    });
+
+    const page = JSON.stringify(view.toJSON());
+    expect(page).toContain('Update this machine’s daemon to ask the agent to stop these jobs');
+    expect(page).toContain('4.152.0');
+    expect(page).toContain('fy daemon update');
+    expect(page).not.toContain('Ask the agent to stop its background jobs');
+    expect(page).toContain('There is no force control');
+  });
+
+  it('does not name an update when the refusing daemon already has the ask', async () => {
+    const view = await refuse({
+      migrateSession: async () => {
+        throw new FyHttpError(
+          'refused',
+          409,
+          'migration_refused',
+          {
+            error: 'refused',
+            code: 'migration_refused',
+            inflight: {
+              status: 'waiting',
+              turn: 3,
+              blockedBy: 'unknown',
+              items: [{ ...SCRIPT_JOB, backgroundJob: undefined }],
+              restartsWithCli: 1,
+            },
+          },
+          '4.156.2',
+        );
+      },
+    });
+
+    expect(JSON.stringify(view.toJSON())).not.toContain('Update this machine’s daemon');
+  });
+
   it('reports a failed ask and keeps the button to try again', async () => {
     const view = await refuse({
       migrateSession: async () => {
