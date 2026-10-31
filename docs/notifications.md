@@ -45,7 +45,7 @@ is, a notice without `--ping`, the owner's own moves — moves the Inbox badge a
 | 3   | A notice with **`--ping`**                                                                 | The notice's summary                                              | Once per notice                         |
 | 4   | A **snoozed** item wakes and it **blocks** the ferret or has a **`neededBy`**              | The item's title; "Back from snooze: <ask>"                       | Once per wake                           |
 
-A woken item already inside its deadline's window gets the deadline's push (row 2) instead, never both. A snoozed
+An input card always counts as inside the window (row 2), so it pushes once the moment it is raised. A woken item already inside its deadline's window gets the deadline's push (row 2) instead, never both. A snoozed
 or replied item is parked ([agenda.md](agenda.md#parked-items)): it never counts toward a stop or a deadline while
 it sleeps.
 
@@ -117,7 +117,10 @@ a Focus mode) is an option for native apps only; Web Push on iOS and iPadOS expo
 cannot set it. A Focus mode can still hold a code push on an iPhone.
 
 The payload says `urgency: "high"` and never the code, the value or anything typed: only what an ordinary push says
-(the push service is a third party). A service worker older than this field cannot read the payload and shows its
+(the push service is a third party). Every input card pushes ONCE the moment it is raised, while its ferret still waits in
+`input_wait`: its expiry is its deadline, and an input card always counts as inside the warning window whatever
+`attention.deadlineWarnHours` says (`buzz.ts`, `deadlineDue`). A code card's push is high priority; every other card's
+is normal. A service worker older than this field cannot read the payload and shows its
 plain "something is waiting in your Inbox" notification instead: never nothing.
 
 ## Where a tap goes
@@ -285,6 +288,3 @@ every push from v4.116.0 until it was read again, and a push that cannot be made
   notice that should have been an item.
 - **Page-level notifications for a new item.** A device with no push enrolment learns about an item only
   from the unread mark while the app is open.
-- **An input card has no push of its own.** A code card buzzes (at high priority) when its ferret stops or when its
-  deadline comes near, like any item. A ferret still inside `input_wait` has not stopped, so the owner is not pushed
-  until it does.
