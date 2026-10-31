@@ -56,8 +56,14 @@ Daemons read it to report whether the firewall is applied, missing or stale.
 ## Tests only
 
 `FERRETRY_FIREWALL_CONF`, `FERRETRY_FIREWALL_RUN_DIR` and `FERRETRY_NFT` redirect the conf, the run
-directory and the nft binary. They exist for the integration tests. **A root invocation must not
-set them**; without `FERRETRY_FIREWALL_RUN_DIR` the script refuses to run as anyone but root.
+directory and the nft binary for the integration tests, and the script **enforces** that they are
+test-only: as root it refuses, applying nothing, when any of them is set, and it runs nft only from
+`/usr/sbin/nft`, `/sbin/nft` or `/usr/bin/nft` (the first executable), never through `PATH`, refusing
+when none exists. Without `FERRETRY_FIREWALL_RUN_DIR` it refuses to run as anyone but root.
+
+`FERRETRY_FIREWALL_TEST_UID` is the seam that lets a non-root test stand in for root and reach those
+checks. It is honoured only when the real uid is not root; real root refuses it like any other
+override, so it cannot be used to weaken a root run.
 
 The port arithmetic is pinned to `scripts/host/per-user-ports.fixtures.json` by a test on the bash
 side and one on the TypeScript side (`perUserBrowserPorts` in `@ferretry/protocol`).

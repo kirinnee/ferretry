@@ -421,6 +421,64 @@ describe('refusing the conf', () => {
   });
 });
 
+// FERRETRY_FIREWALL_TEST_UID stands in for root, and the script honours it only when the real uid is not
+// root, so a suite that is itself root cannot stand in for it and these cases skip there.
+describe.skipIf(process.getuid?.() === 0)('running as root', () => {
+  const FIXED_NFT = ['/usr/sbin/nft', '/sbin/nft', '/usr/bin/nft'];
+  const root = { FERRETRY_FIREWALL_TEST_UID: '0' };
+
+  for (const override of ['FERRETRY_FIREWALL_CONF', 'FERRETRY_FIREWALL_RUN_DIR', 'FERRETRY_NFT']) {
+    it(`should refuse ${override}, applying and writing nothing`, async () => {
+      // Arrange
+      await rig.writeConf('user 1001\n');
+      const env = {
+        ...root,
+        FERRETRY_FIREWALL_CONF: undefined,
+        FERRETRY_FIREWALL_RUN_DIR: undefined,
+        FERRETRY_NFT: undefined,
+        [override]: override === 'FERRETRY_NFT' ? join(rig.bin, 'nft') : rig.conf,
+      };
+
+      // Act
+      const result = rig.run([], env);
+
+      // Assert
+      should(result.code).equal(1);
+      should(result.err.trim().split('\n')).have.length(1);
+      should(result.err).containEql(`${override} is for the tests only`);
+      should(await rig.nftInputs()).deepEqual([]);
+      should(await rig.marked()).be.false();
+    });
+  }
+
+  it('should refuse the overrides in stop mode too', async () => {
+    // Act
+    const result = rig.run(['stop'], root);
+
+    // Assert
+    should(result.code).equal(1);
+    should(result.err).containEql('for the tests only');
+    should(await rig.nftInputs()).deepEqual([]);
+  });
+
+  it('should never take nft from PATH', async () => {
+    // Arrange: the fake nft heads PATH, and no override is set
+    const env = { ...root, FERRETRY_FIREWALL_CONF: undefined, FERRETRY_FIREWALL_RUN_DIR: undefined };
+    const fixed = await Promise.all(FIXED_NFT.map(path => Bun.file(path).exists()));
+
+    // Act
+    const result = rig.run([], env);
+
+    // Assert: with no nft in the fixed list the script says so; with one it goes on to the real conf, which
+    // this user does not own, and either way the fake on PATH is never run
+    should(result.code).equal(1);
+    if (fixed.some(Boolean)) should(result.err).not.containEql('no nft found');
+    else should(result.err).containEql('no nft found in /usr/sbin, /sbin or /usr/bin');
+    should(await rig.nftInputs()).deepEqual([]);
+    should(await rig.marked()).be.false();
+  });
+});
+
 describe('the marker', () => {
   it('should hold the spec shape, world-readable, in a 0755 directory, with no temp file left', async () => {
     // Arrange
