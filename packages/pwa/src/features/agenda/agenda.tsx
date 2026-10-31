@@ -141,6 +141,8 @@ export interface Agenda {
   readonly scrim: ReactNode;
   /** A view is open: the message list underneath is hidden from sight and from the keyboard, but stays mounted. */
   readonly covered: boolean;
+  /** Shuts the drawer and the item view, leaving the conversation as it was. */
+  readonly close: () => void;
   /** The line takes `live` itself, so the transcript must not draw it a second time. */
   readonly hostsLive: boolean;
   /**
@@ -416,6 +418,7 @@ export const useAgenda = ({
     view,
     scrim,
     covered: cardItem !== undefined,
+    close: () => update(() => ({ drawer: false, card: null })),
     hostsLive,
     section,
     references: () => aboutRef.current,
