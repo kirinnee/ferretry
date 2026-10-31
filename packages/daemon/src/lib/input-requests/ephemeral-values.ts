@@ -107,9 +107,17 @@ export class EphemeralValues {
     }
   }
 
-  /** Lets go of everything held for a session that ended. */
+  /**
+   * Lets go of everything typed for a session that ended. A secure copy's mask stays for its after-mask window
+   * (docs/secure-copy.md): the value may still be on a screen it was pasted to, and other sessions read screens too.
+   */
   drop(sessionId: string): void {
-    this.held.delete(sessionId);
+    const latest = this.clock.now() + COPY_AFTER_MASK_SECONDS * 1000;
+    const copies = (this.held.get(sessionId) ?? [])
+      .filter(entry => entry.marker !== undefined)
+      .map(entry => ({ ...entry, until: Math.min(entry.until, latest) }));
+    if (copies.length === 0) this.held.delete(sessionId);
+    else this.held.set(sessionId, copies);
   }
 
   /** How many values are held, for one session or all: a count, never a value, so a test can prove one was let go. */

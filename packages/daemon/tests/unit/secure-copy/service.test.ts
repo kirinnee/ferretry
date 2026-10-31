@@ -383,3 +383,77 @@ describe('SecureCopyService and a short value', () => {
     should(report?.stderr).equal('printed [sealed:token] once');
   });
 });
+
+describe('SecureCopyService under the re-review', () => {
+  it('should mask a copy kept with its newline in every spelling: stderr, reads, and the transcript check', async () => {
+    const { service, runner, masking } = world();
+    runner.outcome = {
+      outcome: 'exited',
+      exitCode: 0,
+      stdout: `${TOKEN}\n`,
+      stderr: `token ${TOKEN} minted`,
+      truncated: false,
+    };
+
+    const { command: report } = await service.capture('s1', command(['x'], { trim: false }));
+
+    should(report?.stderr).equal('token [sealed:token] minted');
+    should(masking.scrub('s1', `see ${TOKEN} here`)).equal('see [sealed:token] here');
+    should(JSON.stringify(report)).not.containEql(TOKEN);
+  });
+
+  it('should call a copy seen when the transcript holds it without its newline', async () => {
+    const { runner } = world();
+    const seen = new SecureCopyService({
+      clock: { now: () => Date.parse('2026-10-31T09:00:00.000Z') },
+      runner,
+      folders: { folderOf: async () => '/work' },
+      exposure: { transcriptHolds: async (_session, value) => (value === TOKEN ? 'found' : 'clean') },
+      masking: new EphemeralValues({ now: () => Date.parse('2026-10-31T09:00:00.000Z') }),
+      redact: async text => text,
+    });
+    runner.outcome = { ...runner.outcome, stdout: `${TOKEN}\n` };
+
+    should((await seen.capture('s1', command(['x'], { trim: false }))).copy.exposure.transcript).equal('found');
+  });
+
+  it('should hold the value before stderr goes through the redactor', async () => {
+    const clock = { now: () => Date.parse('2026-10-31T09:00:00.000Z') };
+    const masking = new EphemeralValues(clock);
+    const masked: boolean[] = [];
+    const service = new SecureCopyService({
+      clock,
+      runner: {
+        run: async () => ({ outcome: 'exited', exitCode: 0, stdout: TOKEN, stderr: 'a warning', truncated: false }),
+      },
+      folders: { folderOf: async () => '/work' },
+      exposure: { transcriptHolds: async () => 'clean' },
+      masking,
+      redact: async text => {
+        masked.push(masking.scrub('s1', TOKEN) !== TOKEN);
+        return text;
+      },
+    });
+
+    await service.capture('s1', command());
+
+    should(masked).eql([true]);
+  });
+
+  it('should keep a short token whose command wrote a long stderr', async () => {
+    const { service, runner } = world();
+    runner.outcome = { outcome: 'exited', exitCode: 0, stdout: TOKEN, stderr: 'w'.repeat(20_000), truncated: true };
+
+    should((await service.capture('s1', command())).copy.state).equal('live');
+  });
+
+  it('should refuse a value too short to seal and mask safely', async () => {
+    const { service, runner, masking } = world();
+    runner.outcome = { ...runner.outcome, stdout: 'ab1\n' };
+
+    const error = await refusal(service.capture('s1', command()));
+
+    should(error.message).containEql('fewer than 4 characters');
+    should(masking.heldCount()).equal(0);
+  });
+});

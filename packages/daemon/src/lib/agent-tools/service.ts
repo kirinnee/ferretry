@@ -412,7 +412,12 @@ export class AgentToolService {
           source: call.source,
           ...(call.expiresInSeconds === undefined ? {} : { expiresInSeconds: call.expiresInSeconds }),
         });
-        facts.detail = { copyLength: captured.copy.length, transcript: captured.copy.exposure.transcript };
+        // The program a command copy ran, by base name: it ran outside any terminal, so the audit is where it shows.
+        facts.detail = {
+          copyLength: captured.copy.length,
+          transcript: captured.copy.exposure.transcript,
+          ...(captured.copy.from.program === undefined ? {} : { program: captured.copy.from.program }),
+        };
         return {
           summary: copiedSummary(captured.copy),
           copies: [captured.copy],

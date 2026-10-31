@@ -44,8 +44,9 @@ a field for the value; a protocol test walks every schema to keep it that way.
 | `browser`   | Reads one element of a page the agent may act on, by `ref` or `selector`: its text, a field's value or one attribute.                                                                                                                                                                                       | SC3   |
 | `clipboard` | Reads the agent browser's clipboard for that page's origin, after the agent pressed the page's own Copy button. Never this computer's system clipboard.                                                                                                                                                     | SC3   |
 
-A capture is refused, and nothing is held, when the command fails, times out, prints nothing, or prints
-more than 16 KiB. Capturing needs no approval: the agent could run the command or read the page itself. The
+A capture is refused, and nothing is held, when the command fails, times out, prints nothing, prints fewer
+than 4 characters (too short to mask without masking it everywhere by chance), or prints more than 16 KiB on
+stdout (stderr's size does not count). Capturing needs no approval: the agent could run the command or read the page itself. The
 tools are an AGENT's: a person's terminal and browser tool routes refuse every `secure.*` call, so a device granted only
 the browser can never reach a command through them.
 Capturing **instead** keeps the value out of its context. It does need the "What agents may control"
@@ -65,9 +66,11 @@ name. A copy lives one hour by default and four at most.
 
 ## Hiding
 
-From the moment it is read, a copy is held in the daemon's one masking registry (`EphemeralValues`, the
-one the input bridge uses) as `[sealed:<name>]`, until it expires **plus 10 minutes** (it may still be on a
-screen it was pasted to). That masks it in:
+From the moment it is read, before anything else is awaited, a copy is held in the daemon's one masking
+registry (`EphemeralValues`, the one the input bridge uses) as `[sealed:<name>]`, in every spelling a reader may
+meet it in (as read, and without its surrounding white space), until it expires **plus 10 minutes** (it may
+still be on a screen it was pasted to). A session that ends lets go of its copies at once, and their masks
+run the 10 minutes from then. That masks it in:
 
 - the agent's `terminal.read` and `terminal.wait`, and the live terminal viewer;
 - the owner's screen, transcript, journal and process reads;

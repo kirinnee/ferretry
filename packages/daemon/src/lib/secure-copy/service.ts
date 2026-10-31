@@ -7,6 +7,7 @@ import {
   COPY_MAX_LIVE_PER_SESSION,
   COPY_STDERR_MAX_CHARS,
   COPY_VALUE_MAX_BYTES,
+  COPY_VALUE_MIN_CHARS,
   type CopyCapture,
   type CopyCommandReport,
   type CopyExposure,
@@ -66,9 +67,19 @@ export interface CopyCaptured {
 interface Read {
   readonly value: string;
   readonly from: CopyOrigin;
-  readonly command?: CopyCommandReport;
+  /** How a command ended, and its stderr AS IT WAS: masked only once the value is held. */
+  readonly command?: {
+    readonly outcome: CopyCommandReport['outcome'];
+    readonly exitCode?: number;
+    readonly stderr: string;
+    readonly stdout: string;
+  };
   readonly pageReadBeforeCapture?: boolean;
 }
+
+/** The spellings of a value a reader may meet it in: as read, and with its surrounding white space dropped. */
+const spellings = (value: string): readonly string[] =>
+  [...new Set([value, value.trimEnd(), value.trim()])].filter(spelling => spelling !== '');
 
 export class SecureCopyService implements InputSealedPort {
   private readonly copies = new Map<string, Map<CopyName, Entry>>();
@@ -118,9 +129,18 @@ export class SecureCopyService implements InputSealedPort {
     const read = await this.read(sessionId, request.name, request.source);
     const capturedAt = this.ports.clock.now();
     const expiresAt = capturedAt + (request.expiresInSeconds ?? COPY_DEFAULT_LIFETIME_SECONDS) * 1000;
-    // Masked BEFORE anything else is awaited or returned: no read after this point can carry the value.
-    this.ports.masking.holdUntil(sessionId, read.value, copyMask(request.name), expiresAt + AFTER_MASK_MS);
-    const transcript = await this.ports.exposure.transcriptHolds(sessionId, read.value).catch(() => 'unknown' as const);
+    // Masked BEFORE anything else is awaited or returned, in every spelling a reader may meet it in: no read after
+    // this point can carry the value, whether a program printed it with its newline or without.
+    for (const spelling of spellings(read.value))
+      this.ports.masking.holdUntil(sessionId, spelling, copyMask(request.name), expiresAt + AFTER_MASK_MS);
+    const command =
+      read.command === undefined
+        ? undefined
+        : await this.report(read.command, [read.command.stdout, read.value], request.name);
+    const found: readonly ('found' | 'clean' | 'unknown')[] = await Promise.all(
+      spellings(read.value).map(async spelling => await this.ports.exposure.transcriptHolds(sessionId, spelling)),
+    ).catch(() => ['unknown']);
+    const transcript = found.includes('found') ? 'found' : found.includes('unknown') ? 'unknown' : 'clean';
     const entry: Entry = {
       name: request.name,
       value: read.value,
@@ -139,7 +159,7 @@ export class SecureCopyService implements InputSealedPort {
     const session = this.copies.get(sessionId) ?? new Map<CopyName, Entry>();
     session.set(request.name, entry);
     this.copies.set(sessionId, session);
-    return { copy: meta(entry), ...(read.command === undefined ? {} : { command: read.command }) };
+    return { copy: meta(entry), ...(command === undefined ? {} : { command }) };
   }
 
   /** Every copy of this session, live or recently ended, oldest first. */
@@ -258,13 +278,10 @@ export class SecureCopyService implements InputSealedPort {
       maxOutputBytes: COPY_VALUE_MAX_BYTES + 1,
     });
     const value = source.trim === false ? outcome.stdout : outcome.stdout.trim();
-    const stderr = await this.maskedStderr(outcome.stderr, [outcome.stdout, value], name);
-    const report: CopyCommandReport = {
-      outcome: outcome.outcome,
-      ...(outcome.exitCode === undefined ? {} : { exitCode: outcome.exitCode }),
-      ...(stderr === undefined ? {} : { stderr }),
+    const why = async (): Promise<string> => {
+      const stderr = await this.maskedStderr(outcome.stderr, [outcome.stdout, value], name);
+      return stderr === undefined ? '' : ` It said on stderr: ${stderr}`;
     };
-    const why = stderr === undefined ? '' : ` It said on stderr: ${stderr}`;
     if (outcome.outcome === 'spawn_failed')
       throw new SecureCopyError(
         'bad_request',
@@ -273,21 +290,36 @@ export class SecureCopyService implements InputSealedPort {
     if (outcome.outcome === 'timeout')
       throw new SecureCopyError(
         'upstream_failed',
-        `The command ran out of time and was stopped; nothing was copied.${why}`,
+        `The command ran out of time and was stopped; nothing was copied.${await why()}`,
       );
     if (outcome.exitCode !== 0)
       throw new SecureCopyError(
         'upstream_failed',
-        `The command exited with ${String(outcome.exitCode)}; nothing was copied.${why}`,
+        `The command exited with ${String(outcome.exitCode)}; nothing was copied.${await why()}`,
       );
-    if (outcome.truncated || encoder.encode(value).length > COPY_VALUE_MAX_BYTES)
+    // stdout's OWN size: a long stderr beside a short token is no reason to refuse it.
+    if (encoder.encode(outcome.stdout).length > COPY_VALUE_MAX_BYTES)
       throw new SecureCopyError(
         'bad_request',
         `The command printed more than ${String(COPY_VALUE_MAX_BYTES)} bytes; nothing was copied.`,
       );
     if (value === '')
       throw new SecureCopyError('bad_request', 'The command printed nothing on stdout; nothing was copied.');
-    return { value, from, command: report };
+    if ([...value.trim()].length < COPY_VALUE_MIN_CHARS)
+      throw new SecureCopyError(
+        'bad_request',
+        `The command printed fewer than ${String(COPY_VALUE_MIN_CHARS)} characters: too short to seal and mask safely; nothing was copied.`,
+      );
+    return {
+      value,
+      from,
+      command: {
+        outcome: outcome.outcome,
+        ...(outcome.exitCode === undefined ? {} : { exitCode: outcome.exitCode }),
+        stderr: outcome.stderr,
+        stdout: outcome.stdout,
+      },
+    };
   }
 
   private async workingFolder(sessionId: string, cwd: string | undefined): Promise<string> {
@@ -302,20 +334,29 @@ export class SecureCopyService implements InputSealedPort {
    * stderr with what stdout held masked first, then through the vault redactor, then cut. A redactor that fails
    * withholds the text rather than hand back what it could not check.
    */
+  /** How a command that worked ended, for the agent: its stderr masked once the value is held. */
+  private async report(
+    command: NonNullable<Read['command']>,
+    values: readonly string[],
+    name: CopyName,
+  ): Promise<CopyCommandReport> {
+    const stderr = await this.maskedStderr(command.stderr, values, name);
+    return {
+      outcome: command.outcome,
+      ...(command.exitCode === undefined ? {} : { exitCode: command.exitCode }),
+      ...(stderr === undefined ? {} : { stderr }),
+    };
+  }
+
   private async maskedStderr(stderr: string, values: readonly string[], name: CopyName): Promise<string | undefined> {
     const trimmed = stderr.trim();
     if (trimmed === '') return undefined;
-    // A piece of the value is as much a leak as the whole: stderr holding any run of it is not handed back at all.
-    const whole = values.flatMap(value => [value, value.trim()]).filter(value => value !== '');
-    const rest = [...whole]
-      .sort((a, b) => b.length - a.length)
-      .reduce((text, value) => text.replaceAll(value, ' '), trimmed);
+    // Every spelling of the value, longest first: masked whole, and any piece left over withholds the lot.
+    const whole = [...new Set(values.flatMap(value => spellings(value)))].sort((a, b) => b.length - a.length);
+    const rest = whole.reduce((text, value) => text.replaceAll(value, ' '), trimmed);
     if (whole.some(value => holdsPieceOf(rest, value))) return `[withheld: it held part of ${copyHandle(name)}]`;
     const marker = copyMask(name);
-    const masked = [...values]
-      .filter(value => value.trim() !== '')
-      .sort((a, b) => b.length - a.length)
-      .reduce((text, value) => text.replaceAll(value, marker), trimmed);
+    const masked = whole.reduce((text, value) => text.replaceAll(value, marker), trimmed);
     try {
       const redacted = await this.ports.redact(masked);
       return redacted.length > COPY_STDERR_MAX_CHARS ? `${redacted.slice(0, COPY_STDERR_MAX_CHARS - 1)}…` : redacted;
