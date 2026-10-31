@@ -38,6 +38,10 @@ import { type HealthApiClient, ProtocolDaemonHealth } from '../src/adapters/daem
 import { ProcIoPressureReader } from '../src/adapters/daemon/io-pressure';
 import { FileDaemonLifecycleLock } from '../src/adapters/daemon/lifecycle-lock';
 import { TailDaemonLog } from '../src/adapters/daemon/log-stream';
+import {
+  assertOwnLoopbackListener,
+  type LoopbackListenerGuardPorts,
+} from '../src/adapters/daemon/loopback-listener-guard';
 import { NixStoreGcRoot } from '../src/adapters/daemon/nix-gc-root';
 import { BunDaemonProcess } from '../src/adapters/daemon/process';
 import { HostProcessIncarnations } from '../src/adapters/daemon/process-incarnation';
@@ -353,6 +357,8 @@ async function daemonBaseUrl(environment: Record<string, string | undefined>, st
 export async function daemonConnection(
   environment: Record<string, string | undefined>,
   homeDirectory: string,
+  /** Whose program holds the port; the host's own socket tables unless a test says otherwise. */
+  listeners?: LoopbackListenerGuardPorts,
 ): Promise<{
   baseUrl: string;
   token: string;
@@ -366,6 +372,9 @@ export async function daemonConnection(
       `FY_TOKEN is required when the daemon is not on this machine (${baseUrl}); local daemon credentials are never sent remotely. Set FY_TOKEN to that daemon's own token.`,
     );
   }
+  // The local token goes only to a listener this user owns: on a shared host a stopped daemon's port is
+  // anybody's to bind, and the admin token is the whole machine (`lib/daemon/listener-owner.ts`).
+  if (explicitToken === '') await assertOwnLoopbackListener(baseUrl, 'the daemon admin token', listeners);
   const token = explicitToken === '' ? await readDaemonToken(`${stateHome}/api-token`) : explicitToken;
   return { baseUrl, token, version: assertSemver(pkg.version) };
 }

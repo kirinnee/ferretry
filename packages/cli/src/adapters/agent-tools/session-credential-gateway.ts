@@ -9,6 +9,7 @@ import {
 import type { z } from 'zod';
 import type { IAgentToolsGateway } from '../../lib/agent-tools/client.ts';
 import { isLocalDaemonUrl } from '../../lib/daemon/address.ts';
+import { assertOwnLoopbackListener, type LoopbackListenerGuardPorts } from '../daemon/loopback-listener-guard.ts';
 
 /** How long one agent tool request may take: a page load (45 s in the worker) or a held-open wait. */
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -57,6 +58,7 @@ export class SessionCredentialGateway implements IAgentToolsGateway {
     private readonly baseUrl: () => Promise<string>,
     private readonly fetcher: (url: string, init: RequestInit) => Promise<Response> = fetch,
     private readonly restart?: SessionGatewayRestart,
+    private readonly listeners?: LoopbackListenerGuardPorts,
   ) {}
 
   async request<T>(
@@ -68,6 +70,9 @@ export class SessionCredentialGateway implements IAgentToolsGateway {
     const base = await this.baseUrl();
     if (!isLocalDaemonUrl(base))
       throw new Error(`the agent tools talk only to the daemon on this machine, and ${base} is not on it`);
+    // Asked on every request: this gateway lives as long as the agent's tools server, across daemon restarts
+    // that leave the port free for another user's program to take.
+    await assertOwnLoopbackListener(base, 'the session credential', this.listeners);
     const headers = new Headers(init.headers);
     headers.delete('authorization');
     const attempt = async (): Promise<DaemonAttempt<Response>> => {
