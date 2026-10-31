@@ -45,7 +45,7 @@ import {
  * secret to type: it is a touch on this device, it lasts a short while, and it never widens.
  */
 export const STEP_UP_NOTE =
-  'Changing how a capability behaves, or opening a terminal, the browser, a pairing code or a stored secret, asks you to confirm with your passkey on this device. It covers this open copy of the app for a short while and never turns anything on that was switched off.';
+  'Changing how a capability behaves, or opening a terminal, the browser, a pairing code, a stored secret or sharing a catalog, asks you to confirm with your passkey on this device. It covers this open copy of the app for a short while and never turns anything on that was switched off.';
 
 /**
  * The capability as an operator reads it, so a refusal names a thing rather than a key.
@@ -147,7 +147,7 @@ const CAPABILITY_REACH: Readonly<Record<DaemonCapability, string>> = {
   secrets:
     'Runs a command with a stored secret in its environment — code on this machine; and sets or deletes stored secrets.',
   sharing:
-    "Making catalogs of this machine's skills and MCP setups and exporting them as signed files, which makes this machine vouch for what they hold. Members are not built yet.",
+    'Making catalogs of this machine’s skills and MCP setups and exporting them as signed files, which makes this machine vouch for what they hold. Sharing with named people comes in a later update.',
 };
 
 export const capabilityReach = (capability: DaemonCapability): string => CAPABILITY_REACH[capability];
@@ -263,7 +263,7 @@ const POSTURE_COPY = {
     badge: 'Governed',
     headline: 'The operator’s limits apply to this browser, even when it runs on the machine itself.',
     detail:
-      'Every capability below is open only because the operator allowed it, and changing one, or opening a terminal, the browser, a pairing code or a stored secret, asks you to confirm with your passkey.',
+      'Every capability below is open only because the operator allowed it, and changing one, or opening a terminal, the browser, a pairing code, a stored secret or sharing a catalog, asks you to confirm with your passkey.',
     tone: 'disclosure',
   },
   unknown: {
