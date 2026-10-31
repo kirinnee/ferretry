@@ -52,15 +52,18 @@ export interface NotificationServiceOptions {
  * repeat of the same stop, item or notice is no second push, across restarts too.
  */
 /**
- * The most HIGH-priority pushes this daemon sends in any rolling hour, across every ferret. Past it a push still goes,
- * once per card as always, at normal priority: a ferret raising card after card cannot keep the owner's phone loud.
+ * The most HIGH-priority pushes in any rolling hour: per ferret, and across the whole daemon. Past either a push still
+ * goes, once per card as always, at normal priority. The per-ferret bucket is the tighter one, so a ferret raising card
+ * after card spends its own three and never the slots another ferret's real code needs.
  */
-export const HIGH_PUSHES_PER_HOUR = 6;
+export const HIGH_PUSHES_PER_SESSION_PER_HOUR = 3;
+export const HIGH_PUSHES_PER_HOUR = 12;
 const HOUR_MS = 3_600_000;
 
 export class NotificationService implements AgendaRaisedObserver {
-  /** When each recent high push was sent, oldest first: the rolling window {@link HIGH_PUSHES_PER_HOUR} counts. */
+  /** When each recent high push was sent, oldest first, daemon-wide and per session: the rolling windows. */
   private readonly highSent: number[] = [];
+  private readonly highSentBySession = new Map<string, number[]>();
 
   constructor(private readonly options: NotificationServiceOptions) {}
 
@@ -134,11 +137,17 @@ export class NotificationService implements AgendaRaisedObserver {
   private urgentOf(sessionId: string, shown: AgendaItem): AgendaItem | undefined {
     const subjectOf = this.options.subjectOf;
     if (subjectOf === undefined || pushUrgencyFor(subjectOf(sessionId, shown)) !== 'high') return undefined;
-    // The daemon-wide cap: counted and taken in one synchronous step, so two pushes cannot both take the last slot.
+    // Both caps: counted and taken in one synchronous step, so two pushes cannot both take the last slot.
     const now = Date.parse(this.options.clock.now());
-    while (this.highSent.length > 0 && (this.highSent[0] as number) <= now - HOUR_MS) this.highSent.shift();
-    if (this.highSent.length >= HIGH_PUSHES_PER_HOUR) return undefined;
+    const recent = (sent: readonly number[]): number[] => sent.filter(at => at > now - HOUR_MS);
+    const daemon = recent(this.highSent);
+    const session = recent(this.highSentBySession.get(sessionId) ?? []);
+    this.highSent.splice(0, this.highSent.length, ...daemon);
+    if (session.length === 0) this.highSentBySession.delete(sessionId);
+    else this.highSentBySession.set(sessionId, session);
+    if (session.length >= HIGH_PUSHES_PER_SESSION_PER_HOUR || daemon.length >= HIGH_PUSHES_PER_HOUR) return undefined;
     this.highSent.push(now);
+    this.highSentBySession.set(sessionId, [...session, now]);
     return shown;
   }
 

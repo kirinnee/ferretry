@@ -2305,9 +2305,14 @@ describe('a one-time code (`code`): visible, never locked, never masked when the
       { ...RAISE, prompt: 'the card wants it', fields: [{ id: 'value', label: 'Card PIN', sensitivity: 'code' }] },
     );
 
+    const hidden = await raised({ facts: OTP }, { ...CODE, prompt: 'sudo needs your pass\u200bword' });
+    const lookalike = await raised({ facts: OTP }, { ...CODE, prompt: 'sudo needs your p\u0430ssword' });
+
     // Assert
     should(prompt.request.sensitivity).equal('secret');
     should(label.request.sensitivity).equal('secret');
+    should(hidden.request.sensitivity).equal('secret');
+    should(lookalike.request.sensitivity).equal('secret');
   });
 
   it('should keep a code at an OTP prompt with typing hidden: the pane asks for a code', async () => {

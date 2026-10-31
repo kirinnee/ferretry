@@ -71,7 +71,7 @@ import type {
 } from './ports.ts';
 import type { QuarantineHold, QuarantineRegistry } from './quarantine.ts';
 import { bindingOf, mayRebind } from './rebind.ts';
-import { heldFromView, lockFor, longerLock, passwordTarget, probeable } from './lock.ts';
+import { heldFromView, lockFor, longerLock, lookAlike, matchable, passwordTarget, probeable } from './lock.ts';
 import type { LoginObserver } from './login-observer.ts';
 import { savedForFields, targetMatchKey } from './saved-logins.ts';
 import { SessionLock } from './session-lock.ts';
@@ -1681,7 +1681,8 @@ function observedAs(
 ): InputRequestField[] {
   return fields.map(field => {
     // The ferret's own words (its prompt, the field's label or id) may only ever RAISE a code to a secret.
-    const said = PASSWORD_WORDS.test(prompt) || PASSWORD_WORDS.test(field.label) || PASSWORD_WORDS.test(field.id);
+    // Matched as normalised text, and a look-alike spelling counts, as for the pane's own words (lock.ts).
+    const said = [prompt, field.label, field.id].some(word => PASSWORD_WORDS.test(matchable(word)) || lookAlike(word));
     if (field.sensitivity === 'code' && (said || passwordTarget(facts, field.id))) upgraded.add(field.id);
     if (!upgraded.has(field.id)) return { ...field, risk: riskOf(field, facts) };
     const secret = { ...field, sensitivity: 'secret' as const };

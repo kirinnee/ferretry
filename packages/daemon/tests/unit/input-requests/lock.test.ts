@@ -6,6 +6,8 @@ import {
   type LockContext,
   lockFor,
   longerLock,
+  lookAlike,
+  matchable,
   passwordTarget,
   pageFieldsQualify,
   probeable,
@@ -280,8 +282,29 @@ describe('a password target (a `code` aimed at one is handled as a secret)', () 
     // A prompt that asks for a password in other words is one, typing shown or not.
     for (const line of ['[sudo] passwd for kirin:', 'Passwort:', 'pw:', 'PIN:', 'Kennwort:', 'Enter credentials:'])
       should(passwordTarget(sudo({ echo: 'on', promptLine: line }, 'bash'), 'value')).be.true();
+    // Only a program that asks for 2FA codes keeps an echo-off code prompt a code: a shell's `read -s` does not.
+    should(hidden('Verification code:', 'bash')).be.true();
+    should(hidden('Verification code:', 'aws')).be.false();
     // A getpass program is always a password, whatever its prompt says.
     should(hidden('Verification code:', 'sudo')).be.true();
     should(passwordTarget(sudo({ echo: 'on', promptLine: 'Verification code:' }, 'su'), 'value')).be.true();
+  });
+});
+
+describe('look-alike and hidden spellings (the pane and the ferret are untrusted text)', () => {
+  it('should read accented, fullwidth, zero-width and mixed-script spellings of password as password', () => {
+    // Arrange
+    const shown = (promptLine: string) => passwordTarget(sudo({ echo: 'on', promptLine }, 'bash'), 'value');
+
+    // Act / Assert
+    for (const line of ['Pàssword:', 'ｐａｓｓｗｏｒｄ:', 'pass\u200bword:', 'P\u0430ssword:', 'Enter Р\u0406N:'])
+      should(shown(line)).be.true();
+    should(
+      passwordTarget(sudo({ echo: 'off', promptLine: 'Verification code (p\u0430ssword):' }, 'ssh'), 'value'),
+    ).be.true();
+    should(passwordTarget(page([pageField({}, { type: 'text', name: 'p\u0430ss' })]), 'password')).be.true();
+    should(shown('Verification code:')).be.false();
+    should(lookAlike('Verification code:')).be.false();
+    should(matchable('pa\u0301ss\u200bword')).equal('password');
   });
 });

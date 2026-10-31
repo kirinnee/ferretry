@@ -90,6 +90,42 @@ export function provenByFacts(
  */
 const GETPASS_PROGRAMS: ReadonlySet<string> = new Set(['sudo', 'sudoedit', 'su', 'doas', 'passwd']);
 
+/**
+ * The programs whose echo-off prompt may be a one-time code: remote shells and cloud CLIs that ask for a 2FA code.
+ * A bare shell's `read -s` is never one, whatever its line says.
+ */
+const CODE_PROGRAMS: ReadonlySet<string> = new Set([
+  'ssh',
+  'scp',
+  'sftp',
+  'mosh-client',
+  'aws',
+  'gcloud',
+  'az',
+  'vault',
+]);
+
+/**
+ * Text as it is matched: compatibility-normalised (NFKC), with combining marks and invisible format characters taken
+ * out, so "pàss​word" or a fullwidth "ｐａｓｓｗｏｒｄ" reads "password". Applied to the pane's line and to the ferret's own words.
+ */
+export function matchable(text: string): string {
+  return text
+    .normalize('NFKD')
+    .replace(/[\p{Mn}\p{Me}\p{Cf}]/gu, '')
+    .normalize('NFKC');
+}
+
+/**
+ * Whether a word mixes Latin letters with Cyrillic or Greek ones ("Pаssword" with a Cyrillic а): a look-alike spelling,
+ * read as a password word. It can only make a code a secret, so a false hit costs nothing but visibility.
+ */
+export function lookAlike(text: string): boolean {
+  return matchable(text)
+    .split(/[^\p{L}]+/u)
+    .some(word => /\p{Script=Latin}/u.test(word) && /[\p{Script=Cyrillic}\p{Script=Greek}]/u.test(word));
+}
+
 /** A prompt line asking for a one-time code, in the words the pane shows (never the ferret's). */
 const CODE_PROMPT = /\b(?:verification\s+code|one[\s-]?time|otp|2fa|authenticator)\b|\bcode\s*:/iu;
 /**
@@ -111,17 +147,21 @@ const NOT_A_CODE = /\b(?:password|passphrase|pin|token|secret)\b/iu;
  * - A terminal running a getpass program (sudo, sudoedit, su, doas, passwd), or whose prompt line asks for a password
  *   (password, passphrase, passwd, Passwort, Kennwort, contraseña, mot de passe, credential, secret, "pw:", PIN):
  *   always, whatever else the line says.
- * - A terminal reading with echo off, UNLESS the prompt line the daemon read from the pane asks for a code
- *   ("Verification code:", one-time, OTP, 2FA, authenticator, "code:") and says none of password, passphrase, PIN,
- *   token or secret. Whole words, any case. A bare ": " with echo off is a password.
+ * - A terminal reading with echo off, UNLESS its program is one that asks for 2FA codes (ssh, scp, sftp, mosh, the
+ *   aws, gcloud, az and vault CLIs) AND the prompt line the daemon read from the pane asks for a code ("Verification
+ *   code:", one-time, OTP, 2FA, authenticator, "code:") and says none of password, passphrase, PIN, token or secret.
+ *   Whole words, any case. A bare ": " with echo off, or a shell's `read -s`, is a password.
+ * - Every line and word is matched as {@link matchable} text, and a look-alike spelling ({@link lookAlike}) counts as a
+ *   password word.
  */
 export function passwordTarget(facts: InputTargetFacts, fieldId: string): boolean {
   // (The ferret's own words are checked in service.ts: they may only raise a code to a secret.)
   if (facts.kind === 'terminal') {
-    const line = facts.promptLine;
-    if (GETPASS_PROGRAMS.has(facts.foreground.comm) || PASSWORD_PROMPT.test(line)) return true;
+    const line = matchable(facts.promptLine);
+    const program = facts.foreground.comm;
+    if (GETPASS_PROGRAMS.has(program) || PASSWORD_PROMPT.test(line) || lookAlike(facts.promptLine)) return true;
     if (facts.echo !== 'off') return false;
-    return !(CODE_PROMPT.test(line) && !NOT_A_CODE.test(line));
+    return !(CODE_PROGRAMS.has(program) && CODE_PROMPT.test(line) && !NOT_A_CODE.test(line));
   }
   if (facts.kind !== 'browser') return false;
   const found = facts.fields.find(field => field.fieldId === fieldId);
@@ -129,7 +169,7 @@ export function passwordTarget(facts: InputTargetFacts, fieldId: string): boolea
   return (
     found.field.type?.toLowerCase() === 'password' ||
     [found.field.name, found.field.id, found.field.autocomplete].some(
-      word => word !== undefined && PASSWORD_FIELD.test(word),
+      word => word !== undefined && (PASSWORD_FIELD.test(matchable(word)) || lookAlike(word)),
     )
   );
 }
