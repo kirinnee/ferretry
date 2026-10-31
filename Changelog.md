@@ -1,3 +1,10 @@
+## [4.156.2](https://github.com/kirinnee/ferretry/compare/v4.156.1...v4.156.2) (2026-10-31)
+
+### Fixes
+
+* **daemon:** re-issue the session credential on every pane launch ([#1119](https://github.com/kirinnee/ferretry/issues/1119)) ([1e5e73f](https://github.com/kirinnee/ferretry/commit/1e5e73fc6058d23680179bb815d841795a285cf5)), closes [#1115](https://github.com/kirinnee/ferretry/issues/1115)
+* **pwa:** show the current proxy setting and save and test in one step ([#1120](https://github.com/kirinnee/ferretry/issues/1120)) ([cdb879a](https://github.com/kirinnee/ferretry/commit/cdb879a54120ac5be8837310151421f9dae29954))
+
 ## [4.156.1](https://github.com/kirinnee/ferretry/compare/v4.156.0...v4.156.1) (2026-10-31)
 
 ### Fixes

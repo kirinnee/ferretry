@@ -1,3 +1,10 @@
+## [4.156.1](https://github.com/kirinnee/ferretry/compare/v4.156.0...v4.156.1) (2026-10-31)
+
+### Fixes
+
+* **pair:** sweep pairing redirect pages a killed fy pair leaves behind ([#1118](https://github.com/kirinnee/ferretry/issues/1118)) ([640fb88](https://github.com/kirinnee/ferretry/commit/640fb8807387db42f019f747c9b0461ed9899574))
+* **pwa:** stop the expanded board flickering shut when an item is open ([#1117](https://github.com/kirinnee/ferretry/issues/1117)) ([2f5dbef](https://github.com/kirinnee/ferretry/commit/2f5dbef251195718ac65dad1e17f9db655c582ba)), closes [#1101](https://github.com/kirinnee/ferretry/issues/1101)
+
 ## [4.156.0](https://github.com/kirinnee/ferretry/compare/v4.155.1...v4.156.0) (2026-10-31)
 
 ### Features
