@@ -208,6 +208,7 @@ export function machineView(
     agentControl: { ...model.machine.agentControl },
     browserMode: model.machine.browserMode,
     browserProxy: model.machine.browserProxy ?? null,
+    browserPorts: model.machine.browserPorts,
     autoResume: model.machine.autoResume,
     agendaMode: model.machine.agendaMode,
     lastAutoResume: facts.lastAutoResume ?? null,

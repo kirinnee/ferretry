@@ -47,6 +47,7 @@ describe('AccountModelSchema', () => {
       agentPermissions: 'auto',
       agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
       browserMode: 'headless',
+      browserPorts: 'random',
       autoResume: true,
       agendaMode: true,
       attentionNudge: true,
@@ -762,6 +763,39 @@ describe('the conversations setting', () => {
     // Assert
     should(notBoolean.some(message => message.startsWith('machine.conversations.listComputer'))).be.true();
     should(unknown.some(message => message.startsWith('machine.conversations'))).be.true();
+  });
+});
+
+describe('the browser ports setting', () => {
+  it('should take the ports from a machine that says per-user or names three of its own', () => {
+    // Arrange
+    const explicit = { cdp: 9222, relay: 9223, vnc: 5901 };
+    const inputs = ['per-user', explicit].map(browserPorts => documentWith({ machine: { browserPorts } }));
+
+    // Act
+    const actual = inputs.map(input => parseAccountModel(input).machine.browserPorts);
+
+    // Assert
+    should(actual).deepEqual(['per-user', explicit]);
+  });
+
+  it('should refuse ports below 1024, past 65535, repeated, or out of a word it does not know', () => {
+    // Arrange
+    const refused = [
+      { cdp: 80, relay: 9223, vnc: 5901 },
+      { cdp: 9222, relay: 65_536, vnc: 5901 },
+      { cdp: 9222, relay: 9222, vnc: 5901 },
+      { cdp: 9222, relay: 9223 },
+      'fixed',
+    ];
+
+    // Act
+    const actual = refused.map(browserPorts => messagesOf(documentWith({ machine: { browserPorts } })));
+
+    // Assert
+    for (const messages of actual) {
+      should(messages.some(message => message.startsWith('machine.browserPorts'))).be.true();
+    }
   });
 });
 

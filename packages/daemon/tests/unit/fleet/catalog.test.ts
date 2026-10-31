@@ -413,6 +413,7 @@ describe('machineView', () => {
       defaultRuntime: null,
       agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
       browserMode: 'headless',
+      browserPorts: 'random',
       browserProxy: null,
       autoResume: true,
       agendaMode: true,
@@ -426,6 +427,17 @@ describe('machineView', () => {
       authority: OPEN,
     });
     FleetMachineViewSchema.parse(actual);
+  });
+
+  it('should carry the machine browser ports setting, random unless the machine says otherwise', () => {
+    // Act
+    const random = machineView(modelOf({}), factsOf({}), OPEN);
+    const perUser = machineView(modelOf({ machine: { browserPorts: 'per-user' } }), factsOf({}), OPEN);
+
+    // Assert
+    should(random.browserPorts).equal('random');
+    should(perUser.browserPorts).equal('per-user');
+    FleetMachineViewSchema.parse(perUser);
   });
 
   it('should carry the machine default for agenda mode, on unless turned off', () => {

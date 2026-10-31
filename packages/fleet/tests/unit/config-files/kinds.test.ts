@@ -49,6 +49,7 @@ describe('SINGLETON_DEFAULTS', () => {
       agentPermissions: 'auto',
       agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
       browserMode: 'headless',
+      browserPorts: 'random',
       autoResume: true,
       agendaMode: true,
       attentionNudge: true,

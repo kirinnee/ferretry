@@ -5,8 +5,12 @@ import { join } from 'node:path';
 import type { BrowserScreencastFrame } from '@ferretry/protocol';
 import should from 'should';
 import { BrowserProfileStore } from '../../../../src/adapters/browser/control/profile-store.ts';
-import { NodeSessionBrowserLauncher } from '../../../../src/adapters/browser/runtime/session-browser-launcher.ts';
+import {
+  NodeSessionBrowserLauncher,
+  type SessionBrowserModeOptions,
+} from '../../../../src/adapters/browser/runtime/session-browser-launcher.ts';
 import { BrowserWorkerClient } from '../../../../src/adapters/browser/transport/worker-client.ts';
+import { BrowserControlError } from '../../../../src/lib/browser/control/index.ts';
 import type { ResolvedBrowserProxy } from '../../../../src/lib/browser/proxy/index.ts';
 import type { BrowserWorkerProgram } from '../../../../src/lib/browser/runtime/index.ts';
 import { type BrowserAutomation, BrowserTransportError } from '../../../../src/lib/browser/transport/index.ts';
@@ -460,6 +464,84 @@ describe('NodeSessionBrowserLauncher', () => {
     should(started).not.containEql('--ozone-platform=x11');
     // The debugging port takes no cross-origin WebSocket: only the worker, which sends no Origin.
     should(started).not.containEql('--remote-allow-origins');
+  });
+
+  describe('Browser ports', () => {
+    /** A loopback port nobody holds right now, taken the way the launcher's own `freePort` does. */
+    async function spare(): Promise<number> {
+      const held = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data: () => undefined } });
+      const port = held.port;
+      held.stop(true);
+      return port;
+    }
+
+    async function launchWith(
+      ports: SessionBrowserModeOptions['ports'],
+      proxy?: ResolvedBrowserProxy,
+    ): Promise<{ readonly root: string; readonly started: string }> {
+      const chrome = await fakeChrome({ recordArguments: true });
+      const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
+      roots.push(root);
+      const worker = { unexpectedExit: new Promise<number>(() => undefined), close: async () => undefined };
+      const launcher = new NodeSessionBrowserLauncher(
+        new BrowserProfileStore(root),
+        INJECTED_WORKER,
+        process.execPath,
+        environment(chrome),
+        async () => worker as never,
+        { ...PORT, ports, proxy: async () => proxy },
+      );
+      const browser = await launcher.launch({ width: 800, height: 600 });
+      opened.push(browser);
+      return { root, started: await readFile(`${chrome}.args`, 'utf8') };
+    }
+
+    it('should start Chrome on the DevTools port the setting names', async () => {
+      const cdp = await spare();
+      const { started } = await launchWith(async () => ({
+        kind: 'fixed',
+        ports: { cdp, relay: cdp + 1, vnc: cdp + 2 },
+      }));
+      should(started).containEql(`--remote-debugging-port=${cdp}\n`);
+    });
+
+    it('should open the proxy sign-in relay on the relay port the setting names', async () => {
+      const relay = await spare();
+      const { started } = await launchWith(
+        async () => ({ kind: 'fixed', ports: { cdp: await spare(), relay, vnc: relay + 1 } }),
+        {
+          setting: { url: 'http://proxy.example.test:8080', bypass: [], username: 'u', password: 'p' },
+          credentials: { username: 'a-user', password: 'a-password' },
+        },
+      );
+      should(started).containEql(`--proxy-server=http://127.0.0.1:${relay}\n`);
+    });
+
+    it('should pick free ports as it always did when the setting is random or unreadable here', async () => {
+      const random = await launchWith(async () => ({ kind: 'random' }));
+      const absent = await launchWith(undefined);
+      should(random.started).match(/--remote-debugging-port=\d+\n/u);
+      should(absent.started).match(/--remote-debugging-port=\d+\n/u);
+    });
+
+    it('should refuse the launch with the reason, rather than quietly falling back to a random port', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
+      roots.push(root);
+      const launcher = new NodeSessionBrowserLauncher(
+        new BrowserProfileStore(root),
+        INJECTED_WORKER,
+        process.execPath,
+        environment(await fakeChrome()),
+        async () => {
+          throw new Error('no worker should start');
+        },
+        { ...PORT, ports: async () => ({ kind: 'refused', reason: 'uid 999 gets ports outside 1024–32767' }) },
+      );
+      const refused = await launcher.launch({ width: 800, height: 600 }).catch((error: unknown) => error);
+      should(refused).instanceOf(BrowserControlError);
+      should((refused as Error).message).equal('uid 999 gets ports outside 1024–32767');
+      should(await new BrowserProfileStore(root).acquire({ sessionId: 'after' })).have.property('sessionId', 'after');
+    });
   });
 
   describe('Browser proxy and user agent', () => {

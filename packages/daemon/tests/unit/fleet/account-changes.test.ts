@@ -1531,6 +1531,13 @@ describe('deriveAccountChange: credential.remove with runtimes on the login', ()
   });
 });
 
+const PORTS_BASE = {
+  kind: 'machine.settings' as const,
+  agentPermissions: 'auto' as const,
+  defaultRuntime: null,
+  agentControl: { terminals: true, browsers: true, files: true },
+};
+
 describe('deriveAccountChange: machine.settings', () => {
   it('should apply to new sessions when none is running', () => {
     // Act
@@ -1651,6 +1658,49 @@ describe('deriveAccountChange: machine.settings', () => {
     should(off.model.machine.browserProxy).be.undefined();
     should(kept.model.machine.browserProxy).eql({ url: 'http://proxy.example:8080', bypass: [] });
     should(same.summary).equal('Keep machine settings the same');
+  });
+
+  it('should set the browser ports, saying they wait for the next browser or login-window start', () => {
+    // Act
+    const perUser = derive({ ...PORTS_BASE, browserPorts: 'per-user' });
+    const explicit = derive({ ...PORTS_BASE, browserPorts: { cdp: 9222, relay: 9223, vnc: 5901 } });
+
+    // Assert
+    should(perUser.summary).equal('Set the browser ports to per-user (derived from the user id)');
+    should(perUser.model.machine.browserPorts).equal('per-user');
+    should(explicit.summary).equal('Set the browser ports to cdp 9222, relay 9223, vnc 5901');
+    should(explicit.model.machine.browserPorts).eql({ cdp: 9222, relay: 9223, vnc: 5901 });
+    should(explicit.consequences).deepEqual([
+      'Applies the next time the browser or the login window starts; a browser already running keeps its ports until it stops.',
+    ]);
+  });
+
+  it('should say random when the ports go back to random', () => {
+    // Arrange
+    const model = modelOf({ machine: { browserPorts: 'per-user' } });
+
+    // Act
+    const edit = derive({ ...PORTS_BASE, browserPorts: 'random' }, model);
+
+    // Assert
+    should(edit.summary).equal('Set the browser ports to random');
+    should(edit.model.machine.browserPorts).equal('random');
+  });
+
+  it('should keep the browser ports when an older client leaves them out or says the same again', () => {
+    // Arrange
+    const explicit = { cdp: 9222, relay: 9223, vnc: 5901 };
+    const model = modelOf({ machine: { browserPorts: explicit } });
+
+    // Act
+    const left = derive(PORTS_BASE, model);
+    const same = derive({ ...PORTS_BASE, browserPorts: { ...explicit } }, model);
+
+    // Assert
+    should(left.model.machine.browserPorts).eql(explicit);
+    should(left.summary).equal('Keep machine settings the same');
+    should(same.summary).equal('Keep machine settings the same');
+    should(same.consequences).deepEqual([]);
   });
 
   it('should leave the browser mode as it is when an older client leaves it out', () => {

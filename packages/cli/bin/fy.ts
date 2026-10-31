@@ -9,6 +9,7 @@ import {
   DAEMON_RESTART_PATIENCE_MS,
   type DaemonRestartPatience,
   type IFyApiClient,
+  readLoopbackFirewallMarker,
   type SessionView,
 } from '@ferretry/protocol';
 import { FyApiClient } from '@ferretry/protocol/client';
@@ -959,6 +960,8 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       program,
       new BrowserController(client, world.io, new FileScreenshotWriter(), {
         ...(ownSessionId === undefined ? {} : { selfSessionId: ownSessionId }),
+        ...(process.getuid === undefined ? {} : { uid: process.getuid() }),
+        loopbackMarker: async () => await readLoopbackFirewallMarker(async path => await Bun.file(path).text()),
       }),
     ),
   // After the browser group, because `browser firewall` mounts onto it.

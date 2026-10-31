@@ -1,6 +1,6 @@
 import { closeSync, existsSync } from 'node:fs';
 import { createServer } from 'node:net';
-import type { BrowserMode, BrowserProxyStatus } from '@ferretry/protocol';
+import type { BrowserMode, BrowserProxyStatus, ResolvedBrowserPorts } from '@ferretry/protocol';
 import {
   agentBrowserArguments,
   type CdpEndpoint,
@@ -70,6 +70,8 @@ export interface SessionBrowserModeOptions {
   readonly cdpPort?: () => Promise<number>;
   /** Proves the listener on that port is the spawned Chrome's. Defaults to this host's `/proc`. */
   readonly listenerProver?: ListenerProverPort;
+  /** Which loopback ports `browserPorts` asks for, read at every launch like the mode; absent means random. */
+  readonly ports?: () => Promise<ResolvedBrowserPorts>;
   readonly platform?: NodeJS.Platform;
   /** The daemon-owned directory the worker stages downloads and PDFs in (the file tools read them from here). */
   readonly stageDirectory?: string;
@@ -101,6 +103,9 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
     const platform = this.modes.platform ?? process.platform;
     const mode = await this.mode();
     const transport = (await this.modes.transport?.().catch(() => undefined)) ?? defaultCdpTransport();
+    const ports = await this.modes.ports?.();
+    if (ports?.kind === 'refused') throw new BrowserControlError('launch_failed', ports.reason);
+    const fixed = ports?.kind === 'fixed' ? ports.ports : undefined;
     const proxy = await this.modes.proxy?.();
     const version = await chromeVersion(executable);
     const display = mode === 'window' && platform === 'linux' ? await this.privateDisplay() : undefined;
@@ -110,9 +115,16 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
     let pipe: CdpPipeEnds | undefined;
     try {
       const cdp: CdpEndpoint =
-        transport === 'pipe' ? { kind: 'pipe' } : { kind: 'port', port: await (this.modes.cdpPort ?? freePort)() };
+        transport === 'pipe'
+          ? { kind: 'pipe' }
+          : { kind: 'port', port: fixed?.cdp ?? (await (this.modes.cdpPort ?? freePort)()) };
       if (proxy?.credentials !== undefined) {
-        relay = await ProxySignInRelay.start(proxyEndpoint(proxy.setting.url), proxy.credentials);
+        relay = await ProxySignInRelay.start(
+          proxyEndpoint(proxy.setting.url),
+          proxy.credentials,
+          undefined,
+          fixed === undefined ? {} : { port: fixed.relay },
+        );
       }
       const userAgent = honestChromeUserAgent(version, platform, process.arch);
       chrome = Bun.spawn({

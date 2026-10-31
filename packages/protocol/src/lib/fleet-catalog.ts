@@ -34,6 +34,7 @@
 import { z } from 'zod';
 import { AutoResumeSummarySchema } from './auto-resume.ts';
 import { BrowserModeSchema, BrowserProxySettingSchema } from './browser.ts';
+import { BrowserPortsSettingSchema } from './browser-ports.ts';
 import { InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSchema } from './common.ts';
 import {
   FleetApplyOutcomeSchema,
@@ -174,6 +175,11 @@ export const FleetMachineViewSchema = z.strictObject({
    * Credentials are only ever `${secret:NAME}` references here. Optional so a newer app can read an older daemon.
    */
   browserProxy: BrowserProxySettingSchema.nullable().optional(),
+  /**
+   * "Browser ports": `random`, `per-user` or explicit loopback ports for the agent browser, its sign-in relay and
+   * the login window. Optional so a newer app can read an older daemon, which always uses random ports.
+   */
+  browserPorts: BrowserPortsSettingSchema.optional(),
   /**
    * "Auto-resume after restart": when the daemon boots and finds ferrets that were running when the host
    * went down, it resumes them with their conversation intact. Optional only so a newer app can read an
@@ -763,6 +769,9 @@ export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
     browserMode: BrowserModeSchema.optional(),
     /** Left out by a client that predates it, and then left as it is; `null` turns the proxy off. */
     browserProxy: BrowserProxySettingSchema.nullable().optional(),
+    /** Left out by a client that predates it, and then left as it is. */
+    /** Left out by a client that predates it, and then left as it is. */
+    browserPorts: BrowserPortsSettingSchema.optional(),
     /** Left out by a client that predates it, and then left as it is. */
     autoResume: z.boolean().optional(),
     /** Left out by a client that predates it, and then left as it is. */
