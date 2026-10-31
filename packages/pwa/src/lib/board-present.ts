@@ -199,8 +199,10 @@ export const cardSegments = (task: BoardTaskView, context: SegmentContext): read
     },
     activitySegment(task, context.category, context.now),
   ];
+  // In a lane waiting to be tested the activity only repeats the lane, so whether there are test steps comes first
+  // there: a narrow column drops items from the right, and this is the one the lead needs to see.
   const test = testSegment(task, context.category);
-  if (test !== null) segments.push(test);
+  if (test !== null) segments.splice(context.category === 'verify' ? 1 : 2, 0, test);
   const pr = prSegment(task.links.prs);
   if (pr !== null) segments.push(pr);
   if (task.blockedBy.length > 0) {

@@ -1,7 +1,8 @@
 /**
  * ONE BOARD CARD: the title (truncated), its one-line summary (truncated, when it has one), and a meta line of
- * short segments (`&F412 · ● 4m · How to test · PR ✓ · ⛓ 1 · subs 2/3 · owner→assignee`). A card waiting to be
- * tested that says nothing about how wears a quiet "no test steps" instead.
+ * short segments (`&F412 · ● 4m · How to test · PR ✓ · ⛓ 1 · subs 2/3 · owner→assignee`; on a card to test, How to
+ * test comes before the activity). A card waiting to be tested that says nothing about how wears a quiet "no test
+ * steps" instead.
  *
  * It is the only card renderer. The full-page Board, the phone and the per-chat side pane all draw it, and
  * `density` is the only thing that differs: `side` keeps one short line by dropping the summary and the

@@ -95,8 +95,10 @@ describe('cardSegments', () => {
     expect(segment(card('F1'), 'test', 'verify')).toMatchObject({ text: 'no test steps', tone: 'quiet', icon: null });
     expect(segment(card('F1'), 'test', 'active')).toBeUndefined();
     expect(segment(card('F1', { howToTest: '  ' }), 'test', 'active')).toBeUndefined();
-    const keys = cardSegments(steps, { names, now: NOW, category: 'verify', machine: null }).map(entry => entry.key);
-    expect(keys.slice(0, 3)).toEqual(['ref', 'activity', 'test']);
+    const keys = (category: 'verify' | 'active') =>
+      cardSegments(steps, { names, now: NOW, category, machine: null }).map(entry => entry.key);
+    expect(keys('verify').slice(0, 3)).toEqual(['ref', 'test', 'activity']);
+    expect(keys('active').slice(0, 3)).toEqual(['ref', 'activity', 'test']);
   });
 
   it('draws the ref, the people and the machine only when there are several', () => {
