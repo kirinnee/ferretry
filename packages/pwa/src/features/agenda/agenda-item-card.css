@@ -243,28 +243,34 @@
   outline-offset: 2px;
 }
 
-/* Premise and context: ONE soft panel, the label column on the left, the points on the right. No accent bar. */
+/* Premise and context: two soft tinted blocks, each with its label ABOVE its points so the text gets the full width.
+   The tints come from the theme's own accent and warn tokens, so both light and dark keep their contrast. No accent bar. */
 .fy-card__situation {
-  border-radius: var(--radius-md);
-  background: var(--surface-2, var(--bg));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 .fy-card__sit-row {
-  position: relative;
-  display: grid;
-  grid-template-columns: 84px minmax(0, 1fr);
+  --fy-sit-bg: var(--surface-2, var(--bg));
+  --fy-sit-ink: var(--muted);
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
   padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--fy-sit-bg);
 }
-.fy-card__sit-row + .fy-card__sit-row::before {
-  position: absolute;
-  top: 0;
-  right: 12px;
-  left: 12px;
-  height: 1px;
-  background: var(--border);
-  content: '';
+.fy-card__sit-row[data-agenda-section='premise'] {
+  --fy-sit-bg: var(--accent-soft);
+  --fy-sit-ink: var(--accent-strong);
 }
-.fy-card__sit-label {
-  padding-top: 1px;
+.fy-card__sit-row[data-agenda-section='context'] {
+  --fy-sit-bg: var(--warn-bg);
+  --fy-sit-ink: var(--warn);
+}
+.fy-card .fy-card__sit-label {
+  color: var(--fy-sit-ink);
 }
 .fy-card .fy-card__points {
   display: flex;
