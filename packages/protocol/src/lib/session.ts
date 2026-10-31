@@ -1257,8 +1257,42 @@ export const InflightItemSchema = z.strictObject({
   detail: z.string().optional(),
   age: z.string().optional(),
   blocks: z.boolean(),
+  /**
+   * Set on a process the agent started from its own tool shell and left running — a background job of
+   * the agent's, which the agent can be asked to stop (`askToStopJobs`). Absent on everything else,
+   * and on every item from a daemon that predates it.
+   */
+  backgroundJob: z.literal(true).optional(),
+  /** The process id, carried on a background job so the agent can be told which one. */
+  pid: PositiveIntegerSchema.optional(),
 });
 export type InflightItem = z.infer<typeof InflightItemSchema>;
+
+/** The ask names nothing: the daemon looks again and asks about what it finds. */
+export const AskToStopJobsRequestSchema = z.strictObject({});
+export type AskToStopJobsRequest = z.infer<typeof AskToStopJobsRequestSchema>;
+
+/** One of the agent's background jobs a refused migration asked it to stop. */
+export const AgentJobSchema = z.strictObject({
+  pid: PositiveIntegerSchema,
+  /** The command line, trimmed to one line. */
+  command: z.string().min(1),
+  age: z.string().optional(),
+});
+export type AgentJob = z.infer<typeof AgentJobSchema>;
+
+/**
+ * `POST /v1/sessions/:sessionId/migrate/ask-to-stop-jobs`: the daemon looked again, found the agent's
+ * own background jobs that block a migration, and queued ONE message asking the agent to stop them
+ * (or say why not). It stops nothing itself. `alreadyAsked` means the same jobs were asked about before
+ * and that message is the one answered with, so a second press never asks twice.
+ */
+export const AskToStopJobsResultSchema = z.strictObject({
+  messageId: z.string().min(1),
+  jobs: z.array(AgentJobSchema).min(1),
+  alreadyAsked: z.boolean(),
+});
+export type AskToStopJobsResult = z.infer<typeof AskToStopJobsResultSchema>;
 
 /**
  * Why a Restart (a migration) was refused, as data. `restartsWithCli` counts the processes the

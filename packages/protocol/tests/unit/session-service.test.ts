@@ -371,6 +371,34 @@ const sessionCases: SchemaCase[] = [
     },
   },
   {
+    name: 'in-flight background job',
+    schema: session.InflightItemSchema,
+    value: {
+      kind: 'process',
+      verdict: 'unknown',
+      title: 'A program Ferretry doesn’t recognise is running',
+      detail: 'bash /tmp/merge-all.sh 765',
+      blocks: true,
+      backgroundJob: true,
+      pid: 5101,
+    },
+  },
+  { name: 'ask to stop jobs request', schema: session.AskToStopJobsRequestSchema, value: {} },
+  {
+    name: 'agent job',
+    schema: session.AgentJobSchema,
+    value: { pid: 5101, command: 'bash /tmp/merge-all.sh 765', age: '4m' },
+  },
+  {
+    name: 'ask to stop jobs result',
+    schema: session.AskToStopJobsResultSchema,
+    value: {
+      messageId: 'migrate-jobs-5101',
+      jobs: [{ pid: 5101, command: 'bash /tmp/merge-all.sh 765' }],
+      alreadyAsked: false,
+    },
+  },
+  {
     name: 'migration refusal',
     schema: session.MigrationRefusalSchema,
     value: { status: 'running', turn: 13, blockedBy: 'unreadable', restartsWithCli: 1, items: [] },

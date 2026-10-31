@@ -20,6 +20,7 @@ import type {
   UsageFeedView,
 } from './service.ts';
 import type {
+  AskToStopJobsResult,
   ComposerDraftRequest,
   ComposerDraftResult,
   ConversionPreview,
@@ -204,6 +205,11 @@ export interface IFyApiClient {
    * made. A read: nothing is written and no request id is needed.
    */
   conversionPreview(id: string, agent: string, model?: string): Promise<ConversionPreview>;
+  /**
+   * After a migration was refused only because of the agent's own background jobs: queue one message
+   * asking the agent to stop them, or to say why not. Stops nothing itself, and asks once per set of jobs.
+   */
+  askToStopJobs(id: string): Promise<AskToStopJobsResult>;
   /**
    * Restart the ferrets `request` names on their current conversation: the idle ones now, the busy ones
    * at their next idle moment. `requestId` makes the POST safe to retry (the restart is destructive).

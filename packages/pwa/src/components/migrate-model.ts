@@ -1,3 +1,4 @@
+import { type MigrationRefusal, MigrationRefusedBodySchema } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { downgradeOf, downgradeSentence } from '../features/session-actions/context-downgrade.ts';
 
@@ -44,7 +45,20 @@ export interface MigrationFailure {
   readonly guidance: string;
   readonly code?: string;
   readonly suggestedModel?: string;
+  /** What the preflight saw, on a refusal from a daemon that attaches it. */
+  readonly inflight?: MigrationRefusal;
 }
+
+/**
+ * Whether the ONLY things in the way are jobs the agent started from its own shell — the one refusal the
+ * agent can clear by itself, so the one where the sheet offers to ask it. Anything else that blocks (an
+ * open tool call, a program Ferretry can't place, a blind spot) keeps the offer away: asking the agent
+ * would not be the remedy there.
+ */
+export const onlyAgentJobsBlock = (refusal: MigrationRefusal | undefined): boolean => {
+  const blockers = refusal?.items.filter(item => item.blocks) ?? [];
+  return blockers.length > 0 && blockers.every(item => item.backgroundJob === true);
+};
 
 /** The daemon's current convention: `[1m]` selects a million-token variant. */
 export const contextWindowForModel = (model: string): number | undefined => {
@@ -182,6 +196,8 @@ export const migrationFailure = (error: unknown): MigrationFailure => {
   const kind = kindForCode(http?.code);
   const [title, guidance] = FAILURE_COPY[kind];
   const suggestedModel = kind === 'context-downgrade' ? modelFromDowngradeError(message) : null;
+  const refused = kind === 'preflight-refused' ? MigrationRefusedBodySchema.safeParse(http?.body) : undefined;
+  const inflight = refused?.success === true ? refused.data.inflight : undefined;
   // The daemon's sentence names an API field and a CLI flag, neither of which a person can use here, so a
   // downgrade is said from its numbers in plain words.
   const shown =
@@ -193,5 +209,6 @@ export const migrationFailure = (error: unknown): MigrationFailure => {
     guidance,
     ...(http?.code === undefined ? {} : { code: http.code }),
     ...(suggestedModel === null ? {} : { suggestedModel }),
+    ...(inflight === undefined ? {} : { inflight }),
   };
 };

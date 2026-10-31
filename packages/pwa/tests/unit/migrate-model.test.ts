@@ -10,6 +10,7 @@ import {
   migrationTarget,
   modelFromDowngradeError,
   oneMillionVariant,
+  onlyAgentJobsBlock,
   SMALL_CONTEXT_WINDOW,
   withoutOneMillionVariant,
 } from '../../src/components/migrate-model.ts';
@@ -168,5 +169,53 @@ describe('a refused downgrade, in plain words', () => {
       'Moving would give this conversation a smaller window — 200,000 tokens instead of 1,000,000 — so part of it would be cut off.',
     );
     expect(failure.suggestedModel).toBe('claude-opus-5-5[1m]');
+  });
+});
+
+describe('a refusal the agent can clear by itself', () => {
+  const job = (pid: number) => ({
+    kind: 'process' as const,
+    verdict: 'unknown' as const,
+    title: 'A program Ferretry doesn’t recognise is running',
+    detail: `bash /tmp/job-${pid}.sh`,
+    blocks: true,
+    backgroundJob: true as const,
+    pid,
+  });
+  const stranger = { kind: 'process' as const, verdict: 'unknown' as const, title: 'A program', blocks: true };
+  const refusal = (items: readonly object[]) => ({
+    status: 'waiting',
+    turn: 3,
+    blockedBy: 'unknown',
+    items,
+    restartsWithCli: 1,
+  });
+
+  it('reads the inventory off a typed refusal and says when only the agent’s own jobs block', () => {
+    const body = { error: 'refused', code: 'migration_refused', inflight: refusal([job(5100), job(5101)]) };
+    const failure = migrationFailure(new FyHttpError('refused', 409, 'migration_refused', body));
+
+    expect(failure.kind).toBe('preflight-refused');
+    expect(failure.inflight?.items.map(item => item.pid)).toEqual([5100, 5101]);
+    expect(onlyAgentJobsBlock(failure.inflight)).toBe(true);
+  });
+
+  it('keeps the offer away when anything else blocks, nothing does, or the daemon sent no inventory', () => {
+    const mixed = migrationFailure(
+      new FyHttpError('refused', 409, 'migration_refused', { error: 'x', inflight: refusal([job(1), stranger]) }),
+    );
+    const nonBlocking = migrationFailure(
+      new FyHttpError('refused', 409, 'migration_refused', {
+        error: 'x',
+        inflight: refusal([{ ...job(2), blocks: false }, stranger]),
+      }),
+    );
+    const older = migrationFailure(new FyHttpError('refused', 409, 'migration_refused'));
+
+    expect(onlyAgentJobsBlock(mixed.inflight)).toBe(false);
+    expect(onlyAgentJobsBlock(nonBlocking.inflight)).toBe(false);
+    expect(older.inflight).toBeUndefined();
+    expect(onlyAgentJobsBlock(older.inflight)).toBe(false);
+    expect(onlyAgentJobsBlock(refusal([]) as never)).toBe(false);
   });
 });

@@ -108,6 +108,15 @@ not the owner, and where `migration-inflight.md` is (`packages/daemon/src/lib/mi
 A notice that travelled as a turn file is recognised by the document it holds, so it is a system row once
 that file has been read.
 
+A **migration refused only by the agent's own background jobs** — processes it started from its own tool
+shell (a Claude `Bash` call, a codex `exec`) and left running — offers the owner "Ask the agent to stop its
+background jobs" in Change model or account. That press queues ONE message, `by: {kind: 'ferretry',
+feature: 'Migrate'}`, that opens `Ferretry could not move this session…`, names each blocking pid and
+command, and asks the agent to stop them or say why not (`packages/daemon/src/lib/migrate/agent-jobs.ts`).
+The daemon looks again before it asks, asks about the same set of pids once, and stops nothing itself: the
+owner runs the safety check again, which stays the only way a migration starts. Anything else in the way —
+an open tool call, a program the agent did not start from its shell, a blind spot — keeps the offer away.
+
 ## What the board types into a chat
 
 No board news reaches a chat (the owner, 2026-10-30: "there should not be any append or prepend on any
