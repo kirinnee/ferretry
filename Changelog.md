@@ -1,3 +1,9 @@
+## [4.160.1](https://github.com/kirinnee/ferretry/compare/v4.160.0...v4.160.1) (2026-10-31)
+
+### Performance
+
+* **session:** parse a session's unchanged documents once for the presence check ([#1144](https://github.com/kirinnee/ferretry/issues/1144)) ([4c91932](https://github.com/kirinnee/ferretry/commit/4c9193232e49ecb64dad69e424769cf55493b9ef))
+
 ## [4.160.0](https://github.com/kirinnee/ferretry/compare/v4.159.0...v4.160.0) (2026-10-31)
 
 ### Features

@@ -1,3 +1,15 @@
+## [4.160.0](https://github.com/kirinnee/ferretry/compare/v4.159.0...v4.160.0) (2026-10-31)
+
+### Features
+
+* **board:** readable cards with How to test above Done ([#1135](https://github.com/kirinnee/ferretry/issues/1135)) ([7017a82](https://github.com/kirinnee/ferretry/commit/7017a82a916b6426760fb297a90a214aaee85822))
+* **cli:** ship the loopback firewall script and unit for shared hosts ([#1126](https://github.com/kirinnee/ferretry/issues/1126)) ([724ea35](https://github.com/kirinnee/ferretry/commit/724ea355e795d1cf93cf3a2b1b54578bebb03f60))
+* **warden:** revive and action stats by decider on the Warden page ([#1137](https://github.com/kirinnee/ferretry/issues/1137)) ([e4618bd](https://github.com/kirinnee/ferretry/commit/e4618bd221c4da4b1ede585289c132e55b9566a1))
+
+### Performance
+
+* **board:** derive one card from its neighbourhood, and memoize the roster ([#1143](https://github.com/kirinnee/ferretry/issues/1143)) ([d1990da](https://github.com/kirinnee/ferretry/commit/d1990da00af60e771ec7b948b0abe7b16607cbee))
+
 ## [4.159.0](https://github.com/kirinnee/ferretry/compare/v4.158.1...v4.159.0) (2026-10-31)
 
 ### Features
