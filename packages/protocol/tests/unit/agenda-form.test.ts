@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  AgendaActionRequestSchema,
   AgendaFormFieldSchema,
   AgendaItemSchema,
   AgendaResponseSchema,
@@ -110,6 +111,34 @@ describe('a form card on the agenda', () => {
   it('should ask the ferret for fields when it raises a form without them', () => {
     should(agendaShapeProblems({ kind: 'form' }).length).be.above(0);
     should(agendaShapeProblems({ kind: 'form', fields: FIELDS })).deepEqual([]);
+  });
+
+  it('should keep the questions in the fields, not beside them', () => {
+    const asked = agendaShapeProblems({ kind: 'form', fields: FIELDS, questions: [{ question: 'Which?' }] });
+    const stepped = agendaShapeProblems({ kind: 'form', fields: FIELDS, steps: ['One'] });
+
+    should(asked.length).equal(1);
+    should(stepped.length).equal(1);
+  });
+});
+
+describe('a form raised through the add request', () => {
+  const add = {
+    action: 'add',
+    subject: 'Deploy settings',
+    why: 'The deploy waits on them',
+    howToResolve: 'Fill in the form',
+    kind: 'form',
+    ask: { kind: 'open-question' },
+  } as const;
+
+  it('should be taken with its fields and refused, at fields, when they repeat an id', () => {
+    should(AgendaActionRequestSchema.safeParse({ ...add, fields: FIELDS }).success).be.true();
+
+    const repeated = AgendaActionRequestSchema.safeParse({ ...add, fields: [region, { ...restart, id: '1' }] });
+
+    should(repeated.success).be.false();
+    should(repeated.error?.issues.some(issue => issue.path.join('.') === 'fields')).be.true();
   });
 });
 

@@ -85,17 +85,13 @@ export class AgendaFormStore {
 export const agendaForms = new AgendaFormStore();
 
 /** How often the picks of the form `key` names have been changed, redrawn when one is. */
-export const useFormChanges = (key: string): number =>
-  useSyncExternalStore(
-    agendaForms.subscribe,
-    () => agendaForms.changes(key),
-    () => 0,
-  );
+export const useFormChanges = (key: string): number => {
+  const changes = () => agendaForms.changes(key);
+  return useSyncExternalStore(agendaForms.subscribe, changes, changes);
+};
 
 /** The picks of the form `key` names, redrawn when one changes. */
-export const useFormPicks = (key: string, fields: readonly AgendaFormField[]): FormPicks =>
-  useSyncExternalStore(
-    agendaForms.subscribe,
-    () => agendaForms.picks(key, fields),
-    () => recommendedPicks(fields),
-  );
+export const useFormPicks = (key: string, fields: readonly AgendaFormField[]): FormPicks => {
+  const picks = () => agendaForms.picks(key, fields);
+  return useSyncExternalStore(agendaForms.subscribe, picks, picks);
+};

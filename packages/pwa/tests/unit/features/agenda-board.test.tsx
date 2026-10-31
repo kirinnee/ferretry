@@ -419,6 +419,15 @@ describe('attention helpers and transport', () => {
     expect(
       describeResponse({ kind: 'answer-review', verdict: 'clarify', clarification: 'Cite the source.' }),
     ).toContain('Cite the source.');
+    expect(
+      describeResponse({
+        kind: 'form',
+        answers: [
+          { id: '1', picked: 'EU' },
+          { id: '2', picked: ['Failures', 'Slow builds'] },
+        ],
+      }),
+    ).toBe('Form answered: 1: EU · 2: Failures, Slow builds');
   });
 
   // The live-page cases that used to sit here went with `AgendaPage` and

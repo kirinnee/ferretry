@@ -47,6 +47,22 @@ describe('--field', () => {
     should(fieldsFrom(['9|text|Notes?'], file)?.[0]).containDeep({ id: '9', type: 'text' });
     should(fieldsFrom(undefined, undefined)).be.undefined();
   });
+
+  it('should keep a recommendation from the JSON body, one value or several', () => {
+    const one = fieldsFrom(undefined, [
+      { id: 1, type: 'one', label: 'Region?', options: ['EU', 'US'], recommended: 'EU' },
+    ]);
+    const many = fieldsFrom(undefined, [
+      { id: 2, type: 'many', label: 'Alerts?', options: ['A', 'B'], recommended: ['A', 'B'] },
+    ]);
+
+    should(one?.[0]).containDeep({ recommended: ['EU'] });
+    should(many?.[0]).containDeep({ recommended: ['A', 'B'] });
+  });
+
+  it('should name the field when the JSON body gives one the card cannot hold', () => {
+    should(() => fieldsFrom(undefined, [{ id: 1, type: 'text', label: '' }])).throw(/^field 1: /u);
+  });
 });
 
 describe('a form card from the CLI', () => {
