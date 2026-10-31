@@ -1,14 +1,14 @@
 /**
- * THE SESSION'S BROWSER PAGES, GROUPED BY THE AGENT THEY BELONG TO — the strip over every browser tab.
+ * THE SESSION'S BROWSER PAGES, GROUPED BY THE AGENT THEY BELONG TO — the list the browser bar's page menu opens.
  *
  * The machine runs one shared browser, and every page in it belongs to the session that opened it
  * (`docs/agent-tools.md`). The daemon stamps each page with its owner (`ownerSessionId`) and what a
  * person calls that agent (`ownerName`), popups included, so a reader groups by owner and says whose
  * browser it is: "Hadi’s browser". Each page is one chip: its name (`app` in `%browser:app`) or its
  * title, an INCOGNITO badge for a throwaway page with its own cookies, and AGENT while an agent is
- * driving it. A chip opens that page's own workspace tab — Take over / Hand back are per tab — and its
- * ✕ closes the page; New page opens one for the person. In the workspace this strip IS the page list:
- * the real engine below it draws no tab strip of its own.
+ * driving it. A row opens that page's own workspace tab — Take over / Hand back are per tab — and its
+ * ✕ closes the page; New page opens one for the person. It is the only page list there is: the real
+ * engine draws no tab strip of its own, and the list costs the tab no row until the bar's name is tapped.
  *
  * Presentational: the status, the per-page control facts and the open intent come from the host.
  * An unread status says so rather than claiming the browser is empty.
@@ -16,7 +16,6 @@
 
 import type { BrowserPageSummary, BrowserStatus } from '@ferretry/protocol';
 import { EyeOff, Globe2, Plus, X } from 'lucide-react';
-import type { ReactNode } from 'react';
 import { remotePageLabel } from '../../lib/remote-browser.ts';
 import type { AgentControlDriver } from '../workspace/agent-control-marker.tsx';
 
@@ -73,8 +72,6 @@ export interface BrowserSurfaceListProps {
   readonly onClosePage?: (page: BrowserPageSummary) => void;
   /** Opens a new page for the person. Absent: no New page control. */
   readonly onNewPage?: () => void;
-  /** Rendered at the end of the strip's first row — the page's agent-control marker and Full screen button. */
-  readonly trailing?: ReactNode;
 }
 
 function PageChip({
@@ -150,13 +147,8 @@ export function BrowserSurfaceList({
   onOpenPage,
   onClosePage,
   onNewPage,
-  trailing,
 }: BrowserSurfaceListProps) {
   const groups = status === null ? [] : groupBrowserPages(status.pages, sessionName);
-  const controls =
-    trailing === undefined || trailing === null ? null : <div className="fy-ws-pages-controls">{trailing}</div>;
-  // New page sits at the end of the first row — beside the first owner, or beside the note that says
-  // there are none — so it never takes a column away from the chips below it.
   const newPage =
     onNewPage === undefined ? null : (
       <button
@@ -179,7 +171,6 @@ export function BrowserSurfaceList({
               : `${browserOwnerLabel(sessionName)} has no pages open${status.state === 'running' ? '' : ' — it is not running'}.`}
           </p>
           {newPage}
-          {controls}
         </div>
       ) : (
         groups.map((group, index) => (
@@ -187,7 +178,6 @@ export function BrowserSurfaceList({
             <div className="fy-ws-pages-head">
               <h3 className="fy-ws-pages-owner">{group.label}</h3>
               {index === 0 ? newPage : null}
-              {index === 0 ? controls : null}
             </div>
             <ul className="fy-ws-pages-list">
               {group.pages.map(page => (

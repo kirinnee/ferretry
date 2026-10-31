@@ -1,12 +1,10 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
 import type { BrowserAction, BrowserStatus } from '@ferretry/protocol';
+import { paneState } from '../../support/browser-pane-state.ts';
 import { type ComponentType, useCallback, useEffect, useState } from 'react';
 import type { InAppBrowserFrameProps } from '../../../src/features/browser/in-app-browser.tsx';
 import { type BrowserDestination, browserDestination } from '../../../src/features/browser/in-app-browser-model.ts';
-import type {
-  RemoteBrowserPaneProps,
-  RemoteBrowserPaneState,
-} from '../../../src/features/browser/remote-browser-pane.tsx';
+import type { RemoteBrowserPaneProps } from '../../../src/features/browser/remote-browser-pane.tsx';
 import {
   browserEngineForSession,
   browserSessionMemory,
@@ -136,7 +134,7 @@ const fakeRemoteEngine = (): FakeRemoteEngine => {
     }, []);
 
     useEffect(() => {
-      const state: RemoteBrowserPaneState = { status: snapshot.status, busy: snapshot.busy, error: null, runAction };
+      const state = paneState({ status: snapshot.status, busy: snapshot.busy, error: null, runAction });
       onStateChange?.(state);
     }, [onStateChange, runAction, snapshot]);
 
@@ -203,7 +201,7 @@ const churningRemoteEngine = (status: BrowserStatus | null): ChurningRemoteEngin
       // into a plain count mismatch.
       if (publishes >= CHURN_LIMIT) return;
       publishes += 1;
-      onStateChange?.({ status, busy, error: null, runAction });
+      onStateChange?.(paneState({ status, busy, error: null, runAction }));
     });
     return <div data-churning-pane={String(generation)} />;
   };
@@ -250,7 +248,7 @@ const delayedRemoteEngine = (): DelayedRemoteEngine => {
       },
       [grant],
     );
-    announce = () => onStateChange?.({ status: null, busy: false, error: null, runAction });
+    announce = () => onStateChange?.(paneState({ status: null, busy: false, error: null, runAction }));
     return <div data-delayed-pane="live" />;
   };
 
@@ -451,8 +449,8 @@ describe('the unified browser surface', () => {
     expect(props.daemon).toBe(daemonA);
     expect(props.scope).toBe(scopeA);
     expect(props.isActive).toBe(true);
-    // The surface owns the shared chrome, so the pane's own address row is off.
-    expect(props.showNavigation).toBe(false);
+    // The surface owns the shared chrome, so the pane draws none of its own.
+    expect(props.hosted).toBe(true);
     // The selector resumes Chrome's own history: no preview URL is smuggled in.
     expect(remote.actions).toEqual([{ action: 'open' }]);
 

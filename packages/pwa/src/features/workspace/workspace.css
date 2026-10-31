@@ -338,13 +338,6 @@
     order: 3;
     white-space: normal;
   }
-  .fy-ws-pages-head {
-    flex-wrap: wrap;
-  }
-  .fy-ws-frame[data-fullscreen] .fy-ws-pages-owner,
-  .fy-ws-frame[data-fullscreen] .fy-ws-pages-new {
-    display: none;
-  }
   .kt-webterm__toolbar:has(> .fy-ws-marker[data-state='ask']) {
     flex-wrap: wrap;
   }
@@ -392,26 +385,6 @@
 
 /* ---- full-screen frame --------------------------------------------------- */
 /* The slim bar a browser tab gets only when it has no page strip to carry its controls. */
-.fy-ws-bar {
-  display: flex;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--gap-xs);
-  min-width: 0;
-  min-height: 32px;
-  padding: 2px var(--gap-sm);
-  border-bottom: var(--stroke) solid var(--border);
-  background: var(--surface-2);
-}
-.fy-ws-pages-controls {
-  display: flex;
-  flex: 0 1 auto;
-  align-items: center;
-  gap: var(--gap-xs);
-  min-width: 0;
-  margin-inline-start: auto;
-}
 /* Full screen — the platform's own, or this overlay where it has none. The dynamic viewport
    unit follows a phone's collapsing browser chrome, and the safe-area insets keep the first row
    out from under a notch and the last out from under a home indicator. */
@@ -428,23 +401,13 @@
   padding: var(--inset-top) env(safe-area-inset-right, 0px) var(--safe-bottom) env(safe-area-inset-left, 0px);
   box-sizing: border-box;
 }
-/* The page strip folds down to its first row — owner, New page, who is driving, Exit — so the page gets the height. */
-.fy-ws-frame[data-fullscreen] .fy-ws-pages-list,
-.fy-ws-frame[data-fullscreen] .fy-ws-pages-group:not(:first-child) {
-  display: none;
-}
-
-/* ---- browser page strip ------------------------------------------------- */
-/* Each owner's row (New page at the end of the first), its chips, then the selected page's marker. */
+/* ---- browser pages (the bar's page menu) --------------------------------- */
+/* Each owner's heading (New page beside the first), then its pages one to a row. */
 .fy-ws-pages {
   display: flex;
-  flex-shrink: 0;
   flex-direction: column;
   gap: var(--gap-sm);
   min-width: 0;
-  padding: var(--gap-xs) var(--gap-sm);
-  border-bottom: var(--stroke) solid var(--border);
-  background: var(--surface-2);
 }
 .fy-ws-pages-head {
   display: flex;
@@ -474,31 +437,19 @@
   text-transform: uppercase;
   white-space: nowrap;
 }
-/* Chips wrap rather than scroll: a page hidden past a scroll edge is a page a reader never finds. */
 .fy-ws-pages-list {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: var(--gap-xs);
   min-width: 0;
   margin: 0;
   padding: 0;
   list-style: none;
 }
-/* A phone has no width to wrap into, and the browser below needs the height more: one row that
-   scrolls sideways, the way the phone's own tab chips do. */
-@media (max-width: 640px) {
-  .fy-ws-pages-list {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-}
 .fy-ws-pages-item {
   display: flex;
-  flex: none;
   align-items: stretch;
   min-width: 0;
-  max-width: 240px;
   border: var(--stroke) solid var(--border);
   border-radius: var(--radius-control);
   background: var(--surface);
