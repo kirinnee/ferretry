@@ -1,3 +1,9 @@
+## [4.172.0](https://github.com/kirinnee/ferretry/compare/v4.171.0...v4.172.0) (2026-10-31)
+
+### Features
+
+* **protocol:** add the signed catalog contract (catalogs phase 0) ([#1166](https://github.com/kirinnee/ferretry/issues/1166)) ([ccd0166](https://github.com/kirinnee/ferretry/commit/ccd01667a3235d61bd5d1d5d13d164bac761a3f1))
+
 ## [4.171.0](https://github.com/kirinnee/ferretry/compare/v4.170.0...v4.171.0) (2026-10-31)
 
 ### Features
