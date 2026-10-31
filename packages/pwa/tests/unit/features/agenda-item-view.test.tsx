@@ -4,6 +4,8 @@ import { Markdown } from '../../../src/components/markdown.tsx';
 import { AgendaItemView, type AgendaItemViewProps } from '../../../src/features/agenda/agenda-item-view.tsx';
 import type { HistoryEvent } from '../../../src/lib/agenda-history.ts';
 import { DISMISS_ACTION, type InboxAction } from '../../../src/lib/agenda-inbox.ts';
+import type { DaemonId } from '../../../src/lib/daemon-connection.ts';
+import { registerComposerQuoteTarget } from '../../../src/lib/quote.ts';
 import { agendaItem, choices } from '../../support/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must, pressKey } from '../../support/dom.ts';
 
@@ -669,6 +671,75 @@ describe('What I need from you', () => {
     await draw(richItem, { settled: <p>Answered.</p> });
     expect(root().querySelector('[data-agenda-need]')).not.toBeNull();
     expect(root().querySelector('[data-agenda-need-lead]')).toBeNull();
+  });
+});
+
+describe('Request changes, with a composer at hand', () => {
+  const scope = { daemonId: 'daemon-rc' as DaemonId, sessionId: 'session-rc' };
+  const review = agendaItem('A11', {
+    kind: 'review',
+    ask: { kind: 'answer-review' },
+    subject: 'Is the new sign-in page right?',
+  } as Partial<AgendaItem>);
+  const composer = (draft: string) => {
+    const replaced: string[] = [];
+    const dispose = registerComposerQuoteTarget({
+      ...scope,
+      draft: () => draft,
+      replaceDraft: next => replaced.push(next),
+    });
+    return { replaced, dispose };
+  };
+  const requestChanges = () =>
+    interact(() =>
+      must(
+        root().querySelector<HTMLButtonElement>('[data-agenda-option="Request changes"]'),
+        'Request changes',
+      ).click(),
+    );
+
+  test('puts the owner in the composer when it is empty, and sends nothing', async () => {
+    const box = composer('  ');
+    const spy = await draw(review, { quoteScope: scope });
+    await requestChanges();
+    expect(box.replaced).toEqual(['  ']);
+    expect(spy.acted).toEqual([]);
+    box.dispose();
+  });
+
+  test('sends what the composer holds as the change asked for', async () => {
+    const box = composer('Make the button bigger');
+    const spy = await draw(review, { quoteScope: scope });
+    await requestChanges();
+    expect(spy.acted).toEqual([
+      {
+        kind: 'respond',
+        label: 'Request changes',
+        response: { kind: 'answer-review', verdict: 'clarify', clarification: 'Make the button bigger' },
+      },
+    ]);
+    expect(box.replaced).toEqual([]);
+    box.dispose();
+  });
+});
+
+describe('an item raised before the shapes', () => {
+  test('a question with steps is a mix: answered in words, its steps and impact still drawn below', async () => {
+    const spy = await draw(
+      agendaItem('A12', {
+        kind: 'choice',
+        ask: choices('Now', 'Later'),
+        steps: ['Open it', 'Try it'],
+        impact: 'The release waits',
+      } as Partial<AgendaItem>),
+    );
+    expect(one('[data-agenda-need]').getAttribute('data-agenda-need')).toBe('answers');
+    expect(one('[data-agenda-wanted]').textContent).toContain('Have you done the steps below?');
+    expect(root().querySelectorAll('[data-agenda-section="steps"] [data-agenda-tick]')).toHaveLength(2);
+    expect(one('[data-agenda-section="impact"]').textContent).toContain('The release waits');
+    expect(root().querySelector('[data-agenda-quick-replies]')).toBeNull();
+    await interact(() => one<HTMLInputElement>('[data-agenda-tick="1"]').click());
+    expect(spy.progress).toEqual([[1, true]]);
   });
 });
 

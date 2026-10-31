@@ -183,13 +183,13 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   await shot(full, 'row-three-answers', form, theme);
   await full.close();
 
-  // A to-do (Need more info · Done, in words): the row keeps one line with "Not needed", the button goes under it.
+  // A to-do (its one Mark as done): the button takes the free slot in the row, which keeps one line.
   const alone = await open(context, theme, 'alone', `alone ${at}`);
   const aloneAt = await placement(alone);
   check(aloneAt !== null, `alone ${at}: the button is missing`);
   check(aloneAt?.outside.length === 0, `alone ${at}: off the screen: ${aloneAt?.outside.join(' | ')}`);
   check(aloneAt?.oneLine === true, `alone ${at}: the row wraps — "Not needed" is not on the answers' line`);
-  check(aloneAt !== null && !aloneAt.inRow && aloneAt.below, `alone ${at}: the button is not under the worded answers`);
+  check(aloneAt?.inRow === true, `alone ${at}: the button is not in the to-do's row beside Mark as done`);
   await shot(alone, 'row-alone', form, theme);
   await alone.close();
 

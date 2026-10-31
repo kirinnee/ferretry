@@ -25,6 +25,17 @@ describe('withComposerNote', () => {
     expect(withComposerNote(pick, '   ')).toBe(pick);
   });
 
+  it('takes Request changes as already holding the composer words, and spends the composer', () => {
+    const clarify: InboxAction = {
+      kind: 'respond',
+      label: 'Request changes',
+      response: { kind: 'answer-review', verdict: 'clarify', clarification: 'bigger button' },
+    };
+    const sent = withComposerNote(clarify, 'bigger button');
+    expect(sent).toEqual(clarify);
+    expect(sent).not.toBe(clarify);
+  });
+
   it('joins a note the action already has', () => {
     expect(withComposerNote({ ...pick, note: 'first' }, 'second')).toEqual({ ...pick, note: 'first — second' });
   });
