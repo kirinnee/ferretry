@@ -284,18 +284,17 @@ describe('the child runner, finding the program it runs', () => {
     });
   });
 
-  it('should say a program this account could swap is replaceable, and a system one is not', async () => {
-    // Arrange
+  it('should say a program in a folder this account owns is replaceable', async () => {
+    // Arrange — which programs on a machine's PATH another account owns differs by machine (a CI runner may own
+    // its whole Nix store), so the "not replaceable" side is pinned below by an account that owns nothing here.
     const { folder, bin } = await folderWithProgram('runner-replaceable');
-    const runner = new BunSecretChildRunner(() => ({ PATH: `${bin}:${process.env.PATH ?? ''}` }));
+    const runner = new BunSecretChildRunner(() => ({ PATH: bin }));
 
     // Act
     const own = await runner.run(spec(['hello'], folder));
-    const system = await runner.run(spec(['sh', '-c', 'true'], folder));
 
     // Assert
     should(own.replaceable).be.true();
-    should(system.replaceable).be.undefined();
   });
 
   it('should still call a program this account owns replaceable after it took away its own write bits', async () => {
