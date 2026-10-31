@@ -6,6 +6,7 @@ export * from './envelope.ts';
 export * from './frame-governor.ts';
 export * from './input.ts';
 export * from './page-acts.ts';
+export * from './page-script.ts';
 export * from './page-lifecycle.ts';
 export * from './pointer-acts.ts';
 export * from './pointer.ts';

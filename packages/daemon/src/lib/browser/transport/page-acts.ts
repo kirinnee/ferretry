@@ -53,8 +53,11 @@ export interface ActableLocator {
   }): Promise<string>;
   screenshot(options: { readonly timeout: number; readonly type: BrowserScreenshotFormat }): Promise<Uint8Array>;
   setInputFiles(files: string[], options: { readonly timeout: number }): Promise<void>;
-  /** Runs a function expression (as text) in the element; the answer is read, never trusted. */
-  evaluate(expression: string): Promise<unknown>;
+  /**
+   * Runs `pageFunction` in the page with the element and one string; the answer is read, never trusted. A
+   * real function, never its text: Playwright evaluates text as an expression and does not call what it makes.
+   */
+  evaluate(pageFunction: (element: never, arg: string) => unknown, arg: string): Promise<unknown>;
   scrollIntoViewIfNeeded(options: { readonly timeout: number }): Promise<void>;
   boundingBox(options: {
     readonly timeout: number;
@@ -256,7 +259,9 @@ export async function shootPage(
 /** How the files reach the page: into a file field (a dialog counts), or dropped on the element like a drag from the desktop. */
 export type BrowserUploadMode = 'input' | 'drop';
 
-const IS_FILE_INPUT = '(element) => element.tagName === "INPUT" && element.type === "file"';
+/** Whether an element is a file field. Runs in the page, so it uses nothing from outside itself. */
+const isFileInput = (element: { readonly tagName: string; readonly type?: unknown }, _: string): boolean =>
+  element.tagName === 'INPUT' && element.type === 'file';
 
 /**
  * Hands `paths` (already confined by the daemon, absolute) to the page.
@@ -276,7 +281,7 @@ export async function uploadFiles(
   if (paths.length === 0) throw new Error('there is nothing to upload');
   const element = await browserElementOf(page, target);
   if (mode === 'input') {
-    if ((await element.evaluate(IS_FILE_INPUT)) === true) {
+    if ((await element.evaluate(isFileInput, '')) === true) {
       await element.setInputFiles([...paths], { timeout: BROWSER_ACT_TIMEOUT_MS });
       return;
     }

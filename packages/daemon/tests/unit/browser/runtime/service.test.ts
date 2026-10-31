@@ -90,6 +90,7 @@ class Tabs {
       ...this.acted('pdf', pageId),
       staged: { path: '/stage/pdf-1', name: 'page.pdf', size: 5 },
     }),
+    evaluate: async (pageId, script) => ({ ...this.acted('evaluate', pageId), text: `ran:${script.source}` }),
     back: async pageId => this.acted('back', pageId),
     forward: async pageId => this.acted('forward', pageId),
     reload: async pageId => this.acted('reload', pageId),
@@ -342,6 +343,30 @@ describe('the machine agent browser — one Chrome, pages by session', () => {
 
     should(refused.message).equal('a person holds it');
     should(tabs.calls.filter(call => call.startsWith('pdf'))).deepEqual([]);
+  });
+
+  it('should run a page script on the named page, behind its guard, and keep it off another session’s page', async () => {
+    // Arrange
+    const { tabs, service } = harness();
+    const app = await service.openPage('s1', 'app');
+    const other = await service.openPage('s2', 'theirs');
+
+    // Act
+    const ran = await service.scriptOnPage('s1', 'app', { source: '() => 1', target: { kind: 'ref', ref: 'e1' } });
+    const foreign = await failure(service.scriptOnPage('s1', other.id, { source: '() => 1' }));
+    const guarded = await failure(
+      service.scriptOnPage('s1', 'app', { source: '() => 2' }, async () => {
+        throw new BrowserSessionError('conflict', 'a person holds it');
+      }),
+    );
+
+    // Assert
+    should(ran.text).equal('ran:() => 1');
+    should(ran.result).not.have.property('text');
+    should(ran.status.pages.map(page => page.id)).containEql(app.id);
+    should(foreign).match({ code: 'not_found' });
+    should(guarded.message).equal('a person holds it');
+    should(tabs.calls.filter(call => call.startsWith('evaluate'))).deepEqual([`evaluate:${app.id}`]);
   });
 
   it('should refuse a name in use, and a page past the session’s or the machine’s cap — never hide it', async () => {

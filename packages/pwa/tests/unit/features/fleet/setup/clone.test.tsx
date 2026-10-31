@@ -1149,7 +1149,7 @@ describe('CloneMachine · the copy', () => {
         kind: 'machine.settings',
         agentPermissions: 'auto',
         defaultRuntime: 'claude-default',
-        agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
+        agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
       });
 
       expect(screen.step()).toBe('done');

@@ -21,6 +21,7 @@ import {
   type BrowserScreenshotOptions,
   type BrowserTypeOptions,
   type BrowserUploadMode,
+  type PageScript,
   type PointerAct,
   WorkerLineAssembler,
   type WorkerStagedFile,
@@ -250,6 +251,16 @@ export class BrowserWorkerClient implements BrowserAutomation {
       // An older worker sends no format; its screenshots were always PNG.
       screenshotFormat: (raw as { screenshotFormat?: unknown }).screenshotFormat === 'jpeg' ? 'jpeg' : 'png',
     };
+  }
+
+  async evaluate(pageId: string, script: PageScript): Promise<BrowserPageActed & { readonly text: string }> {
+    const raw = await this.request('evaluate', {
+      pageId,
+      source: script.source,
+      ...(script.target === undefined ? {} : { target: script.target }),
+      ...(script.timeoutMs === undefined ? {} : { timeoutMs: script.timeoutMs }),
+    });
+    return { ...acted(raw), text: boundedReadText(raw) };
   }
 
   upload(

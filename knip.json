@@ -139,6 +139,7 @@
         "harness/needs-you-sidebar-screenshot.tsx",
         "harness/ended-agenda-sidebar-screenshot.tsx",
         "harness/agenda-default-screenshot.tsx",
+        "harness/page-scripts-screenshot.tsx",
         "harness/voice-cleanup-screenshot.tsx",
         "harness/device-permissions-screenshot.tsx",
         "harness/setup-import-screenshot.tsx",
