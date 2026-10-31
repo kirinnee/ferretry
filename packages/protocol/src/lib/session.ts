@@ -691,6 +691,9 @@ const QuotaSchema = z.object({
   fiveHourResetAt: NonNegativeFiniteSchema.optional(),
   weeklyResetAt: NonNegativeFiniteSchema.optional(),
   resetAt: NonNegativeFiniteSchema.optional(),
+  /** The harness's own words for the limit Ferretry read this session as `rate_limited` on (a pane dialog or a
+   *  transcript record) — present exactly while that reading holds. */
+  limitNotice: z.string().min(1).optional(),
 });
 
 const DeclaredWaitSchema = z.object({

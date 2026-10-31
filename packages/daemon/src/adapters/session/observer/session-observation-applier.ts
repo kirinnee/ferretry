@@ -50,10 +50,11 @@ export async function recordTurnChange(
     else next.permissionRequest = change.request;
     if (change.dialog === undefined) delete next.harnessDialog;
     else next.harnessDialog = change.dialog;
-    // A session parked on "You've hit your … limit" is rate limited (and released again when it is not),
-    // so failover, the Warden and the login's quota see what the pane shows. No option is ever chosen.
+    // A session parked on "You've hit your … limit", or whose turn the transcript says ended on it, is rate
+    // limited (and released again when it is not), so failover, the Warden and the login's quota see what the
+    // pane shows. No option is ever chosen.
     if (current.data.status !== 'awaiting_question') {
-      const limit = limitPatch(current.data, change.dialog, Date.parse(at));
+      const limit = limitPatch(current.data, change.dialog, Date.parse(at), { limit: change.limit, to: change.to });
       if (limit !== undefined) {
         next.status = limit.status;
         if (limit.quota === undefined) delete next.quota;

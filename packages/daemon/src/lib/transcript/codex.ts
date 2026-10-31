@@ -217,7 +217,11 @@ function codexError(payload: Record<string, unknown>): { message?: string; code?
       transcriptString(payload.text) ??
       transcriptString(nested?.message) ??
       transcriptString(nested?.error),
-    code: transcriptString(payload.code) ?? transcriptString(nested?.code) ?? transcriptString(nested?.type),
+    code:
+      transcriptString(payload.code) ??
+      transcriptString(nested?.code) ??
+      transcriptString(nested?.codex_error_info) ??
+      transcriptString(nested?.type),
   };
 }
 
@@ -304,7 +308,10 @@ export class CodexTranscriptParser implements TranscriptParser {
     ) {
       const state = itemType === 'task_started' ? 'started' : itemType === 'task_complete' ? 'completed' : 'aborted';
       events.push({ ...codexMetadata(record, payload, 'system', context), kind: 'turn', state });
-      if (state === 'aborted') {
+      // A turn that ENDED ON A FAILURE says so on its boundary: `task_complete` carries `error` when the
+      // provider refused the turn (`codex_error_info: usage_limit_exceeded` — the login is out of quota),
+      // and dropping it would read a turn that never ran a step as one that finished its work.
+      if (state === 'aborted' || (state === 'completed' && transcriptObject(payload.error) !== undefined)) {
         const normalized = codexError(payload);
         if (normalized.message !== undefined) {
           events.push({

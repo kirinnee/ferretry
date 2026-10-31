@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import fixture from '../../fixtures/transcript/codex.jsonl' with { type: 'text' };
 import { CodexTranscriptParser } from '../../../src/lib/transcript/codex.ts';
+import fixture from '../../fixtures/transcript/codex.jsonl' with { type: 'text' };
 
 describe('CodexTranscriptParser', () => {
   it('should normalize the synthetic fixture into the common event model', () => {
@@ -171,6 +171,37 @@ describe('CodexTranscriptParser', () => {
       { kind: 'tool-call', call: { id: 'call-shell', name: 'local_shell', input: ['pwd'] } },
       { kind: 'tool-result', result: { callId: 'call-shell', isError: true } },
     ]);
+  });
+
+  it('should keep the error a completed turn ended on, and add none to a clean one', () => {
+    // Arrange — the record Codex wrote when its login was out of quota (2026-10-31).
+    const subject = new CodexTranscriptParser();
+    const refused = {
+      type: 'event_msg',
+      payload: {
+        type: 'task_complete',
+        turn_id: 'turn-4',
+        last_agent_message: null,
+        error: {
+          message: 'Your workspace is out of credits. Add credits to continue.',
+          codex_error_info: 'usage_limit_exceeded',
+        },
+      },
+    };
+
+    // Act
+    const failed = subject.parseRecord(refused).events;
+    const clean = subject.parseRecord({ type: 'event_msg', payload: { type: 'task_complete', turn_id: 'turn-5' } });
+
+    // Assert
+    should(failed).containDeep([
+      { kind: 'turn', state: 'completed', turnId: 'turn-4' },
+      {
+        kind: 'error',
+        error: { message: 'Your workspace is out of credits. Add credits to continue.', code: 'usage_limit_exceeded' },
+      },
+    ]);
+    should(clean.events.map(event => event.kind)).deepEqual(['turn']);
   });
 
   it('should return structured issues for malformed known records', () => {

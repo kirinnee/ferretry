@@ -11,6 +11,7 @@ import {
   type TurnPaneEvidence,
   transcriptTurnPhase,
 } from '../turn/policy.ts';
+import { transcriptUsageLimit, type UsageLimit } from '../turn/usage-limit.ts';
 
 /** How much of a transcript's end a turn decision reads: the last turn boundary is always near the end. */
 export const TURN_TAIL_EVENTS = 80;
@@ -31,6 +32,11 @@ export interface TurnStateChange {
   readonly request?: PermissionRequest | undefined;
   /** The harness's own dialog behind `to`, recorded as `harnessDialog`; absent clears it. */
   readonly dialog?: HarnessDialog | undefined;
+  /**
+   * The usage limit the transcript says the newest turn ended on (Codex writes it on the turn boundary and
+   * shows no dialog), so the change records the session `rate_limited`; absent proves no limit.
+   */
+  readonly limit?: UsageLimit | undefined;
 }
 
 /** What one look at a LIVE session found: its transcript tail and one frame of its pane. */
@@ -75,6 +81,7 @@ export function stepTurn(
   const prompt = settleTurnPrompt(facts.turnPrompt, next, observation);
   const request = settlePermissionRequest(facts.permissionRequest, next, observation);
   const dialog = settleHarnessDialog(facts.harnessDialog, next, observation);
+  const limit = live && look?.transcript !== undefined ? transcriptUsageLimit(look.transcript) : undefined;
   if (
     next === facts.turnState &&
     prompt === facts.turnPrompt &&
@@ -90,6 +97,7 @@ export function stepTurn(
       ...(prompt === undefined ? {} : { prompt }),
       ...(request === undefined ? {} : { request }),
       ...(dialog === undefined ? {} : { dialog }),
+      ...(limit === undefined ? {} : { limit }),
     },
   };
 }
