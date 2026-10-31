@@ -13,6 +13,11 @@ export const EMPTY_PROXY_DRAFT: BrowserProxyDraft = { url: '', bypass: '', usern
 
 const WHOLE_REFERENCE = new RegExp(`^${SECRET_REFERENCE_SOURCE}$`, 'u');
 
+const SECRET_NAME = /^[A-Z][A-Z0-9_]{0,63}$/u;
+
+/** What was typed as a secret name; a pasted `${secret:NAME}` reference counts as its name. */
+const nameTyped = (text: string): string => secretName(text.trim()) || text.trim();
+
 const secretName = (reference: string | undefined): string => WHOLE_REFERENCE.exec(reference ?? '')?.[1] ?? '';
 
 export const draftOf = (setting: BrowserProxySetting | null | undefined): BrowserProxyDraft =>
@@ -35,8 +40,19 @@ export const bypassEntries = (text: string): string[] =>
 export function settingOf(
   draft: BrowserProxyDraft,
 ): { readonly ok: true; readonly setting: BrowserProxySetting } | { readonly ok: false; readonly problem: string } {
-  const username = draft.usernameSecret.trim();
-  const password = draft.passwordSecret.trim();
+  const username = nameTyped(draft.usernameSecret);
+  const password = nameTyped(draft.passwordSecret);
+  for (const [field, name] of [
+    ['username', username],
+    ['password', password],
+  ] as const) {
+    if (name !== '' && !SECRET_NAME.test(name)) {
+      return {
+        ok: false,
+        problem: `The ${field} box takes the NAME of a stored secret (capital letters, digits and _, like PROXY_${field === 'username' ? 'USER' : 'PASSWORD'}), not the ${field} itself. Store the value with fy secret set NAME, then type only the name here.`,
+      };
+    }
+  }
   const parsed = BrowserProxySettingSchema.safeParse({
     url: draft.url,
     bypass: bypassEntries(draft.bypass),

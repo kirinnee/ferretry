@@ -65,6 +65,16 @@ describe('browser proxy draft', () => {
       passwordSecret: 'PROXY_PASSWORD',
     });
     expect(name.ok).toBe(false);
-    if (!name.ok) expect(name.problem).toStartWith('The username secret: ');
+    if (!name.ok) expect(name.problem).toStartWith('The username box takes the NAME of a stored secret');
+  });
+
+  it('accepts a pasted ${secret:NAME} reference as the name', () => {
+    const result = settingOf({
+      ...EMPTY_PROXY_DRAFT,
+      url: 'socks5://proxy.example:1080',
+      usernameSecret: '${secret:PROXY_USER}',
+      passwordSecret: '${secret:PROXY_PASSWORD}',
+    });
+    expect(result.ok).toBe(true);
   });
 });

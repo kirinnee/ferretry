@@ -68,7 +68,14 @@ export function BrowserProxySection({
           ? { proxy: wanted.setting }
           : {}
         : null;
+  const typed = draft.url.trim() !== '';
   const test = (): void => {
+    if (typed && !wanted.ok) {
+      testRun.current += 1;
+      setTesting(false);
+      setShown({ kind: 'refused', sentence: wanted.problem });
+      return;
+    }
     if (testBody === null) return;
     testRun.current += 1;
     const mine = testRun.current;
@@ -93,7 +100,6 @@ export function BrowserProxySection({
     });
   };
 
-  const typed = draft.url.trim() !== '';
   const testHint =
     !typed && saved === null
       ? 'Type a proxy address to test it.'
@@ -180,7 +186,7 @@ export function BrowserProxySection({
         </SetupNote>
       )}
       <BrowserProxyTestBlock
-        disabled={testBody === null || !online}
+        disabled={(testBody === null && !(typed && !wanted.ok)) || !online}
         testing={testing}
         hint={testHint}
         shown={shown}
