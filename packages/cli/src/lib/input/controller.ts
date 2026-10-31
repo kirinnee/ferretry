@@ -1,4 +1,12 @@
-import { type InputRequest, inputValueProblem, padInputValue } from '@ferretry/protocol';
+import {
+  type InputDeliverBody,
+  type InputRequest,
+  inputValueProblem,
+  LOGIN_LABEL_MAX_LENGTH,
+  LOGIN_PASSWORD_MIN_LENGTH,
+  LoginEntryIdSchema,
+  padInputValue,
+} from '@ferretry/protocol';
 import { parseAgendaReference } from '../agenda/reference.ts';
 import type { InputPorts } from './ports.ts';
 import { describeInputReason, inputTargetReference, renderInputFacts, renderInputList } from './render.ts';
@@ -10,14 +18,52 @@ export interface InputCommandOptions {
   readonly json?: boolean | undefined;
 }
 
-/** Flags on `fy input answer`. There is deliberately no flag that carries a value. */
+/** Flags on `fy input answer`. There is deliberately no flag that carries a value: only a saved login's NAME. */
 export interface InputAnswerOptions extends InputCommandOptions {
   /** `--no-enter` is `false`; `--enter` (browser targets) is `true`. */
   readonly enter?: boolean | undefined;
+  /** `--secret NAME`: type this saved login's field instead of reading a value. */
+  readonly secret?: string | undefined;
+  /** `--entry NAME`: the same flag, spelled for the entry it names. */
+  readonly entry?: string | undefined;
+  /** `--save-as NAME`: keep the typed value in this saved login. */
+  readonly saveAs?: string | undefined;
+  /** `--label TEXT`: the label a new saved login gets. */
+  readonly label?: string | undefined;
 }
 
 /** Said when a ferret reaches for the owner's command. */
 export const FERRET_REFUSAL = "this is the owner's command; a ferret cannot answer an input request";
+
+function handle(value: string, flag: string): string {
+  const parsed = LoginEntryIdSchema.safeParse(value.trim());
+  if (!parsed.success)
+    throw new Error(`${flag} "${value}" is not a saved login's handle: uppercase letters, digits and underscores`);
+  return parsed.data;
+}
+
+/** The saved login `--secret` / `--entry` names, if either was given. */
+function namedEntry(options: InputAnswerOptions): string | undefined {
+  const secret = options.secret === undefined ? undefined : handle(options.secret, '--secret');
+  const entry = options.entry === undefined ? undefined : handle(options.entry, '--entry');
+  if (secret !== undefined && entry !== undefined && secret !== entry)
+    throw new Error('--secret and --entry are the same flag: name one saved login');
+  return secret ?? entry;
+}
+
+/** The label a save carries: the owner's own, else the one the card suggests or the entry already has, else the handle. */
+function saveLabel(request: InputRequest, id: string, given: string | undefined): string {
+  const label = (
+    given ??
+    (request.saved?.suggest?.id === id ? request.saved.suggest.label : undefined) ??
+    request.saved?.offers.find(offer => offer.id === id)?.label ??
+    id
+  ).trim();
+  if (label === '' || label.length > LOGIN_LABEL_MAX_LENGTH || /[\p{Cc}\p{Cf}]/u.test(label)) {
+    throw new Error(`--label must be one line of 1 to ${LOGIN_LABEL_MAX_LENGTH} characters`);
+  }
+  return label;
+}
 
 function target(options: InputCommandOptions): string {
   const session = options.session?.trim() ?? '';
@@ -55,7 +101,13 @@ export class InputController {
 
   async answer(reference: string, options: InputAnswerOptions): Promise<void> {
     this.#refuseFerret();
-    if (!this.ports.interactive) {
+    const named = namedEntry(options);
+    const saveAs = options.saveAs === undefined ? undefined : handle(options.saveAs, '--save-as');
+    if (named !== undefined && (saveAs !== undefined || options.label !== undefined)) {
+      throw new Error('--save-as keeps a value you type; it cannot be combined with --secret / --entry');
+    }
+    if (saveAs === undefined && options.label !== undefined) throw new Error('--label goes with --save-as');
+    if (named === undefined && !this.ports.interactive) {
       throw new Error('typing a value needs a terminal you are sitting at: run this where you can type, not in a pipe');
     }
     const sessionId = target(options);
@@ -65,17 +117,32 @@ export class InputController {
     if (request.observed === undefined || request.observedDigest === undefined) {
       throw new Error(`!${request.agendaItemId} is still being re-checked after a restart: try again in a moment`);
     }
+    if (saveAs !== undefined && request.saved?.saves === undefined) {
+      throw new Error(`!${request.agendaItemId} cannot be saved: this kind of value is never kept in a saved login`);
+    }
     for (const line of renderInputFacts(request)) this.ports.out.diagnostic(line);
-    const value = await this.ports.prompt.askHidden(`value for !${request.agendaItemId} (hidden): `);
-    const problem = inputValueProblem(value, request.sensitivity);
-    if (problem !== undefined) throw new Error(problem);
     const submit = submitAfter(request, options);
-    const result = await this.ports.gateway.deliver(sessionId, request.id, {
-      deliveryId: this.ports.newDeliveryId(),
-      observedDigest: request.observedDigest,
-      padded: padInputValue(value),
-      submit,
-    });
+    const base = { deliveryId: this.ports.newDeliveryId(), observedDigest: request.observedDigest, submit };
+    let body: InputDeliverBody;
+    if (named !== undefined) {
+      this.ports.out.diagnostic(`using the saved login ${named}`);
+      body = { ...base, entry: named };
+    } else {
+      const value = await this.ports.prompt.askHidden(`value for !${request.agendaItemId} (hidden): `);
+      const problem = inputValueProblem(value, request.sensitivity);
+      if (problem !== undefined) throw new Error(problem);
+      if (saveAs !== undefined && request.saved?.saves === 'password' && value.length < LOGIN_PASSWORD_MIN_LENGTH) {
+        throw new Error(
+          `that value is shorter than the ${LOGIN_PASSWORD_MIN_LENGTH} characters a saved password needs, so it cannot be saved: nothing was sent, run this again without --save-as to send it unsaved`,
+        );
+      }
+      body = {
+        ...base,
+        padded: padInputValue(value),
+        ...(saveAs === undefined ? {} : { save: { entry: saveAs, label: saveLabel(request, saveAs, options.label) } }),
+      };
+    }
+    const result = await this.ports.gateway.deliver(sessionId, request.id, body);
     if (options.json === true) {
       this.ports.out.success(JSON.stringify(result, null, 2));
       return;
@@ -86,6 +153,13 @@ export class InputController {
         ? `Sent to ${where}${result.submitted ? ' and pressed Enter' : ''}.`
         : `Not sent: ${result.reason === undefined ? result.state : describeInputReason(result.reason)}.`,
     );
+    if (result.saved !== undefined) {
+      this.ports.out.success(
+        result.saved.ok
+          ? `Saved as ${result.saved.entry}.`
+          : `Not saved as ${result.saved.entry}: ${result.saved.problem ?? 'no reason was given'}. It was typed all the same; add it under \`secret entry\` instead.`,
+      );
+    }
   }
 
   async cancel(reference: string, options: InputCommandOptions): Promise<void> {

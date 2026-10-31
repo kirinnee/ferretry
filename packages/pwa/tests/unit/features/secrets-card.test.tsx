@@ -339,7 +339,7 @@ describe('SecretsSurface', () => {
               schema: { parse: (value: unknown) => unknown },
               init?: { method?: string },
             ) => {
-              calls.push(`${init?.method ?? 'GET'} ${path}`);
+              if (!path.startsWith(`${SECRETS_PATH}/logins`)) calls.push(`${init?.method ?? 'GET'} ${path}`);
               if (init?.method === undefined) return schema.parse(list());
               return schema.parse({ name: 'TOKEN', createdAt: AT, updatedAt: AT });
             },
@@ -372,7 +372,7 @@ describe('SecretsSurface', () => {
               schema: { parse: (value: unknown) => unknown },
               init?: { method?: string },
             ) => {
-              calls.push(`${init?.method ?? 'GET'} ${path}`);
+              if (!path.startsWith(`${SECRETS_PATH}/logins`)) calls.push(`${init?.method ?? 'GET'} ${path}`);
               if (init?.method === 'DELETE') {
                 deleted = true;
                 return schema.parse({ name: 'ANTHROPIC_API_KEY', removed: true });

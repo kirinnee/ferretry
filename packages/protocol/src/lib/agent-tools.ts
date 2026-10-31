@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AgendaIdSchema } from './agenda.ts';
 import {
   BROWSER_MAX_FIND_CHARS,
   BROWSER_MAX_SNAPSHOT_DEPTH,
@@ -43,7 +44,6 @@ import {
 } from './browser-pointer.ts';
 import { InstantSchema } from './common.ts';
 import type { AgentConfigToolName } from './config-files.ts';
-import { AgendaIdSchema } from './agenda.ts';
 import {
   INPUT_MAX_EXPIRY_SECONDS,
   INPUT_PROMPT_MAX_LENGTH,
@@ -51,6 +51,7 @@ import {
   InputSensitivitySchema,
   InputSubmitModeSchema,
 } from './input-request.ts';
+import { LoginEntryIdSchema } from './login-entries.ts';
 import { SurfaceKeySchema, SurfaceKindSchema, SurfaceNameSchema } from './surface-names.ts';
 
 export * from './surface-names.ts';
@@ -246,6 +247,8 @@ export const AgentToolCallSchema = z.discriminatedUnion('tool', [
     expiresInSeconds: z.number().int().min(30).max(INPUT_MAX_EXPIRY_SECONDS).optional(),
     blocking: z.boolean().optional(),
     chain: AgendaIdSchema.optional(),
+    /** The saved login the agent expects; a hint only, the daemon decides what matches. */
+    secretHint: LoginEntryIdSchema.optional(),
   }),
   z.strictObject({
     tool: z.literal('input.wait'),

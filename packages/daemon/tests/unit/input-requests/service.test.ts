@@ -211,6 +211,7 @@ function build(overrides: Partial<World> = {}) {
         if (w.auditThrows && entry.event === 'input.quarantine_revealed') throw new Error('the audit sink is down');
         w.audits.push(entry);
       },
+      saved: async () => undefined,
     },
     clock,
     ids: { requestId: () => (w.nextId++).toString(16).padStart(32, '0') },
@@ -652,7 +653,7 @@ describe('InputRequestService.deliver', () => {
     const enter = await refused(service.deliver(SESSION, id, bodyFor(digest, {}, 'pass\nrm -rf'), HOST));
     const shape = await refused(service.deliver(SESSION, id, bodyFor(digest, { padded: 'hunter2' }), HOST));
     const saved = await refused(
-      service.deliver(SESSION, id, bodyFor(digest, { padded: undefined, secretName: 'deploy-key' as never }), HOST),
+      service.deliver(SESSION, id, bodyFor(digest, { padded: undefined, entry: 'DEPLOY_KEY' }), HOST),
     );
 
     should(enter.code).equal('bad_request');

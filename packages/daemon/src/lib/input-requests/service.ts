@@ -1,5 +1,6 @@
 import {
   type AgendaId,
+  fillRoleFor,
   INPUT_DEFAULT_EXPIRY_SECONDS,
   INPUT_ERROR_CODES,
   INPUT_JOURNAL_EVENT_TYPES,
@@ -25,8 +26,12 @@ import {
   type InputTarget,
   type InputTargetFacts,
   inputValueProblem,
+  LOGIN_PASSWORD_MIN_LENGTH,
+  LOGIN_USERNAME_MAX_LENGTH,
+  type LoginEntryId,
   unpadInputValue,
 } from '@ferretry/protocol';
+import { LoginEntryError } from '../secrets/logins.ts';
 import { digestFacts } from './digest.ts';
 import type { EphemeralValues } from './ephemeral-values.ts';
 import { InputRequestError } from './errors.ts';
@@ -38,12 +43,14 @@ import type {
   InputClock,
   InputIds,
   InputJournal,
+  InputLoginPort,
   InputSessionDirectory,
   InputTargetPort,
   InputTimers,
   TypeResult,
 } from './ports.ts';
 import type { QuarantineHold, QuarantineRegistry } from './quarantine.ts';
+import { savedFieldFor, savedFor, targetMatchKey } from './saved-logins.ts';
 import { SessionLock } from './session-lock.ts';
 
 /**
@@ -95,6 +102,10 @@ interface Held {
   /** Every name the terminal was seen under (its key and its id), so a quarantine on any of them seals it. */
   names: readonly string[];
   checkFailures: number;
+  /** The target's key for saved logins (`sudo@kirin-box`), from what the DAEMON saw; never from the agent. */
+  matchKey?: string;
+  /** The saved login the ferret said it expects: shown to the owner as a hint, never made the one-tap choice. */
+  readonly hint?: LoginEntryId;
   /** Every `deliveryId` seen and what came of it, so a retry gets the first outcome and never types twice. */
   readonly deliveries: Map<string, Promise<InputDeliverResult>>;
   readonly waiters: Set<() => void>;
@@ -115,6 +126,10 @@ export interface InputRequestServiceDependencies {
   readonly quarantine: QuarantineRegistry;
   /** Masks every known secret and every just-typed value in text shown to the owner; rejects when it cannot. */
   readonly redact: (text: string) => Promise<string>;
+  /** Saved logins: offered on the card, typed by name, and kept by "Save as". Absent: none are offered. */
+  readonly logins?: InputLoginPort;
+  /** This machine's host name, for a terminal target's key (`sudo@<host>`). */
+  readonly hostName?: string;
 }
 
 const instant = (ms: number): string => new Date(ms).toISOString();
@@ -188,10 +203,13 @@ export class InputRequestService {
       await this.deps.agenda.close(sessionId, card.id, 'Input request could not be recorded.');
       throw new InputRequestError('unavailable', 'Ferretry could not record the request, so it did not ask the owner');
     }
+    const matchKey = targetMatchKey(seen.facts, this.deps.hostName ?? '');
     const held: Held = {
       request,
       names: [target.key, ...(seen.names ?? [])],
       checkFailures: 0,
+      ...(matchKey === undefined ? {} : { matchKey }),
+      ...(raise.secretHint === undefined ? {} : { hint: raise.secretHint }),
       deliveries: new Map(),
       waiters: new Set(),
     };
@@ -236,8 +254,21 @@ export class InputRequestService {
     const { request } = held;
     const facts = request.observed;
     const prompt = (await this.deps.redact(request.prompt)).slice(0, INPUT_PROMPT_MAX_LENGTH);
-    if (facts === undefined) return { ...request, prompt };
-    return { ...request, prompt, observed: await this.project(request.sessionId, facts, held.names) };
+    const saved = await this.savedView(held);
+    const withSaved = saved === undefined ? { ...request, prompt } : { ...request, prompt, saved };
+    if (facts === undefined) return withSaved;
+    return { ...withSaved, observed: await this.project(request.sessionId, facts, held.names) };
+  }
+
+  /**
+   * What the owner's card may offer from the saved logins. A store that cannot be read offers nothing
+   * rather than failing the card: the owner can still type the value.
+   */
+  private async savedView(held: Held): Promise<InputRequest['saved']> {
+    const { logins } = this.deps;
+    if (logins === undefined || held.request.state !== 'pending') return undefined;
+    const entries = await logins.entries().catch(() => []);
+    return savedFor(held.request.sensitivity, held.matchKey, entries, held.hint);
   }
 
   /** The last word before a request leaves the service: a hold taken while it was being redacted still seals it. */
@@ -512,6 +543,8 @@ export class InputRequestService {
       return;
     }
     held.names = [target.key, ...(seen.names ?? [])];
+    const matchKey = targetMatchKey(seen.facts, this.deps.hostName ?? '');
+    if (matchKey !== undefined) held.matchKey = matchKey;
     held.request = {
       ...request,
       observed: await this.project(request.sessionId, seen.facts, held.names),
@@ -592,18 +625,24 @@ export class InputRequestService {
     held.request = { ...request, state: 'delivering' };
     let hold: QuarantineHold | undefined;
     try {
-      if (body.secretName !== undefined)
-        throw new InputRequestError('bad_request', 'saved secrets are not available yet; type the value instead');
-      const value = body.padded === undefined ? undefined : unpadInputValue(body.padded);
-      if (value === undefined)
-        throw new InputRequestError('bad_request', 'the value was not sent in the expected form');
-      const problem = inputValueProblem(value, request.sensitivity);
-      if (problem !== undefined) throw new InputRequestError('bad_request', problem);
+      const typedValue = body.padded === undefined ? undefined : unpadInputValue(body.padded);
+      if (body.entry === undefined) {
+        if (typedValue === undefined)
+          throw new InputRequestError('bad_request', 'the value was not sent in the expected form');
+        const problem = inputValueProblem(typedValue, request.sensitivity);
+        if (problem !== undefined) throw new InputRequestError('bad_request', problem);
+      } else if (this.deps.logins === undefined) {
+        throw new InputRequestError('bad_request', 'this daemon keeps no saved logins; type the value instead');
+      }
+      if (body.save !== undefined && typedValue !== undefined) this.guardSave(request, typedValue);
       if (body.observedDigest !== request.observedDigest) return await fail('target_changed', targetChanged());
       const submitted = body.submit && request.submit !== 'agent';
       const seen = await this.deps.target.observe(request.sessionId, request.target);
       if (!seen.ok) return await fail('target_gone', targetChanged());
       if (digestFacts(seen.facts) !== request.observedDigest) return await fail('target_changed', targetChanged());
+      // A saved value is opened HERE, inside the use boundary, after every check that can refuse without
+      // typing, and only to be typed: it is in no request, event, audit entry, result or error.
+      const value = body.entry === undefined ? (typedValue as string) : await this.fill(request, body.entry);
       held.names = [...new Set([...held.names, request.target.key, ...(seen.names ?? [])])];
       if (request.sensitivity !== 'plain') hold = await this.holdFor(request, held.names);
       try {
@@ -638,12 +677,20 @@ export class InputRequestService {
       }
       await this.settle(hold);
       hold = undefined;
-      await this.finish(held, 'delivered', undefined, by, { closeCard: true, tellAgent: true, submitted });
+      const saved = body.save === undefined ? undefined : await this.save(held, body.save, value, by, body.deliveryId);
+      await this.finish(held, 'delivered', undefined, by, {
+        closeCard: true,
+        tellAgent: true,
+        submitted,
+        ...(body.entry === undefined ? {} : { entry: body.entry }),
+        ...(saved === undefined ? {} : { saved: saved.ok }),
+      });
       return {
         id: request.id,
         deliveryId: body.deliveryId,
         state: 'delivered',
         submitted,
+        ...(saved === undefined ? {} : { saved }),
       };
     } catch (error) {
       // A hold still open here is for a write that may have started: it runs its window rather than lifting.
@@ -651,6 +698,79 @@ export class InputRequestService {
       if (held.request.state === 'delivering') held.request = { ...held.request, state: 'pending' };
       throw error;
     }
+  }
+
+  /**
+   * "Save as" is checked before anything is typed, so a save that could never happen refuses the whole
+   * Send with nothing typed rather than typing and then failing to keep it.
+   */
+  private guardSave(request: InputRequest, value: string): void {
+    const field = savedFieldFor(request.sensitivity);
+    if (this.deps.logins === undefined)
+      throw new InputRequestError('bad_request', 'this daemon keeps no saved logins; send without saving');
+    if (field === undefined)
+      throw new InputRequestError(
+        'bad_request',
+        'a one-time code is not saved; add the 2FA seed to a saved login in Settings instead',
+      );
+    if (field === 'password' && [...value].length < LOGIN_PASSWORD_MIN_LENGTH)
+      throw new InputRequestError(
+        'bad_request',
+        `a saved password is at least ${LOGIN_PASSWORD_MIN_LENGTH} characters, so it can be masked safely; send it without saving`,
+      );
+    if (
+      field === 'username' &&
+      (value.trim() === '' || value.length > LOGIN_USERNAME_MAX_LENGTH || /\p{Cc}/u.test(value))
+    )
+      throw new InputRequestError('bad_request', 'that value cannot be kept as a username; send it without saving');
+  }
+
+  /** The value a saved login types for this request's field. Refuses with the entry's name, never its value. */
+  private async fill(request: InputRequest, entry: LoginEntryId): Promise<string> {
+    const logins = this.deps.logins as InputLoginPort;
+    const value = await logins
+      .fill(entry, fillRoleFor(request.sensitivity), this.deps.clock.now())
+      .catch((error: unknown) => {
+        throw error instanceof LoginEntryError
+          ? new InputRequestError(
+              error.refusal === 'unknown_login' ? 'not_found' : 'bad_request',
+              `${error.message}; nothing was typed`,
+            )
+          : new InputRequestError('unavailable', 'Ferretry could not open the saved login, so nothing was typed');
+      });
+    const problem = inputValueProblem(value, request.sensitivity);
+    if (problem !== undefined)
+      throw new InputRequestError('bad_request', 'that saved login cannot be typed here; nothing was typed');
+    return value;
+  }
+
+  /**
+   * Keeps the typed value in a saved login once it has been typed. A failure never undoes the delivery: it
+   * says what happened in a fixed sentence and the owner can save it from Settings. The record is KEPT.
+   */
+  private async save(
+    held: Held,
+    save: NonNullable<InputDeliverBody['save']>,
+    value: string,
+    by: InputActor,
+    _deliveryId: string,
+  ): Promise<NonNullable<InputDeliverResult['saved']>> {
+    const field = savedFieldFor(held.request.sensitivity);
+    const logins = this.deps.logins;
+    if (field === undefined || logins === undefined) return { entry: save.entry, ok: false, problem: 'not saved' };
+    try {
+      await logins.save(save.entry, save.label, held.matchKey, { [field]: value });
+    } catch {
+      return {
+        entry: save.entry,
+        ok: false,
+        problem: 'The value was typed, but Ferretry could not keep it; save it from Settings › Secrets.',
+      };
+    }
+    await this.deps.audit
+      .saved({ sessionId: held.request.sessionId, requestId: held.request.id, actor: by, entry: save.entry, field })
+      .catch(() => undefined);
+    return { entry: save.entry, ok: true };
   }
 
   /**
@@ -719,12 +839,28 @@ export class InputRequestService {
     state: 'delivered' | 'refused' | 'expired' | 'cancelled',
     reason: InputReason | undefined,
     by: InputActor | undefined,
-    options: { closeCard: boolean; tellAgent: boolean; submitted?: boolean; uncertain?: boolean },
+    options: {
+      closeCard: boolean;
+      tellAgent: boolean;
+      submitted?: boolean;
+      uncertain?: boolean;
+      /** The saved login the value was typed from. */
+      entry?: LoginEntryId;
+      /** Whether "Save as" kept the typed value. */
+      saved?: boolean;
+    },
   ): Promise<void> {
     const at = instant(this.deps.clock.now());
+    const source = options.entry === undefined ? ('typed' as const) : ('saved' as const);
     const outcome =
       state === 'delivered' && by !== undefined
-        ? { at, by, submitted: options.submitted ?? false, source: 'typed' as const }
+        ? {
+            at,
+            by,
+            submitted: options.submitted ?? false,
+            source,
+            ...(options.entry === undefined ? {} : { entry: options.entry }),
+          }
         : undefined;
     const seen = held.request;
     const { observed: _seen, observedDigest: _digest, ...rest } = held.request;
@@ -746,7 +882,14 @@ export class InputRequestService {
     await this.record(request, `input.${kind}`, by ?? { kind: 'daemon' }, {
       ...this.auditOf(seen),
       ...(reason === undefined ? {} : { reason }),
-      ...(state === 'delivered' ? { source: 'typed' as const, submitted: options.submitted ?? false } : {}),
+      ...(state === 'delivered'
+        ? {
+            source,
+            submitted: options.submitted ?? false,
+            ...(options.entry === undefined ? {} : { entry: options.entry }),
+            ...(options.saved === undefined ? {} : { saved: options.saved }),
+          }
+        : {}),
     });
     if (options.closeCard) await this.deps.agenda.close(request.sessionId, request.agendaItemId, noteOf(state, reason));
     if (options.tellAgent)

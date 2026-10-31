@@ -96,6 +96,8 @@ export interface AgendaCardProps {
   readonly onSnooze?: (until: string) => void;
   /** Opens what the item knows beyond its question (`AgendaDetail`): the side panel, or the phone's full view. */
   readonly onOpenDetail?: () => void;
+  /** The form an `input` item is answered with (`InputCardHost`): drawn in the answer bar's place. */
+  readonly inputForm?: ReactNode;
 }
 
 const markdownProse = (text: string): ReactNode => <ChatProse text={text} />;
@@ -118,6 +120,7 @@ export function AgendaCard({
   flat = false,
   onOpenDetail,
   onSnooze,
+  inputForm,
 }: AgendaCardProps) {
   const titleId = useId();
   const [picks, setPicks] = useState<readonly string[]>([]);
@@ -246,30 +249,36 @@ export function AgendaCard({
           Not sent: {error}
         </p>
       )}
-      <AgendaActions
-        answers={answers}
-        arrows={!flat && (swipeHints || pinned)}
-        busy={busy}
-        dismissInMenu={model.dismissInMenu && !model.notice}
-        extraOptions={extras}
-        onAnswer={answer => {
-          const action = answerAction(answer, '');
-          if (action !== null) give(action);
-        }}
-        onDismiss={() => give(DISMISS_ACTION)}
-        onOption={option => give(optionAction(option, ''))}
-        recommendationLine={model.recommendationLine}
-        recommended={recommended}
-        swipeHints={swipeHints && !flat}
-        {...(model.composerHint === undefined ? {} : { composerHint: model.composerHint })}
-        {...(model.notice ? { clear: () => give(CLEAR_ACTION) } : {})}
-        {...(onSkip === undefined ? {} : { onSkip })}
-        {...(onOpenDetail !== undefined && !model.notice && agendaHasDetail(item) ? { onOpenDetail } : {})}
-        {...(item.waitingOn === 'ferret' && !model.notice
-          ? { waiting: `With ${origin?.ferret ?? 'the ferret'} — it will update this.` }
-          : {})}
-        {...(perQuestion ? { sendAnswers: { ready: sendable !== null, onSend: sendAnswers } } : {})}
-      />
+      {inputForm !== undefined && item.kind === 'input' ? (
+        <div className="fy-attn-card__input" data-agenda-input-form="">
+          {inputForm}
+        </div>
+      ) : (
+        <AgendaActions
+          answers={answers}
+          arrows={!flat && (swipeHints || pinned)}
+          busy={busy}
+          dismissInMenu={model.dismissInMenu && !model.notice}
+          extraOptions={extras}
+          onAnswer={answer => {
+            const action = answerAction(answer, '');
+            if (action !== null) give(action);
+          }}
+          onDismiss={() => give(DISMISS_ACTION)}
+          onOption={option => give(optionAction(option, ''))}
+          recommendationLine={model.recommendationLine}
+          recommended={recommended}
+          swipeHints={swipeHints && !flat}
+          {...(model.composerHint === undefined ? {} : { composerHint: model.composerHint })}
+          {...(model.notice ? { clear: () => give(CLEAR_ACTION) } : {})}
+          {...(onSkip === undefined ? {} : { onSkip })}
+          {...(onOpenDetail !== undefined && !model.notice && agendaHasDetail(item) ? { onOpenDetail } : {})}
+          {...(item.waitingOn === 'ferret' && !model.notice
+            ? { waiting: `With ${origin?.ferret ?? 'the ferret'} — it will update this.` }
+            : {})}
+          {...(perQuestion ? { sendAnswers: { ready: sendable !== null, onSend: sendAnswers } } : {})}
+        />
+      )}
       {origin === undefined || pinned ? null : (
         <RouteLink className="fy-attn-card__open" data-agenda-open="" onNavigate={origin.onNavigate} to={origin.href}>
           Open conversation

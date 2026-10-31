@@ -191,6 +191,8 @@ import { registerScratchCommands } from '../src/lib/scratch/commands';
 import { ScratchController } from '../src/lib/scratch/controller';
 import { registerSecretCommands } from '../src/lib/secrets/commands';
 import { SecretController } from '../src/lib/secrets/controller';
+import { LoginEntryController } from '../src/lib/secrets/entry-controller';
+import { ProtocolLoginEntryGateway } from '../src/lib/secrets/entry-gateway';
 import { ProtocolSecretGateway } from '../src/lib/secrets/gateway';
 import { registerSecurityCommands } from '../src/lib/security/commands';
 import { SecurityController } from '../src/lib/security/controller';
@@ -918,6 +920,12 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         new StdinSecretValue(BINARY_NAME),
         process.cwd(),
       ),
+      new LoginEntryController({
+        gateway: new ProtocolLoginEntryGateway(client),
+        out: world.io,
+        prompt: world.prompt,
+        interactive: world.interactive,
+      }),
     ),
   ({ program, world, client }) =>
     registerFilesystemCommands(program, new FilesystemController(new ProtocolFilesystemGateway(client), world.io)),

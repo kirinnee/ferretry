@@ -82,6 +82,7 @@ import { AgendaCountBadge } from '../../shell/app-bar.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { sessionsBarNames } from '../../shell/sessions-bar-model.ts';
 import { PageThemeSwitch } from '../../shell/theme-toggle.tsx';
+import { InputCardHost } from '../input-request/input-card-host.tsx';
 import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
 import { agendaAge, agendaReference } from './agenda-board.tsx';
 import { AgendaCard, type AgendaCardOrigin } from './agenda-card.tsx';
@@ -153,9 +154,27 @@ const renderInboxCard = (
     onSnooze={until => act(snoozeAction(until))}
     origin={inboxCardOrigin(card, onNavigate)}
     swipeHints={false}
+    {...inputFormFor(inbox, card)}
     {...(now === undefined ? {} : { now })}
   />
 );
+
+/** The form an `input` card is answered with, or nothing for any other kind (or a machine that is not paired here). */
+const inputFormFor = (inbox: AgendaInbox, card: InboxCard): { readonly inputForm?: ReactNode } => {
+  const connection = inbox.connectionFor(card.daemonId);
+  return card.item.kind !== 'input' || connection === undefined
+    ? {}
+    : {
+        inputForm: (
+          <InputCardHost
+            agentName={inboxWho(card).ferret}
+            connection={connection}
+            item={card.item}
+            sessionId={card.view.config.id}
+          />
+        ),
+      };
+};
 
 /** The conversation an item belongs to, as the composer registers itself under it. */
 const scopeOf = (card: InboxCard) => daemonSessionScope({ daemonId: card.daemonId }, card.view.config.id);
@@ -271,6 +290,7 @@ function OpenItem({
         onSnooze={until => act(snoozeAction(until))}
         position={{ index: place.index, total: place.total }}
         quoteScope={scopeOf(card)}
+        {...inputFormFor(inbox, card)}
         renderProse={text => <ChatProse copyable={copyWriter} text={text} />}
         // The SAME row as the chat: on touch its buttons say their arrows and its head and row swipe (↓ going to
         // "next", the skip); the deck takes a drag that starts on the who-and-what line, and the keys go to the view.

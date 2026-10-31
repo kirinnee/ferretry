@@ -209,7 +209,10 @@ function composed(
       quarantine: async (_session, event) => void quarantineLog.push(event),
       quarantines: async () => quarantineLog,
     },
-    audit: { record: async (entry: InputAuditEntry) => void emitted.push(JSON.stringify(entry)) },
+    audit: {
+      record: async (entry: InputAuditEntry) => void emitted.push(JSON.stringify(entry)),
+      saved: async entry => void emitted.push(JSON.stringify(entry)),
+    },
     clock,
     ids: { requestId: () => (id++).toString(16).padStart(32, '0') },
     timers: { after: async () => await new Promise<void>(() => undefined) },

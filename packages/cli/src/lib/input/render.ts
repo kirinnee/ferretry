@@ -26,14 +26,20 @@ function remaining(request: InputRequest, now: number): string {
   return seconds < 90 ? `${seconds}s left` : `${Math.round(seconds / 60)}m left`;
 }
 
+/** The saved login the daemon matched to this target, as a handle and a label; nothing more of it. */
+function matchedLogin(request: InputRequest): { readonly id: string; readonly text: string } | undefined {
+  const offer = request.saved?.offers.find(candidate => candidate.matched);
+  return offer === undefined ? undefined : { id: offer.id, text: `${offer.id} (${compact(offer.label, 80)})` };
+}
+
 /** One line per open request. There is no value in a request, so there is none to print. */
 export function renderInputList(list: InputRequestList, now: number): string {
   if (list.requests.length === 0) return 'No input requests are waiting.';
   return list.requests
-    .map(
-      request =>
-        `!${request.agendaItemId}  ${request.state}  ${request.sensitivity}  ${inputTargetReference(request)}  ${remaining(request, now)}\n      the agent says: ${compact(request.prompt, 120)}`,
-    )
+    .map(request => {
+      const login = matchedLogin(request);
+      return `!${request.agendaItemId}  ${request.state}  ${request.sensitivity}  ${inputTargetReference(request)}  ${remaining(request, now)}\n      the agent says: ${compact(request.prompt, 120)}${login === undefined ? '' : `\n      use: ${login.text}`}`;
+    })
     .join('\n');
 }
 
@@ -44,6 +50,8 @@ export function renderInputFacts(request: InputRequest): string[] {
     `the agent says: ${compact(request.prompt, 200)}`,
   ];
   if (request.risk !== undefined) lines.push(`risk ${request.risk.level}: ${showUntrusted(request.risk.reason)}`);
+  const login = matchedLogin(request);
+  if (login !== undefined) lines.push(`a saved login matches: ${login.text} (answer with --secret ${login.id})`);
   const observed = request.observed;
   if (observed?.kind === 'terminal') {
     lines.push(

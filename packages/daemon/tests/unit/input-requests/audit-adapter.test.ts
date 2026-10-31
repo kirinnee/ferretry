@@ -65,3 +65,41 @@ describe('InputAuditAdapter', () => {
     should(refused.detail?.reason).equal('target_changed');
   });
 });
+
+describe('InputAuditAdapter, saving a typed value to a saved login', () => {
+  it('should write the KEPT secrets.changed record fy secret set writes, by handle and field only', async () => {
+    const records: AuditEntry[] = [];
+    const adapter = new InputAuditAdapter({ record: async record => void records.push(record) });
+    await adapter.saved({
+      sessionId: 's1',
+      requestId: 'r'.repeat(32),
+      actor: { kind: 'device', deviceId: 'phone-1' },
+      entry: 'SUDO_KIRIN_BOX',
+      field: 'password',
+    });
+    await adapter.saved({
+      sessionId: 's1',
+      requestId: 'r'.repeat(32),
+      actor: { kind: 'host' },
+      entry: 'U',
+      field: 'username',
+    });
+
+    should(records).eql([
+      {
+        event: 'secrets.changed',
+        actor: { kind: 'device', deviceId: 'phone-1' },
+        subject: 'SUDO_KIRIN_BOX',
+        outcome: 'succeeded',
+        detail: { action: 'login-save', field: 'password', requestId: 'r'.repeat(32), session: 's1' },
+      },
+      {
+        event: 'secrets.changed',
+        actor: { kind: 'host' },
+        subject: 'U',
+        outcome: 'succeeded',
+        detail: { action: 'login-save', field: 'username', requestId: 'r'.repeat(32), session: 's1' },
+      },
+    ]);
+  });
+});

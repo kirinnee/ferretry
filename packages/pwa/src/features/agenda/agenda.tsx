@@ -43,6 +43,7 @@ import { laneEditDestination } from '../../lib/lane-proposal-link.ts';
 import { composerQuoteTarget } from '../../lib/quote.ts';
 import { useOptionalRouter } from '../../lib/router.tsx';
 import type { TranscriptEntry } from '../../lib/session-screens.ts';
+import { InputCardHost } from '../input-request/input-card-host.tsx';
 import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
 import { agendaReference } from './agenda-board.tsx';
 import { AgendaDeliveryContext, agendaHeading, deliveringIds } from './agenda-delivery.tsx';
@@ -369,6 +370,18 @@ export const useAgenda = ({
           position={paged >= 0 ? { index: paged, total: openItems.length } : { index: 0, total: 1 }}
           quoteScope={scope}
           renderProse={proseText => <ChatProse copyable={copyWriter} text={proseText} />}
+          {...(cardItem.kind === 'input'
+            ? {
+                inputForm: (
+                  <InputCardHost
+                    agentName={ferret}
+                    connection={connection}
+                    item={cardItem}
+                    sessionId={scope.sessionId}
+                  />
+                ),
+              }
+            : {})}
           swipeable={swipeable}
           {...(settled === undefined
             ? { onSnooze: (until: string) => act(cardItem, snoozeAction(until), '') }

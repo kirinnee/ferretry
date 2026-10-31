@@ -47,6 +47,13 @@ its own sealed document of refresh tokens and client secrets), the
 alone can open — and none of them returns what it read.
 A getter added "just for testing" would delete the whole property.
 
+[Saved logins](input-requests.md#saved-logins) — the input bridge's password manager — follow the same rule
+over a **separate** sealed document (`login-secrets.json`, under the same key). The route table is handed a
+`LoginDirectory`, which seals and never opens; only two things hold the `LoginVault` that opens it: the
+redactor (saved values are masked as `[redacted:login:<ID>:password]`) and the input-request service, which
+types one into the target the owner tapped "Use" for and answers only what happened. `use` cannot spend a
+saved login and `${secret:…}` cannot name one.
+
 ## Redaction
 
 Because the daemon knows the values, it removes them from text before that text is stored or

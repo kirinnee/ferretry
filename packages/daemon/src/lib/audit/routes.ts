@@ -281,6 +281,28 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     subject: 'name',
     detail: { action: 'delete' },
   },
+  // Saved logins (docs/input-requests.md) are the secret store too: every change is kept, by handle only.
+  {
+    method: 'PUT',
+    path: '/v1/secrets/logins/:id',
+    event: 'secrets.changed',
+    subject: 'id',
+    detail: { action: 'login-put' },
+  },
+  {
+    method: 'POST',
+    path: '/v1/secrets/logins/:id/rename',
+    event: 'secrets.changed',
+    subject: 'id',
+    detail: { action: 'login-rename' },
+  },
+  {
+    method: 'DELETE',
+    path: '/v1/secrets/logins/:id',
+    event: 'secrets.changed',
+    subject: 'id',
+    detail: { action: 'login-delete' },
+  },
   // Copying secrets to another machine: both ends name the SAME import id as the subject, so the source's
   // record and the target's can be matched up by eye. Names only — the bundle is never read here.
   {

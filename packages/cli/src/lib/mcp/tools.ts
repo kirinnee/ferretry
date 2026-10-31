@@ -183,6 +183,10 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
         },
         blocking: { type: 'boolean', description: 'You are stopped until it is answered: also ping the owner.' },
         chain: { type: 'string', description: 'A follow-up in a multi-step login: the card it follows, like A7.' },
+        secretHint: {
+          type: 'string',
+          description: 'Saved login you expect, by handle (SUDO_KIRIN_BOX): a hint only, the owner still taps.',
+        },
       },
       ['name', 'prompt', 'sensitivity'],
     ),

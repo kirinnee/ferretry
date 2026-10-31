@@ -456,6 +456,7 @@ export class AgentToolService {
           ...(call.expiresInSeconds === undefined ? {} : { expiresInSeconds: call.expiresInSeconds }),
           ...(call.blocking === undefined ? {} : { blocking: call.blocking }),
           ...(call.chain === undefined ? {} : { chain: call.chain }),
+          ...(call.secretHint === undefined ? {} : { secretHint: call.secretHint }),
         });
         return {
           summary: `Asked the owner for the value (!${view.id}) for ${reference}. Wait with input.wait; do not type there yourself.`,

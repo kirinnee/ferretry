@@ -1,0 +1,320 @@
+/**
+ * THE INPUT CARD, AS DECISIONS (docs/input-requests.md, "The agenda card").
+ *
+ * Everything the card decides that is not drawing lives here as a pure function: which saved login may be the
+ * one-tap choice, what a Send carries, whether Save may be ticked, and which sentence a refusal becomes. The
+ * component only draws what these return.
+ *
+ * NO FUNCTION HERE STORES A VALUE. The typed value comes in as an argument, goes out inside one
+ * {@link InputDeliverBody} (padded) and is never kept. A saved login is only ever named: the DAEMON resolves
+ * its value, so a saved value never passes through the app.
+ */
+
+import {
+  type InputDeliverBody,
+  type InputDeliverResult,
+  type InputRequest,
+  type InputSaved,
+  type InputSavedOffer,
+  type InputSensitivity,
+  inputValueProblem,
+  LOGIN_LABEL_MAX_LENGTH,
+  LOGIN_PASSWORD_MIN_LENGTH,
+  LoginEntryIdSchema,
+  padInputValue,
+} from '@ferretry/protocol';
+import { grantRefusalNotice } from './grants.ts';
+
+/**
+ * One value the card asks for. Today a request has exactly one; the multi-field card (username + password on one
+ * card) adds fields to this list and nothing else here changes.
+ */
+export interface InputCardField {
+  /** Stable within the card: the key its own state is kept under. */
+  readonly key: string;
+  readonly requestId: string;
+  readonly sensitivity: InputSensitivity;
+  readonly label: string;
+  readonly saved?: InputSaved;
+}
+
+const FIELD_LABEL: Readonly<Record<InputSensitivity, string>> = {
+  secret: 'Password',
+  private: 'Code',
+  plain: 'Value',
+};
+
+/** The fields of a request: one today. */
+export const fieldsOf = (request: InputRequest): readonly InputCardField[] => [
+  {
+    key: 'value',
+    requestId: request.id,
+    sensitivity: request.sensitivity,
+    label: FIELD_LABEL[request.sensitivity],
+    ...(request.saved === undefined ? {} : { saved: request.saved }),
+  },
+];
+
+const NEEDS: Readonly<Record<InputSensitivity, string>> = {
+  secret: 'a password',
+  private: 'a code',
+  plain: 'an answer',
+};
+
+/** `!A7 · Hadi needs a password` — the agenda reference first, because it is how the owner names the card. */
+export const titleWords = (request: InputRequest, agentName: string): string =>
+  `!${request.agendaItemId} · ${agentName} needs ${NEEDS[request.sensitivity]}`;
+
+/** The target as the owner writes a reference to it: `%terminal:dev`. */
+export const targetRef = (request: InputRequest): string => `%${request.target.kind}:${request.target.key}`;
+
+export interface SplitOffers {
+  /** The one-tap choice: the first offer the DAEMON matched to this target. Never a hinted one by itself. */
+  readonly primary: InputSavedOffer | undefined;
+  /** Every other offer, in the daemon's order, selectable by hand. */
+  readonly others: readonly InputSavedOffer[];
+}
+
+/**
+ * Only an offer the daemon marked `matched` may be the one-tap primary. `hinted` (the ferret named it) is a tag,
+ * never a promotion: a hinted offer that is not matched stays among the others.
+ */
+export const splitOffers = (saved: InputSaved | undefined): SplitOffers => {
+  const offers = saved?.offers ?? [];
+  const primary = offers.find(offer => offer.matched);
+  return { primary, others: offers.filter(offer => offer !== primary) };
+};
+
+/** The button words for a saved login: `Use saved sudo on kirin-box`. */
+export const savedButtonWords = (offer: InputSavedOffer): string => `Use saved ${offer.label}`;
+
+/** The username line under it, unless the label already says it. */
+export const offerUsername = (offer: InputSavedOffer): string | undefined =>
+  offer.username === undefined || offer.label.includes(offer.username) ? undefined : offer.username;
+
+export const REOBSERVING = 'Ferretry is looking at the target again';
+
+/** Why Send and Use are off right now, or `undefined`. The RISK never appears here: it flags, it does not refuse. */
+export const sendBlock = (request: InputRequest, now: number): string | undefined => {
+  if (request.state !== 'pending') return 'This request is no longer waiting for a value.';
+  if (Date.parse(request.expiresAt) <= now) return 'This request has expired.';
+  if (request.observed === undefined || request.observedDigest === undefined) return REOBSERVING;
+  return undefined;
+};
+
+/** Whether "Press Enter for me" is drawn at all: the agent presses it itself for `agent`. */
+export const offersPressEnter = (request: InputRequest): boolean => request.submit !== 'agent';
+
+/** What the Enter tick starts as: on for an owner default and for a terminal secret. */
+export const defaultSubmit = (request: InputRequest): boolean =>
+  request.submit === 'owner-default' ||
+  (request.submit === 'offer-owner' && request.target.kind === 'terminal' && request.sensitivity === 'secret');
+
+const pad2 = (value: number): string => String(value).padStart(2, '0');
+
+/** `8m 05s left`, or `expired`. */
+export const expiryWords = (expiresAt: string, now: number): string => {
+  const seconds = Math.floor((Date.parse(expiresAt) - now) / 1_000);
+  if (!(seconds > 0)) return 'expired';
+  const hours = Math.floor(seconds / 3_600);
+  const minutes = Math.floor((seconds % 3_600) / 60);
+  if (hours > 0) return `${hours}h ${pad2(minutes)}m left`;
+  return `${minutes}m ${pad2(seconds % 60)}s left`;
+};
+
+const ECHO_WORDS = { off: 'typing hidden', on: 'typing shows', unknown: 'echo unknown' } as const;
+
+export interface ObservedWords {
+  /** The program, or the page's origin. */
+  readonly program: string;
+  readonly echo: string;
+  /** The prompt's own line, as the daemon read it; absent for a page. */
+  readonly promptLine?: string;
+  readonly recognised: boolean;
+}
+
+/** What the daemon saw, in words: drawn large, because the agent's own sentence is not evidence. */
+export const observedWords = (request: InputRequest): ObservedWords | undefined => {
+  const facts = request.observed;
+  if (facts === undefined) return undefined;
+  if (facts.kind === 'terminal')
+    return {
+      program: facts.foreground.comm,
+      echo: ECHO_WORDS[facts.echo],
+      promptLine: facts.promptLine,
+      recognised: facts.recognisedConsumer,
+    };
+  return {
+    program: facts.origin,
+    echo: facts.field.type === 'password' ? 'password field' : 'field',
+    recognised: true,
+  };
+};
+
+/** The value field's HTML attributes, by sensitivity. Every one stops a keyboard "helping". */
+export interface FieldAttributes {
+  readonly type: 'password' | 'text';
+  readonly autoComplete: string;
+  readonly inputMode?: 'numeric';
+}
+
+export const fieldAttributes = (sensitivity: InputSensitivity, revealed: boolean): FieldAttributes => {
+  if (sensitivity === 'secret') return { type: revealed ? 'text' : 'password', autoComplete: 'current-password' };
+  if (sensitivity === 'private')
+    return { type: revealed ? 'text' : 'password', autoComplete: 'one-time-code', inputMode: 'numeric' };
+  return { type: 'text', autoComplete: 'off' };
+};
+
+export const PLAIN_NOTICE = 'Not secret: the ferret can see this value.';
+
+/** The handle as it is typed: uppercase letters, digits and underscores only. */
+export const normalizeHandle = (text: string): string =>
+  text
+    .toUpperCase()
+    .replaceAll(/[^A-Z0-9_]/gu, '_')
+    .slice(0, 64);
+
+export interface SaveDraft {
+  readonly enabled: boolean;
+  readonly label: string;
+  readonly id: string;
+}
+
+/** Where "Save as" starts: off, with the daemon's suggestion. */
+export const initialSaveDraft = (saved: InputSaved | undefined): SaveDraft => ({
+  enabled: false,
+  label: saved?.suggest?.label ?? '',
+  id: saved?.suggest?.id ?? '',
+});
+
+/** Save is drawn only when a typed value of this kind is ever kept (a one-time code is not). */
+export const offersSave = (field: InputCardField): boolean => field.saved?.saves !== undefined;
+
+/** The existing entry a handle would overwrite, if any: the card then says "updates <label>". */
+export const updatedEntry = (saved: InputSaved | undefined, id: string): InputSavedOffer | undefined =>
+  saved?.offers.find(offer => offer.id === id);
+
+export const SAVE_TOO_SHORT = `Too short to save: at least ${LOGIN_PASSWORD_MIN_LENGTH} characters. You can still send it.`;
+
+/**
+ * Why the typed value cannot be saved, or `undefined`. It can always be SENT: a short value is only refused a
+ * place in the vault, because a very short value would mask ordinary words.
+ */
+export const saveBlock = (field: InputCardField, value: string): string | undefined => {
+  if (!offersSave(field)) return undefined;
+  if (field.saved?.saves === 'password' && value.length < LOGIN_PASSWORD_MIN_LENGTH) return SAVE_TOO_SHORT;
+  return undefined;
+};
+
+/** The sentence under the Save fields when what is typed in them will not do, or `undefined`. */
+export const saveDraftProblem = (draft: SaveDraft): string | undefined => {
+  if (!draft.enabled) return undefined;
+  if (draft.label.trim() === '') return 'Give it a label.';
+  if (draft.label.trim().length > LOGIN_LABEL_MAX_LENGTH)
+    return `A label is at most ${LOGIN_LABEL_MAX_LENGTH} characters.`;
+  if (!LoginEntryIdSchema.safeParse(draft.id).success)
+    return 'A handle is uppercase letters, digits and underscores, starting with a letter.';
+  return undefined;
+};
+
+/** Whether the typed value will be kept: ticked, long enough, and the label and handle are fine. */
+const savesTypedValue = (field: InputCardField, value: string, draft: SaveDraft): boolean =>
+  offersSave(field) && draft.enabled && saveBlock(field, value) === undefined && saveDraftProblem(draft) === undefined;
+
+export interface TypedSend {
+  readonly request: InputRequest;
+  readonly field: InputCardField;
+  readonly value: string;
+  readonly submit: boolean;
+  readonly save: SaveDraft;
+  readonly deliveryId: string;
+}
+
+export type BuiltBody =
+  | { readonly ok: true; readonly body: InputDeliverBody }
+  | { readonly ok: false; readonly problem: string };
+
+const enterFor = (request: InputRequest, submit: boolean): boolean => offersPressEnter(request) && submit;
+
+/**
+ * What typing a value sends. The value is padded here and nowhere else; `save` rides only when the field is
+ * one that is ever saved and the value may be. A refusal is a sentence, never a throw.
+ */
+export const typedBody = ({ request, field, value, submit, save, deliveryId }: TypedSend): BuiltBody => {
+  const problem = inputValueProblem(value, field.sensitivity);
+  if (problem !== undefined) return { ok: false, problem };
+  if (request.observedDigest === undefined) return { ok: false, problem: REOBSERVING };
+  const keeps = savesTypedValue(field, value, save);
+  return {
+    ok: true,
+    body: {
+      deliveryId,
+      observedDigest: request.observedDigest,
+      padded: padInputValue(value),
+      submit: enterFor(request, submit),
+      ...(keeps ? { save: { entry: save.id, label: save.label.trim() } } : {}),
+    },
+  };
+};
+
+/** What tapping a saved login sends: its handle, and nothing else about it. */
+export const savedBody = (request: InputRequest, entry: string, submit: boolean, deliveryId: string): BuiltBody =>
+  request.observedDigest === undefined
+    ? { ok: false, problem: REOBSERVING }
+    : {
+        ok: true,
+        body: { deliveryId, observedDigest: request.observedDigest, entry, submit: enterFor(request, submit) },
+      };
+
+type InputFailureKind = 'changed' | 'already' | 'gone' | 'refused' | 'step-up' | 'unknown';
+
+export interface InputFailure {
+  readonly kind: InputFailureKind;
+  readonly text: string;
+  /** The daemon answered: nothing was typed twice, so a retry takes a new delivery id. */
+  readonly definitive: boolean;
+}
+
+interface HttpFailure {
+  readonly status?: unknown;
+  readonly code?: unknown;
+  readonly message?: unknown;
+}
+
+/** A failed Send as a sentence, and what kind it is: each needs a different next step from the owner. */
+export const inputFailure = (error: unknown): InputFailure => {
+  const failure = (error !== null && typeof error === 'object' ? error : {}) as HttpFailure;
+  const message = typeof failure.message === 'string' && failure.message !== '' ? failure.message : undefined;
+  if (failure.status === 409 && failure.code === 'target_changed')
+    return {
+      kind: 'changed',
+      definitive: true,
+      text: 'The target changed since this card was drawn, so nothing was typed. Ferretry is looking at it again.',
+    };
+  if (failure.status === 409 && failure.code === 'already_delivered')
+    return { kind: 'already', definitive: true, text: 'This was already sent.' };
+  if (failure.status === 410)
+    return { kind: 'gone', definitive: true, text: 'This request expired or was cancelled. Nothing was typed.' };
+  const grant = grantRefusalNotice(error);
+  if (grant !== null)
+    return {
+      kind: 'refused',
+      definitive: true,
+      text: grant.detail === '' ? grant.guidance.explanation : `${grant.guidance.explanation} ${grant.detail}`,
+    };
+  if (typeof failure.status === 'number')
+    return { kind: 'refused', definitive: true, text: message ?? 'The daemon refused this.' };
+  return {
+    kind: 'unknown',
+    definitive: false,
+    text: 'Could not reach the machine. If you press Send again it will not type twice.',
+  };
+};
+
+/** What Save came to, in the daemon's words, or `undefined` when none was asked for. */
+export const savedOutcomeWords = (result: InputDeliverResult, label: string): string | undefined =>
+  result.saved === undefined
+    ? undefined
+    : result.saved.ok
+      ? `Saved as ${label}.`
+      : `It was typed, but not saved: ${result.saved.problem ?? 'the daemon could not save it'}. Save it from Settings instead.`;
