@@ -5,7 +5,6 @@ import {
   BROWSER_INPUT_SHOT_MAX_SIDE,
   type BrowserInputFacts,
   describeInputDocument,
-  INPUT_MARKER,
   type InputCdp,
   type InputCdpSession,
   type InputFrame,
@@ -18,6 +17,7 @@ import {
   isSecureUrl,
   observeInputFields,
   originOfUrl,
+  playwrightNodeOf,
   shootInputFields,
   typeInputFields,
 } from '../../../../src/lib/index.ts';
@@ -30,9 +30,10 @@ interface FakeElement {
   nodeName: string;
   attributes: string[];
   readonly frame: FakeFrame;
-  marker?: string;
+  /** What the handle's own DevTools session says the handle holds, when it is not this element itself. */
+  held?: unknown;
   box: { x: number; y: number; width: number; height: number } | null;
-  /** What the Playwright handle says the box is, when it is not what DevTools measures. */
+  /** What Playwright measures for the element it holds, when it is not the box DevTools measures. */
   claimedBox?: { x: number; y: number; width: number; height: number } | null;
   visible: boolean;
 }
@@ -62,8 +63,6 @@ class FakeSession implements InputCdpSession {
   detached = false;
   /** Where focus really lands when asked for a node: another node, to play a page that moves focus. */
   focusLandsOn: number | undefined;
-  /** Extra nodes a marker search finds, to play a page that copies the marker. */
-  extraMatches = 0;
   /** The node that answers a hit test at its centre instead of the one there, to play something stacked on top. */
   onTop: FakeElement | undefined;
   /** What a page's own `select` override does when run in the page's world: focus moves to this node. */
@@ -74,7 +73,6 @@ class FakeSession implements InputCdpSession {
   private readonly isolatedObjects = new Set<string>();
   private nextContext = 100;
   failOn: ((method: string, params: Record<string, unknown>) => Error | undefined) | undefined;
-  private searches = 0;
 
   constructor(
     readonly name: string,
@@ -109,19 +107,6 @@ class FakeSession implements InputCdpSession {
       }
       case 'Target.getTargetInfo':
         return { targetInfo: { targetId: this.name } };
-      case 'DOM.getDocument':
-      case 'DOM.discardSearchResults':
-        return {};
-      case 'DOM.performSearch': {
-        const token = /"([^"]+)"/u.exec(String(params.query))?.[1];
-        this.searches += 1;
-        const hits = own.filter(element => element.marker === token).length + this.extraMatches;
-        return { searchId: `search-${this.searches}`, resultCount: hits };
-      }
-      case 'DOM.getSearchResults': {
-        const hit = own.find(element => element.marker !== undefined);
-        return { nodeIds: hit === undefined ? [] : [hit.backendNodeId + 1000] };
-      }
       case 'DOM.getBoxModel': {
         const element = own.find(candidate => candidate.backendNodeId === params.backendNodeId);
         if (element?.box == null) throw new Error('Could not compute box model.');
@@ -155,9 +140,9 @@ class FakeSession implements InputCdpSession {
               : (params.backendNodeId as number);
         const element = own.find(candidate => candidate.backendNodeId === id);
         if (element === undefined) throw new Error('No node with given id found');
-        const attributes =
-          element.marker === undefined ? element.attributes : [...element.attributes, INPUT_MARKER, element.marker];
-        return { node: { nodeName: element.nodeName, backendNodeId: element.backendNodeId, attributes } };
+        return {
+          node: { nodeName: element.nodeName, backendNodeId: element.backendNodeId, attributes: element.attributes },
+        };
       }
       case 'DOM.focus':
         this.focused = this.focusLandsOn ?? (params.backendNodeId as number);
@@ -234,8 +219,8 @@ class FakeWorld {
   viewport: Record<string, number> = { clientWidth: 800, clientHeight: 500, pageX: 0, pageY: 0 };
   /** The element each selector or ref points at. */
   readonly pointers = new Map<string, FakeElement>();
-  /** A page that overrides `setAttribute` so the marker lands on another element than the one handed to it. */
-  readonly redirects = new Map<FakeElement, FakeElement>();
+  /** The nodes each handle was asked about, in order: the identity comes from the handle, not the page. */
+  readonly described: number[] = [];
 
   session(name: string): FakeSession {
     let session = this.sessions.get(name);
@@ -281,13 +266,16 @@ class FakeWorld {
         if (element === undefined) return null;
         const handle: InputHandle = {
           ownerFrame: async () => element.frame,
-          mark: async token => {
-            (this.redirects.get(element) ?? element).marker = token;
-          },
-          unmark: async () => {
-            element.marker = undefined;
-            const redirected = this.redirects.get(element);
-            if (redirected !== undefined) redirected.marker = undefined;
+          describe: async () => {
+            this.described.push(element.backendNodeId);
+            if (element.held instanceof Error) throw element.held;
+            return (
+              element.held ?? {
+                nodeName: element.nodeName,
+                backendNodeId: element.backendNodeId,
+                attributes: element.attributes,
+              }
+            );
           },
           boundingBox: async () => (element.claimedBox === undefined ? element.box : element.claimedBox),
           isVisible: async () => element.visible,
@@ -371,57 +359,124 @@ describe('observeInputFields', () => {
     should(user?.field).eql({ tag: 'input', type: 'text', autocomplete: 'username', name: 'username', id: 'user' });
     should(user?.box).eql({ x: 10, y: 20, w: 100, h: 24 });
     should(user?.visible).equal(true);
+    should(user?.covered).be.undefined();
     should(password?.field).eql({ tag: 'input', type: 'password', autocomplete: 'current-password', name: 'pw' });
   });
 
-  it('takes the marker off every element after the look, and disposes the handle', async () => {
-    const { world, user, password } = loginWorld();
-    const marks: (string | undefined)[] = [];
-    const session = world.session('page-target');
-    session.failOn = method => {
-      if (method === 'DOM.performSearch') marks.push(user.marker ?? password.marker);
-      return undefined;
-    };
+  it('asks the handle which node it holds, never the page, and disposes every handle', async () => {
+    const { world } = loginWorld();
     await observed(world, ['#user', '#pw']);
-    should(marks.length).equal(2);
-    should(marks.every(mark => typeof mark === 'string' && mark.length >= 16)).equal(true);
-    should(marks[0]).not.equal(marks[1]);
-    should(user.marker).be.undefined();
-    should(password.marker).be.undefined();
+    const session = world.session('page-target');
+    should(world.described).eql([11, 12]);
+    should(session.count('DOM.performSearch')).equal(0);
+    should(session.calls.filter(call => call.method === 'DOM.describeNode').map(call => call.params)).eql([
+      { backendNodeId: 11 },
+      { backendNodeId: 12 },
+    ]);
     should(world.disposed.length).equal(2);
-    should(session.count('DOM.discardSearchResults')).equal(2);
   });
 
-  it('takes the marker off even when the look fails', async () => {
-    const { world, user } = loginWorld();
+  it('disposes the handle even when the look fails', async () => {
+    const { world } = loginWorld();
     world.session('page-target').failOn = method => (method === 'DOM.describeNode' ? new Error('boom') : undefined);
     await observeInputFields(world.subject, [target('#user')]).then(
       () => should.fail(undefined, undefined, 'it should reject'),
       () => undefined,
     );
-    should(user.marker).be.undefined();
     should(world.disposed.length).equal(1);
-    should(world.session('page-target').count('DOM.discardSearchResults')).equal(1);
   });
 
-  it('refuses a marker that is not on exactly one node', async () => {
+  describe('refuses a field whose identity is not proved', () => {
+    const refused = async (world: FakeWorld, pointer = '#user'): Promise<void> => {
+      await observeInputFields(world.subject, [target(pointer)]).then(
+        () => should.fail(undefined, undefined, 'it should reject'),
+        error => should((error as Error).message).equal('the browser could not identify that field on the page'),
+      );
+      should(world.remembered.get('page-target')).be.undefined();
+    };
+
+    it('when the handle cannot say which node it holds', async () => {
+      const { world, user } = loginWorld();
+      user.held = new Error('the handle is gone');
+      await refused(world);
+      user.held = { nodeName: 'INPUT', attributes: [] };
+      await refused(world);
+      user.held = { backendNodeId: 0, nodeName: 'INPUT', attributes: [] };
+      await refused(world);
+    });
+
+    it('when the session the write uses describes that node differently', async () => {
+      const { world, user } = loginWorld();
+      user.held = { backendNodeId: 11, nodeName: 'INPUT', attributes: ['type', 'password'] };
+      await refused(world);
+      user.held = { backendNodeId: 11, nodeName: 'TEXTAREA', attributes: user.attributes };
+      await refused(world);
+    });
+
+    it('when the node is not in the session that owns the handle’s frame', async () => {
+      const { world, user } = loginWorld();
+      user.held = { backendNodeId: 99, nodeName: 'INPUT', attributes: user.attributes };
+      await refused(world);
+    });
+
+    it('when the node has no usable id', async () => {
+      const world = new FakeWorld();
+      world.element('#odd', 0, ['type', 'password']);
+      await refused(world, '#odd');
+    });
+  });
+
+  describe('flags, never refuses, a proved field that is covered or off screen', () => {
+    it('the review combination: a would-be marker redirect AND a same-box overlay on top — the handle’s node, covered', async () => {
+      const { world, user, password } = loginWorld();
+      password.box = user.box;
+      world.session('page-target').onTop = password;
+      const field = (await observed(world, ['#user'])).fields[0];
+      should(field?.backendNodeId).equal(11);
+      should(field?.field.type).equal('text');
+      should(field?.covered).equal(true);
+      should(field?.visible).equal(true);
+    });
+
+    it('when the hit test finds nothing at all, or DevTools cannot measure the node', async () => {
+      const { world } = loginWorld();
+      const session = world.session('page-target');
+      session.failOn = method =>
+        method === 'DOM.getNodeForLocation' ? new Error('No node found at given location') : undefined;
+      should((await observed(world, ['#user'])).fields[0]?.covered).equal(true);
+      session.failOn = method => (method === 'DOM.getBoxModel' ? new Error('Could not compute box model.') : undefined);
+      should((await observed(world, ['#user'])).fields[0]?.covered).equal(true);
+      session.failOn = undefined;
+      session.quad = [1, 2, 3];
+      should((await observed(world, ['#user'])).fields[0]?.covered).equal(true);
+      session.quad = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+      should((await observed(world, ['#user'])).fields[0]?.covered).equal(true);
+    });
+  });
+
+  it('takes the box Playwright measured for the element it holds, and hit-tests the centre DevTools measured', async () => {
     const { world, user } = loginWorld();
-    world.session('page-target').extraMatches = 1;
-    await observeInputFields(world.subject, [target('#user')]).then(
-      () => should.fail(undefined, undefined, 'it should reject'),
-      error => should((error as Error).message).equal('the browser could not identify that field on the page'),
-    );
-    should(user.marker).be.undefined();
-    should(world.session('page-target').count('DOM.discardSearchResults')).equal(1);
+    user.claimedBox = { x: 10.6, y: 19.5, width: 100.9, height: 23.2 };
+    const facts = await observed(world, ['#user']);
+    should(facts.fields[0]?.box).eql({ x: 10.6, y: 19.5, w: 100.9, h: 23.2 });
+    const session = world.session('page-target');
+    should(session.calls.find(call => call.method === 'DOM.getBoxModel')?.params).eql({ backendNodeId: 11 });
+    should(session.calls.find(call => call.method === 'DOM.getNodeForLocation')?.params).eql({
+      x: 60,
+      y: 32,
+      includeUserAgentShadowDOM: false,
+      ignorePointerEventsNone: true,
+    });
   });
 
-  it('refuses a marker that is on no node', async () => {
-    const { world } = loginWorld();
-    world.session('page-target').extraMatches = -1;
-    await observeInputFields(world.subject, [target('#user')]).then(
-      () => should.fail(undefined, undefined, 'it should reject'),
-      error => should((error as Error).message).equal('the browser could not identify that field on the page'),
-    );
+  it('hit-tests the centre of a rotated node’s border quad', async () => {
+    const { world, user } = loginWorld();
+    user.box = { x: 5, y: 10, width: 40, height: 30 };
+    world.session('page-target').quad = [5, 20, 25, 10, 45, 30, 25, 40];
+    await observed(world, ['#user']);
+    should(
+      world.session('page-target').calls.find(call => call.method === 'DOM.getNodeForLocation')?.params,
+    ).containEql({ x: 25, y: 25 });
   });
 
   it('names a field whose element is not on the page, for a stale ref and for a selector alike', async () => {
@@ -438,17 +493,35 @@ describe('observeInputFields', () => {
   it('reads an out-of-process frame through the frame own session', async () => {
     const { world } = loginWorld();
     const cross = new FakeFrame('https://pay.example.com/card', 'frame-target', true);
-    const card = world.element('#card', 7, ['name', 'cardnumber', 'autocomplete', 'cc-number'], cross);
+    world.element('#card', 7, ['name', 'cardnumber', 'autocomplete', 'cc-number'], cross);
     const facts = await observed(world, ['#card']);
     const field = facts.fields[0];
     should(field?.frameId).equal('frame-target');
     should(field?.frameOrigin).equal('https://pay.example.com');
     should(field?.backendNodeId).equal(7);
     should(facts.origin).equal('http://localhost:3000');
-    should(world.session('frame-target').count('DOM.performSearch')).equal(1);
-    should(world.session('page-target').count('DOM.performSearch')).equal(0);
+    should(world.session('frame-target').count('DOM.describeNode')).equal(1);
+    should(world.session('page-target').count('DOM.describeNode')).equal(0);
     should(world.remembered.get('frame-target')).equal(world.session('frame-target'));
-    should(card.marker).be.undefined();
+  });
+
+  it('the review combination in a frame of its own: two same-sized inputs, the handle’s one is observed', async () => {
+    const { world } = loginWorld();
+    const cross = new FakeFrame('https://pay.example.com/card', 'frame-target', true);
+    cross.offset = { x: 300, y: 200 };
+    const card = world.element('#card', 7, ['name', 'cardnumber'], cross);
+    const other = world.element('#other', 8, ['name', 'decoy'], cross);
+    card.box = { x: 310, y: 220, width: 100, height: 24 };
+    other.box = { x: 310, y: 260, width: 100, height: 24 };
+    const field = (await observed(world, ['#card'])).fields[0];
+    should(field?.backendNodeId).equal(7);
+    should(field?.field.name).equal('cardnumber');
+    should(field?.box).eql({ x: 310, y: 220, w: 100, h: 24 });
+    should(field?.covered).be.undefined();
+    should(
+      world.session('frame-target').calls.find(call => call.method === 'DOM.getNodeForLocation')?.params,
+    ).containEql({ x: 60, y: 32 });
+    should(world.session('page-target').count('DOM.getNodeForLocation')).equal(0);
   });
 
   it('falls back to the page session for a frame that shares its process', async () => {
@@ -457,7 +530,7 @@ describe('observeInputFields', () => {
     world.element('#inner', 9, ['name', 'inner'], same);
     const facts = await observed(world, ['#inner']);
     should(facts.fields[0]?.frameId).equal('page-target');
-    should(world.session('page-target').count('DOM.performSearch')).equal(1);
+    should(world.session('page-target').count('DOM.describeNode')).equal(1);
   });
 
   it('lets go of a frame session a later look replaces', async () => {
@@ -474,149 +547,18 @@ describe('observeInputFields', () => {
     should(world.remembered.get('frame-target')).be.undefined();
   });
 
-  it('takes the box from the node DevTools measured and hit-tests the node at its centre', async () => {
-    const { world, user } = loginWorld();
-    user.claimedBox = { x: 10.6, y: 19.5, width: 100.9, height: 23.2 };
-    const facts = await observed(world, ['#user']);
-    should(facts.fields[0]?.box).eql({ x: 10, y: 20, w: 100, h: 24 });
-    should(facts.fields[0]?.visible).equal(true);
-    const session = world.session('page-target');
-    should(session.calls.find(call => call.method === 'DOM.getBoxModel')?.params).eql({ backendNodeId: 11 });
-    should(session.calls.find(call => call.method === 'DOM.getNodeForLocation')?.params).eql({
-      x: 60,
-      y: 32,
-      includeUserAgentShadowDOM: false,
-      ignorePointerEventsNone: true,
-    });
-  });
-
-  it('measures the border quad of a node that is rotated', async () => {
-    const { world, user } = loginWorld();
-    user.claimedBox = { x: 5, y: 10, width: 40, height: 30 };
-    world.session('page-target').quad = [5, 20, 25, 10, 45, 30, 25, 40];
-    const facts = await observed(world, ['#user']);
-    should(facts.fields[0]?.box).eql({ x: 5, y: 10, w: 40, h: 30 });
-  });
-
-  describe('refuses a field whose node is not proved to be the element the handle holds', () => {
-    const unidentified = (error: unknown) =>
-      should((error as Error).message).equal('the browser could not identify that field on the page');
-    const refused = async (world: FakeWorld): Promise<void> => {
-      await observeInputFields(world.subject, [target('#user')]).then(
-        () => should.fail(undefined, undefined, 'it should reject'),
-        unidentified,
-      );
-      should(world.remembered.get('page-target')).be.undefined();
-    };
-
-    it('when the marker was put on another node with a box of its own', async () => {
-      const { world, user, password } = loginWorld();
-      world.redirects.set(user, password);
-      await refused(world);
-      should(user.marker).be.undefined();
-      should(password.marker).be.undefined();
-    });
-
-    it('when the marker was put on another node with the same box and the element is on top', async () => {
-      const { world, user, password } = loginWorld();
-      password.box = user.box;
-      world.redirects.set(user, password);
-      await refused(world);
-    });
-
-    it('when another node sits on top of the field at its centre', async () => {
-      const { world, user, password } = loginWorld();
-      password.box = user.box;
-      world.session('page-target').onTop = password;
-      await refused(world);
-    });
-
-    it('when the hit test finds nothing at all', async () => {
-      const { world } = loginWorld();
-      world.session('page-target').failOn = method =>
-        method === 'DOM.getNodeForLocation' ? new Error('No node found at given location') : undefined;
-      await refused(world);
-    });
-
-    it('when the node has a box and the handle has none, and the other way round', async () => {
-      const { world, user } = loginWorld();
-      user.claimedBox = null;
-      await refused(world);
-      user.claimedBox = undefined;
-      world.session('page-target').failOn = method =>
-        method === 'DOM.getBoxModel' ? new Error('Could not compute box model.') : undefined;
-      await refused(world);
-    });
-
-    it('when the sizes differ by more than a pixel', async () => {
-      const { world, user } = loginWorld();
-      user.claimedBox = { x: 10, y: 20, width: 102, height: 24 };
-      await refused(world);
-      user.claimedBox = { x: 10, y: 20, width: 100, height: 22.5 };
-      await refused(world);
-    });
-
-    it('when the positions differ by more than a pixel', async () => {
-      const { world, user } = loginWorld();
-      user.claimedBox = { x: 12, y: 20, width: 100, height: 24 };
-      await refused(world);
-      user.claimedBox = { x: 10, y: 18.5, width: 100, height: 24 };
-      await refused(world);
-    });
-
-    it('when DevTools answers a box that is not a quad of numbers', async () => {
-      const { world } = loginWorld();
-      const session = world.session('page-target');
-      session.quad = [1, 2, 3];
-      await refused(world);
-      session.quad = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
-      await refused(world);
-      session.quad = undefined;
-    });
-  });
-
-  it('reads an out-of-process frame in its own coordinates: sizes must agree, the place is the handle own', async () => {
-    const { world } = loginWorld();
-    const cross = new FakeFrame('https://pay.example.com/card', 'frame-target', true);
-    cross.offset = { x: 300, y: 200 };
-    const card = world.element('#card', 7, ['name', 'cardnumber'], cross);
-    card.box = { x: 310, y: 220, width: 100, height: 24 };
-    const field = (await observed(world, ['#card'])).fields[0];
-    should(field?.box).eql({ x: 310, y: 220, w: 100, h: 24 });
-    should(field?.visible).equal(true);
-    const frameSession = world.session('frame-target');
-    should(frameSession.calls.find(call => call.method === 'DOM.getNodeForLocation')?.params).containEql({
-      x: 60,
-      y: 32,
-    });
-    should(world.session('page-target').count('DOM.getNodeForLocation')).equal(0);
-    card.claimedBox = { x: 310, y: 220, width: 130, height: 24 };
-    await observeInputFields(world.subject, [target('#card')]).then(
-      () => should.fail(undefined, undefined, 'it should reject'),
-      error => should((error as Error).message).equal('the browser could not identify that field on the page'),
-    );
-  });
-
   it('reports a box of zeros and not visible for an element with no area', async () => {
     const { world, user } = loginWorld();
     user.box = null;
     const hidden = await observed(world, ['#user']);
     should(hidden.fields[0]?.box).eql({ x: 0, y: 0, w: 0, h: 0 });
     should(hidden.fields[0]?.visible).equal(false);
+    should(hidden.fields[0]?.covered).equal(true);
     user.box = { x: 1, y: 2, width: 0, height: 10 };
     should((await observed(world, ['#user'])).fields[0]?.visible).equal(false);
     user.box = { x: 1, y: 2, width: 50, height: 10 };
     user.visible = false;
     should((await observed(world, ['#user'])).fields[0]?.visible).equal(false);
-  });
-
-  it('refuses a node the browser names with no usable id', async () => {
-    const world = new FakeWorld();
-    world.element('#odd', 0, ['type', 'password']);
-    await observeInputFields(world.subject, [target('#odd')]).then(
-      () => should.fail(undefined, undefined, 'it should reject'),
-      error => should((error as Error).message).equal('the browser could not identify that field on the page'),
-    );
   });
 
   it('still describes a page whose title cannot be read, with no human check guessed from it', async () => {
@@ -1248,5 +1190,49 @@ describe('shootInputFields', () => {
       () => should.fail(undefined, undefined, 'it should reject'),
       error => should((error as Error).message).equal('the browser took no picture'),
     );
+  });
+});
+
+describe('playwrightNodeOf', () => {
+  /** A Playwright client handle over its in-process server handle and the DevTools session that holds it. */
+  const handleOver = (server: unknown) => ({
+    _connection: { toImpl: (object: unknown) => (object ? server : undefined) },
+  });
+  const sessionAnswering = (node: unknown, seen: unknown[] = []) => ({
+    _client: {
+      send: async (method: string, params: unknown) => {
+        seen.push({ method, params });
+        return { node };
+      },
+    },
+  });
+
+  it('describes the remote object Playwright holds, through the session that holds it', async () => {
+    const seen: unknown[] = [];
+    const node = { backendNodeId: 11, nodeName: 'INPUT', attributes: ['type', 'password'] };
+    const server = {
+      _objectId: 'obj-1',
+      _page: { delegate: { _sessionForHandle: () => sessionAnswering(node, seen) } },
+    };
+
+    should(await playwrightNodeOf(handleOver(server))).eql(node);
+    should(seen).eql([{ method: 'DOM.describeNode', params: { objectId: 'obj-1' } }]);
+  });
+
+  it('refuses when any part of the way to that session is missing', async () => {
+    const node = { backendNodeId: 11 };
+    const missing = [
+      null,
+      {},
+      { _connection: {} },
+      handleOver({ _page: { delegate: { _sessionForHandle: () => sessionAnswering(node) } } }),
+      handleOver({ _objectId: 'obj-1', _page: { delegate: {} } }),
+      handleOver({ _objectId: 'obj-1', _page: { delegate: { _sessionForHandle: () => ({ _client: {} }) } } }),
+    ];
+    for (const handle of missing)
+      await playwrightNodeOf(handle).then(
+        () => should.fail(undefined, undefined, 'it should reject'),
+        error => should((error as Error).message).equal('the browser could not identify that field on the page'),
+      );
   });
 });

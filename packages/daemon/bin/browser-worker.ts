@@ -52,7 +52,6 @@ import { DownloadStage } from '../src/lib/browser/transport/download-stage.ts';
 import type { BrowserInputFacts, BrowserInputValue } from '../src/lib/browser/transport/input-contracts.ts';
 import {
   describeInputDocument,
-  INPUT_MARKER,
   type InputablePage,
   type InputCdpSession,
   InputFrameSessions,
@@ -60,6 +59,7 @@ import {
   type InputLocator,
   type InputSubject,
   observeInputFields,
+  playwrightNodeOf,
   shootInputFields,
   typeInputFields,
 } from '../src/lib/browser/transport/input-fields.ts';
@@ -470,25 +470,10 @@ async function challengeOf(page: Page): Promise<{ challenge?: { provider: string
   }
 }
 
-/** What the marker script sees of an element: all it is made to do is set or remove one attribute. */
-type MarkableElement = { setAttribute(name: string, value: string): void; removeAttribute(name: string): void };
-
 function inputHandleOf(handle: ElementHandle): InputHandle {
-  const run = handle as unknown as {
-    evaluate(
-      work: (element: MarkableElement, argument: readonly string[]) => void,
-      argument: readonly string[],
-    ): Promise<void>;
-  };
   return {
     ownerFrame: async () => await handle.ownerFrame(),
-    mark: async token =>
-      await run.evaluate(
-        (element, [name, value]) => element.setAttribute(name as string, value as string),
-        [INPUT_MARKER, token],
-      ),
-    unmark: async () =>
-      await run.evaluate((element, [name]) => element.removeAttribute(name as string), [INPUT_MARKER]),
+    describe: async () => await playwrightNodeOf(handle),
     boundingBox: async () => await handle.boundingBox(),
     isVisible: async () => await handle.isVisible(),
     dispose: async () => await handle.dispose(),

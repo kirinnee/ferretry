@@ -1277,7 +1277,7 @@ function riskOf(field: Pick<InputRequestField, 'id' | 'sensitivity'>, facts: Inp
 
 const PAGE_PRIVATE_FLAG = 'This code will show on the page; Ferretry hides the page from the ferret for 2 minutes.';
 /**
- * A page field's flag, worst first: the field the agent named is missing or hidden, the page is not secure (http
+ * A page field's flag, worst first: the field the agent named is missing or hidden, covered or off screen, the page is not secure (http
  * crosses the network in the clear), the field sits in a frame from another site, or a secret is going into a
  * field that is not a password field (it will show on the page). Fixed sentences only, like the terminal's.
  */
@@ -1290,6 +1290,11 @@ function pageRiskOf(
     return {
       level: 'amber',
       reason: 'Ferretry could not see this field on the page, so the value may land somewhere unexpected.',
+    };
+  if (found.covered === true)
+    return {
+      level: 'amber',
+      reason: 'Something on the page covers this field, or it is off screen, so you cannot see where the value goes.',
     };
   if (!facts.secure)
     return { level: 'amber', reason: 'The page is not https, so the value crosses the network unencrypted.' };

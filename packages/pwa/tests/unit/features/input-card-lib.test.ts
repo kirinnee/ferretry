@@ -416,6 +416,18 @@ describe('what the daemon saw in a browser', () => {
     expect(observedWords(page({ origin: 'http://localhost:3000', secure: true }))?.program).toBe('localhost:3000');
   });
 
+  it('says when something covers a field or it is off screen', () => {
+    const card = page();
+    const facts = card.observed;
+    if (facts?.kind !== 'browser') throw new Error('a page card');
+    const covered = {
+      ...card,
+      observed: { ...facts, fields: facts.fields.map(field => ({ ...field, covered: true as const })) },
+    };
+
+    expect(observedWords(covered)?.fields?.[1]?.words).toBe('password field, covered or off screen');
+  });
+
   it('flags a field that sits in a frame from another origin', () => {
     const words = observedWords(page({ frameOrigin: 'https://ads.example.test' }));
 
