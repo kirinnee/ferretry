@@ -17,6 +17,7 @@ import {
   isSecureUrl,
   observeInputFields,
   originOfUrl,
+  PLAYWRIGHT_REACHED_VERSION,
   playwrightNodeOf,
   shootInputFields,
   typeInputFields,
@@ -32,6 +33,8 @@ interface FakeElement {
   readonly frame: FakeFrame;
   /** What the handle's own DevTools session says the handle holds, when it is not this element itself. */
   held?: unknown;
+  /** The target that session says it is, when it is not the one this element's frame runs in. */
+  heldTarget?: unknown;
   box: { x: number; y: number; width: number; height: number } | null;
   /** What Playwright measures for the element it holds, when it is not the box DevTools measures. */
   claimedBox?: { x: number; y: number; width: number; height: number } | null;
@@ -41,6 +44,10 @@ interface FakeElement {
 class FakeFrame implements InputFrame {
   /** Where an out-of-process frame sits in the page; its own coordinates are relative to this. */
   offset = { x: 0, y: 0 };
+  /** The frame this one is inside; a frame made without one is put inside the main frame. */
+  parent: FakeFrame | null = null;
+  /** An out-of-process frame whose own session cannot be attached right now. */
+  failAttach = false;
   readonly id: string;
   constructor(
     readonly address: string,
@@ -51,6 +58,9 @@ class FakeFrame implements InputFrame {
   }
   url(): string {
     return this.address;
+  }
+  parentFrame(): FakeFrame | null {
+    return this.parent;
   }
 }
 
@@ -249,6 +259,7 @@ class FakeWorld {
     this.elements.push(element);
     this.pointers.set(pointer, element);
     if (pointer.startsWith('aria-ref=')) this.refs.add(pointer.slice('aria-ref='.length));
+    if (frame !== this.main && frame.parent === null) frame.parent = this.main;
     if (!this.frames.includes(frame)) this.frames.push(frame);
     return element;
   }
@@ -269,13 +280,14 @@ class FakeWorld {
           describe: async () => {
             this.described.push(element.backendNodeId);
             if (element.held instanceof Error) throw element.held;
-            return (
-              element.held ?? {
+            return {
+              node: element.held ?? {
                 nodeName: element.nodeName,
                 backendNodeId: element.backendNodeId,
                 attributes: element.attributes,
-              }
-            );
+              },
+              targetId: element.heldTarget ?? element.frame.sessionName,
+            };
           },
           boundingBox: async () => (element.claimedBox === undefined ? element.box : element.claimedBox),
           isVisible: async () => element.visible,
@@ -301,7 +313,7 @@ class FakeWorld {
       page: async () => this.session('page-target'),
       frame: async frame => {
         const fake = frame as FakeFrame;
-        if (!fake.outOfProcess) throw new Error('This frame does not have a separate CDP session');
+        if (!fake.outOfProcess || fake.failAttach) throw new Error('This frame does not have a separate CDP session');
         return this.session(fake.sessionName);
       },
     };
@@ -1198,7 +1210,8 @@ describe('playwrightNodeOf', () => {
   const handleOver = (server: unknown) => ({
     _connection: { toImpl: (object: unknown) => (object ? server : undefined) },
   });
-  const sessionAnswering = (node: unknown, seen: unknown[] = []) => ({
+  const sessionAnswering = (node: unknown, seen: unknown[] = [], targetId: unknown = 'page-target') => ({
+    _targetId: targetId,
     _client: {
       send: async (method: string, params: unknown) => {
         seen.push({ method, params });
@@ -1215,7 +1228,7 @@ describe('playwrightNodeOf', () => {
       _page: { delegate: { _sessionForHandle: () => sessionAnswering(node, seen) } },
     };
 
-    should(await playwrightNodeOf(handleOver(server))).eql(node);
+    should(await playwrightNodeOf(handleOver(server))).eql({ node, targetId: 'page-target' });
     should(seen).eql([{ method: 'DOM.describeNode', params: { objectId: 'obj-1' } }]);
   });
 
@@ -1228,11 +1241,85 @@ describe('playwrightNodeOf', () => {
       handleOver({ _page: { delegate: { _sessionForHandle: () => sessionAnswering(node) } } }),
       handleOver({ _objectId: 'obj-1', _page: { delegate: {} } }),
       handleOver({ _objectId: 'obj-1', _page: { delegate: { _sessionForHandle: () => ({ _client: {} }) } } }),
+      handleOver({
+        _objectId: 'obj-1',
+        _page: { delegate: { _sessionForHandle: () => sessionAnswering(node, [], null) } },
+      }),
     ];
     for (const handle of missing)
       await playwrightNodeOf(handle).then(
         () => should.fail(undefined, undefined, 'it should reject'),
         error => should((error as Error).message).equal('the browser could not identify that field on the page'),
       );
+  });
+});
+
+describe('the Playwright release the identity reach was written against', () => {
+  it('is the one installed: a bump must check the private reach in playwrightNodeOf again', async () => {
+    const manifest = Bun.resolveSync('playwright-core/package.json', import.meta.dir);
+    const installed = (JSON.parse(await Bun.file(manifest).text()) as { version: string }).version;
+    // A failure here is the cue: re-read toImpl, _sessionForHandle, _targetId and _objectId in the new release,
+    // then move PLAYWRIGHT_REACHED_VERSION.
+    should(installed).equal(PLAYWRIGHT_REACHED_VERSION);
+  });
+});
+
+describe('review regressions: the write is bound to the target that holds the handle', () => {
+  /** A cross-site frame in its own process, and the page session carrying a node with the same id and attributes. */
+  function collidingWorld() {
+    const world = new FakeWorld();
+    const oopif = new FakeFrame('https://pay.example.com/card', 'frame-target', true);
+    const decoy = world.element('#decoy', 7, ['type', 'password', 'name', 'pw']);
+    return { world, oopif, decoy };
+  }
+
+  it('binds a same-process frame nested inside an out-of-process one to that frame’s target, never the page', async () => {
+    const { world, oopif } = collidingWorld();
+    const nested = new FakeFrame('https://pay.example.com/inner', 'frame-target');
+    nested.parent = oopif;
+    world.frames.push(oopif);
+    world.element('#card', 7, ['type', 'password', 'name', 'pw'], nested);
+
+    const facts = await observed(world, ['#card']);
+    const field = facts.fields[0];
+
+    should(field?.frameId).equal('frame-target');
+    should(field?.frameOrigin).equal('https://pay.example.com');
+    should(world.remembered.get('frame-target')).equal(world.session('frame-target'));
+    should(world.session('page-target').count('DOM.describeNode')).equal(0);
+    const outcome = await typeInputFields(world.subject, facts, [{ field: '#card', text: SECRET }], false);
+    should(outcome).equal('typed');
+    should(world.session('page-target').typed).eql([]);
+    should(world.session('frame-target').typed).eql([{ backendNodeId: 7, text: SECRET }]);
+  });
+
+  it('refuses a field whose frame’s own session cannot be attached, rather than reading the page’s colliding node', async () => {
+    const { world, oopif } = collidingWorld();
+    oopif.failAttach = true;
+    world.element('#card', 7, ['type', 'password', 'name', 'pw'], oopif);
+
+    await observeInputFields(world.subject, [target('#card')]).then(
+      () => should.fail(undefined, undefined, 'it should reject'),
+      error => should((error as Error).message).equal('the browser could not identify that field on the page'),
+    );
+    should(world.session('page-target').count('DOM.describeNode')).equal(0);
+    should(world.session('page-target').typed).eql([]);
+  });
+
+  it('lets go of a frame session that is not the target, and refuses when no session is', async () => {
+    const { world, oopif } = collidingWorld();
+    const card = world.element('#card', 7, ['type', 'password', 'name', 'pw'], oopif);
+    card.heldTarget = 'some-other-target';
+
+    await observeInputFields(world.subject, [target('#card')]).then(
+      () => should.fail(undefined, undefined, 'it should reject'),
+      error => should((error as Error).message).equal('the browser could not identify that field on the page'),
+    );
+    should(world.session('frame-target').detached).equal(true);
+    card.heldTarget = '';
+    await observeInputFields(world.subject, [target('#card')]).then(
+      () => should.fail(undefined, undefined, 'it should reject'),
+      () => undefined,
+    );
   });
 });

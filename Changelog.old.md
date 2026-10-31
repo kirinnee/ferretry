@@ -1,3 +1,33 @@
+## [4.168.0](https://github.com/kirinnee/ferretry/compare/v4.167.0...v4.168.0) (2026-10-31)
+
+### Features
+
+* **secure-copy:** paste a secure copy into the secret store (SC2b) ([#1161](https://github.com/kirinnee/ferretry/issues/1161)) ([4a6c07a](https://github.com/kirinnee/ferretry/commit/4a6c07a1e2e1a68726e87653e6de12fd80b2bba7)), closes [#F230](https://github.com/kirinnee/ferretry/issues/F230)
+
+## [4.167.0](https://github.com/kirinnee/ferretry/compare/v4.166.0...v4.167.0) (2026-10-31)
+
+### Features
+
+* **secure-copy:** paste a sealed copy into a terminal, approved by the owner or in advance (SC2a) ([#1159](https://github.com/kirinnee/ferretry/issues/1159)) ([e75a77a](https://github.com/kirinnee/ferretry/commit/e75a77abfe1a318fe70a0028d54eca8b9cc83265))
+
+## [4.166.0](https://github.com/kirinnee/ferretry/compare/v4.165.0...v4.166.0) (2026-10-31)
+
+### Features
+
+* **secure-copy:** seal what a command prints, paste by handle later (SC1) ([#1139](https://github.com/kirinnee/ferretry/issues/1139)) ([2ec8e4e](https://github.com/kirinnee/ferretry/commit/2ec8e4e0a5119987f03ff75b27165914d0d59f77))
+
+## [4.165.0](https://github.com/kirinnee/ferretry/compare/v4.164.0...v4.165.0) (2026-10-31)
+
+### Features
+
+* **input:** cards of several fields, each with its own sensitivity (P2) ([#1134](https://github.com/kirinnee/ferretry/issues/1134)) ([03fc192](https://github.com/kirinnee/ferretry/commit/03fc1923817aec6f34169708aac7f423c6d0c784))
+
+## [4.164.0](https://github.com/kirinnee/ferretry/compare/v4.163.0...v4.164.0) (2026-10-31)
+
+### Features
+
+* **input:** saved logins — save as, one-tap use, 2FA codes (P3) ([#1094](https://github.com/kirinnee/ferretry/issues/1094)) ([fc7a543](https://github.com/kirinnee/ferretry/commit/fc7a543035574a4f75dcd53b327b1a94e68ee8ae))
+
 ## [4.163.0](https://github.com/kirinnee/ferretry/compare/v4.162.0...v4.163.0) (2026-10-31)
 
 ### Features

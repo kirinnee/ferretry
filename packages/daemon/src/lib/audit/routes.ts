@@ -97,6 +97,29 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     fixedSubject: 'daemon-update-settings',
     responseSettings: [],
   },
+  // A secure-copy rule lets a ferret paste a value it holds without asking each time (docs/secure-copy.md): adding
+  // one, or approving a ferret's plan of them, loosens what agents may do; removing one narrows it. All are kept.
+  {
+    method: 'POST',
+    path: '/v1/copy-rules',
+    event: 'security.changed',
+    fixedSubject: 'copy-rule',
+    detail: { action: 'added' },
+  },
+  {
+    method: 'DELETE',
+    path: '/v1/copy-rules/:ruleId',
+    event: 'security.changed',
+    subject: 'ruleId',
+    detail: { action: 'removed' },
+  },
+  {
+    method: 'POST',
+    path: '/v1/sessions/:sessionId/copy-plans/:planId/approve',
+    event: 'security.changed',
+    subject: 'planId',
+    detail: { action: 'plan-answered' },
+  },
   { method: 'POST', path: '/v1/passkeys', event: 'passkey.registered' },
   {
     method: 'POST',

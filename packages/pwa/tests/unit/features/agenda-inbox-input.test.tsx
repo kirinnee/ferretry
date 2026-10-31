@@ -52,3 +52,43 @@ describe('an input card in the Inbox', () => {
     expect(view.container.querySelector('[data-agenda-input-form]')).toBeNull();
   });
 });
+
+describe('a paste plan card in the Inbox', () => {
+  const notice = (planned: boolean) =>
+    inboxCard(
+      agendaItem('A8', {
+        kind: 'permission',
+        ask: undefined,
+        raisedBy: 'daemon',
+        ...(planned ? { copyPlan: { planId: 'b'.repeat(32) } } : {}),
+      } as never),
+    );
+
+  const draw = async (planned: boolean, connected = true) => {
+    const fake = fakeInbox();
+    const view = await mount(
+      <InboxHarness
+        cards={[notice(planned)]}
+        fake={fake}
+        render={inbox => (
+          <AgendaNeedsYou
+            clock={fake.clock.now}
+            daemonId={WORKSHOP.daemonId}
+            inbox={{ ...inbox, connectionFor: id => (connected && id === WORKSHOP.daemonId ? WORKSHOP : undefined) }}
+            now={NOW}
+            onNavigate={() => undefined}
+          />
+        )}
+      />,
+    );
+    mounted.push(view);
+    await settle();
+    return view;
+  };
+
+  it('carries the plan form for a card with a plan from a machine paired here, and none otherwise', async () => {
+    expect((await draw(true)).container.querySelector('[data-agenda-plan-form]')).not.toBeNull();
+    expect((await draw(false)).container.querySelector('[data-agenda-plan-form]')).toBeNull();
+    expect((await draw(true, false)).container.querySelector('[data-agenda-plan-form]')).toBeNull();
+  });
+});

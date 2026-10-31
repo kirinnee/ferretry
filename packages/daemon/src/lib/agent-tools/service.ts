@@ -19,6 +19,9 @@ import {
   type BrowserWaitCondition,
   browserReadModeOf,
   browserTargetOf,
+  COPY_HANDLE_PREFIX,
+  type CopyMeta,
+  copyHandle,
   INPUT_SINGLE_FIELD_ID,
   type InputAgentView,
   type SurfaceController,
@@ -44,6 +47,7 @@ import type { AgentControlPolicy } from '../fleet/agent-control.ts';
 import { InputRequestError } from '../input-requests/errors.ts';
 import { TerminalMountError, type TerminalSubsystem } from '../runtime/mounts/terminals.ts';
 import type { TextRedactor } from '../secrets/redaction.ts';
+import { SecureCopyError } from '../secure-copy/errors.ts';
 import type { SurfaceControl } from './control.ts';
 import {
   auditHost,
@@ -56,7 +60,14 @@ import {
   surfaceReference,
   terminalInput,
 } from './policy.ts';
-import type { AgentInputPort, AgentToolCaller, AgentToolClock, ResolvedSurface } from './types.ts';
+import type {
+  AgentCopyPort,
+  AgentInputPort,
+  AgentPlanPort,
+  AgentToolCaller,
+  AgentToolClock,
+  ResolvedSurface,
+} from './types.ts';
 
 /**
  * Why a tool call was not carried out, in words an agent can act on.
@@ -126,6 +137,10 @@ export interface AgentToolPorts {
    * every way the terminal is known. An agent's read and wait are refused while it is quarantined.
    */
   readonly quarantinedUntil?: (sessionId: string, names: readonly (string | undefined)[]) => number | undefined;
+  /** Secure copies (docs/secure-copy.md); absent where none are wired, which refuses the `secure.*` tools. */
+  readonly copy?: AgentCopyPort;
+  /** A ferret's paste plans, for `secure.preapprove`; absent where none are wired. */
+  readonly plans?: AgentPlanPort;
 }
 
 /** Page tools that hand back a PICTURE of a page: no mask can be drawn on pixels, so a hold refuses them to its end. */
@@ -216,9 +231,26 @@ type LifecycleCall = Extract<
 /** How far up a popup's opener chain ownership is followed. */
 const MAX_OPENER_DEPTH = 8;
 
-/** The kind of surface a call is about; `input.wait` is about a request, not a surface. */
+/** The kind of surface a call is about; `input.wait` is about a request and `secure.*` about a copy, not a surface. */
 const kindOf = (call: AgentToolCall): SurfaceKind | undefined =>
-  call.tool === 'input.wait' ? undefined : call.tool.startsWith('terminal.') ? 'terminal' : 'browser';
+  call.tool === 'input.wait' || call.tool.startsWith('secure.')
+    ? undefined
+    : call.tool.startsWith('terminal.')
+      ? 'terminal'
+      : 'browser';
+
+/**
+ * Which "What agents may control" switch a call needs: its surface's, and for a secure copy the switch of what it
+ * reads — running a command is terminal control, reading a page is browser control.
+ */
+const switchOf = (call: AgentToolCall): SurfaceKind | undefined =>
+  call.tool === 'secure.copy'
+    ? call.source.kind === 'command'
+      ? 'terminal'
+      : 'browser'
+    : call.tool === 'secure.paste'
+      ? 'terminal'
+      : kindOf(call);
 
 const plural = (count: number, word: string): string => `${String(count)} ${word}${count === 1 ? '' : 's'}`;
 
@@ -253,7 +285,7 @@ export class AgentToolService {
     const facts: CallFacts = {};
     let result: AgentToolResult;
     try {
-      const kind = kindOf(call);
+      const kind = switchOf(call);
       if (caller.kind === 'agent' && kind !== undefined && !(await this.ports.policy.allows(kind)))
         throw new AgentToolError('forbidden', controlRefusal(kind));
       if (caller.kind === 'agent' && FILE_TOOLS.has(call.tool) && !(await this.ports.policy.allows('files')))
@@ -393,6 +425,79 @@ export class AgentToolService {
           summary: `Opened ${kind}${surfaceReference('browser', call.name)} at ${page.url}${handedNote(call.askOwner)}.`,
         };
       }
+      case 'secure.copy': {
+        if (caller.kind !== 'agent')
+          throw new AgentToolError('bad_request', 'Only an agent seals a value; you can read it yourself.');
+        const captured = await this.copyPort().capture(sessionId, {
+          name: call.name,
+          source: call.source,
+          ...(call.expiresInSeconds === undefined ? {} : { expiresInSeconds: call.expiresInSeconds }),
+        });
+        // The program a command copy ran, by base name: it ran outside any terminal, so the audit is where it shows.
+        facts.detail = {
+          copyLength: captured.copy.length,
+          transcript: captured.copy.exposure.transcript,
+          ...(captured.copy.from.program === undefined ? {} : { program: captured.copy.from.program }),
+        };
+        return {
+          summary: copiedSummary(captured.copy),
+          copies: [captured.copy],
+          ...(captured.command === undefined ? {} : { command: captured.command }),
+        };
+      }
+      case 'secure.list': {
+        const copies = this.copyPort().list(sessionId);
+        return {
+          summary:
+            copies.length === 0
+              ? 'This session holds no copies.'
+              : liveCopies(copies.filter(copy => copy.state === 'live').length),
+          copies: [...copies],
+        };
+      }
+      case 'secure.discard': {
+        const copy = this.copyPort().discard(sessionId, bareCopyName(call.handle));
+        return { summary: `${copy.handle} is ${copy.state}: its value is gone from the daemon.`, copies: [copy] };
+      }
+      case 'secure.paste': {
+        if (caller.kind !== 'agent')
+          throw new AgentToolError(
+            'bad_request',
+            'Only an agent pastes a secure copy; the owner allows it on the card.',
+          );
+        const name = bareCopyName(call.handle);
+        if (call.to.kind === 'secret') return await this.pasteToStore(sessionId, caller, call, call.to.name, name);
+        const surface = await this.resolve(sessionId, 'terminal', call.to.name);
+        facts.surface = surface;
+        await this.assertAgentMay(sessionId, surface);
+        const reference = surfaceReference('terminal', surface.name ?? surface.id);
+        const view = await this.inputPort(caller).raise(sessionId, {
+          target: { kind: 'terminal', key: surface.name ?? surface.id },
+          prompt: call.prompt,
+          sensitivity: 'secret',
+          submit: call.submit ?? 'offer-owner',
+          source: { kind: 'sealed', name },
+          ...(call.expiresInSeconds === undefined ? {} : { expiresInSeconds: call.expiresInSeconds }),
+        });
+        return {
+          summary:
+            view.state === 'delivered'
+              ? `Pasted ${copyHandle(name)} into ${reference} under a rule the owner approved in advance (!${view.id}). The terminal is unreadable for about two minutes.`
+              : `Asked the owner to allow pasting ${copyHandle(name)} into ${reference} (!${view.id}). Wait with input.wait; do not type there yourself.`,
+          input: view,
+        };
+      }
+      case 'secure.preapprove': {
+        if (caller.kind !== 'agent')
+          throw new AgentToolError('bad_request', 'Only an agent asks for pastes to be approved in advance.');
+        if (this.ports.plans === undefined)
+          throw new AgentToolError('unavailable', 'Secure copy is not available on this daemon.');
+        const plan = await this.ports.plans.propose(sessionId, call.items, call.expiresInSeconds);
+        return {
+          summary: `Asked the owner to approve ${plural(plan.items.length, 'paste')} in advance (!${plan.agendaItemId}). Until they answer, each paste asks them.`,
+          plan,
+        };
+      }
       case 'input.wait': {
         const input = this.inputPort(caller);
         const view = await input.agentView(sessionId, call.id, call.timeoutMs ?? AGENT_TOOL_DEFAULT_WAIT_MS);
@@ -432,7 +537,12 @@ export class AgentToolService {
           | 'browser.tabs'
           | 'terminal.open'
           | 'browser.open'
-          | 'input.wait';
+          | 'input.wait'
+          | 'secure.copy'
+          | 'secure.list'
+          | 'secure.discard'
+          | 'secure.paste'
+          | 'secure.preapprove';
       }
     >,
     surface: ResolvedSurface,
@@ -999,11 +1109,11 @@ export class AgentToolService {
   ): Promise<void> {
     if (!PAGE_PICTURES.has(tool) && !PAGE_TEXT.has(tool)) return;
     const input = this.ports.input;
-    const held = input?.pageHeld(caller.sessionId, [surface.name, surface.id]);
+    const held = input?.pageHeld?.(caller.sessionId, [surface.name, surface.id]);
     if (input === undefined || held === undefined) return;
     if (PAGE_TEXT.has(tool) && held.documents.length > 0) {
       const now = await (
-        document ?? (async () => await input.pageDocument(caller.sessionId, surface.name ?? surface.id))
+        document ?? (async () => await input.pageDocument?.(caller.sessionId, surface.name ?? surface.id))
       )();
       if (now !== undefined && !held.documents.includes(now)) return;
     }
@@ -1054,6 +1164,37 @@ export class AgentToolService {
   /** Screen text with the values the daemon just typed masked; text unchanged where no mask is wired. */
   private masked(sessionId: string, text: string): string {
     return this.ports.scrub === undefined ? text : this.ports.scrub(sessionId, text);
+  }
+
+  /** A paste "as the secret NAME": no surface is involved, so there is nothing of the agent's to resolve. */
+  private async pasteToStore(
+    sessionId: string,
+    caller: AgentToolCaller,
+    call: Extract<AgentToolCall, { readonly tool: 'secure.paste' }>,
+    secret: string,
+    name: string,
+  ): Promise<AgentToolResult> {
+    const view = await this.inputPort(caller).raise(sessionId, {
+      target: { kind: 'secret', key: secret },
+      prompt: call.prompt,
+      sensitivity: 'secret',
+      submit: 'agent',
+      source: { kind: 'sealed', name },
+      ...(call.expiresInSeconds === undefined ? {} : { expiresInSeconds: call.expiresInSeconds }),
+    });
+    return {
+      summary:
+        view.state === 'delivered'
+          ? `Saved ${copyHandle(name)} as the secret ${secret} under a rule the owner approved in advance (!${view.id}). Use it as \${secret:${secret}}.`
+          : `Asked the owner to allow saving ${copyHandle(name)} as the secret ${secret} (!${view.id}). Wait with input.wait.`,
+      input: view,
+    };
+  }
+
+  private copyPort(): AgentCopyPort {
+    if (this.ports.copy === undefined)
+      throw new AgentToolError('unavailable', 'Secure copy is not available on this daemon.');
+    return this.ports.copy;
   }
 
   private inputPort(caller: AgentToolCaller): AgentInputPort {
@@ -1361,6 +1502,19 @@ function callFacts(call: AgentToolCall): AuditDetail {
       return { sensitivity: strongestSensitivity(call.fields), fields: call.fields.length };
     case 'input.wait':
       return { timeoutMs: call.timeoutMs ?? AGENT_TOOL_DEFAULT_WAIT_MS };
+    case 'secure.copy':
+      // The copy's name and where it came from; never a command's arguments, which may hold anything.
+      return {
+        copy: copyHandle(call.name),
+        source: call.source.kind,
+        ...(call.source.kind === 'command' ? { args: call.source.argv.length - 1 } : {}),
+      };
+    case 'secure.discard':
+      return { copy: copyHandle(bareCopyName(call.handle)) };
+    case 'secure.paste':
+      return { copy: copyHandle(bareCopyName(call.handle)) };
+    case 'secure.preapprove':
+      return { items: call.items.length };
     case 'browser.dialog':
       return {
         action: call.action,
@@ -1459,6 +1613,16 @@ function raiseOptions(
   };
 }
 
+/** What a capture caught, in one sentence: where from, how long, and whether it was already seen. */
+function copiedSummary(copy: CopyMeta): string {
+  const from = copy.from.origin ?? copy.from.program ?? copy.from.kind;
+  const seen =
+    copy.exposure.transcript === 'found'
+      ? ' WARNING: this value was already in your transcript before it was sealed, so it is NOT protected; tell the owner it should be rotated.'
+      : '';
+  return `Sealed ${plural(copy.length, 'character')} from ${from} as ${copy.handle}, until ${copy.expiresAt}. You cannot read it; paste it by handle.${seen}`;
+}
+
 /** Where an input request stands, in one sentence an agent can act on. */
 function inputSummary(view: InputAgentView): string {
   const card = `!${view.id}`;
@@ -1468,6 +1632,8 @@ function inputSummary(view: InputAgentView): string {
     case 'delivering':
       return `${card}: the owner's value is being typed now. Wait again with input.wait.`;
     case 'delivered':
+      if (view.source === 'sealed')
+        return `${card}: the secure copy was pasted${view.submitted === true ? ' and Enter pressed' : ''}. Read the terminal once its quarantine allows.`;
       return `${card}: the owner typed the value${view.submitted === true ? ' and pressed Enter' : ''}. Read the terminal to see what happened.`;
     case 'refused':
       return `${card} was refused${view.reason === undefined ? '' : ` (${view.reason})`}: the value was not typed. Look at the terminal, then raise a new request if it is still needed.`;
@@ -1664,6 +1830,7 @@ function shown(surface: SurfaceKind, rows: readonly (AgentSurface | undefined)[]
  */
 function translate(error: unknown): AgentToolError | undefined {
   if (error instanceof AgentToolError) return error;
+  if (error instanceof SecureCopyError) return new AgentToolError(error.code, error.message);
   if (error instanceof InputRequestError)
     return new AgentToolError(error.code === 'gone' ? 'not_found' : error.code, error.message);
   if (error instanceof TerminalMountError) return new AgentToolError(error.code, error.message);
@@ -1718,3 +1885,11 @@ function humanCheckNote(answer: BrowserActionResult, pageId: string): string {
   if (page?.challenge === undefined) return '';
   return ' The page appears to be showing a human check (a captcha or a "checking your browser" page). Do not try to solve or get around it: ask your owner to take the page over in Ferretry and solve it themselves, then carry on.';
 }
+
+/** "This session holds 2 live copies." */
+const liveCopies = (count: number): string =>
+  `This session holds ${String(count)} live ${count === 1 ? 'copy' : 'copies'}.`;
+
+/** A copy's name as a call wrote it: `sealed:vercel` and `vercel` are one copy, whether or not the wire parsed it. */
+const bareCopyName = (handle: string): string =>
+  handle.startsWith(COPY_HANDLE_PREFIX) ? handle.slice(COPY_HANDLE_PREFIX.length) : handle;

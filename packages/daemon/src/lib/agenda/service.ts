@@ -10,21 +10,21 @@ import type {
   TaskRef,
 } from '@ferretry/protocol';
 import { agendaCardKind } from '@ferretry/protocol';
+import { isAncestorOf, NO_SUB_FERRETS, type SubFerretDirectory, subFerretRefusal } from '../sub-ferret/index.ts';
 import {
   type AgendaActor,
   type AgendaChange,
   type AgendaFailure,
   type AgendaLedger,
   type AgendaMutation,
+  agendaSnapshot,
   agentConfinedTo,
   applyAgendaCommandToSession,
-  agendaSnapshot,
   type DaemonAgendaCause,
   type EditAgendaPatch,
   emptyAgendaLedger,
   type RaiseAgendaRequest,
 } from './state-machine.ts';
-import { isAncestorOf, NO_SUB_FERRETS, type SubFerretDirectory, subFerretRefusal } from '../sub-ferret/index.ts';
 
 /** The heading of an item the daemon raised without wording one: plain words, never an id. */
 const DAEMON_TITLES: Readonly<Record<DaemonAgendaCause, string>> = {
@@ -33,6 +33,7 @@ const DAEMON_TITLES: Readonly<Record<DaemonAgendaCause, string>> = {
   system: 'Needs you',
   'harness-prompt': 'The ferret is waiting on you',
   'input-request': 'Needs a secret',
+  'secure-copy': 'Asks to approve pastes in advance',
 };
 
 const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u;

@@ -51,6 +51,11 @@ export function renderToolResult(result: AgentToolResult): string {
     lines.push(
       `  ${surface.name ?? surface.id}  ${surface.title}${surface.url === undefined ? '' : `  ${surface.url}`}${surface.openerId === undefined ? '' : `  (popup of ${surface.openerId})`}${surface.available === false ? '  [not yours]' : ''}`,
     );
+  for (const copy of result.copies ?? [])
+    lines.push(
+      `  ${copy.handle}  ${copy.state}  ${String(copy.length)} chars from ${copy.from.origin ?? copy.from.program ?? copy.from.kind}  until ${copy.expiresAt}${copy.exposure.transcript === 'found' ? '  [already in your transcript: not protected]' : ''}`,
+    );
+  if (result.command?.stderr !== undefined) lines.push(`stderr (masked): ${result.command.stderr}`);
   if (result.output !== undefined && result.output !== '') lines.push(result.output);
   return lines.join('\n');
 }

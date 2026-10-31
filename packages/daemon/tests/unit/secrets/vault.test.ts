@@ -1,18 +1,18 @@
 import { describe, it } from 'bun:test';
-import should from 'should';
 import { MAX_SECRETS_PER_DAEMON } from '@ferretry/protocol';
+import should from 'should';
 import {
-  NO_REDACTION,
   combinedReferences,
+  NO_REDACTION,
   NO_REFERENCES,
-  type SecretReferenceSource,
   SecretDirectory,
+  type SecretDocumentStore,
   SecretRedactor,
+  type SecretReferenceSource,
   SecretStoreError,
   SecretVault,
-  secretListView,
-  type SecretDocumentStore,
   type SecretVaultDocument,
+  secretListView,
 } from '../../../src/lib/secrets/index.ts';
 import { FakeSecretCipher, MemorySecretDocuments } from '../runtime/mounts/support.ts';
 
@@ -429,5 +429,62 @@ describe('several places that name secrets, as one source', () => {
 
     // Assert
     should((raised as Error).message).match(/config\.yaml/u);
+  });
+});
+
+describe('SecretDirectory, changes taking turns', () => {
+  it('should keep both of two puts made at once, never let the second drop the first', async () => {
+    // Arrange
+    const secrets = directory();
+
+    // Act
+    await Promise.all([secrets.put('FIRST', TOKEN), secrets.put('SECOND', TOKEN), secrets.remove('NONE')]);
+
+    // Assert
+    should((await secrets.list()).map(summary => summary.name)).deepEqual(['FIRST', 'SECOND']);
+  });
+
+  it('should store only while the name is as the caller saw it, and say what it found otherwise', async () => {
+    // Arrange
+    const secrets = directory();
+    await secrets.put('HELD', TOKEN);
+
+    // Act
+    const outcomes = [
+      await secrets.putIf('NEW', TOKEN, false),
+      await secrets.putIf('NEW', TOKEN, false),
+      await secrets.putIf('HELD', TOKEN, true),
+      await secrets.putIf('GONE', TOKEN, true),
+    ];
+
+    // Assert
+    should(outcomes).deepEqual(['stored', 'changed', 'stored', 'changed']);
+    should((await secrets.list()).map(summary => summary.name)).deepEqual(['HELD', 'NEW']);
+  });
+
+  it('should let only one of two pastes into one new name store it', async () => {
+    // Arrange
+    const secrets = directory();
+
+    // Act
+    const outcomes = await Promise.all([secrets.putIf('NEW', 'first', false), secrets.putIf('NEW', 'second', false)]);
+
+    // Assert
+    should(outcomes).deepEqual(['stored', 'changed']);
+  });
+
+  it('should refuse before writing when the store is full or cannot be read, and run the next change after a failure', async () => {
+    // Arrange
+    const full = directory();
+    for (let index = 0; index < MAX_SECRETS_PER_DAEMON; index += 1) await full.put(`K${String(index)}`, TOKEN);
+    const unreadable = directory(new MemorySecretDocuments(new SecretStoreError('unreadable', 'damaged')));
+
+    // Act
+    const failed = await unreadable.put('X', TOKEN).catch((error: unknown) => error);
+    const outcomes = [await full.putIf('ONE_MORE', TOKEN, false), await unreadable.putIf('X', TOKEN, false)];
+
+    // Assert
+    should(failed).be.instanceOf(SecretStoreError);
+    should(outcomes).deepEqual(['full', 'unreadable']);
   });
 });

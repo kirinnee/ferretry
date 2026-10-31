@@ -3,7 +3,9 @@ import { AgendaIdSchema } from './agenda.ts';
 import { BrowserChallengeProviderSchema, BrowserRefSchema } from './browser-target.ts';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 import { InputSavedSchema, LOGIN_LABEL_MAX_LENGTH, LoginEntryIdSchema } from './login-entries.ts';
-import { SurfaceKeySchema, SurfaceKindSchema } from './surface-names.ts';
+import { SecretNameSchema } from './secrets.ts';
+import { CopyNameSchema, CopyOriginSchema } from './secure-copy.ts';
+import { SurfaceKeySchema } from './surface-names.ts';
 
 /**
  * THE INPUT REQUEST: the contract between an agent stuck at a password, sudo, one-time-code or 2FA prompt
@@ -79,8 +81,17 @@ export type InputSubmitMode = z.infer<typeof InputSubmitModeSchema>;
 export const InputTargetSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('terminal'), key: SurfaceKeySchema }),
   z.strictObject({ kind: z.literal('browser'), key: SurfaceKeySchema }),
+  /**
+   * The secret store, under a name (docs/secure-copy.md): only a paste of a secure copy goes here, and what the
+   * daemon observes is whether the name already holds a value.
+   */
+  z.strictObject({ kind: z.literal('secret'), key: SecretNameSchema }),
 ]);
 export type InputTarget = z.infer<typeof InputTargetSchema>;
+
+/** The kinds of place a value can go: a terminal, a page, or the secret store. */
+export const InputTargetKindSchema = z.enum(['terminal', 'browser', 'secret']);
+export type InputTargetKind = z.infer<typeof InputTargetKindSchema>;
 
 /** The most fields one card holds: a login's username, password and code, and one spare. */
 export const INPUT_MAX_FIELDS = 4;
@@ -150,6 +161,11 @@ export const InputRaiseSchema = z
      * a hint never makes an entry the one-tap choice, and the answer is the same whether such an entry exists.
      */
     secretHint: LoginEntryIdSchema.optional(),
+    /**
+     * The value comes from a secure copy the agent holds (`sealed:<name>`, docs/secure-copy.md), not from the
+     * owner's keyboard: the owner only allows it. The daemon treats every field as `secret` whatever it says.
+     */
+    source: z.strictObject({ kind: z.literal('sealed'), name: CopyNameSchema }).optional(),
   })
   .superRefine((raise, context) => {
     if ((raise.sensitivity === undefined) === (raise.fields === undefined))
@@ -158,6 +174,14 @@ export const InputRaiseSchema = z
     if (problem !== undefined) context.addIssue({ code: 'custom', path: ['fields'], message: problem });
   });
 export type InputRaise = z.infer<typeof InputRaiseSchema>;
+
+/** Where a pasted value came from, as the DAEMON recorded it when the copy was captured: names, never the value. */
+export const InputSourceSchema = z.strictObject({
+  kind: z.literal('sealed'),
+  name: CopyNameSchema,
+  from: CopyOriginSchema,
+});
+export type InputSource = z.infer<typeof InputSourceSchema>;
 
 /**
  * Which fields of a card "Save as" keeps, and as what, so a login's username and password are kept together in
@@ -285,7 +309,19 @@ const BrowserFactsSchema = z.strictObject({
  * RAM and re-observed on restart; the card draws it large and the agent's `prompt` small, which is the
  * defence against a fake prompt.
  */
-export const InputTargetFactsSchema = z.discriminatedUnion('kind', [TerminalFactsSchema, BrowserFactsSchema]);
+/** The secret store under one name: whether it already holds a value, as the vault said when the daemon looked. */
+const SecretStoreFactsSchema = z.strictObject({
+  kind: z.literal('secret'),
+  name: SecretNameSchema,
+  /** The name already holds a value: the paste REPLACES it. */
+  exists: z.boolean(),
+});
+
+export const InputTargetFactsSchema = z.discriminatedUnion('kind', [
+  TerminalFactsSchema,
+  BrowserFactsSchema,
+  SecretStoreFactsSchema,
+]);
 export type InputTargetFacts = z.infer<typeof InputTargetFactsSchema>;
 
 /** Where a request stands. Only `pending` may become `delivering`; the rest are final. */
@@ -309,6 +345,8 @@ export const INPUT_REASONS = [
   'agent_cancelled',
   'check_failures',
   'expired',
+  /** The secure copy a paste was to come from was discarded, expired, or forgotten by a restart. */
+  'copy_gone',
 ] as const;
 export const InputReasonSchema = z.enum(INPUT_REASONS);
 export type InputReason = z.infer<typeof InputReasonSchema>;
@@ -317,6 +355,8 @@ export type InputReason = z.infer<typeof InputReasonSchema>;
 export const InputActorSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('host') }),
   z.strictObject({ kind: z.literal('device'), deviceId: boundedLine(128) }),
+  /** A paste the owner approved IN ADVANCE: the daemon delivered it under this pre-approval rule (docs/secure-copy.md). */
+  z.strictObject({ kind: z.literal('rule'), ruleId: z.string().regex(/^[0-9a-f]{32}$/u) }),
 ]);
 export type InputActor = z.infer<typeof InputActorSchema>;
 
@@ -325,7 +365,7 @@ export const InputOutcomeSchema = z.strictObject({
   by: InputActorSchema,
   submitted: z.boolean(),
   /** Typed by the owner, or a saved login chosen by the owner. */
-  source: z.enum(['typed', 'saved']),
+  source: z.enum(['typed', 'saved', 'sealed']),
   /** The saved login used; the owner's card shows it, the agent never sees it. */
   entry: LoginEntryIdSchema.optional(),
   reason: InputReasonSchema.optional(),
@@ -380,6 +420,8 @@ export const InputRequestSchema = z.strictObject({
   sessionId: boundedLine(128),
   /** The agenda card that presents it (`kind: 'input'`): the owner knows it as `!A<n>`. */
   agendaItemId: AgendaIdSchema,
+  /** A paste of a secure copy: where the value comes from. The owner allows it; there is nothing to type. */
+  source: InputSourceSchema.optional(),
   target: InputTargetSchema,
   prompt: z.string().trim().min(1).max(INPUT_PROMPT_MAX_LENGTH),
   /** The most careful of the fields' sensitivities: what the journal and the audit record. */
@@ -422,7 +464,7 @@ export const InputAgentViewSchema = z.strictObject({
     })
     .optional(),
   submitted: z.boolean().optional(),
-  source: z.enum(['typed', 'saved']).optional(),
+  source: z.enum(['typed', 'saved', 'sealed']).optional(),
   reason: InputReasonSchema.optional(),
   screen: z.string().max(65_536).optional(),
   note: z.string().max(400).optional(),
@@ -464,6 +506,8 @@ export const InputDeliverBodySchema = z
       .optional(),
     /** A saved login, by its handle: the daemon types the fields the request needs from it. */
     entry: LoginEntryIdSchema.optional(),
+    /** Allow a paste: the daemon types the secure copy the request names (`request.source`), never one the body names. */
+    sealed: z.literal(true).optional(),
     /** Press Enter / submit after typing. */
     submit: z.boolean(),
     /**
@@ -486,8 +530,14 @@ export const InputDeliverBodySchema = z
     if (body.padded !== undefined && (body.entry !== undefined || body.fields !== undefined)) {
       context.addIssue({ code: 'custom', message: 'padded is the one value of a one-field card: send it alone' });
     }
-    if (body.padded === undefined && body.entry === undefined && body.fields === undefined) {
-      context.addIssue({ code: 'custom', message: 'send a value: padded, fields or a saved entry' });
+    if (body.sealed === true && (body.padded !== undefined || body.entry !== undefined || body.fields !== undefined)) {
+      context.addIssue({ code: 'custom', message: 'sealed allows a paste: send it alone, with no value' });
+    }
+    if (body.padded === undefined && body.entry === undefined && body.fields === undefined && body.sealed !== true) {
+      context.addIssue({
+        code: 'custom',
+        message: 'send a value: padded, fields, a saved entry, or sealed for a paste',
+      });
     }
     if (body.fields !== undefined) {
       const problem = fieldsProblem(body.fields.map(typed => ({ id: typed.field })));
@@ -595,15 +645,17 @@ export const InputEventSchema = z.strictObject({
   requestId: InputRequestIdSchema,
   agendaItemId: AgendaIdSchema,
   sessionId: boundedLine(128),
-  target: z.strictObject({ kind: SurfaceKindSchema, key: SurfaceKeySchema }),
+  target: z.strictObject({ kind: InputTargetKindSchema, key: SurfaceKeySchema }),
   sensitivity: InputSensitivitySchema,
   /** Who presses Enter, so a restart can rebuild a pending request. */
   submit: InputSubmitModeSchema.optional(),
+  /** A paste: the secure copy it was to come from, by name, so a restart (which forgets copies) can close it. */
+  sealed: CopyNameSchema.optional(),
   state: InputRequestStateSchema,
   /** The attempt a `delivering` event starts: an id, never the value. */
   deliveryId: InputDeliveryIdSchema.optional(),
   submitted: z.boolean().optional(),
-  source: z.enum(['typed', 'saved']).optional(),
+  source: z.enum(['typed', 'saved', 'sealed']).optional(),
   reason: InputReasonSchema.optional(),
   expiresAt: InstantSchema.optional(),
   at: InstantSchema,
@@ -658,13 +710,20 @@ export type InputAuditEvent = z.infer<typeof InputAuditEventSchema>;
  * `secret`), the prompt text or a URL path. `consumer` is a program name or an origin's host.
  */
 export const InputAuditDetailSchema = z.strictObject({
-  targetKind: SurfaceKindSchema,
+  targetKind: InputTargetKindSchema,
+  /** A paste: the secure copy pasted, by name. */
+  copy: CopyNameSchema.optional(),
+  /** A paste the owner approved in advance: the rule it was delivered under. */
+  rule: z
+    .string()
+    .regex(/^[0-9a-f]{32}$/u)
+    .optional(),
   consumer: boundedLine(160).optional(),
   sensitivity: InputSensitivitySchema,
   /** The terminal a quarantine was about: its name, never what was typed there. */
   surface: SurfaceKeySchema.optional(),
   recognised: z.boolean().optional(),
-  source: z.enum(['typed', 'saved']).optional(),
+  source: z.enum(['typed', 'saved', 'sealed']).optional(),
   /** The saved login typed from, or saved to: a handle, never what it holds. */
   entry: LoginEntryIdSchema.optional(),
   /** The typed value was kept in `entry`. */

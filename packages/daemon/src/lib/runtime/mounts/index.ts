@@ -23,6 +23,8 @@ import { observedRoutes } from '../../performance/observed-routes.ts';
 import type { PerformanceProbe } from '../../performance/recorder.ts';
 import type { PinService } from '../../pins/index.ts';
 import type { QuotaFailoverLoop } from '../../quota-failover/index.ts';
+import type { CopyPlanService } from '../../secure-copy/plans.ts';
+import type { PasteRuleService } from '../../secure-copy/rules.ts';
 import type { SecuritySettingsService } from '../../security/index.ts';
 import type { SessionFilesystem } from '../../session/filesystem/index.ts';
 import type { MonitorLoop } from '../../session/monitor/types.ts';
@@ -85,6 +87,7 @@ import { type PushSubscriptionSubsystem, pushRoutes } from './push.ts';
 import { type RecommendSubsystem, recommendRoutes } from './recommend.ts';
 import { type ScratchGcSubsystem, scratchGcRoutes } from './scratch-gc.ts';
 import { type SecretSubsystem, secretRoutes } from './secrets.ts';
+import { type CopyListing, secureCopyRoutes } from './secure-copy.ts';
 import { securityRoutes } from './security.ts';
 import { type SessionAddressBook, sessionAddressedRoutes, sessionAddressedSockets } from './session-addressing.ts';
 import { type SessionAgendaModeSubsystem, sessionAgendaModeRoutes } from './session-agenda-mode.ts';
@@ -381,6 +384,12 @@ export interface MountedSubsystems {
   readonly agentTools: { readonly service: AgentToolService; readonly identities: AgentIdentityResolver };
   /** The owner's answers to an agent's request for a password, a code or an answer (docs/input-requests.md). */
   readonly inputRequests: InputRequestService;
+  /** Secure copy (docs/secure-copy.md): copies by description, pre-approval rules and paste plans. */
+  readonly secureCopy: {
+    readonly copies: CopyListing;
+    readonly rules: PasteRuleService;
+    readonly plans: CopyPlanService;
+  };
   /** Free teammate callsigns, for composing a session title before starting one. */
   readonly names: NameSubsystem;
   /** The learning review board: the evidence the daemon holds, and a human's verdict on each rule
@@ -652,6 +661,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // `/v1/sessions/:sessionId/surfaces`, which no other subsystem uses: none can shadow or be shadowed.
         ...agentToolRoutes(subsystems.agentTools.service, subsystems.agentTools.identities),
         ...inputRequestRoutes(subsystems.inputRequests),
+        ...secureCopyRoutes(subsystems.secureCopy.copies, subsystems.secureCopy.rules, subsystems.secureCopy.plans),
         ...terminalRoutes(subsystems.terminals),
         // The login window is a fixed literal under `/v1/browser`, which no other subsystem uses, so it
         // can neither shadow nor be shadowed. Its per-session refusal is a deeper pattern ending in the

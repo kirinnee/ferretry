@@ -79,13 +79,13 @@ import {
   type PackConfig,
   type PackRefusal,
   ProtocolVersionSchema,
-  readLoopbackFirewallMarker,
   type RegisterProjectRequest,
   type ResolvedBrowserPorts,
-  resolveBrowserPorts,
   type RuntimeControlRequest,
   type RuntimeModelChoice,
+  readLoopbackFirewallMarker,
   refusalNotice,
+  resolveBrowserPorts,
   type SessionConfig,
   SessionConfigSchema,
   type SessionHandoff,
@@ -212,14 +212,13 @@ import {
 import {
   AgendaLaneAgenda,
   AnalyticsTranscriptSpend,
-  afterAsActivity,
   AsyncActivityScope,
-  asActivity,
   AuthorizedProviderProbe,
+  afterAsActivity,
+  asActivity,
   type BrowserDisplayPort,
   BrowserLoginWindowService,
   BrowserProfileStore,
-  FileLoopbackMarkerReader,
   BrowserWorkerClient,
   BunApiServer,
   BunConnectorProcesses,
@@ -249,7 +248,9 @@ import {
   FileLaneSetStore,
   FileLegacyWireUseStore,
   FileLoginIndexStore,
+  FileLoopbackMarkerReader,
   FileModelCatalogCache,
+  FilePasteRuleStore,
   FileProjectCatalog,
   FileQuotaFailoverConfigStore,
   FileQuotaFailoverStateStore,
@@ -328,6 +329,7 @@ import {
   stackSamplerEnabled,
   systemLegacyWireTimers,
   TmuxPaneSnapshot,
+  TranscriptFileExposure,
   TunnelProxyProbe,
   type ViewerSocket,
   WebCryptoPasskeyCrypto,
@@ -651,8 +653,10 @@ import {
   AgendaService,
   AgendaTurnNudge,
   AgendaWaker,
+  type AgentCopyPort,
   AgentFiles,
   type AgentInputPort,
+  type AgentPlanPort,
   AgentSendFailureNotifier,
   AgentToolService,
   ANALYTICS_BACKSTOP_MS,
@@ -726,6 +730,8 @@ import {
   type ConversationLinker,
   type ConversionCheckPort,
   type ConversionSummary as ConvertedConversationSummary,
+  CopyPlanAgendaAdapter,
+  CopyPlanService,
   CredentialAgentIdentities,
   CredentialUsageSource,
   canServeModel,
@@ -808,6 +814,7 @@ import {
   type FoundationPaths,
   fastStartRefusal,
   findAccountByAgent,
+  firewallRefusal,
   firstWriteReleasedAnswerAgenda,
   fleetManifestRefusal,
   foreignAdvertisementNotice,
@@ -846,7 +853,9 @@ import {
   InputAuditAdapter,
   InputCardClosedObserver,
   InputLoginAdapter,
+  type InputPasteRules,
   InputRequestService,
+  type InputSealedPort,
   InputTargetRouter,
   InstructionRefresh,
   type InterruptedLaunchOutcome,
@@ -872,12 +881,14 @@ import {
   LiveDeviceConnections,
   type LivenessSample,
   type LivenessTarget,
+  LOOPBACK_FIREWALL_CHECK_MS,
   LocalModelsService,
   LoginDirectory,
   type LoginSweep,
   LoginVault,
   type LogLevel,
   type LoopBlockedClockPort,
+  LoopbackFirewallWatch,
   type LoopWatchdogPort,
   launchGuardActive,
   launchReasoningEffort,
@@ -932,6 +943,7 @@ import {
   type PaneLimit,
   PassTrigger,
   type PassTriggerTimers,
+  PasteRuleService,
   PinService,
   type PlannedAttachmentFile,
   type PlannedInitialAttachments,
@@ -997,14 +1009,10 @@ import {
   type RunOverrides,
   readDaemonRelayIdentity,
   readDoctorReport,
-  readUserSlice,
-  firewallRefusal,
-  LOOPBACK_FIREWALL_CHECK_MS,
-  LoopbackFirewallWatch,
-  readLoopbackFirewall,
   readHarnessPreflight,
+  readLoopbackFirewall,
   readTranscriptPage,
-  searchTranscriptRecords,
+  readUserSlice,
   refuseExhaustedCandidates,
   refuseHeldStateHome,
   refuseOccupiedAddress,
@@ -1032,9 +1040,12 @@ import {
   SecretExportService,
   SecretImportService,
   SecretRedactor,
+  type SecretStoreDirectory,
+  SecretStoreTarget,
   type SecretSubsystem,
   SecretUseService,
   SecretVault,
+  SecureCopyService,
   SecuritySettingsService,
   SelfRestartCoordinator,
   SendDraftRefused,
@@ -1104,9 +1115,9 @@ import {
   SessionStopPending,
   type SessionTranscriptMessageTokenCodec,
   type SessionTranscriptPages,
-  type SessionTranscriptSearch,
   SessionTranscriptReader,
   SessionTranscriptResolver,
+  type SessionTranscriptSearch,
   type SessionTranscriptTail,
   SharedFleetBacklog,
   SignalRefused,
@@ -1130,6 +1141,7 @@ import {
   SurfaceControl,
   SystemCallsignIssuer,
   searchTranscript,
+  searchTranscriptRecords,
   secretsMatch,
   selectBrowserWorker,
   sendRecordView,
@@ -6057,6 +6069,8 @@ function createAgentToolsSubsystem(input: {
   readonly files: AgentFiles;
   /** The vault redactor every operator read is scrubbed by; a page's text goes through it too. */
   readonly redactor: Pick<SecretRedactor, 'batch'>;
+  readonly copy: AgentCopyPort;
+  readonly plans: AgentPlanPort;
 }): MountedSubsystems['agentTools'] {
   const clock = { now: () => Date.now() };
   const control = new SurfaceControl(
@@ -6090,6 +6104,8 @@ function createAgentToolsSubsystem(input: {
       input: input.input,
       scrub: input.scrub,
       quarantinedUntil: input.quarantinedUntil,
+      copy: input.copy,
+      plans: input.plans,
       redactor: input.redactor,
       binaryName: CLIENT_NAME,
       clock,
@@ -6097,6 +6113,14 @@ function createAgentToolsSubsystem(input: {
     }),
     identities: agentIdentities(input.storage),
   };
+}
+
+/** The folder a session works in, from its own document; nothing when the session is unknown. */
+async function sessionFolder(storage: DaemonStorage, sessionId: string): Promise<string | undefined> {
+  const id = tryParseSessionId(sessionId);
+  if (id === undefined || storage.findSession(id) === undefined) return undefined;
+  const config = SessionConfigSchema.safeParse(await storage.readConfig(id).catch(() => undefined));
+  return config.success ? config.data.cwd : undefined;
 }
 
 /** How often a request that outlived its time is found and ended, so its card does not wait for the next event. */
@@ -6123,6 +6147,11 @@ function createInputRequestService(input: {
   readonly logins: InputLoginAdapter;
   /** The agent browser's pages, for a request on a page: looked at, pictured and typed into in each page's own queue. */
   readonly pages: PageInputHost;
+  /** Secure copies a paste types from, and the owner's rules that approve pastes in advance. */
+  readonly sealed: InputSealedPort;
+  readonly rules: InputPasteRules;
+  /** Where a paste "as the secret NAME" is kept. */
+  readonly secretStore: SecretStoreDirectory;
 }): InputRequestService {
   const clock = { now: () => Date.now() };
   return new InputRequestService({
@@ -6139,6 +6168,9 @@ function createInputRequestService(input: {
         runProgram,
       ),
       new PageInputTarget(input.pages),
+      // A secure copy pasted "as the secret NAME" (docs/secure-copy.md): the vault's management surface, which
+      // replaces a value and lists names, never returns one.
+      new SecretStoreTarget(input.secretStore),
     ),
     agenda: new InputAgendaAdapter(input.agenda),
     notifier: new InputAgentNotifierAdapter(
@@ -6203,6 +6235,8 @@ function createInputRequestService(input: {
     quarantine: input.quarantine,
     redact: input.redact,
     logins: input.logins,
+    sealed: input.sealed,
+    rules: input.rules,
     hostName: hostname(),
   });
 }
@@ -10014,6 +10048,33 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       });
       setInterval(sweepDeadlines, AGENDA_DEADLINE_SWEEP_MS).unref();
       setTimeout(sweepDeadlines, 30_000).unref();
+      // Secure copy (docs/secure-copy.md): a value an agent may name and never read. It lives in this process's
+      // memory only and is masked by the same registry as a value typed for the owner, from the moment it is read.
+      const secureCopies = new SecureCopyService({
+        clock: { now: () => Date.now() },
+        runner: new BunSecretChildRunner(),
+        folders: { folderOf: async sessionId => await sessionFolder(storage, sessionId) },
+        exposure: new TranscriptFileExposure(createTranscriptFileResolver(storage)),
+        masking: justTyped,
+        redact: async text => await secretRedactor.redact(text),
+      });
+      // The owner's pre-approval rules: routes, counts and expiries, never a value. Damage reads as no rules.
+      const pasteRules = new PasteRuleService({
+        store: new FilePasteRuleStore(join(paths.state, 'secure-copy'), stateFiles),
+        clock: { now: () => Date.now() },
+        ids: { ruleId: () => crypto.randomUUID().replaceAll('-', '') },
+        warn: message => void process.stderr.write(`secure copy: ${message}\n`),
+      });
+      void asActivity(activities, 'secure-copy-rules', async () => await pasteRules.load())();
+      const copyPlans = new CopyPlanService({
+        agenda: new CopyPlanAgendaAdapter(agenda),
+        rules: pasteRules,
+        tell: async (sessionId, agendaId, message) =>
+          void (await agendaReplies.add(sessionId, agendaId, message).catch(() => undefined)),
+        clock: { now: () => Date.now() },
+        ids: { planId: () => crypto.randomUUID().replaceAll('-', '') },
+      });
+      setInterval(() => copyPlans.sweep(), INPUT_REQUEST_SWEEP_MS).unref();
       // An agent stuck at a password prompt asks the owner through an agenda card (docs/input-requests.md). The value
       // lives only in this process's memory and in the one tmux write; the journal and the audit log carry names and flags.
       let pageHost: PageInputHost | undefined;
@@ -10037,8 +10098,26 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             return await pageHost.inputOnPage(sessionId, key, work);
           },
         },
+        sealed: secureCopies,
+        rules: pasteRules,
+        secretStore: secretDirectory,
       });
       inputRequests = inputRequestService;
+      setInterval(
+        asActivity(activities, 'secure-copies', async () => {
+          secureCopies.purge();
+          for (const sessionId of secureCopies.sessions()) {
+            const id = tryParseSessionId(sessionId);
+            const state =
+              id === undefined || storage.findSession(id) === undefined
+                ? undefined
+                : SessionStateSchema.safeParse(await storage.readState(id).catch(() => undefined));
+            if (state === undefined || (state.success && INPUT_ENDED_SESSION_STATUSES.has(state.data.status)))
+              secureCopies.drop(sessionId);
+          }
+        }),
+        INPUT_REQUEST_SWEEP_MS,
+      ).unref();
       const sweepInputRequests = asActivity(
         activities,
         'input-requests',
@@ -11524,6 +11603,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         browserLogin,
         browser: browserHost,
         inputRequests: inputRequestService,
+        secureCopy: {
+          copies: { list: sessionId => secureCopies.list(sessionId) },
+          rules: pasteRules,
+          plans: copyPlans,
+        },
         browserProxy: {
           tester: new BrowserProxyTester({
             saved: async () => (await declaredAccountModel())?.machine.browserProxy,
@@ -11543,14 +11627,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           input: inputRequestService,
           scrub: (sessionId, text) => inputRequestService.scrub(sessionId, text),
           quarantinedUntil: (sessionId, names) => inputRequestService.quarantinedUntil(sessionId, names),
+          copy: {
+            capture: async (sessionId, request) => await secureCopies.capture(sessionId, request),
+            list: sessionId => secureCopies.list(sessionId),
+            discard: (sessionId, name) => secureCopies.discard(sessionId, name),
+          },
+          plans: { propose: async (sessionId, items, expires) => await copyPlans.propose(sessionId, items, expires) },
           files: new AgentFiles({
             fs: new NodeAgentFilesystem(),
-            folderOf: async sessionId => {
-              const id = tryParseSessionId(sessionId);
-              if (id === undefined || storage.findSession(id) === undefined) return undefined;
-              const config = SessionConfigSchema.safeParse(await storage.readConfig(id).catch(() => undefined));
-              return config.success ? config.data.cwd : undefined;
-            },
+            folderOf: async sessionId => await sessionFolder(storage, sessionId),
             readAttachment: async (sessionId, attachmentId) => {
               const { attachment, bytes } = await attachmentStore.download(sessionId, attachmentId);
               return { filename: attachment.filename, bytes };

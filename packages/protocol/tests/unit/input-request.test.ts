@@ -259,6 +259,29 @@ describe('an input request', () => {
     should(InputTargetFactsSchema.safeParse({ ...BROWSER_FACTS, extra: 1 }).success).be.false();
   });
 
+  it('should carry the secret store as a name and whether it holds a value, never a value', () => {
+    const facts = { kind: 'secret', name: 'VERCEL_TOKEN', exists: false };
+
+    should(InputTargetFactsSchema.safeParse(facts).success).be.true();
+    should(InputTargetFactsSchema.safeParse({ ...facts, value: 'vcp_1' }).success).be.false();
+    should(InputTargetFactsSchema.safeParse({ ...facts, name: 'vercel token' }).success).be.false();
+    should(
+      InputRaiseSchema.safeParse({
+        target: { kind: 'secret', key: 'VERCEL_TOKEN' },
+        prompt: 'the token',
+        sensitivity: 'secret',
+        source: { kind: 'sealed', name: 'vercel' },
+      }).success,
+    ).be.true();
+    should(
+      InputRaiseSchema.safeParse({ target: { kind: 'secret', key: 'lower' }, prompt: 'p', sensitivity: 'secret' })
+        .success,
+    ).be.false();
+    should(
+      InputAuditDetailSchema.safeParse({ targetKind: 'secret', sensitivity: 'secret', copy: 'vercel' }).success,
+    ).be.true();
+  });
+
   it('should refuse an unknown state, a short id and a request with a field of its own making', () => {
     should(InputRequestSchema.safeParse({ ...REQUEST, state: 'typing' }).success).be.false();
     should(InputRequestSchema.safeParse({ ...REQUEST, id: 'abc' }).success).be.false();

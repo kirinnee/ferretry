@@ -1,13 +1,15 @@
 import { describe, it } from 'bun:test';
 import { type InputTargetFacts, padInputValue } from '@ferretry/protocol';
 import should from 'should';
+import type { CapabilityGuard } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { finalised } from '../../../../src/lib/api/http.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
+import type { InputRequestService } from '../../../../src/lib/input-requests/service.ts';
 import { inputRequestRoutes } from '../../../../src/lib/runtime/mounts/input-requests.ts';
 import { bodyReads, jsonBody, request } from '../../api/support.ts';
 import { FACTS, inputRequestService, RAISE, SESSION } from '../../input-requests/support.ts';
-import { agentIn, CREDENTIALS, GRANTED, human } from './support.ts';
+import { agentIn, CREDENTIALS, GRANTED, human, withoutSecretsConfigure } from './support.ts';
 
 /**
  * The owner's input-request routes, driven through the real router and authorization boundary with the
@@ -330,5 +332,71 @@ describe('the picture of a page request', () => {
 
     // Assert
     should(response.status).equal(404);
+  });
+});
+
+describe('allowing a paste into the secret store', () => {
+  /** A service whose one request goes where the case says; it records each delivery and holds no value. */
+  function store(kind: 'secret' | 'terminal', guard: CapabilityGuard) {
+    const delivered: string[] = [];
+    const service = {
+      targetOf: () => (kind === 'secret' ? { kind, key: 'VERCEL_TOKEN' } : { kind, key: 'dev' }),
+      deliver: async (_session: string, requestId: string) => {
+        delivered.push(requestId);
+        return { id: requestId, deliveryId: crypto.randomUUID(), state: 'delivered', submitted: false };
+      },
+    } as unknown as InputRequestService;
+    const dispatch = new ApiDispatcher(new ApiRouter(inputRequestRoutes(service)), CREDENTIALS, guard);
+    return { dispatch, delivered };
+  }
+  const allow = { deliveryId: crypto.randomUUID(), observedDigest: 'a'.repeat(64), sealed: true, submit: false };
+  const REQUEST = 'c'.repeat(32);
+
+  it('should need the secrets grant from a governed device as well as the terminal one, reading no body without it', async () => {
+    const refused = store('secret', withoutSecretsConfigure('not-granted'));
+    const reads = bodyReads();
+
+    const response = await refused.dispatch.dispatch(post(path(REQUEST, 'deliver'), allow, human, reads));
+
+    should(response.status).equal(403);
+    should(jsonBody(response).code).equal('grant_not_granted');
+    should(String(jsonBody(response).error)).containEql('changes the secret store');
+    should(reads.consumed).be.false();
+    should(refused.delivered).eql([]);
+  });
+
+  it('should ask a device for a passkey when its secrets grant wants one, naming the secrets demand', async () => {
+    const asking = store('secret', withoutSecretsConfigure('step-up-required'));
+
+    const response = await asking.dispatch.dispatch(post(path(REQUEST, 'deliver'), allow));
+
+    should(response.status).equal(403);
+    should(jsonBody(response)).match({
+      code: 'grant_step_up_required',
+      demand: { capability: 'secrets', axis: 'configure' },
+    });
+    should(asking.delivered).eql([]);
+  });
+
+  it('should deliver a store paste for a caller holding the grant, and a terminal paste without it', async () => {
+    const granted = store('secret', GRANTED);
+    const terminal = store('terminal', withoutSecretsConfigure('not-granted'));
+
+    const answers = [
+      await granted.dispatch.dispatch(post(path(REQUEST, 'deliver'), allow)),
+      await terminal.dispatch.dispatch(post(path(REQUEST, 'deliver'), allow)),
+    ];
+
+    should(answers.map(answer => answer.status)).eql([200, 200]);
+    should([granted.delivered, terminal.delivered]).eql([[REQUEST], [REQUEST]]);
+  });
+
+  it('should refuse a store paste when the daemon cannot say who is asking', async () => {
+    const blind = store('secret', { ...GRANTED, governance: () => undefined } as unknown as CapabilityGuard);
+
+    const response = await blind.dispatch.dispatch(post(path(REQUEST, 'deliver'), allow));
+
+    should(response.status).equal(403);
+    should(blind.delivered).eql([]);
   });
 });

@@ -86,6 +86,18 @@ caches them between reads, so plaintext lives no longer than the read that neede
 - **A value read off a screen.** The PWA never receives one. Write-only in, masked forever after.
 - **A secret in a configuration file, or copied along with one.** `config/daemon.json`, a fleet
   document and any copied configuration hold a **reference**, never a value.
+- **An agent writing the store.** Every ferret holds the host admin token, but the daemon tells a ferret
+  (`peer:`, a warden) from the owner's own `fy` and from a paired device, and **refuses a ferret the
+  routes that change the store**, before it reads a body: `POST /v1/secrets` (set or replace),
+  `DELETE /v1/secrets/:name`, the saved-login writes (`PUT`, rename, `DELETE` under
+  `/v1/secrets/logins`), opening or filing a copy-in (`POST /v1/secrets/imports[/:importId]`) and
+  sealing values out (`POST /v1/secrets/exports/:importId`). So a confused or prompt-injected agent cannot
+  swap `GITHUB_TOKEN` for a value it controls, or delete it. It can still list names and **use** a secret
+  by name. A ferret gets a value into the store the way it gets any secret from the owner: an input
+  request (the owner sees a card and types it) or a sealed copy pasted into the store ([secure
+  copy](secure-copy.md)); both show the owner a card. The owner's `fy secret set` in a normal shell and
+  the app's write-only form keep working. This is an honest-client guard (`isHumanAdminActor`): it holds
+  against an honest or confused client, not one that forges its own identity header.
 - **A credential in shell history or in `/proc`.** `fy secret set` takes no value argument, so it
   cannot be typed onto a command line.
 - **One file travelling without the other.** The vault at `<FY_HOME>/state/secrets.json` is
@@ -106,6 +118,19 @@ caches them between reads, so plaintext lives no longer than the read that neede
   against _accidents_, not against local access. A passphrase-derived key or an OS keychain would be
   a stronger claim; this is not that.
 - **Anyone who already has your user account on that machine.**
+- **A ferret that drops its identity, or reads the vault directly.** The refusal above is an
+  **honest-client guard**, like the other owner-only rules (updating the daemon, confirming a configuration
+  change). It reads who is asking from the session id that `fy` sends from inside a ferret. An agent holds
+  the same admin token, so it can send raw HTTP without that header and look like the owner's shell. The
+  real limit is the one this whole section states: **agents run as the same user, with the admin token.**
+  Such an agent can also read `secrets.json` and `secrets.key` straight off the disk. The guard stops a
+  confused or prompt-injected agent from using the obvious route; it does not stop one that is working
+  around it. A per-session credential would, and is not built.
+- **Two writers that are not the store's own routes.** Importing your harness setup
+  (`fy`'s setup import and clone, through `/v1/fleet/proposals/:id/apply`) adds secrets read from this
+  machine's harness files, and only under names the store does not hold, so it cannot replace one. An
+  MCP sign-in stores the token its authorization server answered, after a browser consent. Neither takes a
+  value the agent chose; both are listed so they are decisions, not oversights.
 - **A paired device, once it unlocks.** The secret routes sit on the seventh capability, `secrets`:
   `use` lists them and runs a command with one in its environment through `POST /v1/secrets/use`,
   which is code execution on this machine, and `configure` sets and deletes them. A device proves

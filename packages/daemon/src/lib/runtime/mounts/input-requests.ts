@@ -16,6 +16,7 @@ import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import { InputRequestError } from '../../input-requests/errors.ts';
 import type { InputCaller } from '../../input-requests/ports.ts';
 import type { InputRequestService } from '../../input-requests/service.ts';
+import { refusedSecretWrite, spentSecretWrite } from './secret-write-grant.ts';
 
 /**
  * THE OWNER'S ROUTES FOR INPUT REQUESTS (docs/input-requests.md).
@@ -50,14 +51,17 @@ export function answered(error: unknown): never {
   throw error;
 }
 
-export function ownerOf(context: RouteContext): InputCaller {
+/** The owner a route was called by: the person at the machine or a paired device. Refuses an agent before any body is read. */
+export function ownerActorOf(context: RouteContext): Extract<InputActor, { readonly kind: 'host' | 'device' }> {
   const credential = context.credential;
-  const device = credential?.tokenClass === 'device';
-  if (!device && !isHumanAdminActor(context.actor))
+  if (credential?.tokenClass !== 'device' && !isHumanAdminActor(context.actor))
     throw new ApiError(403, 'only the owner answers an input request; an agent cannot', 'forbidden');
-  const actor: InputActor =
-    credential?.tokenClass === 'device' ? { kind: 'device', deviceId: credential.deviceId } : { kind: 'host' };
-  return { kind: 'owner', actor, carrier: device ? 'direct' : 'loopback' };
+  return credential?.tokenClass === 'device' ? { kind: 'device', deviceId: credential.deviceId } : { kind: 'host' };
+}
+
+export function ownerOf(context: RouteContext): InputCaller {
+  const actor = ownerActorOf(context);
+  return { kind: 'owner', actor, carrier: actor.kind === 'device' ? 'direct' : 'loopback' };
 }
 
 function sessionOf(context: RouteContext): string {
@@ -148,10 +152,14 @@ export function inputRequestRoutes(service: InputRequestService): readonly ApiRo
       noStore: true,
       handle: async context => {
         const caller = ownerOf(context);
+        // A paste into the secret store changes it, so it needs what `POST /v1/secrets` needs as well.
+        const intoStore = service.targetOf(sessionOf(context), requestOf(context))?.kind === 'secret';
+        const refused = intoStore ? refusedSecretWrite(context, 'allow a paste into the secret store') : undefined;
+        if (refused !== undefined) return refused;
         const body = await parseBody(context.request, InputDeliverBodySchema);
-        return jsonResponse(
-          await service.deliver(sessionOf(context), requestOf(context), body, caller).catch(answered),
-        );
+        const result = await service.deliver(sessionOf(context), requestOf(context), body, caller).catch(answered);
+        if (intoStore) spentSecretWrite(context);
+        return jsonResponse(result);
       },
     },
     {

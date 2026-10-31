@@ -134,7 +134,11 @@ function build(options: { facts?: InputTargetFacts; entries?: LoginEntrySummary[
       quarantine: async () => undefined,
       quarantines: async () => [],
     },
-    audit: { record: async () => undefined, saved: async entry => void kept.push(entry.field) },
+    audit: {
+      record: async () => undefined,
+      saved: async entry => void kept.push(entry.field),
+      stored: async () => undefined,
+    },
     clock,
     ids: { requestId: () => (id++).toString(16).padStart(32, '0') },
     timers: { after: async () => await new Promise<void>(() => undefined) },

@@ -1,4 +1,17 @@
-import type { AgendaId, AuditActor, InputAgentView, InputRaise, SurfaceKind, SurfaceOpener } from '@ferretry/protocol';
+import type {
+  AgendaId,
+  AuditActor,
+  CopyCapture,
+  CopyCommandReport,
+  CopyMeta,
+  CopyName,
+  CopyPlan,
+  CopyPlanItem,
+  InputAgentView,
+  InputRaise,
+  SurfaceKind,
+  SurfaceOpener,
+} from '@ferretry/protocol';
 
 /**
  * WHO IS CALLING A TOOL — derived by the route, never stated by the caller.
@@ -82,12 +95,30 @@ export interface AgentInputPort {
   exclusive<T>(sessionId: string, work: () => Promise<T>): Promise<T>;
   /**
    * A page the daemon just typed a secret into: when its hold ends and the documents the values went into, or
-   * nothing when it is not held. `names` are every way the page is known.
+   * nothing when it is not held. `names` are every way the page is known. Absent where no page is ever held.
    */
-  pageHeld(
+  pageHeld?(
     sessionId: string,
     names: readonly (string | undefined)[],
   ): { readonly until: number; readonly documents: readonly string[] } | undefined;
   /** The document a session's page shows now, or nothing when it cannot be told. */
-  pageDocument(sessionId: string, key: string): Promise<string | undefined>;
+  pageDocument?(sessionId: string, key: string): Promise<string | undefined>;
+}
+
+/**
+ * What the agent tools ask of secure copy (docs/secure-copy.md): capture a value under a name, list the session's
+ * copies, discard one. It throws `SecureCopyError` for a refusal. Nothing it returns carries a value.
+ */
+export interface AgentCopyPort {
+  capture(
+    sessionId: string,
+    request: CopyCapture,
+  ): Promise<{ readonly copy: CopyMeta; readonly command?: CopyCommandReport }>;
+  list(sessionId: string): readonly CopyMeta[];
+  discard(sessionId: string, name: CopyName): CopyMeta;
+}
+
+/** What `secure.preapprove` asks: raise one card listing the pastes the agent plans. Nothing in it is a value. */
+export interface AgentPlanPort {
+  propose(sessionId: string, items: readonly CopyPlanItem[], expiresInSeconds?: number): Promise<CopyPlan>;
 }

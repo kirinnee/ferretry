@@ -55,6 +55,22 @@ describe('the card words', () => {
     expect(targetRef(request())).toBe('%terminal:deploy');
   });
 
+  it('names a secret by its name, since no reference sigil names one', () => {
+    const into = (exists: boolean) =>
+      request({
+        target: { kind: 'secret', key: 'VERCEL_TOKEN' } as never,
+        observed: { kind: 'secret', name: 'VERCEL_TOKEN', exists } as never,
+      });
+    expect(targetRef(into(false))).toBe('the secret VERCEL_TOKEN');
+    expect(observedWords(into(false))).toEqual({
+      program: 'VERCEL_TOKEN',
+      verb: 'in the secret store',
+      echo: 'a new secret',
+      recognised: true,
+    });
+    expect(observedWords(into(true))?.echo).toBe('replaces its value');
+  });
+
   it('counts down and says expired', () => {
     expect(expiryWords('2026-08-05T10:04:05.000Z', NOW)).toBe('4m 05s left');
     expect(expiryWords('2026-08-05T09:59:00.000Z', NOW)).toBe('expired');

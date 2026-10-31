@@ -74,8 +74,11 @@ export const titleWords = (request: InputRequest, agentName: string): string =>
 export const chainWords = (request: InputRequest): string | undefined =>
   request.chain === undefined ? undefined : `Step ${request.step ?? 2} · after !${request.chain}`;
 
-/** The target as the owner writes a reference to it: `%terminal:dev`. */
-export const targetRef = (request: InputRequest): string => `%${request.target.kind}:${request.target.key}`;
+/** Where a value goes, as the owner writes it: `%terminal:dev`, `%browser:app`, or "the secret NAME" (no sigil names a secret). */
+export const targetRef = (request: InputRequest): string =>
+  request.target.kind === 'secret'
+    ? `the secret ${request.target.key}`
+    : `%${request.target.kind}:${request.target.key}`;
 
 export interface SplitOffers {
   /** The one-tap choice: the first offer the DAEMON matched to this target. Never a hinted one by itself. */
@@ -178,8 +181,10 @@ interface ObservedFieldWords {
 }
 
 export interface ObservedWords {
-  /** The program, or the page's host. */
+  /** The program, the page's host, or the secret's name. */
   readonly program: string;
+  /** What it is doing: "is asking", or for a secret "in the secret store". */
+  readonly verb?: string;
   /** Typing hidden or showing for a terminal; https or not for a page. */
   readonly echo: string;
   /** The prompt's own line, as the daemon read it; absent for a page. */
@@ -213,6 +218,13 @@ const fieldWords = (field: InputBrowserFieldFacts, pageOrigin: string): string =
 export const observedWords = (request: InputRequest): ObservedWords | undefined => {
   const facts = request.observed;
   if (facts === undefined) return undefined;
+  if (facts.kind === 'secret')
+    return {
+      program: facts.name,
+      verb: 'in the secret store',
+      echo: facts.exists ? 'replaces its value' : 'a new secret',
+      recognised: true,
+    };
   if (facts.kind === 'terminal')
     return {
       program: facts.foreground.comm,
@@ -446,6 +458,19 @@ export const savedBody = (request: InputRequest, entry: string, submit: boolean,
         ok: true,
         body: { deliveryId, observedDigest: request.observedDigest, entry, submit: enterFor(request, submit) },
       };
+
+/** What allowing a paste sends: no value, only that the owner allows the copy the REQUEST names (docs/secure-copy.md). */
+export const sealedBody = (request: InputRequest, submit: boolean, deliveryId: string): BuiltBody =>
+  request.observedDigest === undefined
+    ? { ok: false, problem: REOBSERVING }
+    : {
+        ok: true,
+        body: { deliveryId, observedDigest: request.observedDigest, sealed: true, submit: enterFor(request, submit) },
+      };
+
+/** "sealed:vercel_token": the handle a paste card pastes (where it came from is a row of its own). */
+export const pastedWords = (request: InputRequest): string | undefined =>
+  request.source === undefined ? undefined : `sealed:${request.source.name}`;
 
 type InputFailureKind = 'changed' | 'already' | 'gone' | 'refused' | 'step-up' | 'unknown';
 

@@ -433,7 +433,7 @@ const AUTO_MODE_REFUSAL =
  * not learn too late.
  */
 export const SET_UP_FERRETRY_INSTRUCTION = (fy: string): string =>
-  `Ferretry settings: this machine's logins, MCP servers, skills, profiles, runtimes and its Warden, Learning, Voice and Pack settings are YAML files (\`${fy} config path\`). Before changing any, read \`${fy} config guide\` and follow it: never write a secret value into a file (\`${fy} secret set NAME\`, then \${secret:NAME}), run \`${fy} config check\` after every edit, and an edit that loosens what the machine may spend or what agents may do waits for the owner — tell them; never work around it.`;
+  `Ferretry settings: this machine's logins, MCP servers, skills, profiles, runtimes and its Warden, Learning, Voice and Pack settings are YAML files (\`${fy} config path\`). Before changing any, read \`${fy} config guide\` and follow it: never write a secret value into a file (the owner runs \`${fy} secret set NAME\`; then \${secret:NAME}), run \`${fy} config check\` after every edit, and an edit that loosens what the machine may spend or what agents may do waits for the owner — tell them; never work around it.`;
 
 /**
  * AGENDA MODE — a per-FERRET section (docs/agenda.md): this ferret keeps a list of what only the owner can

@@ -212,6 +212,7 @@ function build(overrides: Partial<World> = {}) {
         w.audits.push(entry);
       },
       saved: async () => undefined,
+      stored: async () => undefined,
     },
     clock,
     ids: { requestId: () => (w.nextId++).toString(16).padStart(32, '0') },

@@ -45,6 +45,18 @@ export interface InputCdpSession {
 /** A frame of the page, as far as the input calls look at it. */
 export interface InputFrame {
   url(): string;
+  /** The frame this one is inside, or `null` for the page's main frame. */
+  parentFrame(): InputFrame | null;
+}
+
+/**
+ * Who a handle holds, as the DevTools session that holds it says: the node (its `backendNodeId`, name and
+ * attributes) and that session's TARGET. A backend node id is only unique inside one renderer, so the target is
+ * half of the identity: the write must go through a session of the same target.
+ */
+export interface InputHeldNode {
+  readonly node: unknown;
+  readonly targetId: unknown;
 }
 
 /** The element a locator resolved, held while it is looked at. */
@@ -52,10 +64,10 @@ export interface InputHandle {
   ownerFrame(): Promise<InputFrame | null>;
   /**
    * The node this handle holds, as the DevTools session that holds it describes it (`DOM.describeNode` on the
-   * handle's own remote object): its `backendNodeId`, name and attributes. This is the element's identity; no
-   * page script runs to answer it.
+   * handle's own remote object), and that session's target. This is the element's identity; no page script runs
+   * to answer it.
    */
-  describe(): Promise<unknown>;
+  describe(): Promise<InputHeldNode>;
   boundingBox(): Promise<{
     readonly x: number;
     readonly y: number;
@@ -155,6 +167,9 @@ const NAVIGATION_ID_LIMIT = 128;
 type FieldAttributes = InputBrowserFieldFacts['field'];
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/** The Playwright release {@link playwrightNodeOf} was written against; a test pins the installed one to it. */
+export const PLAYWRIGHT_REACHED_VERSION = '1.62.1';
 
 /** The sentences this file throws: fixed, so no page text or value can be in one. */
 const REFUSALS = {
@@ -264,18 +279,34 @@ async function titleOf(page: InputablePage): Promise<string> {
   }
 }
 
-/** The one session that owns an element's frame: the page's, or an out-of-process frame's own. */
-async function sessionOwning(
+/**
+ * The session of the TARGET that holds an element, found from the element's frame: that frame's own session when
+ * it is out of process, else the nearest ancestor frame that has one, else the page's. Each candidate proves its
+ * target id; one that is not `targetId` is let go and the next is tried, and none matching is a refusal — the
+ * page's session is never used for a frame that runs in another target, because the same backend node id names
+ * a different node there.
+ */
+async function sessionOfTarget(
   subject: InputSubject,
   frame: InputFrame,
+  targetId: string,
 ): Promise<{ readonly session: InputCdpSession; readonly owned: boolean }> {
-  const own = await subject.cdp.page();
-  if (frame === subject.page.mainFrame()) return { session: own, owned: false };
-  try {
-    return { session: await subject.cdp.frame(frame), owned: true };
-  } catch {
-    return { session: own, owned: false };
+  const main = subject.page.mainFrame();
+  for (let at: InputFrame | null = frame; at !== null && at !== main; at = at.parentFrame()) {
+    const own = await subject.cdp.frame(at).catch(() => undefined);
+    if (own === undefined) continue;
+    if ((await targetOf(own)) === targetId) return { session: own, owned: true };
+    await own.detach?.().catch(() => undefined);
   }
+  const page = await subject.cdp.page();
+  if ((await targetOf(page)) === targetId) return { session: page, owned: false };
+  throw new Error(REFUSALS.unidentified);
+}
+
+/** The target a session is attached to, or an empty string when it will not say. */
+async function targetOf(session: InputCdpSession): Promise<string> {
+  const info = objectOf(objectOf(await ask(session, 'Target.getTargetInfo').catch(() => ({}))).targetInfo);
+  return typeof info.targetId === 'string' ? info.targetId : '';
 }
 
 /**
@@ -284,26 +315,32 @@ async function sessionOwning(
  * remote object it holds IS the element; asking that session to describe the object needs no page script.
  *
  * This reaches past Playwright's public API (the in-process connection's `toImpl`, the page delegate's
- * `_sessionForHandle`, the handle's `_objectId`), pinned with the Playwright version the worker ships. Any
+ * `_sessionForHandle` and that frame session's `_targetId`, the handle's `_objectId`), pinned with the Playwright
+ * version the worker ships ({@link PLAYWRIGHT_REACHED_VERSION}; a test fails on a bump so the reach is checked again). Any
  * part that is not there is a refusal: a field whose identity cannot be proved is never observed.
  */
-export async function playwrightNodeOf(handle: unknown): Promise<unknown> {
+export async function playwrightNodeOf(handle: unknown): Promise<InputHeldNode> {
   const client = handle as { readonly _connection?: { toImpl?: (object: unknown) => unknown } } | null;
   const server = client?._connection?.toImpl?.(handle) as
     | {
         readonly _objectId?: unknown;
         readonly _page?: {
           readonly delegate?: {
-            _sessionForHandle?: (object: unknown) => { readonly _client?: { send?: unknown } } | undefined;
+            _sessionForHandle?: (
+              object: unknown,
+            ) => { readonly _client?: { send?: unknown }; readonly _targetId?: unknown } | undefined;
           };
         };
       }
     | undefined;
   const objectId = server?._objectId;
-  const session = server?._page?.delegate?._sessionForHandle?.(server)?._client;
-  if (typeof objectId !== 'string' || typeof session?.send !== 'function') throw new Error(REFUSALS.unidentified);
+  const frameSession = server?._page?.delegate?._sessionForHandle?.(server);
+  const session = frameSession?._client;
+  const targetId = frameSession?._targetId;
+  if (typeof objectId !== 'string' || typeof session?.send !== 'function' || typeof targetId !== 'string')
+    throw new Error(REFUSALS.unidentified);
   const send = session.send as (method: string, params: Readonly<Record<string, unknown>>) => Promise<unknown>;
-  return objectOf(objectOf(await send.call(session, 'DOM.describeNode', { objectId })).node);
+  return { node: objectOf(objectOf(await send.call(session, 'DOM.describeNode', { objectId })).node), targetId };
 }
 
 interface Box {
@@ -370,15 +407,17 @@ async function observeField(
     const frame = await handle.ownerFrame();
     if (frame === null) throw new Error(REFUSALS.frameless);
     // The identity: the node Playwright holds, described by the session that holds it.
-    const held = objectOf(
-      await handle.describe().catch(() => {
-        throw new Error(REFUSALS.unidentified);
-      }),
-    );
+    const described = await handle.describe().catch(() => {
+      throw new Error(REFUSALS.unidentified);
+    });
+    const held = objectOf(described.node);
     const backendNodeId = held.backendNodeId;
+    const target = described.targetId;
     if (typeof backendNodeId !== 'number' || !Number.isSafeInteger(backendNodeId) || backendNodeId <= 0)
       throw new Error(REFUSALS.unidentified);
-    const { session, owned } = await sessionOwning(subject, frame);
+    if (typeof target !== 'string' || target === '') throw new Error(REFUSALS.unidentified);
+    // The write's session is bound to the target that holds the handle, or there is none.
+    const { session, owned } = await sessionOfTarget(subject, frame, target);
     // The same node, as the session the write will use names it: the same name and attributes, or a refusal.
     const node = objectOf(
       (
@@ -388,9 +427,7 @@ async function observeField(
       ).node,
     );
     if (node.backendNodeId !== backendNodeId || !sameNode(node, held)) throw new Error(REFUSALS.unidentified);
-    const info = objectOf(objectOf(await ask(session, 'Target.getTargetInfo')).targetInfo);
-    const frameId = typeof info.targetId === 'string' ? oneLine(info.targetId, FRAME_ID_LIMIT) : '';
-    if (frameId === '') throw new Error(REFUSALS.unidentified);
+    const frameId = oneLine(target, FRAME_ID_LIMIT);
     // Playwright measures the element it holds, in the page's viewport whichever frame it is in.
     const measured = await handle.boundingBox().catch(() => null);
     const box =

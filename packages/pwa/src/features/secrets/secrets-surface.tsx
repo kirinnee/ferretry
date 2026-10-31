@@ -15,6 +15,7 @@ import { ArrowRightLeft } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { useDaemonClient } from '../../lib/store.tsx';
+import { CopyRulesSurface } from '../secure-copy/copy-rules-surface.tsx';
 import { LoginsSurface } from './logins-surface.tsx';
 import { SecretCopyPanel } from './secret-copy-panel.tsx';
 import { listSecrets, putSecret, removeSecret, type SecretClient } from './secrets-api.ts';
@@ -161,6 +162,7 @@ export function SecretsSurface({
         )
       )}
       <LoginsSurface connection={connection} createClient={createClient} />
+      <CopyRulesSurface connection={connection} createClient={createClient} />
     </div>
   );
 }
