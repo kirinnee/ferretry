@@ -174,7 +174,9 @@ describe('catalogItemWarnings', () => {
       command('npx -y @acme/github-mcp@1.4.2', { NPM_CONFIG_REGISTRY: 'https://r.example' }),
     );
     expect(warnings.map(warning => warning.code)).toEqual(['package-registry']);
-    expect(warnings[0]?.text).toContain('NPM_CONFIG_REGISTRY=https://r.example, not the public registry');
+    expect(warnings[0]?.text).toStartWith(
+      'It sets NPM_CONFIG_REGISTRY=https://r.example, which changes where packages come from',
+    );
   });
 
   it('says a server at an address runs on someone else’s computer', () => {
@@ -291,5 +293,65 @@ describe('catalogItemReview', () => {
       { label: 'Opens', text: 'A application/pdf file of 2048 bytes', document: false },
     ]);
     expect(catalogItemWarnings(artifact)).toEqual([]);
+  });
+});
+
+describe('what the second security review found (PR #1166)', () => {
+  it('reads cmd /c and powershell -Command as the rest of the arguments, and combined shell flags', () => {
+    expect(fetched(['cmd', '/c', 'npx', '-y', 'pkg'])).toEqual(['npx pkg']);
+    expect(fetched(['cmd.exe', '/C', 'npx -y pkg'])).toEqual(['npx pkg']);
+    expect(fetched(['powershell', '-Command', 'npx', '-y', 'pkg'])).toEqual(['npx pkg']);
+    expect(fetched(['bash', '-lc', 'npx pkg'])).toEqual(['npx pkg']);
+    expect(fetched(['sh', '-ec', 'npx pkg'])).toEqual(['npx pkg']);
+    expect(fetched(['sh', '-e'])).toEqual([]);
+    expect(fetched(['cmd', '/q'])).toEqual([]);
+    expect(fetched(['pwsh', '-File', 'x.ps1'])).toEqual([]);
+  });
+
+  it('reads env -u, env -C and env -S, and docker’s own flags before run', () => {
+    expect(fetched('env -u FOO npx pkg')).toEqual(['npx pkg']);
+    expect(fetched('env -C /tmp A=1 npx pkg')).toEqual(['npx pkg']);
+    expect(fetched(['env', '-S', 'npx -y pkg'])).toEqual(['npx pkg']);
+    expect(fetched('docker --context x run img')).toEqual(['docker run img']);
+  });
+
+  it('names -i for Python tools only, --userconfig, proxies and switched-off certificate checks', () => {
+    expect(packageRegistries('uv', ['pip', 'install', '-i', 'https://evil.example', 'x'], {})).toEqual([
+      'https://evil.example',
+    ]);
+    expect(packageRegistries('docker', ['run', '-i', 'img'], {})).toEqual([]);
+    expect(packageRegistries('npx', ['--userconfig', './npmrc', 'pkg@1.2.3'], {})).toEqual(['./npmrc']);
+    expect(
+      packageRegistries('npx', ['pkg@1.2.3'], {
+        HTTPS_PROXY: 'http://p.example',
+        NODE_TLS_REJECT_UNAUTHORIZED: '0',
+        SSL_CERT_FILE: '/tmp/ca.pem',
+      }),
+    ).toEqual(['HTTPS_PROXY=http://p.example', 'NODE_TLS_REJECT_UNAUTHORIZED=0', 'SSL_CERT_FILE=/tmp/ca.pem']);
+  });
+
+  it('marks a carriage return that does not end a line, and quotes a value with a line break', () => {
+    const [entry] = catalogItemReview(skill([{ path: 'SKILL.md', content: 'rm -rf ~ #\recho hi\r\n' }]));
+    expect(entry?.text).toBe('rm -rf ~ #⟨U+000D⟩echo hi\r\n');
+    const review = catalogItemReview(
+      mcp({ transport: 'command', command: 'node', args: [], env: { LOG: 'a\nStarts x', TAB: 'a\tb', PLAIN: 'p q' } }),
+    );
+    expect(review.slice(1)).toEqual([
+      { label: 'Environment LOG', text: '"a\\nStarts x"', document: false },
+      { label: 'Environment PLAIN', text: 'p q', document: false },
+      { label: 'Environment TAB', text: '"a\\tb"', document: false },
+    ]);
+  });
+
+  it('warns on tool files whatever their case, and on mise and just', () => {
+    const warnings = catalogItemWarnings(
+      skill([
+        { path: 'SKILL.md', content: '#' },
+        { path: '.ENVRC', content: '' },
+        { path: 'mise.toml', content: '' },
+        { path: 'justfile', content: '' },
+      ]),
+    );
+    expect(warnings[0]?.text).toContain('.ENVRC, mise.toml, justfile');
   });
 });

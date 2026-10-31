@@ -487,3 +487,48 @@ describe('a placeholder is a name, not a key', () => {
     ).toBe(true);
   });
 });
+
+describe('what the second security review found (PR #1166)', () => {
+  const md = { path: 'SKILL.md', content: '#' };
+  const carries = (paths: readonly string[]) =>
+    CatalogSkillSchema.safeParse({ files: [md, ...paths.map(path => ({ path, content: 'x' }))] }).success;
+
+  it('refuses a folder laid out as a bare git repository, at the root or below', () => {
+    expect(carries(['r/HEAD', 'r/config', 'r/objects/info', 'r/refs/heads/main'])).toBe(false);
+    expect(carries(['HEAD', 'objects/x', 'refs/y'])).toBe(false);
+    expect(carries(['a/b/head', 'a/b/OBJECTS/x', 'a/b/refs/y'])).toBe(false);
+    // Each part alone is an ordinary file name.
+    expect(carries(['r/HEAD', 'r/objects/x'])).toBe(true);
+    expect(carries(['docs/refs/list.md', 'docs/objects/a.md', 'HEAD'])).toBe(true);
+  });
+
+  it('refuses a name that starts with a dash, and the braille blank and Mongolian selectors in a label', () => {
+    expect(carries(['-rf'])).toBe(false);
+    expect(carries(['a/-n.md'])).toBe(false);
+    for (const point of [0x2800, 0x180b, 0x180c, 0x180d, 0x180f]) {
+      expect(CatalogLabelSchema.safeParse(`a${String.fromCodePoint(point)}b`).success).toBe(false);
+    }
+  });
+
+  it('reads whole words, not substrings, for a name that announces a key', () => {
+    for (const setup of [
+      { transport: 'url', url: 'https://mcp.example.com/auth/callback-handler-v2' },
+      { transport: 'url', url: 'https://example.com/oauth/authorize/mcp-server-endpoint' },
+      { transport: 'url', url: 'https://api.example.com/v1/keys/list-all-the-things' },
+      { transport: 'url', url: 'https://api.example.com/v1?author=someone-with-a-long-handle' },
+      { ...COMMAND, args: ['--author', 'someone-with-a-long-handle'] },
+      { ...COMMAND, args: ['--keyboard-layout', 'international-english'] },
+    ]) {
+      expect([JSON.stringify(setup), CatalogMcpSetupSchema.safeParse(setup).success]).toEqual([
+        JSON.stringify(setup),
+        true,
+      ]);
+    }
+    for (const setup of [
+      { transport: 'url', url: 'https://x.example/?access_token=abcdef0123456789abcdef' },
+      { ...COMMAND, args: ['--access-token', 'abcdef0123456789abcdef'] },
+    ]) {
+      expect(CatalogMcpSetupSchema.safeParse(setup).success).toBe(false);
+    }
+  });
+});

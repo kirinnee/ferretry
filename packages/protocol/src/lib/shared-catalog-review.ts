@@ -68,10 +68,15 @@ export type CatalogInstallWarning = z.infer<typeof CatalogInstallWarningSchema>;
 
 /**
  * Invisible and text-direction characters, and controls other than a tab, a line break and a carriage
- * return — a fresh global matcher each time, since `lastIndex` is state.
+ * return that ends a line — a fresh global matcher each time, since `lastIndex` is state.
  */
 const hiddenCharacters = (): RegExp =>
-  new RegExp(String.raw`[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F${HIDDEN_CHARACTER_SOURCE}]`, 'gu');
+  // A carriage return is fine before a line feed (a Windows line ending) and hidden anywhere else: in a
+  // terminal `rm -rf ~ #\recho hi` shows as `echo hi`.
+  new RegExp(
+    String.raw`(?:[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F${HIDDEN_CHARACTER_SOURCE}]|\r(?!\n))`,
+    'gu',
+  );
 
 /**
  * A file's text with each hidden character written as `⟨U+202E⟩`, so the review shows what the file
@@ -93,6 +98,10 @@ const skillEntries = (files: readonly { readonly path: string; readonly content:
       .toSorted((left, right) => (left.path < right.path ? -1 : 1)),
   ].map(file => ({ label: `Skill file ${file.path}`, text: revealHidden(file.content), document: true }));
 
+/** A value that holds a line break or a tab is shown quoted, so it cannot draw a review line of its own. */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: finding a control character is the point.
+const oneLine = (value: string): string => (/[\u0000-\u001F\u007F]/u.test(value) ? JSON.stringify(value) : value);
+
 const mcpEntries = (setup: CatalogMcpSetup): CatalogReviewEntry[] => {
   if (setup.transport === 'url') {
     return [
@@ -113,7 +122,7 @@ const mcpEntries = (setup: CatalogMcpSetup): CatalogReviewEntry[] => {
     { label: 'Starts', text: commandLine(setup.command, setup.args), document: false },
     ...Object.keys(setup.env)
       .toSorted()
-      .map(name => ({ label: `Environment ${name}`, text: setup.env[name] ?? '', document: false })),
+      .map(name => ({ label: `Environment ${name}`, text: oneLine(setup.env[name] ?? ''), document: false })),
   ];
 };
 
@@ -298,11 +307,38 @@ const DOCKER_VALUED = new Set([
   '-w',
   '--workdir',
 ]);
+const DOCKER_GLOBAL_VALUED = new Set([
+  '--context',
+  '-c',
+  '--host',
+  '-H',
+  '--config',
+  '--log-level',
+  '-l',
+  '--tlscacert',
+  '--tlscert',
+  '--tlskey',
+]);
+const ENV_VALUED = new Set(['-u', '--unset', '-C', '--chdir']);
 const DENO_VALUED = new Set(['-c', '--config', '--lock', '--import-map', '--cert', '--location', '--seed']);
 
-/** Shells and wrappers whose `-c`/`/c` string is itself a command line to read. */
-const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'cmd', 'powershell', 'pwsh']);
-const SHELL_COMMAND_FLAGS = ['-c', '/c', '/C', '-Command', '-command'];
+const POSIX_SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish']);
+
+/**
+ * The command line a shell is asked to run, or `undefined` when it runs none. A POSIX shell takes the ONE
+ * argument after `-c` (also combined, `-lc`, `-ec`); `cmd /c` and `powershell -Command` take the REST of
+ * the arguments, which is how a Windows MCP setup usually spells `cmd /c npx -y pkg`.
+ */
+const shellLine = (program: string, args: readonly string[]): string | undefined => {
+  if (POSIX_SHELLS.has(program)) {
+    const at = args.findIndex(arg => /^-[A-Za-z]*c[A-Za-z]*$/u.test(arg));
+    return at === -1 ? undefined : args[at + 1];
+  }
+  const flag =
+    program === 'cmd' ? /^\/[ck]$/iu : program === 'powershell' || program === 'pwsh' ? /^-(?:c|command)$/iu : null;
+  const at = flag === null ? -1 : args.findIndex(arg => flag.test(arg));
+  return at === -1 ? undefined : args.slice(at + 1).join(' ');
+};
 
 /** The simple commands in a shell string: split on `&&`, `||`, `;` and `|`, then on spaces, quotes dropped. */
 const shellCommands = (line: string): readonly (readonly string[])[] =>
@@ -317,18 +353,29 @@ const shellCommands = (line: string): readonly (readonly string[])[] =>
     )
     .filter(words => words.length > 0);
 
-/** A registry or index other than the public one: it can serve any bytes for any version. */
-const REGISTRY_FLAGS = ['--registry', '--index-url', '--extra-index-url', '--index', '--default-index', '--find-links'];
+/**
+ * A registry or index other than the public one, a proxy, or a change to which servers are trusted:
+ * each lets someone serve different bytes for the same version.
+ */
+const REGISTRY_FLAGS = [
+  '--userconfig',
+  '--registry',
+  '--index-url',
+  '--extra-index-url',
+  '--index',
+  '--default-index',
+  '--find-links',
+];
 const REGISTRY_ENV =
-  /^(?:NPM_CONFIG_REGISTRY|NPM_CONFIG_USERCONFIG|BUN_CONFIG_REGISTRY|YARN_REGISTRY|YARN_NPM_REGISTRY_SERVER|UV_INDEX|UV_INDEX_URL|UV_DEFAULT_INDEX|UV_EXTRA_INDEX_URL|UV_FIND_LINKS|PIP_INDEX_URL|PIP_EXTRA_INDEX_URL|PIP_FIND_LINKS|GOPROXY|GOFLAGS)$/u;
+  /^(?:NPM_CONFIG_REGISTRY|NPM_CONFIG_USERCONFIG|BUN_CONFIG_REGISTRY|YARN_REGISTRY|YARN_NPM_REGISTRY_SERVER|UV_INDEX|UV_INDEX_URL|UV_DEFAULT_INDEX|UV_EXTRA_INDEX_URL|UV_FIND_LINKS|PIP_INDEX_URL|PIP_EXTRA_INDEX_URL|PIP_FIND_LINKS|PIP_TRUSTED_HOST|UV_INSECURE_HOST|GOPROXY|GOFLAGS|GOSUMDB|GONOSUMDB|GONOSUMCHECK|GOINSECURE|GOPRIVATE|GONOPROXY|HTTPS?_PROXY|ALL_PROXY|NPM_CONFIG_(?:PROXY|HTTPS_PROXY|STRICT_SSL|CAFILE|CA)|NODE_TLS_REJECT_UNAUTHORIZED|NODE_EXTRA_CA_CERTS|PIP_CERT|SSL_CERT_(?:FILE|DIR)|REQUESTS_CA_BUNDLE|CURL_CA_BUNDLE)$/u;
+/** Python tools, where `-i` is the index (elsewhere, `docker run -i`, it means interactive). */
+const PYTHON_TOOLS = new Set(['uv', 'uvx', 'pip', 'pip3', 'pipx']);
 
 /** How deep a shell string inside a shell string is read. Past it, the line is still shown in full. */
 const MAX_WRAPPER_DEPTH = 3;
 
 const npmLike = (launcher: string, args: readonly string[], depth: number): UnpinnedPackage[] => {
-  const calls = flagValues(args, ['-c', '--call']).flatMap(line =>
-    shellCommands(line).flatMap(([program = '', ...rest]) => launched(program, rest, depth + 1)),
-  );
+  const calls = flagValues(args, ['-c', '--call']).flatMap(line => inLine(line, depth));
   const packages = flagValues(args, ['-p', '--package']);
   const specs = packages.length > 0 ? packages : operands(args, NPX_VALUED).slice(0, 1);
   return [...specs.filter(spec => !npmPinned(spec)).map(spec => ({ launcher, target: splitAt(spec).name })), ...calls];
@@ -349,28 +396,33 @@ const subcommand = (args: readonly string[]): { readonly name: string; readonly 
 };
 
 /** A container image is fixed only by its digest: a missing tag or `latest` moves, and any tag can be re-pushed. */
-const containerRun = (program: string, args: readonly string[]): UnpinnedPackage[] => {
+const containerRun = (program: string, all: readonly string[]): UnpinnedPackage[] => {
+  const args = operands(all, DOCKER_GLOBAL_VALUED);
   const run = args[0] === 'run' ? args.slice(1) : args[0] === 'container' && args[1] === 'run' ? args.slice(2) : null;
   if (run === null) return [];
   const image = operands(run, DOCKER_VALUED)[0];
   return image === undefined || image.includes('@sha256:') ? [] : [{ launcher: `${program} run`, target: image }];
 };
 
+/** Every package a shell string fetches, one wrapper deeper. */
+const inLine = (line: string, depth: number): UnpinnedPackage[] =>
+  shellCommands(line).flatMap(([inner = '', ...innerArgs]) => launched(inner, innerArgs, depth + 1));
+
 /** Every package this command line fetches at launch without a fixed version. */
 function launched(command: string, args: readonly string[], depth: number): UnpinnedPackage[] {
   if (depth > MAX_WRAPPER_DEPTH) return [];
   const program = programName(command);
   const { name, rest } = subcommand(args);
-  if (SHELLS.has(program)) {
-    return flagValues(args, SHELL_COMMAND_FLAGS).flatMap(line =>
-      shellCommands(line).flatMap(([inner = '', ...innerArgs]) => launched(inner, innerArgs, depth + 1)),
-    );
-  }
+  const line = shellLine(program, args);
+  if (line !== undefined) return inLine(line, depth);
   switch (program) {
     case 'env': {
-      // `env [-i] NAME=value … program args`
-      const at = args.findIndex(arg => !arg.startsWith('-') && !arg.includes('='));
-      return at === -1 ? [] : launched(args[at] ?? '', args.slice(at + 1), depth + 1);
+      // `env [-i] [-u NAME] [-C dir] NAME=value … program args`, or `env -S "program args"`.
+      const split = flagValues(args, ['-S', '--split-string']);
+      if (split.length > 0) return split.flatMap(text => inLine(text, depth));
+      const after = operands(args, ENV_VALUED);
+      const at = after.findIndex(arg => !arg.includes('='));
+      return at === -1 ? [] : launched(after[at] ?? '', after.slice(at + 1), depth + 1);
     }
     case 'npx':
     case 'bunx':
@@ -433,8 +485,9 @@ export function unpinnedPackages(command: string, args: readonly string[]): read
 }
 
 /**
- * Where this command line fetches packages from, when it is not the public registry: a `--registry` or
- * `--index-url` flag anywhere, or a variable that sets one. An exact version means nothing there — that
+ * Where this command line fetches packages from, when it is not the public registry: a `--registry`,
+ * `--index-url` or `--userconfig` flag anywhere (`-i` for Python tools), or a variable that sets a
+ * registry, a proxy or which certificates are trusted. An exact version means nothing there — that
  * registry serves whatever bytes it likes for it.
  */
 export function packageRegistries(
@@ -442,9 +495,11 @@ export function packageRegistries(
   args: readonly string[],
   env: Readonly<Record<string, string>>,
 ): readonly string[] {
-  const words = [command, ...args, ...args.flatMap(arg => shellCommands(arg).flat())];
+  const lines = [[command, ...args], ...args.flatMap(arg => shellCommands(arg))];
   return [
-    ...flagValues(words, REGISTRY_FLAGS),
+    ...lines.flatMap(([program = '', ...rest]) =>
+      flagValues(rest, PYTHON_TOOLS.has(programName(program)) ? [...REGISTRY_FLAGS, '-i'] : REGISTRY_FLAGS),
+    ),
     ...Object.keys(env)
       .toSorted()
       .filter(name => REGISTRY_ENV.test(name))
@@ -461,7 +516,7 @@ const isScript = (file: { readonly path: string; readonly content: string }): bo
 
 /** Files a tool runs or obeys on its own when it opens the folder: a direnv file, editor tasks, package scripts. */
 const RUNS_ON_ITS_OWN =
-  /(?:^|\/)(?:\.envrc|\.env|package\.json|Makefile|\.pre-commit-config\.yaml|\.mcp\.json|\.(?:vscode|idea|husky|claude|codex|agents)\/.*)$/u;
+  /(?:^|\/)(?:\.envrc|\.env|package\.json|Makefile|justfile|\.?mise\.toml|\.pre-commit-config\.yaml|\.mcp\.json|\.(?:vscode|idea|husky|claude|codex|agents|mise)\/.*)$/iu;
 
 const listed = (paths: readonly string[]): string => paths.join(', ');
 
@@ -525,7 +580,7 @@ export function catalogItemWarnings(item: SharedCatalogItem): readonly CatalogIn
   const registries = packageRegistries(setup.command, setup.args, setup.env).map(
     (registry): CatalogInstallWarning => ({
       code: 'package-registry',
-      text: `It fetches packages from ${registry}, not the public registry. That registry can serve different files for the same version, so this item can change without an update.`,
+      text: `It sets ${registry}, which changes where packages come from or which servers are trusted to send them. Whoever controls that can serve different files for the same version, so this item can change without an update.`,
     }),
   );
   return [...unpinned, ...registries];

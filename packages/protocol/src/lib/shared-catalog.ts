@@ -36,13 +36,7 @@ import { isCanonicalAssetPath } from './fleet-clone-review.ts';
 import { InstantSchema } from './common.ts';
 import { DaemonIdSchema } from './pairing.ts';
 import { SECRET_REFERENCE_SOURCE } from './secrets.ts';
-import {
-  mcpServerRefusal,
-  RAW_KEY_PREFIXES,
-  SECRET_SOUNDING_NAME,
-  SessionMcpEnvNameSchema,
-  SessionMcpNameSchema,
-} from './session-mcp.ts';
+import { mcpServerRefusal, RAW_KEY_PREFIXES, SessionMcpEnvNameSchema, SessionMcpNameSchema } from './session-mcp.ts';
 
 // ── Formats and bounds ───────────────────────────────────────────────────────────────────────────
 
@@ -94,14 +88,14 @@ const utf8Length = (text: string): number => new TextEncoder().encode(text).leng
  * publisher. One of these could make "Anthropic" out of other letters, hide the end of a name, or make
  * two different file names look the same in the review \u2014 and the review is the control.
  */
-export const HIDDEN_CHARACTER_SOURCE = String.raw`\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180E\u200B-\u200F\u2028-\u202E\u2060-\u2064\u2066-\u206F\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF9-\uFFFB\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}`;
+export const HIDDEN_CHARACTER_SOURCE = String.raw`\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B-\u200F\u2028-\u202E\u2060-\u2064\u2066-\u206F\u2800\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF9-\uFFFB\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}`;
 /** C0 and C1 controls, except tab and line feed. */
 const CONTROLS = String.raw`\u0000-\u0008\u000B-\u001F\u007F-\u009F`;
 
 /** Anything hidden, any control, a tab or a line break: for one-line text a person reads as a name. */
 const HIDDEN_IN_LINE = new RegExp(String.raw`[${CONTROLS}\u0009\u000A${HIDDEN_CHARACTER_SOURCE}]`, 'u');
 /** Anything hidden or any control, but tabs and line breaks are fine: for longer text. */
-const HIDDEN_IN_TEXT = new RegExp(String.raw`[${CONTROLS}${HIDDEN_CHARACTER_SOURCE}]`, 'u');
+const HIDDEN_IN_TEXT = new RegExp(`[${CONTROLS}${HIDDEN_CHARACTER_SOURCE}]`, 'u');
 
 const NO_HIDDEN = 'no control, invisible or text-direction characters';
 
@@ -179,6 +173,8 @@ const segmentProblem = (segment: string): string | null => {
   if (!SKILL_SEGMENT.test(segment))
     return `${JSON.stringify(segment)} uses a character other than A-Z, a-z, 0-9, ., _ and -`;
   if (segment.endsWith('.')) return `${segment} ends with a dot`;
+  // A name a shell glob would hand a program as an option: `rm *` in that folder would read `-rf`.
+  if (segment.startsWith('-')) return `${segment} starts with a dash`;
   if (WINDOWS_DEVICE.test(segment)) return `${segment} is a device name on Windows`;
   // A carried `.git` folder is a repository inside the skill: its config can name programs (`fsmonitor`)
   // that any `git` run in that folder starts, with nothing in the review that looks like a script.
@@ -246,6 +242,22 @@ export const CatalogSkillSchema = z
         }
       }
     }
+    // A bare repository needs no `.git` name: a folder holding HEAD with objects/ and refs/ IS one to git,
+    // and its config can name programs any `git` run there starts.
+    for (const key of seen.keys()) {
+      if (key !== 'head' && !key.endsWith('/head')) continue;
+      const folder = key.slice(0, -'head'.length);
+      const keys = [...seen.keys()];
+      if (
+        keys.some(other => other.startsWith(`${folder}objects/`)) &&
+        keys.some(other => other.startsWith(`${folder}refs/`))
+      ) {
+        issue(
+          `${folder === '' ? 'the skill' : folder.slice(0, -1)} is laid out as a git repository, which a skill cannot carry`,
+        );
+        return;
+      }
+    }
     const total = files.reduce((sum, file) => sum + utf8Length(file.content), 0);
     if (total > CATALOG_SKILL_MAX_BYTES) issue('a skill is at most 2 MiB in total');
   });
@@ -268,32 +280,70 @@ const RAW_KEY = 'this looks like a raw key: name a secret as a whole environment
 const pieces = (value: string): readonly string[] => value.split(/[\s=&?#/:,;"'`]+/u).filter(piece => piece !== '');
 
 /**
- * A HEURISTIC, not a guarantee: whether a value carries what looks like a raw key — a known provider
- * prefix anywhere in it, or a long unbroken value right after a secret-sounding name (`--token=…`,
- * `?api_key=…`). A key with no known prefix under an innocent name is not found by anything.
+ * The whole words that say the next value is a credential, and the HTTP auth schemes. Whole words of a
+ * name split on `-`, `_` and `.`, never substrings: `--api-key` and `ACCESS_TOKEN` announce one, while
+ * `--author`, `--keyboard-layout` and `/oauth/authorize` do not.
  */
-/** A word that says the next one is a credential: a secret-sounding name, or an HTTP auth scheme. */
-const announcesKey = (word: string): boolean =>
-  SECRET_SOUNDING_NAME.test(word.toUpperCase()) || /^(?:bearer|basic)$/iu.test(word);
+const KEY_WORDS = new Set([
+  'key',
+  'apikey',
+  'token',
+  'secret',
+  'password',
+  'passwd',
+  'pass',
+  'pwd',
+  'credential',
+  'credentials',
+  'auth',
+  'pat',
+  'bearer',
+  'basic',
+]);
+const announcesKey = (name: string): boolean =>
+  name
+    .toLowerCase()
+    .split(/[-_.]+/u)
+    .some(word => KEY_WORDS.has(word));
 
+/** A known provider prefix on a piece long enough to be a key. */
+const prefixedKey = (piece: string): boolean => RAW_KEY_PREFIXES.test(piece) && piece.length >= 20;
+
+/**
+ * A HEURISTIC, not a guarantee: whether a value carries what looks like a raw key — a known provider
+ * prefix anywhere in it, or a long unbroken value right after a word that announces one (`--token=…`,
+ * `--api-key …`, `Bearer …`). A key with no known prefix under an innocent name is not found by anything.
+ */
 const holdsRawKey = (value: string): boolean => {
   const parts = pieces(value);
   return parts.some(
-    (part, index) =>
-      (RAW_KEY_PREFIXES.test(part) && part.length >= 20) ||
-      (index > 0 && announcesKey(parts[index - 1] ?? '') && part.length >= 16),
+    (part, index) => prefixedKey(part) || (index > 0 && announcesKey(parts[index - 1] ?? '') && part.length >= 16),
   );
 };
 
+/**
+ * The same heuristic for an address: a known prefix anywhere, and an announcing name only as a QUERY
+ * parameter's name (`?api_key=…`). A path segment is never read as "name, then value", so
+ * `/auth/callback-handler` is an ordinary address.
+ */
+const addressHoldsRawKey = (url: string): boolean => {
+  if (pieces(url).some(prefixedKey)) return true;
+  const query = url.split(/[?#]/u)[1] ?? '';
+  return query.split('&').some(pair => {
+    const [name = '', value = ''] = pair.split('=');
+    return announcesKey(name) && value.length >= 16;
+  });
+};
+
 /** One line a person reads as a command, an address or an id. */
-const plainLine = (max: number) =>
+const plainLine = (max: number, rawKey: (text: string) => boolean = holdsRawKey) =>
   z
     .string()
     .min(1)
     .max(max)
     .refine(text => !HIDDEN_IN_LINE.test(text), NO_HIDDEN)
     .refine(text => !substitutes(text), NO_SUBSTITUTION)
-    .refine(text => !holdsRawKey(text), RAW_KEY);
+    .refine(text => !rawKey(text), RAW_KEY);
 
 /** An argument or a value: tabs and line breaks are fine (the review quotes them), nothing hidden is. */
 const plainText = z
@@ -320,7 +370,10 @@ const CatalogMcpUrlSchema = z.strictObject({
   transport: z.literal('url'),
   // A plain pattern rather than `z.url()`, which accepts `javascript:` and `data:`. No user name or
   // password in the address: that is a credential in plain text.
-  url: plainLine(2_048).regex(HTTP_URL, 'an http:// or https:// address, with no user name or password in it'),
+  url: plainLine(2_048, addressHoldsRawKey).regex(
+    HTTP_URL,
+    'an http:// or https:// address, with no user name or password in it',
+  ),
   /** The installer signs in to it from their own machine (docs/mcp-oauth.md). A token never travels. */
   auth: z.literal('oauth').optional(),
   /** A client registered by hand with the provider. Its client SECRET has no field: it never travels. */

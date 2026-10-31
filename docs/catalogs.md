@@ -42,12 +42,13 @@ written and no two names can look alike:
 - every path is one plain relative path (no leading `/`, `~` or `$`, no `.` or `..`, no `\`), at most
   16 folders deep;
 - **every name in it is plain ASCII**: letters, digits, `.`, `_` and `-`, at most 255 characters, not
-  ending in `.`. That rules out invisible characters, look-alike letters, Unicode normalisation and case
+  ending in `.` and not starting with `-` (a shell glob would hand that to a program as an option). That rules out invisible characters, look-alike letters, Unicode normalisation and case
   folding beyond ASCII, and Windows's own tricks (`name::$DATA`, a trailing dot);
 - no Windows device names (`CON`, `NUL`, `COM1`…), because a project install lands in a repository a
   teammate on Windows may check out;
 - **no `.git` folder**. A carried repository's config can name programs (`core.fsmonitor`) that any
-  `git` command run in that folder starts, and nothing in the review would look like a script;
+  `git` command run in that folder starts, and nothing in the review would look like a script. A folder
+  laid out as a **bare repository** (`HEAD` beside `objects/` and `refs/`) is refused for the same reason;
 - no file is carried twice, **including two names a case-insensitive file system treats as one**
   (`SKILL.md` and `skill.md`);
 - no path is both a file and a folder;
@@ -68,11 +69,12 @@ placeholder the installer fills:
 - **A heuristic refuses values that look like raw keys**: the rule the MCP forms already use
   (`mcpServerRefusal`), plus a known provider prefix anywhere in an argument, value or address
   (`--token=ghp_…`, `?key=sk-…`), and a long value right after a secret-sounding word or an auth scheme
-  (`--api-key …`, `Bearer …`). It is a heuristic: a key with no known prefix under an innocent name is
+  (`--api-key …`, `Bearer …`). Those names are read as whole words, so `--author` and `/oauth/authorize`
+  are ordinary, and in an address only as a query parameter. It is a heuristic: a key with no known prefix under an innocent name is
   not found by anything.
 - A command, an argument, a value, an address and an OAuth client id refuse controls and invisible or
   text-direction characters. An argument or a value may hold a tab or a line break, which the review
-  shows quoted.
+  shows quoted, so it cannot draw a review line of its own.
 - An address is plain `http://` or `https://`, with no user name or password in it. A signed-in server
   is `https://` only.
 - An OAuth **client secret has no field**. The installer signs in on their own machine
@@ -151,29 +153,33 @@ The installer answers a preview from one module, `shared-catalog-review.ts`, so 
 what gets written can never disagree:
 
 - **Every file in full**: `SKILL.md` first, then every other file by path. Each invisible or
-  text-direction character, and each control but a tab, line break or carriage return, is **shown
-  marked** as `⟨U+202E⟩` (`revealHidden`), so a file cannot read differently on screen from what it says
-  (Trojan Source). The bytes installed are the bytes published; only what a person reads is marked.
+  text-direction character, and each control but a tab, a line break or a carriage return that ends a
+  line, is **shown marked** as `⟨U+202E⟩` (`revealHidden`), so a file cannot read differently on screen
+  from what it says (Trojan Source). The bytes installed are the bytes published; only what a person
+  reads is marked.
 - **Every command line**, quoted the way a person would type it, and **every variable**, with
-  placeholders shown as written.
+  placeholders shown as written. A value holding a tab or a line break is shown quoted.
 - **Warnings**, in words:
   - `unpinned-package`: each package the command fetches at launch with no fixed version. It reads npx,
     bunx, `npm exec`, `pnpm dlx`/`pnpx`, `yarn dlx`, `bun x`, uvx, `uv tool run`, `uv run --with`,
     `pipx run`, `docker`/`podman run`, `go run`, `deno run` and `nix run`/`nix shell`, every `-p` and
-    `--with` package, and the command lines inside `sh -c`, `cmd /c`, `env` and `npx -c` (three
-    levels deep). A container image counts as fixed only by its digest, since any tag can be pushed
+    `--with` package, and the command lines inside `sh -c` (also `-lc`), `cmd /c` and
+    `powershell -Command` (the rest of the arguments), `env` (also `-u`, `-C` and `-S`) and `npx -c`,
+    three levels deep. A container image counts as fixed only by its digest, since any tag can be pushed
     again. The text says it runs whatever is newest each time a ferret starts, so it can change without
     an update. **Even an exact version is only the top of the tree**: its own dependencies resolve fresh
     when it installs. This is a warning, not a refusal (owner decision Q15), because refusing would
     block most real servers.
-  - `package-registry`: a `--registry` or `--index-url` flag, or a variable such as
-    `NPM_CONFIG_REGISTRY` or `UV_INDEX_URL`. That registry can serve different files for the same
-    version, so an exact version means nothing there.
+  - `package-registry`: a `--registry`, `--index-url` or `--userconfig` flag (`-i` for Python tools), or
+    a variable that sets a registry (`NPM_CONFIG_REGISTRY`, `UV_INDEX_URL`), a proxy (`HTTPS_PROXY`) or
+    which certificates are trusted (`NODE_TLS_REJECT_UNAUTHORIZED`, `SSL_CERT_FILE`). Whoever controls
+    that can serve different files for the same version, so an exact version means nothing there.
   - `network-url`: a server at an address runs on someone else's computer and can change at any time.
   - `carries-scripts`: a skill carries scripts (by extension, or a `#!` first line), named one by one.
   - `runs-on-its-own`: a skill carries files a tool runs or obeys by itself when it opens the folder
-    (`.envrc`, `.env`, `package.json`, `Makefile`, `.pre-commit-config.yaml`, `.mcp.json`, and anything
-    in `.vscode`, `.idea`, `.husky`, `.claude`, `.codex` or `.agents`).
+    (`.envrc`, `.env`, `package.json`, `Makefile`, `justfile`, `mise.toml`, `.pre-commit-config.yaml`,
+    `.mcp.json`, and anything in `.vscode`, `.idea`, `.husky`, `.mise`, `.claude`, `.codex` or
+    `.agents`), in any letter case.
   - `hidden-characters`: which files hold the characters the review marks.
   - Only the installer can know `first-publisher`, `older-version` and `edited-locally`, so it adds those
     itself.

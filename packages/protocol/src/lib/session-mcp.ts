@@ -164,7 +164,7 @@ export type SessionMcpListing = z.infer<typeof SessionMcpListingSchema>;
 export const RAW_KEY_PREFIXES =
   /^(?:sk-|sk_live_|sk_test_|rk_live_|AKIA|ASIA|ghp_|gho_|ghs_|ghu_|github_pat_|glpat-|xox[abposr]-|AIza|hf_|pk_live_)/u;
 /** A name that announces a credential. */
-export const SECRET_SOUNDING_NAME = /(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH)/u;
+const SECRET_SOUNDING_NAME = /(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH)/u;
 /** A reference: Ferretry's secret store, or the environment. */
 const SECRET_REFERENCE = /^\$\{secret:[A-Za-z0-9_.-]+\}$/u;
 const ENV_REFERENCE = /^\$\{[A-Z_][A-Z0-9_]*(?::-[^}]*)?\}$/u;
