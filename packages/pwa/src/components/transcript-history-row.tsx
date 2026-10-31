@@ -23,11 +23,13 @@ export const wantsOlder = (status: TranscriptHistoryStatus, scrollTop: number): 
  *
  * Older messages load by themselves as the reader nears the top; the button is the same load for a
  * keyboard, a screen reader, or a reader who got there faster than the page. The row is one height in
- * every state, so changing state never moves the messages under the reader.
+ * every state — including before the first read says which, when it is empty — so a state arriving never
+ * moves the messages under the reader, and a reading position kept across a reload lands where it was.
  */
 export function TranscriptHistoryRow({ control }: { readonly control: TranscriptHistoryControl }) {
   const { status, loadOlder } = control;
-  if (status === 'unavailable') return null;
+  if (status === 'unavailable')
+    return <div aria-hidden="true" className="fy-transcript-history" data-history={status} />;
   return (
     <div className="fy-transcript-history" data-history={status}>
       {status === 'loading' ? (

@@ -43,9 +43,11 @@ describe('wantsOlder', () => {
 });
 
 describe('TranscriptHistoryRow', () => {
-  test('says nothing where the daemon cannot page', async () => {
+  test('says nothing where the daemon cannot page, but keeps the row’s place', async () => {
     mounted = await mount(<TranscriptHistoryRow control={control('unavailable')} />);
-    expect(mounted.container.querySelector('.fy-transcript-history')).toBeNull();
+    const row = must(mounted.container.querySelector('.fy-transcript-history'), 'the empty row');
+    expect(row.textContent).toBe('');
+    expect(row.getAttribute('aria-hidden')).toBe('true');
   });
 
   test('says older messages are loading, as a status', async () => {
