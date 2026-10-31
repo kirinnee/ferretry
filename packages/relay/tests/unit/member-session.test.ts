@@ -9,7 +9,9 @@ import {
   MemberAuthRecordSchema,
   MemberBoxKeySchema,
   memberAuthMessage,
+  MEMBER_JOIN_OUTCOME_BYTES,
   MemberJoinOutcomeSchema,
+  padJoinOutcome,
   MemberJoinRecordSchema,
   memberJoinMessage,
   MemberKeySchema,
@@ -19,6 +21,7 @@ import {
   toBase64Url,
   verifyDeviceProof,
 } from '@ferretry/relay';
+import { MemberJoinedResponseSchema } from '@ferretry/protocol';
 import should from 'should';
 import { newDaemonIdentity, relayCrypto } from '../support/identities.ts';
 
@@ -131,30 +134,69 @@ describe('member records', () => {
     should(MemberKeySchema.safeParse(BOX).success).be.false();
   });
 
-  it('should answer a join with one outcome or the one generic refusal', () => {
-    const joined = {
+  const joinedResponse = (overrides: Record<string, unknown> = {}) => ({
+    memberId: `mbr_${'m'.repeat(22)}`,
+    keyId: KEY_ID,
+    label: 'Alice',
+    daemonId: `fy_daemon_${'D'.repeat(43)}`,
+    daemonName: 'kirin-box',
+    catalogCount: 3,
+    carriers: [],
+    passkeyWindowEndsAt: '2026-10-31T09:10:00.000Z',
+    memberUnlockDays: 30,
+    ...overrides,
+  });
+
+  it('should answer a join with one outcome or the one generic refusal, padded', () => {
+    const joined = padJoinOutcome({
       t: 'joined',
       protocol: 'ferretry-relay/2',
-      response: {
-        memberId: `mbr_${'m'.repeat(22)}`,
-        keyId: KEY_ID,
-        label: 'Alice',
-        daemonId: `fy_daemon_${'D'.repeat(43)}`,
-        daemonName: 'kirin-box',
-        catalogs: [],
-        passkeyWindowEndsAt: '2026-10-31T09:10:00.000Z',
-        memberUnlockDays: 30,
-      },
-    };
-    should(MemberJoinOutcomeSchema.safeParse(joined).success).be.true();
+      response: MemberJoinedResponseSchema.parse(joinedResponse()),
+    });
+    const refused = padJoinOutcome({ t: 'join-refused', protocol: 'ferretry-relay/2', reason: 'join_refused' });
+    should(MemberJoinOutcomeSchema.safeParse(JSON.parse(joined ?? '')).success).be.true();
+    should(MemberJoinOutcomeSchema.safeParse(JSON.parse(refused ?? '')).success).be.true();
+    // One reason only: a second one would be an oracle. And an unpadded outcome is not an outcome.
+    const bad = JSON.parse(refused ?? '') as Record<string, unknown>;
+    should(MemberJoinOutcomeSchema.safeParse({ ...bad, reason: 'code_expired' }).success).be.false();
     should(
       MemberJoinOutcomeSchema.safeParse({ t: 'join-refused', protocol: 'ferretry-relay/2', reason: 'join_refused' })
         .success,
-    ).be.true();
-    // One reason only: a second one would be an oracle.
-    should(
-      MemberJoinOutcomeSchema.safeParse({ t: 'join-refused', protocol: 'ferretry-relay/2', reason: 'code_expired' })
-        .success,
     ).be.false();
+    should(MemberJoinOutcomeSchema.safeParse({ ...bad, pad: 'xx' }).success).be.false();
+  });
+
+  it('should write both outcomes at exactly the same size, so the size says nothing', () => {
+    const joined =
+      padJoinOutcome({
+        t: 'joined',
+        protocol: 'ferretry-relay/2',
+        response: MemberJoinedResponseSchema.parse(joinedResponse()),
+      }) ?? '';
+    const refused = padJoinOutcome({ t: 'join-refused', protocol: 'ferretry-relay/2', reason: 'join_refused' }) ?? '';
+    should(new TextEncoder().encode(joined).length).equal(MEMBER_JOIN_OUTCOME_BYTES);
+    should(new TextEncoder().encode(refused).length).equal(MEMBER_JOIN_OUTCOME_BYTES);
+  });
+
+  it('should fit the largest joined answer a publisher can send, and refuse to write one that does not fit', () => {
+    const longUrl = (index: number) => `https://${String(index).padStart(2, '0')}${'a'.repeat(2_000)}.example`;
+    const carriers = Array.from({ length: 8 }, (_, index) => ({ kind: 'direct', url: longUrl(index) }));
+    const worst = MemberJoinedResponseSchema.safeParse(
+      joinedResponse({ label: '€'.repeat(80), daemonName: '€'.repeat(100), carriers, catalogCount: 64 }),
+    );
+    // The worst case must really be a valid answer, or this test would prove nothing.
+    should(worst.success ? 'parsed' : JSON.stringify(worst.error.issues[0])).equal('parsed');
+    if (worst.success) {
+      const text = padJoinOutcome({ t: 'joined', protocol: 'ferretry-relay/2', response: worst.data });
+      should(text).not.be.null();
+      should(new TextEncoder().encode(text ?? '').length).equal(MEMBER_JOIN_OUTCOME_BYTES);
+    }
+    const tooBig = {
+      t: 'join-refused',
+      protocol: 'ferretry-relay/2',
+      reason: 'join_refused',
+      extra: 'x'.repeat(MEMBER_JOIN_OUTCOME_BYTES),
+    };
+    should(padJoinOutcome(tooBig as never)).be.null();
   });
 });

@@ -1510,17 +1510,19 @@ failed to understand.
 
 ### One session, one job
 
-The record at sequence `1` is the client's credential, and it is a **strict union of five**. Each
+The record at sequence `1` is the client's credential, and it is a **strict union of three** today —
+`auth`, `stream`, `pair` — and of **five** once catalogs phase 2b serves `join` and `member` (Member
+sessions). Each
 one commits the session to a mode, the mode is decided by that record's own shape rather than by any
 later negotiation, and each mode's terminal state is unreachable from the others:
 
-| sequence-1 record | the session is        | what follows                                                                             |
-| ----------------- | --------------------- | ---------------------------------------------------------------------------------------- |
-| `auth`            | a **request session** | any number of `req`, each answered by `res` (in parts when large)                        |
-| `stream`          | a **stream session**  | exactly one protocol-switching stream, in `data` frames, until it ends                   |
-| `pair`            | a **pairing session** | one redemption attempt, one sealed outcome, then the session closes                      |
-| `join`            | a **join session**    | one share-code redemption, one sealed outcome, then the session closes (Member sessions) |
-| `member`          | a **member session**  | requests on the member route table only (Member sessions)                                |
+| sequence-1 record | the session is        | what follows                                                                                            |
+| ----------------- | --------------------- | ------------------------------------------------------------------------------------------------------- |
+| `auth`            | a **request session** | any number of `req`, each answered by `res` (in parts when large)                                       |
+| `stream`          | a **stream session**  | exactly one protocol-switching stream, in `data` frames, until it ends                                  |
+| `pair`            | a **pairing session** | one redemption attempt, one sealed outcome, then the session closes                                     |
+| `join`            | a **join session**    | one share-code redemption, one sealed outcome, then the session closes (Member sessions, from phase 2b) |
+| `member`          | a **member session**  | requests on the member route table only (Member sessions, from phase 2b)                                |
 
 Any other message at sequence `1` ends the session with `4400`. So does any message a mode does not
 list: a `req` on a stream session, a second credential record anywhere, a `data` record on a request
@@ -2440,7 +2442,7 @@ and says so.
 
 ### Member sessions
 
-**Status: specified, not yet served.** This is the contract catalogs phase 2b builds against; until it
+**Status: specified, not yet served.** This is the contract catalogs phase 2b builds against. Until it
 lands a daemon's union is still `auth`, `stream` and `pair`, and a `join` or `member` record is an unknown
 `t` that ends the session with `4400`.
 
@@ -2482,32 +2484,63 @@ messages and parses both records; both ends use it.
 The publisher answers with exactly one sealed outcome and then `4440`, as a pairing session does:
 
 ```json
-{ "t": "joined", "protocol": "ferretry-relay/2", "response": { "memberId": "mbr_…", "keyId": "mk_…", "label": "Alice", "daemonId": "fy_daemon_…", "daemonName": "kirin-box", "catalogs": [{ "catalogId": "cat_…", "name": "Kirin's skills" }], "carriers": [], "passkeyWindowEndsAt": "…", "memberUnlockDays": 30 } }
-{ "t": "join-refused", "protocol": "ferretry-relay/2", "reason": "join_refused" }
+{ "t": "joined", "protocol": "ferretry-relay/2", "response": { "memberId": "mbr_…", "keyId": "mk_…", "label": "Alice", "daemonId": "fy_daemon_…", "daemonName": "kirin-box", "catalogCount": 1, "carriers": [], "passkeyWindowEndsAt": "…", "memberUnlockDays": 30 }, "pad": "   …" }
+{ "t": "join-refused", "protocol": "ferretry-relay/2", "reason": "join_refused", "pad": "   …" }
 ```
 
 - **Every rule of a pairing session holds, by name.** It is a record, never a routed request, so no
   route is reachable before a member key exists; it reads no host credential; one attempt per session,
   success or failure; **no edge to serving** — a browser that joined reconnects with `member`; the
-  client latches the outcome before the close; the outcome's SIZE tells a relay operator whether it
-  joined, and this document says so rather than claiming the exchange is outcome-blind.
-- **One refusal for every cause.** An unknown, spent, expired or ended code, a full publisher, a
-  malformed field, a key that is not an Ed25519 SPKI, a box key that is not a usable point and a proof
-  that does not verify are all the same `join-refused`. A publisher with no live share still keys the
-  channel and refuses identically, so no observer can tell "no code exists" from "wrong code".
-- **The code is burned before anything else is decided**, single use or not (a multi-use code counts a
-  use), with no suspension point between the comparison and the burn, so two concurrent joins cannot
-  both spend it. **Except a full publisher**: at most 128 members and 512 member keys, and a join that
-  would exceed either answers `join-refused` and **leaves the code live**, as a full pairing does.
+  client latches the outcome before the close.
+- **The outcome's size says nothing, unlike a pairing's.** Both outcomes are padded with spaces to
+  exactly `MEMBER_JOIN_OUTCOME_BYTES` (24 KiB) of plaintext, which holds the largest `joined` a publisher
+  can send (eight published carriers of 2 KiB addresses, a 100-character publisher name, an 80-character
+  label) with room to spare, and fits one record. `padJoinOutcome` writes it; an outcome without its pad,
+  or with anything but spaces in it, does not parse. That is also why `joined` names no catalog, only how
+  many: the browser reads the names from `GET /v1/shared/me` once it has a passkey, and the publisher
+  names the passkey itself. A relay operator still sees THAT a join session happened (§10), never whether
+  it succeeded.
+- **One refusal for every cause.** An unknown, spent, expired or ended code, a full publisher, the hourly
+  count, a malformed field, a key that is not an Ed25519 SPKI, the all-zero box key and a proof that does
+  not verify are all the same `join-refused`. A publisher with no live share still keys the channel and
+  refuses identically, so no observer can tell "no code exists" from "wrong code".
+- **The code.** 16 random bytes (128 bits of entropy), written as `fy_share_` and 22 base64url
+  characters; the prefix lets a secret scanner recognise a leaked one. The publisher stores only the
+  SHA-256 of the code's text, a fingerprint, never the code; a 128-bit value cannot be found from its
+  hash by trying. It travels only inside this sealed record and in the link's fragment.
+- **The order of the checks, which is contract:**
+  1. **Everything that needs no state first**: every field against its schema, the member key, the box
+     key, and the proof against this session's `TH`. These may suspend (a signature check is async); a
+     failure here refuses and **spends nothing**, so a broken client never loses a code.
+  2. Then **in one step with no suspension point**: find the share by the code's SHA-256 (compared in
+     constant time against a dummy when nothing is live); check it is live; check room — the publisher's
+     128 members and 512 keys, the member's own 200 keys, and the hourly count of SUCCESSFUL joins and
+     redeems (60). **A refusal for room or the hourly count leaves the code live**, as a full pairing does.
+     Then burn the code (single use) or count one use (multi use), and reserve the key's slot.
+  3. Then **persist** the member and the key. Only after the write succeeds does the publisher seal
+     `joined`. A write that fails refuses, and the code stays spent: the owner sees the share as used with
+     no key behind it, and mints another.
+     So two concurrent joins cannot both spend one code, and nothing a stranger sends can spend one at all.
 - **`joined.response` is `MemberJoinedResponseSchema`, whole**, `carriers` included, for the reason
   `paired.response` is whole. It has no field for a key, a proof or a fingerprint.
-- **The key is filed only after `joined`**, and the new key can do exactly one thing for the next ten
-  minutes: register its passkey (zero-trust B2). After the window it is useless until the owner
-  re-opens one or shares again.
-- **Budgets.** A code is 128 random bits, so guessing is not an attack and the budget only stops
-  floods: at most 10 join attempts a minute per carrier and peer (relayed: per rendezvous session, as
-  pairing), and 60 joins an hour per publisher. A transport failure spends nothing; a sealed
-  `join-refused` is final for that attempt.
+- **The browser keeps the key only after it reads `joined`.** An attempt whose answer never arrived is
+  reported plainly; the owner's Members list shows the unused key, and it disappears on its own (below).
+- **The passkey window.** A new key can do exactly one thing for ten minutes: register ONE passkey
+  (zero-trust B2). More passkeys for that key are registered only from inside a member session that is
+  already **unlocked** with an earlier one, never on the key alone. A key that registered no passkey when
+  its window closes is **removed** — it could never do anything — so keys pressed through a leaked
+  multi-use code drain on their own instead of filling the publisher.
+- **Budgets stop floods and can never lock the real recipient out.** A code cannot be guessed, so unlike
+  pairing's five-per-code budget, **no failed attempt is counted against a code or a share**: nothing a
+  stranger sends can spend, expire or lock somebody else's code. The hourly count is of successful joins
+  only, which need a live code, so a stranger cannot spend it either. Failed attempts are bounded by the
+  carrier alone: 10 a minute per peer address on the direct carrier. **On the relay there is no per-peer
+  limit worth the name** — every relayed attempt is its own rendezvous session, one attempt each — so
+  relayed attempts are priced only by the rendezvous admission (30 a minute) and this section's 6
+  pre-credential slots. The residual is the one stated for every pre-credential session: a relayed flood
+  can occupy the rendezvous's shared admission and slots and DELAY a relayed recipient (who retries
+  `4429`), never refuse them, and the direct carrier is untouched. A transport failure spends nothing; a
+  sealed `join-refused` is final for that attempt.
 
 **`member`: a request session on the member route table.**
 
@@ -2524,6 +2557,10 @@ The publisher answers with exactly one sealed outcome and then `4440`, as a pair
 - The publisher verifies the proof against the member key it filed at join. Unknown key, revoked key,
   idle-expired key and bad proof are **one** refusal, `4403`, as for a device. (Phase 5 adds a sealed
   `member-revoked` answered only to a holder whose proof verifies; until then a revoked key gets `4403`.)
+- **`4403` is a cleartext close a relay can forge, so a browser never deletes a member key on it.** It
+  marks the key refused, says so, and keeps it — exactly as a paired device keeps its key on `4403` —
+  until the person chooses to join again or to forget it, or a SEALED `member-revoked` arrives (phase 5).
+  Joining again with a new code makes a NEW key; the refused one is never discarded silently.
 - Accepted, it answers `authenticated { accessExpiresAt }` and the session becomes a request session
   with a device session's lease, `renew` and close rules — the renew answered with the `member-renew`
   signature — on a **separate route table**: `/v1/shared/*` and nothing else. The dispatcher hands a
@@ -2531,18 +2568,29 @@ The publisher answers with exactly one sealed outcome and then `4440`, as a pair
   forgotten capability is still unreachable to a member. Its requests carry a member principal that
   meets **no** credential minimum of the main table (`authenticated`, `operator`, `admin-token`), and
   a test sweeps the main table to prove it.
-- A member session that has not unlocked with its member passkey reaches only `/v1/shared/unlock*` and
-  `/v1/shared/passkeys*`. One unlock lasts the member unlock period (30 days by default, 1 to 90), not
-  the 8 hours of a device unlock, because a member only reads.
+- A member session that has not unlocked with its member passkey reaches only `/v1/shared/unlock*` and,
+  inside the key's window only, `/v1/shared/passkeys*` (the one-passkey rule above). Everything else —
+  `GET /v1/shared/me` included, so a key-only holder never reads the member's name or catalogs — needs
+  the unlock. One unlock lasts the member unlock period (30 days by default, 1 to 90), not the 8 hours of
+  a device unlock, because a member only reads.
 - **Every member request re-checks the member's catalog grants**, so a revoke is effective for the very
   next request, and revoking closes the member's live sessions at once — write first, then drop the
   grant, then close, as device revocation does.
 
 **A browser already a member that opens another code** opens a `member` session and spends the code with
-`POST /v1/shared/redeem` inside it (design §2.3). The publisher burns the code first, whatever happens
-next; a code minted for a different member, or for a new one, is refused and the owner is told. A
-`member` session whose key the publisher no longer knows (`4403`) forgets that key and joins afresh
-with the same code.
+`POST /v1/shared/redeem` inside it (design §2.3), under the same order and the same hourly count as a
+join. The rules, said once:
+
+- A **single-use** code is burned whatever happens next, then compared: minted for this member, it adds
+  any catalogs it grants; minted for a different member or for a new one, it is refused and the owner is
+  told (owner decision Q5).
+- A **multi-use** code counts a use only when the redeem succeeds and adds a catalog. Reopening a
+  workshop link this browser already joined adds nothing and spends nothing; a browser of a different
+  member is refused and spends nothing, because the code was never single use.
+- **Q5 holds only for a browser that uses `redeem`.** A `join` carries a fresh key that links to no
+  member, so a browser that chooses to join instead of redeem — or a person in a second browser profile —
+  becomes whichever member the code names. That is not a leak (the code was a credential for that member
+  either way), and the owner's Members list shows each browser under its member.
 
 **Reserved, not part of this union yet:** `guest`, a session bound to one public catalog with no key at
 all (design §2.8, phase 4), and the sealed `member-revoked` (phase 5). A record with either `t` today is
@@ -2551,7 +2599,7 @@ an unknown `t` and ends the session with `4400`.
 **What a relay operator sees of a member** is §10's list: a pre-auth session for fingerprint X at time T
 from IP Y, a handshake, sealed records, a close. It sees **that** a join or a member session happened,
 because the pre-auth slot timing and the record sizes differ from a device's, and never the code, the
-keys, the member's name, the catalogs or any content.
+keys, the member's name, the catalogs, any content, or whether a join succeeded.
 
 ### What this tunnel does not carry
 

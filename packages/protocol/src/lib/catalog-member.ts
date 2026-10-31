@@ -22,7 +22,7 @@
 import { z } from 'zod';
 import { PublishedCarriersSchema } from './carriers.ts';
 import { InstantSchema } from './common.ts';
-import { DaemonIdSchema, DaemonNameSchema } from './pairing.ts';
+import { DaemonIdSchema, DaemonNameSchema, isDialableLinkAddress, readLinkFragmentFields } from './pairing.ts';
 import { CatalogLabelSchema, SharedCatalogIdSchema } from './shared-catalog.ts';
 
 export const CATALOG_SHARES_PATH = '/v1/catalog-shares' as const;
@@ -48,7 +48,7 @@ export const CATALOG_SHARE_EXPIRY_SECONDS: Readonly<Record<CatalogShareExpiry, n
 
 /** A multi-use code's cap: how many browsers may join through it before it ends. */
 export const CATALOG_SHARE_MULTI_CAP_DEFAULT = 50;
-export const CATALOG_SHARE_MULTI_CAP_MAX = 500;
+export const CATALOG_SHARE_MULTI_CAP_MAX = 200;
 /** How many catalogs one share may grant. */
 export const CATALOG_SHARE_MAX_CATALOGS = 64;
 /** Live (unspent, unexpired) shares at once. */
@@ -57,6 +57,12 @@ export const CATALOG_MAX_LIVE_SHARES = 64;
 export const CATALOG_MAX_MEMBERS = 128;
 /** Browsers across every member. A full publisher refuses a join and LEAVES THE CODE LIVE, as a full pairing does. */
 export const CATALOG_MAX_MEMBER_KEYS = 512;
+/**
+ * Browsers one member may have. Below the publisher-wide bound, so one leaked multi-use code fills at most its
+ * own member and never shuts every other invitee out. A key that never registered a passkey is removed when
+ * its passkey window closes, so such a flood also drains on its own.
+ */
+export const CATALOG_MAX_KEYS_PER_MEMBER = 200;
 
 /** After a join, the new key may register its passkey for this long and do nothing else (zero-trust B2). */
 export const MEMBER_PASSKEY_WINDOW_SECONDS = 600;
@@ -69,8 +75,13 @@ export const MEMBER_KEY_IDLE_EXPIRY_DAYS = 90;
 
 /** Join attempts per minute per carrier and peer (relayed: per rendezvous session, as pairing). */
 export const MEMBER_JOIN_ATTEMPTS_PER_MINUTE = 10;
-/** Joins per hour per publisher, whatever the carrier. */
+/**
+ * SUCCESSFUL joins and redeems per hour per publisher, whatever the carrier. Only a live code can succeed, so a
+ * stranger cannot spend this; checked before the code is burned, so a refusal for it leaves the code live.
+ */
 export const MEMBER_JOINS_PER_HOUR = 60;
+/** How many shares a list answers: the live ones, then the most recent ended ones. */
+export const CATALOG_SHARES_LISTED_MAX = 500;
 
 // ── Identifiers ──────────────────────────────────────────────────────────────────────────────────
 
@@ -87,9 +98,12 @@ export const CatalogShareIdSchema = z.string().regex(/^shr_[A-Za-z0-9_-]{22}$/u,
 export type CatalogShareId = z.infer<typeof CatalogShareIdSchema>;
 
 /**
- * A share code: `fy_share_` and 22 base64url characters, 128 random bits. Long enough that guessing is not
- * an attack (so its rate limit only stops floods), and prefixed so a chat or a code host's secret scanner
- * can recognise a leaked one. It cannot be read as a pairing code, nor a pairing code as it.
+ * A share code: `fy_share_` and 22 base64url characters — 16 random bytes, so 128 bits of entropy (the 22
+ * characters hold 132 bits; the last 4 are the encoding's zero padding). Far past guessing, so its rate limit
+ * only stops floods and no failed attempt ever spends or locks a code. Prefixed so a chat or a code host's
+ * secret scanner can recognise a leaked one. It cannot be read as a pairing code, nor a pairing code as it.
+ * The publisher stores only the SHA-256 of the code's text, a fingerprint that is safe to keep because a
+ * 128-bit value cannot be found from its hash by trying.
  */
 export const CatalogShareCodeSchema = z
   .string()
@@ -183,7 +197,9 @@ export const CatalogShareMintResponseSchema = z.strictObject({
 });
 export type CatalogShareMintResponse = z.infer<typeof CatalogShareMintResponseSchema>;
 
-export const CatalogShareListSchema = z.strictObject({ shares: z.array(CatalogShareViewSchema) });
+export const CatalogShareListSchema = z.strictObject({
+  shares: z.array(CatalogShareViewSchema).max(CATALOG_SHARES_LISTED_MAX),
+});
 export type CatalogShareList = z.infer<typeof CatalogShareListSchema>;
 
 /** One browser of a member, as the owner sees it. */
@@ -220,6 +236,11 @@ export type CatalogMemberList = z.infer<typeof CatalogMemberListSchema>;
  * What a browser is told the one moment its join succeeded, inside the sealed `joined` record. Like the
  * pairing response it has no field for a key, a proof or a fingerprint, and it is embedded WHOLE so the
  * next field added here crosses a relay the day it ships.
+ *
+ * IT NAMES NO CATALOG, only how many. Both join outcomes are padded to one size (`@ferretry/relay`'s
+ * `MEMBER_JOIN_OUTCOME_BYTES`) so a relay operator cannot read the outcome from the record's length, and a
+ * list of names is what would make a `joined` too large to pad cheaply. The browser reads the names from
+ * `GET /v1/shared/me` once it has a passkey, and the publisher names the passkey itself.
  */
 export const MemberJoinedResponseSchema = z.strictObject({
   memberId: CatalogMemberIdSchema,
@@ -227,9 +248,8 @@ export const MemberJoinedResponseSchema = z.strictObject({
   label: CatalogMemberLabelSchema,
   daemonId: DaemonIdSchema,
   daemonName: DaemonNameSchema,
-  catalogs: z
-    .array(z.strictObject({ catalogId: SharedCatalogIdSchema, name: CatalogLabelSchema }))
-    .max(CATALOG_SHARE_MAX_CATALOGS),
+  /** How many catalogs this member may read now. Their names come from `GET /v1/shared/me`. */
+  catalogCount: z.number().int().min(0).max(CATALOG_SHARE_MAX_CATALOGS),
   carriers: PublishedCarriersSchema.default([]),
   /** The new key must register its passkey before this; after it, the key is useless until the owner re-opens it. */
   passkeyWindowEndsAt: InstantSchema,
@@ -252,9 +272,11 @@ export const SharedMeSchema = z.strictObject({
     )
     .max(CATALOG_SHARE_MAX_CATALOGS),
   carriers: PublishedCarriersSchema.default([]),
-  /** A member session that is not unlocked reaches only the unlock and passkey routes. */
-  unlocked: z.boolean(),
-  unlockExpiresAt: InstantSchema.optional(),
+  /**
+   * When this browser's member unlock ends. There is no "unlocked" flag: this route is reachable ONLY from an
+   * unlocked session, and a key-only holder must never read the label or the catalogs.
+   */
+  unlockExpiresAt: InstantSchema,
   passkeys: z.number().int().min(0).max(16),
 });
 export type SharedMe = z.infer<typeof SharedMeSchema>;
@@ -308,8 +330,12 @@ export interface ShareLinkSeed {
   readonly code: CatalogShareCode;
 }
 
-/** A share fragment, for surfaces that gate before parsing. Admits exactly the version the parser reads. */
-export const SHARE_FRAGMENT_PATTERN = /^#?v1(?:;|$)/u;
+/**
+ * A share fragment, for surfaces that gate before parsing: `v1` with a `share=` field. A pairing fragment
+ * (`PAIRING_FRAGMENT_PATTERN`, any `v1`) also admits a share fragment, so a surface ROUTES BY PATH — `/join`
+ * is a share, the pairing page a pairing — and only then gates and parses.
+ */
+export const SHARE_FRAGMENT_PATTERN = /^#?v1;(?:[^;]*;)*share=/u;
 
 /**
  * Writes the one fragment form for one share: `v1;url=…;fp=…;share=…`. The pairing fragment's grammar
@@ -331,37 +357,21 @@ export function shareLinkUrl(appOrigin: string, seed: ShareLinkSeed): string {
 }
 
 /**
- * Reads a share fragment back, or throws the reason it cannot. Pairing's tolerance rules: an unrecognised
- * field is IGNORED (the next version arriving), a repeated one is REFUSED (a real ambiguity), and every
- * value is proved against its own schema. No field names a rendezvous: the app finds one itself.
+ * Reads a share fragment back, or throws the reason it cannot. The SAME field reader as a pairing link
+ * (`readLinkFragmentFields`): an unrecognised field is ignored, a repeated one refused. One name is refused
+ * rather than ignored — `code`, which only a pairing link carries — so a link holding both a pairing code
+ * and a share code is read by neither. The publisher's address must be http(s). No field names a
+ * rendezvous: the app finds one itself.
  */
 export function parseShareFragment(fragment: string): ShareLinkSeed {
-  const pieces = (fragment.startsWith('#') ? fragment.slice(1) : fragment).split(';');
-  if (pieces.shift() !== 'v1') throw new Error('share link version is not recognised');
-  const fields = new Map<string, string>();
-  for (const piece of pieces) {
-    const separator = piece.indexOf('=');
-    if (separator <= 0) throw new Error('share link field is not name=value');
-    const name = piece.slice(0, separator);
-    if (fields.has(name)) throw new Error(`share link repeats ${name}`);
-    let value: string;
-    try {
-      value = decodeURIComponent(piece.slice(separator + 1));
-    } catch {
-      throw new Error(`share link field ${name} is not decodable`);
-    }
-    fields.set(name, value);
-  }
+  const fields = readLinkFragmentFields(fragment, 'share link');
+  if (fields.has('code')) throw new Error('this is a pairing link, not a share link');
   const daemonUrl = fields.get('url');
   const fingerprint = fields.get('fp');
   const code = fields.get('share');
   if (daemonUrl === undefined || fingerprint === undefined || code === undefined)
     throw new Error('share link must include url, fp and share');
-  try {
-    new URL(daemonUrl);
-  } catch {
-    throw new Error('share link publisher address is not a URL');
-  }
+  if (!isDialableLinkAddress(daemonUrl)) throw new Error('share link publisher address is not an http or https URL');
   const daemonId = DaemonIdSchema.safeParse(fingerprint);
   if (!daemonId.success) throw new Error('share link carries an invalid fingerprint');
   const parsedCode = CatalogShareCodeSchema.safeParse(code);
@@ -371,23 +381,46 @@ export function parseShareFragment(fragment: string): ShareLinkSeed {
 
 // ── The member passkey's name ────────────────────────────────────────────────────────────────────
 
-/** WebAuthn recommends user names of at most 64 bytes; a passkey manager may cut a longer one anywhere. */
-export const MEMBER_PASSKEY_NAME_MAX = 64;
+/**
+ * WebAuthn lets an authenticator cut `user.name` at 64 BYTES, anywhere, so the name is built to fit 64 bytes
+ * of UTF-8 itself and is never cut by somebody else.
+ */
+export const MEMBER_PASSKEY_NAME_MAX_BYTES = 64;
 
-const shorten = (text: string, max: number): string => {
-  const characters = Array.from(text);
-  return characters.length <= max ? text : `${characters.slice(0, Math.max(1, max - 1)).join('')}…`;
+const SEPARATOR = ' · ';
+const ELLIPSIS = '…';
+const bytesOf = (text: string): number => new TextEncoder().encode(text).length;
+
+/** `text` cut to at most `max` UTF-8 bytes, at a character boundary, with an ellipsis when it was cut. */
+const shortenToBytes = (text: string, max: number): string => {
+  if (bytesOf(text) <= max) return text;
+  let kept = '';
+  for (const character of text) {
+    if (bytesOf(kept + character) + bytesOf(ELLIPSIS) > max) break;
+    kept += character;
+  }
+  return kept + ELLIPSIS;
 };
 
 /**
  * The name a member passkey is registered under (design §3.2): "‹member› · ‹catalog or 'N catalogs'› ·
  * ‹publisher›", e.g. "Alice · Kirin's skills · kirin-box", so a person with five shares can tell their
- * passkeys apart and knows which one to delete when access ends. Each part is shortened so the whole fits
- * {@link MEMBER_PASSKEY_NAME_MAX} characters, the publisher's name kept longest.
+ * passkeys apart and knows which one to delete when access ends. It fits {@link MEMBER_PASSKEY_NAME_MAX_BYTES}:
+ * when it would not, each part is shortened to its own byte budget, the publisher's name kept longest
+ * because it is what tells two publishers' passkeys apart.
+ *
+ * It is the publisher's own text and proves nothing: a hostile publisher may call itself "kirin-box" too.
+ * The passkey's `user.id` is the member KEY id, not the member id, so a synced passkey manager — which
+ * replaces a passkey with the same RP and `user.id` — never lets a member's second browser overwrite the
+ * first browser's passkey.
  */
 export function memberPasskeyName(memberLabel: string, catalogNames: readonly string[], daemonName: string): string {
   const what = catalogNames.length === 1 ? (catalogNames[0] ?? '') : `${catalogNames.length} catalogs`;
-  const name = `${memberLabel} · ${what} · ${daemonName}`;
-  if (Array.from(name).length <= MEMBER_PASSKEY_NAME_MAX) return name;
-  return `${shorten(memberLabel, 16)} · ${shorten(what, 24)} · ${shorten(daemonName, 18)}`;
+  const name = [memberLabel, what, daemonName].join(SEPARATOR);
+  if (bytesOf(name) <= MEMBER_PASSKEY_NAME_MAX_BYTES) return name;
+  // The member gets at most 14 bytes and the catalog 18; the publisher gets everything left (at least 24).
+  const label = shortenToBytes(memberLabel, 14);
+  const catalog = shortenToBytes(what, 18);
+  const left = MEMBER_PASSKEY_NAME_MAX_BYTES - bytesOf(label) - bytesOf(catalog) - 2 * bytesOf(SEPARATOR);
+  return [label, catalog, shortenToBytes(daemonName, left)].join(SEPARATOR);
 }

@@ -417,47 +417,66 @@ as JSON on stderr, so a script never skips the review a person would have read.
 **Status: the contract (2a) is written; nothing serves it yet.** Phase 2b builds the publisher's side,
 2c the app's. The wire is `packages/protocol/src/lib/catalog-member.ts` and
 `packages/relay/src/lib/member-session.ts`; the session records are
-[relay-protocol.md](relay-protocol.md) §14 "Member sessions".
+[relay-protocol.md](relay-protocol.md) §14 "Member sessions", which also fixes the exact order of a join's
+checks.
 
 **A member is a person, not a device.** The owner names a member ("Alice", "Workshop Oct 31"). A
 member can read the catalogs they were given, and nothing else on the machine: no capability, no unlock
 of the machine, no place in the device list. One member can have many browsers; each is a **member
 key** that browser made and can never export, plus that browser's own **member passkey**, named
-"‹member› · ‹catalog› · ‹publisher›" (for example "Alice · Kirin's skills · kirin-box") so a person can
-tell their passkeys apart.
+"‹member› · ‹catalog› · ‹publisher›" (for example "Alice · Kirin's skills · kirin-box", at most 64 bytes)
+so a person can tell their passkeys apart. That name is the publisher's own text and proves nothing. Each
+passkey is filed under its browser's key id, so a synced password manager never replaces one browser's
+passkey with another's.
 
 **Sharing.** The owner mints a **share**: the catalogs it grants, who it is for (a new person, or a
 member who already exists), how long the code works (15 minutes, 1, 3 or 8 hours, or 1 day), and single
 use (the code burns when used) or many (one member named by the share, until it expires or reaches its
-cap, at most 500). Minting needs the `sharing` capability and, from a device, a passkey proved for this
+cap, at most 200). Minting needs the `sharing` capability and, from a device, a passkey proved for this
 act alone (`share-catalog`), as minting a pairing code does.
 
-- **The code is shown once.** `fy_share_` and 128 random bits. The answer to the mint is the only place
-  it ever appears; the publisher keeps only its SHA-256, and no list, view or audit event has a field for
-  it (a test walks every schema).
+- **The code is shown once.** `fy_share_` and 16 random bytes (128 bits). The answer to the mint is the
+  only place it ever appears; the publisher keeps only its SHA-256, and no list, view or audit event has a
+  field for it (a test walks every schema).
+- **A code for an existing member is a credential for everything that member can read**, not only the
+  catalogs the share adds: whoever opens it becomes another browser of that member. The share sheet says
+  so before a code is minted for an existing member, and suggests a new member instead when in doubt.
 - **The link carries it in the fragment only**: `https://<app>/join#v1;url=…;fp=…;share=…`. The pairing
-  link's grammar, but the code is under its own field name, so a pairing reader refuses a share link and
-  a share reader refuses a pairing link. A link-preview fetcher never sees a fragment.
+  link's grammar and the same reader, but the code is under its own field name: a share reader refuses a
+  link carrying `code=`, a pairing reader one carrying `share=`, so no link is read by both. The app routes
+  by path (`/join` is a share). The publisher's address must be http(s). A link-preview fetcher never sees
+  a fragment.
 
 **Joining.** The browser opens the link, makes its member key and box key, proves the publisher against
 the fingerprint, and sends one sealed `join` record, on the direct address or the hosted relay. Every
-failure is one generic refusal. The code is burned before anything else is decided. The new key then has
-ten minutes to register its passkey, and can do nothing else; after that every member session needs a
-**member unlock** with that passkey, which lasts 30 days by default (1 to 90), because a member only
-reads.
+failure is one generic refusal, and the answer is padded so even its size does not tell a relay whether it
+worked. Checks that need nothing stored come first, so a broken client never loses a code; then, in one
+step, the code is found, room is checked (a refusal for room leaves the code live), and the code is burned.
 
-**Already a member?** The browser signs in first, then spends the new code inside its session; the
-code is burned whatever happens next. A code made for a different member, or for a new member, is
-refused and the owner is told (owner decision Q5): a browser is one member per publisher.
+- The new key then has **ten minutes to register ONE passkey**, and can do nothing else. A key that
+  registered none when its window closes is removed. More passkeys for a browser are added only from a
+  session already unlocked with an earlier one.
+- After that every member session needs a **member unlock** with that passkey, which lasts 30 days by
+  default (1 to 90), because a member only reads. Before the unlock nothing about the member — not even
+  their own name or catalogs — can be read.
+- If a session is refused (`4403`), the browser keeps its key and says so: a relay could forge that close,
+  so a key is only ever forgotten by the person's choice or a sealed revocation (phase 5).
+
+**Already a member?** The browser signs in first, then spends the new code inside its session. A
+single-use code is burned whatever happens next; one made for a different member, or for a new member, is
+refused and the owner is told (owner decision Q5). A multi-use code counts a use only when it adds a
+catalog, so reopening a workshop link costs nothing. Q5 is enforced for a browser that signs in first; a
+browser that joins instead becomes whichever member the code names, which is what the code allowed anyway.
 
 **What a member can reach** is a **separate route table**, `/v1/shared/*`: their own summary, the signed
 manifests and items of the catalogs they hold now, redeeming a code, registering passkeys and unlocking,
 and leaving. Every request re-checks their grants, so a revoke works on the very next request. Members
 never see each other (Q14) and never share onward (Q16).
 
-**Bounds.** 128 members and 512 member keys per publisher (a full publisher refuses a join and leaves the
-code live), 64 live shares, 64 catalogs per share, 10 join attempts a minute per carrier and peer, 60
-joins an hour. A member key unused for 90 days is removed; the member stays.
+**Bounds.** 128 members and 512 member keys per publisher, 200 keys per member (so one leaked multi-use
+code fills its own member, never the publisher), 64 live shares, 64 catalogs per share, 60 successful joins
+and redeems an hour, 10 failed joins a minute per peer on the direct carrier. A full publisher refuses a
+join and leaves the code live. A member key unused for 90 days is removed; the member stays.
 
 ## Declared gaps
 

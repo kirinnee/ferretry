@@ -9,7 +9,7 @@ import {
   CatalogShareMintResponseSchema,
   CatalogShareViewSchema,
   formatShareFragment,
-  MEMBER_PASSKEY_NAME_MAX,
+  MEMBER_PASSKEY_NAME_MAX_BYTES,
   MemberJoinedResponseSchema,
   memberPasskeyName,
   parseShareFragment,
@@ -138,7 +138,7 @@ describe('the share link', () => {
       ['v2;url=x', 'version'],
       ['v1;url', 'name=value'],
       [`v1;url=${encodeURIComponent(URL_)};fp=${DAEMON}`, 'must include'],
-      [`v1;url=not-a-url;fp=${DAEMON};share=${CODE}`, 'not a URL'],
+      [`v1;url=not-a-url;fp=${DAEMON};share=${CODE}`, 'not an http or https URL'],
       [`v1;url=${encodeURIComponent(URL_)};fp=fy_daemon_short;share=${CODE}`, 'fingerprint'],
       [`v1;url=${encodeURIComponent(URL_)};fp=${DAEMON};share=ABCD-EFGH`, 'invalid code'],
       [`v1;url=%E0%A4%A;fp=${DAEMON};share=${CODE}`, 'not decodable'],
@@ -153,22 +153,51 @@ describe('the share link', () => {
       daemonId: DAEMON,
       code: PairingCodeSchema.parse('ABCD-EFGH'),
     });
-    expect(() => parseShareFragment(pairing)).toThrow('must include');
+    expect(() => parseShareFragment(pairing)).toThrow('this is a pairing link');
+  });
+
+  it('refuses a link that carries both a pairing code and a share code, in both readers', () => {
+    const both = `${formatShareFragment(seed)};code=ABCD-EFGH`;
+    expect(() => parseShareFragment(both)).toThrow('this is a pairing link');
+    expect(() => parsePairingFragment(both)).toThrow('this is a share link');
+  });
+
+  it('dials only an http or https publisher address', () => {
+    for (const address of ['javascript:alert(1)', 'file:///etc/passwd', 'wss://relay.example']) {
+      const fragment = `v1;url=${encodeURIComponent(address)};fp=${DAEMON};share=${CODE}`;
+      expect(() => parseShareFragment(fragment)).toThrow('not an http or https URL');
+    }
+    const pairing = `v1;url=${encodeURIComponent('javascript:alert(1)')};code=ABCD-EFGH;fp=${DAEMON}`;
+    expect(() => parsePairingFragment(pairing)).toThrow('not an http or https URL');
+  });
+
+  it('gates on a share field, so a surface routes by path first', () => {
+    expect(SHARE_FRAGMENT_PATTERN.test(`#${formatShareFragment(seed)}`)).toBe(true);
+    expect(SHARE_FRAGMENT_PATTERN.test(`#v1;url=x;code=ABCD-EFGH;fp=${DAEMON}`)).toBe(false);
+    expect(SHARE_FRAGMENT_PATTERN.test('#v2;share=x')).toBe(false);
   });
 });
 
 describe('the member passkey name', () => {
+  const bytes = (text: string) => new TextEncoder().encode(text).length;
+
   it('names the member, the catalog and the publisher', () => {
     expect(memberPasskeyName('Alice', ["Kirin's skills"], 'kirin-box')).toBe("Alice · Kirin's skills · kirin-box");
     expect(memberPasskeyName('Alice', ['a', 'b', 'c'], 'kirin-box')).toBe('Alice · 3 catalogs · kirin-box');
   });
 
-  it('shortens each part to fit, keeping a hint of all three', () => {
-    const name = memberPasskeyName('A'.repeat(40), ['B'.repeat(40)], 'C'.repeat(40));
-    expect(Array.from(name).length).toBeLessThanOrEqual(MEMBER_PASSKEY_NAME_MAX);
-    expect(name).toBe(`${'A'.repeat(15)}… · ${'B'.repeat(23)}… · ${'C'.repeat(17)}…`);
-    // Characters, not UTF-16 units: an emoji is never cut in half.
-    expect(memberPasskeyName('😀'.repeat(30), ['x'.repeat(40)], 'y'.repeat(30))).toStartWith(`${'😀'.repeat(15)}…`);
+  it('fits 64 BYTES, cutting at a character and keeping the publisher longest', () => {
+    const ascii = memberPasskeyName('A'.repeat(40), ['B'.repeat(40)], 'C'.repeat(40));
+    expect(bytes(ascii)).toBeLessThanOrEqual(MEMBER_PASSKEY_NAME_MAX_BYTES);
+    expect(ascii).toBe(`${'A'.repeat(11)}… · ${'B'.repeat(15)}… · ${'C'.repeat(21)}…`);
+    // Three bytes a character: still within 64 bytes, and never half a character.
+    const wide = memberPasskeyName('€'.repeat(30), ['€'.repeat(30)], '€'.repeat(30));
+    expect(bytes(wide)).toBeLessThanOrEqual(MEMBER_PASSKEY_NAME_MAX_BYTES);
+    expect(wide.split(' · ').every(part => part.endsWith('…'))).toBe(true);
+    // A short member name leaves its room to the publisher.
+    const short = memberPasskeyName('Al', ['x'.repeat(40)], 'p'.repeat(60));
+    expect(bytes(short)).toBeLessThanOrEqual(MEMBER_PASSKEY_NAME_MAX_BYTES);
+    expect(short.split(' · ')[2]?.length).toBeGreaterThan(21);
   });
 });
 
@@ -180,7 +209,7 @@ describe('the joined response', () => {
       label: 'Alice',
       daemonId: DAEMON,
       daemonName: 'kirin-box',
-      catalogs: [{ catalogId: CATALOG, name: "Kirin's skills" }],
+      catalogCount: 1,
       passkeyWindowEndsAt: AT,
       memberUnlockDays: 30,
     });

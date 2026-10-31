@@ -71,7 +71,9 @@ export const MemberProofSchema = DeviceProofSchema;
 
 /**
  * The browser's X25519 BOX key, raw 32 bytes, base64url. Filed at join and used by phase 6 to wrap a
- * members-only artifact's content key to this browser. An all-zero key is a point nothing can agree with.
+ * members-only artifact's content key to this browser. Only the all-zero key is refused here. The other
+ * small-order points pass this check and are refused where they would matter: a wrap whose agreement yields
+ * an all-zero shared secret aborts, as §6 aborts on an all-zero IKM (phase 6).
  */
 export const MemberBoxKeySchema = z
   .string()
@@ -79,7 +81,7 @@ export const MemberBoxKeySchema = z
   .refine(text => {
     const bytes = fromBase64UrlFixed(text, X25519_PUBLIC_KEY_BYTES);
     return bytes !== null && !isAllZero(bytes);
-  }, 'not a usable X25519 public key');
+  }, 'the all-zero X25519 key');
 
 const Dialect = z.literal(SESSION_PROTOCOL_ID);
 
@@ -120,13 +122,53 @@ export const MemberRenewedRecordSchema = z.strictObject({
 });
 
 /**
- * The publisher's sealed answers to a `join`, then `4440`. ONE refusal for every cause — an unknown,
+ * Every join outcome's plaintext is EXACTLY this many bytes, `joined` and `join-refused` alike, so the one
+ * thing a relay operator could read off a join — the size of the sealed answer — says nothing about whether it
+ * succeeded (docs/relay-protocol.md §14 "Member sessions"). It holds the largest `joined`: eight published
+ * carriers of 2 KiB addresses, a 100-character publisher name and an 80-character label, with room to spare,
+ * and fits one record.
+ */
+export const MEMBER_JOIN_OUTCOME_BYTES = 24 * 1024;
+
+/** Padding: ASCII spaces only, so it adds bytes and no meaning. */
+const JoinPadSchema = z.string().regex(/^ *$/u, 'padding is spaces only').max(MEMBER_JOIN_OUTCOME_BYTES);
+
+/**
+ * The publisher's sealed answers to a `join`, each padded by {@link padJoinOutcome}, then `4440`. ONE refusal for every cause — an unknown,
  * spent or expired code, a full publisher, a malformed field, a proof that did not verify — so a surface
  * the whole internet can reach is no oracle. As with pairing, a publisher with no live share still keys
  * the channel and refuses identically.
  */
 export const MemberJoinOutcomeSchema = z.discriminatedUnion('t', [
-  z.strictObject({ t: z.literal('joined'), protocol: Dialect, response: MemberJoinedResponseSchema }),
-  z.strictObject({ t: z.literal('join-refused'), protocol: Dialect, reason: z.literal('join_refused') }),
+  z.strictObject({
+    t: z.literal('joined'),
+    protocol: Dialect,
+    response: MemberJoinedResponseSchema,
+    pad: JoinPadSchema,
+  }),
+  z.strictObject({
+    t: z.literal('join-refused'),
+    protocol: Dialect,
+    reason: z.literal('join_refused'),
+    pad: JoinPadSchema,
+  }),
 ]);
 export type MemberJoinOutcome = z.infer<typeof MemberJoinOutcomeSchema>;
+
+/** An outcome before it is padded: what the publisher decided, without its `pad`. */
+export type MemberJoinOutcomeContent = MemberJoinOutcome extends infer Outcome
+  ? Outcome extends { readonly pad: string }
+    ? Omit<Outcome, 'pad'>
+    : never
+  : never;
+
+/**
+ * The exact text of a join outcome, padded to {@link MEMBER_JOIN_OUTCOME_BYTES}, or `null` when it cannot fit
+ * (which the bounds above make impossible for a well-formed outcome; a publisher that meets one sends the
+ * refusal instead, never an unpadded record). Pure: the same outcome always writes the same text.
+ */
+export function padJoinOutcome(outcome: MemberJoinOutcomeContent): string | null {
+  const unpadded = utf8Bytes(JSON.stringify({ ...outcome, pad: '' })).length;
+  if (unpadded > MEMBER_JOIN_OUTCOME_BYTES) return null;
+  return JSON.stringify({ ...outcome, pad: ' '.repeat(MEMBER_JOIN_OUTCOME_BYTES - unpadded) });
+}
