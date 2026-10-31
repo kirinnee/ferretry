@@ -15,8 +15,13 @@
  *
  * WHAT IT DOES NOT CLOSE: the instant between this read and the connection. A squatter would have to
  * bind in that window, after the owner's daemon released the port, which is a far narrower thing than
- * "any time the daemon is down". A host without `/proc/net` (macOS) has no table to read, and the
- * verdict says so rather than guessing.
+ * "any time the daemon is down".
+ *
+ * GAP — macOS IS NOT CHECKED. It has no `/proc/net`, so the verdict is `unknown` and the credential is sent
+ * exactly as it was before this check existed: refusing there would break every call on the owner's Mac,
+ * and a Mac is a one-person machine in every setup this product documents. A shared macOS host would need
+ * `lsof -nP -iTCP:<port> -sTCP:LISTEN` (or `proc_pidinfo`) here; `docs/multi-user-host.md` declares the
+ * shared host as Linux-only until then.
  */
 
 /** One listening socket, as the kernel's table records it. */

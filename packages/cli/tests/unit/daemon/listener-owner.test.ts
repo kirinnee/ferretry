@@ -138,11 +138,46 @@ describe('sending a credential to a loopback daemon', () => {
     ).be.rejectedWith(/held by another user \(uid 1002\)/u);
   });
 
-  it('should let it go to the owner’s own daemon, to nobody, or where the host cannot tell', async () => {
+  it('should let it go to the owner’s own daemon, or to nobody', async () => {
     await assertOwnLoopbackListener('http://127.0.0.1:7432', 'x', ports([table(row(LOOPBACK_V4, 7_432, OWNER))]));
     await assertOwnLoopbackListener('http://127.0.0.1:7432', 'x', ports([table()]));
-    await assertOwnLoopbackListener('http://127.0.0.1:7432', 'x', ports(undefined));
-    await assertOwnLoopbackListener('http://127.0.0.1:7432', 'x', ports([table()], undefined));
+  });
+
+  it('should send as before on macOS, which has no /proc/net to read (a declared GAP, not a refusal)', async () => {
+    // Arrange — exactly what a Mac answers: neither table exists.
+    const mac: LoopbackListenerGuardPorts = {
+      tables: () =>
+        procTcpTables(async () => {
+          throw Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
+        }),
+      uid: () => OWNER,
+    };
+    const sent: string[] = [];
+    const gateway = new SessionCredentialGateway(
+      async () => 'http://127.0.0.1:7432',
+      async url => {
+        sent.push(url);
+        return Response.json({ summary: 'ok' });
+      },
+      undefined,
+      mac,
+    );
+
+    // Act
+    await assertOwnLoopbackListener('http://127.0.0.1:7432', 'the daemon admin token', mac);
+    const answer = await gateway.request('/v1/agent/tools', z.object({ summary: z.string() }));
+
+    // Assert
+    should(answer).deepEqual({ summary: 'ok' });
+    should(sent).deepEqual(['http://127.0.0.1:7432/v1/agent/tools']);
+  });
+
+  it('should not judge a platform with no uids at all', async () => {
+    const squatted = [table(row(LOOPBACK_V4, 7_432, STRANGER))];
+    await assertOwnLoopbackListener('http://127.0.0.1:7432', 'x', {
+      tables: async () => squatted,
+      uid: () => undefined,
+    });
   });
 
   it('should never send an agent’s session credential to a squatted port', async () => {
