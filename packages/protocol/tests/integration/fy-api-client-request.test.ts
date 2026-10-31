@@ -18,6 +18,7 @@ describe('FyApiClient construction and generic requests', () => {
     const expected = [
       'analytics',
       'answer',
+      'askToStopJobs',
       'attachTarget',
       'cancelHandover',
       'cancelRestarts',
