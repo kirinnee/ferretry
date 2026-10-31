@@ -249,6 +249,26 @@ describe('Inbox — swiping a card waiting for a try', () => {
     expect(document.body.querySelector('[role="dialog"]')).toBeNull();
   });
 
+  it('still reads the drag when the browser will not capture the pointer', async () => {
+    const original = HTMLElement.prototype.setPointerCapture;
+    HTMLElement.prototype.setPointerCapture = () => {
+      throw new Error('the pointer is already released');
+    };
+    try {
+      const { root, actions } = await open({ phone: true });
+      await drag(rowOf(root, 'F22'), 300, true);
+      await interact(() => flush());
+      expect(actions.calls).toEqual(['moveTask:["closed"]']);
+    } finally {
+      HTMLElement.prototype.setPointerCapture = original;
+    }
+  });
+
+  it('says how long a card has waited, in days once it is past two', async () => {
+    const { root } = await open({ page: { now: NOW + 3 * 24 * 60 * 60 * 1000 } });
+    expect(rowOf(root, 'F22').querySelector('.fy-totest__age')?.textContent).toBe('4d');
+  });
+
   it('does not follow the title link on the click that ends a swipe', async () => {
     const { root, navigated } = await open({ phone: true });
     await drag(rowOf(root, 'F22'), 40, true);
