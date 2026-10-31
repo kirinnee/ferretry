@@ -1,3 +1,15 @@
+## [4.159.0](https://github.com/kirinnee/ferretry/compare/v4.158.1...v4.159.0) (2026-10-31)
+
+### Features
+
+* **fleet:** answer owner questions on the agenda too ([#1138](https://github.com/kirinnee/ferretry/issues/1138)) ([fa165f0](https://github.com/kirinnee/ferretry/commit/fa165f0ed8647cab9052bd5a23e3689428363900))
+
+### Performance
+
+* **agenda:** check a session exists without projecting its transcript ([#1136](https://github.com/kirinnee/ferretry/issues/1136)) ([92d721e](https://github.com/kirinnee/ferretry/commit/92d721e592ea7d0d6153d07f48f1b6754a8f149c))
+* **daemon:** keep the transcript parse worker warm for ten minutes idle ([#1131](https://github.com/kirinnee/ferretry/issues/1131)) ([b82555e](https://github.com/kirinnee/ferretry/commit/b82555e083048f2ad5a0810b8119bcb7c9fcb291))
+* **pwa:** read an Inbox item's thread from the transcript tail ([#1132](https://github.com/kirinnee/ferretry/issues/1132)) ([a7503e6](https://github.com/kirinnee/ferretry/commit/a7503e6e44659a532370ac521cbaca29b0928823))
+
 ## [4.158.1](https://github.com/kirinnee/ferretry/compare/v4.158.0...v4.158.1) (2026-10-31)
 
 ### Performance
