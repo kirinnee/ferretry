@@ -298,6 +298,71 @@ and (after the quarantine) the agent's `terminal.read` and `terminal.wait`. Reda
   starts with no note), because a note is the one place a value could be pasted into the ledger by
   mistake.
 
+## Pages
+
+A request on a page (`browser_request_input`) goes through the same service, card and deliver as a terminal's.
+What is different is how the daemon looks and types, and what it holds back afterwards.
+
+### Looking: the browser decides, the agent only points
+
+- The agent names each field's element (a snapshot `ref` or a selector). The **browser** resolves it and
+  reports what is there: the page's origin and whether it is secure (https, or http on this machine), the
+  document (the main frame's `loaderId`), and per field the frame it is in and that frame's origin, the node
+  (`backendNodeId`, found by a marker the worker sets and removes, never by page script), its tag and
+  `type`/`autocomplete`/`name`/`id`/`inputmode`, its box and whether it is visible.
+- A field the page lacks refuses the raise. Every look and write runs in the page's own queue
+  (`BrowserSubsystem.inputOnPage`), so no act of the agent lands between the check and the write.
+- The card's flags come from those facts: http, a field in a frame from another site, a `secret` into a field
+  that is not `type=password`, a field that cannot be seen: amber. Only a password input on a secure page
+  is green.
+- **A picture of the fields** is taken at raise, before anything is typed, and kept in RAM for the card
+  (`GET /v1/sessions/:sid/input-requests/:id/shot`, owner only; `request.pictured` says there is one). The
+  card draws each field's box on it from the browser's facts. It is let go when the request ends.
+
+### Typing: one write into exactly the nodes the card showed
+
+`inputType` re-checks the page against the card's facts first: the same document, the same origin, and every
+node still there with the same attributes. Anything different types nothing (`target_changed`). Then, per
+value in order: focus the node, confirm the focus landed on it, select what the field holds, and insert the
+text (`Input.insertText`, which a page's script sees as ordinary input). Enter goes to the last field when
+the owner ticked it. A failure before the first insert typed nothing; one after it is `uncertain` and the
+request ends, never retried. The value crosses the worker pipe in that one request and is in no answer,
+error or log.
+
+### The hold on a page
+
+A `secret` or `private` value typed into a page holds that page for the same window as a terminal
+(`INPUT_QUARANTINE_SECONDS`):
+
+- The agent's **pictures** of it (`browser_screenshot`, `browser_pdf`, `browser_highlight`) are refused for
+  the whole window: no mask can be drawn on pixels.
+- Its **text** (`browser_read` in every mode, `browser_console`, `browser_network`, `browser_wait_for`, and
+  page script results) is refused while the page still shows the document the value went into. Once the
+  page has moved on (a new `loaderId`), text reads come back, and they are **masked** for the redaction
+  window like every other read: a next page that prints the password back shows a mask.
+- While a request is pending on a page, the agent's `browser_type`, `browser_fill_form` and `browser_press`
+  on it are refused: those values are the owner's to type.
+- Page holds share the terminal's registry under their own names (a hold on page `app` never seals terminal
+  `app`) and are not journalled: a page does not outlive the daemon that drove it, and a page's card ends as
+  interrupted on restart. GAP: the owner cannot end a page's hold early from the app; it runs its two minutes.
+
+### Passkeys are off in the agent browser
+
+Every page of the agent browser (popups included) gets a CDP virtual authenticator that answers with the
+user-presence bit unset (`WebAuthn.addVirtualAuthenticator` + `setResponseOverrideBits({ isBadUP: true })`):
+`PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()` is false, so sites do not offer a
+passkey, and a passkey or security-key prompt fails at once, so the site falls back to its password form. The
+user agent and every fingerprint stay honest; nothing is spoofed. A login that needs the owner's real passkey
+or security key is handed over (`browser_ask_owner`). GAP: a WebAuthn prompt inside a cross-origin iframe
+is not covered.
+
+### Captchas are the owner's
+
+The daemon recognises the common human checks (reCAPTCHA, hCaptcha, Cloudflare Turnstile and interstitials,
+and others; `recogniseBrowserChallenge`) from what the browser knows about the page, and puts `challenge` in
+the facts. The card says so and the agent's answer tells it to hand the page over with `browser_ask_owner`
+("complete the captcha") and wait. Ferretry never solves, skips or disguises itself past one.
+
 ## Saved logins
 
 The bridge is also a small **password manager**. A saved login is a **labelled entry**: a label the owner
@@ -457,7 +522,7 @@ default**, revocable, and audited on every use. Until then every placement is a 
 | ----- | ------------------------------------------------------------------------------------------- | ----------- |
 | P0    | This contract and the schemas                                                               | done        |
 | P1    | Terminal secret and plain: service, agent tools, deliver and cancel, quarantine, `fy input` | done        |
-| P2    | The app card, cards of several fields, `chain` steps                                        | this change |
+| P2    | The app card, cards of several fields, `chain` steps                                        | done        |
 | P3    | Saved logins (one tap), "Save as", 2FA codes, `fy secret entry`, Settings › Saved logins    | done        |
-| P4    | Browser fields, and the agent-instruction extension for the browser                         | later       |
+| P4    | Pages: browser fields, field shot, page holds, passkeys off, captcha handover               | this change |
 | P5    | Multi-step chains, consumer configuration, a per-daemon remote cap                          | later       |
