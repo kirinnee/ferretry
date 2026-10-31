@@ -86,6 +86,8 @@ export interface AgendaItemViewProps {
   readonly inputForm?: ReactNode;
   /** A ferret's paste plan (`CopyPlanHost`): drawn in the card, in the answer row's place. */
   readonly planForm?: ReactNode;
+  /** Names this item's form picks when a composer sends them (the Inbox); absent, a form is read, not filled in. */
+  readonly formKey?: string;
 }
 
 /** Keys that are a field's or a button's own. */
@@ -143,6 +145,7 @@ export function AgendaItemView({
   parkedNote,
   inputForm,
   planForm,
+  formKey,
   daemonId,
 }: AgendaItemViewProps) {
   const root = useRef<HTMLElement | null>(null);
@@ -256,6 +259,7 @@ export function AgendaItemView({
             {...(parkedNote === undefined ? {} : { parkedNote })}
             {...(inputForm === undefined ? {} : { inputForm })}
             {...(planForm === undefined ? {} : { planForm })}
+            {...(formKey === undefined ? {} : { formKey })}
             {...(quoteScope === null ? {} : { onRequestChanges: requestChanges })}
           />
           <AgendaItemHistory events={history} ferret={ferret} now={now} renderProse={renderProse} />

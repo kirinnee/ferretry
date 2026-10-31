@@ -69,6 +69,7 @@ import {
   skipSelection,
   stepSelection,
 } from '../../lib/agenda-inbox-list.ts';
+import { sendForm } from '../../lib/agenda-form-send.ts';
 import { composerNoteFor, inputDraftDiscarded, withComposerNote } from '../../lib/agenda-reply.ts';
 import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
 import type { ModeFilter } from '../../lib/controls.ts';
@@ -213,6 +214,16 @@ const answerWithDraft = (host: Pick<CardHostProps, 'inbox' | 'onNavigate'>, card
   if (sent !== action || inputDraftDiscarded(card.item, draft)) composer?.replaceDraft('');
 };
 
+/**
+ * A form item's one Send: the picks on the card and what is typed in the composer go as one answer into the undo
+ * window. Throws the sentence the composer shows when Send must wait (empty fields, asked once).
+ */
+const answerForm = (host: Pick<CardHostProps, 'inbox' | 'onNavigate'>, card: InboxCard): void => {
+  const composer = composerQuoteTarget(scopeOf(card));
+  sendForm(card.key, card.item, composer?.draft() ?? '', action => answerCard(host, card, action));
+  composer?.replaceDraft('');
+};
+
 const copyWriter = browserClipboardWriter();
 
 /**
@@ -304,6 +315,7 @@ function OpenItem({
         daemonId={card.daemonId}
         error={failureFor(inbox.deferredState.failed, card.key)}
         ferret={inboxWho(card).ferret}
+        formKey={card.key}
         history={history}
         item={card.item}
         onAct={act}
@@ -747,7 +759,7 @@ export interface AgendaInboxPageProps {
    * The open item's ferret's REAL composer, bound to that conversation: what is typed goes to its chat about the
    * item. The host draws it (it holds the clients); absent, the open item has no composer.
    */
-  readonly renderComposer?: (card: InboxCard) => ReactNode;
+  readonly renderComposer?: (card: InboxCard, answerForm: (() => void) | undefined) => ReactNode;
   /** How "Clear all from agent ferrets" reaches the machines. Absent: the Agents filter has no such button. */
   readonly clearPort?: ClearPort;
   /** How the "Ready to test" items move their cards (the Board's own verbs). Absent: they list, and refuse to move. */
@@ -1361,7 +1373,10 @@ export function AgendaInboxPage({
                   data-inbox-composer={deck[0].key}
                   onKeyDown={escapeCloses(() => setDeckOpen(false))}
                 >
-                  {renderComposer(deck[0])}
+                  {renderComposer(
+                    deck[0],
+                    deck[0].item.kind === 'form' ? () => answerForm(host, deck[0] as InboxCard) : undefined,
+                  )}
                 </div>
               )}
             </div>

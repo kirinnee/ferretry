@@ -342,6 +342,7 @@ ends with one plain instruction, so the owner always knows what to do:
 | `review`                            | what to review (`--link`)                           | Approve · Request changes                              |
 | `reply`, one question               | the question                                        | none: "Type your answer below."                        |
 | `reply`, several questions or a mix | a numbered list of each answer wanted               | none: "Reply with your answers below, numbered."       |
+| `form`                              | numbered fields, each answered where it is asked    | none: the card's fields, the reply box, one Send       |
 | `todo`                              | the steps, numbered, each ticked                    | Mark as done                                           |
 | `info`, and a notice                | the message                                         | Got it (quiet: a bare Got it does not wake the ferret) |
 
@@ -364,6 +365,36 @@ ends with one plain instruction, so the owner always knows what to do:
   every ferret's prompt carries (`AGENDA_SHAPE_LINE`, inside `AGENDA_INSTRUCTION`), the `fy agenda add --help` table
   with an example per kind (`agendaShapeHelp`), the refusals (`AGENDA_SHAPE_ERRORS`, `agendaShapeProblems`) and the
   owner's instruction lines (`AGENDA_SHAPE_LEADS`). Change the wording there, never at a surface.
+
+### Forms
+
+A **form** (`--kind form`) is several structured answers at once. Its `fields` are an ordered list, one per question:
+
+| Field type (`--field`)                 | Drawn as                               | Answer                       |
+| -------------------------------------- | -------------------------------------- | ---------------------------- |
+| `one` (options `Label: meaning`, 2–12) | radio buttons, each with what it means | the chosen label             |
+| `many` (options as above)              | checkboxes                             | the chosen labels            |
+| `yesno`                                | a Yes \| No segment                    | `Yes` or `No`                |
+| `text`                                 | "Type it below."                       | whatever the reply box holds |
+
+Write a field as `--field "id|type|Question|option|option…"`, one flag per field, in order: `--field "1|one|Which region?|EU: data
+stays in Europe|*US: cheapest"` is a pick-one with two options. A leading `*` on an option (or `*Yes` / `*No` on a yes/no) marks the
+recommended value; a trailing `optional` segment lets the field stay empty; `Name~Question` sets the short word the numbered
+answer uses (`Region~Which region?` → "1. Region: EU"). The same list can be the `fields` of a `--json-file`. Ids are short and
+unique (`1`, `region`); a pick-one or pick-many needs 2–12 options, a text field none. `fy agenda edit <id> --field …` replaces
+the whole list.
+
+- **One Send.** The card's fields and the reply box are one answer. Send combines them — "1. Region: EU · 2. Alerts: Page, Mail · 3. Restart: Yes · 4. <typed text>" — and delivers that to the ferret as the answer to the item. A form that has no `text`
+  field sends the typed words as a note instead.
+- **Recorded by field id.** The answer is stored on the item as `{ kind: "form", answers: [{ id, value }] }` (a pick-many's
+  value is a list), so the ferret reads `fy agenda show <id> --json` instead of parsing prose.
+- **Empty required fields are asked about once.** The first Send says which fields are unanswered and that Send again sends
+  it as it is; the next Send goes through. Nothing filled in at all is not sent.
+- **No swipes** except ↓ Not needed. Recommended values start picked and say "Recommended".
+- **In the chat** (the Sessions page's compact card) the fields are drawn read-only with "Open this in the Inbox to fill it
+  in, or answer in the reply box, numbered."
+- **Stored `ask` is still `open-question`**, so an app that predates forms still reads the item as an open-question reply item;
+  `kind: form` is what makes a current app draw the fields.
 
 ## Clearing the agent ferrets' backlog
 

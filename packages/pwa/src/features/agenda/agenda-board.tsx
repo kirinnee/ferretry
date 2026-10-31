@@ -90,6 +90,8 @@ export const describeResponse = (response: AgendaResponse): string => {
   if (response.kind === 'multiple-choice') return `Chose “${response.choice}”`;
   if (response.kind === 'answer-review')
     return response.verdict === 'good' ? 'Answer accepted' : `Clarification requested: ${response.clarification}`;
+  if (response.kind === 'form')
+    return `Form answered: ${response.answers.map(each => `${each.id}: ${typeof each.value === 'string' ? each.value : each.value.join(', ')}`).join(' · ')}`;
   return `Answered: ${response.answer}`;
 };
 
@@ -364,18 +366,16 @@ function AgendaRow({
         ) : item.ask ? (
           <AgendaAnswerControls ask={item.ask} busy={busy} onRespond={response => onAction(item.id, response)} />
         ) : (
-          <>
-            <div className="flex justify-end">
-              <Button size="sm" className="min-h-[44px]" disabled={busy} onClick={() => onAction(item.id, null)}>
-                {busy ? (
-                  <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" />
-                ) : (
-                  <UserRoundCheck size={14} />
-                )}
-                Mark done
-              </Button>
-            </div>
-          </>
+          <div className="flex justify-end">
+            <Button size="sm" className="min-h-[44px]" disabled={busy} onClick={() => onAction(item.id, null)}>
+              {busy ? (
+                <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" />
+              ) : (
+                <UserRoundCheck size={14} />
+              )}
+              Mark done
+            </Button>
+          </div>
         )}
       </div>
       <div className="mt-sm flex flex-wrap items-center gap-x-sm gap-y-xs text-meta text-faint">

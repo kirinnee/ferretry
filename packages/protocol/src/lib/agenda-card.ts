@@ -18,6 +18,7 @@
  * | review     | Request changes |                   | Approve       |
  * | info       |                 |                   | Got it        |
  * | reply      |                 |                   |               |
+ * | form       |                 |                   |               |
  * | input      |                 |                   |               |
  *
  * WHAT A CARD SHOWS IS ITS SHAPE (`agendaShape`), and the buttons follow it for every item, old or new: a card
@@ -159,6 +160,7 @@ export const askForKind = (kind: AgendaKind, options: readonly AgendaAskOption[]
     case 'info':
       return undefined;
     case 'reply':
+    case 'form':
       return { kind: 'open-question' };
     case 'input':
       return undefined;
@@ -238,6 +240,7 @@ export const defaultAgendaAnswers = (
       case 'info':
         return [answer('right', 'done', GOT_IT_LABEL)];
       case 'reply':
+      case 'form':
       case 'input':
         return [];
     }
@@ -291,11 +294,23 @@ const inOptionOrder = (
  * - `reply`: one open question, answered in the reply box: no buttons.
  * - `answers`: several questions, or a question mixed with steps: a numbered list of each answer wanted, all of
  *   them given in one reply — no buttons.
+ * - `form`: structured fields on the card (pick one, pick many, yes/no) and one free-text field in the reply box,
+ *   all sent together as one numbered answer — no buttons (the form's own Send).
  * - `todo`: numbered steps, then Mark as done.
  * - `info`: something to know (a notice too), Got it.
  * - `input`: a value typed into the item's own form (docs/input-requests.md).
  */
-export type AgendaShape = 'choice' | 'yesno' | 'approval' | 'review' | 'reply' | 'answers' | 'todo' | 'info' | 'input';
+export type AgendaShape =
+  | 'choice'
+  | 'yesno'
+  | 'approval'
+  | 'review'
+  | 'reply'
+  | 'answers'
+  | 'form'
+  | 'todo'
+  | 'info'
+  | 'input';
 
 /** What a card's shape is read from: its kind, ask, questions and steps, and whether it is a notice. */
 export type AgendaShapeSource = Pick<AgendaCardSource, 'kind' | 'ask' | 'questions' | 'steps'> & {
@@ -312,6 +327,7 @@ export const agendaShape = (item: AgendaShapeSource): AgendaShape => {
   if (item.confirms !== undefined) return 'choice';
   if (kind === 'task') return 'todo';
   if (kind === 'info') return 'info';
+  if (kind === 'form') return 'form';
   // More than one answer is wanted: several questions, or a question with steps to follow as well.
   if ((item.questions?.length ?? 0) > 1 || (item.steps?.length ?? 0) > 0) return 'answers';
   switch (kind) {
@@ -332,6 +348,7 @@ export const agendaShape = (item: AgendaShapeSource): AgendaShape => {
 const SHAPE_KEEPS: Readonly<Partial<Record<AgendaShape, (answer: AgendaCardAnswer) => boolean>>> = {
   reply: () => false,
   answers: () => false,
+  form: () => false,
   input: () => false,
   todo: answer => answer.does === 'done' || answer.does === 'dismiss',
   info: answer => answer.does === 'done',

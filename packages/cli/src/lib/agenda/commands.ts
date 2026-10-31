@@ -35,6 +35,8 @@ const WRITING_GUIDE = `The reader has NOT been following this session. Write for
   --question     each thing they must answer (repeat); --option gives a lone question its choices
   --option       a choice's label, ONE word (a longer one letters them all); "Label: what it means" adds a one-line
                  detail, --option-detail "Label=markdown" a longer one
+  --field        one field of a FORM (--kind form), repeat in order: "id|one/many/yesno/text|Question|option|option…"
+                 (options "Label: what it means", a leading * recommends one; "Name~Question" names its answer line)
   --recommend    your suggested decision (an option label, or the answer in words); --recommend-why
   --impact       what happens if nobody answers; --urgency by when ("before the 14:00 deploy")
   --link         a PR, file or reference worth opening (repeat)
@@ -180,6 +182,12 @@ function mountVerbs(
       )
       .option('--option-detail <label=markdown>', "an option's longer explanation, in Markdown; repeat", collect, [])
       .option(
+        '--field <spec>',
+        'one field of a form (--kind form): "id|one/many/yesno/text|Question|option|option…"; repeat for each field, in order',
+        collect,
+        [],
+      )
+      .option(
         '--premise <point>',
         'the situation: what is going on; a plain line, no leading "- " (repeat for more points)',
         collect,
@@ -269,6 +277,7 @@ function mountVerbs(
       .option('-q, --question <text>', "reword the item's questions, in order, one per question; repeat", collect, [])
       .option('-o, --option <label-and-detail>', "give an existing option's detail; repeat", collect, [])
       .option('--option-detail <label=markdown>', "replace an option's longer explanation; repeat", collect, [])
+      .option('--field <spec>', "replace a form's fields with these, all of them, in order; repeat", collect, [])
       .option('--recommend <decision>', 'replace the recommendation')
       .option('--recommend-why <reason>', 'why you recommend it')
       .option(

@@ -65,4 +65,37 @@ describe('the open Inbox item’s composer', () => {
     expect(view.root.findAllByType(Composer)).toHaveLength(0);
     run(() => view.unmount());
   });
+
+  test('on a form card Send answers the form, never the chat, even with an empty box', async () => {
+    const sent: string[] = [];
+    let answered = 0;
+    const api = {
+      send: async (_sessionId: string, request: { message: string }) => {
+        sent.push(request.message);
+        return {} as never;
+      },
+    };
+    const view = render(
+      <AgendaInboxComposer
+        answerForm={() => {
+          answered += 1;
+        }}
+        clientFor={async () => api}
+        compact
+        connection={daemon}
+        itemId={'A6' as AgendaId}
+        view={sessionView('sess-2', { config: { teammate: 'kai', name: 'Release train' } })}
+      />,
+    );
+    await runAsync(async () => {
+      await Promise.resolve();
+    });
+    expect(view.root.findByType(Composer).props.allowEmptySend).toBe(true);
+    await runAsync(async () => {
+      view.root.findByType('form').props.onSubmit({ preventDefault() {} });
+    });
+    expect(answered).toBe(1);
+    expect(sent).toEqual([]);
+    run(() => view.unmount());
+  });
 });

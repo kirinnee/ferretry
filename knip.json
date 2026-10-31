@@ -83,6 +83,7 @@
         "harness/to-test-inbox-screenshot.ts",
         "harness/answer-quickly-cards-screenshot.ts",
         "harness/task-panel-cards-screenshot.ts",
+        "harness/agenda-forms-screenshot.ts",
         "harness/allow-confirm-screenshot.tsx",
         "harness/agenda-page.tsx",
         "harness/inbox-page.tsx",

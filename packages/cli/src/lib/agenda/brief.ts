@@ -22,6 +22,7 @@ import {
 } from '@ferretry/protocol';
 import { z } from 'zod';
 import { type AskFlags, type CardAsk, parseAsk, parseKind, TOO_MANY_ANSWERS } from './ask.ts';
+import { type FieldInput, fieldsFrom } from './fields.ts';
 import { DEFAULT_HOW_TO_RESOLVE } from './how-to-resolve.ts';
 
 /** The flags that describe a new item, beside its one-line summary. */
@@ -71,6 +72,8 @@ export interface BriefFlags extends AskFlags {
   readonly confirms?: string;
   /** `label=markdown`, repeated: the longer explanation of one option. */
   readonly optionDetail?: readonly string[];
+  /** `id|type|Question|option…`, repeated: one field of a form (`fields.ts`). */
+  readonly field?: readonly string[];
 }
 
 const OptionInput = z.union([z.string(), z.object({ label: z.string(), description: z.string().optional() })]);
@@ -120,6 +123,19 @@ const BriefFileSchema = z.strictObject({
   neededBy: z.string().optional(),
   confirms: z.string().optional(),
   optionDetails: z.array(z.object({ label: z.string(), detail: z.string() })).optional(),
+  fields: z
+    .array(
+      z.strictObject({
+        id: z.union([z.string(), z.number()]),
+        type: z.string(),
+        label: z.string(),
+        name: z.string().optional(),
+        options: z.array(OptionInput).optional(),
+        recommended: z.union([z.string(), z.array(z.string())]).optional(),
+        required: z.boolean().optional(),
+      }),
+    )
+    .optional(),
 });
 export type BriefFile = z.infer<typeof BriefFileSchema>;
 
@@ -166,7 +182,9 @@ export function composeAddRequest(
   const fileOptions = file.options?.map(option);
   const questions = questionsFrom(flags, file, options);
   const steps = stepsFrom(flags.step) ?? stepsFrom(file.steps);
-  const named = flags.kind ?? (flags.task === true ? 'task' : file.kind);
+  const fields = fieldsFrom(flags.field, file.fields as readonly FieldInput[] | undefined);
+  const named =
+    flags.kind ?? (flags.task === true ? 'task' : (file.kind ?? (fields === undefined ? undefined : 'form')));
   const confirms = confirmsFrom(flags, file, named, options ?? fileOptions, questions);
   const card = askFor(
     named,
@@ -219,6 +237,7 @@ export function composeAddRequest(
     ...(questions === undefined ? {} : { questions }),
     ...(recommendation === undefined ? {} : { recommendation }),
     ...(optionDetails === undefined ? {} : { optionDetails }),
+    ...(fields === undefined ? {} : { fields }),
     ...(impact === undefined ? {} : { impact }),
     ...(urgency === undefined ? {} : { urgency }),
     ...(links === undefined || links.length === 0 ? {} : { links }),
@@ -551,6 +570,8 @@ export interface EditFlags {
   readonly option?: readonly string[];
   /** `label=markdown`, repeated: the longer explanation of one option. */
   readonly optionDetail?: readonly string[];
+  /** Replaces a form's fields: `id|type|Question|option…`, repeated, all of them. */
+  readonly field?: readonly string[];
 }
 
 /**
@@ -580,6 +601,7 @@ export function composeEditRequest(
   if (stepProblem !== undefined) throw new Error(stepProblem);
   const body = text(flags.body);
   const questionAnswer = text(flags.questionAnswer);
+  const fields = fieldsFrom(flags.field, undefined);
   const willBlock = text(flags.willBlock);
   const neededBy = text(flags.neededBy);
   const optionDetails = optionDetailsFrom(
@@ -628,6 +650,7 @@ export function composeEditRequest(
     ...(questions === undefined ? {} : { questions }),
     ...(decision === undefined ? {} : { recommendation: { decision, ...(why === undefined ? {} : { why }) } }),
     ...(optionDetails === undefined ? {} : { optionDetails }),
+    ...(fields === undefined ? {} : { fields }),
     ...(impact === undefined ? {} : { impact }),
     ...(urgency === undefined ? {} : { urgency }),
     ...(links === undefined ? {} : { links }),

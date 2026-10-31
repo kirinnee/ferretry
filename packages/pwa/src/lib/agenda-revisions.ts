@@ -38,6 +38,7 @@ export const FIELD_LABEL: Readonly<Record<AgendaRevisableField, string>> = {
   title: 'Title',
   kind: 'Kind',
   answers: 'Answers',
+  fields: 'Fields',
   premise: 'Premise',
   decided: 'Decided so far',
   stillOpen: 'Still open',

@@ -11,6 +11,7 @@
  * | one option picked          | the question, then each option with what it means     | the options (≤3 on the row)|
  * | an open answer             | the question                                          | none: the reply box        |
  * | several answers, or a mix  | a numbered list of each answer wanted                 | none: the reply box        |
+ * | several STRUCTURED answers | a form: radios, checkboxes, yes/no, one reply box    | none: the form's Send      |
  * | steps followed             | the steps, numbered, each ticked                      | Mark as done               |
  * | to be read                 | the message                                           | Got it                     |
  * | permission                 | what is approved, and its effect                      | Approve · Deny             |
@@ -20,7 +21,7 @@
  * this rule reads in its shape too; this module only says it and refuses a new raise that does not fit one.
  */
 
-import type { AgendaAsk, AgendaKind, AgendaQuestion } from './agenda.ts';
+import type { AgendaAsk, AgendaFormField, AgendaKind, AgendaQuestion } from './agenda.ts';
 import { type AgendaShape, kindOfAsk } from './agenda-card.ts';
 
 /** The heading of the card's segment that holds exactly the ask. */
@@ -34,6 +35,7 @@ export const AGENDA_SHAPE_LEADS: Readonly<Record<AgendaShape, string>> = {
   review: 'Review it, then approve or request changes.',
   reply: 'Type your answer below.',
   answers: 'Reply with your answers below, numbered.',
+  form: 'Fill in the fields, add anything else in the reply box, then tap Send.',
   todo: 'Do these steps, then tap Mark as done.',
   info: 'Nothing to decide. Tap Got it once you have read it.',
   input: 'Type the value below.',
@@ -52,6 +54,12 @@ export const AGENDA_SHAPE_ERRORS = {
     '--step is only for a to-do (--kind todo): steps, then Mark as done. Steps AND a question are a mix → put each answer you need in a --question (--kind reply) and the instructions in --body-file',
   todoAsksNothing:
     'a to-do asks nothing: steps, then Mark as done. To ask something as well → one --question each, --kind reply (the instructions in --body-file)',
+  formNeedsFields:
+    'a form is its --field list: --field "1|one|Which region?|EU: data stays in Europe|US: cheapest" --field "2|yesno|OK to restart?" --field "3|text|Anything else?" (--kind form)',
+  fieldsOnlyForm:
+    '--field is only for a form (--kind form): several structured answers, free text in the reply. One choice → --kind choice with --option; open questions → --kind reply with --question',
+  formAsksInFields:
+    'a form asks in its fields: no --question, --option or --step. Anything free-form is one "text" field, answered in the reply box',
   infoAsksNothing:
     'an info card only tells: no --question, --option or --step; the owner taps Got it. To ask → --kind reply',
 } as const;
@@ -96,6 +104,12 @@ const SHAPE_HELP: readonly ShapeHelp[] = [
     example: `-k reply "Three answers for the deploy" -q "Which region?" -q "OK to restart?" -q "Your work email?"`,
   },
   {
+    kind: 'form',
+    shows:
+      'SEVERAL STRUCTURED answers: radios, checkboxes and yes/no on the card, free text in the reply box; one Send answers all',
+    example: `-k form "Deploy settings" --field "1|one|Which region?|*EU: data stays in Europe|US: cheapest" --field "2|many|Which alerts?|Failures|Slow builds" --field "3|yesno|OK to restart?" --field "4|text|Anything else?"`,
+  },
+  {
     kind: 'todo',
     shows: 'numbered steps the owner ticks, then one Mark as done button',
     example: `-k todo "Sign in to the work account" --step "Open **Settings › Logins**" --step "Run \`fy login work\`"`,
@@ -118,8 +132,8 @@ export const agendaShapeHelp = (fy: string): string =>
       `  ${each.kind.padEnd(11)}${each.shows}`,
       `             e.g. ${fy} agenda add -t "<topic>" --premise … --context … ${each.example}`,
     ]),
-    'Options are ONLY for a choice; steps ONLY for a to-do. Several questions, or a question mixed with anything',
-    'else, is --kind reply with one --question each: never options; the owner answers them all in one reply.',
+    'Options are ONLY for a choice; steps ONLY for a to-do. Several structured answers is --kind form (--field each,',
+    'a leading * recommends an option; free text is a "text" field); other mixes are --kind reply with one --question each.',
   ].join('\n');
 
 /**
@@ -127,7 +141,7 @@ export const agendaShapeHelp = (fy: string): string =>
  * prompt that turns Agenda mode on.
  */
 export const AGENDA_SHAPE_LINE =
-  'Kinds: choice=ONE question+2–3 `-o "Label: why"`, `--recommend`; reply=open question or several/mixed asks (one `-q` each, no options); todo=`--step`s; info=Got it; permission=Approve/Deny.';
+  'Kinds: choice=ONE question+2–3 `-o "Label: why"`, `--recommend`; reply=open or several asks (one `-q` each); form=several structured answers (`--field`), free text in the reply; todo=`--step`s; info=Got it; permission=Approve/Deny.';
 
 /** What a new raise says about its shape: the fields `agendaShapeProblems` reads. */
 export interface AgendaShapeRaise {
@@ -135,6 +149,7 @@ export interface AgendaShapeRaise {
   readonly ask?: AgendaAsk | undefined;
   readonly questions?: readonly AgendaQuestion[] | undefined;
   readonly steps?: readonly string[] | undefined;
+  readonly fields?: readonly AgendaFormField[] | undefined;
   readonly notice?: true | undefined;
   readonly confirms?: unknown;
 }
@@ -152,6 +167,14 @@ export const agendaShapeProblems = (raise: AgendaShapeRaise): string[] => {
   const questions = raise.questions ?? [];
   const hasOptions = raise.ask?.kind === 'multiple-choice' || questions.some(each => each.options !== undefined);
   const problems = new Set<string>();
+  if (kind === 'form') {
+    if ((raise.fields?.length ?? 0) === 0) problems.add(AGENDA_SHAPE_ERRORS.formNeedsFields);
+    if (questions.length > 0 || hasOptions || (raise.steps?.length ?? 0) > 0) {
+      problems.add(AGENDA_SHAPE_ERRORS.formAsksInFields);
+    }
+    return [...problems];
+  }
+  if ((raise.fields?.length ?? 0) > 0) problems.add(AGENDA_SHAPE_ERRORS.fieldsOnlyForm);
   if (questions.length > 1 && (kind !== 'reply' || hasOptions)) problems.add(AGENDA_SHAPE_ERRORS.severalQuestions);
   else if (hasOptions && !OPTION_KINDS.has(kind)) problems.add(AGENDA_SHAPE_ERRORS.optionsOnlyChoice);
   if (kind === 'info' && (questions.length > 0 || (raise.steps?.length ?? 0) > 0)) {

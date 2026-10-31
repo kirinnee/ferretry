@@ -882,3 +882,72 @@ describe('a question the owner replied to', () => {
     expect(root().querySelector('[data-agenda-question-answer]')).toBeNull();
   });
 });
+
+describe('a form card', () => {
+  const form = agendaItem('A60', {
+    kind: 'form',
+    ask: { kind: 'open-question' },
+    fields: [
+      {
+        id: '1',
+        type: 'one',
+        label: 'Which region?',
+        name: 'Region',
+        options: [{ label: 'EU', description: 'data stays in Europe' }, { label: 'US' }],
+        recommended: ['EU'],
+      },
+      {
+        id: '2',
+        type: 'many',
+        label: 'Which alerts?',
+        name: 'Alerts',
+        options: [{ label: 'Page' }, { label: 'Mail' }],
+      },
+      { id: '3', type: 'yesno', label: 'OK to restart?', name: 'Restart' },
+      { id: '4', type: 'text', label: 'Anything else?', required: false },
+    ],
+  } as unknown as Partial<AgendaItem>);
+
+  test('draws radios, checkboxes, Yes/No and a pointer to the reply box, with the recommendation already picked', async () => {
+    await draw(form, { formKey: 'view-test' });
+    expect(root().querySelectorAll('[data-agenda-form-field]')).toHaveLength(4);
+    const radios = [...root().querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+    expect(radios.map(radio => radio.value)).toEqual(['EU', 'US']);
+    expect(radios.map(radio => radio.checked)).toEqual([true, false]);
+    expect(root().querySelectorAll('input[type="checkbox"]')).toHaveLength(2);
+    expect(root().querySelectorAll('[data-agenda-form-yesno] button')).toHaveLength(2);
+    expect(one('[data-agenda-form-text]').textContent).toBe('Type it below.');
+    expect(root().textContent).toContain('data stays in Europe');
+    expect(root().textContent).toContain('Recommended');
+  });
+
+  test('has no answer buttons to swipe, but Not needed is still there', async () => {
+    await draw(form, { formKey: 'view-test' });
+    expect(root().querySelector('[data-agenda-quick-replies] button')).toBeNull();
+    expect(one('[data-agenda-dismiss]').textContent).toContain('Not needed');
+  });
+
+  test('picking changes the form: a radio replaces, a checkbox adds, Yes/No presses', async () => {
+    await draw(form, { formKey: 'view-test-pick' });
+    const [eu, us] = [...root().querySelectorAll<HTMLInputElement>('input[type="radio"]')] as [
+      HTMLInputElement,
+      HTMLInputElement,
+    ];
+    await interact(() => us.click());
+    expect([eu.checked, us.checked]).toEqual([false, true]);
+    const [page] = [...root().querySelectorAll<HTMLInputElement>('input[type="checkbox"]')] as [HTMLInputElement];
+    await interact(() => page.click());
+    expect(page.checked).toBe(true);
+    const yes = must(root().querySelector<HTMLButtonElement>('[data-agenda-form-yesno] button'), 'yes');
+    await interact(() => yes.click());
+    expect(yes.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  test('without a form key it only reads: no controls, and it says where to answer', async () => {
+    await draw(form);
+    expect(root().querySelector('input')).toBeNull();
+    expect(root().querySelector('[data-agenda-form-yesno]')).toBeNull();
+    expect(root().querySelector('[data-agenda-form-options]')).not.toBeNull();
+    expect(root().textContent).toContain('Open this in the Inbox');
+  });
+});

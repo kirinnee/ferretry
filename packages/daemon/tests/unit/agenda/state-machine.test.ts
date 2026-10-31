@@ -3832,6 +3832,74 @@ describe('Agenda state machine answer shapes', () => {
     should(refused.error).deepEqual({ code: 'invalid', message: AGENDA_SHAPE_ERRORS.stepsOnlyTodo });
     should(edited.item?.steps).deepEqual(['Two']);
   });
+
+  describe('a form card', () => {
+    const FIELDS: NonNullable<RaiseAgendaRequest['fields']> = [
+      { id: '1', type: 'one', label: 'Which region?', options: [{ label: 'EU' }, { label: 'US' }] },
+      { id: '2', type: 'yesno', label: 'OK to restart?' },
+      { id: '3', type: 'text', label: 'Anything else?' },
+    ];
+    const form = () => raised(AGENT, { ask: { kind: 'open-question' }, kind: 'form', fields: FIELDS });
+    const answer = (board: ReturnType<typeof form>, response: AgendaResponse) =>
+      applyAgendaCommand(board.ledger, {
+        action: 'answer',
+        actor: HUMAN,
+        id: 'A1',
+        response,
+        note: 'Ship at 6pm',
+        at: SECOND,
+      });
+
+    it('should be raised with its fields, and kept on the item', () => {
+      const board = form();
+
+      should(board.snapshot.items[0]?.kind).equal('form');
+      should(board.snapshot.items[0]?.fields).deepEqual(FIELDS);
+    });
+
+    it('should refuse a form raised without fields', () => {
+      const refused = failed(
+        applyAgendaCommandToSession(
+          null,
+          SESSION_ID,
+          raiseCommand(AGENT, { ask: { kind: 'open-question' }, kind: 'form' }),
+        ),
+      );
+
+      should(refused.error.code).equal('invalid');
+    });
+
+    it('should record the answer by field id and close the card', () => {
+      const response: AgendaResponse = {
+        kind: 'form',
+        answers: [
+          { id: '1', value: 'EU' },
+          { id: '2', value: 'Yes' },
+        ],
+      };
+
+      const actual = succeeded(answer(form(), response));
+
+      should(actual.snapshot.items).have.length(0);
+      should(actual.snapshot.resolved[0]).containDeep({ response, resolutionNote: 'Ship at 6pm' });
+    });
+
+    it('should refuse an answer to a field the form does not have, or a value that is not an option', () => {
+      const board = form();
+
+      for (const answers of [[{ id: '9', value: 'x' }], [{ id: '1', value: 'Asia' }]]) {
+        should(failed(answer(board, { kind: 'form', answers })).error.code).equal('invalid');
+      }
+    });
+
+    it('should refuse a form answer to any other kind of card', () => {
+      const permission = raised();
+
+      should(failed(answer(permission, { kind: 'form', answers: [{ id: '1', value: 'EU' }] })).error.code).equal(
+        'invalid',
+      );
+    });
+  });
 });
 
 describe('Agenda state machine: a question item is never lost to a Got it (the owner asks, the ferret answers)', () => {

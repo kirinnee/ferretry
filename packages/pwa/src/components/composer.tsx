@@ -114,6 +114,8 @@ export interface ComposerProps {
     Partial<Pick<IFyApiClient, 'history' | 'resolveComposerDraft' | 'submitSend' | 'cancelSend' | 'retrySend'>>;
   readonly busy?: boolean;
   readonly disabled?: boolean;
+  /** Send is allowed with an empty box: the host's send needs no words (a form card whose fields carry the answer). */
+  readonly allowEmptySend?: boolean;
   readonly placeholder?: string;
   /** This session's own daemon reading; composer quota is never ambient state. */
   readonly quota?: ComposerQuotaProps['quota'];
@@ -368,6 +370,7 @@ export function Composer({
   api,
   busy = false,
   disabled = false,
+  allowEmptySend = false,
   placeholder = 'Message this session',
   quota,
   draftStore = documentDraftStore,
@@ -739,6 +742,7 @@ export function Composer({
     !attachments.uploading &&
     attachments.failed.length === 0 &&
     (canSubmitComposer(draft, disabled, sending) ||
+      (allowEmptySend && !disabled && !sending) ||
       ((attachmentIds.length > 0 || attachments.deferred.length > 0 || location?.kind === 'ready') &&
         !disabled &&
         !sending));

@@ -291,7 +291,7 @@ export const PASSIVE_LEARNING_ENV = 'FY_LEARNING_PASSIVE';
 
 /** The teaching a ferret that is instructed to learn carries. Short on purpose — it is in every prompt. */
 export const LESSONS_INSTRUCTION = (fy: string): string =>
-  `Lessons: when the owner corrects you or you learn a lasting preference of theirs, file one imperative rule: \`${fy} lesson suggest "<rule>" --scope global|repo\` (or lessons_suggest); global = every ferret, repo = this project. File each once; the owner reviews them.`;
+  `Lessons: when the owner corrects you or you learn a lasting preference of theirs, file one imperative rule: \`${fy} lesson suggest "<rule>" --scope global|repo\` (or lessons_suggest); global = every ferret, repo = this project. File each once.`;
 
 /**
  * HYPERMEDIA — a per-FERRET section of the appended system prompt, carried exactly like passive learning

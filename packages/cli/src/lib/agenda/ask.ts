@@ -25,12 +25,13 @@ const KINDS = new Map<string, AgendaKind>([
   ['answer-review', 'review'],
   ['info', 'info'],
   ['reply', 'reply'],
+  ['form', 'form'],
   ['open', 'reply'],
   ['open-question', 'reply'],
 ]);
 
 /** The names `--kind` is documented with, for help text and error messages. */
-export const ASK_KIND_NAMES = ['todo', 'yesno', 'permission', 'choice', 'review', 'info', 'reply'] as const;
+export const ASK_KIND_NAMES = ['todo', 'yesno', 'permission', 'choice', 'review', 'info', 'reply', 'form'] as const;
 
 /** Why a card cannot offer more than three answers, and what to do instead. */
 export const TOO_MANY_ANSWERS = `a card offers at most ${MAX_AGENDA_CARD_ANSWERS} answers (swipe left, up, right). Split this into several items, or use --kind reply and let the owner answer in words.`;
