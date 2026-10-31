@@ -1332,7 +1332,11 @@ export class RelayLink {
       }
       if (this.#live(session)) {
         this.#answer(session, request.id, response);
-        if (response.endsSession === true && member !== undefined) this.#conclude(session);
+        if (response.endsSession === true && member !== undefined) {
+          // A request racing the close is refused as a record after the end, not served and then cut off.
+          session.phase = 'concluding';
+          this.#conclude(session);
+        }
       }
     } finally {
       session.running -= 1;

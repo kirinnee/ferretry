@@ -227,6 +227,7 @@ async function publisher() {
     publisher: () => ({ daemonId: identity.daemonId, daemonName: 'studio', carriers: [], memberUnlockDays: 30 }),
     audit,
     now: () => clock.now,
+    after: () => undefined,
   });
   const gateway = new MemberGateway({ gate, dispatcher, members, live });
   /** Every request the DEVICE side was asked: a member must never put one here. */

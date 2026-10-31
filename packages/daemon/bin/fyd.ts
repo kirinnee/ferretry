@@ -12367,6 +12367,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         }),
         audit: auditLog,
         now: () => millisecondClock.now(),
+        after: (run, ms) => {
+          setTimeout(run, ms).unref();
+        },
       });
       memberSessions.bind(
         new MemberGateway({

@@ -31,6 +31,7 @@ function build(
   const calls: string[] = [];
   const audit: AuditEntry[] = [];
   const sink = { failing: false };
+  const timers: { run: () => void; ms: number }[] = [];
   const members: Members = {
     ready: async () => {
       calls.push('ready');
@@ -61,8 +62,11 @@ function build(
       },
     },
     now: () => r.clock.now,
+    after: (run, ms) => {
+      timers.push({ run, ms });
+    },
   });
-  return { gate, calls, audit, sink };
+  return { gate, calls, audit, sink, timers };
 }
 
 function attemptOf(
@@ -613,6 +617,98 @@ describe('MemberJoinGate: the refusal audit is coalesced', () => {
 
     // Assert — fourteen in the first minute: one written, thirteen folded, then the fifteenth
     should(audit.map(entry => entry.detail?.count)).eql([1, MEMBER_JOIN_ATTEMPTS_PER_MINUTE + 4]);
+  });
+});
+
+describe('MemberJoinGate: the folded tail is flushed when the minute ends', () => {
+  const refuse = async (gate: MemberJoinGate, times: number): Promise<void> => {
+    for (let index = 0; index < times; index += 1)
+      await gate.join(attemptOf('fy_share_BBBBBBBBBBBBBBBBBBBBBB', index + 1).attempt, RELAY);
+  };
+
+  it('should arm one timer for the rest of the minute, however many refusals fold', async () => {
+    // Arrange
+    const r = await rig();
+    const { gate, timers } = build(r);
+    await refuse(gate, 1);
+    r.clock.now = T0 + 20_000;
+
+    // Act
+    await refuse(gate, 5);
+
+    // Assert
+    should(timers.map(timer => timer.ms)).eql([MINUTE - 20_000]);
+  });
+
+  it('should write the tail at the boundary, without waiting for another refusal', async () => {
+    // Arrange
+    const r = await rig();
+    const { gate, audit, timers } = build(r);
+    await refuse(gate, 6);
+
+    // Act
+    r.clock.now = T0 + MINUTE;
+    timers[0]?.run();
+    await gate.join(attemptOf('fy_share_BBBBBBBBBBBBBBBBBBBBBB', 99).attempt, TUNNEL);
+
+    // Assert — the five folded are written on their own, and the tunnel's window is its own
+    should(audit.map(entry => [entry.detail?.carrier, entry.detail?.count])).eql([
+      ['relay', 1],
+      ['relay', 5],
+      ['tunnel', 1],
+    ]);
+  });
+
+  it('should fold what follows a flush, and flush that too at the next minute', async () => {
+    // Arrange
+    const r = await rig();
+    const { gate, audit, timers } = build(r);
+    await refuse(gate, 3);
+    r.clock.now = T0 + MINUTE;
+    timers[0]?.run();
+    await Promise.resolve();
+
+    // Act
+    await refuse(gate, 4);
+    r.clock.now = T0 + 2 * MINUTE;
+    timers[1]?.run();
+    await Promise.resolve();
+
+    // Assert
+    should(timers.map(timer => timer.ms)).eql([MINUTE, MINUTE]);
+    should(audit.map(entry => entry.detail?.count)).eql([1, 2, 4]);
+  });
+
+  it('should leave a window that a later refusal already wrote to that refusal, and write nothing twice', async () => {
+    // Arrange
+    const r = await rig();
+    const { gate, audit, timers } = build(r);
+    await refuse(gate, 4);
+    r.clock.now = T0 + MINUTE;
+    await refuse(gate, 1);
+
+    // Act — the timer of the window that was just written fires late
+    timers[0]?.run();
+    await Promise.resolve();
+
+    // Assert
+    should(audit.map(entry => entry.detail?.count)).eql([1, 4]);
+  });
+
+  it("should keep the last refusal's reason on the flushed entry", async () => {
+    // Arrange
+    const r = await rig();
+    const { gate, audit, timers } = build(r);
+    await refuse(gate, 1);
+    await gate.join(attemptOf('fy_share_BBBBBBBBBBBBBBBBBBBBBB', 7, {}, async () => false).attempt, RELAY);
+
+    // Act
+    r.clock.now = T0 + MINUTE;
+    timers[0]?.run();
+    await Promise.resolve();
+
+    // Assert
+    should(audit[1]?.detail).containDeep({ reason: 'proof', count: 1 });
   });
 });
 

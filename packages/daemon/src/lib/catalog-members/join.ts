@@ -81,6 +81,8 @@ export interface MemberJoinDeps {
   readonly publisher: () => MemberJoinPublisher;
   readonly audit: MemberAuditSink;
   readonly now: () => number;
+  /** Runs a callback once, after this many milliseconds. */
+  readonly after: (run: () => void, ms: number) => void;
 }
 
 /** The join record's fields as a stranger spelled them, judged by the share API's own schemas. */
@@ -99,8 +101,8 @@ type Attempted = { readonly joined: MemberJoinedResponse } | { readonly why: str
 
 export class MemberJoinGate {
   readonly #budget = new FailedJoinBudget();
-  /** Per carrier: when a refusal was last written, and how many were left out since. */
-  readonly #written = new Map<string, { at: number; folded: number }>();
+  /** Per carrier: when a refusal was last written, how many were left out since, and the last one's reason. */
+  readonly #written = new Map<string, { at: number; folded: number; reason: string; armed: boolean }>();
 
   constructor(private readonly deps: MemberJoinDeps) {}
 
@@ -179,21 +181,38 @@ export class MemberJoinGate {
 
   /**
    * A flood of bad codes must not flood the general audit store: one entry per carrier per minute, the first at
-   * once, each saying how many refusals it stands for. What is left out rides on the next entry written.
+   * once, each saying how many refusals it stands for. What is left out is written when the minute ends, so a
+   * burst's tail is never missing from the log.
    */
   async #refused(carrier: MemberJoinCarrier, why: string): Promise<void> {
     const now = this.deps.now();
     const last = this.#written.get(carrier.kind);
     if (last !== undefined && now - last.at < MINUTE_MS) {
       last.folded += 1;
+      last.reason = why;
+      if (!last.armed) {
+        last.armed = true;
+        this.deps.after(() => void this.#flush(carrier.kind, last), last.at + MINUTE_MS - now);
+      }
       return;
     }
-    this.#written.set(carrier.kind, { at: now, folded: 0 });
+    this.#written.set(carrier.kind, { at: now, folded: 0, reason: why, armed: false });
+    await this.#write(carrier.kind, why, (last?.folded ?? 0) + 1);
+  }
+
+  /** The minute is over: write what it left out, and start a quiet minute. A newer window is not this one's to flush. */
+  async #flush(kind: string, window: { folded: number; reason: string }): Promise<void> {
+    if (this.#written.get(kind) !== window) return;
+    this.#written.set(kind, { at: this.deps.now(), folded: 0, reason: window.reason, armed: false });
+    await this.#write(kind, window.reason, window.folded);
+  }
+
+  async #write(carrier: string, reason: string, count: number): Promise<void> {
     await this.#record({
       event: 'catalog.member.join-refused',
       actor: { kind: 'anonymous' },
       outcome: 'refused',
-      detail: { carrier: carrier.kind, reason: why, count: (last?.folded ?? 0) + 1 },
+      detail: { carrier, reason, count },
     });
   }
 

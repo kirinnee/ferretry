@@ -2534,7 +2534,7 @@ The publisher answers with exactly one sealed outcome and then `4440`, as a pair
   refusal, never an unpadded record. The session is `concluding` before the join is judged, so a second
   record is refused rather than racing a spent attempt, and the `4440` follows the sealed answer whatever
   it was. The audit trail is bounded too: a refused join is written at once when it is the first in a quiet
-  minute, and the rest of that minute's refusals on the carrier are folded into one entry with a `count`. The per-peer budget counts FAILED joins only (10 a minute) and is keyed by the socket's client
+  minute, and the rest of that minute's refusals on the carrier are folded into one entry, written when the minute ends, with a `count`. The per-peer budget counts FAILED joins only (10 a minute) and is keyed by the socket's client
   address on the direct carrier; a relayed or tunnelled join has no per-peer key. The publisher awaits the
   write of the burn before it seals ANY outcome, a refusal included, and commits or releases the
   reservation in a `finally`, so a failed write never leaves a slot held for its thirty-second lapse.

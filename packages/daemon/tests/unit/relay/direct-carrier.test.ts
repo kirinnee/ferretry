@@ -874,7 +874,9 @@ describe('a shared-catalog member on a direct socket', () => {
     const messages = await records(proving.wire, channel);
     should(messages[0]).containDeep({ t: 'authenticated' });
     should(messages[1]).containDeep({ t: 'res', id: 1, status: 200, body: '{"shared":true}' });
-    should(fake.opened).deepEqual([{ memberId: MEMBER_ID, keyId: MEMBER_KEY_ID, appSession: APP_SESSION }]);
+    should(fake.opened).deepEqual([
+      { memberId: MEMBER_ID, keyId: MEMBER_KEY_ID, appSession: APP_SESSION, sessionId: proving.sessionId.text },
+    ]);
     should(fake.dispatched).have.length(1);
     should(requests).be.empty();
     await connect(route, { clientAddress: '192.0.2.50' });
