@@ -7,8 +7,8 @@
  *   has its PR.
  * - **Cadence** is per repository: about once a minute while it has an open PR, every ten minutes when
  *   nothing is open, each delay jittered so a fleet of repositories does not poll in lockstep.
- * - **Refiling** (`board-design.md` §2.2): a card left on the Unfiled board for over a day with a PR linked
- *   moves to the project whose repository that PR is in.
+ * - **Refiling** (`board-design.md` §2.2): an Unfiled card with a PR in a registered project's repository
+ *   moves to that project at once ({@link refileTargets}); `unfiled.ts` adds the ferret's own folder.
  */
 import {
   type BoardProjectId,
@@ -37,8 +37,6 @@ export const MAX_REPOSITORIES_PER_TICK = 8;
 export const MAX_COMPARES_PER_TICK = 10;
 /** How long a project's `origin` is trusted before it is read again. */
 export const PROJECT_REMOTES_TTL_MS = 10 * 60_000;
-/** How long a card sits on the Unfiled board, with a PR linked, before it is refiled. */
-export const UNFILED_REFILE_AFTER_MS = 24 * 60 * 60_000;
 /** Branches no card's work is on: a session sitting on one of them names no PR. */
 export const SHARED_BRANCHES: ReadonlySet<string> = new Set(['main', 'master', 'trunk', 'develop', 'HEAD']);
 
@@ -77,11 +75,18 @@ export const repoKey = (repo: string): string => repo.toLowerCase();
 /** A PR as a key, across every card: `owner/name#number`, case-folded. */
 export const prKey = (repo: string, number: number): string => `${repoKey(repo)}#${String(number)}`;
 
-/** When a card last arrived on the Unfiled board: its last refile there, else its creation. */
-const unfiledSince = (card: BoardTask): string => {
+/**
+ * Whether someone, not the daemon, put the card on the Unfiled board on purpose: its last refile there was
+ * theirs. Such a card stays where it was put, so the daemon never refiles it back and forth.
+ */
+export const unfiledOnPurpose = (card: BoardTask): boolean => {
   const refiled = card.history.findLast(event => event.type === 'refiled' && event.toProject === UNFILED_PROJECT_ID);
-  return refiled?.at ?? card.createdAt;
+  return refiled !== undefined && refiled.actor.kind !== 'daemon';
 };
+
+/** Whether a card is an Unfiled card the daemon may refile: still open, and not put there on purpose. */
+export const isRefilable = (card: BoardTask, laneSets: LaneSets): boolean =>
+  card.projectId === UNFILED_PROJECT_ID && isWatched(card, laneSets) && !unfiledOnPurpose(card);
 
 export interface RefileTarget {
   readonly card: BoardTask;
@@ -90,18 +95,17 @@ export interface RefileTarget {
 }
 
 /**
- * The Unfiled cards to refile, and where: the first of the card's PRs whose repository a registered project
- * owns decides. `owners` maps a case-folded `owner/name` to the project registered for it first.
+ * The Unfiled cards a registered project's repository claims, and where: the first of the card's PRs whose
+ * repository a project owns decides. `owners` maps a case-folded `owner/name` to the project registered for
+ * it first. Applies at once: a card that belongs on a board never waits on the Unfiled one.
  */
 export const refileTargets = (
   cards: readonly BoardTask[],
   laneSets: LaneSets,
   owners: ReadonlyMap<string, { readonly id: BoardProjectId; readonly name: string }>,
-  nowMs: number,
 ): readonly RefileTarget[] =>
   cards.flatMap(card => {
-    if (card.projectId !== UNFILED_PROJECT_ID || !isWatched(card, laneSets)) return [];
-    if (nowMs - Date.parse(unfiledSince(card)) <= UNFILED_REFILE_AFTER_MS) return [];
+    if (!isRefilable(card, laneSets)) return [];
     const pr = card.links.prs.find(link => owners.has(repoKey(link.repo)));
     const owner = pr === undefined ? undefined : owners.get(repoKey(pr.repo));
     if (pr === undefined || owner === undefined) return [];
@@ -109,7 +113,7 @@ export const refileTargets = (
       {
         card,
         projectId: owner.id,
-        reason: `${formatTaskRef(card)} sat on the Unfiled board for over a day, and its PR #${String(pr.number)} is in ${pr.repo}, which ${owner.name} owns`,
+        reason: `${formatTaskRef(card)}'s PR #${String(pr.number)} is in ${pr.repo}, which ${owner.name} owns`,
       },
     ];
   });

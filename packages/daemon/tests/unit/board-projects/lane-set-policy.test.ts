@@ -4,11 +4,13 @@ import {
   type LaneLayoutValue,
   type LaneSet,
   LaneSetSchema,
+  QUICK_TO_TEST_LANE,
   UNFILED_PROJECT_ID,
 } from '@ferretry/protocol';
 import should from 'should';
 import {
   actorName,
+  addQuickToTestLane,
   confirmLaneSet,
   describeLaneSetFailure,
   editLaneSet,
@@ -19,7 +21,7 @@ import {
   RELEASED_TO_TEST_NAME,
   unfiledLaneSet,
 } from '../../../src/lib/board-projects/index.ts';
-import { lanes, templateLanes } from '../board/support.ts';
+import { lanes, oldQuickLanes, templateLanes } from '../board/support.ts';
 import { FERRETRY_ID } from './support.ts';
 
 const OWNER: LaneActor = { kind: 'owner' };
@@ -58,6 +60,7 @@ describe('actorName and unfiledLaneSet', () => {
       proposedBy: 'ferretry',
       ...LANE_TEMPLATES.quick,
     });
+    should(unfiledLaneSet().lanes.map(lane => lane.id)).deepEqual(['todo', 'doing', 'to-test', 'closed']);
   });
 });
 
@@ -68,7 +71,7 @@ describe('proposeLaneSet', () => {
     should(actual.ok).be.true();
     if (!actual.ok) return;
     should(actual.value).containDeep({ projectId: FERRETRY_ID, version: 1, confirmedBy: null, proposedBy: 'koen' });
-    should(actual.value.lanes.map(lane => lane.name)).deepEqual(['Todo', 'Busy', 'Closed']);
+    should(actual.value.lanes.map(lane => lane.name)).deepEqual(['Todo', 'Busy', 'To test', 'Closed']);
   });
 
   it('should raise the version when it replaces an unconfirmed proposal', () => {
@@ -299,5 +302,92 @@ describe('mergeReleaseLanes', () => {
     should(mergeReleaseLanes(lanes(FERRETRY_ID, 'quick'))).be.null();
     should(mergeReleaseLanes(reordered)).be.null();
     should(mergeReleaseLanes(noMerged)).not.be.null();
+  });
+});
+
+describe('addQuickToTestLane', () => {
+  const old = { ...oldQuickLanes(UNFILED_PROJECT_ID), version: 4 };
+
+  it('should put To test between Doing and Closed, keep every lane and its name, and gate Closed', () => {
+    // Arrange
+    const renamed = { ...old, lanes: old.lanes.map(lane => (lane.id === 'doing' ? { ...lane, name: 'Busy' } : lane)) };
+
+    // Act
+    const next = addQuickToTestLane(renamed);
+
+    // Assert
+    should(next?.lanes.map(lane => `${lane.id}:${lane.name}`)).deepEqual([
+      'todo:Todo',
+      'doing:Busy',
+      'to-test:To test',
+      'closed:Closed',
+    ]);
+    should(next?.lanes[2]).deepEqual(QUICK_TO_TEST_LANE);
+    should(next?.lanes[3]).deepEqual({
+      id: 'closed',
+      name: 'Closed',
+      category: 'closed',
+      ownerGate: true,
+      emphasis: 'info',
+    });
+    should(LaneSetSchema.safeParse(next).success).be.true();
+  });
+
+  it('should raise the version, keep the confirmation, the proposer and the targets, and ask the owner nothing', () => {
+    // Act
+    const next = addQuickToTestLane({ ...old, confirmedBy: null, proposedBy: 'koen' });
+
+    // Assert
+    should(next).match({
+      projectId: UNFILED_PROJECT_ID,
+      version: 5,
+      confirmedBy: null,
+      proposedBy: 'koen',
+      doneLane: 'closed',
+      notGoodLane: 'doing',
+    });
+    should(addQuickToTestLane(old)?.confirmedBy).equal('owner');
+  });
+
+  it('should walk To test in every variant that walked Doing or Closed, in lane order', () => {
+    // Arrange
+    const variants = { quick: ['todo', 'doing', 'closed'], investigate: ['todo', 'closed'], 'design-first': ['todo'] };
+
+    // Act
+    const next = addQuickToTestLane({ ...old, variants });
+
+    // Assert
+    should(next?.variants).deepEqual({
+      quick: ['todo', 'doing', 'to-test', 'closed'],
+      investigate: ['todo', 'to-test', 'closed'],
+      'design-first': ['todo'],
+    });
+  });
+
+  it('should keep any other trigger Closed was entered on, and only drop signal.done', () => {
+    // Arrange
+    const [todo, doing, closed] = old.lanes;
+    const triggered = {
+      ...old,
+      lanes: [todo!, doing!, { ...closed!, enterOn: ['signal.done' as const, 'pr.merged' as const] }],
+    };
+
+    // Act / Assert
+    should(addQuickToTestLane(triggered)?.lanes[3]?.enterOn).deepEqual(['pr.merged']);
+  });
+
+  it('should be idempotent and leave every other set alone', () => {
+    // Arrange
+    const once = addQuickToTestLane(old);
+
+    // Act / Assert
+    should(once).not.be.null();
+    should(addQuickToTestLane(once as LaneSet)).be.null();
+    should(addQuickToTestLane({ ...unfiledLaneSet() })).be.null();
+    should(addQuickToTestLane(lanes())).be.null();
+    should(addQuickToTestLane(templateLanes())).be.null();
+    should(addQuickToTestLane(lanes(UNFILED_PROJECT_ID, 'ops'))).be.null();
+    const [todo, doing, closed] = old.lanes;
+    should(addQuickToTestLane({ ...old, lanes: [todo!, { ...doing!, id: 'busy' }, closed!], variants: {} })).be.null();
   });
 });
