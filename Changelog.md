@@ -1,3 +1,9 @@
+## [4.175.0](https://github.com/kirinnee/ferretry/compare/v4.174.0...v4.175.0) (2026-10-31)
+
+### Features
+
+* **secure-copy:** copy a page element, and keep its page out of pictures (SC3b) ([#1172](https://github.com/kirinnee/ferretry/issues/1172)) ([0966af3](https://github.com/kirinnee/ferretry/commit/0966af31e22bbdd82876607904ce3de683e7accf)), closes [#F230](https://github.com/kirinnee/ferretry/issues/F230)
+
 ## [4.174.0](https://github.com/kirinnee/ferretry/compare/v4.173.0...v4.174.0) (2026-10-31)
 
 ### Features
