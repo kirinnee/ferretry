@@ -105,6 +105,43 @@ describe('a sub-ferret that has not answered its parent', () => {
     should(answered.remedies).be.empty();
   });
 
+  it('should remember nothing when the message could not be typed, so the next sweep tries again', async () => {
+    // Arrange
+    const subject = harness({
+      config: enabled(),
+      fleet: [leadWithName, reviewer()],
+      exchanges: ledgers({ reviewer: [asked] }),
+      remedyFails: 'nudge',
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.state().overdue).be.undefined();
+    should(subject.journal.find(entry => entry.type === 'fleet.warden_overdue_failed')?.data).eql({
+      sessionId: 'reviewer',
+      via: 'nudge',
+      to: 'reviewer',
+    });
+  });
+
+  it('should flag nobody whose ledgers could not be read', async () => {
+    // Arrange
+    const subject = harness({
+      config: enabled(),
+      fleet: [leadWithName, reviewer()],
+      exchanges: { sends: async () => await Promise.reject(new Error('unreadable')) },
+    });
+
+    // Act
+    const run = await subject.service.run({ force: false });
+
+    // Assert
+    should(run.anomalies).be.empty();
+    should(subject.remedies).be.empty();
+  });
+
   it('should be flagged but tell nobody while the Warden is off', async () => {
     // Arrange
     const subject = harness({
