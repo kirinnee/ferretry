@@ -1,3 +1,13 @@
+## [4.176.0](https://github.com/kirinnee/ferretry/compare/v4.175.0...v4.176.0) (2026-10-31)
+
+### Features
+
+* **catalogs:** install a catalog item from a signed file (phase 1b) ([#1170](https://github.com/kirinnee/ferretry/issues/1170)) ([e6a9309](https://github.com/kirinnee/ferretry/commit/e6a93094d1b072697d4cba683ffcf38c4437776b))
+
+### Fixes
+
+* **daemon:** give process provenance an explicit no-procfs value ([#1175](https://github.com/kirinnee/ferretry/issues/1175)) ([0afd380](https://github.com/kirinnee/ferretry/commit/0afd380eb4fc233cc686d709b9313de9c78898b5))
+
 ## [4.175.0](https://github.com/kirinnee/ferretry/compare/v4.174.0...v4.175.0) (2026-10-31)
 
 ### Features
