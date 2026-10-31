@@ -752,6 +752,56 @@ describe('attention needs-info command', () => {
     ]);
   });
 
+  it('should ask for the Done button with --offer-close, on a daemon that offers it', async () => {
+    // Arrange + Act
+    const { parsed, gateway, out } = run(
+      ['agenda', 'add', 'Try it', '--title', 'Try it', '--task', 'F12', '--offer-close'],
+      afterAdd,
+      [DAEMON_FEATURES.agendaTask, DAEMON_FEATURES.agendaOfferClose],
+    );
+    await parsed;
+    const plain = run(['agenda', 'add', 'Try it', '--title', 'Try it', '--task', 'F12'], afterAdd, [
+      DAEMON_FEATURES.agendaTask,
+      DAEMON_FEATURES.agendaOfferClose,
+    ]);
+    await plain.parsed;
+
+    // Assert
+    should(gateway.applied[0]?.request).match({ task: { id: 'F12' }, offerClose: true });
+    should(out.diagnostics).be.empty();
+    should(plain.gateway.applied[0]?.request).not.have.property('offerClose');
+  });
+
+  it('should raise the item without the Done button on an older daemon, and say so', async () => {
+    // Arrange + Act
+    const { parsed, gateway, out } = run(
+      ['agenda', 'add', 'Try it', '--title', 'Try it', '--task', 'F12', '--offer-close'],
+      afterAdd,
+      [DAEMON_FEATURES.agendaTask],
+    );
+    await parsed;
+
+    // Assert
+    should(gateway.applied[0]?.request).not.have.property('offerClose');
+    should(out.diagnostics).deepEqual([
+      'this daemon is older than the Done button on agenda items, so the item is raised without it; update the daemon to offer it',
+    ]);
+  });
+
+  it('should leave the card to the focus card when --offer-close comes with a bare --task', async () => {
+    // Arrange + Act
+    const { parsed, gateway } = run(
+      ['agenda', 'add', 'Try it', '--title', 'Try it', '--task', '--offer-close'],
+      afterAdd,
+      [DAEMON_FEATURES.agendaOfferClose],
+    );
+    await parsed;
+
+    // Assert
+    should(gateway.applied[0]?.request).match({ offerClose: true, ask: { kind: 'task' } });
+    should(gateway.applied[0]?.request).not.have.property('task');
+  });
+
   it('should keep a bare --task, a word that is not a card, and --todo as a to-do', async () => {
     // Arrange + Act
     const word = run(['agenda', 'add', '--title', 'Rotate', '--task', 'Rotate', 'the', 'key'], afterAdd, [

@@ -32,8 +32,11 @@ import { AgendaConfigChange } from './agenda-config-change.tsx';
 import { AgendaDelivery, agendaHeading } from './agenda-delivery.tsx';
 import { AgendaDetail } from './agenda-detail.tsx';
 import { AgendaItemHistory } from './agenda-item-history.tsx';
+import { useDoneClose } from '../../hooks/use-done-close.ts';
+import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { AgendaQuickReplies } from './agenda-quick-replies.tsx';
 import { AgendaRevisions } from './agenda-revisions-view.tsx';
+import { useDoneCloseFlow } from './use-done-close-flow.ts';
 import { agendaAsk } from './agenda-row.tsx';
 import { AgendaSnoozeMenu } from './agenda-snooze-menu.tsx';
 import { AgendaStatusPill } from './agenda-status-pill.tsx';
@@ -65,6 +68,8 @@ export interface AgendaItemViewProps {
    * there, exactly as in the chat (`useQuoteMenu`). Absent: nothing to quote into.
    */
   readonly quoteScope?: DaemonSessionScope | null;
+  /** The machine the item is on: with it, an item that offers to close its card draws "Done · closes &F12". */
+  readonly daemonId?: DaemonId;
   /** What ✕ is called: "Back to the chat", unless the host is somewhere else (the Inbox). */
   readonly closeLabel?: string;
   /**
@@ -109,6 +114,7 @@ export function AgendaItemView({
   closeLabel = 'Back to the chat',
   quoteScope = null,
   settled,
+  daemonId,
 }: AgendaItemViewProps) {
   const root = useRef<HTMLElement | null>(null);
   const quote = useQuoteMenu(root, quoteScope);
@@ -127,6 +133,7 @@ export function AgendaItemView({
   const ask = agendaAsk(item);
   const skip = onNext ?? onClose;
   const pull = useDownSwipe(skip, swipeable);
+  const doneClose = useDoneCloseFlow(useDoneClose(daemonId, item), label => onAct({ kind: 'resolve', label }));
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: focus the dialog again whenever another item opens
   useEffect(() => {
@@ -285,6 +292,7 @@ export function AgendaItemView({
           onSkip={skip}
           options={itemOptions(item)}
           swipeable={swipeable}
+          {...(doneClose === undefined ? {} : { doneClose })}
           {...(item.waitingOn === 'ferret' && !model.notice ? { waitingOn: ferret } : {})}
           {...(model.perQuestion && asked.length > 0
             ? {

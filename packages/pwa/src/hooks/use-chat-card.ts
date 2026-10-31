@@ -25,7 +25,7 @@ const IDLE_PORT: BoardPort = {
   version: refuse,
   act: refuse,
 };
-const IDLE_STORE = new DaemonBoardStore(IDLE_PORT);
+export const IDLE_STORE = new DaemonBoardStore(IDLE_PORT);
 const NO_MACHINES: readonly BoardMachine[] = [];
 
 export interface UseChatCardInput {

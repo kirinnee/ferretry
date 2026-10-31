@@ -465,3 +465,90 @@ describe('Agenda service: parking', () => {
     should(urgent.ok ? urgent.item?.parked : 'refused').be.undefined();
   });
 });
+
+describe('an agenda item offers to close the card that waits to be tried', () => {
+  const taskRequest = { ...request, kind: 'task' as const, ask: { kind: 'task' as const } };
+  const withCards = (waiting: readonly string[]) => {
+    const asked: string[] = [];
+    const repository = new MemoryRepository();
+    const service = new AgendaService(
+      repository,
+      { now: () => NOW },
+      { has: async sessionId => sessionId === SESSION },
+      new Observer(),
+      undefined,
+      NO_AGENDA_FOCUS,
+      undefined,
+      {
+        inToTest: async task => {
+          asked.push(task.id);
+          if (task.id === 'BROKEN') throw new Error('board unreadable');
+          return waiting.includes(task.id);
+        },
+      },
+    );
+    return { asked, service };
+  };
+  const offered = (mutation: AgendaMutation) => (mutation.ok ? mutation.item?.offerClose : undefined);
+
+  it('should offer by default for a to-do or a review on a card in the to-test lane', async () => {
+    // Arrange
+    const { service } = withCards(['F12']);
+
+    // Act
+    const todo = await service.raise(SESSION, { ...taskRequest, task: { id: 'F12' } }, AGENT);
+    const review = await service.raise(SESSION, { ...request, kind: 'review', task: { id: 'F12' } }, AGENT);
+
+    // Assert
+    should([offered(todo), offered(review)]).deepEqual([true, true]);
+  });
+
+  it('should not offer for another lane, another kind, a notice, a card-less item or an unreadable board', async () => {
+    // Arrange
+    const { asked, service } = withCards(['F12']);
+
+    // Act
+    const elsewhere = await service.raise(SESSION, { ...taskRequest, task: { id: 'F99' } }, AGENT);
+    const permission = await service.raise(SESSION, { ...request, task: { id: 'F12' } }, AGENT);
+    const notice = await service.raise(
+      SESSION,
+      { ...request, kind: 'info', notice: true, ask: undefined, task: { id: 'F12' } },
+      AGENT,
+    );
+    const cardless = await service.raise(SESSION, taskRequest, AGENT);
+    const broken = await service.raise(SESSION, { ...taskRequest, task: { id: 'BROKEN' } }, AGENT);
+
+    // Assert
+    should([elsewhere, permission, notice, cardless, broken].map(offered)).deepEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    should(asked).deepEqual(['F99', 'BROKEN']);
+  });
+
+  it('should keep an offer the add asked for without asking the board', async () => {
+    // Arrange
+    const { asked, service } = withCards([]);
+
+    // Act
+    const raised = await service.raise(SESSION, { ...request, task: { id: 'F12' }, offerClose: true }, AGENT);
+
+    // Assert
+    should(offered(raised)).equal(true);
+    should(asked).deepEqual([]);
+  });
+
+  it('should offer nothing by default when no board is wired', async () => {
+    // Arrange
+    const { service } = createService();
+
+    // Act
+    const raised = await service.raise(SESSION, { ...taskRequest, task: { id: 'F12' } }, AGENT);
+
+    // Assert
+    should(offered(raised)).be.undefined();
+  });
+});
