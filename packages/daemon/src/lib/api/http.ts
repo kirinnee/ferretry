@@ -95,6 +95,12 @@ export interface ApiResponse {
   readonly status: number;
   readonly headers: ReadonlyMap<string, string>;
   readonly body: string;
+  /**
+   * The gzip form of `body`, attached by the dispatcher when the caller asked for one and the policy
+   * allows it (`compression.ts`). `body` stays the plain text, so the tag, the audit and every test read
+   * what the route said; the transport that sends this adds `Content-Encoding: gzip`.
+   */
+  readonly gzip?: Uint8Array;
 }
 
 /**

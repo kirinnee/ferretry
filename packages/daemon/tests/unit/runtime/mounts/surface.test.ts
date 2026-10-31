@@ -1227,6 +1227,39 @@ describe('the mounted daemon surface', () => {
     should(firstLiteral).be.below(firstPattern);
   });
 
+  it('should name every GET route whose answer is never compressed, so a new credential route must choose', () => {
+    // BREACH: a compressed answer's length depends on its content, so an answer that can carry a credential
+    // is never gzipped (`lib/api/compression.ts`). The set is an inventory, not a count: adding a route
+    // that returns credential-adjacent state fails here until its author decides and lists it.
+    // Arrange
+    const routes = mountedDaemonRoutes(base, subsystems());
+
+    // Act
+    const never = routes
+      .filter(route => route.method === 'GET' && route.neverCompress === true)
+      .map(route => route.path)
+      .sort();
+
+    // Assert
+    should(never).eql([
+      '/v1/browser/login',
+      '/v1/browser/state',
+      '/v1/fleet/credentials',
+      '/v1/fleet/mcp-auth',
+      '/v1/pair/code/:pairingId',
+      '/v1/pair/devices',
+      '/v1/passkeys',
+      '/v1/push/subscriptions',
+      '/v1/secrets',
+      '/v1/security',
+      '/v1/sessions/:sessionId/attachments/:attachmentId',
+      '/v1/sessions/:sessionId/fs/diff',
+      '/v1/sessions/:sessionId/fs/file',
+      '/v1/tunnel',
+    ]);
+    should(routes.filter(route => route.method !== 'GET' && route.neverCompress === true)).eql([]);
+  });
+
   it('should dispatch a base feed and a subsystem route through the same dispatcher', async () => {
     // Arrange
     // REFRESHED FIRST, exactly as the composition root does before it binds an address. A service

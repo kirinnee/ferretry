@@ -69,6 +69,7 @@ export function mcpOAuthRoutes(subsystem: McpOAuthSubsystem): readonly ApiRoute[
     {
       method: 'GET',
       path: '/v1/fleet/mcp-auth',
+      neverCompress: true,
       minimum: 'operator',
       capability: { capability: 'fleet', axis: 'use' },
       noStore: true,

@@ -123,6 +123,7 @@ export function sessionAttachmentRoutes(subsystem: SessionAttachmentSubsystem): 
     {
       method: 'GET',
       path: '/v1/sessions/:sessionId/attachments/:attachmentId',
+      neverCompress: true,
       minimum: 'operator',
       noStore: true,
       handle: async context => await download(subsystem, context),

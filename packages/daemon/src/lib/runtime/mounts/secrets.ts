@@ -235,6 +235,7 @@ export function secretRoutes(subsystem: SecretSubsystem): readonly ApiRoute[] {
     {
       method: 'GET',
       path: '/v1/secrets',
+      neverCompress: true,
       minimum: 'operator',
       capability: SECRETS_USE,
       noStore: true,

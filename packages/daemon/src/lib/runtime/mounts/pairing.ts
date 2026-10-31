@@ -228,6 +228,7 @@ export function pairingRoutes(subsystem: PairingSubsystem, grants: DeviceGrantSu
     {
       method: 'GET',
       path: '/v1/pair/code/:pairingId',
+      neverCompress: true,
       minimum: 'operator',
       capability: PAIRING_DEMAND,
       noStore: true,
@@ -264,6 +265,7 @@ export function pairingRoutes(subsystem: PairingSubsystem, grants: DeviceGrantSu
     {
       method: 'GET',
       path: '/v1/pair/devices',
+      neverCompress: true,
       minimum: 'operator',
       capability: PAIRING_DEMAND,
       noStore: true,

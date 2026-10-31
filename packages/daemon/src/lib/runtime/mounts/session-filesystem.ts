@@ -228,6 +228,7 @@ export function sessionFilesystemRoutes(
     {
       method: 'GET',
       path: '/v1/sessions/:sessionId/fs/file',
+      neverCompress: true,
       minimum: 'operator',
       capability: { capability: 'filesystem', axis: 'use' },
       noStore: true,
@@ -252,6 +253,7 @@ export function sessionFilesystemRoutes(
     {
       method: 'GET',
       path: '/v1/sessions/:sessionId/fs/diff',
+      neverCompress: true,
       minimum: 'operator',
       capability: { capability: 'filesystem', axis: 'use' },
       noStore: true,
