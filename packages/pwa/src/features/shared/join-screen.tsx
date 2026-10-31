@@ -200,8 +200,11 @@ export function JoinScreen({ members, fragment, now, ticker = secondTicker, onSh
             <p className="m-0 break-words text-cell text-fg">
               Publisher address: <span className="font-mono">{facts.host}</span>
             </p>
-            <p className="m-0 text-cell text-fg">Fingerprint, to compare with the owner:</p>
-            <Fingerprint head={facts.fingerprint} full={facts.fingerprintFull} />
+            <Fingerprint
+              head={facts.fingerprint}
+              full={facts.fingerprintFull}
+              label="Machine ID, to compare with the owner"
+            />
           </section>
           {phase.oldKey ? (
             <p className="m-0 text-cell text-warn" data-join-old-key="">

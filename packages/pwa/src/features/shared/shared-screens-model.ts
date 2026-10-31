@@ -20,6 +20,7 @@ import {
 
 export const TRY_AGAIN = 'Try again';
 export const BACK_TO_START = 'Back to start';
+export const BACK_TO_MACHINES = '‹ Your machines';
 export const JOIN_BUTTON = 'Join';
 export const JOINING = 'Joining…';
 export const JOIN_NOTHING_SENT = 'Nothing is sent until you tap Join.';

@@ -26,7 +26,7 @@ import {
   UNLOCK_NOTE,
 } from './shared-model.ts';
 import {
-  BACK_TO_START,
+  BACK_TO_MACHINES,
   CANCEL,
   CONFIRM_LEAVE,
   CONFIRM_LEAVE_YES,
@@ -103,8 +103,8 @@ export function SharedWithMe({ members, machines, installHost, onHome }: SharedW
         </ul>
       )}
       <div>
-        <Button type="button" onClick={onHome} data-shared-home="">
-          {BACK_TO_START}
+        <Button type="button" variant="ghost" className="kt-btn--flush-start" onClick={onHome} data-shared-home="">
+          {BACK_TO_MACHINES}
         </Button>
       </div>
     </SharedPage>
@@ -184,7 +184,7 @@ function PublisherCard({
             <h2 className="m-0 min-w-0 flex-1 break-words text-row font-semibold text-fg" data-publisher-label="">
               {line.label}
             </h2>
-            <Button type="button" size="sm" onClick={() => setRenaming(true)} data-publisher-rename="">
+            <Button type="button" size="sm" variant="ghost" onClick={() => setRenaming(true)} data-publisher-rename="">
               {RENAME}
               <span className="sr-only"> {line.label}</span>
             </Button>
@@ -236,7 +236,14 @@ function PublisherCard({
               </div>
             </fieldset>
           ) : (
-            <Button type="button" size="sm" onClick={() => setConfirmLeave(true)} data-publisher-leave="">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="kt-btn--flush-start"
+              onClick={() => setConfirmLeave(true)}
+              data-publisher-leave=""
+            >
               {LEAVE}
               <span className="sr-only"> {line.label}</span>
             </Button>

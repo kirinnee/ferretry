@@ -18,11 +18,11 @@ const ADD_FROM_LINK_TITLE = 'Add a catalog from a link';
 const ADD_FROM_LINK_HELP = 'Paste the link someone sent you.';
 
 interface AddCatalogFromLinkProps {
-  /** Where a share link goes. Defaults to the router, or the address bar where there is no router. */
-  readonly onJoin?: (fragment: string) => void;
+  /** Opens the join page at `to` (path and fragment). Defaults to the router, or the address bar where there is none. */
+  readonly navigate?: (to: string) => void;
 }
 
-export function AddCatalogFromLink({ onJoin }: AddCatalogFromLinkProps) {
+export function AddCatalogFromLink({ navigate }: AddCatalogFromLinkProps) {
   const router = useOptionalRouter();
   const inputId = useId();
   const [text, setText] = useState('');
@@ -37,9 +37,10 @@ export function AddCatalogFromLink({ onJoin }: AddCatalogFromLinkProps) {
     }
     setText('');
     setProblem(null);
-    if (onJoin !== undefined) onJoin(link.fragment);
-    else if (router !== null) router.navigate(`${joinPath()}${link.fragment}`);
-    else window.location.assign(`${joinPath()}${link.fragment}`);
+    const to = `${joinPath()}${link.fragment}`;
+    if (navigate !== undefined) navigate(to);
+    else if (router !== null) router.navigate(to);
+    else window.location.assign(to);
   };
 
   return (

@@ -16,7 +16,6 @@ import {
   expiryLine,
   formatWhen,
   liveShareCount,
-  memberCatalogNames,
   mintRequest,
   multiShareOf,
   multiSummary,
@@ -239,11 +238,6 @@ describe('shares', () => {
 
 describe('members', () => {
   const catalogs = [ownedCatalog()];
-  it('names the catalogs a person reads, leaving out ones that are gone', () => {
-    should(memberCatalogNames(alice, catalogs)).equal('Team skills');
-    should(memberCatalogNames(bob, catalogs)).equal('No catalogs');
-    should(memberCatalogNames(memberView({ catalogIds: [`cat_${'z'.repeat(22)}`] }), catalogs)).equal('No catalogs');
-  });
   it('lists only real catalogs to take away', () => {
     should(takeAwayChoices(alice, catalogs).map(catalog => catalog.id)).eql([CATALOG]);
     should(takeAwayChoices(bob, catalogs)).eql([]);

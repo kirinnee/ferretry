@@ -628,7 +628,7 @@ describe('an item a member already opened', () => {
     expect(q('[data-catalog-pick-file]')).toBeNull();
     expect(q(`[data-catalog-file-item="${MCP_ID}"]`)).not.toBeNull();
     expect(q(`[data-catalog-file-item="${SKILL_ID}"]`)).toBeNull();
-    expect(q('[data-catalog-shared-by]')?.textContent).toBe('Shared with you as Studio.');
+    expect(q('[data-catalog-shared-by]')?.textContent).toBe('You call this publisher: Studio');
     expect(text()).not.toContain('withdrawn');
     await view.unmount();
   });

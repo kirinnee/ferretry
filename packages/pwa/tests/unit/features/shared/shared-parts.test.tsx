@@ -47,6 +47,18 @@ describe('Fingerprint', () => {
   });
 });
 
+describe('Fingerprint label', () => {
+  it('says Machine ID by default and takes another label', async () => {
+    const view = await mount(<Fingerprint head="abc" full="abcdef" />);
+    expect(q('[data-fingerprint]')?.parentElement?.textContent).toBe('Machine ID:abc…');
+    expect(q('[data-fingerprint]')?.getAttribute('aria-label')).toContain('Machine ID');
+    await view.unmount();
+    const other = await mount(<Fingerprint head="abc" full="abcdef" label="Compare" />);
+    expect(q('[data-fingerprint]')?.parentElement?.textContent).toBe('Compare:abc…');
+    await other.unmount();
+  });
+});
+
 describe('JoinAgain', () => {
   it('says what to do and fetches nothing', async () => {
     const view = await mount(<JoinAgain />);

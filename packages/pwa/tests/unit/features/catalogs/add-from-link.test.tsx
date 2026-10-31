@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import { formatShareFragment } from '@ferretry/protocol';
 import { AddCatalogFromLink } from '../../../../src/features/catalogs/add-from-link.tsx';
 import { CatalogMoreMenu } from '../../../../src/features/catalogs/catalog-more-menu.tsx';
@@ -12,6 +12,31 @@ const FP = `fy_daemon_${'q'.repeat(43)}`;
 const hash = `#${formatShareFragment({ daemonUrl: 'https://box.example.test', daemonId: FP, code: FAKE_CODE } as never)}`;
 const q = (selector: string): HTMLElement | null => document.querySelector<HTMLElement>(selector);
 
+afterEach(() => {
+  mock.restore();
+});
+
+/** Just enough of a window for the router: it records what was pushed and never touches the real history. */
+const fakeBrowser = () => {
+  const pushed: string[] = [];
+  const state: { current: unknown } = { current: null };
+  const history = {
+    get state() {
+      return state.current;
+    },
+    pushState: (next: unknown, _title: string, url?: string | URL | null) => {
+      state.current = next;
+      pushed.push(String(url));
+    },
+    replaceState: (next: unknown) => {
+      state.current = next;
+    },
+    back: () => {},
+  };
+  const events = new EventTarget();
+  return Object.assign(events, { history, location: { pathname: '/', search: '' }, pushed });
+};
+
 const paste = async (value: string) => {
   await typeInto(q('[data-catalog-link-input]'), value);
   await click(q('[data-catalog-link-add]'));
@@ -21,30 +46,37 @@ const paste = async (value: string) => {
 describe('AddCatalogFromLink', () => {
   it('hands a share link to the join page and clears the field', async () => {
     const joined: string[] = [];
-    const view = await mount(<AddCatalogFromLink onJoin={fragment => joined.push(fragment)} />);
+    const view = await mount(<AddCatalogFromLink navigate={to => joined.push(to)} />);
     await paste(`https://app.example.test/join${hash}`);
-    expect(joined).toEqual([hash]);
+    expect(joined).toEqual([`/join${hash}`]);
     expect((q('[data-catalog-link-input]') as HTMLInputElement).value).toBe('');
     expect(q('[role="alert"]')).toBeNull();
     await view.unmount();
   });
 
   it('opens /join with the fragment through the router', async () => {
+    const browser = fakeBrowser();
     const view = await mount(
-      <RouterProvider>
+      <RouterProvider browser={browser as unknown as Window} trailStorage={null}>
         <AddCatalogFromLink />
       </RouterProvider>,
     );
     await paste(`https://app.example.test/join${hash}`);
-    expect(window.location.pathname).toBe('/join');
-    expect(window.location.hash).toBe(hash);
-    window.history.replaceState({}, '', '/');
+    expect(browser.pushed).toEqual([`/join${hash}`]);
+    await view.unmount();
+  });
+
+  it('follows the address bar where there is no router', async () => {
+    const assign = spyOn(window.location, 'assign').mockImplementation(() => {});
+    const view = await mount(<AddCatalogFromLink />);
+    await paste(`https://app.example.test/join${hash}`);
+    expect(assign).toHaveBeenCalledWith(`/join${hash}`);
     await view.unmount();
   });
 
   it('says plainly what any other link is, and drops the sentence when typing again', async () => {
     const joined: string[] = [];
-    const view = await mount(<AddCatalogFromLink onJoin={fragment => joined.push(fragment)} />);
+    const view = await mount(<AddCatalogFromLink navigate={to => joined.push(to)} />);
     await paste('https://example.com/skills');
     expect(document.body.textContent).toContain(LINK_OTHER);
     await typeInto(q('[data-catalog-link-input]'), 'x');

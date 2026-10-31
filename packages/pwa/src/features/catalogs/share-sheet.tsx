@@ -405,7 +405,7 @@ function ShareQr({ link }: { readonly link: string }) {
   }
   return (
     // theme-literal-ok: the QR plate must stay white behind the dark modules to scan, in every theme
-    <div className="rounded-control border border-border bg-white p-3" data-share-qr="">
+    <div className="flex justify-center rounded-control border border-border bg-white p-3" data-share-qr="">
       <QrSymbol matrix={matrix} label={SHARE_QR_LABEL} className="h-auto w-full max-w-[240px]" />
     </div>
   );

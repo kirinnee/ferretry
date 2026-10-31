@@ -112,7 +112,7 @@ describe('Install on a machine', () => {
     expect(q('[data-shared-machine]')).toBeNull();
     await click(q('[data-shared-install-button]'));
     expect(q('[data-catalog-sheet="install"] h3')?.textContent).toBe('Install on a machine');
-    expect(q('[data-catalog-shared-by]')?.textContent).toBe('Shared with you as Studio.');
+    expect(q('[data-catalog-shared-by]')?.textContent).toBe('You call this publisher: Studio');
     expect(q('[data-catalog-file-input]')).toBeNull();
     expect(document.querySelectorAll('[data-catalog-file-item]')).toHaveLength(1);
     expect(

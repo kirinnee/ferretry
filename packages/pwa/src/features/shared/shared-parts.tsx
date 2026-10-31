@@ -25,19 +25,33 @@ export function SharedPage({
   );
 }
 
-/** The start of a fingerprint to compare, in full when tapped. A real button, so it works without a mouse. */
-export function Fingerprint({ head, full }: { readonly head: string; readonly full: string }) {
+/**
+ * A machine's ID: the start of its fingerprint, in full when tapped. It is how a person compares a
+ * publisher, so it stays reachable; it is quiet text, not a box. A real button, so it works without a mouse.
+ */
+export function Fingerprint({
+  head,
+  full,
+  label = 'Machine ID',
+}: {
+  readonly head: string;
+  readonly full: string;
+  readonly label?: string;
+}) {
   const [open, setOpen] = useState(false);
   return (
-    <button
-      type="button"
-      className="min-h-[44px] max-w-full break-all rounded-control border border-border bg-surface-2 px-2 text-left font-mono text-meta text-fg focus-visible:outline-focus focus-visible:outline-offset-focus"
-      aria-expanded={open}
-      aria-label={open ? 'Fingerprint, shown in full' : 'Fingerprint, start only. Tap for all of it'}
-      onClick={() => setOpen(current => !current)}
-      data-fingerprint=""
-    >
-      {open ? full : `${head}…`}
-    </button>
+    <p className="m-0 flex min-w-0 flex-wrap items-center gap-x-1 text-meta text-muted">
+      <span>{label}:</span>
+      <button
+        type="button"
+        className="inline-flex min-h-[44px] max-w-full items-center break-all bg-transparent p-0 text-left font-mono text-meta text-fg underline decoration-dotted underline-offset-4 focus-visible:outline-focus focus-visible:outline-offset-focus"
+        aria-expanded={open}
+        aria-label={open ? `${label}, shown in full` : `${label}, start only. Tap for all of it`}
+        onClick={() => setOpen(current => !current)}
+        data-fingerprint=""
+      >
+        {open ? full : `${head}…`}
+      </button>
+    </p>
   );
 }

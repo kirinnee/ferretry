@@ -7,7 +7,7 @@
  */
 
 import type { CatalogMemberView, CatalogShareView, OwnedCatalog } from '@ferretry/protocol';
-import { CircleCheck } from 'lucide-react';
+import { CircleCheck, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { useDaemonClient } from '../../lib/store.tsx';
@@ -30,7 +30,6 @@ import {
   MEMBERS_EMPTY,
   MEMBERS_NOTE,
   MEMBERS_TITLE,
-  memberCatalogNames,
   multiShareOf,
   multiSummary,
   orderedShares,
@@ -218,7 +217,7 @@ export function CatalogMembersPanel({
                 {SHARES_EMPTY}
               </p>
             ) : (
-              <ul className="m-0 flex list-none flex-col gap-xs p-0">
+              <ul className="m-0 flex list-none flex-col p-0">
                 {orderedShares(shares, nowMs).map(share => (
                   <ShareRowView
                     key={share.shareId}
@@ -308,12 +307,30 @@ function MemberCard({
 }) {
   const multi = multiShareOf(member, shares);
   const mine = confirm !== null && confirm.memberId === member.memberId ? confirm : null;
+  const readable = takeAwayChoices(member, catalogs);
   const browsers = (
-    <ul className="m-0 flex list-none flex-col gap-xs p-0" aria-label={`${member.label}’s browsers`}>
+    <ul className="m-0 flex list-none flex-col p-0" aria-label={`${member.label}’s browsers`}>
       {member.keys.map(key => (
-        <li key={key.keyId} className="flex min-w-0 flex-col gap-0.5" data-members-browser={key.clientName}>
-          <span className="break-words text-cell font-semibold text-fg">{key.clientName}</span>
-          <span className="break-words text-meta text-muted">{browserLine(key, nowMs, timeZone)}</span>
+        <li key={key.keyId} className="flex min-w-0 flex-col gap-xs py-1" data-members-browser={key.clientName}>
+          <div className="flex min-w-0 items-start justify-between gap-xs">
+            <p className="m-0 min-w-0 break-words text-cell text-fg">
+              <span className="font-semibold">{key.clientName}</span>
+              <span className="text-meta text-muted"> · {browserLine(key, nowMs, timeZone)}</span>
+            </p>
+            {mine?.kind === 'browser' && mine.keyId === key.keyId ? null : (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={busy}
+                aria-label={`Remove ${key.clientName}`}
+                onClick={() => onAsk({ kind: 'browser', memberId: member.memberId, keyId: key.keyId })}
+                data-members-remove-browser={key.clientName}
+              >
+                Remove
+              </Button>
+            )}
+          </div>
           {mine?.kind === 'browser' && mine.keyId === key.keyId ? (
             <ConfirmBox
               words={removeBrowserConfirm(member, key)}
@@ -321,29 +338,46 @@ function MemberCard({
               onYes={() => onRemoveBrowser(key.keyId)}
               onCancel={onCancel}
             />
-          ) : (
-            <div>
-              <Button
-                type="button"
-                size="sm"
-                disabled={busy}
-                onClick={() => onAsk({ kind: 'browser', memberId: member.memberId, keyId: key.keyId })}
-                data-members-remove-browser={key.clientName}
-              >
-                Remove this browser…
-              </Button>
-            </div>
-          )}
+          ) : null}
         </li>
       ))}
     </ul>
   );
+  const taking = mine?.kind === 'catalog' ? readable.find(catalog => catalog.id === mine.catalogId) : undefined;
   return (
     <li className="kt-panel flex min-w-0 flex-col gap-xs p-control-x py-2" data-members-person={member.label}>
       <span className="break-words text-ui font-semibold text-fg">{member.label}</span>
-      <span className="break-words text-meta text-muted" data-members-catalogs="">
-        Can read: {memberCatalogNames(member, catalogs)}
-      </span>
+      <div className="flex min-w-0 flex-wrap items-center gap-xs" data-members-catalogs="">
+        <span className="text-meta text-muted">Can read</span>
+        {readable.length === 0 ? <span className="text-meta text-muted">No catalogs</span> : null}
+        {readable.map(catalog => (
+          <span
+            key={catalog.id}
+            className="inline-flex min-w-0 items-center gap-0.5 rounded-control border border-border bg-surface-2 pl-2 text-meta text-fg"
+          >
+            <span className="break-words">{catalog.name}</span>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={busy}
+              aria-label={`Take ${catalog.name} away from ${member.label}`}
+              onClick={() => onAsk({ kind: 'catalog', memberId: member.memberId, catalogId: catalog.id })}
+              data-members-take-away={catalog.name}
+            >
+              <X size={14} aria-hidden="true" />
+            </Button>
+          </span>
+        ))}
+      </div>
+      {taking === undefined ? null : (
+        <ConfirmBox
+          words={takeAwayConfirm(member, taking.name)}
+          busy={busy}
+          onYes={() => onTakeAway(taking.id)}
+          onCancel={onCancel}
+        />
+      )}
       {multi === null ? null : (
         <span className="break-words text-meta text-muted" data-members-multi="">
           {multiSummary(multi, nowMs, timeZone)}
@@ -357,32 +391,6 @@ function MemberCard({
           {browsers}
         </details>
       )}
-      <ul className="m-0 flex list-none flex-col gap-xs p-0" aria-label={`Take a catalog away from ${member.label}`}>
-        {takeAwayChoices(member, catalogs).map(catalog => (
-          <li key={catalog.id} className="flex min-w-0 flex-col gap-xs">
-            {mine?.kind === 'catalog' && mine.catalogId === catalog.id ? (
-              <ConfirmBox
-                words={takeAwayConfirm(member, catalog.name)}
-                busy={busy}
-                onYes={() => onTakeAway(catalog.id)}
-                onCancel={onCancel}
-              />
-            ) : (
-              <div>
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={busy}
-                  onClick={() => onAsk({ kind: 'catalog', memberId: member.memberId, catalogId: catalog.id })}
-                  data-members-take-away={catalog.name}
-                >
-                  Take away {catalog.name}…
-                </Button>
-              </div>
-            )}
-          </li>
-        ))}
-      </ul>
       {mine?.kind === 'revoke' ? (
         <ConfirmBox
           words={revokeConfirm(member, liveShareCount(member, shares, nowMs))}
@@ -395,7 +403,8 @@ function MemberCard({
           <Button
             type="button"
             size="sm"
-            variant="danger"
+            variant="ghost"
+            className="kt-btn--flush-start text-err"
             disabled={busy}
             onClick={() => onAsk({ kind: 'revoke', memberId: member.memberId })}
             data-members-revoke={member.label}
@@ -423,20 +432,23 @@ function ShareRowView({
 }) {
   const row = shareRow(share, nowMs, timeZone);
   return (
-    <li className="kt-panel flex min-w-0 flex-col gap-0.5 p-control-x py-2" data-members-share={row.state}>
-      <span className="break-words text-cell text-fg">{row.line}</span>
+    <li
+      className="flex min-w-0 flex-col gap-0.5 border-b border-border py-1 last:border-b-0"
+      data-members-share={row.state}
+    >
+      <div className="flex min-w-0 items-start justify-between gap-xs">
+        <span className="min-w-0 break-words text-cell text-fg">{row.line}</span>
+        {row.canEnd ? (
+          <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={onEnd} data-members-end-share="">
+            End now
+          </Button>
+        ) : null}
+      </div>
       {row.usedBy.length === 0 ? null : (
         <span className="break-words text-meta text-muted" data-members-used-by="">
           Used by {row.usedBy.join(', ')}
         </span>
       )}
-      {row.canEnd ? (
-        <div>
-          <Button type="button" size="sm" disabled={busy} onClick={onEnd} data-members-end-share="">
-            End now
-          </Button>
-        </div>
-      ) : null}
     </li>
   );
 }

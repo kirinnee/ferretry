@@ -287,12 +287,6 @@ export function orderedShares(shares: readonly CatalogShareView[], nowMs: number
 
 // ── Members ──────────────────────────────────────────────────────────────────────────────────────
 
-/** The catalogs a person can read, by name. A catalog this list no longer has is left out. */
-export function memberCatalogNames(member: CatalogMemberView, catalogs: readonly OwnedCatalog[]): string {
-  const names = member.catalogIds.flatMap(id => catalogs.find(catalog => catalog.id === id)?.name ?? []);
-  return names.length === 0 ? 'No catalogs' : names.join(', ');
-}
-
 /** The catalogs of this person that are on this machine, so the Take away menu lists only real ones. */
 export function takeAwayChoices(member: CatalogMemberView, catalogs: readonly OwnedCatalog[]): readonly OwnedCatalog[] {
   return catalogs.filter(catalog => member.catalogIds.includes(catalog.id));
