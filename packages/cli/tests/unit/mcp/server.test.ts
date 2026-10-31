@@ -148,6 +148,44 @@ describe('McpServer — the tools', () => {
     should(MCP_LESSON_TOOLS.map(tool => tool.lessonTool)).deepEqual(['lessons.suggest']);
   });
 
+  it('should carry secretHint on terminal_request_input as a hint the owner still taps', async () => {
+    // Arrange
+    const { calls, request } = harness();
+
+    // Act
+    const listed = (await request('tools/list')) as {
+      result: {
+        tools: {
+          name: string;
+          description: string;
+          inputSchema: { properties: Record<string, { description?: string }> };
+        }[];
+      };
+    };
+    await request(
+      'tools/call',
+      toolCall('terminal_request_input', {
+        name: 'dev',
+        prompt: 'sudo password to install jq',
+        sensitivity: 'secret',
+        secretHint: 'SUDO_KIRIN_BOX',
+      }),
+    );
+
+    // Assert
+    const tool = listed.result.tools.find(candidate => candidate.name === 'terminal_request_input');
+    should(tool?.inputSchema.properties.secretHint?.description).containEql('a hint only, the owner still taps');
+    should(calls).deepEqual([
+      {
+        tool: 'terminal.request_input',
+        name: 'dev',
+        prompt: 'sudo password to install jq',
+        sensitivity: 'secret',
+        secretHint: 'SUDO_KIRIN_BOX',
+      },
+    ]);
+  });
+
   it('should send each tool as its wire call, and answer with the daemon’s words', async () => {
     // Arrange
     const { calls, request } = harness(async () => ({ summary: 'Opened %terminal:dev.', output: 'ready' }));

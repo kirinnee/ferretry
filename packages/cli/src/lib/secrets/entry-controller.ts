@@ -1,0 +1,202 @@
+import {
+  LOGIN_LABEL_MAX_LENGTH,
+  LOGIN_PASSWORD_MAX_LENGTH,
+  LOGIN_PASSWORD_MIN_LENGTH,
+  LOGIN_TOTP_WARNING,
+  LOGIN_USERNAME_MAX_LENGTH,
+  LoginEntryIdSchema,
+  type LoginEntrySummary,
+  LoginMatchSchema,
+  type PutLoginEntryRequest,
+  TotpSeedSchema,
+} from '@ferretry/protocol';
+import type { LoginEntryPorts } from './entry-ports.ts';
+import { renderLoginEntryLine, renderLoginEntryList } from './entry-render.ts';
+
+export interface LoginEntryListOptions {
+  readonly json?: boolean | undefined;
+}
+
+/** `fy secret entry add`. There is no value flag: the password is typed at the prompt. */
+export interface LoginEntryAddOptions {
+  readonly label: string;
+  readonly match?: readonly string[] | undefined;
+  readonly username?: string | undefined;
+  /** `--no-password` is `false`: an entry with no password yet. */
+  readonly password?: boolean | undefined;
+}
+
+/** `fy secret entry edit`. Each flag names a field to change; a field not named is kept. */
+export interface LoginEntryEditOptions {
+  readonly label?: string | undefined;
+  readonly match?: readonly string[] | undefined;
+  /** `--username U` is the text; `--no-username` is `false`. */
+  readonly username?: string | false | undefined;
+  /** `--password`: prompt for a new one. */
+  readonly password?: boolean | undefined;
+  /** `--totp`: prompt for a seed; `--no-totp` is `false` and removes it. */
+  readonly totp?: boolean | undefined;
+  readonly iUnderstandTotp?: boolean | undefined;
+}
+
+export interface LoginEntryRemoveOptions {
+  readonly yes?: boolean | undefined;
+}
+
+function handle(value: string): string {
+  const parsed = LoginEntryIdSchema.safeParse(value.trim());
+  if (!parsed.success)
+    throw new Error(
+      `"${value}" is not a usable handle: use uppercase letters, digits and underscores, like SUDO_KIRIN_BOX`,
+    );
+  return parsed.data;
+}
+
+function oneLine(value: string, name: string, maximum: number): string {
+  const text = value.trim();
+  if (text === '' || text.length > maximum || /[\p{Cc}\p{Cf}]/u.test(text))
+    throw new Error(`${name} must be one line of 1 to ${maximum} characters`);
+  return text;
+}
+
+function matches(values: readonly string[]): string[] {
+  return values.map(value => {
+    const parsed = LoginMatchSchema.safeParse(value.trim().toLowerCase());
+    if (!parsed.success)
+      throw new Error(
+        `"${value}" is not something a login matches: use program@host (sudo@kirin-box) or a web host (github.com)`,
+      );
+    return parsed.data;
+  });
+}
+
+/** Said without the value: a problem with a typed password never repeats what was typed. */
+function passwordProblem(value: string): string | undefined {
+  if (value.length < LOGIN_PASSWORD_MIN_LENGTH)
+    return `a saved password must be at least ${LOGIN_PASSWORD_MIN_LENGTH} characters: a shorter one cannot be masked out of output safely`;
+  if (value.length > LOGIN_PASSWORD_MAX_LENGTH)
+    return `a saved password is at most ${LOGIN_PASSWORD_MAX_LENGTH} characters`;
+  if (/\p{Cc}/u.test(value)) return 'a password with a control character or line break would press keys';
+  return undefined;
+}
+
+/**
+ * Drives `fy secret entry ls|add|edit|rename|rm`: the owner's saved logins, the password manager the input
+ * bridge places values from.
+ *
+ * VALUES GO IN, ONLY AT A PROMPT. A password or a 2FA seed is read hidden from a terminal a person is
+ * sitting at, sent once in the PUT body, and dropped. There is no flag, argument, environment variable or
+ * pipe that carries one, and nothing here prints one, echoes one back in an error, or keeps one past the
+ * call. Reading one back is not a command: the daemon serves no route that could.
+ */
+export class LoginEntryController {
+  constructor(private readonly ports: LoginEntryPorts) {}
+
+  async list(options: LoginEntryListOptions): Promise<void> {
+    const list = await this.ports.gateway.list();
+    this.ports.out.success(options.json === true ? JSON.stringify(list, null, 2) : renderLoginEntryList(list));
+  }
+
+  async add(id: string, options: LoginEntryAddOptions): Promise<void> {
+    const handleId = handle(id);
+    const body: PutLoginEntryRequest = {
+      label: oneLine(options.label, '--label', LOGIN_LABEL_MAX_LENGTH),
+      match: matches(options.match ?? []),
+    };
+    if (options.username !== undefined)
+      body.username = oneLine(options.username, '--username', LOGIN_USERNAME_MAX_LENGTH);
+    if ((await this.#find(handleId)) !== undefined)
+      throw new Error(`${handleId} already exists: change it with \`secret entry edit ${handleId}\``);
+    if (options.password !== false) body.password = await this.#askPassword(`password for ${handleId} (hidden): `);
+    const saved = await this.ports.gateway.put(handleId, body);
+    this.ports.out.success(`Added ${renderLoginEntryLine(saved)}`);
+  }
+
+  async edit(id: string, options: LoginEntryEditOptions): Promise<void> {
+    const handleId = handle(id);
+    if (
+      options.label === undefined &&
+      options.match === undefined &&
+      options.username === undefined &&
+      options.password !== true &&
+      options.totp === undefined
+    )
+      throw new Error('nothing to change: name a field (--label, --match, --username, --password, --totp ...)');
+    const body: PutLoginEntryRequest = {};
+    if (options.label !== undefined) body.label = oneLine(options.label, '--label', LOGIN_LABEL_MAX_LENGTH);
+    if (options.match !== undefined) body.match = matches(options.match);
+    if (options.username === false) body.username = null;
+    else if (options.username !== undefined)
+      body.username = oneLine(options.username, '--username', LOGIN_USERNAME_MAX_LENGTH);
+    if (options.totp === false) body.totp = null;
+    if ((await this.#find(handleId)) === undefined)
+      throw new Error(`no saved login ${handleId} (see \`secret entry ls\`)`);
+    if (options.password === true) body.password = await this.#askPassword(`new password for ${handleId} (hidden): `);
+    if (options.totp === true) {
+      body.totp = { seed: await this.#askSeed(options.iUnderstandTotp === true) };
+      body.totpAcknowledged = true;
+    }
+    const saved = await this.ports.gateway.put(handleId, body);
+    this.ports.out.success(`Updated ${renderLoginEntryLine(saved)}`);
+  }
+
+  async rename(id: string, to: string): Promise<void> {
+    const from = handle(id);
+    const next = handle(to);
+    const saved = await this.ports.gateway.rename(from, next);
+    this.ports.out.success(`Renamed ${from} to ${saved.id}.`);
+  }
+
+  async remove(id: string, options: LoginEntryRemoveOptions): Promise<void> {
+    const handleId = handle(id);
+    const entry = await this.#find(handleId);
+    if (entry === undefined) throw new Error(`no saved login ${handleId} (see \`secret entry ls\`)`);
+    if (options.yes !== true) {
+      this.#needTerminal('removing a saved login asks first; pass --yes to skip the question');
+      const answer = await this.ports.prompt.ask(
+        `Remove ${handleId} (${entry.label})? This cannot be undone. Type yes: `,
+      );
+      if (answer.trim().toLowerCase() !== 'yes') {
+        this.ports.out.success(`Kept ${handleId}.`);
+        return;
+      }
+    }
+    await this.ports.gateway.remove(handleId);
+    this.ports.out.success(`Removed ${handleId}.`);
+  }
+
+  async #find(id: string): Promise<LoginEntrySummary | undefined> {
+    const list = await this.ports.gateway.list();
+    if (list.health === 'damaged')
+      throw new Error(
+        `this daemon cannot read its secret store (${list.diagnosis ?? 'no diagnosis was given'}): its saved logins are NOT gone, so nothing was changed`,
+      );
+    return list.entries.find(entry => entry.id === id);
+  }
+
+  async #askPassword(message: string): Promise<string> {
+    this.#needTerminal('the password is typed at a prompt, never given as a flag');
+    const value = await this.ports.prompt.askHidden(message);
+    const problem = passwordProblem(value);
+    if (problem !== undefined) throw new Error(problem);
+    return value;
+  }
+
+  /** The warning first, then a typed "yes" (or --i-understand-totp), and only then the seed. */
+  async #askSeed(understood: boolean): Promise<string> {
+    this.#needTerminal('the 2FA seed is typed at a prompt, never given as a flag');
+    this.ports.out.success(`Keeping a 2FA seed: ${LOGIN_TOTP_WARNING}`);
+    if (!understood) {
+      const answer = await this.ports.prompt.ask('Type yes to keep the seed anyway: ');
+      if (answer.trim().toLowerCase() !== 'yes') throw new Error('no 2FA seed was kept: nothing was changed');
+    }
+    const seed = await this.ports.prompt.askHidden('2FA seed, as the setup page shows it (hidden): ');
+    if (!TotpSeedSchema.safeParse(seed).success)
+      throw new Error('that is not a base32 2FA seed of 16 to 128 characters');
+    return seed;
+  }
+
+  #needTerminal(why: string): void {
+    if (!this.ports.interactive) throw new Error(`this needs a terminal you are sitting at: ${why}`);
+  }
+}
