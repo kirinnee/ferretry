@@ -202,6 +202,16 @@ describe('agenda brief points and edits', () => {
     should(none).not.have.property('decided');
   });
 
+  it('should strip a leading list marker from a point but keep a multi-line value as written', () => {
+    // Arrange / Act
+    const marked = add(['pick'], { premise: ['- You asked to', '* second'], decided: ['- only one'] });
+    const block = add(['pick'], { decided: ['- a\n- b'] });
+
+    // Assert
+    should(marked).containDeep({ premise: '- You asked to\n- second', decided: 'only one' });
+    should(block).containDeep({ decided: '- a\n- b' });
+  });
+
   it('should read premise and decided from a JSON body, and let a flag win', () => {
     // Arrange
     const file = parseBriefFile(JSON.stringify({ summary: 'Pick', premise: ['one', 'two'], decided: 'earlier' }));
