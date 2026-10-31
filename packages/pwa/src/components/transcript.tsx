@@ -136,7 +136,7 @@ export function Transcript({
   const clearCount = useCallback(() => setNewCount(0), []);
   // A new daemon or session is a newly opened transcript; a bumped `pinSignal` is the reader having
   // just sent something. Either lands at the latest message and follows.
-  const { viewportRef, contentRef, following, gap, detached, onScroll, jumpToLatest, scrollTo } = useStickToBottom({
+  const { viewportRef, contentRef, following, gap, jumpShown, onScroll, jumpToLatest, scrollTo } = useStickToBottom({
     resetKey: `${daemonId}\u0000${sessionId}\u0000${pinSignal}`,
     contentKeys: [shown.entries, shown.busy],
     onFollow: clearCount,
@@ -234,7 +234,7 @@ export function Transcript({
         </div>
       </div>
       {quote.menu}
-      {detached ? <JumpToLatest count={newCount} onJump={jumpToLatest} /> : null}
+      <JumpToLatest count={newCount} onJump={jumpToLatest} shown={jumpShown} />
     </section>
   );
 }

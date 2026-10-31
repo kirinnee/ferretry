@@ -5,6 +5,9 @@ import { type TranscriptEntry, transcriptItems } from '../../src/lib/session-scr
 import {
   followPinBlocked,
   gapFromBottom,
+  JUMP_PILL_HIDE_PX,
+  JUMP_PILL_SHOW_PX,
+  jumpPillShown,
   jumpToLatestLabel,
   newTailRows,
   pinBlockedBySelection,
@@ -120,6 +123,16 @@ describe('follow decisions', () => {
     expect(jumpToLatestLabel(0)).toBe('Jump to latest');
     expect(jumpToLatestLabel(3)).toBe('3 new — jump to latest');
   });
+
+  test('the pill takes more distance to appear than to leave, so drift near the tail never toggles it', () => {
+    expect(jumpPillShown(false, false, 500)).toBe(false);
+    expect(jumpPillShown(true, false, 500)).toBe(false);
+    expect(jumpPillShown(false, true, JUMP_PILL_SHOW_PX)).toBe(false);
+    expect(jumpPillShown(false, true, JUMP_PILL_SHOW_PX + 1)).toBe(true);
+    expect(jumpPillShown(true, true, JUMP_PILL_SHOW_PX)).toBe(true);
+    expect(jumpPillShown(true, true, JUMP_PILL_HIDE_PX + 1)).toBe(true);
+    expect(jumpPillShown(true, true, JUMP_PILL_HIDE_PX)).toBe(false);
+  });
 });
 
 describe('transcriptItems', () => {
@@ -232,6 +245,18 @@ describe('Transcript follow', () => {
     expect(element.scrollTop).toBe(2_000);
   });
 
+  test('a nudge within reach of the tail detaches without showing the pill, and the pill row is always there', async () => {
+    const { view, element } = await open(rows(4));
+    expect(view.container.querySelectorAll('.fy-jump-latest-shell')).toHaveLength(1);
+    expect(view.container.querySelector('.fy-jump-latest-reserve')).not.toBeNull();
+    await readerScroll(element, 2_000 - 400 - 10);
+    expect(pill(view)).toBeNull();
+    await readerScroll(element, 600);
+    expect(pill(view)).not.toBeNull();
+    expect(view.container.querySelectorAll('.fy-jump-latest-shell')).toHaveLength(1);
+    expect(view.container.querySelector('.fy-jump-latest-reserve')).toBeNull();
+  });
+
   test('a send (a bumped pinSignal) and a session switch both return a detached reader to the tail', async () => {
     const first = rows(4);
     const { view, element } = await open(first, { pinSignal: 0 });
@@ -275,12 +300,14 @@ describe('Transcript follow', () => {
     const { view, element } = await open(first);
     const range = document.createRange();
     range.selectNodeContents(must(element.querySelector('p'), 'a row'));
-    window.getSelection()?.addRange(range);
+    await interact(() => window.getSelection()?.addRange(range));
     metrics.scrollHeight = 2_200;
     await view.render(<Transcript daemonId="d" entries={[...first, ...rows(1, 'later')]} sessionId="s" />);
     expect(element.scrollTop).toBe(2_000);
-    window.getSelection()?.removeAllRanges();
-    await interact(() => document.dispatchEvent(new Event('selectionchange')));
+    await interact(() => {
+      window.getSelection()?.removeAllRanges();
+      document.dispatchEvent(new Event('selectionchange'));
+    });
     expect(element.scrollTop).toBe(2_200);
   });
 

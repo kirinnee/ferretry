@@ -163,3 +163,12 @@ export const prependRestoreTarget = (metrics: ScrollMetrics, gap: number): numbe
 /** The pill's words: the count when there is one. */
 export const jumpToLatestLabel = (count: number): string =>
   count > 0 ? `${count} new — jump to latest` : 'Jump to latest';
+
+/** A detached reader sees the pill once they are farther than this from the bottom… */
+export const JUMP_PILL_SHOW_PX = 48;
+/** …and it goes away again only inside this, so a few pixels of drift near the tail never toggle it. */
+export const JUMP_PILL_HIDE_PX = 8;
+
+/** Should the pill show? Hysteresis on the gap: it takes JUMP_PILL_SHOW_PX to appear, only JUMP_PILL_HIDE_PX to leave. */
+export const jumpPillShown = (shown: boolean, detached: boolean, gap: number): boolean =>
+  detached && gap > (shown ? JUMP_PILL_HIDE_PX : JUMP_PILL_SHOW_PX);
