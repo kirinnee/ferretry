@@ -3132,3 +3132,31 @@ button.fy-context-ring::after {
     animation: none;
   }
 }
+/* The board's nudge is a quiet one-line aside: meta-sized muted text, mark and sender first, the time at the
+   right edge of the FIRST line (never wrapped under the mark on a phone), the sentence wrapping in its own column. */
+.fy-message-system[data-board-nudge] {
+  align-items: flex-start;
+  flex-wrap: nowrap;
+  font-size: var(--chrome-font-size, 11px);
+}
+.fy-message-system[data-board-nudge] > .fy-system-icon {
+  align-self: flex-start;
+  margin-top: 0.15em;
+}
+.fy-message-system[data-board-nudge] .fy-system-label,
+.fy-message-system[data-board-nudge] .fy-system-text,
+.fy-message-system[data-board-nudge] .fy-system-text p {
+  font-size: inherit;
+  line-height: inherit;
+}
+.fy-message-system[data-board-nudge] .fy-system-label {
+  color: var(--fy-muted);
+}
+.fy-message-system[data-board-nudge] .fy-system-text {
+  color: var(--fy-muted);
+  flex: 1 1 0;
+}
+.fy-message-system[data-board-nudge] > .fy-receipt-line {
+  flex: 0 0 auto;
+  margin-left: auto;
+}

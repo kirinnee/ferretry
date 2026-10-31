@@ -137,9 +137,15 @@ because each names its card and says what to do, so nothing needs a "not from th
 
 Declared gaps:
 
-- **An interactive session's daemon messages skip the queue.** The queue never types a daemon message into
-  the owner's own chat, so a board message to an interactive ferret still takes the direct send path,
-  which has no `by`; the app has no queue item to read the chip from.
+- **An interactive session's daemon messages skip the queue**, because the queue never types a daemon message
+  into the owner's own chat. The direct send path carries the sender itself: the ledger record has
+  `senderKind: daemon` and the same `by` the queue item would have held (`SendRecord.by`), so the app draws it
+  the way it draws a queued one.
+
+**How the app shows it.** A board message (`by: {kind: 'ferretry', feature: 'Board'}`, read from the queue
+item or from the ledger record) is never the owner's bubble: it is one compact system row — a board mark,
+"Board" as the sender, the sentence as it is, and the card (`&F412`) and the PR (`PR #930`, when the card links
+it) as links (`BoardNudgeRow`, `packages/pwa/src/components/agent-message-rows.tsx`).
 
 ## The Warden and the board
 
