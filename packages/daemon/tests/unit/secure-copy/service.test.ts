@@ -78,6 +78,15 @@ const refusal = async (work: Promise<unknown>): Promise<SecureCopyError> => {
 };
 
 describe('SecureCopyService capturing what a command prints', () => {
+  it('should record a program name or path holding a line break or a control character as one printable line', async () => {
+    const { service, runner } = world();
+    runner.outcome = { ...runner.outcome, program: '/work/s1/fake\n\u001b[2Jvercel' };
+
+    const { copy } = await service.capture('s1', command(['./fake\n\u001b[2Jvercel']));
+
+    should(copy.from).eql({ kind: 'command', program: './fake??[2Jvercel', path: '/work/s1/fake??[2Jvercel' });
+  });
+
   it('should record which file printed the value, as the runner found it, for the owner to see', async () => {
     const { service, runner } = world();
     runner.outcome = { ...runner.outcome, program: '/home/kirin/.bun/bin/vercel' };
