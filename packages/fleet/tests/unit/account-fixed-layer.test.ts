@@ -893,7 +893,7 @@ describe('AGENT_TOOLS_INSTRUCTION — saved logins', () => {
 
     // Assert
     should(text).containEql('Read account_hint before sign-in; account_propose fixes after.');
-    should(text).not.containEql('Before a web sign-in, account_hint says how and where.');
+    should(text).not.containEql('Before a web sign-in, login_hint says how and where.');
   });
 });
 
