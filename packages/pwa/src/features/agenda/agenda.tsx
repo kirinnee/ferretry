@@ -147,6 +147,8 @@ export interface Agenda {
   readonly close: () => void;
   /** The line takes `live` itself, so the transcript must not draw it a second time. */
   readonly hostsLive: boolean;
+  /** The line's slot for the transcript's Jump-to-latest pill; `null` while the line is not drawn. */
+  readonly jumpHost: HTMLElement | null;
   /**
    * The ferret's agenda as its one list in Info: open, parked and resolved, each row opening the same view.
    * `afterOpen` runs when a row opened its card, so a phone's Info sheet can get out of the card's way.
@@ -223,6 +225,7 @@ export const useAgenda = ({
 
   const [busy, setBusy] = useState<ReadonlyMap<AgendaId, string | null>>(new Map());
   const [announcement, setAnnouncement] = useState('');
+  const [jumpHost, setJumpHost] = useState<HTMLElement | null>(null);
   const onSent = useCallback((): void => update(() => ({ card: null })), [update]);
 
   const setCard = useCallback((id: AgendaId, state: string | null | undefined): void => {
@@ -328,6 +331,7 @@ export const useAgenda = ({
         controls={drawerId}
         ferret={ferret}
         onToggle={() => update(current => ({ drawer: !current.drawer }))}
+        jumpSlot={setJumpHost}
         open={drawerOpen}
         sending={{ count: sendingCount, headings: sendingHeadings }}
         {...(counts === undefined || cardId !== null ? {} : { counts })}
@@ -447,6 +451,7 @@ export const useAgenda = ({
     covered: cardItem !== undefined,
     close: () => update(() => ({ drawer: false, card: null })),
     hostsLive,
+    jumpHost,
     section,
     references: () => aboutRef.current,
     placeholder: cardId === null || closed ? undefined : `Reply to ${ferret}…`,

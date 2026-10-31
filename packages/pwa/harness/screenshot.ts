@@ -222,8 +222,8 @@ const WALKS_SETTINGS = !(
 /**
  * HOW MANY SIDEWAYS-SCROLL CHECKS A RUN THAT WALKS SETTINGS OWES, and the number is the gate.
  *
- * Owed PER VIEWPORT, as measured: ninety-eight on a phone and ninety-five on a desktop, one hundred and
- * ninety-three for a run that walks both. The phone's three more are its MOBILE-ONLY bottom sheets, below.
+ * Owed PER VIEWPORT, as measured: one hundred and one on a phone and ninety-eight on a desktop, one hundred and
+ * ninety-nine for a run that walks both. The phone's three more are its MOBILE-ONLY bottom sheets, below.
  * A `--viewport` run owes its own share and nothing else, so the two CI legs cannot both pass while
  * either one skips a frame. Of the extras at each viewport, one is the
  * open per-device capabilities disclosure inside Add a device, one is the unlock screen a locked machine
@@ -243,7 +243,7 @@ const WALKS_SETTINGS = !(
  * and the not-set-up Runtimes card it leaves to). Each of these is also a Machines geometry check, below.
  *
  * The rest, seventeen at both viewports plus the open device-capabilities disclosure, the unlock screen and the Files editor's refused save at both: three Settings sections (Appearance, Behaviour, Daemons), the
- * healthy daemon's Warden and its twelve other panels (Security, the passkey panel, Security log, Files, About & updates and Agent CLIs among them), the unreachable daemon's Warden and Carrier, and the
+ * healthy daemon's Warden and its eighteen other panels (Accounts, Secure copy, Security, the passkey panel, Security log, Files, About & updates and Agent CLIs among them), the unreachable daemon's Warden and Carrier, and the
  * one-daemon route. (The old Fleet and Accounts panels, their eight-step new-account sequence and the
  * Environment panel went with the old account system in U21.) Plus THREE MOBILE-ONLY open bottom
  * sheets, which have no desktop equivalent because a desktop reads a real tablist instead. The asymmetry
@@ -263,7 +263,7 @@ const WALKS_SETTINGS = !(
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS: Readonly<Record<ViewportName, number>> = { mobile: 99, desktop: 96 };
+const SETTINGS_SIDEWAYS_CHECKS: Readonly<Record<ViewportName, number>> = { mobile: 101, desktop: 98 };
 
 /**
  * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`), per
@@ -2898,9 +2898,9 @@ try {
             // The fixture is only evidence about the real frame if it carries the panels the composition
             // root supplies: every app panel but Model pricing, Speed-ups and Learning, which it has never mounted.
             const daemonPanels = await wardenFrame.locator('[data-daemon-panel]').count();
-            if (daemonPanels !== 15)
+            if (daemonPanels !== 17)
               fail(
-                `settings fixture listed ${daemonPanels} connection and security panels instead of the 15 it mounts`,
+                `settings fixture listed ${daemonPanels} connection and security panels instead of the 17 it mounts`,
               );
             await wardenFrame.scrollIntoViewIfNeeded();
             // Ten rows with a sentence each is the longest list in Settings; if one row widens a phone, it is here.
@@ -2919,6 +2919,8 @@ try {
               // account failover and policy) is exactly what could widen a phone.
               ['Warden', 'warden', '[data-daemon-panel-open="warden"] > *'],
               ['Secrets', 'secrets', '[data-testid="secrets-card"]'],
+              ['Accounts', 'accounts', '[data-testid="logins-card"]'],
+              ['Secure copy', 'secure-copy', '[data-testid="copy-rules-card"]'],
               // The live panel, inside the frame, because that is where a reader meets it. The gallery
               // cards prove the individual states; this proves it is reachable and fits both widths.
               ['What devices may do', 'grants', '[data-grant-surface="harness-daemon"]'],

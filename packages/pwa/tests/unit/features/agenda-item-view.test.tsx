@@ -117,9 +117,10 @@ describe('the v6 layout: title, ONE card, history — one column', () => {
       'fy-item-view__head',
       'fy-card',
       'fy-hist',
+      'fy-item-view__dock',
     ]);
-    // The answer row is IN the card, not a strip of its own above the composer.
-    expect(one('.fy-card [data-agenda-quick-replies]')).toBeDefined();
+    // The answer row is in the sticky dock at the foot of the column, not a strip of its own above the composer.
+    expect(one('.fy-item-view__dock [data-agenda-quick-replies]')).toBeDefined();
     expect(root().querySelectorAll('[data-agenda-quick-replies]')).toHaveLength(1);
   });
 
@@ -195,7 +196,7 @@ describe('the question and its options', () => {
 
   test('puts at most three answers in ONE row, in the list’s order, ← ↑ → with their arrows, named as the list names them', async () => {
     await draw(spend);
-    const chips = [...root().querySelectorAll('.fy-card .fy-qr__row > button')];
+    const chips = [...root().querySelectorAll('.fy-item-view__dock .fy-qr__row > button')];
     // In the options list's order, wherever the recommendation sits; it keeps its outline in its place.
     expect(chips.map(chip => chip.textContent)).toEqual(['←Pause', '↑Switch', '→Warn']);
     expect(chips[0]?.hasAttribute('data-recommended')).toBe(true);
@@ -499,7 +500,9 @@ describe('the keys', () => {
 describe('the answer row', () => {
   test('tags the recommended chip, and a tap answers', async () => {
     const spy = await draw(richItem);
-    const chip = one<HTMLButtonElement>('.fy-card [data-agenda-quick-replies] [data-agenda-option="SQLite"]');
+    const chip = one<HTMLButtonElement>(
+      '.fy-item-view__dock [data-agenda-quick-replies] [data-agenda-option="SQLite"]',
+    );
     expect(chip.hasAttribute('data-recommended')).toBe(true);
     expect(chip.getAttribute('aria-label')).toContain('SQLite, recommended');
     await interact(() => chip.click());
@@ -602,6 +605,7 @@ describe('What I need from you', () => {
     expect(need().getAttribute('data-agenda-need')).toBe('reply');
     expect(lead()).toBe('Type your answer below.');
     expect(root().querySelector('[data-agenda-quick-replies]')).toBeNull();
+    expect(one('[data-agenda-dock]').childElementCount).toBe(0);
   });
 
   test('a to-do: its steps numbered and ticked inside it, then one Mark as done', async () => {

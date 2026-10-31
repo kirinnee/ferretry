@@ -1,9 +1,21 @@
 import { splitFerretryNotice } from '@ferretry/protocol';
-import { Cog, SquareKanban } from 'lucide-react';
+import {
+  Activity,
+  ArrowRightLeft,
+  BookOpen,
+  ClipboardList,
+  Cog,
+  type LucideIcon,
+  RotateCw,
+  Send,
+  ShieldCheck,
+  SquareKanban,
+} from 'lucide-react';
 import { type MouseEvent, type ReactNode, useId, useState } from 'react';
 import { linkNudgePullRequests } from '../lib/board-nudge.ts';
 import { displayCallsign } from '../lib/callsign.ts';
 import { useCardPullRequests } from '../lib/card-pull-requests.tsx';
+import { ferretryLine, ferretryRest } from '../lib/ferretry-sender.ts';
 import { clockOfInstant } from '../lib/message-clock.ts';
 import { ferretryChip, stripFraming } from '../lib/message-framing.ts';
 import type { InstructionsUpdate } from '../lib/instructions-update.ts';
@@ -222,7 +234,7 @@ export function InstructionsUpdateRow({
               onClick={() => setOpen(current => !current)}
               type="button"
             >
-              {open ? 'hide changes' : 'show changes'}
+              {open ? 'Hide' : 'Show'}
             </button>
           </>
         )}
@@ -321,6 +333,76 @@ export function BoardNudgeRow({
       </span>
       <Markdown className="fy-system-text" text={linkNudgePullRequests(stripFraming(text).body, cards)} {...surface} />
       <MessageFooter clock={clockOfInstant(entry.at)} side="other" />
+    </div>
+  );
+}
+
+const FEATURE_ICONS: Readonly<Record<string, LucideIcon>> = {
+  Warden: ShieldCheck,
+  Agenda: ClipboardList,
+  Monitor: Activity,
+  Lessons: BookOpen,
+  Migrate: ArrowRightLeft,
+  Restart: RotateCw,
+  Delivery: Send,
+};
+
+/**
+ * Any message Ferretry itself typed into a ferret's chat — a Warden nudge, an agenda reminder, a delivery
+ * notice — as one compact system line: the part of Ferretry's icon, its name, one line of what it said, and
+ * the rest behind "Show". Who sent it is the sender metadata, never a tag in the words; never an owner bubble.
+ */
+export function FerretryMessageRow({
+  entry,
+  feature,
+  rhythm,
+  text,
+}: {
+  readonly entry: TranscriptEntry;
+  readonly feature: string;
+  readonly rhythm: Rhythm;
+  readonly text: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const detailId = useId();
+  const Icon = FEATURE_ICONS[feature] ?? Cog;
+  const { line, long } = ferretryLine(stripFraming(text).body);
+  return (
+    <div
+      className="fy-message fy-message-system fy-message-chrome"
+      data-ferretry-message={feature}
+      data-transcript-kind="system"
+      role="note"
+      {...rhythm}
+    >
+      <Icon aria-hidden="true" className="fy-system-icon" size={12} />
+      <span className="fy-system-text">
+        <span className="fy-system-label" data-sender-chip>
+          Ferretry · {feature}
+        </span>
+        <span aria-hidden="true"> · </span>
+        {line}
+        {long ? (
+          <>
+            <span aria-hidden="true"> · </span>
+            <button
+              aria-controls={detailId}
+              aria-expanded={open}
+              className="fy-system-details"
+              onClick={() => setOpen(current => !current)}
+              type="button"
+            >
+              {open ? 'Hide' : 'Show'}
+            </button>
+          </>
+        ) : null}
+      </span>
+      <MessageFooter clock={clockOfInstant(entry.at)} side="other" />
+      {open ? (
+        <div className="fy-system-detail" data-ferretry-detail="" data-system-detail="" id={detailId}>
+          <p>{ferretryRest(stripFraming(text).body)}</p>
+        </div>
+      ) : null}
     </div>
   );
 }

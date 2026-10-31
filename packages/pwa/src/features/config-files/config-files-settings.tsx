@@ -61,7 +61,7 @@ export type ConfigFilesClientFactory = (connection: DaemonConnection) => Promise
 /** Each kind of file, as the group a person looks for it under. */
 export const CONFIG_KIND_WORDS: Readonly<Record<ConfigFileKind, string>> = {
   machine: 'Machine',
-  login: 'Logins',
+  login: 'AI logins',
   component: 'Components',
   profile: 'Profiles',
   runtime: 'Runtimes',

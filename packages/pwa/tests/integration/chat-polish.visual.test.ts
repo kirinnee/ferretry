@@ -173,6 +173,8 @@ describe('chat polish, captured', () => {
         ['chat', ''],
         ['chat-open', '&open=1'],
         ['chat-update', '&update=1'],
+        ['ferretry', '&ferretry=1'],
+        ['ferretry-open', '&ferretry=1'],
         ['picker', '&picker=1'],
         ['picker-on', '&picker=1&on=1'],
         ['picker-many', '&picker=1&many=1'],
@@ -191,6 +193,9 @@ describe('chat polish, captured', () => {
               );
               if (state === 'chat-open') await tab.locator('[data-peer-more]').click();
               if (state === 'chat-update') await tab.locator('[data-instructions-update] .fy-system-details').click();
+              if (state === 'ferretry-open')
+                for (const toggle of await tab.locator('[data-ferretry-message] .fy-system-details').all())
+                  await toggle.click();
               await tab.waitForTimeout(150);
               await tab.screenshot({
                 path: join(shotsDir, `chat-polish-${state}-${phone ? 'phone' : 'desktop'}-${mode}.png`),

@@ -6,6 +6,19 @@ it.
 Read the [threat model](#threat-model) before you trust it with anything. The useful property here
 is real, and it is narrower than people assume.
 
+## Where it is on screen
+
+Settings › this machine has three tabs, one per kind of credential; they share no data and no route:
+
+- **Secrets** — env vars for the programs ferrets run (this page), and "Copy to another machine…".
+- **Accounts** — who ferrets sign in as: username, password and 2FA keys, per site (the former "Saved logins").
+  See [input requests](input-requests.md#saved-logins).
+- **Secure copy** — values moved without a ferret seeing them, and "Pastes approved in advance"
+  ([secure copy](secure-copy.md)).
+
+The Claude, Codex and API-key logins with spend budgets are **AI logins** on screen (Warden, config files, Fleet);
+their files stay `config/logins/*.yaml`.
+
 ## The shape
 
 ```bash
@@ -52,7 +65,7 @@ over a **separate** sealed document (`login-secrets.json`, under the same key). 
 `LoginDirectory`, which seals and never opens; only two things hold the `LoginVault` that opens it: the
 redactor (saved values are masked as `[redacted:login:<ID>:password]`) and the input-request service, which
 types one into the target the owner tapped "Use" for and answers only what happened. `use` cannot spend a
-saved login and `${secret:…}` cannot name one. The agent tool `login_hint` (and `GET /v1/secrets/logins/hint`) is
+saved login and `${secret:…}` cannot name one. The agent tool `account_hint` (`login_hint` still works) (and `GET /v1/secrets/logins/hint`) is
 handed the same `LoginDirectory`: it answers labels, sign-in methods, login domains and usernames, never a value.
 
 ## Redaction

@@ -1,3 +1,15 @@
+## [4.185.0](https://github.com/kirinnee/ferretry/compare/v4.184.0...v4.185.0) (2026-10-31)
+
+### Features
+
+* **pwa:** sticky agenda item head and answer row; one row above the composer ([#1192](https://github.com/kirinnee/ferretry/issues/1192)) ([ef974a5](https://github.com/kirinnee/ferretry/commit/ef974a5ce0d92cdd1e68461f343b4eecccf93329))
+
+## [4.184.0](https://github.com/kirinnee/ferretry/compare/v4.183.0...v4.184.0) (2026-10-31)
+
+### Features
+
+* **catalogs:** join and member sessions on the publisher (phase 2b-2) ([#1191](https://github.com/kirinnee/ferretry/issues/1191)) ([6655def](https://github.com/kirinnee/ferretry/commit/6655def4e9ff76d63d7c1fd096e9a25d3deae088))
+
 ## [4.183.0](https://github.com/kirinnee/ferretry/compare/v4.182.0...v4.183.0) (2026-10-31)
 
 ### Features

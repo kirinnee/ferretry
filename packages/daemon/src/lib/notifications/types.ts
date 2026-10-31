@@ -43,7 +43,19 @@ export const DirectNotificationRequestedRecordSchema = z.strictObject({
   enrolled: NonNegativeIntegerSchema,
 });
 
-export const AgendaNotificationRequestedRecordSchema = z
+/**
+ * A daemon older than the agenda rename (v4.116.0) wrote an agenda record's item as `attentionId`. The ledger
+ * is decision state that is never rewritten, and one line it cannot read fails EVERY lookup closed — so the old
+ * spelling is read as `agendaId` for as long as such a line may exist. Writes always use `agendaId`.
+ */
+function withAgendaId(value: unknown): unknown {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return value;
+  if (!('attentionId' in value) || 'agendaId' in value) return value;
+  const { attentionId, ...rest } = value;
+  return { ...rest, agendaId: attentionId };
+}
+
+const AgendaNotificationRequestedRecordObjectSchema = z
   .strictObject({
     v: z.literal(1),
     phase: z.literal('requested'),
@@ -73,6 +85,11 @@ export const AgendaNotificationRequestedRecordSchema = z
     message: 'the agenda notification key does not name its session and item',
     path: ['key'],
   });
+
+export const AgendaNotificationRequestedRecordSchema = z.preprocess(
+  withAgendaId,
+  AgendaNotificationRequestedRecordObjectSchema,
+);
 
 export const NotificationRequestedRecordSchema = z.union([
   DirectNotificationRequestedRecordSchema,
@@ -136,6 +153,11 @@ export interface NotificationPushDispatcher {
 
 export interface NotificationClock {
   now(): string;
+}
+
+/** Where the notification service says what it could not do. */
+export interface NotificationDiagnostics {
+  warn(message: string): void;
 }
 
 export type NotificationSerialExecutor = Pick<SerialExecutor, 'run'>;

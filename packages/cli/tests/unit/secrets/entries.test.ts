@@ -15,7 +15,7 @@ import { Command } from 'commander';
 import should from 'should';
 import { registerSecretCommands } from '../../../src/lib/secrets/commands';
 import { SecretController } from '../../../src/lib/secrets/controller';
-import { registerLoginEntryCommands } from '../../../src/lib/secrets/entry-commands';
+import { registerAccountCommands, registerLoginEntryCommands } from '../../../src/lib/secrets/entry-commands';
 import { LoginEntryController } from '../../../src/lib/secrets/entry-controller';
 import { LOGIN_ENTRIES_PATH, ProtocolLoginEntryGateway } from '../../../src/lib/secrets/entry-gateway';
 import type { ILoginEntryGateway, ILoginEntryPrompt, LoginEntryPorts } from '../../../src/lib/secrets/entry-ports';
@@ -193,7 +193,7 @@ describe('fy secret entry ls', () => {
     await controller.list({});
 
     // Assert
-    should(messages).deepEqual(['No saved logins on this daemon.']);
+    should(messages).deepEqual(['No accounts on this daemon.']);
   });
 });
 
@@ -352,7 +352,7 @@ describe('fy secret entry edit', () => {
 
     // Assert
     should(nothing).containEql('nothing to change');
-    should(missing).containEql('no saved login NO_SUCH');
+    should(missing).containEql('no account NO_SUCH');
     should(gateway.puts).have.length(0);
   });
 
@@ -496,7 +496,7 @@ describe('fy secret entry rename and rm', () => {
     // Assert
     should(noTerminal).containEql('--yes');
     should(off.gateway.removed).have.length(0);
-    should(missing).containEql('no saved login NO_SUCH');
+    should(missing).containEql('no account NO_SUCH');
   });
 });
 
@@ -846,6 +846,21 @@ describe('how a saved login signs in, from the command line', () => {
     should(JSON.parse(messages[0] ?? '').hints[0].id).equal('VERCEL');
   });
 
+  it('should run `account hint` from the command line, and list the alias nowhere in `secret --help`', async () => {
+    const { controller, messages } = rig(world());
+    const root = new Command().name('fy').exitOverride();
+    root.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+    registerAccountCommands(root, controller);
+    const secret = root.command('secret');
+    registerLoginEntryCommands(secret, controller);
+
+    await root.parseAsync(['node', 'fy', 'account', 'hint', 'vercel.com', '--json']);
+
+    should(JSON.parse(messages[0] ?? '').hints[0].id).equal('VERCEL');
+    should(secret.helpInformation()).not.containEql('entry');
+    should(root.helpInformation()).containEql('account');
+  });
+
   it('should ask the hint route with the site in the query', async () => {
     const seen: string[] = [];
     const gateway = new ProtocolLoginEntryGateway({
@@ -941,11 +956,9 @@ describe('fy secret entry recipe', () => {
     const { controller, gateway } = rig(world(), undefined, true, { '-': 'steps' });
 
     // Act / Assert
-    should(await fails(async () => await controller.recipeShow('NOPE', {}))).containEql('no saved login NOPE');
-    should(await fails(async () => await controller.recipeSet('NOPE', { file: '-' }))).containEql(
-      'no saved login NOPE',
-    );
-    should(await fails(async () => await controller.recipeClear('NOPE'))).containEql('no saved login NOPE');
+    should(await fails(async () => await controller.recipeShow('NOPE', {}))).containEql('no account NOPE');
+    should(await fails(async () => await controller.recipeSet('NOPE', { file: '-' }))).containEql('no account NOPE');
+    should(await fails(async () => await controller.recipeClear('NOPE'))).containEql('no account NOPE');
     should(await fails(async () => await controller.recipeSet('not a handle', { file: '-' }))).containEql(
       'not a usable handle',
     );

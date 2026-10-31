@@ -45,7 +45,7 @@ const row = (view: { q: (selector: string) => HTMLElement | null }, id: string):
 const inRow = (element: HTMLElement, selector: string): HTMLElement =>
   must(element.querySelector<HTMLElement>(selector), selector);
 
-describe('the saved logins list', () => {
+describe('the accounts list', () => {
   it('shows label, match, username and which secret fields exist, and never a value', async () => {
     const view = await show();
     const github = row(view, 'GITHUB_KIRINNEE');
@@ -62,7 +62,7 @@ describe('the saved logins list', () => {
   it('says a damaged store is damaged, and not that it is empty', async () => {
     const view = await show(logins({ health: 'damaged', diagnosis: 'the vault file did not decrypt', entries: [] }));
 
-    expect(view.q('[data-testid="logins-damaged"]')?.textContent).toContain('cannot read its saved logins');
+    expect(view.q('[data-testid="logins-damaged"]')?.textContent).toContain('cannot read its accounts');
     expect(view.q('[data-testid="logins-damaged"]')?.textContent).toContain('the vault file did not decrypt');
     expect(view.q('[data-testid="logins-damaged"]')?.textContent).toContain('It is not empty');
     expect(view.q('[data-testid="logins-empty"]')).toBeNull();
@@ -71,7 +71,7 @@ describe('the saved logins list', () => {
 
   it('says there are none only when the store is healthy and empty', async () => {
     const view = await show(logins({ entries: [] }));
-    expect(view.q('[data-testid="logins-empty"]')?.textContent).toContain('No saved logins');
+    expect(view.q('[data-testid="logins-empty"]')?.textContent).toContain('No accounts');
   });
 });
 

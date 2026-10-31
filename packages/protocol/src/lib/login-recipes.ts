@@ -210,7 +210,7 @@ export const LoginRecipeProposalSchema = z.strictObject({
 });
 export type LoginRecipeProposal = z.infer<typeof LoginRecipeProposalSchema>;
 
-/** What a ferret sends to propose a recipe (`login_propose`, `POST /v1/secrets/logins/:id/recipe/proposals`). */
+/** What a ferret sends to propose a recipe (`account_propose`, `POST /v1/secrets/logins/:id/recipe/proposals`). */
 export const LoginRecipeProposeRequestSchema = z.strictObject({
   recipe: LoginRecipeSchema,
   why: oneLine(LOGIN_PROPOSAL_WHY_MAX_LENGTH),

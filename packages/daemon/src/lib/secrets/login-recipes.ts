@@ -106,7 +106,7 @@ export class LoginRecipeService {
       subject: `Recipe change for '${entry.label}'`,
       // The card shows the CURRENT recipe too, which may hold a value kept after it was written: masked like any read.
       context: await this.masked(cardContext(entry.recipe, recipe, why)),
-      howToResolve: `Approve or decline it in Settings › Saved logins › ${entry.label} › Recipe, or at the machine: \`fy secret entry recipe approve ${id} ${proposal.id}\`.`,
+      howToResolve: `Approve or decline it in Settings › Accounts › ${entry.label} › Recipe, or at the machine: \`fy account recipe approve ${id} ${proposal.id}\`.`,
     });
     if (!card.ok) return { id: proposal.id, login: id, state: 'pending' };
     await this.ports.logins.proposalCard(id, proposal.id, card.id).catch(() => undefined);
@@ -213,7 +213,7 @@ const RECIPE_CARD_ACTOR: AgendaActor = { kind: 'daemon', cause: 'login-recipe' }
 
 /**
  * A proposal's card on the owner's agenda: a `task` ("look at this"), whose answers change nothing. The owner
- * approves or declines on the login's Recipe in Settings, or with `fy secret entry recipe`, and the card closes.
+ * approves or declines on the login's Recipe in Settings, or with `fy account recipe`, and the card closes.
  */
 export class RecipeAgendaAdapter implements RecipeAgendaPort {
   constructor(private readonly agenda: Pick<AgendaService, 'raise' | 'resolve'>) {}

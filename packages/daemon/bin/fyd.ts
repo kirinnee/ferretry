@@ -4382,6 +4382,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
             sendId: crypto.randomUUID(),
             message,
             origin: 'daemon',
+            by: { kind: 'ferretry', feature: 'Warden' },
           });
         },
         // A message is the turn the ferret is handed (its focus card, `focus-card.ts`); without one the resume
@@ -6137,7 +6138,7 @@ function createAgentToolsSubsystem(input: {
   readonly copy: AgentCopyPort;
   readonly plans: AgentPlanPort;
   readonly copyPages: AgentCopyPagesPort;
-  /** The saved logins' directory (never the vault): `login.hint` reads labels, methods and domains from it. */
+  /** The saved logins' directory (never the vault): `account.hint` reads labels, methods and domains from it. */
   readonly logins: Pick<LoginDirectory, 'list'>;
   /** A ferret's recipe proposals, and where its acts are told so a steered sign-in fact is not kept. */
   readonly recipes: Pick<LoginRecipeService, 'propose' | 'scrubbed'>;
@@ -9915,6 +9916,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         push,
         serial: new KeyedSerialExecutor(),
         clock,
+        diagnostics: { warn: message => void process.stderr.write(`notifications: ${message}\n`) },
       });
       // ONE agenda service for this opened store, shared by the route a person answers on and by
       // the warden sweep that raises and clears its own escalations. Two would each hold their own
@@ -10229,7 +10231,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       });
       inputRequests = inputRequestService;
       // Login recipes (docs/input-requests.md): every recipe text is checked against every value the daemon masks, and a
-      // ferret's proposal waits on a card the owner answers in Settings or with `fy secret entry recipe`.
+      // ferret's proposal waits on a card the owner answers in Settings or with `fy account recipe`.
       const loginRecipes = new LoginRecipeService({
         logins: loginDirectory,
         values: { redact: async text => await secretRedactor.redact(text) },

@@ -43,7 +43,6 @@ import {
   refineBrowserTarget,
 } from './browser-target.ts';
 import { InstantSchema } from './common.ts';
-import type { AgentConfigToolName } from './config-files.ts';
 import {
   INPUT_FIELD_LABEL_MAX_LENGTH,
   INPUT_MAX_EXPIRY_SECONDS,
@@ -238,7 +237,7 @@ const SaveAsSchema = z.string().trim().min(1).max(AGENT_TOOL_MAX_PATH_CHARS);
 /** Where in history `browser.navigate` goes instead of to a URL. */
 export const BrowserHistoryStepSchema = z.enum(['back', 'forward', 'reload']);
 
-export const AgentToolCallSchema = z.discriminatedUnion('tool', [
+const AgentToolCallBodySchema = z.discriminatedUnion('tool', [
   z.strictObject({ tool: z.literal('terminal.list') }),
   z.strictObject({
     tool: z.literal('terminal.open'),
@@ -322,7 +321,7 @@ export const AgentToolCallSchema = z.discriminatedUnion('tool', [
   }),
   z
     .strictObject({
-      tool: z.literal('login.hint'),
+      tool: z.literal('account.hint'),
       /** A page of the agent's: the daemon reads the host from where the page IS, not from the agent. */
       name: SurfaceKeySchema.optional(),
       /** A site the agent is about to sign in to: a host, a URL or a `program@host`. */
@@ -334,7 +333,7 @@ export const AgentToolCallSchema = z.discriminatedUnion('tool', [
    * why. It is the ferret's words; it waits on the owner unless the owner allowed auto-apply for that login.
    */
   z.strictObject({
-    tool: z.literal('login.propose'),
+    tool: z.literal('account.propose'),
     login: LoginEntryIdSchema,
     recipe: LoginRecipeSchema,
     why: LoginRecipeProposeRequestSchema.shape.why,
@@ -674,6 +673,24 @@ export const AgentToolCallSchema = z.discriminatedUnion('tool', [
     expiresInSeconds: z.number().int().min(300).max(COPY_PLAN_MAX_LIFETIME_SECONDS).optional(),
   }),
 ]);
+
+/** Names an older client still sends, read as the tool they became: every check downstream sees only the new name. */
+const LEGACY_TOOL_NAMES: Readonly<Record<string, string>> = {
+  'login.hint': 'account.hint',
+  'login.propose': 'account.propose',
+};
+
+export const AgentToolCallSchema = z.preprocess(
+  (raw: unknown) =>
+    typeof raw === 'object' &&
+    raw !== null &&
+    'tool' in raw &&
+    typeof raw.tool === 'string' &&
+    Object.hasOwn(LEGACY_TOOL_NAMES, raw.tool)
+      ? { ...raw, tool: LEGACY_TOOL_NAMES[raw.tool] }
+      : raw,
+  AgentToolCallBodySchema,
+);
 export type AgentToolCall = z.infer<typeof AgentToolCallSchema>;
 export type AgentToolName = AgentToolCall['tool'];
 
@@ -684,11 +701,12 @@ export type AgentToolName = AgentToolCall['tool'];
  * without anything happening twice, so a patient client repeats it (`daemon-restart.ts`). Every other
  * tool types, clicks, opens, closes or writes, and is repeated only when it provably never arrived.
  */
-const REPEATABLE_AGENT_TOOLS: ReadonlySet<string> = new Set<AgentToolName | AgentConfigToolName>([
+const REPEATABLE_AGENT_TOOLS: ReadonlySet<string> = new Set<string>([
   'terminal.list',
   'terminal.read',
   'terminal.wait',
   'input.wait',
+  'account.hint',
   'login.hint',
   'secure.list',
   'browser.list',
@@ -716,8 +734,8 @@ export const AGENT_TOOL_NAMES: readonly AgentToolName[] = [
   'terminal.ask_owner',
   'terminal.request_input',
   'input.wait',
-  'login.hint',
-  'login.propose',
+  'account.hint',
+  'account.propose',
   'browser.list',
   'browser.open',
   'browser.navigate',
@@ -800,9 +818,9 @@ export const AgentToolResultSchema = z.strictObject({
   command: CopyCommandReportSchema.optional(),
   /** `secure.preapprove` only: the plan card raised for the owner. */
   plan: CopyPlanSchema.optional(),
-  /** `login.hint` only: the saved logins for the site, by their non-secret metadata. */
+  /** `account.hint` only: the saved logins for the site, by their non-secret metadata. */
   logins: LoginHintListSchema.optional(),
-  /** `login.propose` only: whether the recipe waits on the owner or was applied. */
+  /** `account.propose` only: whether the recipe waits on the owner or was applied. */
   recipe: LoginRecipeProposedSchema.optional(),
 });
 export type AgentToolResult = z.infer<typeof AgentToolResultSchema>;

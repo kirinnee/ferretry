@@ -78,7 +78,7 @@ describe('a ferret proposes', () => {
     should(w.cards).have.length(1);
     should(w.cards[0]?.subject).equal("Recipe change for 'Vercel'");
     should(w.cards[0]?.context).equal('- Click Log in\n+ Continue with Google\n\nThe ferret says: the button moved');
-    should(w.cards[0]?.howToResolve).containEql('fy secret entry recipe approve VERCEL rp_0000000000000000');
+    should(w.cards[0]?.howToResolve).containEql('fy account recipe approve VERCEL rp_0000000000000000');
     const [entry] = await w.directory.list();
     should(entry?.recipe).equal('Open vercel.com\nClick Log in');
     should(entry?.proposals?.[0]).containDeep({ base: 'Open vercel.com\nClick Log in', agendaItemId: 'A1' });

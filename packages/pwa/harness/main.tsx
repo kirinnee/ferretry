@@ -1812,7 +1812,7 @@ const HARNESS_DOCTOR: DoctorReport = {
  * no route that returns one, so there is nothing for a harness to invent. What a review is looking
  * at is a name, an instant, a mask, and a configured reference that does not resolve.
  */
-/** Settings › Secrets › Pastes approved in advance: one route, a count and an end; never a value. */
+/** Settings › Secure copy › Pastes approved in advance: one route, a count and an end; never a value. */
 const COPY_RULES_READY: PasteRuleList = {
   rules: [
     {

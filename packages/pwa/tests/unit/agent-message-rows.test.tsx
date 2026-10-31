@@ -101,7 +101,7 @@ describe('a message from another ferret', () => {
     };
     const view = render(<TranscriptRow entry={note} />);
     const shown = textOf(view);
-    expect(shown).toContain("Ferretry updated this ferret's instructions · Board, Ferretry tools");
+    expect(shown).toContain('Ferretry · Instructions updated · Board, Ferretry tools');
     expect(shown).not.toContain('[instructions updated]');
     expect(shown).not.toContain('all work is a card');
     const toggle = view.root.findByProps({ className: 'fy-system-details' });
@@ -223,5 +223,50 @@ describe('a notice from Ferretry itself', () => {
   test('omits the clock when the record had none', () => {
     const view = render(<TranscriptRow entry={{ id: 'n', kind: 'system', text: 'A notice.' }} />);
     expect(view.root.findAllByType('time')).toHaveLength(0);
+  });
+});
+
+describe('a Ferretry message from any part of Ferretry', () => {
+  const FEATURES = ['Warden', 'Agenda', 'Monitor', 'Lessons', 'Migrate', 'Restart', 'Delivery'];
+  const entryFor = (feature: string, text: string) => ({
+    id: `f-${feature}`,
+    kind: 'user' as const,
+    text,
+    at: Date.UTC(2026, 9, 18, 1, 1, 2),
+    send: {
+      sendId: `s-${feature}`,
+      acceptedAt: '2026-10-18T01:01:02.000Z',
+      message: text,
+      attachmentIds: [],
+      fate: 'accepted' as const,
+      path: 'direct' as const,
+      senderKind: 'daemon' as const,
+      by: { kind: 'ferretry' as const, feature },
+    },
+  });
+
+  test('draws as one compact system row, never the owner bubble, for every feature', () => {
+    for (const feature of FEATURES) {
+      const view = render(<TranscriptRow entry={entryFor(feature, 'Still with us?')} />);
+      expect(view.root.findByProps({ 'data-ferretry-message': feature })).toBeDefined();
+      expect(textOf(view)).toContain(`Ferretry · ${feature}`);
+      expect(textOf(view)).toContain('Still with us?');
+      expect(view.root.findAllByProps({ className: 'fy-system-details' })).toHaveLength(0);
+    }
+  });
+
+  test('keeps long text behind Show', () => {
+    const view = render(
+      <TranscriptRow entry={entryFor('Warden', 'You went quiet.\n\nRun fy signal working if busy.')} />,
+    );
+    expect(textOf(view)).not.toContain('fy signal working');
+    run(() => view.root.findByProps({ className: 'fy-system-details' }).props.onClick());
+    expect(textOf(view)).toContain('fy signal working');
+  });
+
+  test('draws the same row while it travels as a ledger row', () => {
+    const { send } = entryFor('Warden', 'Still with us?');
+    const view = render(<TranscriptRow entry={{ id: 'l1', kind: 'ledger', text: send.message, ledger: send }} />);
+    expect(view.root.findByProps({ 'data-ferretry-message': 'Warden' })).toBeDefined();
   });
 });

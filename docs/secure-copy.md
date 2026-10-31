@@ -176,6 +176,8 @@ without ever reading it. It is the same input request, with the store as the des
 
 ### Approving in advance
 
+On screen: Settings › this machine › **Secure copy** › Pastes approved in advance.
+
 - **A rule** allows pastes from a source (`command:<program>`, `browser:<origin>`, `clipboard:<origin>`) to
   a destination (`terminal:<program>`, `browser:<origin>`, `secret:<NAME>`), for one session or any, with an
   optional expiry and count. Only the owner adds or removes one (`fy copy rules add|rm`, `POST|DELETE

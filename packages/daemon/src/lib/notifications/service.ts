@@ -14,6 +14,7 @@ import {
 import {
   type NotificationClock,
   type NotificationDeliveryLedger,
+  type NotificationDiagnostics,
   type NotificationLedgerEntry,
   type NotificationPushDispatcher,
   NotificationRecordSchema,
@@ -28,6 +29,11 @@ export interface NotificationServiceOptions {
   readonly push: NotificationPushDispatcher;
   readonly serial: NotificationSerialExecutor;
   readonly clock: NotificationClock;
+  /**
+   * Where a push that could not be made is said. Announcing stays total, so without it a ledger that
+   * cannot be read silences every push and leaves no trace anywhere.
+   */
+  readonly diagnostics?: NotificationDiagnostics;
 }
 
 /**
@@ -143,6 +149,7 @@ export class NotificationService implements AgendaRaisedObserver {
         try {
           ({ delivered, failed } = await this.options.push.notify({ payload }));
         } catch (error) {
+          this.warn(`push ${key} was not delivered — ${errorText(error)}`);
           await this.options.ledger
             .append(
               NotificationRecordSchema.parse({
@@ -171,7 +178,15 @@ export class NotificationService implements AgendaRaisedObserver {
           )
           .catch(() => undefined);
       })
-      .catch(() => undefined);
+      .catch((error: unknown) => this.warn(`push ${key} was not made — ${errorText(error)}`));
+  }
+
+  private warn(message: string): void {
+    try {
+      this.options.diagnostics?.warn(message);
+    } catch {
+      // Saying a push failed must never be what fails.
+    }
   }
 }
 

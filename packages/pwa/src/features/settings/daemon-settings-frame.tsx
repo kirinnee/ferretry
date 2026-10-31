@@ -18,6 +18,7 @@ import {
   Fingerprint,
   Gauge,
   GraduationCap,
+  ClipboardPaste,
   KeyRound,
   Library,
   Lock,
@@ -31,6 +32,7 @@ import {
   SquareTerminal,
   Stethoscope,
   Zap,
+  UserRound,
 } from 'lucide-react';
 import { type ComponentType, createContext, type ReactNode, useContext, useMemo } from 'react';
 import { useCarrierRtt } from '../../hooks/use-carrier-rtt.ts';
@@ -38,11 +40,14 @@ import type { WardenStatusReader } from '../../hooks/use-warden-status.ts';
 import type { ConnectionHealthState } from '../../lib/connection-health.ts';
 import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { useDaemonClient } from '../../lib/store.tsx';
 import { Button } from '../../shell/primitives.tsx';
 import { ActiveCarrierCard, type CarrierPreferenceControl } from '../carrier/active-carrier-card.tsx';
 import { CatalogsSurface } from '../catalogs/catalogs-surface.tsx';
 import type { CatalogClientFactory } from '../catalogs/catalogs-api.ts';
+import { LoginsSurface } from '../secrets/logins-surface.tsx';
 import { type SecretClientFactory, SecretsSurface } from '../secrets/secrets-surface.tsx';
+import { CopyRulesSurface } from '../secure-copy/copy-rules-surface.tsx';
 import { type WardenClientFactory, WardenConfigSurface } from '../warden/warden-config-card.tsx';
 import { AddDeviceSurface, type PairingClientFactory } from './add-device-settings.tsx';
 import { DaemonHostChecks, type DaemonReachabilityProbe, daemonDisplayName } from './daemon-settings.tsx';
@@ -82,6 +87,8 @@ export interface DaemonSettingsTabDefinition {
 const PANEL_ICONS: Readonly<Record<string, ReactNode>> = {
   warden: <ShieldCheck size={16} aria-hidden="true" />,
   secrets: <KeyRound size={16} aria-hidden="true" />,
+  accounts: <UserRound size={16} aria-hidden="true" />,
+  'secure-copy': <ClipboardPaste size={16} aria-hidden="true" />,
   catalogs: <Library size={16} aria-hidden="true" />,
   // A phone, because the panel's subject is the other device — the thing being added, not this one.
   devices: <Smartphone size={16} aria-hidden="true" />,
@@ -185,6 +192,18 @@ function SecretsPanel({ connection }: DaemonSettingsTabProps) {
   );
 }
 
+function AccountsPanel({ connection }: DaemonSettingsTabProps) {
+  const { createSecretClient } = useFrameLive();
+  const routed = useDaemonClient();
+  return <LoginsSurface connection={connection} createClient={createSecretClient ?? routed} />;
+}
+
+function SecureCopyPanel({ connection }: DaemonSettingsTabProps) {
+  const { createSecretClient } = useFrameLive();
+  const routed = useDaemonClient();
+  return <CopyRulesSurface connection={connection} createClient={createSecretClient ?? routed} />;
+}
+
 function CatalogsPanel({ connection }: DaemonSettingsTabProps) {
   const { createCatalogClient } = useFrameLive();
   return (
@@ -268,8 +287,20 @@ const LEADING_TABS: readonly DaemonSettingsTabDefinition[] = [
   {
     id: 'secrets',
     label: 'Secrets',
-    description: 'Credentials agents can use without ever holding one.',
+    description: 'Env vars for the programs ferrets run.',
     Surface: SecretsPanel,
+  },
+  {
+    id: 'accounts',
+    label: 'Accounts',
+    description: 'Who ferrets sign in as: username, password and 2FA keys, per site.',
+    Surface: AccountsPanel,
+  },
+  {
+    id: 'secure-copy',
+    label: 'Secure copy',
+    description: 'Values moved without a ferret seeing them, and pastes approved in advance.',
+    Surface: SecureCopyPanel,
   },
   {
     id: 'catalogs',

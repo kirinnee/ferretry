@@ -115,6 +115,71 @@ describe('FileNotificationDeliveryLedger', () => {
     should(await world.ledger.find('attention:session-1:A1')).be.undefined();
   });
 
+  it('should read a ledger a daemon wrote before the agenda rename, and keep appending to it', async () => {
+    // Arrange: the lines exactly as a v4.115.0 daemon wrote them, the item named `attentionId`.
+    const world = await fixture('notification-ledger-pre-rename');
+    const sent = {
+      kind: 'attention',
+      interactive: true,
+      title: 'Ada is stopped · 2 need you',
+      body: 'Choose a region',
+    };
+    const stop = 'agenda:session-1:stopped:2026-10-30T05:07:08.738Z';
+    await writeLines(world, [
+      {
+        v: 1,
+        phase: 'requested',
+        key: 'attention:session-1:A1',
+        at: AT,
+        origin: 'attention',
+        attribution: 'attention:human',
+        sessionId: 'session-1',
+        attentionId: 'A1',
+        sent,
+        enrolled: 1,
+      },
+      { v: 1, phase: 'outcome', key: 'attention:session-1:A1', at: AT, delivered: 1, failed: 0 },
+      {
+        v: 1,
+        phase: 'requested',
+        key: stop,
+        at: AT,
+        origin: 'agenda',
+        attribution: 'attention:agent:session-1',
+        sessionId: 'session-1',
+        attentionId: 'A46',
+        stoppedAt: '2026-10-30T05:07:08.738Z',
+        sent,
+        enrolled: 1,
+      },
+      { v: 1, phase: 'outcome', key: stop, at: AT, delivered: 1, failed: 0 },
+    ]);
+
+    // Act
+    const old = await world.ledger.find('attention:session-1:A1');
+    const stopped = await world.ledger.find(stop);
+    await world.ledger.append(agendaBuzz('agenda:session-1:A1:ping', { origin: 'agenda', ping: true }));
+    const appended = await world.ledger.find('agenda:session-1:A1:ping');
+
+    // Assert
+    should(old?.requested).containDeep({ agendaId: 'A1' });
+    should(old?.outcome).containDeep({ delivered: 1 });
+    should(stopped?.requested).containDeep({ agendaId: 'A46', stoppedAt: '2026-10-30T05:07:08.738Z' });
+    should(appended?.requested).containDeep({ agendaId: 'A1', ping: true });
+    const written = (await Bun.file(world.ledger.path).text()).trimEnd().split('\n').at(-1) ?? '';
+    should(JSON.parse(written)).have.property('agendaId', 'A1').and.not.have.property('attentionId');
+  });
+
+  it('should refuse a record that names its item in both spellings', () => {
+    // Act + Assert
+    should(() =>
+      NotificationRecordSchema.parse({
+        ...agendaBuzz('attention:session-1:A1:ping', { ping: true }),
+        attentionId: 'A1',
+      }),
+    ).throw();
+  });
+
   it('should refuse a record whose key does not name what it is for', () => {
     // Act + Assert
     should(() => agendaBuzz('attention:session-1:A1:ping', { deadline: true })).throw();
