@@ -126,14 +126,15 @@ run('./node_modules/.bin/tailwindcss', [
 const server = Bun.serve({
   hostname: '127.0.0.1',
   port: 0,
-  fetch(request) {
+  async fetch(request) {
     const url = new URL(request.url);
     if (url.pathname === '/') {
       return new Response(html(url.searchParams.get('theme') ?? 'studio-dark'), {
         headers: { 'content-type': 'text/html' },
       });
     }
-    return new Response(Bun.file(join(outDir, url.pathname)));
+    const file = Bun.file(join(outDir, url.pathname));
+    return (await file.exists()) ? new Response(file) : new Response('missing', { status: 404 });
   },
 });
 
@@ -160,7 +161,7 @@ try {
         });
         const page = await context.newPage();
         await page.goto(`${server.url}?theme=studio-${scheme}`);
-        await page.locator('[data-restart-outdated-button]').waitFor({ state: 'visible' });
+        await page.locator('[data-session-bar]').waitFor({ state: 'visible' });
         const shoot = async (scene: string): Promise<void> => {
           const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
           if (overflow > 0) fail(`${scene} at ${viewport.name}/${scheme} scrolls sideways by ${overflow}px`);

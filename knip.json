@@ -131,6 +131,7 @@
         "harness/task-picker-screenshot.tsx",
         "harness/agenda-switch-screenshot.tsx",
         "harness/needs-you-sidebar-screenshot.tsx",
+        "harness/ended-agenda-sidebar-screenshot.tsx",
         "harness/agenda-default-screenshot.tsx",
         "harness/voice-cleanup-screenshot.tsx",
         "harness/device-permissions-screenshot.tsx",
