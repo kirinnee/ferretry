@@ -13,6 +13,7 @@ export * from './handshake.ts';
 export * from './hosted.ts';
 export * from './hosted-directory-default.ts';
 export * from './identity.ts';
+export * from './member-session.ts';
 export * from './rendezvous.ts';
 export * from './tenancy.ts';
 export * from './tunnel.ts';

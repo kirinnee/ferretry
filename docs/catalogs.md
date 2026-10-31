@@ -412,6 +412,53 @@ carries exactly one protocol payload: the
 applied install with its notes, the install list, or what was removed. The preview still goes out in full,
 as JSON on stderr, so a script never skips the review a person would have read.
 
+## Members (phase 2)
+
+**Status: the contract (2a) is written; nothing serves it yet.** Phase 2b builds the publisher's side,
+2c the app's. The wire is `packages/protocol/src/lib/catalog-member.ts` and
+`packages/relay/src/lib/member-session.ts`; the session records are
+[relay-protocol.md](relay-protocol.md) §14 "Member sessions".
+
+**A member is a person, not a device.** The owner names a member ("Alice", "Workshop Oct 31"). A
+member can read the catalogs they were given, and nothing else on the machine: no capability, no unlock
+of the machine, no place in the device list. One member can have many browsers; each is a **member
+key** that browser made and can never export, plus that browser's own **member passkey**, named
+"‹member› · ‹catalog› · ‹publisher›" (for example "Alice · Kirin's skills · kirin-box") so a person can
+tell their passkeys apart.
+
+**Sharing.** The owner mints a **share**: the catalogs it grants, who it is for (a new person, or a
+member who already exists), how long the code works (15 minutes, 1, 3 or 8 hours, or 1 day), and single
+use (the code burns when used) or many (one member named by the share, until it expires or reaches its
+cap, at most 500). Minting needs the `sharing` capability and, from a device, a passkey proved for this
+act alone (`share-catalog`), as minting a pairing code does.
+
+- **The code is shown once.** `fy_share_` and 128 random bits. The answer to the mint is the only place
+  it ever appears; the publisher keeps only its SHA-256, and no list, view or audit event has a field for
+  it (a test walks every schema).
+- **The link carries it in the fragment only**: `https://<app>/join#v1;url=…;fp=…;share=…`. The pairing
+  link's grammar, but the code is under its own field name, so a pairing reader refuses a share link and
+  a share reader refuses a pairing link. A link-preview fetcher never sees a fragment.
+
+**Joining.** The browser opens the link, makes its member key and box key, proves the publisher against
+the fingerprint, and sends one sealed `join` record, on the direct address or the hosted relay. Every
+failure is one generic refusal. The code is burned before anything else is decided. The new key then has
+ten minutes to register its passkey, and can do nothing else; after that every member session needs a
+**member unlock** with that passkey, which lasts 30 days by default (1 to 90), because a member only
+reads.
+
+**Already a member?** The browser signs in first, then spends the new code inside its session; the
+code is burned whatever happens next. A code made for a different member, or for a new member, is
+refused and the owner is told (owner decision Q5): a browser is one member per publisher.
+
+**What a member can reach** is a **separate route table**, `/v1/shared/*`: their own summary, the signed
+manifests and items of the catalogs they hold now, redeeming a code, registering passkeys and unlocking,
+and leaving. Every request re-checks their grants, so a revoke works on the very next request. Members
+never see each other (Q14) and never share onward (Q16).
+
+**Bounds.** 128 members and 512 member keys per publisher (a full publisher refuses a join and leaves the
+code live), 64 live shares, 64 catalogs per share, 10 join attempts a minute per carrier and peer, 60
+joins an hour. A member key unused for 90 days is removed; the member stays.
+
 ## Declared gaps
 
 What this does **not** protect against, said plainly (more in design §4.8):
@@ -461,4 +508,5 @@ What this does **not** protect against, said plainly (more in design §4.8):
 | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **0. The contract**: items, manifests, files, canonical JSON, signing and checking, the review, the warnings | **Built.**                                                                                                                                                                                                                                                                                                                   |
 | **1. Signed catalog files**: make catalogs, export a file, install it on another machine with the review     | **Built**: the publisher side (`fy catalog`, the owner routes, the `sharing` capability), the installer side (`fy catalog install`, the install routes, a passkey per install), and the app screens (Add to catalog, Settings › Sharing › Catalogs, Install from a file). The next phase is 2 (members, live), once decided. |
-| 2–7. Members, the offline library, public catalogs, revoke clean-up, hosted artifacts, passkey-locked ones   | Designed ([design/catalogs.md](design/catalogs.md) §6), not started.                                                                                                                                                                                                                                                         |
+| **2. Members, live**: shares and codes, joining, member passkeys, the member route table, revoke             | **2a contract written** ([Members](#members-phase-2), relay-protocol §14 "Member sessions"). Next: 2b the publisher side, 2c the app, 2d the end-to-end test.                                                                                                                                                                |
+| 3–7. The offline library, public catalogs, revoke clean-up, hosted artifacts, passkey-locked ones            | Designed ([design/catalogs.md](design/catalogs.md) §6), not started.                                                                                                                                                                                                                                                         |

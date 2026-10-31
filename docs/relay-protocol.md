@@ -1510,15 +1510,17 @@ failed to understand.
 
 ### One session, one job
 
-The record at sequence `1` is the client's credential, and it is a **strict union of three**. Each
+The record at sequence `1` is the client's credential, and it is a **strict union of five**. Each
 one commits the session to a mode, the mode is decided by that record's own shape rather than by any
 later negotiation, and each mode's terminal state is unreachable from the others:
 
-| sequence-1 record | the session is        | what follows                                                           |
-| ----------------- | --------------------- | ---------------------------------------------------------------------- |
-| `auth`            | a **request session** | any number of `req`, each answered by `res` (in parts when large)      |
-| `stream`          | a **stream session**  | exactly one protocol-switching stream, in `data` frames, until it ends |
-| `pair`            | a **pairing session** | one redemption attempt, one sealed outcome, then the session closes    |
+| sequence-1 record | the session is        | what follows                                                                             |
+| ----------------- | --------------------- | ---------------------------------------------------------------------------------------- |
+| `auth`            | a **request session** | any number of `req`, each answered by `res` (in parts when large)                        |
+| `stream`          | a **stream session**  | exactly one protocol-switching stream, in `data` frames, until it ends                   |
+| `pair`            | a **pairing session** | one redemption attempt, one sealed outcome, then the session closes                      |
+| `join`            | a **join session**    | one share-code redemption, one sealed outcome, then the session closes (Member sessions) |
+| `member`          | a **member session**  | requests on the member route table only (Member sessions)                                |
 
 Any other message at sequence `1` ends the session with `4400`. So does any message a mode does not
 list: a `req` on a stream session, a second credential record anywhere, a `data` record on a request
@@ -2435,6 +2437,121 @@ rather than claiming the exchange is outcome-blind. "Fingerprint X
 gained its first device at T, from Y" is a new operator-visible event that used to happen invisibly
 on a LAN; this design accepts that disclosure as the price of a phone that can pair from anywhere,
 and says so.
+
+### Member sessions
+
+**Status: specified, not yet served.** This is the contract catalogs phase 2b builds against; until it
+lands a daemon's union is still `auth`, `stream` and `pair`, and a `join` or `member` record is an unknown
+`t` that ends the session with `4400`.
+
+A catalog **member** is a person a publisher shared catalogs with ([catalogs.md](catalogs.md) § Members),
+not a paired device. Their browser reaches the publisher through exactly the carriers a device uses —
+direct first, then the discovered rendezvous — and proves itself the same way, by signing this session's
+transcript with a key it made and cannot export. It adds two records to the sequence-1 union, each a
+separate mode with its own terminal states, and **neither reaches a single route a device session
+reaches**.
+
+**The keys and their labels.** At join the browser makes a non-extractable Ed25519 **member key** for
+this publisher, and an X25519 **box key** that phase 6 wraps artifact keys to. Every member signature
+has a label of its own, so a member proof can never be presented as a device, pairing, handshake,
+rendezvous or catalog signature, nor any of those as one:
+
+```
+join   = Ed25519(member key, "ferretry-member-join-v1"  ‖ 0x00 ‖ TH ‖ LP(memberKey) ‖ LP(boxKey))
+member = Ed25519(member key, "ferretry-member-auth-v1"  ‖ 0x00 ‖ TH ‖ LP("member") ‖ LP(keyId) ‖ LP(appSession))
+renew  = Ed25519(member key, "ferretry-member-renew-v1" ‖ 0x00 ‖ TH ‖ LP(nonce))
+```
+
+Fields enter as their base64url text, as §6's do. `@ferretry/relay`'s `member-session.ts` builds these
+messages and parses both records; both ends use it.
+
+**`join`: one redemption, then the session ends.**
+
+```json
+{
+  "t": "join",
+  "protocol": "ferretry-relay/2",
+  "code": "fy_share_…",
+  "clientName": "Firefox on a Mac",
+  "memberKey": "<44-byte Ed25519 SPKI b64url>",
+  "boxKey": "<32-byte X25519 public key b64url>",
+  "proof": "<the join signature by memberKey>"
+}
+```
+
+The publisher answers with exactly one sealed outcome and then `4440`, as a pairing session does:
+
+```json
+{ "t": "joined", "protocol": "ferretry-relay/2", "response": { "memberId": "mbr_…", "keyId": "mk_…", "label": "Alice", "daemonId": "fy_daemon_…", "daemonName": "kirin-box", "catalogs": [{ "catalogId": "cat_…", "name": "Kirin's skills" }], "carriers": [], "passkeyWindowEndsAt": "…", "memberUnlockDays": 30 } }
+{ "t": "join-refused", "protocol": "ferretry-relay/2", "reason": "join_refused" }
+```
+
+- **Every rule of a pairing session holds, by name.** It is a record, never a routed request, so no
+  route is reachable before a member key exists; it reads no host credential; one attempt per session,
+  success or failure; **no edge to serving** — a browser that joined reconnects with `member`; the
+  client latches the outcome before the close; the outcome's SIZE tells a relay operator whether it
+  joined, and this document says so rather than claiming the exchange is outcome-blind.
+- **One refusal for every cause.** An unknown, spent, expired or ended code, a full publisher, a
+  malformed field, a key that is not an Ed25519 SPKI, a box key that is not a usable point and a proof
+  that does not verify are all the same `join-refused`. A publisher with no live share still keys the
+  channel and refuses identically, so no observer can tell "no code exists" from "wrong code".
+- **The code is burned before anything else is decided**, single use or not (a multi-use code counts a
+  use), with no suspension point between the comparison and the burn, so two concurrent joins cannot
+  both spend it. **Except a full publisher**: at most 128 members and 512 member keys, and a join that
+  would exceed either answers `join-refused` and **leaves the code live**, as a full pairing does.
+- **`joined.response` is `MemberJoinedResponseSchema`, whole**, `carriers` included, for the reason
+  `paired.response` is whole. It has no field for a key, a proof or a fingerprint.
+- **The key is filed only after `joined`**, and the new key can do exactly one thing for the next ten
+  minutes: register its passkey (zero-trust B2). After the window it is useless until the owner
+  re-opens one or shares again.
+- **Budgets.** A code is 128 random bits, so guessing is not an attack and the budget only stops
+  floods: at most 10 join attempts a minute per carrier and peer (relayed: per rendezvous session, as
+  pairing), and 60 joins an hour per publisher. A transport failure spends nothing; a sealed
+  `join-refused` is final for that attempt.
+
+**`member`: a request session on the member route table.**
+
+```json
+{
+  "t": "member",
+  "protocol": "ferretry-relay/2",
+  "keyId": "mk_…",
+  "appSession": "<16 bytes b64url>",
+  "proof": "<the member signature>"
+}
+```
+
+- The publisher verifies the proof against the member key it filed at join. Unknown key, revoked key,
+  idle-expired key and bad proof are **one** refusal, `4403`, as for a device. (Phase 5 adds a sealed
+  `member-revoked` answered only to a holder whose proof verifies; until then a revoked key gets `4403`.)
+- Accepted, it answers `authenticated { accessExpiresAt }` and the session becomes a request session
+  with a device session's lease, `renew` and close rules — the renew answered with the `member-renew`
+  signature — on a **separate route table**: `/v1/shared/*` and nothing else. The dispatcher hands a
+  member session to that table and to no other, so a route added tomorrow to the main table with a
+  forgotten capability is still unreachable to a member. Its requests carry a member principal that
+  meets **no** credential minimum of the main table (`authenticated`, `operator`, `admin-token`), and
+  a test sweeps the main table to prove it.
+- A member session that has not unlocked with its member passkey reaches only `/v1/shared/unlock*` and
+  `/v1/shared/passkeys*`. One unlock lasts the member unlock period (30 days by default, 1 to 90), not
+  the 8 hours of a device unlock, because a member only reads.
+- **Every member request re-checks the member's catalog grants**, so a revoke is effective for the very
+  next request, and revoking closes the member's live sessions at once — write first, then drop the
+  grant, then close, as device revocation does.
+
+**A browser already a member that opens another code** opens a `member` session and spends the code with
+`POST /v1/shared/redeem` inside it (design §2.3). The publisher burns the code first, whatever happens
+next; a code minted for a different member, or for a new one, is refused and the owner is told. A
+`member` session whose key the publisher no longer knows (`4403`) forgets that key and joins afresh
+with the same code.
+
+**Reserved, not part of this union yet:** `guest`, a session bound to one public catalog with no key at
+all (design §2.8, phase 4), and the sealed `member-revoked` (phase 5). A record with either `t` today is
+an unknown `t` and ends the session with `4400`.
+
+**What a relay operator sees of a member** is §10's list: a pre-auth session for fingerprint X at time T
+from IP Y, a handshake, sealed records, a close. It sees **that** a join or a member session happened,
+because the pre-auth slot timing and the record sizes differ from a device's, and never the code, the
+keys, the member's name, the catalogs or any content.
 
 ### What this tunnel does not carry
 

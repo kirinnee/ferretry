@@ -471,6 +471,12 @@ typed client gains each route, and `scripts/validate/route-agreement.sh` keeps t
 
 ### 3.1 Session records (an addition to relay-protocol §14)
 
+> **As built in phase 2a** (the contract wins where it differs, [../relay-protocol.md](../relay-protocol.md) §14
+> "Member sessions"): the share link carries the code under its own field, `share=`, not `code=`, so the pairing
+> and share readers each refuse the other's link; a code is `fy_share_` and 22 base64url characters; the box
+> key is the raw 32-byte X25519 key, not an SPKI; and `guest` and `member-revoked` are reserved for phases 4
+> and 5, not part of the union yet.
+
 The record at sequence `1` is a strict union of `auth`, `stream` and `pair` today. This adds three
 modes, **each with its own signature label**, so a member proof can never be read as a device proof:
 
