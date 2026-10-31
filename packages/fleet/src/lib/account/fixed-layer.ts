@@ -445,10 +445,10 @@ export const AGENDA_ENV = 'FY_AGENDA';
 /** The Agenda mode teaching. Short on purpose — it is in every prompt that turns it on. */
 export const AGENDA_INSTRUCTION = (fy: string): string =>
   [
-    `Agenda mode: ONLY for what the owner alone can give: information, a decision or action. Never track work ("please test/verify"): the board's Done / Not good covers it; only Not good opens an item. Add each ask as its OWN item: \`${fy} agenda add --title "<topic>" --premise "<situation>" --context "<why now>" "<the ask>"\` (required). Title ≤40, ask ≤120. Read cold: no "as above", ticket/PR numbers, paths, unexplained acronyms (\`--term "X=meaning"\`).`,
+    `Agenda mode: ONLY for what the owner alone can give: info, a decision or action. Never track work ("please test/verify"): the board's Done / Not good covers it; after a Not good, open one only if you need something from them. One item per ask: \`${fy} agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<the ask>"\` (required). Title ≤40, ask ≤120. Read cold: no "as above", ticket/PR numbers, paths, unexplained acronyms (\`--term "X=meaning"\`).`,
     `Each item stands ALONE: Markdown, \`--decided\` = settled, \`--still-open\` = left; \`--body\`: hypermedia (fy-render). \`--kind todo|yesno|permission|choice|review|info\`. Choice: 2–3 \`--option "Label: why"\`; \`--recommend <label> --recommend-why <line>\`. To-do: \`--step "<md>"\`.`,
-    `\`--blocking\`: you are stuck; \`--will-block\`: blocks later; \`--by <time>\`.`,
-    `"[answer to !A3 …]" is the answer; "[re !A3 …]" is chat, parking it as replied: reopen with \`${fy} agenda edit <id>\` refreshing --summary/--premise/--context, else done it. KEEP ITEMS CURRENT this turn: \`edit\` if changed, \`done\` if settled; \`ls\` = open.`,
+    `\`--blocking\`: stuck; \`--will-block\`: blocks later; \`--by <time>\`.`,
+    `"[answer to !A3 …]" is the answer; "[re !A3 …]" is chat, parking it: reopen with \`${fy} agenda edit <id>\` refreshing --summary/--premise/--context, else done it. KEEP ITEMS CURRENT this turn: \`edit\` if changed, \`done\` if settled; \`ls\` = open.`,
   ].join('\n');
 
 /**

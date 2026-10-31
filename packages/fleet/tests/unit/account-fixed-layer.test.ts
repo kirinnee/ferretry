@@ -758,15 +758,15 @@ describe('AGENDA_INSTRUCTION', () => {
     const text = AGENDA_INSTRUCTION('zz');
 
     // Assert
-    should(text).startWith('Agenda mode: ONLY for what the owner alone can give: information, a decision or action.');
+    should(text).startWith('Agenda mode: ONLY for what the owner alone can give: info, a decision or action.');
     // The agenda is never a tracker: testing and checking ride the board's Done / Not good, and only a Not good result opens an item.
     should(text).containEql('Never track work ("please test/verify")');
     should(text).containEql("the board's Done / Not good covers it");
-    should(text).containEql('only Not good opens an item.');
-    should(text).containEql('Add each ask as its OWN item');
+    should(text).containEql('after a Not good, open one only if you need something from them.');
+    should(text).containEql('One item per ask:');
     // Premise and context are part of the one command, and required: every item is read cold.
     should(text).containEql(
-      '`zz agenda add --title "<topic>" --premise "<situation>" --context "<why now>" "<the ask>"` (required)',
+      '`zz agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<the ask>"` (required)',
     );
     should(text).containEql('Title ≤40, ask ≤120.');
     should(text).containEql('no "as above", ticket/PR numbers, paths, unexplained acronyms');
@@ -785,7 +785,7 @@ describe('AGENDA_INSTRUCTION', () => {
     // The answer and discussion loops, then resolving and reading.
     should(text).containEql('"[answer to !A3 …]" is the answer;');
     // A reply PARKS the item: the ferret brings it back by refreshing the WHOLE card with edit, or closes it.
-    should(text).containEql('"[re !A3 …]" is chat, parking it as replied');
+    should(text).containEql('"[re !A3 …]" is chat, parking it:');
     should(text).containEql('reopen with `zz agenda edit <id>` refreshing --summary/--premise/--context, else done it');
     should(text).not.containEql('agenda surface');
     // Every item stays current, in the turn the facts changed: edited or closed, never left stale.
