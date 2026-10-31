@@ -332,6 +332,45 @@ describe('the fleet catalogue mount', () => {
     should(jsonBody(stale).code).equal('fleet_change_stale');
   });
 
+  it('should refuse a catalog.install on the public route however it is spelled: only the installer produces one', async () => {
+    // Arrange — a forged install: a path out of the skill's folder, and a made-up provenance.
+    const { subsystem, calls } = stub();
+    const forged = {
+      kind: 'catalog.install',
+      name: 'x',
+      component: { kind: 'skills', items: ['x'] },
+      files: [{ path: '../../../../config/x.yaml', content: 'owned' }],
+      profile: 'work',
+      installedFrom: {
+        publisher: `fy_daemon_${'p'.repeat(43)}`,
+        publisherName: 'trusted',
+        catalogId: `cat_${'c'.repeat(22)}`,
+        catalogName: 'Catalog',
+        itemId: `itm_${'i'.repeat(22)}`,
+        kind: 'skill',
+        name: 'x',
+        version: 1,
+        digest: `sha256:${'a'.repeat(64)}`,
+      },
+      replace: false,
+    };
+
+    // Act
+    const forgedAnswer = await dispatcher(subsystem).dispatch(
+      post('/v1/fleet/proposals', JSON.stringify({ change: forged })),
+    );
+    const cleanAnswer = await dispatcher(subsystem).dispatch(
+      post(
+        '/v1/fleet/proposals',
+        JSON.stringify({ change: { ...forged, files: [{ path: 'SKILL.md', content: 'x' }] } }),
+      ),
+    );
+
+    // Assert
+    should([forgedAnswer.status, cleanAnswer.status]).deepEqual([400, 400]);
+    should(calls.proposed).have.length(0);
+  });
+
   it('should refuse a change id that cannot be decoded, and a body naming no known change, before the service', async () => {
     // Arrange
     const { subsystem, calls } = stub();

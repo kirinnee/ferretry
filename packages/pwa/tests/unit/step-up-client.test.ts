@@ -162,6 +162,22 @@ describe('the passkey routes', () => {
     should(options.allowCredentials).have.length(1);
   });
 
+  it('should name the act in the step-up options request when it is for one', async () => {
+    // Arrange
+    const client = clientAnswering({
+      challenge: 'BQYH',
+      rpId: 'ferretry.pages.dev',
+      allowCredentials: [{ type: 'public-key', id: 'qrs' }],
+      timeout: 60_000,
+    });
+
+    // Act
+    await stepUpOptions(client, ORIGIN, 'catalog-install');
+
+    // Assert
+    should(bodyOf(client.calls[0])).eql({ origin: ORIGIN, act: 'catalog-install' });
+  });
+
   it('should submit the assertion as the body and read back when the step-up lapses', async () => {
     // Arrange
     const assertion: StepUpAssertion = {

@@ -3,6 +3,15 @@ import type { AnalyticsResponse } from './analytics.ts';
 import type { ProjectList, SessionSkills } from './catalog.ts';
 import type { ConfigChangeFrame } from './config-changes.ts';
 import type { DaemonRestartPatience } from './daemon-restart.ts';
+import type {
+  CatalogInstalled,
+  CatalogInstallList,
+  CatalogInstallPreview,
+  CatalogInstallPreviewRequest,
+  CatalogInstallRemoved,
+  CatalogInstallRequest,
+  CatalogInstallScope,
+} from './catalog-install.ts';
 import type { DaemonUpdateSettingsPatch, DaemonUpdateStartRequest, DaemonUpdateView } from './daemon-update.ts';
 import type { ForeignHistoryListing, ImportedConversationDetail } from './foreign-history.ts';
 import type { RestartCancelResult, RestartRequest, RestartResult, RestartStatus } from './session-restart.ts';
@@ -119,6 +128,17 @@ export interface IFyApiClient {
   cgroupConfig(): Promise<CgroupConfigView>;
   updateCgroupConfig(patch: CgroupConfigPatch): Promise<CgroupConfigView>;
   /** How this machine's daemon was installed, the latest release, and what updating takes. */
+  /** Verify a signed catalog item and answer its review. Writes nothing. */
+  previewCatalogInstall(
+    scope: CatalogInstallScope,
+    request: CatalogInstallPreviewRequest,
+  ): Promise<CatalogInstallPreview>;
+  /** Install exactly one reviewed preview, binding each placeholder to one of the caller's own secrets or to nothing. */
+  applyCatalogInstall(scope: CatalogInstallScope, request: CatalogInstallRequest): Promise<CatalogInstalled>;
+  /** What this machine installed from catalogs. */
+  catalogInstalls(): Promise<CatalogInstallList>;
+  /** Remove exactly what one install wrote. */
+  removeCatalogInstall(scope: CatalogInstallScope, installId: string): Promise<CatalogInstallRemoved>;
   daemonUpdate(): Promise<DaemonUpdateView>;
   /** Start, or schedule for idle, the update to `request.target`; the daemon restarts after answering. */
   startDaemonUpdate(request: DaemonUpdateStartRequest): Promise<DaemonUpdateView>;

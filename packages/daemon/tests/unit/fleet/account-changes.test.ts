@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
-import { type AccountModel, builtInPresets, parseAccountModel } from '@ferretry/fleet';
+import { type AccountModel, builtInPresets, parseAccountModel, skillSourceReference } from '@ferretry/fleet';
 import should from 'should';
+import { KIND_WORDS } from '../../../src/lib/fleet/catalog.ts';
 import {
   type AccountChangeFacts,
   type AccountModelEdit,
@@ -2753,3 +2754,175 @@ describe('deriveAccountChange: disable and enable', () => {
     should(refusalOf({ kind: 'runtime.enable', name: 'ghost' })).equal('no runtime ghost exists on this machine');
   });
 });
+
+describe('deriveAccountChange: catalog.install', () => {
+  const ORIGIN = {
+    publisher: `fy_daemon_${'A'.repeat(43)}`,
+    publisherName: 'kirin-box',
+    catalogId: `cat_${'c'.repeat(22)}`,
+    catalogName: "Kirin's catalog",
+    itemId: `itm_${'m'.repeat(22)}`,
+    kind: 'mcp',
+    name: 'acme-mcp',
+    version: 1,
+    digest: `sha256:${'a'.repeat(64)}`,
+  } as const;
+  const SKILL_ORIGIN = { ...ORIGIN, itemId: `itm_${'s'.repeat(22)}`, kind: 'skill', name: 'pdf-tools' } as const;
+
+  const mcpInput = { kind: 'mcp', command: 'acme-mcp', args: ['--stdio'], env: { ACME_TOKEN: secretRef('ACME') } };
+  const skillInput = { kind: 'skills', items: ['pdf-tools'] };
+
+  const install = (overrides: Record<string, unknown> = {}): AccountPlanChange =>
+    ({
+      kind: 'catalog.install',
+      name: 'acme-mcp',
+      component: mcpInput,
+      files: [],
+      profile: 'base',
+      installedFrom: ORIGIN,
+      replace: false,
+      ...overrides,
+    }) as AccountPlanChange;
+
+  const installSkill = (overrides: Record<string, unknown> = {}): AccountPlanChange =>
+    install({
+      name: 'pdf-tools',
+      component: skillInput,
+      files: [
+        { path: 'SKILL.md', content: '# pdf tools\n' },
+        { path: 'scripts/split.sh', content: 'echo split\n' },
+      ],
+      installedFrom: SKILL_ORIGIN,
+      ...overrides,
+    });
+
+  /** The setup after one install of each, with the MCP server a layer of `base`, which a runtime runs. */
+  const installedModel = (): AccountModel => {
+    const base = modelOf();
+    return parseAccountModel({
+      ...base,
+      components: {
+        ...base.components,
+        mcp: { ...base.components.mcp, 'acme-mcp': { command: 'acme-mcp', installedFrom: ORIGIN } },
+        skills: { ...base.components.skills, 'pdf-tools': { items: ['pdf-tools'], installedFrom: SKILL_ORIGIN } },
+      },
+      profiles: { ...base.profiles, base: { layers: ['instructions/main', 'mcp/acme-mcp'] } },
+    });
+  };
+
+  it('should put an MCP server in with where it came from, and make it a layer of the profile', () => {
+    // Act
+    const edit = derive(install());
+
+    // Assert
+    should(edit.summary).equal('Install MCP server acme-mcp from kirin-box');
+    should(edit.model.components.mcp['acme-mcp']).deepEqual({
+      command: 'acme-mcp',
+      args: ['--stdio'],
+      env: { ACME_TOKEN: secretRef('ACME') },
+      installedFrom: ORIGIN,
+    });
+    should(edit.model.profiles.base?.layers).deepEqual(['instructions/main', 'mcp/acme-mcp']);
+    should(edit.files).deepEqual([]);
+    should(edit.consequences).deepEqual([
+      'It becomes a layer of profile base, so every runtime on that profile gets it the next time it starts.',
+    ]);
+  });
+
+  it('should write a skill’s files under the skills store, in the same change', () => {
+    // Act
+    const edit = derive(installSkill());
+
+    // Assert
+    const folder = skillSourceReference('pdf-tools');
+    should(edit.summary).equal('Install skills pdf-tools from kirin-box');
+    should(edit.model.components.skills['pdf-tools']).deepEqual({ items: ['pdf-tools'], installedFrom: SKILL_ORIGIN });
+    should(edit.files).deepEqual([
+      { file: `${folder}/SKILL.md`, content: '# pdf tools\n' },
+      { file: `${folder}/scripts/split.sh`, content: 'echo split\n' },
+    ]);
+    should(edit.model.profiles.base?.layers).containEql('skills/pdf-tools');
+  });
+
+  it('should refuse a name something else already holds, saying no install of this item put it there', () => {
+    // Act + Assert
+    should(refusalOf(install({ name: 'search' }))).equal(
+      `search is already a ${refusalWord('mcp')} on studio, and no install of this item put it there`,
+    );
+  });
+
+  it('should replace the very item this publisher installed before, and say what it touches', () => {
+    // Act
+    const edit = derive(install({ replace: true, installedFrom: { ...ORIGIN, version: 2 } }), installedModel());
+
+    // Assert
+    should(edit.summary).equal('Replace MCP server acme-mcp from kirin-box');
+    should(edit.model.components.mcp['acme-mcp']).containEql({ installedFrom: { ...ORIGIN, version: 2 } });
+    should(edit.model.profiles.base?.layers).deepEqual(['instructions/main', 'mcp/acme-mcp']);
+    should(edit.consequences[0]).match(/^Used by 2 profiles and 2 runtimes\. Saving changes it everywhere\./u);
+    should(edit.consequences).have.length(2);
+  });
+
+  it('should replace a skill and write its new files', () => {
+    // Act
+    const edit = derive(
+      installSkill({ replace: true, files: [{ path: 'SKILL.md', content: 'v2\n' }] }),
+      installedModel(),
+    );
+
+    // Assert
+    should(edit.summary).equal('Replace skills pdf-tools from kirin-box');
+    should(edit.files).deepEqual([{ file: `${skillSourceReference('pdf-tools')}/SKILL.md`, content: 'v2\n' }]);
+  });
+
+  it.each([
+    ['publisher', { publisher: `fy_daemon_${'B'.repeat(43)}` }],
+    ['catalog', { catalogId: `cat_${'d'.repeat(22)}` }],
+    ['item', { itemId: `itm_${'x'.repeat(22)}` }],
+  ])('should never replace a component another %s installed, however the names match', (_, other) => {
+    // Act + Assert
+    should(refusalOf(install({ replace: true, installedFrom: { ...ORIGIN, ...other } }), installedModel())).equal(
+      `acme-mcp is a ${refusalWord('mcp')} on studio that this item did not install`,
+    );
+  });
+
+  it('should refuse to replace a component that was put in by hand', () => {
+    // Act + Assert
+    should(refusalOf(install({ name: 'search', replace: true }))).equal(
+      `search is a ${refusalWord('mcp')} on studio that this item did not install`,
+    );
+  });
+
+  it('should refuse to replace what is not there', () => {
+    // Act + Assert
+    should(refusalOf(install({ replace: true }))).equal(`no ${refusalWord('mcp')} acme-mcp exists to replace`);
+  });
+
+  it('should refuse a profile the machine does not have', () => {
+    // Act + Assert
+    should(refusalOf(install({ profile: 'ghost' }))).equal('no profile ghost exists on this machine');
+  });
+
+  it('should refuse a skill that is not the one folder carrying its name', () => {
+    // Act + Assert
+    should(refusalOf(installSkill({ component: { kind: 'skills', items: ['other-name'] } }))).equal(
+      'a skill installed from a catalog is the one folder that carries its name',
+    );
+  });
+
+  it('should lose where it came from when the component is edited by hand', () => {
+    // Act
+    const edit = derive(
+      componentPut({ kind: 'mcp', command: 'acme-mcp', args: ['--other'] }, { name: 'acme-mcp', create: false }),
+      installedModel(),
+    );
+
+    // Assert
+    should(edit.model.components.mcp['acme-mcp']).deepEqual({ command: 'acme-mcp', args: ['--other'] });
+  });
+});
+
+/** How a refusal spells a component kind, read from the same table the derivation reads. */
+function refusalWord(kind: 'mcp' | 'skills'): string {
+  return KIND_WORDS[kind];
+}

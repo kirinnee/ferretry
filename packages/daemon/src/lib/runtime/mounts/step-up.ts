@@ -29,6 +29,7 @@ import {
   StepUpGrantedSchema,
   StepUpOptionsSchema,
   type StepUpRefusal,
+  StepUpOptionsRequestSchema,
   stepUpRefusalCode,
 } from '@ferretry/protocol';
 import {
@@ -128,8 +129,8 @@ export function stepUpRoutes(service: StepUpService): readonly ApiRoute[] {
       minimum: 'operator',
       noStore: true,
       handle: async context => {
-        const body = await parseBody(context.request, PasskeyOptionsRequestSchema);
-        return answer(await service.stepUpOptions(caller(context), body.origin), value =>
+        const body = await parseBody(context.request, StepUpOptionsRequestSchema);
+        return answer(await service.stepUpOptions(caller(context), body.origin, body.act), value =>
           StepUpOptionsSchema.parse(value),
         );
       },

@@ -22,6 +22,7 @@ import {
 } from '@ferretry/fleet';
 import {
   FleetAccountChangeOutcomeSchema,
+  type FleetCatalogInstallChange,
   FleetAccountChangeViewSchema,
   FleetComponentCatalogSchema,
   type FleetCredentialView,
@@ -45,6 +46,7 @@ import {
   sameManifest,
 } from '../../../src/lib/fleet/catalog-service.ts';
 import { FleetCredentialRefusal } from '../../../src/lib/fleet/credentials-service.ts';
+import { deriveAccountChange, FleetMutationRefusal } from '../../../src/lib/fleet/mutations.ts';
 import { configReading } from '../../support/config-reading.ts';
 
 const LAYOUT: FleetLayout = {
@@ -637,6 +639,144 @@ describe('applying a change', () => {
       apply: { outcome: 'rolled-back', failedOperation: 'write /a', reason: 'disk full' },
     });
     should(error.message).match(/not what this change was composed against/u);
+  });
+});
+
+describe('installing from a catalog', () => {
+  const ORIGIN = {
+    publisher: `fy_daemon_${'A'.repeat(43)}`,
+    publisherName: 'kirin-box',
+    catalogId: `cat_${'c'.repeat(22)}`,
+    catalogName: "Kirin's catalog",
+    itemId: `itm_${'s'.repeat(22)}`,
+    kind: 'skill',
+    name: 'pdf-tools',
+    version: 1,
+    digest: `sha256:${'a'.repeat(64)}`,
+  } as const;
+  const SKILL_INSTALL: FleetCatalogInstallChange = {
+    kind: 'catalog.install',
+    name: 'pdf-tools',
+    component: { kind: 'skills', items: ['pdf-tools'] },
+    files: [
+      { path: 'SKILL.md', content: '---\nname: pdf-tools\n---\n' },
+      { path: 'scripts/split.sh', content: 'echo split\n' },
+    ],
+    profile: 'default',
+    installedFrom: ORIGIN,
+    replace: false,
+  };
+
+  it('should write the skill files in the documents the provisioner applies, in one call', async () => {
+    // Arrange
+    const { service, applied } = world();
+
+    // Act
+    const installed = await service.installCatalogItem(SKILL_INSTALL, governance);
+    const outcome = FleetAccountChangeOutcomeSchema.parse(installed.outcome);
+
+    // Assert
+    should(outcome.outcome).equal('applied');
+    should(installed.component).containEql({ installedFrom: ORIGIN });
+    should(await service.storedComponent('skills', 'nothing-here')).be.undefined();
+    should(applied).have.length(1);
+    const written = new Map(applied[0]?.documents.map(document => [document.path, document.content]));
+    should(written.get('/state/fleet/assets/skills/pdf-tools/SKILL.md')).equal('---\nname: pdf-tools\n---\n');
+    should(written.get('/state/fleet/assets/skills/pdf-tools/scripts/split.sh')).equal('echo split\n');
+  });
+
+  it('should never put the install in the proposal store the public routes read', async () => {
+    // Arrange
+    const { service } = world();
+
+    // Act
+    await service.installCatalogItem(SKILL_INSTALL, governance);
+
+    // Assert — nothing was staged, so there is nothing to read back or to apply by id.
+    await refusal(service.read('fy_fprop_anything'), 'fleet_change_unknown');
+  });
+
+  it('should refuse a path that climbs out of the skill folder, even when called internally', async () => {
+    // Arrange
+    const { service, applied } = world();
+    const escaping = { ...SKILL_INSTALL, files: [{ path: '../../../../config/x.yaml', content: 'x: 1\n' }] };
+
+    // Act & Assert
+    await refusal(service.installCatalogItem(escaping, governance), 'fleet_change_refused');
+    should(applied).have.length(0);
+  });
+
+  it('should refuse a file whose resolved path leaves the skill folder, whatever spelling checks passed before', () => {
+    // Arrange
+    const model = MODEL();
+    const facts = { machineName: 'box', runningSessions: 0, settingsBodies: {} };
+    const attempt = (path: string) => () =>
+      deriveAccountChange(model, { ...SKILL_INSTALL, files: [{ path, content: 'x' }] }, facts);
+
+    // Act & Assert
+    for (const path of ['../other/SKILL.md', 'a/../../b', '..', '']) should(attempt(path)).throw(FleetMutationRefusal);
+    should(attempt('scripts/ok.sh')).not.throw();
+  });
+
+  it('should refuse an installedFrom that is not a verified provenance', async () => {
+    // Arrange
+    const { service } = world();
+    const forged = {
+      ...SKILL_INSTALL,
+      installedFrom: { ...ORIGIN, digest: 'sha256:nope' },
+    } as unknown as FleetCatalogInstallChange;
+
+    // Act & Assert
+    await refusal(service.installCatalogItem(forged, governance), 'fleet_change_refused');
+  });
+
+  it('should refuse an install nobody has said whether a caller may make', async () => {
+    // Arrange
+    const { service } = world();
+
+    // Act & Assert
+    const error = await service.installCatalogItem(SKILL_INSTALL, undefined).then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+    should(error).have.property('status', 403);
+  });
+
+  it('should refuse an install the configuration moved under', async () => {
+    // Arrange
+    const { service, state } = world();
+    state.preview = async plan => {
+      state.reading = { ...state.reading, revision: 'rev-2' };
+      return { ...plan, sharedHistory: [] };
+    };
+
+    // Act & Assert
+    await refusal(service.installCatalogItem(SKILL_INSTALL, governance), 'fleet_change_stale');
+  });
+
+  it('should report a skill install the provisioner rolled back as a failure, not a success', async () => {
+    // Arrange
+    const { service, state } = world();
+    state.apply = async () => {
+      throw new FleetApplyFailureError({ kind: 'rolled-back', failedOperation: 'write /a', reason: 'disk full' });
+    };
+
+    // Act & Assert
+    await refusal(service.installCatalogItem(SKILL_INSTALL, governance), 'fleet_change_failed');
+  });
+
+  it('should refuse an install of a name the setup already holds from elsewhere', async () => {
+    // Arrange
+    const { service } = world();
+
+    // Act & Assert — `mine` is a skills component this machine wrote itself.
+    await refusal(
+      service.installCatalogItem(
+        { ...SKILL_INSTALL, name: 'mine', component: { kind: 'skills', items: ['mine'] } },
+        governance,
+      ),
+      'fleet_change_refused',
+    );
   });
 });
 

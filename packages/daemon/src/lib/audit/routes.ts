@@ -1,4 +1,5 @@
 import type { AuditDetail, AuditEvent, AuditOutcome } from '@ferretry/protocol';
+import { ApiError } from '../api/error.ts';
 import { decodeParameter } from '../api/http.ts';
 import type { ApiRoute, RouteContext } from '../api/route.ts';
 import type { SocketAttachment, SocketRoute } from '../api/socket.ts';
@@ -40,6 +41,11 @@ export interface AuditedRouteRule {
    * `detail` under the same key.
    */
   readonly responseNames?: string;
+  /**
+   * Copy the `code` of the refusal an `ApiError` raised into `detail`, for a rule whose refusals mean different
+   * things to a reader — the codes are a fixed vocabulary the daemon chose, never text a person typed.
+   */
+  readonly refusalCode?: true;
   /**
    * A top-level OBJECT of a successful JSON response whose number and boolean fields are copied into
    * `detail` — the settings a `security.changed` left in place, so a reader sees `idleExpiryDays: 1`.
@@ -235,6 +241,43 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     subject: 'sessionId',
     responseNames: 'name',
     detail: { action: 'mcp-add', scope: 'login' },
+  },
+  // Installing, or removing, an item from a catalog someone else published (`mounts/catalog-installs.ts`): the
+  // item's NAME, never a file, command or secret. `code` says why a refusal was one — a signature that did
+  // not verify, a publisher that changed, a file edited here — because those mean different things to a reader.
+  {
+    method: 'POST',
+    path: '/v1/catalog-installs/project',
+    event: 'fleet.configured',
+    responseNames: 'install.provenance.name',
+    refusalCode: true,
+    detail: { action: 'catalog-install', scope: 'project' },
+  },
+  {
+    method: 'POST',
+    path: '/v1/catalog-installs/runtime',
+    event: 'fleet.configured',
+    responseNames: 'install.provenance.name',
+    refusalCode: true,
+    detail: { action: 'catalog-install', scope: 'runtime' },
+  },
+  {
+    method: 'DELETE',
+    path: '/v1/catalog-installs/project/:installId',
+    event: 'fleet.configured',
+    subject: 'installId',
+    responseNames: 'provenance.name',
+    refusalCode: true,
+    detail: { action: 'catalog-remove', scope: 'project' },
+  },
+  {
+    method: 'DELETE',
+    path: '/v1/catalog-installs/runtime/:installId',
+    event: 'fleet.configured',
+    subject: 'installId',
+    responseNames: 'provenance.name',
+    refusalCode: true,
+    detail: { action: 'catalog-remove', scope: 'runtime' },
   },
   { method: 'POST', path: '/v1/sessions/:sessionId/terminals', event: 'terminal.opened', subject: 'sessionId' },
   // Typing into the session's own pane from the Console: counted on the session and folded per window,
@@ -557,6 +600,7 @@ function audited(subsystem: AuditedRoutesSubsystem, route: ApiRoute, rule: Audit
           : undefined;
       let status: number | undefined;
       let body: string | undefined;
+      let code: string | undefined;
       try {
         const response = await route.handle(context);
         status = response.status;
@@ -564,12 +608,13 @@ function audited(subsystem: AuditedRoutesSubsystem, route: ApiRoute, rule: Audit
         return response;
       } catch (error) {
         status = statusOf(error);
+        code = error instanceof ApiError ? error.code : undefined;
         throw error;
       } finally {
         // A record that throws would turn a request that already WORKED into a 500 from here, and the
         // person would retry something that happened. `AuditLog` already reports its own failures; this
         // catches what is left — a device-name lookup, a sink that is not an `AuditLog`.
-        await record(subsystem, context, rule, { status, body, subject, subjectName }).catch((error: unknown) =>
+        await record(subsystem, context, rule, { status, body, subject, subjectName, code }).catch((error: unknown) =>
           subsystem.failures.auditWriteFailed(describeFailure(rule, error)),
         );
       }
@@ -582,6 +627,7 @@ interface Answer {
   readonly body: string | undefined;
   readonly subject: string | undefined;
   readonly subjectName: string | undefined;
+  readonly code: string | undefined;
 }
 
 async function record(
@@ -608,7 +654,8 @@ async function record(
     ...settings,
     ...fields,
     ...(answer.subjectName === undefined ? {} : { deviceName: answer.subjectName }),
-    ...(names === undefined ? {} : { [rule.responseNames ?? 'names']: names }),
+    ...(names === undefined ? {} : { [(rule.responseNames ?? 'names').split('.').at(-1) as string]: names }),
+    ...(rule.refusalCode === true && outcome !== 'succeeded' && answer.code !== undefined ? { code: answer.code } : {}),
     ...(answer.status === undefined ? {} : { status: answer.status }),
   };
   await subsystem.log.record({
@@ -634,7 +681,8 @@ function statusOf(error: unknown): number | undefined {
  */
 function namesIn(body: string | undefined, field: string): string | undefined {
   try {
-    const parsed = (JSON.parse(body ?? '') as Record<string, unknown>)[field];
+    let parsed: unknown = JSON.parse(body ?? '');
+    for (const key of field.split('.')) parsed = (parsed as Record<string, unknown> | null)?.[key];
     const value = typeof parsed === 'string' ? [parsed] : parsed;
     if (!Array.isArray(value) || !value.every(entry => typeof entry === 'string')) return undefined;
     return value.length === 0 ? undefined : joinedWithin(value, AUDIT_TEXT_MAX);

@@ -36,6 +36,17 @@ import { CatalogInstallWarningSchema, CatalogReviewEntrySchema } from './shared-
 
 export const CATALOG_INSTALLS_PATH = '/v1/catalog-installs' as const;
 
+/** The two scopes' own routes: `<CATALOG_INSTALLS_PATH>/project` and `…/runtime`, each with a `/preview`. */
+export const catalogInstallsPath = (scope: 'project' | 'runtime', preview = false): string =>
+  `${CATALOG_INSTALLS_PATH}/${scope}${preview ? '/preview' : ''}`;
+
+/**
+ * The most a preview request may weigh, refused before it is parsed. An item is at most 2 MiB of text
+ * and JSON may spell one control character as six, so 12 MiB of item plus the manifest's 200 lines
+ * (well under 1 MiB) fits with room; 16 MiB is that, rounded up.
+ */
+export const CATALOG_INSTALL_PREVIEW_MAX_BODY_BYTES = 16 * 1024 * 1024;
+
 /** How long a preview may be applied. Long enough to read every file; short enough to be the same decision. */
 export const CATALOG_INSTALL_PREVIEW_TTL_SECONDS = 600;
 
@@ -100,10 +111,15 @@ export const CatalogProvenanceSchema = z.strictObject({
 });
 export type CatalogProvenance = z.infer<typeof CatalogProvenanceSchema>;
 
-/** One secret the item asks for, and whether B holds a secret of that same name (it is never bound for you). */
+/**
+ * One secret the item asks for, and whether B holds a secret of that same name (it is never bound for you).
+ * `held` is OPTIONAL BECAUSE IT IS A DISCLOSURE: it tells the caller which secret NAMES exist on this
+ * machine, which only a caller who may list secrets (`secrets.use`, as `GET /v1/secrets` asks) is told.
+ * For any other caller it is left out, and the review still lists every placeholder.
+ */
 export const CatalogInstallSecretSchema = z.strictObject({
   placeholder: SecretNameSchema,
-  held: z.boolean(),
+  held: z.boolean().optional(),
 });
 export type CatalogInstallSecret = z.infer<typeof CatalogInstallSecretSchema>;
 
@@ -127,9 +143,10 @@ export type CatalogInstallPreview = z.infer<typeof CatalogInstallPreviewSchema>;
 
 /**
  * `POST /v1/catalog-installs/<scope>`: apply one preview. `secretBindings` names EVERY placeholder the
- * preview listed, each mapped to one of the installer's own secrets or to `null` (left unbound: the
- * install lands, and a launch is refused with the existing "missing secret" sentence until it is set).
- * Nobody gets "it used my key" without having chosen it.
+ * preview listed, each mapped to one of the installer's own secrets or to `null`. `null` LEAVES THE
+ * VARIABLE OUT of what is written: the install lands, the program runs without it, and the apply's notes
+ * say so. An unbound placeholder is never filled by a secret of the same name — nobody gets "it used my
+ * key" without having chosen it.
  */
 export const CatalogInstallRequestSchema = z.strictObject({
   previewId: CatalogInstallPreviewIdSchema,
@@ -149,6 +166,22 @@ export const CatalogInstallSchema = z.strictObject({
 });
 export type CatalogInstall = z.infer<typeof CatalogInstallSchema>;
 
+/** What an apply answers: the install as recorded, and anything the person should know about how it landed. */
+export const CatalogInstalledSchema = z.strictObject({
+  install: CatalogInstallSchema,
+  /** Plain sentences, e.g. that a project server needs a variable set in the ferret's environment. */
+  notes: z.array(z.string().min(1)),
+});
+export type CatalogInstalled = z.infer<typeof CatalogInstalledSchema>;
+
+/** What a remove answers. */
+export const CatalogInstallRemovedSchema = z.strictObject({
+  installId: CatalogInstallIdSchema,
+  provenance: CatalogProvenanceSchema,
+  destination: z.string().min(1),
+});
+export type CatalogInstallRemoved = z.infer<typeof CatalogInstallRemovedSchema>;
+
 export const CatalogInstallListSchema = z.strictObject({ installs: z.array(CatalogInstallSchema) });
 export type CatalogInstallList = z.infer<typeof CatalogInstallListSchema>;
 
@@ -159,18 +192,22 @@ export type CatalogInstallList = z.infer<typeof CatalogInstallListSchema>;
  * - `catalog_item_mismatch`: the item is not the version, or not the bytes, the signed manifest lists.
  * - `catalog_publisher_changed`: B already installed from a publisher of this catalog under a different
  *   fingerprint — a different machine is using the same catalog.
+ * - `catalog_revision_older`: the manifest is an older revision of this catalog than B has already seen.
  * - `catalog_downgrade`: the version is lower than the one installed, and the person did not choose that.
  * - `catalog_item_invalid`: the item breaks a bundle rule (path, size, a raw secret).
  * - `catalog_not_installable`: an artifact is opened, not installed; or a kind this target cannot take.
  * - `catalog_target_unknown`: B does not know that project, runtime or profile.
  * - `catalog_preview_unknown`, `catalog_preview_expired`: apply again from a fresh preview.
  * - `catalog_bindings_invalid`: a placeholder was left out, an extra one named, or an own secret B lacks.
- * - `catalog_install_conflict`: something already sits where the item would land, and B did not write it.
+ * - `catalog_install_conflict`: something already sits where the item would land, and B did not write it,
+ *   or what B wrote there was edited on this machine since.
+ * - `catalog_install_unknown`: B has no install with that id (remove).
  */
 export const CATALOG_INSTALL_REFUSALS = [
   'catalog_signature_invalid',
   'catalog_item_mismatch',
   'catalog_publisher_changed',
+  'catalog_revision_older',
   'catalog_downgrade',
   'catalog_item_invalid',
   'catalog_not_installable',
@@ -179,6 +216,7 @@ export const CATALOG_INSTALL_REFUSALS = [
   'catalog_preview_expired',
   'catalog_bindings_invalid',
   'catalog_install_conflict',
+  'catalog_install_unknown',
 ] as const;
 export const CatalogInstallRefusalSchema = z.enum(CATALOG_INSTALL_REFUSALS);
 export type CatalogInstallRefusal = z.infer<typeof CatalogInstallRefusalSchema>;

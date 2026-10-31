@@ -20,6 +20,7 @@
  * the app; the browser holds nothing it could lose, replay or leak.
  */
 
+import type { StepUpAct } from '@ferretry/protocol';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
 import { STEP_UP_FALLBACK_ACT } from './grants.ts';
 
@@ -49,7 +50,7 @@ export type PromptOrigin = 'explicit' | 'background';
 
 export interface StepUpGateDependencies {
   /** Runs the whole ceremony for one machine: options, the passkey sheet, and the daemon's verdict. */
-  readonly ceremony: (daemon: DaemonConnection) => Promise<void>;
+  readonly ceremony: (daemon: DaemonConnection, act?: StepUpAct) => Promise<void>;
   /** The sentence a person is shown for a ceremony that failed. Never a raw exception. */
   readonly describe: (reason: unknown) => string;
   /**
@@ -68,6 +69,9 @@ interface Waiting {
   readonly daemon: DaemonConnection;
   readonly acts: string[];
   readonly resolvers: ((stepped: boolean) => void)[];
+  /** The ids of the acts the daemon named, and whether any waiting request named none. */
+  readonly actIds: Set<StepUpAct>;
+  unnamed: boolean;
   /** A person started at least one of these requests, so it may ask from off screen. */
   explicit: boolean;
 }
@@ -118,6 +122,7 @@ export class StepUpGate {
     daemon: DaemonConnection,
     act: string = STEP_UP_FALLBACK_ACT,
     origin: PromptOrigin = 'explicit',
+    actId?: StepUpAct,
   ): Promise<boolean> {
     return new Promise(resolve => {
       const explicit = origin === 'explicit';
@@ -125,6 +130,8 @@ export class StepUpGate {
       if (waiting !== undefined) {
         waiting.resolvers.push(resolve);
         waiting.explicit ||= explicit;
+        if (actId === undefined) waiting.unnamed = true;
+        else waiting.actIds.add(actId);
         if (!waiting.acts.includes(act)) {
           waiting.acts.push(act);
           this.#refreshActs(daemon.daemonId);
@@ -132,7 +139,14 @@ export class StepUpGate {
         if (this.#prompt === null && this.#mayShow(waiting)) this.#show(waiting);
         return;
       }
-      const entry: Waiting = { daemon, acts: [act], resolvers: [resolve], explicit };
+      const entry: Waiting = {
+        daemon,
+        acts: [act],
+        resolvers: [resolve],
+        actIds: new Set(actId === undefined ? [] : [actId]),
+        unnamed: actId === undefined,
+        explicit,
+      };
       this.#waiting.set(daemon.daemonId, entry);
       if (this.#prompt === null && this.#mayShow(entry)) this.#show(entry);
       else this.#set(this.#prompt);
@@ -160,7 +174,7 @@ export class StepUpGate {
     const { failure: _cleared, ...kept } = prompt;
     this.#set({ ...kept, busy: true });
     try {
-      await this.deps.ceremony(prompt.daemon);
+      await this.deps.ceremony(prompt.daemon, this.#soleAct(prompt.daemon.daemonId));
     } catch (reason) {
       this.#set({ ...kept, busy: false, failure: this.deps.describe(reason) });
       return;
@@ -173,6 +187,16 @@ export class StepUpGate {
     const prompt = this.#prompt;
     if (prompt === null || prompt.busy) return;
     this.#settle(prompt.daemon.daemonId, false);
+  }
+
+  /**
+   * The ONE act this confirmation is for, or nothing. A prompt that several different acts share proves
+   * none of them in particular, so the proof is unstamped and an act that wants its own asks again.
+   */
+  #soleAct(daemonId: DaemonId): StepUpAct | undefined {
+    const waiting = this.#waiting.get(daemonId);
+    if (waiting === undefined || waiting.unnamed || waiting.actIds.size !== 1) return undefined;
+    return [...waiting.actIds][0];
   }
 
   #mayShow(waiting: Waiting): boolean {

@@ -1944,7 +1944,12 @@ describe('the carrier router meeting a passkey step-up', () => {
   /** A router whose daemon answers by `respond`, with `stepUp` as the only thing that can ask a person. */
   const steppedRouter = async (
     respond: (attempt: number) => { status: number; body: unknown } | { status: number; body: string },
-    stepUp?: (daemon: ReturnType<typeof daemonConnection>, act?: string) => Promise<boolean>,
+    stepUp?: (
+      daemon: ReturnType<typeof daemonConnection>,
+      act?: string,
+      origin?: unknown,
+      actId?: string,
+    ) => Promise<boolean>,
   ) => {
     const identity = await newDaemonIdentity();
     const daemon = daemonConnection({ daemonId: identity.daemonId, baseUrl: DAEMON_URL, deviceId: DEVICE_ID });
@@ -2017,6 +2022,40 @@ describe('the carrier router meeting a passkey step-up', () => {
 
     // Assert
     should(acts).eql(['open a terminal', 'change the settings for the secret store']);
+  });
+
+  it('should hand the prompt the id of the act the daemon named, so the proof is stamped for it', async () => {
+    // Arrange
+    const ids: (string | undefined)[] = [];
+    const stepUp = async (_daemon: unknown, _act?: string, _origin?: unknown, actId?: string): Promise<boolean> => {
+      ids.push(actId);
+      return true;
+    };
+    const named = await steppedRouter(
+      attempt =>
+        attempt === 1
+          ? {
+              status: 403,
+              body: {
+                error: 'Confirm with your passkey.',
+                code: REQUIRED.code,
+                demand: { capability: 'fleet', axis: 'configure', act: 'catalog-install' },
+              },
+            }
+          : { status: 200, body: {} },
+      stepUp,
+    );
+    const plain = await steppedRouter(
+      attempt => (attempt === 1 ? { status: 403, body: REQUIRED } : { status: 200, body: {} }),
+      stepUp,
+    );
+
+    // Act
+    await named.router.fetch(`${DAEMON_URL}/v1/catalog-installs/runtime`, { method: 'POST', body: '{}' });
+    await plain.router.fetch(`${DAEMON_URL}/v1/fleet/import`, { method: 'POST', body: '{}' });
+
+    // Assert
+    should(ids).eql(['catalog-install', undefined]);
   });
 
   it('should still ask, with no act, when the demand is missing or does not parse', async () => {

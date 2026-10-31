@@ -327,25 +327,84 @@ Ids only, never what an item holds ([audit.md](audit.md)): `catalog.changed` (cr
 publish, withdraw, with item id, version, digest and revision) and `catalog.exported` (revision and
 item ids). Both are **kept** events.
 
-### Declared gaps (publisher)
+## Installing from a file
 
-- A catalog file is plain JSON that anyone can read. Signed is not secret: do not add what you would not
-  hand over.
-- Skill content is shown in full but is only checked by the heuristics in [The review](#the-review).
-- **The ferret refusal is an honest-client guard, and the export's printout is the check.** "A ferret may
-  only list" reads who is asking from the session header `fy` sends from inside a ferret. A ferret holds
-  the same admin token and runs as the same user, so it can send raw HTTP without that header, or write
-  `state/catalogs/` itself. Either way a program running as the owner on the publisher can change what
-  the **next export signs**. `fy catalog export` therefore prints every item it will sign (name, version,
-  digest) and asks first, and refuses to write a file that differs from what it printed; read that list.
-  A per-session credential would close this and is not built (the same limit as
-  [secrets.md](secrets.md)).
-- **A folder swapped for a link during the read (declared as a gap).** The skill walk resolves the
-  folder, checks each parent, and opens each file with `O_NOFOLLOW`; after the open it checks the file is
-  a regular file with one link. What is not closed is the instant between the parent check and the open:
-  a folder replaced by a link in that instant is followed for that one read. The attacker must already be
-  the same user on the publisher, and the content is shown in the preview and bound by its digest.
-- `public` and members are not available; a file is the only way a catalog leaves.
+Installing is two steps and every route has exactly one capability. A project write is governed by
+`filesystem` and a runtime write by `fleet`, so each scope has its own preview and its own apply
+(`packages/daemon/src/lib/runtime/mounts/catalog-installs.ts`):
+
+| Route                                            | Capability             | What it does                                                              |
+| ------------------------------------------------ | ---------------------- | ------------------------------------------------------------------------- |
+| `POST /v1/catalog-installs/project/preview`      | `filesystem.use`       | verifies everything, answers the review and a `previewId`; writes nothing |
+| `POST /v1/catalog-installs/project`              | `filesystem.configure` | applies exactly that preview into a project folder                        |
+| `POST /v1/catalog-installs/runtime/preview`      | `fleet.use`            | the same, for a runtime and profile                                       |
+| `POST /v1/catalog-installs/runtime`              | `fleet.configure`      | applies it as one fleet change                                            |
+| `GET /v1/catalog-installs`                       | `fleet.use`            | what is installed, and where                                              |
+| `DELETE /v1/catalog-installs/project/:installId` | `filesystem.configure` | removes exactly what that install wrote                                   |
+| `DELETE /v1/catalog-installs/runtime/:installId` | `fleet.configure`      | the same, for a runtime install                                           |
+
+- **The preview** runs the checks above in that order. Each refusal has its own code and a plain
+  sentence (`CATALOG_INSTALL_REFUSALS`); the first one to fail is the one reported. The body is refused
+  past 16 MiB before it is parsed. The answer is the full review, the publisher (with `firstSeen`),
+  where it would land in words, and every placeholder. `held` (whether B holds a secret of that name) is
+  told only to a caller who may list secret names (`secrets.use`, as `GET /v1/secrets` asks); to any other
+  it is left out, so a preview never tells which names exist. `replaces` is set only when B's own record shows the same publisher, catalog and item at the same
+  target; another publisher's item of the same name is never replaced.
+- **Previews live in memory** only, for 600 seconds, up to 8 per caller. A preview is bound to the item's
+  digest, the target **and the caller that reviewed it** (a paired device by its id, the machine's own
+  shell as the host, a ferret as an agent): another caller's apply is `catalog_preview_unknown`, and one
+  caller can never push another's preview out. An apply consumes it.
+- **The apply** takes `{previewId, secretBindings}`. The bindings name **exactly** the preview's
+  placeholders. Each maps to one of B's own secrets (it must exist) or to `null` (unbound). Nothing is
+  bound silently, so a mismatch is `catalog_bindings_invalid`. **`null` leaves the variable OUT** of what is
+  written (the project `.mcp.json` and the runtime component alike), the install records it as unbound,
+  and the apply's notes say "NAME is not set by this install. The program runs without it unless its own
+  environment already has a variable of that name." An unbound placeholder is never filled by a secret of the same name. A bound project
+  server gets `${OWN}` in `.mcp.json` (the variable must be set in the ferret's environment, and the apply
+  says so); a bound runtime server gets `${secret:OWN}`. No secret value crosses any route.
+- **It writes only through existing paths**: the project `.mcp.json` compare-and-swap, a project skill
+  folder (a new port that never follows a symbolic link and refuses one on the path), and for a runtime
+  the fleet catalogue (an INTERNAL change, `catalog.install`: the component, its skill files and the
+  profile entry are one change). That kind is not in the wire schema, so `POST /v1/fleet/proposals`
+  refuses it; only the installer produces one, after its checks. The fleet executor also resolves every
+  file path and refuses any write outside the skill's own folder in the assets directory. Anything already at the destination that B's install record did not write is
+  `catalog_install_conflict`. An update replaces an install only when every file it wrote still has the
+  hash B recorded (files are compared by exact relative path); a file edited by hand is a conflict that
+  says so. A runtime component is compared by a hash of what it holds, recorded at install, so a hand
+  edit is found even when its provenance is kept. B records the resolved project folder and root, so a
+  removal needs no re-derivation from the spelling the install used. Keeping your edits is phase 3.
+- **A passkey for every install.** An apply from a governed caller needs a fresh step-up for the act
+  `catalog-install` (`403 grant_step_up_required` otherwise). **The unlock is not that proof**: it
+  opens the machine, and only a passkey proved for this act counts. Each proof is stamped with the act it
+  was proved for (the app names the act when it asks), so a leftover proof for another act, such as loosening
+  a configuration file, does not count either. The proof is claimed atomically at
+  admission, so one confirmation buys one install even when two applies race, and it is **not** given
+  back when the install is then refused: if the install is refused after you confirm, you confirm again. An update asks too. **Removing never asks.** A loopback caller is ungoverned: the CLI asks y/N instead.
+- **A ferret may preview and list, but never install or remove**: it is refused with `403 forbidden`
+  , because an install is code that will run.
+- **What "pinned" means.** The first install from a catalog records the publisher's fingerprint, and
+  later installs of that catalog from any other fingerprint are `catalog_publisher_changed`. B also
+  records the highest manifest revision it has installed from, and an older revision is
+  `catalog_revision_older`. The pin, the revision and the install are recorded **only when an apply
+  succeeds**, never by a preview. Nothing updates itself: a newer version is a new preview and a new yes.
+- **Storage.** `<FY_HOME>/state/catalog-installs.json`, mode `0600`, written by temp file and rename,
+  with a `schemaVersion` and checked on read. It holds each install with the SHA-256 of every file it
+  wrote, the publishers, the pin per catalog and the highest revision seen. A damaged file stops every
+  install route with `500 catalog_installs_unreadable` instead of starting afresh.
+
+### The command line
+
+```
+fy catalog install <file> [--item <name>]
+    ( --project <root> --harness claude|codex | --runtime <r> --profile <p> )
+    [--bind PLACEHOLDER=MY_SECRET]... [--unbound PLACEHOLDER]... [--older] [--yes]
+fy catalog installs
+fy catalog uninstall <installId> [--yes]
+```
+
+`install` checks the file's size before reading it, previews, prints the **whole** review (every file,
+command and warning), asks for each placeholder you did not name (or fails when it cannot ask), asks
+y/N unless `--yes`, then applies. When the daemon wants a passkey it says so and changes nothing.
 
 ## Declared gaps
 
@@ -364,13 +423,36 @@ What this does **not** protect against, said plainly (more in design §4.8):
   under a name that does not sound secret, passes.
 - **Look-alike names.** A publisher may name itself with letters that look like another's. The reader's
   own label and the fingerprint are what tell two publishers apart.
+- **Files left behind.** If B's state file cannot be written after the files were, they stay on disk
+  with no record, and the next install there is a `catalog_install_conflict`. Nothing is deleted
+  that B has no hash for.
+- **A folder swapped for a link mid-install** (the installer side). The write refuses a link on the path when it checks and
+  again for each file, but a folder swapped for a link in the instant between the two is not caught.
+- **Refused previews are not in the audit log.** Only applies and removes are.
 - **Signed means attributable (G9).** Anyone holding a signed manifest can prove the publisher
   published it. A catalog file's `exportedAt` is not signed: it only says when the file was written.
+- A catalog file is plain JSON that anyone can read. Signed is not secret: do not add what you would not
+  hand over.
+- Skill content is shown in full but is only checked by the heuristics in [The review](#the-review).
+- **The ferret refusal is an honest-client guard, and the export's printout is the check.** "A ferret may
+  only list" reads who is asking from the session header `fy` sends from inside a ferret. A ferret holds
+  the same admin token and runs as the same user, so it can send raw HTTP without that header, or write
+  `state/catalogs/` itself. Either way a program running as the owner on the publisher can change what
+  the **next export signs**. `fy catalog export` therefore prints every item it will sign (name, version,
+  digest) and asks first, and refuses to write a file that differs from what it printed; read that list.
+  A per-session credential would close this and is not built (the same limit as
+  [secrets.md](secrets.md)).
+- **A folder swapped for a link during the publisher’s read (declared as a gap).** The skill walk resolves the
+  folder, checks each parent, and opens each file with `O_NOFOLLOW`; after the open it checks the file is
+  a regular file with one link. What is not closed is the instant between the parent check and the open:
+  a folder replaced by a link in that instant is followed for that one read. The attacker must already be
+  the same user on the publisher, and the content is shown in the preview and bound by its digest.
+- `public` and members are not available; a file is the only way a catalog leaves.
 
 ## What is built
 
-| Phase                                                                                                        | State                                                                                                                       |
-| ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
-| **0. The contract**: items, manifests, files, canonical JSON, signing and checking, the review, the warnings | **Built.**                                                                                                                  |
-| **1. Signed catalog files**: make catalogs, export a file, install it on another machine with the review     | **1a built:** the publisher side (`fy catalog`, the owner routes, the `sharing` capability). Next: 1b installs, 1c screens. |
-| 2–7. Members, the offline library, public catalogs, revoke clean-up, hosted artifacts, passkey-locked ones   | Designed ([design/catalogs.md](design/catalogs.md) §6), not started.                                                        |
+| Phase                                                                                                        | State                                                                                                                                            |
+| ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **0. The contract**: items, manifests, files, canonical JSON, signing and checking, the review, the warnings | **Built.**                                                                                                                                       |
+| **1. Signed catalog files**: make catalogs, export a file, install it on another machine with the review     | **1a built:** the publisher side (`fy catalog`, the owner routes, the `sharing` capability). **1b built:** the installer side. Next: 1c screens. |
+| 2–7. Members, the offline library, public catalogs, revoke clean-up, hosted artifacts, passkey-locked ones   | Designed ([design/catalogs.md](design/catalogs.md) §6), not started.                                                                             |

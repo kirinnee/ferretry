@@ -1574,3 +1574,160 @@ describe('auditedSocketRoutes', () => {
     ]);
   });
 });
+
+describe('auditing an install from a catalog', () => {
+  const INSTALL_ID = `cin_${'i'.repeat(22)}`;
+  const send = async (api: ApiDispatcher, method: string, path: string) =>
+    await api.dispatch(request({ method, path, headers: ADMIN, loopback: true }));
+
+  for (const scope of ['project', 'runtime'] as const) {
+    it(`should record an install on the ${scope} route by the item's NAME, never a file, command or secret`, async () => {
+      // Arrange
+      const { journal, routes } = decorated({
+        [`POST /v1/catalog-installs/${scope}`]: async () =>
+          jsonResponse({
+            install: { provenance: { name: 'pdf-tools' }, secretBindings: { ACME_TOKEN: 'MY_KEY' } },
+            notes: ['set ACME_TOKEN'],
+          }),
+      });
+      const api = await dispatcher(routes);
+
+      // Act
+      await send(api, 'POST', `/v1/catalog-installs/${scope}`);
+
+      // Assert
+      should(records(journal)).deepEqual([
+        {
+          at: AT,
+          event: 'fleet.configured',
+          actor: { kind: 'host' },
+          outcome: 'succeeded',
+          detail: { action: 'catalog-install', scope, name: 'pdf-tools', status: 200 },
+        },
+      ]);
+      should(journal.lines.join('\n')).not.match(/MY_KEY|ACME_TOKEN/u);
+    });
+
+    it(`should record a removal on the ${scope} route against the install id, with the item's name`, async () => {
+      // Arrange
+      const { journal, routes } = decorated({
+        [`DELETE /v1/catalog-installs/${scope}/:installId`]: async () =>
+          jsonResponse({ installId: INSTALL_ID, provenance: { name: 'pdf-tools' }, destination: '/srv/app' }),
+      });
+      const api = await dispatcher(routes);
+
+      // Act
+      await send(api, 'DELETE', `/v1/catalog-installs/${scope}/${INSTALL_ID}`);
+
+      // Assert
+      should(records(journal)).deepEqual([
+        {
+          at: AT,
+          event: 'fleet.configured',
+          actor: { kind: 'host' },
+          subject: INSTALL_ID,
+          outcome: 'succeeded',
+          detail: { action: 'catalog-remove', scope, name: 'pdf-tools', status: 200 },
+        },
+      ]);
+    });
+  }
+
+  it('should say WHY a refusal was one, because a changed publisher and an edited file mean different things', async () => {
+    // Arrange
+    const { journal, routes } = decorated({
+      'POST /v1/catalog-installs/project': async () => {
+        throw new ApiError(409, 'a different machine', 'catalog_publisher_changed');
+      },
+    });
+    const api = await dispatcher(routes);
+
+    // Act
+    const answer = await send(api, 'POST', '/v1/catalog-installs/project');
+
+    // Assert
+    should(answer.status).equal(409);
+    should(records(journal).map(record => [record.outcome, record.detail])).deepEqual([
+      ['refused', { action: 'catalog-install', scope: 'project', code: 'catalog_publisher_changed', status: 409 }],
+    ]);
+  });
+
+  it('should carry the code of a refused removal too, and no name for it', async () => {
+    // Arrange
+    const { journal, routes } = decorated({
+      'DELETE /v1/catalog-installs/runtime/:installId': async () => {
+        throw new ApiError(404, 'no such install', 'catalog_install_unknown');
+      },
+    });
+    const api = await dispatcher(routes);
+
+    // Act
+    await send(api, 'DELETE', `/v1/catalog-installs/runtime/${INSTALL_ID}`);
+
+    // Assert
+    should(records(journal).map(record => record.detail)).deepEqual([
+      { action: 'catalog-remove', scope: 'runtime', code: 'catalog_install_unknown', status: 404 },
+    ]);
+  });
+
+  it('should leave the code out when the failure was not an ApiError, or an ApiError that had none', async () => {
+    // Arrange
+    const { journal, routes } = decorated({
+      'POST /v1/catalog-installs/project': async () => {
+        throw new Error('disk on fire');
+      },
+      'POST /v1/catalog-installs/runtime': async () => {
+        throw new ApiError(409, 'no code');
+      },
+    });
+    const api = await dispatcher(routes);
+
+    // Act
+    await send(api, 'POST', '/v1/catalog-installs/project');
+    await send(api, 'POST', '/v1/catalog-installs/runtime');
+
+    // Assert
+    should(records(journal).map(record => [record.outcome, record.detail])).deepEqual([
+      ['failed', { action: 'catalog-install', scope: 'project' }],
+      ['refused', { action: 'catalog-install', scope: 'runtime', status: 409 }],
+    ]);
+  });
+
+  it('should not copy a code onto a rule that did not ask for it', async () => {
+    // Arrange
+    const { journal, routes } = decorated({
+      'PATCH /v1/grants': async () => {
+        throw new ApiError(403, 'no', 'grant_forbidden');
+      },
+    });
+    const api = await dispatcher(routes);
+
+    // Act
+    await api.dispatch(request({ method: 'PATCH', path: '/v1/grants', headers: ADMIN, loopback: true, body: '{}' }));
+
+    // Assert
+    should(records(journal).map(record => record.detail)).deepEqual([{ status: 403 }]);
+  });
+
+  for (const [label, answer] of [
+    ['a null link on the way', { install: null }],
+    ['a name that is not text', { install: { provenance: { name: 7 } } }],
+    ['a body that is not an object', 'just text'],
+  ] as const) {
+    it(`should name nothing when the answer is not shaped as the dotted path says: ${label}`, async () => {
+      // Arrange
+      const { journal, routes } = decorated({
+        'POST /v1/catalog-installs/project': async () => jsonResponse(answer),
+      });
+      const api = await dispatcher(routes);
+
+      // Act
+      await send(api, 'POST', '/v1/catalog-installs/project');
+
+      // Assert
+      should(records(journal).map(record => record.detail)).deepEqual([
+        { action: 'catalog-install', scope: 'project', status: 200 },
+      ]);
+    });
+  }
+});
