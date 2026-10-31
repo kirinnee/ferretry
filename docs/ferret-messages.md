@@ -181,7 +181,8 @@ The Warden reads the board (`board-design.md` §3.4). Its orphaned-card message 
 - **The card a resumed ferret carries on.** When the Warden starts an auto ferret again — an auto-revive,
   or a verdict's resume or restart — and the ferret has a focus card, its turn names the card: id, title,
   lane, the ask and every clarification verbatim, its links and its last five history lines
-  (`packages/daemon/src/lib/warden/focus-card.ts`). A ferret with no card gets the turn it got before.
+  (`packages/daemon/src/lib/warden/focus-card.ts`). A ferret with no card gets the turn it got before. The closing line
+  tells a lead to move the card as it works; a sub-ferret, who may not, is told its card moves itself.
   An interactive ferret never gets a card typed into its terminal.
 
 Declared gaps:

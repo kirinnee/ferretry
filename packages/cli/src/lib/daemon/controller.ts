@@ -1,4 +1,10 @@
-import type { DaemonServiceFacts, HealthView, LivenessView, TunnelStatusView } from '@ferretry/protocol';
+import type {
+  DaemonServiceFacts,
+  HealthView,
+  LivenessView,
+  LoopbackFirewallState,
+  TunnelStatusView,
+} from '@ferretry/protocol';
 import { type IProgress, NO_PROGRESS, withStep } from '../progress/index.ts';
 import { passMidTurn } from '../update/mid-turn.ts';
 import { type DaemonUpdateStatus, renderUpdateStatus } from '../update/status.ts';
@@ -195,6 +201,11 @@ export interface DaemonControllerDeps {
    * has no `/v1/tunnel` yet, and the line is then left out. Optional for the reason `updateStatus` is.
    */
   readonly tunnel?: { read(): Promise<TunnelStatusView | undefined> };
+  /**
+   * The `Loopback firewall:` line `status` adds, read only while the daemon serves; `undefined` while the browser
+   * ports are random, from an older daemon, or when the owner's token is not there yet. A warning, never a failure.
+   */
+  readonly firewall?: { read(): Promise<LoopbackFirewallState | undefined> };
   /** Offers a nix profile install when `install` finds a daemon running from a `nix shell`. */
   readonly nixShellOffer?: INixShellOffer;
   /**
@@ -656,19 +667,24 @@ export class DaemonController {
     const supervisor = view.supervisor;
     const code = statusExitCode(view);
     const tunnel = health === undefined ? undefined : await this.deps.tunnel?.read();
+    const firewall = health === undefined ? undefined : await this.deps.firewall?.read();
+    const unprotected = firewall !== undefined && firewall.state !== 'applied';
     const human = [
       renderDaemonStatus(view, this.deps.clientName),
       ...(tunnel === undefined ? [] : [tunnel.sentence]),
+      ...(firewall === undefined ? [] : [`  Loopback firewall: ${firewall.detail}`]),
       ...(update === undefined ? [] : renderUpdateStatus(update, this.deps.clientName)),
     ];
     if (options.json === true) {
       this.deps.out.success(
         renderDaemonStatusJson(view, {
           ...(tunnel === undefined ? {} : { tunnel }),
+          ...(firewall === undefined ? {} : { firewall }),
           ...(update === undefined ? {} : { install: update.install ?? null, update: update.update ?? null }),
         }),
       );
-    } else if (code === 0 && !view.orphan && !launchdThrottled(supervisor)) this.deps.out.success(human.join('\n'));
+    } else if (code === 0 && !view.orphan && !launchdThrottled(supervisor) && !unprotected)
+      this.deps.out.success(human.join('\n'));
     else this.deps.out.warn(human.join('\n'));
     // Still exit 0: an orphan serves, which is the question a script asks. The remedy is said instead.
     if (options.json !== true && view.orphan && health !== undefined) {

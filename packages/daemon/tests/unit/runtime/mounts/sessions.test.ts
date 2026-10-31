@@ -1,7 +1,10 @@
 import { describe, it } from 'bun:test';
 import { SessionListSchema, type SessionView, SessionViewSchema } from '@ferretry/protocol';
 import should from 'should';
+import { gunzipSync } from 'node:zlib';
+import { NodeGzip } from '../../../../src/adapters/api/node-gzip.ts';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
+import type { ResponseCompressor } from '../../../../src/lib/api/compression.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { type SessionDirectorySubsystem, sessionRoutes } from '../../../../src/lib/runtime/mounts/sessions.ts';
@@ -158,6 +161,48 @@ describe('the session read mount', () => {
     should(again.headers.get('etag')).equal(etag);
     // Still live state: a 304 confirms the bytes, it never licenses a cache to answer for them.
     should(again.headers.get('cache-control')).match(/no-store/u);
+  });
+
+  it('should answer two reads of an unchanged fleet with the same tag, and the second with a 304 that compresses nothing', async () => {
+    // The tag is a digest of the served body and nothing in a list read is volatile, so an unchanged fleet
+    // is a 304 over ANY encoding. Two separately built, equal fleets stand in for two reads of one.
+    // Arrange
+    const fleet = () =>
+      Array.from({ length: 60 }, (_, index) => sessionView(`s${index}`, { name: `Session ${index}` }));
+    const compressed: string[] = [];
+    const real = new NodeGzip();
+    const compressor: ResponseCompressor = {
+      gzip: async text => {
+        compressed.push(text);
+        return await real.gzip(text);
+      },
+    };
+    const mount = (views: readonly SessionView[]) =>
+      new ApiDispatcher(
+        new ApiRouter(sessionRoutes(sessionDirectory(views))),
+        CREDENTIALS,
+        NO_GOVERNED_ROUTES_GUARD,
+        undefined,
+        undefined,
+        undefined,
+        compressor,
+      );
+    const gzip = { ...human, 'accept-encoding': 'gzip' };
+
+    // Act
+    const first = await mount(fleet()).dispatch(request({ path: '/v1/sessions', headers: gzip }));
+    const etag = first.headers.get('etag') ?? '';
+    const second = await mount(fleet()).dispatch(
+      request({ path: '/v1/sessions', headers: { ...gzip, 'if-none-match': etag } }),
+    );
+
+    // Assert
+    should(first.status).equal(200);
+    should(Buffer.from(gunzipSync(first.gzip ?? new Uint8Array())).toString('utf8')).equal(first.body);
+    should(second.status).equal(304);
+    should(second.gzip).be.undefined();
+    should(second.headers.get('etag')).equal(etag);
+    should(compressed).have.length(1);
   });
 
   it('should answer in full when the tag the client holds is not the current one', async () => {

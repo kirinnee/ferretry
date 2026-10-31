@@ -217,7 +217,7 @@ describe('observing a terminal an input request aims at', () => {
 
     for (const w of [missing, noTmux, dead, badProof, noTty, noCursor, noPs, noForeground, noCapture])
       should(await target(w).observe('s1', dev)).deepEqual(gone);
-    should(await target(world()).observe('s1', { kind: 'browser', key: 'app', selector: '#pw' })).deepEqual({
+    should(await target(world()).observe('s1', { kind: 'browser', key: 'app' })).deepEqual({
       ok: false,
       reason: 'unsupported',
     });
@@ -355,9 +355,7 @@ describe('typing into a terminal an input request aims at', () => {
     const expected = await observed(w);
     const browserFacts = { ...expected, kind: 'browser' } as unknown as InputTargetFacts;
 
-    should(await target(w).type('s1', { kind: 'browser', key: 'a', selector: '#x' }, SECRET, true, expected)).equal(
-      'target_gone',
-    );
+    should(await target(w).type('s1', { kind: 'browser', key: 'a' }, SECRET, true, expected)).equal('target_gone');
     should(await target(w).type('s1', dev, SECRET, true, browserFacts)).equal('target_gone');
   });
 

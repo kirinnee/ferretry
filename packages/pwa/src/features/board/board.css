@@ -511,6 +511,15 @@
   -webkit-line-clamp: 2;
   line-clamp: 2;
 }
+/* The summary: one muted line under the title, cut with an ellipsis; the whole line is the card's tooltip. */
+.fy-board-card__summary {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /* ONE line of whole items. The row wraps and is one line tall, so an item that does not fit falls to a second
    line and is clipped away entire; the items are in priority order, so what is dropped is always the last. */
 .fy-board-card__meta {

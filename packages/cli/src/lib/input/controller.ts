@@ -9,7 +9,13 @@ import {
 } from '@ferretry/protocol';
 import { parseAgendaReference } from '../agenda/reference.ts';
 import type { InputPorts } from './ports.ts';
-import { describeInputReason, inputTargetReference, renderInputFacts, renderInputList } from './render.ts';
+import {
+  describeInputReason,
+  inputTargetReference,
+  renderInputFacts,
+  renderInputList,
+  showUntrusted,
+} from './render.ts';
 
 /** Options every input command accepts. */
 export interface InputCommandOptions {
@@ -133,6 +139,28 @@ export class InputController {
     } else if (named !== undefined) {
       this.ports.out.diagnostic(`using the saved login ${named}`);
       body = { ...base, entry: named };
+    } else if (request.fields.length > 1) {
+      const fields: { field: string; padded: string }[] = [];
+      for (const field of request.fields) {
+        const flag = field.sensitivity === 'plain' ? ', not secret: the ferret can see it' : '';
+        const value = await this.ports.prompt.askHidden(
+          `${showUntrusted(field.label)} for !${request.agendaItemId} (hidden${flag}): `,
+        );
+        const problem = inputValueProblem(value, field.sensitivity);
+        if (problem !== undefined) throw new Error(`${field.id}: ${problem}`);
+        if (saveAs !== undefined && field.sensitivity === 'secret' && value.length < LOGIN_PASSWORD_MIN_LENGTH) {
+          throw new Error(
+            `${field.id} is shorter than the ${LOGIN_PASSWORD_MIN_LENGTH} characters a saved password needs, so the card cannot be saved: nothing was sent, run this again without --save-as to send it unsaved`,
+          );
+        }
+        fields.push({ field: field.id, padded: padInputValue(value) });
+      }
+      // Save as keeps the card's username and password together, as one saved login.
+      body = {
+        ...base,
+        fields,
+        ...(saveAs === undefined ? {} : { save: { entry: saveAs, label: saveLabel(request, saveAs, options.label) } }),
+      };
     } else {
       const value = await this.ports.prompt.askHidden(`value for !${request.agendaItemId} (hidden): `);
       const problem = inputValueProblem(value, request.sensitivity);

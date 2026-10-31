@@ -77,7 +77,7 @@ const ASK_KINDS = `--kind says what the human DOES, and the answers the card swi
   permission   approve or reject: ← Deny · → Allow          (--up "Always allow" adds ↑, which approves)
   choice       pick one of 2 or 3 --option labels; the --recommend option (else the first) is →
   review       say the answer is good, or ask for a clarification: ← Needs changes · → Looks good
-  info         nothing to decide, only to read: → Got it
+  info         nothing to decide, only to read: → Got it  (also where the answer to the owner's question goes)
   reply        write a full answer (the default); no swipes
 (task, open, multiple-choice and answer-review are still accepted as older names.) More than 3 options is
 refused: split the item, or use --kind reply. --up-why "<line>" describes the --up answer.

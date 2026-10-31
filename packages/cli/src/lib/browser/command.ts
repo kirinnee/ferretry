@@ -1,5 +1,6 @@
 import type { Command } from 'commander';
 import type { IBrowserRunner } from './controller.ts';
+import { firewallGroup } from './firewall.ts';
 import { optionalText, parseLoginMinutes, parseProxyTestFlags, parseViewport, requireText } from './parse.ts';
 import type { BrowserCommand } from './types.ts';
 
@@ -120,6 +121,7 @@ export function registerBrowserCommands(program: Command, controller: IBrowserRu
 
   registerLoginCommands(browser, controller);
   registerProxyCommands(browser, controller);
+  registerFirewallCommands(browser, controller);
 }
 
 /**
@@ -183,5 +185,18 @@ function registerProxyCommands(browser: Command, controller: IBrowserRunner): vo
     .action(async (options: { url?: string; bypass?: string; usernameSecret?: string; passwordSecret?: string }) => {
       const setting = parseProxyTestFlags(options);
       await controller.run({ command: 'proxy', action: 'test', ...(setting === undefined ? {} : { proxy: setting }) });
+    });
+}
+
+/**
+ * Owner-only and machine-wide, like `proxy`, so this verb takes no `--session`. Prints the one line this user gives
+ * the host admin for `/etc/ferretry/loopback-firewall.conf`.
+ */
+function registerFirewallCommands(browser: Command, controller: IBrowserRunner): void {
+  firewallGroup(browser)
+    .command('entry')
+    .description('print the line to add to /etc/ferretry/loopback-firewall.conf for this user, from browserPorts')
+    .action(async () => {
+      await controller.run({ command: 'firewall', action: 'entry' });
     });
 }

@@ -5,7 +5,18 @@ import { InputCard } from '../../../src/features/input-request/input-card.tsx';
 import { fieldsOf, REOBSERVING, SAVE_TOO_SHORT } from '../../../src/lib/input-card.ts';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import { byText, click, settle, typeInto } from '../../support/dom-form.ts';
-import { type Call, fakeClient, NOW, offer, request, saved, withSaved } from '../../support/input-fixtures.ts';
+import {
+  browserField,
+  type Call,
+  fakeClient,
+  field,
+  NOW,
+  offer,
+  request,
+  requestOf,
+  saved,
+  withSaved,
+} from '../../support/input-fixtures.ts';
 
 const SECRET = 'correct-horse-battery';
 const mounted: Mounted[] = [];
@@ -72,7 +83,7 @@ describe('the card', () => {
   });
 
   it('asks a one-time code for the code keyboard and offers no Save', async () => {
-    const { q } = await show(request({ sensitivity: 'private', saved: saved({ saves: undefined }) }));
+    const { q } = await show(requestOf('private', { saved: saved({ saves: undefined }) }));
     const field = must(q<HTMLInputElement>('[data-input-value]'), 'the field');
 
     expect(field.getAttribute('autocomplete')).toBe('one-time-code');
@@ -81,7 +92,7 @@ describe('the card', () => {
   });
 
   it('says a plain answer is not secret', async () => {
-    const { q } = await show(request({ sensitivity: 'plain' }));
+    const { q } = await show(requestOf('plain'));
 
     expect(must(q<HTMLInputElement>('[data-input-value]'), 'the field').type).toBe('text');
     expect(q('[data-input-plain]')?.textContent).toBe('Not secret: the ferret can see this value.');
@@ -498,5 +509,406 @@ describe('the action row and the embedded card', () => {
     mounted.push(view);
     const row = must(view.container.querySelector('[data-input-actions]'), 'the action row');
     expect([...row.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Cancel request']);
+  });
+});
+
+const email = field('plain', { id: 'email', label: 'Email' });
+const password = field('secret', { id: 'password', label: 'Password' });
+const googleLogin = (overrides: Partial<InputRequest> = {}): InputRequest =>
+  request({
+    target: { kind: 'browser', key: 'app' },
+    prompt: 'Sign in to Google',
+    sensitivity: 'secret',
+    fields: [email, password],
+    submit: 'offer-owner',
+    risk: email.risk,
+    observed: {
+      kind: 'browser',
+      pageId: 'page-1',
+      origin: 'https://accounts.google.com',
+      secure: true,
+      navigationId: 'nav-1',
+      fields: [
+        browserField('email', { field: { tag: 'input', type: 'email' } }),
+        browserField('password', { backendNodeId: 8, field: { tag: 'input', type: 'password' } }),
+      ],
+    },
+    ...overrides,
+  });
+
+describe('a card of several fields', () => {
+  const inside = (view: Awaited<ReturnType<typeof show>>, key: string) =>
+    view.q<HTMLInputElement>(`[data-input-field="${key}"] [data-input-value]`);
+  const typeBoth = async (view: Awaited<ReturnType<typeof show>>) => {
+    await typeInto(inside(view, 'email'), 'kirin@example.test');
+    await typeInto(inside(view, 'password'), SECRET);
+  };
+
+  it('draws one masked field per value, each with the attributes its sensitivity gets', async () => {
+    const view = await show(googleLogin());
+
+    expect(must(inside(view, 'email'), 'the email field').type).toBe('text');
+    expect(must(inside(view, 'email'), 'the email field').getAttribute('autocomplete')).toBe('off');
+    expect(must(inside(view, 'password'), 'the password field').type).toBe('password');
+    expect(must(inside(view, 'password'), 'the password field').getAttribute('autocomplete')).toBe('current-password');
+    expect(view.q('[data-input-title]')?.textContent).toBe('!A7 · Hadi needs a login');
+    expect(view.q('[data-input-save]')).toBeNull();
+  });
+
+  it('puts a red "not secret" flag beside every plain field and none beside a secret one', async () => {
+    const second = field('plain', { id: 'recovery', label: 'Recovery email' });
+    const view = await show(googleLogin({ fields: [email, password, second] }));
+
+    const flags = [...view.view.container.querySelectorAll('[data-input-plain]')];
+    expect(flags).toHaveLength(2);
+    expect(flags.map(flag => flag.closest('[data-input-field]')?.getAttribute('data-input-field'))).toEqual([
+      'email',
+      'recovery',
+    ]);
+    expect(flags.every(flag => flag.textContent === 'Not secret: the ferret can see this value.')).toBe(true);
+    expect(flags.every(flag => flag.className.includes('text-err'))).toBe(true);
+    expect(view.q('[data-input-field="password"] [data-input-plain]')).toBeNull();
+  });
+
+  it("uses the daemon's sentence for a plain field's flag when it gave one", async () => {
+    const worded = field('plain', {
+      id: 'email',
+      label: 'Email',
+      risk: { level: 'red', reason: 'Anyone can read it.' },
+    });
+    const view = await show(googleLogin({ fields: [worded, password] }));
+
+    expect(view.q('[data-input-plain]')?.textContent).toBe('Anyone can read it.');
+  });
+
+  it("shows a secret field's own risk line only when it differs from the header's", async () => {
+    const plain = await show(googleLogin());
+    expect(plain.q('[data-input-field-risk]')).not.toBeNull();
+
+    const amber = { level: 'amber', reason: 'This field may show what is typed.' } as const;
+    const differs = await show(googleLogin({ fields: [email, field('secret', { id: 'password', risk: amber })] }));
+    expect(differs.q('[data-input-field="password"] [data-input-field-risk]')?.textContent).toBe(amber.reason);
+
+    const same = await show(request());
+    expect(same.q('[data-input-field-risk]')).toBeNull();
+  });
+
+  it('keeps Send off until every field is typed', async () => {
+    const view = await show(googleLogin());
+    const send = () => must(view.q<HTMLButtonElement>('[data-input-send]'), 'Send');
+    expect(send().disabled).toBe(true);
+
+    await typeInto(inside(view, 'email'), 'kirin@example.test');
+    expect(send().disabled).toBe(true);
+
+    await typeInto(inside(view, 'password'), SECRET);
+    expect(send().disabled).toBe(false);
+
+    await typeInto(inside(view, 'email'), '');
+    expect(send().disabled).toBe(true);
+  });
+
+  it('sends a padded value for every field, named by its field, and no single value or save', async () => {
+    const view = await show(googleLogin());
+    await typeBoth(view);
+
+    await click(view.q('[data-input-send]'));
+    await settle();
+
+    const body = deliver(view.calls).body as {
+      padded?: string;
+      save?: unknown;
+      entry?: string;
+      fields: { field: string; padded: string }[];
+    };
+    expect(body.padded).toBeUndefined();
+    expect(body.save).toBeUndefined();
+    expect(body.entry).toBeUndefined();
+    expect(body.fields.map(typed => [typed.field, unpadInputValue(typed.padded)])).toEqual([
+      ['email', 'kirin@example.test'],
+      ['password', SECRET],
+    ]);
+    expect(view.q('[data-input-settled]')?.textContent).toContain('Sent to %browser:app');
+    expect(view.view.container.textContent).not.toContain(SECRET);
+  });
+
+  it('sends on Enter only when every field is typed', async () => {
+    const view = await show(googleLogin());
+    const enter = () =>
+      interact(() =>
+        must(inside(view, 'password'), 'the password field').dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+        ),
+      );
+    await typeInto(inside(view, 'password'), SECRET);
+    await enter();
+    await settle();
+    expect(view.calls).toEqual([]);
+
+    await typeInto(inside(view, 'email'), 'kirin@example.test');
+    await enter();
+    await settle();
+    expect(deliver(view.calls)).toBeDefined();
+  });
+
+  it('says what is wrong with a value under its own field, and keeps Send off', async () => {
+    const view = await show(googleLogin());
+    await typeInto(inside(view, 'email'), 'kirin@example.test');
+    await typeInto(inside(view, 'password'), 'pass\tword');
+
+    expect(view.q('[data-input-field="password"] [data-input-field-problem]')?.textContent).toContain(
+      'would press keys',
+    );
+    expect(view.q('[data-input-field="email"] [data-input-field-problem]')).toBeNull();
+    expect(must(view.q<HTMLButtonElement>('[data-input-send]'), 'Send').disabled).toBe(true);
+  });
+
+  it('is one tap for a saved login, which sends the handle and fills every field', async () => {
+    const view = await show(
+      googleLogin({ saved: saved({ offers: [offer({ id: 'GOOGLE_KIRIN', label: 'Google' })] }) }),
+    );
+
+    expect(inside(view, 'email')).toBeNull();
+    await click(view.q('[data-input-offer-matched]'));
+    await settle();
+
+    const body = deliver(view.calls).body as Record<string, unknown>;
+    expect(body.entry).toBe('GOOGLE_KIRIN');
+    expect(body.fields).toBeUndefined();
+    expect(body.padded).toBeUndefined();
+  });
+
+  it('draws Cancel request and one Send in a single row', async () => {
+    const view = await show(googleLogin());
+    const row = must(view.q('[data-input-actions]'), 'the action row');
+
+    expect([...row.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Cancel request', 'Send']);
+    expect(view.view.container.querySelectorAll('[data-input-actions]')).toHaveLength(1);
+  });
+});
+
+describe('a chained card', () => {
+  it('says which step it is and which card it follows', async () => {
+    const { q } = await show(requestOf('private', { chain: 'A7', step: 2 }));
+
+    expect(q('[data-input-chain]')?.textContent).toBe('Step 2 · after !A7');
+  });
+
+  it('counts step two when the daemon did not, and draws no line on a lone card', async () => {
+    expect((await show(requestOf('private', { chain: 'A9' }))).q('[data-input-chain]')?.textContent).toBe(
+      'Step 2 · after !A9',
+    );
+    expect((await show(request())).q('[data-input-chain]')).toBeNull();
+  });
+
+  it('draws the line inside an agenda item too', async () => {
+    const value = requestOf('private', { chain: 'A7', step: 3 });
+    const view = await mount(
+      <InputCard
+        client={fakeClient(answerDelivered).client}
+        embedded
+        fields={fieldsOf(value)}
+        now={NOW}
+        onDone={() => undefined}
+        request={value}
+      />,
+    );
+    mounted.push(view);
+
+    expect(view.container.querySelector('[data-input-chain]')?.textContent).toBe('Step 3 · after !A7');
+  });
+});
+
+describe('what the daemon saw in a browser, drawn', () => {
+  const seen = (view: Awaited<ReturnType<typeof show>>) =>
+    [...view.view.container.querySelectorAll('[data-input-seen-field]')].map(node => node.textContent);
+
+  it('names the host and https, and each field by its label and kind', async () => {
+    const view = await show(googleLogin());
+
+    expect(view.q('[data-input-program]')?.textContent).toBe('accounts.google.com');
+    expect(view.q('[data-input-echo]')?.textContent).toContain('https');
+    expect(seen(view)).toEqual(['Email · email field', 'Password · password field']);
+    expect(view.q('[data-input-challenge]')).toBeNull();
+  });
+
+  it('says an http page is not secure', async () => {
+    const view = await show(
+      googleLogin({
+        observed: {
+          kind: 'browser',
+          pageId: 'page-1',
+          origin: 'http://intranet.example.test',
+          secure: false,
+          navigationId: 'nav-1',
+          fields: [browserField('email', { frameOrigin: 'http://intranet.example.test' })],
+        },
+      }),
+    );
+
+    expect(view.q('[data-input-program]')?.textContent).toBe('intranet.example.test');
+    expect(view.q('[data-input-echo]')?.textContent).toContain('not secure (http)');
+  });
+
+  it('flags a field in a frame from another origin', async () => {
+    const view = await show(
+      googleLogin({
+        observed: {
+          kind: 'browser',
+          pageId: 'page-1',
+          origin: 'https://accounts.google.com',
+          secure: true,
+          navigationId: 'nav-1',
+          fields: [
+            browserField('email', { field: { tag: 'input', type: 'email' } }),
+            browserField('password', {
+              frameOrigin: 'https://ads.example.test',
+              field: { tag: 'input', type: 'password' },
+            }),
+          ],
+        },
+      }),
+    );
+
+    expect(seen(view)).toEqual(['Email · email field', 'Password · password field in a frame from ads.example.test']);
+  });
+
+  it('draws an amber captcha line that tells the owner to take over, and no button for it', async () => {
+    const base = googleLogin();
+    const facts = base.observed;
+    if (facts?.kind !== 'browser') throw new Error('a browser request');
+    const view = await show({ ...base, observed: { ...facts, challenge: { provider: 'recaptcha' } } });
+    const line = must(view.q('[data-input-challenge]'), 'the captcha line');
+
+    expect(line.textContent).toBe(
+      'This page is showing a captcha. Take over the browser and complete it yourself; Ferretry never solves one.',
+    );
+    expect(line.className).toContain('text-warn');
+    expect(line.querySelector('button')).toBeNull();
+  });
+});
+
+describe('where the values of several fields may live', () => {
+  const setVisibility = (state: 'hidden' | 'visible') => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
+  };
+  afterEach(() => {
+    Reflect.deleteProperty(document, 'visibilityState');
+  });
+
+  const typed = async () => {
+    const view = await show(googleLogin());
+    const fields = ['email', 'password'].map(key =>
+      must(view.q<HTMLInputElement>(`[data-input-field="${key}"] [data-input-value]`), `the ${key} field`),
+    );
+    await typeInto(fields[0] ?? null, 'kirin@example.test');
+    await typeInto(fields[1] ?? null, SECRET);
+    expect(fields.map(each => each.value)).toEqual(['kirin@example.test', SECRET]);
+    return { view, fields };
+  };
+
+  it('clears EVERY field when the page goes to the background', async () => {
+    const { view } = await typed();
+
+    setVisibility('hidden');
+    await interact(() => document.dispatchEvent(new Event('visibilitychange')));
+
+    const now = [...view.view.container.querySelectorAll<HTMLInputElement>('[data-input-value]')];
+    expect(now.map(each => each.value)).toEqual(['', '']);
+    expect(must(view.q<HTMLButtonElement>('[data-input-send]'), 'Send').disabled).toBe(true);
+  });
+
+  it('clears EVERY field when the card unmounts', async () => {
+    const { view, fields } = await typed();
+
+    await view.view.unmount();
+    mounted.splice(mounted.indexOf(view.view), 1);
+
+    expect(fields.map(each => each.value)).toEqual(['', '']);
+  });
+
+  it('empties every field the moment it sends, even when the machine never answers', async () => {
+    const view = await show(googleLogin(), () => {
+      throw new TypeError('network down');
+    });
+    await typeInto(view.q('[data-input-field="email"] [data-input-value]'), 'kirin@example.test');
+    await typeInto(view.q('[data-input-field="password"] [data-input-value]'), SECRET);
+
+    await click(view.q('[data-input-send]'));
+    await settle();
+
+    const now = [...view.view.container.querySelectorAll<HTMLInputElement>('[data-input-value]')];
+    expect(now.map(each => each.value)).toEqual(['', '']);
+    expect(view.q('[data-input-failure]')?.textContent).toContain('will not type twice');
+  });
+});
+
+describe('the card, review regressions', () => {
+  it('shows every field and its flag above a matched saved login, before anything can be sent', async () => {
+    const amber = {
+      level: 'amber',
+      reason: 'This is not a password field, so the value will show on the page.',
+    } as const;
+    const card = withSaved(saved({ offers: [offer({ username: 'kirin' })] }), {
+      target: { kind: 'browser', key: 'app' },
+      sensitivity: 'secret',
+      fields: [
+        field('plain', { id: 'email', label: 'Email' }),
+        field('secret', { id: 'password', label: 'Password', risk: amber }),
+      ],
+      risk: { level: 'red', reason: 'Not secret: the ferret can see this value.' },
+    });
+    const view = await show(card);
+
+    const summary = must(view.q('[data-input-field-summary]'), 'the field summary');
+    const use = must(view.q('[data-input-offer]'), 'the saved-login button');
+    expect(view.q('[data-input-value]')).toBeNull();
+    expect(summary.querySelector('[data-input-summary-field="email"] [data-input-plain]')?.textContent).toBe(
+      'Not secret: the ferret can see this value.',
+    );
+    expect(
+      summary.querySelector('[data-input-summary-field="password"] [data-input-field-risk="amber"]')?.textContent,
+    ).toBe(amber.reason);
+    // The flags come first in the card, then the button that would send without typing.
+    expect(summary.compareDocumentPosition(use) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+describe('the card, Save as on a login card', () => {
+  const loginCard = (overrides: Partial<InputRequest> = {}) =>
+    withSaved(saved({ match: 'accounts.google.com', suggest: { id: 'GOOGLE_COM', label: 'Google' } }), {
+      target: { kind: 'browser', key: 'app' },
+      sensitivity: 'secret',
+      fields: [field('plain', { id: 'email', label: 'Email' }), field('secret', { id: 'password', label: 'Password' })],
+      ...overrides,
+    });
+
+  it('keeps the username and the password together, sent once with the card', async () => {
+    const view = await show(loginCard());
+    await typeInto(view.q('[data-input-field="email"] [data-input-value]'), 'kirin@example.test');
+    await typeInto(view.q('[data-input-field="password"] [data-input-value]'), SECRET);
+
+    await click(view.q('[data-input-save-tick]'));
+    await click(view.q('[data-input-send]'));
+    await settle();
+
+    const body = deliver(view.calls).body as { save?: unknown; fields: { field: string; padded: string }[] };
+    expect(body.save).toEqual({ entry: 'GOOGLE_COM', label: 'Google' });
+    expect(body.fields.map(typed => [typed.field, unpadInputValue(typed.padded)])).toEqual([
+      ['email', 'kirin@example.test'],
+      ['password', SECRET],
+    ]);
+  });
+
+  it('can send a short password but not save it, and offers no Save on a card the daemon cannot keep', async () => {
+    const view = await show(loginCard());
+    await typeInto(view.q('[data-input-field="email"] [data-input-value]'), 'kirin@example.test');
+    await typeInto(view.q('[data-input-field="password"] [data-input-value]'), 'abc');
+
+    expect(must(view.q<HTMLInputElement>('[data-input-save-tick]'), 'the tick').disabled).toBe(true);
+    expect(view.q('[data-input-save-reason]')?.textContent).toBe(SAVE_TOO_SHORT);
+
+    const unsaved = await show(loginCard({ saved: saved({ saves: undefined, suggest: undefined }) }));
+    expect(unsaved.q('[data-input-save]')).toBeNull();
   });
 });

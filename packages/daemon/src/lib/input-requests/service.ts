@@ -12,6 +12,7 @@ import {
   INPUT_PROMPT_MAX_LENGTH,
   INPUT_QUARANTINE_EVENT_TYPES,
   INPUT_QUARANTINE_SECONDS,
+  INPUT_SINGLE_FIELD_ID,
   type InputActor,
   type InputAgentView,
   type InputAuditDetail,
@@ -19,21 +20,28 @@ import {
   type InputDeliverBody,
   type InputDeliverResult,
   type InputEvent,
+  type InputFieldRaise,
   type InputQuarantine,
   type InputQuarantineEvent,
   type InputRaise,
   type InputReason,
   type InputRequest,
+  type InputRequestField,
   type InputRisk,
+  type InputSensitivity,
   type InputTarget,
   type InputTargetFacts,
+  inputRaiseFields,
   inputValueProblem,
   LOGIN_PASSWORD_MIN_LENGTH,
   LOGIN_USERNAME_MAX_LENGTH,
   type LoginEntryId,
+  savedRolesOf,
+  strongestSensitivity,
   unpadInputValue,
+  worstRisk,
 } from '@ferretry/protocol';
-import { LoginEntryError } from '../secrets/logins.ts';
+import { LoginEntryError, type LoginFieldValues } from '../secrets/logins.ts';
 import { digestFacts } from './digest.ts';
 import type { EphemeralValues } from './ephemeral-values.ts';
 import { InputRequestError } from './errors.ts';
@@ -43,18 +51,20 @@ import type {
   InputAudit,
   InputCaller,
   InputClock,
+  InputFieldValue,
   InputIds,
   InputJournal,
   InputLoginPort,
   InputPasteRules,
   InputSealedPort,
   InputSessionDirectory,
+  InputTargetField,
   InputTargetPort,
   InputTimers,
   TypeResult,
 } from './ports.ts';
 import type { QuarantineHold, QuarantineRegistry } from './quarantine.ts';
-import { savedFieldFor, savedFor, targetMatchKey } from './saved-logins.ts';
+import { savedForFields, targetMatchKey } from './saved-logins.ts';
 import { SessionLock } from './session-lock.ts';
 
 /**
@@ -100,6 +110,15 @@ const QUARANTINE_MS = INPUT_QUARANTINE_SECONDS * 1000;
 const FINAL = new Set<InputRequest['state']>(['delivered', 'refused', 'expired', 'cancelled']);
 
 const TITLES = { secret: 'Needs a secret', private: 'Needs a code', plain: 'Needs an answer' } as const;
+const LOGIN_TITLE = 'Needs a login';
+/** What a field is called on the card when the agent gave it no label. */
+const FIELD_LABELS: Readonly<Record<InputSensitivity, string>> = {
+  secret: 'Password',
+  private: 'Code',
+  plain: 'Value',
+};
+/** The longest a chain is counted: a login is a few steps, not a loop. */
+const MAX_STEP = 16;
 
 interface Held {
   request: InputRequest;
@@ -153,14 +172,19 @@ export class InputRequestService {
 
   /** The agent raises. Nothing in `raise` was observed; everything in the answer and the card was. */
   async raise(sessionId: string, raise: InputRaise): Promise<InputAgentView> {
-    if (raise.target.kind !== 'terminal')
-      throw new InputRequestError('bad_request', 'only terminal inputs can be requested for now');
+    guardFields(raise.target, inputRaiseFields(raise));
+    if (raise.source !== undefined && inputRaiseFields(raise).length !== 1)
+      throw new InputRequestError('bad_request', 'a paste fills one field: raise it with one field');
     await this.sweep();
     return await this.lock.run(sessionId, async () => {
       if (raise.source === undefined) return await this.admit(sessionId, raise, raise.target);
       // A paste is always a secret, whatever the agent said: the value is one it must not see.
       const copy = this.describeCopy(sessionId, raise.source.name);
-      return await this.admit(sessionId, { ...raise, sensitivity: 'secret' }, raise.target, copy);
+      const secret: InputRaise =
+        raise.fields === undefined
+          ? { ...raise, sensitivity: 'secret' }
+          : { ...raise, fields: raise.fields.map(field => ({ ...field, sensitivity: 'secret' as const })) };
+      return await this.admit(sessionId, secret, raise.target, copy);
     });
   }
 
@@ -188,24 +212,28 @@ export class InputRequestService {
   ): Promise<InputAgentView> {
     const now = this.deps.clock.now();
     this.guardRate(sessionId, target, now);
-    const seen = await this.deps.target.observe(sessionId, target);
+    const raised = inputRaiseFields(raise);
+    const sensitivity = strongestSensitivity(raised);
+    const seen = await this.deps.target.observe(sessionId, target, raised.map(pointerOf));
     if (!seen.ok) {
       throw new InputRequestError(
         seen.reason === 'target_gone' ? 'not_found' : 'bad_request',
         seen.reason === 'target_gone'
-          ? `there is no terminal named ${target.key} in this session`
+          ? `there is no ${target.kind} named ${target.key} in this session, or a field you named is not on it`
           : 'that target cannot take an input request',
       );
     }
     const shown = await this.project(sessionId, seen.facts, [target.key, ...(seen.names ?? [])]);
     const expiresAt = instant(now + (raise.expiresInSeconds ?? INPUT_DEFAULT_EXPIRY_SECONDS) * 1000);
     const requestId = this.deps.ids.requestId();
+    const fields = withRisk(raised.map(cardField), seen.facts);
+    const step = raise.chain === undefined ? undefined : this.stepAfter(sessionId, raise.chain);
     const card = await this.deps.agenda.raise(sessionId, {
       requestId,
-      title: copy === undefined ? TITLES[raise.sensitivity] : PASTE_TITLE,
-      ask: copy === undefined ? askOf(shown, raise.sensitivity) : pasteAskOf(copy),
+      title: copy === undefined ? titleOf(fields) : PASTE_TITLE,
+      ask: copy === undefined ? askOf(shown, fields) : pasteAskOf(copy, shown),
       prompt: raise.prompt,
-      blocking: raise.blocking ?? raise.sensitivity === 'secret',
+      blocking: raise.blocking ?? sensitivity === 'secret',
       expiresAt,
       ...(raise.chain === undefined ? {} : { chain: raise.chain }),
     });
@@ -217,13 +245,15 @@ export class InputRequestService {
       ...(copy === undefined ? {} : { source: { kind: 'sealed' as const, name: copy.name, from: copy.from } }),
       target: raise.target,
       prompt: raise.prompt,
-      sensitivity: raise.sensitivity,
+      sensitivity,
+      fields,
       submit: raise.submit,
       raisedAt: instant(now),
       expiresAt,
       ...(raise.chain === undefined ? {} : { chain: raise.chain }),
+      ...(step === undefined ? {} : { step }),
       observed: shown,
-      risk: pasteRisk(riskOf(raise.sensitivity, seen.facts), copy),
+      risk: pasteRisk(worstRisk(fields.map(field => field.risk)), copy),
       observedDigest: digestFacts(seen.facts),
       state: 'pending',
     };
@@ -253,7 +283,8 @@ export class InputRequestService {
   /**
    * A paste the owner approved IN ADVANCE: delivered now, under the rule, still as one guarded write with the
    * card raised, audited and closed so it shows in the log. Runs inside the raise's turn of the session lock.
-   * A rule that cannot apply (the write is refused) gives its use back and leaves the card for the owner.
+   * Only a target that hides what is typed is pasted unasked. A use is given back only when NOTHING may have
+   * been typed; an uncertain write spends it.
    */
   private async underRule(
     held: Held,
@@ -261,7 +292,6 @@ export class InputRequestService {
     facts: InputTargetFacts,
     submit: InputRaise['submit'],
   ): Promise<void> {
-    // With nobody looking at the card, only a target that hides what is typed is pasted unasked.
     if (!hidesTyping(facts)) return;
     const ruleId = this.deps.rules?.reserve(held.request.sessionId, copy.from, facts);
     if (ruleId === undefined) return;
@@ -271,7 +301,6 @@ export class InputRequestService {
       sealed: true,
       submit: submit === 'owner-default',
     };
-    // A use is given back only when NOTHING may have been typed; an uncertain write spends it.
     let written = false;
     try {
       await this.attempt(held, body, { kind: 'rule', ruleId }, typed => {
@@ -282,6 +311,21 @@ export class InputRequestService {
       if (written) this.deps.rules?.spent(ruleId);
       else this.deps.rules?.release(ruleId);
     }
+  }
+
+  /**
+   * Which step of a login a chained card is: one more than the card it follows. The card it follows must be one
+   * of THIS session's input requests that this daemon holds: another session's card, an unknown one, or one from
+   * before a restart is refused, so a card never claims to continue a login it is not part of.
+   */
+  private stepAfter(sessionId: string, chain: AgendaId): number {
+    const before = this.byCard(sessionId, chain);
+    if (before === undefined)
+      throw new InputRequestError(
+        'bad_request',
+        `chain names ${chain}, which is not an input request of this session; raise this card without chain`,
+      );
+    return Math.min(MAX_STEP, (before.request.step ?? 1) + 1);
   }
 
   /** What the agent reads about its request: where it stands, never the value. Waits up to `waitMs` for a final state. */
@@ -319,8 +363,15 @@ export class InputRequestService {
     const { request } = held;
     const facts = request.observed;
     const prompt = (await this.deps.redact(request.prompt)).slice(0, INPUT_PROMPT_MAX_LENGTH);
+    // A label is the agent's words as much as the prompt is, and could carry a value just the same.
+    const fields = await Promise.all(
+      request.fields.map(async field => ({
+        ...field,
+        label: (await this.deps.redact(field.label)).slice(0, 60).trim() || FIELD_LABELS[field.sensitivity],
+      })),
+    );
     const saved = await this.savedView(held);
-    const withSaved = saved === undefined ? { ...request, prompt } : { ...request, prompt, saved };
+    const withSaved = saved === undefined ? { ...request, prompt, fields } : { ...request, prompt, fields, saved };
     if (facts === undefined) return withSaved;
     return { ...withSaved, observed: await this.project(request.sessionId, facts, held.names) };
   }
@@ -333,7 +384,7 @@ export class InputRequestService {
     const { logins } = this.deps;
     if (logins === undefined || held.request.state !== 'pending') return undefined;
     const entries = await logins.entries().catch(() => []);
-    return savedFor(held.request.sensitivity, held.matchKey, entries, held.hint);
+    return savedForFields(held.request.fields, held.matchKey, entries, held.hint);
   }
 
   /** The last word before a request leaves the service: a hold taken while it was being redacted still seals it. */
@@ -584,11 +635,10 @@ export class InputRequestService {
   private async revive(event: InputEvent, now: number): Promise<void> {
     if (event.type === INPUT_JOURNAL_EVENT_TYPES.delivering) return await this.interrupt(event);
     if (event.type !== INPUT_JOURNAL_EVENT_TYPES.requested || event.expiresAt === undefined) return;
-    if (Date.parse(event.expiresAt) <= now || event.target.kind !== 'terminal') return;
+    if (Date.parse(event.expiresAt) <= now) return;
     const prompt = await this.deps.agenda.promptOf(event.sessionId, event.agendaItemId);
     if (prompt === undefined || this.held.has(event.requestId)) return;
-    const target: InputTarget = { kind: 'terminal', key: event.target.key };
-    if (event.sealed !== undefined) return await this.copyForgotten(event, prompt, target);
+    const target: InputTarget = { kind: event.target.kind, key: event.target.key };
     const request: InputRequest = {
       id: event.requestId,
       sessionId: event.sessionId,
@@ -596,6 +646,7 @@ export class InputRequestService {
       target,
       prompt,
       sensitivity: event.sensitivity,
+      fields: [restoredField(event.sensitivity)],
       submit: event.submit ?? 'offer-owner',
       raisedAt: event.at,
       expiresAt: event.expiresAt,
@@ -603,7 +654,18 @@ export class InputRequestService {
     };
     const held: Held = { request, names: [target.key], checkFailures: 0, deliveries: new Map(), waiters: new Set() };
     this.held.set(request.id, held);
-    const seen = await this.deps.target.observe(request.sessionId, target);
+    // A paste's copy lived in the memory of the daemon that stopped: it is gone, so the paste is too.
+    if (event.sealed !== undefined) {
+      await this.finish(held, 'cancelled', 'copy_gone', undefined, { closeCard: true, tellAgent: true });
+      return;
+    }
+    // A page's fields are named by elements the journal does not keep (they are the agent's words), and a page
+    // rarely outlives the daemon: its card ends, and the agent raises it again if it still needs the values.
+    if (target.kind === 'browser') {
+      await this.finish(held, 'cancelled', 'interrupted', undefined, { closeCard: true, tellAgent: true });
+      return;
+    }
+    const seen = await this.deps.target.observe(request.sessionId, target, request.fields.map(pointerOf));
     if (!seen.ok) {
       await this.finish(held, 'cancelled', 'interrupted', undefined, { closeCard: true, tellAgent: true });
       return;
@@ -611,44 +673,28 @@ export class InputRequestService {
     held.names = [target.key, ...(seen.names ?? [])];
     const matchKey = targetMatchKey(seen.facts, this.deps.hostName ?? '');
     if (matchKey !== undefined) held.matchKey = matchKey;
+    const fields = withRisk(request.fields, seen.facts);
     held.request = {
       ...request,
+      fields,
       observed: await this.project(request.sessionId, seen.facts, held.names),
-      risk: riskOf(request.sensitivity, seen.facts),
+      risk: worstRisk(fields.map(field => field.risk)),
       observedDigest: digestFacts(seen.facts),
     };
   }
 
-  /** A paste waiting when the daemon stopped: the restart forgot its copy, so it ends and the card closes. */
-  private async copyForgotten(event: InputEvent, prompt: string, target: InputTarget): Promise<void> {
-    const request: InputRequest = {
-      id: event.requestId,
-      sessionId: event.sessionId,
-      agendaItemId: event.agendaItemId,
-      target,
-      prompt,
-      sensitivity: 'secret',
-      submit: event.submit ?? 'offer-owner',
-      raisedAt: event.at,
-      expiresAt: event.expiresAt ?? event.at,
-      state: 'pending',
-    };
-    const held: Held = { request, names: [target.key], checkFailures: 0, deliveries: new Map(), waiters: new Set() };
-    this.held.set(request.id, held);
-    await this.finish(held, 'cancelled', 'copy_gone', undefined, { closeCard: true, tellAgent: true });
-  }
-
   /** A write was begun and never recorded as done: it may have landed, so the request ends and never types again. */
   private async interrupt(event: InputEvent): Promise<void> {
-    if (this.held.has(event.requestId) || event.target.kind !== 'terminal') return;
+    if (this.held.has(event.requestId)) return;
     const prompt = (await this.deps.agenda.promptOf(event.sessionId, event.agendaItemId)) ?? 'input request';
     const request: InputRequest = {
       id: event.requestId,
       sessionId: event.sessionId,
       agendaItemId: event.agendaItemId,
-      target: { kind: 'terminal', key: event.target.key },
+      target: { kind: event.target.kind, key: event.target.key },
       prompt,
       sensitivity: event.sensitivity,
+      fields: [restoredField(event.sensitivity)],
       submit: event.submit ?? 'offer-owner',
       raisedAt: event.at,
       expiresAt: event.expiresAt ?? event.at,
@@ -716,7 +762,6 @@ export class InputRequestService {
     held.request = { ...request, state: 'delivering' };
     let hold: QuarantineHold | undefined;
     try {
-      const typedValue = body.padded === undefined ? undefined : unpadInputValue(body.padded);
       const pasted = request.source?.name;
       if (pasted !== undefined && body.sealed !== true)
         throw new InputRequestError(
@@ -725,30 +770,26 @@ export class InputRequestService {
         );
       if (pasted === undefined && body.sealed === true)
         throw new InputRequestError('bad_request', 'this card pastes no secure copy; type the value instead');
-      if (pasted !== undefined) {
-        // Checked again at the write, below.
-      } else if (body.entry === undefined) {
-        if (typedValue === undefined)
-          throw new InputRequestError('bad_request', 'the value was not sent in the expected form');
-        const problem = inputValueProblem(typedValue, request.sensitivity);
-        if (problem !== undefined) throw new InputRequestError('bad_request', problem);
-      } else if (this.deps.logins === undefined) {
+      const typed = pasted === undefined ? typedValues(request, body) : new Map<string, string>();
+      if (body.entry !== undefined && this.deps.logins === undefined)
         throw new InputRequestError('bad_request', 'this daemon keeps no saved logins; type the value instead');
-      }
-      if (body.save !== undefined && typedValue !== undefined) this.guardSave(request, typedValue);
-      if (body.observedDigest !== request.observedDigest) return await fail('target_changed', targetChanged());
+      const kept = body.save === undefined ? undefined : this.guardSave(request, typed);
+      const changed = (): InputRequestError => targetChanged(request.target.kind);
+      if (body.observedDigest !== request.observedDigest) return await fail('target_changed', changed());
       const submitted = body.submit && request.submit !== 'agent';
-      const seen = await this.deps.target.observe(request.sessionId, request.target);
-      if (!seen.ok) return await fail('target_gone', targetChanged());
-      if (digestFacts(seen.facts) !== request.observedDigest) return await fail('target_changed', targetChanged());
+      const seen = await this.deps.target.observe(request.sessionId, request.target, request.fields.map(pointerOf));
+      if (!seen.ok) return await fail('target_gone', changed());
+      if (digestFacts(seen.facts) !== request.observedDigest) return await fail('target_changed', changed());
+      // A secure copy is opened HERE, like a saved value: after every check that can refuse without typing, and only to be typed.
+      if (pasted !== undefined)
+        typed.set((request.fields[0] as InputRequestField).id, await this.openCopy(held, pasted));
       // A saved value is opened HERE, inside the use boundary, after every check that can refuse without
       // typing, and only to be typed: it is in no request, event, audit entry, result or error.
-      const value =
-        pasted !== undefined
-          ? await this.openCopy(held, pasted)
-          : body.entry === undefined
-            ? (typedValue as string)
-            : await this.fill(request, body.entry);
+      const values: InputFieldValue[] = [];
+      for (const field of request.fields) {
+        const text = typed.get(field.id) ?? (await this.fill(field, body.entry as LoginEntryId));
+        values.push({ field: field.id, text });
+      }
       held.names = [...new Set([...held.names, request.target.key, ...(seen.names ?? [])])];
       if (request.sensitivity !== 'plain') hold = await this.holdFor(request, held.names);
       try {
@@ -758,12 +799,15 @@ export class InputRequestService {
         hold = undefined;
         throw new InputRequestError('unavailable', 'Ferretry could not record the attempt, so nothing was typed');
       }
-      if (request.sensitivity !== 'plain') this.deps.values.hold(request.sessionId, value, request.agendaItemId);
-      const typed: TypeResult = await this.deps.target
-        .type(request.sessionId, request.target, value, submitted, seen.facts)
+      // Every value that is not plain is masked from reads before it is typed, so a read racing the write already hides it.
+      for (const [index, field] of request.fields.entries())
+        if (field.sensitivity !== 'plain')
+          this.deps.values.hold(request.sessionId, (values[index] as InputFieldValue).text, request.agendaItemId);
+      const outcome: TypeResult = await this.deps.target
+        .type(request.sessionId, request.target, values, submitted, seen.facts)
         .catch((): TypeResult => 'uncertain');
-      wrote?.(typed);
-      if (typed === 'uncertain') {
+      wrote?.(outcome);
+      if (outcome === 'uncertain') {
         await this.settle(hold);
         hold = undefined;
         await this.finish(held, 'refused', 'interrupted', undefined, {
@@ -773,19 +817,20 @@ export class InputRequestService {
         });
         throw new InputRequestError(
           'unavailable',
-          'Ferretry could not confirm the value was typed cleanly, so it stopped and will not type it again; check the terminal',
+          `Ferretry could not confirm the value was typed cleanly, so it stopped and will not type it again; check the ${surfaceWord(request.target.kind)}`,
         );
       }
-      if (typed !== 'typed') {
+      if (outcome !== 'typed') {
         await this.letGo(hold);
         hold = undefined;
         await this.journalQuietly({ ...held.request, state: 'pending' }, 'requested');
-        return await fail(typed, targetChanged());
+        return await fail(outcome, changed());
       }
       await this.settle(hold);
       hold = undefined;
       if (pasted !== undefined) this.deps.sealed?.used(request.sessionId, pasted);
-      const saved = body.save === undefined ? undefined : await this.save(held, body.save, value, by, body.deliveryId);
+      const saved =
+        body.save === undefined || kept === undefined ? undefined : await this.save(held, body.save, kept, by);
       await this.finish(held, 'delivered', undefined, by, {
         closeCard: true,
         tellAgent: true,
@@ -813,30 +858,44 @@ export class InputRequestService {
    * "Save as" is checked before anything is typed, so a save that could never happen refuses the whole
    * Send with nothing typed rather than typing and then failing to keep it.
    */
-  private guardSave(request: InputRequest, value: string): void {
-    const field = savedFieldFor(request.sensitivity);
+  private guardSave(request: InputRequest, typed: ReadonlyMap<string, string>): LoginFieldValues {
     if (this.deps.logins === undefined)
       throw new InputRequestError('bad_request', 'this daemon keeps no saved logins; send without saving');
-    if (field === undefined)
+    const roles = savedRolesOf(request.fields);
+    if (roles === undefined)
       throw new InputRequestError(
         'bad_request',
-        'a one-time code is not saved; add the 2FA seed to a saved login in Settings instead',
+        request.fields.every(field => field.sensitivity === 'private')
+          ? 'a one-time code is not saved; add the 2FA seed to a saved login in Settings instead'
+          : 'this card cannot be kept as one saved login (it has two usernames or two passwords); send without saving',
       );
-    if (field === 'password' && [...value].length < LOGIN_PASSWORD_MIN_LENGTH)
-      throw new InputRequestError(
-        'bad_request',
-        `a saved password is at least ${LOGIN_PASSWORD_MIN_LENGTH} characters, so it can be masked safely; send it without saving`,
-      );
-    if (
-      field === 'username' &&
-      (value.trim() === '' || value.length > LOGIN_USERNAME_MAX_LENGTH || /\p{Cc}/u.test(value))
-    )
-      throw new InputRequestError('bad_request', 'that value cannot be kept as a username; send it without saving');
+    const kept: { username?: string; password?: string } = {};
+    for (const [id, role] of roles) {
+      const value = typed.get(id);
+      if (value === undefined)
+        throw new InputRequestError(
+          'bad_request',
+          'Save as keeps the values you typed: type every field it keeps, or send without saving',
+        );
+      if (role === 'password' && [...value].length < LOGIN_PASSWORD_MIN_LENGTH)
+        throw new InputRequestError(
+          'bad_request',
+          `a saved password is at least ${LOGIN_PASSWORD_MIN_LENGTH} characters, so it can be masked safely; send it without saving`,
+        );
+      if (
+        role === 'username' &&
+        (value.trim() === '' || value.length > LOGIN_USERNAME_MAX_LENGTH || /\p{Cc}/u.test(value))
+      )
+        throw new InputRequestError('bad_request', 'that value cannot be kept as a username; send it without saving');
+      kept[role] = value;
+    }
+    return kept;
   }
 
+  /** The value a saved login types for one field. Refuses with the entry's name, never its value. */
   /**
-   * The value of the copy a paste names, opened HERE (after every check that can refuse without typing) and only
-   * to be typed. A copy that ended since the card was raised ends the request: it can never be pasted now.
+   * The value of the copy a paste names, opened only to be typed. A copy that ended since the card was raised ends
+   * the request: it can never be pasted now. One with a line break or a control character would press keys.
    */
   private async openCopy(held: Held, name: string): Promise<string> {
     const value = this.deps.sealed?.open(held.request.sessionId, name);
@@ -851,16 +910,15 @@ export class InputRequestService {
     if (inputValueProblem(value, 'secret') !== undefined)
       throw new InputRequestError(
         'bad_request',
-        `${copyHandle(name)} holds a line break or a control character, which would press keys; it cannot be pasted into a terminal`,
+        `${copyHandle(name)} holds a line break or a control character, which would press keys; it cannot be pasted here`,
       );
     return value;
   }
 
-  /** The value a saved login types for this request's field. Refuses with the entry's name, never its value. */
-  private async fill(request: InputRequest, entry: LoginEntryId): Promise<string> {
+  private async fill(field: InputRequestField, entry: LoginEntryId): Promise<string> {
     const logins = this.deps.logins as InputLoginPort;
     const value = await logins
-      .fill(entry, fillRoleFor(request.sensitivity), this.deps.clock.now())
+      .fill(entry, fillRoleFor(field.sensitivity), this.deps.clock.now())
       .catch((error: unknown) => {
         throw error instanceof LoginEntryError
           ? new InputRequestError(
@@ -869,28 +927,27 @@ export class InputRequestService {
             )
           : new InputRequestError('unavailable', 'Ferretry could not open the saved login, so nothing was typed');
       });
-    const problem = inputValueProblem(value, request.sensitivity);
+    const problem = inputValueProblem(value, field.sensitivity);
     if (problem !== undefined)
       throw new InputRequestError('bad_request', 'that saved login cannot be typed here; nothing was typed');
     return value;
   }
 
   /**
-   * Keeps the typed value in a saved login once it has been typed. A failure never undoes the delivery: it
-   * says what happened in a fixed sentence and the owner can save it from Settings. The record is KEPT.
+   * Keeps the typed values in a saved login once they have been typed, in ONE change: a login card's username and
+   * password land together. A failure never undoes the delivery: it says what happened in a fixed sentence and
+   * the owner can save it from Settings. The record is KEPT, one per field kept.
    */
   private async save(
     held: Held,
     save: NonNullable<InputDeliverBody['save']>,
-    value: string,
+    kept: LoginFieldValues,
     by: InputActor,
-    _deliveryId: string,
   ): Promise<NonNullable<InputDeliverResult['saved']>> {
-    const field = savedFieldFor(held.request.sensitivity);
     const logins = this.deps.logins;
-    if (field === undefined || logins === undefined) return { entry: save.entry, ok: false, problem: 'not saved' };
+    if (logins === undefined) return { entry: save.entry, ok: false, problem: 'not saved' };
     try {
-      await logins.save(save.entry, save.label, held.matchKey, { [field]: value });
+      await logins.save(save.entry, save.label, held.matchKey, kept);
     } catch {
       return {
         entry: save.entry,
@@ -898,9 +955,12 @@ export class InputRequestService {
         problem: 'The value was typed, but Ferretry could not keep it; save it from Settings › Secrets.',
       };
     }
-    await this.deps.audit
-      .saved({ sessionId: held.request.sessionId, requestId: held.request.id, actor: by, entry: save.entry, field })
-      .catch(() => undefined);
+    for (const field of ['username', 'password'] as const) {
+      if (kept[field] === undefined) continue;
+      await this.deps.audit
+        .saved({ sessionId: held.request.sessionId, requestId: held.request.id, actor: by, entry: save.entry, field })
+        .catch(() => undefined);
+    }
     return { entry: save.entry, ok: true };
   }
 
@@ -1052,6 +1112,8 @@ export class InputRequestService {
     const facts =
       request.observed?.kind === 'terminal' && quarantined ? maskedFacts(request.observed) : request.observed;
     const terminal = facts?.kind === 'terminal' ? facts : undefined;
+    const page = facts?.kind === 'browser' ? facts : undefined;
+    const pending = request.state === 'pending';
     return {
       id: request.agendaItemId,
       state: request.state,
@@ -1064,11 +1126,19 @@ export class InputRequestService {
               recognised: terminal.recognisedConsumer,
             },
           }),
+      ...(page === undefined ? {} : { observed: { consumer: hostOf(page.origin) } }),
       ...(request.outcome === undefined
         ? {}
         : { submitted: request.outcome.submitted, source: request.outcome.source }),
-      ...(request.state === 'pending' ? { note: `Waiting for the owner on ${request.agendaItemId}.` } : {}),
-      ...(request.outcome?.by.kind === 'rule' ? { note: 'Pasted under a rule the owner approved in advance.' } : {}),
+      ...(pending && page?.challenge !== undefined
+        ? {
+            note: `The page is showing a captcha: hand it to the owner with browser_ask_owner ("complete the captcha") and wait; never try to solve it. ${request.agendaItemId} waits for the owner too.`,
+          }
+        : pending
+          ? { note: `Waiting for the owner on ${request.agendaItemId}.` }
+          : request.outcome?.by.kind === 'rule'
+            ? { note: 'Pasted under a rule the owner approved in advance.' }
+            : {}),
     };
   }
 
@@ -1132,12 +1202,104 @@ function requireOwner(caller: InputCaller): InputActor {
   return caller.actor;
 }
 
-function targetChanged(): InputRequestError {
+function targetChanged(kind: InputTarget['kind']): InputRequestError {
   return new InputRequestError(
     'conflict',
-    'what is on the terminal is no longer what the card showed; nothing was typed',
+    `what is on the ${surfaceWord(kind)} is no longer what the card showed; nothing was typed`,
     INPUT_ERROR_CODES.targetChanged,
   );
+}
+
+const surfaceWord = (kind: InputTarget['kind']): string => (kind === 'terminal' ? 'terminal' : 'page');
+
+/** The host of an origin the browser reported, or the origin itself when it does not parse. */
+function hostOf(origin: string): string {
+  try {
+    return new URL(origin).host;
+  } catch {
+    return origin;
+  }
+}
+
+/** The field a raise names, as the card holds it before the daemon has looked: labelled, no risk yet. */
+function cardField(field: InputFieldRaise): InputRequestField {
+  return {
+    id: field.id,
+    label: field.label ?? FIELD_LABELS[field.sensitivity],
+    sensitivity: field.sensitivity,
+    ...(field.element === undefined ? {} : { element: field.element }),
+  };
+}
+
+/** A field brought back from the journal, which keeps only the sensitivity: a terminal's one value. */
+function restoredField(sensitivity: InputSensitivity): InputRequestField {
+  return { id: INPUT_SINGLE_FIELD_ID, label: FIELD_LABELS[sensitivity], sensitivity };
+}
+
+/** What the target adapter is told about a field: its id and the element it names, never its label. */
+function pointerOf(field: { readonly id: string; readonly element?: InputRequestField['element'] }): InputTargetField {
+  return field.element === undefined ? { id: field.id } : { id: field.id, element: field.element };
+}
+
+function withRisk(fields: readonly InputRequestField[], facts: InputTargetFacts): InputRequestField[] {
+  return fields.map(field => ({ ...field, risk: riskOf(field, facts) }));
+}
+
+/**
+ * A raise's fields must suit its surface: a terminal shows ONE prompt at a time, so it takes one value with no
+ * element (a second prompt is a chained request); every field of a page names the element it goes into.
+ */
+function guardFields(target: InputTarget, fields: readonly InputFieldRaise[]): void {
+  if (target.kind === 'terminal') {
+    if (fields.length !== 1)
+      throw new InputRequestError(
+        'bad_request',
+        'a terminal shows one prompt at a time: ask for one value, then raise the next with chain',
+      );
+    if (fields[0]?.element !== undefined)
+      throw new InputRequestError('bad_request', 'a terminal field names no element: the value goes to its prompt');
+    return;
+  }
+  if (fields.some(field => field.element === undefined))
+    throw new InputRequestError('bad_request', 'name the element each field goes into: a ref or a selector');
+}
+
+/**
+ * The typed values of a Send, each by its field and checked for what its field may take, before anything is
+ * looked at or typed. Every field is covered: typed here, or left to the saved login the Send names.
+ */
+function typedValues(request: InputRequest, body: InputDeliverBody): Map<string, string> {
+  const typed = new Map<string, string>();
+  const take = (field: InputRequestField | undefined, padded: string): void => {
+    if (field === undefined) throw new InputRequestError('bad_request', 'that field is not on this card');
+    const value = unpadInputValue(padded);
+    if (value === undefined) throw new InputRequestError('bad_request', 'the value was not sent in the expected form');
+    const problem = inputValueProblem(value, field.sensitivity);
+    if (problem !== undefined) throw new InputRequestError('bad_request', problem);
+    typed.set(field.id, value);
+  };
+  if (body.padded !== undefined) {
+    if (request.fields.length !== 1)
+      throw new InputRequestError('bad_request', 'this card asks for several values: send each by its field');
+    take(request.fields[0], body.padded);
+  }
+  for (const each of body.fields ?? [])
+    take(
+      request.fields.find(field => field.id === each.field),
+      each.padded,
+    );
+  const missing = request.fields.filter(field => !typed.has(field.id));
+  if (missing.length > 0 && body.entry === undefined)
+    throw new InputRequestError(
+      'bad_request',
+      `fill every field before Send: ${missing.map(field => field.id).join(', ')} ${missing.length === 1 ? 'is' : 'are'} empty`,
+    );
+  if (missing.length === 0 && body.entry !== undefined && body.padded === undefined && body.fields !== undefined)
+    throw new InputRequestError(
+      'bad_request',
+      'every field was typed, so there is nothing for the saved login to fill',
+    );
+  return typed;
 }
 
 const PLAIN_FLAG = 'Not secret: the ferret can see this value.';
@@ -1147,10 +1309,11 @@ const PRIVATE_FLAG = 'This code will show on screen while the terminal is hidden
  * The flag a card carries, from what was seen at the target: it is never a refusal, the owner decides. The
  * sentence is fixed text (no program name, nothing the terminal showed), so it is safe to show and to log.
  */
-function riskOf(sensitivity: InputRequest['sensitivity'], facts: InputTargetFacts): InputRisk {
+function riskOf(field: Pick<InputRequestField, 'id' | 'sensitivity'>, facts: InputTargetFacts): InputRisk {
+  const { sensitivity } = field;
   if (sensitivity === 'plain') return { level: 'red', reason: PLAIN_FLAG };
+  if (facts.kind === 'browser') return pageRiskOf(field, facts);
   if (sensitivity === 'private') return { level: 'amber', reason: PRIVATE_FLAG };
-  if (facts.kind !== 'terminal') return { level: 'amber', reason: 'Ferretry cannot check this target before typing.' };
   if (facts.echo === 'on')
     return {
       level: 'amber',
@@ -1171,9 +1334,44 @@ function riskOf(sensitivity: InputRequest['sensitivity'], facts: InputTargetFact
   return { level: 'green', reason: 'Typing is hidden and the program is one known to ask for a password.' };
 }
 
-function askOf(facts: InputTargetFacts, sensitivity: InputRequest['sensitivity']): string {
-  const where = facts.kind === 'terminal' ? 'Type it into the terminal' : 'Type it into the page';
-  return sensitivity === 'plain' ? `${where}. ${PLAIN_FLAG}` : where;
+const PAGE_PRIVATE_FLAG = 'This code will show on the page; Ferretry hides the page from the ferret for 2 minutes.';
+/**
+ * A page field's flag, worst first: the field the agent named is missing or hidden, the page is not secure (http
+ * crosses the network in the clear), the field sits in a frame from another site, or a secret is going into a
+ * field that is not a password field (it will show on the page). Fixed sentences only, like the terminal's.
+ */
+function pageRiskOf(
+  field: Pick<InputRequestField, 'id' | 'sensitivity'>,
+  facts: Extract<InputTargetFacts, { readonly kind: 'browser' }>,
+): InputRisk {
+  const found = facts.fields.find(each => each.fieldId === field.id);
+  if (found === undefined || !found.visible)
+    return {
+      level: 'amber',
+      reason: 'Ferretry could not see this field on the page, so the value may land somewhere unexpected.',
+    };
+  if (!facts.secure)
+    return { level: 'amber', reason: 'The page is not https, so the value crosses the network unencrypted.' };
+  if (found.frameOrigin !== facts.origin)
+    return { level: 'amber', reason: 'This field is inside a frame from another site, not the page itself.' };
+  if (field.sensitivity === 'private') return { level: 'amber', reason: PAGE_PRIVATE_FLAG };
+  // Only a password input masks what is typed. `autocomplete="current-password"` is a hint about the field's role
+  // and leaves a text input showing the value, so it never earns green.
+  if (found.field.type?.toLowerCase() !== 'password')
+    return { level: 'amber', reason: 'This is not a password field, so the value will show on the page.' };
+  return { level: 'green', reason: 'A password field on a secure page, as the browser reported it.' };
+}
+
+function titleOf(fields: readonly InputRequestField[]): string {
+  const kinds = new Set(fields.map(field => field.sensitivity));
+  if (fields.length > 1 && kinds.has('secret') && kinds.has('plain')) return LOGIN_TITLE;
+  return TITLES[strongestSensitivity(fields)];
+}
+
+function askOf(facts: InputTargetFacts, fields: readonly InputRequestField[]): string {
+  const it = fields.length === 1 ? 'it' : 'them';
+  const where = facts.kind === 'terminal' ? 'Type it into the terminal' : `Type ${it} into the page`;
+  return fields.some(field => field.sensitivity === 'plain') ? `${where}. ${PLAIN_FLAG}` : where;
 }
 
 function auditDetail(request: InputRequest): InputAuditDetail {
@@ -1188,23 +1386,26 @@ function auditDetail(request: InputRequest): InputAuditDetail {
 
 const PASTE_TITLE = 'Wants to paste a secure copy';
 
-/** A target that does not show what is typed: a terminal with echo off, or a page's password field. */
-function hidesTyping(facts: InputTargetFacts): boolean {
-  return facts.kind === 'terminal' ? facts.echo === 'off' : facts.field.type === 'password';
-}
-
 /** A paste's ask: what is pasted and where it came from, in the daemon's words. There is nothing to type. */
-function pasteAskOf(copy: CopyMeta): string {
+function pasteAskOf(copy: CopyMeta, facts: InputTargetFacts): string {
   const from = copy.from.origin ?? copy.from.program ?? copy.from.kind;
-  return `Allow pasting ${copy.handle} (${String(copy.length)} characters from ${from}) into the terminal. You type nothing.`;
+  const into = facts.kind === 'terminal' ? 'the terminal' : 'the page';
+  return `Allow pasting ${copy.handle} (${String(copy.length)} characters from ${from}) into ${into}. You type nothing.`;
 }
 
 const SEEN_FLAG = 'The ferret saw this value before it was sealed, so it is not protected; consider rotating it.';
 
 /** A copy the agent had already seen is never green: the owner is told it is not protected. */
-function pasteRisk(risk: InputRisk, copy: CopyMeta | undefined): InputRisk {
+function pasteRisk(risk: InputRisk | undefined, copy: CopyMeta | undefined): InputRisk | undefined {
   if (copy?.exposure.transcript !== 'found') return risk;
-  return { level: risk.level === 'red' ? 'red' : 'amber', reason: SEEN_FLAG };
+  return { level: risk?.level === 'red' ? 'red' : 'amber', reason: SEEN_FLAG };
+}
+
+/** A target that does not show what is typed: a terminal with echo off, or a page whose fields are all password fields. */
+function hidesTyping(facts: InputTargetFacts): boolean {
+  return facts.kind === 'terminal'
+    ? facts.echo === 'off'
+    : facts.fields.every(field => field.field.type === 'password');
 }
 
 /** What a terminal's facts read as while it is quarantined: what a secret may have left on the screen is gone. */
@@ -1222,11 +1423,14 @@ function noteOf(state: string, reason: InputReason | undefined): string {
 }
 
 function tellOf(request: InputRequest, state: string, reason: InputReason | undefined, uncertain: boolean): string {
+  const { kind, key } = request.target;
+  const surface = surfaceWord(kind);
+  const tool = `${kind}_request_input`;
   if (uncertain)
-    return `${request.agendaItemId} was interrupted while the owner's value was going into %terminal:${request.target.key}; it may be partly or fully typed there. Read the terminal before you act once its quarantine allows; if you still need a value, raise a fresh terminal_request_input, or ask the owner to take over the terminal.`;
+    return `${request.agendaItemId} was interrupted while the owner's value was going into %${kind}:${key}; it may be partly or fully typed there. Read the ${surface} before you act once its quarantine allows; if you still need a value, raise a fresh ${tool}, or ask the owner to take over the ${surface}.`;
   if (state === 'delivered' && request.source !== undefined)
-    return `${request.agendaItemId}: ${copyHandle(request.source.name)} was pasted into %terminal:${request.target.key}. Read the terminal to continue once its quarantine allows.`;
+    return `${request.agendaItemId}: ${copyHandle(request.source.name)} was pasted into %${kind}:${key}. Read the ${surface} to continue once its quarantine allows.`;
   if (state === 'delivered')
-    return `${request.agendaItemId} was answered and typed into %terminal:${request.target.key}. Read the terminal to continue.`;
-  return `${request.agendaItemId} ended without a value (${state}${reason === undefined ? '' : `: ${reason.replaceAll('_', ' ')}`}). If you still need a value, raise a fresh terminal_request_input, or ask the owner to take over the terminal.`;
+    return `${request.agendaItemId} was answered and typed into %${kind}:${key}. Read the ${surface} to continue.`;
+  return `${request.agendaItemId} ended without a value (${state}${reason === undefined ? '' : `: ${reason.replaceAll('_', ' ')}`}). If you still need a value, raise a fresh ${tool}, or ask the owner to take over the ${surface}.`;
 }

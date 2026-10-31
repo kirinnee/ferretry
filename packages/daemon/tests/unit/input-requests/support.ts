@@ -53,8 +53,8 @@ export function inputRequestService(
           ...(options.names === undefined ? {} : { names: options.names }),
         };
       },
-      type: async (_session, _target, text) => {
-        writes.push(text);
+      type: async (_session, _target, values) => {
+        writes.push(...values.map(value => value.text));
         return 'typed';
       },
     },

@@ -97,8 +97,8 @@ async function world(
   const service = new InputRequestService({
     target: {
       observe: async () => ({ ok: true, facts: facts.current }),
-      type: async (_session, _target, text) => {
-        writes.push(text);
+      type: async (_session, _target, values) => {
+        writes.push(...values.map(value => value.text));
         return typed.result;
       },
     },
@@ -427,5 +427,28 @@ describe('what the security review found about pastes approved in advance', () =
 
     should(view.state).equal('pending');
     should(w.writes).eql([]);
+  });
+});
+
+describe('a paste raised with named fields', () => {
+  it('should refuse a paste of more than one field, and make the one field it names a secret', async () => {
+    const w = await world();
+    await w.capture();
+    const { sensitivity: _sensitivity, ...base } = PASTE;
+
+    const several = await refusal(
+      w.service.raise(SESSION, {
+        ...base,
+        target: { kind: 'browser', key: 'app' },
+        fields: [
+          { id: 'user', sensitivity: 'plain', element: { kind: 'ref', ref: 'e1' } },
+          { id: 'token', sensitivity: 'plain', element: { kind: 'ref', ref: 'e2' } },
+        ],
+      }),
+    );
+    await w.service.raise(SESSION, { ...base, fields: [{ id: 'token', sensitivity: 'plain' }] });
+
+    should(several.message).equal('a paste fills one field: raise it with one field');
+    should((await w.pending())?.fields.map(field => field.sensitivity)).eql(['secret']);
   });
 });

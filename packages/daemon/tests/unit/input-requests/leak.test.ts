@@ -105,8 +105,9 @@ function composed(options: { type?: () => TypeResult } = {}) {
   service = new InputRequestService({
     target: {
       observe: async (): Promise<ObserveResult> => ({ ok: true, facts: FACTS }),
-      type: async (sessionId, _target, text, submit) => {
+      type: async (sessionId, _target, values, submit) => {
         const result = options.type?.() ?? 'typed';
+        const text = values.map(value => value.text).join('');
         const terminal = (await tools.terminals.list(sessionId)).terminals[0];
         if (terminal !== undefined)
           await tools.terminals.write(sessionId, terminal.id, new TextEncoder().encode(`${text}${submit ? '\r' : ''}`));

@@ -413,9 +413,12 @@ describe('machineView', () => {
       defaultRuntime: null,
       agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
       browserMode: 'headless',
+      browserPorts: 'random',
+      browserFirewallFailure: 'warn',
       browserProxy: null,
       autoResume: true,
       agendaMode: true,
+      publicUsageFeed: false,
       lastAutoResume: null,
       tools: [
         { harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/local/bin/claude' },
@@ -428,6 +431,28 @@ describe('machineView', () => {
     FleetMachineViewSchema.parse(actual);
   });
 
+  it('should carry the firewall failure policy, warn unless the machine says refuse', () => {
+    // Act
+    const warn = machineView(modelOf({}), factsOf({}), OPEN);
+    const refuse = machineView(modelOf({ machine: { browserFirewallFailure: 'refuse' } }), factsOf({}), OPEN);
+
+    // Assert
+    should(warn.browserFirewallFailure).equal('warn');
+    should(refuse.browserFirewallFailure).equal('refuse');
+    FleetMachineViewSchema.parse(refuse);
+  });
+
+  it('should carry the machine browser ports setting, random unless the machine says otherwise', () => {
+    // Act
+    const random = machineView(modelOf({}), factsOf({}), OPEN);
+    const perUser = machineView(modelOf({ machine: { browserPorts: 'per-user' } }), factsOf({}), OPEN);
+
+    // Assert
+    should(random.browserPorts).equal('random');
+    should(perUser.browserPorts).equal('per-user');
+    FleetMachineViewSchema.parse(perUser);
+  });
+
   it('should carry the machine default for agenda mode, on unless turned off', () => {
     // Act
     const on = machineView(modelOf({}), factsOf({}), OPEN);
@@ -437,6 +462,17 @@ describe('machineView', () => {
     should(on.agendaMode).equal(true);
     should(off.agendaMode).equal(false);
     FleetMachineViewSchema.parse(off);
+  });
+
+  it('should carry the public usage feed switch, off unless the owner turned it on', () => {
+    // Act
+    const off = machineView(modelOf({}), factsOf({}), OPEN);
+    const on = machineView(modelOf({ machine: { publicUsageFeed: true } }), factsOf({}), OPEN);
+
+    // Assert
+    should(off.publicUsageFeed).equal(false);
+    should(on.publicUsageFeed).equal(true);
+    FleetMachineViewSchema.parse(on);
   });
 
   it('should carry auto-resume and what the last pass did', () => {

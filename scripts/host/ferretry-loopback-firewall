@@ -1,0 +1,273 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Loopback firewall for a shared Linux host. Installed and run by the HOST ADMIN as root, never by a
+# Ferretry user: it reads the admin-curated conf, rejects every uid but the owner on each user's fixed
+# browser ports (the agent Chrome's DevTools port, the proxy sign-in relay, the login window's VNC
+# port), and records what it applied in a marker the daemons read.
+#
+#   ferretry-loopback-firewall [apply]   validate the conf, replace `table inet ferretry`, write the marker
+#   ferretry-loopback-firewall stop      delete `table inet ferretry` and the marker
+#   ferretry-loopback-firewall --verify  re-apply when the table is gone or a user's rule is missing, then
+#                                        probe each listening port as an unprivileged account and rewrite
+#                                        the marker with verifiedAt and perUser (ok | failed | missing)
+#
+# FERRETRY_FIREWALL_CONF, FERRETRY_FIREWALL_RUN_DIR, FERRETRY_NFT, FERRETRY_RUNUSER and FERRETRY_PROC_NET
+# exist for the tests ONLY, and the script enforces it: as root it refuses, applying nothing, when any of
+# them is set, and it runs nft (and, for --verify, runuser, timeout and bash) only from fixed system
+# directories, never through PATH. Without FERRETRY_FIREWALL_RUN_DIR it refuses to run as anyone but root.
+# FERRETRY_FIREWALL_TEST_UID lets a non-root test stand in for root to reach those root-only checks;
+# real root refuses it like every other override.
+#
+# The port arithmetic below is packages/protocol's `perUserBrowserPorts`; both are pinned to
+# scripts/host/per-user-ports.fixtures.json by a test on each side.
+
+conf="${FERRETRY_FIREWALL_CONF:-/etc/ferretry/loopback-firewall.conf}"
+run_dir="${FERRETRY_FIREWALL_RUN_DIR:-/run/ferretry}"
+marker="${run_dir}/loopback-firewall.json"
+mode="${1:-apply}"
+real_uid="$(id -u)"
+me="${real_uid}"
+
+[[ "${mode}" == "apply" || "${mode}" == "stop" || "${mode}" == "--verify" ]] || { echo "❌ usage: ferretry-loopback-firewall [apply|stop|--verify]" >&2; exit 2; }
+
+# --- root takes no overrides and finds its tools only in fixed directories -----------------------
+# A stand-in uid is honoured only when the real uid is not root, so root cannot be made to use it.
+if [ "${real_uid}" -eq 0 ]; then
+  [ -z "${FERRETRY_FIREWALL_TEST_UID:-}" ] || { echo "❌ FERRETRY_FIREWALL_TEST_UID is for the tests only and must not be set when running as root, so nothing was applied" >&2; exit 1; }
+else
+  me="${FERRETRY_FIREWALL_TEST_UID:-${real_uid}}"
+fi
+if [ "${me}" -eq 0 ]; then
+  for override in FERRETRY_NFT FERRETRY_RUNUSER FERRETRY_PROC_NET FERRETRY_FIREWALL_CONF FERRETRY_FIREWALL_RUN_DIR; do
+    [ -z "${!override:-}" ] || { echo "❌ ${override} is for the tests only and must not be set when running as root, so nothing was applied" >&2; exit 1; }
+  done
+  tools=(nft)
+  [ "${mode}" != "--verify" ] || tools=(nft runuser timeout bash)
+  declare -A tool_path=()
+  for tool in "${tools[@]}"; do
+    dirs=(/usr/sbin /sbin /usr/bin)
+    [ "${tool}" = "nft" ] || dirs+=(/bin)
+    for dir in "${dirs[@]}"; do
+      if [ -x "${dir}/${tool}" ]; then
+        tool_path["${tool}"]="${dir}/${tool}"
+        break
+      fi
+    done
+    [ -n "${tool_path[${tool}]:-}" ] || { echo "❌ no ${tool} found in ${dirs[*]}, so nothing was applied" >&2; exit 1; }
+  done
+  nft="${tool_path[nft]}"
+  runuser="${tool_path[runuser]:-}"
+  timeout_bin="${tool_path[timeout]:-}"
+  bash_bin="${tool_path[bash]:-}"
+  proc_net="/proc/net"
+else
+  nft="${FERRETRY_NFT:-nft}"
+  runuser="${FERRETRY_RUNUSER:-runuser}"
+  timeout_bin="timeout"
+  bash_bin="bash"
+  proc_net="${FERRETRY_PROC_NET:-/proc/net}"
+fi
+
+[ "${me}" -eq 0 ] || [ -n "${FERRETRY_FIREWALL_RUN_DIR:-}" ] || { echo "❌ ferretry-loopback-firewall changes the host firewall and must run as root" >&2; exit 1; }
+
+# --- stop: drop the table and the marker, whether or not either exists ---------------------------
+if [ "${mode}" = "stop" ]; then
+  echo "🔁 Removing table inet ferretry and ${marker}"
+  printf 'add table inet ferretry\ndelete table inet ferretry\n' | "${nft}" -f -
+  rm -f "${marker}"
+  echo "✅ Loopback firewall removed"
+  exit 0
+fi
+
+# --- the conf must be a root-owned regular file nobody else can write ----------------------------
+# "Root-owned" is compared with the real invoking uid: root in production, the test user in the tests.
+conf_dir="$(dirname "${conf}")"
+[[ -f "${conf}" && ! -L "${conf}" ]] || { echo "❌ ${conf} is not a regular file, so nothing was applied" >&2; exit 1; }
+read -r conf_owner conf_mode < <(stat -c '%u %a' "${conf}")
+read -r dir_owner dir_mode < <(stat -c '%u %a' "${conf_dir}")
+[ "${conf_owner}" = "${real_uid}" ] || { echo "❌ ${conf} is not owned by root, so nothing was applied" >&2; exit 1; }
+[ $((8#${conf_mode} & 8#022)) -eq 0 ] || { echo "❌ ${conf} is writable by its group or by others, so nothing was applied" >&2; exit 1; }
+[[ "${dir_owner}" == "${real_uid}" && $((8#${dir_mode} & 8#022)) -eq 0 ]] || { echo "❌ ${conf_dir} is not a root-owned directory closed to group and others, so nothing was applied" >&2; exit 1; }
+
+# --- parse every line before anything is applied -------------------------------------------------
+number='^(0|[1-9][0-9]{0,8})$'
+base=""
+declare -A uid_seen=()
+users=()
+ports=()
+error=""
+lineno=0
+
+while IFS= read -r line || [ -n "${line}" ]; do
+  lineno=$((lineno + 1))
+  read -r -a word <<<"${line%%#*}"
+  [ "${#word[@]}" -eq 0 ] && continue
+
+  case "${word[0]}:${#word[@]}" in
+    base:2)
+      [ -z "${base}" ] || { error="line ${lineno}: base is given twice"; break; }
+      [[ "${word[1]}" =~ ${number} ]] || { error="line ${lineno}: base must be a whole number"; break; }
+      [ "${word[1]}" -ge 1024 ] || { error="line ${lineno}: base must be at least 1024"; break; }
+      base="${word[1]}"
+      continue
+      ;;
+    user:2 | user:5) ;;
+    *)
+      error="line ${lineno}: expected 'base <int>', 'user <uid>' or 'user <uid> <cdp> <relay> <vnc>'"
+      break
+      ;;
+  esac
+
+  for field in "${word[@]:1}"; do
+    [[ "${field}" =~ ${number} ]] || { error="line ${lineno}: '${field}' is not a whole number"; break 2; }
+  done
+  uid="${word[1]}"
+  [ "${uid}" -ge 1000 ] || { error="line ${lineno}: uid ${uid} is below 1000, which is not a login user"; break; }
+  [ -z "${uid_seen[${uid}]:-}" ] || { error="line ${lineno}: uid ${uid} is listed twice"; break; }
+  uid_seen["${uid}"]=1
+
+  for port in "${word[@]:2}"; do
+    [[ "${port}" -ge 1024 && "${port}" -le 65535 ]] || { error="line ${lineno}: port ${port} is outside 1024-65535"; break 2; }
+  done
+  users+=("${uid}")
+  ports+=("${word[*]:2}")
+done <"${conf}"
+
+[ -z "${error}" ] || { echo "❌ ${conf}: ${error}; nothing was applied" >&2; exit 1; }
+
+# --- derive ports and claim each one once (after the whole file, so `base` may sit anywhere) -----
+base="${base:-20000}"
+declare -A port_owner=()
+rules=""
+entries=""
+for i in "${!users[@]}"; do
+  uid="${users[${i}]}"
+  if [ -z "${ports[${i}]}" ]; then
+    # packages/protocol perUserBrowserPorts: b = base + (uid - 1000) * 4; cdp b, relay b + 1, vnc b + 2.
+    b=$((base + (uid - 1000) * 4))
+    [ $((b + 2)) -le 32767 ] || { error="uid ${uid} gets ports outside 1024-32767 from base ${base}; set explicit ports or another base"; break; }
+    ports[i]="${b} $((b + 1)) $((b + 2))"
+  fi
+  read -r -a mine <<<"${ports[${i}]}"
+  for port in "${mine[@]}"; do
+    [ -z "${port_owner[${port}]:-}" ] || { error="port ${port} is claimed by both uid ${port_owner[${port}]} and uid ${uid}"; break 2; }
+    port_owner["${port}"]="${uid}"
+  done
+  tuple="${mine[0]}, ${mine[1]}, ${mine[2]}"
+  rules="${rules}    oif \"lo\" tcp dport { ${tuple} } meta skuid != ${uid} reject with tcp reset"$'\n'
+  entries="${entries}${entries:+, }{ \"uid\": ${uid}, \"ports\": [${tuple}] }"
+done
+
+[ -z "${error}" ] || { echo "❌ ${conf}: ${error}; nothing was applied" >&2; exit 1; }
+
+# --- the one atomic transaction that replaces ONLY our table -------------------------------------
+ruleset="$(
+  cat <<RULESET
+add table inet ferretry
+delete table inet ferretry
+table inet ferretry {
+  chain output {
+    type filter hook output priority 0; policy accept;
+${rules}  }
+}
+RULESET
+)"
+iso_utc='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
+applied_at=""
+marker_extra=""
+
+if [ "${mode}" = "apply" ]; then
+  echo "🔨 Applying table inet ferretry for ${#users[@]} user(s)"
+  printf '%s\n' "${ruleset}" | "${nft}" -f -
+  applied_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+else
+  # --- verify: the probe account must be a real, unlisted user who can run a command ---------------
+  probe_user="nobody"
+  probe_uid="$(id -u "${probe_user}" 2>/dev/null)" || { echo "❌ the probe account ${probe_user} does not exist, so nothing was verified" >&2; exit 1; }
+  [ -z "${uid_seen[${probe_uid}]:-}" ] || { echo "❌ the probe account ${probe_user} is uid ${probe_uid}, which ${conf} lists, so nothing was verified" >&2; exit 1; }
+  "${runuser}" -u "${probe_user}" -- "${bash_bin}" -c 'exit 0' >/dev/null 2>&1 || { echo "❌ cannot run a probe as ${probe_user}, so nothing was verified" >&2; exit 1; }
+
+  # --- verify: the table and each user's rule line, re-applying once if either is missing ----------
+  declare -A verdict=()
+  for attempt in 1 2; do
+    present=0
+    listing=""
+    listing="$("${nft}" list table inet ferretry 2>/dev/null)" && present=1
+    lacking="$((1 - present))"
+    for i in "${!users[@]}"; do
+      uid="${users[${i}]}"
+      read -r -a mine <<<"${ports[${i}]}"
+      verdict["${uid}"]="missing"
+      while IFS= read -r line; do
+        [[ "${line} " == *"skuid != ${uid} "* ]] || continue
+        spaced=" $(tr ",{}" "   " <<<"${line}") "
+        # nft may print consecutive ports as a range (20000-20002), so a port is covered by a token or a range
+        covered=1
+        for port in "${mine[@]}"; do
+          found=0
+          for token in ${spaced}; do
+            if [[ "${token}" == "${port}" ]]; then
+              found=1
+            elif [[ "${token}" =~ ^([0-9]+)-([0-9]+)$ ]] && [ "${port}" -ge "${BASH_REMATCH[1]}" ] && [ "${port}" -le "${BASH_REMATCH[2]}" ]; then
+              found=1
+            fi
+          done
+          [ "${found}" -eq 1 ] || covered=0
+        done
+        [ "${covered}" -eq 1 ] || continue
+        verdict["${uid}"]="listed"
+      done <<<"${listing}"
+      [ "${verdict[${uid}]}" = "listed" ] || lacking=1
+    done
+    [ "${lacking}" -eq 0 ] || [ "${attempt}" -eq 2 ] || {
+      echo "🔁 Table inet ferretry is missing or incomplete; re-applying"
+      printf '%s\n' "${ruleset}" | "${nft}" -f -
+      applied_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      continue
+    }
+    break
+  done
+
+  # --- verify: probe every port that has a LISTEN socket (state 0A) as the unprivileged account ----
+  listening="$(awk 'FNR > 1 && $4 == "0A" { n = split($2, a, ":"); print a[n] }' "${proc_net}/tcp" "${proc_net}/tcp6" 2>/dev/null || true)"
+  per_user=""
+  for i in "${!users[@]}"; do
+    uid="${users[${i}]}"
+    read -r -a mine <<<"${ports[${i}]}"
+    if [ "${verdict[${uid}]}" = "listed" ]; then
+      verdict["${uid}"]="ok"
+      for port in "${mine[@]}"; do
+        grep -qx "$(printf '%04X' "${port}")" <<<"${listening}" || continue
+        # shellcheck disable=SC2016 # $1 is expanded by the probe shell, not this one
+        if "${runuser}" -u "${probe_user}" -- "${timeout_bin}" 2 "${bash_bin}" -c 'exec 3<>/dev/tcp/127.0.0.1/"$1"' _ "${port}" >/dev/null 2>&1; then
+          verdict["${uid}"]="failed"
+        fi
+      done
+    fi
+    [ "${verdict[${uid}]}" = "ok" ] || echo "⚠️  uid ${uid}: ${verdict[${uid}]}" >&2
+    per_user="${per_user}${per_user:+, }\"${uid}\": \"${verdict[${uid}]}\""
+  done
+
+  if [ -z "${applied_at}" ] && [ -f "${marker}" ]; then
+    applied_at="$(sed -n 's/.*"appliedAt": "\([^"]*\)".*/\1/p' "${marker}")"
+    [[ "${applied_at}" =~ ${iso_utc} ]] || applied_at=""
+  fi
+  marker_extra=", \"verifiedAt\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\", \"perUser\": { ${per_user} }"
+fi
+
+# --- the marker, written only after a successful apply or verify, atomically ---------------------
+applied_at="${applied_at:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+install -d -m 0755 "${run_dir}"
+tmp="$(mktemp "${run_dir}/.loopback-firewall.json.XXXXXX")"
+trap 'rm -f "${tmp}"' EXIT
+printf '{ "version": 1, "appliedAt": "%s", "base": %s%s,\n  "entries": [ %s ] }\n' \
+  "${applied_at}" "${base}" "${marker_extra}" "${entries}" >"${tmp}"
+chmod 0644 "${tmp}"
+mv -f "${tmp}" "${marker}"
+
+if [ "${mode}" = "apply" ]; then
+  echo "✅ Loopback firewall applied; marker at ${marker}"
+else
+  echo "✅ Loopback firewall verified; marker at ${marker}"
+fi

@@ -1095,9 +1095,10 @@ export class DaemonStorage {
     return await this.readDocument(id, 'config', freshness);
   }
 
-  async readState(id: SessionId): Promise<FrozenJsonValue | undefined> {
+  /** A session's state, proved on every read unless a whole-fleet reader asks for `heard`. */
+  async readState(id: SessionId, freshness: DocumentFreshness = 'proved'): Promise<FrozenJsonValue | undefined> {
     this.assertOpen();
-    return await this.readDocument(id, 'state');
+    return await this.readDocument(id, 'state', freshness);
   }
 
   /**

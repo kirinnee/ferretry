@@ -84,12 +84,13 @@ function refuse(error: unknown): never {
 /**
  * Every session the index holds, in the index's own order.
  *
- * CONDITIONAL, because every open app re-reads it on a beat — about 25 KB a read on a real fleet, and
- * after the PWA stopped re-asking everything else it was most of an idle phone's metered bytes, for an
- * answer that is usually the one it already holds. The tag is a digest of the exact body served, so it
- * moves when ANY byte a client could render moves — a status, a name, a turn count, `journalSequence`
- * — and an unchanged fleet costs its headers. It is taken over the JSON this route already built: one
- * serialisation and one hash, never a second rendering kept only to compare.
+ * CONDITIONAL, because every open app re-reads it on a beat — about 1.7 MB a read on a fleet with forty
+ * running sessions (gzip takes ~10x off the wire), and after the PWA stopped re-asking everything else it
+ * was most of an idle phone's metered bytes, for an answer that is usually the one it already holds. The
+ * tag is a digest of the exact body served, so it moves when ANY byte a client could render moves — a
+ * status, a name, a turn count, `journalSequence` — and an unchanged fleet costs its headers. It is taken
+ * over the JSON this route already built: one serialisation and one hash, never a second rendering kept
+ * only to compare.
  */
 async function list(subsystem: SessionDirectorySubsystem, context: RouteContext): Promise<ApiResponse> {
   const sessions: SessionList = [...(await subsystem.list().catch(refuse))];
@@ -122,6 +123,7 @@ export function sessionRoutes(subsystem: SessionDirectorySubsystem): readonly Ap
       path: '/v1/sessions',
       minimum: 'operator',
       noStore: true,
+      compress: true,
       handle: async context => await list(subsystem, context),
     },
     {

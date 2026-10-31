@@ -80,9 +80,12 @@ import {
   type PackRefusal,
   ProtocolVersionSchema,
   type RegisterProjectRequest,
+  type ResolvedBrowserPorts,
   type RuntimeControlRequest,
   type RuntimeModelChoice,
+  readLoopbackFirewallMarker,
   refusalNotice,
+  resolveBrowserPorts,
   type SessionConfig,
   SessionConfigSchema,
   type SessionHandoff,
@@ -211,6 +214,8 @@ import {
   AnalyticsTranscriptSpend,
   AsyncActivityScope,
   AuthorizedProviderProbe,
+  afterAsActivity,
+  asActivity,
   type BrowserDisplayPort,
   BrowserLoginWindowService,
   BrowserProfileStore,
@@ -243,6 +248,7 @@ import {
   FileLaneSetStore,
   FileLegacyWireUseStore,
   FileLoginIndexStore,
+  FileLoopbackMarkerReader,
   FileModelCatalogCache,
   FilePasteRuleStore,
   FileProjectCatalog,
@@ -285,6 +291,7 @@ import {
   NodeConversationLinker,
   NodeDataChannelEngine,
   NodeForeignHistoryFiles,
+  NodeGzip,
   NodePairingCryptography,
   NodeSessionBrowserLauncher,
   NodeSkillFiles,
@@ -497,6 +504,7 @@ import { FileMcpProjectFiles } from '../src/adapters/session-mcp/project-files.t
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import { BunDetachedLauncher } from '../src/adapters/system/detached-launcher.ts';
 import { ProcIoPressure } from '../src/adapters/system/proc-io-pressure.ts';
+import { SystemdUserSliceReader } from '../src/adapters/system/user-slice-reader.ts';
 import {
   ManagedTerminalService,
   RedactingTerminalStreamService,
@@ -806,6 +814,7 @@ import {
   type FoundationPaths,
   fastStartRefusal,
   findAccountByAgent,
+  firewallRefusal,
   firstWriteReleasedAnswerAgenda,
   fleetManifestRefusal,
   foreignAdvertisementNotice,
@@ -847,6 +856,7 @@ import {
   type InputPasteRules,
   InputRequestService,
   type InputSealedPort,
+  InputTargetRouter,
   InstructionRefresh,
   type InterruptedLaunchOutcome,
   InterruptedLaunchReconciler,
@@ -871,12 +881,14 @@ import {
   LiveDeviceConnections,
   type LivenessSample,
   type LivenessTarget,
+  LOOPBACK_FIREWALL_CHECK_MS,
   LocalModelsService,
   LoginDirectory,
   type LoginSweep,
   LoginVault,
   type LogLevel,
   type LoopBlockedClockPort,
+  LoopbackFirewallWatch,
   type LoopWatchdogPort,
   launchGuardActive,
   launchReasoningEffort,
@@ -996,7 +1008,9 @@ import {
   readDaemonRelayIdentity,
   readDoctorReport,
   readHarnessPreflight,
+  readLoopbackFirewall,
   readTranscriptPage,
+  readUserSlice,
   refuseExhaustedCandidates,
   refuseHeldStateHome,
   refuseOccupiedAddress,
@@ -1610,6 +1624,15 @@ export interface DaemonWorld {
    *  period is the fleet's declared `usage.interval`, so it is built once both
    *  documents have been read — which is why it resolves rather than returns. */
   readonly createUsageFeed: (config: DaemonConfig) => Promise<UsageFeedPort>;
+  /**
+   * Whether `GET /usage` and `GET /metrics` answer a caller with no credential: the machine's
+   * `publicUsageFeed` setting, asked at every request.
+   *
+   * It reads the configuration service's last load, which is memory and never the YAML, and an
+   * empty or not-yet-loaded configuration is the default — off — so the feed can only become reachable
+   * once a load has judged the setting, and a held (unconfirmed) switch-on is not the one in effect.
+   */
+  readonly publicUsageFeed: () => boolean;
   /**
    * Opens this daemon's durable identity and device grants before any remote route is served.
    *
@@ -4120,21 +4143,6 @@ const WARDEN_TRIAGE_TAIL = 12;
 const WARDEN_LIVENESS_TICK_SECONDS = 30;
 
 /** The collaborators a warden subsystem needs from the rest of the root. */
-/**
- * `tick`, run as the labelled activity `name`, so `fy daemon profile` and a stall can name the timer
- * that did the work. The tick's own errors stay its own: a rejection is swallowed here exactly as each
- * timer already swallowed it. Without a ledger the tick runs as it always did.
- */
-function asActivity(activities: ActivityLedger | undefined, name: string, tick: () => unknown): () => void {
-  return () => {
-    if (activities === undefined) {
-      void tick();
-      return;
-    }
-    void activities.run(name, async () => await tick()).catch(() => undefined);
-  };
-}
-
 interface WardenParts {
   /** The named work in flight, so the sweep and the liveness tick are attributed in a profile. */
   readonly activities?: ActivityLedger;
@@ -6139,16 +6147,19 @@ function createInputRequestService(input: {
 }): InputRequestService {
   const clock = { now: () => Date.now() };
   return new InputRequestService({
-    target: new TmuxInputTarget(
-      input.tmux,
-      {
-        locate: async (sessionId, key) =>
-          (await input.terminals.list()).find(
-            record => record.ownerId === sessionId && (record.name === key || record.id === key),
-          ),
-      },
-      new SttyTerminalModes(process.platform, runProgram),
-      runProgram,
+    // A page cannot take a request yet: the router answers `unsupported` until a browser adapter is wired.
+    target: new InputTargetRouter(
+      new TmuxInputTarget(
+        input.tmux,
+        {
+          locate: async (sessionId, key) =>
+            (await input.terminals.list()).find(
+              record => record.ownerId === sessionId && (record.name === key || record.id === key),
+            ),
+        },
+        new SttyTerminalModes(process.platform, runProgram),
+        runProgram,
+      ),
     ),
     agenda: new InputAgendaAdapter(input.agenda),
     notifier: new InputAgentNotifierAdapter(
@@ -6464,7 +6475,11 @@ const TERMINAL_IDLE_TIMEOUT_MS = 60 * 60_000;
  * that has none refuses with a sentence naming what is missing rather than spawning whatever answers
  * to the name.
  */
-function createBrowserLoginWorld(paths: FoundationPaths, closeAgentBrowsers: () => Promise<void>): BrowserLoginWorld {
+function createBrowserLoginWorld(
+  paths: FoundationPaths,
+  closeAgentBrowsers: () => Promise<void>,
+  ports: () => Promise<ResolvedBrowserPorts>,
+): BrowserLoginWorld {
   const profile = new BrowserProfileStore(paths.home);
   const which = (name: string) => () => Bun.which(name, { PATH: process.env.PATH }) ?? undefined;
   const runtime = new NodeBrowserLoginRuntime({
@@ -6472,6 +6487,7 @@ function createBrowserLoginWorld(paths: FoundationPaths, closeAgentBrowsers: () 
     secretsDirectory: profile.browserDirectory,
     x11vncExecutable: which('x11vnc'),
     timeoutExecutable: which('timeout'),
+    ports,
     // The operator's explicit Chrome, honoured ahead of this platform's candidate list. The domain
     // names the variable in its own refusal, so the name is read here rather than invented.
     chromeOverride: () => process.env.FY_CHROME_BIN,
@@ -7469,6 +7485,42 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    */
   const declaredAccountModel = async () => await readDeclaredAccountModel(configFiles, configLocations);
   /**
+   * Which loopback ports the browser, its sign-in relay and the login window bind: read at every start, like the
+   * mode. An unreadable configuration is `random`, which is what every start did before the setting.
+   */
+  const browserPorts = async (): Promise<ResolvedBrowserPorts> => {
+    const setting = (await declaredAccountModel())?.machine.browserPorts ?? 'random';
+    if (setting === 'random') return { kind: 'random' };
+    const marker = await readLoopbackFirewallMarker(async path => await Bun.file(path).text());
+    return resolveBrowserPorts(setting, process.getuid?.() ?? 0, marker);
+  };
+  /**
+   * Whether the fixed browser ports are fenced off from other local users: read on demand, so the answer
+   * follows both the setting and the host's marker. A reading for warnings, never a gate. `cached` takes the
+   * setting from the last configuration load instead of re-scanning the directory, for the timer.
+   */
+  const loopbackFirewall = async (cached = false) =>
+    await readLoopbackFirewall(
+      async () =>
+        (cached ? await effectiveAccountModel() : await declaredAccountModel())?.machine.browserPorts ?? 'random',
+      process.getuid?.() ?? 0,
+      new FileLoopbackMarkerReader(),
+      () => Date.now(),
+    );
+  /**
+   * This user's systemd slice limits and linger, for the doctor's shared-host rows. Asked only on Linux with
+   * `browserPorts` set to something but `random`, so a single-user host never reads it. A reading for
+   * warnings, never a gate.
+   */
+  const userSlice = async () =>
+    await readUserSlice(
+      process.platform,
+      async () => (await declaredAccountModel())?.machine.browserPorts ?? 'random',
+      new SystemdUserSliceReader({ uid: process.getuid?.() ?? 0, user: userInfo().username }),
+    );
+  /** Each change of that reading is said once (a daemon notice), at a browser start and on the five-minute tick. */
+  const loopbackFirewallWatch = new LoopbackFirewallWatch(loopbackFirewall, message => bootNotices.state(message));
+  /**
    * The same model as the last configuration load has it, without touching the directory: for the
    * readers that run on a timer — the credential catalogue, the usage feed and its cadence, auto-resume —
    * which each re-scanned the whole configuration tree on every pass. A change reaches them once the
@@ -7643,6 +7695,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     deliverCallback: deliverCodexCallback,
     environment: process.env,
     timer: harnessLoginTimer,
+    sharedHost: async () => ((await declaredAccountModel())?.machine.browserPorts ?? 'random') !== 'random',
     portHolders: systemPortHolders(),
     clientName: CLIENT_NAME,
     onSignedIn: () => configChanges.announce(['credentials', 'runtimes']),
@@ -8620,6 +8673,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     createResumeLauncher,
     createSessionLaunch,
     createSessionResume,
+    publicUsageFeed: () => configFiles.current().evaluation.effective.model.machine.publicUsageFeed,
     createUsageFeed: async config => {
       housekeepingEnabled = config.housekeeping.enabled;
       usageCollector = config.usage.url !== undefined;
@@ -8827,6 +8881,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // Read at every launch, so a switch applies the next time the browser starts. An unreadable
         // configuration launches headless rather than not at all.
         mode: async () => (await declaredAccountModel())?.machine.browserMode ?? 'headless',
+        ports: browserPorts,
+        checkFirewall: async () =>
+          firewallRefusal(
+            await loopbackFirewallWatch.check(),
+            (await declaredAccountModel())?.machine.browserFirewallFailure ?? 'warn',
+          ),
         // Read at every launch too, but a proxy the owner asked for is never dropped quietly: a secret the vault
         // does not hold refuses the launch (resolveBrowserProxy) rather than sending traffic around the proxy.
         proxy: async () => {
@@ -8942,7 +9002,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         })),
       };
     },
-    browserLogin: createBrowserLoginWorld(paths, async () => await closeAgentBrowsers()),
+    browserLogin: createBrowserLoginWorld(paths, async () => await closeAgentBrowsers(), browserPorts),
     fileEvents,
     tmuxControl: tmux,
     createSubsystems: (
@@ -9493,10 +9553,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
         },
         timers: {
-          after: (ms, run) => {
-            const handle = setTimeout(asActivity(activities, 'board github watch', run), ms);
-            return () => clearTimeout(handle);
-          },
+          after: (ms, run) => afterAsActivity(activities, 'board github watch', run, ms),
         },
         clock: { now: () => clock.now(), random: () => Math.random() },
         diagnostics: boardDiagnostics,
@@ -10070,6 +10127,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         asActivity(activities, 'board sweep', async () => await boardSweep.tick()),
         BOARD_SWEEP_INTERVAL_MS,
       ).unref();
+      // The loopback firewall is re-read every five minutes, not only at a browser start, so a rule that was
+      // flushed or a check that stopped running is said out loud. First tick after five minutes, not at boot (a
+      // browser start checks at once). Reads nothing while browserPorts is random,
+      // and never re-scans the configuration directory: an idle daemon does no parsing (the idle-daemon test).
+      const checkLoopbackFirewall = asActivity(
+        activities,
+        'loopback firewall check',
+        async () => await loopbackFirewallWatch.check(true),
+      );
+      setInterval(checkLoopbackFirewall, LOOPBACK_FIREWALL_CHECK_MS).unref();
       // Agenda mode: the switch (the session document and its launch variable, written together like Pack's and
       // hypermedia's) and the one-time migration that turns it on for every ferret that already had open items —
       // they ARE its agenda.
@@ -10880,11 +10947,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         republish: async () => {
           await fleetCatalog.republish();
         },
-        setTimer: (run, ms) => {
-          const handle = setTimeout(asActivity(activities, 'disable expiry', run), ms);
-          handle.unref();
-          return () => clearTimeout(handle);
-        },
+        setTimer: (run, ms) => afterAsActivity(activities, 'disable expiry', run, ms, { unref: true }),
       });
       /**
        * Pack mode (docs/pack-mode.md): over the same runtimes, logins and catalogs every picker reads, and
@@ -11199,6 +11262,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               harnesses: await readHarnesses(accounts, executables, harnessDiscovery),
               directorySyscalls,
               tmuxRelease: await new TmuxReleaseReader(tmuxExecutable, tmux).read(),
+              loopbackFirewall: await loopbackFirewall(),
+              userSlice: await userSlice(),
             });
           },
         },
@@ -11529,6 +11594,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             now: () => performance.now(),
           }),
           state: () => browserService.overview(),
+          firewall: loopbackFirewall,
         },
         agentTools: createAgentToolsSubsystem({
           storage,
@@ -11700,7 +11766,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               if (ref === null || (ref.machineId !== undefined && ref.machineId !== attachmentDaemonId))
                 return undefined;
               const found = await boardWorld.board.task(ref.id).catch(() => undefined);
-              return found === undefined ? undefined : { task: found.task, laneSet: found.laneSet };
+              if (found === undefined) return undefined;
+              const lead = await new StorageSubFerretDirectory(storage).leadOf(sessionId).catch(() => undefined);
+              return { task: found.task, laneSet: found.laneSet, ...(lead === undefined ? {} : { subFerret: true }) };
             },
           },
           activities,
@@ -12077,23 +12145,33 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // fails and the viewer is told 1011 "terminal redraw failed" instead of the 1000 "daemon shutting
   // down" it is owed. The host does not exist yet, so this is bound once it does.
   let closeLiveSockets: () => void = () => {};
-  cleanups.push(() => {
+  // The saved-login sweep below writes under THIS home lock, so the lock must outlive it: a stop that arrives
+  // while it is in flight drains it BEFORE storage closes (closing releases the lock), and a stop that arrives
+  // before it starts means it never starts. Otherwise a second daemon could take the home while the sweep writes.
+  let stopping = false;
+  let loginSweep: Promise<LoginSweep | undefined> | undefined;
+  cleanups.push(async () => {
+    stopping = true;
+    await loginSweep?.catch(() => undefined);
     closeLiveSockets();
-    return opened.storage.close();
+    await opened.storage.close();
   });
   world.notices.step('state home opened', opened.paths.home);
   // A page left by a `fy pair --open` that was killed holds a dead code; the daemon owns the home now, so it clears it.
   await world.boot.sweepPairingRedirects?.(opened.paths.home);
   // Saved-login ciphertext a stopped change left behind, swept only NOW: this process holds the state home's
   // lock, so no other daemon can be mid-change on these files. Masked until swept; a damaged index sweeps nothing.
-  const loginSweep = await world.boot.sweepSavedLogins?.().catch((error: unknown) => ({
-    swept: 0,
-    damaged: error instanceof Error ? error.message : 'the saved logins could not be read',
-  }));
-  if (loginSweep?.damaged !== undefined)
-    world.notices.state(`saved logins kept as they are: ${loginSweep.damaged}; nothing was swept`);
-  else if (loginSweep !== undefined && loginSweep.swept > 0)
-    world.notices.step('saved logins tidied', `removed ${loginSweep.swept} sealed value(s) no saved login points at`);
+  loginSweep = stopping
+    ? undefined
+    : world.boot.sweepSavedLogins?.().catch((error: unknown) => ({
+        swept: 0,
+        damaged: error instanceof Error ? error.message : 'the saved logins could not be read',
+      }));
+  const swept = await loginSweep;
+  if (swept?.damaged !== undefined)
+    world.notices.state(`saved logins kept as they are: ${swept.damaged}; nothing was swept`);
+  else if (swept !== undefined && swept.swept > 0)
+    world.notices.step('saved logins tidied', `removed ${swept.swept} sealed value(s) no saved login points at`);
 
   progress.enter('loading configuration');
   const peeked = await world.config.peek();
@@ -12298,6 +12376,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     },
     usage,
     clock: world.clock,
+    publicUsageFeed: world.publicUsageFeed,
     startedAtMs,
     liveness,
   };
@@ -12485,6 +12564,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     ...createdSubsystems,
     health: { ...createdSubsystems.health, legacyWire: () => legacyWire.snapshot() },
     legacyWire,
+    compressor: new NodeGzip(),
   };
   // Registered BEFORE the address is bound, like every other acquisition: from here on the daemon can
   // be asked to put an X server, a Chrome and a VNC listener on this host, and whatever it took must

@@ -11,6 +11,13 @@ after the release". That is the board's job: a finished card reaches its "To tes
 opens an agenda item only if it needs something from them to fix it. The ferret's instruction says so
 (`AGENDA_INSTRUCTION`, [notifications.md](notifications.md#agenda-mode)).
 
+**A question the owner asks is answered on the agenda too.** The owner reads the agenda, not every reply, so an answer
+given only in chat can be missed. When the owner asks a question, the ferret answers in chat **and** raises one
+`--kind info` item holding the answer: the premise is the question and the situation, the ask or body is the answer,
+short and plain, readable with no chat open. The owner closes it once read. It is one item per question; a follow-up on
+the same topic edits that item (`fy agenda edit`) rather than adding another. This is the one case where an item carries
+no ask of the owner. It is still information only the ferret can give, and it is not tracking: no "please test/verify".
+
 The daemon owns the model: the state machine is `packages/daemon/src/lib/agenda/state-machine.ts`,
 the wire contract is `packages/protocol/src/lib/agenda.ts`. This page says what they mean.
 

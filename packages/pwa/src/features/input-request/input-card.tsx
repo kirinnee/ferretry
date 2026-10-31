@@ -8,16 +8,18 @@
  *
  *   - a saved login the daemon matched to this target is ONE TAP: "Use saved <label>". Tapping it is the owner's
  *     permission; nothing is ever sent on its own. Only a `matched` offer is that button, never a hinted one;
- *   - otherwise (or after "Type a different one") a masked field, a local eye that is not remembered,
- *     "Press Enter for me", and "Save as" when this kind of value is ever kept;
+ *   - otherwise (or after "Type a different one") one masked field per value, each with a local eye that is not
+ *     remembered, "Press Enter for me", and "Save as" when the value is ever kept (one value, or a login
+ *     card's username and password kept together);
  *   - the other saved logins stay selectable by hand under "Choose another saved login".
  *
- * THE VALUE LIVES ONLY IN THE CONTROLLED FIELD until Send. It is never put in a draft store, storage, a query
- * cache, a URL or a log; it is cleared on Send, when the field unmounts and when the page is hidden. A saved
- * value NEVER passes through this app: tapping a login sends its handle and the daemon types it.
+ * A CARD OF SEVERAL FIELDS (a login's email and password) is ONE Send: it waits until every field is typed, and
+ * each PLAIN field carries its own red flag, because the ferret can see that value. A saved login is one tap for
+ * the whole card.
  *
- * ONE FIELD TODAY, MANY LATER. The card draws `fields` as a list and each field keeps its own state and its own
- * Send; the multi-field card (username + password on one card) adds fields and rewrites nothing.
+ * THE VALUES LIVE ONLY IN THE CONTROLLED FIELDS until Send. They are never put in a draft store, storage, a query
+ * cache, a URL or a log; every field is cleared on Send, when the card unmounts and when the page is hidden. A saved
+ * value NEVER passes through this app: tapping a login sends its handle and the daemon types it.
  */
 
 import type { InputRequest, InputSavedOffer } from '@ferretry/protocol';
@@ -25,30 +27,36 @@ import { Eye, EyeOff, ShieldAlert, ShieldCheck, ShieldQuestion } from 'lucide-re
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { cancelInput, deliverInput, type InputClient } from '../../lib/input-api.ts';
 import {
+  cardOffersSave,
+  cardSaveBlock,
+  chainWords,
   defaultSubmit,
   expiryWords,
   fieldAttributes,
+  fieldProblem,
+  fieldRiskLine,
   type InputCardField,
   initialSaveDraft,
   inputFailure,
   normalizeHandle,
   observedWords,
   offersPressEnter,
-  offersSave,
   offerUsername,
-  PLAIN_NOTICE,
   pastedWords,
-  saveBlock,
+  plainFlagWords,
   saveDraftProblem,
   savedBody,
   savedButtonWords,
   savedOutcomeWords,
   sealedBody,
   sendBlock,
+  showsHeaderRisk,
   splitOffers,
   targetRef,
   titleWords,
   typedBody,
+  typedFieldsBody,
+  typedReady,
   updatedEntry,
 } from '../../lib/input-card.ts';
 
@@ -141,6 +149,13 @@ export function InputCard({
       {expiryWords(request.expiresAt, now)}
     </span>
   );
+  const chainLine = chainWords(request);
+  const chain =
+    chainLine === undefined ? null : (
+      <p className="m-0 text-meta font-medium text-muted" data-input-chain="">
+        {chainLine}
+      </p>
+    );
 
   return (
     <section
@@ -152,6 +167,7 @@ export function InputCard({
     >
       {embedded ? (
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+          {chain}
           {target}
           {expiry}
         </div>
@@ -163,6 +179,7 @@ export function InputCard({
             </h3>
             {expiry}
           </header>
+          {chain}
           {target}
         </>
       )}
@@ -192,6 +209,15 @@ export function InputCard({
                 {facts.promptLine}
               </code>
             )}
+            {facts.fields === undefined ? null : (
+              <ul className="m-0 flex list-none flex-col gap-0.5 p-0 text-cell text-muted" data-input-seen-fields="">
+                {facts.fields.map(seen => (
+                  <li data-input-seen-field={seen.key} key={seen.key}>
+                    <span className="font-medium text-fg">{seen.label}</span> · {seen.words}
+                  </li>
+                ))}
+              </ul>
+            )}
           </>
         )}
         <p className="m-0 text-meta text-faint" data-input-agent-says="">
@@ -199,7 +225,14 @@ export function InputCard({
         </p>
       </div>
 
-      {request.risk === undefined || Risk === null ? null : (
+      {facts?.challenge === undefined ? null : (
+        <p className="m-0 flex items-start gap-2 text-cell text-warn" data-input-challenge="" role="status">
+          <ShieldQuestion aria-hidden="true" className="mt-0.5 shrink-0" size={16} />
+          <span>{facts.challenge}</span>
+        </p>
+      )}
+
+      {request.risk === undefined || Risk === null || !showsHeaderRisk(request) ? null : (
         <p
           className={`m-0 flex items-start gap-2 text-cell ${RISK_TONE[request.risk.level]}`}
           data-input-risk={request.risk.level}
@@ -223,14 +256,13 @@ export function InputCard({
           request={request}
         />
       ) : settled === null ? (
-        fields.map((field, index) => (
-          <InputFieldSection
+        fields.length === 0 ? null : (
+          <InputForm
             blocked={blocked}
             busy={cancelling}
-            cancel={index === fields.length - 1 ? cancelButton : null}
+            cancel={cancelButton}
             client={client}
-            field={field}
-            key={field.key}
+            fields={fields}
             onRefresh={onRefresh}
             onSettled={text => {
               setSettled(text);
@@ -238,7 +270,7 @@ export function InputCard({
             }}
             request={request}
           />
-        ))
+        )
       ) : (
         <p className="m-0 text-ui text-ok" data-input-settled="" role="status">
           {settled}
@@ -330,42 +362,187 @@ function SealedPasteSection({ request, client, blocked, busy, cancel, onSettled,
   );
 }
 
-interface FieldSectionProps {
+interface FormProps {
   readonly request: InputRequest;
-  readonly field: InputCardField;
+  readonly fields: readonly InputCardField[];
   readonly client: InputClient;
   readonly blocked: string | undefined;
   readonly busy: boolean;
-  /** The card's Cancel, drawn in this field's action row (left of Send) when this is the last field. */
+  /** The card's Cancel, drawn in the action row (left of Send). */
   readonly cancel: ReactNode;
   readonly onSettled: (text: string) => void;
   readonly onRefresh: (() => void) | undefined;
 }
 
-function InputFieldSection({ request, field, client, blocked, busy, cancel, onSettled, onRefresh }: FieldSectionProps) {
+type Nodes = Map<string, HTMLInputElement>;
+
+interface FieldInputProps {
+  readonly field: InputCardField;
+  readonly request: InputRequest;
+  readonly nodes: Nodes;
+  readonly value: string;
+  readonly revealed: boolean;
+  readonly disabled: boolean;
+  readonly many: boolean;
+  /** What is wrong with the typed value, shown under the field (a card of several fields only). */
+  readonly problem: string | undefined;
+  readonly onChange: (value: string) => void;
+  readonly onReveal: () => void;
+  readonly onEnter: () => void;
+}
+
+function FieldInput({
+  field,
+  request,
+  nodes,
+  value,
+  revealed,
+  disabled,
+  many,
+  problem,
+  onChange,
+  onReveal,
+  onEnter,
+}: FieldInputProps) {
   const inputId = useId();
-  const input = useRef<HTMLInputElement | null>(null);
-  const { primary, others } = splitOffers(field.saved);
-  const [value, setValue] = useState('');
-  const [revealed, setRevealed] = useState(false);
+  const attributes = fieldAttributes(field.sensitivity, revealed);
+
+  // React detaches a ref BEFORE passive cleanups run, so the field is emptied when it is detached.
+  const attach = useCallback(
+    (node: HTMLInputElement | null): void => {
+      if (node !== null) {
+        nodes.set(field.key, node);
+        return;
+      }
+      const detached = nodes.get(field.key);
+      if (detached !== undefined) detached.value = '';
+      nodes.delete(field.key);
+    },
+    [nodes, field.key],
+  );
+
+  return (
+    <div className="flex min-w-0 flex-col gap-2" data-input-field={field.key}>
+      <label className="text-cell font-medium text-fg" htmlFor={inputId}>
+        {field.label}
+      </label>
+      <div className="flex min-w-0 items-stretch gap-2">
+        <input
+          {...attributes}
+          autoCapitalize="off"
+          autoCorrect="off"
+          className="kt-input min-h-[44px] min-w-0 flex-1 rounded-control border border-border bg-surface-2 px-2 text-fg"
+          data-input-value=""
+          disabled={disabled}
+          id={inputId}
+          onChange={event => onChange(event.target.value)}
+          onKeyDown={event => {
+            if (event.key === 'Enter' && value !== '') {
+              event.preventDefault();
+              onEnter();
+            }
+          }}
+          ref={attach}
+          spellCheck={false}
+          value={value}
+        />
+        {field.sensitivity === 'plain' ? null : (
+          <button
+            aria-label={`${revealed ? 'Hide' : 'Show'} what you typed${many ? ` in ${field.label}` : ''}`}
+            aria-pressed={revealed}
+            className="kt-btn min-h-[44px] min-w-[44px] justify-center"
+            data-input-reveal=""
+            onClick={onReveal}
+            type="button"
+          >
+            {revealed ? <EyeOff aria-hidden="true" size={16} /> : <Eye aria-hidden="true" size={16} />}
+          </button>
+        )}
+      </div>
+      {problem === undefined ? null : (
+        <p className="m-0 text-meta text-err" data-input-field-problem="" role="alert">
+          {problem}
+        </p>
+      )}
+      <FieldFlags field={field} request={request} />
+    </div>
+  );
+}
+
+/**
+ * A field's own flags: the red "the ferret can see this" of a plain field and the daemon's risk for the rest. Drawn
+ * with the field when it is typed AND in the field summary above a saved login's button, so a one-tap send never
+ * goes out with a warning the owner was not shown.
+ */
+function FieldFlags({ field, request }: { readonly field: InputCardField; readonly request: InputRequest }) {
+  const riskLine = fieldRiskLine(request, field);
+  const RiskIcon = riskLine === undefined ? null : RISK_ICON[riskLine.level];
+  return (
+    <>
+      {field.sensitivity === 'plain' ? (
+        <p className="m-0 flex items-start gap-2 text-meta text-err" data-input-plain="">
+          <ShieldAlert aria-hidden="true" className="mt-0.5 shrink-0" size={14} />
+          <span>{plainFlagWords(field)}</span>
+        </p>
+      ) : null}
+      {riskLine === undefined || RiskIcon === null ? null : (
+        <p
+          className={`m-0 flex items-start gap-2 text-meta ${RISK_TONE[riskLine.level]}`}
+          data-input-field-risk={riskLine.level}
+        >
+          <RiskIcon aria-hidden="true" className="mt-0.5 shrink-0" size={14} />
+          <span>{riskLine.reason}</span>
+        </p>
+      )}
+    </>
+  );
+}
+
+/** Each field a saved login would fill, by name, with its flags: what the owner sees instead of the inputs. */
+function FieldSummary({
+  fields,
+  request,
+}: {
+  readonly fields: readonly InputCardField[];
+  readonly request: InputRequest;
+}) {
+  return (
+    <ul className="m-0 flex min-w-0 list-none flex-col gap-2 p-0" data-input-field-summary="">
+      {fields.map(field => (
+        <li className="flex min-w-0 flex-col gap-1" data-input-summary-field={field.key} key={field.key}>
+          <span className="text-cell font-medium text-fg">
+            {field.label} <span className="font-normal text-muted">· {SENSITIVITY_WORDS[field.sensitivity]}</span>
+          </span>
+          <FieldFlags field={field} request={request} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+const SENSITIVITY_WORDS = { secret: 'secret', private: 'one-time code', plain: 'not secret' } as const;
+
+function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, onRefresh }: FormProps) {
+  const nodes = useRef<Nodes>(new Map());
+  const { primary, others } = splitOffers(request.saved);
+  const [values, setValues] = useState<Readonly<Record<string, string>>>({});
+  const [revealed, setRevealed] = useState<Readonly<Record<string, boolean>>>({});
   const [typing, setTyping] = useState(primary === undefined);
   const [submit, setSubmit] = useState(() => defaultSubmit(request));
-  const [save, setSave] = useState(() => initialSaveDraft(field.saved));
   const [sending, setSending] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   // A send the daemon never answered keeps its id, so pressing Send again cannot type twice.
   const pending = useRef<string | null>(null);
 
-  // React detaches a ref BEFORE passive cleanups run, so the field is emptied when it is detached.
-  const attach = useCallback((node: HTMLInputElement | null): void => {
-    if (node === null && input.current !== null) input.current.value = '';
-    input.current = node;
-  }, []);
+  // "Save as" keeps the one typed value, or a login card's username and password together.
+  const only = fields.length === 1 ? fields[0] : undefined;
+  const [save, setSave] = useState(() => initialSaveDraft(request.saved));
+  const many = only === undefined;
 
   const clear = useCallback((): void => {
-    setValue('');
-    setRevealed(false);
-    if (input.current !== null) input.current.value = '';
+    setValues({});
+    setRevealed({});
+    for (const node of nodes.current.values()) node.value = '';
   }, []);
 
   useEffect(() => {
@@ -376,11 +553,13 @@ function InputFieldSection({ request, field, client, blocked, busy, cancel, onSe
     return () => document.removeEventListener('visibilitychange', hide);
   }, [clear]);
 
-  const attributes = fieldAttributes(field.sensitivity, revealed);
   const off = blocked !== undefined || sending || busy;
-  const existing = updatedEntry(field.saved, save.id);
-  const saveReason = saveBlock(field, value);
+  const value = only === undefined ? '' : (values[only.key] ?? '');
+  const saving = cardOffersSave(request, fields);
+  const existing = updatedEntry(request.saved, save.id);
+  const saveReason = cardSaveBlock(request, fields, values);
   const draftProblem = saveDraftProblem(save);
+  const ready = typedReady(fields, values);
 
   const mintId = (): string => {
     pending.current ??= crypto.randomUUID();
@@ -396,7 +575,7 @@ function InputFieldSection({ request, field, client, blocked, busy, cancel, onSe
     }
     setFailure(null);
     setSending(true);
-    // The body now holds the padded value; the field does not keep it a moment longer.
+    // The body now holds the padded values; the fields do not keep them a moment longer.
     clear();
     try {
       const result = await deliverInput(client, request, built.body);
@@ -417,7 +596,12 @@ function InputFieldSection({ request, field, client, blocked, busy, cancel, onSe
   const tapOffer = (offer: InputSavedOffer): void =>
     void send(deliveryId => savedBody(request, offer.id, submit, deliveryId));
 
-  const sendTyped = (): void => void send(deliveryId => typedBody({ request, field, value, submit, save, deliveryId }));
+  const sendTyped = (): void =>
+    void send(deliveryId =>
+      only === undefined
+        ? typedFieldsBody({ request, fields, values, submit, deliveryId, save })
+        : typedBody({ request, field: only, value, submit, save, deliveryId }),
+    );
 
   const offerButton = (offer: InputSavedOffer, primaryTap: boolean): ReactNode => {
     const username = offerUsername(offer);
@@ -444,52 +628,31 @@ function InputFieldSection({ request, field, client, blocked, busy, cancel, onSe
   };
 
   return (
-    <div className="flex min-w-0 flex-col gap-3" data-input-field={field.key}>
+    <div className="flex min-w-0 flex-col gap-3" data-input-form="">
       {typing ? (
-        <div className="flex min-w-0 flex-col gap-2">
-          <label className="text-cell font-medium text-fg" htmlFor={inputId}>
-            {field.label}
-          </label>
-          <div className="flex min-w-0 items-stretch gap-2">
-            <input
-              {...attributes}
-              autoCapitalize="off"
-              autoCorrect="off"
-              className="kt-input min-h-[44px] min-w-0 flex-1 rounded-control border border-border bg-surface-2 px-2 text-fg"
-              data-input-value=""
+        <div className="flex min-w-0 flex-col gap-3">
+          {fields.map(field => (
+            <FieldInput
               disabled={off}
-              id={inputId}
-              onChange={event => setValue(event.target.value)}
-              onKeyDown={event => {
-                if (event.key === 'Enter' && value !== '') {
-                  event.preventDefault();
-                  sendTyped();
-                }
+              field={field}
+              key={field.key}
+              many={many}
+              nodes={nodes.current}
+              onChange={next => setValues(current => ({ ...current, [field.key]: next }))}
+              onEnter={() => {
+                if (ready) sendTyped();
               }}
-              ref={attach}
-              spellCheck={false}
-              value={value}
+              onReveal={() => setRevealed(current => ({ ...current, [field.key]: current[field.key] !== true }))}
+              problem={many ? fieldProblem(field, values[field.key] ?? '') : undefined}
+              request={request}
+              revealed={revealed[field.key] === true}
+              value={values[field.key] ?? ''}
             />
-            {field.sensitivity === 'plain' ? null : (
-              <button
-                aria-label={revealed ? 'Hide what you typed' : 'Show what you typed'}
-                aria-pressed={revealed}
-                className="kt-btn min-h-[44px] min-w-[44px] justify-center"
-                data-input-reveal=""
-                onClick={() => setRevealed(current => !current)}
-                type="button"
-              >
-                {revealed ? <EyeOff aria-hidden="true" size={16} /> : <Eye aria-hidden="true" size={16} />}
-              </button>
-            )}
-          </div>
-          {field.sensitivity === 'plain' ? (
-            <p className="m-0 text-meta text-warn" data-input-plain="">
-              {PLAIN_NOTICE}
-            </p>
-          ) : null}
+          ))}
         </div>
       ) : null}
+
+      {primary === undefined || typing ? null : <FieldSummary fields={fields} request={request} />}
 
       {primary === undefined || typing ? null : (
         <div className="flex flex-wrap items-stretch gap-2">
@@ -505,7 +668,7 @@ function InputFieldSection({ request, field, client, blocked, busy, cancel, onSe
         </div>
       )}
 
-      {typing && offersSave(field) ? (
+      {typing && saving ? (
         <div className="flex min-w-0 flex-col gap-2" data-input-save="">
           <label className="flex items-center gap-2 text-cell text-fg">
             <input
@@ -592,23 +755,21 @@ function InputFieldSection({ request, field, client, blocked, busy, cancel, onSe
         </p>
       )}
 
-      {cancel === null && !typing ? null : (
-        <div className="flex flex-wrap items-center justify-end gap-2" data-input-actions="">
-          {cancel}
-          {typing ? (
-            <button
-              className="kt-btn min-h-[44px] justify-center"
-              data-input-send=""
-              data-variant="primary"
-              disabled={off || value === '' || (save.enabled && saveReason === undefined && draftProblem !== undefined)}
-              onClick={sendTyped}
-              type="button"
-            >
-              {sending ? 'Sending…' : 'Send'}
-            </button>
-          ) : null}
-        </div>
-      )}
+      <div className="flex flex-wrap items-center justify-end gap-2" data-input-actions="">
+        {cancel}
+        {typing ? (
+          <button
+            className="kt-btn min-h-[44px] justify-center"
+            data-input-send=""
+            data-variant="primary"
+            disabled={off || !ready || (save.enabled && saveReason === undefined && draftProblem !== undefined)}
+            onClick={sendTyped}
+            type="button"
+          >
+            {sending ? 'Sending…' : 'Send'}
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }

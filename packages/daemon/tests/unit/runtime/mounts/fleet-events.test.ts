@@ -493,22 +493,23 @@ describe('the mounted fleet event feed', () => {
     should(refusedCode(decision)).equal('invalid_query');
   });
 
-  it('should authenticate a LOOPBACK handshake by its query token alone', async () => {
-    // Arrange — a browser `WebSocket` cannot carry an authorization header, so the token arrives as
-    // a query parameter. That credential is honoured for loopback peers ONLY, and the route has to
-    // tolerate the parameter as well: refusing it as an unknown query would make the feed
-    // unreachable from every browser. A REMOTE browser presents a ticket instead — see the cases
-    // below — because a durable token in a URL is a durable token in an access log.
+  it('should not authenticate a handshake by a query token, from any peer', async () => {
+    // Arrange — a token in a URL is a durable token in argv, shell history and an access log, so none
+    // is read from one. Authentication is the header's alone; a bearer-authenticated handshake that
+    // also carries `token` is refused as an unknown parameter rather than silently ignored.
     const { dispatcher } = fixture();
     const query = [['token', CREDENTIALS.admin]] as const;
 
-    // Act — no authorization header at all in either case; only the peer differs.
+    // Act
     const local = await dispatcher.upgrade(request({ path: '/v1/events', query, loopback: true }));
     const remote = await dispatcher.upgrade(request({ path: '/v1/events', query }));
+    const withBearer = await dispatcher.upgrade(request({ path: '/v1/events', query, headers: human }));
 
     // Assert
-    should(local.outcome).equal('accepted');
+    should(refusedStatus(local)).equal(401);
     should(refusedStatus(remote)).equal(401);
+    should(refusedStatus(withBearer)).equal(400);
+    should(refusedCode(withBearer)).equal('invalid_query');
   });
 
   it('should refuse a session id the layout would never produce', async () => {

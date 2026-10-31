@@ -26,8 +26,7 @@ export interface ApiRequest {
   readonly headers: ApiHeaders;
   /** Transport-observed peer address, used only as a rate-limit bucket key. */
   readonly clientAddress?: string;
-  /** Whether the peer is on the loopback interface. Query-parameter tokens are honoured only for
-   *  loopback peers, so a token can never travel in a loggable URL across a network hop. */
+  /** Whether the peer is on the loopback interface. */
   readonly loopback: boolean;
   /**
    * Whether this carrier can prove that a loopback peer is the machine itself rather than a remote
@@ -103,6 +102,12 @@ export interface ApiResponse {
    * last step before the bytes leave (`finalised`), and sends what it returns.
    */
   readonly late?: () => ApiResponse;
+  /**
+   * The gzip form of `body`, attached by the dispatcher when the caller asked for one and the policy
+   * allows it (`compression.ts`). `body` stays the plain text, so the tag, the audit and every test read
+   * what the route said; the transport that sends this adds `Content-Encoding: gzip`.
+   */
+  readonly gzip?: Uint8Array;
 }
 
 /**

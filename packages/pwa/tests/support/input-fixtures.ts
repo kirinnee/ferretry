@@ -1,10 +1,51 @@
 /** Fake input requests and saved logins for the card's tests and screenshots. No real account or daemon. */
 
-import type { InputRequest, InputSaved, InputSavedOffer, LoginEntryList, LoginEntrySummary } from '@ferretry/protocol';
+import type {
+  InputBrowserFieldFacts,
+  InputRequest,
+  InputRequestField,
+  InputRisk,
+  InputSaved,
+  InputSavedOffer,
+  InputSensitivity,
+  LoginEntryList,
+  LoginEntrySummary,
+} from '@ferretry/protocol';
 
 export const NOW = Date.parse('2026-08-05T10:00:00.000Z');
 const AT = '2026-08-01T09:00:00.000Z';
 const DIGEST = 'a'.repeat(64);
+
+const LABEL: Readonly<Record<InputSensitivity, string>> = { secret: 'Password', private: 'Code', plain: 'Value' };
+const PLAIN_RISK: InputRisk = { level: 'red', reason: 'Not secret: the ferret can see this value.' };
+const SUDO_RISK: InputRisk = { level: 'green', reason: 'sudo is a recognised password prompt and typing is hidden.' };
+
+/** One field of a card, with the label and risk its sensitivity gets unless the test says otherwise. */
+export const field = (
+  sensitivity: InputSensitivity,
+  overrides: Partial<InputRequestField> = {},
+): InputRequestField => ({
+  id: 'value',
+  label: LABEL[sensitivity],
+  sensitivity,
+  risk: sensitivity === 'plain' ? PLAIN_RISK : SUDO_RISK,
+  ...overrides,
+});
+
+/** A browser field as the daemon found it: an element in the page's own frame unless the test moves it. */
+export const browserField = (
+  fieldId: string,
+  overrides: Partial<InputBrowserFieldFacts> = {},
+): InputBrowserFieldFacts => ({
+  fieldId,
+  frameOrigin: 'https://accounts.google.com',
+  frameId: 'frame-1',
+  backendNodeId: 7,
+  field: { tag: 'input', type: 'text' },
+  box: { x: 0, y: 0, w: 200, h: 24 },
+  visible: true,
+  ...overrides,
+});
 
 export const request = (overrides: Partial<InputRequest> = {}): InputRequest => ({
   id: 'ab'.repeat(16),
@@ -13,6 +54,7 @@ export const request = (overrides: Partial<InputRequest> = {}): InputRequest => 
   target: { kind: 'terminal', key: 'deploy' },
   prompt: '[sudo] password for kirin:',
   sensitivity: 'secret',
+  fields: [field('secret')],
   submit: 'offer-owner',
   raisedAt: '2026-08-05T09:59:00.000Z',
   expiresAt: '2026-08-05T10:04:00.000Z',
@@ -26,11 +68,25 @@ export const request = (overrides: Partial<InputRequest> = {}): InputRequest => 
     promptLineDigest: DIGEST,
     recognisedConsumer: true,
   },
-  risk: { level: 'green', reason: 'sudo is a recognised password prompt and typing is hidden.' },
+  risk: SUDO_RISK,
   observedDigest: DIGEST,
   state: 'pending',
   ...overrides,
 });
+
+/**
+ * A request whose one field follows its `sensitivity` (and `risk`) the way the daemon builds it: the card's
+ * sensitivity and risk and the field's own agree unless a test gives `fields` itself.
+ */
+export const requestOf = (sensitivity: InputSensitivity, overrides: Partial<InputRequest> = {}): InputRequest => {
+  const risk = 'risk' in overrides ? overrides.risk : sensitivity === 'plain' ? PLAIN_RISK : SUDO_RISK;
+  return request({
+    sensitivity,
+    fields: [field(sensitivity, risk === undefined ? { risk: undefined } : { risk })],
+    ...(risk === undefined ? {} : { risk }),
+    ...overrides,
+  });
+};
 
 export const offer = (overrides: Partial<InputSavedOffer> = {}): InputSavedOffer => ({
   id: 'SUDO_KIRIN_BOX',

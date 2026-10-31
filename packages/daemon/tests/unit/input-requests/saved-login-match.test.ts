@@ -25,12 +25,18 @@ const browser = (origin: string): InputTargetFacts => ({
   pageId: 'p',
   origin,
   secure: true,
-  frameOrigin: origin,
   navigationId: 'n',
-  backendNodeId: 1,
-  field: { tag: 'input', type: 'password' },
-  box: { x: 0, y: 0, w: 1, h: 1 },
-  visible: true,
+  fields: [
+    {
+      fieldId: 'value',
+      frameOrigin: origin,
+      frameId: 'f',
+      backendNodeId: 1,
+      field: { tag: 'input', type: 'password' },
+      box: { x: 0, y: 0, w: 1, h: 1 },
+      visible: true,
+    },
+  ],
 });
 
 const entry = (id: string, match: string[], extra: Partial<LoginEntrySummary> = {}): LoginEntrySummary => ({

@@ -68,6 +68,7 @@ import type {
   WardenInvestigationOrigin,
   WardenJevBefore,
   WardenJevCheck,
+  WardenJevPathStep,
   WardenLayerStatus,
   WardenLeaveDuration,
   WardenLeaveView,
@@ -86,7 +87,8 @@ import {
   wardenInvestigatorSequence,
 } from '@ferretry/protocol';
 import { displayAgentName } from '../names/session-names.ts';
-import type { TriageDecision, TriageGuardPort } from '../speedups/jev.ts';
+import type { JevJudgement, TriageGuardPort } from '../speedups/jev.ts';
+import { sumActionTallies, sumReviveResults } from './action-tally.ts';
 import { type AgendaBoardInput, buildWardenAgendaView } from './agenda.ts';
 import {
   BACKOFF_CEILING_MS,
@@ -168,6 +170,7 @@ import {
   type WardenJevCheckLog,
 } from './jev-checks.ts';
 import { type WardenFocusCard, wardenResumeMessage } from './focus-card.ts';
+import { JEV_JUDGEMENT_QUESTIONS, jevFactScalars, jevFactsOf, reachableJudgements, treeResponse } from './jev-tree.ts';
 import { leftoverBrowserCandidates } from './leftovers.ts';
 import {
   detectOrphanedCards,
@@ -197,6 +200,7 @@ import {
   wardenNudgeMessage,
 } from './remedy.ts';
 import type { WardenReviveService } from './revive-service.ts';
+import { resolveReviveWatch, watchRevive } from './revive-watch.ts';
 import {
   parseWardenRuntimeState,
   jevHandoffKey,
@@ -723,6 +727,7 @@ export class WardenSweepService {
     ]);
     const resolved = await this.resolveLogin(stored.config);
     const budget = this.budget(stored.config, state, nowMs, resolved.usable);
+    const history = wardenHistory(state, nowMs);
     const jevChecks = await this.ports.jevChecks.recent(JEV_CHECKS_SHOWN).catch(() => undefined);
     const investigators = new Map(
       (state.investigations ?? []).flatMap(record =>
@@ -764,7 +769,9 @@ export class WardenSweepService {
       ],
       actions: (state.actions ?? []).slice(0, WARDEN_STATUS_LIST_LIMIT).map(action => ({ ...action })),
       blessings: [...blessingViews(state.blessings ?? {}, nowMs)],
-      history: [...wardenHistory(state, nowMs)],
+      history: [...history],
+      actionTotals: [...sumActionTallies(history)],
+      reviveTotals: sumReviveResults(history),
       // A record that cannot be read is left out — unknown, as from an older daemon — never shown as none.
       ...(jevChecks === undefined ? {} : { jevChecks: [...jevChecks] }),
     };
@@ -1045,6 +1052,7 @@ export class WardenSweepService {
     };
     await this.ports.state.write(state);
     state = await this.closeLeftovers(state, fleet, config, nowMs);
+    state = resolveReviveWatch(state, fleet, nowMs);
     const reviveRun = await this.reviveDead(state, fleet, config, nowMs);
     state = reviveRun.state;
     const anomalies = detected.anomalies.filter(anomaly => !reviveRun.revived.has(anomaly.sessionId));
@@ -1558,8 +1566,10 @@ export class WardenSweepService {
         passed.push(anomaly);
         continue;
       }
-      // A flag Jev cannot judge is handed on unasked, and remembered so it is noted once, not per sweep.
-      if (!jevJudges(anomaly)) {
+      // A flag Jev cannot judge — or whose ferret the daemon cannot read the tree's facts from — is handed
+      // on unasked, and remembered so it is noted once, not per sweep.
+      const target = byId.get(anomaly.sessionId);
+      if (!jevJudges(anomaly) || target === undefined) {
         passed.push(anomaly);
         this.ports.journal.record('fleet.warden_jev_handed_on', {
           sessionId: anomaly.sessionId,
@@ -1583,7 +1593,7 @@ export class WardenSweepService {
         next = await this.noteCapSkip(next, anomaly, config, investigating, nowMs);
         continue;
       }
-      const guarded = await this.askGuard(anomaly, config, next, byId, investigating);
+      const guarded = await this.askGuard(anomaly, target, config, next, investigating);
       next = guarded.state;
       if (guarded.outcome === undefined) {
         capped = true;
@@ -1595,7 +1605,17 @@ export class WardenSweepService {
       passed.push(anomaly);
       if (guarded.decided) next = { ...next, passedOn: [...(next.passedOn ?? []), key] };
       // Why it was handed on, for the owner's notification when no investigation can follow (`owner-routes.ts`).
-      if (guarded.outcome.kind === 'escalate') next = withJevHandoff(next, anomaly, guarded.outcome, nowMs);
+      if (guarded.outcome.kind === 'escalate')
+        next = withJevHandoff(
+          next,
+          anomaly,
+          {
+            ...guarded.outcome,
+            ...(guarded.path === undefined ? {} : { path: guarded.path }),
+            ...(guarded.node === undefined ? {} : { node: guarded.node }),
+          },
+          nowMs,
+        );
     }
     return { state: next, passed };
   }
@@ -1650,15 +1670,20 @@ export class WardenSweepService {
    */
   private async askGuard(
     anomaly: WardenAnomaly,
+    /** The flagged ferret, as the sweep sees it: where the tree's facts are read from. */
+    target: WardenFleetSession,
     config: WardenConfig,
     state: WardenRuntimeState,
-    byId: ReadonlyMap<string, WardenFleetSession>,
     investigating: boolean,
   ): Promise<{
     readonly state: WardenRuntimeState;
     readonly outcome?: WardenGuardOutcome;
     readonly decided?: boolean;
     readonly settled?: boolean;
+    /** The decision tree's path, when one was walked. */
+    readonly path?: readonly WardenJevPathStep[];
+    /** The node Jev was not sure enough of. */
+    readonly node?: string;
   }> {
     const nowMs = this.ports.nowMs();
     const at = new Date(nowMs).toISOString();
@@ -1671,10 +1696,24 @@ export class WardenSweepService {
         outcome: { kind: 'escalate', why: 'failed', confidence: 0 },
       };
 
+    // The tree's facts are the daemon's own: answered here, never asked of Jev (`jev-tree.ts`).
+    const facts = jevFactsOf({
+      anomaly,
+      view: target,
+      actions: state.actions ?? [],
+      windowMs: wardenDetectOptions(config).susThinkingSeconds * 1_000,
+      nowMs,
+    });
+    const offered = jevActsFor(anomaly);
+    const plan = reachableJudgements(facts);
     const evidence = await this.ports.evidence.evidence(anomaly.sessionId).catch(() => ({ recentTurns: [] }));
     let snapshot: Awaited<ReturnType<typeof redactTriageSnapshot>>;
     try {
-      snapshot = await redactTriageSnapshot(triageSnapshotOf(anomaly, evidence), this.ports.redactor);
+      const shown = triageSnapshotOf(anomaly, evidence);
+      snapshot = await redactTriageSnapshot(
+        { ...shown, facts: { ...shown.facts, ...jevFactScalars(facts, target, nowMs) }, acts: [] },
+        this.ports.redactor,
+      );
     } catch {
       this.ports.journal.record('fleet.warden_guard_unredacted', { sessionId: anomaly.sessionId, kind: anomaly.kind });
       return {
@@ -1685,25 +1724,36 @@ export class WardenSweepService {
         outcome: { kind: 'escalate', why: 'failed', confidence: 0, failure: 'unredacted' },
       };
     }
-    const decision: TriageDecision = await this.ports
+    // ONE call per flag: every judgement still open after the facts, each its own yes/no question.
+    const judgement: JevJudgement = await this.ports
       .guard(config.guard)
-      .decide(snapshot)
+      .judge({
+        snapshot,
+        questions: plan.judgements.map(id => ({ id, ...JEV_JUDGEMENT_QUESTIONS[id] })),
+        ...(plan.nudgeMessages === undefined || !offered.includes('nudge')
+          ? {}
+          : { nudgeMessages: plan.nudgeMessages }),
+      })
       .catch(
-        (): TriageDecision => ({
-          verdict: 'unsure',
-          confidence: 0,
+        (): JevJudgement => ({
+          answers: {},
           model: config.guard.model,
           inputTokens: 0,
           latencyMs: 0,
           failure: { code: 'provider_error' },
         }),
       );
-    const outcome = firstResponse(decision, {
+    const tree = treeResponse(facts, judgement, {
       leaveThreshold: config.guard.threshold,
-      offered: jevActsFor(anomaly),
+      offered,
       acts: config.jevActs,
       mayActAlone: config.mayActAlone,
     });
+    const { decision, outcome } = tree;
+    const traced = {
+      ...(tree.path === undefined ? {} : { path: tree.path }),
+      ...(tree.node === undefined ? {} : { node: tree.node }),
+    };
     let next: WardenRuntimeState = {
       ...state,
       triageDay: recordGuardDecision(today, decision, outcome, nowMs),
@@ -1717,9 +1767,10 @@ export class WardenSweepService {
       confidence: outcome.confidence,
       ...(outcome.kind === 'escalate' ? { why: outcome.why, route: investigating ? 'investigation' : 'owner' } : {}),
       ...(decision.failure === undefined ? {} : { failure: decision.failure.code }),
+      ...(tree.leaf === undefined ? {} : { leaf: tree.leaf }),
+      ...traced,
     });
     const decided = decision.failure === undefined;
-    const target = byId.get(anomaly.sessionId);
     const check = (took?: boolean) =>
       jevCheckOf({
         anomaly,
@@ -1728,6 +1779,7 @@ export class WardenSweepService {
         route: investigating ? 'investigation' : 'owner',
         nowMs,
         ...(took === undefined ? {} : { took }),
+        ...traced,
       });
     const base = {
       at,
@@ -1738,7 +1790,7 @@ export class WardenSweepService {
       confidence: outcome.confidence,
       ...(decision.reason === undefined ? {} : { reason: decision.reason }),
     };
-    if (outcome.kind === 'leave' && target !== undefined) {
+    if (outcome.kind === 'leave') {
       const cleared = this.clearFlags(
         next,
         { sessionId: anomaly.sessionId, kinds: [anomaly.kind], status: target.state.status, by: 'jev' },
@@ -1753,7 +1805,7 @@ export class WardenSweepService {
         outcome: 'done',
         detail: `Jev was ${Math.round(outcome.confidence * 100)}% sure it is healthy, so this flag is left alone ${leftAloneNote(anomaly.subject, cleared.ttlMs, cleared.streak)}.`,
       });
-      return { state: await this.noteJevCheck(next, check()), outcome, decided, settled: true };
+      return { state: await this.noteJevCheck(next, check()), outcome, decided, settled: true, ...traced };
     }
     if (outcome.kind === 'act') {
       const act: WardenVerdictAct = { action: outcome.act, reason: outcome.reason };
@@ -1770,15 +1822,15 @@ export class WardenSweepService {
         },
       );
       next = await this.noteJevCheck(done.state, check(done.done));
-      if (!done.done) return { state: next, outcome, decided, settled: false };
+      if (!done.done) return { state: next, outcome, decided, settled: false, ...traced };
       next = {
         ...next,
         triageDay: recordJevAction(next.triageDay ?? today),
         backoff: recordJevAct(next.backoff ?? {}, anomaly, nowMs, outcome.act, assignedCooldownMs(config)),
       };
-      return { state: next, outcome, decided, settled: true };
+      return { state: next, outcome, decided, settled: true, ...traced };
     }
-    if (outcome.kind === 'escalate' && outcome.recommends !== undefined && !investigating && target !== undefined) {
+    if (outcome.kind === 'escalate' && outcome.recommends !== undefined && !investigating) {
       this.ports.journal.record('fleet.warden_action_held', {
         targetId: anomaly.sessionId,
         action: outcome.recommends,
@@ -1793,7 +1845,7 @@ export class WardenSweepService {
         detail: jevActDetail(outcome.recommends, decision.reason ?? outcome.recommends, outcome.confidence, 'held'),
       });
     }
-    return { state: await this.noteJevCheck(next, check()), outcome, decided, settled: false };
+    return { state: await this.noteJevCheck(next, check()), outcome, decided, settled: false, ...traced };
   }
 
   /**
@@ -1969,8 +2021,11 @@ export class WardenSweepService {
       ...(investigator === undefined ? {} : { investigator }),
       ...(jev === undefined ? {} : { jev }),
     };
-    return recordWardenOutcome(
-      { ...state, actions: [stamped, ...(state.actions ?? [])].slice(0, WARDEN_HISTORY_LIMIT) },
+    return watchRevive(
+      recordWardenOutcome(
+        { ...state, actions: [stamped, ...(state.actions ?? [])].slice(0, WARDEN_HISTORY_LIMIT) },
+        stamped,
+      ),
       stamped,
     );
   }
@@ -3033,6 +3088,8 @@ function withJevHandoff(
       ...(outcome.recommends === undefined ? {} : { recommends: outcome.recommends }),
       ...(outcome.reason === undefined ? {} : { reason: outcome.reason }),
       ...(outcome.failure === undefined ? {} : { failure: outcome.failure }),
+      ...(outcome.path === undefined || outcome.path.length === 0 ? {} : { path: outcome.path }),
+      ...(outcome.node === undefined ? {} : { node: outcome.node }),
     }),
   };
 }

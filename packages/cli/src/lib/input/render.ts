@@ -66,12 +66,23 @@ export function renderInputFacts(request: InputRequest): string[] {
       ...(observed.promptLine === '' ? [] : [`its prompt line: ${showUntrusted(observed.promptLine)}`]),
     );
   }
+  if (observed?.kind === 'browser') {
+    lines.push(`the page: ${showUntrusted(observed.origin)}${observed.secure ? '' : ' (not secure: http)'}`);
+    if (observed.challenge !== undefined)
+      lines.push('the page is showing a captcha: take over the browser and complete it yourself');
+  }
+  if (request.chain !== undefined) lines.push(`step ${request.step ?? 2}, after !${request.chain}`);
+  if (request.fields.length > 1)
+    for (const field of request.fields)
+      lines.push(
+        `field ${field.id} (${compact(field.label, 60)}): ${field.sensitivity}${field.risk === undefined ? '' : `, risk ${field.risk.level}: ${showUntrusted(field.risk.reason)}`}`,
+      );
   return lines;
 }
 
 const REASONS: Readonly<Record<InputReason, string>> = {
-  target_changed: 'the terminal is no longer the one the card showed',
-  target_gone: 'the terminal is gone',
+  target_changed: 'the target is no longer the one the card showed',
+  target_gone: 'the target is gone',
   insecure_origin: 'the page is not a secure origin',
   interrupted: 'the daemon was interrupted',
   owner_declined: 'declined',

@@ -317,12 +317,18 @@ describe('PasteRuleService and plans: the rest of the routes', () => {
       pageId: 'p1',
       origin: 'https://vercel.com',
       secure: true,
-      frameOrigin: 'https://vercel.com',
       navigationId: 'n1',
-      backendNodeId: 7,
-      field: { tag: 'input', type: 'password' },
-      box: { x: 0, y: 0, w: 10, h: 10 },
-      visible: true,
+      fields: [
+        {
+          fieldId: 'value',
+          frameOrigin: 'https://vercel.com',
+          frameId: 'f1',
+          backendNodeId: 7,
+          field: { tag: 'input', type: 'password' },
+          box: { x: 0, y: 0, w: 10, h: 10 },
+          visible: true,
+        },
+      ],
     };
 
     should(service.reserve('s1', { kind: 'clipboard', origin: 'https://github.com' }, field)).equal(page.id);

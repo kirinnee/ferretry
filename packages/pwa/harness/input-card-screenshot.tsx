@@ -2,14 +2,17 @@
  * Screenshots of the input card and of Settings › Secrets › Saved logins, at a 390px phone and a 1440px
  * desktop, in the light and dark studio themes. Review evidence; nothing compares the PNGs.
  *
- *   bun harness/input-card-screenshot.tsx [out-dir]   # writes input-card-*.png and saved-logins-*.png
+ *   bun harness/input-card-screenshot.tsx [out-dir] [states]   # writes input-card-*.png, input-p2-*.png, saved-logins-*.png
+ *
+ * `states` is a comma list (first,next,google,chain,logins) when only some are wanted.
  *
  * Fake fixtures only (`tests/support/input-fixtures.ts`): no real account, no real daemon, and the typed value
  * is a made-up phrase. Two card states are captured. "first" is the first time a password is asked for: a
  * value typed, "Save as" ticked with the daemon's suggested label and handle. "next" is the next time: a
- * saved login the daemon matched, one tap, with another login folded away. Settings is shown with a 2FA seed
- * form open on one row, so the warning and its tick are on screen. Every width asserts no sideways scroll and
- * the touch floor on every button of the phone.
+ * saved login the daemon matched, one tap, with another login folded away. "google" is a browser login of two
+ * fields (Email plain, Password secret) with the email typed, each plain field flagged red; "chain" is the second
+ * step of that login, a 2FA code. Settings is shown with a 2FA seed form open on one row, so the warning and
+ * its tick are on screen. Every width asserts no sideways scroll and the touch floor on every button of the phone.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
@@ -38,7 +41,7 @@ import { AgendaItemView } from '../../src/features/agenda/agenda-item-view.tsx';
 import { InputCard } from '../../src/features/input-request/input-card.tsx';
 import { LoginsCard } from '../../src/features/secrets/logins-card.tsx';
 import { fieldsOf } from '../../src/lib/input-card.ts';
-import { NOW, login, logins, offer, saved, withSaved } from '../../tests/support/input-fixtures.ts';
+import { NOW, browserField, field, login, logins, offer, request as fakeRequest, saved, withSaved } from '../../tests/support/input-fixtures.ts';
 
 const view = new URLSearchParams(location.search).get('view');
 const refuse = async () => {
@@ -59,7 +62,50 @@ const next = withSaved(
     ],
   }),
 );
-const request = view === 'next' ? next : first;
+const page = (fields) => ({
+  kind: 'browser',
+  pageId: 'page-1',
+  origin: 'https://accounts.google.com',
+  secure: true,
+  navigationId: 'nav-1',
+  fields,
+});
+// The daemon's own sentences for a page (service.ts pageRiskOf), so the shots show what an owner reads.
+const CODE_RISK = {
+  level: 'amber',
+  reason: 'This code will show on the page; Ferretry hides the page from the ferret for 2 minutes.',
+};
+const google = fakeRequest({
+  target: { kind: 'browser', key: 'app' },
+  prompt: 'Sign in to Google',
+  sensitivity: 'secret',
+  fields: [
+    field('plain', { id: 'email', label: 'Email' }),
+    field('secret', {
+      id: 'password',
+      label: 'Password',
+      risk: { level: 'green', reason: 'A password field on a secure page, as the browser reported it.' },
+    }),
+  ],
+  risk: { level: 'red', reason: 'Not secret: the ferret can see this value.' },
+  observed: page([
+    browserField('email', { field: { tag: 'input', type: 'email' } }),
+    browserField('password', { backendNodeId: 8, field: { tag: 'input', type: 'password' } }),
+  ]),
+});
+const chain = fakeRequest({
+  agendaItemId: 'A9',
+  target: { kind: 'browser', key: 'app' },
+  prompt: 'Google wants the 2FA code',
+  sensitivity: 'private',
+  fields: [field('private', { id: 'code', label: '2FA code', risk: CODE_RISK })],
+  risk: CODE_RISK,
+  chain: 'A7',
+  step: 2,
+  observed: page([browserField('code', { field: { tag: 'input', type: 'text', autocomplete: 'one-time-code' } })]),
+});
+const request = { first, next, google, chain }[view] ?? first;
+const subject = view === 'google' || view === 'chain' ? 'Sign in to Google' : 'Type it into sudo';
 
 // The agenda item the daemon raises for the request (lib/input-requests/agenda-adapter.ts), drawn by the REAL v5
 // item view with the card as its form: the type badge, the header and the paging are the item view's own.
@@ -69,10 +115,10 @@ const item = {
   sourceRef: request.id,
   sourceSeq: 1,
   kind: 'input',
-  title: 'Needs a secret',
-  subject: 'Type it into sudo',
-  why: 'Type it into sudo',
-  context: 'sudo for the rebuild you asked for in &F131',
+  title: view === 'google' ? 'Needs a login' : view === 'chain' ? 'Needs a code' : 'Needs a secret',
+  subject,
+  why: subject,
+  context: 'The rebuild you asked for in &F131',
   howToResolve: 'Open the card and type the value in its form. Nothing is sent until you press Send.',
   input: { requestId: request.id },
   neededBy: request.expiresAt,
@@ -147,6 +193,11 @@ run('./node_modules/.bin/tailwindcss', [
   join(buildDir, 'app.css'),
 ]);
 
+const wanted = process.argv[3]?.split(',');
+const STATES = (['first', 'next', 'google', 'chain', 'logins'] as const).filter(
+  state => wanted === undefined || wanted.includes(state),
+);
+
 const server = Bun.serve({
   hostname: '127.0.0.1',
   port: 0,
@@ -189,7 +240,7 @@ try {
           return await route.continue();
         });
         const page = await context.newPage();
-        for (const state of ['first', 'next', 'logins'] as const) {
+        for (const state of STATES) {
           await page.goto(`${server.url}?theme=studio-${scheme}&view=${state}`);
           const surface =
             state === 'logins' ? page.locator('[data-testid="logins-card"]') : page.locator('[data-input-request]');
@@ -198,6 +249,8 @@ try {
             await page.locator('[data-input-value]').fill('correct-horse-battery');
             await page.locator('[data-input-save-tick]').check();
           }
+          if (state === 'google')
+            await page.locator('[data-input-field="email"] [data-input-value]').fill('kirin@example.test');
           if (state === 'logins') {
             await page.locator('[aria-label="Add 2FA seed to GitHub (kirinnee)"]').click();
             await page.locator('[data-login-totp-ack]').check();
@@ -212,7 +265,12 @@ try {
               .evaluateAll(buttons => buttons.map(button => button.getBoundingClientRect().height)))
               if (height < 44) fail(`${where}: a button is ${height}px tall, under the 44px floor`);
           }
-          const name = state === 'logins' ? 'saved-logins' : `input-card-${state}`;
+          const name =
+            state === 'logins'
+              ? 'saved-logins'
+              : state === 'google' || state === 'chain'
+                ? `input-p2-${state}`
+                : `input-card-${state}`;
           const target = join(outDir, `${name}-${viewport.name}-${scheme}.png`);
           await page.screenshot({ path: target, fullPage: state === 'logins' });
           process.stdout.write(`📸 ${target}\n`);

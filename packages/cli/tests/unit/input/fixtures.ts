@@ -17,6 +17,7 @@ export function request(overrides: Partial<InputRequest> = {}): InputRequest {
     target: { kind: 'terminal', key: 'dev' },
     prompt: 'sudo password to install the package',
     sensitivity: 'secret',
+    fields: [{ id: 'value', label: 'Password', sensitivity: 'secret' }],
     submit: 'offer-owner',
     raisedAt: AT,
     expiresAt: '2026-10-30T09:10:00.000Z',

@@ -28,6 +28,10 @@ import {
   type RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE,
   type RELAY_SESSION_CONCLUDED_CLOSE_CODE,
   relayDataByteBudget,
+  TUNNEL_BASE64URL_TRANSFER,
+  TUNNEL_CONTENT_ENCODING_HEADER,
+  TUNNEL_GZIP_ENCODING,
+  TUNNEL_TRANSFER_ENCODING_HEADER,
 } from '@ferretry/protocol';
 import {
   AppSessionSchema,
@@ -503,13 +507,28 @@ const RES_MORE_ENVELOPE = encodeTunnelMessage({ t: 'res-more', id: MAX_TUNNEL_RE
  * refusal: the direct carrier now runs through this tunnel too, and a LAN that used to answer a large
  * session list uncapped must not start refusing it. Past {@link MAX_TUNNEL_BODY_BYTES} the answer is a
  * `502` naming the size — never a truncated body a client would parse and believe.
+ *
+ * An answer the dispatcher compressed (`response.gzip`) travels as its gzip bytes in unpadded base64url
+ * under `content-encoding: gzip` and `content-transfer-encoding: base64url`, so the size rules above
+ * apply to what is actually sent. The compression happened before this, and the channel seals what it is
+ * handed: compress-then-encrypt. The envelope is unchanged — see {@link TUNNEL_GZIP_ENCODING}.
  */
 export function tunnelResponseMessages(id: number, answer: ApiResponse): readonly RelayTunnelDaemonMessage[] {
   const response = finalised(answer);
-  const headers = Object.fromEntries(response.headers);
-  const whole: RelayTunnelDaemonMessage = { t: 'res', id, status: response.status, headers, body: response.body };
+  const compressed = response.gzip !== undefined;
+  const headers = {
+    ...Object.fromEntries(response.headers),
+    ...(compressed
+      ? {
+          [TUNNEL_CONTENT_ENCODING_HEADER]: TUNNEL_GZIP_ENCODING,
+          [TUNNEL_TRANSFER_ENCODING_HEADER]: TUNNEL_BASE64URL_TRANSFER,
+        }
+      : {}),
+  };
+  const wireBody = response.gzip === undefined ? response.body : toBase64Url(response.gzip);
+  const whole: RelayTunnelDaemonMessage = { t: 'res', id, status: response.status, headers, body: wireBody };
   if (encodeTunnelMessage(whole).byteLength <= MAX_PLAINTEXT_BYTES) return [whole];
-  const bodyBytes = utf8Bytes(response.body).byteLength;
+  const bodyBytes = utf8Bytes(wireBody).byteLength;
   if (bodyBytes > MAX_TUNNEL_BODY_BYTES)
     return [
       {
@@ -527,7 +546,7 @@ export function tunnelResponseMessages(id: number, answer: ApiResponse): readonl
     ];
   const head = encodeTunnelMessage({ ...whole, body: '', more: true }).byteLength;
   const budget = MAX_PLAINTEXT_BYTES - Math.max(head, RES_MORE_ENVELOPE.byteLength);
-  const parts = partitionTunnelBody(response.body, budget);
+  const parts = partitionTunnelBody(wireBody, budget);
   return parts.map((body, index): RelayTunnelDaemonMessage => {
     const more = index < parts.length - 1 ? ({ more: true } as const) : {};
     return index === 0 ? { ...whole, body, ...more } : { t: 'res-more', id, body, ...more };
