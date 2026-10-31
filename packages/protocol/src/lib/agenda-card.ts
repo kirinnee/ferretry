@@ -11,18 +11,19 @@
  * | kind       | ←              | ↑ (optional)      | →             |
  * | ---------- | -------------- | ----------------- | ------------- |
  * | task       | Need more info | e.g. Skip         | Done          |
- * | yesno      | No             |                   | Yes           |
+ * | yesno      | the first      |                   | the second    |
  * | permission | Deny           | e.g. Always allow | Allow         |
- * | choice (2) | the other      | recommended       |               |
- * | choice (3) | the first other| recommended       | the next other|
+ * | choice (2) | the first      |                   | the second    |
+ * | choice (3) | the first      | the second        | the third     |
  * | review     | Needs changes  |                   | Looks good    |
  * | info       |                |                   | Got it        |
  * | reply      |                |                   |               |
  * | input      |                |                   |               |
  *
- * A choice's recommended answer is always in the MIDDLE (↑): the swipe row reads left · middle · right, and the
- * pick sits where the thumb goes first. A choice with no recommendation recommends its first option. Swipe ↓ is
- * never an answer: it skips the card.
+ * ONE MEANING FOR EVERY SWIPE: a row of options reads in the options list's order — the first ←, the second ↑,
+ * the third → (two: ← and →; one: ↑) — wherever the recommendation sits, so a swipe means the same in the Inbox
+ * deck, on the card, in the item view and in what the CLI prints. The recommended option is the one kept on the
+ * row when there are more than three, and is tagged where it lands. Swipe ↓ is never an answer.
  */
 import {
   AGENDA_PUSH_TITLE_LENGTH,
@@ -35,6 +36,7 @@ import {
   type AgendaKind,
   MAX_AGENDA_CARD_ANSWERS,
   recommendedAgendaOption,
+  singleAgendaQuestion,
 } from './agenda.ts';
 
 /** The words a yes-or-no card's two options are. */
@@ -147,9 +149,9 @@ const optionLabel = (options: readonly AgendaAskOption[], wanted: string): Agend
   options.find(option => option.label.trim().toLowerCase() === wanted.trim().toLowerCase());
 
 /**
- * A choice's answers: the recommended option (or the first) in the MIDDLE (↑), then the rest in the order the
- * ferret listed them — the first other on the left, the next on the right. Options past the third have no
- * direction; the card offers them under "…" and by their letter in the Options section.
+ * A choice's answers: which options sit on the row — the recommended one (or the first) and the first others, three
+ * at most. Their directions are then the options list's order (`inOptionOrder`). Options past the third have no
+ * direction; the card offers them in its options list.
  */
 const choiceAnswers = (options: readonly AgendaAskOption[], recommended: string | undefined): AgendaCardAnswer[] => {
   const middle = (recommended === undefined ? undefined : optionLabel(options, recommended)) ?? options[0];
@@ -222,14 +224,47 @@ export const byDirection = (answers: readonly AgendaCardAnswer[]): AgendaCardAns
     (left, right) => ANSWER_DIRECTIONS.indexOf(left.direction) - ANSWER_DIRECTIONS.indexOf(right.direction),
   );
 
+/** Where a row of option answers sits, by how many there are. */
+const LIST_SLOTS: Readonly<Record<number, readonly AgendaDirection[]>> = {
+  1: ['up'],
+  2: ['left', 'right'],
+  3: ['left', 'up', 'right'],
+};
+
+const optionKey = (label: string): string => label.trim().toLowerCase();
+
+/**
+ * A row whose answers are all the item's options, pointed in the options list's order (the first ←, the second ↑,
+ * the third →; two: ← →; one: ↑). Answers that are not options (Allow / Deny, Done / Need more info) keep their
+ * directions: those mean something on their own.
+ */
+const inOptionOrder = (
+  item: Pick<AgendaCardSource, 'ask' | 'questions'>,
+  answers: readonly AgendaCardAnswer[],
+): AgendaCardAnswer[] => {
+  const options = item.ask?.kind === 'multiple-choice' ? item.ask.options : (singleAgendaQuestion(item)?.options ?? []);
+  const order = options.map(option => optionKey(option.label));
+  const slots = LIST_SLOTS[answers.length];
+  const listed =
+    slots !== undefined && answers.every(each => each.does === 'choose' && order.includes(optionKey(each.label)));
+  if (!listed) return [...answers];
+  return [...answers]
+    .sort((a, b) => order.indexOf(optionKey(a.label)) - order.indexOf(optionKey(b.label)))
+    .map((each, at) => ({ ...each, direction: slots[at] ?? each.direction }));
+};
+
 /**
  * The card's answers, left · up · right: the ones it was raised with, else its kind's defaults — which
- * is how an item from before cards reads (its choice recommends what its brief recommends).
+ * is how an item from before cards reads (its choice keeps on its row what its brief recommends) — a row of
+ * options always in the options list's order (`inOptionOrder`).
  */
 export const agendaCardAnswers = (item: AgendaCardSource): AgendaCardAnswer[] =>
-  item.answers !== undefined
-    ? byDirection(item.answers)
-    : defaultAgendaAnswers(agendaCardKind(item), item.ask, recommendedAgendaOption(item));
+  byDirection(
+    inOptionOrder(
+      item,
+      item.answers ?? defaultAgendaAnswers(agendaCardKind(item), item.ask, recommendedAgendaOption(item)),
+    ),
+  );
 
 /** The answer a direction gives on this card, if any. */
 export const answerInDirection = (

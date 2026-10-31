@@ -1,7 +1,6 @@
 /**
- * THE ↓ SWIPE THAT SKIPS THE ITEM, on touch: drag down from the item view's head or its answer area, past the
- * distance an answer swipe needs (`swipeThreshold`), mostly straight. The host decides what skipping is (the next
- * item, or back to the chat on the last); the ↓ key does the same.
+ * THE ↓ SWIPE, on touch: drag down from the agenda card's top bar or its answer row, past the distance an answer
+ * swipe needs (`swipeThreshold`), mostly straight. On the card it is Not needed; the ↓ key does the same.
  */
 
 import { type PointerEvent, useRef } from 'react';
@@ -17,8 +16,8 @@ interface Start {
   readonly y: number;
 }
 
-/** Pointer handlers for a region that skips the item when it is pulled down. Mouse never swipes. */
-export function useDownSwipe(onSkip: () => void, enabled: boolean) {
+/** Pointer handlers for a region that does `onDown` when it is pulled down. Mouse never swipes. */
+export function useDownSwipe(onDown: () => void, enabled: boolean) {
   const start = useRef<Start | null>(null);
   return {
     onPointerDown: (event: PointerEvent<HTMLElement>): void => {
@@ -32,7 +31,7 @@ export function useDownSwipe(onSkip: () => void, enabled: boolean) {
       if (
         isDownSwipe(event.clientX - began.x, event.clientY - began.y, event.currentTarget.getBoundingClientRect().width)
       ) {
-        onSkip();
+        onDown();
       }
     },
     onPointerCancel: (): void => {

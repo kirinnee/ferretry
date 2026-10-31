@@ -306,8 +306,8 @@ export type AgendaLink = z.infer<typeof AgendaLinkSchema>;
 
 /**
  * THE STRUCTURED PART OF AN ITEM, every field optional so an item raised before it existed still
- * reads. The item's `subject` is its SUMMARY (one line: what is needed) and `context` is what is
- * happening and why it matters; these carry the rest of what a reader who has not been following
+ * reads. The item's `subject` is its SUMMARY (one line: what is needed) and `context` is the facts
+ * around it; these carry the rest of what a reader who has not been following
  * needs (docs/agenda.md, "What an item says").
  */
 export const AgendaBriefShape = {
@@ -423,7 +423,7 @@ export const agendaNoticeProblems = (value: {
 
 /**
  * What a NEW ferret-raised item lacks of the two fields a cold reader starts from: the premise (the situation)
- * and the context (why it matters now). Both are required on every new item a ferret raises; a notice is read,
+ * and the context (the facts around it). Both are required on every new item a ferret raises; a notice is read,
  * not answered, so it is exempt, and an item already on the board keeps working without them — this is checked
  * when an item is raised, never when one is read. A blank field counts as missing.
  */
@@ -436,7 +436,7 @@ export const agendaBriefRequiredProblems = (value: {
   const blank = (field: string | null | undefined): boolean => (field ?? '').trim() === '';
   return [
     ...(blank(value.premise) ? ['premise (--premise) is required: the situation, what is going on'] : []),
-    ...(blank(value.context) ? ['context (--context) is required: why it matters now'] : []),
+    ...(blank(value.context) ? ['context (--context) is required: the facts around it'] : []),
   ];
 };
 

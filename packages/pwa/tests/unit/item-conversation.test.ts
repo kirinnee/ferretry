@@ -24,20 +24,22 @@ const clientOf = (
 };
 
 describe('readItemConversation', () => {
-  it('keeps the user and ferret rows that name the item, across pages, oldest first, with their times', async () => {
+  it('keeps the rows that name the item, and the ferret’s answer to the owner’s, across pages, oldest first', async () => {
     const client = clientOf([
       [row(1, 'user', 'unrelated'), row(2, 'assistant', 'Asking about !A4', '2026-08-01T10:00:00.000Z')],
       [
         row(3, 'user', 'reply !A4: ship it', '2026-08-01T10:05:00.000Z'),
         row(4, 'developer', '!A4 hidden'),
-        row(5, 'user', 'about !A40'),
+        row(5, 'assistant', 'Shipped.'),
+        row(6, 'user', 'about !A40'),
+        row(7, 'assistant', 'not about it'),
       ],
     ]);
     const entries = await readItemConversation(client, 'sess', 'A4');
     expect(entries.map(entry => [entry.kind, entry.text])).toEqual([
       ['assistant', 'Asking about !A4'],
       ['user', 'reply !A4: ship it'],
-      ['user', 'about !A40'],
+      ['assistant', 'Shipped.'],
     ]);
     expect(entries[1]?.at).toBe(Date.parse('2026-08-01T10:05:00.000Z'));
     expect(client.cursors).toEqual([undefined, '1']);

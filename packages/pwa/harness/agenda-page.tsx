@@ -11,6 +11,8 @@
  *   &v5=1                 adds the v5 card items: A80 (a long decision with revisions and a conversation with
  *                         tool calls in it) and one item of each type — A81 approval, A82 to-do, A83 review,
  *                         A84 note, A85 reply
+ *   &v6=1                 adds the v6 card items: A90 (the spend-limit decision with terms, two versions and a
+ *                         conversation), A91 a to-do with steps, A92 a lettered choice of four, A93 an input request
  *
  * Every component is the REAL one (`useAgenda` through `AgendaChatHarness`); only the data is
  * invented and the answers go nowhere.
@@ -594,6 +596,115 @@ const V5_ENTRIES = [
   owner('v11', 4, '!A80 leaning SQLite, keep the nightly export'),
 ] as unknown as TranscriptEntry[];
 
+// V6: the approved mockup's items. A90 is the spend-limit decision (premise, context, terms, a recommendation, a
+// chart, two versions and a conversation about it — with tool calls and an unrelated message that must stay out of
+// its History); A91 a to-do with steps; A92 a reply with a long option label set (lettered); A93 an input request.
+const SPEND_CHART = [
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 96">',
+  '<g fill="#7c78e6"><rect x="16" y="56" width="56" height="24" rx="4"/><rect x="92" y="38" width="56" height="42" rx="4"/>',
+  '<rect x="168" y="20" width="56" height="60" rx="4"/></g><rect x="244" y="6" width="56" height="74" rx="4" fill="#d9534f"/>',
+  '<g fill="#8a90a0" font-family="sans-serif" font-size="11" text-anchor="middle"><text x="44" y="93">Mon</text>',
+  '<text x="120" y="93">Tue</text><text x="196" y="93">Wed</text><text x="272" y="93">limit</text></g></svg>',
+].join('');
+const A90 = item('A90', 58, {
+  title: 'Spend limit: what happens at the hard limit?',
+  subject: 'One rule left before spend limits ship.',
+  why: 'One rule left before spend limits ship.',
+  kind: 'choice',
+  raisedByName: 'lizzette',
+  premise: '- Each login has a daily and weekly limit\n- **Soft** limit warns, **hard** limit stops spend',
+  context: '- Everything else is built\n- A running turn always finishes\n- This decides what starts next',
+  questions: [
+    {
+      question: 'At the hard limit, what should happen?',
+      options: [
+        { label: 'Pause', description: 'No new turns on that login until it resets' },
+        { label: 'Switch', description: 'New turns move to a login with room left' },
+        { label: 'Warn', description: 'Nothing stops; you get one Inbox notice' },
+      ],
+      recommended: 'Pause',
+    },
+  ],
+  ask: {
+    kind: 'multiple-choice',
+    options: [
+      { label: 'Pause', description: 'No new turns on that login until it resets' },
+      { label: 'Switch', description: 'New turns move to a login with room left' },
+      { label: 'Warn', description: 'Nothing stops; you get one Inbox notice' },
+    ],
+  },
+  recommendation: { decision: 'Pause', why: '- It can never overspend\n- Switch can quietly drain a second login' },
+  steps: ['I set the rule', 'A ferret adds a test', 'It ships next release'],
+  body: `**claude-liftoff this week**\n\n${FENCE}fy-render\ntype: svg\nalt: Spend on claude-liftoff, Monday to Wednesday, against the limit\n---\n${SPEND_CHART}\n${FENCE}`,
+  terms: [
+    { term: 'login', meaning: 'One signed-in account, e.g. claude-liftoff.' },
+    { term: 'turn', meaning: 'One reply cycle of a ferret: your message in, its answer out.' },
+    { term: 'reset', meaning: 'When the daily or weekly window starts again.' },
+  ],
+  revisions: [
+    {
+      at: ago(53),
+      by: 'agent',
+      changed: ['context'],
+      previous: { context: '- Everything else is built\n- This decides what starts next' },
+    },
+  ],
+} as Partial<AgendaItem>);
+const A91 = item('A91', 30, {
+  title: 'Rotate the relay signing key',
+  subject: 'Rotate the relay key before Friday’s release.',
+  kind: 'task',
+  ask: { kind: 'task' },
+  raisedByName: 'lizzette',
+  premise: '- The relay signs every session with one key\n- That key is 11 months old',
+  context: '- Keys rotate yearly\n- The release on Friday ships the new pin',
+  steps: [
+    'Open **Settings › Relay** on the studio machine',
+    'Press **Rotate key** and copy the new fingerprint',
+    'Paste it into `config/daemon.json` under `relay.pin`',
+  ],
+  stepsDone: [0],
+} as Partial<AgendaItem>);
+const A92 = item('A92', 20, {
+  title: 'Where should the nightly export go?',
+  subject: 'Pick where the nightly ledger export lands.',
+  kind: 'choice',
+  raisedByName: 'lizzette',
+  premise: '- The ledger is exported once a night\n- The export is 40 MB',
+  context: '- The studio disk is 80% full\n- The bucket costs about $1 a month',
+  ask: {
+    kind: 'multiple-choice',
+    options: [
+      { label: 'Studio disk', description: 'Free; fills the disk in about a year' },
+      { label: 'S3 bucket', description: 'About $1 a month; off the machine' },
+      { label: 'Both, for a week', description: 'Try the bucket, keep the disk copy as a fallback' },
+      { label: 'Skip it', description: 'No nightly export at all' },
+    ],
+  },
+  recommendation: { decision: 'S3 bucket', why: 'Off the machine, and cheap' },
+} as Partial<AgendaItem>);
+const A93 = item('A93', 6, {
+  title: 'GitHub password for the deploy',
+  subject: 'Type the GitHub password the deploy terminal is asking for.',
+  kind: 'input',
+  raisedByName: 'lizzette',
+  premise: '- %terminal:deploy is waiting at a password prompt',
+  context: '- Ferretry types it there; the ferret never sees it',
+  input: { requestId: '0123456789abcdef0123456789abcdef' },
+} as Partial<AgendaItem>);
+const V6_ITEMS = [A90, A91, A92, A93] as const;
+const V6_ENTRIES = [
+  ferretSays('w0', 70, 'Building the spend-limit settings page now.'),
+  ferretSays('w1', 58, 'What should happen at the hard limit? I raised !A90.'),
+  owner('w2', 55, '!A90 does pause kill a running turn?'),
+  tool('w3', 55, 'Bash(rg "hardLimit" packages/daemon) → 6 matches'),
+  ferretSays('w4', 54, 'Let me check the runner.'),
+  tool('w5', 54, 'Read(packages/daemon/src/runner.ts) → 140 lines'),
+  ferretSays('w6', 53, 'No. A running turn finishes; pause only stops new ones. Added to the context.'),
+  owner('w7', 40, 'unrelated: can you also bump the lockfile?'),
+  ferretSays('w8', 39, 'Bumped the lockfile.'),
+] as unknown as TranscriptEntry[];
+
 const params = new URLSearchParams(location.search);
 const view = params.get('view') ?? 'board';
 const target = (params.get('attention') ?? params.get('agenda') ?? null) as AgendaId | null;
@@ -605,6 +716,7 @@ const jaeda = params.get('jaeda') === '1';
 const v4 = params.get('v4') === '1';
 const parked = params.get('parked') === '1';
 const v5 = params.get('v5') === '1';
+const v6 = params.get('v6') === '1';
 
 const items = [
   ...AGENDA,
@@ -612,6 +724,7 @@ const items = [
   ...(v4 ? [A60, A61, A62, A63, A64, A65] : []),
   ...(parked ? [A70, A71] : []),
   ...(v5 ? V5_ITEMS : []),
+  ...(v6 ? V6_ITEMS : []),
 ].map(entry =>
   entry.id === 'A5'
     ? long
@@ -651,7 +764,9 @@ createRoot(root).render(
     <AgendaChatHarness
       agendaMode={view !== 'none'}
       board={board}
-      entries={v5 ? [...HISTORY_ENTRIES, ...V5_ENTRIES] : withHistory || long ? HISTORY_ENTRIES : undefined}
+      entries={
+        v6 ? V6_ENTRIES : v5 ? [...HISTORY_ENTRIES, ...V5_ENTRIES] : withHistory || long ? HISTORY_ENTRIES : undefined
+      }
       live={live}
       now={NOW}
       target={target}

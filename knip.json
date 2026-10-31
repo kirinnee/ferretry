@@ -64,7 +64,7 @@
         "harness/agenda-v4-screenshot.ts",
         "harness/agenda-settled-screenshot.ts",
         "harness/agenda-settled-page.tsx",
-        "harness/agenda-v5-card-screenshot.ts",
+        "harness/agenda-v6-screenshot.ts",
         "harness/doneclose-screenshot.ts",
         "harness/doneclose-page.tsx",
         "harness/inbox-v2-screenshot.ts",

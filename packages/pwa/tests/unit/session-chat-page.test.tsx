@@ -2901,7 +2901,7 @@ describe('SessionChatPage', () => {
         expect(page.root.findByType(Composer).props.placeholder).toBeUndefined();
         press(page.root);
         run(() => page.root.findByType(AgendaRow).props.onOpen());
-        expect(page.root.findByType(Composer).props.placeholder).toBe('Reply about !A3…');
+        expect(page.root.findByType(Composer).props.placeholder).toMatch(/^Reply to .+…$/u);
         await send('ship it');
         run(() => page.root.findByType(Composer).props.onSent());
         expect(page.root.findByType(Composer).props.placeholder).toBeUndefined();

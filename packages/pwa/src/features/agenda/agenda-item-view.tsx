@@ -1,47 +1,39 @@
 /**
- * ONE AGENDA ITEM, IN FOCUS — an OVERLAY over the MESSAGE LIST only. The agenda row and the real composer stay
- * where they are, visible and typeable, below it; the transcript stays mounted underneath (its scroll position is
- * simply kept) and nothing of it shows or takes focus while this is open.
+ * ONE AGENDA ITEM, IN FOCUS — an OVERLAY over the MESSAGE LIST only. The agenda row and the real composer stay where
+ * they are, visible and typeable, below it; the transcript stays mounted underneath (its scroll position is simply
+ * kept) and nothing of it shows or takes focus while this is open.
  *
- *   top     STICKY   the title, the one-line ask, where the item stands, ‹ n of N › and ✕ — on a PHONE one line:
- *                    the title cut to fit, and the ask is the body's first paragraph unless ⓘ pins it here
- *   body    SCROLLS  the ONE scroller (`overscroll-behavior: contain`, no nested scroller): the type badge, ONE
- *                    tinted block of what's going on and why now, the questions, decided, still open, options, terms as a
- *                    Term | Meaning table, steps (a to-do and a review lead with theirs), mock-ups, then the History — the
- *                    conversation about the item as chat bubbles — and the Revisions, v1 to now, before → after
- *   bottom  STICKY   the QUICK REPLIES (`agenda-quick-replies.tsx`), directly above the composer
+ * ONE COLUMN, the composer's own width at every breakpoint, top to bottom:
  *
- * Top and bottom are flex items outside the scroller, so scrolling the body moves neither. Every section is drawn
- * open, in order, as plain Markdown: nothing in the body folds. ✕ and Esc go back to the chat; ↓ SKIPS — on to
- * the next item, or back to the chat when there is none; ← ↑ → answer on a keyboard (a field or a button keeps
- * its own keys). Everything typed goes through the composer: this view has no text field of its own.
+ *   head     the title and the one-line description (the item's ask), with where it stands, ‹ n of N ›, the snooze
+ *            clock and ✕ beside the title
+ *   card     everything to read and answer (`agenda-item-card.tsx`): premise and context, the question, the options,
+ *            whatever sections the ferret added, the version picker, and the ONE answer row
+ *   history  the conversation about the item, newest at the bottom, just above the composer
+ *
+ * The body is the ONE scroller (`overscroll-behavior: contain`). ✕ and Esc go back to the chat; ‹ › page through the
+ * items without answering; ← ↑ → answer on a keyboard and ↓ is Not needed, exactly as the swipes (a field or a button
+ * keeps its own keys). Everything typed goes through the composer: this view has no text field of its own.
  */
 
-import type { AgendaItem, AgendaQuestion } from '@ferretry/protocol';
-import { ChevronLeft, ChevronRight, Info, X } from 'lucide-react';
-import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 'react';
+import type { AgendaItem } from '@ferretry/protocol';
+import { ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { type KeyboardEvent, type ReactNode, useEffect, useRef } from 'react';
 import { useQuoteMenu } from '../../components/quote-menu.tsx';
-import { readAskPinned, writeAskPinned } from '../../lib/agenda-ask-pin.ts';
+import { useDoneClose } from '../../hooks/use-done-close.ts';
+import { agendaCardHead } from '../../lib/agenda-card-head.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import type { HistoryEvent } from '../../lib/agenda-history.ts';
-import { type InboxAction, questionAnswersAction, swipeMap } from '../../lib/agenda-inbox.ts';
-import { itemOptions } from '../../lib/agenda-options.ts';
+import { DISMISS_ACTION, type InboxAction, swipeMap } from '../../lib/agenda-inbox.ts';
 import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
-import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
-import { AgendaConfigChange } from './agenda-config-change.tsx';
-import { AgendaDelivery, agendaHeading } from './agenda-delivery.tsx';
-import { AgendaDetail } from './agenda-detail.tsx';
-import { AgendaItemHistory } from './agenda-item-history.tsx';
-import { useDoneClose } from '../../hooks/use-done-close.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
-import { AgendaQuickReplies } from './agenda-quick-replies.tsx';
-import { AgendaRevisions } from './agenda-revisions-view.tsx';
-import { useDoneCloseFlow } from './use-done-close-flow.ts';
-import { agendaAsk } from './agenda-row.tsx';
+import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
+import { agendaHeading } from './agenda-delivery.tsx';
+import { AgendaItemCard } from './agenda-item-card.tsx';
+import { AgendaItemHistory } from './agenda-item-history.tsx';
 import { AgendaSnoozeMenu } from './agenda-snooze-menu.tsx';
 import { AgendaStatusPill } from './agenda-status-pill.tsx';
-import { AgendaTypeBadge } from './agenda-type.tsx';
-import { useDownSwipe } from './use-down-swipe.ts';
+import { useDoneCloseFlow } from './use-done-close-flow.ts';
 
 export interface AgendaItemViewProps {
   readonly item: AgendaItem;
@@ -73,27 +65,24 @@ export interface AgendaItemViewProps {
   /** What ✕ is called: "Back to the chat", unless the host is somewhere else (the Inbox). */
   readonly closeLabel?: string;
   /**
-   * The item cannot be answered here — it is parked or resolved (`agenda-settled.tsx`): this is drawn in the quick
-   * replies' place, and the arrow keys answer nothing.
+   * The item cannot be answered here — it is parked or resolved (`agenda-settled.tsx`): this is drawn in the answer
+   * row's place, and the arrow keys answer nothing.
    */
   readonly settled?: ReactNode;
+  /** The form an `input` item is answered with (`InputCardHost`): drawn in the card, in the answer row's place. */
+  readonly inputForm?: ReactNode;
 }
-
-/** The option a question's recommendation names, or '' when it names none. */
-const recommendedPick = (question: AgendaQuestion): string => {
-  const pick = question.recommended?.trim() ?? '';
-  return question.options?.some(option => option.label === pick) === true ? pick : '';
-};
-
-/** The detail without its premise: the daemon also writes a confirmed change into it for older apps, and the change is drawn on its own. */
-const withoutPremise = (item: AgendaItem): AgendaItem => {
-  const { premise, ...rest } = item;
-  return rest;
-};
 
 /** Keys that are a field's or a button's own. */
 const ownsKeys = (target: EventTarget): boolean =>
-  target instanceof HTMLElement && target.closest('input, textarea, select, button, a, [contenteditable]') !== null;
+  target instanceof HTMLElement &&
+  target.closest('input, textarea, select, button, a, summary, [contenteditable]') !== null;
+
+const KEY_DIRECTION: Readonly<Record<string, 'left' | 'up' | 'right'>> = {
+  ArrowLeft: 'left',
+  ArrowUp: 'up',
+  ArrowRight: 'right',
+};
 
 export function AgendaItemView({
   item,
@@ -114,58 +103,40 @@ export function AgendaItemView({
   closeLabel = 'Back to the chat',
   quoteScope = null,
   settled,
+  inputForm,
   daemonId,
 }: AgendaItemViewProps) {
   const root = useRef<HTMLElement | null>(null);
   const quote = useQuoteMenu(root, quoteScope);
-  const [picks, setPicks] = useState<readonly string[]>([]);
-  // On a phone the head is one line and the ask is the body's first paragraph; ⓘ pins it in the head instead.
-  const [pinned, setPinned] = useState(readAskPinned);
   const model = cardModel(item);
   const map = swipeMap(item);
-  const questions = item.questions ?? [];
-  const asked = questions.flatMap((question, index) => (question.options === undefined ? [] : [{ question, index }]));
-  const ready = asked.length > 0 && asked.every(({ index }) => (picks[index] ?? '').trim() !== '');
-  const agreed = questions.map(recommendedPick);
-  const canUseRecommended = asked.length > 0 && asked.every(({ index }) => agreed[index] !== '');
-  const sendable = model.perQuestion && ready ? questionAnswersAction(questions, picks) : null;
+  const head = agendaCardHead(item);
   const status = agendaStatus(item, agendaAuthor(item, ferret), now);
-  const ask = agendaAsk(item);
-  const skip = onNext ?? onClose;
-  const pull = useDownSwipe(skip, swipeable);
   const doneClose = useDoneCloseFlow(useDoneClose(daemonId, item), label => onAct({ kind: 'resolve', label }));
+  const answerable = settled === undefined && !(inputForm !== undefined && item.kind === 'input');
+  const canDismiss = answerable && model.dismissInMenu && !model.notice;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: focus the dialog again whenever another item opens
   useEffect(() => {
     root.current?.focus({ preventScroll: true });
   }, [item.id]);
 
-  const picker = model.perQuestion
-    ? {
-        answers: picks,
-        disabled: busy,
-        onAnswer: (index: number, text: string) =>
-          setPicks(current => {
-            const next = questions.map((_, at) => current[at] ?? '');
-            next[index] = text;
-            return next;
-          }),
-      }
-    : undefined;
-
   const onKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
     if (ownsKeys(event.target) || event.metaKey || event.ctrlKey || event.altKey) return;
-    if (event.key === 'Escape' || event.key === 'ArrowDown') {
+    if (event.key === 'Escape') {
       event.preventDefault();
-      (event.key === 'Escape' ? onClose : skip)();
+      onClose();
       return;
     }
-    const direction = { ArrowLeft: 'left', ArrowUp: 'up', ArrowRight: 'right' }[event.key] as
-      | 'left'
-      | 'up'
-      | 'right'
-      | undefined;
-    const action = direction === undefined || busy || settled !== undefined ? undefined : map[direction];
+    if (busy || !answerable) return;
+    if (event.key === 'ArrowDown') {
+      if (!canDismiss) return;
+      event.preventDefault();
+      onAct(DISMISS_ACTION);
+      return;
+    }
+    const direction = KEY_DIRECTION[event.key];
+    const action = direction === undefined ? undefined : map[direction];
     if (action === undefined) return;
     event.preventDefault();
     onAct(action);
@@ -177,139 +148,81 @@ export function AgendaItemView({
       aria-modal="true"
       className="fy-item-view"
       data-agenda-view={item.id}
-      data-ask-pinned={pinned || undefined}
       onKeyDown={onKeyDown}
       {...quote.handlers}
       ref={root}
       role="dialog"
       tabIndex={-1}
     >
-      <header className="fy-item-view__top" data-agenda-top="" {...pull}>
-        {/* ONE compact head: the controls float right — status dot, n of N, ‹ › and ✕ — and the title flows beside and
-            under them, so a long title wraps across the full width instead of into a narrow column. */}
-        <div className="fy-item-view__nav">
-          <div className="fy-item-view__pager">
-            {status === null ? null : (
-              <span className="fy-item-view__status" title={status.label}>
-                <AgendaStatusPill status={status} />
-              </span>
-            )}
-            <button
-              aria-label="Previous item"
-              className="fy-item-view__step"
-              disabled={onPrevious === undefined}
-              onClick={onPrevious}
-              type="button"
-            >
-              <ChevronLeft aria-hidden="true" size={18} />
-            </button>
-            <span className="fy-item-view__where" data-agenda-where="">
-              {position.index + 1} of {position.total}
-            </span>
-            <button
-              aria-label="Next item"
-              className="fy-item-view__step"
-              disabled={onNext === undefined}
-              onClick={onNext}
-              type="button"
-            >
-              <ChevronRight aria-hidden="true" size={18} />
-            </button>
-            {ask === null ? null : (
-              <button
-                aria-label="Pin the ask here"
-                aria-pressed={pinned}
-                className="fy-item-view__step fy-item-view__info"
-                data-agenda-info=""
-                onClick={() => {
-                  writeAskPinned(!pinned);
-                  setPinned(!pinned);
-                }}
-                type="button"
-              >
-                <Info aria-hidden="true" size={18} />
-              </button>
-            )}
-            {onSnooze === undefined ? null : (
-              <AgendaSnoozeMenu disabled={busy} now={now} onSnooze={onSnooze} triggerClass="fy-item-view__step" />
-            )}
-            <button
-              aria-label={closeLabel}
-              className="fy-item-view__step fy-item-view__close"
-              data-agenda-close=""
-              onClick={onClose}
-              type="button"
-            >
-              <X aria-hidden="true" size={18} />
-            </button>
-          </div>
-          <h2 className="fy-item-view__title" data-agenda-title="">
-            {agendaHeading(item)}
-          </h2>
-        </div>
-        {ask === null ? null : (
-          <div className="fy-item-view__ask" data-agenda-ask="">
-            {renderProse(ask)}
-          </div>
-        )}
-      </header>
       <div className="fy-item-view__body" data-agenda-body="">
         <div className="fy-item-view__column">
-          {ask === null ? null : (
-            <div className="fy-item-view__body-ask" data-agenda-body-ask="">
-              {renderProse(ask)}
+          <header className="fy-item-view__head" data-agenda-top="">
+            <div className="fy-item-view__pager">
+              {status === null ? null : (
+                <span className="fy-item-view__status" title={status.label}>
+                  <AgendaStatusPill status={status} />
+                </span>
+              )}
+              <button
+                aria-label="Previous item"
+                className="fy-item-view__step"
+                disabled={onPrevious === undefined}
+                onClick={onPrevious}
+                type="button"
+              >
+                <ChevronLeft aria-hidden="true" size={18} />
+              </button>
+              <span className="fy-item-view__where" data-agenda-where="">
+                {position.index + 1} of {position.total}
+              </span>
+              <button
+                aria-label="Next item"
+                className="fy-item-view__step"
+                disabled={onNext === undefined}
+                onClick={onNext}
+                type="button"
+              >
+                <ChevronRight aria-hidden="true" size={18} />
+              </button>
+              {onSnooze === undefined ? null : (
+                <AgendaSnoozeMenu disabled={busy} now={now} onSnooze={onSnooze} triggerClass="fy-item-view__step" />
+              )}
+              <button
+                aria-label={closeLabel}
+                className="fy-item-view__step fy-item-view__close"
+                data-agenda-close=""
+                onClick={onClose}
+                type="button"
+              >
+                <X aria-hidden="true" size={18} />
+              </button>
             </div>
-          )}
-          <AgendaTypeBadge item={item} />
-          <AgendaDelivery busy={busy} ferret={ferret} item={item} onAct={onAct} />
-          <AgendaConfigChange item={item} />
-          <AgendaDetail
-            brief={{
-              askShown: true,
-              askLabel: null,
-              ...(model.recommendation === undefined ? {} : { recommendation: model.recommendation }),
-              ...(picker === undefined ? {} : { picker }),
-            }}
+            <h2 className="fy-item-view__title" data-agenda-title="">
+              {head.title}
+            </h2>
+            {head.description === null ? null : (
+              <div className="fy-item-view__desc" data-agenda-ask="">
+                {renderProse(head.description)}
+              </div>
+            )}
+          </header>
+          <AgendaItemCard
             busy={busy}
-            item={item.confirms === undefined ? item : withoutPremise(item)}
-            layout="full"
+            error={error}
+            ferret={ferret}
+            item={item}
+            now={now}
+            onAct={onAct}
             renderProse={renderProse}
+            swipeable={swipeable}
             {...(onProgress === undefined ? {} : { onProgress })}
+            {...(doneClose === undefined ? {} : { doneClose })}
+            {...(settled === undefined ? {} : { settled })}
+            {...(inputForm === undefined ? {} : { inputForm })}
           />
-          <AgendaItemHistory events={history} ferret={ferret} now={now} />
-          <AgendaRevisions ferret={ferret} item={item} now={now} />
+          <AgendaItemHistory events={history} ferret={ferret} now={now} renderProse={renderProse} />
         </div>
       </div>
-      {settled !== undefined ? (
-        settled
-      ) : (
-        <AgendaQuickReplies
-          busy={busy}
-          error={error}
-          map={map}
-          model={model}
-          onAct={onAct}
-          onSkip={skip}
-          options={itemOptions(item)}
-          swipeable={swipeable}
-          {...(doneClose === undefined ? {} : { doneClose })}
-          {...(item.waitingOn === 'ferret' && !model.notice ? { waitingOn: ferret } : {})}
-          {...(model.perQuestion && asked.length > 0
-            ? {
-                sending: {
-                  ready: sendable !== null,
-                  canUseRecommended,
-                  onSend: () => {
-                    if (sendable === null || busy) return;
-                    onAct(sendable);
-                    setPicks([]);
-                  },
-                  onUseRecommended: () => setPicks(agreed),
-                },
-              }
-            : {})}
-        />
-      )}
       {quote.menu}
     </section>
   );

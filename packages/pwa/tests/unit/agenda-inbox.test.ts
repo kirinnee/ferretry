@@ -184,10 +184,10 @@ describe('inbox cards', () => {
 const card = (extra: Partial<AgendaItem> = {}) => ({ subject: 'Rebase the branch?', ...extra });
 
 describe('swipes', () => {
-  test('a card swipes the answers it has: its right answer, its left, and an up only when it was given one', () => {
+  test('a card swipes the answers it has — options in the list’s order — and an up only when it has one there', () => {
     const yesNo = swipeMap(card({ ask: choice('Yes', 'No') }));
-    expect(yesNo.right).toMatchObject({ kind: 'respond', label: 'Yes' });
-    expect(yesNo.left).toMatchObject({ kind: 'respond', label: 'No' });
+    expect(yesNo.left).toMatchObject({ kind: 'respond', label: 'Yes' });
+    expect(yesNo.right).toMatchObject({ kind: 'respond', label: 'No' });
     expect(yesNo.up).toBeUndefined();
     const task = swipeMap(card({ ask: { kind: 'task' } }));
     expect(task.right).toMatchObject({ kind: 'resolve', label: 'Done' });
@@ -256,7 +256,7 @@ describe('replies', () => {
     expect(actionSentence(DONE_ACTION, 'A3')).toBe('Marked !A3 done');
     expect(actionSentence({ kind: 'resolve', label: 'Reply', note: 'x' }, 'A3')).toBe('Replied to !A3');
     expect(actionSentence(inboxOptions(card({ ask: choice('Wait', 'Go') }))[0] ?? DONE_ACTION, 'A3')).toBe(
-      'Answered !A3: Wait',
+      'Answered !A3: Go',
     );
   });
 });

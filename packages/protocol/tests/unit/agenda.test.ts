@@ -175,13 +175,13 @@ describe('agendaBriefRequiredProblems', () => {
     // Assert
     should(agendaBriefRequiredProblems({})).deepEqual([
       'premise (--premise) is required: the situation, what is going on',
-      'context (--context) is required: why it matters now',
+      'context (--context) is required: the facts around it',
     ]);
     should(agendaBriefRequiredProblems({ premise: '  ', context: 'Why' })).deepEqual([
       'premise (--premise) is required: the situation, what is going on',
     ]);
     should(agendaBriefRequiredProblems({ premise: 'What', context: null })).deepEqual([
-      'context (--context) is required: why it matters now',
+      'context (--context) is required: the facts around it',
     ]);
   });
 });
