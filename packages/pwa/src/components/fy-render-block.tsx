@@ -70,13 +70,9 @@ import {
   isFyRenderMediaBlock,
   type FyRenderBlock as ParsedBlock,
 } from '../lib/fy-render.ts';
-import {
-  isNarrowColumn,
-  mermaidDisplayWidth,
-  mermaidNaturalSize,
-  verticalizeMermaid,
-} from '../lib/fy-render-mermaid-layout.ts';
+import { isNarrowColumn, verticalizeMermaid } from '../lib/fy-render-mermaid-layout.ts';
 import { mermaidThemeVariables, paletteKey, type ResolvedTheme } from '../lib/fy-render-palette.ts';
+import { MERMAID_LEGIBLE_SCALE, svgNaturalSize, viewBoxSize } from '../lib/fy-render-viewport.ts';
 import { FyRenderChart, type FyRenderChartModules } from './fy-render-chart.tsx';
 import { FyRenderFragment } from './fy-render-fragment.tsx';
 import { FyRenderHtmlFrame, type FyRenderHtmlPaint } from './fy-render-html-frame.tsx';
@@ -84,6 +80,7 @@ import { FyRenderMap, type FyRenderMapModules } from './fy-render-map.tsx';
 import { FyRenderMedia } from './fy-render-media.tsx';
 import { FyRenderSandbox, type FyRenderSandboxFailure } from './fy-render-sandbox.tsx';
 import { documentThemeName, readTheme } from './fy-render-theme.ts';
+import { FyRenderViewport } from './fy-render-viewport.tsx';
 
 /**
  * How long new bytes must stop changing before they replace what is on screen.
@@ -116,16 +113,6 @@ const prefersReducedMotion = (): boolean => {
 
 /** The app's theme name: what a theme switch changes, and so what a repaint is keyed on. */
 const themeName = documentThemeName;
-
-/**
- * A diagram wider than its column pans sideways inside its own box, so that box is a named region and a tab
- * stop: a keyboard reaches it and a screen reader says what it is.
- */
-const SCROLLING_DIAGRAM = {
-  'aria-label': 'Diagram, scrolls sideways',
-  role: 'region',
-  tabIndex: 0,
-} as const;
 
 const TRANSPARENT = new Set(['', 'transparent', 'rgba(0, 0, 0, 0)']);
 
@@ -475,12 +462,10 @@ export function FyRenderBlock({
       compiled.source !== source ||
       ((compiled.palette !== resolved.key || compiled.drawn !== diagramSource) && visible));
   const diagram = mermaid && fallback === null && compiled !== null;
-  /** The compiled image's size on screen, once its natural size and the column are both known. */
-  const natural = diagram && compiled !== null ? mermaidNaturalSize(compiled.svg) : null;
-  const shown =
-    natural === null || column === null
-      ? null
-      : mermaidDisplayWidth({ bodyPx: column.bodyPx, columnPx: column.px, fullscreen, naturalWidth: natural.width });
+  /** The compiled diagram's natural size, from its `viewBox`: what the viewport fits, zooms and pans. */
+  const natural = diagram && compiled !== null ? viewBoxSize(compiled.svg) : null;
+  /** An authored SVG with a size is shown through the same viewport. Without one it stays a plain image. */
+  const svgSize = presentation === 'visual' && block.type === 'svg' ? svgNaturalSize(block.payload) : null;
   const lottie = live && presentation === 'sandbox' && block.type === 'lottie';
   const fragment = live && presentation === 'fragment';
   /**
@@ -601,6 +586,18 @@ export function FyRenderBlock({
         onShape={setMediaRow}
         {...(readWorkspaceMedia === undefined ? {} : { readWorkspaceMedia })}
       />
+    ) : picture && svgSize !== null ? (
+      <FyRenderViewport
+        alt={block.alt}
+        diagram={false}
+        fullscreen={fullscreen}
+        key={`${generation.current}:${revision}`}
+        kind="Illustration"
+        legibleScale={0}
+        natural={svgSize}
+        onError={onDecodeFailure(generation.current)}
+        src={svgDataUrl(block.payload)}
+      />
     ) : picture ? (
       <img
         alt={block.alt}
@@ -685,29 +682,32 @@ export function FyRenderBlock({
       />
     ) : (
       <>
-        {diagram ? (
+        {diagram && natural !== null ? (
           /**
-           * AT A READABLE SIZE, not the column's. The compiled image has no size of its own, so left alone it is
-           * stretched or squeezed to the column and its 16px text goes with it. Its width is set from its
-           * `viewBox` (`fy-render-mermaid-layout.ts`); wider than the column, it pans sideways in this box
-           * rather than shrinking, and the box is a tab stop so a keyboard can pan it too.
+           * FITTED, ZOOMABLE, PANNABLE. The compiled image has no size of its own, so the viewport gives it one
+           * from its `viewBox` (`fy-render-viewport.ts`): the whole diagram at rest, text no smaller than
+           * 10px, and Zoom / Reset / drag / pinch from there.
            */
-          <div
-            className="fy-render-diagram"
-            data-fy-render-scrolls={shown?.scrolls ? 'true' : 'false'}
-            {...(shown?.scrolls ? SCROLLING_DIAGRAM : {})}
-          >
-            <img
-              alt={block.alt}
-              className="fy-render-image"
-              data-fy-render-diagram="true"
-              data-fy-render-sized={shown === null ? 'false' : 'true'}
-              key={`diagram:${generation.current}`}
-              onError={onDecodeFailure(generation.current)}
-              src={svgDataUrl(compiled?.svg as string)}
-              style={shown === null ? undefined : { width: `${shown.width}px` }}
-            />
-          </div>
+          <FyRenderViewport
+            alt={block.alt}
+            diagram
+            fullscreen={fullscreen}
+            key={`diagram:${generation.current}`}
+            kind="Diagram"
+            legibleScale={MERMAID_LEGIBLE_SCALE}
+            natural={natural}
+            onError={onDecodeFailure(generation.current)}
+            src={svgDataUrl(compiled?.svg as string)}
+          />
+        ) : diagram ? (
+          <img
+            alt={block.alt}
+            className="fy-render-image"
+            data-fy-render-diagram="true"
+            key={`diagram:${generation.current}`}
+            onError={onDecodeFailure(generation.current)}
+            src={svgDataUrl(compiled?.svg as string)}
+          />
         ) : near || presentation === 'map' || presentation === 'chart' ? (
           // A diagram's first draw holds a quiet plane rather than nothing, so the
           // prose below does not jump twice. A map holds its plane from the start, for the same reason.

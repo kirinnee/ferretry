@@ -211,7 +211,15 @@ const viewport = (isIntersecting: boolean): void => {
 };
 
 /** A host node for a test renderer, so the viewport hook observes something. */
-const hostNode = () => ({ contains: (): boolean => false, focus: (): void => {} });
+const hostNode = () => ({
+  addEventListener: (): void => {},
+  clientHeight: 0,
+  clientWidth: 0,
+  contains: (): boolean => false,
+  focus: (): void => {},
+  getBoundingClientRect: () => ({ left: 0, top: 0 }),
+  removeEventListener: (): void => {},
+});
 
 const OWNED_THEME = 'studio-dark';
 let ambientTheme: string | null = null;
@@ -345,8 +353,8 @@ describe('FyRenderBlock inline by default', () => {
     should(count(tree, 'figcaption')).equal(0);
     should(tree.root.findAll(node => node.props?.role === 'status').length).equal(0);
     should(textOf(tree.root)).not.containEql('Render');
-    // The only buttons are the corner tools, hidden until hover, focus or a long press.
-    should(tools(tree)).eql(['SVG source', 'Fullscreen']);
+    // The only buttons are the zoom controls and the corner tools, hidden until hover, focus or a long press.
+    should(tools(tree)).eql(['Zoom in', 'Zoom out', 'Reset zoom', 'SVG source', 'Fullscreen']);
     should(attribute(tree, 'data-fy-render-tools')).equal('hover');
   });
 
@@ -1356,19 +1364,37 @@ describe('FyRenderBlock mermaid on a narrow column', () => {
     should(count(tree, 'iframe')).equal(0);
   });
 
-  test('should show a diagram that is wider than the column at a readable size, scrolling in its own box', () => {
+  test('should rest a diagram wider than the column at the legible scale, panning inside its own viewport', () => {
     // Arrange
     const tree = mountOn(lrBlock());
 
     // Act
     run(() => compile(tree, 'dark', WIDE_SVG));
 
-    // Assert — 760px at a floor of 14.45px of 16 (a 17px body is not measured here, so 14px: 11.9 → 12px floor).
+    // Assert — 760px into 358 would be 0.47 (7.5px text): it rests at 0.625 (10px) and pans.
+    const pan = tree.root.find(node => node.props['data-fy-render-fit'] !== undefined);
+    should(pan.props['data-fy-render-fit']).equal('legible');
+    should(pan.props['data-fy-render-pannable']).equal('true');
+    should(pan.props['data-fy-render-scale']).equal('0.625');
     const img = tree.root.findByType('img');
-    const shown = Number.parseFloat(String((img.props.style as { width: string }).width));
-    should(shown / 760).be.aboveOrEqual(12 / 16);
-    should(shown).be.above(358);
-    should(marked(tree, { 'data-fy-render-scrolls': 'true' })).equal(1);
+    should(Number.parseFloat(String((img.props.style as { width: string }).width))).equal(475);
+    should(marked(tree, { 'data-fy-render-viewport': 'inline' })).equal(1);
+  });
+
+  test('should show a diagram that fits the column whole, at its natural size', () => {
+    // Arrange
+    const tree = mountOn(lrBlock());
+    const fits =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="100%" viewBox="0 0 300 100"><rect width="300" height="100"/></svg>';
+
+    // Act
+    run(() => compile(tree, 'dark', fits));
+
+    // Assert
+    const pan = tree.root.find(node => node.props['data-fy-render-fit'] !== undefined);
+    should(pan.props['data-fy-render-fit']).equal('whole');
+    should(pan.props['data-fy-render-pannable']).equal('false');
+    should(pan.props['data-fy-render-scale']).equal('1.000');
   });
 
   test('should never rewrite another kind of diagram', () => {

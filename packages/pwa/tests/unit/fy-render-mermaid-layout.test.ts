@@ -3,8 +3,6 @@ import should from 'should';
 import {
   isNarrowColumn,
   MERMAID_NARROW_COLUMN_PX,
-  mermaidDisplayWidth,
-  mermaidNaturalSize,
   verticalizeMermaid,
 } from '../../src/lib/fy-render-mermaid-layout.ts';
 
@@ -120,85 +118,5 @@ describe('isNarrowColumn', () => {
     should(isNarrowColumn(MERMAID_NARROW_COLUMN_PX)).be.false();
     should(isNarrowColumn(860)).be.false();
     should(isNarrowColumn(0)).be.false();
-  });
-});
-
-describe('mermaidNaturalSize', () => {
-  test('should read the root viewBox', () => {
-    should(mermaidNaturalSize('<svg xmlns="x" width="100%" viewBox="0 0 320.5 480"><g/></svg>')).deepEqual({
-      height: 480,
-      width: 320.5,
-    });
-  });
-
-  test('should read a viewBox that does not start at the origin and one separated by commas', () => {
-    should(mermaidNaturalSize('<svg viewBox="-8, -8, 200, 100">')).deepEqual({ height: 100, width: 200 });
-  });
-
-  test('should be null without a usable viewBox', () => {
-    should(mermaidNaturalSize('<svg width="10" height="10"></svg>')).be.null();
-    should(mermaidNaturalSize('<svg viewBox="0 0 0 10"></svg>')).be.null();
-    should(mermaidNaturalSize('<svg><g viewBox="0 0 10 10"/></svg>')).be.null();
-  });
-});
-
-describe('mermaidDisplayWidth', () => {
-  const phone = { bodyPx: 17, columnPx: 358 };
-  const desktop = { bodyPx: 13.75, columnPx: 860 };
-
-  test('should show a diagram that fits at its natural size', () => {
-    should(mermaidDisplayWidth({ ...phone, naturalWidth: 240 })).deepEqual({ scrolls: false, width: 240 });
-  });
-
-  test('should shrink a diagram to the column while its text stays readable', () => {
-    // 358 / 380 = 0.94 of 16px = 15px, above 85% of a 17px body (14.45px)
-    const actual = mermaidDisplayWidth({ ...phone, naturalWidth: 380 });
-
-    should(actual.scrolls).be.false();
-    should(actual.width).equal(358);
-  });
-
-  test('should stop shrinking at a readable size and scroll instead', () => {
-    // A 760px diagram would need 0.47 to fit; the floor on a 17px body is 14.45px of 16, or 0.903.
-    const actual = mermaidDisplayWidth({ ...phone, naturalWidth: 760 });
-
-    should(actual.scrolls).be.true();
-    should(actual.width).equal(Math.round(760 * (14.45 / 16)));
-    should(actual.width / 760).be.aboveOrEqual(12 / 16);
-  });
-
-  test('should never take the text under 12px, whatever the body size', () => {
-    const actual = mermaidDisplayWidth({ bodyPx: 11, columnPx: 300, naturalWidth: 2000 });
-
-    should(actual.width / 2000).be.aboveOrEqual(12 / 16);
-    should(actual.scrolls).be.true();
-  });
-
-  test('should never take the text over 1.25× the body inline', () => {
-    // A 10px body caps the scale at 12.5 / 16.
-    const actual = mermaidDisplayWidth({ bodyPx: 10, columnPx: 900, naturalWidth: 400 });
-
-    should(actual.width).equal(Math.round(400 * (12.5 / 16)));
-  });
-
-  test('should keep a desktop diagram at natural size, which is within 1.25× its body', () => {
-    should(mermaidDisplayWidth({ ...desktop, naturalWidth: 500 })).deepEqual({ scrolls: false, width: 500 });
-    should(16 / desktop.bodyPx).be.belowOrEqual(1.25);
-  });
-
-  test('should let fullscreen enlarge a small diagram, but no more than twice', () => {
-    const big = mermaidDisplayWidth({ ...phone, fullscreen: true, naturalWidth: 240 });
-    const huge = mermaidDisplayWidth({ bodyPx: 17, columnPx: 1200, fullscreen: true, naturalWidth: 240 });
-
-    should(big.width).equal(358);
-    should(huge.width).equal(480);
-    should(huge.scrolls).be.false();
-  });
-
-  test('should treat an unmeasured column as one with room', () => {
-    should(mermaidDisplayWidth({ bodyPx: 14, columnPx: 0, naturalWidth: 700 })).deepEqual({
-      scrolls: false,
-      width: 700,
-    });
   });
 });
