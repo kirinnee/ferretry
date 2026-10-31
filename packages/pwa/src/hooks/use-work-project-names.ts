@@ -29,10 +29,7 @@ export function useWorkProjectNames(
     return board.watchProjects(daemon);
   }, [board, daemonId, baseUrl, deviceId, active]);
 
-  const state = useSyncExternalStore(
-    board?.subscribe ?? noSubscription,
-    () => (board === undefined || daemonId === undefined ? NEVER : board.projectsState(daemonId)),
-    () => NEVER,
-  );
+  const snapshot = () => (board === undefined || daemonId === undefined ? NEVER : board.projectsState(daemonId));
+  const state = useSyncExternalStore(board?.subscribe ?? noSubscription, snapshot, snapshot);
   return useMemo(() => workProjectNames(state.projects ?? []), [state.projects]);
 }
