@@ -1,3 +1,9 @@
+## [4.182.0](https://github.com/kirinnee/ferretry/compare/v4.181.0...v4.182.0) (2026-10-31)
+
+### Features
+
+* **input:** adaptive post-typing lock — 10 s when proven hidden (!A149) ([#1187](https://github.com/kirinnee/ferretry/issues/1187)) ([ad1f86b](https://github.com/kirinnee/ferretry/commit/ad1f86b61945af80d2c32d343d498181980f00ab))
+
 ## [4.181.0](https://github.com/kirinnee/ferretry/compare/v4.180.1...v4.181.0) (2026-10-31)
 
 ### Features
