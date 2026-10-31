@@ -1,3 +1,9 @@
+## [4.188.0](https://github.com/kirinnee/ferretry/compare/v4.187.1...v4.188.0) (2026-10-31)
+
+### Features
+
+* **daemon:** one fast search over cards and agenda items, with a related check ([#1196](https://github.com/kirinnee/ferretry/issues/1196)) ([5b1dc02](https://github.com/kirinnee/ferretry/commit/5b1dc02bb2124cd3e16dbacbc52e92e36e15607a))
+
 ## [4.187.1](https://github.com/kirinnee/ferretry/compare/v4.187.0...v4.187.1) (2026-10-31)
 
 ### Fixes
