@@ -50,8 +50,8 @@ JSON Schema of a kind (\`${bin} config schema\` lists the kinds).
 
 ## The rules
 
-1. **Never write a secret value into a file.** Store it with \`${bin} secret set NAME\` (the owner types the
-   value), then write \`\${secret:NAME}\` where the value would go. A file holding anything that looks like a
+1. **Never write a secret value into a file.** Store it with \`${bin} secret set NAME\` (the owner runs it and types the
+   value; a ferret cannot write the secret store), then write \`\${secret:NAME}\` where the value would go. A file holding anything that looks like a
    key is refused.
 2. **Run \`${bin} config check\` after every edit.** It names each problem by file, line and column, with the
    fix. (\`${bin} config write <file>\` writes from stdin through the daemon and refuses a file that does not check.) A broken file is never half-applied: its last good version stays in effect until it checks.

@@ -23,6 +23,7 @@ import {
 } from '@ferretry/protocol';
 import { parseBody } from '../../api/body.ts';
 import type { CapabilityDemand } from '../../api/capability.ts';
+import { isAgentCaller } from '../../api/agent-caller.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
@@ -68,6 +69,9 @@ import {
  *
  * Every route is `admin`. A warden supervises sessions and has no business enumerating, replacing or
  * spending the operator's credentials, and the route table is where that decision belongs.
+ *
+ * A FERRET HOLDS THE ADMIN TOKEN BUT MAY NOT WRITE THE STORE: set, replace, delete, saved logins, and
+ * filing or sealing a copy are refused to an agent (`ownerOnly`). It lists names and uses a secret by name.
  */
 
 /** A domain failure's HTTP answer. A damaged store is a 500: the caller did nothing wrong, and
@@ -114,6 +118,22 @@ function reraise(error: unknown): never {
   throw error;
 }
 
+/**
+ * THE SECRET STORE IS THE OWNER'S TO WRITE. Every ferret holds the host admin token, so without this a
+ * confused or prompt-injected agent could replace `GITHUB_TOKEN` with a value it controls, or delete it.
+ * It is refused here, before a body is read, with the two ways a ferret does reach the store: an input
+ * request, or a sealed copy. Both put a card in front of the owner. The owner's own `fy` in a shell, and
+ * a paired device, are not agents.
+ */
+function ownerOnly(context: RouteContext, act: string): void {
+  if (!isAgentCaller(context)) return;
+  throw new ApiError(
+    403,
+    `a ferret cannot ${act}; the owner does. To get a value into the store, ask the owner with an input request (they see a card and type it), or paste a sealed copy into the store (secure copy). Both show the owner a card.`,
+    'forbidden',
+  );
+}
+
 /** The saved login's handle in the path. */
 function pathLoginId(context: RouteContext): LoginEntryId {
   const parsed = LoginEntryIdSchema.safeParse(decodeParameter(context.params.get('id') ?? '') ?? '');
@@ -141,6 +161,7 @@ async function listLogins(logins: LoginDirectory): Promise<ApiResponse> {
 }
 
 async function putLogin(logins: LoginDirectory, context: RouteContext): Promise<ApiResponse> {
+  ownerOnly(context, 'change a saved login');
   const id = pathLoginId(context);
   const change = await parseBody(context.request, PutLoginEntryRequestSchema);
   try {
@@ -151,6 +172,7 @@ async function putLogin(logins: LoginDirectory, context: RouteContext): Promise<
 }
 
 async function renameLogin(logins: LoginDirectory, context: RouteContext): Promise<ApiResponse> {
+  ownerOnly(context, 'rename a saved login');
   const id = pathLoginId(context);
   const { to } = await parseBody(context.request, RenameLoginEntryRequestSchema);
   try {
@@ -161,6 +183,7 @@ async function renameLogin(logins: LoginDirectory, context: RouteContext): Promi
 }
 
 async function removeLogin(logins: LoginDirectory, context: RouteContext): Promise<ApiResponse> {
+  ownerOnly(context, 'delete a saved login');
   const id = pathLoginId(context);
   try {
     if (!(await logins.remove(id))) throw new ApiError(404, `there is no saved login ${id}`, 'unknown_login');
@@ -225,6 +248,7 @@ async function list(directory: SecretDirectory, references: SecretReferenceSourc
 }
 
 async function put(directory: SecretDirectory, context: RouteContext): Promise<ApiResponse> {
+  ownerOnly(context, 'set or replace a secret');
   const request = await parseBody(context.request, PutSecretRequestSchema);
   try {
     const summary: SecretSummary = await directory.put(request.name, request.value);
@@ -235,6 +259,7 @@ async function put(directory: SecretDirectory, context: RouteContext): Promise<A
 }
 
 async function remove(directory: SecretDirectory, context: RouteContext): Promise<ApiResponse> {
+  ownerOnly(context, 'delete a secret');
   const name = pathSecretName(context);
   try {
     if (!(await directory.remove(name))) throw new ApiError(404, `no secret named ${name}`, 'unknown_secret');
@@ -260,7 +285,8 @@ function pathImportId(context: RouteContext): SecretImportId {
   return parsed.data;
 }
 
-async function openImport(imports: SecretImportService): Promise<ApiResponse> {
+async function openImport(imports: SecretImportService, context: RouteContext): Promise<ApiResponse> {
+  ownerOnly(context, 'open a secret import');
   try {
     return jsonResponse(SecretImportOfferSchema.parse(await imports.open()), 201);
   } catch (error) {
@@ -269,6 +295,7 @@ async function openImport(imports: SecretImportService): Promise<ApiResponse> {
 }
 
 async function completeImport(imports: SecretImportService, context: RouteContext): Promise<ApiResponse> {
+  ownerOnly(context, 'file secrets into the store');
   const importId = pathImportId(context);
   const { bundle } = await parseBody(context.request, SecretImportCompleteRequestSchema);
   try {
@@ -287,6 +314,7 @@ async function completeImport(imports: SecretImportService, context: RouteContex
  * the machine (B4). The governance is the boundary's, never re-derived here; its absence refuses.
  */
 async function exportSecrets(exports: SecretExportService, context: RouteContext): Promise<ApiResponse> {
+  ownerOnly(context, 'seal secrets for another machine');
   if (context.governance === undefined)
     throw new ApiError(500, 'this daemon cannot say who is asking, so it is refusing', 'internal_error');
   const importId = pathImportId(context);
@@ -385,7 +413,7 @@ export function secretRoutes(subsystem: SecretSubsystem): readonly ApiRoute[] {
       minimum: 'operator',
       capability: SECRETS_CONFIGURE,
       noStore: true,
-      handle: async () => await openImport(subsystem.imports),
+      handle: async context => await openImport(subsystem.imports, context),
     },
     {
       method: 'POST',
