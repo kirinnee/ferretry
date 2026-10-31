@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import type { InputRequestField, InputTargetFacts, LoginObserved } from '@ferretry/protocol';
 import should from 'should';
 import {
+  heldFromView,
   type LockContext,
   lockFor,
   longerLock,
@@ -194,5 +195,34 @@ describe('when the dummy probe may run', () => {
     should(
       probeable(page([pageField({}, { autocomplete: 'current-password', inputmode: 'text' })]), SECRET, QUIET),
     ).be.true();
+  });
+});
+
+describe('a one-time code (`code`)', () => {
+  const CODE = [field('code', 'code')];
+
+  it('should hold nothing for a card of codes and plain values, and hold a private value or a secret', () => {
+    // Act / Assert — the ferret may see a code, so no lock would hide anything it is not allowed to read.
+    should(heldFromView(CODE)).be.false();
+    should(heldFromView([field('email', 'plain'), field('code', 'code')])).be.false();
+    should(heldFromView([field('code', 'private')])).be.true();
+    should(heldFromView([field('password', 'secret'), field('code', 'code')])).be.true();
+  });
+
+  it('should lock a password beside a code by the password alone, and still never probe such a card', () => {
+    // Arrange — a sign-in page with a password and a code field, the password proven by a saved login's facts.
+    const facts = page([pageField(), pageField({ fieldId: 'code' }, { type: 'text', name: 'otp' })]);
+    const fields = [field('password', 'secret'), field('code', 'code')];
+    const observed = [proven(facts)];
+
+    // Act / Assert
+    should(lockFor(facts, fields, { ...QUIET, observed })).deepEqual({ seconds: 10, reason: 'proven-field' });
+    should(lockFor(facts, fields, QUIET)).deepEqual({ seconds: 120, reason: 'not-proven' });
+    should(probeable(facts, fields, QUIET)).be.false();
+    // A private value on the card keeps today's full lock, as before.
+    should(lockFor(facts, [field('password', 'secret'), field('code', 'private')], { ...QUIET, observed })).deepEqual({
+      seconds: 120,
+      reason: 'code',
+    });
   });
 });

@@ -89,8 +89,15 @@ export interface AgentInputPort {
   raise(sessionId: string, raise: InputRaise): Promise<InputAgentView>;
   /** Waits up to `waitMs` for the request to reach a final state, then says where it stands. */
   agentView(sessionId: string, id: AgendaId, waitMs: number): Promise<InputAgentView>;
-  /** The card of a request pending on this surface, if any. */
-  pendingOn(sessionId: string, target: { readonly kind: SurfaceKind; readonly key: string }): AgendaId | undefined;
+  /**
+   * The card of a request pending on this surface, if any. With `typing`, a card of one-time codes only is left out:
+   * the agent may type a code itself, so such a card never keeps it off the surface.
+   */
+  pendingOn(
+    sessionId: string,
+    target: { readonly kind: SurfaceKind; readonly key: string },
+    options?: { readonly typing?: boolean },
+  ): AgendaId | undefined;
   /** Runs `work` as one turn in the session, so a send or close and a raise or secure write never interleave. */
   exclusive<T>(sessionId: string, work: () => Promise<T>): Promise<T>;
   /**

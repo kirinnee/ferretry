@@ -659,7 +659,12 @@ export class AgentToolService {
         // The check and the keystrokes are one turn in the session: a request cannot be raised on this
         // pane between them, and the secure write cannot land in the middle of them.
         return await this.exclusively(sessionId, async () => {
-          const pending = this.ports.input?.pendingOn(sessionId, { kind: 'terminal', key: surface.name ?? surface.id });
+          // A card of one-time codes does not keep the ferret off the pane: it may type a code it read itself.
+          const pending = this.ports.input?.pendingOn(
+            sessionId,
+            { kind: 'terminal', key: surface.name ?? surface.id },
+            { typing: true },
+          );
           if (pending !== undefined)
             throw new AgentToolError(
               'conflict',
@@ -1194,7 +1199,7 @@ export class AgentToolService {
     if (input !== undefined && PAGE_TYPING.has(tool)) {
       const pending = [surface.name, surface.id]
         .filter((key): key is string => key !== undefined)
-        .map(key => input.pendingOn(caller.sessionId, { kind: 'browser', key }))
+        .map(key => input.pendingOn(caller.sessionId, { kind: 'browser', key }, { typing: true }))
         .find(id => id !== undefined);
       if (pending !== undefined)
         throw new AgentToolError(

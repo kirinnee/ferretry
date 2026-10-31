@@ -615,3 +615,90 @@ describe('the schemas that must never hold a value', () => {
     should(InputRequestListSchema.safeParse({ requests: [], value: 'x' }).success).be.false();
   });
 });
+
+describe('a one-time code (`code`)', () => {
+  it('should rank code above plain and below private and secret', () => {
+    // Arrange
+    const of = (...kinds: ('secret' | 'private' | 'code' | 'plain')[]) =>
+      strongestSensitivity(kinds.map(sensitivity => ({ sensitivity })));
+
+    // Act / Assert — the card, the journal and the audit record the strongest field.
+    should(of('plain', 'code')).equal('code');
+    should(of('code', 'private')).equal('private');
+    should(of('code', 'secret')).equal('secret');
+    should(of('code')).equal('code');
+  });
+
+  it('should refuse a code that would press keys and never keep one as a saved login', () => {
+    // Act / Assert
+    should(inputValueProblem('123 456', 'code')).be.undefined();
+    should(inputValueProblem('12\t34', 'code')).containEql('press keys');
+    should(inputValueProblem('12\n34', 'code')).containEql('press keys');
+    should(savedRolesOf([{ id: 'code', sensitivity: 'code' }])).be.undefined();
+    should([
+      ...(savedRolesOf([
+        { id: 'email', sensitivity: 'plain' },
+        { id: 'password', sensitivity: 'secret' },
+        { id: 'code', sensitivity: 'code' },
+      ])?.entries() ?? []),
+    ]).eql([
+      ['email', 'username'],
+      ['password', 'password'],
+    ]);
+  });
+
+  it('should rank a neutral flag above green and below amber', () => {
+    // Arrange
+    const green = { level: 'green', reason: 'A password field on a secure page.' } as const;
+    const neutral = { level: 'neutral', reason: 'One-time code: the ferret can see it.' } as const;
+    const amber = { level: 'amber', reason: 'Not https.' } as const;
+
+    // Act / Assert
+    should(worstRisk([green, neutral])).equal(neutral);
+    should(worstRisk([neutral, amber])).equal(amber);
+  });
+
+  it('should take code from an agent and refuse a sensitivity it does not know, never reading it as plain', () => {
+    // Act / Assert — the raise stays closed: an unknown word is a refusal the agent can correct.
+    should(
+      InputRaiseSchema.safeParse({
+        target: { kind: 'terminal', key: 'dev' },
+        prompt: 'the 2FA code',
+        sensitivity: 'code',
+      }).success,
+    ).be.true();
+    should(
+      InputRaiseSchema.safeParse({ target: { kind: 'terminal', key: 'dev' }, prompt: 'x', sensitivity: 'otp' }).success,
+    ).be.false();
+  });
+
+  it('should read a sensitivity or risk level this build does not know as secret and amber, never plain', () => {
+    // Arrange — a request from a NEWER daemon, with a kind and a level this client was built without.
+    const newer = {
+      ...REQUEST,
+      sensitivity: 'passkey-pin',
+      fields: [{ id: 'value', label: 'PIN', sensitivity: 'passkey-pin', risk: { level: 'violet', reason: 'New.' } }],
+      risk: { level: 'violet', reason: 'New.' },
+    };
+
+    // Act
+    const read = InputRequestListSchema.parse({ requests: [newer] }).requests[0];
+
+    // Assert
+    should(read?.sensitivity).equal('secret');
+    should(read?.fields[0]?.sensitivity).equal('secret');
+    should(read?.fields[0]?.risk?.level).equal('amber');
+    should(read?.risk?.level).equal('amber');
+  });
+
+  it('should be refused whole by a client built before code existed, so an older app never draws it as plain', () => {
+    // Arrange — the three-value enum every client before this change was built with.
+    const older = z.enum(['secret', 'private', 'plain']);
+    const olderRequest = z.object({ sensitivity: older, fields: z.array(z.object({ sensitivity: older })) });
+    const code = { ...REQUEST, sensitivity: 'code', fields: [{ id: 'value', label: 'Code', sensitivity: 'code' }] };
+
+    // Act / Assert — the request still parses here, and an old reader refuses it rather than guessing.
+    should(InputRequestSchema.parse(code).sensitivity).equal('code');
+    should(olderRequest.safeParse(code).success).be.false();
+  });
+});

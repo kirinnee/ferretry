@@ -86,9 +86,10 @@ through the input tool; the generic add refuses it.
 | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `secret`  | A password or passphrase. The bridge never carries it to the agent, a log or disk; what the target prints afterwards is held back (quarantine) and then only masked best effort. | Never refused for its target: the card flags the risk (green, amber or red) and Send stays available. Hard refusals: a control character or line break in the value, a changed target (409 `target_changed`), and a caller who is not the owner. |
 | `plain`   | A username, email, hostname or `y`. **Not secret.**                                                                                                                              | Target binding only. The card says "Not secret: the ferret can see this value." and flags it.                                                                                                                                                    |
-| `private` | A code that echoes (a 2FA code typed into a terminal).                                                                                                                           | Never refused: the card flags it amber ("This code will show on screen while the terminal is hidden from the ferret for 2 minutes."). Quarantine and masking apply exactly as for `secret`. Same hard refusals as `secret`.                      |
+| `private` | A value that is not one-time but shows on screen as it is typed (rare).                                                                                                          | Never refused: the card flags it amber ("This value will show on screen while the terminal is hidden from the ferret for 2 minutes."). Quarantine and masking apply exactly as for `secret`. Same hard refusals as `secret`.                     |
+| `code`    | A one-time code: 2FA, an e-mail or SMS verification code, a device code. **Not secret.**                                                                                         | Never refused: the card says "One-time code: the ferret can see it." and flags it **neutral**. No lock, no quarantine, no page hold, not masked (but see [one-time codes](#one-time-codes-code)). Same hard refusals as `secret`.                |
 
-`secret` and `private` values containing a control character or a line break are refused
+`secret`, `private` and `code` values containing a control character or a line break are refused
 ("this would press keys"). `plain` allows Tab. `inputValueProblem` is that rule.
 
 A `plain` value is typed the same way and is not held in the redaction window, so the agent's next read
@@ -106,7 +107,7 @@ beside the field) and "Password" (`secret`) on one card, and the daemon types ea
 - **A terminal takes exactly one field.** A terminal shows one prompt at a time, so a value it asks for
   next is a new card with `chain`. A terminal field may carry a `label` ("Passphrase").
 - **Every field is covered before anything is typed**: typed, or filled from ONE saved login by its role
-  (`plain` → the username, `secret` → the password, `private` → the 2FA code). Only a saved login that
+  (`plain` → the username, `secret` → the password, `code` or `private` → the 2FA code). Only a saved login that
   holds every field's value is offered.
 - **"Save as" keeps a login card as ONE saved login**, in one change under the store-wide lock: the `plain`
   field as the username and the `secret` one as the password (`savedRolesOf`). A one-time code is never
@@ -124,6 +125,51 @@ beside the field) and "Password" (`secret`) on one card, and the daemon types ea
   `plain` field, the daemon's risk of the rest) above the one-tap button, so nothing is sent unseen.
 - A page's card does not survive a daemon restart: its elements are the agent's words and are not
   journalled, so the card ends as interrupted and the agent raises it again.
+
+### One-time codes (`code`)
+
+The owner decided that one-time codes are not secrets: a ferret may read an e-mail or SMS code from an inbox it has,
+and may see a TOTP code. `code` is the sensitivity for them; `private` stays for a value that echoes but is not
+one-time.
+
+- **The card** says "One-time code: the ferret can see it.", flags it neutral (not the red of `plain`, not the amber
+  of `private`), and shows the value as it is typed (no Show toggle, no numeric pad: a device code may hold letters).
+- **Nothing is held**: no lock, no quarantine, no page hold, no redaction window. The ferret's next read shows the
+  screen as it is.
+- **The ferret may type a code itself** with `terminal_send` or `browser_type`. A pending card whose every field is a
+  `code` does not keep it off the surface; any other field on the card still does. The card stays open (the owner
+  can dismiss it), and an owner's Send after the ferret typed is checked against the target like any other.
+- **A code the DAEMON made** from a saved 2FA seed is the one exception: it is masked from every read for the
+  redaction window, and no tool, result or route carries it. It is typed only into the observed field of that
+  sign-in.
+- **Never saved**: "Save as" keeps no code; the seed is added in Settings.
+- **Never probed**: a card with a code is not dummy-probed, as before.
+
+Where `code` is weaker than `private`, and why that is the design:
+
+| `private` does                                 | `code` does                              | Why                                                                     |
+| ---------------------------------------------- | ---------------------------------------- | ----------------------------------------------------------------------- |
+| Locks the target 120 s (quarantine, page hold) | No lock                                  | The ferret may see the code; a lock would hide nothing it may not read. |
+| Masks the typed value for the redaction window | Not masked (a daemon-made code still is) | Same; and a daemon-made code is never handed back (open question 11).   |
+| Keeps the ferret's keystrokes off the surface  | A code-only card does not                | The ferret may type a code it read itself.                              |
+| Flagged amber                                  | Flagged neutral                          | It is not secret and goes where it was asked for.                       |
+| Hidden behind Show on the card                 | Shown as typed                           | It is not secret.                                                       |
+
+What a ferret or a page could abuse (design §11.4):
+
+| Who    | Abuse                                                                                     | Answer                                                                                                                                                            |
+| ------ | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ferret | relays a live code to an attacker's page (real-time phishing) within its 30 s–10 min life | a daemon-made TOTP code is typed only into the sign-in's observed field and never returned. **Not covered**: a code the ferret reads itself can be typed anywhere |
+| Ferret | with inbox access, resets the password of any account that recovers by e-mail             | not Ferretry's to stop: **inbox access is account-recovery power.** Give a ferret an inbox only when you would give it the accounts behind it                     |
+| Page   | an e-mail or page tells the ferret "enter this code at evil.example" (prompt injection)   | the agent instruction says to type a code only on the page of the sign-in it is for                                                                               |
+| Page   | a look-alike page asks for the code                                                       | the card shows where it goes and flags a missing, covered, insecure or cross-site field amber, as for a password                                                  |
+| Ferret | raises a `code` card for a password prompt                                                | the card says plainly that the ferret can see the value; the owner reads it, as for a `plain` card                                                                |
+
+**Older clients fail closed.** A PWA or `fy` built before `code` existed reads a request through a closed enum and
+refuses the whole request (the card shows an error), so it is never drawn or answered as `plain`. A client from
+this release on reads an unknown sensitivity as `secret` and an unknown risk level as `amber`
+(`ReadInputSensitivitySchema`), so the next addition fails closed without refusing the card. An older daemon refuses a
+raise naming `code`, and the agent is told so.
 
 ## Who may do what
 
@@ -226,19 +272,20 @@ card draws what the **daemon** observed (`sudo` is reading it, typing is hidden)
 **agent** wrote small, and carries a **risk flag** with one fixed sentence that says what the risk is
 (`request.risk`: a level and a reason; the sentence never contains terminal text):
 
-| Level | When                                                                                                                                                                        |
-| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| green | A `secret`, echo off, and a recognised program (`sudo`, `ssh`, `gpg` and so on).                                                                                            |
-| amber | A `secret` with echo on (the value will show on screen), echo unknown, an unrecognised program or the bare shell.                                                           |
-| amber | A `private` code (it echoes): "This code will show on screen while the terminal is hidden from the ferret for 2 minutes."                                                   |
-| amber | A page field: the page is not https, the field is in a frame from another site, a `secret` is going into a field that is not a password field, or the field cannot be seen. |
-| green | A page's `secret` going into a password field on a secure page.                                                                                                             |
-| red   | A `plain` value: "Not secret: the ferret can see this value."                                                                                                               |
+| Level   | When                                                                                                                                                                        |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| green   | A `secret`, echo off, and a recognised program (`sudo`, `ssh`, `gpg` and so on).                                                                                            |
+| amber   | A `secret` with echo on (the value will show on screen), echo unknown, an unrecognised program or the bare shell.                                                           |
+| amber   | A `private` value (it echoes): "This value will show on screen while the terminal is hidden from the ferret for 2 minutes."                                                 |
+| neutral | A one-time `code`: "One-time code: the ferret can see it." A page field's amber checks (missing, covered, not https, another site's frame) still come first.                |
+| amber   | A page field: the page is not https, the field is in a frame from another site, a `secret` is going into a field that is not a password field, or the field cannot be seen. |
+| green   | A page's `secret` going into a password field on a secure page.                                                                                                             |
+| red     | A `plain` value: "Not secret: the ferret can see this value."                                                                                                               |
 
 The flag is computed from what the daemon observed, when the request is raised and again when it is
 restored. Send is available at every level. The only refusals are a control character or line break in
-a `secret` or `private` value ("this would press keys"), a target that changed since the card was drawn (`target_changed`),
-and a caller who is not the owner. A `private` code is always flagged amber.
+a `secret`, `private` or `code` value ("this would press keys"), a target that changed since the card was drawn (`target_changed`),
+and a caller who is not the owner. A `private` value is always flagged amber, a `code` neutral.
 
 **`sudo` always goes through the app.** The agent instruction makes `terminal_request_input` the only way
 to answer a `sudo` password prompt: the agent never types it and never asks for it in chat.
@@ -314,7 +361,7 @@ When a `secret` is delivered the terminal is **quarantined** from the write for 
 - **A terminal is known by every name** (its key, name and id), so a read by any of them is refused.
 - **Raise-time rules**: nothing is refused for its target. A `secret` on a terminal that echoes, or whose
   echo is unknown, is allowed and flagged amber; the quarantine hides the pane, including what echoed, and
-  the facts are checked again at delivery (the compare-and-enqueue check below). A `private` code is allowed and flagged amber, with the same quarantine.
+  the facts are checked again at delivery (the compare-and-enqueue check below). A `private` value is allowed and flagged amber, with the same quarantine. A one-time `code` gets no quarantine at all.
 
 ### How long the lock lasts
 
@@ -327,11 +374,14 @@ seconds (`lockSeconds`). It is decided only from what the daemon observed (`pack
 | `hidden-terminal` | 10 s  | A LOCAL password prompt: echo off AND line (canonical) mode, the program is sudo, sudoedit, su, doas or passwd, and it runs setuid root (effective uid 0, real uid not), which a script or binary the ferret wrote cannot. ssh, docker, psql and every readline or raw-mode program are never short. |
 | `proven-field`    | 10 s  | A submitted value into exactly the page fields below, AND a saved login's facts for that very field identity say masked, no echo after submit and moved on, with no record saying otherwise.                                                                                                         |
 | `probed-field`    | 10 s  | One password field as below, and the daemon's **dummy probe** at raise came back clean.                                                                                                                                                                                                              |
-| `code`            | 120 s | A one-time code (`private`): it shows as it is typed.                                                                                                                                                                                                                                                |
+| `code`            | 120 s | A `private` value: it shows as it is typed. (A one-time `code` field gets no lock at all; the reason's name is older than the sensitivity.)                                                                                                                                                          |
 | `not-proven`      | 120 s | Anything else, every probe that did not run cleanly, an unreadable login store, a ferret that could have steered the page.                                                                                                                                                                           |
 
 A page field qualifies when every secret field is a visible, uncovered `input type=password` on a secure page, in the
 page's own origin, with no human check showing.
+
+A card of `plain` values and one-time `code`s has **no lock** (`heldFromView`): the ferret may see both. A card with a
+`code` beside a `secret` is locked for the secret alone, by the rules above.
 
 - **Masking does not shorten.** The redaction window stays 10 minutes whatever the lock; the owner can still end a
   lock early or reveal.
@@ -343,7 +393,7 @@ page's own origin, with no human check showing.
   card's own facts do, and only for a setuid-root password program.
 - **The dummy probe** runs on a page card only, for exactly ONE secret field, after the field picture and before the
   owner is asked, inside the page's own queue. It is skipped for a session that ran a page script, for any card with a
-  one-time code, and for a field whose `autocomplete`, `name` or `id` says code, PIN, OTP, 2FA, verification, CVV or
+  `private` value or a one-time `code`, and for a field whose `autocomplete`, `name` or `id` says code, PIN, OTP, 2FA, verification, CVV or
   token, or whose `inputmode` is numeric, tel or decimal. It runs only on an EMPTY field in the page's main frame, and
   only when the page holds no WebSocket open. A throwaway value of three characters (a tilde and two random letters or
   digits, shorter than any code or PIN field and than the minimum length of nearly every password field) is typed the way the owner's will be; the page's text is
@@ -458,7 +508,7 @@ error or log.
 
 ### The hold on a page
 
-A `secret` or `private` value typed into a page holds that page for the same window as a terminal
+A `secret` or `private` value typed into a page (never a one-time `code`) holds that page for the same window as a terminal
 (`INPUT_QUARANTINE_SECONDS`):
 
 - The agent's **pictures** of it (`browser_screenshot`, `browser_pdf`, `browser_highlight`) are refused for
@@ -693,8 +743,8 @@ for `ssh`, `scp` and `sftp`), or the web host for a page. A saved login whose `m
   hex write, the quarantine, the risk flag. The value is opened **inside the daemon**, after every check that
   can refuse without typing, and goes only into that write.
 - **A saved value never passes through the app.** The card sends the entry's handle; the daemon resolves it.
-- **Which field it fills** follows the request: the password for a `secret`, the 2FA code for a `private`
-  request, the username for a `plain` one. An entry that does not hold that field is not offered.
+- **Which field it fills** follows the request: the password for a `secret`, the 2FA code for a `code`
+  (or `private`) request, the username for a `plain` one. An entry that does not hold that field is not offered.
 - **A mismatch is never the primary.** A look-alike program, another host or another site is not matched;
   every entry that holds the field stays **selectable by hand**, because the owner may know better.
 - **The ferret may hint** (`secretHint` / `secret_hint`): the card marks that entry as "the ferret suggested
@@ -705,8 +755,9 @@ for `ssh`, `scp` and `sftp`), or the web host for a page. A saved login whose `m
 ### 2FA seeds (opt-in, per entry)
 
 An entry may keep a TOTP seed (RFC 6238; SHA-1, 6 digits and 30 seconds unless the setup page says otherwise).
-The daemon makes the current code when the owner taps Use on a `private` request and types it like any
-`private` value; the seed never leaves the use boundary. It is **off by default**, and adding one requires an
+The daemon makes the current code when the owner taps Use on a `code` (or `private`) request and types it into the
+observed field; the seed never leaves the use boundary, and the code it made is **masked from every read** for the
+redaction window, so no tool, result or route hands it back (a code the owner typed is not masked). It is **off by default**, and adding one requires an
 explicit confirmation of this sentence (`LOGIN_TOTP_WARNING`), shown in the app and the CLI:
 
 > Keeping the password and the 2FA seed in the same place means one compromise of this machine's vault
@@ -747,7 +798,8 @@ default**, revocable, and audited on every use. Until then every placement is a 
   can send keys can still make the program print what it received; the agent's `terminal.read` of it is
   refused, but a process the agent started in another pane or a file it redirected to is not covered.
 - **A `plain` value is visible by design.** It is marked on the card.
-- **A browser `private` code can appear in an after-screenshot** (a later phase).
+- **A browser `private` value can appear in an after-screenshot** (a later phase).
+- **A one-time `code` is weaker than `private` on purpose** (the owner's decision, see [one-time codes](#one-time-codes-code)).
 - **Not zeroed, not locked.** Strings are immutable in the runtime. "Dropped" means unreachable. Swap
   and core dumps are out of scope.
 - **The guard is compare-and-ENQUEUE, not compare-and-deliver.** `if-shell -F` evaluates its condition

@@ -2196,3 +2196,58 @@ describe('when the terminal changes under the card (#B100)', () => {
     should(service.quarantinedUntil(SESSION, ['dev'])).be.undefined();
   });
 });
+
+describe('a one-time code (`code`): visible, never locked, never masked when the owner typed it', () => {
+  const CODE: InputRaise = { ...RAISE, prompt: 'GitHub wants the 2FA code', sensitivity: 'code' };
+
+  it('should raise a card that says the ferret can see the code, flagged neutral, with no lock and no ping', async () => {
+    // Act
+    const { w, view, request } = await raised({}, CODE);
+
+    // Assert
+    should(request.risk).eql({ level: 'neutral', reason: 'One-time code: the ferret can see it.' });
+    should(request.fields[0]).containDeep({ label: 'Code', sensitivity: 'code' });
+    should(request.lock).be.undefined();
+    should(view.lockSeconds).be.undefined();
+    should(w.cards[0]?.title).equal('Needs a code');
+    should(w.cards[0]?.blocking).be.false();
+  });
+
+  it('should type the code with no quarantine and keep it out of the redaction window', async () => {
+    // Arrange
+    const { w, service, values, id, digest } = await raised({}, CODE);
+
+    // Act
+    const done = await service.deliver(SESSION, id, bodyFor(digest), HOST);
+
+    // Assert — the ferret may read it straight away, as the card said.
+    should(done.state).equal('delivered');
+    should(w.writes).eql([{ text: VALUE, submit: true }]);
+    should(values.scrub(SESSION, `screen: ${VALUE}`)).equal(`screen: ${VALUE}`);
+    should(w.quarantineEvents.length).equal(0);
+    should(service.quarantinedUntil(SESSION, ['dev'])).be.undefined();
+  });
+
+  it('should still refuse a code that would press keys', async () => {
+    // Arrange
+    const { service, id, digest } = await raised({}, CODE);
+
+    // Act
+    const error = await refused(service.deliver(SESSION, id, bodyFor(digest, {}, '12\n34'), HOST));
+
+    // Assert
+    should(error.code).equal('bad_request');
+  });
+
+  it('should leave the typing gate open for a card of codes only, and closed for any other card', async () => {
+    // Arrange
+    const code = await raised({}, CODE);
+    const secret = await raised({}, RAISE);
+    const at = { kind: 'terminal', key: 'dev' } as const;
+
+    // Act / Assert — the ferret may type a code it read itself; the card stays findable for input.wait.
+    should(code.service.pendingOn(SESSION, at, { typing: true })).be.undefined();
+    should(code.service.pendingOn(SESSION, at)).equal('A1');
+    should(secret.service.pendingOn(SESSION, at, { typing: true })).equal('A1');
+  });
+});

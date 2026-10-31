@@ -106,7 +106,7 @@ function world() {
     input: {
       raise: async (sessionId, raise) => await service.raise(sessionId, raise),
       agentView: async (sessionId, card, waitMs) => await service.agentView(sessionId, card, waitMs),
-      pendingOn: (sessionId, target) => service.pendingOn(sessionId, target),
+      pendingOn: (sessionId, target, options) => service.pendingOn(sessionId, target, options),
       exclusive: async (sessionId, work) => await service.exclusive(sessionId, work),
       pageHeld: (sessionId, names) => service.pageHeld(sessionId, names),
       pageDocument: async (sessionId, key) => await service.pageDocument(sessionId, key),
@@ -151,6 +151,29 @@ describe('a page the owner was asked about', () => {
     should(error.message).containEql('an input request is pending on %browser:app');
   });
 
+  it('should let the agent type into a page whose only card asks for a one-time code: it may type a code itself', async () => {
+    // Arrange — the ferret asked the owner for a code, then read it from an inbox it has.
+    const built = world();
+    await built.tools.service.call(agent, { tool: 'browser.open', name: 'app' });
+    await built.tools.service.call(agent, {
+      tool: 'browser.request_input',
+      name: 'app',
+      prompt: 'the code GitHub sent',
+      fields: [{ id: 'code', label: 'Code', sensitivity: 'code', ref: 'e12' }],
+    });
+
+    // Act
+    const typed = await built.tools.service.call(agent, {
+      tool: 'browser.type',
+      name: 'app',
+      ref: 'e12',
+      text: '481516',
+    });
+
+    // Assert — nothing refused it, and the card is still there for the owner or input.wait.
+    should(typed.summary).not.containEql('pending');
+    should((await built.service.list(HOST))[0]?.state).equal('pending');
+  });
   it('should refuse a page script while the request waits: a script can fill the field as well as type can', async () => {
     const { tools } = await delivered();
 

@@ -137,6 +137,7 @@ function harness(
     sinks,
     saves,
     fills,
+    values,
     directory,
     sealed,
     everything,
@@ -468,6 +469,48 @@ describe('the next time: the card offers the saved login, and the owner taps Use
     should(sunk).not.containEql(code);
   });
 
+  it('should never hand back a code it made for a `code` card: masked from reads, in no result, route or sink', async () => {
+    // Arrange — the approved pick: a daemon-made TOTP code is typed only into the observed field, never returned.
+    const h = harness();
+    await h.directory.put(
+      'GITHUB',
+      PutLoginEntryRequestSchema.parse({ label: 'GitHub', totp: { seed: SEED }, totpAcknowledged: true }),
+    );
+    const { request, view } = await raised(h, { ...RAISE, sensitivity: 'code' });
+    should(request.saved?.offers.map(offer => offer.fills)).deepEqual(['totp']);
+
+    // Act
+    const result = await h.service.deliver(
+      SESSION,
+      request.id,
+      saved(request.observedDigest as string, 'GITHUB'),
+      HOST,
+    );
+    const waited = await h.service.agentView(SESSION, view.id, 0);
+    const code = totpCode(SEED, { algorithm: 'SHA1', digits: 6, period: 30 }, NOW) as string;
+
+    // Assert — typed once, into the target; nowhere else, and a read of the screen shows it masked.
+    should(h.writes).deepEqual([code]);
+    should(h.values.scrub(SESSION, `Enter code: ${code}`)).equal(`Enter code: [redacted:input ${view.id}]`);
+    for (const out of [result, waited, await h.everything()]) {
+      const text = typeof out === 'string' ? out : JSON.stringify(out);
+      should(text).not.containEql(code);
+      should(text).not.containEql(SEED);
+    }
+  });
+
+  it('should leave a code the OWNER typed unmasked: it is not secret', async () => {
+    // Arrange
+    const h = harness();
+    const { request } = await raised(h, { ...RAISE, sensitivity: 'code' });
+
+    // Act
+    await h.service.deliver(SESSION, request.id, typed(request.observedDigest as string, '481516'), HOST);
+
+    // Assert
+    should(h.writes).deepEqual(['481516']);
+    should(h.values.scrub(SESSION, 'Enter code: 481516')).equal('Enter code: 481516');
+  });
   it('should offer nothing and still let the owner type when the saved logins cannot be read', async () => {
     const h = harness({
       logins: port => ({

@@ -22,10 +22,24 @@ import { identityOf, placeOf } from './login-observer.ts';
  *   in its own frame's origin, visible and uncovered, AND either a saved login's observed facts for that very field
  *   identity say it hid the value after submit and the page moved on, or the daemon's own dummy probe at raise found
  *   a throwaway value in no read of the page.
- * - A one-time code (`private`) shows as it is typed: never short. A `plain` value is not held at all.
+ * - A `private` value shows as it is typed: never short.
+ * - A `plain` value and a one-time `code` are not held at all ({@link heldFromView}): the ferret may see both, so a
+ *   lock would hide nothing it is not allowed to read. A card with a `code` beside a `secret` is locked for the
+ *   secret alone, by the rules above.
  */
 
 const SHORT = (reason: InputLock['reason']): InputLock => ({ seconds: INPUT_SHORT_LOCK_SECONDS, reason });
+/** A field the target is kept from the ferret for: a `secret` or a `private` value. */
+const HELD = (field: Pick<InputRequestField, 'sensitivity'>): boolean =>
+  field.sensitivity === 'secret' || field.sensitivity === 'private';
+
+/**
+ * Whether a card's target is kept from the ferret after the write at all: only for a `secret` or a `private` value.
+ * A card of `plain` values and one-time `code`s gets no lock, no quarantine and no page hold.
+ */
+export function heldFromView(fields: readonly Pick<InputRequestField, 'sensitivity'>[]): boolean {
+  return fields.some(HELD);
+}
 const FULL = (reason: InputLock['reason']): InputLock => ({ seconds: INPUT_QUARANTINE_SECONDS, reason });
 
 /** Every secret field of a page goes into a password input the card would flag green. */
@@ -99,7 +113,7 @@ export interface LockContext {
   readonly steered: boolean;
 }
 
-/** The lock a delivery earns from what the daemon saw. */
+/** The lock a delivery earns from what the daemon saw. Asked only of a card {@link heldFromView}. */
 export function lockFor(
   facts: InputTargetFacts,
   fields: readonly InputRequestField[],
@@ -128,7 +142,8 @@ const CODE_LIKE = (field: {
 
 /**
  * Whether the daemon may run its dummy probe on a page card: exactly ONE secret field (typing into a second would blur
- * the first while it holds the test value), qualifying, not already proven, no one-time code on the card, nothing that
+ * the first while it holds the test value), qualifying, not already proven, no `private` value or one-time `code` on
+ * the card (a code field beside the password is typed in the same write, and a wrong code can count), nothing that
  * looks like a code or a PIN, and a session whose ferret never ran a page script. A terminal is never probed.
  */
 export function probeable(
@@ -136,7 +151,11 @@ export function probeable(
   fields: readonly InputRequestField[],
   context: Omit<LockContext, 'probed'>,
 ): boolean {
-  if (facts.kind !== 'browser' || context.steered || fields.some(field => field.sensitivity === 'private'))
+  if (
+    facts.kind !== 'browser' ||
+    context.steered ||
+    fields.some(field => field.sensitivity === 'private' || field.sensitivity === 'code')
+  )
     return false;
   const secret = fields.filter(field => field.sensitivity === 'secret').map(field => field.id);
   if (secret.length !== 1 || !pageFieldsQualify(facts, fields)) return false;

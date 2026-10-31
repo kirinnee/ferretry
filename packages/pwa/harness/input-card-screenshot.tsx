@@ -4,14 +4,14 @@
  *
  *   bun harness/input-card-screenshot.tsx [out-dir] [states]   # writes input-card-*.png, input-p2-*.png, saved-logins-*.png
  *
- * `states` is a comma list (first,next,google,chain,signin,logins) when only some are wanted.
+ * `states` is a comma list (first,next,google,chain,codeterm,signin,logins) when only some are wanted.
  *
  * Fake fixtures only (`tests/support/input-fixtures.ts`): no real account, no real daemon, and the typed value
  * is a made-up phrase. Two card states are captured. "first" is the first time a password is asked for: a
  * value typed, "Save as" ticked with the daemon's suggested label and handle. "next" is the next time: a
  * saved login the daemon matched, one tap, with another login folded away. "google" is a browser login of two
  * fields (Email plain, Password secret) with the email typed, each plain field flagged red; "chain" is the second
- * step of that login, a 2FA code. Settings is shown with a 2FA seed form open on one row, so the warning and
+ * step of that login, a one-time `code` typed and visible; "codeterm" is a one-time code at a terminal. Settings is shown with a 2FA seed form open on one row, so the warning and
  * its tick are on screen. Every width asserts no sideways scroll and the touch floor on every button of the phone.
  */
 import { spawnSync } from 'node:child_process';
@@ -71,10 +71,7 @@ const page = (fields, origin = 'https://accounts.google.com') => ({
   fields,
 });
 // The daemon's own sentences for a page (service.ts pageRiskOf), so the shots show what an owner reads.
-const CODE_RISK = {
-  level: 'amber',
-  reason: 'This code will show on the page; Ferretry hides the page from the ferret for 2 minutes.',
-};
+const CODE_RISK = { level: 'neutral', reason: 'One-time code: the ferret can see it.' };
 const google = fakeRequest({
   target: { kind: 'browser', key: 'app' },
   prompt: 'Sign in to Google',
@@ -98,13 +95,30 @@ const chain = fakeRequest({
   agendaItemId: 'A9',
   target: { kind: 'browser', key: 'app' },
   prompt: 'Google wants the 2FA code',
-  sensitivity: 'private',
-  fields: [field('private', { id: 'code', label: '2FA code', risk: CODE_RISK })],
+  sensitivity: 'code',
+  fields: [field('code', { id: 'code', label: '2FA code', risk: CODE_RISK })],
   risk: CODE_RISK,
-  lock: { seconds: 120, reason: 'code' },
   chain: 'A7',
   step: 2,
   observed: page([browserField('code', { field: { tag: 'input', type: 'text', autocomplete: 'one-time-code' } })]),
+});
+// A one-time code at a terminal: ssh asking for the code its 2FA module sent. Not secret, so no lock line.
+const codeterm = fakeRequest({
+  agendaItemId: 'A8',
+  prompt: 'The bastion wants the code from the authenticator',
+  sensitivity: 'code',
+  fields: [field('code', { label: 'Verification code', risk: CODE_RISK })],
+  risk: CODE_RISK,
+  observed: {
+    kind: 'terminal',
+    paneProof: { paneId: '%1', pid: 4242 },
+    foreground: { pid: 4310, pgid: 4310, comm: 'ssh', argv: 'ssh bastion.example.test' },
+    echo: 'on',
+    cursorRow: 12,
+    promptLine: 'Verification code:',
+    promptLineDigest: 'a'.repeat(64),
+    recognisedConsumer: true,
+  },
 });
 // The ferret asked for a password on Vercel's own page, but Vercel signs in with Google: the card says so, and the
 // Google login is not offered here at all: it is typed only on accounts.google.com, where it is the one tap.
@@ -129,9 +143,15 @@ const signin = fakeRequest({
     offers: [],
   }),
 });
-const request = { first, next, google, chain, signin }[view] ?? first;
+const request = { first, next, google, chain, codeterm, signin }[view] ?? first;
 const subject =
-  view === 'google' || view === 'chain' ? 'Sign in to Google' : view === 'signin' ? 'Sign in to Vercel' : 'Type it into sudo';
+  view === 'google' || view === 'chain'
+    ? 'Sign in to Google'
+    : view === 'signin'
+      ? 'Sign in to Vercel'
+      : view === 'codeterm'
+        ? 'Type it into ssh'
+        : 'Type it into sudo';
 
 // The agenda item the daemon raises for the request (lib/input-requests/agenda-adapter.ts), drawn by the REAL v5
 // item view with the card as its form: the type badge, the header and the paging are the item view's own.
@@ -141,7 +161,7 @@ const item = {
   sourceRef: request.id,
   sourceSeq: 1,
   kind: 'input',
-  title: view === 'google' ? 'Needs a login' : view === 'chain' ? 'Needs a code' : 'Needs a secret',
+  title: view === 'google' ? 'Needs a login' : view === 'chain' || view === 'codeterm' ? 'Needs a code' : 'Needs a secret',
   subject,
   why: subject,
   context: 'The rebuild you asked for in &F131',
@@ -220,7 +240,7 @@ run('./node_modules/.bin/tailwindcss', [
 ]);
 
 const wanted = process.argv[3]?.split(',');
-const STATES = (['first', 'next', 'google', 'chain', 'signin', 'logins'] as const).filter(
+const STATES = (['first', 'next', 'google', 'chain', 'codeterm', 'signin', 'logins'] as const).filter(
   state => wanted === undefined || wanted.includes(state),
 );
 
@@ -277,6 +297,8 @@ try {
           }
           if (state === 'google')
             await page.locator('[data-input-field="email"] [data-input-value]').fill('kirin@example.test');
+          // A made-up code, typed so the shot shows it is visible as it is typed.
+          if (state === 'chain' || state === 'codeterm') await page.locator('[data-input-value]').fill('481516');
           if (state === 'logins') {
             await page.locator('[aria-label="Edit Vercel"]').evaluate(el => (el as HTMLElement).click());
             await page
@@ -303,7 +325,9 @@ try {
               ? 'saved-logins'
               : state === 'google' || state === 'chain'
                 ? `input-p2-${state}`
-                : `input-card-${state}`;
+                : state === 'codeterm'
+                  ? 'input-code-terminal'
+                  : `input-card-${state}`;
           const target = join(outDir, `${name}-${viewport.name}-${scheme}.png`);
           await page.screenshot({ path: target, fullPage: state === 'logins' });
           process.stdout.write(`📸 ${target}\n`);
