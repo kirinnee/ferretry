@@ -67,7 +67,7 @@ through the input tool; the generic add refuses it.
   and risk), the strongest sensitivity, expiry, `chain` and `step`, the facts and their digest while
   observed, the state and the outcome.
 - **`InputDeliverBodySchema`**: `deliveryId` (a UUID), `observedDigest`, the value(s), `submit`, and
-  `save` (`{ entry, label }`, one typed value only). A one-field card sends **exactly one of** `padded`
+  `save` (`{ entry, label }`, typed values only). A one-field card sends **exactly one of** `padded`
   or `entry` (a saved login's handle). A card of several sends `fields` (`[{ field, padded }]`, each
   value padded on its own) and may add `entry` for the fields it did not type.
 - **`InputAgentViewSchema`**: what the agent learns: state, whether Enter was pressed, `source`
@@ -105,12 +105,21 @@ beside the field) and "Password" (`secret`) on one card, and the daemon types ea
   next is a new card with `chain`. A terminal field may carry a `label` ("Passphrase").
 - **Every field is covered before anything is typed**: typed, or filled from ONE saved login by its role
   (`plain` → the username, `secret` → the password, `private` → the 2FA code). Only a saved login that
-  holds every field's value is offered, and "Save as" keeps one typed value, so a card of several does
-  not offer it.
+  holds every field's value is offered.
+- **"Save as" keeps a login card as ONE saved login**, in one change under the store-wide lock: the `plain`
+  field as the username and the `secret` one as the password (`savedRolesOf`). A one-time code is never
+  kept. A card with two usernames or two passwords cannot be kept as one login and does not offer it, and
+  every field it keeps must be typed (not filled from a saved login). The kept record is written once per
+  field kept.
 - **One write**: the target adapter gets the values in field order and types them under one binding
   check, with Enter (submit) after the last. Each value that is not `plain` is masked before it is typed.
 - **A login on two pages is two cards**: the second names the first in `chain` and reads "Step 2 · after
-  !A7" (`request.step`). Submit is per card, so each step chooses its own.
+  !A7" (`request.step`). Submit is per card, so each step chooses its own. `chain` must name one of the
+  SAME session's input requests that this daemon holds; another session's card or an unknown one is refused.
+- **Only a password input is green.** `autocomplete="current-password"` or `"new-password"` says what a field
+  is for, not that it hides what is typed: a text input carrying it stays amber.
+- **With a saved login on offer, the card still lists every field** with its flag (the red "not secret" of a
+  `plain` field, the daemon's risk of the rest) above the one-tap button, so nothing is sent unseen.
 - A page's card does not survive a daemon restart: its elements are the agent's words and are not
   journalled, so the card ends as interrupted and the agent raises it again.
 

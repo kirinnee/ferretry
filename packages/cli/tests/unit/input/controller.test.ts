@@ -342,9 +342,24 @@ describe('fy input answer, a card of several fields', () => {
     should(gateway.delivered).deepEqual([]);
   });
 
-  it('should refuse --save-as: it keeps one value, and this card asks for several', async () => {
+  it('should keep the card as one saved login with --save-as: the username and the password together', async () => {
     // Arrange
-    const { ports, gateway, prompt } = rig({}, new FakeInputGateway([login]));
+    const savable = { ...login, saved: { saves: 'password' as const, offers: [] } };
+    const { ports, gateway } = rig({}, new FakeInputGateway([savable]));
+
+    // Act
+    await new InputController(ports).answer('!A7', { ...options, saveAs: 'GOOGLE', label: 'Google' });
+
+    // Assert
+    const body = gateway.delivered[0]?.body;
+    should(body?.save).deepEqual({ entry: 'GOOGLE', label: 'Google' });
+    should(body?.fields?.map(typed => typed.field)).deepEqual(['email', 'password']);
+  });
+
+  it('should send nothing with --save-as when the password is too short to keep', async () => {
+    // Arrange
+    const savable = { ...login, saved: { saves: 'password' as const, offers: [] } };
+    const { ports, gateway } = rig({}, new FakeInputGateway([savable]), new FakeHiddenPrompt('abc'));
 
     // Act
     const failed = await new InputController(ports).answer('!A7', { ...options, saveAs: 'GOOGLE' }).then(
@@ -353,8 +368,7 @@ describe('fy input answer, a card of several fields', () => {
     );
 
     // Assert
-    should(failed?.message).equal('!A7 asks for several values: --save-as keeps one, so it cannot be used here');
-    should(prompt.asked).deepEqual([]);
+    should(failed?.message).startWith('password is shorter than the');
     should(gateway.delivered).deepEqual([]);
   });
 });

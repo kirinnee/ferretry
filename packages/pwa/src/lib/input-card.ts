@@ -265,7 +265,7 @@ export const initialSaveDraft = (saved: InputSaved | undefined): SaveDraft => ({
 });
 
 /** Save is drawn only when a typed value of this kind is ever kept (a one-time code is not). */
-export const offersSave = (field: InputCardField): boolean => field.saved?.saves !== undefined;
+const offersSave = (field: InputCardField): boolean => field.saved?.saves !== undefined;
 
 /** The existing entry a handle would overwrite, if any: the card then says "updates <label>". */
 export const updatedEntry = (saved: InputSaved | undefined, id: string): InputSavedOffer | undefined =>
@@ -281,6 +281,31 @@ export const saveBlock = (field: InputCardField, value: string): string | undefi
   if (!offersSave(field)) return undefined;
   if (field.saved?.saves === 'password' && value.length < LOGIN_PASSWORD_MIN_LENGTH) return SAVE_TOO_SHORT;
   return undefined;
+};
+
+/**
+ * Whether the card offers "Save as": one field of a kind that is kept, or a login card the daemon can keep as ONE
+ * saved login (its username and password together; `request.saved.saves` says so).
+ */
+export const cardOffersSave = (request: InputRequest, fields: readonly InputCardField[]): boolean => {
+  const [only] = fields;
+  return fields.length === 1 && only !== undefined ? offersSave(only) : request.saved?.saves !== undefined;
+};
+
+/** Why the card's typed values cannot be saved, or `undefined`: a password that would be kept is too short. */
+export const cardSaveBlock = (
+  request: InputRequest,
+  fields: readonly InputCardField[],
+  values: Readonly<Record<string, string>>,
+): string | undefined => {
+  const [only] = fields;
+  if (fields.length === 1 && only !== undefined) return saveBlock(only, values[only.key] ?? '');
+  if (!cardOffersSave(request, fields)) return undefined;
+  return fields.some(
+    field => field.sensitivity === 'secret' && (values[field.key] ?? '').length < LOGIN_PASSWORD_MIN_LENGTH,
+  )
+    ? SAVE_TOO_SHORT
+    : undefined;
 };
 
 /** The sentence under the Save fields when what is typed in them will not do, or `undefined`. */
@@ -340,13 +365,15 @@ export interface TypedFieldsSend {
   readonly values: Readonly<Record<string, string>>;
   readonly submit: boolean;
   readonly deliveryId: string;
+  /** "Save as": the card's username and password kept together, when ticked and fine. */
+  readonly save?: SaveDraft;
 }
 
 /**
  * What typing the values of a card of several fields sends: each value padded on its own, named by its field.
  * Never `save`: that only goes with the one-field form. A field left empty or refused is a sentence, not a throw.
  */
-export const typedFieldsBody = ({ request, fields, values, submit, deliveryId }: TypedFieldsSend): BuiltBody => {
+export const typedFieldsBody = ({ request, fields, values, submit, deliveryId, save }: TypedFieldsSend): BuiltBody => {
   const typed: { field: string; padded: string }[] = [];
   for (const field of fields) {
     const value = values[field.key] ?? '';
@@ -356,6 +383,12 @@ export const typedFieldsBody = ({ request, fields, values, submit, deliveryId }:
     typed.push({ field: field.key, padded: padInputValue(value) });
   }
   if (request.observedDigest === undefined) return { ok: false, problem: REOBSERVING };
+  const keeps =
+    save !== undefined &&
+    save.enabled &&
+    cardOffersSave(request, fields) &&
+    cardSaveBlock(request, fields, values) === undefined &&
+    saveDraftProblem(save) === undefined;
   return {
     ok: true,
     body: {
@@ -363,6 +396,7 @@ export const typedFieldsBody = ({ request, fields, values, submit, deliveryId }:
       observedDigest: request.observedDigest,
       fields: typed,
       submit: enterFor(request, submit),
+      ...(keeps ? { save: { entry: save.id, label: save.label.trim() } } : {}),
     },
   };
 };

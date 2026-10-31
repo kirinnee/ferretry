@@ -159,6 +159,25 @@ export const InputRaiseSchema = z
   });
 export type InputRaise = z.infer<typeof InputRaiseSchema>;
 
+/**
+ * Which fields of a card "Save as" keeps, and as what, so a login's username and password are kept together in
+ * ONE saved login: a `plain` field as the username, a `secret` as the password. A one-time code is never
+ * saved (its seed is, from Settings). `undefined` when the card cannot be kept as one login: nothing to keep,
+ * or two usernames or two passwords.
+ */
+export function savedRolesOf(
+  fields: readonly { readonly id: string; readonly sensitivity: InputSensitivity }[],
+): ReadonlyMap<string, 'username' | 'password'> | undefined {
+  const roles = new Map<string, 'username' | 'password'>();
+  for (const field of fields) {
+    if (field.sensitivity === 'private') continue;
+    const role = field.sensitivity === 'secret' ? 'password' : 'username';
+    if ([...roles.values()].includes(role)) return undefined;
+    roles.set(field.id, role);
+  }
+  return roles.size === 0 ? undefined : roles;
+}
+
 /** A raise's fields: its own, or the one value a `sensitivity` names. */
 export function inputRaiseFields(raise: Pick<InputRaise, 'sensitivity' | 'fields'>): readonly InputFieldRaise[] {
   if (raise.fields !== undefined) return raise.fields;
@@ -470,8 +489,11 @@ export const InputDeliverBodySchema = z
       const problem = fieldsProblem(body.fields.map(typed => ({ id: typed.field })));
       if (problem !== undefined) context.addIssue({ code: 'custom', path: ['fields'], message: problem });
     }
-    if (body.save !== undefined && body.padded === undefined) {
-      context.addIssue({ code: 'custom', message: 'save keeps a typed value', path: ['save'] });
+    if (
+      body.save !== undefined &&
+      ((body.padded === undefined && body.fields === undefined) || body.entry !== undefined)
+    ) {
+      context.addIssue({ code: 'custom', message: 'save keeps values you typed, not a saved login', path: ['save'] });
     }
   });
 export type InputDeliverBody = z.infer<typeof InputDeliverBodySchema>;

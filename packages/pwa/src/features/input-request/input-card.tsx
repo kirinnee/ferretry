@@ -9,7 +9,8 @@
  *   - a saved login the daemon matched to this target is ONE TAP: "Use saved <label>". Tapping it is the owner's
  *     permission; nothing is ever sent on its own. Only a `matched` offer is that button, never a hinted one;
  *   - otherwise (or after "Type a different one") one masked field per value, each with a local eye that is not
- *     remembered, "Press Enter for me", and "Save as" when this kind of value is ever kept (a card of ONE field);
+ *     remembered, "Press Enter for me", and "Save as" when the value is ever kept (one value, or a login
+ *     card's username and password kept together);
  *   - the other saved logins stay selectable by hand under "Choose another saved login".
  *
  * A CARD OF SEVERAL FIELDS (a login's email and password) is ONE Send: it waits until every field is typed, and
@@ -26,6 +27,8 @@ import { Eye, EyeOff, ShieldAlert, ShieldCheck, ShieldQuestion } from 'lucide-re
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { cancelInput, deliverInput, type InputClient } from '../../lib/input-api.ts';
 import {
+  cardOffersSave,
+  cardSaveBlock,
   chainWords,
   defaultSubmit,
   expiryWords,
@@ -38,10 +41,8 @@ import {
   normalizeHandle,
   observedWords,
   offersPressEnter,
-  offersSave,
   offerUsername,
   plainFlagWords,
-  saveBlock,
   saveDraftProblem,
   savedBody,
   savedButtonWords,
@@ -448,9 +449,9 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
   // A send the daemon never answered keeps its id, so pressing Send again cannot type twice.
   const pending = useRef<string | null>(null);
 
-  // "Save as" keeps ONE typed value: a card of several fields offers none.
+  // "Save as" keeps the one typed value, or a login card's username and password together.
   const only = fields.length === 1 ? fields[0] : undefined;
-  const [save, setSave] = useState(() => initialSaveDraft(only?.saved));
+  const [save, setSave] = useState(() => initialSaveDraft(request.saved));
   const many = only === undefined;
 
   const clear = useCallback((): void => {
@@ -469,9 +470,9 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
 
   const off = blocked !== undefined || sending || busy;
   const value = only === undefined ? '' : (values[only.key] ?? '');
-  const saving = only !== undefined && offersSave(only);
-  const existing = updatedEntry(only?.saved, save.id);
-  const saveReason = only === undefined ? undefined : saveBlock(only, value);
+  const saving = cardOffersSave(request, fields);
+  const existing = updatedEntry(request.saved, save.id);
+  const saveReason = cardSaveBlock(request, fields, values);
   const draftProblem = saveDraftProblem(save);
   const ready = typedReady(fields, values);
 
@@ -513,7 +514,7 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
   const sendTyped = (): void =>
     void send(deliveryId =>
       only === undefined
-        ? typedFieldsBody({ request, fields, values, submit, deliveryId })
+        ? typedFieldsBody({ request, fields, values, submit, deliveryId, save })
         : typedBody({ request, field: only, value, submit, save, deliveryId }),
     );
 

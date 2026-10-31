@@ -34,11 +34,12 @@ import {
   LOGIN_PASSWORD_MIN_LENGTH,
   LOGIN_USERNAME_MAX_LENGTH,
   type LoginEntryId,
+  savedRolesOf,
   strongestSensitivity,
   unpadInputValue,
   worstRisk,
 } from '@ferretry/protocol';
-import { LoginEntryError } from '../secrets/logins.ts';
+import { LoginEntryError, type LoginFieldValues } from '../secrets/logins.ts';
 import { digestFacts } from './digest.ts';
 import type { EphemeralValues } from './ephemeral-values.ts';
 import { InputRequestError } from './errors.ts';
@@ -59,7 +60,7 @@ import type {
   TypeResult,
 } from './ports.ts';
 import type { QuarantineHold, QuarantineRegistry } from './quarantine.ts';
-import { savedFieldFor, savedForFields, targetMatchKey } from './saved-logins.ts';
+import { savedForFields, targetMatchKey } from './saved-logins.ts';
 import { SessionLock } from './session-lock.ts';
 
 /**
@@ -683,8 +684,7 @@ export class InputRequestService {
       const typed = typedValues(request, body);
       if (body.entry !== undefined && this.deps.logins === undefined)
         throw new InputRequestError('bad_request', 'this daemon keeps no saved logins; type the value instead');
-      const single = request.fields.length === 1 ? typed.get((request.fields[0] as InputRequestField).id) : undefined;
-      if (body.save !== undefined && single !== undefined) this.guardSave(request, single);
+      const kept = body.save === undefined ? undefined : this.guardSave(request, typed);
       const changed = (): InputRequestError => targetChanged(request.target.kind);
       if (body.observedDigest !== request.observedDigest) return await fail('target_changed', changed());
       const submitted = body.submit && request.submit !== 'agent';
@@ -736,9 +736,7 @@ export class InputRequestService {
       await this.settle(hold);
       hold = undefined;
       const saved =
-        body.save === undefined || single === undefined
-          ? undefined
-          : await this.save(held, body.save, single, by, body.deliveryId);
+        body.save === undefined || kept === undefined ? undefined : await this.save(held, body.save, kept, by);
       await this.finish(held, 'delivered', undefined, by, {
         closeCard: true,
         tellAgent: true,
@@ -765,25 +763,38 @@ export class InputRequestService {
    * "Save as" is checked before anything is typed, so a save that could never happen refuses the whole
    * Send with nothing typed rather than typing and then failing to keep it.
    */
-  private guardSave(request: InputRequest, value: string): void {
-    const field = savedFieldFor(request.sensitivity);
+  private guardSave(request: InputRequest, typed: ReadonlyMap<string, string>): LoginFieldValues {
     if (this.deps.logins === undefined)
       throw new InputRequestError('bad_request', 'this daemon keeps no saved logins; send without saving');
-    if (field === undefined)
+    const roles = savedRolesOf(request.fields);
+    if (roles === undefined)
       throw new InputRequestError(
         'bad_request',
-        'a one-time code is not saved; add the 2FA seed to a saved login in Settings instead',
+        request.fields.every(field => field.sensitivity === 'private')
+          ? 'a one-time code is not saved; add the 2FA seed to a saved login in Settings instead'
+          : 'this card cannot be kept as one saved login (it has two usernames or two passwords); send without saving',
       );
-    if (field === 'password' && [...value].length < LOGIN_PASSWORD_MIN_LENGTH)
-      throw new InputRequestError(
-        'bad_request',
-        `a saved password is at least ${LOGIN_PASSWORD_MIN_LENGTH} characters, so it can be masked safely; send it without saving`,
-      );
-    if (
-      field === 'username' &&
-      (value.trim() === '' || value.length > LOGIN_USERNAME_MAX_LENGTH || /\p{Cc}/u.test(value))
-    )
-      throw new InputRequestError('bad_request', 'that value cannot be kept as a username; send it without saving');
+    const kept: { username?: string; password?: string } = {};
+    for (const [id, role] of roles) {
+      const value = typed.get(id);
+      if (value === undefined)
+        throw new InputRequestError(
+          'bad_request',
+          'Save as keeps the values you typed: type every field it keeps, or send without saving',
+        );
+      if (role === 'password' && [...value].length < LOGIN_PASSWORD_MIN_LENGTH)
+        throw new InputRequestError(
+          'bad_request',
+          `a saved password is at least ${LOGIN_PASSWORD_MIN_LENGTH} characters, so it can be masked safely; send it without saving`,
+        );
+      if (
+        role === 'username' &&
+        (value.trim() === '' || value.length > LOGIN_USERNAME_MAX_LENGTH || /\p{Cc}/u.test(value))
+      )
+        throw new InputRequestError('bad_request', 'that value cannot be kept as a username; send it without saving');
+      kept[role] = value;
+    }
+    return kept;
   }
 
   /** The value a saved login types for one field. Refuses with the entry's name, never its value. */
@@ -806,21 +817,20 @@ export class InputRequestService {
   }
 
   /**
-   * Keeps the typed value in a saved login once it has been typed. A failure never undoes the delivery: it
-   * says what happened in a fixed sentence and the owner can save it from Settings. The record is KEPT.
+   * Keeps the typed values in a saved login once they have been typed, in ONE change: a login card's username and
+   * password land together. A failure never undoes the delivery: it says what happened in a fixed sentence and
+   * the owner can save it from Settings. The record is KEPT, one per field kept.
    */
   private async save(
     held: Held,
     save: NonNullable<InputDeliverBody['save']>,
-    value: string,
+    kept: LoginFieldValues,
     by: InputActor,
-    _deliveryId: string,
   ): Promise<NonNullable<InputDeliverResult['saved']>> {
-    const field = savedFieldFor(held.request.sensitivity);
     const logins = this.deps.logins;
-    if (field === undefined || logins === undefined) return { entry: save.entry, ok: false, problem: 'not saved' };
+    if (logins === undefined) return { entry: save.entry, ok: false, problem: 'not saved' };
     try {
-      await logins.save(save.entry, save.label, held.matchKey, { [field]: value });
+      await logins.save(save.entry, save.label, held.matchKey, kept);
     } catch {
       return {
         entry: save.entry,
@@ -828,9 +838,12 @@ export class InputRequestService {
         problem: 'The value was typed, but Ferretry could not keep it; save it from Settings › Secrets.',
       };
     }
-    await this.deps.audit
-      .saved({ sessionId: held.request.sessionId, requestId: held.request.id, actor: by, entry: save.entry, field })
-      .catch(() => undefined);
+    for (const field of ['username', 'password'] as const) {
+      if (kept[field] === undefined) continue;
+      await this.deps.audit
+        .saved({ sessionId: held.request.sessionId, requestId: held.request.id, actor: by, entry: save.entry, field })
+        .catch(() => undefined);
+    }
     return { entry: save.entry, ok: true };
   }
 

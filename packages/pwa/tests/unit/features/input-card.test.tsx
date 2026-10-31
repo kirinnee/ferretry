@@ -873,3 +873,42 @@ describe('the card, review regressions', () => {
     expect(summary.compareDocumentPosition(use) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
+
+describe('the card, Save as on a login card', () => {
+  const loginCard = (overrides: Partial<InputRequest> = {}) =>
+    withSaved(saved({ match: 'accounts.google.com', suggest: { id: 'GOOGLE_COM', label: 'Google' } }), {
+      target: { kind: 'browser', key: 'app' },
+      sensitivity: 'secret',
+      fields: [field('plain', { id: 'email', label: 'Email' }), field('secret', { id: 'password', label: 'Password' })],
+      ...overrides,
+    });
+
+  it('keeps the username and the password together, sent once with the card', async () => {
+    const view = await show(loginCard());
+    await typeInto(view.q('[data-input-field="email"] [data-input-value]'), 'kirin@example.test');
+    await typeInto(view.q('[data-input-field="password"] [data-input-value]'), SECRET);
+
+    await click(view.q('[data-input-save-tick]'));
+    await click(view.q('[data-input-send]'));
+    await settle();
+
+    const body = deliver(view.calls).body as { save?: unknown; fields: { field: string; padded: string }[] };
+    expect(body.save).toEqual({ entry: 'GOOGLE_COM', label: 'Google' });
+    expect(body.fields.map(typed => [typed.field, unpadInputValue(typed.padded)])).toEqual([
+      ['email', 'kirin@example.test'],
+      ['password', SECRET],
+    ]);
+  });
+
+  it('can send a short password but not save it, and offers no Save on a card the daemon cannot keep', async () => {
+    const view = await show(loginCard());
+    await typeInto(view.q('[data-input-field="email"] [data-input-value]'), 'kirin@example.test');
+    await typeInto(view.q('[data-input-field="password"] [data-input-value]'), 'abc');
+
+    expect(must(view.q<HTMLInputElement>('[data-input-save-tick]'), 'the tick').disabled).toBe(true);
+    expect(view.q('[data-input-save-reason]')?.textContent).toBe(SAVE_TOO_SHORT);
+
+    const unsaved = await show(loginCard({ saved: saved({ saves: undefined, suggest: undefined }) }));
+    expect(unsaved.q('[data-input-save]')).toBeNull();
+  });
+});

@@ -7,6 +7,7 @@ import {
   type LoginEntrySummary,
   type LoginFieldRole,
   LoginMatchSchema,
+  savedRolesOf,
   strongestSensitivity,
   suggestedLoginId,
   suggestedLoginLabel,
@@ -131,10 +132,12 @@ export function savedFor(
 /**
  * What a card of one or more fields may offer. One field is {@link savedFor}. Several are filled from ONE
  * entry, so only an entry that holds every field's value is offered (a login with a username and a password
- * for "Email" + "Password"), and nothing is ever saved from such a card: "Save as" keeps one typed value.
+ * for "Email" + "Password"). "Save as" keeps the card's username and password together in one entry
+ * ({@link savedRolesOf}); it is suggested only for a card that can be kept that way, and `saves` names the
+ * password when there is one, else the username.
  */
 export function savedForFields(
-  fields: readonly { readonly sensitivity: InputSensitivity }[],
+  fields: readonly { readonly id: string; readonly sensitivity: InputSensitivity }[],
   matchKey: string | undefined,
   entries: readonly LoginEntrySummary[],
   hint: string | undefined,
@@ -148,5 +151,13 @@ export function savedForFields(
     saves: _saves,
     ...offered
   } = savedFor(strongestSensitivity(fields), matchKey, complete, hint);
-  return offered;
+  const kept = savedRolesOf(fields);
+  if (kept === undefined) return offered;
+  // The entry Save as would update is one this target already matches, not only one that can fill the card.
+  const { suggest } = savedFor('secret', matchKey, entries, hint);
+  return {
+    ...offered,
+    ...(suggest === undefined ? {} : { suggest }),
+    saves: [...kept.values()].includes('password') ? 'password' : 'username',
+  };
 }
