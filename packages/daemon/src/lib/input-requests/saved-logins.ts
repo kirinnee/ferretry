@@ -19,8 +19,8 @@ import {
 /**
  * WHICH SAVED LOGIN IS FOR THIS TARGET — decided by the daemon from what IT observed, never by the agent.
  *
- * A terminal's key is `program@host`: the foreground program's name and this machine's short host name
- * (`sudo@kirin-box`). For `ssh`, `scp` and `sftp` the host is the destination on the command line when one
+ * A terminal's key is `program@host`: the PROVED foreground program's name (no key when it is unproved) and this
+ * machine's short host name (`sudo@kirin-box`). For `ssh`, `scp` and `sftp` the host is the destination on the command line when one
  * can be read (`ssh@build.example.com`), because the password is the remote one. A page's key is its
  * origin's host (`github.com`). Matching is EXACT: a look-alike host or another program is not a match, so
  * it is never the one-tap choice — though the owner can still pick any entry by hand.
@@ -65,7 +65,9 @@ export function targetMatchKey(facts: InputTargetFacts, hostName: string): strin
   let key: string | undefined;
   if (facts.kind === 'secret') return undefined;
   if (facts.kind === 'terminal') {
-    const program = facts.foreground.comm.trim().toLowerCase();
+    // The PROVED program only: a shell that calls itself `sudo` must not make the sudo password the one-tap choice.
+    const program = facts.program?.trim().toLowerCase();
+    if (program === undefined || program === '') return undefined;
     const host = REMOTE_PROGRAMS.has(program) ? remoteHostOf(facts.foreground.argv) : shortHost(hostName);
     key = host === undefined ? undefined : `${program}@${host}`;
   } else {

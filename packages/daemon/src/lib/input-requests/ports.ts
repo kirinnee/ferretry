@@ -32,6 +32,32 @@ export interface CodeProgramPort {
   codeProgram(pid: number): Promise<boolean>;
 }
 
+/** The program one process runs, as the kernel PROVES it (adapters/system/kernel-program-proof.ts). */
+export interface ProvenProgram {
+  /**
+   * Its name: the entry in a root-controlled bin folder its executable is reached from, or, for a process running
+   * setuid root, the name the kernel keeps for it (only the root process itself can change that).
+   */
+  readonly name: string;
+  /** It runs setuid root right now: effective uid 0 while its real uid is not. A ferret cannot make one. */
+  readonly setuidRoot: boolean;
+}
+
+/**
+ * WHO CAN READ A TERMINAL. Every process of the TTY's foreground process group can read what is typed, and so can a
+ * process of ANOTHER session that opened the TTY by its path (the pty belongs to this account). The name `ps` shows
+ * is no proof of either: any process can rewrite its own (`printf sudo > /proc/$$/comm`).
+ */
+export interface ProgramProofPort {
+  /** What the kernel proves about the program `pid` runs; `undefined` when anything is unproven or unreadable. */
+  prove(pid: number): Promise<ProvenProgram | undefined>;
+  /**
+   * Whether a process whose controlling terminal is NOT `ttyPath` holds it open, so it could read from it outside job
+   * control. `false` only when that was looked for and none was found; `undefined` when it cannot be told.
+   */
+  heldElsewhere(ttyPath: string): Promise<boolean | undefined>;
+}
+
 export type ObserveResult =
   | {
       readonly ok: true;

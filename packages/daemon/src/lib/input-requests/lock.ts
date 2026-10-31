@@ -179,6 +179,7 @@ export function passwordTarget(
     // A getpass NAME is enough here: faking one only makes the card stricter.
     if (
       GETPASS_PROGRAMS.has(facts.foreground.comm) ||
+      (facts.program !== undefined && GETPASS_PROGRAMS.has(facts.program)) ||
       PASSWORD_PROMPT.test(line) ||
       spellsPassword(facts.promptLine) ||
       lookAlike(facts.promptLine)
@@ -198,14 +199,19 @@ export function passwordTarget(
   );
 }
 
-/** A terminal proven to hide typing: a local password prompt, from a setuid-root program the ferret could not have placed. */
+/**
+ * A terminal proven to hide typing: a local password prompt, from a setuid-root program the ferret could not have
+ * placed. EVERY process of the foreground group runs setuid root and the kernel names the group's program a getpass one
+ * (`program`, never `foreground.comm`, which a shell can rewrite to `sudo`). Anything less keeps the full lock.
+ */
 export function terminalHides(facts: InputTargetFacts): boolean {
   return (
     facts.kind === 'terminal' &&
     facts.echo === 'off' &&
     facts.canonical === true &&
     facts.trustedProgram === true &&
-    GETPASS_PROGRAMS.has(facts.foreground.comm)
+    facts.program !== undefined &&
+    GETPASS_PROGRAMS.has(facts.program)
   );
 }
 

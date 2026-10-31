@@ -12,6 +12,7 @@ const facts: Extract<InputTargetFacts, { kind: 'terminal' }> = {
   cursorRow: 7,
   promptLine: '[sudo] password for kirin:',
   promptLineDigest: digestLine('[sudo] password for kirin:'),
+  program: 'sudo',
   recognisedConsumer: true,
 };
 

@@ -262,7 +262,9 @@ function fromMatches(rule: PasteRule, from: CopyOrigin): boolean {
 function toMatches(rule: PasteRule, facts: InputTargetFacts): boolean {
   switch (rule.to.kind) {
     case 'terminal':
-      return facts.kind === 'terminal' && facts.foreground.comm === rule.to.program;
+      // The PROVED program (every process of the foreground group, by the kernel), never the name ps shows: a ferret's
+      // shell can call itself `sudo` and would be pasted into without a card. Unproved, the owner is asked.
+      return facts.kind === 'terminal' && facts.program !== undefined && facts.program === rule.to.program;
     case 'browser':
       return facts.kind === 'browser' && facts.origin === rule.to.origin;
     case 'secret':

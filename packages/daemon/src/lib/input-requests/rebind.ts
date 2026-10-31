@@ -18,7 +18,8 @@ import { digestValue } from './digest.ts';
  *   became a text field, a field that moved to another site's frame, or a page on another origin is never re-bound.
  *   Its node, frame id, box, cover, document and challenge may change. Every field must be visible.
  * - a terminal: the same pane, the same program (pid, process group, name and argv), the same echo, the same prompt
- *   line and whether the program is one known to ask for a secret. Only the cursor row may change.
+ *   line, the same PROVED program (or the same lack of one), whether every process of the group is one known to ask
+ *   for a secret and whether every one runs setuid root. Only the cursor row may change.
  * - the secret store: the same name. Whether it already holds a value may change; the card's risk says so.
  *
  * Keyed like every digest here (`digest.ts`): it is compared, never shown.
@@ -43,7 +44,9 @@ export function bindingOf(facts: InputTargetFacts): string {
       foreground: facts.foreground,
       echo: facts.echo,
       promptLineDigest: facts.promptLineDigest,
+      program: facts.program ?? null,
       recognisedConsumer: facts.recognisedConsumer,
+      trustedProgram: facts.trustedProgram === true,
     });
   return digestValue({ kind: facts.kind, name: facts.name });
 }

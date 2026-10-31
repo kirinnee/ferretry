@@ -14,6 +14,7 @@ export const FACTS: Extract<InputTargetFacts, { readonly kind: 'terminal' }> = {
   cursorRow: 1,
   promptLine: '[sudo] password for kirin:',
   promptLineDigest: 'a'.repeat(64),
+  program: 'sudo',
   recognisedConsumer: true,
 };
 

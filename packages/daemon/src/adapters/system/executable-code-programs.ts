@@ -1,22 +1,10 @@
 import { readlink, realpath } from 'node:fs/promises';
 import { basename, isAbsolute } from 'node:path';
 import { CODE_PROGRAMS, type CodeProgramPort } from '../../lib/input-requests/index.ts';
-import { replaceableBy } from './replaceable-file.ts';
+import { ROOT_PROGRAM_FOLDERS, replaceableBy } from './replaceable-file.ts';
 
-/**
- * The folders a program is trusted from: system folders this account cannot fill. A program counts only when the
- * file a process runs IS what one of these resolves `<folder>/<name>` to (the code exception here; secure copy reuses
- * the same list). Never a raw store path (any user can
- * `nix-store --add` a shell copy at `<hash>/bin/ssh`) and never a user profile. `/usr/local/bin` counts only when this
- * account cannot change it, which `replaceableBy` decides like for every other folder.
- */
-export const ROOT_PROGRAM_FOLDERS: readonly string[] = [
-  '/usr/bin',
-  '/bin',
-  '/usr/local/bin',
-  '/run/current-system/sw/bin',
-  '/nix/var/nix/profiles/default/bin',
-];
+// The folders a program is trusted from are owned by replaceable-file.ts, beside the rule that walks them.
+export { ROOT_PROGRAM_FOLDERS };
 
 /**
  * Whether a process runs a code program (`CODE_PROGRAMS`: ssh, scp, sftp, mosh, the aws, gcloud, az and vault CLIs)

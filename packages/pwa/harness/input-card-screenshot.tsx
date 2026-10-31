@@ -117,6 +117,7 @@ const codeterm = fakeRequest({
     cursorRow: 12,
     promptLine: 'Verification code:',
     promptLineDigest: 'a'.repeat(64),
+    program: 'ssh',
     recognisedConsumer: true,
   },
 });

@@ -46,6 +46,7 @@ const TERMINAL_FACTS = {
   cursorRow: 14,
   promptLine: '[sudo] password for kirin:',
   promptLineDigest: DIGEST,
+  program: 'sudo',
   recognisedConsumer: true,
 } as const;
 

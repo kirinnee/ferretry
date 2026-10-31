@@ -72,6 +72,7 @@ export const request = (overrides: Partial<InputRequest> = {}): InputRequest => 
     cursorRow: 12,
     promptLine: '[sudo] password for kirin:',
     promptLineDigest: DIGEST,
+    program: 'sudo',
     recognisedConsumer: true,
   },
   risk: SUDO_RISK,

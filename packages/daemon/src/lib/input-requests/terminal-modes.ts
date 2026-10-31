@@ -5,8 +5,6 @@ export interface TerminalModes {
   echo(ttyPath: string): Promise<InputEcho>;
   /** Whether the TTY is in canonical (line) mode; `undefined` when it cannot be read. */
   canonical?(ttyPath: string): Promise<boolean | undefined>;
-  /** Whether the program `pid` runs setuid root: effective uid 0 while its real uid is not. */
-  trusted?(pid: number): Promise<boolean>;
 }
 
 /** Runs one program with argv (no shell) and answers its stdout, or `undefined` when it failed or is missing. */
@@ -59,14 +57,6 @@ export class SttyTerminalModes implements TerminalModes {
     if (argv === undefined) return undefined;
     const output = await this.run(argv);
     return output === undefined ? undefined : parseCanonical(output);
-  }
-
-  /** The program runs setuid root (effective uid 0, real uid not); anything unreadable is not trusted. */
-  async trusted(pid: number): Promise<boolean> {
-    if (!Number.isSafeInteger(pid) || pid <= 0) return false;
-    const output = await this.run(['ps', '-o', 'uid=,ruid=', '-p', String(pid)]).catch(() => undefined);
-    const uids = output === undefined ? undefined : parseUids(output);
-    return uids !== undefined && uids.effective === 0 && uids.real !== 0;
   }
 
   async echo(ttyPath: string): Promise<InputEcho> {

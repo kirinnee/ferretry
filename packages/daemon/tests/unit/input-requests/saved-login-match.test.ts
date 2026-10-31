@@ -19,6 +19,7 @@ const terminal = (comm: string, argv: string): InputTargetFacts => ({
   cursorRow: 0,
   promptLine: '',
   promptLineDigest: 'a'.repeat(64),
+  program: comm,
   recognisedConsumer: true,
 });
 
@@ -57,6 +58,14 @@ describe('which saved login is for a target', () => {
     should(targetMatchKey(terminal('gpg', 'gpg --sign'), 'laptop')).equal('gpg@laptop');
     should(shortHost('  ')).be.undefined();
     should(targetMatchKey(terminal('sudo', 'sudo'), '')).be.undefined();
+  });
+
+  it('should key nothing when the program is unproved, so a shell named sudo never gets the sudo login one-tap', () => {
+    const disguised = { ...terminal('sudo', 'sudo -v'), program: undefined } as InputTargetFacts;
+    should(targetMatchKey(disguised, 'kirin-box')).be.undefined();
+    // The proved program decides, not the name the process gave itself.
+    const proved = { ...terminal('bash', 'bash'), program: 'sudo' } as InputTargetFacts;
+    should(targetMatchKey(proved, 'kirin-box')).equal('sudo@kirin-box');
   });
 
   it('should key ssh, scp and sftp by the destination on the command line', () => {

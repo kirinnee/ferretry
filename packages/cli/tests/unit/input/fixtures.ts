@@ -29,6 +29,7 @@ export function request(overrides: Partial<InputRequest> = {}): InputRequest {
       cursorRow: 4,
       promptLine: '[sudo] password for deploy:',
       promptLineDigest: DIGEST,
+      program: 'sudo',
       recognisedConsumer: true,
     },
     observedDigest: DIGEST,
