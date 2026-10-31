@@ -96,7 +96,7 @@ caches them between reads, so plaintext lives no longer than the read that neede
   by name. A ferret gets a value into the store the way it gets any secret from the owner: an input
   request (the owner sees a card and types it) or a sealed copy pasted into the store ([secure
   copy](secure-copy.md)); both show the owner a card. The owner's `fy secret set` in a normal shell and
-  the app's write-only form keep working. This is the boundary `isHumanAdminActor` states: it holds
+  the app's write-only form keep working. This is an honest-client guard (`isHumanAdminActor`): it holds
   against an honest or confused client, not one that forges its own identity header.
 - **A credential in shell history or in `/proc`.** `fy secret set` takes no value argument, so it
   cannot be typed onto a command line.
@@ -118,11 +118,14 @@ caches them between reads, so plaintext lives no longer than the read that neede
   against _accidents_, not against local access. A passphrase-derived key or an OS keychain would be
   a stronger claim; this is not that.
 - **Anyone who already has your user account on that machine.**
-- **A ferret that forges who it is.** The refusal above reads the caller from the session id the `fy`
-  client sends, which every ferret's shell carries. An agent that can run raw HTTP with the admin token and
-  leave the session header off looks like the owner's shell. That is the same operational boundary the
-  other owner-only acts (updating the daemon, confirming a configuration change) have; a per-session
-  credential is the stronger design and is not built.
+- **A ferret that drops its identity, or reads the vault directly.** The refusal above is an
+  **honest-client guard**, like the other owner-only rules (updating the daemon, confirming a configuration
+  change). It reads who is asking from the session id that `fy` sends from inside a ferret. An agent holds
+  the same admin token, so it can send raw HTTP without that header and look like the owner's shell. The
+  real limit is the one this whole section states: **agents run as the same user, with the admin token.**
+  Such an agent can also read `secrets.json` and `secrets.key` straight off the disk. The guard stops a
+  confused or prompt-injected agent from using the obvious route; it does not stop one that is working
+  around it. A per-session credential would, and is not built.
 - **Two writers that are not the store's own routes.** Importing your harness setup
   (`fy`'s setup import and clone, through `/v1/fleet/proposals/:id/apply`) adds secrets read from this
   machine's harness files, and only under names the store does not hold, so it cannot replace one. An
