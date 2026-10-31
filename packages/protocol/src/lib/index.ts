@@ -23,6 +23,7 @@ export * from './board-lanes.ts';
 export * from './board-projects.ts';
 export * from './board-refs.ts';
 export * from './browser.ts';
+export * from './browser-target.ts';
 export * from './browser-login.ts';
 export * from './browser-stream.ts';
 export * from './carriers.ts';

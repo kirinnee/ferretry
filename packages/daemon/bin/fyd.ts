@@ -5961,6 +5961,8 @@ function createAgentToolsSubsystem(input: {
   readonly browser: MountedSubsystems['browser'];
   readonly audit: AuditLog;
   readonly policy: AgentControlPolicy;
+  /** The vault redactor every operator read is scrubbed by; a page's text goes through it too. */
+  readonly redactor: Pick<SecretRedactor, 'batch'>;
 }): MountedSubsystems['agentTools'] {
   const clock = { now: () => Date.now() };
   const control = new SurfaceControl(
@@ -5990,6 +5992,7 @@ function createAgentToolsSubsystem(input: {
       control,
       policy: input.policy,
       audit: input.audit,
+      redactor: input.redactor,
       clock,
       sleep: async milliseconds => await Bun.sleep(milliseconds),
     }),
@@ -11054,6 +11057,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           browser: browserHost,
           audit: auditLog,
           policy: agentControl,
+          redactor: secretRedactor,
         }),
         configFiles: createConfigFilesSubsystem({
           activities,

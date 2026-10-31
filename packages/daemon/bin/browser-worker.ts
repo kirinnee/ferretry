@@ -16,16 +16,29 @@
  * closed with the page.
  */
 import { createInterface } from 'node:readline';
-import type { BrowserInputEvent } from '@ferretry/protocol';
+import {
+  BROWSER_MODIFIERS,
+  type BrowserInputEvent,
+  type BrowserModifier,
+  type BrowserMouseButton,
+  type BrowserTarget,
+} from '@ferretry/protocol';
 import { type Browser, type BrowserContext, type CDPSession, chromium, type Page } from 'playwright-core';
 import { recogniseBrowserChallenge } from '../src/lib/browser/transport/challenge.ts';
+import {
+  browserElementParam,
+  browserTargetParam,
+  clickOn,
+  readPage,
+  shootPage,
+  typeInto,
+} from '../src/lib/browser/transport/page-acts.ts';
 import { type PointerPosition, pointerAfter, pointerSequence } from '../src/lib/browser/transport/pointer.ts';
 
 const endpoint = process.argv[2];
 const MAX_PAGES = 200;
 const DEFAULT_VIEWPORT = { width: 1280, height: 800 } as const;
 const MAX_ERROR_CHARS = 200;
-const MAX_TEXT_CHARS = 200_000;
 const MAX_SCREENSHOT_CHARS = 24 * 1024 * 1024;
 const MAX_URL_CHARS = 4_096;
 const MAX_TITLE_CHARS = 500;
@@ -425,35 +438,50 @@ async function run(request: Request): Promise<Record<string, unknown>> {
     }
     case 'click': {
       const page = targetPage(params.pageId);
-      await page.locator(text(params.selector, 'selector')).first().click({ timeout: 30_000 });
+      await clickOn(page, requiredTarget(params), {
+        ...(isButton(params.button) ? { button: params.button } : {}),
+        ...(params.double === true ? { double: true } : {}),
+        ...(Array.isArray(params.modifiers) ? { modifiers: params.modifiers.filter(isModifier) } : {}),
+      });
       return await acted(page);
     }
     case 'type': {
       const page = targetPage(params.pageId);
-      await page
-        .locator(text(params.selector, 'selector'))
-        .first()
-        .fill(typeof params.text === 'string' ? params.text : '', { timeout: 30_000 });
+      const target = browserElementParam(legacyTarget(params));
+      if (target === undefined) throw new Error('target is required');
+      await typeInto(page, target, typeof params.text === 'string' ? params.text : '', {
+        ...(params.submit === true ? { submit: true } : {}),
+        ...(params.slowly === true ? { slowly: true } : {}),
+      });
       return await acted(page);
     }
     case 'read': {
       const page = targetPage(params.pageId);
-      const selector = typeof params.selector === 'string' && params.selector ? params.selector : 'body';
-      const target = page.locator(selector).first();
-      // The accessibility tree names what can be clicked and typed into, which is what an agent needs
-      // to choose a selector; the visible text is what a person reads.
-      const read =
-        params.mode === 'a11y'
-          ? await target.ariaSnapshot({ timeout: 30_000 })
-          : await target.innerText({ timeout: 30_000 });
-      return await acted(page, { text: read.slice(0, MAX_TEXT_CHARS) });
+      const target = browserElementParam(legacyTarget(params));
+      // The snapshot names what can be clicked and typed into, each with a ref an act accepts; the
+      // visible text is what a person reads.
+      const read = await readPage(page, {
+        ...(target === undefined ? {} : { target }),
+        mode: params.mode === 'a11y' || params.mode === 'snapshot' ? params.mode : 'text',
+        ...(typeof params.find === 'string' && params.find ? { find: params.find } : {}),
+        ...(typeof params.depth === 'number' && Number.isSafeInteger(params.depth) && params.depth > 0
+          ? { depth: params.depth }
+          : {}),
+        ...(params.boxes === true ? { boxes: true } : {}),
+      });
+      return await acted(page, { text: read });
     }
     case 'screenshot': {
       const page = targetPage(params.pageId);
+      const target = browserElementParam(params.target);
+      const shot = await shootPage(page, {
+        ...(target === undefined ? {} : { target }),
+        ...(params.fullPage === true ? { fullPage: true } : {}),
+        format: params.format === 'jpeg' ? 'jpeg' : 'png',
+      });
       return await acted(page, {
-        screenshotBase64: (await page.screenshot({ type: 'png', fullPage: false }))
-          .toString('base64')
-          .slice(0, MAX_SCREENSHOT_CHARS),
+        screenshotBase64: shot.base64.slice(0, MAX_SCREENSHOT_CHARS),
+        screenshotFormat: shot.format,
       });
     }
     case 'back': {
@@ -523,6 +551,26 @@ async function run(request: Request): Promise<Record<string, unknown>> {
       throw new Error(`unknown browser worker method: ${request.method}`);
   }
 }
+
+/** A request's target — or, from a daemon older than refs, its bare `selector`. */
+function legacyTarget(params: Readonly<Record<string, unknown>>): unknown {
+  if (params.target !== undefined) return params.target;
+  return typeof params.selector === 'string' && params.selector
+    ? { kind: 'selector', selector: params.selector }
+    : undefined;
+}
+
+function requiredTarget(params: Readonly<Record<string, unknown>>): BrowserTarget {
+  const target = browserTargetParam(legacyTarget(params));
+  if (target === undefined) throw new Error('target is required');
+  return target;
+}
+
+const isButton = (value: unknown): value is BrowserMouseButton =>
+  value === 'left' || value === 'right' || value === 'middle';
+
+const isModifier = (value: unknown): value is BrowserModifier =>
+  typeof value === 'string' && (BROWSER_MODIFIERS as readonly string[]).includes(value);
 
 function parse(line: string): Request {
   const value: unknown = JSON.parse(line);

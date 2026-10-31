@@ -173,6 +173,53 @@ describe('McpServer — the tools', () => {
     ]);
   });
 
+  it('should take a ref or a point in place of a selector, and read a false flag as one left out', async () => {
+    // Arrange
+    const { calls, request } = harness();
+
+    // Act
+    await request('tools/call', toolCall('browser_click', { name: 'app', ref: 'e12', double: false }));
+    await request('tools/call', toolCall('browser_click', { name: 'app', x: 10, y: 20, double: true }));
+    await request('tools/call', toolCall('browser_open', { name: 'app', incognito: false }));
+    await request('tools/call', toolCall('browser_read', { name: 'app', mode: 'snapshot', boxes: false }));
+    await request('tools/call', toolCall('browser_navigate', { name: 'app', history: 'back' }));
+
+    // Assert
+    should(calls).deepEqual([
+      { tool: 'browser.click', name: 'app', ref: 'e12' },
+      { tool: 'browser.click', name: 'app', x: 10, y: 20, double: true },
+      { tool: 'browser.open', name: 'app' },
+      { tool: 'browser.read', name: 'app', mode: 'snapshot' },
+      { tool: 'browser.navigate', name: 'app', history: 'back' },
+    ]);
+  });
+
+  it('should send a JPEG screenshot as a JPEG', async () => {
+    const { request } = harness(async () => ({
+      summary: 'A screenshot of %browser:app.',
+      screenshotBase64: '/9j/4AAQ',
+      screenshotFormat: 'jpeg',
+    }));
+    should(await request('tools/call', toolCall('browser_screenshot', { name: 'app', format: 'jpeg' }))).match({
+      result: { content: [{ type: 'text' }, { type: 'image', data: '/9j/4AAQ', mimeType: 'image/jpeg' }] },
+    });
+  });
+
+  it('should keep the tools list inside the budget every agent pays for it, every turn', () => {
+    // Arrange — a runtime that loads every schema (Codex) carries this whole list in each prompt.
+    const listed = [...MCP_TOOLS, ...MCP_CONFIG_TOOLS, ...MCP_LESSON_TOOLS].map(
+      ({ name, description, inputSchema }) => ({ name, description, inputSchema }),
+    );
+
+    // Act
+    const bytes = JSON.stringify(listed).length;
+    const longest = Math.max(...listed.map(tool => tool.description.length));
+
+    // Assert — 11.9 KB measured with refs (#F199); 20 KB is the ceiling the browser-tools plan set.
+    should(bytes).be.below(20_000);
+    should(longest).be.belowOrEqual(300);
+  });
+
   it('should return a screenshot as an image the model can see', async () => {
     const { request } = harness(async () => ({
       summary: 'A screenshot of %browser:app.',

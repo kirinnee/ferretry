@@ -1,16 +1,23 @@
 import { dirname } from 'node:path';
 import type {
+  BrowserElementTarget,
   BrowserInputEvent,
   BrowserPageActionSnapshot,
   BrowserPageSnapshot,
   BrowserScreencastFrame,
+  BrowserScreenshotFormat,
+  BrowserTarget,
   BrowserViewport,
 } from '@ferretry/protocol';
 import {
   type BrowserAutomation,
   BrowserFrameGovernor,
   BrowserTransportError,
+  type BrowserClickOptions,
   type FrameClock,
+  type BrowserReadOptions,
+  type BrowserScreenshotOptions,
+  type BrowserTypeOptions,
   WorkerLineAssembler,
   type WorkerSnapshotResult,
   boundedReadText,
@@ -186,30 +193,43 @@ export class BrowserWorkerClient implements BrowserAutomation {
     return this.action('navigate', { pageId, url });
   }
 
-  click(pageId: string, selector: string): Promise<BrowserPageActionSnapshot> {
-    return this.action('click', { pageId, selector });
+  click(pageId: string, target: BrowserTarget, options: BrowserClickOptions = {}): Promise<BrowserPageActionSnapshot> {
+    return this.action('click', { pageId, target, ...options });
   }
 
-  type(pageId: string, selector: string, text: string): Promise<BrowserPageActionSnapshot> {
-    return this.action('type', { pageId, selector, text });
+  type(
+    pageId: string,
+    target: BrowserElementTarget,
+    text: string,
+    options: BrowserTypeOptions = {},
+  ): Promise<BrowserPageActionSnapshot> {
+    return this.action('type', { pageId, target, text, ...options });
   }
 
   async read(
     pageId: string,
-    selector?: string,
-    mode?: 'text' | 'a11y',
+    options: BrowserReadOptions = {},
   ): Promise<BrowserPageActionSnapshot & { readonly text: string }> {
-    const raw = await this.request('read', {
-      pageId,
-      ...(selector === undefined ? {} : { selector }),
-      ...(mode === undefined ? {} : { mode }),
-    });
+    const raw = await this.request('read', { pageId, ...options });
     return { ...unwrap(normalizeWorkerActionSnapshot(raw)), text: boundedReadText(raw) };
   }
 
-  async screenshot(pageId: string): Promise<BrowserPageActionSnapshot & { readonly screenshotBase64: string }> {
-    const raw = await this.request('screenshot', { pageId });
-    return { ...unwrap(normalizeWorkerActionSnapshot(raw)), screenshotBase64: boundedScreenshot(raw) };
+  async screenshot(
+    pageId: string,
+    options: BrowserScreenshotOptions = {},
+  ): Promise<
+    BrowserPageActionSnapshot & {
+      readonly screenshotBase64: string;
+      readonly screenshotFormat: BrowserScreenshotFormat;
+    }
+  > {
+    const raw = await this.request('screenshot', { pageId, ...options });
+    return {
+      ...unwrap(normalizeWorkerActionSnapshot(raw)),
+      screenshotBase64: boundedScreenshot(raw),
+      // An older worker sends no format; its screenshots were always PNG.
+      screenshotFormat: (raw as { screenshotFormat?: unknown }).screenshotFormat === 'jpeg' ? 'jpeg' : 'png',
+    };
   }
 
   back(pageId: string): Promise<BrowserPageActionSnapshot> {
