@@ -9915,6 +9915,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         push,
         serial: new KeyedSerialExecutor(),
         clock,
+        diagnostics: { warn: message => void process.stderr.write(`notifications: ${message}\n`) },
       });
       // ONE agenda service for this opened store, shared by the route a person answers on and by
       // the warden sweep that raises and clears its own escalations. Two would each hold their own

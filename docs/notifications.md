@@ -224,7 +224,10 @@ A second, separate marker, `agenda-files-migration.json`, records the move of ea
 rules: written only when every session succeeded, a failed session keeps its old file and is retried next start, and it
 never stops the daemon starting. [agenda.md § On disk](agenda.md#on-disk) has the rest. Records in
 `notifications.jsonl` are not rewritten: both key spellings (`attention:`, `agenda:`) are read as one, so an item
-notified before the upgrade is never notified again.
+notified before the upgrade is never notified again. A record written before v4.116.0 names its item `attentionId`;
+it is read as `agendaId`. The ledger fails closed on any line it cannot read, so refusing that spelling silenced
+every push from v4.116.0 until it was read again, and a push that cannot be made now says so in the daemon log
+(`notifications: push <key> was not made — <reason>`).
 
 ## Every automatic push, and why it stays or goes
 

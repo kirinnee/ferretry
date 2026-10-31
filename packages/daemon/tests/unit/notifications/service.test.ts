@@ -96,6 +96,7 @@ function fixture(
     readonly sessions?: Sessions;
     readonly push?: Push;
     readonly callLog?: string[];
+    readonly warnings?: string[];
   } = {},
 ) {
   const callLog = options.callLog ?? [];
@@ -113,6 +114,7 @@ function fixture(
       push,
       serial: new KeyedSerialExecutor(),
       clock: { now: () => AT },
+      ...(options.warnings === undefined ? {} : { diagnostics: { warn: message => options.warnings?.push(message) } }),
     }),
   };
 }
@@ -304,6 +306,47 @@ describe('NotificationService containment', () => {
     should(pushFailure.push.calls).equal(1);
     should(outcomeFailure.push.calls).equal(1);
   });
+
+  it('should say, through its diagnostics, a push it could not make or deliver', async () => {
+    // Arrange
+    const unreadableWarnings: string[] = [];
+    const unreadable = fixture({ warnings: unreadableWarnings });
+    unreadable.ledger.failFind = true;
+    const undeliveredWarnings: string[] = [];
+    const undelivered = fixture({ warnings: undeliveredWarnings });
+    undelivered.push.notifyHook = async () => {
+      throw new Error('push failed');
+    };
+
+    // Act
+    await unreadable.service.stopped(SESSION, AT, snapshot);
+    await undelivered.service.stopped(SESSION, AT, snapshot);
+
+    // Assert
+    should(unreadableWarnings).eql([`push agenda:${SESSION}:stopped:${AT} was not made — ledger cannot be read`]);
+    should(undeliveredWarnings).eql([`push agenda:${SESSION}:stopped:${AT} was not delivered — push failed`]);
+  });
+
+  it('should stay total when its diagnostics throw', async () => {
+    // Arrange
+    const world = fixture();
+    world.ledger.failFind = true;
+    const service = new NotificationService({
+      ledger: world.ledger,
+      sessions: world.sessions,
+      push: world.push,
+      serial: new KeyedSerialExecutor(),
+      clock: { now: () => AT },
+      diagnostics: {
+        warn: () => {
+          throw new Error('stderr closed');
+        },
+      },
+    });
+
+    // Act / Assert
+    await should(service.stopped(SESSION, AT, snapshot)).be.fulfilled();
+  });
 });
 
 describe('NotificationService delivered count', () => {
@@ -446,7 +489,17 @@ describe('NotificationRecordSchema across the agenda rename', () => {
   };
 
   it('should parse a record written before the rename and one written after', () => {
-    // Arrange / Act / Assert
+    // Arrange
+    const { agendaId, ...unnamed } = base;
+    const before = { ...unnamed, attentionId: agendaId, key: `attention:${SESSION}:A1:ping`, origin: 'attention' };
+
+    // Act
+    const parsed = NotificationRecordSchema.safeParse(before);
+
+    // Assert
+    should(parsed.success).be.true();
+    should(parsed.data).containDeep({ agendaId: 'A1' });
+    should(parsed.data).not.have.property('attentionId');
     should(
       NotificationRecordSchema.safeParse({ ...base, key: `attention:${SESSION}:A1:ping`, origin: 'attention' }).success,
     ).be.true();

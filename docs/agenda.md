@@ -502,8 +502,9 @@ old one, and always writes the new one**, so a daemon upgraded or downgraded in 
   aside as before, and the next start tries again. The marker `agenda-files-migration.json` in the daemon's home is
   written only when every session succeeded, and the migration never stops the daemon starting.
 - **`*.migrated` files are kept for one release.** The release after the one that migrated may delete them.
-- Records already in `notifications.jsonl` keep their `attention:` keys and their `attention` origin; new ones are
-  written `agenda:`, and a repeat check treats the two spellings as one key. A daemon-written send id is read the same
+- Records already in `notifications.jsonl` keep their `attention:` keys, their `attention` origin and their
+  `attentionId` field; new ones are written `agenda:` with `agendaId`, a repeat check treats the two key spellings as
+  one key, and `attentionId` is read as `agendaId`. A daemon-written send id is read the same
   way: `attention-…` and `agenda-…` name one send.
 
 ### How each end finds out
