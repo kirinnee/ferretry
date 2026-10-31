@@ -20,8 +20,9 @@
 /**
  * What one ferret's message to another IS:
  *
- *   * `message` — a note; the sender has carried on and no answer is owed.
- *   * `question` — the sender is parked until this is answered.
+ *   * `message` — a note; the sender has carried on and did not say whether it wants an answer.
+ *   * `question` — the sender asked for an answer: parked until it comes (`send --ask`), or carrying on
+ *     while it waits for one (`send --expect-reply`).
  *   * `reply` — the answer to a question the RECEIVER asked, and is parked on.
  */
 export const PEER_MESSAGE_KINDS = ['message', 'question', 'reply'] as const;
@@ -43,16 +44,17 @@ export interface PeerEnvelopeSender {
  *
  * Two short lines, because the receiver reads them in every peer message it is ever sent: who it is
  * from and that it is not the owner, then whether an answer is owed and the one command that sends it.
- * Only a `question` asks for an answer, so a note never nags its receiver into replying.
+ * Only a `question` asks for an answer, so a note never nags its receiver into replying — and a note
+ * never says no answer is owed either: a sender that forgot `--expect-reply` may still be waiting on
+ * one, and "No reply needed" over "send your verdict now" left a lead's sub-ferrets silent for hours
+ * (2026-10-31).
  */
 export function peerEnvelopePreamble(sender: PeerEnvelopeSender): string {
   const { name, sessionId, kind, clientName } = sender;
   const attribution = `[${kind} from ferret ${name} (session ${sessionId}) — not from the owner]`;
   const command = `${clientName} send ${name} "<reply>"`;
   const note =
-    kind === 'question'
-      ? `${name} is waiting for your answer. Reply with: ${command}`
-      : `No reply needed. To reply: ${command}`;
+    kind === 'question' ? `${name} is waiting for your answer. Reply with: ${command}` : `To reply: ${command}`;
   return `${attribution}\n${note}\n\n`;
 }
 
@@ -63,7 +65,7 @@ export interface PeerEnvelope {
   /** The sender's session id, when the banner names one. */
   readonly sessionId?: string;
   readonly kind: PeerMessageKind;
-  /** The sender was parked on a reply when it sent this — the same fact as `kind === 'question'`. */
+  /** The sender asked for an answer when it sent this — the same fact as `kind === 'question'`. */
   readonly replyExpected: boolean;
   /** The banner's second line — delivery boilerplate addressed to the receiving agent. */
   readonly note: string;

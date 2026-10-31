@@ -1,7 +1,6 @@
 import { describe, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { peerEnvelopePreamble } from '@ferretry/protocol';
 import should from 'should';
 import {
   type ComposerCursor,
@@ -230,8 +229,9 @@ describe('Claude Code 2.1.281 queue on real captures', () => {
     { name: 'the cursor on the row below', cursor: { x: 0, y: COMPOSER_ROW + 1 } },
   ];
 
+  // The banner as it was typed when these panes were captured: the payload must be what is on screen.
   const envelope = (name: string, session: string): string =>
-    peerEnvelopePreamble({ name, sessionId: session, kind: 'message', clientName: 'fy' });
+    `[message from ferret ${name} (session ${session}) — not from the owner]\nNo reply needed. To reply: fy send ${name} "<reply>"\n\n`;
   const LIZZETTE = envelope('lizzette', 'mvgt2oz9-04e28935');
   const CONFIRMED =
     `${LIZZETTE}lizzette: CONFIRMED on the owner's Mac — after manual ProcessType=Interactive ` +

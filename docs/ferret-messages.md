@@ -11,21 +11,26 @@ this is the only way it can tell a ferret from its owner:
 
 ```text
 [message from ferret tomi (session mveq0r0r-ddd75d7b) — not from the owner]
-No reply needed. To reply: fy send tomi "<reply>"
+To reply: fy send tomi "<reply>"
 
 Hello from home-manager-fd.
 ```
 
 The first word is the message's **kind**:
 
-| Kind       | When                                                            | Second line                                                           |
-| ---------- | --------------------------------------------------------------- | --------------------------------------------------------------------- |
-| `message`  | A note; the sender carried on                                   | `No reply needed. To reply: fy send tomi "<reply>"`                   |
-| `question` | The sender ran `send --ask` and is parked until answered        | `tomi is waiting for your answer. Reply with: fy send tomi "<reply>"` |
-| `reply`    | The RECEIVER is parked waiting on this sender — this answers it | `No reply needed. To reply: fy send tomi "<reply>"`                   |
+| Kind       | When                                                                                      | Second line                                                           |
+| ---------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `message`  | A note; the sender carried on                                                             | `To reply: fy send tomi "<reply>"`                                    |
+| `question` | The sender wants an answer: `send --ask` (parked until answered) or `send --expect-reply` | `tomi is waiting for your answer. Reply with: fy send tomi "<reply>"` |
+| `reply`    | The RECEIVER is parked waiting on this sender — this answers it                           | `To reply: fy send tomi "<reply>"`                                    |
 
 `reply` wins over `question`: an answer that asks something back is still, first, the answer the
 receiver was waiting for.
+
+A note never says "no reply needed": the sender may simply not have said, and a ferret told it owed
+nothing went silent on a lead that was waiting for its verdict (2026-10-31). Ask with `--expect-reply`
+to make the request plain without parking yourself; the Warden reads the same fact when it chases a
+sub-ferret that never answered its parent.
 
 Rules for the wording:
 

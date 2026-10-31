@@ -183,6 +183,7 @@ export function registerSessionCommands(program: Command, deps: SessionCommandDe
       attachmentPaths: list(options, 'file'),
       ...(flag(options, 'now') === undefined ? {} : { now: true }),
       ...(flag(options, 'ask') === undefined ? {} : { ask: true }),
+      ...(flag(options, 'expectReply') === undefined ? {} : { expectReply: true }),
       ...(text(options, 'until') === undefined ? {} : { until: text(options, 'until') }),
       ...(flag(options, 'wait') === undefined ? {} : { wait: true }),
       ...(flag(options, 'json') === undefined ? {} : { json: true }),
@@ -198,6 +199,7 @@ export function registerSessionCommands(program: Command, deps: SessionCommandDe
     .option('--message-file <file>', 'read the message from a file (use for long messages)')
     .option('--now', 'interrupt the active turn and deliver immediately instead of riding the queue')
     .option('--ask', 'label this as needing a reply and park this session until the peer answers')
+    .option('--expect-reply', 'label this as needing a reply, without parking this session')
     .option('--until <when>', 'with --ask: give up waiting after this long (45m, 2h, or an ISO timestamp)')
     .option('--wait', 'wait until the message is proven delivered, timed out, or unconfirmed')
     .option('--json', 'print the session as JSON')

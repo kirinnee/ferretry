@@ -11,6 +11,8 @@ export interface SendFlags {
   readonly attachmentPaths?: readonly string[];
   readonly now?: boolean;
   readonly ask?: boolean;
+  /** Mark it as wanting an answer without parking the sender (`--ask` does both). */
+  readonly expectReply?: boolean;
   readonly until?: string;
 }
 
@@ -51,7 +53,7 @@ export function planSend(flags: SendFlags, environment: SessionEnvironment): Sen
     message,
     attachmentPaths,
     now: flags.now === true,
-    replyExpected: flags.ask === true,
+    replyExpected: flags.ask === true || flags.expectReply === true,
     ...(flags.ask === true && caller !== undefined && caller !== ''
       ? { park: { callerSessionId: caller, ...(flags.until === undefined ? {} : { until: flags.until }) } }
       : {}),
