@@ -599,6 +599,36 @@ describe('browser worker client — process handles', () => {
   });
 });
 
+describe('browser worker client — a secure copy', () => {
+  it('should carry a copy read and believe only an answer in its shape, quoting none of a bad one', async () => {
+    // Arrange
+    const client = await connect();
+
+    // Act
+    const read = await client.copyRead('p1', { kind: 'ref', ref: 'e3' }, 'attribute', 'data-token');
+    const text = await client.copyRead('p1', { kind: 'selector', selector: '#t' }, 'text');
+    const missing = await client.copyRead('missing', { kind: 'ref', ref: 'e3' }, 'text');
+    const garbled = await rejection(client.copyRead('garbled', { kind: 'ref', ref: 'e3' }, 'text'));
+    const huge = await rejection(client.copyRead('huge', { kind: 'ref', ref: 'e3' }, 'text'));
+
+    // Assert
+    should(read).deepEqual({
+      ok: true,
+      value: 'fake-attribute-data-token-e3',
+      origin: 'https://example.test',
+      frameOrigin: 'https://frame.example',
+      navigationId: 'loader-1',
+    });
+    should(text).match({ ok: true, value: 'fake-text--#t' });
+    should(missing).deepEqual({ ok: false, reason: 'missing' });
+    for (const failure of [garbled, huge]) {
+      should(failure.code).equal('upstream_failed');
+      should(failure.message).not.containEql('fake-');
+      should(failure.message).not.containEql('xxxx');
+    }
+  });
+});
+
 describe('browser worker client — the input bridge', () => {
   it('should carry the four input calls and believe only answers in the protocol’s shape', async () => {
     // Arrange

@@ -383,6 +383,7 @@ describe('McpServer — the tools', () => {
     // Secure copy's five tools add about 1.3 KB (31,998 measured with browser_eval and secure_paste, #F230).
     // Pasting into the secret store fit by dropping NEW_NAME's words that repeated its own pattern (31,912).
     // Pasting into a page field (secure_paste's own words) took it to 31,984.
+    // Copying a page element fit by trimming lessons_suggest, browser_open and browser_network (31,975).
     // Owner-gated groups are listed only while they are on.
     should(bytes).be.below(32_000);
     should(longest).be.belowOrEqual(300);

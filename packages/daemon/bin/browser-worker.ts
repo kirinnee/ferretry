@@ -48,6 +48,7 @@ import {
   CdpPipeTransport,
 } from '../src/lib/browser/transport/cdp-pipe.ts';
 import { recogniseBrowserChallenge } from '../src/lib/browser/transport/challenge.ts';
+import { type CopyablePage, readCopyElement } from '../src/lib/browser/transport/copy-read.ts';
 import { DownloadStage } from '../src/lib/browser/transport/download-stage.ts';
 import type { BrowserInputFacts, BrowserInputValue } from '../src/lib/browser/transport/input-contracts.ts';
 import {
@@ -73,7 +74,6 @@ import {
   typeInto,
   uploadFiles,
 } from '../src/lib/browser/transport/page-acts.ts';
-import { runPageScript } from '../src/lib/browser/transport/page-script.ts';
 import {
   ConsoleLog,
   NetworkLog,
@@ -82,9 +82,10 @@ import {
   runLifecycleRequest,
   type WaitablePage,
 } from '../src/lib/browser/transport/page-lifecycle.ts';
+import { runPageScript } from '../src/lib/browser/transport/page-script.ts';
 import { disablePasskeys } from '../src/lib/browser/transport/passkeys.ts';
-import { performPointerAct, type PointerPage, pointerActParam } from '../src/lib/browser/transport/pointer-acts.ts';
 import { type PointerPosition, pointerAfter, pointerSequence } from '../src/lib/browser/transport/pointer.ts';
+import { type PointerPage, performPointerAct, pointerActParam } from '../src/lib/browser/transport/pointer-acts.ts';
 
 const endpoint = process.argv[2];
 /** Where downloads and PDFs are staged for the daemon; without it the worker stages nothing. */
@@ -874,6 +875,23 @@ async function act(request: Request): Promise<Record<string, unknown>> {
         ...(params.slowly === true ? { slowly: true } : {}),
       });
       return await acted(page, typed.passwordField ? { passwordField: true } : {});
+    }
+    case 'copyRead': {
+      const page = targetPage(params.pageId);
+      const target = browserElementParam(params.target);
+      const part = params.part;
+      if (target === undefined || (part !== 'text' && part !== 'value' && part !== 'attribute'))
+        throw new Error('a copy read needs a target and a part');
+      const attribute = typeof params.attribute === 'string' ? params.attribute : undefined;
+      return {
+        read: await readCopyElement(
+          page as unknown as CopyablePage,
+          async () => await describeInputDocument(inputSubject(page)),
+          target,
+          part,
+          attribute,
+        ),
+      };
     }
     case 'inputDocument':
       return { document: await describeInputDocument(inputSubject(targetPage(params.pageId))) };

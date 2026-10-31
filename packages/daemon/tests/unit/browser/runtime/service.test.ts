@@ -97,6 +97,10 @@ class Tabs {
     forward: async pageId => this.acted('forward', pageId),
     reload: async pageId => this.acted('reload', pageId),
     location: async pageId => this.state(pageId),
+    copyRead: async pageId => {
+      this.calls.push(`copyRead:${pageId}`);
+      return { ok: false, reason: 'empty' };
+    },
     inputDocument: async pageId => {
       this.calls.push(`inputDocument:${pageId}`);
       if (this.documentFails) throw new Error('the page is gone');
@@ -887,6 +891,24 @@ describe('the machine agent browser — a page’s lifecycle', () => {
     // Assert
     should(answered).equal(app.id);
     should(tabs.calls).containEql(`inputDocument:${app.id}`);
+    should(refused.code).equal('not_found');
+  });
+
+  it('should read a secure copy on the session’s own named page, in its queue, and refuse another session’s', async () => {
+    // Arrange
+    const { tabs, service } = harness();
+    const app = await service.openPage('s1', 'app');
+    const other = await service.openPage('s2', 'app');
+
+    // Act
+    const read = await service.copyOnPage('s1', 'app', async (copy, pageId) =>
+      copy.copyRead(pageId, { kind: 'ref', ref: 'e1' }, 'text'),
+    );
+    const refused = await failure(service.copyOnPage('s1', other.id, async () => 'reached'));
+
+    // Assert
+    should(read).eql({ ok: false, reason: 'empty' });
+    should(tabs.calls).containEql(`copyRead:${app.id}`);
     should(refused.code).equal('not_found');
   });
 

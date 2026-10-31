@@ -67,14 +67,23 @@ export interface CopyCaptured {
 interface Read {
   readonly value: string;
   readonly from: CopyOrigin;
-  /** How a command ended, and its stderr AS IT WAS: masked only once the value is held. Every source is a command until pages arrive (SC3). */
-  readonly command: {
+  /** How a command ended, and its stderr AS IT WAS: masked only once the value is held. Absent for a page. */
+  readonly command?: {
     readonly outcome: CopyCommandReport['outcome'];
     readonly exitCode?: number;
     readonly stderr: string;
     readonly stdout: string;
   };
-  readonly pageReadBeforeCapture?: boolean;
+  /** The page and document a page copy was read from: every name the page is known by. */
+  readonly page?: { readonly names: readonly string[]; readonly navigationId: string };
+}
+
+/**
+ * What the CALLER knows about the capture, beside the agent's own request: for a page copy, the documents of that
+ * page the agent has already read, screenshotted or evaluated (`exposure.pageReadBeforeCapture`).
+ */
+export interface CopyCaptureContext {
+  readonly seenDocuments?: readonly string[];
 }
 
 /** The spellings of a value a reader may meet it in: as read, and with its surrounding white space dropped. */
@@ -90,7 +99,7 @@ export class SecureCopyService implements InputSealedPort {
   constructor(private readonly ports: CopyPorts) {}
 
   /** Reads a value from `source` and holds it as `sealed:<name>`; refuses with a sentence when it cannot. */
-  async capture(sessionId: string, request: CopyCapture): Promise<CopyCaptured> {
+  async capture(sessionId: string, request: CopyCapture, context: CopyCaptureContext = {}): Promise<CopyCaptured> {
     this.purge();
     const own = this.copies.get(sessionId);
     const running = this.capturing.get(sessionId) ?? new Set<CopyName>();
@@ -117,7 +126,7 @@ export class SecureCopyService implements InputSealedPort {
     running.add(request.name);
     this.capturing.set(sessionId, running);
     try {
-      return await this.hold(sessionId, request);
+      return await this.hold(sessionId, request, context);
     } finally {
       running.delete(request.name);
       if (running.size === 0) this.capturing.delete(sessionId);
@@ -125,7 +134,7 @@ export class SecureCopyService implements InputSealedPort {
   }
 
   /** Reads the value and holds it: the second half of a capture, run with its name taken. */
-  private async hold(sessionId: string, request: CopyCapture): Promise<CopyCaptured> {
+  private async hold(sessionId: string, request: CopyCapture, context: CopyCaptureContext): Promise<CopyCaptured> {
     const read = await this.read(sessionId, request.name, request.source);
     const capturedAt = this.ports.clock.now();
     const expiresAt = capturedAt + (request.expiresInSeconds ?? COPY_DEFAULT_LIFETIME_SECONDS) * 1000;
@@ -133,7 +142,15 @@ export class SecureCopyService implements InputSealedPort {
     // this point can carry the value, whether a program printed it with its newline or without.
     for (const spelling of spellings(read.value))
       this.ports.masking.holdUntil(sessionId, spelling, copyMask(request.name), expiresAt + AFTER_MASK_MS);
-    const command = await this.report(read.command, [read.command.stdout, read.value], request.name);
+    // No picture of the page while it still shows the document the value was read from.
+    if (read.page !== undefined)
+      this.ports.pageHolds?.hold(sessionId, read.page.names, read.page.navigationId, expiresAt + AFTER_MASK_MS);
+    const command =
+      read.command === undefined
+        ? undefined
+        : await this.report(read.command, [read.command.stdout, read.value], request.name);
+    const pageReadBeforeCapture =
+      read.page === undefined ? undefined : (context.seenDocuments ?? []).includes(read.page.navigationId);
     const found: readonly ('found' | 'clean' | 'unknown')[] = await Promise.all(
       spellings(read.value).map(async spelling => await this.ports.exposure.transcriptHolds(sessionId, spelling)),
     ).catch(() => ['unknown']);
@@ -148,7 +165,7 @@ export class SecureCopyService implements InputSealedPort {
       expiresAt,
       exposure: {
         transcript,
-        ...(read.pageReadBeforeCapture === undefined ? {} : { pageReadBeforeCapture: read.pageReadBeforeCapture }),
+        ...(pageReadBeforeCapture === undefined ? {} : { pageReadBeforeCapture }),
       },
       state: 'live',
       uses: 0,
@@ -156,7 +173,7 @@ export class SecureCopyService implements InputSealedPort {
     const session = this.copies.get(sessionId) ?? new Map<CopyName, Entry>();
     session.set(request.name, entry);
     this.copies.set(sessionId, session);
-    return { copy: meta(entry), command };
+    return { copy: meta(entry), ...(command === undefined ? {} : { command }) };
   }
 
   /** Every copy of this session, live or recently ended, oldest first. */
@@ -205,6 +222,7 @@ export class SecureCopyService implements InputSealedPort {
   drop(sessionId: string): void {
     this.copies.delete(sessionId);
     this.captures.delete(sessionId);
+    this.ports.pageHolds?.drop(sessionId);
   }
 
   /** What the daemon recorded about a LIVE copy, for a paste's card: never the value. */
@@ -250,12 +268,52 @@ export class SecureCopyService implements InputSealedPort {
       case 'command':
         return await this.runCommand(sessionId, name, source);
       case 'browser':
+        return await this.readPage(sessionId, source);
       case 'clipboard':
         throw new SecureCopyError(
           'unavailable',
-          'Copying from a page or its clipboard arrives with the browser input bridge; for now copy what a command prints.',
+          "Copying from a page's clipboard is not here yet; copy the element that shows the value instead.",
         );
     }
+  }
+
+  /**
+   * One element of one of the session's pages: its text, a field's value or one attribute, with the page's and the
+   * frame's origin and the document as the browser reported them. The copy's origin is the FRAME's: where the value
+   * actually was. White space around the value is dropped, as a page lays text out with it.
+   */
+  private async readPage(sessionId: string, source: Extract<CopySource, { readonly kind: 'browser' }>): Promise<Read> {
+    const pages = this.ports.pages;
+    if (pages === undefined)
+      throw new SecureCopyError('unavailable', 'Copying from a page is not available on this daemon.');
+    const target =
+      source.ref === undefined
+        ? { kind: 'selector' as const, selector: source.selector ?? '' }
+        : { kind: 'ref' as const, ref: source.ref };
+    const read = await pages.read(sessionId, source.key, target, source.read, source.attribute);
+    if (!read.ok)
+      throw new SecureCopyError(
+        'bad_request',
+        read.reason === 'missing'
+          ? 'That element is not on the page (read the page again for a fresh ref); nothing was copied.'
+          : 'That element holds nothing to copy; nothing was copied.',
+      );
+    const value = read.value.trim();
+    if (encoder.encode(read.value).length > COPY_VALUE_MAX_BYTES)
+      throw new SecureCopyError(
+        'bad_request',
+        `The element holds more than ${String(COPY_VALUE_MAX_BYTES)} bytes; nothing was copied.`,
+      );
+    if ([...value].length < COPY_VALUE_MIN_CHARS)
+      throw new SecureCopyError(
+        'bad_request',
+        `The element holds fewer than ${String(COPY_VALUE_MIN_CHARS)} characters: too short to seal and mask safely; nothing was copied.`,
+      );
+    return {
+      value,
+      from: { kind: 'browser', origin: read.frameOrigin, surface: source.key },
+      page: { names: [source.key, read.pageId], navigationId: read.navigationId },
+    };
   }
 
   private async runCommand(

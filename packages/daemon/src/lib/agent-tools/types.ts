@@ -113,9 +113,20 @@ export interface AgentCopyPort {
   capture(
     sessionId: string,
     request: CopyCapture,
+    context?: { readonly seenDocuments?: readonly string[] },
   ): Promise<{ readonly copy: CopyMeta; readonly command?: CopyCommandReport }>;
   list(sessionId: string): readonly CopyMeta[];
   discard(sessionId: string, name: CopyName): CopyMeta;
+}
+
+/**
+ * What secure copy knows about pages, by document (`PageCopyRecords`): the documents a value was copied from,
+ * which are not pictured while a page still shows one, and the documents the agent has read.
+ */
+export interface AgentCopyPagesPort {
+  documents(sessionId: string, names: readonly (string | undefined)[]): readonly string[];
+  saw(sessionId: string, names: readonly (string | undefined)[], navigationId: string): void;
+  seen(sessionId: string, names: readonly (string | undefined)[]): readonly string[];
 }
 
 /** What `secure.preapprove` asks: raise one card listing the pastes the agent plans. Nothing in it is a value. */

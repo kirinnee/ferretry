@@ -1,9 +1,11 @@
+import type { BrowserElementTarget, CopyElementPart } from '@ferretry/protocol';
 import type { SecretChildRunner } from '../secrets/types.ts';
 
 /**
  * THE SEAMS THE SECURE-COPY SERVICE STANDS ON (docs/secure-copy.md).
  *
- * A value enters through exactly one of these — {@link CopyPorts.runner}'s stdout — and leaves through two:
+ * A value enters through one of two — {@link CopyPorts.runner}'s stdout, or a page read by {@link CopyPorts.pages} —
+ * and leaves through two:
  * the masking registry, which only ever matches it, and the transcript check, which answers a word. No port
  * here hands a value to a caller.
  */
@@ -34,6 +36,36 @@ export interface CopyMasking {
   retime(sessionId: string, marker: string, until: number): void;
 }
 
+/** One page element, read for a copy in that page's own queue: the value and where it was read, or why not. */
+export type CopyPageRead =
+  | {
+      readonly ok: true;
+      readonly value: string;
+      /** The page's id, beside the key the agent named it by. */
+      readonly pageId: string;
+      readonly origin: string;
+      readonly frameOrigin: string;
+      readonly navigationId: string;
+    }
+  | { readonly ok: false; readonly reason: 'missing' | 'empty' };
+
+/** The agent browser, as a page copy needs it. The page is the session's own; the agent tools checked it may act there. */
+export interface CopyPagePort {
+  read(
+    sessionId: string,
+    key: string,
+    target: BrowserElementTarget,
+    part: CopyElementPart,
+    attribute?: string,
+  ): Promise<CopyPageRead>;
+}
+
+/** Where pictures of a page wait while it shows the document a value was copied from (`PageCopyRecords`). */
+export interface CopyPageHolds {
+  hold(sessionId: string, names: readonly (string | undefined)[], navigationId: string, until: number): void;
+  drop(sessionId: string): void;
+}
+
 export interface CopyPorts {
   readonly clock: CopyClock;
   /** The secret store's no-shell child runner: an allowlisted environment, a timeout and a byte cap. */
@@ -43,4 +75,8 @@ export interface CopyPorts {
   readonly masking: CopyMasking;
   /** The vault redactor over one text; it throws when the vault cannot be opened, and the text is withheld. */
   readonly redact: (text: string) => Promise<string>;
+  /** The agent browser, for a copy of a page element. Absent: a page copy is unavailable. */
+  readonly pages?: CopyPagePort;
+  /** Holds pictures of a page a value was copied from. */
+  readonly pageHolds?: CopyPageHolds;
 }

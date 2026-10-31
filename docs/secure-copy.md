@@ -38,15 +38,16 @@ a field for the value; a protocol test walks every schema to keep it that way.
 
 ## Capturing
 
-| Source      | What the daemon does                                                                                                                                                                                                                                                                                        | State |
-| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
-| `command`   | Runs `argv` with **no shell**, in the session's folder (or `cwd`), through the secret store's child runner: an allowlisted environment (no admin token, none of the daemon's own secrets), stdin closed, a timeout (30 s, 60 s at most) and a byte cap. Stdout, trimmed unless `trim: false`, is the value. | live  |
-| `browser`   | Reads one element of a page the agent may act on, by `ref` or `selector`: its text, a field's value or one attribute.                                                                                                                                                                                       | SC3   |
-| `clipboard` | Reads the agent browser's clipboard for that page's origin, after the agent pressed the page's own Copy button. Never this computer's system clipboard.                                                                                                                                                     | SC3   |
+| Source      | What the daemon does                                                                                                                                                                                                                                                                                              | State |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
+| `command`   | Runs `argv` with **no shell**, in the session's folder (or `cwd`), through the secret store's child runner: an allowlisted environment (no admin token, none of the daemon's own secrets), stdin closed, a timeout (30 s, 60 s at most) and a byte cap. Stdout, trimmed unless `trim: false`, is the value.       | live  |
+| `browser`   | Reads one element of a page the agent opened or was handed (not one taken over), by `ref` or `selector`, in the page's own queue: its text, a field's value or one attribute. White space around it is dropped. Its origin is the FRAME's the element is in, and the browser names the document it was read from. | live  |
+| `clipboard` | Reads the agent browser's clipboard for that page's origin, after the agent pressed the page's own Copy button. Never this computer's system clipboard, so only in a headless browser.                                                                                                                            | SC3c  |
 
 A capture is refused, and nothing is held, when the command fails, times out, prints nothing, prints fewer
 than 4 characters (too short to mask without masking it everywhere by chance), or prints more than 16 KiB on
-stdout (stderr's size does not count). Capturing needs no approval: the agent could run the command or read the page itself. The
+stdout (stderr's size does not count); or when the element is not on the page, holds nothing, or holds fewer
+than 4 characters or more than 16 KiB. Capturing needs no approval: the agent could run the command or read the page itself. The
 tools are an AGENT's: a person's terminal and browser tool routes refuse every `secure.*` call, so a device granted only
 the browser can never reach a command through them.
 Capturing **instead** keeps the value out of its context. It does need the "What agents may control"
@@ -77,9 +78,14 @@ run the 10 minutes from then. That masks it in:
 - the owner's screen, transcript, journal and process reads;
 - a command copy's own stderr.
 
-Page reads, accessibility snapshots, evaluation results and screenshots are covered by the browser phase
-(SC3), through the same browser guard the input bridge's browser fields use. A screenshot of a page that
-shows a held value is **withheld**, not pixel-masked.
+- **The page a copy was read from is not pictured** while it still shows that document: `browser.screenshot`,
+  `browser.pdf` and `browser.highlight` are refused there (no mask can be drawn on pixels), through the same page
+  gate as the input bridge's holds, checked before the act, inside the page's queue and after it. Its text stays
+  readable, masked as `[sealed:<name>]`, so the agent can still find "Done" by its ref. Navigating away (or the
+  copy's mask ending) lifts it. A page whose document cannot be told is treated as still showing it.
+- A screenshot of ANOTHER page that shows a held value is the next phase (SC3c): it will be **withheld**, not
+  pixel-masked. **GAP until then:** a page can draw the value where masking cannot see it (a canvas, an image),
+  and another page that shows it can be pictured.
 
 ### A value the agent had already seen
 
@@ -89,8 +95,9 @@ Masking cannot take back what the agent already read. So a capture says, honestl
   the value, as it is and as JSON escapes it. `found` means it is in the agent's context and **is not
   protected**: the agent is told so in plain words and should tell the owner to rotate it. `clean` means
   it was not found in what was read; `unknown` means the transcript could not be read.
-- **`exposure.pageReadBeforeCapture`** (SC3): the agent read, screenshotted or evaluated that page since it
-  last navigated.
+- **`exposure.pageReadBeforeCapture`**: the agent read, screenshotted or evaluated that very document of the
+  page before the copy (the daemon records the document after each such read), so the value may be in its
+  context already.
 
 The agent instruction teaches the rule that makes this work: **capture before you read**.
 
@@ -230,6 +237,7 @@ without ever reading it. It is the same input request, with the store as the des
 | SC1   | This contract, the in-memory store, command capture, masking, exposure check, `secure_*` agent tools | done        |
 | SC2a  | Paste to a terminal prompt, pre-approval rules and the plan card, `fy copy`, Allow on the input card | done        |
 | SC2b  | Paste to the secret store, with the exact-NAME rule                                                  | done        |
-| SC3a  | Paste to a field on a page; the card names the file a command copy came from                         | this change |
-| SC3b  | Page and clipboard capture, page-read and screenshot hiding                                          | later       |
+| SC3a  | Paste to a field on a page; the card names the file a command copy came from                         | done        |
+| SC3b  | Copy from a page element; the source page is not pictured; `pageReadBeforeCapture`                   | this change |
+| SC3c  | Clipboard capture (headless only); another page showing a held value is not pictured                 | later       |
 | SC4   | The app's paste and plan cards, Settings, and the agent instruction                                  | later       |

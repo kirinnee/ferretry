@@ -128,6 +128,22 @@ process.stdin.on('data', chunk => {
   }
 });
 
+/** Secure copy's read; the page id picks the answer. The value is a fixed fake, echoed with what was asked. */
+function copyReply(id, params) {
+  const page = params?.pageId;
+  const read = {
+    ok: true,
+    value: `fake-${params?.part}-${params?.attribute ?? ''}-${params?.target?.ref ?? params?.target?.selector}`,
+    origin: 'https://example.test',
+    frameOrigin: 'https://frame.example',
+    navigationId: 'loader-1',
+  };
+  if (page === 'missing') reply(id, true, { read: { ok: false, reason: 'missing' } });
+  else if (page === 'garbled') reply(id, true, { read: { ...read, navigationId: 7 } });
+  else if (page === 'huge') reply(id, true, { read: { ...read, value: 'x'.repeat(20_000) } });
+  else reply(id, true, { read });
+}
+
 /** The input bridge's four calls; the page id picks the answer, so one fixture covers each path. */
 function inputReply(id, method, params) {
   const page = params?.pageId;
@@ -192,6 +208,10 @@ function handle({ id, method, params }) {
   if (endpoint === 'no-screencast' && method === 'startScreencast') return;
   if (method.startsWith('input')) {
     inputReply(id, method, params);
+    return;
+  }
+  if (method === 'copyRead') {
+    copyReply(id, params);
     return;
   }
   // A request's own argument selects the reply behaviour, so one fixture covers every path.

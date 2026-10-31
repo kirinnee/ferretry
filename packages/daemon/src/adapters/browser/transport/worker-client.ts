@@ -9,12 +9,15 @@ import type {
   BrowserScreenshotFormat,
   BrowserTarget,
   BrowserViewport,
+  CopyElementPart,
 } from '@ferretry/protocol';
-import { InputTargetFactsSchema } from '@ferretry/protocol';
+import { COPY_VALUE_MAX_BYTES, InputTargetFactsSchema } from '@ferretry/protocol';
 import {
+  BROWSER_COPY_WORKER_METHODS,
   BROWSER_INPUT_WORKER_METHODS,
   type BrowserAutomation,
   type BrowserClickOptions,
+  type BrowserCopyRead,
   BrowserFrameGovernor,
   type BrowserInputDocument,
   type BrowserInputFacts,
@@ -29,7 +32,6 @@ import {
   BrowserTransportError,
   type BrowserTypeOptions,
   type BrowserUploadMode,
-  type PageScript,
   boundedReadText,
   boundedScreenshot,
   encodeWorkerRequest,
@@ -39,6 +41,7 @@ import {
   normalizeWorkerDialog,
   normalizeWorkerSnapshot,
   normalizeWorkerStaged,
+  type PageScript,
   type PointerAct,
   parseWorkerLine,
   WorkerLineAssembler,
@@ -58,6 +61,41 @@ function parseObservation(raw: unknown): BrowserInputObservation {
   throw new BrowserTransportError(
     'upstream_failed',
     'the browser described the fields in a form Ferretry does not accept',
+    502,
+  );
+}
+
+/** The longest a document id or an origin in a copy read may be, as the input bridge bounds them. */
+const COPY_READ_LIMITS = { origin: 256, navigationId: 128 } as const;
+
+/**
+ * A copy read, checked before it is believed: a value no longer than one character over the cap, the page's and
+ * the frame's origin and the document, or one of the two refusals. A malformed answer is refused in words that
+ * quote none of it, because it may carry a value.
+ */
+function parseCopyRead(raw: unknown): BrowserCopyRead {
+  const read = (raw ?? {}) as Record<string, unknown>;
+  if (read.ok === false && (read.reason === 'missing' || read.reason === 'empty'))
+    return { ok: false, reason: read.reason };
+  const bounded = (value: unknown, limit: number): value is string =>
+    typeof value === 'string' && value !== '' && value.length <= limit;
+  if (
+    read.ok === true &&
+    bounded(read.value, COPY_VALUE_MAX_BYTES + 1) &&
+    bounded(read.origin, COPY_READ_LIMITS.origin) &&
+    bounded(read.frameOrigin, COPY_READ_LIMITS.origin) &&
+    bounded(read.navigationId, COPY_READ_LIMITS.navigationId)
+  )
+    return {
+      ok: true,
+      value: read.value,
+      origin: read.origin,
+      frameOrigin: read.frameOrigin,
+      navigationId: read.navigationId,
+    };
+  throw new BrowserTransportError(
+    'upstream_failed',
+    'the browser answered the copy in a form Ferretry does not accept',
     502,
   );
 }
@@ -396,6 +434,25 @@ export class BrowserWorkerClient implements BrowserAutomation {
     if (typeof navigationId !== 'string' || navigationId === '' || navigationId.length > 128)
       throw new BrowserTransportError('upstream_failed', 'the browser did not say which document the page shows', 502);
     return { navigationId };
+  }
+
+  /**
+   * One element's text, value or attribute, for a secure copy. The value rides in this answer only; a malformed
+   * answer is refused in words that quote none of it.
+   */
+  async copyRead(
+    pageId: string,
+    target: BrowserElementTarget,
+    part: CopyElementPart,
+    attribute?: string,
+  ): Promise<BrowserCopyRead> {
+    const raw = await this.request(BROWSER_COPY_WORKER_METHODS.read, {
+      pageId,
+      target,
+      part,
+      ...(attribute === undefined ? {} : { attribute }),
+    });
+    return parseCopyRead((raw as { read?: unknown } | null)?.read);
   }
 
   async inputObserve(pageId: string, fields: readonly BrowserInputFieldPointer[]): Promise<BrowserInputObservation> {

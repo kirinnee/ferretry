@@ -171,6 +171,13 @@ import {
   FileLegacyTaskSource,
   StorageImportSessions,
 } from '../src/adapters/board-import/index.ts';
+import {
+  budgetHoldsWriter,
+  claudeSubagentFiles,
+  FileBudgetTold,
+  readBudgetHoldsSync,
+  StorageBudgetSessions,
+} from '../src/adapters/budget/ports.ts';
 import { FileAcceptedConfigStore, FileConfigDirectory } from '../src/adapters/config-files/files.ts';
 import { unrefFileEventTimers } from '../src/adapters/file-events/bun-file-event-source.ts';
 import { platformFileEventSource } from '../src/adapters/file-events/platform.ts';
@@ -565,6 +572,7 @@ import {
   SystemWorktreeClock,
   WorktreeOperationQueue,
 } from '../src/adapters/worktrees/index.ts';
+import { snapshotAnalyticsUsagePricing } from '../src/lib/analytics/pricing.ts';
 import {
   type AnalyticsPricingConfigurationPort,
   AnalyticsPricingService,
@@ -584,6 +592,10 @@ import {
 } from '../src/lib/board/index.ts';
 import { GitHubWatcher, UnfiledRefiler } from '../src/lib/board-github/index.ts';
 import { BoardImporter, LaneSetImportProjects, type TaskAssigneeCandidate } from '../src/lib/board-import/index.ts';
+import { type MeteredFile, SpendMeter } from '../src/lib/budget/meter.ts';
+import { budgetNoticeRequest } from '../src/lib/budget/notice.ts';
+import { BUDGET_TICK_MS, BudgetService } from '../src/lib/budget/service.ts';
+import { budgetAlternative, budgetedLogins } from '../src/lib/budget/state.ts';
 import {
   ConfigChangeLedger,
   ConfigChangeStreamService,
@@ -601,18 +613,6 @@ import {
   FleetCredentialCatalog,
 } from '../src/lib/fleet/credentials-service.ts';
 import { DisableExpiryWatch } from '../src/lib/fleet/disable-expiry.ts';
-import { snapshotAnalyticsUsagePricing } from '../src/lib/analytics/pricing.ts';
-import {
-  budgetHoldsWriter,
-  claudeSubagentFiles,
-  FileBudgetTold,
-  readBudgetHoldsSync,
-  StorageBudgetSessions,
-} from '../src/adapters/budget/ports.ts';
-import { type MeteredFile, SpendMeter } from '../src/lib/budget/meter.ts';
-import { budgetNoticeRequest } from '../src/lib/budget/notice.ts';
-import { BUDGET_TICK_MS, BudgetService } from '../src/lib/budget/service.ts';
-import { budgetAlternative, budgetedLogins } from '../src/lib/budget/state.ts';
 import { createFleetSetupSubsystem } from '../src/lib/fleet/setup-service.ts';
 import { type RuntimeNamesPort, resolveStartAccount } from '../src/lib/fleet/start-resolution.ts';
 import { polledDirectoryLimitations } from '../src/lib/performance/fallbacks.ts';
@@ -665,6 +665,7 @@ import {
   AgendaService,
   AgendaTurnNudge,
   AgendaWaker,
+  type AgentCopyPagesPort,
   type AgentCopyPort,
   AgentFiles,
   type AgentInputPort,
@@ -712,6 +713,7 @@ import {
   type BootNoticePort,
   BootProgress,
   type BootRefusal,
+  BrowserCopyPages,
   type BrowserLoginLifecycle,
   BrowserProxyTester,
   type BrowserSessionLauncher,
@@ -742,6 +744,7 @@ import {
   type ConversationLinker,
   type ConversionCheckPort,
   type ConversionSummary as ConvertedConversationSummary,
+  type CopyPageHost,
   CopyPlanAgendaAdapter,
   CopyPlanService,
   CredentialAgentIdentities,
@@ -947,6 +950,7 @@ import {
   outdatedSections,
   overriddenBy,
   PacedTranscriptParser,
+  PageCopyRecords,
   type PageInputHost,
   PageInputTarget,
   PairedPushDevices,
@@ -6096,6 +6100,7 @@ function createAgentToolsSubsystem(input: {
   readonly redactor: Pick<SecretRedactor, 'batch'>;
   readonly copy: AgentCopyPort;
   readonly plans: AgentPlanPort;
+  readonly copyPages: AgentCopyPagesPort;
 }): MountedSubsystems['agentTools'] {
   const clock = { now: () => Date.now() };
   const control = new SurfaceControl(
@@ -6131,6 +6136,7 @@ function createAgentToolsSubsystem(input: {
       quarantinedUntil: input.quarantinedUntil,
       copy: input.copy,
       plans: input.plans,
+      copyPages: input.copyPages,
       redactor: input.redactor,
       binaryName: CLIENT_NAME,
       clock,
@@ -10075,6 +10081,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       setTimeout(sweepDeadlines, 30_000).unref();
       // Secure copy (docs/secure-copy.md): a value an agent may name and never read. It lives in this process's
       // memory only and is masked by the same registry as a value typed for the owner, from the moment it is read.
+      // The browser is built further down; a page copy reaches it through the same hand-off as a page request.
+      let pageHost: (PageInputHost & CopyPageHost) | undefined;
+      // Pages a value was copied from (not pictured while they show that document) and pages the agent read.
+      const copyPageRecords = new PageCopyRecords({ now: () => Date.now() });
       const secureCopies = new SecureCopyService({
         clock: { now: () => Date.now() },
         runner: new BunSecretChildRunner(),
@@ -10082,6 +10092,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         exposure: new TranscriptFileExposure(createTranscriptFileResolver(storage)),
         masking: justTyped,
         redact: async text => await secretRedactor.redact(text),
+        pages: new BrowserCopyPages({
+          copyOnPage: async (sessionId, key, work) => {
+            if (pageHost === undefined) throw new Error('the agent browser is not running yet');
+            return await pageHost.copyOnPage(sessionId, key, work);
+          },
+        }),
+        pageHolds: copyPageRecords,
       });
       // The owner's pre-approval rules: routes, counts and expiries, never a value. Damage reads as no rules.
       const pasteRules = new PasteRuleService({
@@ -10102,7 +10119,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       setInterval(() => copyPlans.sweep(), INPUT_REQUEST_SWEEP_MS).unref();
       // An agent stuck at a password prompt asks the owner through an agenda card (docs/input-requests.md). The value
       // lives only in this process's memory and in the one tmux write; the journal and the audit log carry names and flags.
-      let pageHost: PageInputHost | undefined;
       const inputRequestService = createInputRequestService({
         storage,
         terminals,
@@ -11754,11 +11770,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           scrub: (sessionId, text) => inputRequestService.scrub(sessionId, text),
           quarantinedUntil: (sessionId, names) => inputRequestService.quarantinedUntil(sessionId, names),
           copy: {
-            capture: async (sessionId, request) => await secureCopies.capture(sessionId, request),
+            capture: async (sessionId, request, context) => await secureCopies.capture(sessionId, request, context),
             list: sessionId => secureCopies.list(sessionId),
             discard: (sessionId, name) => secureCopies.discard(sessionId, name),
           },
           plans: { propose: async (sessionId, items, expires) => await copyPlans.propose(sessionId, items, expires) },
+          copyPages: copyPageRecords,
           files: new AgentFiles({
             fs: new NodeAgentFilesystem(),
             folderOf: async sessionId => await sessionFolder(storage, sessionId),
