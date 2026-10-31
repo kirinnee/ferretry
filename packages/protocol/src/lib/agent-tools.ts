@@ -55,6 +55,7 @@ import {
   InputSubmitModeSchema,
 } from './input-request.ts';
 import { LoginEntryIdSchema, LoginHintListSchema } from './login-entries.ts';
+import { LoginRecipeProposedSchema, LoginRecipeProposeRequestSchema, LoginRecipeSchema } from './login-recipes.ts';
 import { SecretNameSchema } from './secrets.ts';
 import {
   COPY_MAX_LIFETIME_SECONDS,
@@ -328,6 +329,16 @@ export const AgentToolCallSchema = z.discriminatedUnion('tool', [
       site: z.string().trim().min(1).max(AGENT_TOOL_MAX_URL_CHARS).optional(),
     })
     .refine(call => (call.name === undefined) !== (call.site === undefined), 'name a page or a site, not both'),
+  /**
+   * A ferret proposes the recipe of one saved login after signing in (login-recipes.ts): the whole new Markdown and
+   * why. It is the ferret's words; it waits on the owner unless the owner allowed auto-apply for that login.
+   */
+  z.strictObject({
+    tool: z.literal('login.propose'),
+    login: LoginEntryIdSchema,
+    recipe: LoginRecipeSchema,
+    why: LoginRecipeProposeRequestSchema.shape.why,
+  }),
   z.strictObject({
     tool: z.literal('terminal.ask_owner'),
     name: SurfaceKeySchema,
@@ -706,6 +717,7 @@ export const AGENT_TOOL_NAMES: readonly AgentToolName[] = [
   'terminal.request_input',
   'input.wait',
   'login.hint',
+  'login.propose',
   'browser.list',
   'browser.open',
   'browser.navigate',
@@ -790,6 +802,8 @@ export const AgentToolResultSchema = z.strictObject({
   plan: CopyPlanSchema.optional(),
   /** `login.hint` only: the saved logins for the site, by their non-secret metadata. */
   logins: LoginHintListSchema.optional(),
+  /** `login.propose` only: whether the recipe waits on the owner or was applied. */
+  recipe: LoginRecipeProposedSchema.optional(),
 });
 export type AgentToolResult = z.infer<typeof AgentToolResultSchema>;
 

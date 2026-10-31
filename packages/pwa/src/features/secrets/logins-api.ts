@@ -51,3 +51,21 @@ export async function renameLogin(client: LoginClient, id: string, to: string): 
 export async function removeLogin(client: LoginClient, id: string): Promise<void> {
   await client.request(entryPath(id), RemovedLoginEntrySchema, { method: 'DELETE' });
 }
+
+/** The owner's answer to one ferret recipe proposal; answers the login as it stands after. */
+export async function decideRecipeProposal(
+  client: LoginClient,
+  id: string,
+  proposalId: string,
+  decision: 'approve' | 'decline',
+): Promise<LoginEntrySummary> {
+  return await client.request(
+    `${entryPath(id)}/recipe/proposals/${encodeURIComponent(proposalId)}`,
+    LoginEntrySummarySchema,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ decision }),
+    },
+  );
+}

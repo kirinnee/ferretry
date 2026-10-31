@@ -33,6 +33,7 @@ import {
   type InputShot,
   type InputTarget,
   type InputTargetFacts,
+  loginDomainsOf,
   inputRaiseFields,
   inputValueProblem,
   LOGIN_PASSWORD_MIN_LENGTH,
@@ -68,6 +69,7 @@ import type {
 } from './ports.ts';
 import type { QuarantineHold, QuarantineRegistry } from './quarantine.ts';
 import { bindingOf, mayRebind } from './rebind.ts';
+import type { LoginObserver } from './login-observer.ts';
 import { savedForFields, targetMatchKey } from './saved-logins.ts';
 import { SessionLock } from './session-lock.ts';
 
@@ -180,6 +182,11 @@ export interface InputRequestServiceDependencies {
   readonly sealed?: InputSealedPort;
   /** The owner's pre-approval rules. Absent: every paste waits for the owner. */
   readonly rules?: InputPasteRules;
+  /**
+   * Told about every value typed into a terminal or a page, once it landed: the facts a saved login keeps
+   * (docs/input-requests.md, "Login recipes") come only from here. Absent: no facts are kept.
+   */
+  readonly observer?: Pick<LoginObserver, 'delivered'>;
 }
 
 const instant = (ms: number): string => new Date(ms).toISOString();
@@ -902,6 +909,8 @@ export class InputRequestService {
         .type(request.sessionId, request.target, values, submitted, seen.facts)
         .catch((): TypeResult => 'uncertain');
       wrote?.(outcome);
+      // Taken before anything else is awaited: what the ferret does after this counts against a sign-in's facts.
+      const deliveredAt = this.deps.clock.now();
       const stored = async (uncertain: boolean): Promise<void> => {
         if (seen.facts.kind !== 'secret') return;
         await this.deps.audit
@@ -944,6 +953,15 @@ export class InputRequestService {
       await stored(false);
       const saved =
         body.save === undefined || kept === undefined ? undefined : await this.save(held, body.save, kept, by);
+      // Not awaited: the facts are looked for after the submit, and nothing about them may hold up or fail the Send.
+      void this.observeLogin(
+        held,
+        seen.facts,
+        values,
+        submitted,
+        deliveredAt,
+        body.entry ?? (saved?.ok === true ? body.save?.entry : undefined),
+      );
       await this.finish(held, 'delivered', undefined, by, {
         closeCard: true,
         tellAgent: true,
@@ -1003,6 +1021,47 @@ export class InputRequestService {
       kept[role] = value;
     }
     return kept;
+  }
+
+  /**
+   * Hands a landed delivery to the login observer: the facts the card was drawn from, the fields, the values that
+   * were not plain (for the observer's own yes-or-no echo look; they are already held in the redaction window) and
+   * the saved login typed or kept, with its sign-in hosts. Total.
+   */
+  private async observeLogin(
+    held: Held,
+    facts: InputTargetFacts,
+    values: readonly InputFieldValue[],
+    submitted: boolean,
+    deliveredAt: number,
+    login: LoginEntryId | undefined,
+  ): Promise<void> {
+    const observer = this.deps.observer;
+    const { request } = held;
+    if (observer === undefined || request.target.kind === 'secret' || request.source !== undefined) return;
+    try {
+      const entry =
+        login === undefined ? undefined : (await this.deps.logins?.entries())?.find(each => each.id === login);
+      const secrets = request.fields
+        .map((field, index) => (field.sensitivity === 'plain' ? undefined : values[index]?.text))
+        .filter((text): text is string => text !== undefined);
+      await observer.delivered({
+        sessionId: request.sessionId,
+        ...(entry === undefined ? {} : { login: entry.id }),
+        domains: entry === undefined ? [] : loginDomainsOf(entry),
+        target: request.target,
+        facts,
+        fields: request.fields,
+        secrets,
+        submitted,
+        ...(held.matchKey === undefined ? {} : { matchKey: held.matchKey }),
+        surfaces: [...held.names],
+        since: Date.parse(request.raisedAt),
+        deliveredAt,
+      });
+    } catch {
+      // A fact not kept is a fact not kept: the delivery already happened.
+    }
   }
 
   /** The value a saved login types for one field. Refuses with the entry's name, never its value. */

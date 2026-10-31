@@ -14,6 +14,7 @@ import type {
 import { COPY_VALUE_MAX_BYTES, InputTargetFactsSchema } from '@ferretry/protocol';
 import {
   BROWSER_COPY_WORKER_METHODS,
+  BROWSER_INPUT_TEXT_MAX_CHARS,
   BROWSER_INPUT_WORKER_METHODS,
   type BrowserAutomation,
   type BrowserClickOptions,
@@ -436,7 +437,17 @@ export class BrowserWorkerClient implements BrowserAutomation {
     const navigationId = ((raw as { document?: { navigationId?: unknown } } | null)?.document ?? {}).navigationId;
     if (typeof navigationId !== 'string' || navigationId === '' || navigationId.length > 128)
       throw new BrowserTransportError('upstream_failed', 'the browser did not say which document the page shows', 502);
-    return { navigationId };
+    const host = (raw as { document?: { host?: unknown } } | null)?.document?.host;
+    return typeof host === 'string' && host !== '' && host.length <= 260 ? { navigationId, host } : { navigationId };
+  }
+
+  /** The page's visible text, for the daemon's own look for a just-typed value. A malformed answer is refused. */
+  async inputText(pageId: string): Promise<string> {
+    const raw = await this.request(BROWSER_INPUT_WORKER_METHODS.text, { pageId });
+    const text = (raw as { text?: unknown } | null)?.text;
+    if (typeof text !== 'string' || text.length > BROWSER_INPUT_TEXT_MAX_CHARS * 3 + 2)
+      throw new BrowserTransportError('upstream_failed', 'the browser did not answer with the page text', 502);
+    return text;
   }
 
   /**

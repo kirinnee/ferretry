@@ -2,9 +2,12 @@ import {
   type LoginEntryId,
   LoginEntryIdSchema,
   type LoginEntryList,
+  type LoginEntrySummary,
   type LoginHintList,
   loginHintSite,
   loginHintsFor,
+  LoginRecipeDecisionSchema,
+  LoginRecipeProposalIdSchema,
   PutLoginEntryRequestSchema,
   PutSecretRequestSchema,
   RenameLoginEntryRequestSchema,
@@ -34,6 +37,8 @@ import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import {
   type LoginDirectory,
   LoginEntryError,
+  type LoginRecipeService,
+  RecipeValueError,
   SecretCloneError,
   type SecretDirectory,
   type SecretExportService,
@@ -108,6 +113,8 @@ const LOGIN_STATUS: Readonly<Record<LoginEntryError['refusal'], number>> = {
   label_required: 400,
   no_such_field: 400,
   bad_via: 400,
+  unknown_proposal: 404,
+  stale_proposal: 409,
 };
 
 /** Re-raises a domain failure as its HTTP answer, and anything else as itself so a genuine bug is
@@ -119,6 +126,7 @@ function reraise(error: unknown): never {
   if (error instanceof SecretUseError) throw new ApiError(USE_STATUS[error.refusal], error.message, error.refusal);
   if (error instanceof SecretStoreError) throw new ApiError(STORE_STATUS[error.failure], error.message, error.failure);
   if (error instanceof LoginEntryError) throw new ApiError(LOGIN_STATUS[error.refusal], error.message, error.refusal);
+  if (error instanceof RecipeValueError) throw new ApiError(400, error.message, 'recipe_holds_value');
   throw error;
 }
 
@@ -150,9 +158,22 @@ function pathLoginId(context: RouteContext): LoginEntryId {
  * secret routes, nothing here answers a value: the directory a route holds seals and never opens. A damaged
  * store is part of the listing, never an empty one.
  */
-async function listLogins(logins: LoginDirectory): Promise<ApiResponse> {
+/**
+ * The entries as a route may answer them: every recipe and proposal masked through the redactor at READ time (a value
+ * kept after the text was written shows as a mask), or left out where nothing can mask them.
+ */
+async function served(
+  logins: LoginDirectory,
+  recipes: LoginRecipeService | undefined,
+): Promise<readonly LoginEntrySummary[]> {
+  const entries = await logins.list();
+  if (recipes !== undefined) return await recipes.scrubbed(entries);
+  return entries.map(({ recipe: _recipe, recipeBy: _by, proposals: _proposals, ...entry }) => entry);
+}
+
+async function listLogins(logins: LoginDirectory, recipes: LoginRecipeService | undefined): Promise<ApiResponse> {
   try {
-    return jsonResponse({ v: 1, health: 'ready', entries: await logins.list() } satisfies LoginEntryList);
+    return jsonResponse({ v: 1, health: 'ready', entries: await served(logins, recipes) } satisfies LoginEntryList);
   } catch (error) {
     if (!(error instanceof SecretStoreError)) throw error;
     return jsonResponse({
@@ -169,23 +190,54 @@ async function listLogins(logins: LoginDirectory): Promise<ApiResponse> {
  * label, method, login domains and the plain username. A narrower view than the listing (no `fields`, no
  * `match`, no times), and never a value. A damaged store is a 500, never an empty hint.
  */
-async function loginHint(logins: LoginDirectory, context: RouteContext): Promise<ApiResponse> {
+async function loginHint(
+  logins: LoginDirectory,
+  recipes: LoginRecipeService | undefined,
+  context: RouteContext,
+): Promise<ApiResponse> {
   const site = loginHintSite(context.request.query.get('site')?.[0] ?? '');
   if (site === undefined) throw new ApiError(400, 'name a site: a host like github.com, or a URL', 'invalid_site');
   try {
-    const hints = loginHintsFor(site, await logins.list());
+    const hints = loginHintsFor(site, await served(logins, recipes));
     return jsonResponse({ v: 1, site, hints, passkeys: 'off' } satisfies LoginHintList);
   } catch (error) {
     return reraise(error);
   }
 }
 
-async function putLogin(logins: LoginDirectory, context: RouteContext): Promise<ApiResponse> {
+async function putLogin(
+  logins: LoginDirectory,
+  recipes: LoginRecipeService | undefined,
+  context: RouteContext,
+): Promise<ApiResponse> {
   ownerOnly(context, 'change a saved login');
   const id = pathLoginId(context);
   const change = await parseBody(context.request, PutLoginEntryRequestSchema);
   try {
-    return jsonResponse(await logins.put(id, change));
+    // A recipe never holds a value: without the checker that proves it, a recipe is not taken at all.
+    if (typeof change.recipe === 'string') {
+      if (recipes === undefined) throw new ApiError(503, 'this daemon cannot check recipes for values', 'unavailable');
+      await recipes.assertNoValue(change.recipe);
+    }
+    const changed = await logins.put(id, change);
+    return jsonResponse(recipes === undefined ? changed : ((await recipes.scrubbed([changed]))[0] ?? changed));
+  } catch (error) {
+    return reraise(error);
+  }
+}
+
+/**
+ * THE OWNER'S ANSWER TO A FERRET'S RECIPE PROPOSAL. Owner only, like every change to a saved login: an agent
+ * answering its own proposal is refused before the body is read.
+ */
+async function decideRecipe(recipes: LoginRecipeService, context: RouteContext): Promise<ApiResponse> {
+  ownerOnly(context, 'approve or decline a recipe proposal');
+  const id = pathLoginId(context);
+  const proposal = LoginRecipeProposalIdSchema.safeParse(decodeParameter(context.params.get('proposalId') ?? '') ?? '');
+  if (!proposal.success) throw new ApiError(400, 'the proposal in the path is not usable', 'invalid_proposal');
+  const { decision } = await parseBody(context.request, LoginRecipeDecisionSchema);
+  try {
+    return jsonResponse(await recipes.decide(id, proposal.data, decision));
   } catch (error) {
     return reraise(error);
   }
@@ -214,7 +266,7 @@ async function removeLogin(logins: LoginDirectory, context: RouteContext): Promi
 }
 
 /** The saved-login routes, when the daemon keeps them. */
-function loginRoutes(logins: LoginDirectory | undefined): readonly ApiRoute[] {
+function loginRoutes(logins: LoginDirectory | undefined, recipes: LoginRecipeService | undefined): readonly ApiRoute[] {
   if (logins === undefined) return [];
   return [
     {
@@ -223,7 +275,7 @@ function loginRoutes(logins: LoginDirectory | undefined): readonly ApiRoute[] {
       minimum: 'operator',
       capability: SECRETS_USE,
       noStore: true,
-      handle: async () => await listLogins(logins),
+      handle: async () => await listLogins(logins, recipes),
     },
     {
       method: 'GET',
@@ -231,7 +283,7 @@ function loginRoutes(logins: LoginDirectory | undefined): readonly ApiRoute[] {
       minimum: 'operator',
       capability: SECRETS_USE,
       noStore: true,
-      handle: async context => await loginHint(logins, context),
+      handle: async context => await loginHint(logins, recipes, context),
     },
     {
       method: 'PUT',
@@ -239,8 +291,20 @@ function loginRoutes(logins: LoginDirectory | undefined): readonly ApiRoute[] {
       minimum: 'operator',
       capability: SECRETS_CONFIGURE,
       noStore: true,
-      handle: async context => await putLogin(logins, context),
+      handle: async context => await putLogin(logins, recipes, context),
     },
+    ...(recipes === undefined
+      ? []
+      : [
+          {
+            method: 'POST',
+            path: '/v1/secrets/logins/:id/recipe/proposals/:proposalId',
+            minimum: 'operator',
+            capability: SECRETS_CONFIGURE,
+            noStore: true,
+            handle: async (context: RouteContext) => await decideRecipe(recipes, context),
+          } satisfies ApiRoute,
+        ]),
     {
       method: 'POST',
       path: '/v1/secrets/logins/:id/rename',
@@ -374,6 +438,8 @@ export interface SecretSubsystem {
   readonly directory: SecretDirectory;
   /** Saved logins: management only, like `directory`. It seals and never opens. */
   readonly logins?: LoginDirectory;
+  /** Login recipes: the value check on every recipe text, and the owner's answer to a proposal. */
+  readonly loginRecipes?: LoginRecipeService;
   /** Where configuration names secrets, so an unresolvable reference is visible before it fails. */
   readonly references: SecretReferenceSource;
   /** Use-without-read. Holds the vault; returns only a child's scrubbed output. */
@@ -459,6 +525,6 @@ export function secretRoutes(subsystem: SecretSubsystem): readonly ApiRoute[] {
       noStore: true,
       handle: async context => await exportSecrets(subsystem.exports, context),
     },
-    ...loginRoutes(subsystem.logins),
+    ...loginRoutes(subsystem.logins, subsystem.loginRecipes),
   ];
 }

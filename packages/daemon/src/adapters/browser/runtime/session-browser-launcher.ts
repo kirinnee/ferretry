@@ -286,6 +286,7 @@ class LeasedBrowser implements BrowserAutomation {
   copyRead: BrowserAutomation['copyRead'] = (pageId, target, part, attribute) =>
     this.worker.copyRead(pageId, target, part, attribute);
   inputDocument: BrowserAutomation['inputDocument'] = pageId => this.worker.inputDocument(pageId);
+  inputText = (pageId: string): Promise<string> => this.worker.inputText(pageId);
   inputObserve: BrowserAutomation['inputObserve'] = (pageId, fields) => this.worker.inputObserve(pageId, fields);
   inputRefind: BrowserAutomation['inputRefind'] = (pageId, expected, fields) =>
     this.worker.inputRefind(pageId, expected, fields);

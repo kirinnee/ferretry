@@ -36,6 +36,7 @@ function host(
   options: {
     pageId?: string;
     refuse?: boolean;
+    hostless?: boolean;
     observation?: BrowserInputObservation;
     refound?: BrowserInputObservation;
   } = {},
@@ -45,7 +46,13 @@ function host(
   const port: BrowserInputFieldsPort = {
     inputDocument: async pageId => {
       calls.push(`document:${pageId}`);
-      return { navigationId: 'loader-2' };
+      return options.hostless === true
+        ? { navigationId: 'loader-2' }
+        : { navigationId: 'loader-2', host: 'accounts.example.test' };
+    },
+    inputText: async pageId => {
+      calls.push(`text:${pageId}`);
+      return 'Welcome back';
     },
     inputObserve: async (pageId, fields) => {
       calls.push(`observe:${pageId}:${fields.map(field => `${field.id}=${JSON.stringify(field.target)}`).join(',')}`);
@@ -188,5 +195,32 @@ describe('PageInputTarget', () => {
     should(await target.shoot('s1', { kind: 'terminal', key: 'dev' }, FACTS)).be.undefined();
     should(await target.document('s1', 'app')).equal('loader-2');
     should(await refused.target.document('s1', 'app')).be.undefined();
+  });
+});
+
+describe('PageInputTarget, for a saved login’s facts', () => {
+  it('should say the page’s document and host, and its text, through the page’s own queue', async () => {
+    const { target, calls } = host();
+    should(await target.where('s1', 'app', ['app', 'page-1'])).deepEqual({
+      navigationId: 'loader-2',
+      host: 'accounts.example.test',
+    });
+    should(await target.text('s1', 'app', ['app', 'page-1'])).equal('Welcome back');
+    should(calls).deepEqual(['page:s1:app', 'document:page-1', 'page:s1:app', 'text:page-1']);
+  });
+
+  it('should answer nothing for a page that is gone or does not say its host', async () => {
+    should(await host({ refuse: true }).target.where('s1', 'app', ['app', 'page-1'])).be.undefined();
+    should(await host({ refuse: true }).target.text('s1', 'app', ['app', 'page-1'])).be.undefined();
+    should(await host({ hostless: true }).target.where('s1', 'app', ['app', 'page-1'])).be.undefined();
+  });
+});
+
+describe('PageInputTarget pins its looks to the page typed into', () => {
+  it('should say nothing about another page opened under the same name', async () => {
+    const { target, calls } = host({ pageId: 'page-9' });
+    should(await target.where('s1', 'app', ['app', 'page-1'])).be.undefined();
+    should(await target.text('s1', 'app', ['app', 'page-1'])).be.undefined();
+    should(calls).deepEqual(['page:s1:app', 'page:s1:app']);
   });
 });

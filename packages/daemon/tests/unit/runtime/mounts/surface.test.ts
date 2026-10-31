@@ -908,7 +908,7 @@ describe('the mounted daemon surface', () => {
       3 + // a ferret's processes: the list, one process's output, and Stop
       3 + // the board's projects: the list, one project's lanes, and a propose, edit or confirm of them
       7 + // the owner's input requests: the two lists, a page request's picture, deliver or cancel one, and the quarantine list and its end (docs/input-requests.md)
-      5 + // saved logins: the list, the ferret's hint, put, rename and delete (docs/input-requests.md#saved-logins)
+      6 + // saved logins: the list, the ferret’s hint, put, rename, delete and the owner’s answer to a recipe proposal (docs/input-requests.md#saved-logins)
       6 + // secure copy: a session's copies, the rules (list, add, remove), the paste plans and an answer to one (docs/secure-copy.md)
       2 + // the board's legacy import: the old-reference lookup, and the one-time import (owner only)
       7 + // installing a catalog item from a signed file: a preview and an apply per scope, the list, and a remove per scope (docs/catalogs.md)
@@ -1075,6 +1075,7 @@ describe('the mounted daemon surface', () => {
       'GET /v1/secrets/logins',
       'GET /v1/secrets/logins/hint',
       'PUT /v1/secrets/logins/:id',
+      'POST /v1/secrets/logins/:id/recipe/proposals/:proposalId',
       'POST /v1/secrets/logins/:id/rename',
       'DELETE /v1/secrets/logins/:id',
       // The catalogs this machine publishes (docs/catalogs.md): every one is `sharing`/`use`.

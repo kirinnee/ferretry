@@ -955,6 +955,10 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         out: world.io,
         prompt: world.prompt,
         interactive: world.interactive,
+        readRecipe: async source =>
+          source === '-'
+            ? await Bun.stdin.text()
+            : await Bun.file(isAbsolute(source) ? source : join(world.cwd, source)).text(),
       }),
     ),
   ({ program, world, client }) =>

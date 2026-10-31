@@ -53,6 +53,7 @@ import { DownloadStage } from '../src/lib/browser/transport/download-stage.ts';
 import type { BrowserInputFacts, BrowserInputValue } from '../src/lib/browser/transport/input-contracts.ts';
 import {
   describeInputDocument,
+  readInputText,
   type InputablePage,
   type InputCdpSession,
   InputFrameSessions,
@@ -897,6 +898,8 @@ async function act(request: Request): Promise<Record<string, unknown>> {
     }
     case 'inputDocument':
       return { document: await describeInputDocument(inputSubject(targetPage(params.pageId))) };
+    case 'inputText':
+      return { text: await readInputText(inputSubject(targetPage(params.pageId))) };
     case 'inputObserve':
       return {
         observation: await observeInputFields(inputSubject(targetPage(params.pageId)), inputPointers(params.fields)),

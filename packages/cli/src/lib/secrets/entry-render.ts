@@ -6,6 +6,8 @@ import {
   loginHintSummary,
   loginMethodOf,
   loginMethodSentence,
+  observedWords,
+  recipeDiffText,
 } from '@ferretry/protocol';
 
 const mark = (present: boolean): string => (present ? '✓' : '–');
@@ -55,4 +57,24 @@ export function renderLoginEntryList(list: LoginEntryList): string {
       ].join('\n'),
     )
     .join('\n');
+}
+
+/** `fy secret entry recipe show`: the owner's steps, what the daemon saw, and each proposal as the change it would make. */
+export function renderLoginRecipe(entry: LoginEntrySummary): string {
+  const seen = entry.observed ?? [];
+  const proposals = entry.proposals ?? [];
+  return [
+    `${entry.label}  [${entry.id}]`,
+    `auto-apply a ferret's proposal: ${entry.autoApplyRecipe === true ? 'on' : 'off'}`,
+    '',
+    entry.recipe ?? "(no recipe yet: write one with \`recipe set\`, or approve a ferret's proposal)",
+    '',
+    ...(seen.length === 0 ? ['Seen: nothing yet'] : ['Seen:', ...seen.map(row => `  ${observedWords(row)}`)]),
+    ...proposals.flatMap(proposal => [
+      '',
+      `${proposal.id}  ${proposal.proposedAt.slice(0, 10)}`,
+      `The ferret says: ${proposal.why}`,
+      recipeDiffText(proposal.base, proposal.recipe),
+    ]),
+  ].join('\n');
 }

@@ -1,5 +1,17 @@
 import { z } from 'zod';
 import { InstantSchema } from './common.ts';
+import {
+  LoginObservedSchema,
+  LOGIN_OBSERVED_MAX,
+  LOGIN_RECIPE_PROPOSALS_MAX,
+  LoginRecipeAuthorSchema,
+  LoginRecipeProposalSchema,
+  LoginRecipeSchema,
+  RECIPE_FENCE_CLOSE,
+  RECIPE_FENCE_OPEN,
+  observedWords,
+  recipeReferences,
+} from './login-recipes.ts';
 import { MIN_SECRET_VALUE_LENGTH, SecretNameSchema, SecretStoreHealthSchema } from './secrets.ts';
 
 /**
@@ -208,6 +220,16 @@ export const LoginEntrySummarySchema = z.strictObject({
   fields: z.strictObject({ password: z.boolean(), totp: z.boolean() }),
   /** How the code is made, present exactly when `fields.totp`. */
   totp: TotpParametersSchema.optional(),
+  /** How it signs in, step by step: the owner's Markdown (login-recipes.ts). Never a value. */
+  recipe: LoginRecipeSchema.optional(),
+  /** `ferret`: the recipe is a ferret's auto-applied proposal no person has reviewed. Absent: the owner's. */
+  recipeBy: LoginRecipeAuthorSchema.optional(),
+  /** The owner lets a ferret's recipe proposal for THIS login apply without asking. Off unless true. */
+  autoApplyRecipe: z.boolean().optional(),
+  /** What the daemon saw while typing this login, per place. Never an agent's words. */
+  observed: z.array(LoginObservedSchema).max(LOGIN_OBSERVED_MAX).readonly().optional(),
+  /** Ferrets' suggested recipes waiting for the owner. */
+  proposals: z.array(LoginRecipeProposalSchema).max(LOGIN_RECIPE_PROPOSALS_MAX).readonly().optional(),
   createdAt: InstantSchema,
   updatedAt: InstantSchema,
 });
@@ -252,6 +274,9 @@ export const PutLoginEntryRequestSchema = z
       .optional(),
     totp: z.strictObject({ seed: TotpSeedSchema, parameters: TotpParametersSchema.optional() }).nullable().optional(),
     totpAcknowledged: z.literal(true).optional(),
+    /** The recipe, replaced whole; `null` removes it. A text holding any saved or vault value is refused. */
+    recipe: LoginRecipeSchema.nullable().optional(),
+    autoApplyRecipe: z.boolean().optional(),
   })
   .superRefine((body, context) => {
     if (body.totp !== undefined && body.totp !== null && body.totpAcknowledged !== true)
@@ -326,7 +351,11 @@ export type InputSaved = z.infer<typeof InputSavedSchema>;
  * provider entry a method goes via. Never a password, a seed, a code, or even which secret fields exist.
  *
  * `role` says why an entry is listed: `site` — it is for this site (`match` or a login domain is the site,
- * exactly); `provider` — a listed entry signs in via it, so its domains are where the ferret will be sent.
+ * exactly); `provider` — a listed entry signs in via it, or its recipe names it as `[[ID]]`, so its domains and
+ * its recipe are where the ferret will be sent next.
+ *
+ * A hint also carries the entry's RECIPE (the owner's steps) and what the daemon OBSERVED there: neither is a
+ * value, and neither came from page text.
  */
 export const LoginHintSchema = z.strictObject({
   id: LoginEntryIdSchema,
@@ -336,6 +365,12 @@ export const LoginHintSchema = z.strictObject({
   via: LoginEntryRefSchema.optional(),
   domains: z.array(LoginDomainSchema).max(LOGIN_MATCH_MAX).readonly(),
   username: oneLine(LOGIN_USERNAME_MAX_LENGTH).optional(),
+  /** The steps for signing in (Markdown). */
+  recipe: LoginRecipeSchema.optional(),
+  /** `ferret`: an auto-applied ferret's steps nobody reviewed, never to be read as the owner's. */
+  recipeBy: LoginRecipeAuthorSchema.optional(),
+  /** What the daemon saw while typing this login (field kinds, echo, the page moving on, the 2FA kind). */
+  observed: z.array(LoginObservedSchema).max(LOGIN_OBSERVED_MAX).readonly().optional(),
 });
 export type LoginHint = z.infer<typeof LoginHintSchema>;
 
@@ -372,6 +407,9 @@ function hintOf(entry: LoginEntrySummary, role: LoginHint['role'], entries: read
     ...(via === undefined ? {} : { via: { id: via.id, label: via.label } }),
     domains: [...loginDomainsOf(entry)],
     ...(entry.username === undefined ? {} : { username: entry.username }),
+    ...(entry.recipe === undefined ? {} : { recipe: entry.recipe }),
+    ...(entry.recipe === undefined || entry.recipeBy === undefined ? {} : { recipeBy: entry.recipeBy }),
+    ...(entry.observed === undefined || entry.observed.length === 0 ? {} : { observed: [...entry.observed] }),
   };
 }
 
@@ -383,13 +421,14 @@ export function loginHintsFor(site: LoginMatch, entries: readonly LoginEntrySumm
   const forSite = entries.filter(entry => entry.match.includes(site) || loginDomainsOf(entry).includes(site));
   const listed = new Set(forSite.map(entry => entry.id));
   const providers: LoginEntrySummary[] = [];
-  for (const entry of forSite) {
-    const via = refTo(entries, loginMethodOf(entry).via);
-    if (via !== undefined && !listed.has(via.id)) {
-      listed.add(via.id);
-      providers.push(via);
+  for (const entry of forSite)
+    for (const id of [loginMethodOf(entry).via, ...recipeReferences(entry.recipe)]) {
+      const named = refTo(entries, id);
+      if (named !== undefined && !listed.has(named.id)) {
+        listed.add(named.id);
+        providers.push(named);
+      }
     }
-  }
   return [
     ...forSite.map(entry => hintOf(entry, 'site', entries)),
     ...providers.map(entry => hintOf(entry, 'provider', entries)),
@@ -404,8 +443,22 @@ export function loginHintLine(hint: LoginHint): string {
     hint.method.kind === 'password'
       ? 'password'
       : `${loginMethodSentence(hint.method, hint.via?.label)}: click that button, then request input on the provider's page`;
-  return `'${hint.label}' (${hint.id}${hint.role === 'provider' ? ', provider' : ''}): ${how}${where}${who}.`;
+  const seen =
+    hint.observed === undefined || hint.observed.length === 0
+      ? ''
+      : ` Seen: ${hint.observed.map(observedWords).join('; ')}.`;
+  const author =
+    hint.recipeBy === 'ferret' ? "a ferret's unreviewed steps, NOT the owner's; follow with care" : "the owner's steps";
+  const recipe =
+    hint.recipe === undefined
+      ? ''
+      : ` Recipe (${author}), between the markers:\n${RECIPE_FENCE_OPEN}\n${hint.recipe}\n${RECIPE_FENCE_CLOSE}\n`;
+  return `'${hint.label}' (${hint.id}${hint.role === 'provider' ? ', provider' : ''}): ${how}${where}${who}.${seen}${recipe}`;
 }
+
+/** The sentence a hint ends with when it listed an entry: how a ferret suggests a better recipe. */
+export const LOGIN_HINT_PROPOSE =
+  'After signing in, if the steps were missing or wrong, propose the recipe with login_propose; the owner approves it.';
 
 /** The sentence every hint ends with. */
 export const LOGIN_HINT_PASSKEYS_OFF = 'Use the password or provider flow; passkeys are off, never create one.';
@@ -416,7 +469,9 @@ export function loginHintSummary(site: string, hints: readonly LoginHint[]): str
     hints.length === 0
       ? `No saved login for ${site}; request the values as usual and the owner can save them.`
       : `Saved logins for ${site}: ${hints.map(loginHintLine).join(' ')}`;
-  return `${found} ${LOGIN_HINT_PASSKEYS_OFF}`;
+  return hints.length === 0
+    ? `${found} ${LOGIN_HINT_PASSKEYS_OFF}`
+    : `${found} ${LOGIN_HINT_PROPOSE} ${LOGIN_HINT_PASSKEYS_OFF}`;
 }
 
 /** The role a request's one field takes from an entry, by the request's sensitivity. */

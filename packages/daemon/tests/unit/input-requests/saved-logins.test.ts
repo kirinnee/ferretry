@@ -10,6 +10,7 @@ import {
 import should from 'should';
 import { EphemeralValues } from '../../../src/lib/input-requests/ephemeral-values.ts';
 import { InputLoginAdapter } from '../../../src/lib/input-requests/login-adapter.ts';
+import { type LoginDelivery, LoginObserver } from '../../../src/lib/input-requests/login-observer.ts';
 import type { InputCaller, InputLoginPort } from '../../../src/lib/input-requests/ports.ts';
 import { QuarantineRegistry } from '../../../src/lib/input-requests/quarantine.ts';
 import { InputRequestService } from '../../../src/lib/input-requests/service.ts';
@@ -53,6 +54,8 @@ function harness(
     logins?: (port: InputLoginPort) => InputLoginPort;
     /** A daemon that keeps no saved logins at all. */
     none?: true;
+    /** Where landed deliveries are told, for a saved login's facts. */
+    observer?: (directory: LoginDirectory) => Pick<LoginObserver, 'delivered'>;
   } = {},
 ) {
   const writes: string[] = [];
@@ -117,6 +120,7 @@ function harness(
     quarantine: new QuarantineRegistry(clock),
     redact: async text => values.scrubAll(text),
     ...(options.none === true ? {} : { logins: options.logins?.(spied) ?? spied }),
+    ...(options.observer === undefined ? {} : { observer: options.observer(directory) }),
     hostName: 'Kirin-Box.local',
   });
   /** Everything that left the service except the one write: sinks, plus what the owner and the agent read. */
@@ -539,5 +543,83 @@ describe('the refusals around saved logins, each with nothing typed', () => {
     should(refused.code).equal('bad_request');
     should(refused.message).not.containEql('line-one');
     should(h.writes).deepEqual([]);
+  });
+});
+
+describe('what the daemon saw is kept on the saved login', () => {
+  it('should hand a one-tap delivery to the observer with the login, its hosts and the value for its own look', async () => {
+    const told: LoginDelivery[] = [];
+    const h = harness({ observer: () => ({ delivered: async delivery => void told.push(delivery) }) });
+    await h.directory.put(
+      'SUDO_KIRIN_BOX',
+      PutLoginEntryRequestSchema.parse({ label: 'sudo', match: ['sudo@kirin-box'], password: PASSWORD }),
+    );
+    const { request } = await raised(h);
+    await h.service.deliver(SESSION, request.id, saved(request.observedDigest as string, 'SUDO_KIRIN_BOX'), HOST);
+    await Bun.sleep(0);
+
+    should(told).have.length(1);
+    should(told[0]).containDeep({
+      sessionId: SESSION,
+      login: 'SUDO_KIRIN_BOX',
+      target: { kind: 'terminal', key: 'dev' },
+      secrets: [PASSWORD],
+      submitted: true,
+      matchKey: 'sudo@kirin-box',
+    });
+  });
+
+  it('should keep the facts of the write on the login, never the value', async () => {
+    const h = harness({
+      observer: directory =>
+        new LoginObserver({
+          sink: directory,
+          probe: { shows: async () => false, where: async () => undefined },
+          now: () => NOW,
+          sleep: async () => undefined,
+        }),
+    });
+    const { request } = await raised(h);
+    await h.service.deliver(
+      SESSION,
+      request.id,
+      typed(request.observedDigest as string, PASSWORD, { save: { entry: 'SUDO_KIRIN_BOX', label: 'sudo' } }),
+      HOST,
+    );
+    await Bun.sleep(5);
+
+    const [entry] = await h.directory.list();
+    should(entry?.observed?.[0]).containDeep({
+      at: 'sudo@kirin-box',
+      surface: 'terminal',
+      masked: { value: true, count: 1 },
+      noEchoAfterSubmit: { value: true, count: 1 },
+    });
+    should(await h.everything()).not.containEql(PASSWORD);
+  });
+
+  it('should tell the observer about a typed value no login holds, so a code can follow a password', async () => {
+    const told: LoginDelivery[] = [];
+    const h = harness({ observer: () => ({ delivered: async delivery => void told.push(delivery) }) });
+    const { request } = await raised(h);
+    await h.service.deliver(SESSION, request.id, typed(request.observedDigest as string, PASSWORD), HOST);
+    await Bun.sleep(0);
+    should(told).have.length(1);
+    should(told[0]).not.have.property('login');
+  });
+});
+
+describe('a login observer that fails', () => {
+  it('should never fail or hold up the delivery', async () => {
+    const h = harness({ observer: () => ({ delivered: async () => await Promise.reject(new Error('store gone')) }) });
+    const { request } = await raised(h);
+    const result = await h.service.deliver(
+      SESSION,
+      request.id,
+      typed(request.observedDigest as string, PASSWORD),
+      HOST,
+    );
+    await Bun.sleep(0);
+    should(result.state).equal('delivered');
   });
 });

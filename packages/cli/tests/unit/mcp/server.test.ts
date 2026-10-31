@@ -386,6 +386,8 @@ describe('McpServer — the tools', () => {
     // Copying a page element fit by trimming lessons_suggest, browser_open and browser_network (31,975).
     // login_hint (saved logins' method and login domain) fit by trimming browser_emulate, browser_drag,
     // browser_wait_for, the ask_owner pair and the file tools' repeated words (31,974).
+    // login_propose (a ferret proposes a saved login's recipe) fit by trimming the words NAME, REF and ASK_OWNER
+    // repeat in every tool that takes them (31,577).
     // Owner-gated groups are listed only while they are on.
     should(bytes).be.below(32_000);
     should(longest).be.belowOrEqual(300);
@@ -431,6 +433,35 @@ describe('McpServer — the tools', () => {
       },
     });
     should(tooLong).match({ result: { isError: true, content: [{ text: /^timeoutMs: /u }] } });
+  });
+
+  it('should map login_propose to the wire call, and name the login, the recipe and why as required', async () => {
+    // Arrange
+    const { calls, request } = harness(async () => ({ summary: 'Proposed; the owner decides.' }));
+    const tool = MCP_TOOLS.find(({ name }) => name === 'login_propose');
+
+    // Act
+    await request(
+      'tools/call',
+      toolCall('login_propose', {
+        login: 'VERCEL',
+        recipe: 'Open app.vercel.com → Continue with Google → [[GOOGLE_KIRIN]]',
+        why: 'The Google button moved below the fold.',
+      }),
+    );
+
+    // Assert
+    should(calls).deepEqual([
+      {
+        tool: 'login.propose',
+        login: 'VERCEL',
+        recipe: 'Open app.vercel.com → Continue with Google → [[GOOGLE_KIRIN]]',
+        why: 'The Google button moved below the fold.',
+      },
+    ]);
+    should(tool?.tool).equal('login.propose');
+    should(tool?.inputSchema).containEql({ required: ['login', 'recipe', 'why'] });
+    should(tool?.description.length).belowOrEqual(300);
   });
 
   it('should map each page-lifecycle tool to its wire call', async () => {

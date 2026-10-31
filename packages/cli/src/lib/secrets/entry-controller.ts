@@ -1,3 +1,4 @@
+import { FyHttpError } from '@ferretry/protocol/client';
 import {
   LOGIN_LABEL_MAX_LENGTH,
   LOGIN_PASSWORD_MAX_LENGTH,
@@ -9,6 +10,8 @@ import {
   type LoginMethod,
   LoginMethodKindSchema,
   LoginMethodChangeSchema,
+  LoginRecipeProposalIdSchema,
+  LoginRecipeSchema,
   LOGIN_METHODS,
   LoginMatchSchema,
   loginHintSite,
@@ -19,7 +22,7 @@ import {
   TotpSeedSchema,
 } from '@ferretry/protocol';
 import type { LoginEntryPorts } from './entry-ports.ts';
-import { renderLoginEntryLine, renderLoginEntryList, renderLoginHint } from './entry-render.ts';
+import { renderLoginEntryLine, renderLoginEntryList, renderLoginHint, renderLoginRecipe } from './entry-render.ts';
 
 export interface LoginEntryListOptions {
   readonly json?: boolean | undefined;
@@ -54,6 +57,17 @@ export interface LoginEntryEditOptions {
   /** `--via ID` is the handle; `--no-via` is `false`. */
   readonly via?: string | false | undefined;
   readonly domain?: readonly string[] | undefined;
+  /** `--auto-apply-recipe on|off`: let a ferret's recipe proposal for this login apply without asking. */
+  readonly autoApplyRecipe?: string | undefined;
+}
+
+export interface LoginEntryRecipeShowOptions {
+  readonly json?: boolean | undefined;
+}
+
+/** `fy secret entry recipe set`: where the Markdown comes from, a file path or `-` for standard input. */
+export interface LoginEntryRecipeSetOptions {
+  readonly file?: string | undefined;
 }
 
 export interface LoginEntryHintOptions {
@@ -70,6 +84,35 @@ function handle(value: string): string {
     throw new Error(
       `"${value}" is not a usable handle: use uppercase letters, digits and underscores, like SUDO_KIRIN_BOX`,
     );
+  return parsed.data;
+}
+
+/** The owner's words for what the daemon refused about a recipe, by its code. */
+function recipeRefusal(error: unknown): unknown {
+  if (!(error instanceof FyHttpError)) return error;
+  if (error.code === 'recipe_holds_value')
+    return new Error(
+      'that recipe holds a saved or vaulted value, which a recipe never may: name the login with [[ID]] and describe the step instead. Nothing was changed',
+    );
+  if (error.code === 'stale_proposal')
+    return new Error(
+      'the recipe changed after the ferret proposed this one, so approving it would undo that change unseen: decline it (`recipe decline`) or edit the recipe yourself',
+    );
+  if (error.code === 'unknown_proposal')
+    return new Error('there is no such proposal: it was already answered or replaced (see `secret entry recipe show`)');
+  return error;
+}
+
+function onOrOff(value: string): boolean {
+  const word = value.trim().toLowerCase();
+  if (word === 'on') return true;
+  if (word === 'off') return false;
+  throw new Error('--auto-apply-recipe is on or off');
+}
+
+function proposalHandle(value: string): string {
+  const parsed = LoginRecipeProposalIdSchema.safeParse(value.trim());
+  if (!parsed.success) throw new Error(`"${value}" is not a proposal id: they look like rp_0123456789abcdef`);
   return parsed.data;
 }
 
@@ -183,10 +226,11 @@ export class LoginEntryController {
       options.method === undefined &&
       options.ssoName === undefined &&
       options.via === undefined &&
-      options.domain === undefined
+      options.domain === undefined &&
+      options.autoApplyRecipe === undefined
     )
       throw new Error(
-        'nothing to change: name a field (--label, --match, --method, --via, --domain, --username, --password, --totp ...)',
+        'nothing to change: name a field (--label, --match, --method, --via, --domain, --username, --password, --totp, --auto-apply-recipe ...)',
       );
     const body: PutLoginEntryRequest = {};
     if (options.label !== undefined) body.label = oneLine(options.label, '--label', LOGIN_LABEL_MAX_LENGTH);
@@ -196,6 +240,7 @@ export class LoginEntryController {
       body.username = oneLine(options.username, '--username', LOGIN_USERNAME_MAX_LENGTH);
     if (options.totp === false) body.totp = null;
     if (options.domain !== undefined) body.domains = domains(options.domain);
+    if (options.autoApplyRecipe !== undefined) body.autoApplyRecipe = onOrOff(options.autoApplyRecipe);
     const existing = await this.#find(handleId);
     if (existing === undefined) throw new Error(`no saved login ${handleId} (see \`secret entry ls\`)`);
     const chosen = method(loginMethodOf(existing), options);
@@ -215,6 +260,55 @@ export class LoginEntryController {
     if (key === undefined) throw new Error(`"${site}" is not a site: use a host like github.com, or a URL`);
     const hint = await this.ports.gateway.hint(key);
     this.ports.out.success(options.json === true ? JSON.stringify(hint, null, 2) : renderLoginHint(hint));
+  }
+
+  /** The recipe, what the daemon saw, and each ferret's proposal as the diff it would make. */
+  async recipeShow(id: string, options: LoginEntryRecipeShowOptions): Promise<void> {
+    const entry = await this.#entry(handle(id));
+    this.ports.out.success(options.json === true ? JSON.stringify(entry, null, 2) : renderLoginRecipe(entry));
+  }
+
+  /** Replaces the whole recipe with Markdown from a file or standard input. A recipe never holds a value. */
+  async recipeSet(id: string, options: LoginEntryRecipeSetOptions): Promise<void> {
+    const handleId = handle(id);
+    if (options.file === undefined)
+      throw new Error('name the Markdown: --file <path>, or --file - to read standard input');
+    const text = await this.ports.readRecipe(options.file);
+    const parsed = LoginRecipeSchema.safeParse(text);
+    if (!parsed.success)
+      throw new Error(
+        `that is not a usable recipe: ${parsed.error.issues.map(issue => issue.message).join('; ')} (1 to 4000 characters of plain lines)`,
+      );
+    await this.#entry(handleId);
+    const saved = await this.ports.gateway.put(handleId, { recipe: parsed.data }).catch(error => {
+      throw recipeRefusal(error);
+    });
+    this.ports.out.success(`Saved the recipe of ${renderLoginEntryLine(saved)}`);
+  }
+
+  async recipeClear(id: string): Promise<void> {
+    const handleId = handle(id);
+    const entry = await this.#entry(handleId);
+    if (entry.recipe === undefined) {
+      this.ports.out.success(`${handleId} has no recipe to clear.`);
+      return;
+    }
+    await this.ports.gateway.put(handleId, { recipe: null });
+    this.ports.out.success(`Cleared the recipe of ${handleId}.`);
+  }
+
+  /** Makes the ferret's proposal the recipe, unless the recipe changed since it was made. */
+  async recipeDecide(id: string, proposalId: string, decision: 'approve' | 'decline'): Promise<void> {
+    const handleId = handle(id);
+    const proposal = proposalHandle(proposalId);
+    const saved = await this.ports.gateway.decideRecipe(handleId, proposal, decision).catch(error => {
+      throw recipeRefusal(error);
+    });
+    this.ports.out.success(
+      decision === 'approve'
+        ? `Approved ${proposal}: that is now the recipe of ${renderLoginEntryLine(saved)}`
+        : `Declined ${proposal}: the recipe of ${handleId} is as it was.`,
+    );
   }
 
   async rename(id: string, to: string): Promise<void> {
@@ -240,6 +334,12 @@ export class LoginEntryController {
     }
     await this.ports.gateway.remove(handleId);
     this.ports.out.success(`Removed ${handleId}.`);
+  }
+
+  async #entry(id: string): Promise<LoginEntrySummary> {
+    const entry = await this.#find(id);
+    if (entry === undefined) throw new Error(`no saved login ${id} (see \`secret entry ls\`)`);
+    return entry;
   }
 
   async #find(id: string): Promise<LoginEntrySummary | undefined> {

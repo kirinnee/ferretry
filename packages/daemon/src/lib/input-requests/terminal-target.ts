@@ -105,6 +105,27 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
     private readonly run: ProgramRunner,
   ) {}
 
+  /**
+   * The terminal's screen and the 50 rows above it, wrapped rows joined, for the DAEMON's own yes-or-no look for a
+   * just-typed value after a sign-in. Never published. `undefined` when it cannot be had.
+   */
+  async screen(sessionId: string, key: string, surfaces: readonly string[]): Promise<string | undefined> {
+    const located = await this.terminals.locate(sessionId, key);
+    // A terminal opened again under the same name is another terminal: nothing is said about it.
+    if (located?.id === undefined || !surfaces.includes(located.id)) return undefined;
+    const captured = await this.tmux.execute([
+      'capture-pane',
+      '-p',
+      '-J',
+      '-N',
+      '-S',
+      '-50',
+      '-t',
+      terminalPaneTarget(located),
+    ]);
+    return captured.code === 0 ? captured.stdout : undefined;
+  }
+
   async observe(sessionId: string, target: InputTarget): Promise<ObserveResult> {
     if (target.kind !== 'terminal') return { ok: false, reason: 'unsupported' };
     const sight = await this.look(sessionId, target.key);

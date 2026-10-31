@@ -104,6 +104,36 @@ export class PageInputTarget implements InputTargetPort {
     }
   }
 
+  /**
+   * The page's document and host now, for a saved login's facts. Nothing when the page is gone, will not say, or is
+   * not the page that was typed into (`surfaces`): a page opened again under the same name is another page.
+   */
+  async where(
+    sessionId: string,
+    key: string,
+    surfaces: readonly string[],
+  ): Promise<{ navigationId: string; host: string } | undefined> {
+    try {
+      const document = await this.host.inputOnPage(sessionId, key, async (port, pageId) =>
+        surfaces.includes(pageId) ? await port.inputDocument(pageId) : undefined,
+      );
+      return document?.host === undefined ? undefined : { navigationId: document.navigationId, host: document.host };
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** What a read of the page could show, for the daemon's own look for a just-typed value. Never published. Pinned like `where`. */
+  async text(sessionId: string, key: string, surfaces: readonly string[]): Promise<string | undefined> {
+    try {
+      return await this.host.inputOnPage(sessionId, key, async (port, pageId) =>
+        surfaces.includes(pageId) ? await port.inputText?.(pageId) : undefined,
+      );
+    } catch {
+      return undefined;
+    }
+  }
+
   /** The document the page shows now, or nothing when the page is gone: a quarantine ends early once it changed. */
   async document(sessionId: string, key: string): Promise<string | undefined> {
     try {

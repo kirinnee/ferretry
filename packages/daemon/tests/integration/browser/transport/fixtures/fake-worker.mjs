@@ -170,7 +170,16 @@ function inputReply(id, method, params) {
     return;
   }
   if (method === 'inputDocument')
-    reply(id, true, page === 'garbled' ? { document: {} } : { document: { navigationId: 'loader-1' } });
+    reply(
+      id,
+      true,
+      page === 'garbled'
+        ? { document: {} }
+        : page === 'hostless'
+          ? { document: { navigationId: 'loader-1' } }
+          : { document: { navigationId: 'loader-1', host: 'accounts.example.test' } },
+    );
+  else if (method === 'inputText') reply(id, true, page === 'garbled' ? { text: 5 } : { text: 'Welcome back' });
   else if (method === 'inputObserve')
     reply(
       id,

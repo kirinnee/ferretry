@@ -69,11 +69,22 @@ export interface BrowserInputShot {
 /** Which document a page is showing now: a navigation since the owner's value was typed changes `navigationId`. */
 export interface BrowserInputDocument {
   readonly navigationId: string;
+  /** The host the page is on now (`accounts.google.com`): a login's facts watch it leave the sign-in hosts. */
+  readonly host?: string;
 }
+
+/** The most of each part of a page (text, snapshot, markup) the daemon looks at for a value after a sign-in. */
+export const BROWSER_INPUT_TEXT_MAX_CHARS = 400_000;
 
 export interface BrowserInputFieldsPort {
   /** The page's current document, cheaply: no field is looked at. */
   inputDocument(pageId: string): Promise<BrowserInputDocument>;
+  /**
+   * What a ferret's read of the page could show (visible text, accessibility snapshot, markup; see `readInputText`),
+   * for the DAEMON's own yes-or-no look for a just-typed value after a sign-in. Never published: no route or tool
+   * returns it.
+   */
+  inputText?(pageId: string): Promise<string>;
   inputObserve(pageId: string, fields: readonly BrowserInputFieldPointer[]): Promise<BrowserInputObservation>;
   /**
    * The fields `expected` describes, found again in the page as it is now. Each field: the node the card showed, if
@@ -113,4 +124,5 @@ export const BROWSER_INPUT_WORKER_METHODS = {
   refind: 'inputRefind',
   shot: 'inputShot',
   type: 'inputType',
+  text: 'inputText',
 } as const;

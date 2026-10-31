@@ -9,7 +9,14 @@
 import type { LoginEntryList, PutLoginEntryRequest } from '@ferretry/protocol';
 import { useCallback, useEffect, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { type LoginClient, listLogins, putLogin, removeLogin, renameLogin } from './logins-api.ts';
+import {
+  decideRecipeProposal,
+  type LoginClient,
+  listLogins,
+  putLogin,
+  removeLogin,
+  renameLogin,
+} from './logins-api.ts';
 import { LoginsCard } from './logins-card.tsx';
 
 export type LoginClientFactory = (connection: DaemonConnection) => Promise<LoginClient>;
@@ -84,6 +91,11 @@ export function LoginsSurface({
   );
   const rename = useCallback((id: string, to: string) => write(id, next => renameLogin(next, id, to)), [write]);
   const remove = useCallback((id: string) => write(id, next => removeLogin(next, id)), [write]);
+  const decide = useCallback(
+    (id: string, proposalId: string, decision: 'approve' | 'decline') =>
+      write(id, next => decideRecipeProposal(next, id, proposalId, decision)),
+    [write],
+  );
 
   if (failure !== null && failure.daemonId === connection.daemonId)
     return (
@@ -103,5 +115,15 @@ export function LoginsSurface({
       </section>
     );
 
-  return <LoginsCard list={loaded.list} busy={busy} error={error} onPut={put} onRename={rename} onRemove={remove} />;
+  return (
+    <LoginsCard
+      list={loaded.list}
+      busy={busy}
+      error={error}
+      onPut={put}
+      onRename={rename}
+      onRemove={remove}
+      onDecide={decide}
+    />
+  );
 }

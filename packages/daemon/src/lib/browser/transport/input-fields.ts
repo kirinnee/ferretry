@@ -10,6 +10,7 @@ import {
   type BrowserInputOutcome,
   type BrowserInputShot,
   type BrowserInputValue,
+  BROWSER_INPUT_TEXT_MAX_CHARS,
 } from './input-contracts.ts';
 import { type ActablePage, BROWSER_PROBE_TIMEOUT_MS, browserElementOf, browserSelectorOf } from './page-acts.ts';
 
@@ -83,6 +84,8 @@ export interface InputLocator {
   first(): InputLocator;
   /** The element at this index of the ones it matches; a re-find looks at each candidate in turn. */
   nth(index: number): InputLocator;
+  innerText?(options: { readonly timeout: number }): Promise<string>;
+  ariaSnapshot?(options: { readonly timeout: number }): Promise<string>;
   count(): Promise<number>;
   elementHandle(options: { readonly timeout: number }): Promise<InputHandle | null>;
 }
@@ -262,7 +265,42 @@ async function navigationIdOf(session: InputCdpSession): Promise<string> {
 /** The page's current document, cheaply: no field is looked at. */
 export async function describeInputDocument(subject: InputSubject): Promise<BrowserInputDocument> {
   if (subject.page.isClosed()) throw new Error(REFUSALS.noDocument);
-  return { navigationId: await navigationIdOf(await subject.cdp.page()) };
+  const navigationId = await navigationIdOf(await subject.cdp.page());
+  let host: string | undefined;
+  try {
+    host = new URL(subject.page.url()).host.toLowerCase() || undefined;
+  } catch {
+    host = undefined;
+  }
+  return { navigationId, ...(host === undefined ? {} : { host }) };
+}
+
+/** How long the daemon waits for a page's text after a sign-in. */
+const TEXT_WAIT_MS = 2_000;
+
+/**
+ * Everything a ferret's read of the page could show, for the daemon's own look for a just-typed value: the main
+ * frame's visible text and its accessibility snapshot (read by Playwright in its utility world, where a page's
+ * overrides are not; the snapshot carries what text fields hold and accessible names), and the document's markup as
+ * DevTools has it (attributes, hidden text), no page script asked. A part longer than
+ * {@link BROWSER_INPUT_TEXT_MAX_CHARS} REFUSES: a value past a cut would read as "not there", which is a claim.
+ */
+export async function readInputText(subject: InputSubject): Promise<string> {
+  if (subject.page.isClosed()) throw new Error(REFUSALS.noDocument);
+  const body = subject.page.locator('body').first();
+  if (body.innerText === undefined || body.ariaSnapshot === undefined) throw new Error(REFUSALS.noDocument);
+  const session = await subject.cdp.page();
+  const root = objectOf(objectOf(await ask(session, 'DOM.getDocument', { depth: 0 })).root).nodeId;
+  if (typeof root !== 'number') throw new Error(REFUSALS.noDocument);
+  const markup = objectOf(await ask(session, 'DOM.getOuterHTML', { nodeId: root })).outerHTML;
+  const parts = [
+    await body.innerText({ timeout: TEXT_WAIT_MS }),
+    await body.ariaSnapshot({ timeout: TEXT_WAIT_MS }),
+    typeof markup === 'string' ? markup : '',
+  ];
+  if (typeof markup !== 'string' || parts.some(part => part.length > BROWSER_INPUT_TEXT_MAX_CHARS))
+    throw new Error(REFUSALS.noDocument);
+  return parts.join('\n');
 }
 
 async function titleOf(page: InputablePage): Promise<string> {

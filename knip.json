@@ -149,6 +149,7 @@
         "harness/device-permissions-screenshot.tsx",
         "harness/setup-import-screenshot.tsx",
         "harness/add-login-screenshot.tsx",
+        "harness/login-recipe-screenshot.tsx",
         "harness/disable-switch-screenshot.tsx",
         "harness/disable-switch-overlay.ts",
         "harness/budget-screenshot.tsx",

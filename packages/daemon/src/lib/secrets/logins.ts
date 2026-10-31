@@ -30,6 +30,14 @@ import {
   LOGIN_MATCH_MAX,
   LoginDomainSchema,
   type LoginMethod,
+  type LoginObservation,
+  LoginObservedSchema,
+  type LoginRecipeProposal,
+  LoginRecipeProposalSchema,
+  LOGIN_OBSERVED_MAX,
+  LOGIN_RECIPE_PROPOSALS_MAX,
+  foldObservation,
+  recipeRenamed,
   LoginMethodSchema,
   MAX_LOGIN_ENTRIES,
   PASSWORD_METHOD,
@@ -72,6 +80,16 @@ export const LoginRecordSchema = z.strictObject({
   }),
   /** How the 2FA code is made; present exactly when `seals.totp` is. */
   totp: TotpParametersSchema.optional(),
+  /** The owner's sign-in steps (Markdown). Not secret; a change holding a value is refused before it gets here. */
+  recipe: z.string().min(1).max(4_000).optional(),
+  /** A ferret's proposal applies without asking. Absent: it waits for the owner. */
+  autoApplyRecipe: z.literal(true).optional(),
+  /** `ferret`: the recipe is an auto-applied proposal nobody reviewed. Cleared by any owner edit or approval. */
+  recipeBy: z.literal('ferret').optional(),
+  /** What the daemon saw while typing this login. Written only by the input service. */
+  observed: z.array(LoginObservedSchema).max(LOGIN_OBSERVED_MAX).optional(),
+  /** Ferrets' recipes waiting for the owner. */
+  proposals: z.array(LoginRecipeProposalSchema).max(LOGIN_RECIPE_PROPOSALS_MAX).optional(),
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1),
 });
@@ -93,7 +111,14 @@ export interface LoginIndexStore {
 }
 
 /** Why a change to a saved login was refused: each is a different thing for the person to do. */
-export type LoginRefusal = 'unknown_login' | 'login_exists' | 'label_required' | 'no_such_field' | 'bad_via';
+export type LoginRefusal =
+  | 'unknown_login'
+  | 'login_exists'
+  | 'label_required'
+  | 'no_such_field'
+  | 'bad_via'
+  | 'unknown_proposal'
+  | 'stale_proposal';
 
 export class LoginEntryError extends Error {
   constructor(
@@ -142,6 +167,11 @@ function summary(id: LoginEntryId, record: LoginRecord): LoginEntrySummary {
     ...(record.username === undefined ? {} : { username: record.username }),
     fields: { password: record.seals.password !== undefined, totp: record.seals.totp !== undefined },
     ...(record.totp === undefined ? {} : { totp: record.totp }),
+    ...(record.recipe === undefined ? {} : { recipe: record.recipe }),
+    ...(record.recipe === undefined || record.recipeBy === undefined ? {} : { recipeBy: record.recipeBy }),
+    ...(record.autoApplyRecipe === true ? { autoApplyRecipe: true } : {}),
+    ...(record.observed === undefined ? {} : { observed: [...record.observed] }),
+    ...(record.proposals === undefined ? {} : { proposals: [...record.proposals] }),
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
   };
@@ -350,6 +380,108 @@ export class LoginDirectory {
     await this.documents.sealed.write({ ...sealed, entries: kept }).catch(() => undefined);
   }
 
+  /**
+   * Folds what the input service SAW while typing this login into its facts (login-recipes.ts). Only the input
+   * service calls this, from its own observation of a real target; no route or agent tool reaches it. An entry
+   * that is gone is ignored: the delivery happened, there is just nothing left to remember it on. Facts are not an
+   * owner's edit, so `updatedAt` is kept.
+   */
+  async observe(id: LoginEntryId, seen: LoginObservation): Promise<void> {
+    await this.lock.run(async () => {
+      const index = await this.documents.readIndex();
+      const record = index.entries[id];
+      if (record === undefined) return;
+      const observed = [...foldObservation(record.observed ?? [], seen, this.clock.now())];
+      await this.documents.index.write({ ...index, entries: { ...index.entries, [id]: { ...record, observed } } });
+    });
+  }
+
+  /**
+   * Files a ferret's recipe proposal on the entry, or applies it at once when the owner turned auto-apply on for
+   * this login. A fourth proposal pushes out the oldest, which is answered back so its card can close. The caller
+   * has already refused a recipe that holds a value.
+   */
+  async propose(
+    id: LoginEntryId,
+    proposal: LoginRecipeProposal,
+  ): Promise<{ readonly applied: boolean; readonly dropped: readonly LoginRecipeProposal[] }> {
+    return await this.lock.run(async () => {
+      const index = await this.documents.readIndex();
+      const record = index.entries[id];
+      if (record === undefined) throw new LoginEntryError('unknown_login', `there is no saved login ${id}`);
+      if (record.autoApplyRecipe === true) {
+        const applied: LoginRecord = {
+          ...record,
+          recipe: proposal.recipe,
+          recipeBy: 'ferret',
+          updatedAt: this.clock.now(),
+        };
+        await this.documents.index.write({ ...index, entries: { ...index.entries, [id]: applied } });
+        return { applied: true, dropped: [] };
+      }
+      const waiting = [...(record.proposals ?? []), proposal];
+      const dropped = waiting.slice(0, Math.max(0, waiting.length - LOGIN_RECIPE_PROPOSALS_MAX));
+      const proposals = waiting.slice(-LOGIN_RECIPE_PROPOSALS_MAX);
+      await this.documents.index.write({ ...index, entries: { ...index.entries, [id]: { ...record, proposals } } });
+      return { applied: false, dropped };
+    });
+  }
+
+  /** Remembers the agenda card a proposal was raised on, so settling it closes that card. */
+  async proposalCard(id: LoginEntryId, proposalId: string, agendaItemId: string): Promise<void> {
+    await this.lock.run(async () => {
+      const index = await this.documents.readIndex();
+      const record = index.entries[id];
+      if (record?.proposals?.some(proposal => proposal.id === proposalId) !== true) return;
+      const proposals = record.proposals.map(proposal =>
+        proposal.id === proposalId ? { ...proposal, agendaItemId } : proposal,
+      );
+      await this.documents.index.write({ ...index, entries: { ...index.entries, [id]: { ...record, proposals } } });
+    });
+  }
+
+  /**
+   * The owner's answer to a proposal. `approve` makes it the recipe, but only while the recipe is still the one it
+   * was proposed against: the owner was shown a diff from THAT text, so approving it over a newer edit would undo
+   * the edit unseen (`stale_proposal`; decline it, or edit the recipe by hand). Either answer removes it.
+   */
+  async decide(
+    id: LoginEntryId,
+    proposalId: string,
+    decision: 'approve' | 'decline',
+  ): Promise<{ readonly entry: LoginEntrySummary; readonly proposal: LoginRecipeProposal }> {
+    return await this.lock.run(async () => {
+      const index = await this.documents.readIndex();
+      const record = index.entries[id];
+      if (record === undefined) throw new LoginEntryError('unknown_login', `there is no saved login ${id}`);
+      const proposal = record.proposals?.find(waiting => waiting.id === proposalId);
+      if (proposal === undefined)
+        throw new LoginEntryError(
+          'unknown_proposal',
+          `${id} has no recipe proposal ${proposalId}; it was answered or replaced`,
+        );
+      if (decision === 'approve' && record.recipe !== proposal.base)
+        throw new LoginEntryError(
+          'stale_proposal',
+          `the recipe of ${id} changed after this proposal was made; decline it, or edit the recipe yourself`,
+        );
+      const proposals = (record.proposals ?? []).filter(waiting => waiting.id !== proposalId);
+      const { proposals: _old, recipeBy, ...rest } = record;
+      const next: LoginRecord = {
+        ...rest,
+        ...(proposals.length === 0 ? {} : { proposals }),
+        // An approved recipe is the owner's: whoever wrote it before, a person has now read it.
+        ...(decision === 'approve'
+          ? { recipe: proposal.recipe, updatedAt: this.clock.now() }
+          : recipeBy === undefined
+            ? {}
+            : { recipeBy }),
+      };
+      await this.documents.index.write({ ...index, entries: { ...index.entries, [id]: next } });
+      return { entry: summary(id, next), proposal };
+    });
+  }
+
   /** A new handle for an entry. Its sealed values stay where they are, filed under the entry's key. */
   async rename(from: LoginEntryId, to: LoginEntryId): Promise<LoginEntrySummary> {
     return await this.lock.run(async () => await this.move(from, to));
@@ -428,9 +560,14 @@ function repointed(
 ): Record<string, LoginRecord> {
   return Object.fromEntries(
     Object.entries(entries).map(([handle, record]) => {
-      if (record.method?.via !== from) return [handle, record];
-      const { via: _gone, ...method } = record.method;
-      return [handle, { ...record, method: to === undefined ? method : { ...method, via: to } }];
+      // A recipe that names `[[from]]` names the renamed login; after a delete the name stays, and reads as missing.
+      const named =
+        to === undefined || record.recipe === undefined
+          ? record
+          : { ...record, recipe: recipeRenamed(record.recipe, from, to) };
+      if (named.method?.via !== from) return [handle, named];
+      const { via: _gone, ...method } = named.method;
+      return [handle, { ...named, method: to === undefined ? method : { ...method, via: to } }];
     }),
   );
 }
@@ -445,6 +582,10 @@ function nextRecord(
   const username = change.username === undefined ? existing?.username : (change.username ?? undefined);
   const method = change.method ?? existing?.method;
   const domains = change.domains ?? existing?.domains;
+  const recipe = change.recipe === undefined ? existing?.recipe : (change.recipe ?? undefined);
+  // An owner's own edit makes the recipe theirs; anything else keeps who wrote it.
+  const recipeBy = change.recipe === undefined ? existing?.recipeBy : undefined;
+  const autoApply = change.autoApplyRecipe ?? existing?.autoApplyRecipe === true;
   const totp: TotpParameters | undefined =
     change.totp === undefined
       ? existing?.totp
@@ -460,6 +601,11 @@ function nextRecord(
     ...(username === undefined ? {} : { username }),
     seals,
     ...(totp === undefined || seals.totp === undefined ? {} : { totp }),
+    ...(recipe === undefined ? {} : { recipe }),
+    ...(recipe === undefined || recipeBy === undefined ? {} : { recipeBy }),
+    ...(autoApply ? { autoApplyRecipe: true as const } : {}),
+    ...(existing?.observed === undefined ? {} : { observed: existing.observed }),
+    ...(existing?.proposals === undefined ? {} : { proposals: existing.proposals }),
     createdAt: existing?.createdAt ?? at,
     updatedAt: at,
   };
