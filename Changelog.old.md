@@ -1,3 +1,15 @@
+## [4.162.0](https://github.com/kirinnee/ferretry/compare/v4.161.0...v4.162.0) (2026-10-31)
+
+### Features
+
+* **daemon:** make the public /usage and /metrics feeds opt-in ([#1156](https://github.com/kirinnee/ferretry/issues/1156)) ([fac289b](https://github.com/kirinnee/ferretry/commit/fac289b04d58cc779518466d3fb39af5287f785b))
+* **daemon:** warn in doctor when a shared host's user slice is uncapped or linger is off ([#1160](https://github.com/kirinnee/ferretry/issues/1160)) ([4604263](https://github.com/kirinnee/ferretry/commit/460426394bd05b1ac64302292361315ecb8aa8e6))
+
+### Fixes
+
+* **cli:** keep the daemon lifecycle claim in the user's private runtime directory ([#1158](https://github.com/kirinnee/ferretry/issues/1158)) ([3a0bb58](https://github.com/kirinnee/ferretry/commit/3a0bb5826b02449c1b3699fc059b89b42af3a01c))
+* **daemon:** send tmux pane environment and typed keys on stdin, never in argv ([#1115](https://github.com/kirinnee/ferretry/issues/1115)) ([942e002](https://github.com/kirinnee/ferretry/commit/942e0027f40037eadf5be25da5e0cd8e5970705f))
+
 ## [4.161.0](https://github.com/kirinnee/ferretry/compare/v4.160.1...v4.161.0) (2026-10-31)
 
 ### Features
