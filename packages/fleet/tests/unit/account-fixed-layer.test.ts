@@ -761,21 +761,23 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).startWith('Agenda mode: ONLY for what the owner alone can give: info, a decision or action.');
     // The agenda is never a tracker: testing and checking ride the board's Done / Not good, and only a Not good result opens an item.
     should(text).containEql('Never track work ("please test/verify")');
-    should(text).containEql("the board's Done / Not good covers it");
-    should(text).containEql('after a Not good, open one only if you need something from them.');
+    should(text).containEql('the board covers it (Done/Not good)');
+    should(text).containEql('after a Not good, open one only if you need input.');
+    // An owner's question is answered in chat AND on the agenda as one info item, so a missed reply is not a missed answer.
+    should(text).containEql("Owner's question: ALSO answer as a `--kind info` item.");
     should(text).containEql('One item per ask:');
     // Premise and context are part of the one command, and required: every item is read cold.
     should(text).containEql(
       '`zz agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<the ask>"` (required)',
     );
     should(text).containEql('Title ≤40, ask ≤120.');
-    should(text).containEql('no "as above", ticket/PR numbers, paths, unexplained acronyms');
+    should(text).containEql('no "as above", ticket/PR numbers, paths, acronyms');
     should(text).containEql('`--term "X=meaning"`');
     should(text).containEql('`--decided` = settled, `--still-open` = left');
-    should(text).containEql('`--body`: hypermedia (fy-render).');
+    should(text).containEql('`--body`: hypermedia.');
     should(text).containEql('`--kind todo|yesno|permission|choice|review|info`');
     // Each item stands alone, in full Markdown, and each option is a short letter-able label plus a one-line reason.
-    should(text).containEql('Each item stands ALONE: Markdown,');
+    should(text).containEql('Items stand ALONE: Markdown,');
     should(text).containEql('Choice: 2–3 `--option "Label: why"`; `--recommend <label> --recommend-why <line>`');
     should(text).containEql('To-do: `--step "<md>"`');
     // When it is needed: it blocks now, will block later, or by a time.
@@ -786,10 +788,10 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql('"[answer to !A3 …]" is the answer;');
     // A reply PARKS the item: the ferret brings it back by refreshing the WHOLE card with edit, or closes it.
     should(text).containEql('"[re !A3 …]" is chat, parking it:');
-    should(text).containEql('reopen with `zz agenda edit <id>` refreshing --summary/--premise/--context, else done it');
+    should(text).containEql('reopen with `zz agenda edit <id>` refreshing summary/premise/context, else done it');
     should(text).not.containEql('agenda surface');
     // Every item stays current, in the turn the facts changed: edited or closed, never left stale.
-    should(text).containEql('KEEP ITEMS CURRENT this turn');
+    should(text).containEql('KEEP CURRENT this turn');
     should(text).containEql('`edit` if changed');
     should(text).containEql('`done` if settled');
     should(text).containEql('`ls` = open');
