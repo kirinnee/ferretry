@@ -1,3 +1,15 @@
+## [4.148.0](https://github.com/kirinnee/ferretry/compare/v4.147.0...v4.148.0) (2026-10-31)
+
+### Features
+
+* **browser:** act on snapshot refs and points, and scrub what pages show ([#1078](https://github.com/kirinnee/ferretry/issues/1078)) ([a17c82a](https://github.com/kirinnee/ferretry/commit/a17c82a5f2e5f8dfa9bc2cc87270ebf59b823192))
+* **browser:** Browser settings tab and Test proxy check ([#1080](https://github.com/kirinnee/ferretry/issues/1080)) ([79a92cb](https://github.com/kirinnee/ferretry/commit/79a92cba9b2196c5d354af8a6f3aaf3caae216e7))
+* **pwa:** Table to-test rows get the card's Done and Not good ([#1084](https://github.com/kirinnee/ferretry/issues/1084)) ([38858c6](https://github.com/kirinnee/ferretry/commit/38858c682828feb469835b7cc48f7c127585f112))
+
+### Fixes
+
+* **daemon:** release what a boot acquires while a stop during boot runs ([#1085](https://github.com/kirinnee/ferretry/issues/1085)) ([47fa20a](https://github.com/kirinnee/ferretry/commit/47fa20a2aecc00687ec03ea2475358203b7c9867))
+
 ## [4.147.0](https://github.com/kirinnee/ferretry/compare/v4.146.0...v4.147.0) (2026-10-31)
 
 ### Features
