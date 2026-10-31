@@ -7,8 +7,9 @@ import { captureError, jsonResponse, QueuedHttpTransport } from './fakes.ts';
 
 /**
  * The fleet read is conditional: the client holds the last list and its tag, sends the tag back, and
- * turns a bodyless `304` into a copy of the list it holds. What can break is the header sent, the list
- * a `304` stands for, and an overlapping read leaving an older list held.
+ * turns a bodyless `304` into the list it holds (shared and frozen: see session-list-sharing.test.ts).
+ * What can break is the header sent, the list a `304` stands for, and an overlapping read leaving an
+ * older list held.
  */
 
 const RENAMED = { ...sessionView, config: { ...sessionView.config, name: 'Renamed' } };
@@ -31,23 +32,6 @@ describe('FyApiClient conditional fleet reads', () => {
     should(headersOf(transport, 0).has('if-none-match')).be.false();
     should(headersOf(transport, 1).get('if-none-match')).equal('"f1"');
     should(transport.calls[1]?.url).equal(`${BASE_URL}/v1/sessions`);
-  });
-
-  it('should hand each caller its own value, so changing one cannot change what a 304 answers', async () => {
-    // Arrange
-    const transport = new QueuedHttpTransport(tagged([sessionView], '"f1"'), notModified('"f1"'), notModified('"f1"'));
-    const client = await connectClient(transport);
-
-    // Act
-    const first = await client.list();
-    first.pop();
-    const second = await client.list();
-    second[0]?.config.harnessFlags.push('--changed');
-    const third = await client.list();
-
-    // Assert
-    should(third).deepEqual([sessionView]);
-    should(third[0]).not.equal(second[0]);
   });
 
   it('should replace the held list when the fleet moved on', async () => {

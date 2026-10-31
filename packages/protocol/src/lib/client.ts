@@ -139,7 +139,7 @@ export interface IFyApiClient {
   foreignHistoryConversation(id: string): Promise<ImportedConversationDetail>;
   scratchPlan(limit?: number): Promise<ScratchPlanView[]>;
   scratchSweep(force?: boolean): Promise<ScratchSweepView>;
-  list(): Promise<SessionView[]>;
+  list(): Promise<readonly SessionView[]>;
   suggestNames(count?: number): Promise<string[]>;
   get(id: string, signal?: AbortSignal): Promise<SessionView>;
   start(input: StartSessionRequestInput, requestId?: string): Promise<SessionView>;
