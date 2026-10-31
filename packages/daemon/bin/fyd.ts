@@ -208,7 +208,9 @@ import {
 import {
   AgendaLaneAgenda,
   AnalyticsTranscriptSpend,
+  afterAsActivity,
   AsyncActivityScope,
+  asActivity,
   AuthorizedProviderProbe,
   type BrowserDisplayPort,
   BrowserLoginWindowService,
@@ -4085,21 +4087,6 @@ const WARDEN_TRIAGE_TAIL = 12;
 const WARDEN_LIVENESS_TICK_SECONDS = 30;
 
 /** The collaborators a warden subsystem needs from the rest of the root. */
-/**
- * `tick`, run as the labelled activity `name`, so `fy daemon profile` and a stall can name the timer
- * that did the work. The tick's own errors stay its own: a rejection is swallowed here exactly as each
- * timer already swallowed it. Without a ledger the tick runs as it always did.
- */
-function asActivity(activities: ActivityLedger | undefined, name: string, tick: () => unknown): () => void {
-  return () => {
-    if (activities === undefined) {
-      void tick();
-      return;
-    }
-    void activities.run(name, async () => await tick()).catch(() => undefined);
-  };
-}
-
 interface WardenParts {
   /** The named work in flight, so the sweep and the liveness tick are attributed in a profile. */
   readonly activities?: ActivityLedger;
@@ -9336,10 +9323,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
         },
         timers: {
-          after: (ms, run) => {
-            const handle = setTimeout(asActivity(activities, 'board github watch', run), ms);
-            return () => clearTimeout(handle);
-          },
+          after: (ms, run) => afterAsActivity(activities, 'board github watch', run, ms),
         },
         clock: { now: () => clock.now(), random: () => Math.random() },
         diagnostics: boardDiagnostics,
@@ -10655,11 +10639,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         republish: async () => {
           await fleetCatalog.republish();
         },
-        setTimer: (run, ms) => {
-          const handle = setTimeout(asActivity(activities, 'disable expiry', run), ms);
-          handle.unref();
-          return () => clearTimeout(handle);
-        },
+        setTimer: (run, ms) => afterAsActivity(activities, 'disable expiry', run, ms, { unref: true }),
       });
       /**
        * Pack mode (docs/pack-mode.md): over the same runtimes, logins and catalogs every picker reads, and
