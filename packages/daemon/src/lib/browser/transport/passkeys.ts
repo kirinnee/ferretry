@@ -12,7 +12,7 @@ import type { InputCdpSession } from './input-fields.ts';
  * claim to verify matters: an authenticator that cannot verify still registers a key when the site only
  * prefers or discourages verification, which would leave a site holding a key nobody has. The one request
  * left waiting is `authenticatorAttachment: 'platform'`, which registers nothing and which a site only
- * makes after the check above said no. Nothing about the browser's identity changes: no user agent, no
+ * makes after the check above said yes, which it never does here. Nothing about the browser's identity changes: no user agent, no
  * fingerprint.
  *
  * NEVER BREAKS A PAGE. Any step that fails is dropped and the page goes on as it was.

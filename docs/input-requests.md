@@ -351,13 +351,23 @@ A `secret` or `private` value typed into a page holds that page for the same win
 
 ### Passkeys are off in the agent browser
 
-Every page of the agent browser (popups included) gets a CDP virtual authenticator that answers with the
-user-presence bit unset (`WebAuthn.addVirtualAuthenticator` + `setResponseOverrideBits({ isBadUP: true })`):
-`PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()` is false, so sites do not offer a
-passkey, and a passkey or security-key prompt fails at once, so the site falls back to its password form. The
-user agent and every fingerprint stay honest; nothing is spoofed. A login that needs the owner's real passkey
-or security key is handed over (`browser_ask_owner`). GAP: a WebAuthn prompt inside a cross-origin iframe
-is not covered.
+Every page of the agent browser (popups included) gets a CDP virtual authenticator (`WebAuthn.addVirtualAuthenticator`,
+USB, no resident keys) that claims to verify users but never does, and answers with the user-presence bit unset
+(`setResponseOverrideBits({ isBadUP: true })`). Measured against a throwaway headless Chrome 154:
+
+- `PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()` is false, so sites do not offer a passkey.
+- Every `navigator.credentials.get` and `create` with `publicKey` (resident key required, preferred or
+  discouraged; user verification required, preferred or discouraged; cross-platform; direct attestation;
+  conditional mediation) fails with `NotAllowedError` in a few milliseconds, so nothing is registered and the
+  site falls back to its password form.
+- The one exception: a `create` that insists on a `platform` authenticator waits for one and registers nothing.
+  A site asks for that only after `isUserVerifyingPlatformAuthenticatorAvailable()` said yes, which it does not.
+
+The user agent and every fingerprint stay honest; nothing is spoofed. A login that needs the owner's real
+passkey or security key is handed over (`browser_ask_owner`), and the agent instruction forbids accepting a
+site's "create a passkey" or "add a security key" offer. GAPs: a WebAuthn call from a frame in another process
+than the page was not separately proved, and a popup that navigates before its authenticator is added is not
+covered.
 
 ### Captchas are the owner's
 
