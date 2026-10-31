@@ -213,6 +213,7 @@ import {
   type BrowserDisplayPort,
   BrowserLoginWindowService,
   BrowserProfileStore,
+  FileLoopbackMarkerReader,
   BrowserWorkerClient,
   BunApiServer,
   BunConnectorProcesses,
@@ -967,6 +968,10 @@ import {
   type RunOverrides,
   readDaemonRelayIdentity,
   readDoctorReport,
+  firewallRefusal,
+  LOOPBACK_FIREWALL_CHECK_MS,
+  LoopbackFirewallWatch,
+  readLoopbackFirewall,
   readHarnessPreflight,
   readTranscriptPage,
   searchTranscriptRecords,
@@ -7287,6 +7292,21 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     return resolveBrowserPorts(setting, process.getuid?.() ?? 0, marker);
   };
   /**
+   * Whether the fixed browser ports are fenced off from other local users: read on demand, so the answer
+   * follows both the setting and the host's marker. A reading for warnings, never a gate. `cached` takes the
+   * setting from the last configuration load instead of re-scanning the directory, for the timer.
+   */
+  const loopbackFirewall = async (cached = false) =>
+    await readLoopbackFirewall(
+      async () =>
+        (cached ? await effectiveAccountModel() : await declaredAccountModel())?.machine.browserPorts ?? 'random',
+      process.getuid?.() ?? 0,
+      new FileLoopbackMarkerReader(),
+      () => Date.now(),
+    );
+  /** Each change of that reading is said once (a daemon notice), at a browser start and on the five-minute tick. */
+  const loopbackFirewallWatch = new LoopbackFirewallWatch(loopbackFirewall, message => bootNotices.state(message));
+  /**
    * The same model as the last configuration load has it, without touching the directory: for the
    * readers that run on a timer — the credential catalogue, the usage feed and its cadence, auto-resume —
    * which each re-scanned the whole configuration tree on every pass. A change reaches them once the
@@ -8645,6 +8665,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // configuration launches headless rather than not at all.
         mode: async () => (await declaredAccountModel())?.machine.browserMode ?? 'headless',
         ports: browserPorts,
+        checkFirewall: async () =>
+          firewallRefusal(
+            await loopbackFirewallWatch.check(),
+            (await declaredAccountModel())?.machine.browserFirewallFailure ?? 'warn',
+          ),
         // Read at every launch too, but a proxy the owner asked for is never dropped quietly: a secret the vault
         // does not hold refuses the launch (resolveBrowserProxy) rather than sending traffic around the proxy.
         proxy: async () => {
@@ -9816,6 +9841,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         asActivity(activities, 'board sweep', async () => await boardSweep.tick()),
         BOARD_SWEEP_INTERVAL_MS,
       ).unref();
+      // The loopback firewall is re-read every five minutes, not only at a browser start, so a rule that was
+      // flushed or a check that stopped running is said out loud. First tick after five minutes, not at boot (a
+      // browser start checks at once). Reads nothing while browserPorts is random,
+      // and never re-scans the configuration directory: an idle daemon does no parsing (the idle-daemon test).
+      const checkLoopbackFirewall = asActivity(
+        activities,
+        'loopback firewall check',
+        async () => await loopbackFirewallWatch.check(true),
+      );
+      setInterval(checkLoopbackFirewall, LOOPBACK_FIREWALL_CHECK_MS).unref();
       // Agenda mode: the switch (the session document and its launch variable, written together like Pack's and
       // hypermedia's) and the one-time migration that turns it on for every ferret that already had open items —
       // they ARE its agenda.
@@ -10939,6 +10974,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               harnesses: await readHarnesses(accounts, executables, harnessDiscovery),
               directorySyscalls,
               tmuxRelease: await new TmuxReleaseReader(tmuxExecutable, tmux).read(),
+              loopbackFirewall: await loopbackFirewall(),
             });
           },
         },
@@ -11263,6 +11299,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             now: () => performance.now(),
           }),
           state: () => browserService.overview(),
+          firewall: loopbackFirewall,
         },
         agentTools: createAgentToolsSubsystem({
           storage,

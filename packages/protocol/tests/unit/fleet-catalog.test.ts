@@ -498,6 +498,28 @@ describe('the account-model catalogue wire contract', () => {
     should(parse('fixed').success).be.false();
   });
 
+  it('should take browserFirewallFailure on a settings change, leave it optional, and refuse another word', () => {
+    // Arrange
+    const sent = {
+      kind: 'machine.settings',
+      agentPermissions: 'auto',
+      defaultRuntime: null,
+      agentControl: { terminals: true, browsers: true, files: true },
+    };
+
+    // Act
+    const parse = (browserFirewallFailure?: unknown) =>
+      catalog.FleetAccountChangeSchema.safeParse(
+        browserFirewallFailure === undefined ? sent : { ...sent, browserFirewallFailure },
+      );
+
+    // Assert
+    should(parse().success).be.true();
+    should(parse('warn').success).be.true();
+    should(parse('refuse').success).be.true();
+    should(parse('ignore').success).be.false();
+  });
+
   it('should require ferretrySettings in what a machine reports, and leave it optional in what a client sends', () => {
     // Arrange
     const sent = { kind: 'machine.settings', agentPermissions: 'auto', defaultRuntime: null };

@@ -209,6 +209,7 @@ export function machineView(
     browserMode: model.machine.browserMode,
     browserProxy: model.machine.browserProxy ?? null,
     browserPorts: model.machine.browserPorts,
+    browserFirewallFailure: model.machine.browserFirewallFailure,
     autoResume: model.machine.autoResume,
     agendaMode: model.machine.agendaMode,
     lastAutoResume: facts.lastAutoResume ?? null,

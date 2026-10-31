@@ -718,6 +718,16 @@ function putMachineSettings(
     }
   }
 
+  // A client that predates the firewall policy leaves it out, and leaves it as it is.
+  if (
+    change.browserFirewallFailure !== undefined &&
+    change.browserFirewallFailure !== model.machine.browserFirewallFailure
+  ) {
+    draft.machine.browserFirewallFailure = change.browserFirewallFailure;
+    parts.push(`the loopback firewall failure policy to ${change.browserFirewallFailure}`);
+    consequences.push('Applies the next time the browser starts; a browser already running is not stopped.');
+  }
+
   // A client that predates Auto-resume leaves it out, and leaves it as it is.
   const autoResume = change.autoResume ?? model.machine.autoResume;
   if (autoResume !== model.machine.autoResume) {

@@ -1,4 +1,9 @@
-import type { DoctorCheck, DoctorReport } from '@ferretry/protocol';
+import {
+  type DoctorCheck,
+  type DoctorReport,
+  LOOPBACK_FIREWALL_MARKER_PATH,
+  type LoopbackFirewallState,
+} from '@ferretry/protocol';
 import { hasSubscriptionCrash, parseTmuxVersion, type TmuxReleaseReading, type TmuxVersion } from '../tmux/version.ts';
 import {
   type HarnessPreflight,
@@ -23,6 +28,11 @@ export interface DoctorReportInput {
    * the composition root did not ask — the row is then left out rather than guessed.
    */
   readonly tmuxRelease?: TmuxReleaseReading;
+  /**
+   * Whether the loopback firewall fences this account's fixed browser ports. Absent while the ports are random
+   * (nothing to fence) — the row is then left out. Never makes the report not ready.
+   */
+  readonly loopbackFirewall?: LoopbackFirewallState;
 }
 
 const present = (
@@ -106,6 +116,23 @@ function harnessCommand(harness: HarnessReadiness): DoctorCheck {
   if (location.outcome === 'override-absent')
     return missing(harness.kind, 'alternative', 'declared, and unusable', `${location.reason}. ${impact}`);
   return missing(harness.kind, 'alternative', harnessLocationLine(location), impact);
+}
+
+/** A warning, never a gate: a browser still starts without the firewall, so `ready` ignores this row. */
+function loopbackFirewall(state: LoopbackFirewallState | undefined): readonly DoctorCheck[] {
+  if (state === undefined) return [];
+  const name = 'loopback firewall';
+  if (state.state === 'applied')
+    return [
+      present(name, 'capability', 'applied', 'Other users on this host cannot reach this account’s browser ports.'),
+    ];
+  const summaries: Record<Exclude<LoopbackFirewallState['state'], 'applied'>, string> = {
+    failed: 'the last check reached this account’s ports from another user',
+    missing: `no firewall rule for this account in the marker at ${LOOPBACK_FIREWALL_MARKER_PATH}`,
+    stale: 'the marker does not list this account’s ports',
+    unverified: 'the 5-minute firewall check is not running',
+  };
+  return [missing(name, 'capability', summaries[state.state], state.detail)];
 }
 
 const TMUX_CRASH =
@@ -216,6 +243,7 @@ export function readDoctorReport(input: DoctorReportInput): DoctorReport {
     ...input.harnesses.harnesses.map(harnessCommand),
     binary(input, 'tmux', 'required', 'Sessions cannot start or be managed.'),
     ...tmuxRelease(input.tmuxRelease),
+    ...loopbackFirewall(input.loopbackFirewall),
     binary(input, 'bash', 'required', 'Generated fleet wrappers cannot run.'),
     binary(input, 'git', 'capability', 'Worktrees, project inspection, and repository features are unavailable.'),
     input.platform === 'darwin'

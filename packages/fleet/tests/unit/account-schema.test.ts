@@ -48,6 +48,7 @@ describe('AccountModelSchema', () => {
       agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
       browserMode: 'headless',
       browserPorts: 'random',
+      browserFirewallFailure: 'warn',
       autoResume: true,
       agendaMode: true,
       attentionNudge: true,
@@ -763,6 +764,21 @@ describe('the conversations setting', () => {
     // Assert
     should(notBoolean.some(message => message.startsWith('machine.conversations.listComputer'))).be.true();
     should(unknown.some(message => message.startsWith('machine.conversations'))).be.true();
+  });
+});
+
+describe('the browser firewall failure policy', () => {
+  it('should default to warn, take refuse, and refuse a word it does not know', () => {
+    // Act
+    const absent = parseAccountModel(documentWith()).machine.browserFirewallFailure;
+    const refuse = parseAccountModel(documentWith({ machine: { browserFirewallFailure: 'refuse' } })).machine
+      .browserFirewallFailure;
+    const unknown = messagesOf(documentWith({ machine: { browserFirewallFailure: 'ignore' } }));
+
+    // Assert
+    should(absent).equal('warn');
+    should(refuse).equal('refuse');
+    should(unknown.some(message => message.startsWith('machine.browserFirewallFailure'))).be.true();
   });
 });
 
