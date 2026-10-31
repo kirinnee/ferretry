@@ -28,7 +28,7 @@ export interface LoginEntryListOptions {
   readonly json?: boolean | undefined;
 }
 
-/** `fy secret entry add`. There is no value flag: the password is typed at the prompt. */
+/** `fy account add`. There is no value flag: the password is typed at the prompt. */
 export interface LoginEntryAddOptions {
   readonly label: string;
   readonly match?: readonly string[] | undefined;
@@ -41,7 +41,7 @@ export interface LoginEntryAddOptions {
   readonly domain?: readonly string[] | undefined;
 }
 
-/** `fy secret entry edit`. Each flag names a field to change; a field not named is kept. */
+/** `fy account edit`. Each flag names a field to change; a field not named is kept. */
 export interface LoginEntryEditOptions {
   readonly label?: string | undefined;
   readonly match?: readonly string[] | undefined;
@@ -65,7 +65,7 @@ export interface LoginEntryRecipeShowOptions {
   readonly json?: boolean | undefined;
 }
 
-/** `fy secret entry recipe set`: where the Markdown comes from, a file path or `-` for standard input. */
+/** `fy account recipe set`: where the Markdown comes from, a file path or `-` for standard input. */
 export interface LoginEntryRecipeSetOptions {
   readonly file?: string | undefined;
 }
@@ -99,7 +99,7 @@ function recipeRefusal(error: unknown): unknown {
       'the recipe changed after the ferret proposed this one, so approving it would undo that change unseen: decline it (`recipe decline`) or edit the recipe yourself',
     );
   if (error.code === 'unknown_proposal')
-    return new Error('there is no such proposal: it was already answered or replaced (see `secret entry recipe show`)');
+    return new Error('there is no such proposal: it was already answered or replaced (see `account recipe show`)');
   return error;
 }
 
@@ -154,7 +154,7 @@ function method(
 ): LoginMethod | undefined {
   if (options.method === undefined && options.ssoName === undefined && options.via === undefined) return undefined;
   if (options.method !== undefined && namesPasskey(options.method))
-    throw new Error('passkeys are off: a saved login signs in with a password or a provider (google, github, ...)');
+    throw new Error('passkeys are off: a account signs in with a password or a provider (google, github, ...)');
   const kind = LoginMethodKindSchema.safeParse((options.method ?? current?.kind ?? 'password').trim().toLowerCase());
   if (!kind.success) throw new Error(`--method is one of ${LOGIN_METHODS.join(', ')}`);
   const via = options.via === false ? undefined : options.via === undefined ? current?.via : handle(options.via);
@@ -181,7 +181,7 @@ function passwordProblem(value: string): string | undefined {
 }
 
 /**
- * Drives `fy secret entry ls|add|edit|rename|rm`: the owner's saved logins, the password manager the input
+ * Drives `fy account ls|add|edit|rename|rm`: the owner's accounts, the password manager the input
  * bridge places values from.
  *
  * VALUES GO IN, ONLY AT A PROMPT. A password or a 2FA seed is read hidden from a terminal a person is
@@ -209,7 +209,7 @@ export class LoginEntryController {
     if (chosen !== undefined) body.method = chosen;
     if (options.domain !== undefined) body.domains = domains(options.domain);
     if ((await this.#find(handleId)) !== undefined)
-      throw new Error(`${handleId} already exists: change it with \`secret entry edit ${handleId}\``);
+      throw new Error(`${handleId} already exists: change it with \`account edit ${handleId}\``);
     if (options.password !== false) body.password = await this.#askPassword(`password for ${handleId} (hidden): `);
     const saved = await this.ports.gateway.put(handleId, body);
     this.ports.out.success(`Added ${renderLoginEntryLine(saved)}`);
@@ -242,7 +242,7 @@ export class LoginEntryController {
     if (options.domain !== undefined) body.domains = domains(options.domain);
     if (options.autoApplyRecipe !== undefined) body.autoApplyRecipe = onOrOff(options.autoApplyRecipe);
     const existing = await this.#find(handleId);
-    if (existing === undefined) throw new Error(`no saved login ${handleId} (see \`secret entry ls\`)`);
+    if (existing === undefined) throw new Error(`no account ${handleId} (see \`account ls\`)`);
     const chosen = method(loginMethodOf(existing), options);
     if (chosen !== undefined) body.method = chosen;
     if (options.password === true) body.password = await this.#askPassword(`new password for ${handleId} (hidden): `);
@@ -254,7 +254,7 @@ export class LoginEntryController {
     this.ports.out.success(`Updated ${renderLoginEntryLine(saved)}`);
   }
 
-  /** What a ferret's `login_hint` is told about a site: never a value, nor which secret fields exist. */
+  /** What a ferret's `account_hint` is told about a site: never a value, nor which secret fields exist. */
   async hint(site: string, options: LoginEntryHintOptions): Promise<void> {
     const key = loginHintSite(site);
     if (key === undefined) throw new Error(`"${site}" is not a site: use a host like github.com, or a URL`);
@@ -321,9 +321,9 @@ export class LoginEntryController {
   async remove(id: string, options: LoginEntryRemoveOptions): Promise<void> {
     const handleId = handle(id);
     const entry = await this.#find(handleId);
-    if (entry === undefined) throw new Error(`no saved login ${handleId} (see \`secret entry ls\`)`);
+    if (entry === undefined) throw new Error(`no account ${handleId} (see \`account ls\`)`);
     if (options.yes !== true) {
-      this.#needTerminal('removing a saved login asks first; pass --yes to skip the question');
+      this.#needTerminal('removing a account asks first; pass --yes to skip the question');
       const answer = await this.ports.prompt.ask(
         `Remove ${handleId} (${entry.label})? This cannot be undone. Type yes: `,
       );
@@ -338,7 +338,7 @@ export class LoginEntryController {
 
   async #entry(id: string): Promise<LoginEntrySummary> {
     const entry = await this.#find(id);
-    if (entry === undefined) throw new Error(`no saved login ${id} (see \`secret entry ls\`)`);
+    if (entry === undefined) throw new Error(`no account ${id} (see \`account ls\`)`);
     return entry;
   }
 
@@ -346,7 +346,7 @@ export class LoginEntryController {
     const list = await this.ports.gateway.list();
     if (list.health === 'damaged')
       throw new Error(
-        `this daemon cannot read its secret store (${list.diagnosis ?? 'no diagnosis was given'}): its saved logins are NOT gone, so nothing was changed`,
+        `this daemon cannot read its secret store (${list.diagnosis ?? 'no diagnosis was given'}): its accounts are NOT gone, so nothing was changed`,
       );
     return list.entries.find(entry => entry.id === id);
   }

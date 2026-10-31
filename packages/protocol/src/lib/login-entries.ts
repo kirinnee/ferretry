@@ -346,7 +346,7 @@ export const InputSavedSchema = z.strictObject({
 export type InputSaved = z.infer<typeof InputSavedSchema>;
 
 /**
- * WHAT A FERRET MAY LEARN ABOUT SIGNING IN TO A SITE (`login_hint`, `fy secret entry hint`): the saved logins for
+ * WHAT A FERRET MAY LEARN ABOUT SIGNING IN TO A SITE (`account_hint`, `fy account hint`): the saved logins for
  * it, by their NON-SECRET metadata only — handle, label, method, login domains, the plain username, and the
  * provider entry a method goes via. Never a password, a seed, a code, or even which secret fields exist.
  *
@@ -458,17 +458,17 @@ export function loginHintLine(hint: LoginHint): string {
 
 /** The sentence a hint ends with when it listed an entry: how a ferret suggests a better recipe. */
 export const LOGIN_HINT_PROPOSE =
-  'After signing in, if the steps were missing or wrong, propose the recipe with login_propose; the owner approves it.';
+  'After signing in, if the steps were missing or wrong, propose the recipe with account_propose; the owner approves it.';
 
 /** The sentence every hint ends with. */
 export const LOGIN_HINT_PASSKEYS_OFF = 'Use the password or provider flow; passkeys are off, never create one.';
 
-/** What `login_hint` and `fy secret entry hint` say: each entry's line, or that none is saved, and the passkey rule. */
+/** What `account_hint` and `fy account hint` say: each entry's line, or that none is saved, and the passkey rule. */
 export function loginHintSummary(site: string, hints: readonly LoginHint[]): string {
   const found =
     hints.length === 0
-      ? `No saved login for ${site}; request the values as usual and the owner can save them.`
-      : `Saved logins for ${site}: ${hints.map(loginHintLine).join(' ')}`;
+      ? `No account for ${site}; request the values as usual and the owner can save them.`
+      : `Accounts for ${site}: ${hints.map(loginHintLine).join(' ')}`;
   return hints.length === 0
     ? `${found} ${LOGIN_HINT_PASSKEYS_OFF}`
     : `${found} ${LOGIN_HINT_PROPOSE} ${LOGIN_HINT_PASSKEYS_OFF}`;

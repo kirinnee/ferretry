@@ -236,6 +236,14 @@ describe('a person’s tool routes', () => {
   it('should keep the login hint an agent’s tool: no person’s surface route takes it', async () => {
     const { dispatch } = served();
     const wrong = await dispatch.dispatch(
+      personCall('/v1/sessions/s1/surfaces/browser/tools', { tool: 'account.hint', site: 'vercel.com' }),
+    );
+    should(wrong.status).equal(400);
+  });
+
+  it('should hold the old login.hint name to the same rule: it is read as account.hint', async () => {
+    const { dispatch } = served();
+    const wrong = await dispatch.dispatch(
       personCall('/v1/sessions/s1/surfaces/browser/tools', { tool: 'login.hint', site: 'vercel.com' }),
     );
     should(wrong.status).equal(400);

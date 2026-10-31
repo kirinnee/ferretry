@@ -52,7 +52,7 @@ over a **separate** sealed document (`login-secrets.json`, under the same key). 
 `LoginDirectory`, which seals and never opens; only two things hold the `LoginVault` that opens it: the
 redactor (saved values are masked as `[redacted:login:<ID>:password]`) and the input-request service, which
 types one into the target the owner tapped "Use" for and answers only what happened. `use` cannot spend a
-saved login and `${secret:…}` cannot name one. The agent tool `login_hint` (and `GET /v1/secrets/logins/hint`) is
+saved login and `${secret:…}` cannot name one. The agent tool `account_hint` (`login_hint` still works) (and `GET /v1/secrets/logins/hint`) is
 handed the same `LoginDirectory`: it answers labels, sign-in methods, login domains and usernames, never a value.
 
 ## Redaction

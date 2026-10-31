@@ -17,7 +17,7 @@ function renderLoginEntryFields(entry: LoginEntrySummary): string {
   return `password ${mark(entry.fields.password)}  2FA ${mark(entry.fields.totp)}`;
 }
 
-/** How an entry signs in, naming the provider's saved login it goes via by its label when it still exists. */
+/** How an entry signs in, naming the provider's account it goes via by its label when it still exists. */
 function signInWords(entry: LoginEntrySummary, entries: readonly LoginEntrySummary[]): string {
   const method = loginMethodOf(entry);
   const via = method.via === undefined ? undefined : entries.find(other => other.id === method.via);
@@ -25,7 +25,7 @@ function signInWords(entry: LoginEntrySummary, entries: readonly LoginEntrySumma
   return method.via !== undefined && via === undefined ? `${words} (via ${method.via}, which is gone)` : words;
 }
 
-/** `fy secret entry hint`: the same words a ferret's `login_hint` reads. */
+/** `fy account hint`: the same words a ferret's `account_hint` reads. */
 export function renderLoginHint(hint: LoginHintList): string {
   return loginHintSummary(hint.site, hint.hints);
 }
@@ -39,12 +39,12 @@ export function renderLoginEntryLine(entry: LoginEntrySummary): string {
 export function renderLoginEntryList(list: LoginEntryList): string {
   if (list.health === 'damaged')
     return [
-      'This daemon cannot read its secret store, so its saved logins cannot be listed.',
+      'This daemon cannot read its secret store, so its accounts cannot be listed.',
       list.diagnosis ?? 'no diagnosis was given',
       '',
       'They are NOT gone. Do not add or edit any until the store is readable, or you may write over entries that are still there.',
     ].join('\n');
-  if (list.entries.length === 0) return 'No saved logins on this daemon.';
+  if (list.entries.length === 0) return 'No accounts on this daemon.';
   return list.entries
     .map(entry =>
       [
@@ -59,7 +59,7 @@ export function renderLoginEntryList(list: LoginEntryList): string {
     .join('\n');
 }
 
-/** `fy secret entry recipe show`: the owner's steps, what the daemon saw, and each proposal as the change it would make. */
+/** `fy account recipe show`: the owner's steps, what the daemon saw, and each proposal as the change it would make. */
 export function renderLoginRecipe(entry: LoginEntrySummary): string {
   const seen = entry.observed ?? [];
   const proposals = entry.proposals ?? [];

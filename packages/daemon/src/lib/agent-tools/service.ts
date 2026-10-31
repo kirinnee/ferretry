@@ -152,12 +152,12 @@ export interface AgentToolPorts {
   /** What secure copy knows about pages: not pictured while showing a copied document, and what the agent read. */
   readonly copyPages?: AgentCopyPagesPort;
   /**
-   * The saved logins' NON-SECRET listing, for `login.hint`: labels, methods, domains, usernames. The directory a
+   * The saved logins' NON-SECRET listing, for `account.hint`: labels, methods, domains, usernames. The directory a
    * route holds, never the vault: nothing here can open a value. Absent: the tool says none are kept.
    */
   readonly logins?: { list(): Promise<readonly LoginEntrySummary[]> };
   /**
-   * A ferret's recipe proposals (`login.propose`): filed on the login, checked for values, shown to the owner.
+   * A ferret's recipe proposals (`account.propose`): filed on the login, checked for values, shown to the owner.
    * Absent: the tool says recipes are not kept here.
    */
   /**
@@ -261,13 +261,13 @@ type LifecycleCall = Extract<
 const MAX_OPENER_DEPTH = 8;
 
 /**
- * The kind of surface a call is about; `input.wait` is about a request, `secure.*` about a copy and `login.hint`
+ * The kind of surface a call is about; `input.wait` is about a request, `secure.*` about a copy and `account.hint`
  * about the saved logins, not a surface.
  */
 const kindOf = (call: AgentToolCall): SurfaceKind | undefined =>
   call.tool === 'input.wait' ||
-  call.tool === 'login.hint' ||
-  call.tool === 'login.propose' ||
+  call.tool === 'account.hint' ||
+  call.tool === 'account.propose' ||
   call.tool.startsWith('secure.')
     ? undefined
     : call.tool.startsWith('terminal.')
@@ -287,7 +287,7 @@ const switchOf = (call: AgentToolCall): SurfaceKind | undefined =>
       ? call.to.kind === 'browser'
         ? 'browser'
         : 'terminal'
-      : call.tool === 'login.hint'
+      : call.tool === 'account.hint'
         ? call.name === undefined
           ? undefined
           : 'browser'
@@ -304,8 +304,8 @@ const LEAVES_SURFACES: ReadonlySet<string> = new Set<AgentToolCall['tool']>([
   'terminal.ask_owner',
   'terminal.request_input',
   'input.wait',
-  'login.hint',
-  'login.propose',
+  'account.hint',
+  'account.propose',
   'browser.list',
   'browser.read',
   'browser.screenshot',
@@ -578,9 +578,9 @@ export class AgentToolService {
           plan,
         };
       }
-      case 'login.hint':
+      case 'account.hint':
         return await this.loginHint(caller, call, facts);
-      case 'login.propose':
+      case 'account.propose':
         return await this.loginPropose(caller, call);
       case 'input.wait': {
         const input = this.inputPort(caller);
@@ -640,8 +640,8 @@ export class AgentToolService {
           | 'terminal.open'
           | 'browser.open'
           | 'input.wait'
-          | 'login.hint'
-          | 'login.propose'
+          | 'account.hint'
+          | 'account.propose'
           | 'secure.copy'
           | 'secure.list'
           | 'secure.discard'
@@ -1462,7 +1462,7 @@ export class AgentToolService {
    */
   private async loginHint(
     caller: AgentToolCaller,
-    call: Extract<AgentToolCall, { readonly tool: 'login.hint' }>,
+    call: Extract<AgentToolCall, { readonly tool: 'account.hint' }>,
     facts: CallFacts,
   ): Promise<AgentToolResult> {
     const logins = this.ports.logins;
@@ -1501,12 +1501,12 @@ export class AgentToolService {
   }
 
   /**
-   * A ferret's suggested recipe for one saved login (`login.propose`). It changes nothing the owner has not
+   * A ferret's suggested recipe for one saved login (`account.propose`). It changes nothing the owner has not
    * allowed: it waits on a card, unless the owner turned auto-apply on for that login.
    */
   private async loginPropose(
     caller: AgentToolCaller,
-    call: Extract<AgentToolCall, { readonly tool: 'login.propose' }>,
+    call: Extract<AgentToolCall, { readonly tool: 'account.propose' }>,
   ): Promise<AgentToolResult> {
     const recipes = this.ports.recipes;
     if (recipes === undefined) throw new AgentToolError('unavailable', 'This daemon keeps no login recipes.');
@@ -1801,9 +1801,9 @@ function callFacts(call: AgentToolCall): AuditDetail {
       return { sensitivity: strongestSensitivity(call.fields), fields: call.fields.length };
     case 'input.wait':
       return { timeoutMs: call.timeoutMs ?? AGENT_TOOL_DEFAULT_WAIT_MS };
-    case 'login.hint':
+    case 'account.hint':
       return { from: call.name === undefined ? 'site' : 'page' };
-    case 'login.propose':
+    case 'account.propose':
       // The login's handle only; the recipe is the ferret's text and stays out of the record.
       return { login: call.login };
     case 'secure.copy':

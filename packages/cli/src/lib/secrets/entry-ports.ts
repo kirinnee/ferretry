@@ -8,7 +8,7 @@ import type {
   RemovedLoginEntry,
 } from '@ferretry/protocol';
 
-/** The daemon calls `fy secret entry` needs. There is no read: a summary never carries a value. */
+/** The daemon calls `fy account` needs. There is no read: a summary never carries a value. */
 export interface ILoginEntryGateway {
   list(): Promise<LoginEntryList>;
   /** Create the entry or change the fields named; a value travels IN here and nowhere else. */
@@ -37,7 +37,7 @@ interface ILoginEntryOutput {
 /** The only client capability the login entry gateway consumes. */
 export type LoginEntryApiClient = Pick<IFyApiClient, 'request'>;
 
-/** Everything a `fy secret entry` run needs besides its words and flags. */
+/** Everything a `fy account` run needs besides its words and flags. */
 export interface LoginEntryPorts {
   readonly gateway: ILoginEntryGateway;
   readonly out: ILoginEntryOutput;

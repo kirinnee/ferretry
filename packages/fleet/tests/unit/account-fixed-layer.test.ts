@@ -885,15 +885,15 @@ describe('instructionDigest', () => {
 });
 
 describe('AGENT_TOOLS_INSTRUCTION — saved logins', () => {
-  it('should tell a ferret to read login_hint before a sign-in and propose recipe fixes after it, with the old sentence gone', () => {
+  it('should tell a ferret to read account_hint before a sign-in and propose recipe fixes after it, with the old sentence gone', () => {
     // Arrange — the sentence is the whole of what teaches the pair of tools.
 
     // Act
     const text = AGENT_TOOLS_INSTRUCTION;
 
     // Assert
-    should(text).containEql('Read login_hint before sign-in; login_propose fixes after.');
-    should(text).not.containEql('Before a web sign-in, login_hint says how and where.');
+    should(text).containEql('Read account_hint before sign-in; account_propose fixes after.');
+    should(text).not.containEql('Before a web sign-in, account_hint says how and where.');
   });
 });
 

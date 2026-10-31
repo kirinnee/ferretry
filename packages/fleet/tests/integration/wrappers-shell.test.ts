@@ -465,7 +465,7 @@ describe('the appended system prompt of a real agent runtime, for every combinat
       'one field per input',
       'Use plain for a username',
       'create passkeys',
-      'login_hint',
+      'account_hint',
     ])
       should(AGENT_TOOLS_INSTRUCTION).containEql(phrase);
   });

@@ -1,6 +1,6 @@
 import type { Command } from 'commander';
 import type { SecretController, SecretListOptions, SecretUseOptions } from './controller.ts';
-import { registerLoginEntryCommands } from './entry-commands.ts';
+import { registerAccountCommands, registerLoginEntryCommands } from './entry-commands.ts';
 import type { LoginEntryController } from './entry-controller.ts';
 
 const JSON_FLAG = '--json';
@@ -45,7 +45,10 @@ export function registerSecretCommands(
       ].join('\n'),
     );
 
-  if (entries !== undefined) registerLoginEntryCommands(secret, entries);
+  if (entries !== undefined) {
+    registerAccountCommands(program, entries);
+    registerLoginEntryCommands(secret, entries);
+  }
 
   secret
     .command('ls', { isDefault: true })
