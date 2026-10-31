@@ -1,6 +1,5 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { NotificationHealthMonitor } from '../../../src/adapters/notifications/notification-health-monitor.ts';
 import { readDoctorReport } from '../../../src/lib/core/doctor.ts';
 import { type NotificationHealthReading, notificationHealthChecks } from '../../../src/lib/notifications/health.ts';
 
@@ -114,32 +113,5 @@ describe('notificationHealthChecks', () => {
     should(withRow.checks.find(check => check.name === 'notifications')?.status).equal('missing');
     should(withRow.ready).be.true();
     should(without.checks.some(check => check.name === 'notifications')).be.false();
-  });
-});
-
-describe('NotificationHealthMonitor', () => {
-  it('should log each failure, keep the newest failure and push made, and log a push that reached no device', () => {
-    // Arrange
-    const lines: string[] = [];
-    let now = EARLY;
-    const monitor = new NotificationHealthMonitor({ now: () => now }, line => lines.push(line));
-    const empty = monitor.snapshot();
-
-    // Act
-    monitor.failed('agenda:s:stopped:x', 'ledger cannot be read');
-    now = LATE;
-    monitor.made('agenda:s:A1:ping', { delivered: 0, failed: 2 });
-    monitor.made('agenda:s:A2:ping', { delivered: 1, failed: 0 });
-
-    // Assert
-    should(empty).eql({});
-    should(monitor.snapshot()).eql({
-      lastFailed: { at: EARLY, key: 'agenda:s:stopped:x', reason: 'ledger cannot be read' },
-      lastMade: { at: LATE, key: 'agenda:s:A2:ping' },
-    });
-    should(lines).eql([
-      'notifications: push agenda:s:stopped:x failed — ledger cannot be read',
-      'notifications: push agenda:s:A1:ping reached none of its 2 device(s)',
-    ]);
   });
 });

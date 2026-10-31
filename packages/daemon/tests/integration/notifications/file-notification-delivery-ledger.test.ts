@@ -310,6 +310,23 @@ describe('FileNotificationDeliveryLedger', () => {
     should(world.warnings[2]).containEql('reads cleanly again');
   });
 
+  it('should still read a ledger whose diagnostics throw', async () => {
+    // Arrange
+    const world = await fixture('notification-ledger-diagnostics-throw');
+    await writeLines(world, ['not json', requested()]);
+    const ledger = new FileNotificationDeliveryLedger(world.paths, world.files, {
+      warn: () => {
+        throw new Error('stderr closed');
+      },
+    });
+
+    // Act
+    const found = await ledger.find('direct:req-1');
+
+    // Assert
+    should(found?.requested).containDeep({ key: 'direct:req-1' });
+  });
+
   it('should inspect a ledger: the lines it skips and its newest outcome', async () => {
     // Arrange
     const world = await fixture('notification-ledger-inspect');
