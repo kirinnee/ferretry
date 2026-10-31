@@ -22,6 +22,16 @@ export interface AgendaFileStore {
   rename(sessionId: string, from: string, to: string): Promise<void>;
   /** Removes the file; a file already gone is not a failure. */
   remove(sessionId: string, name: string): Promise<void>;
+  /**
+   * What the file is now — a value that changes whenever the file does, whoever changes it — or `undefined`
+   * when there is no such file. A store without it is read whole on every read.
+   */
+  identity?(sessionId: string, name: string): Promise<string | undefined>;
+  /** The file's text and the identity of the very file it was read from, or `undefined` when there is none. */
+  readIdentified?(
+    sessionId: string,
+    name: string,
+  ): Promise<{ readonly text: string; readonly identity: string } | undefined>;
 }
 
 /** THE READER'S RULE: the new name when it exists, else the old one. Never both, never a merge. */
