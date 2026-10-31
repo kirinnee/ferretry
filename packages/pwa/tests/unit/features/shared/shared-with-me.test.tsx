@@ -234,6 +234,25 @@ describe('Access refused', () => {
     await view.unmount();
   });
 
+  it('falls back to the locked card with its Unlock button when Try again finds the key accepted but locked', async () => {
+    let accepted = false;
+    const { view } = await open({
+      list: async () => [
+        await testSubscription(studioId, { ownLabel: 'Studio', status: accepted ? 'active' : 'refused' }),
+      ],
+      browse: async () => failedAttempt('locked', 'Unlock with your passkey first.'),
+      tryAgain: async () => {
+        accepted = true;
+        return okAttempt(undefined);
+      },
+    });
+    await click(q('[data-refused-try-again]'));
+    await settle();
+    expect(q('[data-access-refused]')).toBeNull();
+    expect(q('[data-publisher-unlock]')?.textContent).toBe('Unlock with passkey');
+    await view.unmount();
+  });
+
   it('stays refused, with the refusal said again, when the publisher still refuses', async () => {
     const { view } = await open({ list: refusedList, tryAgain: async () => refusedAttempt() });
     await click(q('[data-refused-try-again]'));

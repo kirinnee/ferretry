@@ -348,6 +348,19 @@ describe('passkey and unlock', () => {
     should(keys.forgotten).be.empty();
   });
 
+  it('should take the mark off when the publisher answers locked, because the key was accepted', async () => {
+    const sub = await testSubscription(publisher.daemonId, { status: 'refused' });
+    const { controller, keys } = rig({
+      'GET /v1/shared/me': () => {
+        throw http('member_locked', 403);
+      },
+    });
+    keys.subscriptions.set(sub.daemonId, sub);
+    should((await controller.tryAgain(sub)).kind).equal('ok');
+    should(keys.subscriptions.get(publisher.daemonId)?.status).equal('active');
+    should(keys.forgotten).be.empty();
+  });
+
   it('should leave the mark on, and delete nothing, when the publisher still refuses the key', async () => {
     const sub = await testSubscription(publisher.daemonId, { status: 'refused' });
     const { controller, keys } = rig({

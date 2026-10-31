@@ -273,8 +273,11 @@ export class SharedController {
     const attempt = await this.#attempt(subscription, async client => {
       await readMe(client);
     });
-    if (attempt.kind === 'ok') await this.#ports.keys.clearRefused(subscription.daemonId);
-    return attempt;
+    // A locked answer means the publisher accepted the key and wants the passkey: the key is fine.
+    const accepted = attempt.kind === 'ok' || (attempt.kind === 'failed' && attempt.problem.kind === 'locked');
+    if (!accepted) return attempt;
+    await this.#ports.keys.clearRefused(subscription.daemonId);
+    return { kind: 'ok', value: undefined };
   }
 
   /** Leaves the publisher. The answer is a 200; this browser's key and record are then the person's to drop. */
