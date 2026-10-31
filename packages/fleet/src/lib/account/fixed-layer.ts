@@ -309,16 +309,15 @@ export const HYPERMEDIA_ENV = 'FY_HYPERMEDIA';
  */
 export const HYPERMEDIA_INSTRUCTION = (fy: string): string =>
   [
-    'Hypermedia: when you teach, explain, compare or walk through anything not straightforward — a flow, architecture, state machine, layout or change over time — show it in your reply as well as saying it. Do not overdo it: simple answers stay plain text.',
+    'Hypermedia: when you teach, explain, compare or walk through anything not straightforward (a flow, architecture, state machine, layout, change over time), show it as well as saying it. Do not overdo it: simple answers stay plain text.',
     'Always inline: never publish an artifact, page, gist or link to explain, unless asked.',
     'Make it a short story the reader drives: step-through Next buttons, sliders, tap to reveal. One idea per step, short labels, gentle motion (honour prefers-reduced-motion).',
-    'Write a fenced block whose info string is exactly fy-render: line 1 `type: <type>`, line 2 `alt: <one-line description>`, then a line `---`, then the payload.',
+    'Write a fenced block whose info string is exactly fy-render: `type: <type>`, `alt: <one line>`, a `---` line, then the payload.',
     '- mermaid: Mermaid source (flowchart TB, sequenceDiagram, …): top-down, short labels; auto-themed, so no %%{init}%% or colours.',
     '- svg: one self-contained <svg>…</svg> (CSS animation welcome); no script, foreignObject or external links.',
     '- html: a fragment with inline CSS and <script> for interaction (runs isolated); load nothing from the network.',
     `- chart: JSON/YAML {kind: bar|line|area|pie|…, x: […], series: [{name, data}]}; full spec: \`${fy} render guide chart\`.`,
     `- map, image, video, audio, pdf: \`${fy} render guide <type>\`.`,
-    'Example:',
     '```fy-render',
     'type: mermaid',
     'alt: How a request flows',
@@ -344,7 +343,7 @@ export const PACK_INSTRUCTION = (fy: string): string =>
     `1. \`${fy} recommend\` lists the models usable now, most quota first, with the command to start each.`,
     `2. \`${fy} new --runtime <runtime> --model <model> [--effort <level>] --name "<short task title>" "<complete brief>"\` starts one (\`${fy} new --auto "<brief>"\` lets Ferretry choose). Always pass \`--name\` (2–5 Title Case words). The brief is all it knows: say what to do, where, and what to report.`,
     `3. If it refuses (out_of_quota, not_logged_in, cli_missing, probe_failed, …), read the reason and start the next candidate. limit_reached or depth_exceeded: do the work yourself.`,
-    `4. \`${fy} wait <id>\` blocks until it finishes and prints its result. Check it, then combine the results yourself.`,
+    `4. \`${fy} wait <id>\` prints its result when it finishes; check it, then combine the results yourself.`,
     `Stop sub-ferrets you no longer need (\`${fy} stop children <your id> --yes\`).`,
   ].join('\n');
 
@@ -445,7 +444,7 @@ export const AGENDA_ENV = 'FY_AGENDA';
 /** The Agenda mode teaching. Short on purpose — it is in every prompt that turns it on. */
 export const AGENDA_INSTRUCTION = (fy: string): string =>
   [
-    `Agenda mode: ONLY for what the owner alone can give: info, a decision or action. Never track work ("please test/verify"): the board covers it (Done/Not good); after a Not good, open one only if you need input. Owner's question: answer ON it, options stay (\`${fy} agenda edit <id> --question-answer "<text>"\`), not as \`-k info\`. One item per ask: \`${fy} agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<the ask>"\` (required). Title ≤40, ask ≤120. Read cold: no "as above", ticket/PR numbers, paths, acronyms (\`--term "X=meaning"\`).`,
+    `Agenda mode: ONLY for what the owner alone can give: info, a decision or action. Never track work ("please test/verify"): the board covers it (Done/Not good); after a Not good, open one only if you need input. Owner's question: answer ON it, options stay (\`${fy} agenda edit <id> --question-answer "<text>"\`), not as \`-k info\`. Search first (\`${fy} search\`). One item per ask: \`${fy} agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<the ask>"\` (required). Title ≤40, ask ≤120. Read cold: no "as above", ticket/PR numbers, paths, acronyms (\`--term "X=meaning"\`).`,
     `ALONE: Markdown; \`--decided\`=settled, \`--still-open\`=left, \`--body\`=hypermedia. ${AGENDA_SHAPE_LINE}`,
     `\`--blocking\`=stuck, \`--will-block\`=later, \`--by <time>\`.`,
     `"[answer to !A3 …]" is the answer; "[re !A3 …]" is chat, parking it: \`edit <id>\` reopens (\`--question-answer\`, or refresh summary/premise/context), else \`done --reason "<why>"\` withdraws. KEEP CURRENT this turn: \`edit\` if changed, \`done\` if settled; \`ls\` = open.`,
@@ -466,7 +465,7 @@ export const NOTIFY_INSTRUCTION = (fy: string): string =>
  * the daemon). docs/board.md quotes this text verbatim.
  */
 export const BOARD_INSTRUCTION = (fy: string): string =>
-  `Board: all work is a card (&F412); agenda items are !A48. New ask, first: \`${fy} task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>\` (${fy} new/start make one). Before To test: \`${fy} task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"\`. Lane by the work (\`${fy} board lanes show\`): plan → plan lane (owner OKs leaving), build → active: \`${fy} task move <id> <lane> --reason "<why>"\`. Blocked is no lane: \`${fy} agenda add --task <id>\` (owner), \`${fy} task depend\` (card), \`${fy} task block\` (else). \`${fy} task drop --reason\`, \`${fy} task focus <id>\`. Owner's bug: \`${fy} task reopen <id> --to <lane> --ask "<their words>"\`. Starts, PRs, merges, releases, \`${fy} signal done\` self-move; owner closes.`;
+  `Board: all work is a card (&F412); agenda items are !A48. Search first (\`${fy} search\`); update or link a match instead of adding a duplicate. New ask, first: \`${fy} task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>\` (${fy} new/start make one). Before To test: \`${fy} task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"\`. Lane by the work (\`${fy} board lanes show\`): plan → plan lane (owner OKs leaving), build → active: \`${fy} task move <id> <lane> --reason "<why>"\`. Blocked is no lane: \`${fy} agenda add --task <id>\` (owner), \`${fy} task depend\` (card), \`${fy} task block\` (else). \`${fy} task drop --reason\`, \`${fy} task focus <id>\`. Owner's bug: \`${fy} task reopen <id> --to <lane> --ask "<their words>"\`. Starts, PRs, merges, releases, \`${fy} signal done\` self-move; owner closes.`;
 
 /**
  * SUB-FERRET LIMITS (docs/pack-mode.md § Sub-ferret limits): a ferret another ferret started. The daemon

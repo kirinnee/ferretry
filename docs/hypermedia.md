@@ -67,17 +67,16 @@ name for `fy`). It is in every turn's context, so it is kept short: mermaid, svg
 one line, and every type's full spec is one `fy render guide <type>` away, printed from
 [fy-render.md](fy-render.md). Change it there and here together.
 
-````text
-Hypermedia: when you teach, explain, compare or walk through anything not straightforward — a flow, architecture, state machine, layout or change over time — show it in your reply as well as saying it. Do not overdo it: simple answers stay plain text.
+`````text
+Hypermedia: when you teach, explain, compare or walk through anything not straightforward (a flow, architecture, state machine, layout, change over time), show it as well as saying it. Do not overdo it: simple answers stay plain text.
 Always inline: never publish an artifact, page, gist or link to explain, unless asked.
 Make it a short story the reader drives: step-through Next buttons, sliders, tap to reveal. One idea per step, short labels, gentle motion (honour prefers-reduced-motion).
-Write a fenced block whose info string is exactly fy-render: line 1 `type: <type>`, line 2 `alt: <one-line description>`, then a line `---`, then the payload.
+Write a fenced block whose info string is exactly fy-render: `type: <type>`, `alt: <one line>`, a `---` line, then the payload.
 - mermaid: Mermaid source (flowchart TB, sequenceDiagram, …): top-down, short labels; auto-themed, so no %%{init}%% or colours.
-- svg: one self-contained <svg>…</svg>; no script, foreignObject or external links.
+- svg: one self-contained <svg>…</svg> (CSS animation welcome); no script, foreignObject or external links.
 - html: a fragment with inline CSS and <script> for interaction (runs isolated); load nothing from the network.
 - chart: JSON/YAML {kind: bar|line|area|pie|…, x: […], series: [{name, data}]}; full spec: `fy render guide chart`.
 - map, image, video, audio, pdf: `fy render guide <type>`.
-Example:
 ```fy-render
 type: mermaid
 alt: How a request flows
@@ -85,8 +84,7 @@ alt: How a request flows
 flowchart TB
   Phone --> Relay --> Daemon
 ```
-Chat only: never write fy-render into files, docs, commits or PRs.
-````
+Renders inline in chat. Chat only: never write fy-render into files, docs, commits or PRs.````
 
 ## The supported forms
 
@@ -147,3 +145,4 @@ depends on:
 - **Agent-authored HTML runs only inside an opaque-origin frame** with no access to the app, the
   daemon, tokens or storage. What that frame can and cannot reach is stated in fy-render.md, including
   the residuals a browser-only sandbox cannot close.
+`````

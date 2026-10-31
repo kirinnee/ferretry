@@ -39,14 +39,13 @@ far above a server's text. The runtime wrapper composes it per ferret at exec ti
 ([hypermedia.md](hypermedia.md#delivered-as-system-instructions-per-ferret)). Exactly this, for a binary
 called `fy`:
 
-```text
-Pack mode: you may hand self-contained parts of your task to sub-ferrets — other agents, each on the model that suits its part. Prefer them over your built-in subagents for real work; do small things yourself. Pick each model by the Routing line below.
-1. `fy recommend` lists the models usable now, most quota first.
+````text
+Pack mode: you may hand self-contained parts of your task to sub-ferrets: other agents, each on the model that suits it. Prefer them over your built-in subagents for real work; do small things yourself. Pick each model by the Routing line below.
+1. `fy recommend` lists the models usable now, most quota first, with the command to start each.
 2. `fy new --runtime <runtime> --model <model> [--effort <level>] --name "<short task title>" "<complete brief>"` starts one (`fy new --auto "<brief>"` lets Ferretry choose). Always pass `--name` (2–5 Title Case words). The brief is all it knows: say what to do, where, and what to report.
 3. If it refuses (out_of_quota, not_logged_in, cli_missing, probe_failed, …), read the reason and start the next candidate. limit_reached or depth_exceeded: do the work yourself.
-4. `fy wait <id>` blocks until it finishes and prints its result. Check it, then combine the results yourself.
-Stop sub-ferrets you no longer need (`fy stop children <your id> --yes`).
-```
+4. `fy wait <id>` prints its result when it finishes; check it, then combine the results yourself.
+Stop sub-ferrets you no longer need (`fy stop children <your id> --yes`).```
 
 The Pack section then ends with the **whole routing prompt** ([The routing prompt](#the-routing-prompt)) as
 one line of its own, `Routing: …` — the same text Jev decides with. The daemon renders it into
@@ -101,7 +100,7 @@ prompt: |
   Planning, review and security-sensitive code: claude-opus-5-5 at max; gpt-6-astra for a second opinion.
   Everyday coding: claude-sonnet-5-5. Chores and bulk edits: claude-haiku-5-5 at low.
   When claude-work is low on quota, prefer glm-5.3.
-```
+````
 
 - **A model is named** by its id or its catalog label, ignoring case — `claude-opus-5-5`, `Claude Opus 5.5` —
   exactly as the editor highlights it (`packages/protocol/src/lib/pack-mentions.ts` is the one recogniser both
