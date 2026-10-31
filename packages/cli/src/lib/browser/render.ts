@@ -1,4 +1,4 @@
-import type { BrowserActionResult, BrowserStatus } from '@ferretry/protocol';
+import type { BrowserActionResult, BrowserProxyTestResult, BrowserStatus } from '@ferretry/protocol';
 
 /** The page-level fields only the running-with-a-page member of `BrowserStatus` carries. */
 interface PageDetail {
@@ -54,4 +54,17 @@ export function renderBrowserAction(result: BrowserActionResult, textOnly: boole
 export function screenshotPayload(result: BrowserActionResult): string {
   if ('result' in result && 'screenshotBase64' in result.result) return result.result.screenshotBase64;
   throw new Error('the daemon returned no screenshot bytes');
+}
+
+/**
+ * One line for a proxy test. It carries what the daemon's result carries and nothing more: no proxy
+ * address, header or credential ever reaches this function.
+ */
+export function renderProxyTest(result: BrowserProxyTestResult): string {
+  const which = result.tested === 'saved' ? 'saved proxy' : 'unsaved proxy';
+  if (result.reachable) {
+    return `Proxy reachable via ${which} in ${result.roundTripMs} ms; egress IP ${result.egressIp}. ${result.message}`;
+  }
+  const took = result.roundTripMs === undefined ? '' : ` after ${result.roundTripMs} ms`;
+  return `Proxy test failed (${result.errorClass}): ${result.message} [${which}${took}]`;
 }

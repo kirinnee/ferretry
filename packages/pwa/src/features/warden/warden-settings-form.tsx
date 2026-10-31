@@ -62,6 +62,8 @@ export interface WardenSettingsFormProps {
   readonly machineDefault?: string;
   /** Settings › Speed-ups, where the Jev key is added. */
   readonly speedupsHref?: string;
+  /** Settings › machine › Browser, where the browser's mode and proxy are (the Warden only closes leftovers). */
+  readonly browserHref?: string;
   readonly onNavigate?: (to: string) => void;
 }
 
@@ -353,6 +355,7 @@ export function WardenSettingsForm({
   login,
   machineDefault,
   speedupsHref,
+  browserHref,
   onNavigate,
 }: WardenSettingsFormProps) {
   const name = useId();
@@ -739,6 +742,19 @@ export function WardenSettingsForm({
                 onChange={checked => set({ mayActAlone: { ...value.mayActAlone, [action.id]: checked } })}
               />
             ))}
+            {browserHref === undefined ? null : (
+              <p className="m-0 text-meta leading-base text-muted" data-warden-browser-link="">
+                The browser’s mode and proxy are in{' '}
+                <RouteLink
+                  to={browserHref}
+                  {...(onNavigate === undefined ? {} : { onNavigate })}
+                  className="font-semibold text-accent"
+                >
+                  Settings › machine › Browser
+                </RouteLink>
+                .
+              </p>
+            )}
           </Card>
         )}
       </fieldset>

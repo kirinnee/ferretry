@@ -27,7 +27,8 @@ a window. It is not a disguise; a site that blocks automation on other evidence 
 
 ## Browser proxy
 
-Set per machine, in `machine.yaml` or in the app under Settings › a machine › **Browser proxy**. Empty means
+Set per machine, in `machine.yaml` or in the app under Settings › a machine › **Browser** (the one home for the
+browser: its mode, this proxy, a user-agent note and a live status). Empty means
 the browser goes direct (the default).
 
 ```yaml
@@ -83,3 +84,34 @@ page with an error rather than a direct connection.
 - **A missing `machine.yaml`** is read as "no proxy": a machine that has never been set up goes direct. An
   invalid file is refused at edit time by `fy config check`.
 - **One proxy per machine.** There is no per-site or per-agent routing beyond the bypass list.
+
+## Test proxy
+
+Settings › a machine › **Browser** has a **Test proxy** button, and `fy browser proxy test` does the same
+from a terminal. It answers "does this proxy work, and is my traffic really leaving through it?" without
+starting the agent browser.
+
+- **What it does.** The daemon opens one short-lived connection through the proxy (the saved one, or the one
+  being edited and not yet saved), asks a single neutral HTTPS endpoint for the address it sees, and closes.
+  It reports **reachable or not**, the **error class**, the **round-trip time in ms** and the **egress IP** the
+  endpoint saw, which is the proxy's own when it works. In the CLI, `fy browser proxy test` tests the saved
+  proxy; add `--url` (and `--bypass`, `--username-secret`, `--password-secret` as secret _names_) to test one
+  that is not saved.
+- **Error classes.** `dns` (a name did not resolve), `connect` (nothing accepted a connection at the proxy's
+  address), `auth` (the proxy answered 407 or refused the user name and password), `tls` (the secure step
+  failed), `timeout` (no answer within 10 s), `proxy` (the proxy answered but would not open the connection),
+  `secret` (a secret the setting names is not in this machine's store), `no-proxy` (nothing saved and nothing
+  given) and `other`.
+- **Nothing is kept and nothing leaks.** The credentials are resolved inside the daemon from the secret store
+  and never shown or returned; the result carries a class, one sentence, a time and the egress address, and no
+  header, no proxy address and no URL. The audit log records `browser.proxy-tested` by name with the outcome
+  class and the time, never the proxy or the address ([audit.md](audit.md)).
+- **Testing an unsaved proxy is allowed.** A test is not a save, so it does not wait for the owner's approval
+  the way saving a new proxy does ([config-files.md](config-files.md)). That is exactly why it is owner-only: a
+  test signs in with the secrets a setting names, so an agent that could run one against an address of its
+  choosing could send a stored secret to a server it controls. **An agent or a Warden is refused**, and a
+  paired device confirms with a passkey like any other act that touches the machine's secrets. The route is
+  `POST /v1/browser/proxy/test`; `GET /v1/browser/state` is the machine-wide status line (running or stopped,
+  and the proxy it started with).
+- **The test endpoint** is `api64.ipify.org`, reached over TLS through the proxy. A proxy that cannot reach it
+  fails the test even if it is fine for other sites.

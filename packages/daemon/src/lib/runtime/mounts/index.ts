@@ -44,6 +44,7 @@ import { configFilesConfirmations } from './agenda-confirms.ts';
 import { type AuditSubsystem, auditRoutes } from './audit.ts';
 import { type BoardProjectsSubsystem, boardProjectRoutes } from './board-projects.ts';
 import { type BrowserMountedSubsystem, browserLoginRoutes, browserSocketRoutes } from './browser-login.ts';
+import { type BrowserProxySubsystem, browserProxyRoutes } from './browser-proxy.ts';
 import { carrierRoutes } from './carriers.ts';
 import { type BoardSubsystem, boardRoutes } from './board.ts';
 import { type CatalogSubsystem, catalogRoutes } from './catalogs.ts';
@@ -369,6 +370,8 @@ export interface MountedSubsystems {
   readonly browserLogin: BrowserLoginLifecycle;
   /** One browser host per daemon, owning the real worker, page projection and viewer socket. */
   readonly browser: BrowserMountedSubsystem;
+  /** "Test proxy" and the machine-wide browser state: owner-only, over fake-able ports. */
+  readonly browserProxy: BrowserProxySubsystem;
   /** Terminals and browser pages driven by name — by an agent through its own session credential, and
    *  by a person through the CLI or the app — with take over / hand back. */
   readonly agentTools: { readonly service: AgentToolService; readonly identities: AgentIdentityResolver };
@@ -647,6 +650,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // can neither shadow nor be shadowed. Its per-session refusal is a deeper pattern ending in the
         // literal `browser`, which distinguishes it from every other `/v1/sessions/:id/...` route above.
         ...browserLoginRoutes(subsystems.browserLogin, subsystems.browser),
+        ...browserProxyRoutes(subsystems.browserProxy),
         ...nameRoutes(subsystems.names),
         ...learningRoutes(subsystems.learning),
         ...recommendRoutes(subsystems.recommend),
