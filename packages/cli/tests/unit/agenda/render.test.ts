@@ -107,6 +107,20 @@ describe('attention listing', () => {
     should(blank).not.containEql('decided:');
   });
 
+  it('should print the ferret’s answer to the owner’s question, saying the options are still open, only when there is one', () => {
+    // Act
+    const answered = renderAgendaList(
+      snapshot([humanItem('A1', 'x', { questionAnswer: 'WAL is the write-ahead log' })]),
+    );
+    const blank = renderAgendaList(snapshot([humanItem('A1', 'x', { questionAnswer: '  ' })]));
+
+    // Assert
+    should(answered).containEql(
+      "      answer to the owner's question: WAL is the write-ahead log (the options are still open)",
+    );
+    should(blank).not.containEql('answer to the owner');
+  });
+
   it('should print the still-open points right after the decided ones, only when there are some', () => {
     // Act
     const full = renderAgendaList(
@@ -297,6 +311,39 @@ describe('attention history', () => {
 
     // Assert
     should(actual).containEql('· dismissed by human at');
+  });
+
+  it('should say a ferret closing a question the owner never answered withdrew it', () => {
+    // Act
+    const withdrawn = renderAgendaHistory(
+      snapshot([], {
+        resolved: [
+          resolvedItem('A1', 'which region', {
+            resolvedBy: 'agent',
+            resolvedByName: 'sol',
+            ask: { kind: 'permission' },
+            resolutionNote: 'The owner answered in chat',
+          }),
+        ],
+      }),
+    );
+    const answered = renderAgendaHistory(
+      snapshot([], {
+        resolved: [
+          resolvedItem('A2', 'deploy?', {
+            ask: { kind: 'permission' },
+            response: { kind: 'permission', decision: 'approve' },
+          }),
+        ],
+      }),
+    );
+    const info = renderAgendaHistory(snapshot([], { resolved: [resolvedItem('A3', 'fyi', { resolvedBy: 'agent' })] }));
+
+    // Assert
+    should(withdrawn).containEql('· withdrawn by agent');
+    should(withdrawn).containEql('The owner answered in chat');
+    should(answered).containEql('· resolved by human');
+    should(info).containEql('· resolved by agent');
   });
 
   it('should name an owner reply as a reply, not a resolution', () => {

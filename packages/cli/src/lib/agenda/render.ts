@@ -91,6 +91,9 @@ function itemLines(item: AgendaItem): string[] {
   if (item.stillOpen !== undefined && item.stillOpen.trim() !== '') {
     lines.push(`${INDENT}still open: ${compact(item.stillOpen)}`);
   }
+  if (item.questionAnswer !== undefined && item.questionAnswer.trim() !== '') {
+    lines.push(`${INDENT}answer to the owner's question: ${compact(item.questionAnswer)} (the options are still open)`);
+  }
   lines.push(...agendaLines(item), ...briefLines(item), ...instructionLines(item));
   if (item.why.trim() !== item.subject.trim()) lines.push(`${INDENT}why: ${compact(item.why)}`);
   lines.push(`${INDENT}resolve: ${compact(displayHowToResolve(item.howToResolve))}`);
@@ -206,8 +209,27 @@ export function renderAgendaItem(item: AgendaItem | ResolvedAgendaItem): string 
   return 'resolvedAt' in item ? resolutionLine(item) : itemLines(item).join('\n');
 }
 
+/** A ferret closed a question the owner never answered: it was withdrawn, not settled. */
+export function wasWithdrawn(item: ResolvedAgendaItem): boolean {
+  const shape = agendaShape(item);
+  return (
+    item.disposition === 'done' &&
+    item.resolvedBy === 'agent' &&
+    item.response === undefined &&
+    shape !== 'info' &&
+    shape !== 'input'
+  );
+}
+
 function resolutionLine(item: ResolvedAgendaItem): string {
-  const verb = item.disposition === 'dismissed' ? 'dismissed' : item.disposition === 'replied' ? 'replied' : 'resolved';
+  const verb =
+    item.disposition === 'dismissed'
+      ? 'dismissed'
+      : item.disposition === 'replied'
+        ? 'replied'
+        : wasWithdrawn(item)
+          ? 'withdrawn'
+          : 'resolved';
   const answer = item.response === undefined ? '' : ` — ${compact(describeAnswer(item.response), SHORT_WIDTH)}`;
   const note =
     item.resolutionNote === null || item.resolutionNote.trim() === ''

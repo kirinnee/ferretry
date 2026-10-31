@@ -100,6 +100,16 @@ describe('agenda fields on add and edit', () => {
     should(cleared).have.property('clear', ['blockingNow', 'willBlock', 'neededBy']);
   });
 
+  it('should carry the answer to the owner’s question, and only that, when it is all an edit gives', () => {
+    // Act
+    const request = composeEditRequest('A1', { questionAnswer: '  EU keeps the data in Frankfurt.  ' }, undefined);
+
+    // Assert
+    should(request).containDeep({ action: 'edit', id: 'A1', questionAnswer: 'EU keeps the data in Frankfurt.' });
+    should(request).not.have.property('subject');
+    should(request).not.have.property('body');
+  });
+
   it('should refuse setting and clearing the same field at once', () => {
     // Act + Assert
     should(() => composeEditRequest('A1', { blocking: true, notBlocking: true }, undefined)).throw(/contradict/u);

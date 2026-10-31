@@ -85,7 +85,7 @@ The answers a card gives, as buttons and swipes (left · up · right):
   permission   ← Deny · → Approve           (--up "Always allow" adds ↑, which approves)
   review       ← Request changes · → Approve (Request changes takes the owner's words from the reply box)
   todo         → Mark as done               (--up "Skip" adds ↑ Skip)
-  info         → Got it                     (also where the answer to the owner's question goes)
+  info         → Got it                     (something to know; never where a question's answer goes)
   reply        none: the reply box is the answer (the default)
 (task, open, multiple-choice and answer-review are still accepted as older names.) --up-why "<line>" describes
 the --up answer. Without --kind: steps alone are a todo, --option makes a choice (exactly Yes and No, a yesno),
@@ -281,6 +281,10 @@ function mountVerbs(
       .option('-l, --link <target>', 'replace the links with these; repeat', collect, [])
       .option('--step <markdown>', 'replace the steps with these, in order; repeat (clears ticks)', collect, [])
       .option('--body-file <path>', 'replace the body with this Markdown file, or - for stdin')
+      .option(
+        '--question-answer <markdown>',
+        "answer the owner's QUESTION about this item: shown above its options, which stay open for the owner's own answer",
+      )
       .option('--blocking', 'you are stopped until the owner answers')
       .option('--not-blocking', 'you are no longer stopped')
       .option('--will-block <thing>', 'what this will block, in a few words')
@@ -402,6 +406,10 @@ function mountVerbs(
       .description('resolve an item, optionally answering its ask')
       .argument('<id>', 'the item reference, like !A3')
       .option('-n, --note <text>', 'a note recorded with the resolution')
+      .option(
+        '--reason <text>',
+        'why you close a question the owner has not answered (required: the owner sees it as withdrawn)',
+      )
       .option('--approve', 'answer a permission ask with approval')
       .option('--reject', 'answer a permission ask with a refusal')
       .option('--choice <label>', 'answer a multiple-choice ask with one option label')

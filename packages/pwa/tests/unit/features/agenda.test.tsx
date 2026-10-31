@@ -492,6 +492,32 @@ describe('a request to show an item (`?attention=A5`)', () => {
     });
   }
 
+  test('keeps a replied question answerable: the line is a note above its live answers, not a replacement', () => {
+    const replied = { parked: { reason: 'replied', at: '2026-07-31T11:50:00.000Z' } };
+    const view = mount({ snapshot: board([...MIXED, item('A89', replied)]), focus: target('A89') });
+    const card = view.root.findByType(AgendaItemView);
+    expect(card.props.settled).toBeUndefined();
+    expect(card.props.parkedNote).toBeDefined();
+    expect(card.props.onSnooze).toBeDefined();
+  });
+
+  test('still settles a replied notice and a snoozed question: only a replied question stays live', () => {
+    const at = '2026-07-31T11:50:00.000Z';
+    const notice = mount({
+      snapshot: board([...MIXED, item('A90', { notice: true, parked: { reason: 'replied', at } })]),
+      focus: target('A90'),
+    });
+    expect(notice.root.findByType(AgendaItemView).props.parkedNote).toBeUndefined();
+    const snoozed = mount({
+      snapshot: board([
+        ...MIXED,
+        item('A91', { parked: { reason: 'snoozed', at, until: '2026-08-01T09:00:00.000Z' } }),
+      ]),
+      focus: target('A91'),
+    });
+    expect(snoozed.root.findByType(AgendaItemView).props.settled).toBeDefined();
+  });
+
   test('opens a notice on its own, outside the pager', () => {
     const view = mount({ snapshot: board(MIXED), focus: target('A4') });
     const card = view.root.findByType(AgendaItemView);

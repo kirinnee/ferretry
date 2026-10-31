@@ -310,6 +310,30 @@ describe('agenda controller resolve and dismiss', () => {
     should(out.messages[0]).equal(`resolved !A1 — 0 open items in ${SESSION}`);
   });
 
+  it('should send --reason as the note and say the question was withdrawn when a ferret closes it unanswered', async () => {
+    // Arrange
+    const withdrawn = snapshot([], {
+      resolved: [
+        resolvedItem('A1', 'which region', {
+          resolvedBy: 'agent',
+          resolvedByName: 'sol',
+          ask: { kind: 'permission' },
+          resolutionNote: 'The owner answered in chat',
+        }),
+      ],
+    });
+    const { controller, gateway, out } = build(SESSION, withdrawn);
+
+    // Act
+    await controller.resolve('!A1', { reason: '  The owner answered in chat  ' });
+
+    // Assert
+    should(gateway.applied).deepEqual([
+      { sessionId: SESSION, request: { action: 'resolve', id: 'A1', note: 'The owner answered in chat' } },
+    ]);
+    should(out.messages[0]).startWith('withdrew the unanswered question !A1');
+  });
+
   it('should answer a yes or no card with --yes and --no', async () => {
     // Arrange
     const { controller, gateway } = build(SESSION, snapshot([]));

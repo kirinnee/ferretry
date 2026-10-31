@@ -648,10 +648,22 @@ describe('Agenda state machine', () => {
 
     // Act
     const agentResolveAsked = succeeded(
-      applyAgendaCommand(own.ledger, { action: 'resolve', actor: AGENT, id: 'A1', at: SECOND }),
+      applyAgendaCommand(own.ledger, {
+        action: 'resolve',
+        actor: AGENT,
+        id: 'A1',
+        note: 'Settled in chat.',
+        at: SECOND,
+      }),
     );
     const wrongDaemon = failed(
-      applyAgendaCommand(plainOwn.ledger, { action: 'resolve', actor: AGENT, id: 'A1', at: SECOND }),
+      applyAgendaCommand(plainOwn.ledger, {
+        action: 'resolve',
+        actor: AGENT,
+        id: 'A1',
+        note: 'Settled in chat.',
+        at: SECOND,
+      }),
     );
     const daemonResolve = succeeded(
       applyAgendaCommand(plainOwn.ledger, { action: 'resolve', actor: DAEMON, id: 'A1', at: SECOND }),
@@ -1285,7 +1297,13 @@ describe('Agenda state machine needs-info', () => {
 
     // Act
     const resolved = succeeded(
-      applyAgendaCommand(asked.ledger, { action: 'resolve', actor: AGENT, id: 'A1', note: null, at: THIRD }),
+      applyAgendaCommand(asked.ledger, {
+        action: 'resolve',
+        actor: AGENT,
+        id: 'A1',
+        note: 'Settled in chat.',
+        at: THIRD,
+      }),
     );
 
     // Assert
@@ -1747,7 +1765,13 @@ describe('Agenda state machine: a new ask is the owner’s turn', () => {
   it('should leave a closed item alone', () => {
     // Arrange
     const closed = succeeded(
-      applyAgendaCommand(born().ledger, { action: 'resolve', actor: AGENT, id: 'A1', at: SECOND }),
+      applyAgendaCommand(born().ledger, {
+        action: 'resolve',
+        actor: AGENT,
+        id: 'A1',
+        note: 'Settled in chat.',
+        at: SECOND,
+      }),
     );
 
     // Act
@@ -1911,7 +1935,13 @@ describe('Agenda state machine reply', () => {
     // Arrange
     const created = raised();
     const closed = succeeded(
-      applyAgendaCommand(created.ledger, { action: 'resolve', actor: AGENT, id: 'A1', at: SECOND }),
+      applyAgendaCommand(created.ledger, {
+        action: 'resolve',
+        actor: AGENT,
+        id: 'A1',
+        note: 'Settled in chat.',
+        at: SECOND,
+      }),
     );
     const notice = raised(AGENT, { notice: true, kind: 'info', ask: undefined });
 
@@ -2217,7 +2247,13 @@ describe('Agenda state machine reply', () => {
   it('should not be brought back by a surface of an item that was answered for real', () => {
     // Arrange
     const closed = succeeded(
-      applyAgendaCommand(raised().ledger, { action: 'resolve', actor: AGENT, id: 'A1', at: SECOND }),
+      applyAgendaCommand(raised().ledger, {
+        action: 'resolve',
+        actor: AGENT,
+        id: 'A1',
+        note: 'Settled in chat.',
+        at: SECOND,
+      }),
     );
 
     // Act
@@ -2903,7 +2939,9 @@ describe('an item that confirms a held configuration change', () => {
 
     // Act / Assert
     should(
-      succeeded(applyAgendaCommand(ledger, { action: 'resolve', actor: AGENT, id: 'A1', at: SECOND })).change,
+      succeeded(
+        applyAgendaCommand(ledger, { action: 'resolve', actor: AGENT, id: 'A1', note: 'Settled in chat.', at: SECOND }),
+      ).change,
     ).equal('resolved');
     should(
       succeeded(applyAgendaCommand(ledger, { action: 'dismiss', actor: AGENT, id: 'A1', at: SECOND })).change,
@@ -3233,7 +3271,13 @@ describe('Agenda state machine: snooze, unsnooze and wake', () => {
     // Arrange
     const created = raised();
     const closed = succeeded(
-      applyAgendaCommand(created.ledger, { action: 'resolve', actor: AGENT, id: 'A1', at: SECOND }),
+      applyAgendaCommand(created.ledger, {
+        action: 'resolve',
+        actor: AGENT,
+        id: 'A1',
+        note: 'Settled in chat.',
+        at: SECOND,
+      }),
     );
     const notice = raised(AGENT, { notice: true, kind: 'info', ask: undefined });
 
@@ -3787,5 +3831,149 @@ describe('Agenda state machine answer shapes', () => {
     // Assert
     should(refused.error).deepEqual({ code: 'invalid', message: AGENDA_SHAPE_ERRORS.stepsOnlyTodo });
     should(edited.item?.steps).deepEqual(['Two']);
+  });
+});
+
+describe('Agenda state machine: a question item is never lost to a Got it (the owner asks, the ferret answers)', () => {
+  const REGION: Partial<RaiseAgendaRequest> = {
+    subject: 'Which region should the deploy use?',
+    kind: 'choice',
+    ask: { kind: 'multiple-choice', options: [{ label: 'EU', description: 'data stays in Europe' }, { label: 'US' }] },
+  };
+  const replying = (ledger: AgendaLedger, at = SECOND, note = 'what is EU?') =>
+    applyAgendaCommand(ledger, { action: 'reply', actor: HUMAN, id: 'A1', note, at });
+  const editing = (ledger: AgendaLedger, patch: EditAgendaPatch, actor: AgendaActor = AGENT) =>
+    applyAgendaCommand(ledger, { action: 'edit', actor, id: 'A1', patch, at: THIRD });
+  const shapeOf = (item: AgendaItem | undefined) => ({ kind: item?.kind, ask: item?.ask, answers: item?.answers });
+
+  it('should keep its kind, ask and answers through every owner reply: a re-reply never turns it into Got it', () => {
+    // Arrange
+    const created = raised(AGENT, REGION);
+
+    // Act
+    const once = succeeded(replying(created.ledger));
+    const twice = succeeded(replying(once.ledger, THIRD, 'still do not follow'));
+
+    // Assert
+    should(shapeOf(once.item)).deepEqual(shapeOf(created.item));
+    should(shapeOf(twice.item)).deepEqual(shapeOf(created.item));
+    should(twice.item?.kind).equal('choice');
+    should(twice.item?.notice).be.undefined();
+  });
+
+  it('should take the ferret’s answer to the owner’s question onto the SAME item, with the options unchanged and live again', () => {
+    // Arrange
+    const replied = succeeded(replying(raised(AGENT, REGION).ledger));
+
+    // Act
+    const answered = succeeded(editing(replied.ledger, { questionAnswer: 'EU keeps the data in Frankfurt.' }));
+
+    // Assert
+    should(answered.item?.questionAnswer).equal('EU keeps the data in Frankfurt.');
+    should(answered.item?.parked).be.undefined();
+    should(answered.item?.waitingOn).be.undefined();
+    should(answered.item?.waitingSince).equal(THIRD);
+    should(shapeOf(answered.item)).deepEqual(shapeOf(replied.item));
+    should(agendaSnapshot(answered.ledger).items.map(item => item.id)).deepEqual(['A1']);
+    should(answered.item?.revisions?.map(revision => revision.changed)).deepEqual([['questionAnswer']]);
+  });
+
+  it('should still make a refresh of the whole card the way back when no answer to a question comes with it', () => {
+    // Arrange
+    const replied = succeeded(replying(raised(AGENT, REGION).ledger));
+
+    // Act
+    const refused = failed(editing(replied.ledger, { stillOpen: 'Which region?' }));
+
+    // Assert
+    should(refused.error.message).containEql('missing --summary, --premise, --context');
+  });
+
+  it('should leave an owner’s answer to the original options the only thing that closes it, even while parked as replied', () => {
+    // Arrange
+    const replied = succeeded(replying(raised(AGENT, REGION).ledger));
+
+    // Act
+    const answered = succeeded(
+      applyAgendaCommand(replied.ledger, {
+        action: 'answer',
+        actor: HUMAN,
+        id: 'A1',
+        response: { kind: 'multiple-choice', choice: 'EU' },
+        at: THIRD,
+      }),
+    );
+
+    // Assert
+    should(answered.addressed?.response).deepEqual({ kind: 'multiple-choice', choice: 'EU' });
+    should(agendaSnapshot(answered.ledger).items).have.length(0);
+  });
+
+  it('should never let Got it on an info item resolve a question item, however the two relate', () => {
+    // Arrange: the question, replied to; the ferret’s answer given as a separate info item
+    const asked = succeeded(replying(raised(AGENT, REGION).ledger));
+    const info = succeeded(
+      applyAgendaCommand(asked.ledger, {
+        action: 'raise',
+        actor: AGENT,
+        request: request({ kind: 'info', ask: undefined, subject: 'EU means Frankfurt' }),
+        at: THIRD,
+      }),
+    );
+
+    // Act
+    const gotIt = succeeded(applyAgendaCommand(info.ledger, { action: 'resolve', actor: HUMAN, id: 'A2', at: LATER }));
+
+    // Assert
+    const left = agendaSnapshot(gotIt.ledger).items;
+    should(left.map(item => item.id)).deepEqual(['A1']);
+    should(left[0]?.parked).deepEqual({ reason: 'replied', at: SECOND });
+    should(left[0]?.kind).equal('choice');
+  });
+
+  it('should ask a ferret for its reason when it closes a question the owner has not answered', () => {
+    // Arrange
+    const created = raised(AGENT, REGION);
+    const resolve = (actor: AgendaActor, note?: string) =>
+      applyAgendaCommand(created.ledger, {
+        action: 'resolve',
+        actor,
+        id: 'A1',
+        ...(note === undefined ? {} : { note }),
+        at: SECOND,
+      });
+
+    // Act
+    const bare = failed(resolve(AGENT));
+    const blank = failed(resolve(AGENT, '   '));
+    const withReason = succeeded(resolve(AGENT, 'The owner answered in chat: EU'));
+    const byOwner = succeeded(resolve(HUMAN));
+
+    // Assert
+    should(bare.error.code).equal('invalid');
+    should(bare.error.message).containEql('--reason');
+    should(bare.error.message).containEql('withdrawn');
+    should(blank.error.code).equal('invalid');
+    should(withReason.addressed?.resolutionNote).equal('The owner answered in chat: EU');
+    should(withReason.addressed?.response).be.undefined();
+    should(byOwner.addressed?.resolvedBy).equal('human');
+  });
+
+  it('should ask for the reason on every other question shape too, and let an info item or a notice close with no words', () => {
+    // Arrange
+    const closeBy = (overrides: Partial<RaiseAgendaRequest>) =>
+      applyAgendaCommand(raised(AGENT, overrides).ledger, { action: 'resolve', actor: AGENT, id: 'A1', at: SECOND });
+
+    // Act
+    const info = succeeded(closeBy({ kind: 'info', ask: undefined }));
+    const notice = succeeded(closeBy({ kind: 'info', notice: true, ask: undefined }));
+    const todo = failed(closeBy({ kind: 'task', ask: { kind: 'task' } }));
+    const permission = failed(closeBy({}));
+    const reply = failed(closeBy({ kind: 'reply', ask: { kind: 'open-question' } }));
+
+    // Assert
+    should(info.addressed?.disposition).equal('done');
+    should(notice.addressed?.disposition).equal('done');
+    for (const refused of [todo, permission, reply]) should(refused.error.message).containEql('--reason');
   });
 });

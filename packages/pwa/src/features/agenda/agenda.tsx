@@ -31,6 +31,7 @@ import { ChatProse } from '../../components/chat-prose.tsx';
 import type { InboxAction } from '../../lib/agenda-answers.ts';
 import { agendaCounts, agendaItems } from '../../lib/agenda-chat.ts';
 import type { DaemonAgendaClient } from '../../lib/agenda-client.ts';
+import { cardModel } from '../../lib/agenda-card-model.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
 import { actionSentence, snoozeAction, UNSNOOZE_ACTION } from '../../lib/agenda-inbox.ts';
 import { composerNoteFor, inputDraftDiscarded, withComposerNote } from '../../lib/agenda-reply.ts';
@@ -348,7 +349,14 @@ export const useAgenda = ({
   const next = paged >= 0 && paged < openItems.length - 1 ? openItems[paged + 1] : undefined;
   const history = useMemo(() => (cardItem === undefined ? [] : itemHistory(cardItem, entries)), [cardItem, entries]);
   const cardError = cardItem === undefined ? null : busy.get(cardItem.id);
-  const settled =
+  // A question the owner replied to is not answered by the reply: its options stay live under the "replied" line.
+  const questionKept =
+    cardItem !== undefined &&
+    !closed &&
+    cardItem.parked?.reason === 'replied' &&
+    cardModel(cardItem).shape !== 'info' &&
+    cardModel(cardItem).shape !== 'input';
+  const standing =
     cardItem === undefined || (!closed && cardItem.parked === undefined) ? undefined : (
       <AgendaSettled
         busy={busyIds.has(cardItem.id)}
@@ -400,9 +408,10 @@ export const useAgenda = ({
               }
             : {})}
           swipeable={swipeable}
-          {...(settled === undefined
+          {...(standing === undefined || questionKept
             ? { onSnooze: (until: string) => act(cardItem, snoozeAction(until), '') }
-            : { settled })}
+            : { settled: standing })}
+          {...(standing !== undefined && questionKept ? { parkedNote: standing } : {})}
           {...(now === undefined ? {} : { now })}
           {...(previous === undefined ? {} : { onPrevious: () => update(() => ({ card: previous.id })) })}
           {...(next === undefined ? {} : { onNext: () => update(() => ({ card: next.id })) })}
