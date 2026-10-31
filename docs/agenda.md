@@ -4,6 +4,13 @@ The agenda is what the owner has to decide or do, and what each item blocks. It 
 as the name of the feature (`fy attention …` still works, deprecated). A plain notification with
 nothing to decide is a **notice**, not an agenda item (see [Notices](#notices)).
 
+**The agenda is not a task tracker.** It exists to get information, a decision or an action only the owner can
+give. A ferret never raises an item to track or check its own work: no "please test X", "please verify Y" or "try it
+after the release". That is the board's job: a finished card reaches its "To test" lane and the owner presses
+**Done** or **Not good** ([board.md](board.md)). After the owner marks a result **Not good**, the ferret
+opens an agenda item only if it needs something from them to fix it. The ferret's instruction says so
+(`AGENDA_INSTRUCTION`, [notifications.md](notifications.md#agenda-mode)).
+
 The daemon owns the model: the state machine is `packages/daemon/src/lib/agenda/state-machine.ts`,
 the wire contract is `packages/protocol/src/lib/agenda.ts`. This page says what they mean.
 
