@@ -538,6 +538,27 @@ class RecordingSessionLauncher implements SessionLifecycleLauncher {
  * `planResume` branches on — a live pane is typed into, a gone one is relaunched — so making it a
  * field is what lets one boot prove both halves of the mount.
  */
+/** The daemon's own session storage, handed to a world's `createResumeLauncher`. */
+type SeedingStorage = Parameters<DaemonWorld['createResumeLauncher']>[0];
+
+/**
+ * Seeds a session document THROUGH THE DAEMON'S OWN STORAGE, under the session lock every daemon writer
+ * takes. A plain read-and-write of the file raced them: once a session runs, its observer reads
+ * `state.json`, transforms it and writes it back under that lock, and a seed landing between its read
+ * and its write was overwritten (#1077 found it in the migration case; these share its shape).
+ */
+async function seedUnderLock(
+  storage: SeedingStorage | undefined,
+  id: string,
+  document: 'config' | 'state',
+  fields: Record<string, unknown>,
+): Promise<void> {
+  if (storage === undefined) throw new Error('the daemon never built its resume launcher');
+  const merge = (current: unknown): unknown => ({ ...(current as Record<string, unknown>), ...fields });
+  if (document === 'config') await storage.updateConfig(parseSessionId(id), merge);
+  else await storage.updateState(parseSessionId(id), merge);
+}
+
 class RecordingResumeLauncher implements ResumeLauncher {
   /** What `observe` reports. A session nothing is running: the revive must relaunch it. */
   pane: PaneObservation = { alive: false, dead: false, promptReady: false };
@@ -3349,6 +3370,7 @@ describe('daemon boot lifecycle', () => {
     const cleanups: Array<() => void | Promise<void>> = [];
     const launcher = new RecordingSessionLauncher();
     const reviver = new RecordingResumeLauncher();
+    const seeding: { storage?: SeedingStorage } = {};
     let release = (): void => {};
     const world = {
       ...(await worldAt(home, OS_CHOSEN_PORT, async () => {
@@ -3358,9 +3380,10 @@ describe('daemon boot lifecycle', () => {
       })),
       sessionLauncher: launcher,
       createResumeLauncher: (
-        _storage: unknown,
+        storage: SeedingStorage,
         relaunch: (id: SessionId) => Promise<readonly string[] | undefined>,
       ) => {
+        seeding.storage = storage;
         reviver.argvFor = relaunch;
         return reviver;
       },
@@ -3411,7 +3434,7 @@ describe('daemon boot lifecycle', () => {
     const document = async (file: string): Promise<Record<string, unknown>> =>
       JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>;
     const patch = async (file: string, fields: Record<string, unknown>): Promise<void> =>
-      await writeFile(file, JSON.stringify({ ...(await document(file)), ...fields }), { mode: 0o600 });
+      await seedUnderLock(seeding.storage, id, file === stateFile ? 'state' : 'config', fields);
     const settings = async (): Promise<unknown> =>
       await (await fetch(`${sessions}/${id}/relaunch-settings`, { headers: cli })).json();
     const startArgv = launcher.launched[0]?.command ?? [];
@@ -3530,6 +3553,7 @@ describe('daemon boot lifecycle', () => {
     const cleanups: Array<() => void | Promise<void>> = [];
     const launcher = new RecordingSessionLauncher();
     const reviver = new RecordingResumeLauncher();
+    const seeding: { storage?: SeedingStorage } = {};
     let release = (): void => {};
     const world = {
       ...(await worldAt(home, OS_CHOSEN_PORT, async () => {
@@ -3539,9 +3563,10 @@ describe('daemon boot lifecycle', () => {
       })),
       sessionLauncher: launcher,
       createResumeLauncher: (
-        _storage: unknown,
+        storage: SeedingStorage,
         relaunch: (id: SessionId) => Promise<readonly string[] | undefined>,
       ) => {
+        seeding.storage = storage;
         reviver.argvFor = relaunch;
         return reviver;
       },
@@ -3613,12 +3638,11 @@ describe('daemon boot lifecycle', () => {
     };
     const documentOf = async (id: SessionId, name: string): Promise<Record<string, unknown>> =>
       JSON.parse(await readFile(join(home, 'state', 'sessions', id, name), 'utf8')) as Record<string, unknown>;
-    const patch = async (id: SessionId, name: string, fields: Record<string, unknown>): Promise<void> =>
-      await writeFile(
-        join(home, 'state', 'sessions', id, name),
-        JSON.stringify({ ...(await documentOf(id, name)), ...fields }),
-        { mode: 0o600 },
-      );
+    const patch = async (
+      id: SessionId,
+      name: 'state.json' | 'config.json',
+      fields: Record<string, unknown>,
+    ): Promise<void> => await seedUnderLock(seeding.storage, id, name === 'state.json' ? 'state' : 'config', fields);
     let asked = 0;
     // Each move is asked of a session at its prompt, with nothing in flight, so only the conversation
     // decides. FORCED past the in-flight gate, because the patch below cannot hold it shut: every move
@@ -3773,6 +3797,7 @@ describe('daemon boot lifecycle', () => {
     const cleanups: Array<() => void | Promise<void>> = [];
     const launcher = new RecordingSessionLauncher();
     const reviver = new RecordingResumeLauncher();
+    const seeding: { storage?: SeedingStorage } = {};
     let release = (): void => {};
     const world = {
       ...(await worldAt(home, OS_CHOSEN_PORT, async () => {
@@ -3782,9 +3807,10 @@ describe('daemon boot lifecycle', () => {
       })),
       sessionLauncher: launcher,
       createResumeLauncher: (
-        _storage: unknown,
+        storage: SeedingStorage,
         relaunch: (id: SessionId) => Promise<readonly string[] | undefined>,
       ) => {
+        seeding.storage = storage;
         reviver.argvFor = relaunch;
         return reviver;
       },
@@ -3862,10 +3888,8 @@ describe('daemon boot lifecycle', () => {
     const sessionDirectory = join(home, 'state', 'sessions', id);
     const documentOf = async (name: string): Promise<Record<string, unknown>> =>
       JSON.parse(await readFile(join(sessionDirectory, name), 'utf8')) as Record<string, unknown>;
-    const patch = async (name: string, fields: Record<string, unknown>): Promise<void> =>
-      await writeFile(join(sessionDirectory, name), JSON.stringify({ ...(await documentOf(name)), ...fields }), {
-        mode: 0o600,
-      });
+    const patch = async (name: 'state.json' | 'config.json', fields: Record<string, unknown>): Promise<void> =>
+      await seedUnderLock(seeding.storage, id, name === 'state.json' ? 'state' : 'config', fields);
     let asked = 0;
     const migrate = async (body: Record<string, unknown>): Promise<Response> => {
       await patch('state.json', { status: 'rate_limited', openTools: [] });
