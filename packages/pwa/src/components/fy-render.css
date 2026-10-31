@@ -83,30 +83,30 @@
     linear-gradient(
       to right,
       transparent 0,
-      #000 calc(var(--fy-fade-l, 0) * 28px),
-      #000 calc(100% - var(--fy-fade-r, 0) * 28px),
+      currentcolor calc(var(--fy-fade-l, 0) * 28px),
+      currentcolor calc(100% - var(--fy-fade-r, 0) * 28px),
       transparent 100%
     ),
     linear-gradient(
       to bottom,
       transparent 0,
-      #000 calc(var(--fy-fade-t, 0) * 28px),
-      #000 calc(100% - var(--fy-fade-b, 0) * 28px),
+      currentcolor calc(var(--fy-fade-t, 0) * 28px),
+      currentcolor calc(100% - var(--fy-fade-b, 0) * 28px),
       transparent 100%
     );
   mask-image:
     linear-gradient(
       to right,
       transparent 0,
-      #000 calc(var(--fy-fade-l, 0) * 28px),
-      #000 calc(100% - var(--fy-fade-r, 0) * 28px),
+      currentcolor calc(var(--fy-fade-l, 0) * 28px),
+      currentcolor calc(100% - var(--fy-fade-r, 0) * 28px),
       transparent 100%
     ),
     linear-gradient(
       to bottom,
       transparent 0,
-      #000 calc(var(--fy-fade-t, 0) * 28px),
-      #000 calc(100% - var(--fy-fade-b, 0) * 28px),
+      currentcolor calc(var(--fy-fade-t, 0) * 28px),
+      currentcolor calc(100% - var(--fy-fade-b, 0) * 28px),
       transparent 100%
     );
 }
