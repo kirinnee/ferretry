@@ -14,6 +14,8 @@ export class TranscriptFileExposure implements CopyExposurePort {
     private readonly files: TranscriptFileResolver,
     private readonly tail: (file: string, bytes: number) => Promise<string> = async (file, bytes) => {
       const handle = Bun.file(file);
+      // A missing file reads as empty text, which would answer `clean`: "the agent never saw it" from no evidence.
+      if (!(await handle.exists())) throw new Error('the transcript file is not there');
       return await handle.slice(Math.max(0, handle.size - bytes)).text();
     },
   ) {}
