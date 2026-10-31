@@ -141,7 +141,8 @@ export interface CardAsks {
 
 /** The agenda store's link to cards. U7 implements it; until then no card has asks. */
 export interface AgendaLinkSource {
-  asksFor(cards: readonly BoardTask[]): Promise<ReadonlyMap<BoardTaskId, CardAsks>>;
+  /** The asks on `cards`, read from the agendas of `board`'s ferrets (`cards` when absent). */
+  asksFor(cards: readonly BoardTask[], board?: readonly BoardTask[]): Promise<ReadonlyMap<BoardTaskId, CardAsks>>;
 }
 
 // ---------------------------------------------------------------------------------------------------

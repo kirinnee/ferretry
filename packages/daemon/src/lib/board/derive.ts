@@ -129,8 +129,32 @@ export const deriveView = (card: BoardTask, inputs: DerivationInputs): BoardTask
 };
 
 /**
+ * What one card's view reads ({@link deriveView}): the card, every live descendant (its roll-up and the
+ * activity rolled up into it) and every ancestor on this machine (its human parent). A loop in `parent`
+ * is walked once. Deriving these alone gives that card exactly the view a whole-board read gives it.
+ */
+export const neighbourhoodOf = (card: BoardTask, index: BoardIndex): readonly BoardTask[] => {
+  const seen = new Map<BoardTaskId, BoardTask>([[card.id, card]]);
+  const queue = [...liveChildren(card, index)];
+  for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
+    if (seen.has(next.id)) continue;
+    seen.set(next.id, next);
+    queue.push(...liveChildren(next, index));
+  }
+  let parent = card.parent === null ? undefined : index.get(card.parent);
+  while (parent !== undefined && !seen.has(parent.id)) {
+    seen.set(parent.id, parent);
+    parent = parent.parent === null ? undefined : index.get(parent.parent);
+  }
+  return [...seen.values()];
+};
+
+/**
  * Asks the two ports about a set of cards at once, so a page costs one call to each. The agenda
  * answers first: a blocking ask is part of what makes a card `waiting`.
+ *
+ * `board` is every card whose ferrets' agendas are read: an item about one card may sit in the agenda of
+ * another card's ferret, so a subset still reads the whole board's ferrets and keeps only its own asks.
  */
 export const gatherDerivation = async (
   cards: readonly BoardTask[],
@@ -141,8 +165,9 @@ export const gatherDerivation = async (
     readonly agenda: AgendaLinkSource;
     readonly parents?: SessionParents;
   },
+  board: readonly BoardTask[] = cards,
 ): Promise<DerivationInputs> => {
-  const asks = await ports.agenda.asksFor(cards);
+  const asks = await ports.agenda.asksFor(cards, board);
   const activity = await ports.activity.derive({ cards, index, laneSets, asks });
   if (ports.parents === undefined) return { index, laneSets, activity, asks };
   return { index, laneSets, activity, asks, origins: await originFacts(cards, ports.parents) };
@@ -153,10 +178,12 @@ export const gatherDerivation = async (
  * whose lineage cannot be read reads as the owner's, so a card is never hidden on a failed read.
  */
 const originFacts = async (cards: readonly BoardTask[], parents: SessionParents): Promise<OriginFacts> => {
-  const sessions = new Set(cards.flatMap(card => askSessionOf(card) ?? []));
-  const started = new Set<string>();
-  for (const session of sessions) {
-    if ((await parents.parentOf(session).catch(() => undefined)) !== undefined) started.add(session);
-  }
+  const sessions = [...new Set(cards.flatMap(card => askSessionOf(card) ?? []))];
+  const parented = await Promise.all(
+    sessions.map(async session =>
+      (await parents.parentOf(session).catch(() => undefined)) === undefined ? [] : [session],
+    ),
+  );
+  const started = new Set(parented.flat());
   return { startedByFerret: session => started.has(session) };
 };
