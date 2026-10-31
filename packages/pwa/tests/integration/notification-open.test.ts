@@ -453,7 +453,8 @@ const ASK = {
   tag: 'agenda-mvb9x0-c0ffee01',
   url: '/session/mvb9x0-c0ffee01?attention=A3',
 } as const;
-const BETA_ASK = '/d/beta/session/mvb9x0-c0ffee01?attention=A3';
+/** An agenda push lands on the item in the Inbox, which sends the reader on to its chat when the item is no longer open. */
+const BETA_ASK = '/d/beta/inbox?session=mvb9x0-c0ffee01&agenda=A3';
 
 describe('a notification tap opens its conversation on the machine that sent it', () => {
   beforeAll(async () => {
@@ -466,7 +467,7 @@ describe('a notification tap opens its conversation on the machine that sent it'
     });
   }, 240_000);
 
-  lane('with the app closed, the worker opens Beta’s conversation at the item', async () => {
+  lane('with the app closed, the worker opens Beta’s Inbox at the item', async () => {
     const browserProfile = await profile();
     await push(browserProfile, 'beta', ASK);
     // Every window of the app is gone; only the browser's notification is left.
@@ -480,12 +481,7 @@ describe('a notification tap opens its conversation on the machine that sent it'
     const window = await browserProfile.context.newPage();
     await window.goto(opened[0] ?? '');
     const landed = await settledOn(window, BETA_ASK);
-    expect(landed.route).toMatchObject({
-      kind: 'session',
-      daemonId: 'beta',
-      sessionId: 'mvb9x0-c0ffee01',
-      attention: 'A3',
-    });
+    expect(landed.route).toMatchObject({ kind: 'attention', daemonId: 'beta', attention: 'A3' });
     await browserProfile.context.close();
   });
 
@@ -501,7 +497,7 @@ describe('a notification tap opens its conversation on the machine that sent it'
     const tapped = await tap(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);
     const landed = await settledOn(app, BETA_ASK);
 
-    expect(landed.route).toMatchObject({ kind: 'session', daemonId: 'beta', attention: 'A3' });
+    expect(landed.route).toMatchObject({ kind: 'attention', daemonId: 'beta', attention: 'A3' });
     expect(landed.opens).toEqual([BETA_ASK]);
     expect(await tapped()).toEqual({ focused: [`${origin()}/d/alpha/session/mva1-aaaa0001`], opened: [] });
     // Routed in the app: the same document, not a reload.
@@ -509,7 +505,7 @@ describe('a notification tap opens its conversation on the machine that sent it'
     await browserProfile.context.close();
   });
 
-  lane('with the app on Sessions, opens Beta’s conversation', async () => {
+  lane('with the app on Sessions, opens Beta’s Inbox item', async () => {
     const browserProfile = await profile();
     const app = await appAt(browserProfile, '/d/alpha');
     await retire(browserProfile);
@@ -518,7 +514,7 @@ describe('a notification tap opens its conversation on the machine that sent it'
     const tapped = await tap(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);
     const landed = await settledOn(app, BETA_ASK);
 
-    expect(landed.route).toMatchObject({ kind: 'session', daemonId: 'beta', attention: 'A3' });
+    expect(landed.route).toMatchObject({ kind: 'attention', daemonId: 'beta', attention: 'A3' });
     expect((await tapped()).opened).toEqual([]);
     await browserProfile.context.close();
   });
@@ -533,7 +529,7 @@ describe('a notification tap opens its conversation on the machine that sent it'
     const tapped = await tap(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);
     const landed = await settledOn(app, BETA_ASK);
 
-    expect(landed.route).toMatchObject({ kind: 'session', daemonId: 'beta', attention: 'A3' });
+    expect(landed.route).toMatchObject({ kind: 'attention', daemonId: 'beta', attention: 'A3' });
     // A new navigation, so the conversation re-targets even when the item is one it showed before.
     expect(landed.route?.entry).not.toBe(before.route?.entry);
     expect((await tapped()).opened).toEqual([]);
@@ -553,7 +549,7 @@ describe('a notification tap opens its conversation on the machine that sent it'
     const tapped = await tap(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);
     const landed = await settledOn(app, BETA_ASK);
 
-    expect(landed.route).toMatchObject({ kind: 'session', daemonId: 'beta', attention: 'A3' });
+    expect(landed.route).toMatchObject({ kind: 'attention', daemonId: 'beta', attention: 'A3' });
     expect(await landing.evaluate(() => location.pathname)).toBe('/');
     expect((await tapped()).opened).toEqual([]);
     await browserProfile.context.close();
@@ -568,12 +564,12 @@ describe('a notification tap opens its conversation on the machine that sent it'
 
     // The same session id on both machines: the machine that sent it is what decides.
     await tap(browserProfile, MACHINES.alpha.scope, MACHINES.alpha.script);
-    const onAlpha = await settledOn(app, '/d/alpha/session/mvb9x0-c0ffee01?attention=A2');
+    const onAlpha = await settledOn(app, '/d/alpha/inbox?session=mvb9x0-c0ffee01&agenda=A2');
     await tap(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);
     const onBeta = await settledOn(app, BETA_ASK);
 
-    expect(onAlpha.route).toMatchObject({ kind: 'session', daemonId: 'alpha', attention: 'A2' });
-    expect(onBeta.route).toMatchObject({ kind: 'session', daemonId: 'beta', attention: 'A3' });
+    expect(onAlpha.route).toMatchObject({ kind: 'attention', daemonId: 'alpha', attention: 'A2' });
+    expect(onBeta.route).toMatchObject({ kind: 'attention', daemonId: 'beta', attention: 'A3' });
     await browserProfile.context.close();
   });
 
@@ -647,7 +643,7 @@ describe('a notification tap opens its conversation on the machine that sent it'
     await app.evaluate(() => (globalThis as unknown as { __mountScene: () => void }).__mountScene());
     const landed = await settledOn(app, BETA_ASK);
 
-    expect(landed.route).toMatchObject({ kind: 'session', daemonId: 'beta', attention: 'A3' });
+    expect(landed.route).toMatchObject({ kind: 'attention', daemonId: 'beta', attention: 'A3' });
     await browserProfile.context.close();
   });
 

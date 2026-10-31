@@ -198,7 +198,7 @@ describe('showGroupedNotification', () => {
     should((target.shown[0]?.options as { renotify?: boolean } | undefined)?.renotify).be.false();
     // The Ferretry mark: the icon beside the text, the mono badge Android paints from its alpha.
     should(target.shown[0]?.options).containDeep({ icon: NOTIFICATION_ICON, badge: NOTIFICATION_BADGE });
-    should(NOTIFICATION_ICON).equal('/icons/icon-192.png');
+    should(NOTIFICATION_ICON).equal('/icons/icon-any-192.png');
     should(NOTIFICATION_BADGE).equal('/icons/badge-96.png');
   });
 

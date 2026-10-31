@@ -180,7 +180,7 @@ import { useToTestCards } from './hooks/use-to-test-cards.ts';
 import { useWardenDaemonScope } from './hooks/use-warden-daemon-scope.ts';
 import { useWardenStatus } from './hooks/use-warden-status.ts';
 import { agendaClearPort } from './lib/agenda-clear-agents.ts';
-import { agendaTargetFromSearch } from './lib/agenda-inbox.ts';
+import { agendaConversationPath, agendaTargetFromSearch, inboxTargetFromSearch } from './lib/agenda-inbox.ts';
 import { inboxSourceFromSearch } from './lib/agenda-inbox-list.ts';
 import { AgendaWireProbes } from './lib/agenda-wire-react.tsx';
 import { type MachineSource, machineDisplayOrder } from './lib/all-machines.ts';
@@ -2128,8 +2128,33 @@ function AgendaRoute({ connection }: DaemonPageProps) {
     }),
     [boardActions, store.clients, daemonFetch, pairings],
   );
+  const fleet = useSyncExternalStore(
+    listener => store.fleet.subscribe(listener),
+    () => store.fleet.getSnapshot(),
+  );
+  // A tapped Agenda notification lands here (`/inbox?session=…&agenda=A3`): its card opens when the item is
+  // still open, and the reader goes on to its conversation when it is not.
+  const wanted = inboxTargetFromSearch(window.location.search);
+  const openItem =
+    wanted === null
+      ? null
+      : {
+          daemonId: connection.daemonId,
+          sessionId: wanted.sessionId,
+          id: wanted.id,
+          settled: fleet.daemons.get(connection.daemonId)?.sessions != null,
+        };
   return inbox === null ? null : (
     <AgendaInboxPage
+      open={openItem}
+      onOpenSettled={opened =>
+        navigate(
+          opened || wanted === null
+            ? daemonAgendaPath(connection.daemonId)
+            : agendaConversationPath(connection.daemonId, wanted.sessionId, wanted.id),
+          { replace: true },
+        )
+      }
       clearPort={clearPort}
       toTestHost={toTestHost}
       banner={

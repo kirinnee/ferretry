@@ -36,7 +36,7 @@ export const NOTIFICATION_PAYLOAD_VERSION = 1;
  * status bar from its alpha alone (`scripts/local/gen-pwa-icons.sh`). Same-origin paths, so a push
  * never names an image service. Platforms without one of them (iOS has no badge) simply ignore it.
  */
-export const NOTIFICATION_ICON = '/icons/icon-192.png';
+export const NOTIFICATION_ICON = '/icons/icon-any-192.png';
 export const NOTIFICATION_BADGE = '/icons/badge-96.png';
 
 /** The mark, as notification options. */
