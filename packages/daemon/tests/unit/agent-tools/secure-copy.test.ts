@@ -337,3 +337,14 @@ describe('the secure tools and the switches', () => {
     );
   });
 });
+
+describe('a person and secure.copy', () => {
+  it('should refuse a person sealing a value, running nothing', async () => {
+    const world = copyWorld();
+
+    const error = await refused(world.service.call(person, COPY));
+
+    should(error.code).equal('bad_request');
+    should(world.ran).eql([]);
+  });
+});

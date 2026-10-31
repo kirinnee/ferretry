@@ -405,6 +405,8 @@ export class AgentToolService {
         };
       }
       case 'secure.copy': {
+        if (caller.kind !== 'agent')
+          throw new AgentToolError('bad_request', 'Only an agent seals a value; you can read it yourself.');
         const captured = await this.copyPort().capture(sessionId, {
           name: call.name,
           source: call.source,

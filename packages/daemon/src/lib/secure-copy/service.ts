@@ -73,6 +73,8 @@ interface Read {
 export class SecureCopyService implements InputSealedPort {
   private readonly copies = new Map<string, Map<CopyName, Entry>>();
   private readonly captures = new Map<string, readonly number[]>();
+  /** Names a capture is running for now: taken before anything is awaited, so two captures cannot both pass the checks. */
+  private readonly capturing = new Map<string, Set<CopyName>>();
 
   constructor(private readonly ports: CopyPorts) {}
 
@@ -80,12 +82,13 @@ export class SecureCopyService implements InputSealedPort {
   async capture(sessionId: string, request: CopyCapture): Promise<CopyCaptured> {
     this.purge();
     const own = this.copies.get(sessionId);
-    if (own?.get(request.name)?.state === 'live')
+    const running = this.capturing.get(sessionId) ?? new Set<CopyName>();
+    if (own?.get(request.name)?.state === 'live' || running.has(request.name))
       throw new SecureCopyError(
         'conflict',
         `${copyHandle(request.name)} is already live: discard it with secure.discard first, or pick another name.`,
       );
-    const live = [...(own?.values() ?? [])].filter(entry => entry.state === 'live').length;
+    const live = [...(own?.values() ?? [])].filter(entry => entry.state === 'live').length + running.size;
     if (live >= COPY_MAX_LIVE_PER_SESSION)
       throw new SecureCopyError(
         'capacity',
@@ -100,7 +103,18 @@ export class SecureCopyService implements InputSealedPort {
       );
     // Every attempt counts, a failed one included, so a loop of probing captures is bounded too.
     this.captures.set(sessionId, [...recent, now]);
+    running.add(request.name);
+    this.capturing.set(sessionId, running);
+    try {
+      return await this.hold(sessionId, request);
+    } finally {
+      running.delete(request.name);
+      if (running.size === 0) this.capturing.delete(sessionId);
+    }
+  }
 
+  /** Reads the value and holds it: the second half of a capture, run with its name taken. */
+  private async hold(sessionId: string, request: CopyCapture): Promise<CopyCaptured> {
     const read = await this.read(sessionId, request.name, request.source);
     const capturedAt = this.ports.clock.now();
     const expiresAt = capturedAt + (request.expiresInSeconds ?? COPY_DEFAULT_LIFETIME_SECONDS) * 1000;
@@ -291,6 +305,12 @@ export class SecureCopyService implements InputSealedPort {
   private async maskedStderr(stderr: string, values: readonly string[], name: CopyName): Promise<string | undefined> {
     const trimmed = stderr.trim();
     if (trimmed === '') return undefined;
+    // A piece of the value is as much a leak as the whole: stderr holding any run of it is not handed back at all.
+    const whole = values.flatMap(value => [value, value.trim()]).filter(value => value !== '');
+    const rest = [...whole]
+      .sort((a, b) => b.length - a.length)
+      .reduce((text, value) => text.replaceAll(value, ' '), trimmed);
+    if (whole.some(value => holdsPieceOf(rest, value))) return `[withheld: it held part of ${copyHandle(name)}]`;
     const marker = copyMask(name);
     const masked = [...values]
       .filter(value => value.trim() !== '')
@@ -303,6 +323,21 @@ export class SecureCopyService implements InputSealedPort {
       return undefined;
     }
   }
+}
+
+/** The shortest run of a value that counts as a piece of it. */
+const PIECE = 6;
+
+/** Whether `text` holds any run of `value` at least {@link PIECE} characters long (all of a shorter one). */
+function holdsPieceOf(text: string, value: string): boolean {
+  const characters = [...value];
+  if (characters.length <= PIECE) return text.includes(characters.join(''));
+  const pieces = new Set<string>();
+  for (let at = 0; at + PIECE <= characters.length; at += 1) pieces.add(characters.slice(at, at + PIECE).join(''));
+  const scanned = [...text];
+  for (let at = 0; at + PIECE <= scanned.length; at += 1)
+    if (pieces.has(scanned.slice(at, at + PIECE).join(''))) return true;
+  return false;
 }
 
 function end(entry: Entry, state: 'discarded' | 'expired', at: number): Entry {
