@@ -797,12 +797,12 @@ default**, revocable, and audited on every use. Until then every placement is a 
 
 ## Phases
 
-| Phase | What                                                                                                          | State       |
-| ----- | ------------------------------------------------------------------------------------------------------------- | ----------- |
-| P0    | This contract and the schemas                                                                                 | done        |
-| P1    | Terminal secret and plain: service, agent tools, deliver and cancel, quarantine, `fy input`                   | done        |
-| P2    | The app card, cards of several fields, `chain` steps                                                          | done        |
-| P3    | Saved logins (one tap), "Save as", 2FA codes, `fy account` (alias `fy secret entry`), Settings › Saved logins | done        |
-| P4    | Pages: browser fields, field shot, page holds, passkeys off, captcha handover                                 | done        |
-| P4b   | Login recipes: steps, daemon-observed facts, ferret proposals the owner approves                              | this change |
-| P5    | Multi-step chains, consumer configuration, a per-daemon remote cap                                            | later       |
+| Phase | What                                                                                                                                    | State       |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| P0    | This contract and the schemas                                                                                                           | done        |
+| P1    | Terminal secret and plain: service, agent tools, deliver and cancel, quarantine, `fy input`                                             | done        |
+| P2    | The app card, cards of several fields, `chain` steps                                                                                    | done        |
+| P3    | Saved logins (one tap), "Save as", 2FA codes, `fy account` (alias `fy secret entry`), Settings › Saved logins (now Settings › Accounts) | done        |
+| P4    | Pages: browser fields, field shot, page holds, passkeys off, captcha handover                                                           | done        |
+| P4b   | Login recipes: steps, daemon-observed facts, ferret proposals the owner approves                                                        | this change |
+| P5    | Multi-step chains, consumer configuration, a per-daemon remote cap                                                                      | later       |
