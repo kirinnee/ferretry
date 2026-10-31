@@ -2136,8 +2136,16 @@ export const NARROWED: CapabilityGuard = {
  * first. What a paste into the secret store must also hold, behind a `terminal` route.
  */
 export function withoutSecretsConfigure(refusal: 'not-granted' | 'step-up-required'): CapabilityGuard {
+  return withoutGrant({ capability: 'secrets', axis: 'configure' }, refusal);
+}
+
+/** A governed device granted everything but the one demand named: refused it, or asked for a passkey first. */
+export function withoutGrant(
+  denied: CapabilityDemand,
+  refusal: 'not-granted' | 'step-up-required' = 'not-granted',
+): CapabilityGuard {
   const decide = (demand: CapabilityDemand) =>
-    demand.capability === 'secrets' && demand.axis === 'configure'
+    demand.capability === denied.capability && demand.axis === denied.axis
       ? { allowed: false, refusal }
       : { allowed: true, refusal: 'granted' as const };
   return {

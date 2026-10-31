@@ -85,7 +85,7 @@ export function pasteRoute(request: InputRequest): { readonly from: string; read
   if (source === undefined) return undefined;
   const from =
     source.from.kind === 'command'
-      ? `${source.from.program ?? 'a command'} (what it printed)`
+      ? `${source.from.path ?? source.from.program ?? 'a command'} (what it printed)`
       : `${source.from.origin ?? 'a page'}${source.from.kind === 'clipboard' ? ' (its clipboard)' : ''}`;
   const facts = request.observed;
   const to =

@@ -14,6 +14,8 @@ const OWNER: PasteRuleCaller = { kind: 'owner', actor: { kind: 'host' } };
 const PHONE: PasteRuleCaller = { kind: 'owner', actor: { kind: 'device', deviceId: 'phone-1' } };
 const AGENT: PasteRuleCaller = { kind: 'agent' };
 const GH = { kind: 'command', program: 'gh' } as const;
+/** A copy from the gh the daemon found on its PATH, in a folder no ferret can write. */
+const GH_COPY = { ...GH, path: '/usr/bin/gh' } as const;
 const VERCEL_TERMINAL = { kind: 'terminal', program: 'vercel' } as const;
 const AT_VERCEL: InputTargetFacts = { ...FACTS, foreground: { ...FACTS.foreground, comm: 'vercel' } };
 
@@ -110,7 +112,7 @@ describe('PasteRuleService: who may change the rules', () => {
 
     should(service.list(OWNER)).eql([]);
     should(warned).have.length(1);
-    should(service.reserve('s1', GH, AT_VERCEL)).be.undefined();
+    should(service.reserve('s1', GH_COPY, AT_VERCEL)).be.undefined();
   });
 
   it('should match nothing before the store has been read', async () => {
@@ -126,21 +128,35 @@ describe('PasteRuleService: who may change the rules', () => {
       },
     ];
 
-    should(service.reserve('s1', GH, AT_VERCEL)).be.undefined();
+    should(service.reserve('s1', GH_COPY, AT_VERCEL)).be.undefined();
     await service.load();
-    should(service.reserve('s1', GH, AT_VERCEL)).equal('a'.repeat(32));
+    should(service.reserve('s1', GH_COPY, AT_VERCEL)).equal('a'.repeat(32));
   });
 });
 
 describe('PasteRuleService: matching a paste', () => {
+  it('should match a program only where the daemon found it, in a file no ferret could have swapped', async () => {
+    const { service } = rules();
+    await service.load();
+    await service.create(OWNER, { from: GH, to: VERCEL_TERMINAL });
+
+    should(service.reserve('s1', GH, AT_VERCEL)).be.undefined();
+    should(
+      service.reserve('s1', { ...GH, path: '/home/k/.local/bin/gh', replaceable: true }, AT_VERCEL),
+    ).be.undefined();
+    should(service.reserve('s1', GH_COPY, AT_VERCEL)).not.be.undefined();
+  });
+
   it('should match only the program the copy came from and the program reading the terminal', async () => {
     const { service } = rules();
     await service.load();
     const rule = await service.create(OWNER, { from: GH, to: VERCEL_TERMINAL });
 
-    should(service.reserve('s1', { kind: 'command', program: 'gh' }, AT_VERCEL)).equal(rule.id);
+    should(service.reserve('s1', GH_COPY, AT_VERCEL)).equal(rule.id);
     should(service.reserve('s1', { kind: 'command', program: 'curl' }, AT_VERCEL)).be.undefined();
-    should(service.reserve('s1', GH, { ...FACTS, foreground: { ...FACTS.foreground, comm: 'zsh' } })).be.undefined();
+    should(
+      service.reserve('s1', GH_COPY, { ...FACTS, foreground: { ...FACTS.foreground, comm: 'zsh' } }),
+    ).be.undefined();
     should(service.reserve('s1', { kind: 'browser', origin: 'https://github.com' }, AT_VERCEL)).be.undefined();
   });
 
@@ -149,10 +165,10 @@ describe('PasteRuleService: matching a paste', () => {
     await service.load();
     await service.create(OWNER, { from: GH, to: VERCEL_TERMINAL, sessionId: 's1', expiresInSeconds: 60 });
 
-    should(service.reserve('s2', GH, AT_VERCEL)).be.undefined();
-    should(service.reserve('s1', GH, AT_VERCEL)).not.be.undefined();
+    should(service.reserve('s2', GH_COPY, AT_VERCEL)).be.undefined();
+    should(service.reserve('s1', GH_COPY, AT_VERCEL)).not.be.undefined();
     ms.now += 60_000;
-    should(service.reserve('s1', GH, AT_VERCEL)).be.undefined();
+    should(service.reserve('s1', GH_COPY, AT_VERCEL)).be.undefined();
     should(service.list(OWNER)).eql([]);
   });
 
@@ -161,7 +177,7 @@ describe('PasteRuleService: matching a paste', () => {
     await service.load();
     await service.create(OWNER, { from: GH, to: { kind: 'secret', name: 'VERCEL_TOKEN' } });
 
-    should(service.reserve('s1', GH, AT_VERCEL)).be.undefined();
+    should(service.reserve('s1', GH_COPY, AT_VERCEL)).be.undefined();
   });
 
   it('should let a rule for the secret store match only the exact secret it names', async () => {
@@ -170,9 +186,9 @@ describe('PasteRuleService: matching a paste', () => {
     const rule = await service.create(OWNER, { from: GH, to: { kind: 'secret', name: 'VERCEL_TOKEN' } });
     const into = (name: string) => ({ kind: 'secret', name, exists: false }) as InputTargetFacts;
 
-    should(service.reserve('s1', GH, into('VERCEL_TOKEN_2'))).be.undefined();
-    should(service.reserve('s1', GH, into('vercel_token'))).be.undefined();
-    should(service.reserve('s1', GH, into('VERCEL_TOKEN'))).equal(rule.id);
+    should(service.reserve('s1', GH_COPY, into('VERCEL_TOKEN_2'))).be.undefined();
+    should(service.reserve('s1', GH_COPY, into('vercel_token'))).be.undefined();
+    should(service.reserve('s1', GH_COPY, into('VERCEL_TOKEN'))).equal(rule.id);
   });
 
   it("should hand out a counted rule's last use once, give it back on release, and drop the rule once spent", async () => {
@@ -180,15 +196,15 @@ describe('PasteRuleService: matching a paste', () => {
     await service.load();
     const rule = await service.create(OWNER, { from: GH, to: VERCEL_TERMINAL, count: 1 });
 
-    should(service.reserve('s1', GH, AT_VERCEL)).equal(rule.id);
-    should(service.reserve('s1', GH, AT_VERCEL)).be.undefined();
+    should(service.reserve('s1', GH_COPY, AT_VERCEL)).equal(rule.id);
+    should(service.reserve('s1', GH_COPY, AT_VERCEL)).be.undefined();
     service.release(rule.id);
-    should(service.reserve('s1', GH, AT_VERCEL)).equal(rule.id);
+    should(service.reserve('s1', GH_COPY, AT_VERCEL)).equal(rule.id);
     service.spent(rule.id);
-    should(service.reserve('s1', GH, AT_VERCEL)).be.undefined();
+    should(service.reserve('s1', GH_COPY, AT_VERCEL)).be.undefined();
     await settle();
     should(stored.rules).eql([]);
-    should(service.reserve('s1', GH, AT_VERCEL)).be.undefined();
+    should(service.reserve('s1', GH_COPY, AT_VERCEL)).be.undefined();
   });
 
   it('should count uses of a rule with no count, and ignore a release or spend nobody reserved', async () => {
@@ -198,7 +214,7 @@ describe('PasteRuleService: matching a paste', () => {
 
     service.spent(rule.id);
     service.release(rule.id);
-    service.reserve('s1', GH, AT_VERCEL);
+    service.reserve('s1', GH_COPY, AT_VERCEL);
     service.spent(rule.id);
     await settle();
 
@@ -364,11 +380,11 @@ describe('PasteRuleService and plans: the rest of the routes', () => {
     await service.load();
     const rule = await service.create(OWNER, { from: GH, to: VERCEL_TERMINAL, count: 2 });
 
-    service.reserve('s1', GH, AT_VERCEL);
-    service.reserve('s1', GH, AT_VERCEL);
-    should(service.reserve('s1', GH, AT_VERCEL)).be.undefined();
+    service.reserve('s1', GH_COPY, AT_VERCEL);
+    service.reserve('s1', GH_COPY, AT_VERCEL);
+    should(service.reserve('s1', GH_COPY, AT_VERCEL)).be.undefined();
     service.release(rule.id);
-    should(service.reserve('s1', GH, AT_VERCEL)).equal(rule.id);
+    should(service.reserve('s1', GH_COPY, AT_VERCEL)).equal(rule.id);
   });
 
   it('should refuse a plan that would hold more rules than the cap, making none', async () => {
@@ -405,11 +421,11 @@ describe('PasteRuleService and plans: what the security review found', () => {
     const rule = await service.create(OWNER, { from: GH, to: VERCEL_TERMINAL, count: 1 });
     disk.failing = true;
 
-    should(service.reserve('s1', GH, AT_VERCEL)).equal(rule.id);
+    should(service.reserve('s1', GH_COPY, AT_VERCEL)).equal(rule.id);
     service.spent(rule.id);
     await settle();
 
-    should(service.reserve('s1', GH, AT_VERCEL)).be.undefined();
+    should(service.reserve('s1', GH_COPY, AT_VERCEL)).be.undefined();
     should(service.list(OWNER)).eql([]);
   });
 
@@ -418,7 +434,7 @@ describe('PasteRuleService and plans: what the security review found', () => {
     await service.load();
     const rule = await service.create(OWNER, { from: GH, to: VERCEL_TERMINAL, count: 2 });
 
-    service.reserve('s1', GH, AT_VERCEL);
+    service.reserve('s1', GH_COPY, AT_VERCEL);
     const adding = service.create(OWNER, { from: GH, to: { kind: 'terminal', program: 'fly' } });
     service.spent(rule.id);
     await adding;

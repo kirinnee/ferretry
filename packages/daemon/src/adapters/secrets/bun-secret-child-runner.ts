@@ -1,3 +1,5 @@
+import { lstat, realpath } from 'node:fs/promises';
+import { basename, dirname, isAbsolute } from 'node:path';
 import type { SecretChildOutcome, SecretChildRunner, SecretChildSpec } from '../../lib/index.ts';
 
 /**
@@ -79,7 +81,11 @@ async function readCapped(
  * logic rather than only observable through a spawn.
  */
 export class BunSecretChildRunner implements SecretChildRunner {
-  constructor(private readonly inherited: () => Readonly<Record<string, string | undefined>> = () => process.env) {}
+  constructor(
+    private readonly inherited: () => Readonly<Record<string, string | undefined>> = () => process.env,
+    /** The account this daemon, and every ferret, runs as: what it owns, a ferret could change. */
+    private readonly account: () => number | undefined = () => process.getuid?.(),
+  ) {}
 
   async run(spec: SecretChildSpec): Promise<SecretChildOutcome> {
     const [program, ...rest] = spec.command;
@@ -91,11 +97,31 @@ export class BunSecretChildRunner implements SecretChildRunner {
       if (value !== undefined) environment[key] = value;
     }
 
+    const env = { ...environment, ...spec.env };
+    // Found once, on the child's own PATH, and that very file is what runs: what the outcome names as the
+    // program is what was spawned, never a second lookup that could find something else. A path is walked on the
+    // disk itself, every `..` and symlink as the kernel takes them, so neither a symlinked folder nor a link inside
+    // the path can point it at another file. A lookup that fails (no such file, a name too long) is a spawn
+    // failure like any other.
+    let file: string | null;
+    let replaceable: boolean;
+    try {
+      file = program.includes('/')
+        ? await physical(isAbsolute(program) ? program : `${await realpath(spec.cwd)}/${program}`)
+        : Bun.which(program, { PATH: env.PATH ?? '', cwd: spec.cwd });
+      replaceable = file !== null && (await replaceableBy(this.account(), file));
+    } catch {
+      return { outcome: 'spawn_failed', stdout: '', stderr: '', truncated: false };
+    }
+    if (file === null) return { outcome: 'spawn_failed', stdout: '', stderr: '', truncated: false };
+    const ran = { program: file, ...(replaceable ? { replaceable: true as const } : {}) };
     let child: Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
     try {
-      child = Bun.spawn([program, ...rest], {
+      child = Bun.spawn([file, ...rest], {
+        // The program still sees the name it was asked for as its own argv[0].
+        argv0: program,
         cwd: spec.cwd,
-        env: { ...environment, ...spec.env },
+        env,
         // Never inherited and never open: every use is non-interactive, and an open stdin with
         // nothing written can only hang the daemon on a prompt nobody will answer.
         stdin: 'ignore',
@@ -123,9 +149,10 @@ export class BunSecretChildRunner implements SecretChildRunner {
       // A killed child has no exit status worth reporting: naming one would claim the program chose
       // to end that way, when in fact this daemon ended it.
       if (timedOut || exited === ABANDONED)
-        return { outcome: 'timeout', stdout: stdout.text, stderr: stderr.text, truncated: true };
+        return { outcome: 'timeout', ...ran, stdout: stdout.text, stderr: stderr.text, truncated: true };
       return {
         outcome: 'exited',
+        ...ran,
         exitCode: exited,
         stdout: stdout.text,
         stderr: stderr.text,
@@ -134,5 +161,38 @@ export class BunSecretChildRunner implements SecretChildRunner {
     } finally {
       clearTimeout(timeout);
     }
+  }
+}
+
+/**
+ * A path as the kernel takes it: its folder walked on the disk (every `..` and symlink on the way), its last name
+ * kept. A program that is itself a link keeps the link's name, so a script that reads its own `$0` still sees it.
+ */
+async function physical(path: string): Promise<string> {
+  return `${await realpath(dirname(path))}/${basename(path)}`;
+}
+
+/**
+ * Whether this account could change the program or put another in its place. OWNERSHIP, not today's permission
+ * bits: an owner can `chmod` its way back in. A ferret runs as this same account, so the program counts as
+ * replaceable when any part of the path as found, or of the real file behind it, up to `/`, is owned by this
+ * account (a link it could repoint, a folder it could fill), or is a folder anyone may write without the sticky
+ * bit. A part that cannot be looked at counts as replaceable.
+ */
+async function replaceableBy(account: number | undefined, file: string): Promise<boolean> {
+  const real = await realpath(file).catch(() => file);
+  for (const path of new Set([file, real])) if (await anyPartReplaceable(account, path)) return true;
+  return false;
+}
+
+async function anyPartReplaceable(account: number | undefined, path: string): Promise<boolean> {
+  for (let part = path; ; part = dirname(part)) {
+    const status = await lstat(part).catch(() => undefined);
+    if (status === undefined) return true;
+    if (account !== undefined && status.uid === account) return true;
+    const openToOthers = (status.mode & 0o022) !== 0 && (status.mode & 0o1000) === 0;
+    // A symlink's own mode is always open and means nothing; what it names is checked on the real path.
+    if (openToOthers && !status.isSymbolicLink()) return true;
+    if (part === dirname(part)) return false;
   }
 }

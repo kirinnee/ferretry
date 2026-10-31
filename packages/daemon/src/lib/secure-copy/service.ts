@@ -309,7 +309,15 @@ export class SecureCopyService implements InputSealedPort {
       );
     return {
       value,
-      from,
+      // Which file printed it, as the runner found it: the owner sees it on the card.
+      from:
+        outcome.program === undefined
+          ? from
+          : {
+              ...from,
+              path: oneLine(outcome.program, 1024),
+              ...(outcome.replaceable === true ? { replaceable: true as const } : {}),
+            },
       command: {
         outcome: outcome.outcome,
         ...(outcome.exitCode === undefined ? {} : { exitCode: outcome.exitCode }),
@@ -404,5 +412,16 @@ function meta(entry: Entry): CopyMeta {
  * file the ferret may have made: it never matches a rule naming `vercel`, and the card shows the path.
  */
 function programOf(argv0: string): string {
-  return (argv0.includes('/') ? argv0 : basename(argv0)).slice(0, 64) || 'command';
+  return oneLine(argv0.includes('/') ? argv0 : basename(argv0), 64) || 'command';
+}
+
+/**
+ * A name the agent chose (a file it may have made) as one printable line: a line break, a control or a direction
+ * character becomes `?`, so it can neither break the copy's own record nor draw something else on the owner's
+ * screen, and a cut ends in `…`.
+ */
+function oneLine(text: string, maximum: number): string {
+  const line = text.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, '?');
+  // A cut is marked, so a long path never passes for one whose file name was simply short.
+  return line.length <= maximum ? line : `${line.slice(0, maximum - 1)}…`;
 }

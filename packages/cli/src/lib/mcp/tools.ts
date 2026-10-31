@@ -710,13 +710,15 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
   {
     name: 'secure_paste',
     tool: 'secure.paste',
-    description: 'Paste sealed:<name> into your terminal, or save it as a secret, once allowed; then input_wait.',
+    description:
+      'Paste sealed:<name> into your terminal or a page field, or save it as a secret, once allowed; then input_wait.',
     inputSchema: object(
       {
         handle: { type: 'string' },
         to: {
           type: 'object',
-          description: '{"kind":"terminal","name":"dev"} or {"kind":"secret","name":"VERCEL_TOKEN"}',
+          description:
+            '{"kind":"terminal","name":"dev"}, {"kind":"browser","name":"app","ref":"e3"} or {"kind":"secret","name":"VERCEL_TOKEN"}',
         },
         prompt: { type: 'string' },
       },

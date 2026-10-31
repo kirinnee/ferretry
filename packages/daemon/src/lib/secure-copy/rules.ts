@@ -244,7 +244,14 @@ function requireOwner(caller: PasteRuleCaller) {
 function fromMatches(rule: PasteRule, from: CopyOrigin): boolean {
   switch (rule.from.kind) {
     case 'command':
-      return from.kind === 'command' && from.program === rule.from.program;
+      // The bare name, as the daemon's PATH found it, and only a program no ferret could have swapped: a file
+      // the daemon did not locate, or one this account can change (`~/.local/bin`, its own folder), is asked about.
+      return (
+        from.kind === 'command' &&
+        from.program === rule.from.program &&
+        from.path !== undefined &&
+        from.replaceable !== true
+      );
     case 'browser':
     case 'clipboard':
       return from.kind === rule.from.kind && from.origin === rule.from.origin;

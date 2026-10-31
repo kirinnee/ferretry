@@ -85,6 +85,10 @@ describe('secure copy words', () => {
   it("draws a paste card's two ends from what the daemon saw", () => {
     const fromCommand = request({ source: { kind: 'sealed', name: 't', from: { kind: 'command', program: 'gh' } } });
     expect(pasteRoute(fromCommand)).toEqual({ from: 'gh (what it printed)', to: 'sudo in %terminal:deploy' });
+    const located = request({
+      source: { kind: 'sealed', name: 't', from: { kind: 'command', program: 'gh', path: '/home/k/.local/bin/gh' } },
+    });
+    expect(pasteRoute(located)?.from).toBe('/home/k/.local/bin/gh (what it printed)');
     expect(pasteRoute(request())).toBeUndefined();
     const reobserving = request({
       source: { kind: 'sealed', name: 't', from: { kind: 'clipboard', origin: 'https://github.com' } },

@@ -48,4 +48,19 @@ describe('fy input answer on a paste', () => {
       'pastes the secure copy sealed:vercel, captured from gh: nothing to type',
     );
   });
+
+  it('should name the file that printed it when the daemon found one', () => {
+    const located = {
+      ...PASTE,
+      source: {
+        kind: 'sealed',
+        name: 'vercel',
+        from: { kind: 'command', program: 'gh', path: '/home/k/.local/bin/gh' },
+      },
+    } as typeof PASTE;
+
+    should(renderInputFacts(located)).containEql(
+      'pastes the secure copy sealed:vercel, captured from /home/k/.local/bin/gh: nothing to type',
+    );
+  });
 });

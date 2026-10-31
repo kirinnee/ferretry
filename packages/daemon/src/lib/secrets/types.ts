@@ -124,6 +124,13 @@ export interface SecretChildSpec {
 /** What running one produced. Raw — redaction happens in the domain, above this boundary. */
 export interface SecretChildOutcome {
   readonly outcome: 'exited' | 'timeout' | 'spawn_failed';
+  /**
+   * The file that ran: the command's program as the runner found it on the CHILD's PATH (or as given, when it
+   * names a path), absolute. What was spawned, not what was asked for; absent when nothing ran.
+   */
+  readonly program?: string;
+  /** This account could change that file or put another in its place (it or its folder is writable). */
+  readonly replaceable?: true;
   readonly exitCode?: number;
   readonly stdout: string;
   readonly stderr: string;

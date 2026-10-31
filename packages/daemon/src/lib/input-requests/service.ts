@@ -318,7 +318,7 @@ export class InputRequestService {
     facts: InputTargetFacts,
     submit: InputRaise['submit'],
   ): Promise<void> {
-    if (!hidesTyping(facts) || !ruleMayPaste(copy, facts)) return;
+    if (!hidesTyping(facts) || !ruleMayPaste(copy, facts, held.request.fields)) return;
     const ruleId = this.deps.rules?.reserve(held.request.sessionId, copy.from, facts);
     if (ruleId === undefined) return;
     const body: InputDeliverBody = {
@@ -1499,13 +1499,13 @@ const PASTE_TITLE = 'Wants to paste a secure copy';
 
 /** A paste's ask: what is pasted and where it came from, in the daemon's words. There is nothing to type. */
 function pasteAskOf(copy: CopyMeta, facts: InputTargetFacts): string {
-  const from = copy.from.origin ?? copy.from.program ?? copy.from.kind;
+  const from = copy.from.origin ?? copy.from.path ?? copy.from.program ?? copy.from.kind;
   const into =
     facts.kind === 'terminal'
       ? 'the terminal'
       : facts.kind === 'secret'
         ? `the secret ${facts.name}${facts.exists ? ', replacing its value' : ''}`
-        : 'the page';
+        : `a field on ${hostOf(facts.origin)}`;
   return `Allow pasting ${copy.handle} (${String(copy.length)} characters from ${from}) into ${into}. You type nothing.`;
 }
 
@@ -1519,12 +1519,18 @@ function pasteRisk(risk: InputRisk | undefined, copy: CopyMeta | undefined): Inp
 
 /**
  * What a rule never does unasked, whatever it names: paste a copy the ferret had already seen (it is not
- * protected, and the owner should be told), or replace a value the secret store holds now (the old one is gone
- * for good). Both wait for the owner on the card, which says so.
+ * protected, and the owner should be told), replace a value the secret store holds now (the old one is gone
+ * for good), or paste into a page field the card would flag. Each waits for the owner on the card, which says so.
  */
-function ruleMayPaste(copy: CopyMeta, facts: InputTargetFacts): boolean {
+function ruleMayPaste(copy: CopyMeta, facts: InputTargetFacts, fields: readonly InputRequestField[]): boolean {
   if (copy.exposure.transcript === 'found') return false;
-  return facts.kind !== 'secret' || !facts.exists;
+  if (facts.kind === 'secret') return !facts.exists;
+  // On a page, a rule names the TOP page's origin, so it pastes unasked only where the card would be green for
+  // every field: a visible, uncovered password field of that very page (not a frame from another site), on https,
+  // with no challenge showing. Anything the card would flag waits for the owner.
+  if (facts.kind === 'browser')
+    return facts.challenge === undefined && fields.every(field => pageRiskOf(field, facts).level === 'green');
+  return true;
 }
 
 /** A target that does not show what is typed: a terminal with echo off, or a page whose fields are all password fields. */

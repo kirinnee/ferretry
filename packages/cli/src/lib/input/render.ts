@@ -55,7 +55,8 @@ export function renderInputFacts(request: InputRequest): string[] {
   const login = matchedLogin(request);
   if (login !== undefined) lines.push(`a saved login matches: ${login.text} (answer with --secret ${login.id})`);
   if (request.source !== undefined) {
-    const from = request.source.from.origin ?? request.source.from.program ?? request.source.from.kind;
+    const from =
+      request.source.from.origin ?? request.source.from.path ?? request.source.from.program ?? request.source.from.kind;
     lines.push(
       `pastes the secure copy sealed:${request.source.name}, captured from ${showUntrusted(from)}: nothing to type`,
     );

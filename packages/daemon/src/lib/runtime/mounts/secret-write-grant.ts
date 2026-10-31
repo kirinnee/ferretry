@@ -15,25 +15,44 @@ import type { RouteContext } from '../../api/route.ts';
  * single-use step-up as every other `configure` act does.
  */
 export function refusedSecretWrite(context: RouteContext, act: string): ApiResponse | undefined {
+  return refusedExtra(context, { capability: 'secrets', axis: 'configure' }, act, 'that changes the secret store');
+}
+
+/**
+ * A value typed or pasted into a PAGE is allowed on the input-request route, which is a `terminal` one, so it also
+ * needs `browser.use`, exactly as the card's own field picture does: a device denied the browser must not put a
+ * value into a page by allowing a card instead, nor by approving page pastes in advance (a rule or a plan item).
+ */
+export function refusedPageInput(context: RouteContext, act = 'allow a value into a page'): ApiResponse | undefined {
+  return refusedExtra(context, { capability: 'browser', axis: 'use' }, act, 'that needs the browser permission');
+}
+
+/** One more demand behind a route that already passed its own: the refusal, or `undefined` when allowed. */
+function refusedExtra(
+  context: RouteContext,
+  demand: { readonly capability: 'secrets' | 'browser'; readonly axis: 'use' | 'configure' },
+  act: string,
+  consequence: string,
+): ApiResponse | undefined {
   const governance = context.governance;
   if (governance === undefined)
     return jsonResponse(
       { error: `this daemon cannot say whether this caller may ${act}, so it is refusing`, code: 'forbidden' },
       403,
     );
-  const decision = governance.decide({ capability: 'secrets', axis: 'configure' });
+  const decision = governance.decide(demand);
   if (decision.allowed) return undefined;
   if (decision.refusal === 'step-up-required')
     return jsonResponse(
       {
         error: `${act} from this device needs a passkey confirmation`,
         code: STEP_UP_REQUIRED_CODE,
-        demand: { capability: 'secrets', axis: 'configure' },
+        demand,
       } satisfies StepUpRequiredBody,
       403,
     );
   return jsonResponse(
-    { error: `this device may not ${act}: that changes the secret store`, code: grantRefusalCode(decision.refusal) },
+    { error: `this device may not ${act}: ${consequence}`, code: grantRefusalCode(decision.refusal) },
     403,
   );
 }

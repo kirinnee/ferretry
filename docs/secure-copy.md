@@ -96,7 +96,8 @@ The agent instruction teaches the rule that makes this work: **capture before yo
 
 ## Pasting
 
-`secure.paste` names a handle and a terminal the agent opened. The daemon raises an **input request** whose
+`secure.paste` names a handle and where it goes: a terminal the agent opened, one field on a page the agent
+opened (`{ kind: "browser", name, ref | selector }`), or the secret store. The daemon raises an **input request** whose
 value comes from the copy (`InputRaise.source`), so the card, the daemon-observed destination facts,
 `observedDigest`, the single guarded write, the quarantine and the audit are all the input bridge's own
 ([input requests](input-requests.md)):
@@ -113,6 +114,15 @@ value comes from the copy (`InputRaise.source`), so the card, the daemon-observe
   a line break or a control character is refused for a terminal ("this would press keys").
 - **Risk flag**: as for any terminal secret, and never green when the ferret had already seen the value
   ("The ferret saw this value before it was sealed, so it is not protected; consider rotating it.").
+- **Into a page field** it is one field of the input bridge's page request: the card says "into a field on
+  <host>", the daemon observes the field and the page's origin, the write is the bridge's own guarded one, and
+  the page is held afterwards like any typed secret (pictures refused while held). It needs the `browser`
+  switch, as any page tool does, and allowing it from a device needs `browser.use` too. A rule for
+  `browser:<origin>` names the TOP page, so it pastes unasked only where the card would be green for every field:
+  a visible, uncovered password field of that page itself (not a frame from another site), on https, with no
+  challenge showing. Anything the card would flag waits for the owner.
+  **GAP:** once the page's hold ends, a page script (`browser.eval`, with scripts on) can read the field's value,
+  so a page paste shares the value with whatever the page runs; a rule for a page is that trust, given ahead.
 - **Audit**: `input.delivered` with `source: sealed` and the copy's name, never the value.
 
 ### Into the secret store
@@ -170,6 +180,18 @@ without ever reading it. It is the same input request, with the store as the des
 - **A program run by its path never matches.** A rule names a bare program (`gh`), the one the daemon's PATH
   finds. A copy captured from `./gh` or `/tmp/x/gh` keeps that path as its source, because it may be a file the
   ferret made to print a value of its choosing, so no rule matches it and the owner is asked.
+- **The card names the file that printed it.** The child runner finds the program once, on the command's own
+  PATH, runs that very file, and the copy records its path (`from.path`), so the card, `fy input answer` and
+  `fy copy ls` show WHICH `gh` printed the value: `/usr/bin/gh`, or one in `~/.local/bin` the ferret could
+  have written. A program given by a path is walked on the disk itself, every `..` and symlink as the kernel takes
+  them, so neither a symlinked folder nor a link inside the path can point it at another file. A rule matches the
+  bare name only for a program the daemon found AND that this account cannot change. It is `replaceable` (and every
+  paste of it asks the owner, whose card shows the path) when any part of its path, or of the real file behind it,
+  up to `/`, is OWNED by the account the daemon and every ferret run as, or is a folder anyone may write without the
+  sticky bit. Ownership, not permission bits: an owner can `chmod` its way back in. So a rule auto-pastes only from
+  system programs (`/usr/bin/gh`); anything under `$HOME`, a `~/.nix-profile` link included, always asks.
+  A rule names a program, not what it runs: `gh` (its aliases and extensions), `env`, `node` or `op run` can run
+  anything, and a rule for one matches whatever arguments the ferret gives it.
 - **The secret store is never written by a rule** unless that rule names the exact secret NAME: `secret:<NAME>`
   has no pattern and no wildcard, so a rule for `VERCEL_TOKEN` never writes `VERCEL_TOKEN_2`.
 - **A plan**: `secure.preapprove` raises ONE card listing the pastes the agent plans, each with its route and
@@ -207,6 +229,7 @@ without ever reading it. It is the same input request, with the store as the des
 | ----- | ---------------------------------------------------------------------------------------------------- | ----------- |
 | SC1   | This contract, the in-memory store, command capture, masking, exposure check, `secure_*` agent tools | done        |
 | SC2a  | Paste to a terminal prompt, pre-approval rules and the plan card, `fy copy`, Allow on the input card | done        |
-| SC2b  | Paste to the secret store, with the exact-NAME rule                                                  | this change |
-| SC3   | Page and clipboard capture, paste to a browser field, page-read and screenshot hiding                | later       |
+| SC2b  | Paste to the secret store, with the exact-NAME rule                                                  | done        |
+| SC3a  | Paste to a field on a page; the card names the file a command copy came from                         | this change |
+| SC3b  | Page and clipboard capture, page-read and screenshot hiding                                          | later       |
 | SC4   | The app's paste and plan cards, Settings, and the agent instruction                                  | later       |

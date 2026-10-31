@@ -78,6 +78,36 @@ const refusal = async (work: Promise<unknown>): Promise<SecureCopyError> => {
 };
 
 describe('SecureCopyService capturing what a command prints', () => {
+  it('should record a program name or path holding a line break or a control character as one printable line', async () => {
+    const { service, runner } = world();
+    runner.outcome = { ...runner.outcome, program: '/work/s1/fake\n\u001b[2Jvercel' };
+
+    const { copy } = await service.capture('s1', command(['./fake\n\u001b[2Jvercel']));
+
+    should(copy.from).eql({ kind: 'command', program: './fake??[2Jvercel', path: '/work/s1/fake??[2Jvercel' });
+  });
+
+  it('should mark a cut path, turn a line separator into ?, and say when this account could swap the program', async () => {
+    const { service, runner } = world();
+    const long = `/home/k/${'d/'.repeat(600)}vercel`;
+    runner.outcome = { ...runner.outcome, program: long, replaceable: true };
+
+    const { copy } = await service.capture('s1', command(['ver\u2028cel']));
+
+    should(copy.from.program).equal('ver?cel');
+    should(copy.from.path).equal(`${long.slice(0, 1023)}…`);
+    should(copy.from.replaceable).be.true();
+  });
+
+  it('should record which file printed the value, as the runner found it, for the owner to see', async () => {
+    const { service, runner } = world();
+    runner.outcome = { ...runner.outcome, program: '/home/kirin/.bun/bin/vercel' };
+
+    const { copy } = await service.capture('s1', command(['vercel', 'tokens', 'create']));
+
+    should(copy.from).eql({ kind: 'command', program: 'vercel', path: '/home/kirin/.bun/bin/vercel' });
+  });
+
   it('should keep a program run by its path as written, so a rule naming the bare program never matches it', async () => {
     const { service } = world();
 
