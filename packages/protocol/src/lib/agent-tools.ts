@@ -54,7 +54,7 @@ import {
   InputSensitivitySchema,
   InputSubmitModeSchema,
 } from './input-request.ts';
-import { LoginEntryIdSchema } from './login-entries.ts';
+import { LoginEntryIdSchema, LoginHintListSchema } from './login-entries.ts';
 import { SecretNameSchema } from './secrets.ts';
 import {
   COPY_MAX_LIFETIME_SECONDS,
@@ -319,6 +319,15 @@ export const AgentToolCallSchema = z.discriminatedUnion('tool', [
       .pipe(AgendaIdSchema),
     timeoutMs: z.number().int().min(100).max(AGENT_TOOL_MAX_WAIT_MS).optional(),
   }),
+  z
+    .strictObject({
+      tool: z.literal('login.hint'),
+      /** A page of the agent's: the daemon reads the host from where the page IS, not from the agent. */
+      name: SurfaceKeySchema.optional(),
+      /** A site the agent is about to sign in to: a host, a URL or a `program@host`. */
+      site: z.string().trim().min(1).max(AGENT_TOOL_MAX_URL_CHARS).optional(),
+    })
+    .refine(call => (call.name === undefined) !== (call.site === undefined), 'name a page or a site, not both'),
   z.strictObject({
     tool: z.literal('terminal.ask_owner'),
     name: SurfaceKeySchema,
@@ -669,6 +678,7 @@ const REPEATABLE_AGENT_TOOLS: ReadonlySet<string> = new Set<AgentToolName | Agen
   'terminal.read',
   'terminal.wait',
   'input.wait',
+  'login.hint',
   'secure.list',
   'browser.list',
   'browser.read',
@@ -695,6 +705,7 @@ export const AGENT_TOOL_NAMES: readonly AgentToolName[] = [
   'terminal.ask_owner',
   'terminal.request_input',
   'input.wait',
+  'login.hint',
   'browser.list',
   'browser.open',
   'browser.navigate',
@@ -777,6 +788,8 @@ export const AgentToolResultSchema = z.strictObject({
   command: CopyCommandReportSchema.optional(),
   /** `secure.preapprove` only: the plan card raised for the owner. */
   plan: CopyPlanSchema.optional(),
+  /** `login.hint` only: the saved logins for the site, by their non-secret metadata. */
+  logins: LoginHintListSchema.optional(),
 });
 export type AgentToolResult = z.infer<typeof AgentToolResultSchema>;
 

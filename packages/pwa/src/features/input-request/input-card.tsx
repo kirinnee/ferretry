@@ -52,6 +52,7 @@ import {
   sendBlock,
   shotBoxes,
   showsHeaderRisk,
+  signInWords,
   splitOffers,
   targetRef,
   titleWords,
@@ -593,6 +594,7 @@ const SENSITIVITY_WORDS = { secret: 'secret', private: 'one-time code', plain: '
 function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, onRefresh }: FormProps) {
   const nodes = useRef<Nodes>(new Map());
   const { primary, others } = splitOffers(request.saved);
+  const signInLine = signInWords(request.saved);
   const [values, setValues] = useState<Readonly<Record<string, string>>>({});
   const [revealed, setRevealed] = useState<Readonly<Record<string, boolean>>>({});
   const [typing, setTyping] = useState(primary === undefined);
@@ -626,6 +628,9 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
   const saving = cardOffersSave(request, fields);
   const existing = updatedEntry(request.saved, save.id);
   const saveReason = cardSaveBlock(request, fields, values);
+  // "Too short to save" is said only once something is typed AND Save as is ticked: never before the owner acts.
+  const typedSomething = fields.some(field => (values[field.key] ?? '') !== '');
+  const saveSaid = save.enabled && typedSomething ? saveReason : undefined;
   const draftProblem = saveDraftProblem(save);
   const ready = typedReady(fields, values);
 
@@ -697,6 +702,12 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
 
   return (
     <div className="flex min-w-0 flex-col gap-3" data-input-form="">
+      {signInLine === undefined ? null : (
+        <p className="m-0 text-cell font-medium text-fg" data-input-sign-in="">
+          {signInLine}
+        </p>
+      )}
+
       {typing ? (
         <div className="flex min-w-0 flex-col gap-3">
           {fields.map(field => (
@@ -740,20 +751,20 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
         <div className="flex min-w-0 flex-col gap-2" data-input-save="">
           <label className="flex items-center gap-2 text-cell text-fg">
             <input
-              checked={save.enabled && saveReason === undefined}
+              checked={save.enabled}
               data-input-save-tick=""
-              disabled={off || saveReason !== undefined}
+              disabled={off}
               onChange={event => setSave(current => ({ ...current, enabled: event.target.checked }))}
               type="checkbox"
             />
             Save as
           </label>
-          {saveReason === undefined ? null : (
+          {saveSaid === undefined ? null : (
             <p className="m-0 text-meta text-muted" data-input-save-reason="">
-              {saveReason}
+              {saveSaid}
             </p>
           )}
-          {save.enabled && saveReason === undefined ? (
+          {save.enabled ? (
             <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
               <label className="flex min-w-0 flex-1 flex-col gap-1 text-meta text-muted">
                 Label

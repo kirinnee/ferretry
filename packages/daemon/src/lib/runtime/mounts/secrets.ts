@@ -2,6 +2,9 @@ import {
   type LoginEntryId,
   LoginEntryIdSchema,
   type LoginEntryList,
+  type LoginHintList,
+  loginHintSite,
+  loginHintsFor,
   PutLoginEntryRequestSchema,
   PutSecretRequestSchema,
   RenameLoginEntryRequestSchema,
@@ -104,6 +107,7 @@ const LOGIN_STATUS: Readonly<Record<LoginEntryError['refusal'], number>> = {
   login_exists: 409,
   label_required: 400,
   no_such_field: 400,
+  bad_via: 400,
 };
 
 /** Re-raises a domain failure as its HTTP answer, and anything else as itself so a genuine bug is
@@ -160,6 +164,22 @@ async function listLogins(logins: LoginDirectory): Promise<ApiResponse> {
   }
 }
 
+/**
+ * WHAT A FERRET MAY KNOW ABOUT SIGNING IN TO A SITE: the entries for it and the providers they go via, by handle,
+ * label, method, login domains and the plain username. A narrower view than the listing (no `fields`, no
+ * `match`, no times), and never a value. A damaged store is a 500, never an empty hint.
+ */
+async function loginHint(logins: LoginDirectory, context: RouteContext): Promise<ApiResponse> {
+  const site = loginHintSite(context.request.query.get('site')?.[0] ?? '');
+  if (site === undefined) throw new ApiError(400, 'name a site: a host like github.com, or a URL', 'invalid_site');
+  try {
+    const hints = loginHintsFor(site, await logins.list());
+    return jsonResponse({ v: 1, site, hints, passkeys: 'off' } satisfies LoginHintList);
+  } catch (error) {
+    return reraise(error);
+  }
+}
+
 async function putLogin(logins: LoginDirectory, context: RouteContext): Promise<ApiResponse> {
   ownerOnly(context, 'change a saved login');
   const id = pathLoginId(context);
@@ -204,6 +224,14 @@ function loginRoutes(logins: LoginDirectory | undefined): readonly ApiRoute[] {
       capability: SECRETS_USE,
       noStore: true,
       handle: async () => await listLogins(logins),
+    },
+    {
+      method: 'GET',
+      path: '/v1/secrets/logins/hint',
+      minimum: 'operator',
+      capability: SECRETS_USE,
+      noStore: true,
+      handle: async context => await loginHint(logins, context),
     },
     {
       method: 'PUT',

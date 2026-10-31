@@ -419,6 +419,8 @@ reads ("GitHub (kirinnee)"), what it is for (`match`), and its fields. The wire 
 | ---------- | ------------------ | ----------------------------------------------------- | -------------------------------------------------------- |
 | `label`    | plain              | the index, `login-entries.json` (`0600`)              | the owner's list and card                                |
 | `match`    | plain              | the index                                             | the owner's list and card                                |
+| `method`   | plain              | the index                                             | the owner, and the ferret's `login_hint`                 |
+| `domains`  | plain              | the index                                             | the owner, and the ferret's `login_hint`                 |
 | `username` | **plain**          | the index                                             | the owner, and the ferret once it is typed (it is plain) |
 | `password` | **secret**         | sealed in `login-secrets.json`, under the vault's key | **nobody**: it is typed into a target and masked         |
 | `totp`     | **secret**, opt-in | sealed in `login-secrets.json`                        | **nobody**: the daemon makes the code and types it       |
@@ -428,6 +430,38 @@ answers a password, a seed or a code. A listing shows the label, the match, the 
 fields exist. The sealed document is not the main vault: `fy secret use` cannot spend a saved login and
 `${secret:…}` cannot name one. Saved values are masked wherever the daemon scrubs text, as
 `[redacted:login:<ID>:password]`.
+
+### How it signs in, and where
+
+Each entry says **how** it signs in (`method`) and **where** the sign-in happens (`domains`), apart from what it
+is for (`match`, the site the work is on):
+
+- **`method`**: `password` (the default), or an identity provider — `google`, `github`, `microsoft`, `apple`,
+  or `sso` with the provider's name as its button says it ("Okta"). A provider method may name the provider's own
+  saved login (`via`): Vercel signs in with Google **via** "Google (kirin@…)". The ferret then clicks "Continue
+  with Google", and the provider's page is filled from that entry. `via` must name another entry that exists;
+  renaming the provider entry moves the link, deleting it drops the link.
+- **No passkey method.** The list has none, and an `sso` name that says passkey, WebAuthn, FIDO, U2F or a
+  security key is refused (`namesPasskey`): the agent browser has [passkeys off](#passkeys-are-off-in-the-agent-browser),
+  so a login that needs one is the owner's hands (`browser_ask_owner`), never a saved login.
+- **`domains`**: web hosts, exact (`app.vercel.com`, `accounts.google.com`). A pasted URL is read as its host. A
+  **page** card's one-tap choice is an entry whose login domain is the page's host **exactly** — no wildcard, no
+  parent domain. A **terminal** card still matches by `match` (`sudo@kirin-box`).
+- **Older entries** (saved before methods) read as `password`, with their web `match` hosts as their login
+  domains, and are not rewritten until edited.
+- When the entry a page is for signs in through a provider, the owner's card says so ("Sign in with Google via
+  'Google (kirin@…)'", `InputSaved.signIn`), and the provider's login is **not** offered as the one tap there:
+  it is typed only on the provider's own domain.
+
+### The ferret's hint: `login_hint`
+
+Before a sign-in, a ferret calls **`login_hint`** (a page by name, so the daemon reads the host from where the page
+**is**, or a site) and gets each entry for that site and the provider entries they go via: **handle, label,
+method, login domains and the plain username**. Never a password, a seed, a code, nor even which secret fields
+exist (`LoginHintSchema` has no field for one). Every hint ends "passkeys are off". The owner sees the same words
+with `fy secret entry hint <site>`; the route is `GET /v1/secrets/logins/hint?site=` (`secrets` use). It is
+not more than a ferret could list before (`GET /v1/secrets/logins` was already readable with the admin token);
+it is a narrower view, offered at the moment it helps.
 
 ### The first time: "Save as"
 
@@ -439,7 +473,7 @@ the target's key (`sudo@kirin-box` → `SUDO_KIRIN_BOX`, "sudo on kirin-box"; a 
   Settings instead), and a password shorter than `LOGIN_PASSWORD_MIN_LENGTH` (8, a masking limit, not a
   strength rule) cannot be kept. Either refuses the Send with nothing typed and says to send it unsaved.
 - **The value is kept only once it is typed.** A `secret` is saved as the password, a `plain` value as the
-  username. Saving to an existing entry keeps its label and adds this target to what it matches.
+  username. Saving to an existing entry keeps its label and adds this target to what it matches (and, for a page, to the login domains it keeps).
 - **A failure to keep it never undoes the delivery.** The answer says so in a fixed sentence
   (`saved: { ok: false }`); the owner can save it from Settings.
 - **It is recorded as a change to the secret store**: a KEPT `secrets.changed` record (`login-save`) with
@@ -482,7 +516,8 @@ for `ssh`, `scp` and `sftp`), or the web host for a page. A saved login whose `m
   every entry that holds the field stays **selectable by hand**, because the owner may know better.
 - **The ferret may hint** (`secretHint` / `secret_hint`): the card marks that entry as "the ferret suggested
   this", but a hint never makes an entry matched, and the agent's answer is the same whether the entry exists.
-- **The agent learns `source: saved`** and nothing else: not the handle, not the label, not the value.
+- **The agent learns `source: saved`** from the delivery and nothing else: not the handle, not the label, not the
+  value. What it may know beforehand is the [hint](#the-ferrets-hint-login_hint): metadata, never a value.
 
 ### 2FA seeds (opt-in, per entry)
 
@@ -497,9 +532,10 @@ explicit confirmation of this sentence (`LOGIN_TOTP_WARNING`), shown in the app 
 ### Managing them
 
 Settings › Secrets › Saved logins and `fy secret entry ls|add|edit|rename|rm` list entries (never values),
-add and edit the label, match and username, replace a password, add or remove a 2FA seed, rename the handle and
+add and edit the label, match, sign-in method (`--method`, `--via`, `--sso-name`), login domains (`--domain`)
+and username, replace a password, add or remove a 2FA seed, rename the handle and
 delete. Values are typed into a masked field or read from the TTY with echo off; never a flag.
-Routes: `GET /v1/secrets/logins`, `PUT /v1/secrets/logins/:id` (create or change; an omitted field is kept,
+Routes: `GET /v1/secrets/logins`, `GET /v1/secrets/logins/hint?site=`, `PUT /v1/secrets/logins/:id` (create or change; an omitted field is kept,
 `null` removes it), `POST /v1/secrets/logins/:id/rename`, `DELETE /v1/secrets/logins/:id`, all `secrets`
 capability (`use` to list, `configure` to change) and each change a kept `secrets.changed` record.
 

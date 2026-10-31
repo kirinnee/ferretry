@@ -24,6 +24,10 @@ import {
   copyHandle,
   INPUT_SINGLE_FIELD_ID,
   type InputAgentView,
+  type LoginEntrySummary,
+  loginHintSite,
+  loginHintsFor,
+  loginHintSummary,
   type SurfaceController,
   type SurfaceControlRequest,
   type SurfaceControlView,
@@ -144,6 +148,11 @@ export interface AgentToolPorts {
   readonly plans?: AgentPlanPort;
   /** What secure copy knows about pages: not pictured while showing a copied document, and what the agent read. */
   readonly copyPages?: AgentCopyPagesPort;
+  /**
+   * The saved logins' NON-SECRET listing, for `login.hint`: labels, methods, domains, usernames. The directory a
+   * route holds, never the vault: nothing here can open a value. Absent: the tool says none are kept.
+   */
+  readonly logins?: { list(): Promise<readonly LoginEntrySummary[]> };
 }
 
 /** Page tools that hand back a PICTURE of a page: no mask can be drawn on pixels, so a hold refuses them to its end. */
@@ -234,9 +243,12 @@ type LifecycleCall = Extract<
 /** How far up a popup's opener chain ownership is followed. */
 const MAX_OPENER_DEPTH = 8;
 
-/** The kind of surface a call is about; `input.wait` is about a request and `secure.*` about a copy, not a surface. */
+/**
+ * The kind of surface a call is about; `input.wait` is about a request, `secure.*` about a copy and `login.hint`
+ * about the saved logins, not a surface.
+ */
 const kindOf = (call: AgentToolCall): SurfaceKind | undefined =>
-  call.tool === 'input.wait' || call.tool.startsWith('secure.')
+  call.tool === 'input.wait' || call.tool === 'login.hint' || call.tool.startsWith('secure.')
     ? undefined
     : call.tool.startsWith('terminal.')
       ? 'terminal'
@@ -255,7 +267,11 @@ const switchOf = (call: AgentToolCall): SurfaceKind | undefined =>
       ? call.to.kind === 'browser'
         ? 'browser'
         : 'terminal'
-      : kindOf(call);
+      : call.tool === 'login.hint'
+        ? call.name === undefined
+          ? undefined
+          : 'browser'
+        : kindOf(call);
 
 const plural = (count: number, word: string): string => `${String(count)} ${word}${count === 1 ? '' : 's'}`;
 
@@ -502,6 +518,8 @@ export class AgentToolService {
           plan,
         };
       }
+      case 'login.hint':
+        return await this.loginHint(caller, call, facts);
       case 'input.wait': {
         const input = this.inputPort(caller);
         const view = await input.agentView(sessionId, call.id, call.timeoutMs ?? AGENT_TOOL_DEFAULT_WAIT_MS);
@@ -560,6 +578,7 @@ export class AgentToolService {
           | 'terminal.open'
           | 'browser.open'
           | 'input.wait'
+          | 'login.hint'
           | 'secure.copy'
           | 'secure.list'
           | 'secure.discard'
@@ -1374,6 +1393,43 @@ export class AgentToolService {
     return shown('terminal', surfaces);
   }
 
+  /**
+   * The saved logins for a site, by non-secret metadata only (`LoginHintSchema`). For a page, the site is where the
+   * page IS as the browser reports it, not what the agent says; the page must be one the agent may use.
+   */
+  private async loginHint(
+    caller: AgentToolCaller,
+    call: Extract<AgentToolCall, { readonly tool: 'login.hint' }>,
+    facts: CallFacts,
+  ): Promise<AgentToolResult> {
+    const logins = this.ports.logins;
+    if (logins === undefined) throw new AgentToolError('unavailable', 'This daemon keeps no saved logins.');
+    let where = call.site;
+    if (call.name !== undefined) {
+      const pages = (await this.ports.browser.status(caller.sessionId)).pages;
+      const surface = await this.resolve(caller.sessionId, 'browser', call.name);
+      facts.surface = surface;
+      if (caller.kind === 'agent') await this.assertAgentMay(caller.sessionId, surface, pages);
+      where = pages.find(page => page.id === surface.id)?.url;
+    }
+    const site = where === undefined ? undefined : loginHintSite(where);
+    if (site === undefined)
+      throw new AgentToolError(
+        'bad_request',
+        call.name === undefined
+          ? 'Name a site as a host like github.com, or a URL.'
+          : 'That page is not on a site yet; navigate it first, or name the site.',
+      );
+    const entries = await logins.list().catch(() => {
+      throw new AgentToolError(
+        'unavailable',
+        'The saved logins cannot be read right now; ask the owner to check Settings.',
+      );
+    });
+    const hints = loginHintsFor(site, entries);
+    return { summary: loginHintSummary(site, hints), logins: { v: 1, site, hints, passkeys: 'off' } };
+  }
+
   private async listPages(caller: AgentToolCaller, tabs = false): Promise<AgentToolResult> {
     const status = await this.ports.browser.status(caller.sessionId);
     const surfaces = await Promise.all(
@@ -1562,7 +1618,7 @@ export class AgentToolService {
   ): Promise<void> {
     const surface = facts.surface;
     const key = surface === undefined ? ('name' in call ? call.name : undefined) : (surface.name ?? surface.id);
-    const kind = kindOf(call);
+    const kind = surface?.surface ?? kindOf(call);
     const detail: AuditDetail = {
       tool: call.tool,
       by: caller.kind,
@@ -1645,6 +1701,8 @@ function callFacts(call: AgentToolCall): AuditDetail {
       return { sensitivity: strongestSensitivity(call.fields), fields: call.fields.length };
     case 'input.wait':
       return { timeoutMs: call.timeoutMs ?? AGENT_TOOL_DEFAULT_WAIT_MS };
+    case 'login.hint':
+      return { from: call.name === undefined ? 'site' : 'page' };
     case 'secure.copy':
       // The copy's name and where it came from; never a command's arguments, which may hold anything.
       return {

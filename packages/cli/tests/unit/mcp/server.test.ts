@@ -384,6 +384,8 @@ describe('McpServer — the tools', () => {
     // Pasting into the secret store fit by dropping NEW_NAME's words that repeated its own pattern (31,912).
     // Pasting into a page field (secure_paste's own words) took it to 31,984.
     // Copying a page element fit by trimming lessons_suggest, browser_open and browser_network (31,975).
+    // login_hint (saved logins' method and login domain) fit by trimming browser_emulate, browser_drag,
+    // browser_wait_for, the ask_owner pair and the file tools' repeated words (31,974).
     // Owner-gated groups are listed only while they are on.
     should(bytes).be.below(32_000);
     should(longest).be.belowOrEqual(300);

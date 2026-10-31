@@ -157,3 +157,43 @@ export const fakeClient = (answer: (call: Call) => unknown = () => ({})) => {
   };
   return { client: client as never, calls };
 };
+
+/** Fake saved logins that sign in differently: Vercel via Google, the Google login itself, and a GitHub password. */
+export const signInLogins = (): LoginEntryList => ({
+  v: 1,
+  health: 'ready',
+  entries: [
+    login({
+      id: 'VERCEL',
+      label: 'Vercel',
+      match: ['vercel.com'],
+      method: { kind: 'google', via: 'GOOGLE_KIRIN' },
+      domains: ['app.vercel.com'],
+      username: undefined,
+      fields: { password: false, totp: false },
+    }),
+    login({
+      id: 'GOOGLE_KIRIN',
+      label: 'Google (kirin@…)',
+      match: ['google.com'],
+      domains: ['accounts.google.com'],
+      username: 'kirin@example.test',
+      fields: { password: true, totp: true },
+      totp: { algorithm: 'SHA1', digits: 6, period: 30 },
+    }),
+    login(),
+  ],
+});
+
+/** The input card's view of a saved login that signs in through Google. */
+export const savedSignIn = (overrides: Partial<InputSaved> = {}): InputSaved =>
+  saved({
+    match: 'vercel.com',
+    signIn: {
+      id: 'VERCEL',
+      label: 'Vercel',
+      method: { kind: 'google', via: 'GOOGLE_KIRIN' },
+      via: { id: 'GOOGLE_KIRIN', label: 'Google (kirin@…)' },
+    },
+    ...overrides,
+  });

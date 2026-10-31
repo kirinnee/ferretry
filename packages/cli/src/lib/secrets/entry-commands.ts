@@ -1,11 +1,14 @@
+import { LOGIN_METHODS } from '@ferretry/protocol';
 import type { Command } from 'commander';
 import type { LoginEntryController } from './entry-controller.ts';
 
 const collect = (value: string, previous: readonly string[] = []): string[] => [...previous, value];
 
 const ENTRY_HELP = `Saved logins: the owner's password manager, which the input bridge types from. An entry is a label,
-what it is for (--match sudo@kirin-box, or a web host like github.com), an optional username (plain text)
-and secret fields: a password, and optionally a 2FA seed.
+what it is for (--match sudo@kirin-box, or a web host like github.com), how it signs in (--method:
+password, or a provider such as google --via GOOGLE_KIRIN), where the sign-in happens (--domain
+accounts.google.com), an optional username (plain text) and secret fields: a password, and optionally a
+2FA seed. There is no passkey method: passkeys are off in the agent browser.
 
 A password or seed is typed at a hidden prompt, sent once and dropped. There is no flag, argument,
 environment variable or pipe that carries one, and no command that prints one: an answered input card
@@ -32,6 +35,10 @@ export function registerLoginEntryCommands(secret: Command, controller: LoginEnt
     .requiredOption('--label <text>', 'the name you read it by, e.g. "sudo on kirin-box"')
     .option('--match <target>', 'what it is for: program@host or a web host (repeatable)', collect)
     .option('--username <text>', 'the username (plain text, shown on cards)')
+    .option('--method <kind>', `how it signs in: ${LOGIN_METHODS.join(', ')} (default password)`)
+    .option('--sso-name <text>', 'with --method sso: the provider as its button says it, e.g. Okta')
+    .option('--via <id>', "with a provider method: the provider's saved login, e.g. GOOGLE_KIRIN")
+    .option('--domain <host>', 'where the sign-in happens, e.g. accounts.google.com (repeatable)', collect)
     .option('--no-password', 'save it without a password for now')
     .action(async (id: string, options: Parameters<LoginEntryController['add']>[1]) => {
       await controller.add(id, options);
@@ -44,12 +51,27 @@ export function registerLoginEntryCommands(secret: Command, controller: LoginEnt
     .option('--match <target>', 'REPLACE what it matches (repeatable)', collect)
     .option('--username <text>', 'a new username')
     .option('--no-username', 'remove the username')
+    .option('--method <kind>', `how it signs in: ${LOGIN_METHODS.join(', ')}`)
+    .option('--sso-name <text>', 'with --method sso: the provider as its button says it')
+    .option('--via <id>', "the provider's saved login this one signs in via")
+    .option('--no-via', 'sign in via no saved login')
+    .option('--domain <host>', 'REPLACE where the sign-in happens (repeatable)', collect)
     .option('--password', 'replace the password (typed at a hidden prompt)')
     .option('--totp', 'keep a 2FA seed (typed at a hidden prompt, after a warning)')
     .option('--no-totp', 'forget the 2FA seed')
     .option('--i-understand-totp', 'skip the typed "yes" after the 2FA warning')
     .action(async (id: string, options: Parameters<LoginEntryController['edit']>[1]) => {
       await controller.edit(id, options);
+    });
+
+  entry
+    .command('hint <site>')
+    .description(
+      'what a ferret is told about signing in to a site: label, method, login domains, username; never a value',
+    )
+    .option('--json', 'print the protocol document instead')
+    .action(async (site: string, options: { json?: boolean }) => {
+      await controller.hint(site, options);
     });
 
   entry

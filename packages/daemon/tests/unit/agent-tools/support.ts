@@ -443,7 +443,7 @@ class FakeAgentFiles implements Pick<AgentFiles, 'prepareUpload' | 'save'> {
 
 /** A whole agent-tools domain over fakes, with every collaborator exposed for assertions. */
 export function agentToolWorld(
-  extra: Pick<AgentToolPorts, 'input' | 'scrub' | 'quarantinedUntil' | 'copy' | 'plans' | 'copyPages'> &
+  extra: Pick<AgentToolPorts, 'input' | 'scrub' | 'quarantinedUntil' | 'copy' | 'plans' | 'copyPages' | 'logins'> &
     Partial<Pick<AgentToolPorts, 'redactor'>> = {},
 ) {
   const terminals = new FakeTerminals(['s1', 's2']);

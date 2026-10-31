@@ -15,6 +15,7 @@ import {
   request,
   requestOf,
   saved,
+  savedSignIn,
   withSaved,
 } from '../../support/input-fixtures.ts';
 
@@ -280,12 +281,23 @@ describe('first time: typing and saving', () => {
     });
   });
 
-  it('can send a short secret but cannot save it, and says why', async () => {
+  it('says nothing about length before anything is typed, even with Save as ticked', async () => {
+    const view = await show(withSaved(saved()));
+    const tick = must(view.q<HTMLInputElement>('[data-input-save-tick]'), 'the tick');
+    expect(tick.disabled).toBe(false);
+    expect(view.q('[data-input-save-reason]')).toBeNull();
+
+    await click(tick);
+
+    expect(view.q('[data-input-save-reason]')).toBeNull();
+  });
+
+  it('can send a short secret but cannot save it, and says why only once Save as is ticked', async () => {
     const view = await show(withSaved(saved()));
     await type(view, 'abc');
+    expect(view.q('[data-input-save-reason]')).toBeNull();
 
-    const tick = must(view.q<HTMLInputElement>('[data-input-save-tick]'), 'the tick');
-    expect(tick.disabled).toBe(true);
+    await click(view.q('[data-input-save-tick]'));
     expect(view.q('[data-input-save-reason]')?.textContent).toBe(SAVE_TOO_SHORT);
     await click(view.q('[data-input-send]'));
     await settle();
@@ -905,7 +917,8 @@ describe('the card, Save as on a login card', () => {
     await typeInto(view.q('[data-input-field="email"] [data-input-value]'), 'kirin@example.test');
     await typeInto(view.q('[data-input-field="password"] [data-input-value]'), 'abc');
 
-    expect(must(view.q<HTMLInputElement>('[data-input-save-tick]'), 'the tick').disabled).toBe(true);
+    expect(view.q('[data-input-save-reason]')).toBeNull();
+    await click(view.q('[data-input-save-tick]'));
     expect(view.q('[data-input-save-reason]')?.textContent).toBe(SAVE_TOO_SHORT);
 
     const unsaved = await show(loginCard({ saved: saved({ saves: undefined, suggest: undefined }) }));
@@ -951,5 +964,24 @@ describe('the card, a page’s picture', () => {
     expect(plain.calls.some(call => call.path.endsWith('/shot'))).toBe(false);
     expect(plain.q('[data-input-shot]')).toBeNull();
     expect(failing.q('[data-input-shot]')).toBeNull();
+  });
+});
+
+describe('a saved login that signs in through a provider', () => {
+  it('says so in one line, naming the provider login', async () => {
+    const { q } = await show(withSaved(savedSignIn({ offers: [] })));
+    expect(q('[data-input-sign-in]')?.textContent).toBe("Sign in with Google via 'Google (kirin@…)'");
+  });
+
+  it('leads with it, above the field the owner would type in', async () => {
+    const { q } = await show(withSaved(savedSignIn({ offers: [] })));
+    const line = must(q('[data-input-sign-in]'), 'the sign-in line');
+    const input = must(q('[data-input-value]'), 'the field');
+    expect(line.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('says nothing extra for a plain password login', async () => {
+    const { q } = await show(withSaved(saved({ offers: [] })));
+    expect(q('[data-input-sign-in]')).toBeNull();
   });
 });

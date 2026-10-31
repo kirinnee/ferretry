@@ -171,7 +171,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'terminal_ask_owner',
     tool: 'terminal.ask_owner',
     description:
-      'Hand a terminal to the owner when you need them to act in it (a password, a code, "press Enter"): their tab comes forward with "Your turn here". Then wait; read the terminal to see when they are done.',
+      'Hand a terminal to the owner when you need them to act in it (a password, a code, "press Enter"): their tab comes forward with "Your turn here". Then wait and read it.',
     inputSchema: object({ name: NAME, message: ASK_MESSAGE }, ['name']),
   },
   {
@@ -207,6 +207,13 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
       },
       ['id'],
     ),
+  },
+  {
+    name: 'login_hint',
+    tool: 'login.hint',
+    description:
+      "Before a sign-in: the owner's saved logins for a page or site (label, method like Google, login domain, username). Never a value.",
+    inputSchema: object({ name: NAME, site: { type: 'string', description: 'Or a host or URL.' } }),
   },
   {
     name: 'browser_list',
@@ -339,7 +346,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'browser_wait_for',
     tool: 'browser.wait_for',
     description:
-      'Wait for exactly one thing: an element (ref or selector, with state), text, textGone, url (part of the address), load, or time (ms). Answers whether it happened within timeoutMs.',
+      'Wait for one thing: an element (ref or selector, with state), text, textGone, url (part of the address), load, or time (ms). Says whether it happened in time.',
     inputSchema: object(
       {
         name: NAME,
@@ -354,7 +361,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
         textGone: { type: 'string' },
         url: { type: 'string' },
         load: { type: 'string', enum: ['load', 'domcontentloaded', 'networkidle'] },
-        time: { type: 'integer', minimum: 1, maximum: AGENT_TOOL_MAX_WAIT_MS, description: 'Just wait this many ms.' },
+        time: { type: 'integer', minimum: 1, maximum: AGENT_TOOL_MAX_WAIT_MS },
         timeoutMs: {
           type: 'integer',
           minimum: 100,
@@ -403,8 +410,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
   {
     name: 'browser_emulate',
     tool: 'browser.emulate',
-    description:
-      'Make a page look like another device or setting: viewport, media, geolocation, locale, timezone, cpuThrottle, network, permissions. reset puts it all back. Never the user agent.',
+    description: 'Make a page act like another device or setting; reset puts it all back. Never the user agent.',
     inputSchema: object(
       {
         name: NAME,
@@ -429,10 +435,10 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
         network: object({
           offline: { type: 'boolean' },
           latency: { type: 'integer', minimum: 0, description: 'Added ms.' },
-          throughput: { type: 'integer', minimum: 1, description: 'Kilobits per second.' },
+          throughput: { type: 'integer', minimum: 1, description: 'kbit/s.' },
         }),
         permissions: { type: 'array', items: { type: 'string', enum: BROWSER_EMULATED_PERMISSIONS } },
-        reset: { type: 'boolean', description: 'Put everything back as it was.' },
+        reset: { type: 'boolean' },
       },
       ['name'],
     ),
@@ -441,7 +447,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'browser_upload',
     tool: 'browser.upload',
     description:
-      'Give a page files: a file input, or the button that opens the file picker (ref or selector). files are paths in your working folder, or {"attachment": "att_…"}. mode "drop" drops them on a dropzone with no input. Needs the files switch.',
+      'Give a page files: a file input, or the button that opens the file picker (ref or selector). files are paths in your working folder, or {"attachment": "att_…"}. mode "drop": onto a dropzone. Needs the files switch.',
     inputSchema: object(
       {
         name: NAME,
@@ -467,7 +473,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'browser_download',
     tool: 'browser.download',
     description:
-      'Save a file the page downloaded (a result says "a download started … id dl-1") into your working folder: downloads/<its name> unless saveAs says where. Refuses to overwrite unless overwrite is true. Needs the files switch.',
+      'Save a file the page downloaded (a result says "a download started … id dl-1") into your working folder: downloads/<its name> unless saveAs says where. Needs the files switch.',
     inputSchema: object(
       {
         name: NAME,
@@ -482,7 +488,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'browser_pdf',
     tool: 'browser.pdf',
     description:
-      'Print the page to a PDF in your working folder (downloads/<title>.pdf unless saveAs says where). Needs a headless browser, not the Real window mode. Refuses to overwrite unless overwrite is true. Needs the files switch.',
+      'Print the page to a PDF in your working folder (downloads/<title>.pdf unless saveAs says where). Needs a headless browser, not the Real window mode. Needs the files switch.',
     inputSchema: object(
       {
         name: NAME,
@@ -502,7 +508,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'browser_drag',
     tool: 'browser.drag',
     description:
-      'Drag from one element to another (fromRef/fromSelector to toRef/toSelector): drag and drop. Or from a point to a point (fromX, fromY to toX, toY, in steps): sliders, canvases, maps.',
+      'Drag from one element to another (fromRef/fromSelector to toRef/toSelector), or point to point (fromX, fromY to toX, toY, in steps) for sliders, canvases, maps.',
     inputSchema: object(
       {
         name: NAME,
@@ -518,7 +524,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
           type: 'integer',
           minimum: 1,
           maximum: 100,
-          description: 'Points only: moves on the way. 10 by default.',
+          description: 'Points only; 10 by default.',
         },
       },
       ['name'],
@@ -654,7 +660,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'browser_ask_owner',
     tool: 'browser.ask_owner',
     description:
-      'Hand a page to the owner when you need them to act in it (a login, a captcha, a payment, a consent screen): their tab comes forward with "Your turn here". Then wait; read the page to see when they are done.',
+      'Hand a page to the owner when you need them to act in it (a login, a captcha, a payment, a consent screen): their tab comes forward with "Your turn here". Then wait and read it.',
     inputSchema: object({ name: NAME, message: ASK_MESSAGE }, ['name']),
   },
   {

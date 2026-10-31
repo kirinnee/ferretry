@@ -49,6 +49,8 @@ describe('the saved-login directory', () => {
       id: 'GITHUB_KIRINNEE',
       label: 'GitHub (kirinnee)',
       match: ['github.com'],
+      method: { kind: 'password' },
+      domains: ['github.com'],
       username: 'kirinnee',
       fields: { password: true, totp: false },
       createdAt: CLOCK.now(),
@@ -243,5 +245,85 @@ describe('the saved-login vault when what it reads is wrong', () => {
     const w = world();
     await w.directory.put('BAD', { label: 'bad', totp: { seed: '0189-not-base32' } } as PutLoginEntry);
     should((await w.vault.fill('BAD', 'totp', 0).catch(error => error)).refusal).equal('no_such_field');
+  });
+});
+
+describe('how a saved login signs in, at rest', () => {
+  it('should read an entry saved before methods as a password one on its web hosts, without rewriting it', async () => {
+    const index = new MemoryLoginIndex();
+    const old: LoginIndexDocument = {
+      v: 1,
+      entries: {
+        GITHUB: {
+          key: 'L000000000000000000000000',
+          label: 'GitHub',
+          match: ['github.com', 'git@github.com'],
+          seals: {},
+          createdAt: CLOCK.now(),
+          updatedAt: CLOCK.now(),
+        },
+      },
+    };
+    await index.write(old);
+    const [summary] = await world(index).directory.list();
+    should(summary?.method).deepEqual({ kind: 'password' });
+    should(summary?.domains).deepEqual(['github.com']);
+    should(index.document).deepEqual(old);
+  });
+
+  it('should keep a method, its provider and the login domains, and change only what is named', async () => {
+    const w = world();
+    await w.directory.put('GOOGLE', change({ label: 'Google', match: ['accounts.google.com'], password: PASSWORD }));
+    await w.directory.put(
+      'VERCEL',
+      change({
+        label: 'Vercel',
+        match: ['vercel.com'],
+        method: { kind: 'google', via: 'GOOGLE' },
+        domains: ['vercel.com'],
+      }),
+    );
+    const relabelled = await w.directory.put('VERCEL', change({ label: 'Vercel (team)' }));
+    should(relabelled.method).deepEqual({ kind: 'google', via: 'GOOGLE' });
+    should(relabelled.domains).deepEqual(['vercel.com']);
+    const back = await w.directory.put('VERCEL', change({ method: { kind: 'password' }, domains: [] }));
+    should(back.method).deepEqual({ kind: 'password' });
+    should(back.domains).deepEqual([]);
+    should(JSON.stringify(w.index.document)).not.containEql(PASSWORD);
+  });
+
+  it('should add the page a card saved from to the login domains an entry keeps', async () => {
+    const w = world();
+    await w.directory.put('GOOGLE', change({ label: 'Google', domains: ['accounts.google.com'] }));
+    const saved = await w.directory.saveFields('GOOGLE', 'Google', 'myaccount.google.com', { password: PASSWORD });
+    should(saved.domains).deepEqual(['accounts.google.com', 'myaccount.google.com']);
+    const terminal = await w.directory.saveFields('GOOGLE', 'Google', 'sudo@box', { password: `${PASSWORD}2` });
+    should(terminal.domains).deepEqual(['accounts.google.com', 'myaccount.google.com']);
+  });
+
+  it('should refuse a circle of provider links', async () => {
+    const w = world();
+    await w.directory.put('GOOGLE', change({ label: 'Google' }));
+    await w.directory.put('SITE', change({ label: 'Site', method: { kind: 'google', via: 'GOOGLE' } }));
+    const error = await w.directory
+      .put('GOOGLE', change({ method: { kind: 'sso', name: 'Site SSO', via: 'SITE' } }))
+      .catch(caught => caught);
+    should(error).be.instanceOf(LoginEntryError);
+    should(error.refusal).equal('bad_via');
+    should(error.message).containEql('leads back');
+  });
+
+  it('should refuse a provider that is not saved, or the entry itself', async () => {
+    const w = world();
+    for (const [id, via] of [
+      ['SITE', 'NOPE'],
+      ['SITE', 'SITE'],
+    ] as const) {
+      const error = await w.directory
+        .put(id, change({ label: 'Site', method: { kind: 'github', via } }))
+        .catch(caught => caught);
+      should(error).be.instanceOf(LoginEntryError);
+      should(error.refusal).equal('bad_via');
+    }
   });
 });

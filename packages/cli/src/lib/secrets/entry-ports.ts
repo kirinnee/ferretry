@@ -2,6 +2,7 @@ import type {
   IFyApiClient,
   LoginEntryList,
   LoginEntrySummary,
+  LoginHintList,
   PutLoginEntryRequest,
   RemovedLoginEntry,
 } from '@ferretry/protocol';
@@ -13,6 +14,8 @@ export interface ILoginEntryGateway {
   put(id: string, body: PutLoginEntryRequest): Promise<LoginEntrySummary>;
   rename(id: string, to: string): Promise<LoginEntrySummary>;
   remove(id: string): Promise<RemovedLoginEntry>;
+  /** What a ferret may know about signing in to a site: labels, methods, domains, usernames. */
+  hint(site: string): Promise<LoginHintList>;
 }
 
 /**

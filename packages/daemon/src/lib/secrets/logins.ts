@@ -28,7 +28,12 @@ import {
   type LoginEntrySummary,
   type LoginFieldRole,
   LOGIN_MATCH_MAX,
+  LoginDomainSchema,
+  type LoginMethod,
+  LoginMethodSchema,
   MAX_LOGIN_ENTRIES,
+  PASSWORD_METHOD,
+  webHostsOf,
   type PutLoginEntry,
   type TotpParameters,
   TotpParametersSchema,
@@ -51,6 +56,10 @@ export const LoginRecordSchema = z.strictObject({
   key: z.string().regex(/^L[0-9A-F]{24}$/u),
   label: z.string().min(1).max(80),
   match: z.array(z.string().min(1).max(320)).max(16),
+  /** How it signs in. Absent: an entry from before methods, which signs in with its password. */
+  method: LoginMethodSchema.optional(),
+  /** Where the sign-in happens. Absent: an entry from before login domains, which reads as its web `match` hosts. */
+  domains: z.array(LoginDomainSchema).max(16).optional(),
   username: z.string().min(1).max(256).optional(),
   /**
    * WHERE each secret field rests in the sealed document right now. A change seals a new value under a FRESH
@@ -84,7 +93,7 @@ export interface LoginIndexStore {
 }
 
 /** Why a change to a saved login was refused: each is a different thing for the person to do. */
-export type LoginRefusal = 'unknown_login' | 'login_exists' | 'label_required' | 'no_such_field';
+export type LoginRefusal = 'unknown_login' | 'login_exists' | 'label_required' | 'no_such_field' | 'bad_via';
 
 export class LoginEntryError extends Error {
   constructor(
@@ -128,6 +137,8 @@ function summary(id: LoginEntryId, record: LoginRecord): LoginEntrySummary {
     id,
     label: record.label,
     match: [...record.match],
+    method: record.method ?? PASSWORD_METHOD,
+    domains: [...(record.domains ?? webHostsOf(record.match))],
     ...(record.username === undefined ? {} : { username: record.username }),
     fields: { password: record.seals.password !== undefined, totp: record.seals.totp !== undefined },
     ...(record.totp === undefined ? {} : { totp: record.totp }),
@@ -246,9 +257,14 @@ export class LoginDirectory {
       const matches = [...new Set([...(existing?.match ?? []), ...(match === undefined ? [] : [match])])].slice(
         -LOGIN_MATCH_MAX,
       );
+      const domains =
+        existing?.domains === undefined || match === undefined || webHostsOf([match]).length === 0
+          ? undefined
+          : [...new Set([...existing.domains, match])].slice(-LOGIN_MATCH_MAX);
       return await this.change(id, {
         ...(existing === undefined ? { label } : {}),
         match: matches,
+        ...(domains === undefined ? {} : { domains }),
         ...(fields.username === undefined ? {} : { username: fields.username }),
         ...(fields.password === undefined ? {} : { password: fields.password }),
       });
@@ -274,6 +290,7 @@ export class LoginDirectory {
       throw new SecretStoreError('full', `this daemon already keeps ${MAX_LOGIN_ENTRIES} saved logins`);
     if (existing === undefined && change.label === undefined)
       throw new LoginEntryError('label_required', `a new saved login needs a label; ${id} does not exist yet`);
+    checkVia(id, change.method, index);
     const at = this.clock.now();
     const key = existing?.key ?? this.newKey();
     const seals: { password?: string; totp?: string } = { ...existing?.seals };
@@ -347,7 +364,7 @@ export class LoginDirectory {
       throw new LoginEntryError('login_exists', `${to} is already a saved login; pick another name`);
     const { [from]: _moved, ...rest } = index.entries;
     const renamed = { ...record, updatedAt: this.clock.now() };
-    await this.documents.index.write({ ...index, entries: { ...rest, [to]: renamed } });
+    await this.documents.index.write({ ...index, entries: { ...repointed(rest, from, to), [to]: renamed } });
     return summary(to, renamed);
   }
 
@@ -364,7 +381,7 @@ export class LoginDirectory {
     const record = index.entries[id];
     if (record === undefined) return false;
     const { [id]: _removed, ...rest } = index.entries;
-    const committed: LoginIndexDocument = { ...index, entries: rest };
+    const committed: LoginIndexDocument = { ...index, entries: repointed(rest, id, undefined) };
     await this.documents.index.write(committed);
     await this.sweep(
       committed,
@@ -372,6 +389,50 @@ export class LoginDirectory {
     );
     return true;
   }
+}
+
+/**
+ * A method that goes VIA another saved login names one that exists, and not itself: a dangling or circular link
+ * would send the ferret to a provider page nothing can fill.
+ */
+function checkVia(id: LoginEntryId, method: LoginMethod | undefined, index: LoginIndexDocument): void {
+  const via = method?.via;
+  if (via === undefined) return;
+  if (via === id)
+    throw new LoginEntryError('bad_via', `${id} cannot sign in via itself; pick the provider's saved login`);
+  if (index.entries[via] === undefined)
+    throw new LoginEntryError(
+      'bad_via',
+      `there is no saved login ${via} to sign in via; save the provider's login first`,
+    );
+  // Follow the provider's own links: one that leads back here would send the ferret round in a circle.
+  const seen = new Set<string>([id]);
+  for (let next: string | undefined = via; next !== undefined; next = index.entries[next]?.method?.via) {
+    if (seen.has(next))
+      throw new LoginEntryError(
+        'bad_via',
+        `${id} via ${via} leads back to ${next}; a provider cannot go via a site that uses it`,
+      );
+    seen.add(next);
+  }
+}
+
+/**
+ * Every OTHER entry whose method goes via `from`, pointed at `to` (a rename), or no longer via anything (a
+ * delete). Only the link changes; nothing sealed is touched.
+ */
+function repointed(
+  entries: Readonly<Record<string, LoginRecord>>,
+  from: string,
+  to: string | undefined,
+): Record<string, LoginRecord> {
+  return Object.fromEntries(
+    Object.entries(entries).map(([handle, record]) => {
+      if (record.method?.via !== from) return [handle, record];
+      const { via: _gone, ...method } = record.method;
+      return [handle, { ...record, method: to === undefined ? method : { ...method, via: to } }];
+    }),
+  );
 }
 
 function nextRecord(
@@ -382,6 +443,8 @@ function nextRecord(
   seals: LoginRecord['seals'],
 ): LoginRecord {
   const username = change.username === undefined ? existing?.username : (change.username ?? undefined);
+  const method = change.method ?? existing?.method;
+  const domains = change.domains ?? existing?.domains;
   const totp: TotpParameters | undefined =
     change.totp === undefined
       ? existing?.totp
@@ -392,6 +455,8 @@ function nextRecord(
     key,
     label: change.label ?? (existing?.label as string),
     match: [...new Set(change.match ?? existing?.match ?? [])],
+    ...(method === undefined ? {} : { method }),
+    ...(domains === undefined ? {} : { domains: [...new Set(domains)] }),
     ...(username === undefined ? {} : { username }),
     seals,
     ...(totp === undefined || seals.totp === undefined ? {} : { totp }),
