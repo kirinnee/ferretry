@@ -72,6 +72,24 @@ describe('readUserMessage', () => {
         sessionId: 'mveq0r0r-ddd75d7b',
         kind: 'reply',
         replyExpected: false,
+        note: 'To reply: fy send tomi "<reply>"',
+      },
+      body: 'Hello from home-manager-fd.',
+    });
+  });
+
+  test('reads the banner an older daemon wrote, "No reply needed" and all, the same way', () => {
+    // Transcripts recorded before the rewording keep the old second line.
+    const older =
+      '[reply from ferret tomi (session mveq0r0r-ddd75d7b) — not from the owner]\n' +
+      'No reply needed. To reply: fy send tomi "<reply>"\n\n';
+    expect(readUserMessage(`${older}Hello from home-manager-fd.`)).toEqual({
+      kind: 'peer',
+      from: {
+        name: 'tomi',
+        sessionId: 'mveq0r0r-ddd75d7b',
+        kind: 'reply',
+        replyExpected: false,
         note: 'No reply needed. To reply: fy send tomi "<reply>"',
       },
       body: 'Hello from home-manager-fd.',
