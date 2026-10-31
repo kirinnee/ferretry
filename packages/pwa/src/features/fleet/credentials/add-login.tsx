@@ -561,7 +561,7 @@ export function AddLogin({
             onClick={leave}
           >
             <ChevronLeft size={16} aria-hidden="true" />
-            Logins
+            AI logins
           </Button>
         )}
       </div>

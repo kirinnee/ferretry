@@ -11,7 +11,7 @@
  * %terminal:dev, with the daemon's risk flag. "store" is the same copy saved as the secret VERCEL_TOKEN, which
  * already holds a value, so the card warns it replaces it. "page" is a copy from the vercel found in
  * ~/.bun/bin going into a password field on vercel.com. "plan" is the card a ferret raises before it starts, two planned
- * pastes with one ticked off. "rules" is Settings › Secrets › Pastes approved in advance, with the add form open.
+ * pastes with one ticked off. "rules" is Settings › Secure copy › Pastes approved in advance, with the add form open.
  * Every width asserts no sideways scroll and the touch floor on every button of the phone.
  */
 import { spawnSync } from 'node:child_process';

@@ -623,7 +623,7 @@ facts are `packages/daemon/src/lib/input-requests/login-observer.ts`.
 - **The ferret proposes, the owner decides.** After a sign-in a ferret may call `account_propose` (`login`, the whole
   new `recipe`, `why`). The proposal waits on the entry (three at most; a fourth pushes out the oldest and closes its
   card) and on an agenda card that shows the changed lines and "The ferret says: …". **The card approves nothing**:
-  the owner approves or declines in Settings › Accounts › the login › Recipe, or with
+  the owner approves or declines in Settings › Accounts › the account › Recipe, or with
   `fy account recipe approve|decline <id> <proposal>`, through the owner-only
   `POST /v1/secrets/logins/:id/recipe/proposals/:proposalId` (`secrets` configure, a kept `secrets.changed` record).
   An approval is refused (`stale_proposal`) when the recipe changed after the proposal was made, because the owner
@@ -714,7 +714,7 @@ explicit confirmation of this sentence (`LOGIN_TOTP_WARNING`), shown in the app 
 
 ### Managing them
 
-Settings › Secrets › Saved logins and `fy account ls|add|edit|rename|rm|recipe` (`fy secret entry …` is a hidden alias for one release) list entries (never values),
+Settings › Accounts (the former "Saved logins") and `fy account ls|add|edit|rename|rm|recipe` (`fy secret entry …` is a hidden alias for one release) list entries (never values),
 add and edit the label, match, sign-in method (`--method`, `--via`, `--sso-name`), login domains (`--domain`)
 and username, replace a password, add or remove a 2FA seed, rename the handle and
 delete. Values are typed into a masked field or read from the TTY with echo off; never a flag.
@@ -797,12 +797,12 @@ default**, revocable, and audited on every use. Until then every placement is a 
 
 ## Phases
 
-| Phase | What                                                                                                          | State       |
-| ----- | ------------------------------------------------------------------------------------------------------------- | ----------- |
-| P0    | This contract and the schemas                                                                                 | done        |
-| P1    | Terminal secret and plain: service, agent tools, deliver and cancel, quarantine, `fy input`                   | done        |
-| P2    | The app card, cards of several fields, `chain` steps                                                          | done        |
-| P3    | Saved logins (one tap), "Save as", 2FA codes, `fy account` (alias `fy secret entry`), Settings › Saved logins | done        |
-| P4    | Pages: browser fields, field shot, page holds, passkeys off, captcha handover                                 | done        |
-| P4b   | Login recipes: steps, daemon-observed facts, ferret proposals the owner approves                              | this change |
-| P5    | Multi-step chains, consumer configuration, a per-daemon remote cap                                            | later       |
+| Phase | What                                                                                                                                    | State       |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| P0    | This contract and the schemas                                                                                                           | done        |
+| P1    | Terminal secret and plain: service, agent tools, deliver and cancel, quarantine, `fy input`                                             | done        |
+| P2    | The app card, cards of several fields, `chain` steps                                                                                    | done        |
+| P3    | Saved logins (one tap), "Save as", 2FA codes, `fy account` (alias `fy secret entry`), Settings › Saved logins (now Settings › Accounts) | done        |
+| P4    | Pages: browser fields, field shot, page holds, passkeys off, captcha handover                                                           | done        |
+| P4b   | Login recipes: steps, daemon-observed facts, ferret proposals the owner approves                                                        | this change |
+| P5    | Multi-step chains, consumer configuration, a per-daemon remote cap                                                                      | later       |

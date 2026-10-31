@@ -1,5 +1,5 @@
 /**
- * Screenshots of the input card and of Settings › Secrets › Saved logins, at a 390px phone and a 1440px
+ * Screenshots of the input card and of Settings › Accounts, at a 390px phone and a 1440px
  * desktop, in the light and dark studio themes. Review evidence; nothing compares the PNGs.
  *
  *   bun harness/input-card-screenshot.tsx [out-dir] [states]   # writes input-card-*.png, input-p2-*.png, saved-logins-*.png

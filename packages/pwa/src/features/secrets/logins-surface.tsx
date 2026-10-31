@@ -3,7 +3,7 @@
  *
  * Like the secrets surface it owns no module cache: a login belongs to a machine, the loaded list is stamped
  * with the daemon it came from and dropped when the connection changes, and a load that failed is a stated
- * refusal rather than "no saved logins".
+ * refusal rather than "no accounts".
  */
 
 import type { LoginEntryList, PutLoginEntryRequest } from '@ferretry/protocol';
@@ -99,19 +99,19 @@ export function LoginsSurface({
 
   if (failure !== null && failure.daemonId === connection.daemonId)
     return (
-      <section className="kt-panel p-panel" role="status" aria-label="Saved logins unavailable">
-        <h3 className="m-0 text-row font-semibold text-fg">Saved logins unavailable</h3>
+      <section className="kt-panel p-panel" role="status" aria-label="Accounts unavailable">
+        <h3 className="m-0 text-row font-semibold text-fg">Accounts unavailable</h3>
         <p className="mb-0 mt-1 text-cell leading-base text-muted">
-          This browser could not read this daemon’s saved logins: {failure.reason}. That is not the same as having none,
-          and Ferretry will not show it as one.
+          This browser could not read this daemon’s accounts: {failure.reason}. That is not the same as having none, and
+          Ferretry will not show it as one.
         </p>
       </section>
     );
 
   if (loaded === null || loaded.daemonId !== connection.daemonId)
     return (
-      <section className="kt-panel p-panel" role="status" aria-label="Loading saved logins">
-        <p className="m-0 text-ui text-faint">Reading this daemon’s saved logins…</p>
+      <section className="kt-panel p-panel" role="status" aria-label="Loading accounts">
+        <p className="m-0 text-ui text-faint">Reading this daemon’s accounts…</p>
       </section>
     );
 

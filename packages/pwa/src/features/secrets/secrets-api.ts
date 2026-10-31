@@ -54,7 +54,7 @@ export const SECRET_MASK = '••••••••••••';
  * cannot drift apart on the wording.
  */
 export const SECRET_PROMISE =
-  'Agents use these without holding one: the value goes into the command Ferretry runs, never into the agent. Values never reach this browser and never appear in a transcript.';
+  'Env vars for the programs ferrets run. The value goes into the command Ferretry runs, never into the agent. Values never reach this browser and never appear in a transcript.';
 
 export const SECRET_LIMIT =
   'This does not stop an agent that is deliberately trying to leak a secret it is allowed to use. It is the boundary sudo has.';

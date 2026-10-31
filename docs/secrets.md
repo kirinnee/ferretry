@@ -6,6 +6,19 @@ it.
 Read the [threat model](#threat-model) before you trust it with anything. The useful property here
 is real, and it is narrower than people assume.
 
+## Where it is on screen
+
+Settings › this machine has three tabs, one per kind of credential; they share no data and no route:
+
+- **Secrets** — env vars for the programs ferrets run (this page), and "Copy to another machine…".
+- **Accounts** — who ferrets sign in as: username, password and 2FA keys, per site (the former "Saved logins").
+  See [input requests](input-requests.md#saved-logins).
+- **Secure copy** — values moved without a ferret seeing them, and "Pastes approved in advance"
+  ([secure copy](secure-copy.md)).
+
+The Claude, Codex and API-key logins with spend budgets are **AI logins** on screen (Warden, config files, Fleet);
+their files stay `config/logins/*.yaml`.
+
 ## The shape
 
 ```bash

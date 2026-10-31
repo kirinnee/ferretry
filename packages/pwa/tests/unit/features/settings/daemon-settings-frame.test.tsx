@@ -80,6 +80,8 @@ describe('daemon settings panel rail', () => {
     expect(rows.map(row => String(row.props['data-daemon-panel']))).toEqual([
       'warden',
       'secrets',
+      'accounts',
+      'secure-copy',
       'catalogs',
       'devices',
       'grants',
@@ -104,7 +106,7 @@ describe('daemon settings panel rail', () => {
     });
 
     // ALL of them, so the label column has one left edge.
-    expect(glyphs).toHaveLength(15);
+    expect(glyphs).toHaveLength(17);
     // NONE of them the fallback, so every panel was named deliberately rather than caught by the net.
     expect(glyphs.filter(glyph => glyph.includes(FALLBACK_GLYPH))).toEqual([]);
     // ONE EACH, so two panels cannot claim the same landmark and stop being distinguishable.
@@ -262,7 +264,7 @@ describe('daemon settings panel list', () => {
     const view = await mount(frame({ panel: 'retired-panel' }));
     try {
       expect(view.container.querySelector('[data-daemon-panel-open]')).toBeNull();
-      expect(view.container.querySelectorAll('[data-daemon-panel]')).toHaveLength(15);
+      expect(view.container.querySelectorAll('[data-daemon-panel]')).toHaveLength(17);
     } finally {
       await view.unmount();
     }
@@ -270,6 +272,8 @@ describe('daemon settings panel list', () => {
 
   it.each([
     ['secrets', '[aria-label="Loading secrets"], [aria-label="Secrets unavailable"]'],
+    ['accounts', '[aria-label="Loading accounts"], [aria-label="Accounts unavailable"]'],
+    ['secure-copy', '[aria-label="Loading approved pastes"], [aria-label="Approved pastes unavailable"]'],
     ['catalogs', '[data-catalogs-surface]'],
     ['devices', '[data-daemon-panel-open="devices"] *'],
     ['grants', '[aria-label="Loading capability grants"], [aria-label="Capability grants unavailable"]'],

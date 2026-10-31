@@ -7,6 +7,8 @@ where the two disagree, read that one and fix this one.
 
 ## The five things
 
+On screen, the Claude, Codex and API-key logins that carry spend budgets are called **AI logins**, so they are not confused with Settings › Accounts (usernames and passwords for sites). Config paths and kinds (`config/logins/*.yaml`) do not change.
+
 | Thing          | Is                                                                                                                                                                                                                                                                                                                                                                   |
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Machine**    | One daemon. Everything below belongs to exactly one machine. It owns **Agent permissions** (`auto` or `skip`), the **default runtime for new agents** (optional; must be an agent runtime), **what agents may control** (terminals/browsers/files, each on by default; Ferretry settings, off by default), and knows which tools (Claude Code, Codex) are installed. |

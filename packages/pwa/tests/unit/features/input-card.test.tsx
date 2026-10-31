@@ -170,7 +170,7 @@ describe('next time: a saved login', () => {
     expect(q('[data-input-offer-matched]')).toBeNull();
     expect(q('[data-input-value]')).not.toBeNull();
     const others = must(q('[data-input-others]'), 'the choose-another list');
-    expect(others.textContent).toContain('Choose another saved login');
+    expect(others.textContent).toContain('Choose another account');
     expect(others.querySelector('[data-input-hinted]')?.textContent).toBe('the ferret suggested this');
   });
 

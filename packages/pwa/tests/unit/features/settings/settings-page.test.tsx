@@ -805,7 +805,18 @@ describe('SettingsPage daemon panels on the Machine tab', () => {
     expect(frame.getAttribute('data-daemon-settings-frame')).toBe('daemon-alpha');
     expect(
       [...frame.querySelectorAll('[data-daemon-panel]')].map(row => row.getAttribute('data-daemon-panel')),
-    ).toEqual(['warden', 'secrets', 'catalogs', 'devices', 'grants', 'security', 'carrier', 'host-checks']);
+    ).toEqual([
+      'warden',
+      'secrets',
+      'accounts',
+      'secure-copy',
+      'catalogs',
+      'devices',
+      'grants',
+      'security',
+      'carrier',
+      'host-checks',
+    ]);
 
     await interact(() =>
       must(frame.querySelector<HTMLButtonElement>('[data-daemon-panel="carrier"]'), 'Carrier').click(),
