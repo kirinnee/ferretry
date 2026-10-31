@@ -124,6 +124,7 @@ describe('agent tool schemas', () => {
       { tool: 'terminal.request_input', name: 'dev', prompt: 'sudo password for deploy', sensitivity: 'secret' },
       { tool: 'input.wait', id: '!A7', timeoutMs: 5_000 },
       { tool: 'login.hint', site: 'vercel.com' },
+      { tool: 'login.propose', login: 'VERCEL', recipe: 'Open vercel.com', why: 'first sign-in' },
       { tool: 'browser.list' },
       { tool: 'browser.open', name: 'app', url: 'http://localhost:5173/', incognito: true, askOwner: 'Sign in.' },
       { tool: 'browser.navigate', name: 'app', url: 'https://example.test/' },

@@ -14,6 +14,8 @@ import {
   INPUT_MAX_FIELDS,
   INPUT_PROMPT_MAX_LENGTH,
   LESSON_RULE_MAX_CHARS,
+  LOGIN_PROPOSAL_WHY_MAX_LENGTH,
+  LOGIN_RECIPE_MAX_LENGTH,
   TERMINAL_KEYS,
 } from '@ferretry/protocol';
 
@@ -38,7 +40,7 @@ export interface McpToolDefinition {
 
 const NAME = {
   type: 'string',
-  description: 'The name, as in %terminal:dev or %browser:app; an id from a list works too.',
+  description: 'The name, like %terminal:dev or %browser:app, or a listed id.',
 };
 const NEW_NAME = {
   type: 'string',
@@ -48,7 +50,7 @@ const NEW_NAME = {
 const ASK_OWNER = {
   type: ['boolean', 'string'],
   description:
-    'Hand it to the owner right away: their tab opens on it with "Your turn here". true, or a short plain sentence saying exactly what to do there. Never a secret.',
+    'Hand it to the owner now: their tab opens on it. true, or one plain sentence saying what to do there. Never a secret.',
 };
 const ASK_MESSAGE = {
   type: 'string',
@@ -58,7 +60,7 @@ const URL = { type: 'string', description: 'An http or https URL.' };
 const SELECTOR = { type: 'string', description: 'A CSS or Playwright selector, e.g. "button[type=submit]".' };
 const REF = {
   type: 'string',
-  description: 'An element ref from browser_read mode "snapshot", e.g. "e12". Use this or selector.',
+  description: 'A ref from browser_read "snapshot", e.g. "e12"; or selector.',
 };
 const COORDINATE = { type: 'number', minimum: 0, description: 'Viewport CSS pixels.' };
 const INPUT_PROMPT = {
@@ -212,8 +214,22 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'login_hint',
     tool: 'login.hint',
     description:
-      "Before a sign-in: the owner's saved logins for a page or site (label, method like Google, login domain, username). Never a value.",
+      "Before a sign-in: the owner's saved logins for a page or site (label, method, login domain, username, recipe). Never a value.",
     inputSchema: object({ name: NAME, site: { type: 'string', description: 'Or a host or URL.' } }),
+  },
+  {
+    name: 'login_propose',
+    tool: 'login.propose',
+    description:
+      "After a sign-in, propose the saved login's recipe: the steps (Markdown, no values; [[ID]] names another login). The owner approves it.",
+    inputSchema: object(
+      {
+        login: { type: 'string', description: 'Its handle, like GOOGLE_KIRIN.' },
+        recipe: { type: 'string', maxLength: LOGIN_RECIPE_MAX_LENGTH, description: 'The whole new recipe.' },
+        why: { type: 'string', maxLength: LOGIN_PROPOSAL_WHY_MAX_LENGTH, description: 'One line: what changed.' },
+      },
+      ['login', 'recipe', 'why'],
+    ),
   },
   {
     name: 'browser_list',

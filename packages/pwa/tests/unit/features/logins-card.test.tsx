@@ -32,6 +32,7 @@ const show = async (list: LoginEntryList = logins()) => {
         removes.push(id);
         return true;
       }}
+      onDecide={async () => true}
     />,
   );
   mounted.push(view);
@@ -55,7 +56,7 @@ describe('the saved logins list', () => {
     expect(inRow(github, '[data-login-username]').textContent).toContain('kirinnee');
     expect(inRow(github, '[data-login-fields]').textContent).toBe('password ✓ · no 2FA');
     expect(inRow(sudo, '[data-login-fields]').textContent).toBe('password ✓ · 2FA ✓');
-    expect(view.view.container.querySelectorAll('input')).toHaveLength(0);
+    expect(view.view.container.querySelectorAll('input:not([type="checkbox"])')).toHaveLength(0);
   });
 
   it('says a damaged store is damaged, and not that it is empty', async () => {
@@ -255,6 +256,7 @@ describe('the add form and the rename', () => {
         onPut={async () => false}
         onRename={async () => false}
         onRemove={async () => false}
+        onDecide={async () => false}
       />,
     );
     mounted.push(view);

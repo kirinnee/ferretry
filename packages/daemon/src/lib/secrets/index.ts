@@ -1,4 +1,5 @@
 export * from './clone.ts';
+export * from './login-recipes.ts';
 export * from './logins.ts';
 export * from './policy.ts';
 export * from './redaction.ts';

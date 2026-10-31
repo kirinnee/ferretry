@@ -639,6 +639,8 @@ describe('browser worker client — the input bridge', () => {
     const seen = await client.inputObserve('p1', pointer);
     const missing = await client.inputObserve('missing', pointer);
     const document = await client.inputDocument('p1');
+    const hostless = await client.inputDocument('hostless');
+    const text = await client.inputText('p1');
     if (!seen.ok) throw new Error('the page should have been seen');
     const shot = await client.inputShot('p1', seen.facts);
     const refound = await client.inputRefind('p1', seen.facts, pointer);
@@ -650,7 +652,9 @@ describe('browser worker client — the input bridge', () => {
     // Assert
     should(seen.facts.fields[0]?.backendNodeId).equal(7);
     should(missing).deepEqual({ ok: false, missing: 'password' });
-    should(document).deepEqual({ navigationId: 'loader-1' });
+    should(document).deepEqual({ navigationId: 'loader-1', host: 'accounts.example.test' });
+    should(hostless).deepEqual({ navigationId: 'loader-1' });
+    should(text).equal('Welcome back');
     should(refound.ok && refound.facts.fields[0]?.backendNodeId).equal(9);
     should(refoundMissing).deepEqual({ ok: false, missing: 'password' });
     should(refoundAmbiguous).deepEqual({ ok: false, ambiguous: 'password' });
@@ -676,11 +680,12 @@ describe('browser worker client — the input bridge', () => {
     const pictured = await rejection(client.inputShot('garbled', facts));
     const refound = await rejection(client.inputRefind('garbled', facts, []));
     const documented = await rejection(client.inputDocument('garbled'));
+    const read = await rejection(client.inputText('garbled'));
     const garbled = await client.inputType('garbled', facts, [{ field: 'password', text: 'x' }], true);
     const refused = await client.inputType('refuses', facts, [{ field: 'password', text: 'x' }], true);
 
     // Assert
-    for (const failure of [observed, pictured, documented, refound]) should(failure.code).equal('upstream_failed');
+    for (const failure of [observed, pictured, documented, refound, read]) should(failure.code).equal('upstream_failed');
     should(garbled).equal('uncertain');
     should(refused).equal('uncertain');
   });

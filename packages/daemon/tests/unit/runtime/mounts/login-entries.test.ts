@@ -4,7 +4,7 @@ import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { type SecretSubsystem, secretRoutes } from '../../../../src/lib/runtime/mounts/secrets.ts';
-import { SecretStoreError } from '../../../../src/lib/secrets/index.ts';
+import { LoginRecipeService, SecretStoreError } from '../../../../src/lib/secrets/index.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import {
   agentIn,
@@ -298,5 +298,110 @@ describe('the login hint over a damaged store', () => {
     });
     const response = await dispatchAs(human, subsystem, 'GET', '/v1/secrets/logins/hint?site=github.com');
     should(response.status).equal(500);
+  });
+});
+
+describe('the login recipe routes', () => {
+  async function recipeWorld() {
+    const base = secretSubsystem();
+    const logins = base.logins as NonNullable<SecretSubsystem['logins']>;
+    const loginRecipes = new LoginRecipeService({
+      logins,
+      values: { redact: async text => text.replaceAll(PASSWORD, '[redacted]') },
+      agenda: { raise: async () => ({ ok: true, id: 'A1' }), close: async () => undefined },
+      audit: { record: async () => undefined },
+      clock: { now: () => '2026-10-31T09:00:00.000Z' },
+      newId: () => 'rp_0000000000000001',
+    });
+    const subsystem: SecretSubsystem = { ...base, loginRecipes };
+    await dispatch(subsystem, 'PUT', '/v1/secrets/logins/VERCEL', { label: 'Vercel', password: PASSWORD });
+    return { subsystem, loginRecipes };
+  }
+
+  it('should keep a recipe, and refuse one that holds a saved value', async () => {
+    const { subsystem } = await recipeWorld();
+    const kept = await dispatch(subsystem, 'PUT', '/v1/secrets/logins/VERCEL', { recipe: 'Open vercel.com' });
+    should(kept.status).equal(200);
+    should(((await jsonBody(kept)) as { recipe: string }).recipe).equal('Open vercel.com');
+    const holding = await dispatch(subsystem, 'PUT', '/v1/secrets/logins/VERCEL', { recipe: `type ${PASSWORD}` });
+    should(holding.status).equal(400);
+    should(((await jsonBody(holding)) as { code: string }).code).equal('recipe_holds_value');
+  });
+
+  it('should refuse a recipe where nothing can check it for values', async () => {
+    const { loginRecipes: _none, ...bare } = secretSubsystem();
+    const response = await dispatch(bare, 'PUT', '/v1/secrets/logins/VERCEL', {
+      label: 'Vercel',
+      recipe: 'Open vercel.com',
+    });
+    should(response.status).equal(503);
+  });
+
+  it('should let the owner approve a proposal, and never a ferret', async () => {
+    const { subsystem, loginRecipes } = await recipeWorld();
+    await loginRecipes.propose('ferret-1', 'VERCEL', 'Continue with Google', 'it moved');
+    const path = '/v1/secrets/logins/VERCEL/recipe/proposals/rp_0000000000000001';
+    const byFerret = await dispatchAs(agentIn('ferret-1'), subsystem, 'POST', path, { decision: 'approve' });
+    should(byFerret.status).equal(403);
+    const approved = await dispatch(subsystem, 'POST', path, { decision: 'approve' });
+    should(approved.status).equal(200);
+    should(((await jsonBody(approved)) as { recipe: string }).recipe).equal('Continue with Google');
+    should((await dispatch(subsystem, 'POST', path, { decision: 'decline' })).status).equal(404);
+    should(
+      (await dispatch(subsystem, 'POST', '/v1/secrets/logins/VERCEL/recipe/proposals/nope', { decision: 'approve' }))
+        .status,
+    ).equal(400);
+  });
+});
+
+describe('a recipe is masked whenever a route serves it', () => {
+  it('should mask a value kept after the recipe was written, in the list and in the hint', async () => {
+    const kept = new Set<string>();
+    const base = secretSubsystem();
+    const logins = base.logins as NonNullable<SecretSubsystem['logins']>;
+    const loginRecipes = new LoginRecipeService({
+      logins,
+      values: {
+        redact: async text => [...kept].reduce((masked, value) => masked.replaceAll(value, '[redacted]'), text),
+      },
+      agenda: { raise: async () => ({ ok: true, id: 'A1' }), close: async () => undefined },
+      audit: { record: async () => undefined },
+      clock: { now: () => '2026-10-31T09:00:00.000Z' },
+    });
+    const subsystem: SecretSubsystem = { ...base, loginRecipes };
+    await dispatch(subsystem, 'PUT', '/v1/secrets/logins/VERCEL', {
+      label: 'Vercel',
+      match: ['vercel.com'],
+      recipe: 'backup PIN 8841-2297-ab',
+    });
+    kept.add('8841-2297-ab');
+
+    const changed = JSON.stringify(
+      await jsonBody(await dispatch(subsystem, 'PUT', '/v1/secrets/logins/VERCEL', { label: 'Vercel (team)' })),
+    );
+    const listed = JSON.stringify(await jsonBody(await dispatch(subsystem, 'GET', '/v1/secrets/logins')));
+    const hinted = JSON.stringify(
+      await jsonBody(await dispatchAs(human, subsystem, 'GET', '/v1/secrets/logins/hint?site=vercel.com')),
+    );
+    for (const text of [changed, listed, hinted]) {
+      should(text).not.containEql('8841-2297-ab');
+      should(text).containEql('backup PIN [redacted]');
+    }
+  });
+
+  it('should serve no recipe where nothing can mask it', async () => {
+    const { loginRecipes, ...withRecipes } = secretSubsystem();
+    await dispatch(
+      { ...withRecipes, ...(loginRecipes === undefined ? {} : { loginRecipes }) },
+      'PUT',
+      '/v1/secrets/logins/VERCEL',
+      {
+        label: 'Vercel',
+        match: ['vercel.com'],
+        recipe: 'steps',
+      },
+    );
+    const listed = JSON.stringify(await jsonBody(await dispatch(withRecipes, 'GET', '/v1/secrets/logins')));
+    should(listed).not.containEql('steps');
   });
 });

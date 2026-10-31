@@ -5,6 +5,8 @@ import {
   LoginEntrySummarySchema,
   type LoginHintList,
   LoginHintListSchema,
+  type LoginRecipeDecision,
+  LoginRecipeDecisionSchema,
   type PutLoginEntryRequest,
   PutLoginEntryRequestSchema,
   type RemovedLoginEntry,
@@ -53,6 +55,18 @@ export class ProtocolLoginEntryGateway implements ILoginEntryGateway {
     return await this.client.request(
       `${LOGIN_ENTRIES_PATH}/hint?site=${encodeURIComponent(site)}`,
       LoginHintListSchema,
+    );
+  }
+
+  async decideRecipe(
+    id: string,
+    proposalId: string,
+    decision: LoginRecipeDecision['decision'],
+  ): Promise<LoginEntrySummary> {
+    return await this.client.request(
+      `${entryPath(id)}/recipe/proposals/${encodeURIComponent(proposalId)}`,
+      LoginEntrySummarySchema,
+      { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(LoginRecipeDecisionSchema.parse({ decision })) },
     );
   }
 

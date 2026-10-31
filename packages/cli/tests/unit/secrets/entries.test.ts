@@ -6,9 +6,11 @@ import {
   type LoginEntrySummary,
   type LoginHintList,
   loginHintsFor,
+  type LoginRecipeDecision,
   type PutLoginEntryRequest,
   type RemovedLoginEntry,
 } from '@ferretry/protocol';
+import { FyHttpError } from '@ferretry/protocol/client';
 import { Command } from 'commander';
 import should from 'should';
 import { registerSecretCommands } from '../../../src/lib/secrets/commands';
@@ -41,6 +43,9 @@ class FakeGateway implements ILoginEntryGateway {
   readonly puts: Array<{ id: string; body: PutLoginEntryRequest }> = [];
   readonly renames: Array<[string, string]> = [];
   readonly removed: string[] = [];
+  readonly decisions: Array<[string, string, string]> = [];
+  /** What the daemon refuses a recipe put or a decision with, when a test wants it to. */
+  refuse: FyHttpError | undefined;
 
   constructor(private listing: LoginEntryList = { v: 1, health: 'ready', entries: [summary()] }) {}
 
@@ -52,6 +57,7 @@ class FakeGateway implements ILoginEntryGateway {
   put(id: string, body: PutLoginEntryRequest): Promise<LoginEntrySummary> {
     this.calls.push('put');
     this.puts.push({ id, body });
+    if (this.refuse !== undefined) return Promise.reject(this.refuse);
     return Promise.resolve(
       summary({
         id,
@@ -70,6 +76,13 @@ class FakeGateway implements ILoginEntryGateway {
   hint(site: string): Promise<LoginHintList> {
     this.calls.push(`hint ${site}`);
     return Promise.resolve({ v: 1, site, hints: loginHintsFor(site, this.listing.entries), passkeys: 'off' });
+  }
+
+  decideRecipe(id: string, proposalId: string, decision: LoginRecipeDecision['decision']): Promise<LoginEntrySummary> {
+    this.calls.push('decide');
+    this.decisions.push([id, proposalId, decision]);
+    if (this.refuse !== undefined) return Promise.reject(this.refuse);
+    return Promise.resolve(summary({ id, recipe: 'Open the page\nSign in' }));
   }
 
   remove(id: string): Promise<RemovedLoginEntry> {
@@ -99,12 +112,19 @@ class FakePrompt implements ILoginEntryPrompt {
   }
 }
 
-function rig(gateway = new FakeGateway(), prompt = new FakePrompt(), interactive = true) {
+function rig(
+  gateway = new FakeGateway(),
+  prompt = new FakePrompt(),
+  interactive = true,
+  sources: Readonly<Record<string, string>> = {},
+) {
   const messages: string[] = [];
   const ports: LoginEntryPorts = {
     gateway,
     prompt,
     interactive,
+    readRecipe: source =>
+      source in sources ? Promise.resolve(sources[source] as string) : Promise.reject(new Error(`no file ${source}`)),
     out: { success: message => void messages.push(message) },
   };
   return { gateway, prompt, messages, controller: new LoginEntryController(ports) };
@@ -593,9 +613,19 @@ describe('fy secret entry commands', () => {
       .flatMap(command => command.options)
       .filter(option => option.required || option.optional)
       .map(option => option.long);
-    // Every flag that takes a value takes a NON-secret one: names, hosts and how a login signs in.
+    // Every flag that takes a value takes a NON-secret one: names, hosts, how a login signs in, and whether a
+    // ferret's recipe proposal applies by itself.
     for (const long of takesValue)
-      should(['--label', '--match', '--username', '--method', '--sso-name', '--via', '--domain']).containEql(long);
+      should([
+        '--label',
+        '--match',
+        '--username',
+        '--method',
+        '--sso-name',
+        '--via',
+        '--domain',
+        '--auto-apply-recipe',
+      ]).containEql(long);
   });
 });
 
@@ -826,5 +856,283 @@ describe('how a saved login signs in, from the command line', () => {
     } as never);
     await gateway.hint('vercel.com');
     should(seen).deepEqual([`${LOGIN_ENTRIES_PATH}/hint?site=vercel.com`]);
+  });
+});
+
+describe('fy secret entry recipe', () => {
+  const PROPOSAL = 'rp_0123456789abcdef';
+  const seenOn = {
+    value: true,
+    observedAt: '2026-10-29T09:00:00.000Z',
+    count: 3,
+  } as const;
+  const proposed = summary({
+    id: 'VERCEL',
+    label: 'Vercel',
+    recipe: 'Open app.vercel.com\nContinue with Google',
+    autoApplyRecipe: false,
+    observed: [
+      {
+        at: 'accounts.google.com',
+        surface: 'page',
+        identity: '0123456789abcdef',
+        since: AT,
+        masked: seenOn,
+        navigatedAway: seenOn,
+        secondFactor: { value: 'push', observedAt: AT, count: 3 },
+      },
+    ],
+    proposals: [
+      {
+        id: PROPOSAL,
+        recipe: 'Open app.vercel.com\nContinue with Google\nApprove on the phone',
+        base: 'Open app.vercel.com\nContinue with Google',
+        why: 'Google now waits for a phone approval.',
+        sessionId: 'mvwql1tr-5d3f3a03',
+        proposedAt: '2026-10-30T10:00:00.000Z',
+      },
+    ],
+  });
+  const world = () => new FakeGateway({ v: 1, health: 'ready', entries: [proposed, summary()] });
+
+  it("should show the recipe, then what was seen, then each proposal as the ferret's change", async () => {
+    // Arrange
+    const { controller, messages } = rig(world());
+
+    // Act
+    await controller.recipeShow('VERCEL', {});
+
+    // Assert
+    const text = messages.join('\n');
+    const order = [
+      'Open app.vercel.com',
+      'Seen:',
+      'accounts.google.com: password field',
+      PROPOSAL,
+      'The ferret says',
+    ].map(word => text.indexOf(word));
+    should(order.every(at => at >= 0)).be.true();
+    should([...order].sort((a, b) => a - b)).deepEqual(order);
+    should(text).containEql('2FA by approval');
+    should(text).containEql('2026-10-30');
+    should(text).containEql('The ferret says: Google now waits for a phone approval.');
+    should(text).containEql('+ Approve on the phone');
+    should(text).containEql('  Continue with Google');
+    should(text).containEql("auto-apply a ferret's proposal: off");
+  });
+
+  it('should say so when there is no recipe, nothing seen and no proposal, and print the document with --json', async () => {
+    // Arrange
+    const { controller, messages } = rig();
+
+    // Act
+    await controller.recipeShow('SUDO_KIRIN_BOX', {});
+    await controller.recipeShow('SUDO_KIRIN_BOX', { json: true });
+
+    // Assert
+    should(messages[0]).containEql('no recipe yet');
+    should(messages[0]).containEql('Seen: nothing yet');
+    should(messages[0]).not.containEql('The ferret says');
+    should(JSON.parse(messages[1] ?? '').id).equal('SUDO_KIRIN_BOX');
+  });
+
+  it('should refuse a login that does not exist, and a bad handle, before anything is changed', async () => {
+    // Arrange
+    const { controller, gateway } = rig(world(), undefined, true, { '-': 'steps' });
+
+    // Act / Assert
+    should(await fails(async () => await controller.recipeShow('NOPE', {}))).containEql('no saved login NOPE');
+    should(await fails(async () => await controller.recipeSet('NOPE', { file: '-' }))).containEql(
+      'no saved login NOPE',
+    );
+    should(await fails(async () => await controller.recipeClear('NOPE'))).containEql('no saved login NOPE');
+    should(await fails(async () => await controller.recipeSet('not a handle', { file: '-' }))).containEql(
+      'not a usable handle',
+    );
+    should(gateway.puts).deepEqual([]);
+  });
+
+  it('should set the recipe from a file or from stdin as the whole new Markdown, trimmed', async () => {
+    // Arrange
+    const { controller, gateway, messages } = rig(world(), undefined, true, {
+      'steps.md': 'Open the page\r\nSign in\r\n\r\n',
+      '-': 'From stdin',
+    });
+
+    // Act
+    await controller.recipeSet('VERCEL', { file: 'steps.md' });
+    await controller.recipeSet('VERCEL', { file: '-' });
+
+    // Assert
+    should(gateway.puts).deepEqual([
+      { id: 'VERCEL', body: { recipe: 'Open the page\nSign in' } },
+      { id: 'VERCEL', body: { recipe: 'From stdin' } },
+    ]);
+    should(messages[0]).containEql('Saved the recipe of VERCEL');
+  });
+
+  it('should refuse an empty, oversize or hidden-character recipe, and a missing source, before the daemon', async () => {
+    // Arrange
+    const { controller, gateway } = rig(world(), undefined, true, {
+      empty: '  \n ',
+      huge: 'x'.repeat(4_001),
+      hidden: 'Open the page\u202Eelbat',
+    });
+
+    // Act / Assert
+    for (const file of ['empty', 'huge', 'hidden'])
+      should(await fails(async () => await controller.recipeSet('VERCEL', { file }))).containEql('not a usable recipe');
+    should(await fails(async () => await controller.recipeSet('VERCEL', {}))).containEql('--file');
+    should(await fails(async () => await controller.recipeSet('VERCEL', { file: 'absent' }))).containEql(
+      'no file absent',
+    );
+    should(gateway.puts).deepEqual([]);
+  });
+
+  it('should say a recipe that holds a value was refused, without a stack of codes', async () => {
+    // Arrange
+    const gateway = world();
+    gateway.refuse = new FyHttpError('the recipe holds a value', 400, 'recipe_holds_value');
+    const { controller } = rig(gateway, undefined, true, { '-': 'Type hunter2 in the box' });
+
+    // Act
+    const said = await fails(async () => await controller.recipeSet('VERCEL', { file: '-' }));
+
+    // Assert
+    should(said).containEql('holds a saved or vaulted value');
+    should(said).containEql('Nothing was changed');
+    should(said).not.containEql('hunter2');
+  });
+
+  it('should clear a recipe with a null put, and say so when there is none', async () => {
+    // Arrange
+    const { controller, gateway, messages } = rig(world());
+
+    // Act
+    await controller.recipeClear('VERCEL');
+    await controller.recipeClear('SUDO_KIRIN_BOX');
+
+    // Assert
+    should(gateway.puts).deepEqual([{ id: 'VERCEL', body: { recipe: null } }]);
+    should(messages).deepEqual(['Cleared the recipe of VERCEL.', 'SUDO_KIRIN_BOX has no recipe to clear.']);
+  });
+
+  it('should approve or decline a proposal by its id, and refuse a made-up id', async () => {
+    // Arrange
+    const { controller, gateway, messages } = rig(world());
+
+    // Act
+    await controller.recipeDecide('VERCEL', PROPOSAL, 'approve');
+    await controller.recipeDecide('VERCEL', PROPOSAL, 'decline');
+
+    // Assert
+    should(gateway.decisions).deepEqual([
+      ['VERCEL', PROPOSAL, 'approve'],
+      ['VERCEL', PROPOSAL, 'decline'],
+    ]);
+    should(messages[0]).containEql(`Approved ${PROPOSAL}: that is now the recipe of VERCEL`);
+    should(messages[1]).containEql(`Declined ${PROPOSAL}`);
+    should(await fails(async () => await controller.recipeDecide('VERCEL', 'rp_1', 'approve'))).containEql(
+      'not a proposal id',
+    );
+    should(gateway.decisions).have.length(2);
+  });
+
+  it("should put the refusal words in the owner's terms: a stale proposal says decline it, an unknown one says it is gone", async () => {
+    // Arrange
+    const stale = world();
+    stale.refuse = new FyHttpError('raw', 409, 'stale_proposal');
+    const gone = world();
+    gone.refuse = new FyHttpError('raw', 404, 'unknown_proposal');
+    const other = world();
+    other.refuse = new FyHttpError('the daemon is busy', 503, 'unavailable');
+
+    // Act
+    const staleSaid = await fails(async () => await rig(stale).controller.recipeDecide('VERCEL', PROPOSAL, 'approve'));
+    const goneSaid = await fails(async () => await rig(gone).controller.recipeDecide('VERCEL', PROPOSAL, 'decline'));
+    const otherSaid = await fails(async () => await rig(other).controller.recipeDecide('VERCEL', PROPOSAL, 'approve'));
+
+    // Assert
+    should(staleSaid).containEql('recipe changed after the ferret proposed this one');
+    should(staleSaid).containEql('decline it');
+    should(goneSaid).containEql('already answered or replaced');
+    should(otherSaid).equal('the daemon is busy');
+  });
+
+  it('should turn auto-apply on or off with edit, refuse any other word, and count it as a change', async () => {
+    // Arrange
+    const { controller, gateway } = rig(world());
+
+    // Act
+    await controller.edit('VERCEL', { autoApplyRecipe: 'on' });
+    await controller.edit('VERCEL', { autoApplyRecipe: 'OFF' });
+
+    // Assert
+    should(gateway.puts).deepEqual([
+      { id: 'VERCEL', body: { autoApplyRecipe: true } },
+      { id: 'VERCEL', body: { autoApplyRecipe: false } },
+    ]);
+    should(await fails(async () => await controller.edit('VERCEL', { autoApplyRecipe: 'maybe' }))).containEql(
+      'is on or off',
+    );
+    should(gateway.puts).have.length(2);
+  });
+
+  it('should run every recipe subcommand from the command line', async () => {
+    // Arrange
+    const gateway = world();
+    const { controller, messages } = rig(gateway, undefined, true, { 'steps.md': 'Open the page' });
+    const root = new Command().name('fy').exitOverride();
+    root.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+    registerLoginEntryCommands(root.command('secret'), controller);
+    const run = async (...words: string[]) => await root.parseAsync(['node', 'fy', 'secret', 'entry', ...words]);
+
+    // Act
+    await run('recipe', 'show', 'VERCEL');
+    await run('recipe', 'VERCEL');
+    await run('recipe', 'set', 'VERCEL', '--file', 'steps.md');
+    await run('recipe', 'clear', 'VERCEL');
+    await run('recipe', 'approve', 'VERCEL', PROPOSAL);
+    await run('recipe', 'decline', 'VERCEL', PROPOSAL);
+    await run('edit', 'VERCEL', '--auto-apply-recipe', 'on');
+
+    // Assert
+    should(messages[0]).containEql('Open app.vercel.com');
+    should(messages[1]).containEql('Open app.vercel.com');
+    should(gateway.puts.map(put => put.body)).deepEqual([
+      { recipe: 'Open the page' },
+      { recipe: null },
+      { autoApplyRecipe: true },
+    ]);
+    should(gateway.decisions.map(([, , decision]) => decision)).deepEqual(['approve', 'decline']);
+    await root.parseAsync(['node', 'fy', 'secret', 'entry', 'recipe', 'set', 'VERCEL']).then(
+      () => should.fail(undefined, undefined, 'set without --file should be refused'),
+      (error: unknown) => should((error as Error).message).containEql('--file'),
+    );
+  });
+
+  it('should speak the recipe routes: the owner decision is a POST to the proposal', async () => {
+    // Arrange
+    const seen: Array<{ path: string; init?: { method?: string; body?: string } }> = [];
+    const gateway = new ProtocolLoginEntryGateway({
+      request: (
+        path: string,
+        schema: { parse(value: unknown): unknown },
+        init?: { method?: string; body?: string },
+      ) => {
+        seen.push({ path, ...(init === undefined ? {} : { init }) });
+        return Promise.resolve(schema.parse(summary({ id: 'VERCEL' })));
+      },
+    } as never);
+
+    // Act
+    await gateway.decideRecipe('VERCEL', PROPOSAL, 'approve');
+    await gateway.put('VERCEL', { recipe: null });
+
+    // Assert
+    should(seen[0]?.path).equal(`${LOGIN_ENTRIES_PATH}/VERCEL/recipe/proposals/${PROPOSAL}`);
+    should(seen[0]?.init?.method).equal('POST');
+    should(JSON.parse(seen[0]?.init?.body ?? '')).deepEqual({ decision: 'approve' });
+    should(JSON.parse(seen[1]?.init?.body ?? '')).deepEqual({ recipe: null });
   });
 });

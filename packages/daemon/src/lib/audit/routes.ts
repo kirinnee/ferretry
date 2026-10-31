@@ -369,6 +369,13 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     detail: { action: 'login-rename' },
   },
   {
+    method: 'POST',
+    path: '/v1/secrets/logins/:id/recipe/proposals/:proposalId',
+    event: 'secrets.changed',
+    subject: 'id',
+    detail: { action: 'login-recipe-decide' },
+  },
+  {
     method: 'DELETE',
     path: '/v1/secrets/logins/:id',
     event: 'secrets.changed',

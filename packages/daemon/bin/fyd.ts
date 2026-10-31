@@ -871,6 +871,9 @@ import {
   InputAuditAdapter,
   InputCardClosedObserver,
   InputLoginAdapter,
+  InputLoginProbe,
+  type LoginFactSink,
+  LoginObserver,
   type InputPasteRules,
   InputRequestService,
   type InputSealedPort,
@@ -902,6 +905,8 @@ import {
   LOOPBACK_FIREWALL_CHECK_MS,
   LocalModelsService,
   LoginDirectory,
+  LoginRecipeService,
+  RecipeAgendaAdapter,
   type LoginSweep,
   LoginVault,
   type LogLevel,
@@ -6114,6 +6119,9 @@ function createAgentToolsSubsystem(input: {
   readonly copyPages: AgentCopyPagesPort;
   /** The saved logins' directory (never the vault): `login.hint` reads labels, methods and domains from it. */
   readonly logins: Pick<LoginDirectory, 'list'>;
+  /** A ferret's recipe proposals, and where its acts are told so a steered sign-in fact is not kept. */
+  readonly recipes: Pick<LoginRecipeService, 'propose' | 'scrubbed'>;
+  readonly loginActs: Pick<LoginObserver, 'acted'>;
 }): MountedSubsystems['agentTools'] {
   const clock = { now: () => Date.now() };
   const control = new SurfaceControl(
@@ -6151,6 +6159,8 @@ function createAgentToolsSubsystem(input: {
       plans: input.plans,
       copyPages: input.copyPages,
       logins: input.logins,
+      recipes: input.recipes,
+      loginActs: input.loginActs,
       redactor: input.redactor,
       binaryName: CLIENT_NAME,
       clock,
@@ -6197,22 +6207,35 @@ function createInputRequestService(input: {
   readonly rules: InputPasteRules;
   /** Where a paste "as the secret NAME" is kept. */
   readonly secretStore: SecretStoreDirectory;
-}): InputRequestService {
+  /** Where a saved login's observed facts go: the saved-login directory, under its store lock. */
+  readonly loginFacts: LoginFactSink;
+}): { readonly service: InputRequestService; readonly observer: LoginObserver } {
   const clock = { now: () => Date.now() };
-  return new InputRequestService({
+  const terminalTarget = new TmuxInputTarget(
+    input.tmux,
+    {
+      locate: async (sessionId, key) =>
+        (await input.terminals.list()).find(
+          record => record.ownerId === sessionId && (record.name === key || record.id === key),
+        ),
+    },
+    new SttyTerminalModes(process.platform, runProgram),
+    runProgram,
+  );
+  const pageTarget = new PageInputTarget(input.pages);
+  // What a saved login's sign-in looked like, from the daemon's own looks at the target (docs/input-requests.md,
+  // "Login recipes"); the ferret's acts are reported to it, so a fact it could have steered is not kept.
+  const observer = new LoginObserver({
+    sink: input.loginFacts,
+    probe: new InputLoginProbe(pageTarget, terminalTarget),
+    now: () => Date.now(),
+    sleep: async milliseconds => await Bun.sleep(milliseconds),
+  });
+  const service = new InputRequestService({
+    observer,
     target: new InputTargetRouter(
-      new TmuxInputTarget(
-        input.tmux,
-        {
-          locate: async (sessionId, key) =>
-            (await input.terminals.list()).find(
-              record => record.ownerId === sessionId && (record.name === key || record.id === key),
-            ),
-        },
-        new SttyTerminalModes(process.platform, runProgram),
-        runProgram,
-      ),
-      new PageInputTarget(input.pages),
+      terminalTarget,
+      pageTarget,
       // A secure copy pasted "as the secret NAME" (docs/secure-copy.md): the vault's management surface, which
       // replaces a value and lists names, never returns one.
       new SecretStoreTarget(input.secretStore),
@@ -6284,6 +6307,7 @@ function createInputRequestService(input: {
     rules: input.rules,
     hostName: hostname(),
   });
+  return { service, observer };
 }
 
 /** Who an agent is, from the session credential it presents — the one resolver every agent route uses. */
@@ -10133,7 +10157,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       setInterval(() => copyPlans.sweep(), INPUT_REQUEST_SWEEP_MS).unref();
       // An agent stuck at a password prompt asks the owner through an agenda card (docs/input-requests.md). The value
       // lives only in this process's memory and in the one tmux write; the journal and the audit log carry names and flags.
-      const inputRequestService = createInputRequestService({
+      const { service: inputRequestService, observer: loginObserver } = createInputRequestService({
         storage,
         terminals,
         tmux,
@@ -10156,21 +10180,37 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sealed: secureCopies,
         rules: pasteRules,
         secretStore: secretDirectory,
+        loginFacts: loginDirectory,
       });
       inputRequests = inputRequestService;
+      // Login recipes (docs/input-requests.md): every recipe text is checked against every value the daemon masks, and a
+      // ferret's proposal waits on a card the owner answers in Settings or with `fy secret entry recipe`.
+      const loginRecipes = new LoginRecipeService({
+        logins: loginDirectory,
+        values: { redact: async text => await secretRedactor.redact(text) },
+        agenda: new RecipeAgendaAdapter(agenda),
+        audit: auditLog,
+        clock: { now: () => new Date().toISOString() },
+      });
       setInterval(
         asActivity(activities, 'secure-copies', async () => {
           secureCopies.purge();
           // Every session with a copy or a page record (one that read pages and never copied too); dropping its copies
           // drops its page records.
-          for (const sessionId of new Set([...secureCopies.sessions(), ...copyPageRecords.sessions()])) {
+          for (const sessionId of new Set([
+            ...secureCopies.sessions(),
+            ...copyPageRecords.sessions(),
+            ...loginObserver.sessions(),
+          ])) {
             const id = tryParseSessionId(sessionId);
             const state =
               id === undefined || storage.findSession(id) === undefined
                 ? undefined
                 : SessionStateSchema.safeParse(await storage.readState(id).catch(() => undefined));
-            if (state === undefined || (state.success && INPUT_ENDED_SESSION_STATUSES.has(state.data.status)))
+            if (state === undefined || (state.success && INPUT_ENDED_SESSION_STATUSES.has(state.data.status))) {
               secureCopies.drop(sessionId);
+              loginObserver.forget(sessionId);
+            }
           }
         }),
         INPUT_REQUEST_SWEEP_MS,
@@ -11793,6 +11833,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           plans: { propose: async (sessionId, items, expires) => await copyPlans.propose(sessionId, items, expires) },
           copyPages: copyPageRecords,
           logins: loginDirectory,
+          recipes: loginRecipes,
+          loginActs: loginObserver,
           files: new AgentFiles({
             fs: new NodeAgentFilesystem(),
             folderOf: async sessionId => await sessionFolder(storage, sessionId),
@@ -11937,7 +11979,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           nowMs: () => millisecondClock.now(),
           platform: process.platform,
         }),
-        secrets,
+        secrets: { ...secrets, loginRecipes },
         warden: createWardenSubsystem({
           machineName: () => analyticsMachineName ?? hostname(),
           ledgers: wardenLedgers,

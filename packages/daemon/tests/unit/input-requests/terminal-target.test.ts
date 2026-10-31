@@ -98,7 +98,7 @@ function target(w: World): TmuxInputTarget {
     },
   };
   const terminals: TerminalLocator = {
-    locate: async () => (w.located ? { tmuxSession: SESSION } : undefined),
+    locate: async () => (w.located ? { tmuxSession: SESSION, id: 't-dev' } : undefined),
   };
   const modes: TerminalModes = { echo: async () => w.echo };
   return new TmuxInputTarget(tmux, terminals, modes, async argv => {
@@ -492,5 +492,31 @@ describe('the write is guarded by the tmux server comparison (a change DURING th
     };
 
     should(await target(w).type('s1', dev, SECRET, true, expected)).equal('typed');
+  });
+});
+
+describe('the screen, for a saved login’s echo look', () => {
+  it('should capture the screen and the rows above it, wrapped rows joined', async () => {
+    const w = world();
+    w.capture = ok('Password:\n$ \n');
+    should(await target(w).screen('s1', 'dev', ['dev', 't-dev'])).equal('Password:\n$ \n');
+    should(w.calls.at(-1)).containDeep(['capture-pane', '-p', '-J', '-N', '-S', '-50']);
+  });
+
+  it('should answer nothing for a terminal it cannot find or capture', async () => {
+    const gone = world();
+    gone.located = false;
+    should(await target(gone).screen('s1', 'dev', ['dev', 't-dev'])).be.undefined();
+    const failing = world();
+    failing.capture = failed;
+    should(await target(failing).screen('s1', 'dev', ['dev', 't-dev'])).be.undefined();
+  });
+});
+
+describe('the screen look is pinned to the terminal typed into', () => {
+  it('should say nothing about another terminal opened under the same name', async () => {
+    const w = world();
+    should(await target(w).screen('s1', 'dev', ['dev', 't-old'])).be.undefined();
+    should(w.calls.some(call => call[0] === 'capture-pane')).be.false();
   });
 });

@@ -53,6 +53,7 @@ describe('the secret routes', () => {
       'GET /v1/secrets/logins',
       'GET /v1/secrets/logins/hint',
       'PUT /v1/secrets/logins/:id',
+      'POST /v1/secrets/logins/:id/recipe/proposals/:proposalId',
       'POST /v1/secrets/logins/:id/rename',
       'DELETE /v1/secrets/logins/:id',
     ]);

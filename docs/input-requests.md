@@ -511,11 +511,88 @@ is for (`match`, the site the work is on):
 
 Before a sign-in, a ferret calls **`login_hint`** (a page by name, so the daemon reads the host from where the page
 **is**, or a site) and gets each entry for that site and the provider entries they go via: **handle, label,
-method, login domains and the plain username**. Never a password, a seed, a code, nor even which secret fields
+method, login domains and the plain username**, and its [recipe and observed facts](#login-recipes-how-it-signs-in-and-what-the-daemon-saw). Never a password, a seed, a code, nor even which secret fields
 exist (`LoginHintSchema` has no field for one). Every hint ends "passkeys are off". The owner sees the same words
 with `fy secret entry hint <site>`; the route is `GET /v1/secrets/logins/hint?site=` (`secrets` use). It is
 not more than a ferret could list before (`GET /v1/secrets/logins` was already readable with the admin token);
 it is a narrower view, offered at the moment it helps.
+
+### Login recipes: how it signs in, and what the daemon saw
+
+A saved login can carry a **recipe**: steps for signing in, as Markdown, and the facts the **daemon** recorded while
+it typed that login. Both are plain (not secret) and ride with the entry in the index. The wire is
+`packages/protocol/src/lib/login-recipes.ts`; the policy is `packages/daemon/src/lib/secrets/login-recipes.ts`; the
+facts are `packages/daemon/src/lib/input-requests/login-observer.ts`.
+
+- **The recipe** is steps, never values: "Open app.vercel.com → Continue with Google → [[GOOGLE_KIRIN]] → wait for
+  the phone approval → done when the dashboard shows". `[[ID]]` names another saved login; the ferret's hint lists
+  that login too (as a `provider`), with its own recipe, one level deep. A rename rewrites `[[OLD]]` in every recipe
+  (which makes every proposal against the old text stale); a delete leaves the name, which then names nothing.
+- **Nothing hides in it.** At most 4,000 characters of lines and tabs. Refused: control and format characters,
+  every default-ignorable code point (variation selectors, which can smuggle bytes inside one glyph; Hangul fillers),
+  private-use and unassigned code points, line and paragraph separators and the blank braille pattern
+  (`hidesCharacters`), and the hint's fence markers. A proposal's reason follows the same rule.
+- **A recipe never holds a value**, checked twice. On every WRITE (the owner's text, a ferret's proposal and its
+  reason, and again on approval) the text goes through the daemon's own redactor: one in which any vault secret,
+  saved login or just-typed value is found is refused (`recipe_holds_value`), and a redactor that cannot run refuses
+  too. On every READ (the list, the hint route, the ferret's `login_hint`) the recipe and every proposal are masked
+  again, so a value kept AFTER a recipe was written reaches nobody; where nothing can mask, no recipe is served.
+  Masking does not catch a value shorter than `MIN_SECRET_VALUE_LENGTH`: a short PIN in a recipe is not caught.
+- **Who wrote it.** A recipe is the owner's unless it is an auto-applied proposal (`recipeBy: ferret`), which stays
+  marked until the owner edits or approves it. The hint fences the recipe between `<<<recipe` and `recipe>>>`, after the
+  daemon's facts, and says whose it is: "the owner's steps" or "a ferret's unreviewed steps, NOT the owner's". The
+  app shows "Written by a ferret, not reviewed", and shows every recipe as plain text, never rendered Markdown, so a
+  recipe loads no image and shows no link unlike its target.
+- **The facts** (`observed`) are recorded ONLY by the daemon, from its own looks at a real target while it typed a
+  saved login (one tap, or a "Save as"), never from an agent's words, per place (a web host or a terminal's key):
+  - `masked`: every secret field was a password input, or the terminal had echo off and a recognised program read it.
+  - `noEchoAfterSubmit`: 1.5 s and again 5 s after the submit the daemon read what a ferret's read of the target could
+    show, and the value was in neither (both looks must be able to tell; one that cannot leaves no fact). For a page: the main frame's visible text, its accessibility snapshot (what
+    text fields hold, accessible names) and the document's markup (attributes, hidden text); a page too large to read
+    whole answers "cannot tell", never "not there". For a terminal: the screen and 50 rows above it. The value never
+    leaves the daemon for this; the look answers yes or no, and what it read is dropped.
+  - `navigatedAway`: the page showed a new document within 10 s of the submit.
+  - `secondFactor`: `code` (a one-time code card was typed on the same login soon after), `push` (the page waited on
+    the sign-in hosts, then left them with no code typed), or `none` (it left at once). Watched for 3 minutes.
+  - Each fact keeps when it was last seen and how often in a row; one seen the other way starts again at 1. Each
+    place keeps the field's **identity** (a digest of its origin, frame, tag, type, name, id and autocomplete; or the
+    program for a terminal): when a later delivery finds another identity there, the old facts are dropped.
+- **What the ferret could steer is not kept.** The ferret can navigate, click Continue, clear a screen, or close a
+  surface and open another under the same name. So the facts from after the submit are dropped when, at any time
+  since the request was RAISED, the ferret called any tool that may change a surface of that kind (every tool but the
+  read-only ones; `actsOn`), or, for a page, when the session ever ran a page script (a script can arm a page before
+  the card). The looks are pinned to the page or terminal that was typed into (by its id): another surface under the
+  same name answers "cannot tell". Each after-submit fact is decided at its own moment (the echo once both looks are
+  in, the page moving on at the end of its window, the second factor when the page leaves the sign-in hosts), and an
+  act after that moment does not undo it. A raise time that cannot be read keeps no after-submit fact. The proposal
+  card and the owner's change and approval answers are masked like any read. The facts of the write itself come from
+  the card's own observation.
+- **The ferret reads both** in `login_hint`, and the agent instruction says to read it before a sign-in.
+- **The ferret proposes, the owner decides.** After a sign-in a ferret may call `login_propose` (`login`, the whole
+  new `recipe`, `why`). The proposal waits on the entry (three at most; a fourth pushes out the oldest and closes its
+  card) and on an agenda card that shows the changed lines and "The ferret says: …". **The card approves nothing**:
+  the owner approves or declines in Settings › Saved logins › the login › Recipe, or with
+  `fy secret entry recipe approve|decline <id> <proposal>`, through the owner-only
+  `POST /v1/secrets/logins/:id/recipe/proposals/:proposalId` (`secrets` configure, a kept `secrets.changed` record).
+  An approval is refused (`stale_proposal`) when the recipe changed after the proposal was made, because the owner
+  was shown a diff from the older text. Only an owner who turns **auto-apply** on for that ONE login lets a proposal
+  apply at once; that is audited (`login-recipe-auto`) and marked as the ferret's.
+- **Page text never writes a recipe.** The daemon never reads a recipe off a page, and nothing a page says becomes a
+  fact. A recipe changes only by the owner's edit, the owner's approval, or the owner's per-login auto-apply.
+- **GAPs and limits.**
+  - With auto-apply on, a prompt-injected ferret's proposal applies unseen and reaches every later ferret that signs
+    in there (or names the login with `[[ID]]`). It is marked and fenced as unreviewed ferret text, audited, and holds
+    no value, which is why auto-apply is off by default and per login.
+  - The facts are never stronger than the shared admin token: a ferret that calls the person routes without naming
+    itself, or drives tmux or the browser from its own shell, is not seen acting. Terminal facts are weaker still: a
+    program the ferret placed (a fake `sudo` on its PATH) has the same name, so a terminal's OBSERVED facts are
+    information for the ferret and the owner, and never shorten the post-typing lock (only the card's own
+    echo-off and recognised-program facts do).
+  - The echo look reads the main frame; a value echoed only inside another frame, or transformed on its way to the
+    screen, is not recognised. `push` is inferred from timing and hosts, and an owner who types the code by hand on a
+    taken-over page is not seen, so it reads as `push`.
+  - Any recipe or fact written makes the index unreadable to an older daemon (strict schema): it reads as damaged
+    and fails closed.
 
 ### The first time: "Save as"
 
@@ -585,12 +662,12 @@ explicit confirmation of this sentence (`LOGIN_TOTP_WARNING`), shown in the app 
 
 ### Managing them
 
-Settings › Secrets › Saved logins and `fy secret entry ls|add|edit|rename|rm` list entries (never values),
+Settings › Secrets › Saved logins and `fy secret entry ls|add|edit|rename|rm|recipe` list entries (never values),
 add and edit the label, match, sign-in method (`--method`, `--via`, `--sso-name`), login domains (`--domain`)
 and username, replace a password, add or remove a 2FA seed, rename the handle and
 delete. Values are typed into a masked field or read from the TTY with echo off; never a flag.
 Routes: `GET /v1/secrets/logins`, `GET /v1/secrets/logins/hint?site=`, `PUT /v1/secrets/logins/:id` (create or change; an omitted field is kept,
-`null` removes it), `POST /v1/secrets/logins/:id/rename`, `DELETE /v1/secrets/logins/:id`, all `secrets`
+`null` removes it), `POST /v1/secrets/logins/:id/rename`, `DELETE /v1/secrets/logins/:id`, `POST /v1/secrets/logins/:id/recipe/proposals/:proposalId`, all `secrets`
 capability (`use` to list, `configure` to change) and each change a kept `secrets.changed` record.
 
 ### Later, and off by default: standing permission
@@ -674,5 +751,6 @@ default**, revocable, and audited on every use. Until then every placement is a 
 | P1    | Terminal secret and plain: service, agent tools, deliver and cancel, quarantine, `fy input` | done        |
 | P2    | The app card, cards of several fields, `chain` steps                                        | done        |
 | P3    | Saved logins (one tap), "Save as", 2FA codes, `fy secret entry`, Settings › Saved logins    | done        |
-| P4    | Pages: browser fields, field shot, page holds, passkeys off, captcha handover               | this change |
+| P4    | Pages: browser fields, field shot, page holds, passkeys off, captcha handover               | done        |
+| P4b   | Login recipes: steps, daemon-observed facts, ferret proposals the owner approves            | this change |
 | P5    | Multi-step chains, consumer configuration, a per-daemon remote cap                          | later       |

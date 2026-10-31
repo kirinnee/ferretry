@@ -133,6 +133,7 @@ import type { WardenError, WardenSubsystem } from '../../../../src/lib/runtime/m
 import {
   configuredReferences,
   LoginDirectory,
+  LoginRecipeService,
   type LoginIndexDocument,
   type LoginIndexStore,
   type SecretChildOutcome,
@@ -2029,14 +2030,26 @@ export function secretSubsystem(world: SecretWorld = {}): SecretSubsystem {
   const directory = new SecretDirectory(documents, cipher, clock);
   const identity = { load: async () => world.identity };
   const crypto = new WebCryptoRelayCrypto();
+  const logins = new LoginDirectory(
+    world.loginIndex ?? new MemoryLoginIndex(),
+    world.loginSealed ?? new MemorySecretDocuments(),
+    cipher,
+    clock,
+  );
   return {
     directory,
-    logins: new LoginDirectory(
-      world.loginIndex ?? new MemoryLoginIndex(),
-      world.loginSealed ?? new MemorySecretDocuments(),
-      cipher,
-      clock,
-    ),
+    logins,
+    // Login recipes over the same store; nothing is masked in these fixtures, so no recipe is refused for a value.
+    loginRecipes: new LoginRecipeService({
+      logins,
+      values: { redact: async text => text },
+      agenda: {
+        raise: async () => ({ ok: false, message: 'no agenda in this fixture' }),
+        close: async () => undefined,
+      },
+      audit: { record: async () => undefined },
+      clock: { now: () => clock.now() },
+    }),
     references: { references: async () => configuredReferences(recipes) },
     uses: new SecretUseService(new SecretVault(documents, cipher), world.runner ?? new EchoSecretChildRunner(), {
       read: async () => recipes,

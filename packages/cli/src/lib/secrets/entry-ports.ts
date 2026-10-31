@@ -3,6 +3,7 @@ import type {
   LoginEntryList,
   LoginEntrySummary,
   LoginHintList,
+  LoginRecipeDecision,
   PutLoginEntryRequest,
   RemovedLoginEntry,
 } from '@ferretry/protocol';
@@ -16,6 +17,8 @@ export interface ILoginEntryGateway {
   remove(id: string): Promise<RemovedLoginEntry>;
   /** What a ferret may know about signing in to a site: labels, methods, domains, usernames. */
   hint(site: string): Promise<LoginHintList>;
+  /** The owner's answer to one waiting recipe proposal; the entry as it stands after. */
+  decideRecipe(id: string, proposalId: string, decision: LoginRecipeDecision['decision']): Promise<LoginEntrySummary>;
 }
 
 /**
@@ -41,4 +44,6 @@ export interface LoginEntryPorts {
   readonly prompt: ILoginEntryPrompt;
   /** Whether stdin and stdout are a terminal a person is typing at. */
   readonly interactive: boolean;
+  /** A recipe's Markdown from a file path, or from standard input when the source is `-`. */
+  readonly readRecipe: (source: string) => Promise<string>;
 }

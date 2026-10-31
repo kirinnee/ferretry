@@ -28,6 +28,7 @@ import {
   loginHintSite,
   loginHintsFor,
   loginHintSummary,
+  type LoginRecipeProposed,
   type SurfaceController,
   type SurfaceControlRequest,
   type SurfaceControlView,
@@ -50,6 +51,8 @@ import { BrowserTransportError } from '../browser/transport/worker-protocol.ts';
 import type { AgentControlPolicy } from '../fleet/agent-control.ts';
 import { InputRequestError } from '../input-requests/errors.ts';
 import { TerminalMountError, type TerminalSubsystem } from '../runtime/mounts/terminals.ts';
+import { LoginEntryError } from '../secrets/logins.ts';
+import { RecipeValueError } from '../secrets/login-recipes.ts';
 import type { TextRedactor } from '../secrets/redaction.ts';
 import { SecureCopyError } from '../secure-copy/errors.ts';
 import type { SurfaceControl } from './control.ts';
@@ -153,6 +156,20 @@ export interface AgentToolPorts {
    * route holds, never the vault: nothing here can open a value. Absent: the tool says none are kept.
    */
   readonly logins?: { list(): Promise<readonly LoginEntrySummary[]> };
+  /**
+   * A ferret's recipe proposals (`login.propose`): filed on the login, checked for values, shown to the owner.
+   * Absent: the tool says recipes are not kept here.
+   */
+  /**
+   * Told each time the agent drives a terminal or a page, before the act: what the daemon sees after a saved login's
+   * submit (the page moving on, the screen not echoing) is only kept as a fact when the ferret did nothing meanwhile.
+   */
+  readonly loginActs?: { acted(sessionId: string, kind: SurfaceKind, script: boolean): void };
+  readonly recipes?: {
+    propose(sessionId: string, login: string, recipe: string, why: string): Promise<LoginRecipeProposed>;
+    /** The entries with every recipe and proposal masked now, or their texts dropped where nothing can mask them. */
+    scrubbed(entries: readonly LoginEntrySummary[]): Promise<readonly LoginEntrySummary[]>;
+  };
 }
 
 /** Page tools that hand back a PICTURE of a page: no mask can be drawn on pixels, so a hold refuses them to its end. */
@@ -248,7 +265,10 @@ const MAX_OPENER_DEPTH = 8;
  * about the saved logins, not a surface.
  */
 const kindOf = (call: AgentToolCall): SurfaceKind | undefined =>
-  call.tool === 'input.wait' || call.tool === 'login.hint' || call.tool.startsWith('secure.')
+  call.tool === 'input.wait' ||
+  call.tool === 'login.hint' ||
+  call.tool === 'login.propose' ||
+  call.tool.startsWith('secure.')
     ? undefined
     : call.tool.startsWith('terminal.')
       ? 'terminal'
@@ -272,6 +292,42 @@ const switchOf = (call: AgentToolCall): SurfaceKind | undefined =>
           ? undefined
           : 'browser'
         : kindOf(call);
+
+/**
+ * The tools that change nothing a sign-in's facts are read from: they list, read, wait, look, raise a card for the
+ * owner, or hand a surface over. Every other tool may change a terminal or a page, and {@link actsOn} says which.
+ */
+const LEAVES_SURFACES: ReadonlySet<string> = new Set<AgentToolCall['tool']>([
+  'terminal.list',
+  'terminal.read',
+  'terminal.wait',
+  'terminal.ask_owner',
+  'terminal.request_input',
+  'input.wait',
+  'login.hint',
+  'login.propose',
+  'browser.list',
+  'browser.read',
+  'browser.screenshot',
+  'browser.wait_for',
+  'browser.console',
+  'browser.network',
+  'browser.pdf',
+  'browser.ask_owner',
+  'browser.request_input',
+  'secure.list',
+  'secure.discard',
+  'secure.copy',
+  'secure.preapprove',
+]);
+
+/** The kind of surface a call may change, or nothing for a call that changes none. */
+export function actsOn(call: AgentToolCall): SurfaceKind | undefined {
+  if (LEAVES_SURFACES.has(call.tool)) return undefined;
+  if (call.tool === 'secure.paste') return call.to.kind === 'secret' ? undefined : call.to.kind;
+  if (call.tool === 'browser.tabs' && call.action === 'list') return undefined;
+  return call.tool.startsWith('terminal.') ? 'terminal' : 'browser';
+}
 
 const plural = (count: number, word: string): string => `${String(count)} ${word}${count === 1 ? '' : 's'}`;
 
@@ -315,6 +371,10 @@ export class AgentToolService {
       // must not read the shared profile's sign-ins through a script while the owner has them off.
       if (call.tool === 'browser.eval' && !(await this.ports.policy.allows('scripts')))
         throw new AgentToolError('forbidden', pageScriptsRefusal(this.ports.binaryName));
+      // Told BEFORE anything runs, for every call that may change a terminal or a page: a sign-in's after-submit facts
+      // the ferret could have steered are not kept (docs/input-requests.md, "Login recipes").
+      const acting = caller.kind === 'agent' ? actsOn(call) : undefined;
+      if (acting !== undefined) this.ports.loginActs?.acted(caller.sessionId, acting, call.tool === 'browser.eval');
       // The surface is known only once the call has run: dispatch resolves it.
       const dispatched = await this.dispatch(caller, call, facts);
       result = this.remasked(caller, facts.surface, dispatched);
@@ -520,6 +580,8 @@ export class AgentToolService {
       }
       case 'login.hint':
         return await this.loginHint(caller, call, facts);
+      case 'login.propose':
+        return await this.loginPropose(caller, call);
       case 'input.wait': {
         const input = this.inputPort(caller);
         const view = await input.agentView(sessionId, call.id, call.timeoutMs ?? AGENT_TOOL_DEFAULT_WAIT_MS);
@@ -579,6 +641,7 @@ export class AgentToolService {
           | 'browser.open'
           | 'input.wait'
           | 'login.hint'
+          | 'login.propose'
           | 'secure.copy'
           | 'secure.list'
           | 'secure.discard'
@@ -1426,8 +1489,45 @@ export class AgentToolService {
         'The saved logins cannot be read right now; ask the owner to check Settings.',
       );
     });
-    const hints = loginHintsFor(site, entries);
+    // A recipe is masked at READ time too: a value kept after it was written must reach the ferret as a mask. Where
+    // nothing can mask it, the ferret gets no recipe at all.
+    const recipes = this.ports.recipes;
+    const masked =
+      recipes === undefined
+        ? entries.map(({ recipe: _recipe, recipeBy: _by, proposals: _proposals, ...entry }) => entry)
+        : await recipes.scrubbed(entries);
+    const hints = loginHintsFor(site, masked);
     return { summary: loginHintSummary(site, hints), logins: { v: 1, site, hints, passkeys: 'off' } };
+  }
+
+  /**
+   * A ferret's suggested recipe for one saved login (`login.propose`). It changes nothing the owner has not
+   * allowed: it waits on a card, unless the owner turned auto-apply on for that login.
+   */
+  private async loginPropose(
+    caller: AgentToolCaller,
+    call: Extract<AgentToolCall, { readonly tool: 'login.propose' }>,
+  ): Promise<AgentToolResult> {
+    const recipes = this.ports.recipes;
+    if (recipes === undefined) throw new AgentToolError('unavailable', 'This daemon keeps no login recipes.');
+    let proposed: LoginRecipeProposed;
+    try {
+      proposed = await recipes.propose(caller.sessionId, call.login, call.recipe, call.why);
+    } catch (error) {
+      if (error instanceof LoginEntryError || error instanceof RecipeValueError)
+        throw new AgentToolError(
+          error instanceof LoginEntryError && error.refusal === 'unknown_login' ? 'not_found' : 'bad_request',
+          error.message,
+        );
+      throw new AgentToolError('unavailable', 'The recipe could not be filed right now; try again later.');
+    }
+    return {
+      summary:
+        proposed.state === 'applied'
+          ? `The recipe of ${call.login} was updated (the owner allows that for this login).`
+          : `Proposed a recipe for ${call.login}${proposed.agendaItemId === undefined ? '' : ` (!${proposed.agendaItemId})`}; the owner approves or declines it. You do not need to wait.`,
+      recipe: proposed,
+    };
   }
 
   private async listPages(caller: AgentToolCaller, tabs = false): Promise<AgentToolResult> {
@@ -1703,6 +1803,9 @@ function callFacts(call: AgentToolCall): AuditDetail {
       return { timeoutMs: call.timeoutMs ?? AGENT_TOOL_DEFAULT_WAIT_MS };
     case 'login.hint':
       return { from: call.name === undefined ? 'site' : 'page' };
+    case 'login.propose':
+      // The login's handle only; the recipe is the ferret's text and stays out of the record.
+      return { login: call.login };
     case 'secure.copy':
       // The copy's name and where it came from; never a command's arguments, which may hold anything.
       return {

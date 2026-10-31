@@ -42,6 +42,7 @@ import {
   signInProblem,
   viaChoices,
 } from '../../lib/login-form.ts';
+import { LoginRecipe } from './login-recipe.tsx';
 
 /** A write reports whether it took, so a form clears only when the daemon accepted it. */
 type Write = Promise<boolean> | boolean;
@@ -53,6 +54,7 @@ export interface LoginsCardProps {
   readonly onPut: (id: string, body: PutLoginEntryRequest) => Write;
   readonly onRename: (id: string, to: string) => Write;
   readonly onRemove: (id: string) => Write;
+  readonly onDecide: (id: string, proposalId: string, decision: 'approve' | 'decline') => Write;
 }
 
 const INPUT = 'kt-input min-h-[44px] w-full rounded-control border border-border bg-surface-2 px-2 text-fg';
@@ -315,6 +317,9 @@ function LoginRow({
   onPut,
   onRename,
   onRemove,
+  onDecide,
+  error,
+  onRefused,
 }: {
   readonly entry: LoginEntrySummary;
   readonly entries: readonly LoginEntrySummary[];
@@ -322,6 +327,9 @@ function LoginRow({
   readonly onPut: LoginsCardProps['onPut'];
   readonly onRename: LoginsCardProps['onRename'];
   readonly onRemove: LoginsCardProps['onRemove'];
+  readonly onDecide: LoginsCardProps['onDecide'];
+  readonly error: string | null;
+  readonly onRefused: (id: string) => void;
 }) {
   const [mode, setMode] = useState<RowMode>('view');
   const [label, setLabel] = useState(entry.label);
@@ -454,6 +462,10 @@ function LoginRow({
             <Trash2 size={14} aria-hidden="true" /> Delete
           </button>
         </div>
+      )}
+
+      {mode === 'view' && (
+        <LoginRecipe entry={entry} busy={busy} error={error} onPut={onPut} onDecide={onDecide} onRefused={onRefused} />
       )}
 
       {mode === 'edit' && (
@@ -704,8 +716,11 @@ function LoginRow({
   );
 }
 
-export function LoginsCard({ list, busy = null, error = null, onPut, onRename, onRemove }: LoginsCardProps) {
+export function LoginsCard({ list, busy = null, error = null, onPut, onRename, onRemove, onDecide }: LoginsCardProps) {
   const [adding, setAdding] = useState(false);
+  /** The row whose recipe action was refused: it shows the message beside its own controls, once. */
+  const [claimed, setClaimed] = useState<string | null>(null);
+  if (error === null && claimed !== null) setClaimed(null);
   const working = busy !== null;
 
   return (
@@ -756,12 +771,15 @@ export function LoginsCard({ list, busy = null, error = null, onPut, onRename, o
               onPut={onPut}
               onRename={onRename}
               onRemove={onRemove}
+              onDecide={onDecide}
+              error={claimed === entry.id ? error : null}
+              onRefused={setClaimed}
             />
           ))}
         </ul>
       )}
 
-      {error !== null && (
+      {error !== null && claimed === null && (
         <p role="alert" className="m-0 text-ui text-err" data-testid="logins-error">
           {error}
         </p>

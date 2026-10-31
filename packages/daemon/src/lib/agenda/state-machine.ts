@@ -48,6 +48,7 @@ export const DAEMON_AGENDA_CAUSES = [
   'harness-prompt',
   'input-request',
   'secure-copy',
+  'login-recipe',
 ] as const;
 export type DaemonAgendaCause = (typeof DAEMON_AGENDA_CAUSES)[number];
 const isDaemonAgendaCause = (value: unknown): value is DaemonAgendaCause =>

@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   BROWSER_INPUT_SHOT_MARGIN,
+  BROWSER_INPUT_TEXT_MAX_CHARS,
   BROWSER_INPUT_SHOT_MAX_SIDE,
   type BrowserInputFacts,
   describeInputDocument,
@@ -22,6 +23,7 @@ import {
   PLAYWRIGHT_REACHED_VERSION,
   playwrightNodeOf,
   refindInputFields,
+  readInputText,
   shootInputFields,
   typeInputFields,
 } from '../../../../src/lib/index.ts';
@@ -104,6 +106,10 @@ class FakeSession implements InputCdpSession {
     if (failure !== undefined) throw failure;
     const own = this.world.elements.filter(element => element.frame.sessionName === this.name);
     switch (method) {
+      case 'DOM.getDocument':
+        return { root: { nodeId: 1 } };
+      case 'DOM.getOuterHTML':
+        return { outerHTML: this.world.markup };
       case 'Page.getFrameTree': {
         const frames = this.world.frames.filter(frame => frame.sessionName === this.name);
         const [root, ...inner] = frames;
@@ -230,6 +236,9 @@ class FakeWorld {
   readonly main = new FakeFrame(PAGE_URL, 'page-target');
   frames: FakeFrame[] = [this.main];
   pageUrl = PAGE_URL;
+  bodyText = 'Welcome back';
+  aria = '- textbox "Email": kirin@example.test';
+  markup: unknown = '<html><body><input title="hello"></body></html>';
   title = 'Sign in';
   viewport: Record<string, number> = { clientWidth: 800, clientHeight: 500, pageX: 0, pageY: 0 };
   /** The element each selector or ref points at. */
@@ -331,6 +340,8 @@ class FakeWorld {
     const locatorOf = (selector: string, index?: number): InputLocator => ({
       first: () => locatorOf(selector, index ?? 0),
       nth: at => locatorOf(selector, at),
+      innerText: async () => (selector === 'body' ? this.bodyText : ''),
+      ariaSnapshot: async () => (selector === 'body' ? this.aria : ''),
       count: async () => {
         const ref = /^aria-ref=(.+)$/u.exec(selector)?.[1];
         if (ref !== undefined) return this.refs.has(ref) ? 1 : 0;
@@ -732,14 +743,64 @@ describe('describeInputDocument', () => {
   it('answers the main frame loader and looks at no field', async () => {
     const { world } = loginWorld();
     world.loaderId = 'loader-5';
-    should(await describeInputDocument(world.subject)).eql({ navigationId: 'loader-5' });
+    should(await describeInputDocument(world.subject)).eql({
+      navigationId: 'loader-5',
+      host: new URL(PAGE_URL).host,
+    });
     should(world.session('page-target').calls.map(call => call.method)).eql(['Page.getFrameTree']);
+  });
+
+  it('says the host the page is on, so a login’s facts can watch it leave the sign-in hosts', async () => {
+    const { world } = loginWorld();
+    world.pageUrl = 'https://Vercel.com/dashboard';
+    should((await describeInputDocument(world.subject)).host).equal('vercel.com');
+  });
+
+  it('says no host for a page whose address will not parse', async () => {
+    const { world } = loginWorld();
+    world.pageUrl = '';
+    should(await describeInputDocument(world.subject)).eql({ navigationId: world.loaderId });
   });
 
   it('refuses a closed page', async () => {
     const { world } = loginWorld();
     world.closed = true;
     await describeInputDocument(world.subject).then(
+      () => should.fail(undefined, undefined, 'it should reject'),
+      () => undefined,
+    );
+  });
+});
+
+describe('readInputText', () => {
+  it('reads what a ferret could: the visible text, the accessibility snapshot and the markup', async () => {
+    const { world } = loginWorld();
+    const read = await readInputText(world.subject);
+    for (const part of ['Welcome back', 'kirin@example.test', 'title="hello"']) should(read).containEql(part);
+  });
+
+  it('refuses a page too big to look through whole, rather than say the value is not there', async () => {
+    const { world } = loginWorld();
+    world.bodyText = 'x'.repeat(BROWSER_INPUT_TEXT_MAX_CHARS + 10);
+    await readInputText(world.subject).then(
+      () => should.fail(undefined, undefined, 'it should reject'),
+      () => undefined,
+    );
+  });
+
+  it('refuses a document DevTools will not show', async () => {
+    const { world } = loginWorld();
+    world.markup = undefined;
+    await readInputText(world.subject).then(
+      () => should.fail(undefined, undefined, 'it should reject'),
+      () => undefined,
+    );
+  });
+
+  it('refuses a closed page', async () => {
+    const { world } = loginWorld();
+    world.closed = true;
+    await readInputText(world.subject).then(
       () => should.fail(undefined, undefined, 'it should reject'),
       () => undefined,
     );
