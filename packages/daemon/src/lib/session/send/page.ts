@@ -45,20 +45,16 @@ const newestFirst = (left: SendRecordView, right: SendRecordView): number =>
   Date.parse(right.acceptedAt) - Date.parse(left.acceptedAt) ||
   (left.sendId < right.sendId ? -1 : left.sendId > right.sendId ? 1 : 0);
 
-/** Thrown for a cursor that names no send of this session. */
-export class UnknownSendCursorError extends Error {
-  constructor(readonly cursor: string) {
-    super(`no send ${cursor} to page from`);
-  }
-}
-
-/** The page `query` asks for, out of every send of one session in any order. Pure. */
-export const sendPage = (sends: readonly SendRecordView[], query: SendPageQuery): SendPage => {
+/**
+ * The page `query` asks for, out of every send of one session in any order; `undefined` when its cursor names
+ * no send of this session. Pure and total.
+ */
+export const sendPage = (sends: readonly SendRecordView[], query: SendPageQuery): SendPage | undefined => {
   const ordered = [...sends].sort(newestFirst);
   let start = 0;
   if (query.before !== undefined) {
     const at = ordered.findIndex(send => send.sendId === query.before);
-    if (at === -1) throw new UnknownSendCursorError(query.before);
+    if (at === -1) return undefined;
     start = at + 1;
   }
   const page = ordered.slice(start, start + query.limit);

@@ -24,13 +24,7 @@ import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter, headerValue } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
-import {
-  DEFAULT_SEND_PAGE,
-  MAX_SEND_PAGE,
-  type SendPageQuery,
-  sendPage,
-  UnknownSendCursorError,
-} from '../../session/send/page.ts';
+import { DEFAULT_SEND_PAGE, MAX_SEND_PAGE, type SendPageQuery, sendPage } from '../../session/send/page.ts';
 
 /**
  * Talking to a session that is already running: `POST /v1/sessions/:sessionId/send` and
@@ -308,13 +302,9 @@ function sendPageQuery(context: RouteContext): SendPageQuery {
 /** One page of a session's sends, or the refusal of a cursor that names none of them. */
 async function sendsPage(subsystem: SessionSendSubsystem, context: RouteContext): Promise<ApiResponse> {
   const query = sendPageQuery(context);
-  const sends = await subsystem.sends(pathSessionId(context)).catch(refuse);
-  try {
-    return jsonResponse(sendPage(sends, query));
-  } catch (error) {
-    if (error instanceof UnknownSendCursorError) throw new ApiError(400, error.message, 'invalid_cursor');
-    throw error;
-  }
+  const page = sendPage(await subsystem.sends(pathSessionId(context)).catch(refuse), query);
+  if (page === undefined) throw new ApiError(400, `no send ${query.before ?? ''} to page from`, 'invalid_cursor');
+  return jsonResponse(page);
 }
 
 /**

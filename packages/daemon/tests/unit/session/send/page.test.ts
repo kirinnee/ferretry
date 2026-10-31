@@ -1,12 +1,7 @@
 import { describe, it } from 'bun:test';
 import type { SendRecord } from '@ferretry/protocol';
 import should from 'should';
-import {
-  DEFAULT_SEND_PAGE,
-  isOpenSend,
-  sendPage,
-  UnknownSendCursorError,
-} from '../../../../src/lib/session/send/page.ts';
+import { DEFAULT_SEND_PAGE, isOpenSend, sendPage } from '../../../../src/lib/session/send/page.ts';
 
 /** A send accepted `minutes` after a fixed instant, delivered unless a case says otherwise. */
 const send = (id: string, minutes: number, overrides: Partial<SendRecord> = {}): SendRecord => ({
@@ -23,13 +18,20 @@ const send = (id: string, minutes: number, overrides: Partial<SendRecord> = {}):
 
 const ids = (sends: readonly SendRecord[]) => sends.map(each => each.sendId);
 
+/** A page that must exist: every cursor these cases name is a send of theirs. */
+const pageOf = (...args: Parameters<typeof sendPage>) => {
+  const page = sendPage(...args);
+  if (page === undefined) throw new Error('the cursor named no send');
+  return page;
+};
+
 describe('a page of sends', () => {
   it('should answer the newest sends first and name where the older ones start', () => {
     // Arrange — out of order, as a ledger's map may hold them.
     const sends = [send('a', 1), send('c', 3), send('b', 2), send('d', 4)];
 
     // Act
-    const page = sendPage(sends, { limit: 2 });
+    const page = pageOf(sends, { limit: 2 });
 
     // Assert
     should(ids(page.sends)).eql(['d', 'c']);
@@ -41,8 +43,8 @@ describe('a page of sends', () => {
     const sends = [send('a', 1), send('b', 2), send('c', 3), send('d', 4)];
 
     // Act
-    const second = sendPage(sends, { limit: 2, before: 'c' });
-    const last = sendPage(sends, { limit: 2, before: 'a' });
+    const second = pageOf(sends, { limit: 2, before: 'c' });
+    const last = pageOf(sends, { limit: 2, before: 'a' });
 
     // Assert
     should(ids(second.sends)).eql(['b', 'a']);
@@ -65,7 +67,7 @@ describe('a page of sends', () => {
     ];
 
     // Act
-    const page = sendPage(sends, { limit: DEFAULT_SEND_PAGE });
+    const page = pageOf(sends, { limit: DEFAULT_SEND_PAGE });
 
     // Assert
     should(page.sends).have.length(DEFAULT_SEND_PAGE + 5);
@@ -78,8 +80,8 @@ describe('a page of sends', () => {
     const sends = [send('b', 1), send('a', 1), send('c', 1)];
 
     // Act
-    const first = sendPage(sends, { limit: 1 });
-    const rest = sendPage(sends, { limit: 5, before: first.nextCursor ?? '' });
+    const first = pageOf(sends, { limit: 1 });
+    const rest = pageOf(sends, { limit: 5, before: first.nextCursor ?? '' });
 
     // Assert
     should(ids(first.sends)).eql(['a']);
@@ -87,7 +89,7 @@ describe('a page of sends', () => {
   });
 
   it('should refuse a cursor that names no send', () => {
-    should(() => sendPage([send('a', 1)], { limit: 1, before: 'nope' })).throw(UnknownSendCursorError);
+    should(sendPage([send('a', 1)], { limit: 1, before: 'nope' })).be.undefined();
   });
 
   it('should call a send open while its fate can still change or it is held, never once withdrawn', () => {
