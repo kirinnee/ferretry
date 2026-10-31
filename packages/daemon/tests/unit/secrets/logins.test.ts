@@ -6,6 +6,7 @@ import {
   LoginDirectory,
   LoginEntryError,
   type LoginIndexDocument,
+  type LoginIndexStore,
   LoginVault,
   SecretRedactor,
   SecretStoreError,
@@ -223,5 +224,24 @@ describe('the saved-login vault', () => {
     const foreign = new MemorySecretDocuments(new SecretStoreError('key_missing', 'gone'));
     const redactor = new SecretRedactor(combinedValues(world(new MemoryLoginIndex(), foreign).vault));
     should(await redactor.redact('anything').catch(error => error)).be.instanceOf(SecretStoreError);
+  });
+});
+
+describe('the saved-login vault when what it reads is wrong', () => {
+  it('should reject masking when reading the index fails for a reason that is not a damaged store', async () => {
+    const broken: LoginIndexStore = {
+      read: async () => {
+        throw new Error('the disk went away');
+      },
+      write: async () => undefined,
+    };
+    const vault = new LoginVault(broken, new MemorySecretDocuments(), new FakeSecretCipher());
+    should(await vault.values().catch(error => error)).be.instanceOf(Error);
+  });
+
+  it('should refuse to make a code from a sealed seed that is not base32', async () => {
+    const w = world();
+    await w.directory.put('BAD', { label: 'bad', totp: { seed: '0189-not-base32' } } as PutLoginEntry);
+    should((await w.vault.fill('BAD', 'totp', 0).catch(error => error)).refusal).equal('no_such_field');
   });
 });

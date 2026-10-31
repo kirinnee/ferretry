@@ -47,7 +47,14 @@ const RAISE: InputRaise = {
   submit: 'owner-default',
 };
 
-function harness(options: { facts?: InputTargetFacts; logins?: (port: InputLoginPort) => InputLoginPort } = {}) {
+function harness(
+  options: {
+    facts?: InputTargetFacts;
+    logins?: (port: InputLoginPort) => InputLoginPort;
+    /** A daemon that keeps no saved logins at all. */
+    none?: true;
+  } = {},
+) {
   const writes: string[] = [];
   const sinks: string[] = [];
   const saves: unknown[] = [];
@@ -108,7 +115,7 @@ function harness(options: { facts?: InputTargetFacts; logins?: (port: InputLogin
     values,
     quarantine: new QuarantineRegistry(clock),
     redact: async text => values.scrubAll(text),
-    logins: options.logins?.(spied) ?? spied,
+    ...(options.none === true ? {} : { logins: options.logins?.(spied) ?? spied }),
     hostName: 'Kirin-Box.local',
   });
   /** Everything that left the service except the one write: sinks, plus what the owner and the agent read. */
@@ -469,5 +476,67 @@ describe('the next time: the card offers the saved login, and the owner taps Use
     should(request.saved?.offers).deepEqual([]);
     await h.service.deliver(SESSION, request.id, typed(request.observedDigest as string, PASSWORD), HOST);
     should(h.writes).deepEqual([PASSWORD]);
+  });
+});
+
+describe('the refusals around saved logins, each with nothing typed', () => {
+  it('should refuse "Save as" on a daemon that keeps no saved logins', async () => {
+    const h = harness({ none: true });
+    const { request } = await raised(h);
+    should(request.saved).be.undefined();
+    const refused = await refusal(
+      h.service.deliver(
+        SESSION,
+        request.id,
+        typed(request.observedDigest as string, PASSWORD, { save: { entry: 'X', label: 'x' } }),
+        HOST,
+      ),
+    );
+    should(refused.message).containEql('no saved logins');
+    should(h.writes).deepEqual([]);
+  });
+
+  it('should refuse to keep a plain value that cannot be a username', async () => {
+    const h = harness();
+    const { request } = await raised(h, { ...RAISE, sensitivity: 'plain' });
+    const refused = await refusal(
+      h.service.deliver(
+        SESSION,
+        request.id,
+        typed(request.observedDigest as string, 'kirin\tnee', { save: { entry: 'X', label: 'x' } }),
+        HOST,
+      ),
+    );
+    should(refused.message).containEql('username');
+    should(h.writes).deepEqual([]);
+  });
+
+  it('should answer a store that cannot be opened as unavailable, without what it said', async () => {
+    const h = harness({
+      logins: port => ({
+        ...port,
+        fill: async () => {
+          throw new Error(`the key file near ${PASSWORD} is gone`);
+        },
+      }),
+    });
+    const { request } = await raised(h);
+    const refused = await refusal(
+      h.service.deliver(SESSION, request.id, saved(request.observedDigest as string, 'ANY'), HOST),
+    );
+    should(refused.code).equal('unavailable');
+    should(refused.message).not.containEql(PASSWORD);
+    should(h.writes).deepEqual([]);
+  });
+
+  it('should refuse a saved value that would press keys, without saying what it was', async () => {
+    const h = harness({ logins: port => ({ ...port, fill: async () => 'line-one\nline-two' }) });
+    const { request } = await raised(h);
+    const refused = await refusal(
+      h.service.deliver(SESSION, request.id, saved(request.observedDigest as string, 'ANY'), HOST),
+    );
+    should(refused.code).equal('bad_request');
+    should(refused.message).not.containEql('line-one');
+    should(h.writes).deepEqual([]);
   });
 });
