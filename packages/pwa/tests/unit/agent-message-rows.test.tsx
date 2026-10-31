@@ -101,7 +101,7 @@ describe('a message from another ferret', () => {
     };
     const view = render(<TranscriptRow entry={note} />);
     const shown = textOf(view);
-    expect(shown).toContain("Ferretry updated this ferret's instructions · Board, Ferretry tools");
+    expect(shown).toContain('Ferretry · Instructions updated · Board, Ferretry tools');
     expect(shown).not.toContain('[instructions updated]');
     expect(shown).not.toContain('all work is a card');
     const toggle = view.root.findByProps({ className: 'fy-system-details' });

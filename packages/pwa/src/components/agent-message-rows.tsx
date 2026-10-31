@@ -222,7 +222,7 @@ export function InstructionsUpdateRow({
               onClick={() => setOpen(current => !current)}
               type="button"
             >
-              {open ? 'hide changes' : 'show changes'}
+              {open ? 'Hide' : 'Show'}
             </button>
           </>
         )}

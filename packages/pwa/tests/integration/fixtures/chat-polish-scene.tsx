@@ -4,7 +4,7 @@
  *
  * Parameters (all optional):
  *
- *   ?update=1    the reader pressed "show changes" on the instructions-updated row
+ *   ?update=1    the reader pressed "Show" on the instructions-updated row
  *   ?open=1      the reader pressed "Show more" on the long ferret message
  *   ?tools=1     the reader opened the image group
  *   ?picker=1    show the task menu instead of the conversation
