@@ -260,8 +260,9 @@ class FakeWorld {
   framed = false;
   /** Not even the native value setter empties it. */
   unclearable = false;
-  /** WebSockets the page holds open. */
+  /** WebSockets the page holds open, and how many it ever opened. */
   sockets = 0;
+  socketsEver = 0;
   /** Runs on every insert: a page that fires a request or navigates as you type. */
   onInput: (() => void) | undefined;
   readonly listeners = new Set<() => void>();
@@ -419,6 +420,7 @@ class FakeWorld {
             on: (_event: 'request', listener: () => void) => this.listeners.add(listener),
             off: (_event: 'request', listener: () => void) => this.listeners.delete(listener),
             openSockets: () => this.sockets,
+            socketsOpened: () => this.socketsEver,
           }
         : {}),
     };
@@ -1747,6 +1749,15 @@ describe('probeInputFields', () => {
     const { world, facts } = await ready();
     world.onInput = () => {
       for (const listener of world.listeners) listener();
+    };
+    should(await probe(world, facts)).equal('aborted');
+    should(world.session('page-target').values.get(12)).equal('');
+  });
+
+  it('aborts when the page opens a socket while it runs, even one it closes again', async () => {
+    const { world, facts } = await ready();
+    world.onInput = () => {
+      world.socketsEver += 1;
     };
     should(await probe(world, facts)).equal('aborted');
     should(world.session('page-target').values.get(12)).equal('');

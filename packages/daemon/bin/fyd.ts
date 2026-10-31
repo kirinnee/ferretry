@@ -518,7 +518,6 @@ import { StorageTurnPorts, storagePaneLimits } from '../src/adapters/session/tur
 import { FileMcpProjectFiles } from '../src/adapters/session-mcp/project-files.ts';
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import { BunDetachedLauncher } from '../src/adapters/system/detached-launcher.ts';
-import { SystemExecutables } from '../src/adapters/system/executables.ts';
 import { ProcIoPressure } from '../src/adapters/system/proc-io-pressure.ts';
 import { SystemdUserSliceReader } from '../src/adapters/system/user-slice-reader.ts';
 import {
@@ -6233,7 +6232,7 @@ function createInputRequestService(input: {
           record => record.ownerId === sessionId && (record.name === key || record.id === key),
         ),
     },
-    new SttyTerminalModes(process.platform, runProgram, new SystemExecutables(process.platform, runProgram)),
+    new SttyTerminalModes(process.platform, runProgram),
     runProgram,
   );
   const pageTarget = new PageInputTarget(input.pages);

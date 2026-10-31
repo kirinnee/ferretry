@@ -61,27 +61,28 @@ describe('reading whether a terminal is in line mode', () => {
 });
 
 describe('whether the program reading the prompt is one the ferret could not have placed', () => {
-  const lookup = (path: string | undefined, owner?: { uid: number; mode: number }) => ({
-    path: async () => path,
-    owner: async () => owner,
-  });
-  const modes = (found: ReturnType<typeof lookup> | undefined) =>
-    new SttyTerminalModes('linux', async () => undefined, found);
+  const modes = (answer: string | undefined) => {
+    const asked: (readonly string[])[] = [];
+    return {
+      asked,
+      modes: new SttyTerminalModes('linux', async argv => {
+        asked.push(argv);
+        return answer;
+      }),
+    };
+  };
 
-  it('should trust an executable root owns and nobody else may write', async () => {
-    should(await modes(lookup('/usr/bin/sudo', { uid: 0, mode: 0o104755 })).trusted(42)).be.true();
+  it('should trust a program that runs setuid root: effective uid 0, real uid not', async () => {
+    const { modes: setuid, asked } = modes('    0  1000\n');
+    should(await setuid.trusted(42)).be.true();
+    should(asked).deepEqual([['ps', '-o', 'uid=,ruid=', '-p', '42']]);
   });
 
-  it('should not trust one the user owns, one group or others may write, a relative or unreadable path, or no lookup', async () => {
-    should(await modes(lookup('/home/k/bin/sudo', { uid: 1000, mode: 0o100755 })).trusted(42)).be.false();
-    should(await modes(lookup('/usr/local/bin/sudo', { uid: 0, mode: 0o100775 })).trusted(42)).be.false();
-    should(await modes(lookup('/usr/local/bin/sudo', { uid: 0, mode: 0o100757 })).trusted(42)).be.false();
-    should(await modes(lookup('sudo', { uid: 0, mode: 0o100755 })).trusted(42)).be.false();
-    should(await modes(lookup(undefined)).trusted(42)).be.false();
-    should(await modes(lookup('/usr/bin/sudo')).trusted(42)).be.false();
-    should(await modes(undefined).trusted(42)).be.false();
-    should(await modes(lookup('/usr/bin/sudo', { uid: 0, mode: 0o100755 })).trusted(0)).be.false();
-    const failing = { path: async () => await Promise.reject(new Error('gone')), owner: async () => undefined };
-    should(await modes(failing).trusted(42)).be.false();
+  it('should not trust a program the user runs, one root runs outright, or an answer it cannot read', async () => {
+    for (const answer of ['1000 1000', '0 0', '', 'root kirin', undefined])
+      should(await modes(answer).modes.trusted(42)).be.false();
+    should(await modes('0 1000').modes.trusted(0)).be.false();
+    const failing = new SttyTerminalModes('linux', async () => await Promise.reject(new Error('no ps')));
+    should(await failing.trusted(42)).be.false();
   });
 });

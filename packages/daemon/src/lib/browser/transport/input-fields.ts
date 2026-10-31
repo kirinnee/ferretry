@@ -102,6 +102,8 @@ export interface InputablePage {
   off?(event: 'request', listener: () => void): unknown;
   /** How many WebSockets the page holds open (the worker tracks them): the probe never types where one is. */
   openSockets?(): number;
+  /** How many WebSockets the page has ever opened: one opened and closed while the probe ran still counts. */
+  socketsOpened?(): number;
 }
 
 /** How the page's DevTools sessions are reached. */
@@ -947,9 +949,10 @@ export async function probeInputFields(
 ): Promise<BrowserInputProbeOutcome> {
   const { page } = subject;
   const [field] = fieldIds;
-  if (page.isClosed() || page.on === undefined || page.off === undefined || page.openSockets === undefined)
-    return 'aborted';
+  if (page.isClosed() || page.on === undefined || page.off === undefined) return 'aborted';
+  if (page.openSockets === undefined || page.socketsOpened === undefined) return 'aborted';
   if (field === undefined || fieldIds.length !== 1 || page.openSockets() > 0) return 'aborted';
+  const socketsBefore = page.socketsOpened();
   let requests = 0;
   const heard = (): void => {
     requests += 1;
@@ -985,7 +988,7 @@ export async function probeInputFields(
     }
     const empty = await cleared(typed.session, typed.objectId);
     if (empty) typed = undefined;
-    if (!empty || requests > 0 || page.openSockets() > 0) return 'aborted';
+    if (!empty || requests > 0 || page.socketsOpened() !== socketsBefore) return 'aborted';
     if ((await navigationIdOf(await subject.cdp.page())) !== expected.navigationId) return 'aborted';
     return shown ? 'shown' : 'hidden';
   } catch {

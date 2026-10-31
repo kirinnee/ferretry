@@ -17,7 +17,7 @@ import { identityOf, placeOf } from './login-observer.ts';
  * still end a lock early or reveal. Nothing the agent says is an input to this: only facts the daemon observed.
  *
  * - A TERMINAL is proven only for a local password prompt: echo off in line (canonical) mode, a getpass program
- *   (sudo, su, doas, passwd) running from an executable root owns and only root can write.
+ *   (sudo, su, doas, passwd) running setuid root, which a script or binary the ferret wrote cannot.
  * - A PAGE is proven only when every secret field is a password input on a secure page with no human check showing,
  *   in its own frame's origin, visible and uncovered, AND either a saved login's observed facts for that very field
  *   identity say it hid the value after submit and the page moved on, or the daemon's own dummy probe at raise found
@@ -76,7 +76,7 @@ export function provenByFacts(
  */
 const GETPASS_PROGRAMS: ReadonlySet<string> = new Set(['sudo', 'sudoedit', 'su', 'doas', 'passwd']);
 
-/** A terminal proven to hide typing: a local password prompt, from an executable the ferret could not have placed. */
+/** A terminal proven to hide typing: a local password prompt, from a setuid-root program the ferret could not have placed. */
 export function terminalHides(facts: InputTargetFacts): boolean {
   return (
     facts.kind === 'terminal' &&

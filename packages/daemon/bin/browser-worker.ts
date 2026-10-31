@@ -323,6 +323,7 @@ function registerPage(page: Page): void {
   openSockets.set(page, sockets);
   page.on('websocket', socket => {
     sockets.add(socket);
+    socketsOpened.set(page, (socketsOpened.get(page) ?? 0) + 1);
     socket.on('close', () => sockets.delete(socket));
   });
   watch(page, key);
@@ -507,6 +508,8 @@ function inputLocatorOf(locator: Locator): InputLocator {
 /** The page as the input bridge sees it: Playwright for the element, DevTools for the node. */
 /** Each page's open WebSockets (`registerPage`). */
 const openSockets = new WeakMap<Page, Set<WebSocket>>();
+/** How many WebSockets each page has ever opened. */
+const socketsOpened = new WeakMap<Page, number>();
 
 function inputSubject(page: Page): InputSubject {
   const key = pageId(page);
@@ -527,6 +530,7 @@ function inputSubject(page: Page): InputSubject {
       on: (event: 'request', listener: () => void) => page.on(event, listener),
       off: (event: 'request', listener: () => void) => page.off(event, listener),
       openSockets: () => openSockets.get(page)?.size ?? 0,
+      socketsOpened: () => socketsOpened.get(page) ?? 0,
     } as unknown as InputablePage,
     cdp: {
       page: async () => (await pageSession(page)) as unknown as InputCdpSession,

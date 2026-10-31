@@ -5,7 +5,7 @@ export interface TerminalModes {
   echo(ttyPath: string): Promise<InputEcho>;
   /** Whether the TTY is in canonical (line) mode; `undefined` when it cannot be read. */
   canonical?(ttyPath: string): Promise<boolean | undefined>;
-  /** Whether the program `pid` runs from an executable root owns and only root can write. */
+  /** Whether the program `pid` runs setuid root: effective uid 0 while its real uid is not. */
   trusted?(pid: number): Promise<boolean>;
 }
 
@@ -38,17 +38,20 @@ export function parseCanonical(output: string): boolean | undefined {
   return undefined;
 }
 
-/** Where a running program's executable is, and who may change it. */
-export interface ExecutableLookup {
-  path(pid: number): Promise<string | undefined>;
-  owner(path: string): Promise<{ readonly uid: number; readonly mode: number } | undefined>;
+/**
+ * `ps -o uid=,ruid=`: the effective and the real uid. A program runs setuid root when the first is 0 and the second is
+ * not: the kernel granted it root from a root-owned setuid file, which a script or a binary the ferret wrote cannot
+ * get. `undefined` when the line is not two numbers.
+ */
+export function parseUids(output: string): { readonly effective: number; readonly real: number } | undefined {
+  const match = /^\s*(\d+)\s+(\d+)\s*$/u.exec(output);
+  return match === null ? undefined : { effective: Number(match[1]), real: Number(match[2]) };
 }
 
 export class SttyTerminalModes implements TerminalModes {
   constructor(
     private readonly platform: string,
     private readonly run: ProgramRunner,
-    private readonly executables?: ExecutableLookup,
   ) {}
 
   async canonical(ttyPath: string): Promise<boolean | undefined> {
@@ -58,13 +61,12 @@ export class SttyTerminalModes implements TerminalModes {
     return output === undefined ? undefined : parseCanonical(output);
   }
 
-  /** Root owns the executable and neither its group nor others may write it; anything unreadable is not trusted. */
+  /** The program runs setuid root (effective uid 0, real uid not); anything unreadable is not trusted. */
   async trusted(pid: number): Promise<boolean> {
-    if (this.executables === undefined || !Number.isSafeInteger(pid) || pid <= 0) return false;
-    const path = await this.executables.path(pid).catch(() => undefined);
-    if (path === undefined || !path.startsWith('/')) return false;
-    const owner = await this.executables.owner(path).catch(() => undefined);
-    return owner !== undefined && owner.uid === 0 && (owner.mode & 0o022) === 0;
+    if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+    const output = await this.run(['ps', '-o', 'uid=,ruid=', '-p', String(pid)]).catch(() => undefined);
+    const uids = output === undefined ? undefined : parseUids(output);
+    return uids !== undefined && uids.effective === 0 && uids.real !== 0;
   }
 
   async echo(ttyPath: string): Promise<InputEcho> {

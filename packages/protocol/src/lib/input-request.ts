@@ -43,11 +43,11 @@ export const INPUT_SHORT_LOCK_SECONDS = 10;
 /**
  * Why a card's lock is as long as it is. Only the first three are short, and each is something the DAEMON saw:
  *
- * - `hidden-terminal`: a local password prompt: echo off in line mode, sudo/su/doas/passwd from a root-owned executable.
+ * - `hidden-terminal`: a local password prompt: echo off in line mode, sudo/su/doas/passwd running setuid root.
  * - `proven-field`: a password field on a secure page whose identity Ferretry has seen, on an earlier sign-in, hide
  *   the value after submit and move on (a saved login's observed facts).
- * - `probed-field`: a password field on a secure page into which Ferretry typed a throwaway value, found it in no
- *   read of the page, and cleared it again, with nothing sent and no navigation meanwhile.
+ * - `probed-field`: one password field on a secure page into which Ferretry typed a throwaway value, did not find it in
+ *   the page's text, and cleared it again, with no request or socket it could see and no navigation meanwhile.
  * - `code`: a one-time code shows as it is typed.
  * - `not-proven`: nothing proved that this target hides what is typed.
  */
@@ -311,7 +311,7 @@ const TerminalFactsSchema = z.strictObject({
    * off and draws every character itself (ssh to a remote shell, psql), so echo off alone proves nothing.
    */
   canonical: z.boolean().optional(),
-  /** The foreground program runs from an executable root owns and nobody else can write: not a script a ferret placed. */
+  /** The foreground program runs setuid root (effective uid 0, real uid not): not a script or binary a ferret placed. */
   trustedProgram: z.literal(true).optional(),
 });
 
