@@ -6,7 +6,7 @@
  *
  * It bundles `agenda-page.tsx` (`shapes=1`: A101 a choice … A108 an info card), opens each item's view as the chat
  * does, and FAILS (after writing every picture) when: a page scrolls sideways; the segment is missing, is not
- * directly under the premise and context, or reads as the wrong shape; its instruction line is not the shape's own;
+ * directly under the premise and context, or reads as the wrong shape; its first line is not the ask itself; its instruction line is not the shape's own;
  * the answer row offers anything but the shape's buttons (a card answered in words offers none); or a several-question
  * card draws an option button.
  */
@@ -88,15 +88,21 @@ const THEMES = ['studio-light', 'studio-dark'] as const;
 type Form = 'phone' | 'desktop';
 
 /** Each scene: the item, the shape its segment must read as, and the answer row's buttons, left to right. */
-const SCENES: readonly { readonly id: string; readonly shape: AgendaShape; readonly buttons: readonly string[] }[] = [
-  { id: 'A101', shape: 'choice', buttons: ['EU', 'US', 'Both'] },
-  { id: 'A102', shape: 'yesno', buttons: ['Yes', 'No'] },
-  { id: 'A103', shape: 'approval', buttons: ['Deny', 'Approve'] },
-  { id: 'A104', shape: 'review', buttons: ['Request changes', 'Approve'] },
-  { id: 'A105', shape: 'reply', buttons: [] },
-  { id: 'A106', shape: 'answers', buttons: [] },
-  { id: 'A107', shape: 'todo', buttons: ['Mark as done'] },
-  { id: 'A108', shape: 'info', buttons: ['Got it'] },
+const SCENES: readonly {
+  readonly id: string;
+  readonly shape: AgendaShape;
+  readonly buttons: readonly string[];
+  /** The segment's first line: the ask itself. A several-question card leads with its numbered list instead. */
+  readonly ask: string | null;
+}[] = [
+  { id: 'A101', shape: 'choice', buttons: ['EU', 'US', 'Both'], ask: 'Which region should the deploy use?' },
+  { id: 'A102', shape: 'yesno', buttons: ['Yes', 'No'], ask: 'Restart the build box tonight at 22:00?' },
+  { id: 'A103', shape: 'approval', buttons: ['Deny', 'Approve'], ask: 'Delete the backups older than 90 days?' },
+  { id: 'A104', shape: 'review', buttons: ['Request changes', 'Approve'], ask: 'Is the new sign-in page right?' },
+  { id: 'A105', shape: 'reply', buttons: [], ask: 'What should the welcome email say?' },
+  { id: 'A106', shape: 'answers', buttons: [], ask: null },
+  { id: 'A107', shape: 'todo', buttons: ['Mark as done'], ask: 'Sign in to the work account so the deploy can run.' },
+  { id: 'A108', shape: 'info', buttons: ['Got it'], ask: 'The nightly build is fixed and green again.' },
 ];
 
 const violations: string[] = [];
@@ -151,6 +157,10 @@ const scene = async (form: Form, theme: string, wanted: (typeof SCENES)[number])
     const body = document.querySelector('.fy-item-view__body');
     return {
       shape: need?.getAttribute('data-agenda-need') ?? null,
+      first:
+        need?.children[1]?.hasAttribute('data-agenda-question-line') === true
+          ? (need.children[1]?.textContent ?? '')
+          : null,
       lead: need?.querySelector('[data-agenda-need-lead]')?.textContent ?? null,
       heading: need?.querySelector('h4')?.textContent ?? null,
       order: blocks,
@@ -176,6 +186,10 @@ const scene = async (form: Form, theme: string, wanted: (typeof SCENES)[number])
   check(
     JSON.stringify(found.buttons) === JSON.stringify(wanted.buttons),
     `${label}: the answer row offers ${JSON.stringify(found.buttons)}, wanted ${JSON.stringify(wanted.buttons)}`,
+  );
+  check(
+    found.first === wanted.ask,
+    `${label}: the segment leads with ${JSON.stringify(found.first)}, wanted ${JSON.stringify(wanted.ask)}`,
   );
   check(found.pickers === 0, `${label}: ${found.pickers} per-question picker(s) drawn`);
   if (wanted.shape === 'answers') check(found.wanted === 3, `${label}: ${found.wanted} numbered answers, wanted 3`);

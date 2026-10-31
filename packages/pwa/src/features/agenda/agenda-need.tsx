@@ -4,13 +4,15 @@
  * card's shape (`agendaShape`; the words are the protocol's, `AGENDA_SHAPE_LEADS`):
  *
  *   choice / yes-no   the question, then each option with what it means (the answer row holds the buttons)
- *   approval          what is being approved and its effect
- *   review            what to review: its links
+ *   approval          what is being approved, then its effect
+ *   review            what to review, then its links
  *   reply             the question; the reply box below is the answer
  *   answers           a numbered list of each answer wanted, all given in one reply — never option buttons
- *   todo              the steps, numbered, each ticked; then Mark as done
+ *   todo              what is to be done, then the steps, numbered, each ticked; then Mark as done
  *   info              the message; then Got it
  *
+ * The first line is always the ask itself — the one question, else the item's one-line ask — even where the header
+ * above says it too, so the segment reads whole on its own (several questions are their numbered list instead).
  * The last line is always the plain instruction: "Pick one option.", "Reply with your answers below, numbered."
  * The segment draws no buttons of its own beyond an old choice's extra options: the answer row under the card is
  * the one place an answer is given, so a button never appears twice.

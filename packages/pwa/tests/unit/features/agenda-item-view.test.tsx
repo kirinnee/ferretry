@@ -667,6 +667,56 @@ describe('What I need from you', () => {
     expect(asked).toEqual([]);
   });
 
+  test('leads with the ask itself, even where the header says it too: the question, or what is approved or done', async () => {
+    const asks: readonly [Partial<AgendaItem>, string][] = [
+      [
+        { kind: 'choice', ask: choices('EU', 'US'), subject: 'Which region should the deploy use?' },
+        'Which region should the deploy use?',
+      ],
+      [
+        {
+          kind: 'choice',
+          ask: choices('EU', 'US'),
+          subject: 'Pick a region',
+          questions: [{ question: 'Which region should the deploy use?', options: [{ label: 'EU' }, { label: 'US' }] }],
+        },
+        'Which region should the deploy use?',
+      ],
+      [
+        { kind: 'permission', ask: { kind: 'permission' }, subject: 'Delete the old backups?' },
+        'Delete the old backups?',
+      ],
+      [
+        { kind: 'task', ask: { kind: 'task' }, subject: 'Sign in to the work account', steps: ['Open it'] },
+        'Sign in to the work account',
+      ],
+      [
+        { kind: 'review', ask: { kind: 'answer-review' }, subject: 'Is the sign-in page right?' },
+        'Is the sign-in page right?',
+      ],
+      [
+        { kind: 'reply', ask: { kind: 'open-question' }, subject: 'What should the email say?' },
+        'What should the email say?',
+      ],
+      [{ kind: 'info', subject: 'The nightly build is fixed' }, 'The nightly build is fixed'],
+    ];
+    for (const [patch, ask] of asks) {
+      await view?.unmount();
+      view = null;
+      await draw(agendaItem('A20', { title: 'Short title', ...patch } as Partial<AgendaItem>));
+      const first = need().children[1];
+      expect(first?.hasAttribute('data-agenda-question-line')).toBe(true);
+      expect(first?.textContent).toBe(ask);
+      expect(need().lastElementChild?.hasAttribute('data-agenda-need-lead')).toBe(true);
+    }
+  });
+
+  test('a several-question card leads with its numbered list, not a line', async () => {
+    await draw(several);
+    expect(need().querySelector('[data-agenda-question-line]')).toBeNull();
+    expect(need().children[1]?.hasAttribute('data-agenda-wanted')).toBe(true);
+  });
+
   test('says no instruction on an item that cannot be answered here', async () => {
     await draw(richItem, { settled: <p>Answered.</p> });
     expect(root().querySelector('[data-agenda-need]')).not.toBeNull();

@@ -3,9 +3,10 @@
  *
  *   top bar    the item's type, "↓ Not needed" (the ↓ swipe) and the version picker ("v2 of 2 · 3m ago")
  *   situation  PREMISE and CONTEXT — the two fields every item carries — as two tinted blocks, each label above its points
- *   need       "WHAT I NEED FROM YOU" (`agenda-need.tsx`): exactly the ask, by the card's shape — the question and each
- *              option with what it means; the steps to tick; the numbered answers a reply gives; what an approval
- *              does; what to review — and the one plain instruction ("Pick one option.")
+ *   need       "WHAT I NEED FROM YOU" (`agenda-need.tsx`): exactly the ask, by the card's shape — the ask itself first
+ *              (the question, or what is approved, done or read), then each option with what it means; the steps to
+ *              tick; what an approval does; what to review; or the numbered answers a reply gives — and the one plain
+ *              instruction last ("Pick one option.")
  *   sections   only what the item carries, each open, none folding: why the recommendation, reasoning or more detail
  *              (Markdown with fy-render), decided, still open, impact, links, terms
  *   answers    ONE row of at most three — ← ↑ → — or the item's own form (an input request), or why it cannot be
@@ -16,11 +17,10 @@
  * bars, no hint lines, no menus.
  */
 
-import type { AgendaCardAnswer, AgendaItem, AgendaTerm } from '@ferretry/protocol';
+import { type AgendaCardAnswer, type AgendaItem, type AgendaTerm, singleAgendaQuestion } from '@ferretry/protocol';
 import { Check } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import { optionAction } from '../../lib/agenda-answers.ts';
-import { agendaCardHead } from '../../lib/agenda-card-head.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import { DISMISS_ACTION, type InboxAction, swipeMap } from '../../lib/agenda-inbox.ts';
 import { cardLettered, itemOptions, letteredOptions } from '../../lib/agenda-options.ts';
@@ -261,7 +261,9 @@ export function AgendaItemCard({
   const read = forConfirmation(item);
   const model = cardModel(item);
   const meta = agendaTypeMeta(item);
-  const { question } = agendaCardHead(item);
+  // The segment LEADS WITH THE ASK, whatever the header above it says: the lone question, else the item's one-line
+  // ask — what is being chosen, approved, done or read. Several questions are their own numbered list instead.
+  const askLine = singleAgendaQuestion(item)?.question.trim() || item.subject.trim();
   const terms = item.terms ?? [];
   const seen = new Set<number>();
   const mark = (text: string): string => markTerms(text, terms, seen);
@@ -352,12 +354,12 @@ export function AgendaItemCard({
       <TermLayer renderProse={renderProse} terms={terms}>
         <Situation context={context} premise={premise} renderProse={renderProse} />
         <AgendaNeed shape={shape} {...(answerable ? {} : { lead: '' })}>
-          {model.notice && body !== null ? <AgendaBody renderProse={renderProse} text={body} /> : null}
-          {question === null || shape === 'answers' ? null : (
+          {askLine === '' || shape === 'answers' || shape === 'input' ? null : (
             <div className="fy-card__question" data-agenda-question-line="">
-              {renderProse(mark(question))}
+              {renderProse(mark(askLine))}
             </div>
           )}
+          {model.notice && body !== null ? <AgendaBody renderProse={renderProse} text={body} /> : null}
           {choosing && showList ? (
             <OptionsList
               busy={busy}
