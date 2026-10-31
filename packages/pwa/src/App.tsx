@@ -2391,13 +2391,6 @@ export function AppShell() {
   // The machine on screen tells this browser when its configuration moves, so no screen showing it
   // needs a reload to see a change made anywhere else. See `useConfigChangeFeed`.
   useConfigChangeFeed(store, connection);
-  // The finder searches card and agenda words only on a machine that says it can.
-  const finderFetch = useDaemonFetch();
-  const finderHealth = useDaemonHealth(connection);
-  const finderWorkSearch = useMemo(
-    () => (connection === undefined ? undefined : workSearchPortFor(finderHealth, connection, finderFetch)),
-    [finderHealth, connection, finderFetch],
-  );
   // A notification tap routes here in the app instead of the worker reloading the window.
   useNotificationOpen(notificationOpenSource(), window.location.origin, navigate);
   /*
@@ -2674,6 +2667,13 @@ export function AppShell() {
   const fleetSnapshot = useCallback(() => store.fleet.getSnapshot(), [store.fleet]);
   const fleet = useSyncExternalStore(subscribeFleet, fleetSnapshot);
   const [palette, setPalette] = useState({ open: false, focusSignal: 0 });
+  // The finder searches card and agenda words only on a machine that says it can; it asks while the finder is open.
+  const finderFetch = useDaemonFetch();
+  const finderHealth = useDaemonHealth(palette.open ? connection : undefined);
+  const finderWorkSearch = useMemo(
+    () => (connection === undefined ? undefined : workSearchPortFor(finderHealth, connection, finderFetch)),
+    [finderHealth, connection, finderFetch],
+  );
   const openPalette = useCallback(
     () => setPalette(current => ({ open: true, focusSignal: current.focusSignal + 1 })),
     [],
