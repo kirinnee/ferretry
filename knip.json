@@ -58,6 +58,8 @@
         "harness/phone-chat-screenshot.ts",
         "harness/phone-chat-page.tsx",
         "harness/board-chat-page.tsx",
+        "harness/board-one-done-screenshot.ts",
+        "harness/board-one-done-page.tsx",
         "harness/agenda-v4-screenshot.ts",
         "harness/agenda-settled-screenshot.ts",
         "harness/agenda-settled-page.tsx",

@@ -25,6 +25,7 @@ import { Check, ChevronLeft, EllipsisVertical, MessageSquarePlus, RotateCcw, X }
 import { type CSSProperties, type KeyboardEvent, useId, useState } from 'react';
 import {
   ANSWER_AT_REST,
+  answerRowOf,
   type BoardAnswer,
   type BoardAnswerState,
   type BoardDone,
@@ -113,8 +114,11 @@ export function BoardCard({
     category,
     machine: showMachine ? card.machine : null,
   }).filter(segment => density === 'page' || !segment.optional);
-  const toTest = moves !== undefined && category === 'verify';
-  const released = done !== undefined && done.atRelease && done.done.kind === 'done';
+  const row = answerRowOf({
+    category,
+    movable: moves !== undefined,
+    done: done?.atRelease ? done.done : null,
+  });
   return (
     <li
       className="fy-board-card"
@@ -183,8 +187,10 @@ export function BoardCard({
       {moves !== undefined && (moves.choices.length > 0 || done !== undefined) ? (
         <BoardMoveMenu answer={answer} card={card} done={done} moves={moves} />
       ) : null}
-      {toTest ? <ToTestActions answer={answer} card={card} done={done} moves={moves} touch={touch} /> : null}
-      {released ? (
+      {row === 'verdict' && moves !== undefined ? (
+        <ToTestActions answer={answer} card={card} done={done} moves={moves} touch={touch} />
+      ) : null}
+      {row === 'done' && done !== undefined ? (
         <div className="fy-board-card__verdict" data-touch={touch ? '' : undefined}>
           <BoardDoneAction
             disabled={answer.pressed !== null}
