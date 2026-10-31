@@ -236,6 +236,27 @@ describe('Inbox — swiping a card waiting for a try', () => {
     expect(actions.calls).toEqual([]);
   });
 
+  it('lets a mostly vertical drag scroll the page instead of answering', async () => {
+    const { root, actions } = await open({ phone: true });
+    const grip = must(rowOf(root, 'F22').querySelector<HTMLElement>('.fy-totest__meta'), 'grip');
+    await interact(() => grip.dispatchEvent(pointer('pointerdown', 100)));
+    await interact(() => grip.dispatchEvent(pointer('pointermove', 110, { clientY: 420 })));
+    await interact(() => grip.dispatchEvent(pointer('pointermove', 400, { clientY: 430 })));
+    await interact(() => grip.dispatchEvent(pointer('pointerup', 400, { clientY: 430 })));
+    await interact(() => flush());
+    expect(rowOf(root, 'F22').getAttribute('data-swipe-direction')).toBeNull();
+    expect(actions.calls).toEqual([]);
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('does not follow the title link on the click that ends a swipe', async () => {
+    const { root, navigated } = await open({ phone: true });
+    await drag(rowOf(root, 'F22'), 40, true);
+    const title = must(rowOf(root, 'F22').querySelector<HTMLElement>('[data-to-test-title]'), 'title');
+    await interact(() => title.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })));
+    expect(navigated).toEqual([]);
+  });
+
   it('ignores a mouse drag: swipes are touch only', async () => {
     const { root, actions } = await open();
     const grip = must(rowOf(root, 'F22').querySelector<HTMLElement>('.fy-totest__meta'), 'grip');
