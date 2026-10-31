@@ -373,6 +373,8 @@ its old name until a later release renames it; its files are [on disk](#on-disk)
 "only on receipt (the harness receive the 'card reply'), then it can be considered 'DONE', else it surfaces
 back as a card again".
 
+A bare **Got it** (or Done with no words) on an `info` item is never delivered: it resolves the item quietly, for the ferret to see in `fy agenda ls`, and starts no turn. Words the owner typed, a dismiss and every other kind still go through the steps below.
+
 1. **Held.** The action goes to the ferret's outbox (`agenda-replies.json`, beside the agenda's own
    file). It is due **10 seconds after the last card action**: every further action on that ferret's cards
    restarts the countdown, and the first one never waits more than **2 minutes**. The agenda says so:
