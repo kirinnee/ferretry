@@ -3,7 +3,7 @@ import { type MouseEvent as ReactMouseEvent, useRef } from 'react';
 export interface ScrimDismiss {
   readonly onPointerDown: () => void;
   readonly onPointerCancel: () => void;
-  readonly onClick: (event: ReactMouseEvent<HTMLElement>) => void;
+  readonly onClick: (event?: ReactMouseEvent<HTMLElement>) => void;
 }
 
 /**
@@ -14,7 +14,7 @@ export interface ScrimDismiss {
  * from that same touch lands on the new backdrop — closing the sheet in the
  * frame it appeared. Such a click never had a pointerdown on the backdrop, so a
  * pointer-driven click (`detail > 0`) without one is refused. A keyboard or
- * assistive-technology activation reports `detail === 0` and always closes.
+ * assistive-technology activation reports no pointer click count (`detail` of 0 or absent) and always closes.
  */
 export function useScrimDismiss(onClose: () => void): ScrimDismiss {
   const pressed = useRef(false);
@@ -28,7 +28,7 @@ export function useScrimDismiss(onClose: () => void): ScrimDismiss {
     onClick: event => {
       const began = pressed.current;
       pressed.current = false;
-      if (began || event.detail === 0) onClose();
+      if (began || (event?.detail ?? 0) <= 0) onClose();
     },
   };
 }
