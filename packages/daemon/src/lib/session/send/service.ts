@@ -1,4 +1,4 @@
-import type { SendCancelEffect, SendDisposition } from '@ferretry/protocol';
+import type { QueueAuthor, SendCancelEffect, SendDisposition } from '@ferretry/protocol';
 import type { ClockPort, SerialExecutor } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
 import {
@@ -99,6 +99,8 @@ export interface SendMessageRequest {
    * arrive. Recorded as such so nothing retries it on anybody's behalf, and so it never notifies.
    */
   readonly origin?: 'daemon' | undefined;
+  /** Who the sender is, as data, for a send that bypasses the queue (which would have recorded it). */
+  readonly by?: QueueAuthor | undefined;
 }
 
 export interface SendOutcome {
@@ -1124,6 +1126,7 @@ export class SessionSendService {
       attempt: 1,
       attemptAt: now,
       senderKind: request.origin === 'daemon' ? 'daemon' : sender === undefined ? 'human' : 'agent',
+      ...(request.by === undefined ? {} : { by: request.by }),
       ...(request.attachmentIds === undefined || request.attachmentIds.length === 0
         ? {}
         : { attachmentIds: [...request.attachmentIds] }),

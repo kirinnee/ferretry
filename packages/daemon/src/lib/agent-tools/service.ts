@@ -50,6 +50,7 @@ import {
   clipOutput,
   clipReading,
   controlRefusal,
+  pageScriptsRefusal,
   isShellForeground,
   surfaceReference,
   terminalInput,
@@ -97,7 +98,7 @@ export interface AgentToolPorts {
   readonly terminals: Pick<TerminalSubsystem, 'list' | 'create' | 'write' | 'text' | 'foreground' | 'close'>;
   readonly browser: Pick<
     BrowserSubsystem,
-    'status' | 'openPage' | 'actOnPage' | 'filesOnPage' | 'closePage' | 'lifecycleOnPage' | 'adoptPage'
+    'status' | 'openPage' | 'actOnPage' | 'filesOnPage' | 'scriptOnPage' | 'closePage' | 'lifecycleOnPage' | 'adoptPage'
   >;
   /** What the file tools may reach: the session's own folder and its attachments, nothing else. */
   readonly files: Pick<AgentFiles, 'prepareUpload' | 'save'>;
@@ -111,6 +112,8 @@ export interface AgentToolPorts {
    * harness transcript must not keep it. Fails closed: a vault that cannot be opened withholds the text.
    */
   readonly redactor: Pick<TextRedactor, 'batch'>;
+  /** The command-line client's name, for a refusal that tells the owner the command to type. */
+  readonly binaryName: string;
   readonly clock: AgentToolClock;
   readonly sleep: (milliseconds: number) => Promise<void>;
   /** The owner's input requests; absent where none are wired, which refuses the two input tools. */
@@ -129,16 +132,22 @@ const PAGE_PICTURES: ReadonlySet<string> = new Set(['browser.screenshot', 'brows
 /** Page tools that hand back what a page SAYS: masked always, and refused during a hold until the page moves on. */
 const PAGE_TEXT: ReadonlySet<string> = new Set([
   'browser.read',
-  'browser.evaluate',
+  'browser.eval',
   'browser.console',
   'browser.network',
   'browser.wait_for',
 ]);
-/** Page tools that put text into a page: refused while the owner is being asked for a value on it. */
-const PAGE_TYPING: ReadonlySet<string> = new Set(['browser.type', 'browser.fill_form', 'browser.press']);
+/** Page tools that put text into a page (a script can too): refused while the owner is being asked for a value on it. */
+const PAGE_TYPING: ReadonlySet<string> = new Set([
+  'browser.type',
+  'browser.fill_form',
+  'browser.press',
+  'browser.eval',
+]);
 
 /** The tools that change what a person would see, and so put up the driving marker. */
 const DRIVING_TOOLS: ReadonlySet<AgentToolCall['tool']> = new Set([
+  'browser.eval',
   'terminal.open',
   'terminal.send',
   'browser.open',
@@ -248,6 +257,10 @@ export class AgentToolService {
         throw new AgentToolError('forbidden', controlRefusal(kind));
       if (caller.kind === 'agent' && FILE_TOOLS.has(call.tool) && !(await this.ports.policy.allows('files')))
         throw new AgentToolError('forbidden', controlRefusal('files'));
+      // Page scripts are the owner's to allow for EVERY caller: a paired device with the browser grant
+      // must not read the shared profile's sign-ins through a script while the owner has them off.
+      if (call.tool === 'browser.eval' && !(await this.ports.policy.allows('scripts')))
+        throw new AgentToolError('forbidden', pageScriptsRefusal(this.ports.binaryName));
       result = await this.dispatch(caller, call, facts);
       await this.record(caller, call, facts, 'succeeded');
     } catch (error) {
@@ -524,6 +537,8 @@ export class AgentToolService {
       case 'browser.download':
       case 'browser.pdf':
         return await this.files(caller, call, surface, reference, facts);
+      case 'browser.eval':
+        return await this.script(caller, call, surface, reference, facts);
       default:
         return await this.browse(caller, call, surface, reference, facts);
     }
@@ -722,6 +737,39 @@ export class AgentToolService {
    * the session's own attachments); a download or a PDF is staged by the browser and SAVED by the file service,
    * which alone decides where — under the session's folder, never over an existing file unless asked.
    */
+  /**
+   * An agent's own script, in an isolated world on its page (owner-gated: checked in {@link call}). What it
+   * returned is scrubbed like every page text, and audited by its length only.
+   */
+  private async script(
+    caller: AgentToolCaller,
+    call: Extract<AgentToolCall, { readonly tool: 'browser.eval' }>,
+    surface: ResolvedSurface,
+    reference: string,
+    facts: CallFacts,
+  ): Promise<AgentToolResult> {
+    const target = call.ref !== undefined || call.selector !== undefined ? elementTargetOf(call) : undefined;
+    const answer = await this.ports.browser.scriptOnPage(
+      caller.sessionId,
+      surface.id,
+      {
+        source: call.function,
+        ...(target === undefined ? {} : { target }),
+        ...(call.timeoutMs === undefined ? {} : { timeoutMs: call.timeoutMs }),
+      },
+      this.browserGuard(caller, surface),
+    );
+    facts.detail = { resultLength: answer.text.length };
+    const dialog = pendingDialogOf(answer.result);
+    const read = await this.scrubbed({ url: answer.result.url, text: answer.text, ...dialogOf(dialog) });
+    const output = clipReading(read.text ?? '');
+    const clipped = output.length < (read.text ?? '').length ? ' It was clipped to fit: return less.' : '';
+    return {
+      summary: `Ran your script on ${reference} (now at ${read.url ?? answer.result.url}).${clipped}${humanCheckNote(answer, surface.id)}${dialogNote(dialog, read.dialog)}`,
+      output,
+    };
+  }
+
   private async files(
     caller: AgentToolCaller,
     call: Extract<AgentToolCall, { readonly tool: 'browser.upload' | 'browser.download' | 'browser.pdf' }>,
@@ -1291,6 +1339,12 @@ function callFacts(call: AgentToolCall): AuditDetail {
       return call.id === undefined ? {} : { download: call.id };
     case 'browser.pdf':
       return {};
+    case 'browser.eval':
+      return {
+        functionLength: call.function.length,
+        ...targetFacts(call),
+        ...(call.timeoutMs === undefined ? {} : { timeoutMs: call.timeoutMs }),
+      };
     case 'browser.hover':
       return targetFacts(call);
     case 'browser.drag':

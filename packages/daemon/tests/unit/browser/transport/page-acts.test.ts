@@ -84,7 +84,12 @@ class FakePage implements ActablePage {
       setInputFiles: async files => {
         page.calls.push(`setInputFiles ${selector} ${JSON.stringify(files)}`);
       },
-      evaluate: async () => page.fileInput,
+      // The real page function runs, on an element that is a file field or a button.
+      evaluate: async (pageFunction, arg) =>
+        (pageFunction as (element: unknown, arg: string) => unknown)(
+          page.fileInput ? { tagName: 'INPUT', type: 'file' } : { tagName: 'BUTTON', type: 'submit' },
+          arg,
+        ),
       scrollIntoViewIfNeeded: async () => {
         page.calls.push(`scrollIntoView ${selector}`);
       },

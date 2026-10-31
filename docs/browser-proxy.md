@@ -42,7 +42,16 @@ browserProxy:
 - **The address never carries a user name or password.** `fy config check` and the app refuse
   `http://user:pass@host`. Credentials are `${secret:NAME}` references to the machine's secret store
   ([secrets.md](secrets.md): `fy secret set NAME`), so the value is in neither the file nor the app, and
-  nothing here can read it back.
+  nothing here can read it back. The tab opens with a **Now:** line saying what is saved (the address, whether it
+  signs in, how many addresses it skips, or that there is no proxy). It has write-only **Username** and **Password**
+  fields: what is typed is stored through `POST /v1/secrets` under `PROXY_USER` / `PROXY_PASSWORD` when you press
+  **Save and test** or **Test proxy** (the value goes to the daemon, is never returned and is cleared from the form once
+  stored), and the setting points at that name. **Save and test** stores what was typed, saves the setting, then tests the
+  saved proxy at once. A credential that is already stored shows as a masked, read-only box with
+  **Replace** and **Remove**, never the value; Remove detaches it from the proxy and leaves the secret in the store
+  (Settings › Secrets deletes it). A small **Use a different stored secret** link opens the two secret-name boxes. The
+  store keeps values of at least 8 characters (a redaction rule), so a shorter one gets a one-line error on that field
+  and is never sent.
 - **Applied at launch.** The browser reads the setting every time it starts, so a change applies the next
   time it starts; a browser already running keeps its network route until it stops (it stops after 15 idle
   minutes, or with `fy browser stop`).
@@ -87,7 +96,8 @@ page with an error rather than a direct connection.
 
 ## Test proxy
 
-Settings › a machine › **Browser** has a **Test proxy** button, and `fy browser proxy test` does the same
+Settings › a machine › **Browser** has a **Test proxy** button (it stays pressable when the form is invalid
+and then says plainly what to fix instead of calling the daemon), and `fy browser proxy test` does the same
 from a terminal. It answers "does this proxy work, and is my traffic really leaving through it?" without
 starting the agent browser.
 

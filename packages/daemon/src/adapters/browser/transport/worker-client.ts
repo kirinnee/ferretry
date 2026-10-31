@@ -29,6 +29,7 @@ import {
   BrowserTransportError,
   type BrowserTypeOptions,
   type BrowserUploadMode,
+  type PageScript,
   boundedReadText,
   boundedScreenshot,
   encodeWorkerRequest,
@@ -103,8 +104,17 @@ export interface WorkerClientOptions {
   readonly workerEntry: string;
   /** A compiled worker executable is invoked directly; a source worker is invoked through Bun. */
   readonly workerExecutable?: boolean;
-  /** Argument the worker connects to; opaque to the client. */
+  /**
+   * The worker's first argument: how it reaches Chrome. Opaque to the client. The agent browser passes
+   * `CDP_PIPE_ENDPOINT` together with {@link cdpPipe}; the scripted test worker reads it as a behaviour.
+   */
   readonly endpoint: string;
+  /**
+   * The daemon's ends of Chrome's DevTools pipe, handed to the worker as ITS fds 3 (requests to Chrome) and 4
+   * (replies and events from Chrome). The worker inherits them; the caller still owns — and closes — its own
+   * copies once `connect` has settled, so that only the worker and Chrome hold the pipe.
+   */
+  readonly cdpPipe?: CdpPipeEnds;
   /** The daemon-owned directory the worker stages downloads and PDFs in; without one it stages nothing. */
   readonly stageDirectory?: string;
   readonly cwd?: string;
@@ -118,6 +128,14 @@ export interface WorkerClientOptions {
   readonly clock?: FrameClock;
   /** Floor on the interval between frames handed to viewers. */
   readonly frameIntervalMs?: number;
+}
+
+/** The parent ends of Chrome's `--remote-debugging-pipe`, as `Bun.spawn` returns them in `stdio[3]` and `stdio[4]`. */
+export interface CdpPipeEnds {
+  /** Chrome reads this pipe on its fd 3. */
+  readonly toChrome: number;
+  /** Chrome writes this pipe on its fd 4. */
+  readonly fromChrome: number;
 }
 
 interface PageCast {
@@ -231,9 +249,11 @@ export class BrowserWorkerClient implements BrowserAutomation {
       {
         cwd: options.cwd ?? dirname(options.workerEntry),
         env: workerEnvironment(options.environment ?? {}),
-        stdin: 'pipe',
-        stdout: 'pipe',
-        stderr: 'ignore',
+        // Fds 3 and 4 are Chrome's DevTools pipe when there is one; nothing else is ever passed past stderr.
+        stdio:
+          options.cdpPipe === undefined
+            ? ['pipe', 'pipe', 'ignore']
+            : ['pipe', 'pipe', 'ignore', options.cdpPipe.toChrome, options.cdpPipe.fromChrome],
       },
     );
     const client = new BrowserWorkerClient(child, options);
@@ -295,6 +315,16 @@ export class BrowserWorkerClient implements BrowserAutomation {
       // An older worker sends no format; its screenshots were always PNG.
       screenshotFormat: (raw as { screenshotFormat?: unknown }).screenshotFormat === 'jpeg' ? 'jpeg' : 'png',
     };
+  }
+
+  async evaluate(pageId: string, script: PageScript): Promise<BrowserPageActed & { readonly text: string }> {
+    const raw = await this.request('evaluate', {
+      pageId,
+      source: script.source,
+      ...(script.target === undefined ? {} : { target: script.target }),
+      ...(script.timeoutMs === undefined ? {} : { timeoutMs: script.timeoutMs }),
+    });
+    return { ...acted(raw), text: boundedReadText(raw) };
   }
 
   upload(

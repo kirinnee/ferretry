@@ -6,7 +6,6 @@ import {
   type AgentConfigToolName,
   type AgentLessonToolName,
   type AgentToolName,
-  INPUT_FIELD_LABEL_MAX_LENGTH,
   INPUT_MAX_EXPIRY_SECONDS,
   INPUT_MAX_FIELDS,
   INPUT_PROMPT_MAX_LENGTH,
@@ -83,7 +82,7 @@ const INPUT_OPTIONS = {
   chain: { type: 'string', description: 'The card this login step follows, like A7.' },
   secretHint: {
     type: 'string',
-    description: 'A saved login you expect, e.g. SUDO_KIRIN_BOX: a hint only, the owner still taps.',
+    description: 'Saved login you expect, by handle (SUDO_KIRIN_BOX): a hint only, the owner still taps.',
   },
 };
 
@@ -185,7 +184,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
         name: NAME,
         prompt: INPUT_PROMPT,
         sensitivity: SENSITIVITY,
-        label: { type: 'string', maxLength: INPUT_FIELD_LABEL_MAX_LENGTH },
+        label: { type: 'string' },
         ...INPUT_OPTIONS,
       },
       ['name', 'prompt', 'sensitivity'],
@@ -627,6 +626,25 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     inputSchema: object({ name: NAME, ref: REF, selector: SELECTOR, clear: { type: 'boolean' } }, ['name']),
   },
   {
+    name: 'browser_eval',
+    tool: 'browser.eval',
+    description:
+      'Run your own JavaScript function in a page, in an isolated world (its DOM, none of its scripts); returns the value as JSON. Refused unless the owner turned on Page scripts.',
+    inputSchema: object(
+      {
+        name: NAME,
+        function: {
+          type: 'string',
+          description: 'A function expression: "() => document.title", or "(element) => …" with ref/selector.',
+        },
+        ref: REF,
+        selector: SELECTOR,
+        timeoutMs: { type: 'integer', minimum: 100, maximum: 10_000, description: '5000 by default.' },
+      },
+      ['name', 'function'],
+    ),
+  },
+  {
     name: 'browser_close',
     tool: 'browser.close',
     description: 'Close a page.',
@@ -643,7 +661,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'browser_request_input',
     tool: 'browser.request_input',
     description:
-      'Ask the owner for a login form on ONE card; the daemon types each field: plain (an e-mail you see) or secret (a password). Returns !A<n>; then input_wait. Next page: a new card with chain.',
+      'Ask the owner for a login form on ONE card; the daemon types each field: plain (an e-mail you see) or secret (a password). Then input_wait. Next page: a new card with chain.',
     inputSchema: object(
       {
         name: NAME,
@@ -654,10 +672,10 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
           maxItems: INPUT_MAX_FIELDS,
           items: object(
             {
-              id: { type: 'string', description: 'e.g. email' },
-              label: { type: 'string', maxLength: INPUT_FIELD_LABEL_MAX_LENGTH },
+              id: { type: 'string' },
+              label: { type: 'string' },
               sensitivity: SENSITIVITY,
-              ref: { type: 'string', description: 'e.g. e12, or a selector' },
+              ref: { type: 'string' },
               selector: { type: 'string' },
             },
             ['id', 'sensitivity'],

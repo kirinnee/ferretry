@@ -20,6 +20,7 @@ import type {
   BrowserUploadMode,
 } from './page-acts.ts';
 import type { BrowserInputFieldsPort } from './input-contracts.ts';
+import type { PageScript } from './page-script.ts';
 import type { WorkerStagedFile } from './worker-protocol.ts';
 
 /** What an act answers: the page list, and the dialog the acted page is waiting on, if it has one. */
@@ -74,6 +75,8 @@ export interface BrowserAutomation extends BrowserInputFieldsPort {
   ): Promise<BrowserPageActed>;
   /** The chosen (default: latest) download this page started, as a file the browser staged for the daemon to save. */
   download(pageId: string, downloadId?: string): Promise<BrowserPageActed & { readonly staged: WorkerStagedFile }>;
+  /** Runs an agent's own script in an isolated world on the page, and answers what it returned, as text. */
+  evaluate(pageId: string, script: PageScript): Promise<BrowserPageActed & { readonly text: string }>;
   /** The page printed to PDF and staged for the daemon to save; a visible-window browser refuses. */
   pdf(pageId: string): Promise<BrowserPageActed & { readonly staged: WorkerStagedFile }>;
   back(pageId: string): Promise<BrowserPageActed>;

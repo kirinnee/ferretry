@@ -43,6 +43,24 @@ describe('daemon API token file', () => {
     should(actual.token).equal('daemon-secret');
   });
 
+  it('should refuse to hand the admin token to a port another user holds', async () => {
+    // Arrange — the shared-host squat: this user's daemon recorded 7555 and is down, and a stranger
+    // (uid 1002) bound the port. The kernel's table is the only thing that can tell the two apart.
+    await writeFile(tokenPath, 'daemon-secret\n', { mode: 0o600 });
+    await mkdir(join(root, 'config'), { recursive: true });
+    await writeFile(join(root, 'config', 'daemon.json'), JSON.stringify({ host: '127.0.0.1', port: 7_555 }));
+    const squatted = [
+      '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode',
+      '   0: 0100007F:1D83 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1002        0 1 1 0 100 0 0 10 0',
+    ].join('\n');
+
+    // Act
+    const attempt = daemonConnection({ FY_HOME: root }, root, { tables: async () => [squatted], uid: () => 1_001 });
+
+    // Assert
+    await should(attempt).be.rejectedWith(/refusing to send the daemon admin token to http:\/\/127\.0\.0\.1:7555/u);
+  });
+
   it('should keep FY_TOKEN as the explicit override', async () => {
     // Act — no token file is created, so success proves no local credential was consulted.
     const actual = await daemonConnection({ FY_HOME: root, FY_TOKEN: ' remote-secret ' }, root);

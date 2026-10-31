@@ -273,12 +273,13 @@ describe('InputRequestService.raise', () => {
       note: 'Waiting for the owner on A1.',
     });
     should(w.cards[0]?.title).equal('Needs a secret');
-    should(w.cards[0]?.ask).equal('Type it into sudo');
+    should(w.cards[0]?.ask).equal('Type it into the terminal');
     should(w.cards[0]?.blocking).be.true();
     should(request.expiresAt).equal('2026-10-30T12:10:00.000Z');
     should(w.events[0]?.type).equal('surface.input_requested');
     should(w.audits[0]?.event).equal('input.requested');
-    should(w.audits[0]?.detail.consumer).equal('sudo');
+    should(w.audits[0]?.detail.consumer).be.undefined();
+    should(w.audits[0]?.detail.recognised).equal(true);
   });
 
   it('should title a code and an answer plainly and honour blocking, chain and expiry', async () => {
@@ -1199,8 +1200,8 @@ describe('review regressions: what is shown is masked whole, then clipped, and n
     should(view.observed?.consumer).equal(terminal?.foreground.comm);
     should(view.observed?.consumer).startWith('su-[redacted:input A9]-');
     should(view.observed?.consumer?.length).be.belowOrEqual(64);
-    should(built.w.cards[0]?.ask).startWith('Type it into su-[redacted:input A9]');
-    should(built.w.audits[0]?.detail.consumer).equal(view.observed?.consumer);
+    should(built.w.cards[0]?.ask).equal('Type it into the terminal');
+    should(built.w.audits[0]?.detail.consumer).be.undefined();
     should(everything(built.w, [view, request])).not.containEql('leaked-LEAK');
   });
 
@@ -1647,6 +1648,27 @@ describe('the pane quarantine: a terminal a secret was typed into is kept from a
     const delivered = w.audits.find(entry => entry.event === 'input.delivered');
 
     should(JSON.stringify(delivered)).not.containEql('"consumer":"sudo"');
+  });
+
+  // R9-3
+  it('should word the agenda card without any program the pane named', async () => {
+    const CANARY = 'pane-consumer-CANARY';
+    const built = build();
+    built.w.facts = { ...FACTS, foreground: { ...FACTS.foreground, comm: CANARY } } as InputTargetFacts;
+
+    await built.service.raise(SESSION, RAISE);
+
+    should(JSON.stringify(built.w.cards)).not.containEql(CANARY);
+  });
+
+  // R9-2
+  it('should record no program name in any audit entry, held or not', async () => {
+    const CANARY = 'pane-consumer-CANARY';
+    const live = await raised({ facts: { ...FACTS, foreground: { ...FACTS.foreground, comm: CANARY } }, names: NAMES });
+    await live.service.deliver(SESSION, live.id, bodyFor(live.digest), HOST);
+
+    should(live.w.audits.length).be.above(1);
+    should(JSON.stringify(live.w.audits)).not.containEql(CANARY);
   });
 
   describe('audit records while a terminal is held', () => {

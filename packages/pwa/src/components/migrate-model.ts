@@ -1,3 +1,4 @@
+import { compareProtocolVersions, type MigrationRefusal, MigrationRefusedBodySchema } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { downgradeOf, downgradeSentence } from '../features/session-actions/context-downgrade.ts';
 
@@ -44,7 +45,39 @@ export interface MigrationFailure {
   readonly guidance: string;
   readonly code?: string;
   readonly suggestedModel?: string;
+  /** What the preflight saw, on a refusal from a daemon that attaches it. */
+  readonly inflight?: MigrationRefusal;
+  /** The version the refusing daemon stamped on its answer, when it did. */
+  readonly daemonVersion?: string;
 }
+
+/** The first daemon that marks the agent's own background jobs and can be asked to have them stopped. */
+export const AGENT_JOBS_ASK_SINCE = '4.153.0';
+
+/**
+ * Whether a refusal COULD have offered the ask, had the daemon been new enough: it came from a daemon
+ * older than {@link AGENT_JOBS_ASK_SINCE}, which never marks a job, and everything in the way is a
+ * process — which is what a job is. An open tool call, a blind spot or a codex terminal is not, so an
+ * update would not offer the ask there and the sheet does not promise it. A daemon that did not say its
+ * version is not guessed at.
+ */
+export const askNeedsDaemonUpdate = (failure: MigrationFailure): boolean => {
+  if (failure.kind !== 'preflight-refused' || failure.daemonVersion === undefined) return false;
+  if (compareProtocolVersions(failure.daemonVersion, AGENT_JOBS_ASK_SINCE) !== -1) return false;
+  const blockers = failure.inflight?.items.filter(item => item.blocks) ?? [];
+  return blockers.length > 0 && blockers.every(item => item.kind === 'process');
+};
+
+/**
+ * Whether the ONLY things in the way are jobs the agent started from its own shell — the one refusal the
+ * agent can clear by itself, so the one where the sheet offers to ask it. Anything else that blocks (an
+ * open tool call, a program Ferretry can't place, a blind spot) keeps the offer away: asking the agent
+ * would not be the remedy there.
+ */
+export const onlyAgentJobsBlock = (refusal: MigrationRefusal | undefined): boolean => {
+  const blockers = refusal?.items.filter(item => item.blocks) ?? [];
+  return blockers.length > 0 && blockers.every(item => item.backgroundJob === true);
+};
 
 /** The daemon's current convention: `[1m]` selects a million-token variant. */
 export const contextWindowForModel = (model: string): number | undefined => {
@@ -182,6 +215,8 @@ export const migrationFailure = (error: unknown): MigrationFailure => {
   const kind = kindForCode(http?.code);
   const [title, guidance] = FAILURE_COPY[kind];
   const suggestedModel = kind === 'context-downgrade' ? modelFromDowngradeError(message) : null;
+  const refused = kind === 'preflight-refused' ? MigrationRefusedBodySchema.safeParse(http?.body) : undefined;
+  const inflight = refused?.success === true ? refused.data.inflight : undefined;
   // The daemon's sentence names an API field and a CLI flag, neither of which a person can use here, so a
   // downgrade is said from its numbers in plain words.
   const shown =
@@ -193,5 +228,7 @@ export const migrationFailure = (error: unknown): MigrationFailure => {
     guidance,
     ...(http?.code === undefined ? {} : { code: http.code }),
     ...(suggestedModel === null ? {} : { suggestedModel }),
+    ...(inflight === undefined ? {} : { inflight }),
+    ...(http?.daemonVersion === undefined ? {} : { daemonVersion: http.daemonVersion }),
   };
 };

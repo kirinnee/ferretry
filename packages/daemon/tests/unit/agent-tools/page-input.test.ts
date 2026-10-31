@@ -150,6 +150,14 @@ describe('a page the owner was asked about', () => {
     should(error.message).containEql('an input request is pending on %browser:app');
   });
 
+  it('should refuse a page script while the request waits: a script can fill the field as well as type can', async () => {
+    const { tools } = await delivered();
+
+    const error = await refusal(tools.service.call(agent, { tool: 'browser.eval', name: 'app', function: '() => 1' }));
+
+    should(error.message).containEql('an input request is pending on %browser:app');
+  });
+
   it('should picture the fields for the owner before anything is typed, and let the picture go with the request', async () => {
     const { service, request } = await delivered();
 
@@ -190,6 +198,14 @@ describe('a page the owner’s password was just typed into', () => {
     should(typed).have.length(1);
     should(read.message).containEql('%browser:app is quarantined until');
     should(shot.message).containEql('%browser:app is quarantined until');
+  });
+
+  it('should refuse a page script on the held page until it has moved on', async () => {
+    const { tools } = await typedIn();
+
+    const error = await refusal(tools.service.call(agent, { tool: 'browser.eval', name: 'app', function: '() => 1' }));
+
+    should(error.message).containEql('%browser:app is quarantined until');
   });
 
   it('should hand text back MASKED once the page has moved on, even a page that echoes the password', async () => {

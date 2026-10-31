@@ -261,7 +261,7 @@ async function agentTool(subsystem: ConfigFilesSubsystem, call: AgentConfigToolC
       summary:
         written.outcome === 'applied'
           ? `Wrote ${call.path}; it is in effect.`
-          : `Wrote ${call.path}, but it loosens what this machine allows (${(written.pending?.changes ?? []).join('; ')}), so it waits for the owner to confirm it; the earlier version stays in effect until then. Tell the owner with a card whose Allow confirms it: fy agenda add "<the ask>" --title "<title>" --context "<why now>" --confirms ${call.path}.`,
+          : `Wrote ${call.path}, but it loosens what this machine allows (${(written.pending?.changes ?? []).join('; ')}), so it waits for the owner to confirm it; the earlier version stays in effect until then. Tell the owner with a card whose Allow confirms it: fy agenda add "<the ask>" --title "<title>" --context "<the facts around it>" --confirms ${call.path}.`,
       etag: written.etag,
     };
   } catch (error) {

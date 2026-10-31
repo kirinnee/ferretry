@@ -31,13 +31,13 @@ const POINT_FIELDS: ReadonlySet<AgendaRevisableField> = new Set([
 const FIELD_LABEL: Readonly<Record<AgendaRevisableField, string>> = {
   subject: 'Question',
   why: 'Why it matters',
-  context: 'Why now',
+  context: 'Context',
   howToResolve: 'How to resolve',
   ask: 'Answer type',
   title: 'Title',
   kind: 'Kind',
   answers: 'Answers',
-  premise: "What's going on",
+  premise: 'Premise',
   decided: 'Decided so far',
   stillOpen: 'Still open',
   terms: 'Terms',
@@ -203,81 +203,36 @@ export const revisionStamp = (at: string, now: number): string => {
   return `${MONTHS[when.getMonth()] as string} ${String(when.getDate())}`;
 };
 
-/** One field's change in one version: what it said before, what it says after (`null`: empty), as Markdown. */
-export interface VersionChange {
-  readonly field: AgendaRevisableField;
-  readonly label: string;
-  readonly before: string | null;
-  readonly after: string | null;
-}
-
-/** One version of the item: v1 is as first raised; every later one is what an edit made of it. */
-export interface ItemVersion {
-  readonly number: number;
-  readonly at: string | null;
-  readonly by: AgendaRevision['by'] | null;
-  readonly changes: readonly VersionChange[];
-}
-
-const clip = (text: string, limit = 90): string => (text.length > limit ? `${text.slice(0, limit).trimEnd()}…` : text);
-
-/** A field's value as a reader scans it: its words, its options as bullets, its terms as "Term — meaning". */
-export const versionText = (field: AgendaRevisableField, value: unknown): string | null => {
-  if (field === 'ask' && typeof value === 'object' && value !== null) {
-    const { options } = value as { options?: readonly { label?: unknown }[] };
-    const labels = (options ?? []).flatMap(option => (typeof option.label === 'string' ? [option.label] : []));
-    if (labels.length > 0) return labels.map(label => `- ${label}`).join('\n');
-  }
-  if (field === 'terms' && Array.isArray(value) && value.length > 0) {
-    return value
-      .map(entry => {
-        const { term, meaning } = entry as { term?: unknown; meaning?: unknown };
-        return `- ${String(term)} — ${clip(String(meaning))}`;
-      })
-      .join('\n');
-  }
-  if (field === 'optionDetails' && Array.isArray(value) && value.length > 0) {
-    return value
-      .map(entry => {
-        const { label, detail } = entry as { label?: unknown; detail?: unknown };
-        return `- ${String(label)} — ${clip(String(detail ?? ''))}`;
-      })
-      .join('\n');
-  }
-  if (field === 'recommendation' && typeof value === 'object' && value !== null) {
-    const { decision, why } = value as { decision?: unknown; why?: unknown };
-    return typeof why === 'string' ? `${String(decision)} — ${why}` : String(decision);
-  }
-  return describePrevious(field, value);
-};
-
 /**
- * Every version of the item, newest first: v1 as first raised, then one per edit. What an edit changed is each
- * field's value before it (the edit's `previous`) and after it (the next edit's `previous` of that field, or the
- * item as it stands when no later edit touched it) — the data is already on the item, so an older daemon has it.
+ * The item as it read at version `number` (1 = as first raised): every later edit undone, newest first, each changed
+ * field set back to what that edit's `previous` says it was — a field absent there was absent before the edit. A
+ * number past the newest is the item as it stands.
  */
-export const itemVersions = (item: AgendaItem): readonly ItemVersion[] => {
+export const itemAtVersion = (item: AgendaItem, number: number): AgendaItem => {
   const edits = item.revisions ?? [];
-  const versions = edits.map((edit, index): ItemVersion => {
-    const later = edits.slice(index + 1);
-    return {
-      number: index + 2,
-      at: edit.at,
-      by: edit.by,
-      changes: edit.changed.map(field => {
-        const next = later.find(candidate => candidate.changed.includes(field));
-        const after =
-          next === undefined
-            ? (item as unknown as Record<string, unknown>)[field]
-            : (next.previous as Record<string, unknown>)[field];
-        return {
-          field,
-          label: FIELD_LABEL[field],
-          before: versionText(field, (edit.previous as Record<string, unknown>)[field]),
-          after: versionText(field, after),
-        };
-      }),
-    };
-  });
-  return [...versions.reverse(), { number: 1, at: null, by: null, changes: [] }];
+  const undone = edits.slice(Math.max(0, number - 1));
+  const fields = { ...(item as unknown as Record<string, unknown>) };
+  for (const edit of [...undone].reverse()) {
+    const previous = edit.previous as Record<string, unknown>;
+    for (const field of edit.changed) {
+      if (previous[field] === undefined) delete fields[field];
+      else fields[field] = previous[field];
+    }
+  }
+  return { ...(fields as unknown as AgendaItem), revisions: edits.slice(0, Math.max(0, number - 1)) } as AgendaItem;
 };
+
+/** How long ago, in the fewest characters: "just now", "3m ago", "2h ago", "4d ago". */
+export const shortAgo = (at: string, now: number): string => {
+  const then = Date.parse(at);
+  if (!Number.isFinite(then)) return '';
+  const minutes = Math.max(0, Math.floor((now - then) / 60_000));
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${String(minutes)}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${String(hours)}h ago`;
+  return `${String(Math.floor(hours / 24))}d ago`;
+};
+
+/** How many versions the item has: one as raised, one more per edit. */
+export const versionCount = (item: Pick<AgendaItem, 'revisions'>): number => (item.revisions?.length ?? 0) + 1;

@@ -203,6 +203,38 @@ async function logPage(
 }
 
 /**
+ * Every place in the session's whole transcript that says `?q` — the chat's search.
+ *
+ * `?who` is `all` (the default), `me` or `agent`; `?tools=1` searches tool calls, their results and
+ * thinking too. Not conditional: a search is asked once per query, and its answer is a moment's.
+ */
+async function logSearch(
+  reads: OperatorReadService,
+  sessions: SessionDirectorySubsystem,
+  context: RouteContext,
+): Promise<ApiResponse> {
+  const id = sessionId(context);
+  await requireSession(sessions, id);
+  const who = queryValue(context.request, 'who');
+  const tools = queryValue(context.request, 'tools');
+  if (tools !== undefined && tools !== '0' && tools !== '1')
+    throw new ApiError(400, 'query parameter "tools" must be 0 or 1', 'invalid_query');
+  const limit = numberQuery(context, 'limit');
+  try {
+    return jsonResponse(
+      await reads.logSearch(id, {
+        q: queryValue(context.request, 'q') ?? '',
+        tools: tools === '1',
+        ...(who === undefined || who === '' ? {} : { who }),
+        ...(limit === undefined ? {} : { limit }),
+      }),
+    );
+  } catch (error) {
+    return refuse(error);
+  }
+}
+
+/**
  * One page of the session's addressable conversation.
  *
  * `?cursor` is passed through RAW and unnormalized, which is the one place this mount deliberately
@@ -210,6 +242,10 @@ async function logPage(
  * caller believed it held a continuation token, and serving the first page for it would silently
  * restart a walk they thought they were resuming. The domain owns that refusal, so the mount is not a
  * second place a token's bytes could be trimmed, decoded or re-spelled on the way in.
+ *
+ * `?tail=1` reads the newest rows and `?through=<cursor>` the rows ending at the one a cursor names; either
+ * makes the answer carry `previousCursor` (see `OperatorReadService.messages`). `?through` is passed raw
+ * like `?cursor`, and neither combines with it.
  *
  * `?limit` is the ordinary numeric form, and its default and ceiling belong to the domain rather than
  * to this route — a page size decided in two places is a page size that can disagree with the client's
@@ -223,7 +259,14 @@ async function messages(
   const id = sessionId(context);
   await requireSession(sessions, id);
   try {
-    return jsonResponse(await reads.messages(id, queryValue(context.request, 'cursor'), numberQuery(context, 'limit')));
+    const tail = queryValue(context.request, 'tail') === '1';
+    const through = queryValue(context.request, 'through');
+    if (tail && through !== undefined)
+      throw new OperatorReadError('invalid_query', 'tail and through name two different ends; send one');
+    const backward = tail || through !== undefined ? { ...(through === undefined ? {} : { through }) } : undefined;
+    return jsonResponse(
+      await reads.messages(id, queryValue(context.request, 'cursor'), numberQuery(context, 'limit'), backward),
+    );
   } catch (error) {
     return refuse(error);
   }
@@ -276,8 +319,9 @@ async function transcriptImage(
 }
 
 /**
- * The `operator` minimum on all six: a pane capture is the agent's whole screen, a transcript is
- * everything it has said (a log page is the same transcript, read further back), an addressable page
+ * The `operator` minimum on all seven: a pane capture is the agent's whole screen, a transcript is
+ * everything it has said (a log page is the same transcript read further back, and a search reads all
+ * of it), an addressable page
  * is that transcript row by row, and the journal carries the session's configuration in its lifecycle
  * events. None of it is warden-readable until a unit decides deliberately that it should be.
  *
@@ -324,6 +368,13 @@ export function sessionReadRoutes(
       minimum: 'operator',
       noStore: true,
       handle: async context => await logPage(reads, sessions, context),
+    },
+    {
+      method: 'GET',
+      path: '/v1/sessions/:sessionId/log-search',
+      minimum: 'operator',
+      noStore: true,
+      handle: async context => await logSearch(reads, sessions, context),
     },
     {
       method: 'GET',

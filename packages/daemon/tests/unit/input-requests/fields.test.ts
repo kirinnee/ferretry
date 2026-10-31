@@ -676,6 +676,29 @@ describe('Save as on a login card', () => {
     should([...short.writes, ...part.writes, ...short.saves, ...part.saves]).eql([]);
   });
 
+  it('should refuse to keep a value a saved login filled, even from a caller that skipped the schema', async () => {
+    const { service, request, writes, saves } = await raisedLogin();
+
+    // The wire refuses `save` beside `entry`; the service holds the same line for a caller that never parsed it.
+    const error = await refused(
+      service.deliver(
+        SESSION,
+        request.id,
+        send(request.observedDigest ?? '', {
+          fields: [{ field: 'email', padded: padInputValue(EMAIL) }],
+          entry: 'GOOGLE_COM',
+          save: { entry: 'GOOGLE_COM', label: 'Google' },
+        }),
+        HOST,
+      ),
+    );
+
+    should(error.message).equal(
+      'Save as keeps the values you typed: type every field it keeps, or send without saving',
+    );
+    should([...writes, ...saves]).eql([]);
+  });
+
   it('should refuse to keep a card of two passwords as one login', async () => {
     const { service, request, writes } = await raisedLogin(
       {},

@@ -10,6 +10,7 @@ import {
   FakeClock,
   FixedTerminalSize,
   RecordingBrowserOpener,
+  RecordingRedirectSweeper,
   RecordingProgress,
   ScriptedPairGateway,
   StubQrEncoder,
@@ -29,6 +30,7 @@ function run(argv: string[], binaryName = 'fy') {
     qr,
     terminal: new FixedTerminalSize(100),
     browser,
+    redirectSweeper: new RecordingRedirectSweeper(),
     binaryName,
   };
   const program = new Command().name(binaryName).exitOverride();

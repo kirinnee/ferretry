@@ -23,6 +23,11 @@ export interface ProcessInfo {
   readonly ppid?: number;
   /** It holds a listening socket — a server. Absent where that could not be observed. */
   readonly listening?: true;
+  /**
+   * The agent started it from its own tool shell — a background job of the agent's — and this is that
+   * shell's pid. See `identifyAgentJobs`.
+   */
+  readonly toolShell?: number;
 }
 
 /**

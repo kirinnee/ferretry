@@ -260,7 +260,7 @@ export class InputRequestService {
     };
     this.held.set(requestId, held);
     this.noteRaise(sessionId, now);
-    await this.record(request, 'input.requested', { kind: 'agent' }, this.auditOf(request, held.names));
+    await this.record(request, 'input.requested', { kind: 'agent' }, this.auditOf(request));
     return this.view(held);
   }
 
@@ -355,9 +355,9 @@ export class InputRequestService {
     return this.deps.quarantine.until(sessionId, names) !== undefined;
   }
 
-  /** The audit detail as it reads NOW: a hold taken since the facts were seen hides the program they named. */
-  private auditOf(request: InputRequest, names: readonly string[]): InputAuditDetail {
-    return auditDetail(request, this.quarantined(request.sessionId, names));
+  /** The audit detail: ids, kinds and flags, never a program the pane named. */
+  private auditOf(request: InputRequest): InputAuditDetail {
+    return auditDetail(request);
   }
 
   private async project(
@@ -971,12 +971,7 @@ export class InputRequestService {
     if (held.checkFailures >= INPUT_MAX_CHECK_FAILURES)
       await this.finish(held, 'refused', 'check_failures', undefined, { closeCard: true, tellAgent: true });
     else
-      await this.record(
-        held.request,
-        'input.refused',
-        { kind: 'daemon' },
-        { ...this.auditOf(held.request, held.names), reason },
-      );
+      await this.record(held.request, 'input.refused', { kind: 'daemon' }, { ...this.auditOf(held.request), reason });
   }
 
   private async finish(
@@ -1027,7 +1022,7 @@ export class InputRequestService {
             : 'cancelled';
     await this.journalQuietly(request, kind, reason, options.submitted);
     await this.record(request, `input.${kind}`, by ?? { kind: 'daemon' }, {
-      ...this.auditOf(seen, held.names),
+      ...this.auditOf(seen),
       ...(reason === undefined ? {} : { reason }),
       ...(state === 'delivered'
         ? {
@@ -1316,20 +1311,16 @@ function titleOf(fields: readonly InputRequestField[]): string {
 
 function askOf(facts: InputTargetFacts, fields: readonly InputRequestField[]): string {
   const it = fields.length === 1 ? 'it' : 'them';
-  const where = facts.kind === 'terminal' ? `Type it into ${facts.foreground.comm}` : `Type ${it} into the page`;
+  const where = facts.kind === 'terminal' ? 'Type it into the terminal' : `Type ${it} into the page`;
   return fields.some(field => field.sensitivity === 'plain') ? `${where}. ${PLAIN_FLAG}` : where;
 }
 
-function auditDetail(request: InputRequest, quarantined: boolean): InputAuditDetail {
+function auditDetail(request: InputRequest): InputAuditDetail {
   const facts = request.observed;
   return {
     targetKind: request.target.kind,
     sensitivity: request.sensitivity,
-    ...(facts?.kind === 'terminal'
-      ? { consumer: quarantined ? QUARANTINE_NOTICE : facts.foreground.comm, recognised: facts.recognisedConsumer }
-      : facts?.kind === 'browser'
-        ? { consumer: hostOf(facts.origin).slice(0, 160) }
-        : {}),
+    ...(facts?.kind === 'terminal' ? { recognised: facts.recognisedConsumer } : {}),
   };
 }
 

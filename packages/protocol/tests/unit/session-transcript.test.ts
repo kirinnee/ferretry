@@ -42,7 +42,31 @@ const cases: SchemaCase[] = [
   {
     name: 'log page',
     schema: transcript.SessionLogPageSchema,
-    value: { v: 1, sessionId: 's1', log: '[09:08:07] user/message: hi', start: 4096, file: 'Zm9vYmFy' },
+    value: {
+      v: 1,
+      sessionId: 's1',
+      log: '[09:08:07] user/message: hi',
+      start: 4096,
+      file: 'Zm9vYmFy',
+      offsets: [4096],
+    },
+  },
+  {
+    name: 'log search match',
+    schema: transcript.SessionLogSearchMatchSchema,
+    value: { offset: 4096, role: 'user', kind: 'message', snippet: 'hi', at: '2026-10-20T12:00:00.000Z' },
+  },
+  {
+    name: 'log search',
+    schema: transcript.SessionLogSearchSchema,
+    value: {
+      v: 1,
+      sessionId: 's1',
+      query: 'hi',
+      file: 'Zm9vYmFy',
+      matches: [{ offset: 4096, role: 'user', kind: 'message', snippet: 'hi' }],
+      truncated: false,
+    },
   },
 ];
 
@@ -189,6 +213,16 @@ describe('the session transcript read protocol', () => {
       'The token is [redacted].',
     ]);
     should(parsed.messages.map(entry => entry.selectionBinding)).deepEqual(['binding-a', 'binding-b']);
+  });
+
+  it('should carry the cursor before a page only when the daemon read backwards', () => {
+    // Assert — absent from a forward read and from an older daemon, null at the conversation start.
+    should(transcript.SessionTranscriptPageSchema.parse(page)).not.have.property('previousCursor');
+    should(
+      transcript.SessionTranscriptPageSchema.parse({ ...page, previousCursor: 'message-cursor-0' }).previousCursor,
+    ).equal('message-cursor-0');
+    should(transcript.SessionTranscriptPageSchema.parse({ ...page, previousCursor: null }).previousCursor).be.null();
+    should(transcript.SessionTranscriptPageSchema.safeParse({ ...page, previousCursor: '' }).success).be.false();
   });
 
   it('should describe a page by its version, its session and an opaque nullable cursor', () => {

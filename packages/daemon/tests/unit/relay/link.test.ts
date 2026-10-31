@@ -686,6 +686,79 @@ describe('a relayed session', () => {
     should(requests[0]?.loopback).be.false();
   });
 
+  // R9-1
+  it('should not send an answer whose last word changed while it queued and sealed, and end the session instead', async () => {
+    // Arrange — the answer reads one way when it is spelled and another by the time it would leave.
+    let spellings = 0;
+    const spelled = (): ApiResponse => {
+      spellings += 1;
+      return json(200, { text: spellings === 1 ? 'pane-CANARY' : 'held' });
+    };
+    const { link, wire: sent } = harness(async () => ({ ...json(200, { text: 'pane-CANARY' }), late: spelled }));
+    await link.receiveBinary(challenge());
+    await link.receiveBinary(claimed());
+    const session = await openSession(link, sent, sessionOne());
+    const channel = await clientSend(link, session.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+    const before = sent.frames.length;
+
+    // Act
+    await clientSend(link, channel, { t: 'req', id: 4, method: 'GET', path: '/v1/input' });
+
+    // Assert — no data frame carried the old words, and the session ended rather than skip a sequence.
+    const after = sent.frames.slice(before).filter(frame => frame.kind === FRAME_KINDS.data);
+    should(after).have.length(0);
+    should(controlOf(sent.frames.at(-1))).containDeep({ t: 'closed', code: RELAY_CLOSE_CODES.protocolError });
+    should(link.report()).containDeep({ sessions: 0 });
+  });
+
+  it('should treat an answer that cannot be spelled again as changed', async () => {
+    let spellings = 0;
+    const late = (): ApiResponse => {
+      spellings += 1;
+      if (spellings > 1) throw new Error('cannot spell');
+      return json(200, { text: 'once' });
+    };
+    const { link, wire: sent } = harness(async () => ({ ...json(200, { text: 'once' }), late }));
+    await link.receiveBinary(challenge());
+    await link.receiveBinary(claimed());
+    const session = await openSession(link, sent, sessionOne());
+    const channel = await clientSend(link, session.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+    const before = sent.frames.length;
+
+    await clientSend(link, channel, { t: 'req', id: 4, method: 'GET', path: '/v1/input' });
+
+    should(sent.frames.slice(before).filter(frame => frame.kind === FRAME_KINDS.data)).have.length(0);
+    should(link.report()).containDeep({ sessions: 0 });
+  });
+
+  it('should send an answer whose last word is unchanged', async () => {
+    const { link, wire: sent } = harness(async () => ({
+      ...json(200, { text: 'same' }),
+      late: () => json(200, { text: 'same' }),
+    }));
+    await link.receiveBinary(challenge());
+    await link.receiveBinary(claimed());
+    const session = await openSession(link, sent, sessionOne());
+    const channel = await clientSend(link, session.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+    await clientSend(link, channel, { t: 'req', id: 4, method: 'GET', path: '/v1/input' });
+
+    const read = await clientReadAll(sent, session.channel);
+
+    should(read.messages.at(-1)).containDeep({ t: 'res', id: 4, status: 200, body: JSON.stringify({ text: 'same' }) });
+  });
+
   it('should carry an answer too large for one record as ordered parts, never truncating it', async () => {
     // Arrange — a response far past one record.
     const body = 'x'.repeat(70_000);

@@ -260,6 +260,9 @@ class FakeBrowser implements BrowserMountedSubsystem {
   async filesOnPage(): Promise<never> {
     throw new Error('named pages are the agent tools’ mount, not this one');
   }
+  async scriptOnPage(): Promise<never> {
+    throw new Error('named pages are the agent tools’ mount, not this one');
+  }
   async closePage(): Promise<never> {
     throw new Error('named pages are the agent tools’ mount, not this one');
   }

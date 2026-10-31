@@ -47,7 +47,7 @@ describe('SINGLETON_DEFAULTS', () => {
     // Assert
     should(SINGLETON_DEFAULTS.machine.machine).deepEqual({
       agentPermissions: 'auto',
-      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
+      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
       browserMode: 'headless',
       autoResume: true,
       agendaMode: true,
@@ -67,7 +67,11 @@ describe('SINGLETON_DEFAULTS', () => {
 describe('configValue', () => {
   it('should split machine.yaml into the account model machine and advanced', () => {
     // Arrange
-    const input = { agentPermissions: 'skip', agentControl: { ferretrySettings: true }, advanced: { aliases: {} } };
+    const input = {
+      agentPermissions: 'skip',
+      agentControl: { ferretrySettings: true, pageScripts: false },
+      advanced: { aliases: {} },
+    };
 
     // Act
     const parsed = CONFIG_FILE_SCHEMAS.machine.parse(input);
@@ -202,10 +206,11 @@ describe('configLoosening: machine', () => {
     ['browsers', 'agents may now control browsers'],
     ['files', 'agents may now control project files'],
     ['ferretrySettings', 'agents may now control Ferretry settings'],
+    ['pageScripts', 'agents may now control page scripts'],
   ] as const)('should hold switching %s on, in a sentence naming it', (kind, expected) => {
     // Arrange
     const before = machineWith({
-      agentControl: { terminals: false, browsers: false, files: false, ferretrySettings: false },
+      agentControl: { terminals: false, browsers: false, files: false, ferretrySettings: false, pageScripts: false },
     });
     const after = machineWith({
       agentControl: { terminals: false, browsers: false, files: false, ferretrySettings: false, [kind]: true },
@@ -223,17 +228,33 @@ describe('configLoosening: machine', () => {
     const actual = configLoosening(
       'machine',
       SINGLETON_DEFAULTS.machine,
-      machineWith({ agentControl: { ferretrySettings: true } }),
+      machineWith({ agentControl: { ferretrySettings: true, pageScripts: false } }),
     );
 
     // Assert
     should(actual).deepEqual(['agents may now control Ferretry settings']);
   });
 
+  it('should hold Page scripts going on from the default, and apply it going off at once', () => {
+    // Arrange
+    const on = machineWith({ agentControl: { pageScripts: true } });
+
+    // Act
+    const goingOn = configLoosening('machine', SINGLETON_DEFAULTS.machine, on);
+    const goingOff = configLoosening('machine', on, SINGLETON_DEFAULTS.machine);
+
+    // Assert — an agent's own script can read what a page holds, so only the owner may turn it on.
+    should(SINGLETON_DEFAULTS.machine.machine.agentControl.pageScripts).be.false();
+    should(goingOn).deepEqual(['agents may now control page scripts']);
+    should(goingOff).deepEqual([]);
+  });
+
   it('should say every switch that went on, in one list', () => {
     // Arrange
     const before = machineWith({ agentControl: { terminals: false, browsers: false } });
-    const after = machineWith({ agentControl: { terminals: true, browsers: true, ferretrySettings: true } });
+    const after = machineWith({
+      agentControl: { terminals: true, browsers: true, ferretrySettings: true, pageScripts: false },
+    });
 
     // Act
     const actual = configLoosening('machine', before, after);
@@ -256,10 +277,13 @@ describe('configLoosening: machine', () => {
 
   it('should apply tightening at once: switches going off and prompts returning loosen nothing', () => {
     // Arrange
-    const loose = machineWith({ agentPermissions: 'skip', agentControl: { ferretrySettings: true } });
+    const loose = machineWith({
+      agentPermissions: 'skip',
+      agentControl: { ferretrySettings: true, pageScripts: false },
+    });
     const tight = machineWith({
       agentPermissions: 'auto',
-      agentControl: { terminals: false, browsers: false, files: false, ferretrySettings: false },
+      agentControl: { terminals: false, browsers: false, files: false, ferretrySettings: false, pageScripts: false },
     });
 
     // Act

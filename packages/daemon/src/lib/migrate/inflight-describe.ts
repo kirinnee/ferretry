@@ -1,7 +1,7 @@
 import type { InflightItem, MigrationRefusal } from '@ferretry/protocol';
 import type { InflightReport } from './inflight-report.ts';
 import { age, truncate } from './render-text.ts';
-import { verdictBlocksMigration, type InflightVerdict } from './verdict.ts';
+import { type InflightVerdict, verdictBlocksMigration } from './verdict.ts';
 
 const DETAIL_WIDTH = 120;
 
@@ -61,6 +61,8 @@ function itemsOf(report: InflightReport): readonly InflightItem[] {
       detail: truncate(entry.argv, DETAIL_WIDTH),
       age: age(entry.startedSecondsAgo),
       blocks: verdictBlocksMigration(entry.verdict),
+      // Only the agent's own background jobs carry their pid: it is what the agent is asked to stop.
+      ...(entry.toolShell === undefined ? {} : { pid: entry.pid, backgroundJob: true as const }),
     });
   }
   if (report.codexBackgroundTerminals > 0)

@@ -215,12 +215,15 @@ the write:
   The routes that carry such a body also hand back a way to spell it again (`ApiResponse.late`). The dispatcher
   keeps it on the response, and every carrier calls it (`finalised`) as the last synchronous step before the bytes
   leave: the direct HTTP server and the relay tunnel (which the relay link and the direct carrier both use), so no
-  await sits between the final check and the wire. Only the write to the socket itself remains, which is the
+  await sits between the final check and the wire. The relay link also asks once more after the record is
+  queued and sealed, because those are awaits: an answer whose last word changed in the meantime is dropped unsent,
+  and its session ends so no sequence number is reused. Only the write to the socket itself remains, which is the
   declared compare-and-enqueue gap.
 - **Every projection of what the daemon saw is covered.** While a pane is quarantined the prompt line, the
-  program name and the argv in the card, the owner's list, the agent's view, the audit record and a
-  restored request are replaced with a notice, not just masked. The audit record reads the hold at the moment it is
-  written, not when the request was seen, so a hold taken while the move was being journalled still hides it.
+  program name and the argv in the owner's list, the agent's view and a restored request are replaced with a
+  notice, not just masked. The agenda card and the audit trail never carry what the pane showed at all: the card
+  says "Type it into the terminal", and an audit record holds ids, kinds, flags and outcomes, not the program name,
+  so no later fold, flush or projection of either can republish it.
 - **A viewer gets a notice instead of the pane**, unless that viewer chose "Show anyway". That choice
   is per connection (`?reveal=1` on the viewer socket), owner-gated, and audited as
   `input.quarantine_revealed`.
@@ -336,11 +339,11 @@ A `secret` or `private` value typed into a page holds that page for the same win
 
 - The agent's **pictures** of it (`browser_screenshot`, `browser_pdf`, `browser_highlight`) are refused for
   the whole window: no mask can be drawn on pixels.
-- Its **text** (`browser_read` in every mode, `browser_console`, `browser_network`, `browser_wait_for`, and
-  page script results) is refused while the page still shows the document the value went into. Once the
+- Its **text** (`browser_read` in every mode, `browser_console`, `browser_network`, `browser_wait_for`, `browser_eval` and
+  its results) is refused while the page still shows the document the value went into. Once the
   page has moved on (a new `loaderId`), text reads come back, and they are **masked** for the redaction
   window like every other read: a next page that prints the password back shows a mask.
-- While a request is pending on a page, the agent's `browser_type`, `browser_fill_form` and `browser_press`
+- While a request is pending on a page, the agent's `browser_type`, `browser_fill_form`, `browser_press` and `browser_eval`
   on it are refused: those values are the owner's to type.
 - Page holds share the terminal's registry under their own names (a hold on page `app` never seals terminal
   `app`) and are not journalled: a page does not outlive the daemon that drove it, and a page's card ends as
@@ -403,6 +406,13 @@ the target's key (`sudo@kirin-box` → `SUDO_KIRIN_BOX`, "sudo on kirin-box"; a 
   a delete, `fy secret entry` — runs its read, merge and write in one store-wide queue (`LoginStoreLock`), so
   two that overlap both land and every acknowledged secret stays masked. A per-entry or per-session lock would
   not be enough: the files are shared.
+- **All or nothing, across a crash.** A change never overwrites a sealed value the index points at. New
+  secret values are sealed under **fresh, versioned names** and added beside the old ones; then the index —
+  written to a temporary file, synced and renamed into place — is published pointing at them. That rename is
+  the one commit point: before it, the entry is entirely the old one (old username, old password, the old
+  ciphertext still sealed and still masked); after it, entirely the new one. Ciphertext nothing points at any
+  more is swept after the commit and again at boot (`LoginDirectory.sweepUnreferenced`), and stays masked until
+  then. A boot with no committed index sweeps nothing.
 - **A username and a password from one card are kept together** (`LoginDirectory.saveFields`, one change), so a
   login card never leaves an entry with half of what was typed. The one-field card saves the one field it has.
 

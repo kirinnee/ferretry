@@ -192,6 +192,19 @@ describe('McpServer — the tools', () => {
     ]);
   });
 
+  it('should always list browser_eval, saying it needs the owner’s Page scripts, and send it as its wire call', async () => {
+    // Arrange
+    const { calls, request } = harness();
+
+    // Act
+    const listed = (await request('tools/list')) as { result: { tools: { name: string; description: string }[] } };
+    await request('tools/call', toolCall('browser_eval', { name: 'app', function: '() => 1', ref: 'e2' }));
+
+    // Assert
+    should(listed.result.tools.find(tool => tool.name === 'browser_eval')?.description).containEql('Page scripts');
+    should(calls).deepEqual([{ tool: 'browser.eval', name: 'app', function: '() => 1', ref: 'e2' }]);
+  });
+
   it('should send each tool as its wire call, and answer with the daemon’s words', async () => {
     // Arrange
     const { calls, request } = harness(async () => ({ summary: 'Opened %terminal:dev.', output: 'ready' }));

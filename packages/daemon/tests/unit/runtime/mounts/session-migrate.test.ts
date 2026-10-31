@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import {
+  AskToStopJobsResultSchema,
   type ConversionPreview,
   ConversionPreviewSchema,
   FY_REQUEST_ID_HEADER,
@@ -477,6 +478,9 @@ describe('the session migrate mount, replayed', () => {
     async conversionPreview(sessionId: string, request: { readonly agent: string }): Promise<ConversionPreview> {
       return await this.#views.conversionPreview(sessionId, request);
     }
+    async askToStopJobs(sessionId: string) {
+      return await this.#views.askToStopJobs(sessionId);
+    }
   }
 
   const mounted = (subsystem: CountingMigrate) =>
@@ -726,5 +730,76 @@ describe('the session migrate mount, replayed', () => {
     // ...and now that the slot holds a committed receipt, the cap bites.
     should(full.status).equal(503);
     should(migrator.calls).equal(2);
+  });
+});
+
+describe('asking the agent to stop its background jobs', () => {
+  const ask = (sessionId: string, headers: Readonly<Record<string, string>> = human, body?: string) =>
+    request({
+      method: 'POST',
+      path: `/v1/sessions/${sessionId}/migrate/ask-to-stop-jobs`,
+      headers,
+      ...(body === undefined ? {} : { body }),
+    });
+
+  it('should answer with the jobs the agent was asked about, with no body and no request id needed', async () => {
+    // Arrange
+    const migrator = new FakeSessionMigrate();
+    const subject = dispatcher(migrator);
+
+    // Act
+    const response = await subject.dispatch(ask('s1'));
+
+    // Assert
+    should(response.status).equal(200);
+    const body = AskToStopJobsResultSchema.parse(JSON.parse(response.body));
+    should(body).match({ messageId: 'migrate-jobs-4242', alreadyAsked: false, jobs: [{ pid: 4242 }] });
+    should(migrator.jobAsks).deepEqual(['s1']);
+    // It is an ask, not a move: no migration reached the subsystem.
+    should(migrator.migrations).be.empty();
+  });
+
+  it('should refuse anonymously and refuse a warden token, as sending the agent a message does', async () => {
+    // Arrange
+    const migrator = new FakeSessionMigrate();
+    const subject = dispatcher(migrator);
+
+    // Act
+    const anonymous = await subject.dispatch(ask('s1', {}));
+    const warden = await subject.dispatch(ask('s1', { authorization: `Bearer ${CREDENTIALS.warden}` }));
+
+    // Assert
+    should(anonymous.status).equal(401);
+    should(warden.status).equal(403);
+    should(migrator.jobAsks).be.empty();
+  });
+
+  it('should refuse a body that names anything, because the daemon decides what to ask about', async () => {
+    // Arrange
+    const migrator = new FakeSessionMigrate();
+    const subject = dispatcher(migrator);
+
+    // Act
+    const response = await subject.dispatch(ask('s1', human, JSON.stringify({ pids: [1] })));
+
+    // Assert
+    should(response.status).equal(400);
+    should(migrator.jobAsks).be.empty();
+  });
+
+  it('should answer 409 no_background_jobs when there is nothing of the agent’s left to ask about', async () => {
+    // Arrange
+    const subject = dispatcher(
+      new FakeSessionMigrate(['s1'], {
+        gone: new SessionMigrateError('no_jobs', 'none of the agent’s own background jobs is in the way any more'),
+      }),
+    );
+
+    // Act
+    const response = await subject.dispatch(ask('gone'));
+
+    // Assert
+    should(response.status).equal(409);
+    should((JSON.parse(response.body) as { code: string }).code).equal('no_background_jobs');
   });
 });

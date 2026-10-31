@@ -37,6 +37,7 @@ import {
 import { SessionsPage } from './components/sessions-page.tsx';
 import type { SendDismiss, SendExpand } from './components/settled-send-note.tsx';
 import type { TranscriptHistoryControl } from './components/transcript-history-row.tsx';
+import type { ChatSearchPort } from './components/chat-search.tsx';
 import { useAgendaSessionActions } from './features/agenda/agenda-session-actions.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { TERMINAL_STATUSES } from './shell/status-mark.tsx';
@@ -237,8 +238,7 @@ import {
   supportsWebPush,
 } from './lib/push-enrolment.ts';
 import { frameQrDetector } from './lib/qr-frame-decoder.ts';
-import { readItemConversation } from './lib/item-conversation.ts';
-import { RECENT_MESSAGE_COUNT, type RecentMessagesMemory, readRecentMessages } from './lib/recent-messages.ts';
+import { itemSince, readItemConversation } from './lib/item-conversation.ts';
 import { isCarrierOutage } from './lib/relay-carrier.ts';
 import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
 import { RouterProvider, useRouter } from './lib/router.tsx';
@@ -1051,8 +1051,8 @@ function SessionRoute({
   useRenderTiming(store.performance, 'session');
   // What the chat's Tasks tab needs to open a card over the chat, the same two the Board page is given.
   const boardTasks = useMemo(
-    () => ({ agenda: store.attention, ports: boardPorts(daemon => store.clients.client(daemon)) }),
-    [store.attention, store.clients],
+    () => ({ agenda: store.attention, ports: boardPorts(daemon => store.clients.client(daemon), daemonFetch) }),
+    [store.attention, store.clients, daemonFetch],
   );
   // Memoised on the router rather than rebuilt per render: the deck remounts when its dependencies
   // object changes identity, and a remount mid-session tears down a live shell. Every attach is a
@@ -1171,6 +1171,17 @@ function SessionRoute({
   );
   /** The highest event sequence this browser has actually received. `0` means none yet. */
   const [liveCursor, setLiveCursor] = useState(0);
+  /** Search the whole conversation, and load the chat back to a match (`components/chat-search.tsx`). */
+  const conversationSearch = useMemo<ChatSearchPort | undefined>(
+    () =>
+      client === null
+        ? undefined
+        : {
+            search: async (query, options) => await client.logSearch(sessionId, query, options),
+            reach: async (offset, file) => (await refreshControl.current?.loadUntil(offset, file)) ?? false,
+          },
+    [client, sessionId],
+  );
   /**
    * The same number, held where a RESUBSCRIPTION can read it.
    *
@@ -1666,6 +1677,7 @@ function SessionRoute({
             daemonSessions={fleetSlice?.sessions ?? undefined}
             entries={placedEntries}
             history={history}
+            {...(conversationSearch === undefined ? {} : { conversationSearch })}
             onRetry={retrySend}
             onCancel={cancelSend}
             onSubmit={submitSend}
@@ -2020,8 +2032,6 @@ function AgendaRoute({ connection }: DaemonPageProps) {
   const { navigate } = useRouter();
   const store = useAppStore();
   const inbox = useAgendaInbox();
-  // Each conversation's walk to its last messages, kept while the page is open so a re-read is one page.
-  const recentWalks = useRef<RecentMessagesMemory>(new Map()).current;
   const phone = useLayoutMode() === 'drawer';
   const machineNotifications = usePairedMachineNotifications();
   const daemonFetch = useDaemonFetch();
@@ -2067,18 +2077,11 @@ function AgendaRoute({ connection }: DaemonPageProps) {
       readConversation={async card => {
         const target = inbox.connectionFor(card.daemonId);
         if (target === undefined) throw new Error('That machine is no longer paired with this browser.');
-        return await readItemConversation(await store.clients.client(target), card.view.config.id, card.item.id);
-      }}
-      readRecent={async card => {
-        const target = inbox.connectionFor(card.daemonId);
-        if (target === undefined) throw new Error('That machine is no longer paired with this browser.');
-        const scope = daemonSessionScope(target, card.view.config.id);
-        return await readRecentMessages(
+        return await readItemConversation(
           await store.clients.client(target),
           card.view.config.id,
-          RECENT_MESSAGE_COUNT,
-          recentWalks,
-          daemonSessionKey(scope),
+          card.item.id,
+          itemSince(card.item),
         );
       }}
     />
@@ -2149,7 +2152,11 @@ function BoardRoute({ connection, taskId }: BoardPageProps) {
     (search: string) => navigate(`${window.location.pathname}${search === '' ? '' : `?${search}`}`, { replace: true }),
     [navigate],
   );
-  const ports = useMemo(() => boardPorts(daemon => store.clients.client(daemon)), [store.clients]);
+  const daemonFetch = useDaemonFetch();
+  const ports = useMemo(
+    () => boardPorts(daemon => store.clients.client(daemon), daemonFetch),
+    [store.clients, daemonFetch],
+  );
   return (
     <BoardPage
       agenda={store.attention}

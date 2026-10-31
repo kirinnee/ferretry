@@ -11,9 +11,10 @@
 import type { AccountModel } from '@ferretry/fleet';
 import { parseAccountModel } from '@ferretry/fleet';
 
-/** The four things "What agents may control" switches independently. `settings` is the `config.*`
- *  tools: editing this machine's configuration files (docs/config-files.md), off by default. */
-export type AgentControlKind = 'terminal' | 'browser' | 'files' | 'settings';
+/** The five things "What agents may control" switches independently. `settings` is the `config.*`
+ *  tools: editing this machine's configuration files (docs/config-files.md), off by default. `scripts`
+ *  is `browser.eval`: an agent's own JavaScript in a page it drives, off by default too. */
+export type AgentControlKind = 'terminal' | 'browser' | 'files' | 'settings' | 'scripts';
 
 export interface AgentControlPolicy {
   /** Whether an agent runtime may use `kind` on this machine, right now. */
@@ -34,6 +35,7 @@ const FIELD: Readonly<Record<AgentControlKind, keyof AccountModel['machine']['ag
   browser: 'browsers',
   files: 'files',
   settings: 'ferretrySettings',
+  scripts: 'pageScripts',
 };
 
 /**

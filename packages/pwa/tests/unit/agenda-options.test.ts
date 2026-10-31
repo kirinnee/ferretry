@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import type { AgendaItem } from '@ferretry/protocol';
 import {
+  cardLettered,
+  isOneWord,
   itemOptions,
-  letterOf,
   letteredOptions,
+  letterOf,
   needsOptionsSection,
   optionLetter,
   rowLettered,
@@ -95,5 +97,20 @@ describe('a row of quick replies', () => {
     expect(rowLettered(row)).toBe(true);
     expect(shortLabel('Frankfurt', 'A')).toBe('A');
     expect(shortLabel('Virginia', 'B')).toBe('Virginia');
+  });
+});
+
+describe('naming options on the card by one word or by letter', () => {
+  test('a single short word names its option; two words or a long word does not', () => {
+    expect(isOneWord('Pause')).toBe(true);
+    expect(isOneWord('  Switch ')).toBe(true);
+    expect(isOneWord('Studio disk')).toBe(false);
+    expect(isOneWord('Internationalise')).toBe(false);
+  });
+
+  test('one option that is not a single word letters them all', () => {
+    expect(cardLettered([{ label: 'Pause' }, { label: 'Warn' }])).toBe(false);
+    expect(cardLettered([{ label: 'Pause' }, { label: 'Warn me' }])).toBe(true);
+    expect(cardLettered([])).toBe(false);
   });
 });

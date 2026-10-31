@@ -108,6 +108,18 @@ not the owner, and where `migration-inflight.md` is (`packages/daemon/src/lib/mi
 A notice that travelled as a turn file is recognised by the document it holds, so it is a system row once
 that file has been read.
 
+A **migration refused only by the agent's own background jobs** — processes it started from its own tool
+shell (a Claude `Bash` call, a codex `exec`) and left running — offers the owner "Ask the agent to stop its
+background jobs" in Change model or account. That press queues ONE message, `by: {kind: 'ferretry',
+feature: 'Migrate'}`, that opens `Ferretry could not move this session…`, names each blocking pid and
+command, and asks the agent to stop them or say why not (`packages/daemon/src/lib/migrate/agent-jobs.ts`).
+The daemon looks again before it asks, asks about the same set of pids once, and stops nothing itself: the
+owner runs the safety check again, which stays the only way a migration starts. Anything else in the way —
+an open tool call, a program the agent did not start from its shell, a blind spot — keeps the offer away.
+Claude's own `statusLine` command (`sh -c 'fy' statusline …`, from `claudeStatuslineCommand`) is the
+harness's helper, not a job. A daemon older than 4.153.0 marks no job, so when one refuses on processes
+alone the card says to update this machine's daemon instead of offering the ask.
+
 ## What the board types into a chat
 
 No board news reaches a chat (the owner, 2026-10-30: "there should not be any append or prepend on any
@@ -137,9 +149,15 @@ because each names its card and says what to do, so nothing needs a "not from th
 
 Declared gaps:
 
-- **An interactive session's daemon messages skip the queue.** The queue never types a daemon message into
-  the owner's own chat, so a board message to an interactive ferret still takes the direct send path,
-  which has no `by`; the app has no queue item to read the chip from.
+- **An interactive session's daemon messages skip the queue**, because the queue never types a daemon message
+  into the owner's own chat. The direct send path carries the sender itself: the ledger record has
+  `senderKind: daemon` and the same `by` the queue item would have held (`SendRecord.by`), so the app draws it
+  the way it draws a queued one.
+
+**How the app shows it.** A board message (`by: {kind: 'ferretry', feature: 'Board'}`, read from the queue
+item or from the ledger record) is never the owner's bubble: it is one compact system row — a board mark,
+"Board" as the sender, the sentence as it is, and the card (`&F412`) and the PR (`PR #930`, when the card links
+it) as links (`BoardNudgeRow`, `packages/pwa/src/components/agent-message-rows.tsx`).
 
 ## The Warden and the board
 

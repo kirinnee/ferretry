@@ -13,6 +13,7 @@ import type {
   IPairExit,
   IPairGateway,
   IPairProgress,
+  IPairRedirectSweeper,
   IPairScreen,
   IQrEncoder,
   ITerminalSize,
@@ -267,3 +268,16 @@ export const LIMITED_MINT: PairingCodeMintResponse = PairingCodeMintResponseSche
   ...MINT,
   grants: 'limited',
 });
+
+/** A sweeper that counts how often it was asked, and records what the pairing had done by then. */
+export class RecordingRedirectSweeper implements IPairRedirectSweeper {
+  sweeps = 0;
+
+  constructor(private readonly onSweep: () => void = () => undefined) {}
+
+  async sweep(): Promise<void> {
+    this.sweeps += 1;
+    this.onSweep();
+    await Promise.resolve();
+  }
+}

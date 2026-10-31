@@ -55,6 +55,7 @@ import {
   type Advertisement,
   type AgendaItem,
   type AnalyticsPricingRate,
+  type AskToStopJobsResult,
   type AutoResumeSummary,
   CONFIG_ACCEPTED_FILE,
   type ConversionPreview,
@@ -98,6 +99,7 @@ import {
   type TranscriptProvenance,
   type WardenGuardConfig,
 } from '@ferretry/protocol';
+import { sweepPairingRedirects } from '@ferretry/protocol/pairing-redirect-sweep';
 import { processIncarnationFor } from '@ferretry/protocol/process-incarnation';
 // One WebCrypto binding of the relay's crypto port serves the daemon, the browser and the Worker that
 // verifies the claim. Two implementations that agree about a primitive and disagree about an encoding
@@ -517,6 +519,7 @@ import {
   LOOP_PARSE_PACING,
   NodeTranscriptFileRuntime,
   NodeTranscriptImageFiles,
+  NodeTranscriptRecordScanner,
   NodeTranscriptSource,
   TranscriptParseWorker,
   WorkerConversationDescriber,
@@ -672,6 +675,8 @@ import {
   adoptedTranscriptProvenance,
   advertisesForeignAddress,
   agendaBlockNotice,
+  agentJobsMessage,
+  agentJobsMessageId,
   agentSpokenName,
   answerArguments,
   answerOf,
@@ -985,6 +990,7 @@ import {
   readDoctorReport,
   readHarnessPreflight,
   readTranscriptPage,
+  searchTranscriptRecords,
   refuseExhaustedCandidates,
   refuseHeldStateHome,
   refuseOccupiedAddress,
@@ -1084,6 +1090,7 @@ import {
   SessionStopPending,
   type SessionTranscriptMessageTokenCodec,
   type SessionTranscriptPages,
+  type SessionTranscriptSearch,
   SessionTranscriptReader,
   SessionTranscriptResolver,
   type SessionTranscriptTail,
@@ -1232,6 +1239,7 @@ import {
   LeaseClaimingLaunchWrapper,
   LeaseReleasingSessionExits,
 } from '../src/lib/session/conversation-lease.ts';
+import { SessionCredentialRotation } from '../src/lib/session/lifecycle/credential-rotation.ts';
 import { LaunchEnvironmentStore, type LaunchSwitchDefaults } from '../src/lib/session/lifecycle/launch-environment.ts';
 import { sessionTmuxName } from '../src/lib/session/lifecycle/policy.ts';
 import { SessionPackService } from '../src/lib/session/pack/index.ts';
@@ -1387,6 +1395,11 @@ export interface DaemonWorld {
     readonly stackSampler?: () => Promise<StackSamplerPort | undefined>;
     /** The disk's pressure, kept fresh while the daemon runs, so a stall can say it was the disk. */
     readonly ioPressure?: IoPressureSourcePort;
+    /**
+     * Removes the pairing redirect pages a killed `fy pair --open` left in the state home, returning how many.
+     * A world field so a test can boot without touching a real directory; absent means nothing is swept.
+     */
+    readonly sweepPairingRedirects?: (stateHome: string) => Promise<number>;
   };
   readonly config: DaemonConfigStore;
   /** What this invocation said on the command line, overriding the document for this run only. */
@@ -4669,6 +4682,11 @@ interface SessionMigrateParts {
   /** The SAME service the revive uses — see `createSessionResumeSubsystem`. */
   readonly resume: SessionResumeService;
   readonly preflight: MigrationPreflight;
+  /**
+   * Puts one Ferretry-authored message in the session's queue — the only thing a refused migration's
+   * "ask the agent to stop its background jobs" does. `created` is false when `messageId` was queued before.
+   */
+  readonly askAgent: (id: SessionId, message: { readonly id: string; readonly text: string }) => Promise<boolean>;
   readonly reports: MigrationReportStore;
   readonly planner: SessionPlanner;
   readonly accounts: AccountInventoryPort;
@@ -5034,6 +5052,26 @@ async function decideRelaunchConversation(
  * attempted and not verified would not be.
  */
 function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigrateSubsystem {
+  /** The preflight's look at a session, shared by the move and by the ask that clears its way. */
+  const inspect = async (id: SessionId, { config, state, tmuxSession }: MigrateSubject) =>
+    await parts.preflight.inspect(
+      {
+        sessionId: id,
+        harness: config.harness,
+        tmuxSession,
+        status: state.status,
+        turn: state.turn,
+        // The state document's own record of the tool calls this session has open.
+        openTools: state.openTools ?? [],
+        ...(state.subprocessSince === undefined ? {} : { subprocessSince: state.subprocessSince }),
+      },
+      // The session's OWN transcript, resolved from the provenance its start recorded. A session
+      // with none reads as an empty tail, which classifies every open tool `unknown` and refuses
+      // the migration — the same fail-closed answer this call gave before, now reached only when
+      // the evidence is genuinely absent rather than always.
+      await parts.transcripts.tail({ sessionId: id, harness: config.harness === 'codex' ? 'codex' : 'claude' }),
+    );
+
   /** Both documents plus the tmux address, or a stated refusal. A session whose pair does not parse
    *  is one nothing may restamp: the write would merge new fields over a document already broken. */
   const subject = async (id: SessionId): Promise<MigrateSubject> => {
@@ -5210,23 +5248,7 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
           'Re-run with --allow-context-downgrade to accept that.',
         { downgrade: { model: plan.model, targetWindow: plan.contextWindow, currentWindow: window } },
       );
-    const report = await parts.preflight.inspect(
-      {
-        sessionId: id,
-        harness: config.harness,
-        tmuxSession,
-        status: state.status,
-        turn: state.turn,
-        // The state document's own record of the tool calls this session has open.
-        openTools: state.openTools ?? [],
-        ...(state.subprocessSince === undefined ? {} : { subprocessSince: state.subprocessSince }),
-      },
-      // The session's OWN transcript, resolved from the provenance its start recorded. A session
-      // with none reads as an empty tail, which classifies every open tool `unknown` and refuses
-      // the migration — the same fail-closed answer this call gave before, now reached only when
-      // the evidence is genuinely absent rather than always.
-      await parts.transcripts.tail({ sessionId: id, harness: config.harness === 'codex' ? 'codex' : 'claude' }),
-    );
+    const report = await inspect(id, { config, state, tmuxSession });
     const decision = parts.preflight.gate(report, { force: request.forceInflight });
     if (!decision.proceed)
       throw new SessionMigrateError('refused', `${decision.reason}\n${parts.preflight.summarize(report)}`, {
@@ -5457,7 +5479,26 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
     return id;
   };
 
+  /**
+   * LOOKS AGAIN rather than trusting the refusal the person saw: jobs finish, and the agent must be told
+   * about the ones running now. It asks about the agent's own blocking jobs only, and queues nothing at all
+   * when there are none — a message about work that already ended would only confuse the agent.
+   */
+  const askToStopJobs = async (id: SessionId): Promise<AskToStopJobsResult> => {
+    const report = await inspect(id, await subject(id));
+    const jobs = parts.preflight.agentJobs(report);
+    if (jobs.length === 0)
+      throw new SessionMigrateError(
+        'no_jobs',
+        'none of the agent’s own background jobs is in the way any more — run the safety check again',
+      );
+    const messageId = agentJobsMessageId(jobs);
+    const created = await parts.askAgent(id, { id: messageId, text: agentJobsMessage(jobs) });
+    return { messageId, jobs: [...jobs], alreadyAsked: !created };
+  };
+
   return {
+    askToStopJobs: async reference => await askToStopJobs(existing(reference)),
     conversionPreview: async (reference, request) => await conversionPreview(existing(reference), request),
     migrate: async (reference, request) => {
       const id = tryParseSessionId(reference);
@@ -6035,6 +6076,7 @@ function createAgentToolsSubsystem(input: {
       scrub: input.scrub,
       quarantinedUntil: input.quarantinedUntil,
       redactor: input.redactor,
+      binaryName: CLIENT_NAME,
       clock,
       sleep: async milliseconds => await Bun.sleep(milliseconds),
     }),
@@ -6399,7 +6441,7 @@ function createBrowserLoginWorld(paths: FoundationPaths, closeAgentBrowsers: () 
   const profile = new BrowserProfileStore(paths.home);
   const which = (name: string) => () => Bun.which(name, { PATH: process.env.PATH }) ?? undefined;
   const runtime = new NodeBrowserLoginRuntime({
-    display: new XvfbDisplay({ executable: which('Xvfb') }),
+    display: new XvfbDisplay({ executable: which('Xvfb'), authorityDirectory: profile.displayDirectory }),
     secretsDirectory: profile.browserDirectory,
     x11vncExecutable: which('x11vnc'),
     timeoutExecutable: which('timeout'),
@@ -7157,6 +7199,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   const loginSealed = new FileSecretDocumentStore(paths, stateFiles, LOGIN_SECRETS_DOCUMENT);
   const loginDirectory = new LoginDirectory(loginIndex, loginSealed, secretCipher, clock);
   const loginVault = new LoginVault(loginIndex, loginSealed, secretCipher);
+  // A change that stopped between staging new ciphertext and committing the index left sealed values no entry
+  // points at; they stay masked until this sweep, which runs under the store lock before any change can.
+  void loginDirectory.sweepUnreferenced().catch(() => undefined);
   // Copying secrets to another machine signs and checks offers with THIS daemon's identity — the key its
   // daemon id fingerprints — read per clone, so a daemon whose identity cannot be read refuses the copy
   // and serves everything else.
@@ -7409,6 +7454,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   // The agent browser's own private display for a Linux real window (see `DaemonWorld.agentBrowserDisplay`).
   // Nothing is spawned until a real-window launch asks for it; a host without Xvfb is told what to install.
   const agentBrowserDisplay = new XvfbDisplay({
+    authorityDirectory: new BrowserProfileStore(paths.home).displayDirectory,
     executable: () => Bun.which('Xvfb', { PATH: process.env.PATH }) ?? undefined,
     missing: () => xvfbMissingMessage(command => Bun.which(command, { PATH: process.env.PATH }) !== null),
   });
@@ -7604,6 +7650,22 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    */
   const sessionCredentials = new NodeSessionCredentialIssuer();
   const sessionEnvironments = new FileSessionEnvironmentStore(id => createSessionPaths(paths, id).directory);
+  /**
+   * Re-issues a session's credential for every pane launched for it — the first launch and every
+   * revive — over the SAME issuer and the SAME stored environment creation uses, so a leaked copy dies
+   * with the pane it leaked from. The hash lands through a locked merge over the configuration, so a
+   * concurrent writer of another field is never reverted.
+   */
+  const sessionCredentialRotation = (storage: DaemonStorage): SessionCredentialRotation =>
+    new SessionCredentialRotation({
+      credentials: sessionCredentials,
+      environment: sessionEnvironments,
+      hashes: {
+        record: async (id, sessionCapabilityHash) => {
+          await storage.updateConfig(id, current => ({ ...(jsonObject(current) ?? {}), sessionCapabilityHash }));
+        },
+      },
+    });
   // What a pane is LAUNCHED with: the stored environment over the per-ferret switches its record implies
   // (`LaunchEnvironmentStore`). The defaults are assigned once Pack mode's hooks exist below; a launch
   // before then derives nothing, as every launch did before.
@@ -7886,37 +7948,86 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * The file is named to the caller by a token — a digest of its path and its device and inode — so a
    * page can be refused once the session's transcript is another file, and the path never leaves.
    */
-  const createSessionTranscriptPages = (storage: DaemonStorage): SessionTranscriptPages => {
+  /**
+   * Which file a session's transcript is, the source that reads its harness, and the token that names the
+   * file to a caller — a digest of its path and its device and inode, so a page or a search hit can be
+   * refused once the transcript is another file, and the path never leaves.
+   */
+  const createTranscriptLocation = (storage: DaemonStorage) => {
     const resolver = createTranscriptFileResolver(storage);
+    return async (
+      sessionId: string,
+    ): Promise<
+      | { readonly kind: 'unresolved' }
+      | { readonly kind: 'unreadable' }
+      | {
+          readonly kind: 'found';
+          readonly file: string;
+          readonly source: TranscriptSource;
+          readonly token: string;
+          readonly size: number;
+        }
+    > => {
+      const file = await resolver.file(sessionId).catch(() => undefined);
+      if (file === undefined) return { kind: 'unresolved' };
+      const id = tryParseSessionId(sessionId);
+      if (id === undefined) return { kind: 'unresolved' };
+      const config = SessionConfigSchema.safeParse(await storage.readConfig(id).catch(() => undefined));
+      if (!config.success) return { kind: 'unresolved' };
+      const source = transcriptSources.find(
+        candidate => candidate.harness === (config.data.harness === 'codex' ? 'codex' : 'claude'),
+      );
+      const info = await stat(file).catch(() => undefined);
+      if (source === undefined || info === undefined) return { kind: 'unreadable' };
+      const token = createHash('sha256')
+        .update(`${file}\u0000${String(info.dev)}:${String(info.ino)}`)
+        .digest('base64url')
+        .slice(0, 22);
+      return { kind: 'found', file, source, token, size: info.size };
+    };
+  };
+  const createSessionTranscriptPages = (storage: DaemonStorage): SessionTranscriptPages => {
+    const located = createTranscriptLocation(storage);
     const tails = createSessionTranscriptTail(storage);
     return {
       page: async (sessionId, query) => {
-        const file = await resolver.file(sessionId).catch(() => undefined);
-        if (file === undefined) return { kind: 'unresolved' };
-        const id = tryParseSessionId(sessionId);
-        if (id === undefined) return { kind: 'unresolved' };
-        const config = SessionConfigSchema.safeParse(await storage.readConfig(id).catch(() => undefined));
-        if (!config.success) return { kind: 'unresolved' };
-        const source = transcriptSources.find(
-          candidate => candidate.harness === (config.data.harness === 'codex' ? 'codex' : 'claude'),
-        );
-        const info = await stat(file).catch(() => undefined);
-        if (source === undefined || info === undefined) return { kind: 'unreadable' };
-        const token = createHash('sha256')
-          .update(`${file}\u0000${String(info.dev)}:${String(info.ino)}`)
-          .digest('base64url')
-          .slice(0, 22);
+        const where = await located(sessionId);
+        if (where.kind !== 'found') return where;
         if (query.before === undefined) {
           const tail = await tails.tail(sessionId, query.limit);
           if (tail.kind !== 'read') return tail;
-          const page = tailPage(tail.events, query.limit, info.size);
-          if (page !== undefined) return { kind: 'read', ...page, file: token };
+          const page = tailPage(tail.events, query.limit, where.size);
+          if (page !== undefined) return { kind: 'read', ...page, file: where.token };
         }
-        const before = Math.min(query.before ?? info.size, info.size);
+        const before = Math.min(query.before ?? where.size, where.size);
         const range = { from: query.from ?? 0, before, limit: query.limit };
-        const page = await readTranscriptPage(source, file, sessionId, range).catch(() => undefined);
+        const page = await readTranscriptPage(where.source, where.file, sessionId, range).catch(() => undefined);
         if (page === undefined) return { kind: 'unreadable' };
-        return { kind: 'read', ...page, file: token };
+        return { kind: 'read', ...page, file: where.token };
+      },
+    };
+  };
+  /**
+   * The whole of a session's transcript searched, newest first, through the same file and source as its
+   * pages and under the same file token, so a hit is only ever looked for in the pages it came from.
+   */
+  const transcriptRecordScanner = new NodeTranscriptRecordScanner();
+  const createSessionTranscriptSearch = (storage: DaemonStorage): SessionTranscriptSearch => {
+    const located = createTranscriptLocation(storage);
+    return {
+      search: async (sessionId, query) => {
+        const where = await located(sessionId);
+        if (where.kind !== 'found') return where;
+        const result = await searchTranscriptRecords(
+          where.source,
+          transcriptRecordScanner,
+          where.file,
+          sessionId,
+          query,
+          query.limit,
+        ).catch(() => undefined);
+        if (result === undefined) return { kind: 'unreadable' };
+        return { kind: 'read', ...result, file: where.token };
       },
     };
   };
@@ -8010,6 +8121,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // the two are separate records.
         credentials: sessionCredentials,
         environment: sessionEnvironments,
+        rotation: sessionCredentialRotation(storage),
         leases: conversationLeases(storage),
         // A caller that has already minted the id hands it over, so the plan and the record cannot
         // disagree about which session they describe.
@@ -8138,6 +8250,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       sessionMedia,
       // The binary the wrappers' instructions name, so a revive records what its pane was told.
       CLIENT_NAME,
+      // A replacement pane is a new launch, so it gets a credential the replaced pane never held.
+      sessionCredentialRotation(storage),
     );
   };
   /**
@@ -8291,6 +8405,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       stackSampler: async () =>
         stackSamplerEnabled(process.env[STACK_SAMPLER_VARIABLE]) ? await JscStackSampler.start() : undefined,
       ioPressure,
+      sweepPairingRedirects: stateHome => sweepPairingRedirects(stateHome, Date.now()),
     },
     // An operator's own document when they named one, and the state home's otherwise. The confined
     // filesystem port refuses every path outside the home, which is right for the daemon's own state
@@ -10081,6 +10196,18 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sessions,
         resume,
         preflight,
+        // Sent as the person's (`human`), like the Instructions message, so it is typed into an interactive
+        // session too; WHO it is from is the `by` — Ferretry · Migrate — never text in it.
+        askAgent: async (id, message) => {
+          const { created } = await sessionQueue.enqueue(id, {
+            id: message.id,
+            sender: 'human',
+            by: { kind: 'ferretry', feature: 'Migrate' },
+            text: message.text,
+          });
+          void queueDeliverer.enqueued(id).catch(() => undefined);
+          return created;
+        },
         reports: new FileMigrationReportStore(id => createSessionPaths(paths, id).directory),
         planner,
         accounts,
@@ -10544,6 +10671,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         openPage: browserService.openPage.bind(browserService),
         actOnPage: browserService.actOnPage.bind(browserService),
         filesOnPage: browserService.filesOnPage.bind(browserService),
+        scriptOnPage: browserService.scriptOnPage.bind(browserService),
         closePage: browserService.closePage.bind(browserService),
         lifecycleOnPage: browserService.lifecycleOnPage.bind(browserService),
         inputOnPage: browserService.inputOnPage.bind(browserService),
@@ -10614,6 +10742,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // remembered to. See `lib/secrets/redaction.ts` for the boundary this draws.
         secretRedactor,
         createSessionTranscriptPages(storage),
+        createSessionTranscriptSearch(storage),
       );
       // Lessons: the review board, passive suggestions, Apply and the explicit scan. A new ferret's
       // passive default is recorded through it, and a running one is re-instructed with a queued send.
@@ -11889,6 +12018,8 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     return opened.storage.close();
   });
   world.notices.step('state home opened', opened.paths.home);
+  // A page left by a `fy pair --open` that was killed holds a dead code; the daemon owns the home now, so it clears it.
+  await world.boot.sweepPairingRedirects?.(opened.paths.home);
 
   progress.enter('loading configuration');
   const peeked = await world.config.peek();

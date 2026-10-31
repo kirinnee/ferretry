@@ -148,6 +148,7 @@ describe('agent tool schemas', () => {
       { tool: 'browser.check', name: 'app', ref: 'e5', checked: false },
       { tool: 'browser.fill_form', name: 'app', fields: [{ ref: 'e4', text: 'hadi' }] },
       { tool: 'browser.highlight', name: 'app', clear: true },
+      { tool: 'browser.eval', name: 'app', function: '() => document.title' },
       { tool: 'browser.close', name: 'app' },
       { tool: 'browser.ask_owner', name: 'app' },
       {
@@ -166,6 +167,33 @@ describe('agent tool schemas', () => {
       ...tools.AGENT_TOOL_NAMES.slice(0, 5),
       'terminal.wait',
       ...tools.AGENT_TOOL_NAMES.slice(5),
+    ]);
+  });
+
+  it('should take a page script as a bounded function, with at most one element, and refuse everything else', () => {
+    // Arrange
+    const accepted: AgentToolCall[] = [
+      { tool: 'browser.eval', name: 'app', function: '() => document.title' },
+      { tool: 'browser.eval', name: 'app', function: '(el) => el.value', ref: 'e2', timeoutMs: 10_000 },
+      { tool: 'browser.eval', name: 'app', function: '(el) => el.value', selector: '#q', timeoutMs: 100 },
+    ];
+    const call = (value: Record<string, unknown>): SchemaCase => ({
+      name: JSON.stringify(value).slice(0, 60),
+      schema: tools.AgentToolCallSchema,
+      value: { tool: 'browser.eval', name: 'app', ...value },
+    });
+
+    // Act + Assert
+    should(accepted.every(entry => tools.AgentToolCallSchema.safeParse(entry).success)).be.true();
+    assertRejects([
+      call({}),
+      call({ function: '   ' }),
+      call({ function: 'x'.repeat(tools.AGENT_TOOL_MAX_SCRIPT_CHARS + 1) }),
+      call({ function: '() => 1', ref: 'e1', selector: '#a' }),
+      call({ function: '() => 1', x: 1, y: 2 }),
+      call({ function: '() => 1', timeoutMs: 99 }),
+      call({ function: '() => 1', timeoutMs: tools.AGENT_TOOL_MAX_SCRIPT_MS + 1 }),
+      call({ function: '() => 1', expression: '1' }),
     ]);
   });
 

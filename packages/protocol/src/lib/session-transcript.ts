@@ -78,6 +78,12 @@ export const SessionTranscriptPageSchema = z.strictObject({
   messages: z.array(SessionTranscriptMessageSchema).readonly(),
   /** Opaque continuation token, or null at the end of the conversation as it currently reads. */
   nextCursor: z.string().min(1).nullable(),
+  /**
+   * Only on a backward read (`messagesTail`): the token to ask `through` for the page just older than this
+   * one, or null when this page begins the conversation. ABSENT on a forward read, and absent from a daemon
+   * that predates backward reads — which is how a caller tells that daemon apart.
+   */
+  previousCursor: z.string().min(1).nullable().optional(),
 });
 export type SessionTranscriptPage = z.infer<typeof SessionTranscriptPageSchema>;
 
@@ -99,8 +105,50 @@ export const SessionLogPageSchema = z.strictObject({
   log: z.string(),
   start: z.number().int().nonnegative(),
   file: z.string().min(1),
+  /**
+   * Where each line of `log` came from — one byte offset per event, in order. Absent from a daemon
+   * that predates search; the chat then finds no row for a hit and says so.
+   */
+  offsets: z.array(z.number().int().nonnegative()).readonly().optional(),
 });
 export type SessionLogPage = z.infer<typeof SessionLogPageSchema>;
+
+/**
+ * One place a search found — `GET /v1/sessions/:id/log-search`. `offset` is the byte its event's record
+ * begins at, the coordinate the chat's pages carry (`SessionLogPage.offsets`), so the chat can load
+ * the history back to it and find the row. `snippet` is cut from the scrubbed text: never a secret.
+ */
+export const SessionLogSearchMatchSchema = z.strictObject({
+  offset: z.number().int().nonnegative(),
+  role: z.string().min(1),
+  kind: z.string().min(1),
+  snippet: z.string(),
+  at: z.string().optional(),
+});
+export type SessionLogSearchMatch = z.infer<typeof SessionLogSearchMatchSchema>;
+
+/**
+ * Every match of a query in a session's whole transcript, oldest first. `truncated` says the search
+ * stopped at its limit and older matches were not looked for; `file` is the page token, so a hit is
+ * never looked for in another file's pages.
+ */
+export const SessionLogSearchSchema = z.strictObject({
+  v: z.literal(1),
+  sessionId: z.string().min(1),
+  query: z.string().min(1),
+  file: z.string().min(1),
+  matches: z.array(SessionLogSearchMatchSchema).readonly(),
+  truncated: z.boolean(),
+});
+export type SessionLogSearch = z.infer<typeof SessionLogSearchSchema>;
+
+/** What a `logSearch` looks for: `who` said it, and whether tool calls, results and thinking count. */
+export interface LogSearchOptions {
+  readonly who?: 'all' | 'me' | 'agent';
+  readonly tools?: boolean;
+  readonly limit?: number;
+  readonly signal?: AbortSignal;
+}
 
 /** Which page `logPage` reads: the tail when `before` is absent. */
 export interface LogPageOptions {
@@ -111,4 +159,12 @@ export interface LogPageOptions {
   readonly limit?: number;
   /** The `file` token an earlier page carried. */
   readonly file?: string;
+}
+
+/** Which page `messagesTail` reads: the newest rows, or those ending at the row `through` names. */
+export interface MessagesTailOptions {
+  /** The `previousCursor` of the page already held; absent reads the tail. */
+  readonly through?: string;
+  readonly limit?: number;
+  readonly signal?: AbortSignal;
 }

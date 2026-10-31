@@ -16,6 +16,8 @@ import { useState } from 'react';
 import { BoardPage } from '../src/features/board/board-page.tsx';
 import { AppTabBar } from '../src/shell/app-bar.tsx';
 import { DaemonBoardStore } from '../src/lib/board-store.ts';
+import { boardPorts } from '../src/lib/board-ports.ts';
+import type { DaemonFetch } from '../src/lib/runtime-models.ts';
 import {
   boardAnswer,
   card,
@@ -455,18 +457,29 @@ const store = new DaemonBoardStore(
 );
 
 const OLD_MACHINE = new URLSearchParams(window.location.search).get('old') !== null;
+// A paired device's session is the only way to the daemon: the fake carrier answers an upload like one, and the
+// page refuses the raw network, so a send-back that bypassed the carrier would fail here as it does on a phone.
+const carrier: DaemonFetch = async (input, init) => {
+  const body = JSON.parse(String(init?.body ?? '{}')) as { filename?: string; mime?: string };
+  if (init?.method !== 'POST' || !String(input).endsWith('/attachments'))
+    return new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401 });
+  return new Response(
+    JSON.stringify({
+      id: `att_${'a'.repeat(64)}`,
+      filename: body.filename ?? 'file',
+      mime: body.mime ?? 'application/octet-stream',
+      size: 1,
+      sha256: '0'.repeat(64),
+      createdAt: new Date(NOW).toISOString(),
+    }),
+    { status: 201 },
+  );
+};
 const PORTS = {
   sendMessage: async () => undefined,
   startFerret: async () => 'mvzzzzzz-00000000',
   sendBackFiles: async () => !OLD_MACHINE,
-  uploadAttachment: async (_daemon: unknown, _session: string, file: File) => ({
-    id: `att_${'a'.repeat(64)}`,
-    filename: file.name,
-    mime: file.type,
-    size: file.size,
-    sha256: '0'.repeat(64),
-    createdAt: new Date(NOW).toISOString(),
-  }),
+  uploadAttachment: boardPorts(async () => ({}) as never, carrier).uploadAttachment,
 };
 (window as unknown as { __created: unknown[] }).__created = [];
 

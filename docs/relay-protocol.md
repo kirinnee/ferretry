@@ -1747,6 +1747,11 @@ starts at `0`. Each page is its own path, so the polled tail keeps its `304` whi
 Pages are whole records and meet exactly at `start`; a page asked of a file that is no longer the
 session's transcript is `409 log_cursor_stale`. An older daemon answers `unknown_route` and the chat
 keeps reading `/logs`.
+Each page also carries `offsets`, one byte offset per line of `log`, so a row knows where it came from.
+`GET /v1/sessions/:id/log-search?q=…&who=all|me|agent&tools=0|1` searches the whole transcript and
+answers every match oldest first with that same offset and a scrubbed snippet; the chat loads pages back
+to a match's offset and scrolls to the row that holds it. A search is asked once per query and is not
+conditional.
 
 **An image of a transcript is addressed, not embedded.** `/logs` prints `[fy-image <handle> <type>]`
 where an image was, and `GET /v1/sessions/:id/transcript-images/:handle` answers one image as JSON

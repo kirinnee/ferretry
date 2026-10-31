@@ -259,7 +259,7 @@ export const studioMachine = (overrides: Partial<FleetMachineView> = {}): FleetM
   setUp: true,
   agentPermissions: 'auto',
   defaultRuntime: 'claude-default',
-  agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
+  agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
   tools: [{ harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/local/bin/claude' }],
   runtimeCount: 3,
   runningSessions: 0,
