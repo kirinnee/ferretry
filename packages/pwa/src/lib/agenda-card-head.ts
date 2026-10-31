@@ -6,11 +6,11 @@
  * - The description is the ask (the item's summary, `subject`) when the title is not already it. An old item whose
  *   title IS its ask falls back to its `why`, when that says something else.
  * - The question is the one question the item asks (`questions[0]`), stated plainly above the options. Without one,
- *   an item that asks something states its ask — unless the description already does, so nothing is said twice.
+ *   the ask is already said — in the title or the description — so nothing is said twice.
  */
 
 import type { AgendaItem } from '@ferretry/protocol';
-import { agendaCardKind, agendaTitle, hasOwnTitle, singleAgendaQuestion } from '@ferretry/protocol';
+import { agendaTitle, hasOwnTitle, singleAgendaQuestion } from '@ferretry/protocol';
 import { visibleWhy } from './agenda-inbox.ts';
 
 export interface AgendaCardHead {
@@ -19,23 +19,13 @@ export interface AgendaCardHead {
   readonly question: string | null;
 }
 
-const same = (a: string | null | undefined, b: string | null | undefined): boolean =>
-  (a ?? '').trim().toLowerCase() === (b ?? '').trim().toLowerCase();
-
-/** The kinds that ask the owner to choose or answer; a note, a to-do and an input form do not. */
-const ASKING = new Set(['choice', 'yesno', 'permission', 'review', 'reply']);
+const same = (a: string | null, b: string): boolean => (a ?? '').trim().toLowerCase() === b.trim().toLowerCase();
 
 export const agendaCardHead = (item: AgendaItem): AgendaCardHead => {
   const subject = item.subject.trim();
   const title = hasOwnTitle(item) ? agendaTitle(item) : subject;
   const description = subject !== '' && !same(subject, title) ? subject : visibleWhy(item);
   const lone = singleAgendaQuestion(item)?.question.trim() ?? '';
-  const asks = item.notice !== true && ASKING.has(agendaCardKind(item));
-  const question =
-    lone !== '' && !same(lone, description) && !same(lone, title)
-      ? lone
-      : asks && lone === '' && !same(subject, description) && !same(subject, title)
-        ? subject
-        : null;
-  return { title, description: description === null || description === '' ? null : description, question };
+  const question = lone !== '' && !same(description, lone) && !same(title, lone) ? lone : null;
+  return { title, description, question };
 };

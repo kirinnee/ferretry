@@ -315,6 +315,33 @@ describe('the sections the ferret added', () => {
     expect(root().querySelectorAll('.fy-card__fold')).toHaveLength(0);
   });
 
+  test('folds what else the item carries — decided, still open, impact, links — each under its own name', async () => {
+    await draw(
+      agendaItem('A7', {
+        ask: { kind: 'permission' },
+        decided: '- kept',
+        stillOpen: '- engine',
+        impact: '- writes to the bucket',
+        urgency: 'before Friday',
+        links: [{ label: 'The PR', target: 'https://example.test/pr/1' }],
+        recommendation: { decision: 'Allow it for a week', why: 'It is reversible.' },
+      } as Partial<AgendaItem>),
+    );
+    const titles = [...root().querySelectorAll('.fy-card__fold > summary')].map(summary => summary.textContent);
+    expect(titles).toEqual([
+      'Why I recommend Allow it for a week',
+      'Decided so far',
+      'Still open',
+      'What it allows',
+      'Links',
+    ]);
+    expect(one('details[data-agenda-section="impact"]').textContent).toContain('Urgency: before Friday');
+    expect(one('details[data-agenda-section="recommendation"] .fy-card__decision').textContent).toBe(
+      'Allow it for a week',
+    );
+    expect(one<HTMLAnchorElement>('details[data-agenda-section="links"] a').href).toBe('https://example.test/pr/1');
+  });
+
   test('leads a to-do with its steps, open and tickable', async () => {
     const spy = await draw(
       agendaItem('A4', { kind: 'task', ask: { kind: 'task' }, steps: ['Open it', 'Rotate it'] } as Partial<AgendaItem>),
