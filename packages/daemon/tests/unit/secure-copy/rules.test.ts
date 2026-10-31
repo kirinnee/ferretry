@@ -234,7 +234,7 @@ describe('CopyPlanService', () => {
     should(p.cards).eql([
       {
         sessionId: 's1',
-        ask: 'Allow these 2 pastes once each, without asking, until 2026-10-31T14:00:00.000Z?',
+        ask: 'Allow these 2 pastes once each, without asking, until 2026-10-31 14:00 UTC?',
         context:
           '1. what gh prints → vercel in a terminal. The agent says: the deploy token\n2. what gh prints → fly in a terminal. The agent says: the fly token',
       },

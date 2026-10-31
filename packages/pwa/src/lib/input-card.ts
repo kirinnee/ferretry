@@ -419,13 +419,9 @@ export const sealedBody = (request: InputRequest, submit: boolean, deliveryId: s
         body: { deliveryId, observedDigest: request.observedDigest, sealed: true, submit: enterFor(request, submit) },
       };
 
-/** "sealed:vercel_token, captured from gh": what a paste card says it pastes. */
-export const pastedWords = (request: InputRequest): string | undefined => {
-  const source = request.source;
-  if (source === undefined) return undefined;
-  const from = source.from.origin ?? source.from.program ?? source.from.kind;
-  return `sealed:${source.name}, captured from ${from}`;
-};
+/** "sealed:vercel_token": the handle a paste card pastes (where it came from is a row of its own). */
+export const pastedWords = (request: InputRequest): string | undefined =>
+  request.source === undefined ? undefined : `sealed:${request.source.name}`;
 
 type InputFailureKind = 'changed' | 'already' | 'gone' | 'refused' | 'step-up' | 'unknown';
 

@@ -45,6 +45,7 @@ import { useOptionalRouter } from '../../lib/router.tsx';
 import type { TranscriptEntry } from '../../lib/session-screens.ts';
 import { InputCardHost } from '../input-request/input-card-host.tsx';
 import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
+import { CopyPlanHost } from '../secure-copy/copy-plan-host.tsx';
 import { agendaReference } from './agenda-board.tsx';
 import { AgendaDeliveryContext, agendaHeading, deliveringIds } from './agenda-delivery.tsx';
 import { AgendaInfoList } from './agenda-info-list.tsx';
@@ -370,6 +371,18 @@ export const useAgenda = ({
           position={paged >= 0 ? { index: paged, total: openItems.length } : { index: 0, total: 1 }}
           quoteScope={scope}
           renderProse={proseText => <ChatProse copyable={copyWriter} text={proseText} />}
+          {...(cardItem.kind === 'info' && cardItem.raisedBy === 'daemon'
+            ? {
+                planForm: (
+                  <CopyPlanHost
+                    agentName={ferret}
+                    connection={connection}
+                    item={cardItem}
+                    sessionId={scope.sessionId}
+                  />
+                ),
+              }
+            : {})}
           {...(cardItem.kind === 'input'
             ? {
                 inputForm: (

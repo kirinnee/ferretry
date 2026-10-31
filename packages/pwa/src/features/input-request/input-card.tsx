@@ -59,6 +59,7 @@ import {
   typedReady,
   updatedEntry,
 } from '../../lib/input-card.ts';
+import { pasteRoute } from '../../lib/secure-copy.ts';
 
 export interface InputCardProps {
   readonly request: InputRequest;
@@ -312,6 +313,7 @@ function SealedPasteSection({ request, client, blocked, busy, cancel, onSettled,
   // A paste the daemon never answered keeps its id, so pressing Allow again cannot paste twice.
   const pending = useRef<string | null>(null);
   const off = blocked !== undefined || sending || busy;
+  const route = pasteRoute(request);
 
   const allow = async (): Promise<void> => {
     if (off) return;
@@ -337,8 +339,23 @@ function SealedPasteSection({ request, client, blocked, busy, cancel, onSettled,
 
   return (
     <div className="flex min-w-0 flex-col gap-2" data-input-paste="">
-      <p className="m-0 text-ui text-fg">
-        Pastes <span className="mono">{pastedWords(request)}</span>. You type nothing.
+      <dl
+        className="m-0 grid min-w-0 grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-control border border-border-strong bg-surface-2 p-3 text-ui"
+        data-input-paste-route=""
+      >
+        <dt className="text-faint">Copy</dt>
+        <dd className="m-0 min-w-0 break-words mono text-fg">{pastedWords(request)}</dd>
+        <dt className="text-faint">From</dt>
+        <dd className="m-0 min-w-0 break-words text-fg" data-input-paste-from="">
+          {route?.from}
+        </dd>
+        <dt className="text-faint">Into</dt>
+        <dd className="m-0 min-w-0 break-words font-medium text-fg" data-input-paste-to="">
+          {route?.to}
+        </dd>
+      </dl>
+      <p className="m-0 text-meta text-faint">
+        You type nothing: Ferretry pastes the sealed value, which the ferret never sees.
       </p>
       {failure === null ? null : (
         <p className="m-0 text-ui text-err" data-input-failure="" role="alert">

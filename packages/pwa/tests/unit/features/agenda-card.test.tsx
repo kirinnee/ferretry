@@ -209,3 +209,17 @@ describe('AgendaCard snooze control', () => {
     expect(Date.parse(snoozed[0] ?? '')).toBeGreaterThan(Date.now());
   });
 });
+
+describe('a paste plan on the swipe card', () => {
+  test('draws its form above the answer bar, which stays', async () => {
+    view = await mount(
+      <AgendaCard
+        item={agendaItem('A9', { kind: 'info', raisedBy: 'daemon' } as never)}
+        onAct={() => {}}
+        planForm={<form data-fake-plan="" />}
+      />,
+    );
+
+    expect(view.container.querySelector('[data-agenda-plan-form] [data-fake-plan]')).not.toBeNull();
+  });
+});

@@ -694,3 +694,16 @@ describe('the Inbox’s item view', () => {
     expect(closeLabel()).toBe('Back to the Inbox');
   });
 });
+
+describe('a paste plan', () => {
+  test('draws its form above the answer row, which stays, and not on a settled card', async () => {
+    const notice = agendaItem('A9', { kind: 'info', raisedBy: 'daemon' } as Partial<AgendaItem>);
+    await draw(notice, { planForm: <form data-fake-plan="" /> });
+    expect(one('.fy-card [data-agenda-plan-form] [data-fake-plan]')).toBeDefined();
+    expect(root().querySelector('[data-agenda-quick-replies]')).not.toBeNull();
+    await view?.unmount();
+
+    await draw(notice, { planForm: <form data-fake-plan="" />, settled: <p>Resolved.</p> });
+    expect(root().querySelector('[data-agenda-plan-form]')).toBeNull();
+  });
+});

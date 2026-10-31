@@ -84,6 +84,7 @@ import { sessionsBarNames } from '../../shell/sessions-bar-model.ts';
 import { PageThemeSwitch } from '../../shell/theme-toggle.tsx';
 import { InputCardHost } from '../input-request/input-card-host.tsx';
 import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
+import { CopyPlanHost } from '../secure-copy/copy-plan-host.tsx';
 import { agendaAge, agendaReference } from './agenda-board.tsx';
 import { AgendaCard, type AgendaCardOrigin } from './agenda-card.tsx';
 import { AgendaItemView } from './agenda-item-view.tsx';
@@ -159,9 +160,26 @@ const renderInboxCard = (
   />
 );
 
-/** The form an `input` card is answered with, or nothing for any other kind (or a machine that is not paired here). */
-const inputFormFor = (inbox: AgendaInbox, card: InboxCard): { readonly inputForm?: ReactNode } => {
+/**
+ * The form an `input` card is answered with, the paste plan behind a daemon notice, or nothing for any other kind
+ * (or a machine that is not paired here).
+ */
+const inputFormFor = (
+  inbox: AgendaInbox,
+  card: InboxCard,
+): { readonly inputForm?: ReactNode; readonly planForm?: ReactNode } => {
   const connection = inbox.connectionFor(card.daemonId);
+  if (connection !== undefined && card.item.kind === 'info' && card.item.raisedBy === 'daemon')
+    return {
+      planForm: (
+        <CopyPlanHost
+          agentName={inboxWho(card).ferret}
+          connection={connection}
+          item={card.item}
+          sessionId={card.view.config.id}
+        />
+      ),
+    };
   return card.item.kind !== 'input' || connection === undefined
     ? {}
     : {

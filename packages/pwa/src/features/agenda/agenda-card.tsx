@@ -98,6 +98,8 @@ export interface AgendaCardProps {
   readonly onOpenDetail?: () => void;
   /** The form an `input` item is answered with (`InputCardHost`): drawn in the answer bar's place. */
   readonly inputForm?: ReactNode;
+  /** A ferret's paste plan behind a daemon notice (`CopyPlanHost`): drawn above the answer bar, which stays. */
+  readonly planForm?: ReactNode;
 }
 
 const markdownProse = (text: string): ReactNode => <ChatProse text={text} />;
@@ -121,6 +123,7 @@ export function AgendaCard({
   onOpenDetail,
   onSnooze,
   inputForm,
+  planForm,
 }: AgendaCardProps) {
   const titleId = useId();
   const [picks, setPicks] = useState<readonly string[]>([]);
@@ -248,6 +251,11 @@ export function AgendaCard({
         <p className="m-0 text-meta text-err" role="alert">
           Not sent: {error}
         </p>
+      )}
+      {planForm === undefined ? null : (
+        <div className="fy-attn-card__input" data-agenda-plan-form="">
+          {planForm}
+        </div>
       )}
       {inputForm !== undefined && item.kind === 'input' ? (
         <div className="fy-attn-card__input" data-agenda-input-form="">

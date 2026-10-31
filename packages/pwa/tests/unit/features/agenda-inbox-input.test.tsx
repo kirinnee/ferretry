@@ -52,3 +52,36 @@ describe('an input card in the Inbox', () => {
     expect(view.container.querySelector('[data-agenda-input-form]')).toBeNull();
   });
 });
+
+describe('a daemon notice in the Inbox', () => {
+  const notice = (raisedBy: 'daemon' | 'agent') =>
+    inboxCard(agendaItem('A8', { kind: 'info', ask: undefined, raisedBy } as never));
+
+  const draw = async (raisedBy: 'daemon' | 'agent', connected = true) => {
+    const fake = fakeInbox();
+    const view = await mount(
+      <InboxHarness
+        cards={[notice(raisedBy)]}
+        fake={fake}
+        render={inbox => (
+          <AgendaNeedsYou
+            clock={fake.clock.now}
+            daemonId={WORKSHOP.daemonId}
+            inbox={{ ...inbox, connectionFor: id => (connected && id === WORKSHOP.daemonId ? WORKSHOP : undefined) }}
+            now={NOW}
+            onNavigate={() => undefined}
+          />
+        )}
+      />,
+    );
+    mounted.push(view);
+    await settle();
+    return view;
+  };
+
+  it('carries the paste plan slot for a daemon notice from a machine paired here, and none otherwise', async () => {
+    expect((await draw('daemon')).container.querySelector('[data-agenda-plan-form]')).not.toBeNull();
+    expect((await draw('agent')).container.querySelector('[data-agenda-plan-form]')).toBeNull();
+    expect((await draw('daemon', false)).container.querySelector('[data-agenda-plan-form]')).toBeNull();
+  });
+});

@@ -64,7 +64,7 @@ export class CopyPlanService {
     const expiresAt = new Date(now + (expiresInSeconds ?? COPY_PLAN_DEFAULT_LIFETIME_SECONDS) * 1000).toISOString();
     const card = await this.ports.agenda.raise(sessionId, {
       planId: id,
-      ask: `Allow ${items.length === 1 ? 'this paste' : `these ${String(items.length)} pastes`} once each, without asking, until ${expiresAt}?`,
+      ask: `Allow ${items.length === 1 ? 'this paste' : `these ${String(items.length)} pastes`} once each, without asking, until ${expiresAt.slice(0, 16).replace('T', ' ')} UTC?`,
       context: items
         .map((item, index) => `${String(index + 1)}. ${routeOf(item.from, item.to)}. The agent says: ${item.why}`)
         .join('\n'),

@@ -44,7 +44,7 @@ describe('a paste card', () => {
   it('shows what it pastes and where it came from, with no field to type into', async () => {
     const { q } = await show(PASTE, delivered);
 
-    expect(q('[data-input-paste]')?.textContent).toContain('sealed:vercel, captured from gh');
+    expect(q('[data-input-paste]')?.textContent).toContain('sealed:vercel');
     expect(q('[data-input-value]')).toBeNull();
     expect(q('[data-input-send]')).toBeNull();
   });
@@ -100,7 +100,7 @@ describe('the paste body', () => {
       pastedWords(
         request({ source: { kind: 'sealed', name: 'gh', from: { kind: 'browser', origin: 'https://github.com' } } }),
       ),
-    ).toBe('sealed:gh, captured from https://github.com');
+    ).toBe('sealed:gh');
   });
 
   it('keeps Allow off while the daemon is looking at the target again', async () => {
