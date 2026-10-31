@@ -369,6 +369,23 @@ describe('the child runner, finding the program it runs', () => {
     should(result).match({ outcome: 'exited', stdout: `${link}\n`, program: link });
   });
 
+  it('should report a path whose folder exists but whose file does not, or will not run, as a spawn failure', async () => {
+    // Arrange — the lookup succeeds (the folder is real), so it is the spawn itself that refuses.
+    const { folder } = await folderWithProgram('runner-no-file');
+    await writeFile(join(folder, 'notes.txt'), 'not a program\n');
+    const runner = new BunSecretChildRunner(() => ({ PATH: '/nonexistent' }));
+
+    // Act
+    const missing = await runner.run(spec(['./nope'], folder));
+    const plain = await runner.run(spec(['./notes.txt'], folder));
+
+    // Assert
+    should([missing, plain]).eql([
+      { outcome: 'spawn_failed', stdout: '', stderr: '', truncated: false },
+      { outcome: 'spawn_failed', stdout: '', stderr: '', truncated: false },
+    ]);
+  });
+
   it('should report a name too long to look up as a spawn failure, not throw', async () => {
     // Arrange
     const { folder } = await folderWithProgram('runner-long');
