@@ -300,8 +300,10 @@ describe('navigation without reloads, and the session cache, in the real shell',
       port: 0,
       fetch: request => {
         const path = new URL(request.url).pathname;
-        if (path === '/app.js') return new Response(js, { headers: { 'content-type': 'text/javascript' } });
-        if (path === '/app.css') return new Response(css, { headers: { 'content-type': 'text/css' } });
+        if (path === '/app.js')
+          return new Response(js, { headers: { 'content-type': 'text/javascript', 'cache-control': 'max-age=3600' } });
+        if (path === '/app.css')
+          return new Response(css, { headers: { 'content-type': 'text/css', 'cache-control': 'max-age=3600' } });
         // A file the scene does not serve (the service worker, an icon) is absent, never the document.
         if (path.includes('.')) return new Response('not here', { status: 404 });
         // EVERY APP PATH IS THE SAME DOCUMENT, as the real host serves it: a reload of `/d/<id>/…` works.
@@ -315,50 +317,6 @@ describe('navigation without reloads, and the session cache, in the real shell',
     server?.stop(true);
     if (directory !== '') await rm(directory, { force: true, recursive: true });
   });
-
-  it(
-    'goes Back to the sessions list without reloading the document, on a desktop and a phone',
-    async () =>
-      await eachForm(async form => {
-        // Arrange
-        const { context, tab } = await open(form);
-        try {
-          const daemon = await boot(tab);
-          const listIndex = (await documentFacts(tab)).index;
-          await markDocument(tab);
-
-          // Act: the browser's Back, from a session opened off the list.
-          await tab.click(listRow('s-03'));
-          await tab.waitForSelector('.fy-transcript');
-          await tab.goBack();
-          await tab.waitForSelector(listRow('s-03'));
-          const afterBrowserBack = await documentFacts(tab);
-
-          // Act: the in-app "← Sessions", from New session opened off the list.
-          await tab.click(`a[href="${sessionsPathOf(daemon)}/new"]`);
-          await tab.waitForSelector('#new-session-heading');
-          await tab.click('button:has-text("← Sessions")');
-          await tab.waitForSelector(listRow('s-03'));
-          const afterInAppBack = await documentFacts(tab);
-
-          // Assert
-          const expected: DocumentFacts = {
-            marker: 'same-document',
-            navigations: 1,
-            shellConnected: true,
-            sawSkeleton: false,
-            index: listIndex,
-          };
-          expect(afterBrowserBack).toEqual(expected);
-          // A real step back, not a push of the list: the trail is where it was before New session.
-          expect(afterInAppBack).toEqual(expected);
-          expect(new URL(tab.url()).pathname).toBe(sessionsPathOf(daemon));
-        } finally {
-          await context.close();
-        }
-      }),
-    120_000,
-  );
 
   it(
     'draws the cached rows and transcript on reload, then the live answer, on a desktop and a phone',
@@ -467,7 +425,7 @@ describe('navigation without reloads, and the session cache, in the real shell',
   );
 
   it(
-    'puts Settings and the sessions list back where they were scrolled, on a desktop and a phone',
+    'goes Back to the list without reloading the document, and puts Settings and the list back where they were scrolled, on a desktop and a phone',
     async () =>
       await eachForm(async form => {
         // Arrange
@@ -475,6 +433,8 @@ describe('navigation without reloads, and the session cache, in the real shell',
         const settings = '[data-settings-scroller]';
         try {
           const daemon = await boot(tab);
+          const listIndex = (await documentFacts(tab)).index;
+          await markDocument(tab);
           const listTop = await scrollTo(tab, SCROLLER, 1_234);
 
           // Act: the list, out to a session on screen and Back, then reloaded.
@@ -482,10 +442,21 @@ describe('navigation without reloads, and the session cache, in the real shell',
           await tab.waitForSelector('.fy-transcript');
           await tab.goBack();
           await tab.waitForSelector(listRow('s-03'));
+          const afterBrowserBack = await documentFacts(tab);
           const listAfterBack = await settlesAt(tab, SCROLLER, listTop);
           await tab.reload();
           await tab.waitForSelector(listRow('s-03'));
           const listAfterReload = await settlesAt(tab, SCROLLER, listTop);
+
+          // Act: the in-app "← Sessions", from New session opened off the reloaded list.
+          const reloadedIndex = (await documentFacts(tab)).index;
+          await markDocument(tab);
+          await tab.click(`a[href="${sessionsPathOf(daemon)}/new"]`);
+          await tab.waitForSelector('#new-session-heading');
+          await tab.click('button:has-text("← Sessions")');
+          await tab.waitForSelector(listRow('s-03'));
+          const afterInAppBack = await documentFacts(tab);
+          const pathAfterInAppBack = new URL(tab.url()).pathname;
 
           // Act: Settings, out to the sessions list and Back, then reloaded.
           // Settings is under More on a phone and in the sidebar on a desktop.
@@ -510,7 +481,17 @@ describe('navigation without reloads, and the session cache, in the real shell',
           await tab.waitForSelector(settings);
           const settingsAfterReload = await settlesAt(tab, settings, settingsTop);
 
-          // Assert
+          // Assert: Back is a step in the same document — nothing reloaded, no skeleton on the way, the trail
+          // where it was — and the in-app "← Sessions" is a real step back, not a push of the list.
+          const sameDocument: Omit<DocumentFacts, 'index'> = {
+            marker: 'same-document',
+            navigations: 1,
+            shellConnected: true,
+            sawSkeleton: false,
+          };
+          expect(afterBrowserBack).toEqual({ ...sameDocument, index: listIndex });
+          expect(afterInAppBack).toEqual({ ...sameDocument, index: reloadedIndex });
+          expect(pathAfterInAppBack).toBe(sessionsPathOf(daemon));
           expect(listTop).toBe(1_234);
           expect(Math.abs(listAfterBack - listTop)).toBeLessThanOrEqual(1);
           expect(Math.abs(listAfterReload - listTop)).toBeLessThanOrEqual(1);

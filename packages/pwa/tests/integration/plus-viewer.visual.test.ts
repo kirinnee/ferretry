@@ -16,6 +16,7 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
 import { sharedChromium } from './support/chromium.ts';
+import { laneTests } from './support/lanes.ts';
 import { type ComposerSceneServer, serveComposerScene } from './support/composer-scene.ts';
 
 const evidenceDir = process.env.COMPOSER_EVIDENCE_DIR ?? null;
@@ -45,6 +46,8 @@ beforeAll(async () => {
 afterAll(async () => {
   await server?.stop();
 });
+
+const lane = laneTests();
 
 interface Options {
   readonly theme?: string;
@@ -113,7 +116,7 @@ const evidence = async (page: Page, name: string) => {
 };
 
 describe('the composer add menu', () => {
-  test('on a desktop it is a labelled popover above the composer and never covers the typed text', async () => {
+  lane('on a desktop it is a labelled popover above the composer and never covers the typed text', async () => {
     const scene = await open({ params: { draft: 'a message that must stay readable while the menu is open' } });
     try {
       await scene.page.locator(PLUS).click();
@@ -142,9 +145,9 @@ describe('the composer add menu', () => {
     } finally {
       await scene.close();
     }
-  }, 60_000);
+  });
 
-  test('on a phone it is a bottom sheet with a Take photo row, big targets, and a scrim that closes it', async () => {
+  lane('on a phone it is a bottom sheet with a Take photo row, big targets, and a scrim that closes it', async () => {
     const scene = await open({ width: 390, theme: 'studio-dark' });
     try {
       await scene.page.locator(PLUS).tap();
@@ -177,9 +180,9 @@ describe('the composer add menu', () => {
     } finally {
       await scene.close();
     }
-  }, 60_000);
+  });
 
-  test('does not flicker: one tap shows one menu that survives resizes and scrolls', async () => {
+  lane('does not flicker: one tap shows one menu that survives resizes and scrolls', async () => {
     const scene = await open({ width: 412, params: { layout: 'chat' } });
     try {
       await scene.page.evaluate(() => {
@@ -205,44 +208,47 @@ describe('the composer add menu', () => {
     } finally {
       await scene.close();
     }
-  }, 60_000);
+  });
 });
 
 describe('the full-screen image viewer', () => {
-  test('opens from a composer chip, steps with the arrow keys, and closes on Escape; ✕ removes without opening', async () => {
-    const scene = await open({ params: { upload: '1' } });
-    try {
-      await addPictures(scene.page, ['first.png', 'second.png']);
-      await scene.page.locator('[aria-label="Open first.png"]').click();
-      await scene.page.waitForSelector(VIEWER);
-      const viewer = await box(scene.page, VIEWER);
-      expect(viewer.width).toBe(1_440);
-      expect(viewer.height).toBe(900);
-      const image = scene.page.locator(`${VIEWER} img`);
-      await image.waitFor();
-      const stage = await box(scene.page, '[data-testid="image-viewer-stage"]');
-      const drawn = await image.boundingBox();
-      expect(drawn).not.toBeNull();
-      expect(drawn?.width).toBeLessThanOrEqual(stage.width + 1);
-      expect(drawn?.height).toBeLessThanOrEqual(stage.height + 1);
-      expect(await scene.page.locator(VIEWER).textContent()).toContain('1 of 2');
+  lane(
+    'opens from a composer chip, steps with the arrow keys, and closes on Escape; ✕ removes without opening',
+    async () => {
+      const scene = await open({ params: { upload: '1' } });
+      try {
+        await addPictures(scene.page, ['first.png', 'second.png']);
+        await scene.page.locator('[aria-label="Open first.png"]').click();
+        await scene.page.waitForSelector(VIEWER);
+        const viewer = await box(scene.page, VIEWER);
+        expect(viewer.width).toBe(1_440);
+        expect(viewer.height).toBe(900);
+        const image = scene.page.locator(`${VIEWER} img`);
+        await image.waitFor();
+        const stage = await box(scene.page, '[data-testid="image-viewer-stage"]');
+        const drawn = await image.boundingBox();
+        expect(drawn).not.toBeNull();
+        expect(drawn?.width).toBeLessThanOrEqual(stage.width + 1);
+        expect(drawn?.height).toBeLessThanOrEqual(stage.height + 1);
+        expect(await scene.page.locator(VIEWER).textContent()).toContain('1 of 2');
 
-      await scene.page.keyboard.press('ArrowRight');
-      await expect(scene.page.locator(VIEWER).textContent()).resolves.toContain('2 of 2');
-      expect(await scene.page.locator(`${VIEWER} a[download]`).getAttribute('download')).toBe('second.png');
-      await scene.page.keyboard.press('Escape');
-      await scene.page.waitForSelector(VIEWER, { state: 'detached' });
+        await scene.page.keyboard.press('ArrowRight');
+        await expect(scene.page.locator(VIEWER).textContent()).resolves.toContain('2 of 2');
+        expect(await scene.page.locator(`${VIEWER} a[download]`).getAttribute('download')).toBe('second.png');
+        await scene.page.keyboard.press('Escape');
+        await scene.page.waitForSelector(VIEWER, { state: 'detached' });
 
-      await scene.page.locator('[aria-label="Remove first.png"]').click();
-      expect(await scene.page.locator(VIEWER).count()).toBe(0);
-      expect(await scene.page.locator('[aria-label="Open first.png"]').count()).toBe(0);
-      expect(await scene.page.locator('[aria-label="Open second.png"]').count()).toBe(1);
-    } finally {
-      await scene.close();
-    }
-  }, 60_000);
+        await scene.page.locator('[aria-label="Remove first.png"]').click();
+        expect(await scene.page.locator(VIEWER).count()).toBe(0);
+        expect(await scene.page.locator('[aria-label="Open first.png"]').count()).toBe(0);
+        expect(await scene.page.locator('[aria-label="Open second.png"]').count()).toBe(1);
+      } finally {
+        await scene.close();
+      }
+    },
+  );
 
-  test('opens from a message picture, zooms with the wheel and pans, and fits again on double click', async () => {
+  lane('opens from a message picture, zooms with the wheel and pans, and fits again on double click', async () => {
     const scene = await open({ params: { messages: '3' } });
     try {
       await scene.page.waitForFunction(() => document.querySelectorAll('[data-scene-message] img').length === 3);
@@ -275,7 +281,7 @@ describe('the full-screen image viewer', () => {
     } finally {
       await scene.close();
     }
-  }, 60_000);
+  });
 });
 
 describe('evidence', () => {

@@ -17,6 +17,7 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
 import { sharedChromium } from './support/chromium.ts';
+import { laneTests } from './support/lanes.ts';
 import { type ComposerSceneServer, serveComposerScene } from './support/composer-scene.ts';
 
 const evidenceDir = process.env.COMPOSER_EVIDENCE_DIR ?? null;
@@ -46,6 +47,8 @@ afterAll(async () => {
   await server?.stop();
 });
 
+const lane = laneTests();
+
 const open = async (theme: string, phone = false) => {
   const context = await browser.newContext(phone ? PHONE : DESKTOP);
   const page = await context.newPage();
@@ -73,7 +76,7 @@ const recorded = (page: Page, name: '__sent' | '__drafts') =>
   page.evaluate(key => (window as unknown as Record<string, unknown[]>)[key], name);
 
 describe('a send refused because the agent’s box holds the person’s unsent text', () => {
-  test('shows a plain notice quoting the text, with no session id and no red error', async () => {
+  lane('shows a plain notice quoting the text, with no session id and no red error', async () => {
     const scene = await open('studio-light');
     try {
       await refused(scene.page);
@@ -89,9 +92,9 @@ describe('a send refused because the agent’s box holds the person’s unsent t
     } finally {
       await scene.close();
     }
-  }, 60_000);
+  });
 
-  test('Send it presses Enter on exactly that text, then sends the person’s message by itself', async () => {
+  lane('Send it presses Enter on exactly that text, then sends the person’s message by itself', async () => {
     const scene = await open('studio-light');
     try {
       await refused(scene.page);
@@ -105,9 +108,9 @@ describe('a send refused because the agent’s box holds the person’s unsent t
     } finally {
       await scene.close();
     }
-  }, 60_000);
+  });
 
-  test('Clear it erases exactly that text, then sends the person’s message by itself', async () => {
+  lane('Clear it erases exactly that text, then sends the person’s message by itself', async () => {
     const scene = await open('studio-dark', true);
     try {
       await refused(scene.page);
@@ -120,7 +123,7 @@ describe('a send refused because the agent’s box holds the person’s unsent t
     } finally {
       await scene.close();
     }
-  }, 60_000);
+  });
 
   test('evidence: the notice at desktop and phone width, light and dark', async () => {
     if (evidenceDir === null) return;
