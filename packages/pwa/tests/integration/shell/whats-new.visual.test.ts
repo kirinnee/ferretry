@@ -189,6 +189,55 @@ describe('whats new, on a phone', () => {
         }
       }, 120_000);
 
+      it('opens from the phone More menu', async () => {
+        const { context, tab, settings } = await phone(spec);
+        try {
+          await tab.goto(settings);
+          await tab.tap('[data-app-tab="more"]');
+          await tab.waitForSelector('[data-app-more-whats-new]');
+          await shoot(tab, `${spec.name}-6-more`);
+          await tab.tap('[data-app-more-whats-new]');
+          await tab.waitForSelector('[data-whats-new-body]');
+          const opened = await sheetState(tab);
+          expect(opened.first).toBe(newestVersion);
+          expect(opened.onScreen).toBe(true);
+          await shoot(tab, `${spec.name}-7-from-more`);
+          await tab.tap('[data-whats-new-close]');
+          expect(await closed(tab)).toBe(true);
+        } finally {
+          await context.close();
+        }
+      }, 120_000);
+
+      it('shows that the Settings tab row scrolls, and reaches Machine with the chevron', async () => {
+        const { context, tab, daemon, settings } = await phone(spec);
+        try {
+          await tab.goto(settings);
+          await tab.tap(`[data-settings-machine="${daemon}"]:visible`);
+          await tab.waitForSelector('[data-machine-tab="machine"]');
+          await shoot(tab, `${spec.name}-8-tabs`);
+          const rightEdge = async () =>
+            await tab.evaluate(() => {
+              const machine = document.querySelector<HTMLElement>('[data-machine-tab="machine"]');
+              const strip = machine?.closest('ul');
+              const end = strip?.getBoundingClientRect().right ?? 0;
+              return (machine?.getBoundingClientRect().right ?? 0) - end;
+            });
+          const chevron = tab.locator('[data-utabs-more="end"]');
+          if ((await rightEdge()) > 1) {
+            expect(await chevron.isVisible()).toBe(true);
+            for (let step = 0; step < 4 && (await rightEdge()) > 1; step += 1) {
+              await chevron.tap();
+              await tab.waitForTimeout(500);
+            }
+            await shoot(tab, `${spec.name}-9-tabs-scrolled`);
+          }
+          expect(await rightEdge()).toBeLessThanOrEqual(1);
+        } finally {
+          await context.close();
+        }
+      }, 120_000);
+
       it('opens from the finder', async () => {
         const { context, tab, settings } = await phone(spec);
         try {

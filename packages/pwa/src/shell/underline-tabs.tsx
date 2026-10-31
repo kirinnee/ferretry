@@ -12,12 +12,14 @@
  * - the selected tab is scrolled to the CENTRE on arrival and whenever it changes — instantly the first
  *   time, smoothly afterwards unless the reader asked for reduced motion — so the current view is never
  *   the one hidden off the edge;
- * - an edge fades out on any side that has more tabs beyond it.
+ * - an edge fades out on any side that has more tabs beyond it, and a chevron sits on that edge: a fade
+ *   alone read as a clipped label ("Ma…"), and a chevron both says "more this way" and scrolls there.
  *
  * The strip is scrolled by setting its own `scrollLeft`. `scrollIntoView` was not used because it also
  * scrolls every scrolling ANCESTOR, and the fixed app shell must never scroll.
  */
 
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { type ReactNode, useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { cn } from '../lib/class-names.ts';
 
@@ -101,6 +103,15 @@ export function UnderlineTabs<T extends string>({
     return () => observer.disconnect();
   }, [measure]);
 
+  const page = (direction: 1 | -1): void => {
+    const element = strip.current;
+    if (element === null) return;
+    const left = Math.max(0, element.scrollLeft + direction * element.clientWidth * 0.7);
+    if (typeof element.scrollTo === 'function')
+      element.scrollTo({ left, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+    else element.scrollLeft = left;
+  };
+
   return (
     <nav
       aria-label={label}
@@ -132,6 +143,30 @@ export function UnderlineTabs<T extends string>({
           );
         })}
       </ul>
+      {more.start ? (
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label={`Show earlier ${label}`}
+          className="kt-utabs__more kt-utabs__more--start"
+          data-utabs-more="start"
+          onClick={() => page(-1)}
+        >
+          <ChevronLeft size={16} aria-hidden="true" />
+        </button>
+      ) : null}
+      {more.end ? (
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label={`Show more ${label}`}
+          className="kt-utabs__more kt-utabs__more--end"
+          data-utabs-more="end"
+          onClick={() => page(1)}
+        >
+          <ChevronRight size={16} aria-hidden="true" />
+        </button>
+      ) : null}
     </nav>
   );
 }
