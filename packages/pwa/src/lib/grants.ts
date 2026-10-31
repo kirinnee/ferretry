@@ -63,6 +63,7 @@ const CAPABILITY_NOUNS: Readonly<Record<DaemonCapability, string>> = {
   warden: 'fleet supervision',
   pairing: 'device pairing',
   secrets: 'the secret store',
+  sharing: 'catalog sharing',
 };
 
 export const capabilityNoun = (capability: DaemonCapability): string => CAPABILITY_NOUNS[capability];
@@ -76,6 +77,7 @@ const CAPABILITY_LABELS: Readonly<Record<DaemonCapability, string>> = {
   warden: 'Fleet supervision',
   pairing: 'Device pairing',
   secrets: 'Secrets',
+  sharing: 'Sharing',
 };
 
 export const capabilityLabel = (capability: DaemonCapability): string => CAPABILITY_LABELS[capability];
@@ -95,6 +97,7 @@ const USE_ACTS: Readonly<Record<DaemonCapability, string>> = {
   warden: 'use fleet supervision',
   pairing: 'add or manage a paired device',
   secrets: 'run a command with a stored secret',
+  sharing: 'manage or export a shared catalog',
 };
 
 /**
@@ -143,6 +146,8 @@ const CAPABILITY_REACH: Readonly<Record<DaemonCapability, string>> = {
     'Minting pairing codes that let another device reach this machine. A device that can mint credentials for more devices turns one stolen phone into standing access, so switching this off is the one decision a browser can never undo.',
   secrets:
     'Runs a command with a stored secret in its environment — code on this machine; and sets or deletes stored secrets.',
+  sharing:
+    "Making catalogs of this machine's skills and MCP setups and exporting them as signed files, which makes this machine vouch for what they hold. Members are not built yet.",
 };
 
 export const capabilityReach = (capability: DaemonCapability): string => CAPABILITY_REACH[capability];
@@ -190,6 +195,8 @@ export const REMOTE_ONE_WAY_NOTE =
 const COARSE_SWITCH_ALSO_STOPS: Readonly<Partial<Record<DaemonCapability, string>>> = {
   pairing:
     'It also stops this device revoking a paired one, because both are the same permission — so if you are shutting out a lost or stolen device, revoke that device FIRST and switch this off afterwards.',
+  sharing:
+    'It also stops this device managing and exporting catalogs. It is turned back on at the machine, with the host command.',
 };
 
 /**
@@ -332,6 +339,9 @@ const CAPABILITY_WEIGHTS: Readonly<Record<DaemonCapability, AccessWeight>> = {
   // Running a command is code execution on the host, with credentials in its environment: the same tier
   // as a terminal, whatever the secret store holds.
   secrets: 'broad',
+  // Publishes this machine's own skills and MCP setups to people outside it, signed as this machine. What it
+  // hands over is material the owner chose, not control of the host, so it weighs less than pairing.
+  sharing: 'moderate',
 };
 
 export const capabilityWeight = (capability: DaemonCapability): AccessWeight => CAPABILITY_WEIGHTS[capability];

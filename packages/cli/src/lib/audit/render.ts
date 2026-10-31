@@ -21,6 +21,8 @@ const EVENT_WORDS: Readonly<Record<AuditEvent, string>> = {
   'grants.changed': 'Remote permissions were changed',
   'secrets.used': 'A secret was used',
   'secrets.changed': 'A secret was stored or deleted',
+  'catalog.changed': 'A catalog this machine publishes was changed',
+  'catalog.exported': 'A catalog was exported as a signed file',
   'security.changed': 'A security setting was changed',
   'push.changed': 'Notifications were turned on or off for a device',
   'warden.configured': 'The supervisor was reconfigured',

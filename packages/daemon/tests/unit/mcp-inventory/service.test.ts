@@ -285,6 +285,18 @@ describe('McpInventoryService', () => {
       should(docs[0]?.runtimes.map(use => use.runtime)).deepEqual(['claude-work', 'claude-spare']);
     });
 
+    it('should hand the catalogs publisher every declaration with its id', async () => {
+      // Arrange
+      const service = new McpInventoryService(inventoryWorld().deps);
+
+      // Act
+      const servers = await service.servers();
+      const wire = await service.machine();
+
+      // Assert
+      should(servers.map(server => server.id).sort()).deepEqual(wire.servers.map(server => server.id).sort());
+    });
+
     it('should resolve an id from either view, and refuse one that is gone', async () => {
       // Arrange
       const service = new McpInventoryService(inventoryWorld().deps);

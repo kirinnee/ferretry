@@ -76,6 +76,7 @@ export * from './push.ts';
 export * from './relay-session.ts';
 export * from './secret-clone.ts';
 export * from './shared-catalog.ts';
+export * from './shared-catalog-owner.ts';
 export * from './shared-catalog-review.ts';
 export * from './secrets.ts';
 export * from './security.ts';

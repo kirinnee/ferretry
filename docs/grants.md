@@ -82,17 +82,18 @@ The carrier's `privilegedLoopback` proof (a loopback-only bind that advertises n
 `mayTrustDirectLoopback`) is now about the **place**, never the owner: it admits only `privilegedOnly` routes
 — a local terminal attach — through `arrivedPrivileged`, and grants nothing.
 
-## Seven capabilities, two axes
+## Eight capabilities, two axes
 
-| capability   | what it covers                                                                                                        |
-| ------------ | --------------------------------------------------------------------------------------------------------------------- |
-| `fleet`      | the machine, its credentials, components, profiles and runtimes, and the proposals that change them                   |
-| `terminal`   | opening, writing to and streaming session terminals, and typing into a session's own pane (Console)                   |
-| `browser`    | the human login window and per-session browser control                                                                |
-| `filesystem` | reading session working trees, registering projects, and the browser file tools (upload / download / pdf) on the host |
-| `warden`     | supervision status, sweeps and the warden configuration                                                               |
-| `pairing`    | pairing codes, the paired devices and their grants, and other devices' push enrolments                                |
-| `secrets`    | running a command with a stored secret in its environment, listing, setting and deleting secrets                      |
+| capability   | what it covers                                                                                                                                  |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fleet`      | the machine, its credentials, components, profiles and runtimes, and the proposals that change them                                             |
+| `terminal`   | opening, writing to and streaming session terminals, and typing into a session's own pane (Console)                                             |
+| `browser`    | the human login window and per-session browser control                                                                                          |
+| `filesystem` | reading session working trees, registering projects, and the browser file tools (upload / download / pdf) on the host                           |
+| `warden`     | supervision status, sweeps and the warden configuration                                                                                         |
+| `pairing`    | pairing codes, the paired devices and their grants, and other devices' push enrolments                                                          |
+| `secrets`    | running a command with a stored secret in its environment, listing, setting and deleting secrets                                                |
+| `sharing`    | making catalogs of skills and MCP setups, freezing items into them, and exporting a signed file ([catalogs.md](catalogs.md#the-publisher-side)) |
 
 **Leaving a ferret alone is `warden.configure`.** `POST /v1/warden/leave` keeps the Warden off one flagged
 or cleared ferret for an hour, four, or until its status changes ([config-files.md](config-files.md#the-warden)).
@@ -173,7 +174,7 @@ closed would make a fresh remote session useless until somebody walked to the ma
 **The primary security layer is locality.** A remote caller can never turn a capability on. The passkey
 **unlock** is the **second layer**: a governed caller does nothing until its device unlocks the machine,
 and the unlock then stands in for the step-up over every `configure` and the `use` of `terminal`,
-`browser`, `pairing` and `secrets` — except minting a code, widening a device, sealing secrets for
+`browser`, `pairing`, `secrets` and `sharing` — except minting a code, widening a device, sealing secrets for
 another machine ([secrets.md](secrets.md#copying-secrets-to-another-machine)), or turning "what agents
 may control" back ON (terminals/browsers/files) from a remote device, which always want a passkey for
 that act ([design/zero-trust.md](design/zero-trust.md) B1). Turning one of those three OFF never asks
@@ -274,6 +275,28 @@ The questions above, answered for it ([design/zero-trust.md](design/zero-trust.m
    carries: the host command `fy daemon config set secrets --use`. There is no ordering to follow, so
    nothing like `pairing`'s "revoke FIRST" note is needed.
 
+### Capability eight was added: `sharing`
+
+The questions above, answered for it ([design/catalogs.md](design/catalogs.md) §3.6):
+
+1. **What does somebody reach for this switch to STOP?** A paired device making a catalog, freezing
+   skills and MCP setups into it, and exporting a file this machine has signed. The export is the
+   daemon identity vouching for what is in it, and it is handed to people outside the device list, so
+   it is the one act here that cannot be recalled. `sharing.use` therefore needs a step-up from a
+   governed caller. A ferret that holds the admin token is refused every write regardless of the grant
+   (it may list); that is not a grant, it is the route.
+2. **Does switching it off also stop the thing that undoes it?** Not yet. With catalogs as files there is
+   nothing a remote device has to undo: what was exported stays exported, a leaked device is revoked
+   through `pairing`, and the host's own `fy catalog` commands are ungoverned. When members arrive
+   (phase 2) revoking one will be `sharing.use`, and the remote turn-off warning will then need the
+   "revoke FIRST" ordering [design/catalogs.md](design/catalogs.md) §3.6 describes.
+3. **So the way back on the control** is the same sentence every capability's remote turn-off carries:
+   the host command `fy daemon config set sharing --use`, with `sharing`'s own note in the switch
+   ("it also stops this device managing and exporting catalogs").
+
+`sharing.configure` governs only whether a remote caller may re-grant `sharing`. Both axes are on by
+default; the operator password is the opt-in layer.
+
 Each instance above cites a command. **Verify a cited command exists before adding one**, and verify it a
 second way: `rg -n --fixed-strings "fy daemon adopt"`. Not `rg -r` — that is `--replace`, so
 `rg -rn "adopt" src` prints every hit with `adopt` rewritten to `n`, which reads as "the command is not
@@ -330,9 +353,10 @@ When a per-act step-up is asked for, its window is the `stepUpWindowMinutes` sec
 **What needs one** — which an unlock satisfies by default. A **governed** caller needs a current step-up for:
 
 - **every `configure` demand**, on every capability; and
-- **`use` of `terminal`, `browser`, `pairing` and `secrets`** — session terminals are arbitrary code on the
+- **`use` of `terminal`, `browser`, `pairing`, `secrets` and `sharing`** — session terminals are arbitrary code on the
   host, the browser capability drives a browser the operator is signed into, pairing hands out credentials,
-  and using a secret runs a command with it in that command's environment.
+  using a secret runs a command with it in that command's environment, and an export makes this machine
+  sign material for people who are not its devices.
 
 Every other `use` — reading the fleet, the filesystem view, supervision status — is ordinary operation and
 needs nothing beyond the grant. The rule is one predicate, `demandNeedsStepUp`, read by the same place that

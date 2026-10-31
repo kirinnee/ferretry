@@ -11,7 +11,7 @@ design (`docs/design/zero-trust.md` on `feat/zero-trust`). The wire contract is
   rewritten in place.
   - `audit-kept.jsonl` — the **kept** store: only the successes of a change to who may reach this
     machine and what they may do there (`AUDIT_KEPT_EVENTS`: pairings, revocations, idle expiries, key
-    rotations, passkeys added, grant changes, secret changes, security-setting changes, warden
+    rotations, passkeys added, grant changes, secret changes, catalog changes and exports, security-setting changes, warden
     reconfiguration). Never activity.
   - `audit.jsonl` — the **general** store: everything else — refusals, failures, and all ACTIVITY
     (terminal attaches and input, secrets used, agents started or prompted, codes minted, step-ups).
@@ -79,33 +79,35 @@ actor phrases (`this computer`, `a supervising agent`, …).
 
 ## What is recorded today
 
-| Event                  | Where it is caught                                                                                                                            |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `device.paired`        | `AuditedPairingService.onGranted` — direct and relayed, with the carrier                                                                      |
-| `pairing.refused`      | `AuditedPairingService` — folded per carrier                                                                                                  |
-| `pairing.code-minted`  | `POST /v1/pair/code`                                                                                                                          |
-| `pairing.code-revoked` | `DELETE /v1/pair/code/:pairingId`                                                                                                             |
-| `device.revoked`       | `DELETE /v1/pair/devices/:deviceId`                                                                                                           |
-| `push.changed`         | push subscription enrol and remove                                                                                                            |
-| `grants.changed`       | `PATCH /v1/grants`, one device's grants (`PATCH /v1/pair/devices/:deviceId/grants`)                                                           |
-| `security.changed`     | `PATCH /v1/security` — with every setting's number or boolean after the change in `detail` — and an owner re-opening a passkey window         |
-| `passkey.registered`   | `POST /v1/passkeys`                                                                                                                           |
-| `step-up.succeeded`    | a passed step-up or unlock (`detail.action`); `step-up.failed` when refused                                                                   |
-| `device.key-rotated`   | `AuditedPairingService.rotateDeviceKey`, inside a step-up                                                                                     |
-| `device.expired`       | `AuditedPairingService.revokeDevice` with no actor — the daemon's own idle expiry                                                             |
-| `session.opened`       | `POST /v1/sessions` and a fork — an agent started, folded per device                                                                          |
-| `agent.prompted`       | `POST /v1/sessions/:sessionId/send`, `/answer` and `/migrate/ask-to-stop-jobs` — folded per device per session                                |
-| `fleet.configured`     | proposal create and apply, credential sign-in and its answer/cancel, tool install                                                             |
-| `terminal.opened`      | terminal create, and every stream attach (`detail.mode: 'attach'`)                                                                            |
-| `terminal.input`       | keystroke frames on a terminal stream, a Console write, and a Processes-tab Stop (`detail.mode: 'process-stop'`) — counted, never their bytes |
-| `link.opened`          | `POST /v1/system/open-url` — a link handed to this computer's browser; the host only, never the path or query                                 |
-| `browser.opened`       | browser sign-in window, browser control, and every browser stream attach                                                                      |
-| `browser.proxy-tested` | `POST /v1/browser/proxy/test` — a test of the browser proxy; the outcome and its error class in `detail`, never an address or a credential    |
-| `secrets.used`         | `POST /v1/secrets/use` — the `used` names only, never the output                                                                              |
-| `secrets.changed`      | secret put and delete — the name only                                                                                                         |
-| `warden.configured`    | `PATCH /v1/warden/config`                                                                                                                     |
-| `warden.ran`           | `POST /v1/warden/run`, and `POST /v1/warden/investigate` (detail `action: investigate`)                                                       |
-| `worktree.removed`     | `POST /v1/worktrees/remove`                                                                                                                   |
+| Event                  | Where it is caught                                                                                                                                         |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `device.paired`        | `AuditedPairingService.onGranted` — direct and relayed, with the carrier                                                                                   |
+| `pairing.refused`      | `AuditedPairingService` — folded per carrier                                                                                                               |
+| `pairing.code-minted`  | `POST /v1/pair/code`                                                                                                                                       |
+| `pairing.code-revoked` | `DELETE /v1/pair/code/:pairingId`                                                                                                                          |
+| `device.revoked`       | `DELETE /v1/pair/devices/:deviceId`                                                                                                                        |
+| `push.changed`         | push subscription enrol and remove                                                                                                                         |
+| `grants.changed`       | `PATCH /v1/grants`, one device's grants (`PATCH /v1/pair/devices/:deviceId/grants`)                                                                        |
+| `security.changed`     | `PATCH /v1/security` — with every setting's number or boolean after the change in `detail` — and an owner re-opening a passkey window                      |
+| `passkey.registered`   | `POST /v1/passkeys`                                                                                                                                        |
+| `step-up.succeeded`    | a passed step-up or unlock (`detail.action`); `step-up.failed` when refused                                                                                |
+| `device.key-rotated`   | `AuditedPairingService.rotateDeviceKey`, inside a step-up                                                                                                  |
+| `device.expired`       | `AuditedPairingService.revokeDevice` with no actor — the daemon's own idle expiry                                                                          |
+| `session.opened`       | `POST /v1/sessions` and a fork — an agent started, folded per device                                                                                       |
+| `agent.prompted`       | `POST /v1/sessions/:sessionId/send`, `/answer` and `/migrate/ask-to-stop-jobs` — folded per device per session                                             |
+| `fleet.configured`     | proposal create and apply, credential sign-in and its answer/cancel, tool install                                                                          |
+| `terminal.opened`      | terminal create, and every stream attach (`detail.mode: 'attach'`)                                                                                         |
+| `terminal.input`       | keystroke frames on a terminal stream, a Console write, and a Processes-tab Stop (`detail.mode: 'process-stop'`) — counted, never their bytes              |
+| `link.opened`          | `POST /v1/system/open-url` — a link handed to this computer's browser; the host only, never the path or query                                              |
+| `browser.opened`       | browser sign-in window, browser control, and every browser stream attach                                                                                   |
+| `browser.proxy-tested` | `POST /v1/browser/proxy/test` — a test of the browser proxy; the outcome and its error class in `detail`, never an address or a credential                 |
+| `secrets.used`         | `POST /v1/secrets/use` — the `used` names only, never the output                                                                                           |
+| `secrets.changed`      | secret put and delete — the name only                                                                                                                      |
+| `catalog.changed`      | a catalog made, renamed, described or deleted; an item published or withdrawn. Catalog id, item id, version, digest and revision, never what an item holds |
+| `catalog.exported`     | a signed catalog file made: catalog id, revision and the item ids it lists                                                                                 |
+| `warden.configured`    | `PATCH /v1/warden/config`                                                                                                                                  |
+| `warden.ran`           | `POST /v1/warden/run`, and `POST /v1/warden/investigate` (detail `action: investigate`)                                                                    |
+| `worktree.removed`     | `POST /v1/worktrees/remove`                                                                                                                                |
 
 Starting a daemon update (`POST /v1/daemon/update`, subject `daemon-update`) and changing the
 automatic-install setting (`PATCH /v1/daemon/update/settings`, subject `daemon-update-settings`, with

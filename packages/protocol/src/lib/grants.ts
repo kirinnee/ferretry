@@ -75,7 +75,7 @@ import { InstantSchema } from './common.ts';
 /**
  * The capabilities an operator is asked about, in the order they are asked.
  *
- * SEVEN, and the list is closed. Every one of them either reaches out of the daemon's own state onto
+ * EIGHT, and the list is closed. Every one of them either reaches out of the daemon's own state onto
  * the host — spawning a shell, writing an account's wrapper, opening a browser the operator is
  * signed into, reading a working tree — or decides how much of the host the daemon may spend on its
  * own. Everything the daemon does *inside its own state home* (sessions, tasks, attention, pins) is
@@ -91,6 +91,10 @@ import { InstantSchema } from './common.ts';
  * value in that child's environment — code execution on the host — and its `configure` axis sets and
  * deletes stored values. Before it existed those routes carried no demand at all, so any paired device
  * could run a command through them.
+ *
+ * `sharing` is appended after it for the same reason. Its `use` axis publishes this machine's skills and MCP
+ * setups to people who are not its devices, and signs for the machine; its `configure` axis governs only
+ * re-granting `sharing` (docs/catalogs.md, docs/grants.md).
  */
 export const DAEMON_CAPABILITIES = [
   'fleet',
@@ -100,6 +104,7 @@ export const DAEMON_CAPABILITIES = [
   'warden',
   'pairing',
   'secrets',
+  'sharing',
 ] as const;
 export type DaemonCapability = (typeof DAEMON_CAPABILITIES)[number];
 

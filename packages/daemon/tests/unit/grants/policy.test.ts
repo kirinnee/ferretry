@@ -48,7 +48,7 @@ const grantsWith = (capability: DaemonCapability, grant: { use: boolean; configu
 
 /**
  * THE SPECIFICATION, written out rather than derived from the code under test: every `configure`, and
- * the `use` of the three capabilities whose ordinary use reaches past the daemon.
+ * the `use` of the four capabilities whose ordinary use reaches past the daemon.
  */
 const NEEDS_STEP_UP: Readonly<Record<DaemonCapability, Readonly<Record<CapabilityAxis, boolean>>>> = {
   fleet: { use: false, configure: true },
@@ -58,6 +58,7 @@ const NEEDS_STEP_UP: Readonly<Record<DaemonCapability, Readonly<Record<Capabilit
   warden: { use: false, configure: true },
   pairing: { use: true, configure: true },
   secrets: { use: true, configure: true },
+  sharing: { use: true, configure: true },
 };
 
 /** The grant document states a matrix row can find a capability in. */
@@ -366,6 +367,7 @@ describe('what a refused caller is told', () => {
       'fleet supervision',
       'device pairing',
       'the secret store',
+      'catalog sharing',
     ]);
     should(describeDemand('fleet', 'configure')).equal('fleet.configure');
   });
