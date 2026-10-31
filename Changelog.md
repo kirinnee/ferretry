@@ -1,3 +1,13 @@
+## [4.150.0](https://github.com/kirinnee/ferretry/compare/v4.149.0...v4.150.0) (2026-10-31)
+
+### Features
+
+* **agenda:** Done · closes &F12 resolves the item and closes its card in one tap ([#1082](https://github.com/kirinnee/ferretry/issues/1082)) ([c4aa542](https://github.com/kirinnee/ferretry/commit/c4aa5424267cef5acb8ef8af4cf5e4e5390491c6))
+
+### Fixes
+
+* **pwa:** one Done row per board card ([#1093](https://github.com/kirinnee/ferretry/issues/1093)) ([fa83149](https://github.com/kirinnee/ferretry/commit/fa83149e7fa4c480efd7f1eac1ac608b076910e3))
+
 ## [4.149.0](https://github.com/kirinnee/ferretry/compare/v4.148.0...v4.149.0) (2026-10-31)
 
 ### Features

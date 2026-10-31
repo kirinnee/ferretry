@@ -1,3 +1,13 @@
+## [4.149.0](https://github.com/kirinnee/ferretry/compare/v4.148.0...v4.149.0) (2026-10-31)
+
+### Features
+
+* **browser:** page lifecycle tools — dialog, tabs, wait_for, console, network, emulate ([#1086](https://github.com/kirinnee/ferretry/issues/1086)) ([738078b](https://github.com/kirinnee/ferretry/commit/738078b3f657c3d9372b8029d28b620f5a0da81f))
+
+### Fixes
+
+* **board:** refile Unfiled cards to projects with no lanes or an ssh-alias origin ([#1091](https://github.com/kirinnee/ferretry/issues/1091)) ([9164f9a](https://github.com/kirinnee/ferretry/commit/9164f9ac46d73abb501ecf107165ee7b3d2c817f))
+
 ## [4.148.0](https://github.com/kirinnee/ferretry/compare/v4.147.0...v4.148.0) (2026-10-31)
 
 ### Features
