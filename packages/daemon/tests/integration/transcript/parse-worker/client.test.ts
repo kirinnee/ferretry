@@ -12,6 +12,8 @@ import { describe, it } from 'bun:test';
 import { join } from 'node:path';
 import should from 'should';
 import {
+  PARSE_IDLE_MS,
+  PARSE_WINDOW_HOLD_MS,
   type TranscriptParseThread,
   TranscriptParseWorker,
   type TranscriptParseWorkerOptions,
@@ -657,7 +659,7 @@ describe('WorkerTranscriptSource.window', () => {
     }
 
     // Assert
-    should(delays.filter(each => each !== 120_000)).deepEqual([30_000, 6 * 60 * 60_000]);
+    should(delays.filter(each => each !== 120_000)).deepEqual([PARSE_IDLE_MS, PARSE_WINDOW_HOLD_MS]);
   });
 });
 
