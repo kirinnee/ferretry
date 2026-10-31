@@ -65,11 +65,13 @@ interface HeldDialog {
 export class PageDialogs {
   private readonly held = new Map<string, HeldDialog>();
   private readonly watchers = new Map<string, Set<() => void>>();
+  private readonly timers: DialogTimers;
+  private readonly holdMs: number;
 
-  constructor(
-    private readonly timers: DialogTimers = SYSTEM_TIMERS,
-    private readonly holdMs: number = BROWSER_DIALOG_HOLD_MS,
-  ) {}
+  constructor(timers: DialogTimers = SYSTEM_TIMERS, holdMs: number = BROWSER_DIALOG_HOLD_MS) {
+    this.timers = timers;
+    this.holdMs = holdMs;
+  }
 
   hold(key: string, dialog: HeldDialogPort): void {
     const older = this.held.get(key);
@@ -257,8 +259,11 @@ export class NetworkLog {
   private readonly entries = new Map<string, NetworkEntry>();
   private readonly byRequest = new WeakMap<object, NetworkEntry>();
   private seq = 0;
+  private readonly now: () => number;
 
-  constructor(private readonly now: () => number = Date.now) {}
+  constructor(now: () => number = Date.now) {
+    this.now = now;
+  }
 
   started(request: LoggedRequestPort): void {
     this.seq += 1;
