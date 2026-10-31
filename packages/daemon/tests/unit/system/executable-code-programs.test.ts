@@ -40,11 +40,14 @@ describe('ExecutableCodePrograms', () => {
     should(ROOT_PROGRAM_FOLDERS).containEql('/run/current-system/sw/bin');
   });
 
-  it('should name the program it proved, of any name or only of the names asked for', async () => {
+  it('should name the program it proved, only among the names asked for', async () => {
     // Act / Assert
-    should(await programs(SYSTEM_SSH).programOf(4242)).equal('ssh');
-    should(await programs(SYSTEM_SSH).programOf(4242, new Set(['sudo']))).be.undefined();
-    should(await programs('/nix/store/bbb-ssh/bin/ssh').programOf(4242)).be.undefined();
+    should(await programs(SYSTEM_SSH).provenRootProgram(4242, new Set(['ssh']))).equal('ssh');
+    should(await programs(SYSTEM_SSH).provenRootProgram(4242, new Set(['sudo']))).be.undefined();
+    should(await programs('/usr/bin/sftp').provenRootProgram(4242, new Set())).be.undefined();
+    should(await programs('/usr/bin/sftp').provenRootProgram(4242, name => name.startsWith('sf'))).equal('sftp');
+    should(await programs('/usr/bin/sftp').provenRootProgram(4242, () => false)).be.undefined();
+    should(await programs('/nix/store/bbb-ssh/bin/ssh').provenRootProgram(4242, new Set(['ssh']))).be.undefined();
   });
 
   it('should never prove a store path no system folder resolves to: anyone may add one to the store', async () => {

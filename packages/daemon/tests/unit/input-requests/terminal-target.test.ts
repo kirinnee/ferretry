@@ -284,6 +284,33 @@ describe('a code program is every process of the foreground group, or none', () 
     should(seen.ok && seen.codeProgram).be.undefined();
   });
 
+  it('should refuse the write of a code when a reader joined the group after the card, with nothing typed', async () => {
+    // Arrange — the card saw ssh alone; by the write, the ferret's 'sh -c read' has joined ssh's foreground group.
+    const w = world();
+    w.ps = ' 4242 4242 7 bash -bash\n 7 7 7 ssh ssh bastion\n';
+    const port = target(w, proving(7));
+    const seen = await port.observe('s1', { kind: 'terminal', key: 'dev' });
+    if (!seen.ok) throw new Error('not seen');
+    w.ps = ' 4242 4242 7 bash -bash\n 7 7 7 ssh ssh bastion\n 8 7 7 sh sh -c read\n';
+
+    // Act
+    const checked = await port.type('s1', { kind: 'terminal', key: 'dev' }, '481516', true, seen.facts, {
+      codeProgram: true,
+    });
+    const unchecked = await target(w, proving(7)).type(
+      's1',
+      { kind: 'terminal', key: 'dev' },
+      '481516',
+      true,
+      seen.facts,
+    );
+
+    // Assert — refused only where the card relied on the code program; the facts themselves did not change.
+    should(checked).equal('target_changed');
+    should(w.typed).have.length(1);
+    should(unchecked).equal('typed');
+  });
+
   it('should not prove one with no program port wired', async () => {
     const seen = await observe(' 7 7 7 ssh ssh bastion\n');
 

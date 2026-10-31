@@ -3,7 +3,7 @@ import { hexInputChunks, terminalPaneTarget } from '../terminal/runtime-policy.t
 import type { TmuxCommandPort } from '../tmux/contracts.ts';
 import { PANE_PROOF_FORMAT, parsePaneSighting } from '../tmux/pane-proof.ts';
 import { digestFacts, digestLine } from './digest.ts';
-import type { CodeProgramPort, ObserveResult, TerminalInputTargetPort, TypeResult } from './ports.ts';
+import type { CodeProgramPort, ObserveResult, TerminalInputTargetPort, TypeOptions, TypeResult } from './ports.ts';
 import { recognisedConsumer } from './recognised.ts';
 import type { ProgramRunner, TerminalModes } from './terminal-modes.ts';
 
@@ -253,11 +253,15 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
     text: string,
     submit: boolean,
     expected: InputTargetFacts,
+    options?: TypeOptions,
   ): Promise<TypeResult> {
     if (target.kind !== 'terminal' || expected.kind !== 'terminal') return 'target_gone';
     const fresh = await this.look(sessionId, target.key);
     if (!fresh.ok || fresh.facts.kind !== 'terminal') return 'target_gone';
     if (digestFacts(fresh.facts) !== digestFacts(expected)) return 'target_changed';
+    // A code kept visible because a code program held the terminal: another member joining the foreground group (a
+    // reader the ferret started) is no change to the facts, so the program is proved again here.
+    if (options?.codeProgram === true && fresh.codeProgram !== true) return 'target_changed';
     const { guard } = fresh;
     if (!PINNABLE_COMMAND.test(guard.command)) return 'target_changed';
     const paneId = fresh.facts.paneProof.paneId;

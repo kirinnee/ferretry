@@ -101,6 +101,8 @@ export interface InputTargetPort {
     values: readonly InputFieldValue[],
     submit: boolean,
     expected: InputTargetFacts,
+    /** The card kept a code visible only because a code program was proved: the write proves it again, or refuses. */
+    options?: TypeOptions,
   ): Promise<TypeResult>;
   /** A picture of where the values go, for the owner's card, taken before anything is typed; nothing when none can be had. */
   shoot?(sessionId: string, target: InputTarget, facts: InputTargetFacts): Promise<InputShot | undefined>;
@@ -130,7 +132,14 @@ export interface TerminalInputTargetPort {
     text: string,
     submit: boolean,
     expected: InputTargetFacts,
+    options?: TypeOptions,
   ): Promise<TypeResult>;
+}
+
+/** What a write must prove again, beyond the facts the card was drawn from. */
+export interface TypeOptions {
+  /** A code program (`ObserveResult.codeProgram`) must still hold the terminal, or nothing is typed. */
+  readonly codeProgram?: boolean;
 }
 
 /** The card the owner answers. The daemon words the title and ask; the agent's prompt rides as `prompt` only. */

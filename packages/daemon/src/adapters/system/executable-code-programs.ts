@@ -53,22 +53,26 @@ export class ExecutableCodePrograms implements CodeProgramPort {
   }
 
   async codeProgram(pid: number): Promise<boolean> {
-    return (await this.programOf(pid, CODE_PROGRAMS)) !== undefined;
+    return (await this.provenRootProgram(pid, CODE_PROGRAMS)) !== undefined;
   }
 
   /**
-   * The name of the program a process runs, PROVED: the file it runs is what a root folder resolves that name to,
-   * through an entry this account cannot change. Only a name in `names` when given. `undefined` when anything is
-   * unproven or unreadable, so a caller fails closed. Note: a setuid process (sudo, su) is not dumpable, so its
+   * The name of the program a process runs, PROVED: one `names` accepts (a set, or a test for names such as a prefix;
+   * there is no default, because a root folder holds bash too),
+   * and the file it runs is what a root folder resolves that name to, through an entry this account cannot change.
+   * `undefined` when anything is unproven or unreadable, so a caller fails closed. Note: a setuid process (sudo, su) is not dumpable, so its
    * executable cannot be read and it is never proved here; prove one of those by its uids instead.
    */
-  async programOf(pid: number, names?: ReadonlySet<string>): Promise<string | undefined> {
+  async provenRootProgram(
+    pid: number,
+    names: ReadonlySet<string> | ((name: string) => boolean),
+  ): Promise<string | undefined> {
     if (!Number.isSafeInteger(pid) || pid <= 0) return undefined;
     const path = await this.executable(pid).catch(() => undefined);
     // A deleted executable reads "<path> (deleted)" on Linux: it is not the file on disk any more.
     if (path === undefined || !isAbsolute(path) || path.endsWith(' (deleted)')) return undefined;
     const name = basename(path);
-    if (names !== undefined && !names.has(name)) return undefined;
+    if (!(typeof names === 'function' ? names(name) : names.has(name))) return undefined;
     const running = await this.resolve(path).catch(() => undefined);
     if (running === undefined) return undefined;
     for (const folder of this.folders) {

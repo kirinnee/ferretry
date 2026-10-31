@@ -5,6 +5,7 @@ import type {
   InputTargetPort,
   ObserveResult,
   TerminalInputTargetPort,
+  TypeOptions,
   TypeResult,
 } from './ports.ts';
 
@@ -54,6 +55,7 @@ export class InputTargetRouter implements InputTargetPort {
     values: readonly InputFieldValue[],
     submit: boolean,
     expected: InputTargetFacts,
+    options?: TypeOptions,
   ): Promise<TypeResult> {
     if (target.kind === 'secret')
       return this.store === undefined
@@ -66,7 +68,7 @@ export class InputTargetRouter implements InputTargetPort {
     const [only, ...rest] = values;
     // A terminal shows one prompt at a time: anything but exactly one value is refused with nothing typed.
     if (only === undefined || rest.length > 0) return 'target_changed';
-    return await this.terminal.type(sessionId, target, only.text, submit, expected);
+    return await this.terminal.type(sessionId, target, only.text, submit, expected, options);
   }
 
   async document(sessionId: string, key: string): Promise<string | undefined> {

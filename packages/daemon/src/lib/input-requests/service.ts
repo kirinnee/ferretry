@@ -1003,7 +1003,10 @@ export class InputRequestService {
         if (maskedFromReads(field, typed))
           this.deps.values.hold(request.sessionId, (values[index] as InputFieldValue).text, request.agendaItemId);
       const outcome: TypeResult = await this.deps.target
-        .type(request.sessionId, request.target, values, submitted, seen.facts)
+        .type(request.sessionId, request.target, values, submitted, seen.facts, {
+          // A code left visible on the strength of a proven code program is typed only while one still holds it.
+          codeProgram: seen.codeProgram === true && fields.some(field => field.sensitivity === 'code'),
+        })
         .catch((): TypeResult => 'uncertain');
       wrote?.(outcome);
       // Taken before anything else is awaited: what the ferret does after this counts against a sign-in's facts.
