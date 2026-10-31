@@ -20,7 +20,7 @@ import {
   RELEASE_MERGE_REASON,
   UNFILED_PROJECT_NAME,
 } from '../../../src/lib/board-projects/index.ts';
-import { lanes, templateLanes } from '../board/support.ts';
+import { lanes, oldQuickLanes, templateLanes } from '../board/support.ts';
 import { DOCS_ID, FERRETRY_ID, project } from './support.ts';
 
 const OWNER: LaneActor = { kind: 'owner' };
@@ -327,5 +327,71 @@ describe('LaneSetService merges Released and To test at boot', () => {
       merged: false,
       problem: 'disk gone',
     });
+  });
+});
+
+describe('LaneSetService gives quick sets their To test lane at boot', () => {
+  it('should add To test to each stored quick set from before it, move no card, and ask nothing', async () => {
+    // Arrange
+    const { store, agenda, relocator, service } = world();
+    store.sets.set(UNFILED_PROJECT_ID, { ...oldQuickLanes(UNFILED_PROJECT_ID), version: 2 });
+    store.sets.set(DOCS_ID, oldQuickLanes(DOCS_ID));
+    store.sets.set(FERRETRY_ID, templateLanes(FERRETRY_ID));
+
+    // Act
+    const outcomes = await service.addQuickToTestLanes();
+
+    // Assert
+    should(outcomes).deepEqual([
+      { projectId: UNFILED_PROJECT_ID, added: true, version: 3 },
+      { projectId: DOCS_ID, added: true, version: 2 },
+    ]);
+    should(store.sets.get(UNFILED_PROJECT_ID)?.lanes.map(lane => lane.id)).deepEqual([
+      'todo',
+      'doing',
+      'to-test',
+      'closed',
+    ]);
+    should(store.sets.get(UNFILED_PROJECT_ID)?.confirmedBy).equal('owner');
+    should(store.sets.get(FERRETRY_ID)?.version).equal(1);
+    should(relocator.moves).be.empty();
+    should(agenda.raised).be.empty();
+  });
+
+  it('should do nothing the second time, nor for an Unfiled board that keeps the built-in lanes', async () => {
+    // Arrange
+    const { store, service } = world();
+    store.sets.set(DOCS_ID, oldQuickLanes(DOCS_ID));
+    await service.addQuickToTestLanes();
+
+    // Act
+    const again = await service.addQuickToTestLanes();
+
+    // Assert
+    should(again).deepEqual([]);
+    should(store.sets.has(UNFILED_PROJECT_ID)).be.false();
+    should((await service.laneSet(UNFILED_PROJECT_ID))?.lanes.map(lane => lane.id)).containEql('to-test');
+  });
+
+  it('should report a project it could not update and go on with the rest', async () => {
+    // Arrange
+    const { store, service } = world();
+    store.sets.set(DOCS_ID, oldQuickLanes(DOCS_ID));
+    const transact = store.transact.bind(store);
+    store.transact = async (projectId, decide) => {
+      if (projectId === FERRETRY_ID) throw new Error('damaged lane set');
+      if (projectId === UNFILED_PROJECT_ID) return Promise.reject('disk gone');
+      return await transact(projectId, decide);
+    };
+
+    // Act
+    const outcomes = await service.addQuickToTestLanes();
+
+    // Assert
+    should(outcomes).deepEqual([
+      { projectId: UNFILED_PROJECT_ID, added: false, problem: 'disk gone' },
+      { projectId: FERRETRY_ID, added: false, problem: 'damaged lane set' },
+      { projectId: DOCS_ID, added: true, version: 2 },
+    ]);
   });
 });

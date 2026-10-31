@@ -4,4 +4,5 @@ export * from './query.ts';
 export * from './releases.ts';
 export * from './remote.ts';
 export * from './transcript.ts';
+export * from './unfiled.ts';
 export * from './watcher.ts';

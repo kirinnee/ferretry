@@ -417,13 +417,18 @@ export class InputRequestService {
     // Every quarantine comes back before any request does, and before any reader is let in: a slow
     // observation of one request must not leave a held terminal open, and a journal that cannot be read
     // holds that session's terminals instead.
+    const unresolved: QuarantineHold[] = [];
     for (const sessionId of sessionIds) {
-      await this.restoreQuarantines(sessionId, now).catch(() => this.deps.quarantine.lockSession(sessionId));
+      unresolved.push(
+        ...(await this.restoreQuarantines(sessionId, now).catch(() => {
+          this.deps.quarantine.lockSession(sessionId);
+          return [];
+        })),
+      );
     }
     // A hold that was unresolved when the daemon stopped (a write may have landed) runs a full window from now.
-    const settled = sessionIds.flatMap(sessionId =>
-      this.deps.quarantine.unresolved(sessionId).map(hold => ({ hold, until: this.deps.quarantine.settle(hold) })),
-    );
+    // Only the holds THIS replay brought back: a delivery admitted while it ran owns its hold and settles it itself.
+    const settled = unresolved.map(hold => ({ hold, until: this.deps.quarantine.settle(hold) }));
     this.deps.quarantine.unlock();
     for (const { hold, until } of settled)
       await this.journalHold(hold, INPUT_QUARANTINE_EVENT_TYPES.started, until).catch(() => undefined);
@@ -440,7 +445,7 @@ export class InputRequestService {
    * Every hold the journal still has comes back with all of its names: a hold's last word decides it, so a
    * finished request can never erase one. Holds that were unresolved come back unresolved.
    */
-  private async restoreQuarantines(sessionId: string, now: number): Promise<void> {
+  private async restoreQuarantines(sessionId: string, now: number): Promise<readonly QuarantineHold[]> {
     const holds = new Map<string, { readonly names: readonly string[]; readonly until: number | 'in-flight' }>();
     for (const event of await this.deps.journal.quarantines(sessionId)) {
       if (event.sessionId !== sessionId) continue;
@@ -451,9 +456,13 @@ export class InputRequestService {
         });
       else holds.delete(event.hold);
     }
+    const unresolved: QuarantineHold[] = [];
     for (const [id, { names, until }] of holds) {
-      if (until === 'in-flight' || until > now) this.deps.quarantine.restore(sessionId, names, until, id);
+      if (until !== 'in-flight' && until <= now) continue;
+      const hold = this.deps.quarantine.restore(sessionId, names, until, id);
+      if (hold !== undefined && until === 'in-flight') unresolved.push(hold);
     }
+    return unresolved;
   }
 
   /** The terminals of a session kept from an agent's eyes now, for the owner's viewer. Owner only. */
@@ -1048,8 +1057,8 @@ function noteOf(state: string, reason: InputReason | undefined): string {
 
 function tellOf(request: InputRequest, state: string, reason: InputReason | undefined, uncertain: boolean): string {
   if (uncertain)
-    return `${request.agendaItemId} was interrupted while the owner's value was going into %terminal:${request.target.key}; it may be partly or fully typed there. Read the terminal before you act, and ask in chat if you still need it.`;
+    return `${request.agendaItemId} was interrupted while the owner's value was going into %terminal:${request.target.key}; it may be partly or fully typed there. Read the terminal before you act once its quarantine allows; if you still need a value, raise a fresh terminal_request_input, or ask the owner to take over the terminal.`;
   if (state === 'delivered')
     return `${request.agendaItemId} was answered and typed into %terminal:${request.target.key}. Read the terminal to continue.`;
-  return `${request.agendaItemId} ended without a value (${state}${reason === undefined ? '' : `: ${reason.replaceAll('_', ' ')}`}). Ask in chat if you still need it.`;
+  return `${request.agendaItemId} ended without a value (${state}${reason === undefined ? '' : `: ${reason.replaceAll('_', ' ')}`}). If you still need a value, raise a fresh terminal_request_input, or ask the owner to take over the terminal.`;
 }

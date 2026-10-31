@@ -3,6 +3,7 @@ import {
   InputCancelBodySchema,
   InputDeliverBodySchema,
   type InputQuarantineList,
+  type InputRequest,
   type InputRequestList,
 } from '@ferretry/protocol';
 import { isHumanAdminActor } from '../../api/actor.ts';
@@ -71,10 +72,29 @@ function requestOf(context: RouteContext): string {
   return id;
 }
 
+/** Mirrors the notice `InputRequestService` masks a quarantined terminal's facts with. */
+const QUARANTINE_NOTICE = '[hidden: a secret was just typed in this terminal]';
+
+/** A request as it may be spelled right now: a terminal quarantined since the service answered reads as masked. */
+function sealed(service: InputRequestService, request: InputRequest): InputRequest {
+  const facts = request.observed;
+  if (facts?.kind !== 'terminal' || service.quarantinedUntil(request.sessionId, [request.target.key]) === undefined)
+    return request;
+  return {
+    ...request,
+    observed: {
+      ...facts,
+      promptLine: QUARANTINE_NOTICE,
+      foreground: { ...facts.foreground, comm: QUARANTINE_NOTICE, argv: '' },
+    },
+  };
+}
+
 async function list(service: InputRequestService, context: RouteContext, all: boolean): Promise<ApiResponse> {
   const caller = ownerOf(context);
   const requests = await service.list(caller, all ? undefined : sessionOf(context)).catch(answered);
-  const body: InputRequestList = { requests: [...requests] };
+  // The last synchronous step before the body is spelled: a hold taken since the service answered still wins.
+  const body: InputRequestList = { requests: requests.map(request => sealed(service, request)) };
   return jsonResponse(body);
 }
 

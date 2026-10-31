@@ -1,35 +1,55 @@
-import type { FleetMachineView } from '@ferretry/protocol';
-import { useId, useState } from 'react';
+import type { BrowserProxySetting, FleetMachineView } from '@ferretry/protocol';
+import { useId, useRef, useState } from 'react';
 import { Button } from '../../../shell/primitives.tsx';
-import { type SetupAccess } from '../setup/setup-access.ts';
+import type { SetupAccess } from '../setup/setup-access.ts';
 import { SetupNote, SetupSection } from '../setup/setup-ui.tsx';
 import { ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
+import { testBrowserProxy } from './browser-proxy-api.ts';
 import { type BrowserProxyDraft, draftOf, settingOf } from './browser-proxy-draft.ts';
+import { BrowserProxyTestBlock } from './browser-proxy-test-block.tsx';
+import type { ProxyTestShown } from './browser-proxy-test-result.tsx';
 import { machineSettings } from './machine-settings.ts';
 
 /**
  * "Browser proxy" (docs/browser-proxy.md): where the agent browser sends its traffic. Empty means direct.
  * The form holds the NAMES of secrets, never a username or password: those live in the secret store
  * (`fy secret set NAME`) and the browser reads them when it starts.
+ *
+ * "Test proxy" asks the daemon to try one request through the proxy: the one being edited when it differs
+ * from the saved one, else the saved one. The daemon resolves the secrets; nothing is saved by a test.
  */
 export function BrowserProxySection({
   machine,
   machineName,
   access,
   onSaved,
+  online = true,
 }: {
   readonly machine: FleetMachineView;
   readonly machineName: string;
   readonly access: SetupAccess;
   readonly onSaved: () => void;
+  /** `false` while the machine does not answer: a test could not run. */
+  readonly online?: boolean;
 }) {
   const { changes } = access;
   const ids = useId();
   const saved = machine.browserProxy ?? null;
   const [draft, setDraft] = useState<BrowserProxyDraft>(draftOf(saved));
+  const [testing, setTesting] = useState(false);
+  const [shown, setShown] = useState<ProxyTestShown | null>(null);
+  const testRun = useRef(0);
+  // Whatever a test said is about the proxy as it was: an edit makes it stale, and an answer still on its
+  // way for the old text is dropped.
+  const forgetTest = (): void => {
+    testRun.current += 1;
+    setTesting(false);
+    setShown(null);
+  };
   const edit = (patch: Partial<BrowserProxyDraft>): void => {
     setDraft(current => ({ ...current, ...patch }));
     changes.clear();
+    forgetTest();
   };
   // A daemon that predates the setting cannot be asked for it.
   if (machine.browserProxy === undefined) return null;
@@ -37,12 +57,47 @@ export function BrowserProxySection({
   const wanted = draft.url.trim() === '' ? ({ ok: true, setting: null } as const) : settingOf(draft);
   const before = JSON.stringify(draftOf(saved));
   const dirty = JSON.stringify(draft) !== before;
+  // What to test: nothing is sent for the saved proxy (`{}`); the edited setting is sent only when it differs.
+  const testBody: { readonly proxy?: BrowserProxySetting } | null =
+    draft.url.trim() === ''
+      ? saved === null
+        ? null
+        : {}
+      : wanted.ok && wanted.setting !== null
+        ? dirty
+          ? { proxy: wanted.setting }
+          : {}
+        : null;
+  const test = (): void => {
+    if (testBody === null) return;
+    testRun.current += 1;
+    const mine = testRun.current;
+    setTesting(true);
+    setShown(null);
+    void access
+      .act(client => testBrowserProxy(client, testBody.proxy))
+      .then(outcome => {
+        if (testRun.current !== mine) return;
+        setTesting(false);
+        setShown(
+          outcome.kind === 'done'
+            ? { kind: 'result', result: outcome.value }
+            : { kind: 'refused', sentence: outcome.sentence },
+        );
+      });
+  };
   const apply = (browserProxy: NonNullable<typeof saved> | null): void => {
     void changes.apply(machineSettings(machine, { browserProxy })).then(result => {
       if (result.kind === 'refused') return;
       onSaved();
     });
   };
+
+  const typed = draft.url.trim() !== '';
+  const testHint =
+    !typed && saved === null
+      ? 'Type a proxy address to test it.'
+      : `Tries one request through the proxy from ${machineName}, using the stored secrets. ${dirty && typed ? 'It tests what is typed above, saved or not. ' : ''}Nothing is saved.`;
 
   return (
     <SetupSection title="Browser proxy" name="browser-proxy">
@@ -124,6 +179,13 @@ export function BrowserProxySection({
           {wanted.problem}
         </SetupNote>
       )}
+      <BrowserProxyTestBlock
+        disabled={testBody === null || !online}
+        testing={testing}
+        hint={testHint}
+        shown={shown}
+        onTest={test}
+      />
       {wanted.ok && dirty ? (
         <ChangeApplyPanel
           machineName={machineName}
@@ -133,7 +195,14 @@ export function BrowserProxySection({
           submitLabel={wanted.setting === null ? 'Turn the browser proxy off' : 'Save browser proxy'}
           onSubmit={() => apply(wanted.setting)}
         >
-          <Button type="button" data-browser-proxy-undo="" onClick={() => setDraft(draftOf(saved))}>
+          <Button
+            type="button"
+            data-browser-proxy-undo=""
+            onClick={() => {
+              setDraft(draftOf(saved));
+              forgetTest();
+            }}
+          >
             Keep what is saved
           </Button>
         </ChangeApplyPanel>

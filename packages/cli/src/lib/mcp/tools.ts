@@ -51,6 +51,11 @@ const ASK_MESSAGE = {
 };
 const URL = { type: 'string', description: 'An http or https URL.' };
 const SELECTOR = { type: 'string', description: 'A CSS or Playwright selector, e.g. "button[type=submit]".' };
+const REF = {
+  type: 'string',
+  description: 'An element ref from browser_read mode "snapshot", e.g. "e12". Use this or selector.',
+};
+const COORDINATE = { type: 'number', minimum: 0, description: 'Viewport CSS pixels.' };
 
 const object = (properties: Record<string, unknown>, required: readonly string[] = []) => ({
   type: 'object',
@@ -144,7 +149,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'terminal_request_input',
     tool: 'terminal.request_input',
     description:
-      'Ask the owner to type ONE value into a terminal: a password, sudo password or passphrase (sensitivity secret), or a plain answer such as a username, hostname or y/N (sensitivity plain). Have the program show its prompt first, with echo off for a secret; then raise this and the owner types the value on a card, so you never hold it. Returns the card (!A<n>) at once; call input_wait. "prompt" is shown to the owner as "the agent says", never as fact: say what the value is for. Put no secret anywhere in the call. A secret is never returned to you, and terminal_read and terminal_wait on that terminal are refused for about two minutes after it is typed (you can still send keys); a plain answer is NOT secret and the card tells the owner you can see it. terminal_send is blocked on this terminal until the card is answered, cancelled or expires.',
+      'Ask the owner to type ONE value into a terminal on a card: secret (a password or passphrase; ALWAYS for sudo), private (an echoing code) or plain (you see it). Returns !A<n>; then call input_wait. You never hold a secret; the terminal is unreadable for about two minutes after.',
     inputSchema: object(
       {
         name: NAME,
@@ -228,33 +233,81 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
   {
     name: 'browser_navigate',
     tool: 'browser.navigate',
-    description: 'Load a URL in a page.',
-    inputSchema: object({ name: NAME, url: URL }, ['name', 'url']),
+    description: 'Load a URL in a page, or go back, forward or reload.',
+    inputSchema: object({ name: NAME, url: URL, history: { type: 'string', enum: ['back', 'forward', 'reload'] } }, [
+      'name',
+    ]),
   },
   {
     name: 'browser_click',
     tool: 'browser.click',
-    description: 'Click an element in a page.',
-    inputSchema: object({ name: NAME, selector: SELECTOR }, ['name', 'selector']),
+    description: 'Click an element (ref or selector), or a point (x, y) for a canvas or map.',
+    inputSchema: object(
+      {
+        name: NAME,
+        ref: REF,
+        selector: SELECTOR,
+        x: COORDINATE,
+        y: COORDINATE,
+        button: { type: 'string', enum: ['left', 'right', 'middle'] },
+        double: { type: 'boolean' },
+        modifiers: {
+          type: 'array',
+          items: { type: 'string', enum: ['Alt', 'Control', 'ControlOrMeta', 'Meta', 'Shift'] },
+        },
+      },
+      ['name'],
+    ),
   },
   {
     name: 'browser_type',
     tool: 'browser.type',
-    description: 'Fill an input in a page with text, replacing what it held.',
-    inputSchema: object({ name: NAME, selector: SELECTOR, text: { type: 'string' } }, ['name', 'selector', 'text']),
+    description:
+      'Fill a field (ref or selector) with text, replacing what it held. submit presses Enter after; slowly types key by key. Never a secret.',
+    inputSchema: object(
+      {
+        name: NAME,
+        ref: REF,
+        selector: SELECTOR,
+        text: { type: 'string' },
+        submit: { type: 'boolean' },
+        slowly: { type: 'boolean' },
+      },
+      ['name', 'text'],
+    ),
   },
   {
     name: 'browser_read',
     tool: 'browser.read',
     description:
-      'Read a page: its visible text, or (mode "a11y") its accessibility tree, which names the buttons, links and fields you can act on.',
-    inputSchema: object({ name: NAME, mode: { type: 'string', enum: ['text', 'a11y'] }, selector: SELECTOR }, ['name']),
+      'Read a page: visible text, or mode "snapshot" (use it first): the accessibility tree with a ref per element, which other browser tools take. find narrows it to lines with that text.',
+    inputSchema: object(
+      {
+        name: NAME,
+        mode: { type: 'string', enum: ['text', 'a11y', 'snapshot'] },
+        ref: REF,
+        selector: SELECTOR,
+        find: { type: 'string' },
+        depth: { type: 'integer', minimum: 1 },
+        boxes: { type: 'boolean', description: 'Add each element’s viewport box, for a click by x, y.' },
+      },
+      ['name'],
+    ),
   },
   {
     name: 'browser_screenshot',
     tool: 'browser.screenshot',
-    description: 'Take a screenshot of a page.',
-    inputSchema: object({ name: NAME }, ['name']),
+    description: 'Take a screenshot of a page, the full page, or one element (ref or selector).',
+    inputSchema: object(
+      {
+        name: NAME,
+        ref: REF,
+        selector: SELECTOR,
+        fullPage: { type: 'boolean' },
+        format: { type: 'string', enum: ['png', 'jpeg'] },
+      },
+      ['name'],
+    ),
   },
   {
     name: 'browser_close',

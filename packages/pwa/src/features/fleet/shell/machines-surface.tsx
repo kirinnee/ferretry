@@ -1,6 +1,6 @@
 /**
- * One machine in Settings: its name and status, then its five views as underlined tabs —
- * Runtimes, Credentials, Profiles, Components and Machine (docs/design/account-model.md §4.2).
+ * One machine in Settings: its name and status, then its six views as underlined tabs —
+ * Runtimes, Credentials, Profiles, Components, Browser and Machine (docs/design/account-model.md §4.2).
  *
  * WHICH machine is open is chosen one level up: the Settings sidebar on a desktop and the Machines card
  * on a phone both list every paired machine with its status. This surface used to carry its own
@@ -15,7 +15,7 @@
  */
 
 import type { FleetMachineView } from '@ferretry/protocol';
-import { Boxes, KeyRound, Layers, Play, SlidersHorizontal } from 'lucide-react';
+import { Boxes, Globe, KeyRound, Layers, Play, SlidersHorizontal } from 'lucide-react';
 import type { ComponentType, ReactNode } from 'react';
 import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
 import type { DaemonConnection, DaemonId } from '../../../lib/daemon-connection.ts';
@@ -67,6 +67,7 @@ const TAB_ICONS: Readonly<Record<MachineTabId, ReactNode>> = {
   credentials: <KeyRound size={15} aria-hidden="true" />,
   profiles: <Layers size={15} aria-hidden="true" />,
   components: <Boxes size={15} aria-hidden="true" />,
+  browser: <Globe size={15} aria-hidden="true" />,
   machine: <SlidersHorizontal size={15} aria-hidden="true" />,
 };
 

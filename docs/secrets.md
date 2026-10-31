@@ -61,6 +61,9 @@ rendered:
 
 - the output of a `use` child, on both stdout and stderr;
 - an operator read of a session's **screen**, its **transcript**, and its **journal**;
+- what a **browser page** shows through the browser tools — a read, a snapshot, the page's address —
+  to an agent and to a person ([agent-tools.md](agent-tools.md#what-is-enforced-and-where)); a screenshot
+  is pixels and is not;
 - a ferret's **Processes** tab: every command line and every byte of a process's output
   ([processes.md](processes.md#secrets) says what that cannot catch).
 

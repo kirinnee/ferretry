@@ -244,7 +244,7 @@ _n_ runtimes, Not set up yet, Offline, Locked) and **Add a machine** (the existi
 old Daemons section is merged in: each machine is ONE place, its connection and security panels on its
 **Machine** tab. A machine that is not set up shows a **Finish setting up _machine_** banner above its tabs.
 
-Each machine has five views, drawn as underlined tabs in sentence case (they scroll sideways on a
+Each machine has six views, drawn as underlined tabs in sentence case (they scroll sideways on a
 phone, keeping the current one centred):
 
 | Tab             | Shows                                                                                                                                                                                                                                                                                              | Primary action               |
@@ -253,6 +253,7 @@ phone, keeping the current one centred):
 | **Credentials** | grouped by harness: email, label, "Shared with claude in your terminal", "Copied slot from _machine_", status, "Used by _n_ runtimes", usage bars                                                                                                                                                  | **+ Add a login**            |
 | **Profiles**    | each row leads with the name and a **scope badge** (Generic, Claude only, Codex only; Mixed for one written before P7) and ONE line, "Claude only · 4 parts · Used by 2 runtimes"; the layer stack, conflicts and per-harness detail open behind a tap (owner: the old tab was "VERY complicated") | **+ Build a new profile**    |
 | **Components**  | the six kinds with a one-line description and a count; each opens its list                                                                                                                                                                                                                         | **+ New _kind_** (in a list) |
+| **Browser**     | Browser mode (Headless / Real window); Browser proxy (address, bypass list, secret-name credentials) with **Test proxy**; the honest user-agent line; a status line (running or stopped, via proxy or direct)                                                                                      | **Test proxy**               |
 | **Machine**     | Agent permissions; Tools on _machine_ (installed + version, or Install); Setup (**Clone from another machine**, **Import again**); Connection and security (Warden, Secrets, devices, grants, Security, Security log, Carrier, Host checks…); About this machine                                   | —                            |
 
 Detail pages (one concept each):

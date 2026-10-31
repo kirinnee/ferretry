@@ -453,7 +453,15 @@ describe('the node-datachannel engine answering an offer', () => {
 /** The library's own threads in this process — one worker per core, its poller and the SCTP pair — by name. */
 function libraryThreads(): number {
   return readdirSync('/proc/self/task').filter(task => {
-    const name = readFileSync(`/proc/self/task/${task}/comm`, 'utf8').trim();
+    // A thread listed by readdir can end before its `comm` is read; an ended thread is not running, so it
+    // is not counted. Reading it unguarded threw ENOENT exactly while the library was shutting threads down.
+    let name: string;
+    try {
+      name = readFileSync(`/proc/self/task/${task}/comm`, 'utf8').trim();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+      throw error;
+    }
     return name.startsWith('RTC') || name.startsWith('SCTP');
   }).length;
 }

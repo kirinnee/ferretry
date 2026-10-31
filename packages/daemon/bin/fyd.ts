@@ -318,6 +318,7 @@ import {
   stackSamplerEnabled,
   systemLegacyWireTimers,
   TmuxPaneSnapshot,
+  TunnelProxyProbe,
   type ViewerSocket,
   WebCryptoPasskeyCrypto,
   WebCryptoRelayIdentityKeys,
@@ -367,7 +368,7 @@ import {
 import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
 import { HostCodexAppServerProcesses } from '../src/adapters/process/codex-app-server-stopper.ts';
 import { runPackageInstall } from '../src/adapters/process/package-install.ts';
-import { terminationGate } from '../src/adapters/runtime/termination-gate.ts';
+import { releaseAcquired, terminationGate } from '../src/adapters/runtime/termination-gate.ts';
 import {
   AccountAutoResumeAvailability,
   BootExitRecorder,
@@ -566,7 +567,7 @@ import {
   SessionCards,
   type SessionLivenessSource,
 } from '../src/lib/board/index.ts';
-import { GitHubWatcher } from '../src/lib/board-github/index.ts';
+import { GitHubWatcher, UnfiledRefiler } from '../src/lib/board-github/index.ts';
 import { BoardImporter, LaneSetImportProjects, type TaskAssigneeCandidate } from '../src/lib/board-import/index.ts';
 import {
   ConfigChangeLedger,
@@ -680,6 +681,7 @@ import {
   BootProgress,
   type BootRefusal,
   type BrowserLoginLifecycle,
+  BrowserProxyTester,
   type BrowserSessionLauncher,
   BrowserSessionService,
   type BrowserViewerHost,
@@ -1024,6 +1026,7 @@ import {
   type SessionAnswerSubsystem,
   SessionAttachmentStore,
   SessionAttachService,
+  SessionBoardResolver,
   SessionConsoleService,
   SessionControlError,
   type SessionControlFailure,
@@ -1936,6 +1939,8 @@ interface BoardWorld {
   readonly cards: SessionCards;
   /** Which card each session works on (`config.focusTask`): what the Warden tells a ferret it starts again. */
   readonly focus: StorageSessionFocus;
+  /** The one `ProjectAdoption`: a ferret's first card, and the Unfiled board's refile, register through it. */
+  readonly adoption: ProjectAdoption;
 }
 
 /**
@@ -2028,7 +2033,7 @@ function createBoardWorld(
     diagnostics,
     bin,
   });
-  return { store, board, cards, focus };
+  return { store, board, cards, focus, adoption };
 }
 
 /**
@@ -5984,6 +5989,8 @@ function createAgentToolsSubsystem(input: {
   readonly input: AgentInputPort;
   readonly scrub: (sessionId: string, text: string) => string;
   readonly quarantinedUntil: (sessionId: string, names: readonly (string | undefined)[]) => number | undefined;
+  /** The vault redactor every operator read is scrubbed by; a page's text goes through it too. */
+  readonly redactor: Pick<SecretRedactor, 'batch'>;
 }): MountedSubsystems['agentTools'] {
   const clock = { now: () => Date.now() };
   const control = new SurfaceControl(
@@ -6016,6 +6023,7 @@ function createAgentToolsSubsystem(input: {
       input: input.input,
       scrub: input.scrub,
       quarantinedUntil: input.quarantinedUntil,
+      redactor: input.redactor,
       clock,
       sleep: async milliseconds => await Bun.sleep(milliseconds),
     }),
@@ -9244,10 +9252,31 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // the bind with the other loops, and stopped with the daemon.
       const boardSessionFacts = new StorageSessionFacts(storage);
       const boardSubFerrets = new StorageSubFerretDirectory(storage);
+      const boardCopies = new GitWorkingCopies();
+      // The Unfiled board's cards that belong on a project's board are refiled there: by a linked PR's repository,
+      // else by the folder the card's ferret works in (registering its repository by `ProjectAdoption`'s rules).
+      // ONE instance, so the watcher's tick and the boot run never overlap.
+      const unfiledRefiler = new UnfiledRefiler({
+        board: boardWorld.board,
+        sessions: new SessionBoardResolver(
+          boardSessionFacts,
+          new SessionProjects(
+            boardSessionFacts,
+            { projects: async () => await catalogs.projects() },
+            new GitRepositoryProbe(),
+            [...COMMON_SCRATCH_ROOTS, tmpdir()],
+          ),
+          boardWorld.adoption,
+        ),
+        projects: { projects: async () => await catalogs.projects() },
+        copies: boardCopies,
+        clock: { now: () => clock.now() },
+        diagnostics: boardDiagnostics,
+      });
       const boardGitHub = new GitHubWatcher({
         board: boardWorld.board,
         gh: new GhCliRunner(),
-        copies: new GitWorkingCopies(),
+        copies: boardCopies,
         sessions: { cwdOf: async sessionId => (await boardSessionFacts.read(sessionId))?.cwd ?? null },
         projects: { projects: async () => await catalogs.projects() },
         transcripts: createSessionTranscriptTail(storage),
@@ -9266,6 +9295,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         clock: { now: () => clock.now(), random: () => Math.random() },
         diagnostics: boardDiagnostics,
+        unfiled: unfiledRefiler,
         version: daemonVersion,
       });
       // The warden spawns wardens through the SAME start every other caller uses, so a warden is an
@@ -9522,8 +9552,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         agendaFilesMigrated,
       );
       // Released and To test are one lane now: every stored set that still has both is folded into one at boot,
-      // its cards moved with it, and the owner is asked nothing. Idempotent, so every boot runs it, once the boot
-      // has settled and before the import below.
+      // its cards moved with it, and the owner is asked nothing. A `quick` set from before To test gains it the same
+      // way. Then the Unfiled cards that belong on a project's board are refiled there (`UnfiledRefiler`), so a
+      // card stuck since before projects registered themselves moves without waiting for the watcher. Each step is
+      // idempotent, so every boot runs them, once the boot has settled and before the import below.
       unrefTimer(1000, () => {
         void laneSets
           .mergeReleaseLanes()
@@ -9536,6 +9568,17 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               );
             }
           })
+          .then(async () => await laneSets.addQuickToTestLanes())
+          .then(outcomes => {
+            for (const outcome of outcomes) {
+              process.stderr.write(
+                outcome.added
+                  ? `board lanes: ${outcome.projectId} quick lanes gained To test (version ${String(outcome.version)})\n`
+                  : `board lanes: ${outcome.projectId} could not add To test to its quick lanes: ${outcome.problem}\n`,
+              );
+            }
+          })
+          .then(async () => await unfiledRefiler.run())
           .catch(() => undefined);
       });
       // The one-time import of the old per-session task files onto the project boards. It shares the board's
@@ -11199,6 +11242,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         browserLogin,
         browser: browserHost,
         inputRequests: inputRequestService,
+        browserProxy: {
+          tester: new BrowserProxyTester({
+            saved: async () => (await declaredAccountModel())?.machine.browserProxy,
+            secrets: async () => await secretVault.values(),
+            probe: new TunnelProxyProbe(),
+            now: () => performance.now(),
+          }),
+          state: () => browserService.overview(),
+        },
         agentTools: createAgentToolsSubsystem({
           storage,
           terminals: terminalSubsystem,
@@ -11208,6 +11260,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           input: inputRequestService,
           scrub: (sessionId, text) => inputRequestService.scrub(sessionId, text),
           quarantinedUntil: (sessionId, names) => inputRequestService.quarantinedUntil(sessionId, names),
+          redactor: secretRedactor,
         }),
         configFiles: createConfigFilesSubsystem({
           activities,
@@ -12969,21 +13022,18 @@ async function execute(answer: ArgumentAnswer & { readonly kind: 'boot' | 'check
   // when that failed, the only thing this daemon had ever written was nothing at all.
   const notices = bootJournal(answer.overrides.logLevel);
   // A boot listens for SIGINT/SIGTERM from its first instant: interrupted before it serves, it releases
-  // what it has acquired so far and exits; once serving, the signal ends the wait below as always.
+  // what it has acquired — including what the still-running boot registers until the very moment it
+  // exits — and exits; once serving, the signal ends the wait below as always.
   const gate =
     answer.kind === 'boot'
       ? terminationGate(
           async () => {
             notices.state('stopping during boot — releasing what this boot acquired so far');
-            for (const cleanup of cleanups.splice(0)) {
-              try {
-                await cleanup();
-              } catch {
-                // Intentionally ignored, as below: the process is ending either way.
-              }
-            }
+            await releaseAcquired(cleanups);
           },
           code => process.exit(code),
+          process,
+          () => cleanups.length > 0,
         )
       : undefined;
   try {

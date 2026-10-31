@@ -183,10 +183,10 @@ class LeasedBrowser implements BrowserAutomation {
     });
   }
   navigate: BrowserAutomation['navigate'] = (pageId, url) => this.worker.navigate(pageId, url);
-  click: BrowserAutomation['click'] = (pageId, selector) => this.worker.click(pageId, selector);
-  type: BrowserAutomation['type'] = (pageId, selector, text) => this.worker.type(pageId, selector, text);
-  read: BrowserAutomation['read'] = (pageId, selector, mode) => this.worker.read(pageId, selector, mode);
-  screenshot: BrowserAutomation['screenshot'] = pageId => this.worker.screenshot(pageId);
+  click: BrowserAutomation['click'] = (pageId, target, options) => this.worker.click(pageId, target, options);
+  type: BrowserAutomation['type'] = (pageId, target, text, options) => this.worker.type(pageId, target, text, options);
+  read: BrowserAutomation['read'] = (pageId, options) => this.worker.read(pageId, options);
+  screenshot: BrowserAutomation['screenshot'] = (pageId, options) => this.worker.screenshot(pageId, options);
   back: BrowserAutomation['back'] = pageId => this.worker.back(pageId);
   forward: BrowserAutomation['forward'] = pageId => this.worker.forward(pageId);
   reload: BrowserAutomation['reload'] = pageId => this.worker.reload(pageId);

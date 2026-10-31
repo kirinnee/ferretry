@@ -85,7 +85,8 @@ const open = async (context: BrowserContext, theme: string, view: string, extra 
     route.request().url().startsWith(server.url.origin) ? route.continue() : route.abort(),
   );
   page.on('pageerror', error => process.stderr.write(`page error: ${error.message}\n`));
-  await page.goto(`${server.url}?theme=${theme}&view=${view}&big=1${extra}`);
+  const shell = (page.viewportSize()?.width ?? 1_440) < 640 ? '&shell=1' : '';
+  await page.goto(`${server.url}?theme=${theme}&view=${view}&big=1${shell}${extra}`);
   await page.locator('[data-fixture]').waitFor({ state: 'visible' });
   await page.locator('.fy-board-summary__row, .fy-board-table__row').first().waitFor({ state: 'visible' });
   await page.waitForTimeout(300);

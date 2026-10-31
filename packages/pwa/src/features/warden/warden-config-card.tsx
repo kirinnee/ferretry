@@ -24,6 +24,8 @@ import { type PickerAccount, readAccountPickerCatalog } from '../../lib/account-
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { daemonSettingsPath } from '../../lib/pages/routes.ts';
 import { useConfigChangeEffect, useDaemonClient } from '../../lib/store.tsx';
+import { daemonDisplayName } from '../settings/daemon-settings.tsx';
+import { machineHash } from '../fleet/shell/machine-route.ts';
 import { readSpeedups } from '../speedups/speedups-api.ts';
 import { WardenSettingsForm } from './warden-settings-form.tsx';
 import {
@@ -52,6 +54,7 @@ export interface WardenConfigCardProps {
   /** The runtimes and their models, for the model field (docs/model-catalog.md). */
   readonly runtimes?: readonly PickerAccount[];
   readonly speedupsHref?: string;
+  readonly browserHref?: string;
   readonly onNavigate?: (to: string) => void;
   readonly saving?: boolean;
   readonly error?: string | null;
@@ -67,6 +70,7 @@ export function WardenConfigCard({
   loginOptions = [],
   runtimes = [],
   speedupsHref,
+  browserHref,
   onNavigate,
   saving = false,
   error = null,
@@ -88,6 +92,7 @@ export function WardenConfigCard({
         {...(view.login === undefined ? {} : { login: view.login })}
         {...(wardenMachineDefaultLogin(view) === undefined ? {} : { machineDefault: wardenMachineDefaultLogin(view) })}
         {...(speedupsHref === undefined ? {} : { speedupsHref })}
+        {...(browserHref === undefined ? {} : { browserHref })}
         {...(onNavigate === undefined ? {} : { onNavigate })}
       />
       <div className="flex flex-wrap items-center gap-3">
@@ -296,6 +301,7 @@ export function WardenConfigSurface({
       loginOptions={loaded.loginOptions}
       runtimes={loaded.runtimes}
       speedupsHref={`${daemonSettingsPath(connection.daemonId)}#speedups`}
+      browserHref={`${daemonSettingsPath(connection.daemonId)}${machineHash(daemonDisplayName(connection), 'browser')}`}
       {...(onNavigate === undefined ? {} : { onNavigate })}
       saving={saving}
       error={error}

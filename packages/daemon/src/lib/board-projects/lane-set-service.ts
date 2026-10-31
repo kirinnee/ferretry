@@ -11,24 +11,25 @@ import {
   type BoardResult,
   boardErr,
   boardOk,
-  laneProposalReference,
   type LaneSet,
   type LaneSetActionRequest,
   type LaneSetChangeResponse,
+  laneProposalReference,
   UNFILED_PROJECT_ID,
 } from '@ferretry/protocol';
+import { laneProposalCard } from './lane-proposal-card.ts';
 import {
-  type LaneActor,
-  type LaneSetProblem,
   actorName,
+  addQuickToTestLane,
   confirmLaneSet,
   editLaneSet,
+  type LaneActor,
+  type LaneSetProblem,
   mergeReleaseLanes,
   proposeLaneSet,
   RELEASED_TO_TEST_NAME,
   unfiledLaneSet,
 } from './lane-set-policy.ts';
-import { laneProposalCard } from './lane-proposal-card.ts';
 import type { CardRelocator, LaneProposalAgenda, LaneSetSource, LaneSetStore } from './ports.ts';
 import type { ProjectRegistry, SessionProjects } from './session-projects.ts';
 
@@ -42,6 +43,11 @@ export type LaneSetChange = LaneSetChangeResponse;
 export type ReleaseLaneMergeOutcome =
   | { readonly projectId: BoardProjectId; readonly merged: true; readonly version: number }
   | { readonly projectId: BoardProjectId; readonly merged: false; readonly problem: string };
+
+/** What the boot migration that adds quick's To test lane did to one project's set. */
+export type QuickToTestOutcome =
+  | { readonly projectId: BoardProjectId; readonly added: true; readonly version: number }
+  | { readonly projectId: BoardProjectId; readonly added: false; readonly problem: string };
 
 /** What a card's history says when the merge moves it. */
 export const RELEASE_MERGE_REASON = `Released and To test are one lane now: ${RELEASED_TO_TEST_NAME}`;
@@ -147,6 +153,29 @@ export class LaneSetService implements LaneSetSource {
         outcomes.push({ projectId, merged: true, version });
       } catch (error) {
         outcomes.push({ projectId, merged: false, problem: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    return outcomes;
+  }
+
+  /**
+   * The boot migration that gives every stored `quick` set from before To test its To test lane
+   * ({@link addQuickToTestLane}). No lane goes, so no card moves: the cards a merge already finished then
+   * move on their facts, each with its own history. Idempotent (a set with To test does not match) and
+   * total: a project that fails is reported and the rest go on. The owner is asked nothing.
+   */
+  async addQuickToTestLanes(): Promise<readonly QuickToTestOutcome[]> {
+    const ids = [UNFILED_PROJECT_ID, ...(await this.registry.projects()).map(project => project.id)];
+    const outcomes: QuickToTestOutcome[] = [];
+    for (const projectId of ids) {
+      try {
+        const version = await this.store.transact<number | null>(projectId, current => {
+          const next = current === null ? null : addQuickToTestLane(current);
+          return next === null ? { result: null } : { next, result: next.version };
+        });
+        if (version !== null) outcomes.push({ projectId, added: true, version });
+      } catch (error) {
+        outcomes.push({ projectId, added: false, problem: error instanceof Error ? error.message : String(error) });
       }
     }
     return outcomes;

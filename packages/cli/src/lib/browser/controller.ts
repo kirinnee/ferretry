@@ -1,6 +1,6 @@
-import { BrowserActionResultSchema, BrowserStatusSchema } from '@ferretry/protocol';
+import { BrowserActionResultSchema, BrowserProxyTestResultSchema, BrowserStatusSchema } from '@ferretry/protocol';
 import { BrowserLoginStatusSchema, renderLoginStatus } from './login.ts';
-import { renderBrowserAction, renderBrowserStatus, screenshotPayload } from './render.ts';
+import { renderBrowserAction, renderBrowserStatus, renderProxyTest, screenshotPayload } from './render.ts';
 import { browserRequest } from './request.ts';
 import type { BrowserCommand, BrowserRequest, IBrowserGateway, IBrowserIo, IScreenshotWriter } from './types.ts';
 
@@ -36,6 +36,7 @@ export class BrowserController implements IBrowserRunner {
   ) {}
 
   async run(command: BrowserCommand): Promise<number> {
+    if (command.command === 'proxy') return this.#proxyTest(command);
     try {
       this.io.success(await this.#execute(command));
       return 0;
@@ -46,7 +47,28 @@ export class BrowserController implements IBrowserRunner {
     }
   }
 
-  async #execute(command: BrowserCommand): Promise<string> {
+  /**
+   * A proxy that does not work is an answer, not a crash: it is said in one line and exits 1, with no
+   * stack. A refusal (the daemon's 403 sentence, a transport error) takes the ordinary error path.
+   */
+  async #proxyTest(command: Extract<BrowserCommand, { command: 'proxy' }>): Promise<number> {
+    try {
+      const request = browserRequest(command);
+      const result = await this.gateway.request(request.path, BrowserProxyTestResultSchema, jsonInit(request));
+      const text = renderProxyTest(result);
+      if (result.reachable) {
+        this.io.success(text);
+        return 0;
+      }
+      this.io.error(text);
+    } catch (error) {
+      this.io.error(errorText(error));
+    }
+    this.io.setExitCode(1);
+    return 1;
+  }
+
+  async #execute(command: Exclude<BrowserCommand, { command: 'proxy' }>): Promise<string> {
     const request = browserRequest(command, this.context.selfSessionId);
     const init = jsonInit(request);
 

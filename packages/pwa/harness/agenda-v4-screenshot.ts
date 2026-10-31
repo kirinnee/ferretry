@@ -619,7 +619,7 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   await checkOverlay(change, form, 'config-change item', composerRest);
   check((await change.locator('[data-agenda-confirms="warden.yaml"]').count()) === 1, 'the config change is not drawn');
   check(
-    !((await overlay(change).textContent()) ?? '').includes("What's going on"),
+    !/What['’]s going on/u.test((await overlay(change).textContent()) ?? ''),
     'the premise is drawn beside the change',
   );
   await shot(change, 'item-config-change', form, theme);

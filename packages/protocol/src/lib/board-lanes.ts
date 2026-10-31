@@ -375,10 +375,23 @@ const writingLanes: Lane[] = [
   { id: 'published', name: 'Published', category: 'shipped', enterOn: ['pr.merged'], staleAfter: '3d' },
   closed,
 ];
+/**
+ * Quick work's one thing for the owner to do: try it. It has no release step, so a merge is what the owner
+ * tests, and so is a ferret's done with no PR.
+ */
+export const QUICK_TO_TEST_LANE: Lane = {
+  id: 'to-test',
+  name: 'To test',
+  category: 'verify',
+  enterOn: ['pr.merged', 'release.published', 'signal.done'],
+  ownerGate: true,
+  emphasis: 'action',
+};
 const quickLanes: Lane[] = [
   todo,
   { id: 'doing', name: 'Doing', category: 'active', enterOn: ['work.started'], staleAfter: '2h' },
-  { id: 'closed', name: 'Closed', category: 'closed', enterOn: ['signal.done'], emphasis: 'info' },
+  QUICK_TO_TEST_LANE,
+  closed,
 ];
 
 /** A template: a layout that names its Done and Not good lanes. */
@@ -394,7 +407,8 @@ export type LaneTemplate = LaneLayoutValue & LaneTargets;
  * - `pr` — Merged closes.
  * - `ops` — Investigate → Fix → Verify → Closed.
  * - `writing` — Research → Draft → Review → Published → Closed.
- * - `quick` — Todo → Doing → Closed, closing when the ferret signals done.
+ * - `quick` — Todo → Doing → To test → Closed. A merge, a release or the ferret's done puts the card in To
+ *   test; the owner's Done closes it. The Unfiled board uses it.
  *
  * In the PR templates only `design-first` and `research-first` work walks Plan/Design. Not good sends a
  * card back to the last active lane (In progress, Fix, Draft, Doing); Done sends it to the closed lane.

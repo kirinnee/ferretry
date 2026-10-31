@@ -122,6 +122,48 @@
   align-items: center;
   gap: var(--gap-sm);
 }
+/* "Add card" in the header, beside Lanes ✎: a normal secondary button, the same height as its neighbours. */
+.fy-board__add {
+  height: var(--control-h-sm);
+  gap: var(--gap-xs);
+  padding-inline: var(--gap-md);
+  font-size: var(--text-sm);
+}
+/* On a phone it floats: bottom-right of the page's scroller, which ends where the tab bar begins, so it
+   sits above the bar and the home indicator. Sticky keeps it on screen while the board scrolls under it; a
+   short board pushes it to the foot of the page (`margin-top: auto`) instead of leaving it under the lanes. */
+.fy-board__fab {
+  position: sticky;
+  z-index: 5;
+  bottom: calc(var(--gap-md) + var(--safe-bottom, 0px));
+  display: flex;
+  height: var(--fab-size, 52px);
+  margin-top: auto;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+.fy-board__fab-button {
+  display: inline-flex;
+  width: var(--fab-size, 52px);
+  height: var(--fab-size, 52px);
+  align-items: center;
+  justify-content: center;
+  border: var(--stroke-control, 1px) solid var(--accent);
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  box-shadow: var(--shadow-popover);
+  color: var(--accent-fg);
+  cursor: pointer;
+  pointer-events: auto;
+}
+.fy-board__fab-button:hover,
+.fy-board__fab-button:focus-visible {
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
+}
+.fy-board__fab-button:active {
+  translate: var(--press-translate, 1px) var(--press-translate, 1px);
+}
 
 /* ---- Counts --------------------------------------------------------------------------------------- */
 .fy-board-counts {
@@ -1577,6 +1619,12 @@
   min-width: 2.5rem;
   justify-content: flex-end;
 }
+/* The card's verdict row, worn on a Table row: it sits at the row's end, not as a full-width line under it. */
+.fy-board-summary__act .fy-board-card__verdict {
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+  margin-top: 0;
+}
 .fy-board-summary__act:empty {
   display: none;
 }
@@ -1628,5 +1676,84 @@
     content: '';
     position: absolute;
     inset: -10px -4px;
+  }
+}
+
+/* ---- The Tasks tab, expanded over the chat ---------------------------------------------------------- */
+.fy-board-side__bar {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-sm);
+}
+.fy-board-side__expand {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  margin-left: auto;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: var(--stroke) solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fy-board-side__expand:hover {
+  color: var(--fg);
+}
+@media (pointer: coarse) {
+  .fy-board-side__expand {
+    width: 36px;
+    height: 36px;
+  }
+  .fy-board-side__view {
+    min-height: 36px;
+  }
+}
+.fy-board-side__title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-sm);
+  margin: 0;
+  color: var(--fg);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+.fy-board-side__total {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: normal;
+  font-variant-numeric: tabular-nums;
+}
+/* The board over the chat column: it covers the transcript and the composer, and nothing above them. */
+.fy-board-full {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--bg);
+}
+.fy-board-side[data-density='page'] {
+  min-height: 100%;
+  padding: var(--gap-md);
+}
+.fy-board-side[data-density='page'] .fy-board-kanban {
+  margin: 0;
+  padding: 0 0 var(--gap-xs);
+}
+.fy-board-side[data-density='page'] .fy-board-lane {
+  max-width: 22rem;
+}
+@media (max-width: 720px) {
+  .fy-board-side[data-density='page'] .fy-board-lane {
+    max-width: none;
   }
 }

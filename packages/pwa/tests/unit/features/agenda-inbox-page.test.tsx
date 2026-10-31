@@ -519,7 +519,7 @@ describe('AgendaInboxPage on a phone', () => {
     await mounted.unmount();
   });
 
-  it('reads the ferret’s last messages only when the fold is opened, and shows them', async () => {
+  it('draws what the ferret said lately as the item’s History, read once for the open item', async () => {
     const reads: string[] = [];
     const mounted = await mount(
       page(fakeInbox(), [twoWay], {
@@ -531,15 +531,13 @@ describe('AgendaInboxPage on a phone', () => {
         },
       }),
     );
-    const toggle = must(mounted.container.querySelector<HTMLButtonElement>('[data-agenda-recent-toggle]'), 'the fold');
-    expect(toggle.textContent).toBe('Last messages from Kai');
-    expect(reads).toEqual([]);
-    await interact(() => toggle.click());
     await flush();
     expect(reads).toEqual(['A2']);
-    expect(
-      [...mounted.container.querySelectorAll('[data-agenda-recent-message]')].map(message => message.textContent),
-    ).toEqual(['Cut the release branch.', 'Raised !A2 about shipping.']);
+    expect(mounted.container.querySelector('[data-agenda-recent-toggle]')).toBeNull();
+    const history = must(mounted.container.querySelector('[data-agenda-history]'), 'the History');
+    expect(history.textContent).toContain('Cut the release branch.');
+    expect(history.textContent).toContain('Raised !A2 about shipping.');
+    expect(history.querySelectorAll('[data-history="ferret"]')).toHaveLength(2);
     await mounted.unmount();
   });
 
@@ -567,57 +565,27 @@ describe('AgendaInboxPage on a phone', () => {
     await mounted.unmount();
   });
 
-  it('says how long ago each message was written, and says so when the ferret has written nothing', async () => {
-    const mounted = await mount(
-      page(fakeInbox(), [twoWay], {
-        phone: true,
-        initialOpen: twoWay.key,
-        recentOpen: true,
-        readRecent: async () => [
-          { text: 'Cut the release branch.', timestamp: '2026-08-01T05:00:00.000Z' },
-          { text: 'Pushed it.', timestamp: '2026-08-01T12:00:00.000Z' },
-          { text: 'No time on this one.' },
-        ],
-      }),
-    );
-    await flush();
-    expect([...mounted.container.querySelectorAll('[data-agenda-recent-message]')].map(m => m.textContent)).toEqual([
-      '7h agoCut the release branch.',
-      'just nowPushed it.',
-      'No time on this one.',
-    ]);
-    await mounted.unmount();
+  it('draws no History when the ferret has written nothing, a failed read, or a host that cannot read', async () => {
     const quiet = await mount(
-      page(fakeInbox(), [twoWay], {
-        phone: true,
-        initialOpen: twoWay.key,
-        recentOpen: true,
-        readRecent: async () => [],
-      }),
+      page(fakeInbox(), [twoWay], { phone: true, initialOpen: twoWay.key, readRecent: async () => [] }),
     );
     await flush();
-    expect(quiet.container.querySelector('.fy-attn-recent__note')?.textContent).toBe(
-      'Kai hasn’t written anything yet.',
-    );
+    expect(quiet.container.querySelector('[data-agenda-history]')).toBeNull();
     await quiet.unmount();
-  });
-
-  it('says a failed read in the fold, and draws no fold when the host cannot read', async () => {
     const failing = await mount(
       page(fakeInbox(), [twoWay], {
         phone: true,
         initialOpen: twoWay.key,
-        recentOpen: true,
         readRecent: async () => {
           throw new Error('offline');
         },
       }),
     );
     await flush();
-    expect(failing.container.querySelector('[data-agenda-recent-toggle]')).not.toBeNull();
+    expect(failing.container.querySelector('[data-agenda-history]')).toBeNull();
     await failing.unmount();
     const none = await mount(page(fakeInbox(), [twoWay], { phone: true, initialOpen: twoWay.key }));
-    expect(none.container.querySelector('[data-agenda-recent-toggle]')).toBeNull();
+    expect(none.container.querySelector('[data-agenda-history]')).toBeNull();
     await none.unmount();
   });
 });
@@ -729,10 +697,7 @@ describe('AgendaDetail context and steps', () => {
     await short.unmount();
 
     const long = await mount(<AgendaDetail item={agendaItem('A6', { context: 'word '.repeat(80) })} layout="panel" />);
-    const longContext = must(
-      long.container.querySelector('[data-agenda-section="context"] .fy-attn-sec__body'),
-      'the long context',
-    );
+    const longContext = must(long.container.querySelector('[data-agenda-section="context"]'), 'the long context');
     expect(longContext.textContent?.match(/word/gu)).toHaveLength(80);
     expect(long.container.querySelector('[data-agenda-body-toggle]')).toBeNull();
     await long.unmount();

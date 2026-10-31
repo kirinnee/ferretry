@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import {
+  LOGIN_PASSWORD_MAX_LENGTH,
   LOGIN_TOTP_WARNING,
   type LoginEntryList,
   type LoginEntrySummary,
@@ -249,6 +250,27 @@ describe('fy secret entry add', () => {
     should(handle).containEql('not a usable handle');
     should(match).containEql('not something a login matches');
     should(label).containEql('--label');
+  });
+
+  it('should refuse a password too long, or one that would press keys, without repeating it', async () => {
+    // Arrange
+    const long = 'x'.repeat(LOGIN_PASSWORD_MAX_LENGTH + 1);
+    const keys = 'correct-horse\nbattery';
+    const fresh = (value: string) =>
+      rig(new FakeGateway({ v: 1, health: 'ready', entries: [] }), new FakePrompt([value]));
+
+    // Act
+    const tooLong = fresh(long);
+    const tooLongMessage = await fails(() => tooLong.controller.add('NEW_ONE', { label: 'x' }));
+    const pressing = fresh(keys);
+    const pressingMessage = await fails(() => pressing.controller.add('NEW_ONE', { label: 'x' }));
+
+    // Assert
+    should(tooLongMessage).containEql('at most');
+    should(pressingMessage).containEql('would press keys');
+    should(pressingMessage).not.containEql('correct-horse');
+    should(tooLong.gateway.puts).have.length(0);
+    should(pressing.gateway.puts).have.length(0);
   });
 
   it('should refuse to prompt off a terminal', async () => {

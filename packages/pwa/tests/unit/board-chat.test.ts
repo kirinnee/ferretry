@@ -10,17 +10,19 @@ import {
   descendantSessionIds,
 } from '../../src/lib/board-chat.ts';
 import { sessionView } from '../support/sessions.ts';
-import { boardModelOf, card, laptop, workstation } from './board-support.ts';
+import { NO_BOARD_FILTERS } from '../../src/lib/board-model.ts';
+import { boardModelOf, card, laptop, originCard, workstation } from './board-support.ts';
 
 const SELF = 's1';
 const KID = 'c1';
 const GRANDKID = 'g1';
 
-const who = (extra: Partial<Parameters<typeof chatCards>[1]> = {}) => ({
+const who = (extra: Partial<Parameters<typeof chatCards>[1]> = {}): Parameters<typeof chatCards>[1] => ({
   daemonId: laptop.daemonId,
   sessionId: SELF,
   focus: { id: 'F18' },
   relatives: new Set([KID, GRANDKID]),
+  agents: false,
   ...extra,
 });
 
@@ -227,5 +229,67 @@ describe('chatChip', () => {
     if (closed.kind !== 'card') throw new Error('expected a card chip');
     expect(chatChipSentence(closed)).toBe('&F18, closed');
     expect(chatCardLabel(closed)).toBe('&F18');
+  });
+});
+
+describe('chatCards and "Show agent tasks"', () => {
+  // The chat reads every card (the chip must find a sub-ferret's own focus); what it draws is chatCards'.
+  const everyCard = (cards: Parameters<typeof boardModelOf>[0]) =>
+    boardModelOf(cards, { ...NO_BOARD_FILTERS, agents: true });
+  const mixed = () =>
+    everyCard([
+      originCard('F18', 'human', null, { owner: SELF, laneId: 'plan' }),
+      originCard('F20', 'agent', { id: 'F18' }, { owner: SELF, laneId: 'plan', parent: { id: 'F18' } }),
+      originCard('F21', 'human', null, { owner: SELF, laneId: 'plan' }),
+      originCard('F30', 'agent', null, { owner: KID, laneId: 'implement' }),
+      originCard('F31', 'human', null, { owner: KID, laneId: 'implement' }),
+    ]);
+  const drawn = (cards: ReturnType<typeof chatCards>) => chatDrawn(cards).map(c => c.task.id);
+
+  it('draws only the owner’s own cards until agent tasks are on, and counts what it hides', async () => {
+    const cards = chatCards(await mixed(), who());
+    expect(drawn(cards)).toEqual(['F18', 'F21', 'F31']);
+    expect(cards.total).toBe(3);
+    expect(cards.hiddenAgents).toBe(2);
+    expect(cards.under.size).toBe(0);
+  });
+
+  it('draws the agent cards too when they are on, each right under the human card it serves', async () => {
+    const cards = chatCards(await mixed(), who({ agents: true }));
+    expect(cards.total).toBe(5);
+    expect(cards.hiddenAgents).toBe(0);
+    expect(cards.lanes.find(lane => lane.name === 'Plan/Design')?.cards.map(c => c.task.id)).toEqual([
+      'F18',
+      'F20',
+      'F21',
+    ]);
+    expect([...cards.under]).toEqual([cards.lanes[0]?.cards[1]?.key ?? '']);
+    expect(drawn(cards)).toContain('F30');
+  });
+
+  it('still finds the focus card for the chip when it is an agent card that is not drawn', async () => {
+    const cards = chatCards(await mixed(), who({ focus: { id: 'F20' } }));
+    expect(cards.focus?.task.id).toBe('F20');
+    expect(cards.shownFocus).toBeNull();
+    expect(drawn(cards)).not.toContain('F20');
+    expect(chatChip({ id: 'F20' }, cards.focus, undefined, 'ready')).toMatchObject({ kind: 'card', title: 'Card F20' });
+  });
+
+  it('draws a focus card that is a human card', async () => {
+    const cards = chatCards(await mixed(), who());
+    expect(cards.shownFocus?.task.id).toBe('F18');
+  });
+
+  it('shows every card of an older daemon, which says nothing of who asked', async () => {
+    const cards = chatCards(await board(), who());
+    expect(cards.total).toBe(6);
+    expect(cards.hiddenAgents).toBe(0);
+  });
+
+  it('carries each column’s board and lane id so a drop can be placed', async () => {
+    const cards = chatCards(await mixed(), who());
+    expect(cards.lanes.every(lane => lane.laneId !== null && lane.groupKey !== '')).toBe(true);
+    const model = await boardModelOf([card('F40', { owner: SELF, laneId: 'gone-lane' })]);
+    expect(chatCards(model, who({ focus: null })).lanes[0]).toMatchObject({ laneId: null });
   });
 });

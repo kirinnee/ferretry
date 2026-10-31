@@ -4,8 +4,6 @@
  *
  * - **Agent permissions** — Auto mode or Skip all permission checks, each with a plain sentence. It
  *   applies to new sessions; with sessions running, the tab says how many keep the old mode (E32).
- * - **Browser mode** — Headless, or a Real window an owner browses through (docs/browser-mode.md).
- * - **Browser proxy** — where the shared browser sends its traffic, with secret-store credentials (docs/browser-proxy.md).
  * - **Auto-resume after restart** — On (the default) or Off, and what the last restart resumed.
  * - **Agenda mode** — On (the default) or Off for ferrets started from now on (docs/agenda.md).
  * - **Tools on <machine>** — Claude Code and Codex, installed or not, with **Install**.
@@ -15,11 +13,13 @@
  *   which used to be a separate Daemons section; one place per machine now.
  * - **About this machine** — its name, whether it answers, how many runtimes it has, and its format.
  *
+ * The shared browser (mode, proxy, "Test proxy") is the Browser tab's, not this one's (`browser-tab.tsx`).
+ *
  * Each flow is a linkable address under this tab (`settings-route.ts`), so the Runtimes tab's
  * "Set up <machine>" link lands straight in the first run.
  */
 
-import type { BrowserMode, FleetAgentControl, FleetMachineView } from '@ferretry/protocol';
+import type { FleetAgentControl, FleetMachineView } from '@ferretry/protocol';
 import { ChevronRight } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { cn } from '../../../lib/class-names.ts';
@@ -37,7 +37,6 @@ import { CheckChoices, RadioChoices, SetupNote, SetupRow, SetupSection } from '.
 import { countWords } from '../setup/setup-words.ts';
 import { ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
-import { BrowserProxySection } from './browser-proxy-section.tsx';
 import { machineSettings } from './machine-settings.ts';
 import { KEEP_IN_SYNC_EXPLANATION, MACHINE_FILE, readKeepInSync, withKeepInSync } from './conversations-setting.ts';
 
@@ -406,77 +405,6 @@ export function ConversationsSection({
   );
 }
 
-/** "Browser mode" (docs/browser-mode.md): each choice's words. */
-export const BROWSER_MODE_WORDS: Readonly<Record<BrowserMode, { readonly title: string; readonly detail: string }>> = {
-  headless: {
-    title: 'Headless',
-    detail: 'No window. What agents use by default, and the only choice on a server with no screen.',
-  },
-  window: {
-    title: 'Real window',
-    detail:
-      'A real Chrome window, for when you browse and sign in yourself: sites see an ordinary desktop browser. On Linux it draws on a private virtual screen (needs Xvfb); on a Mac it is a window on your desktop.',
-  },
-};
-
-export function BrowserModeSection({
-  machine,
-  machineName,
-  access,
-  onSaved,
-}: {
-  readonly machine: FleetMachineView;
-  readonly machineName: string;
-  readonly access: SetupAccess;
-  readonly onSaved: () => void;
-}) {
-  const { changes } = access;
-  const current = machine.browserMode ?? 'headless';
-  const [draft, setDraft] = useState<BrowserMode>(current);
-  const pending = draft !== current;
-  const save = (): void => {
-    void changes.apply(machineSettings(machine, { browserMode: draft })).then(result => {
-      if (result.kind === 'refused') return;
-      onSaved();
-    });
-  };
-  // A daemon that predates the setting runs headless and cannot be asked for anything else.
-  if (machine.browserMode === undefined) return null;
-  return (
-    <SetupSection title="Browser mode" name="browser-mode">
-      <RadioChoices
-        legend="Browser mode"
-        legendHidden
-        name="browser-mode"
-        value={draft}
-        onChoose={value => {
-          setDraft(value);
-          changes.clear();
-        }}
-        options={(['headless', 'window'] as const).map(mode => ({ id: mode, ...BROWSER_MODE_WORDS[mode] }))}
-      />
-      <p className="m-0 text-meta leading-base text-muted" data-browser-mode-hint="">
-        Applies the next time the browser on {machineName} starts. Neither mode solves a captcha for you: when a page
-        asks, take it over and solve it yourself.
-      </p>
-      {pending ? (
-        <ChangeApplyPanel
-          machineName={machineName}
-          authority={changes.authority}
-          busy={changes.busy}
-          refusal={changes.refusal}
-          submitLabel="Save browser mode"
-          onSubmit={save}
-        >
-          <Button type="button" data-browser-mode-undo="" onClick={() => setDraft(current)}>
-            Keep {BROWSER_MODE_WORDS[current].title}
-          </Button>
-        </ChangeApplyPanel>
-      ) : null}
-    </SetupSection>
-  );
-}
-
 /** "Auto-resume after restart": each choice's words. */
 export const AUTO_RESUME_WORDS: Readonly<Record<'on' | 'off', { readonly title: string; readonly detail: string }>> = {
   on: {
@@ -714,20 +642,6 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
         onSaved={onSaved}
       />
 
-      <BrowserModeSection
-        key={machine.browserMode ?? 'headless'}
-        machine={machine}
-        machineName={machineName}
-        access={access}
-        onSaved={onSaved}
-      />
-      <BrowserProxySection
-        key={JSON.stringify(machine.browserProxy ?? null)}
-        machine={machine}
-        machineName={machineName}
-        access={access}
-        onSaved={onSaved}
-      />
       <AutoResumeSection
         key={String(machine.autoResume)}
         machine={machine}

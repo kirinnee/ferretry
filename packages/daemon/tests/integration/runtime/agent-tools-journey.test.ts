@@ -146,8 +146,8 @@ class FakeBrowser {
     },
     click: async pageId => this.act('click', pageId),
     type: async pageId => this.act('type', pageId),
-    read: async (pageId, _selector, mode) => ({
-      ...this.act(`read-${mode ?? 'text'}`, pageId),
+    read: async (pageId, options) => ({
+      ...this.act(`read-${options?.mode ?? 'text'}`, pageId),
       text: 'Sign in to continue',
     }),
     screenshot: async pageId => ({ ...this.act('screenshot', pageId), screenshotBase64: 'iVBORw0KGgo=' }),

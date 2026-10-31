@@ -1,12 +1,15 @@
 import {
   AGENT_TOOL_DEFAULT_READ_LINES,
   AGENT_TOOL_DEFAULT_WAIT_MS,
+  type AgendaId,
   type AgentSurface,
   type AgentToolCall,
   type AgentToolResult,
   type AuditDetail,
   type AuditOutcome,
   type BrowserActionResult,
+  type BrowserTargetFields,
+  browserReadModeOf,
   type InputAgentView,
   type SurfaceController,
   type SurfaceControlRequest,
@@ -16,14 +19,17 @@ import {
 } from '@ferretry/protocol';
 import type { AuditSink } from '../audit/types.ts';
 import { type BrowserPageAction, BrowserSessionError, type BrowserSubsystem } from '../browser/runtime/index.ts';
+import { BrowserTransportError } from '../browser/transport/worker-protocol.ts';
 import type { AgentControlPolicy } from '../fleet/agent-control.ts';
 import { InputRequestError } from '../input-requests/errors.ts';
+import type { TextRedactor } from '../secrets/redaction.ts';
 import { TerminalMountError, type TerminalSubsystem } from '../runtime/mounts/terminals.ts';
 import type { SurfaceControl } from './control.ts';
 import {
   auditHost,
   auditSelector,
   clipOutput,
+  clipReading,
   controlRefusal,
   isShellForeground,
   surfaceReference,
@@ -55,6 +61,13 @@ export class AgentToolError extends Error {
   }
 }
 
+/** What a result that carries pane-derived text was read from. */
+interface PaneBinding {
+  readonly caller: AgentToolCaller;
+  readonly surface: ResolvedSurface;
+  readonly reference: string;
+}
+
 /** How often a wait looks again. */
 export const AGENT_TOOL_POLL_MS = 250;
 /** How many recent lines a wait for text searches, and how many it hands back. */
@@ -67,6 +80,13 @@ export interface AgentToolPorts {
   readonly control: SurfaceControl;
   readonly policy: AgentControlPolicy;
   readonly audit: AuditSink;
+  /**
+   * Masks every secret the vault holds in what a PAGE hands back — its text, its snapshot, the address it
+   * is at — before an agent or a person reads it, as the operator's screen and transcript reads are. A
+   * page can show a secret the agent never typed (a dashboard's API key); the agent's context and its
+   * harness transcript must not keep it. Fails closed: a vault that cannot be opened withholds the text.
+   */
+  readonly redactor: Pick<TextRedactor, 'batch'>;
   readonly clock: AgentToolClock;
   readonly sleep: (milliseconds: number) => Promise<void>;
   /** The owner's input requests; absent where none are wired, which refuses the two input tools. */
@@ -89,6 +109,12 @@ const DRIVING_TOOLS: ReadonlySet<AgentToolCall['tool']> = new Set([
   'browser.click',
   'browser.type',
 ]);
+
+/** A page's text as it came back, before redaction: what was read, and where the page is now. */
+interface PageReading {
+  readonly url?: string;
+  readonly text?: string;
+}
 
 /** The kind of surface a call is about; `input.wait` is about a request, not a surface. */
 const kindOf = (call: AgentToolCall): SurfaceKind | undefined =>
@@ -120,8 +146,11 @@ const openedByAgent = (openedBy: SurfaceOpener | undefined, sessionId: string): 
 export class AgentToolService {
   constructor(private readonly ports: AgentToolPorts) {}
 
+  /** The pane each pane-derived result was read from, so the transport can ask once more at the last moment. */
+  private readonly bindings = new WeakMap<AgentToolResult, PaneBinding>();
+
   async call(caller: AgentToolCaller, call: AgentToolCall): Promise<AgentToolResult> {
-    const facts: { surface?: ResolvedSurface } = {};
+    const facts: { surface?: ResolvedSurface; pane?: ResolvedSurface } = {};
     let result: AgentToolResult;
     try {
       const kind = kindOf(call);
@@ -135,15 +164,31 @@ export class AgentToolService {
       await this.record(caller, call, facts.surface, failed ? 'failed' : 'refused');
       throw refusal ?? error;
     }
-    // The last step before anything leaves the daemon: a hold that began during the capture, the redaction
-    // or the audit record above is honoured here, synchronously, at the point of publication.
-    if (result.output !== undefined && facts.surface !== undefined)
-      this.assertReadable(
-        caller,
-        facts.surface,
-        surfaceReference(facts.surface.surface, facts.surface.name ?? facts.surface.id),
-      );
-    return result;
+    const pane = facts.pane ?? facts.surface;
+    if (pane === undefined || (result.output === undefined && result.input?.observed === undefined)) return result;
+    this.bindings.set(result, {
+      caller,
+      surface: pane,
+      reference: surfaceReference(pane.surface, pane.name ?? pane.id),
+    });
+    return this.publish(result);
+  }
+
+  /**
+   * The last step before anything leaves the daemon: a hold that began during the capture, the redaction or the
+   * audit record is honoured here, synchronously. Screen text is refused; the foreground facts of a nested input
+   * view are dropped. A transport calls it again right before it serialises, so a hold taken after the service
+   * answered still wins; a result that read no pane passes through.
+   */
+  publish(result: AgentToolResult): AgentToolResult {
+    const bound = this.bindings.get(result);
+    if (bound === undefined) return result;
+    if (result.output !== undefined) this.assertReadable(bound.caller, bound.surface, bound.reference);
+    if (result.input?.observed === undefined) return result;
+    if (this.ports.quarantinedUntil?.(bound.caller.sessionId, [bound.surface.name, bound.surface.id]) === undefined)
+      return result;
+    const { observed: _hidden, ...input } = result.input;
+    return { ...result, input };
   }
 
   /**
@@ -200,7 +245,7 @@ export class AgentToolService {
   private async dispatch(
     caller: AgentToolCaller,
     call: AgentToolCall,
-    facts: { surface?: ResolvedSurface },
+    facts: { surface?: ResolvedSurface; pane?: ResolvedSurface },
   ): Promise<AgentToolResult> {
     const { sessionId } = caller;
     switch (call.tool) {
@@ -247,7 +292,11 @@ export class AgentToolService {
       case 'input.wait': {
         const input = this.inputPort(caller);
         const view = await input.agentView(sessionId, call.id, call.timeoutMs ?? AGENT_TOOL_DEFAULT_WAIT_MS);
-        return { summary: inputSummary(view), input: view };
+        if (view.observed === undefined) return { summary: inputSummary(view), input: view };
+        facts.pane = await this.paneOf(input, sessionId, call.id);
+        if (facts.pane !== undefined) return { summary: inputSummary(view), input: view };
+        const { observed: _unbound, ...unbound } = view;
+        return { summary: inputSummary(view), input: unbound };
       }
       default: {
         const surface = await this.resolve(
@@ -354,38 +403,59 @@ export class AgentToolService {
     surface: ResolvedSurface,
     reference: string,
   ): Promise<AgentToolResult> {
-    const action: BrowserPageAction =
-      call.tool === 'browser.navigate'
-        ? { action: 'navigate', url: call.url }
-        : call.tool === 'browser.click'
-          ? { action: 'click', selector: call.selector }
-          : call.tool === 'browser.type'
-            ? { action: 'type', selector: call.selector, text: call.text }
-            : call.tool === 'browser.read'
-              ? {
-                  action: 'read',
-                  ...(call.selector === undefined ? {} : { selector: call.selector }),
-                  ...(call.mode === undefined ? {} : { mode: call.mode }),
-                }
-              : { action: 'screenshot' };
     const answer: BrowserActionResult = await this.ports.browser.actOnPage(
       caller.sessionId,
       surface.id,
-      action,
+      pageActionOf(call),
       this.browserGuard(caller, surface),
     );
-    const page: { readonly url?: string; readonly text?: unknown; readonly screenshotBase64?: unknown } =
-      'result' in answer ? answer.result : {};
-    const at = page.url === undefined ? '' : ` (now at ${page.url})`;
+    const page: {
+      readonly url?: string;
+      readonly text?: unknown;
+      readonly screenshotBase64?: unknown;
+      readonly screenshotFormat?: unknown;
+    } = 'result' in answer ? answer.result : {};
+    const read = await this.scrubbed({
+      ...(page.url === undefined ? {} : { url: page.url }),
+      ...(typeof page.text === 'string' ? { text: page.text } : {}),
+    });
+    const at = read.url === undefined ? '' : ` (now at ${read.url})`;
     const check = humanCheckNote(answer, surface.id);
-    if (typeof page.text === 'string')
-      return {
-        summary: `Read ${reference}${at}.${check}`,
-        output: clipOutput(this.scrubbed(caller.sessionId, page.text)),
-      };
+    if (read.text !== undefined && call.tool === 'browser.read') {
+      const mode = browserReadModeOf(call);
+      if (call.find !== undefined && read.text === '')
+        return { summary: `Nothing in the snapshot of ${reference} contains that text${at}.${check}`, output: '' };
+      const output =
+        mode === 'text'
+          ? clipOutput(this.masked(caller.sessionId, read.text))
+          : clipReading(this.masked(caller.sessionId, read.text));
+      const clipped = output.length < read.text.length ? CLIPPED_SNAPSHOT_NOTE : '';
+      const refs = mode === 'snapshot' ? REFS_NOTE : '';
+      return { summary: `Read ${reference}${at}.${refs}${clipped}${check}`, output };
+    }
     if (typeof page.screenshotBase64 === 'string')
-      return { summary: `A screenshot of ${reference}${at}.${check}`, screenshotBase64: page.screenshotBase64 };
+      return {
+        summary: `A screenshot of ${reference}${at}.${check}`,
+        screenshotBase64: page.screenshotBase64,
+        ...(page.screenshotFormat === 'jpeg' ? { screenshotFormat: 'jpeg' as const } : {}),
+      };
     return { summary: `Done on ${reference}${at}.${check}` };
+  }
+
+  /** A page's reading with every vault secret masked, under one vault open — or refused, never served raw. */
+  private async scrubbed(reading: PageReading): Promise<PageReading> {
+    if (reading.url === undefined && reading.text === undefined) return reading;
+    try {
+      return await this.ports.redactor.batch(scrub => ({
+        ...(reading.url === undefined ? {} : { url: scrub.text(reading.url) }),
+        ...(reading.text === undefined ? {} : { text: scrub.text(reading.text) }),
+      }));
+    } catch {
+      throw new AgentToolError(
+        'unavailable',
+        'The page was acted on, but this machine could not open its secret store to mask secrets in what the page shows, so that is withheld. Try again shortly.',
+      );
+    }
   }
 
   /**
@@ -464,7 +534,22 @@ export class AgentToolService {
   ): Promise<string> {
     const text = await this.ports.terminals.text(caller.sessionId, surface.id, lines);
     this.assertReadable(caller, surface, reference);
-    return this.scrubbed(caller.sessionId, text);
+    return this.masked(caller.sessionId, text);
+  }
+
+  /** The terminal a pending request is on: the one it is pending on, among the session's own. */
+  private async paneOf(input: AgentInputPort, sessionId: string, id: AgendaId): Promise<ResolvedSurface | undefined> {
+    const { terminals } = await this.ports.terminals.list(sessionId);
+    for (const terminal of terminals) {
+      const names = [terminal.name, terminal.id];
+      if (names.some(key => key !== undefined && input.pendingOn(sessionId, { kind: 'terminal', key }) === id))
+        return {
+          surface: 'terminal',
+          id: terminal.id,
+          ...(terminal.name === undefined ? {} : { name: terminal.name }),
+        };
+    }
+    return undefined;
   }
 
   /** Runs `work` as one turn in the session when input requests are wired; just runs it where they are not. */
@@ -473,7 +558,7 @@ export class AgentToolService {
   }
 
   /** Screen text with the values the daemon just typed masked; text unchanged where no mask is wired. */
-  private scrubbed(sessionId: string, text: string): string {
+  private masked(sessionId: string, text: string): string {
     return this.ports.scrub === undefined ? text : this.ports.scrub(sessionId, text);
   }
 
@@ -703,13 +788,34 @@ function callFacts(call: AgentToolCall): AuditDetail {
     case 'browser.ask_owner':
       return { message: call.message !== undefined };
     case 'browser.navigate':
-      return { host: auditHost(call.url) };
+      return call.url === undefined ? { history: call.history ?? 'reload' } : { host: auditHost(call.url) };
     case 'browser.click':
-      return { selector: auditSelector(call.selector) };
+      return {
+        ...targetFacts(call),
+        ...(call.button === undefined ? {} : { button: call.button }),
+        ...(call.double === true ? { double: true } : {}),
+        ...(call.modifiers === undefined ? {} : { modifiers: call.modifiers.length }),
+      };
     case 'browser.type':
-      return { selector: auditSelector(call.selector), textLength: call.text.length };
+      return {
+        ...targetFacts(call),
+        textLength: call.text.length,
+        ...(call.submit === true ? { submit: true } : {}),
+        ...(call.slowly === true ? { slowly: true } : {}),
+      };
     case 'browser.read':
-      return { mode: call.mode ?? 'text' };
+      return {
+        mode: browserReadModeOf(call),
+        ...targetFacts(call),
+        ...(call.find === undefined ? {} : { findLength: call.find.length }),
+        ...(call.depth === undefined ? {} : { depth: call.depth }),
+      };
+    case 'browser.screenshot':
+      return {
+        ...targetFacts(call),
+        ...(call.fullPage === true ? { fullPage: true } : {}),
+        ...(call.format === undefined ? {} : { format: call.format }),
+      };
     case 'terminal.request_input':
       return { sensitivity: call.sensitivity };
     case 'input.wait':
@@ -738,6 +844,70 @@ function inputSummary(view: InputAgentView): string {
   }
 }
 
+/** What an act pointed at, for the audit: a ref, a short selector, or only that it was a point. */
+function targetFacts(fields: BrowserTargetFields): AuditDetail {
+  if (fields.ref !== undefined) return { ref: fields.ref };
+  if (fields.selector !== undefined) return { selector: auditSelector(fields.selector) };
+  if (fields.x !== undefined) return { point: true };
+  return {};
+}
+
+/** The browser's own action for an agent tool's call. */
+function pageActionOf(
+  call: Extract<
+    AgentToolCall,
+    { readonly tool: 'browser.navigate' | 'browser.click' | 'browser.type' | 'browser.read' | 'browser.screenshot' }
+  >,
+): BrowserPageAction {
+  const element = {
+    ...(call.tool !== 'browser.navigate' && call.selector !== undefined ? { selector: call.selector } : {}),
+    ...(call.tool !== 'browser.navigate' && call.ref !== undefined ? { ref: call.ref } : {}),
+  };
+  switch (call.tool) {
+    case 'browser.navigate':
+      return call.url === undefined ? { action: call.history ?? 'reload' } : { action: 'navigate', url: call.url };
+    case 'browser.click':
+      return {
+        action: 'click',
+        ...element,
+        ...(call.x === undefined || call.y === undefined ? {} : { x: call.x, y: call.y }),
+        ...(call.button === undefined ? {} : { button: call.button }),
+        ...(call.double === true ? { double: true } : {}),
+        ...(call.modifiers === undefined ? {} : { modifiers: call.modifiers }),
+      };
+    case 'browser.type':
+      return {
+        action: 'type',
+        ...element,
+        text: call.text,
+        ...(call.submit === true ? { submit: true } : {}),
+        ...(call.slowly === true ? { slowly: true } : {}),
+      };
+    case 'browser.read':
+      return {
+        action: 'read',
+        ...element,
+        mode: browserReadModeOf(call),
+        ...(call.find === undefined ? {} : { find: call.find }),
+        ...(call.depth === undefined ? {} : { depth: call.depth }),
+        ...(call.boxes === true ? { boxes: true } : {}),
+      };
+    case 'browser.screenshot':
+      return {
+        action: 'screenshot',
+        ...element,
+        ...(call.fullPage === true ? { fullPage: true } : {}),
+        ...(call.format === undefined ? {} : { format: call.format }),
+      };
+  }
+}
+
+/** Told after a snapshot: the refs in it are what every act accepts. */
+const REFS_NOTE = ' Pass a ref from it (ref: "e12") to any browser tool instead of a selector.';
+/** Told when a snapshot was longer than one answer holds. */
+const CLIPPED_SNAPSHOT_NOTE =
+  ' It was clipped to fit: read one part with a ref or selector, ask for less depth, or find a text.';
+
 const handedNote = (askOwner: true | string | undefined): string =>
   askOwner === undefined ? '' : ' and asked the owner to take over (wait for them)';
 
@@ -760,6 +930,7 @@ function translate(error: unknown): AgentToolError | undefined {
   if (error instanceof InputRequestError)
     return new AgentToolError(error.code === 'gone' ? 'not_found' : error.code, error.message);
   if (error instanceof TerminalMountError) return new AgentToolError(error.code, error.message);
+  if (error instanceof BrowserTransportError) return fromWorker(error);
   if (!(error instanceof BrowserSessionError)) return undefined;
   if (error.code === 'launch_failed') return new AgentToolError('unavailable', browserUnavailable(error.message));
   if (error.code === 'not_running')
@@ -768,6 +939,29 @@ function translate(error: unknown): AgentToolError | undefined {
       'The browser is not running in this session. Open a page with browser.open.',
     );
   return new AgentToolError(error.code, error.message);
+}
+
+/**
+ * The worker's refusal of an act — a ref the page no longer knows, an element that never appeared — in
+ * this domain's words. The worker's own sentence is what the agent needs to act on ("read the page
+ * again"), so it is kept, without the transport's "browser action failed:" prefix.
+ */
+function fromWorker(error: BrowserTransportError): AgentToolError {
+  const message = error.message.replace(/^browser action failed: /u, '');
+  switch (error.code) {
+    case 'launch_failed':
+      return new AgentToolError('unavailable', browserUnavailable(message));
+    case 'not_running':
+      return new AgentToolError(
+        'not_found',
+        'The browser is not running in this session. Open a page with browser.open.',
+      );
+    case 'profile_busy':
+    case 'login_window_open':
+      return new AgentToolError('conflict', message);
+    default:
+      return new AgentToolError(error.code, message);
+  }
 }
 
 /** One sentence: what is missing, and how to fix it. */

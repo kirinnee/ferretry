@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import type { BoardTask, BoardTaskEvent, LaneSet, PrLink, ReleasedIn, TaskWorkflow } from '@ferretry/protocol';
 import should from 'should';
 import { FACT_TRIGGERS, laneFromFacts } from '../../../src/lib/board/index.ts';
-import { card, lanes, PROJECT, templateLanes } from './support.ts';
+import { card, lanes, oldQuickLanes, PROJECT, templateLanes } from './support.ts';
 
 const MERGED_AT = '2026-10-30T09:00:00Z';
 const SHA = 'a'.repeat(40);
@@ -389,5 +389,34 @@ describe('laneFromFacts: the action-first Ferretry lanes', () => {
 
   it('should never close a card on a fact: only the owner’s Done does', () => {
     should(on(at('released', [merged(1, release('4.110.0'))]), '9.0.0')).be.null();
+  });
+});
+
+describe('laneFromFacts on quick lanes (the Unfiled board)', () => {
+  const quick = lanes(PROJECT, 'quick');
+
+  it('should put a card whose PRs merged in To test, released or not: quick work has no release step', () => {
+    for (const laneId of ['todo', 'doing']) {
+      should(verdict(at(laneId, [merged(1)], { workflow: 'quick' }), null, quick)).deepEqual(['to-test', 'pr.merged']);
+      should(verdict(at(laneId, [merged(1, release('4.110.0'))], { workflow: 'quick' }), null, quick)).deepEqual([
+        'to-test',
+        'release.published',
+      ]);
+    }
+    should(verdict(at('doing', [merged(1), merged(2)], { workflow: 'design-first' }), null, quick)).deepEqual([
+      'to-test',
+      'pr.merged',
+    ]);
+  });
+
+  it('should have no opinion on open work, a card already in To test, or Closed', () => {
+    should(verdict(at('doing', [open(1)], { workflow: 'quick' }), null, quick)).be.null();
+    should(verdict(at('to-test', [merged(1)], { workflow: 'quick' }), null, quick)).be.null();
+    should(verdict(at('to-test', [merged(1), open(2)], { workflow: 'quick' }), null, quick)).be.null();
+    should(verdict(at('closed', [merged(1)], { workflow: 'quick' }), null, quick)).be.null();
+  });
+
+  it('should have had nowhere to put a merged card on the quick lanes from before To test', () => {
+    should(verdict(at('doing', [merged(1)], { workflow: 'quick' }), null, oldQuickLanes())).be.null();
   });
 });

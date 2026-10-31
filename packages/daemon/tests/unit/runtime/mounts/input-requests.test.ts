@@ -5,7 +5,7 @@ import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { inputRequestRoutes } from '../../../../src/lib/runtime/mounts/input-requests.ts';
 import { bodyReads, jsonBody, request } from '../../api/support.ts';
-import { inputRequestService, RAISE, SESSION } from '../../input-requests/support.ts';
+import { FACTS, inputRequestService, RAISE, SESSION } from '../../input-requests/support.ts';
 import { agentIn, CREDENTIALS, GRANTED, human } from './support.ts';
 
 /**
@@ -192,5 +192,41 @@ describe('the quarantine routes', () => {
     const stop = await dispatch.dispatch(end('dev', agentIn(SESSION)));
 
     should([read.status, stop.status]).eql([403, 403]);
+  });
+});
+
+describe('the owner request list — publication at the transport', () => {
+  const CANARY = 'pane-consumer-CANARY';
+
+  it('should mask the facts of a terminal a hold took after the service last checked', async () => {
+    const { service, quarantine } = inputRequestService({
+      facts: { ...FACTS, foreground: { ...FACTS.foreground, comm: CANARY }, promptLine: 'pane-prompt-CANARY' },
+      names: ['dev', '000000000001'],
+    });
+    await service.raise(SESSION, RAISE);
+    const list = service.list.bind(service);
+    service.list = async (...args: Parameters<typeof list>) => {
+      const answered = await list(...args);
+      queueMicrotask(() => void quarantine.begin(SESSION, ['dev', '000000000001'], 'race'));
+      return answered;
+    };
+    const dispatch = new ApiDispatcher(new ApiRouter(inputRequestRoutes(service)), CREDENTIALS, GRANTED);
+
+    const answered = await dispatch.dispatch(request({ method: 'GET', path: '/v1/input-requests', headers: human }));
+
+    should(answered.status).equal(200);
+    should(String(answered.body)).not.containEql(CANARY);
+    should(String(answered.body)).not.containEql('pane-prompt-CANARY');
+    should(String(answered.body)).containEql('sudo wants your password');
+  });
+
+  it('should leave the facts of a terminal that is not quarantined as they are', async () => {
+    const { service } = inputRequestService({ facts: { ...FACTS, foreground: { ...FACTS.foreground, comm: CANARY } } });
+    await service.raise(SESSION, RAISE);
+    const dispatch = new ApiDispatcher(new ApiRouter(inputRequestRoutes(service)), CREDENTIALS, GRANTED);
+
+    const answered = await dispatch.dispatch(request({ method: 'GET', path: '/v1/input-requests', headers: human }));
+
+    should(String(answered.body)).containEql(CANARY);
   });
 });

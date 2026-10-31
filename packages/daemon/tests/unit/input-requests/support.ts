@@ -5,7 +5,7 @@ import { InputRequestService } from '../../../src/lib/input-requests/service.ts'
 
 export const SESSION = 'mvv6b4qw-49d0158d';
 
-const FACTS: InputTargetFacts = {
+export const FACTS: Extract<InputTargetFacts, { readonly kind: 'terminal' }> = {
   kind: 'terminal',
   paneProof: { paneId: '%3', pid: 4242, sessionCreated: 1_700_000_000 },
   foreground: { pid: 4300, pgid: 4300, comm: 'sudo', argv: 'sudo -v' },
@@ -24,18 +24,34 @@ export const RAISE: InputRaise = {
 };
 
 /** The real service over a terminal that always shows `FACTS`, a board that takes every card and an empty journal. */
-export function inputRequestService(options: { readonly crash?: () => boolean } = {}) {
+export function inputRequestService(
+  options: {
+    readonly crash?: () => boolean;
+    /** What the terminal shows; the default is a sudo prompt. */
+    readonly facts?: InputTargetFacts;
+    /** Every other way the terminal is known besides its key. */
+    readonly names?: readonly string[];
+    /** The one live session; the default is {@link SESSION}. */
+    readonly session?: string;
+  } = {},
+) {
+  const live = options.session ?? SESSION;
   const writes: string[] = [];
   const events: InputEvent[] = [];
   let card = 1;
   let id = 1;
   const clock = { now: () => Date.parse('2026-10-30T12:00:00.000Z') };
+  const quarantine = new QuarantineRegistry(clock);
   const values = new EphemeralValues(clock);
   const service = new InputRequestService({
     target: {
       observe: async () => {
         if (options.crash?.() === true) throw new Error('the terminal subsystem fell over');
-        return { ok: true, facts: FACTS };
+        return {
+          ok: true,
+          facts: options.facts ?? FACTS,
+          ...(options.names === undefined ? {} : { names: options.names }),
+        };
       },
       type: async (_session, _target, text) => {
         writes.push(text);
@@ -58,10 +74,10 @@ export function inputRequestService(options: { readonly crash?: () => boolean } 
     clock,
     ids: { requestId: () => (id++).toString(16).padStart(32, '0') },
     timers: { after: async () => await new Promise<void>(() => undefined) },
-    sessions: { ended: async candidate => candidate !== SESSION, all: async () => [SESSION] },
+    sessions: { ended: async candidate => candidate !== live, all: async () => [live] },
     values,
-    quarantine: new QuarantineRegistry(clock),
+    quarantine,
     redact: async text => values.scrubAll(text),
   });
-  return { service, writes, events };
+  return { service, writes, events, quarantine };
 }

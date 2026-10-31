@@ -1,8 +1,16 @@
 import { describe, it } from 'bun:test';
-import type { AgendaId, InputAgentView, InputRaise } from '@ferretry/protocol';
+import {
+  type AgendaId,
+  type AgentToolCall,
+  type InputAgentView,
+  type InputRaise,
+  type InputTargetFacts,
+  padInputValue,
+} from '@ferretry/protocol';
 import should from 'should';
 import type { AgentInputPort, AgentToolError } from '../../../src/lib/index.ts';
 import { InputRequestError } from '../../../src/lib/input-requests/errors.ts';
+import { FACTS, inputRequestService, RAISE } from '../input-requests/support.ts';
 import { agent, agentToolWorld, person } from './support.ts';
 
 /** An input port that records what it was asked and answers with whatever the case set. */
@@ -564,5 +572,127 @@ describe('AgentToolService — a terminal the owner just typed a secret into', (
 
     // Assert
     should(read.summary).startWith('The last');
+  });
+});
+
+describe('AgentToolService — a nested input view is sealed where it is published', () => {
+  const CANARY = 'pane-consumer-CANARY';
+  const OWNER = { kind: 'owner', actor: { kind: 'host' }, carrier: 'loopback' } as const;
+  const facts: InputTargetFacts = {
+    ...FACTS,
+    foreground: { ...FACTS.foreground, comm: CANARY },
+    promptLine: 'pane-prompt-CANARY',
+  };
+
+  /** The real input service behind the tools, on a terminal whose foreground command is a canary. */
+  const realWorld = async () => {
+    const built = inputRequestService({ facts, session: 's1', names: ['dev', '000000000001'] });
+    const world = agentToolWorld({
+      input: built.service,
+      quarantinedUntil: (session, names) => built.service.quarantinedUntil(session, names),
+    });
+    await world.service.call(agent, { tool: 'terminal.open', name: 'dev' });
+    return { ...built, world };
+  };
+
+  /** Suspends the call's audit record, lets the owner type a secret, then resumes it. */
+  const deliveredDuring = async (built: Awaited<ReturnType<typeof realWorld>>, call: AgentToolCall) => {
+    let entered!: () => void;
+    let resume!: () => void;
+    const reached = new Promise<void>(resolve => (entered = resolve));
+    const gate = new Promise<void>(resolve => (resume = resolve));
+    built.world.audit.during = async () => {
+      entered();
+      await gate;
+    };
+    const pending = built.world.service.call(agent, call);
+    await reached;
+    const [open] = await built.service.list(OWNER, 's1');
+    await built.service.deliver(
+      's1',
+      open?.id ?? '',
+      {
+        deliveryId: crypto.randomUUID(),
+        observedDigest: open?.observedDigest ?? '',
+        padded: padInputValue('x'),
+        submit: true,
+      },
+      OWNER,
+    );
+    should(built.service.quarantinedUntil('s1', ['dev'])).not.be.undefined();
+    resume();
+    return await pending;
+  };
+
+  it('should not hand back the foreground command when the owner typed a secret while terminal.request_input was audited', async () => {
+    const built = await realWorld();
+
+    const result = await deliveredDuring(built, {
+      tool: 'terminal.request_input',
+      name: 'dev',
+      prompt: 'password',
+      sensitivity: 'secret',
+    });
+
+    should(JSON.stringify(result)).not.containEql(CANARY);
+  });
+
+  it('should not hand back the foreground command when the owner typed a secret while input.wait was audited', async () => {
+    const built = await realWorld();
+    const raised = await built.service.raise('s1', { ...RAISE, target: { kind: 'terminal', key: 'dev' } });
+
+    const result = await deliveredDuring(built, { tool: 'input.wait', id: raised.id, timeoutMs: 0 });
+
+    should(JSON.stringify(result)).not.containEql(CANARY);
+  });
+
+  it('should show the foreground command while nothing is quarantined, and name no pane it cannot bind', async () => {
+    const built = await realWorld();
+    const raised = await built.service.raise('s1', { ...RAISE, target: { kind: 'terminal', key: 'dev' } });
+
+    const waited = await built.world.service.call(agent, { tool: 'input.wait', id: raised.id, timeoutMs: 0 });
+    const stray = await built.world.service
+      .call(agent, { tool: 'input.wait', id: 'A99' as AgendaId, timeoutMs: 0 })
+      .then(
+        () => undefined,
+        (failure: unknown) => failure,
+      );
+
+    should(waited.input?.observed?.consumer).equal(CANARY);
+    should(stray).not.be.undefined();
+  });
+
+  it('should publish a result again at the transport, and pass through one that read no pane', async () => {
+    const built = await realWorld();
+    const raised = await built.service.raise('s1', { ...RAISE, target: { kind: 'terminal', key: 'dev' } });
+    const waited = await built.world.service.call(agent, { tool: 'input.wait', id: raised.id, timeoutMs: 0 });
+    const listed = await built.world.service.call(agent, { tool: 'terminal.list' });
+
+    built.quarantine.begin('s1', ['dev', '000000000001'], 'late');
+
+    should(JSON.stringify(built.world.service.publish(waited))).not.containEql(CANARY);
+    should(built.world.service.publish(listed)).equal(listed);
+  });
+
+  it('should drop the view of a pending request it cannot bind to a terminal', async () => {
+    const input = new FakeInput();
+    input.view = { id: 'A7', state: 'pending', observed: { consumer: CANARY, echo: 'off', recognised: true } };
+    const world = await worldWith(input);
+
+    const result = await world.service.call(agent, { tool: 'input.wait', id: 'A7' });
+
+    should(JSON.stringify(result)).not.containEql(CANARY);
+    should(result.input?.state).equal('pending');
+  });
+
+  it('should bind a pending request to the terminal known by its id as well as by its name', async () => {
+    const input = new FakeInput();
+    input.view = { id: 'A7', state: 'pending', observed: { consumer: CANARY, echo: 'off', recognised: true } };
+    input.pending.set('terminal:000000000001', 'A7');
+    const world = await worldWith(input);
+
+    const result = await world.service.call(agent, { tool: 'input.wait', id: 'A7' });
+
+    should(result.input?.observed?.consumer).equal(CANARY);
   });
 });

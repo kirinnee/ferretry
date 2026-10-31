@@ -167,8 +167,8 @@ describe('browser worker client — requests', () => {
     // Act
     const calls = [
       await client.navigate('p1', 'https://example.test/next'),
-      await client.click('p1', '#submit'),
-      await client.type('p1', '#field', 'hello'),
+      await client.click('p1', { kind: 'selector', selector: '#submit' }),
+      await client.type('p1', { kind: 'selector', selector: '#field' }, 'hello'),
       await client.back('p1'),
       await client.forward('p1'),
       await client.reload('p1'),
@@ -193,7 +193,15 @@ describe('browser worker client — requests', () => {
     ]);
     // Every page act names its page: there is no "active tab" for a request to fall back on.
     should(reportedParams(calls[0]?.url ?? '')).deepEqual({ pageId: 'p1', url: 'https://example.test/next' });
-    should(reportedParams(calls[2]?.url ?? '')).deepEqual({ pageId: 'p1', selector: '#field', text: 'hello' });
+    should(reportedParams(calls[1]?.url ?? '')).deepEqual({
+      pageId: 'p1',
+      target: { kind: 'selector', selector: '#submit' },
+    });
+    should(reportedParams(calls[2]?.url ?? '')).deepEqual({
+      pageId: 'p1',
+      target: { kind: 'selector', selector: '#field' },
+      text: 'hello',
+    });
     should(reportedParams(calls[3]?.url ?? '')).deepEqual({ pageId: 'p1' });
     should(reportedParams(calls[6]?.url ?? '')).deepEqual({ url: 'https://example.test/tab', incognito: true });
     should(reportedParams(calls[7]?.url ?? '')).deepEqual({});
@@ -207,18 +215,24 @@ describe('browser worker client — requests', () => {
     const client = await connect();
 
     // Act
-    const read = await client.read('p1', '#article');
+    const read = await client.read('p1', { target: { kind: 'selector', selector: '#article' } });
     const readWithoutSelector = await client.read('p1');
-    const tree = await client.read('p1', 'main', 'a11y');
+    const tree = await client.read('p1', { target: { kind: 'selector', selector: 'main' }, mode: 'a11y' });
     const shot = await client.screenshot('p1');
 
     // Assert
     should(read.text).equal('page text');
-    should(reportedParams(read.url)).deepEqual({ pageId: 'p1', selector: '#article' });
+    should(reportedParams(read.url)).deepEqual({ pageId: 'p1', target: { kind: 'selector', selector: '#article' } });
     should(reportedParams(readWithoutSelector.url)).deepEqual({ pageId: 'p1' });
     // The accessibility tree is asked for by mode, on the same request.
-    should(reportedParams(tree.url)).deepEqual({ pageId: 'p1', selector: 'main', mode: 'a11y' });
+    should(reportedParams(tree.url)).deepEqual({
+      pageId: 'p1',
+      target: { kind: 'selector', selector: 'main' },
+      mode: 'a11y',
+    });
     should(shot.screenshotBase64).equal('AAAA');
+    // A worker that names no format is an older one, whose screenshots were always PNG.
+    should(shot.screenshotFormat).equal('png');
   });
 
   it('should grant the worker only the allowlisted environment, plus a forced loopback proxy bypass', async () => {
@@ -263,7 +277,7 @@ describe('browser worker client — requests', () => {
     const client = await connect();
 
     // Act
-    const failure = await rejection(client.click('p1', 'refuses'));
+    const failure = await rejection(client.click('p1', { kind: 'selector', selector: 'refuses' }));
 
     // Assert
     should(failure.code).equal('upstream_failed');

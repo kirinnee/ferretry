@@ -11,6 +11,7 @@ import {
   AgentToolError,
   AgentToolService,
   BrowserSessionService,
+  NO_REDACTION,
   SurfaceControl,
 } from '../../../../src/lib/index.ts';
 import { FakeTerminals } from '../../../unit/runtime/mounts/support.ts';
@@ -67,6 +68,13 @@ beforeAll(async () => {
             ...(url.pathname === '/set' ? { 'set-cookie': `who=${url.searchParams.get('v') ?? ''}; Path=/` } : {}),
           },
         });
+      if (url.pathname === '/form')
+        return new Response(
+          '<html><body><label>Name <input id="n"></label>' +
+            "<button onclick=\"document.getElementById('o').textContent='clicked:'+document.getElementById('n').value\">Go</button>" +
+            '<p id="o">idle</p></body></html>',
+          { headers: { 'content-type': 'text/html' } },
+        );
       return page(url.pathname === '/set' ? 'set' : `cookie:${request.headers.get('cookie') ?? ''}`);
     },
   });
@@ -86,6 +94,7 @@ beforeAll(async () => {
     control: new SurfaceControl({ publish: async () => undefined, history: async () => [] }, { now: () => Date.now() }),
     policy: { allows: async () => true },
     audit: { record: async () => undefined },
+    redactor: NO_REDACTION,
     clock: { now: () => Date.now() },
     sleep: async milliseconds => await Bun.sleep(milliseconds),
   });
@@ -97,7 +106,49 @@ afterAll(async () => {
   if (root !== '') await rm(root, { recursive: true, force: true });
 });
 
+/** The ref a snapshot line gives the first element whose line contains `text`. */
+async function refOf(name: string, text: string): Promise<string> {
+  const found = await tools.call(agent('s1'), { tool: 'browser.read', name, mode: 'snapshot', find: text });
+  const ref = /\[ref=([a-z0-9]+)\]/u.exec(found.output ?? '')?.[1];
+  if (ref === undefined) throw new Error(`no ref for ${text} in: ${found.output ?? ''}`);
+  return ref;
+}
+
 describe('the machine agent browser, in a real Chrome', () => {
+  it('should act on the refs a snapshot hands out, and refuse a ref the page no longer knows', async () => {
+    // Arrange
+    await tools.call(agent('s1'), { tool: 'browser.open', name: 'refs', url: `${base}/form` });
+
+    // Act
+    const snapshot = await tools.call(agent('s1'), { tool: 'browser.read', name: 'refs', mode: 'snapshot' });
+    const field = await refOf('refs', 'textbox');
+    const button = await refOf('refs', 'button "Go"');
+    await tools.call(agent('s1'), { tool: 'browser.type', name: 'refs', ref: field, text: 'hadi' });
+    await tools.call(agent('s1'), { tool: 'browser.click', name: 'refs', ref: button });
+    const after = await tools.call(agent('s1'), { tool: 'browser.read', name: 'refs', selector: '#o' });
+    await tools.call(agent('s1'), { tool: 'browser.navigate', name: 'refs', url: `${base}/read` });
+    const stale = await tools.call(agent('s1'), { tool: 'browser.click', name: 'refs', ref: button }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    // Back may restore the page from Chrome's back/forward cache, clicked state and all, so it is read by
+    // where the page is; a reload is what brings the form back fresh.
+    const back = await tools.call(agent('s1'), { tool: 'browser.navigate', name: 'refs', history: 'back' });
+    await tools.call(agent('s1'), { tool: 'browser.navigate', name: 'refs', history: 'reload' });
+    const reloaded = await tools.call(agent('s1'), { tool: 'browser.read', name: 'refs', selector: '#o' });
+    const shot = await tools.call(agent('s1'), { tool: 'browser.screenshot', name: 'refs', format: 'jpeg' });
+
+    // Assert
+    should(snapshot.output).match(/button "Go" \[ref=e\d+\]/u);
+    should(after.output).equal('clicked:hadi');
+    should(stale).be.instanceOf(AgentToolError);
+    should((stale as AgentToolError).message).containEql('latest snapshot');
+    should(back.summary).containEql(`(now at ${base}/form)`);
+    should(reloaded.output).equal('idle');
+    should(shot.screenshotFormat).equal('jpeg');
+    await tools.call(agent('s1'), { tool: 'browser.close', name: 'refs' });
+  }, 60_000);
+
   it('should land a person’s typing in their tab while the agent drives another, with both tabs streaming', async () => {
     // Arrange — the person's page (their toolbar opened it) and the agent's page, in one session.
     await browser.act('s1', { action: 'new-page', url: `${base}/read` });

@@ -13,8 +13,8 @@ import {
   type LaneTemplateName,
   type TaskKind,
   type TaskRef,
-  taskIdPrefix,
   TaskWorkflowSchema,
+  taskIdPrefix,
 } from '@ferretry/protocol';
 import {
   type AgendaLinkSource,
@@ -393,3 +393,19 @@ export const world = (overrides: Partial<ServiceWorld> = {}): ServiceWorld => {
     ...overrides,
   };
 };
+
+/** The `quick` lanes as they were stored before To test: Todo → Doing → Closed, closing on `signal.done`. */
+export const oldQuickLanes = (projectId: BoardProjectId = PROJECT): LaneSet => ({
+  projectId,
+  version: 1,
+  confirmedBy: 'owner',
+  proposedBy: 'ferretry',
+  lanes: [
+    { id: 'todo', name: 'Todo', category: 'backlog', staleAfter: '3d', emphasis: 'progress' },
+    { id: 'doing', name: 'Doing', category: 'active', enterOn: ['work.started'], staleAfter: '2h' },
+    { id: 'closed', name: 'Closed', category: 'closed', enterOn: ['signal.done'], emphasis: 'info' },
+  ],
+  variants: Object.fromEntries(TaskWorkflowSchema.options.map(workflow => [workflow, ['todo', 'doing', 'closed']])),
+  doneLane: 'closed',
+  notGoodLane: 'doing',
+});

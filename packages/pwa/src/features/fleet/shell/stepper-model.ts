@@ -4,7 +4,7 @@
  * Every flow on the Machines surface — first run, Add runtime, Build a profile, Clone —
  * is a stack of steppers: the flow a person started, plus any sub-stepper it opened to create a
  * missing thing in place ("+ Add a new login", "+ Build a new profile"). The rules live here once so
- * the five tabs cannot each invent their own Back:
+ * the six tabs cannot each invent their own Back:
  *
  * - Back goes one step back. From step 1 of a SUB-stepper it returns to the parent step; from step 1
  *   of a top-level stepper it asks to confirm leaving (unless the flow says leaving is harmless).

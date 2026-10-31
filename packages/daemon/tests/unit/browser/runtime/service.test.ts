@@ -69,7 +69,7 @@ class Tabs {
     },
     click: async pageId => this.acted('click', pageId),
     type: async pageId => this.acted('type', pageId),
-    read: async (pageId, _selector, mode) => ({ ...this.acted(`read-${mode ?? 'text'}`, pageId), text: 'hello' }),
+    read: async (pageId, options) => ({ ...this.acted(`read-${options?.mode ?? 'text'}`, pageId), text: 'hello' }),
     screenshot: async pageId => ({ ...this.acted('screenshot', pageId), screenshotBase64: 'iVBOR' }),
     back: async pageId => this.acted('back', pageId),
     forward: async pageId => this.acted('forward', pageId),
@@ -216,6 +216,26 @@ describe('the machine agent browser — one Chrome, pages by session', () => {
     // Assert
     should(through).have.property('proxy').eql(proxy);
     should(goes).not.have.property('proxy');
+  });
+
+  it('should describe the machine browser as a whole: stopped, then running with its proxy, then stopped again', async () => {
+    // Arrange
+    const tabs = new Tabs();
+    const proxy = { url: 'http://proxy.example:8080', authenticated: true, bypassCount: 0 };
+    Object.assign(tabs.automation, { proxy });
+    const { service } = harness(tabs);
+
+    // Act
+    const before = service.overview();
+    await service.openPage('s1', 'app');
+    const during = service.overview();
+    await service.closeAll();
+    const after = service.overview();
+
+    // Assert
+    should(before).eql({ state: 'stopped' });
+    should(during).eql({ state: 'running', startedAt: '2026-10-16T10:00:00.000Z', proxy });
+    should(after).eql({ state: 'stopped' });
   });
 
   it('should let a guard refuse an act from inside the page’s own queue', async () => {

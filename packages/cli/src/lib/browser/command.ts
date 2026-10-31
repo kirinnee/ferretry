@@ -1,6 +1,6 @@
 import type { Command } from 'commander';
 import type { IBrowserRunner } from './controller.ts';
-import { optionalText, parseLoginMinutes, parseViewport, requireText } from './parse.ts';
+import { optionalText, parseLoginMinutes, parseProxyTestFlags, parseViewport, requireText } from './parse.ts';
 import type { BrowserCommand } from './types.ts';
 
 interface SessionOption {
@@ -19,7 +19,7 @@ const SESSION_HELP = 'target another session (an agent is always restricted to i
 export function registerBrowserCommands(program: Command, controller: IBrowserRunner): void {
   const browser = program
     .command('browser')
-    .description("drive this session's shared browser and the human sign-in window")
+    .description("drive this session's shared browser, the human sign-in window, and test the browser proxy")
     .option('-s, --session <id>', SESSION_HELP);
 
   const sessionOf = (options: SessionOption): SessionOption => {
@@ -119,6 +119,7 @@ export function registerBrowserCommands(program: Command, controller: IBrowserRu
     });
 
   registerLoginCommands(browser, controller);
+  registerProxyCommands(browser, controller);
 }
 
 /**
@@ -160,5 +161,27 @@ function registerLoginCommands(browser: Command, controller: IBrowserRunner): vo
     .option('--primed', 'also mark the profile signed in')
     .action(async (options: { primed?: boolean }) => {
       await controller.run({ command: 'login', action: 'stop', ...(options.primed ? { primed: true } : {}) });
+    });
+}
+
+/**
+ * Owner-only and machine-wide, like the sign-in window, so these verbs take no `--session`. Credentials are
+ * secret NAMES (`fy secret set NAME`), never values: there is no flag that accepts one.
+ */
+function registerProxyCommands(browser: Command, controller: IBrowserRunner): void {
+  const proxy = browser.command('proxy').description('the browser proxy; owner only, machine-wide');
+
+  proxy
+    .command('test')
+    .description(
+      'check the saved proxy, or one given here without saving it; reports reachable, error class, ms, egress IP',
+    )
+    .option('--url <address>', 'try this proxy instead of the saved one: http://, https:// or socks5:// host and port')
+    .option('--bypass <list>', 'comma-separated hosts that skip the proxy (needs --url)')
+    .option('--username-secret <name>', 'NAME of the secret holding the proxy user name (needs --url)')
+    .option('--password-secret <name>', 'NAME of the secret holding the proxy password (needs --url)')
+    .action(async (options: { url?: string; bypass?: string; usernameSecret?: string; passwordSecret?: string }) => {
+      const setting = parseProxyTestFlags(options);
+      await controller.run({ command: 'proxy', action: 'test', ...(setting === undefined ? {} : { proxy: setting }) });
     });
 }
