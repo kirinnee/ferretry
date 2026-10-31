@@ -29,6 +29,8 @@ const SHORT_SHUTDOWN = { shutdownTimeoutMs: 250 };
 /** The machine's DevTools transport, named outright where a case is about one of them. */
 const PIPE = { transport: async () => 'pipe' as const };
 const PORT = { transport: async () => 'port' as const };
+/** Says every listener is the spawned Chrome's, so a test of something else is not judged by this host's sockets. */
+const OWN_LISTENER = { prove: async () => ({ kind: 'proven' as const }), holder: async () => undefined };
 
 const roots: string[] = [];
 const opened: BrowserAutomation[] = [];
@@ -539,7 +541,7 @@ describe('NodeSessionBrowserLauncher', () => {
           process.execPath,
           environment(chrome),
           async () => worker as never,
-          { ...PORT, ports: fixed, checkFirewall },
+          { ...PORT, ports: fixed, checkFirewall, listenerProver: OWN_LISTENER },
         );
         opened.push(await launcher.launch({ width: 800, height: 600 }));
       };
