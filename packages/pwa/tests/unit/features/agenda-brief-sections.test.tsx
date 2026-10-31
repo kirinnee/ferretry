@@ -265,7 +265,7 @@ describe('the situation block and the typed layouts', () => {
   test('puts the premise and the context in ONE block that comes first, and nowhere else', async () => {
     const root = await draw({ ask: choices('SQLite', 'Postgres') });
     const block = must(root.querySelector('[data-agenda-situation]'), 'the situation block');
-    expect([...block.querySelectorAll('h4')].map(h => h.textContent)).toEqual(['What’s going on', 'Why now']);
+    expect([...block.querySelectorAll('h4')].map(h => h.textContent)).toEqual(['Premise', 'Context']);
     expect(sections(root).slice(0, 2)).toEqual(['premise', 'context']);
     expect(root.querySelectorAll('[data-agenda-section="premise"]')).toHaveLength(1);
     expect(root.querySelectorAll('[data-agenda-section="context"]')).toHaveLength(1);
@@ -394,9 +394,8 @@ describe('PointForm emphasis and the changed context', () => {
 
 describe('the context heading', () => {
   test("a context that is the ferret's own picks is headed Suggested answers, never Why it matters", () => {
-    expect(contextHeading('My picks: A delete the line · B accept · C yes to all', false)).toBe('Suggested answers');
-    expect(contextHeading('- my pick: delete it', true)).toBe('Suggested answers');
-    expect(contextHeading('The relay drops sessions for ten seconds', false)).toBe('Why it matters');
-    expect(contextHeading('The relay drops sessions for ten seconds', true)).toBe('Context');
+    expect(contextHeading('My picks: A delete the line · B accept · C yes to all')).toBe('Suggested answers');
+    expect(contextHeading('- my pick: delete it')).toBe('Suggested answers');
+    expect(contextHeading('The relay drops sessions for ten seconds')).toBe('Context');
   });
 });

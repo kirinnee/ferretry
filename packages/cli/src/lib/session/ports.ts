@@ -57,7 +57,7 @@ export interface ISessionBoard {
  * independent of the 30-method client interface and makes them testable with a hand-written double.
  */
 export interface ISessionApi {
-  list(): Promise<SessionView[]>;
+  list(): Promise<readonly SessionView[]>;
   get(id: string): Promise<SessionView>;
   suggestNames(count: number): Promise<string[]>;
   start(input: StartSessionRequestInput, requestId?: string): Promise<SessionView>;

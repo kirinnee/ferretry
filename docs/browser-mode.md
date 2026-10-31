@@ -30,11 +30,21 @@ browser draws, not what an agent may do with it, so it applies at once.
   window's display, which is served over VNC. A Linux host with no Xvfb refuses to start the browser with
   one sentence naming the install command (`sudo apt-get install -y xvfb`, or your manager's) or "set
   Browser mode back to Headless". The dev shell carries Xvfb on Linux.
+- **Other users on the host cannot see it.** The display's unix socket is reachable by every local account,
+  so the Xvfb is started with `-auth` and a random cookie kept in a `0600` file under the daemon's own
+  `0700` state directory (`browser/x11/`); the browser and the login window's x11vnc are handed it through
+  `XAUTHORITY`, and the file is removed when the daemon stops. Without the cookie another user could
+  screenshot the window or type into it.
 - **The same profile.** Both modes use the machine's one persistent agent profile, so what you sign in to
   in a Real window stays signed in, for you and for your agents, until you sign out.
 
 Both modes keep Chrome's loopback debugging port, because that is what the view streams through and the
-agent tools drive. **Neither mode passes an automation switch** — no `--enable-automation`, and no
+agent tools drive. (A DevTools pipe transport, `--remote-debugging-pipe`, also exists; it is not on by default.)
+On Linux the daemon talks to that port only once the kernel shows it is held by the Chrome it just started
+— the same proof the login window's x11vnc port passes before its port, password and ssh line are shown —
+so a program another account bound there first is refused with one sentence naming the port and its uid
+("port N is held by another program (uid U), not this browser — …"). macOS has no `/proc` to prove it from
+and starts as before. **Neither mode passes an automation switch** — no `--enable-automation`, and no
 `--disable-blink-features=AutomationControlled` either: Ferretry does not announce automation and does
 not hide it. In a Real window `navigator.webdriver` is `false` because nothing about the browser is
 automated until an agent acts on a page.

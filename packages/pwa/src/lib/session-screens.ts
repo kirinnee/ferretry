@@ -34,6 +34,11 @@ export type SettledForm = 'fresh' | 'slim' | 'expanded';
 /** A browser-safe, display-only transcript row. Content remains daemon-owned. */
 export interface TranscriptEntry {
   readonly id: string;
+  /**
+   * The byte of the session's transcript the row's first record begins at, when the daemon said
+   * (`SessionLogPage.offsets`). A search hit names one; the chat finds its row by it.
+   */
+  readonly offset?: number;
   /** `system` is Ferretry speaking INTO the session (a send that did not arrive), or — with `event` — the
    *  harness's own event typed into the user channel; `notice` is daemon bookkeeping, shown only as an alert. */
   readonly kind: 'user' | 'assistant' | 'tool' | 'command' | 'notice' | 'system' | 'ledger';

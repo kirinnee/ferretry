@@ -1,10 +1,11 @@
 import type { MigrationRefusal, SessionStatus } from '@ferretry/protocol';
+import { type AgentJob, blockingAgentJobs } from './agent-jobs.ts';
 import { backgroundTerminalCount } from './background-terminals.ts';
 import { describeInflight } from './inflight-describe.ts';
-import { assembleInflightReport, gateInflight, type GateDecision, type InflightReport } from './inflight-report.ts';
-import { renderMigrationOutcome, type MigrationOutcome } from './outcome-render.ts';
+import { assembleInflightReport, type GateDecision, gateInflight, type InflightReport } from './inflight-report.ts';
+import { type MigrationOutcome, renderMigrationOutcome } from './outcome-render.ts';
 import type { ProcessInventoryPort } from './process-inventory-port.ts';
-import { renderInflightCli, renderInflightReport, type ReportMeta } from './report-render.ts';
+import { type ReportMeta, renderInflightCli, renderInflightReport } from './report-render.ts';
 import { restartNotice } from './restart-notice.ts';
 import { joinOpenTools } from './tool-inventory.ts';
 
@@ -89,6 +90,11 @@ export class MigrationPreflight {
   /** The inventory as data a person can read, carried on the refusal so the PWA can show it. */
   describe(report: InflightReport): MigrationRefusal {
     return describeInflight(report);
+  }
+
+  /** The agent's own background jobs this report blocks on, which the agent can be asked to stop. */
+  agentJobs(report: InflightReport): readonly AgentJob[] {
+    return blockingAgentJobs(report);
   }
 
   /** The compact table printed to a terminal on refusal. */

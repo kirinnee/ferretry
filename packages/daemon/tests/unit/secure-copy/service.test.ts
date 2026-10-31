@@ -232,9 +232,14 @@ describe('SecureCopyService capturing what a command prints', () => {
   it('should refuse a page or clipboard copy until the browser phase', async () => {
     const { service, runner } = world();
 
-    const error = await refusal(service.capture('s1', { name: 'token', source: { kind: 'clipboard', key: 'app' } }));
+    const clipboard = await refusal(
+      service.capture('s1', { name: 'token', source: { kind: 'clipboard', key: 'app' } }),
+    );
+    const page = await refusal(
+      service.capture('s1', { name: 'token', source: { kind: 'browser', key: 'app', ref: 'e1', read: 'text' } }),
+    );
 
-    should(error.code).equal('unavailable');
+    should([clipboard.code, page.code]).eql(['unavailable', 'unavailable']);
     should(runner.specs).eql([]);
   });
 });

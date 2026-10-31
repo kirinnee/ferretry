@@ -730,6 +730,24 @@ const CASES: readonly MethodCase[] = [
     expected: { kind: 'refused', targetAgent: 'codex-a', reason: 'Too new.' },
   },
   {
+    name: 'asking the agent to stop its background jobs after a refused migration',
+    invoke: client => client.askToStopJobs(SESSION_ID),
+    verb: 'POST',
+    path: '/v1/sessions/session-1/migrate/ask-to-stop-jobs',
+    body: {},
+    response: () =>
+      Response.json({
+        messageId: 'migrate-jobs-5101',
+        jobs: [{ pid: 5101, command: 'bash ./merge-all.sh 765', age: '4m' }],
+        alreadyAsked: false,
+      }),
+    expected: {
+      messageId: 'migrate-jobs-5101',
+      jobs: [{ pid: 5101, command: 'bash ./merge-all.sh 765', age: '4m' }],
+      alreadyAsked: false,
+    },
+  },
+  {
     name: 'rename with a name',
     invoke: client => client.rename(SESSION_ID, 'Cover Typed Methods'),
     verb: 'POST',
@@ -871,6 +889,22 @@ const CASES: readonly MethodCase[] = [
     invoke: client => client.messages(SESSION_ID, undefined, 50),
     verb: 'GET',
     path: '/v1/sessions/session-1/messages?limit=50',
+    response: () => jsonResponse(TRANSCRIPT_PAGE),
+    expected: TRANSCRIPT_PAGE,
+  },
+  {
+    name: 'the messages tail with no stated page size',
+    invoke: client => client.messagesTail(SESSION_ID),
+    verb: 'GET',
+    path: '/v1/sessions/session-1/messages?tail=1',
+    response: () => jsonResponse(TRANSCRIPT_PAGE),
+    expected: TRANSCRIPT_PAGE,
+  },
+  {
+    name: 'messages reading back through an opaque cursor with a stated page size',
+    invoke: client => client.messagesTail(SESSION_ID, { through: 'message-cursor-1', limit: 200 }),
+    verb: 'GET',
+    path: '/v1/sessions/session-1/messages?through=message-cursor-1&limit=200',
     response: () => jsonResponse(TRANSCRIPT_PAGE),
     expected: TRANSCRIPT_PAGE,
   },

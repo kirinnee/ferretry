@@ -16,6 +16,7 @@ import {
   isTransientUploadFailure,
   MAX_ATTACHMENT_BYTES,
   normalizeAttachmentMime,
+  SIGNED_OUT_COPY,
   textExtractionFailureCopy,
   UPLOAD_CONNECTION_DROPPED_COPY,
   unlockFailure,
@@ -79,6 +80,13 @@ describe('attachments', () => {
       'no longer available',
     );
     expect(attachmentErrorMessage(new Error('/home/daemon/private/file.pdf'))).toContain('no longer available');
+    expect(attachmentErrorMessage({ status: 401, code: 'unauthorized', message: 'unauthorized' })).toBe(
+      SIGNED_OUT_COPY,
+    );
+    expect(SIGNED_OUT_COPY).toContain('pair it again');
+    expect(
+      attachmentErrorMessage({ status: 401, code: 'unlock_required', message: 'Confirm it is you with a passkey' }),
+    ).toBe('Confirm it is you with a passkey');
     expect(attachmentErrorMessage('declared MIME does not match bytes')).toContain('does not match');
     expect(attachmentErrorMessage('unsupported image type')).toContain("isn't supported");
     expect(attachmentErrorMessage('attachment is empty')).toContain('empty');

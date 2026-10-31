@@ -177,6 +177,10 @@ const UNKNOWN_TEXT_EXTRACTION_FAILURE_COPY =
 const MAX_TEXT_EXTRACTION_FAILURE_CODE_LENGTH = 64;
 const TEXT_EXTRACTION_FAILURE_CODE = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
 
+/** Said when the machine did not recognise this device on an upload: the fix is the device's, not the file's. */
+export const SIGNED_OUT_COPY =
+  'Unauthorized: this machine did not recognise this device — reload the app, or pair it again from Settings';
+
 export const attachmentErrorCopy = (code: AttachmentErrorCode): string => ERROR_COPY[code];
 
 export const isTextExtraction = (value: unknown): value is TextExtraction => {
@@ -295,6 +299,7 @@ export const attachmentErrorMessage = (error: unknown): string => {
   if (typeof object?.code === 'string' && object.code in ERROR_COPY)
     return ERROR_COPY[object.code as AttachmentErrorCode];
   if (object?.status === 404) return ERROR_COPY.attachment_not_found;
+  if (object?.status === 401 && (object.code === undefined || object.code === 'unauthorized')) return SIGNED_OUT_COPY;
 
   const rawMessage = String(object?.message ?? error ?? '');
   const message = rawMessage.toLowerCase();

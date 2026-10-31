@@ -1,3 +1,94 @@
+## [4.158.0](https://github.com/kirinnee/ferretry/compare/v4.157.0...v4.158.0) (2026-10-31)
+
+### Features
+
+* **daemon:** prove the browser's loopback listeners are its own ([#1127](https://github.com/kirinnee/ferretry/issues/1127)) ([1ab7d1a](https://github.com/kirinnee/ferretry/commit/1ab7d1ae5ec0be214e73371c27ca2af2bb82eea5)), closes [#1112](https://github.com/kirinnee/ferretry/issues/1112)
+
+## [4.157.0](https://github.com/kirinnee/ferretry/compare/v4.156.2...v4.157.0) (2026-10-31)
+
+### Features
+
+* **pwa:** draw every agenda card section open, no folding ([#1121](https://github.com/kirinnee/ferretry/issues/1121)) ([6b3385b](https://github.com/kirinnee/ferretry/commit/6b3385b4c11818a09b49bc558adb384135a44984))
+
+### Fixes
+
+* **board:** upload Not good pictures over the machine's carrier ([#1124](https://github.com/kirinnee/ferretry/issues/1124)) ([3ab664c](https://github.com/kirinnee/ferretry/commit/3ab664c42eba23fb11e6b64308ad4b92359f2945))
+* **daemon:** drive the agent browser over a DevTools pipe, not a shared port ([#1123](https://github.com/kirinnee/ferretry/issues/1123)) ([41803e3](https://github.com/kirinnee/ferretry/commit/41803e3625b236fb4e456e683ce3d6cb30fb3552))
+* **migrate:** say to update an old daemon, and keep Claude's status line out of jobs ([#1125](https://github.com/kirinnee/ferretry/issues/1125)) ([19b4638](https://github.com/kirinnee/ferretry/commit/19b4638096791254168ca01cb4ad5afdc83a2b62))
+* **pwa:** finder tap no longer closes the What's new sheet it opens ([#1122](https://github.com/kirinnee/ferretry/issues/1122)) ([42aafc5](https://github.com/kirinnee/ferretry/commit/42aafc5af12d618f082eb1ad14f4837e108b7d5c))
+
+## [4.156.2](https://github.com/kirinnee/ferretry/compare/v4.156.1...v4.156.2) (2026-10-31)
+
+### Fixes
+
+* **daemon:** re-issue the session credential on every pane launch ([#1119](https://github.com/kirinnee/ferretry/issues/1119)) ([1e5e73f](https://github.com/kirinnee/ferretry/commit/1e5e73fc6058d23680179bb815d841795a285cf5)), closes [#1115](https://github.com/kirinnee/ferretry/issues/1115)
+* **pwa:** show the current proxy setting and save and test in one step ([#1120](https://github.com/kirinnee/ferretry/issues/1120)) ([cdb879a](https://github.com/kirinnee/ferretry/commit/cdb879a54120ac5be8837310151421f9dae29954))
+
+## [4.156.1](https://github.com/kirinnee/ferretry/compare/v4.156.0...v4.156.1) (2026-10-31)
+
+### Fixes
+
+* **pair:** sweep pairing redirect pages a killed fy pair leaves behind ([#1118](https://github.com/kirinnee/ferretry/issues/1118)) ([640fb88](https://github.com/kirinnee/ferretry/commit/640fb8807387db42f019f747c9b0461ed9899574))
+* **pwa:** stop the expanded board flickering shut when an item is open ([#1117](https://github.com/kirinnee/ferretry/issues/1117)) ([2f5dbef](https://github.com/kirinnee/ferretry/commit/2f5dbef251195718ac65dad1e17f9db655c582ba)), closes [#1101](https://github.com/kirinnee/ferretry/issues/1101)
+
+## [4.156.0](https://github.com/kirinnee/ferretry/compare/v4.155.1...v4.156.0) (2026-10-31)
+
+### Features
+
+* **pwa:** stack and tint the agenda card's premise and context ([#1114](https://github.com/kirinnee/ferretry/issues/1114)) ([2f5883c](https://github.com/kirinnee/ferretry/commit/2f5883c8babe28e3ad992b90a0dc31275e042f98))
+
+### Fixes
+
+* **cli:** keep the pairing link out of argv when opening a browser ([#1111](https://github.com/kirinnee/ferretry/issues/1111)) ([5bd09db](https://github.com/kirinnee/ferretry/commit/5bd09db38caaba92e6a8dfe891eff8a0db5cdce1))
+* **cli:** send local credentials only to a loopback listener this user owns ([#1112](https://github.com/kirinnee/ferretry/issues/1112)) ([5df3a0b](https://github.com/kirinnee/ferretry/commit/5df3a0bbaa95f3f3809e2d9a837fab9a1e682fab))
+* **daemon:** authenticate the private Xvfb displays with an MIT-MAGIC-COOKIE ([#1113](https://github.com/kirinnee/ferretry/issues/1113)) ([c96b567](https://github.com/kirinnee/ferretry/commit/c96b5675f7ae1c9ce9948fa7d90f6318287f8b02))
+
+## [4.155.1](https://github.com/kirinnee/ferretry/compare/v4.155.0...v4.155.1) (2026-10-31)
+
+### Fixes
+
+* **security:** keep the syscall trace and CLI version probe out of the shared tmp ([#1110](https://github.com/kirinnee/ferretry/issues/1110)) ([a594ea1](https://github.com/kirinnee/ferretry/commit/a594ea10e107dd333c7ada1cd3dd9d59285e3a28))
+
+## [4.155.0](https://github.com/kirinnee/ferretry/compare/v4.154.0...v4.155.0) (2026-10-31)
+
+### Features
+
+* **browser:** run an agent's own script in a page, behind the owner's Page scripts switch ([#1108](https://github.com/kirinnee/ferretry/issues/1108)) ([a68b6f1](https://github.com/kirinnee/ferretry/commit/a68b6f1c23b96fcdffd3402d2d0cb667cab0e586))
+* **pwa:** agenda card v6 — one card at the composer's width, premise and context, a History about the item only ([#1109](https://github.com/kirinnee/ferretry/issues/1109)) ([94a1aa7](https://github.com/kirinnee/ferretry/commit/94a1aa718e876447a99b897d454cd6f5f7b3a546))
+
+## [4.154.0](https://github.com/kirinnee/ferretry/compare/v4.153.0...v4.154.0) (2026-10-31)
+
+### Features
+
+* **chat:** search within a conversation — the whole transcript, jump to a hit ([#1107](https://github.com/kirinnee/ferretry/issues/1107)) ([12f41a1](https://github.com/kirinnee/ferretry/commit/12f41a1f282cc6ca254b8a27367163431c039d58))
+
+### Fixes
+
+* **pwa:** keep Test proxy pressable and explain the secret-name boxes ([#1106](https://github.com/kirinnee/ferretry/issues/1106)) ([d60dfe8](https://github.com/kirinnee/ferretry/commit/d60dfe8beb1e2782d46b438fcfbb4e53218972fb))
+
+## [4.153.0](https://github.com/kirinnee/ferretry/compare/v4.152.0...v4.153.0) (2026-10-31)
+
+### Features
+
+* **migrate:** ask the agent to stop its own background jobs on a refused migration ([#1103](https://github.com/kirinnee/ferretry/issues/1103)) ([e0dd62b](https://github.com/kirinnee/ferretry/commit/e0dd62bdf3396f19de38508185a69d1f1474fab9))
+
+### Fixes
+
+* **chat:** scroll a long conversation back to its first message ([#1099](https://github.com/kirinnee/ferretry/issues/1099)) ([6de3ba2](https://github.com/kirinnee/ferretry/commit/6de3ba2115d43e82f7a009d2c8be71337015b7b6))
+* **pwa:** key the visual fixture cache on every build input ([#1104](https://github.com/kirinnee/ferretry/issues/1104)) ([59f8c69](https://github.com/kirinnee/ferretry/commit/59f8c691bc732a39de4e6d0cef8f32bc7c212e66))
+* **pwa:** show the board's nudges as a Board system row, not an owner bubble ([#1102](https://github.com/kirinnee/ferretry/issues/1102)) ([b35e6ea](https://github.com/kirinnee/ferretry/commit/b35e6eaef8d302908a9e58cd7bd324477b918802))
+
+## [4.152.0](https://github.com/kirinnee/ferretry/compare/v4.151.0...v4.152.0) (2026-10-31)
+
+### Features
+
+* **browser:** add pointer and keys tools for agents ([#1083](https://github.com/kirinnee/ferretry/issues/1083)) ([a6957fe](https://github.com/kirinnee/ferretry/commit/a6957fe9349c01fcd190ecbf6fa39f3ad488042d)), closes [#1086](https://github.com/kirinnee/ferretry/issues/1086) [#1087](https://github.com/kirinnee/ferretry/issues/1087)
+
+### Fixes
+
+* **fleet:** teach ferrets the agenda is not a task tracker ([#1100](https://github.com/kirinnee/ferretry/issues/1100)) ([f80bc77](https://github.com/kirinnee/ferretry/commit/f80bc775309d5e77faed1a0f08191426fa7426b0))
+* **pwa:** close the agenda when the board is expanded over the chat ([#1101](https://github.com/kirinnee/ferretry/issues/1101)) ([8942a91](https://github.com/kirinnee/ferretry/commit/8942a912b98ffeb5a3239e903f91040b906c7194))
+
 ## [4.151.0](https://github.com/kirinnee/ferretry/compare/v4.150.0...v4.151.0) (2026-10-31)
 
 ### Features

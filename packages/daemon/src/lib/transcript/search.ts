@@ -55,7 +55,8 @@ function searchableText(event: TranscriptEvent): string | undefined {
   }
 }
 
-function snippetAround(text: string, at: number, queryLength: number): string {
+/** `text` around the match at `at`, on one line, with an ellipsis where it was cut. */
+export function snippetAround(text: string, at: number, queryLength: number): string {
   const start = Math.max(0, at - SNIPPET_BEFORE);
   const end = Math.min(text.length, at + queryLength + SNIPPET_AFTER);
   const normalized = text.slice(start, end).replace(/\s+/gu, ' ').trim();

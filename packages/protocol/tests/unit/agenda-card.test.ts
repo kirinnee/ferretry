@@ -126,21 +126,44 @@ describe('attention card', () => {
     });
   });
 
+  describe('one meaning for every swipe', () => {
+    it('points a row of options in the options list’s order, wherever the recommendation sits', () => {
+      const three = { ...item, ask: choice('Pause', 'Switch', 'Warn'), recommendation: { decision: 'Warn' } };
+      should(layout(agendaCardAnswers(three))).eql(['left:Pause', 'up:Switch', 'right:Warn']);
+      should(layout(agendaCardAnswers({ ...item, ask: choice('Ship') }))).eql(['up:Ship']);
+      const asked = {
+        ...item,
+        ask: choice('Monday', 'Friday'),
+        answers: [
+          { direction: 'up' as const, does: 'choose' as const, label: 'Friday' },
+          { direction: 'left' as const, does: 'choose' as const, label: 'Monday' },
+        ],
+      };
+      should(layout(agendaCardAnswers(asked))).eql(['left:Monday', 'right:Friday']);
+    });
+
+    it('leaves answers that are not options where the card put them', () => {
+      const permission = { ...item, ask: { kind: 'permission' as const } };
+      should(layout(agendaCardAnswers(permission))).eql(layout(defaultAgendaAnswers('permission', permission.ask)));
+    });
+  });
+
   describe('old items', () => {
     it('reads an item from before cards with no parse failure and derived answers', () => {
       const old = AgendaItemSchema.parse({ ...item, ask: choice('Renew', 'Leave it', 'Ask me each time') });
       should(old.title).be.undefined();
       should(agendaCardKind(old)).equal('choice');
-      should(layout(agendaCardAnswers(old))).eql(['left:Leave it', 'up:Renew', 'right:Ask me each time']);
+      // A row of options reads in the options list's order: the first ←, the second ↑, the third →.
+      should(layout(agendaCardAnswers(old))).eql(['left:Renew', 'up:Leave it', 'right:Ask me each time']);
     });
 
-    it('takes the old brief recommendation as the middle answer', () => {
+    it('keeps the old brief recommendation on the row, in its place in the list', () => {
       const old = AgendaItemSchema.parse({
         ...item,
         ask: choice('Renew', 'Leave it'),
         recommendation: { decision: 'Leave it' },
       });
-      should(answerInDirection(agendaCardAnswers(old), 'up')?.label).equal('Leave it');
+      should(answerInDirection(agendaCardAnswers(old), 'right')?.label).equal('Leave it');
     });
 
     it('offers an old choice past three options as buttons, not swipes', () => {
@@ -158,7 +181,7 @@ describe('attention card', () => {
   });
 
   describe('validation', () => {
-    it('keeps the answers an item was raised with, in left · up · right order', () => {
+    it('keeps the answers an item was raised with, a row of options pointed in the options list’s order', () => {
       const raised = AgendaItemSchema.parse({
         ...item,
         title: 'Work login renewal',
@@ -169,7 +192,7 @@ describe('attention card', () => {
           { direction: 'left', does: 'choose', label: 'No' },
         ],
       });
-      should(layout(agendaCardAnswers(raised))).eql(['left:No', 'right:Yes']);
+      should(layout(agendaCardAnswers(raised))).eql(['left:Yes', 'right:No']);
     });
 
     it('refuses a stored item whose answers do not fit its ask, naming the answer', () => {

@@ -96,6 +96,8 @@ class PagingDaemon {
   readonly calls: LogPageOptions[] = [];
   /** Answers the next older (`before` without `from`) read with this, once. */
   holdOlder: Promise<void> | undefined;
+  /** Whether pages say where each line came from, as a daemon with search does. */
+  offsets = true;
   failOlder: unknown;
 
   constructor(count: number) {
@@ -134,6 +136,7 @@ class PagingDaemon {
       v: 1,
       sessionId: 's-1',
       log: indexes.map(index => this.line(index)).join('\n'),
+      ...(this.offsets ? { offsets: indexes.map(index => index * STRIDE) } : {}),
       // The tail begins at its first record; a page that dropped nothing begins at its floor.
       start: options.before === undefined || trimmed ? kept * STRIDE : from,
       file: this.file,
@@ -150,6 +153,7 @@ const environment: SessionWorkspaceRefreshEnvironment = {
 
 const chat = (daemon: PagingDaemon, logPage = true) => {
   let entries: readonly TranscriptEntry[] = [];
+  const rows = () => entries;
   const statuses: TranscriptHistoryStatus[] = [];
   const control = startSessionWorkspaceRefresh({
     api: {
@@ -171,6 +175,7 @@ const chat = (daemon: PagingDaemon, logPage = true) => {
   return {
     control,
     texts: () => entries.map(entry => entry.text),
+    rows,
     status: () => statuses.at(-1),
   };
 };
@@ -333,5 +338,108 @@ describe('scrolling a chat back to its first message', () => {
     await control.refresh();
     control.stop();
     expect(calls).toEqual(['logPage', 'logs', 'logs']);
+  });
+});
+
+describe('offsets and jumping back to a search hit', () => {
+  test('every row carries the byte its record came from, across older pages and gaps', async () => {
+    const daemon = new PagingDaemon(600);
+    const view = chat(daemon);
+    await view.control.initial;
+    await view.control.loadOlder();
+    daemon.count = 630;
+    await view.control.refresh();
+    view.control.stop();
+
+    expect(view.rows().map(row => row.offset)).toEqual(
+      Array.from({ length: 430 }, (_, index) => (200 + index) * STRIDE),
+    );
+  });
+
+  test('says nothing of offsets once one page came without them', async () => {
+    const daemon = new PagingDaemon(600);
+    daemon.offsets = false;
+    const view = chat(daemon);
+    await view.control.initial;
+    await view.control.loadOlder();
+    view.control.stop();
+    expect(view.rows().every(row => row.offset === undefined)).toBe(true);
+  });
+
+  test('loads older pages until the history reaches a hit, in large steps', async () => {
+    const daemon = new PagingDaemon(9_000);
+    const view = chat(daemon);
+    await view.control.initial;
+    daemon.calls.length = 0;
+
+    const reached = await view.control.loadUntil(1_000 * STRIDE, 'f1');
+    view.control.stop();
+
+    expect(reached).toBe(true);
+    expect(view.texts()[0]).toBe('m800');
+    expect(daemon.calls.every(call => call.limit === 2_000)).toBe(true);
+    expect(view.control.file()).toBe('f1');
+  });
+
+  test('is already there for a hit the chat holds, and refuses another file or a failed page', async () => {
+    const daemon = new PagingDaemon(600);
+    const view = chat(daemon);
+    await view.control.initial;
+
+    expect(await view.control.loadUntil(500 * STRIDE, 'f1')).toBe(true);
+    expect(await view.control.loadUntil(0, 'f2')).toBe(false);
+    daemon.failOlder = new Error('offline');
+    expect(await view.control.loadUntil(0, 'f1')).toBe(false);
+    view.control.stop();
+  });
+
+  test('cannot jump before anything is read, or on a daemon that cannot page', async () => {
+    const daemon = new PagingDaemon(600);
+    const unread = startSessionWorkspaceRefresh({
+      api: {
+        logs: async () => '',
+        logPage: async (id, options) => await daemon.logPage(id, options),
+        get: async () => sessionView('s-1'),
+      },
+      sessionId: 's-1',
+      environment: { ...environment, visible: () => false },
+      onTranscript: () => undefined,
+      onSession: () => undefined,
+      onError: () => undefined,
+    });
+    expect(await unread.loadUntil(0, 'f1')).toBe(false);
+    expect(unread.file()).toBeUndefined();
+    unread.stop();
+  });
+
+  test('gives up past its most pages, and on a daemon whose page does not move back', async () => {
+    const creeping = (step: number) =>
+      startSessionWorkspaceRefresh({
+        api: {
+          logs: async () => '',
+          logPage: async (_id, options) => ({
+            v: 1,
+            sessionId: 's-1',
+            log: options?.before === undefined ? '[00:00:00] user/message: tail' : '',
+            start: options?.before === undefined ? 1_000_000 : options.before - step,
+            file: 'f1',
+            offsets: options?.before === undefined ? [1_000_000] : [],
+          }),
+          get: async () => sessionView('s-1'),
+        },
+        sessionId: 's-1',
+        environment,
+        onTranscript: () => undefined,
+        onSession: () => undefined,
+        onError: () => undefined,
+      });
+    const slow = creeping(1);
+    await slow.initial;
+    expect(await slow.loadUntil(0, 'f1')).toBe(false);
+    slow.stop();
+    const stuck = creeping(0);
+    await stuck.initial;
+    expect(await stuck.loadUntil(0, 'f1')).toBe(false);
+    stuck.stop();
   });
 });

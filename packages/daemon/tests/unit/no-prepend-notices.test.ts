@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { agentJobsMessage } from '../../src/lib/migrate/agent-jobs.ts';
 import { restartNotice } from '../../src/lib/migrate/restart-notice.ts';
 import { bootNotice } from '../../src/lib/session/auto-resume/policy.ts';
 import { resumeTurnAuthor } from '../../src/lib/session/resume/policy.ts';
@@ -42,6 +43,7 @@ describe('no tag and no footer on anything Ferretry types', () => {
       sendFailureNotice('hadi', record({ fate: 'unaccounted', unaccountedReason: 'revive_unconfirmed' }), 'fy'),
       reviveMessage({ kind: 'tmux_crashed' }, '2026-10-30T19:00:00.000Z', 'auto'),
       reviveMessage({ kind: 'tmux_crashed' }, '2026-10-30T19:00:00.000Z', 'interactive'),
+      agentJobsMessage([{ pid: 4242, command: 'bash /tmp/merge-all.sh 765', age: '4m' }]),
     ];
 
     for (const notice of notices) {

@@ -90,3 +90,14 @@ export interface IPairGateway {
 
 /** The only client capability the pairing gateway consumes. */
 export type PairingApiClient = Pick<IFyApiClient, 'request'>;
+
+/**
+ * Clears away the redirect pages an earlier `--open` was killed before it could delete.
+ *
+ * The page holds a pairing code, so a `SIGKILL` inside its few seconds of life would leave a stale
+ * credential in the state home. It is swept at the start of every pairing, and it is best effort by
+ * contract: a sweep that cannot finish must never stop a pairing, so there is nothing for it to report.
+ */
+export interface IPairRedirectSweeper {
+  sweep(): Promise<void>;
+}

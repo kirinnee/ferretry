@@ -85,13 +85,19 @@ export const SessionLifecycleConfigSchema = z.object({
   updatedAt: z.iso.datetime({ offset: true }),
   tmuxSession: z.string().min(1).max(MAX_TMUX_SESSION_NAME_LENGTH),
   /**
-   * SHA-256 of the session's own credential, never the credential itself.
+   * SHA-256 of the credential the session's CURRENT pane holds, never the credential itself.
    *
-   * The task-board domain keys every grant, invitation proof and child grant on this hash
-   * (`TaskBoardSession.sessionCapabilityHash`), so it must be durable and readable by the daemon
-   * without the plaintext — which lives only in the session environment store. Optional because
-   * sessions started before the credential existed have none, and a board simply cannot address
-   * them.
+   * The agent-tool identity resolver authenticates a presented credential against this hash, so it
+   * must be durable and readable by the daemon without the plaintext — which lives only in the
+   * session environment store. Optional because sessions started before the credential existed have
+   * none, and nothing can authenticate as them.
+   *
+   * IT IS THE ONE FIELD OF THIS CONFIGURATION THAT A LAUNCH REWRITES. Every pane launch re-issues the
+   * credential ({@link SessionCredentialRotator}), so the hash names one pane rather than the whole
+   * session: a copy that leaked from a pane stops authenticating the moment the next pane replaces
+   * it, instead of for as long as the session lives. It stays here rather than in the state document
+   * because every reader of it — the resolver, the fork binder — already reads it here, and a second
+   * home would be a second answer to "which credential is current".
    */
   sessionCapabilityHash: z
     .string()
@@ -267,6 +273,27 @@ export interface SessionCredential {
  */
 export interface SessionCredentialIssuer {
   issue(): SessionCredential;
+}
+
+/**
+ * Persists the hash of a session's newly issued credential into its configuration document.
+ *
+ * Its own port rather than a repository write, because a revive replaces a pane without holding a
+ * lifecycle record, and the hash must still have exactly one place it is written to.
+ */
+export interface SessionCapabilityHashStore {
+  record(id: SessionId, hash: string): Promise<void>;
+}
+
+/**
+ * Re-issues a session's credential for the pane about to launch, and answers the new hash.
+ *
+ * Called by every path that launches a pane — the first launch and every revive — and by nothing
+ * else, which is what keeps a plain daemon restart from rotating it: live panes keep the environment
+ * they were launched with across a restart, and a rotation they never saw would lock them out.
+ */
+export interface SessionCredentialRotator {
+  rotate(id: SessionId): Promise<string>;
 }
 
 /** Mints session ids server-side. */

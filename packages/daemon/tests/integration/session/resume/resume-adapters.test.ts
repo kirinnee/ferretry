@@ -26,6 +26,7 @@ import {
   type AccountLaunchEnvironment,
   type AccountLaunchRenewal,
   parseSessionId,
+  type SessionCredentialRotator,
   type TmuxCommandPort,
   TmuxController,
 } from '../../../../src/lib/index.ts';
@@ -957,5 +958,93 @@ describe('the resume launcher and a credential that can renew itself', () => {
     // Assert
     should(asked).equal(0);
     should(port.calls.filter(call => call[0] === 'new-session')).have.length(1);
+  });
+});
+
+/**
+ * A revive and the session's own credential.
+ *
+ * A replacement pane is a new launch, so it is handed a credential the replaced pane never held: a
+ * copy that leaked from the old pane stops authenticating with it. Only `relaunch` rotates — a read
+ * that merely addresses the pane must never change what a live agent authenticates with.
+ */
+describe('the resume launcher and a credential issued per launch', () => {
+  const rotating = (rotate: SessionCredentialRotator['rotate']) => {
+    const port = new RecordingTmuxPort();
+    const controller = new TmuxController(port);
+    const order: string[] = [];
+    let stored: Readonly<Record<string, string>> = { FY_SESSION_BOARD_CAPABILITY: 'replaced-pane-capability' };
+    const subject = new TmuxResumeLauncher(
+      controller,
+      async () => {
+        order.push('spec');
+        return {
+          tmuxSession: 'fy-session-1',
+          mode: 'auto',
+          cwd: '/workspace/project',
+          command: ['/opt/fleet/bin/agent'],
+          env: stored,
+        };
+      },
+      new TmuxPaneDelivery(controller, async () => {}),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        rotate: async id => {
+          order.push(`rotate:${id}`);
+          const hash = await rotate(id);
+          stored = { FY_SESSION_BOARD_CAPABILITY: 'replacement-capability' };
+          return hash;
+        },
+      },
+    );
+    return { port, order, subject };
+  };
+
+  it('should re-issue the credential before the replacement pane reads its environment', async () => {
+    // Arrange
+    const { port, order, subject } = rotating(async () => 'f'.repeat(64));
+
+    // Act
+    port.alive = false;
+    await subject.relaunch(ID);
+
+    // Assert
+    const launches = port.calls.filter(call => call[0] === 'new-session');
+    should(launches).have.length(1);
+    should(launches[0]).containDeep(['-e', 'FY_SESSION_BOARD_CAPABILITY=replacement-capability']);
+    should(launches[0]?.join(' ')).not.containEql('replaced-pane-capability');
+    should(order[0]).equal(`rotate:${ID}`);
+  });
+
+  it('should never rotate when it only observes, captures or kills the pane', async () => {
+    // Arrange — the reads a daemon restart, a monitor and a stop make of a pane that keeps running.
+    const { order, subject } = rotating(async () => 'f'.repeat(64));
+
+    // Act
+    await subject.observe(ID);
+    await subject.snapshot(ID);
+    await subject.kill(ID, 'cleanup before resume');
+
+    // Assert
+    should(order.filter(step => step.startsWith('rotate:'))).deepEqual([]);
+  });
+
+  it('should launch nothing when the credential cannot be re-issued', async () => {
+    // Arrange
+    const { port, subject } = rotating(async () => {
+      throw new Error('the environment could not be made durable');
+    });
+
+    // Act + Assert
+    port.alive = false;
+    await should(subject.relaunch(ID)).be.rejectedWith('the environment could not be made durable');
+    should(port.calls.filter(call => call[0] === 'new-session')).have.length(0);
   });
 });

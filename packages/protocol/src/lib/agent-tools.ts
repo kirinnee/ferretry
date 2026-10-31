@@ -112,6 +112,11 @@ export const AGENT_TOOL_MAX_TOTAL_WAIT_MS = 120_000;
 export const AGENT_TOOL_MAX_URL_CHARS = 2_048;
 /** The longest selector an agent may click, type into or read. */
 export const AGENT_TOOL_MAX_SELECTOR_CHARS = 1_024;
+/** The longest script one `browser.eval` carries. */
+export const AGENT_TOOL_MAX_SCRIPT_CHARS = 4_096;
+/** The longest one `browser.eval` may run, and how long it runs when asked for no limit. */
+export const AGENT_TOOL_MAX_SCRIPT_MS = 10_000;
+export const AGENT_TOOL_DEFAULT_SCRIPT_MS = 5_000;
 /** The longest folder a terminal may be opened in. */
 export const AGENT_TOOL_MAX_FOLDER_CHARS = 1_024;
 /** The longest path an agent may name a file by (one to upload, or where to save one). */
@@ -543,6 +548,20 @@ export const AgentToolCallSchema = z.discriminatedUnion('tool', [
       clear: z.literal(true).optional(),
     })
     .superRefine(refineBrowserHighlight),
+  z
+    .strictObject({
+      /**
+       * OWNER-GATED: refused unless the owner has turned on "What agents may control › Page scripts".
+       * The function runs in an isolated world of its own: the page's DOM, none of its JavaScript.
+       */
+      tool: z.literal('browser.eval'),
+      name: SurfaceKeySchema,
+      /** A function expression, `() => …`, or `(element) => …` with a ref or selector. */
+      function: z.string().trim().min(1).max(AGENT_TOOL_MAX_SCRIPT_CHARS),
+      ...ElementTargetShape,
+      timeoutMs: z.number().int().min(100).max(AGENT_TOOL_MAX_SCRIPT_MS).optional(),
+    })
+    .superRefine(refineBrowserTarget({ point: false, required: false })),
   z.strictObject({ tool: z.literal('browser.close'), name: SurfaceKeySchema }),
   z.strictObject({
     tool: z.literal('browser.ask_owner'),
@@ -625,6 +644,7 @@ export const AGENT_TOOL_NAMES: readonly AgentToolName[] = [
   'browser.check',
   'browser.fill_form',
   'browser.highlight',
+  'browser.eval',
   'browser.close',
   'browser.ask_owner',
   'secure.copy',

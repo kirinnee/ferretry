@@ -343,4 +343,32 @@ describe('a Ferretry notice handed over through a file', () => {
     expect(row.querySelector('.fy-system-details')).toBeNull();
     await view.unmount();
   });
+
+  it('shows a board nudge that travelled as a file as the Board row, before and after it is read', async () => {
+    const handoffs = source();
+    const nudge = entry({
+      text: '&F209 PR #1087 CI is red.',
+      send: {
+        sendId: 'send-9',
+        senderKind: 'daemon',
+        acceptedAt: '2026-10-18T02:45:00.000Z',
+        message: 'x',
+        attachmentIds: [],
+        fate: 'delivered',
+        by: { kind: 'ferretry', feature: 'Board' },
+      },
+    });
+    const view = await mount(inSession(handoffs.value, nudge));
+    const waiting = must(view.container.querySelector<HTMLElement>('[data-board-nudge]'), 'the Board row');
+    expect(waiting.textContent).toContain('Board');
+    expect(waiting.textContent).toContain('CI is red.');
+    expect(view.container.querySelector('.fy-handoff')).toBeNull();
+
+    await interact(() =>
+      handoffs.pending[0]?.resolve({ name: 'turn-008', message: '&F412 has had no activity for 3h.', attachments: [] }),
+    );
+    const read = must(view.container.querySelector<HTMLElement>('[data-board-nudge]'), 'the Board row once read');
+    expect(read.textContent).toContain('has had no activity for 3h.');
+    await view.unmount();
+  });
 });

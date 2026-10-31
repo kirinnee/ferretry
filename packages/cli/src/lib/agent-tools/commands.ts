@@ -722,6 +722,24 @@ export function registerBrowserPageCommands(program: Command, runner: IAgentTool
       );
     });
 
+  verb('eval', 'run your own JavaScript in a page, in a world of its own; needs the owner’s Page scripts switch')
+    .argument('<name>', 'the page’s name or id')
+    .argument('<function>', 'a function expression: "() => document.title", or "(element) => …" with --of')
+    .option('--of <target>', 'hand the function one element: a ref or a selector')
+    .option('--timeout <ms>', 'stop it after this long (up to 10000)')
+    .action(async (name: string, source: string, options: SessionOption & { of?: string; timeout?: string }) => {
+      await call(
+        {
+          tool: 'browser.eval',
+          name,
+          function: source,
+          ...(options.of === undefined ? {} : elementArgument(options.of)),
+          ...(options.timeout === undefined ? {} : { timeoutMs: wholeNumber(options.timeout, '--timeout') }),
+        },
+        options,
+      );
+    });
+
   verb('close', 'close a page')
     .argument('<name>', 'the page’s name or id')
     .action(async (name: string, options: SessionOption) => {

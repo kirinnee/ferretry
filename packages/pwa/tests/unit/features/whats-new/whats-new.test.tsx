@@ -108,6 +108,20 @@ describe('the What’s new sheet', () => {
   });
 });
 
+describe('the What’s new dialog backdrop', () => {
+  it('ignores the click synthesized from the tap that opened it, and closes on a real backdrop tap', async () => {
+    let closed = 0;
+    view = await mount(sheet([release('4.2.0')], 'dialog', new Set(), () => (closed += 1)));
+    const backdrop = must(view.container.querySelector('[data-whats-new="dialog"] > button'), 'backdrop');
+    const pointerClick = () => backdrop.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+    await interact(pointerClick);
+    expect(closed).toBe(0);
+    await interact(() => backdrop.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+    await interact(pointerClick);
+    expect(closed).toBe(1);
+  });
+});
+
 const memory = (initial?: string): ChangelogStorage & { readonly values: Map<string, string> } => {
   const values = new Map<string, string>(initial === undefined ? [] : [['fy-whats-new-viewed-v1', initial]]);
   return { values, getItem: key => values.get(key) ?? null, setItem: (key, value) => void values.set(key, value) };

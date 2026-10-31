@@ -186,8 +186,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
         chain: { type: 'string', description: 'A follow-up in a multi-step login: the card it follows, like A7.' },
         secretHint: {
           type: 'string',
-          description:
-            'The saved login you expect the owner to use, by handle, e.g. SUDO_KIRIN_BOX; a hint only, the owner still taps. It is the same whether or not such a login exists.',
+          description: 'Saved login you expect, by handle (SUDO_KIRIN_BOX): a hint only, the owner still taps.',
         },
       },
       ['name', 'prompt', 'sensitivity'],
@@ -627,6 +626,25 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     description:
       'Outline an element (ref or selector) so the person watching sees what you mean. clear: true removes it.',
     inputSchema: object({ name: NAME, ref: REF, selector: SELECTOR, clear: { type: 'boolean' } }, ['name']),
+  },
+  {
+    name: 'browser_eval',
+    tool: 'browser.eval',
+    description:
+      'Run your own JavaScript function in a page, in an isolated world (its DOM, none of its scripts); returns the value as JSON. Refused unless the owner turned on Page scripts.',
+    inputSchema: object(
+      {
+        name: NAME,
+        function: {
+          type: 'string',
+          description: 'A function expression: "() => document.title", or "(element) => …" with ref/selector.',
+        },
+        ref: REF,
+        selector: SELECTOR,
+        timeoutMs: { type: 'integer', minimum: 100, maximum: 10_000, description: '5000 by default.' },
+      },
+      ['name', 'function'],
+    ),
   },
   {
     name: 'browser_close',

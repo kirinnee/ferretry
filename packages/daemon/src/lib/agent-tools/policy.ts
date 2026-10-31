@@ -89,6 +89,7 @@ const CONTROL_SETTING: Readonly<Record<AgentControlKind, string>> = {
   browser: 'Browsers',
   files: 'Files',
   settings: 'Ferretry settings',
+  scripts: 'Page scripts',
 };
 
 /** The plain sentence an agent is told when the machine's settings switch a kind of control off. */
@@ -97,6 +98,15 @@ export function controlRefusal(kind: AgentControlKind): string {
   // Lower-cased as a phrase, except a name that is a name: Ferretry settings.
   const phrase = setting.startsWith('Ferretry') ? setting : setting.toLowerCase();
   return `This machine does not let agents control ${phrase}: "What agents may control › ${setting}" is off in this machine's settings. Ask the person to turn it on if you need it.`;
+}
+
+/**
+ * What an agent is told when it asks for `browser.eval` and the owner has not turned Page scripts on:
+ * that only the owner can, every way they can, and why it waits for them. The other browser tools need
+ * no switch, so the agent is pointed back at them.
+ */
+export function pageScriptsRefusal(binaryName: string): string {
+  return `browser.eval is off on this machine: "What agents may control › Page scripts" is off, and only the owner can turn it on — in the app (Settings › this machine › What agents may control › Page scripts), with \`${binaryName} machine set agent-control scripts on\`, or with agentControl.pageScripts: true in machine.yaml. Turning it on waits for their confirmation, because a page script can read what a page holds, sign-ins on the shared profile included. Ask them if you need it; the other browser tools work without it.`;
 }
 
 /** A session as the identity resolver needs it — the task-board directory's projection satisfies it. */

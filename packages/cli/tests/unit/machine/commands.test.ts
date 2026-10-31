@@ -81,7 +81,7 @@ describe('renderMachine', () => {
     const text = renderMachine(
       machine({
         defaultRuntime: null,
-        agentControl: { terminals: false, browsers: true, files: false, ferretrySettings: false },
+        agentControl: { terminals: false, browsers: true, files: false, ferretrySettings: false, pageScripts: false },
       }),
       'fz',
     );
@@ -231,7 +231,7 @@ describe('registerMachineCommands', () => {
       kind: 'machine.settings',
       agentPermissions: 'skip',
       defaultRuntime: 'claude-default',
-      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
+      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
     });
     should(world.gateway.called('apply')).have.length(1);
     await should(runCommand(registerMachineCommands, world, ['machine', 'set', 'colour', 'blue'])).be.rejectedWith(
@@ -249,14 +249,14 @@ describe('registerMachineCommands', () => {
       kind: 'machine.settings',
       agentPermissions: 'auto',
       defaultRuntime: 'claude-review',
-      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
+      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
     });
     await runCommand(registerMachineCommands, world, ['machine', 'set', 'default-runtime', 'automatic']);
     should(world.gateway.called('stage')[1]?.args[0]).eql({
       kind: 'machine.settings',
       agentPermissions: 'auto',
       defaultRuntime: null,
-      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
+      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
     });
     await should(runCommand(registerMachineCommands, world, ['machine', 'set', 'default-runtime', ''])).be.rejectedWith(
       /Name a runtime/,
@@ -270,7 +270,7 @@ describe('registerMachineCommands', () => {
       kind: 'machine.settings',
       agentPermissions: 'auto',
       defaultRuntime: 'claude-default',
-      agentControl: { terminals: false, browsers: true, files: true, ferretrySettings: false },
+      agentControl: { terminals: false, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
     });
     await should(
       runCommand(registerMachineCommands, world, ['machine', 'set', 'agent-control', 'network', 'off']),
@@ -290,10 +290,23 @@ describe('registerMachineCommands', () => {
       kind: 'machine.settings',
       agentPermissions: 'auto',
       defaultRuntime: 'claude-default',
-      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: true },
+      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: true, pageScripts: false },
     });
     await runCommand(registerMachineCommands, world, ['machine', 'set', 'agent-control', 'settings', 'off']);
-    should(world.gateway.called('stage')[1]?.args[0]).match({ agentControl: { ferretrySettings: false } });
+    should(world.gateway.called('stage')[1]?.args[0]).match({
+      agentControl: { ferretrySettings: false, pageScripts: false },
+    });
+  });
+
+  it('should switch agents’ page scripts, which the setting word `scripts` names', async () => {
+    const world = fakeWorld({ answers: ['y', 'y'] });
+    await runCommand(registerMachineCommands, world, ['machine', 'set', 'agent-control', 'scripts', 'on']);
+    should(world.gateway.called('stage')[0]?.args[0]).match({
+      kind: 'machine.settings',
+      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: true },
+    });
+    await runCommand(registerMachineCommands, world, ['machine', 'set', 'agent-control', 'scripts', 'off']);
+    should(world.gateway.called('stage')[1]?.args[0]).match({ agentControl: { pageScripts: false } });
   });
 
   it('should switch auto-resume on or off, and refuse anything else', async () => {
@@ -303,7 +316,7 @@ describe('registerMachineCommands', () => {
       kind: 'machine.settings',
       agentPermissions: 'auto',
       defaultRuntime: 'claude-default',
-      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
+      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
       autoResume: false,
     });
     await runCommand(registerMachineCommands, world, ['machine', 'set', 'auto-resume', 'on']);
@@ -320,7 +333,7 @@ describe('registerMachineCommands', () => {
       kind: 'machine.settings',
       agentPermissions: 'auto',
       defaultRuntime: 'claude-default',
-      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
+      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
       agendaMode: false,
     });
     await runCommand(registerMachineCommands, world, ['machine', 'set', 'agenda-mode', 'on']);
@@ -332,7 +345,9 @@ describe('registerMachineCommands', () => {
 
   it('should list settings in what agents may control, on or off', () => {
     const on = renderMachine(
-      machine({ agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: true } }),
+      machine({
+        agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: true, pageScripts: false },
+      }),
       'fz',
     );
     should(on).match(/What agents may control: terminals on, browsers on, files on, settings on/);

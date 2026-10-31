@@ -32,6 +32,8 @@ export interface SessionCard {
   readonly agentAsked: boolean;
   /** The id this card had as an old task of this session, when it was imported from one. */
   readonly legacyId: string | null;
+  /** The pull requests linked to the card, so a line naming one can open it. */
+  readonly prs?: readonly { readonly number: number; readonly url: string }[];
 }
 
 /** The old id a card was imported under, when it was imported from a task of `sessionId`. */
@@ -62,6 +64,7 @@ export const sessionCards = (model: BoardModel, daemonId: DaemonId, sessionId: s
         touchedAt: task.lastTouchedAt ?? task.createdAt,
         agentAsked: !isMine(task),
         legacyId: legacyIdOf(task, sessionId),
+        prs: task.links.prs.map(pr => ({ number: pr.number, url: pr.url })),
       };
     });
 };

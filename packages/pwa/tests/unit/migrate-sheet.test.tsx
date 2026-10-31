@@ -6,6 +6,7 @@ import { FyHttpError } from '@ferretry/protocol/client';
 import type { ReactElement } from 'react';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import {
+  askToStopJobsWithDaemon,
   type MigrateSession,
   MigrateSheet,
   type MigrateSheetProps,
@@ -146,6 +147,34 @@ describe('migrateSessionWithDaemon', () => {
       ['client', 'daemon-a'],
       ['same-session', 'codex-auto-atomi', 'gpt-5.6-sol[1m]', true, 'request-7'],
     ]);
+  });
+});
+
+describe('askToStopJobsWithDaemon', () => {
+  it('rejects a cross-daemon scope before constructing a typed client', async () => {
+    await expect(
+      askToStopJobsWithDaemon(daemonA, scopeB, async () => {
+        throw new Error('no client may be built for a crossed scope');
+      }),
+    ).rejects.toThrow('the ask must belong to the requested daemon');
+  });
+
+  it('asks the paired daemon about the scoped session', async () => {
+    const calls: unknown[] = [];
+    const answer = { messageId: 'migrate-jobs-1', jobs: [{ pid: 1, command: 'sleep 9' }], alreadyAsked: false };
+
+    const result = await askToStopJobsWithDaemon(daemonA, scopeA, async connection => {
+      calls.push(connection.daemonId);
+      return {
+        askToStopJobs: async (sessionId: string) => {
+          calls.push(sessionId);
+          return answer;
+        },
+      };
+    });
+
+    expect(result).toEqual(answer);
+    expect(calls).toEqual(['daemon-a', 'same-session']);
   });
 });
 
@@ -1070,5 +1099,223 @@ describe('MigrateSheet account picker', () => {
       release();
       await gate;
     });
+  });
+});
+
+describe('MigrateSheet asking the agent to stop its background jobs', () => {
+  const job = (pid: number, detail: string) => ({
+    kind: 'process',
+    verdict: 'unknown',
+    title: 'A program Ferretry doesn’t recognise is running',
+    detail,
+    age: '4m',
+    blocks: true,
+    backgroundJob: true,
+    pid,
+  });
+  const refusedBy = (items: readonly object[]) =>
+    new FyHttpError('refused: A program Ferretry doesn’t recognise is running', 409, 'migration_refused', {
+      error: 'refused',
+      code: 'migration_refused',
+      inflight: { status: 'waiting', turn: 3, blockedBy: 'unknown', items, restartsWithCli: 1 },
+    });
+  const SHELL_JOB = job(5100, '/usr/bin/zsh -c source …/shell-snapshots/snapshot-zsh.sh');
+  const SCRIPT_JOB = job(5101, 'bash /tmp/merge-all.sh 765');
+  const OWNER_CASE = [SHELL_JOB, SCRIPT_JOB];
+  const asked = { messageId: 'migrate-jobs-5100-5101', jobs: [{ pid: 5100, command: 'zsh' }], alreadyAsked: false };
+
+  const refuse = async (sheet: Partial<MigrateSheetProps>) => {
+    const view = renderSheet(<MigrateSheet {...props(sheet)} />);
+    change(field(view.root, 0), 'codex-auto-atomi');
+    review(view.root);
+    await press(view.root, 'Migrate and relaunch');
+    return view;
+  };
+
+  it('offers the ask when only the agent’s own jobs block, sends it once, and leaves the retry to the reader', async () => {
+    const asks: unknown[][] = [];
+    let attempts = 0;
+    const view = await refuse({
+      migrateSession: async () => {
+        attempts += 1;
+        throw refusedBy(OWNER_CASE);
+      },
+      askToStopJobs: async (connection, scope) => {
+        asks.push([connection.daemonId, scope.sessionId]);
+        return asked;
+      },
+    });
+
+    const page = JSON.stringify(view.toJSON());
+    expect(page).toContain('These are jobs the agent started itself');
+    expect(page).toContain('pid 5101');
+    expect(page).toContain('bash /tmp/merge-all.sh 765');
+    await press(view.root, 'Ask the agent to stop its background jobs');
+
+    expect(asks).toEqual([['daemon-a', 'same-session']]);
+    // The ask moves nothing: the migration was attempted once, and only the reader's retry tries again.
+    expect(attempts).toBe(1);
+    expect(text(view.root.findByProps({ role: 'status' }))).toContain('Asked.');
+    expect(view.root.findAll(node => node.props['data-agent-jobs-ask-button'] === '')).toHaveLength(0);
+    // Still no force control: the only way on is the safety check again.
+    expect(JSON.stringify(view.toJSON())).toContain('There is no force control');
+    await press(view.root, 'Retry safety check');
+    expect(attempts).toBe(2);
+    // A fresh refusal offers the ask again; the daemon answers a repeat with the message already queued.
+    expect(view.root.findAll(node => node.props['data-agent-jobs-ask-button'] === '').length).toBeGreaterThan(0);
+  });
+
+  it('never offers the ask when something other than the agent’s own jobs blocks', async () => {
+    const stranger = {
+      kind: 'process',
+      verdict: 'unknown',
+      title: 'A program',
+      detail: 'vendor --watch',
+      blocks: true,
+    };
+    const view = await refuse({
+      migrateSession: async () => {
+        throw refusedBy([SCRIPT_JOB, stranger]);
+      },
+      askToStopJobs: async () => {
+        throw new Error('no ask may be offered here');
+      },
+    });
+
+    expect(JSON.stringify(view.toJSON())).not.toContain('Ask the agent to stop its background jobs');
+  });
+
+  it('says so when the agent was already asked about the same jobs', async () => {
+    const view = await refuse({
+      migrateSession: async () => {
+        throw refusedBy(OWNER_CASE);
+      },
+      askToStopJobs: async () => ({ ...asked, alreadyAsked: true }),
+    });
+
+    await press(view.root, 'Ask the agent to stop its background jobs');
+
+    expect(text(view.root.findByProps({ role: 'status' }))).toContain('already asked about these jobs');
+  });
+
+  it('sends nothing and says to retry when the jobs have already stopped', async () => {
+    const view = await refuse({
+      migrateSession: async () => {
+        throw refusedBy([SCRIPT_JOB]);
+      },
+      askToStopJobs: async () => {
+        throw new FyHttpError(
+          'none of the agent’s own background jobs is in the way any more',
+          409,
+          'no_background_jobs',
+        );
+      },
+    });
+
+    expect(JSON.stringify(view.toJSON())).toContain('This is a job the agent started itself');
+    await press(view.root, 'Ask the agent to stop its background jobs');
+
+    expect(text(view.root.findByProps({ role: 'status' }))).toContain('None of them is running any more');
+  });
+
+  it('shows the ask in flight and refuses a second press until it answers', async () => {
+    let release!: () => void;
+    let asks = 0;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const view = await refuse({
+      migrateSession: async () => {
+        throw refusedBy(OWNER_CASE);
+      },
+      askToStopJobs: async () => {
+        asks += 1;
+        await gate;
+        return asked;
+      },
+    });
+
+    run(() => button(view.root, 'Ask the agent to stop its background jobs').props.onClick());
+    const pending = button(view.root, 'Asking the agent…');
+    expect(pending.props.disabled).toBe(true);
+    expect(pending.findAll(node => String(node.props.className ?? '').includes('animate-spin'))).not.toHaveLength(0);
+    run(() => pending.props.onClick());
+
+    await runAsync(async () => {
+      release();
+      await gate;
+    });
+    expect(asks).toBe(1);
+    expect(text(view.root.findByProps({ role: 'status' }))).toContain('Asked.');
+  });
+
+  it('names the daemon update when an older daemon refused on processes it could not mark', async () => {
+    const unmarked = { ...SCRIPT_JOB, backgroundJob: undefined, pid: undefined };
+    const view = await refuse({
+      migrateSession: async () => {
+        throw new FyHttpError(
+          'refused',
+          409,
+          'migration_refused',
+          {
+            error: 'refused',
+            code: 'migration_refused',
+            inflight: { status: 'waiting', turn: 3, blockedBy: 'unknown', items: [unmarked], restartsWithCli: 1 },
+          },
+          '4.152.0',
+        );
+      },
+    });
+
+    const page = JSON.stringify(view.toJSON());
+    expect(page).toContain('Update this machine’s daemon to ask the agent to stop these jobs');
+    expect(page).toContain('4.152.0');
+    expect(page).toContain('fy daemon update');
+    expect(page).not.toContain('Ask the agent to stop its background jobs');
+    expect(page).toContain('There is no force control');
+  });
+
+  it('does not name an update when the refusing daemon already has the ask', async () => {
+    const view = await refuse({
+      migrateSession: async () => {
+        throw new FyHttpError(
+          'refused',
+          409,
+          'migration_refused',
+          {
+            error: 'refused',
+            code: 'migration_refused',
+            inflight: {
+              status: 'waiting',
+              turn: 3,
+              blockedBy: 'unknown',
+              items: [{ ...SCRIPT_JOB, backgroundJob: undefined }],
+              restartsWithCli: 1,
+            },
+          },
+          '4.156.2',
+        );
+      },
+    });
+
+    expect(JSON.stringify(view.toJSON())).not.toContain('Update this machine’s daemon');
+  });
+
+  it('reports a failed ask and keeps the button to try again', async () => {
+    const view = await refuse({
+      migrateSession: async () => {
+        throw refusedBy(OWNER_CASE);
+      },
+      askToStopJobs: async () => {
+        throw new Error('the daemon did not answer');
+      },
+    });
+
+    await press(view.root, 'Ask the agent to stop its background jobs');
+
+    const alerts = view.root.findAll(node => node.props.role === 'alert' && text(node).includes('Couldn’t ask'));
+    expect(alerts).toHaveLength(1);
+    expect(alerts.map(text).join('')).toContain('the daemon did not answer');
+    expect(button(view.root, 'Ask the agent to stop its background jobs')).toBeDefined();
   });
 });

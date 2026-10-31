@@ -97,19 +97,19 @@ describe('AgendaCard sections', () => {
 });
 
 describe('AgendaCard recommended option', () => {
-  test('a choice puts the recommended option in the middle (up), the other on the left', async () => {
+  test('a choice keeps the options list’s order — first ←, second → — and tags the recommended where it sits', async () => {
     const single = agendaItem('A3', {
       subject: 'Pick',
       questions: [{ question: 'Which?', options: [{ label: 'SQLite' }, { label: 'Postgres' }], recommended: 'SQLite' }],
       ask: choices('SQLite', 'Postgres'),
     });
     view = await mount(<AgendaCard item={single} onAct={() => {}} />);
-    const middle = must(view.container.querySelector('[data-agenda-answer="up"]'), 'middle answer');
-    expect(middle.getAttribute('data-agenda-option')).toBe('SQLite');
-    expect(view.container.querySelector('[data-agenda-answer="left"]')?.getAttribute('data-agenda-option')).toBe(
+    const first = must(view.container.querySelector('[data-agenda-answer="left"]'), 'left answer');
+    expect(first.getAttribute('data-agenda-option')).toBe('SQLite');
+    expect(view.container.querySelector('[data-agenda-answer="right"]')?.getAttribute('data-agenda-option')).toBe(
       'Postgres',
     );
-    expect(view.container.querySelector('[data-agenda-answer="right"]')).toBeNull();
+    expect(view.container.querySelector('[data-agenda-answer="up"]')).toBeNull();
   });
 });
 

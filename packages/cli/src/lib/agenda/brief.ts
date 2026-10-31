@@ -40,7 +40,7 @@ export interface BriefFlags extends AskFlags {
   readonly neededBy?: string;
   /** Repeated: the situation, one point each; more than one becomes bullets. */
   readonly premise?: string | readonly string[];
-  /** Repeated: why it matters now, one point each; more than one becomes bullets. */
+  /** Repeated: the facts around the situation, one point each; more than one becomes bullets. */
   readonly context?: string | readonly string[];
   /** Repeated: earlier answers that bear on this, one point each. */
   readonly decided?: string | readonly string[];

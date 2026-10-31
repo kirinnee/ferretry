@@ -150,7 +150,7 @@ function isCoveredByTerm(word: string, defined: ReadonlySet<string>): boolean {
  *
  * The owner reads cold — often on a phone, days later — so THE RULE IS ISOLATION: could the owner answer
  * with nothing else open? Everything needed to decide is on the card. (Premise, the situation, and context,
- * why it matters now, are how a card gets there — a decision card with neither draws the strongest warning,
+ * the facts around it, are how a card gets there — a decision card with neither draws the strongest warning,
  * but is never refused.) A short plain title (the push's heading) and ask (its text); no pointing at an
  * earlier message; no ticket or PR ids, links, file paths or capitals nobody has explained; options that
  * say what choosing them does. Anything in `terms` counts as explained, and an id followed by what it is
@@ -181,7 +181,7 @@ export function lintAgendaWriting(item: AgendaWriting): string[] {
 
   if (isDecision(item) && isBlank(item.premise) && isBlank(item.context)) {
     warnings.push(
-      'a reader opening this cold cannot tell what is going on — add --premise points (the situation, one bullet each) with `agenda edit <id> --premise "<what is going on>"`, and --context for why it matters now',
+      'a reader opening this cold cannot tell what is going on — add --premise points (the situation, one bullet each) with `agenda edit <id> --premise "<what is going on>"`, and --context for the facts around it',
     );
   }
 

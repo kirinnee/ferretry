@@ -8,11 +8,15 @@
  * `window.__holdOlder()` holds the next older page until `window.__releaseOlder()`, so the loading state
  * can be seen; `window.__appendMessages(n)` lands `n` new records at the tail while older ones are held.
  *
+ * `?search=1` puts the chat's search bar over it, searching the same conversation the way `log-search`
+ * does: every record, oldest first, by the byte its record begins at.
+ *
  *   ?theme=<family>-<mode>
  */
 
-import type { LogPageOptions, SessionLogPage, SessionView } from '@ferretry/protocol';
-import { useEffect, useMemo, useState } from 'react';
+import type { LogPageOptions, SessionLogPage, SessionLogSearch, SessionView } from '@ferretry/protocol';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ChatSearch, type ChatSearchPort } from '../../../src/components/chat-search.tsx';
 import { createRoot } from 'react-dom/client';
 import { startSessionWorkspaceRefresh } from '../../../src/components/session-workspace-model.ts';
 import { Transcript } from '../../../src/components/transcript.tsx';
@@ -88,9 +92,28 @@ const logPage = async (_id: string, options: LogPageOptions = {}): Promise<Sessi
     v: 1,
     sessionId: 's',
     log: lines.join('\n'),
+    offsets: Array.from({ length: end - kept }, (_, index) => (kept + index) * STRIDE),
     start: options.before === undefined || kept > first ? kept * STRIDE : from,
     file: 'f1',
   };
+};
+
+/** Every record that says `query`, as `log-search` answers: oldest first, by its record's byte. */
+const searchRecords = async (query: string, options: { readonly who: string; readonly tools: boolean }) => {
+  const needle = query.toLowerCase();
+  const matches: SessionLogSearch['matches'][number][] = [];
+  for (let index = 0; index < count; index += 1) {
+    const text = record(index);
+    const role = text.includes(' user/') ? 'user' : text.includes(' tool/') ? 'tool' : 'assistant';
+    const tool = text.includes('/tool-');
+    if (tool && !options.tools) continue;
+    if (options.who === 'me' && role !== 'user') continue;
+    if (options.who === 'agent' && role !== 'assistant') continue;
+    const body = text.slice(text.indexOf(': ') + 2);
+    const at = body.toLowerCase().indexOf(needle);
+    if (at >= 0) matches.push({ offset: index * STRIDE, role, kind: 'message', snippet: body });
+  }
+  return { v: 1 as const, sessionId: 's', query, file: 'f1', matches, truncated: false };
 };
 
 function Scene() {
@@ -126,13 +149,26 @@ function Scene() {
     };
     return () => refresh.stop();
   }, []);
+  const transcript = useRef<HTMLDivElement | null>(null);
+  const search = useMemo<ChatSearchPort | undefined>(
+    () =>
+      control === null
+        ? undefined
+        : { search: searchRecords, reach: async (offset, file) => await control.loadUntil(offset, file) },
+    [control],
+  );
   const history = useMemo<TranscriptHistoryControl>(
     () => ({ status, loadOlder: () => void control?.loadOlder() }),
     [control, status],
   );
   return (
     <div className="kt-chat-surface scene-chat">
-      <Transcript agentName="Lizzette" daemonId="d" entries={entries} history={history} sessionId="s" />
+      {params.get('search') === '1' && search !== undefined ? (
+        <ChatSearch agentName="Lizzette" onClose={() => undefined} port={search} transcript={transcript} />
+      ) : null}
+      <div className="scene-messages" ref={transcript}>
+        <Transcript agentName="Lizzette" daemonId="d" entries={entries} history={history} sessionId="s" />
+      </div>
     </div>
   );
 }

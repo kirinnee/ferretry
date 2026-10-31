@@ -1,6 +1,6 @@
 import type { AgendaId, AgendaSnapshot, IFyApiClient, SessionView } from '@ferretry/protocol';
 import { WorktreeListResponseSchema } from '@ferretry/protocol';
-import { Pause, Play } from 'lucide-react';
+import { Pause, Play, Search } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { AgendaItemsProvider } from '../../components/agenda-message.tsx';
 import { AttachmentGalleryProvider } from '../../components/attachment-gallery.tsx';
@@ -18,6 +18,7 @@ import { LiveStreamIndicator, type LiveStreamIndicatorProps } from '../../compon
 import { MigrateSheet } from '../../components/migrate-sheet.tsx';
 import { PackSessionsProvider } from '../../components/pack-call.tsx';
 import { type QuestionAnswerApi, QuestionForm } from '../../components/question-form.tsx';
+import { CardPullRequestsProvider } from '../card-pull-requests.tsx';
 import { ReferenceSurfaceProvider, sessionReferenceSurface } from '../../components/reference-surface.tsx';
 import {
   isPromptKnownBusy,
@@ -31,6 +32,7 @@ import { SessionTopBar, sessionDisplayName } from '../../components/session-top-
 import type { SendDismiss, SendExpand } from '../../components/settled-send-note.tsx';
 import type { PaneSnapshotReader } from '../../components/terminal-snapshot.tsx';
 import { readPaneSnapshot } from '../../components/terminal-snapshot-model.ts';
+import { ChatSearch, type ChatSearchPort } from '../../components/chat-search.tsx';
 import { Transcript } from '../../components/transcript.tsx';
 import type { TranscriptHistoryControl } from '../../components/transcript-history-row.tsx';
 import { TranscriptUnboundNotice } from '../../components/transcript-unbound-notice.tsx';
@@ -202,6 +204,8 @@ export interface SessionChatPageProps {
   readonly readingPosition?: ChatScrollSlot;
   /** What the top of the transcript offers, and how to load older messages (`lib/transcript-history.ts`). */
   readonly history?: TranscriptHistoryControl;
+  /** Search within the conversation — the whole transcript — and jump to a match. Absent: no search. */
+  readonly conversationSearch?: ChatSearchPort;
   /**
    * The Tasks tab's place: expanded over the chat or in the panel, and whether agent tasks show. The app
    * keeps both in the address (`?tasks=full`, `?agents=1`) so Back collapses the board; absent, the page
@@ -439,6 +443,7 @@ export function SessionChatPage({
   catchingUp = false,
   readingPosition,
   history,
+  conversationSearch,
   tasksView,
   connectionState,
   chatWidth = 'readable',
@@ -743,7 +748,9 @@ export function SessionChatPage({
   // navigation that carries a target, the reset runs first and the new target wins.
   // biome-ignore lint/correctness/useExhaustiveDependencies: the pairing, the session id and the navigation re-arm the same target
   useEffect(() => {
-    if (agendaTarget !== null) showAgenda(agendaTarget, true);
+    // Expanding the board pushes a history entry, so the same `?attention=` arrives under a new key: that is the
+    // board's own navigation, not a request for the item, and answering it would collapse the board it just opened.
+    if (agendaTarget !== null && !boardFullRef.current) showAgenda(agendaTarget, true);
   }, [agendaTarget, agendaTargetKey, showAgenda, connection, session.config.id]);
 
   const publish = useCallback(
@@ -896,6 +903,31 @@ export function SessionChatPage({
       ? undefined
       : session.state.harnessDialog;
   const compact = presentation === 'sheet';
+  // ---- SEARCH WITHIN THE CONVERSATION (`components/chat-search.tsx`) ----------------------------------
+  const [searchOpen, setSearchOpen] = useState(false);
+  /** Bumped to put the caret back in the search box. */
+  const [searchFocus, setSearchFocus] = useState(0);
+  const messagesRef = useRef<HTMLDivElement | null>(null);
+  const openSearch = useCallback(() => {
+    setSearchOpen(true);
+    setSearchFocus(count => count + 1);
+  }, []);
+  // Ctrl/Cmd-F in this chat searches the conversation instead of the page — which holds only what is
+  // loaded. Only while focus is in the chat or nowhere, so the browser's own find still serves other panes.
+  useEffect(() => {
+    if (conversationSearch === undefined) return;
+    const find = (event: KeyboardEvent): void => {
+      if (event.key.toLowerCase() !== 'f' || !(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey)
+        return;
+      const surface = messagesRef.current?.closest('.kt-chat-surface') ?? messagesRef.current?.parentElement;
+      const focus = document.activeElement;
+      if (focus !== null && focus !== document.body && surface?.contains(focus) !== true) return;
+      event.preventDefault();
+      openSearch();
+    };
+    window.addEventListener('keydown', find);
+    return () => window.removeEventListener('keydown', find);
+  }, [conversationSearch, openSearch]);
   const chatSurface = useRef<HTMLDivElement | null>(null);
   useChatScrollbarGutter(chatSurface, session.config.id);
   /**
@@ -1182,6 +1214,22 @@ export function SessionChatPage({
   // the name, one status dot, the theme icon, ⓘ and ▾. The theme picker is the bar's own icon, not a form in ▾.
   const interruptSpec = barActions.find(spec => spec.action === 'interrupt');
   const barOverflowActions: readonly SessionActionContribution<CoreActionContext>[] = [
+    // Search: Ctrl/Cmd-F on a keyboard, and this row — the phone's way in, the 🔍 of ▾.
+    ...(conversationSearch === undefined
+      ? []
+      : [
+          {
+            group: 'session',
+            order: 1,
+            build: () => ({
+              kind: 'run',
+              id: 'search',
+              label: 'Search this conversation',
+              icon: Search,
+              run: openSearch,
+            }),
+          } satisfies SessionActionContribution<CoreActionContext>,
+        ]),
     ...(compact
       ? [
           {
@@ -1493,11 +1541,25 @@ export function SessionChatPage({
           />
         </div>
       ) : null}
+      {conversationSearch !== undefined && searchOpen ? (
+        <ChatSearch
+          agentName={agentName}
+          focusSignal={searchFocus}
+          onClose={() => setSearchOpen(false)}
+          port={conversationSearch}
+          transcript={messagesRef}
+        />
+      ) : null}
       <div className="fy-chat-log">
         {/* An open item covers the message list only: the transcript stays mounted, but is hidden from sight and keys.
             The list is a real element in the log's ONE grid cell, like the view over it: a `contents` wrapper let the
             transcript fall into a second row, which squeezed an open item to 0px under an inert, untouchable list. */}
-        <div className="fy-chat-log__messages" data-chat-messages="" inert={agenda.covered || undefined}>
+        <div
+          className="fy-chat-log__messages"
+          data-chat-messages=""
+          inert={agenda.covered || undefined}
+          ref={messagesRef}
+        >
           {/* The agenda the conversation's answer and reply cards name their items from (`agenda-message.tsx`). */}
           <AgendaItemsProvider snapshot={agendaModel?.snapshot}>
             <Transcript
@@ -1658,72 +1720,76 @@ export function SessionChatPage({
     // Every Markdown reader inside the conversation — transcript prose, notices, file previews in the
     // workspace and whatever a later item renders here — reads references through this one surface.
     <ReferenceSurfaceProvider surface={references}>
-      {/* The cards a ferret's Pack commands become say how each sub-ferret is doing NOW, from this list. */}
-      <PackSessionsProvider sessions={daemonSessions}>
-        {/* A message handed to the agent through a file is read back through the same daemon client, so the
+      <CardPullRequestsProvider cards={composerCatalogs.tasks}>
+        {/* The cards a ferret's Pack commands become say how each sub-ferret is doing NOW, from this list. */}
+        <PackSessionsProvider sessions={daemonSessions}>
+          {/* A message handed to the agent through a file is read back through the same daemon client, so the
           transcript shows what the person sent rather than the pointer the agent was typed. */}
-        <HandoffSourceProvider source={handoffs}>
-          {/* One blob cache for every picture on the page — a chat's screenshots and hand-off photos — so the
+          <HandoffSourceProvider source={handoffs}>
+            {/* One blob cache for every picture on the page — a chat's screenshots and hand-off photos — so the
           full-screen viewer reuses what the thumbnails hold and every object URL is revoked when this unmounts. */}
-          <AttachmentGalleryProvider>
-            <SessionSearchWorkspaceActions openFile={openFile} openTasks={openTasks} scope={scope} />
-            {/* `overflow-clip`, not `-hidden`: a hidden box is still a scroll container, so focusing the
+            <AttachmentGalleryProvider>
+              <SessionSearchWorkspaceActions openFile={openFile} openTasks={openTasks} scope={scope} />
+              {/* `overflow-clip`, not `-hidden`: a hidden box is still a scroll container, so focusing the
           composer could scroll the whole session sideways and leave the header off the left edge. */}
-            <main
-              className="flex h-full min-h-0 min-w-0 flex-col overflow-clip"
-              data-daemon={connection.daemonId}
-              data-session={session.config.id}
-            >
-              <SessionWorkspace
-                agentSurfaces={agentSurfaces}
-                // The in-app browser host around the chat: under Settings › Appearance › "Open links in" ›
-                // Ferretry side panel, a tapped link opens BESIDE the conversation on a desktop, and as a
-                // sheet over it on a tablet or phone, where two columns would leave the chat unreadable.
-                chat={<InAppBrowserWorkspace compact={formFactor !== 'desktop'}>{chatWithTasks}</InAppBrowserWorkspace>}
-                connection={connection}
-                driving={driving}
-                formFactor={formFactor}
-                references={references}
-                renderHeader={header}
-                rails={workspaceRails}
-                session={session}
-                workspace={workspace}
-                {...(infoSlot === undefined ? {} : { info: infoSlot })}
-                {...(deck === undefined ? {} : { deck })}
-                {...(readSnapshot === undefined ? {} : { readSnapshot })}
-                {...(typeIntoConsole === undefined ? {} : { typeIntoConsole })}
-                {...(browser === undefined ? {} : { browser })}
-                browserPages={browserPages}
-              />
-              <ActionToast notice={actionNotice} onDismiss={dismissActionNotice} />
-              <BottomSheet
-                ariaLabel={utility === null ? 'Session tool' : UTILITY_LABEL[utility]}
-                closeLabel="Close"
-                id={utilityId}
-                onClose={() => setUtility(null)}
-                open={utility !== null}
-                panelClassName="bg-surface"
+              <main
+                className="flex h-full min-h-0 min-w-0 flex-col overflow-clip"
+                data-daemon={connection.daemonId}
+                data-session={session.config.id}
               >
-                <div className="flex min-h-0 flex-1 flex-col overflow-y-auto" data-session-utility={utility ?? ''}>
-                  {utility === 'analytics' ? <SessionAnalyticsSurface connection={connection} scope={scope} /> : null}
-                </div>
-              </BottomSheet>
-              {convert.sheet}
-              <MigrateSheet
-                {...(accountPicker === undefined ? {} : { accountPicker })}
-                canMutate={canControl}
-                connection={connection}
-                onClose={() => setMigrateOpen(false)}
-                onMigrated={(_daemon, _scope, view) => publish(view)}
-                open={migrateOpen}
-                scope={scope}
-                {...(usage === undefined ? {} : { usage })}
-                view={session}
-              />
-            </main>
-          </AttachmentGalleryProvider>
-        </HandoffSourceProvider>
-      </PackSessionsProvider>
+                <SessionWorkspace
+                  agentSurfaces={agentSurfaces}
+                  // The in-app browser host around the chat: under Settings › Appearance › "Open links in" ›
+                  // Ferretry side panel, a tapped link opens BESIDE the conversation on a desktop, and as a
+                  // sheet over it on a tablet or phone, where two columns would leave the chat unreadable.
+                  chat={
+                    <InAppBrowserWorkspace compact={formFactor !== 'desktop'}>{chatWithTasks}</InAppBrowserWorkspace>
+                  }
+                  connection={connection}
+                  driving={driving}
+                  formFactor={formFactor}
+                  references={references}
+                  renderHeader={header}
+                  rails={workspaceRails}
+                  session={session}
+                  workspace={workspace}
+                  {...(infoSlot === undefined ? {} : { info: infoSlot })}
+                  {...(deck === undefined ? {} : { deck })}
+                  {...(readSnapshot === undefined ? {} : { readSnapshot })}
+                  {...(typeIntoConsole === undefined ? {} : { typeIntoConsole })}
+                  {...(browser === undefined ? {} : { browser })}
+                  browserPages={browserPages}
+                />
+                <ActionToast notice={actionNotice} onDismiss={dismissActionNotice} />
+                <BottomSheet
+                  ariaLabel={utility === null ? 'Session tool' : UTILITY_LABEL[utility]}
+                  closeLabel="Close"
+                  id={utilityId}
+                  onClose={() => setUtility(null)}
+                  open={utility !== null}
+                  panelClassName="bg-surface"
+                >
+                  <div className="flex min-h-0 flex-1 flex-col overflow-y-auto" data-session-utility={utility ?? ''}>
+                    {utility === 'analytics' ? <SessionAnalyticsSurface connection={connection} scope={scope} /> : null}
+                  </div>
+                </BottomSheet>
+                {convert.sheet}
+                <MigrateSheet
+                  {...(accountPicker === undefined ? {} : { accountPicker })}
+                  canMutate={canControl}
+                  connection={connection}
+                  onClose={() => setMigrateOpen(false)}
+                  onMigrated={(_daemon, _scope, view) => publish(view)}
+                  open={migrateOpen}
+                  scope={scope}
+                  {...(usage === undefined ? {} : { usage })}
+                  view={session}
+                />
+              </main>
+            </AttachmentGalleryProvider>
+          </HandoffSourceProvider>
+        </PackSessionsProvider>
+      </CardPullRequestsProvider>
     </ReferenceSurfaceProvider>
   );
 }

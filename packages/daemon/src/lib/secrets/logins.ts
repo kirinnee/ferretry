@@ -44,13 +44,24 @@ import {
   type SecretVaultDocument,
 } from './types.ts';
 
+const SEALED_NAME = /^L[0-9A-F]{24}_(?:PASSWORD|TOTP)_[0-9A-F]{8}$/u;
+
 /** One entry as it rests in the index. `key` never changes; the handle (`id`) is the index's key. */
 export const LoginRecordSchema = z.strictObject({
   key: z.string().regex(/^L[0-9A-F]{24}$/u),
   label: z.string().min(1).max(80),
   match: z.array(z.string().min(1).max(320)).max(16),
   username: z.string().min(1).max(256).optional(),
-  password: z.boolean(),
+  /**
+   * WHERE each secret field rests in the sealed document right now. A change seals a new value under a FRESH
+   * name and only then points the index at it, so the index is the one commit point: until it is written the
+   * old value is still the entry's and still sealed (so still masked). Absent: the entry has no such field.
+   */
+  seals: z.strictObject({
+    password: z.string().regex(SEALED_NAME).optional(),
+    totp: z.string().regex(SEALED_NAME).optional(),
+  }),
+  /** How the 2FA code is made; present exactly when `seals.totp` is. */
   totp: TotpParametersSchema.optional(),
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1),
@@ -85,9 +96,21 @@ export class LoginEntryError extends Error {
   }
 }
 
-/** The sealed name of one secret field: the entry's immutable key, never its handle. */
-function sealedName(key: string, role: 'password' | 'totp'): string {
-  return `${key}_${role === 'password' ? 'PASSWORD' : 'TOTP'}`;
+/**
+ * A FRESH sealed name for one value of one field: the entry's immutable key (never its handle), the field, and a
+ * random generation. Every write of a secret field gets a new name, so writing it never overwrites the value the
+ * index still points at.
+ */
+export function freshSealedName(key: string, role: 'password' | 'totp'): string {
+  return `${key}_${role === 'password' ? 'PASSWORD' : 'TOTP'}_${randomBytes(4).toString('hex').toUpperCase()}`;
+}
+
+/** Every sealed name an index points at. */
+function referenced(index: LoginIndexDocument): ReadonlySet<string> {
+  const names = new Set<string>();
+  for (const record of Object.values(index.entries))
+    for (const name of [record.seals.password, record.seals.totp]) if (name !== undefined) names.add(name);
+  return names;
 }
 
 /** A fresh immutable key: 96 random bits. */
@@ -101,7 +124,7 @@ function summary(id: LoginEntryId, record: LoginRecord): LoginEntrySummary {
     label: record.label,
     match: [...record.match],
     ...(record.username === undefined ? {} : { username: record.username }),
-    fields: { password: record.password, totp: record.totp !== undefined },
+    fields: { password: record.seals.password !== undefined, totp: record.seals.totp !== undefined },
     ...(record.totp === undefined ? {} : { totp: record.totp }),
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
@@ -168,6 +191,7 @@ export class LoginDirectory {
     private readonly clock: ClockPort,
     private readonly newKey: () => string = randomLoginKey,
     private readonly lock: LoginStoreLock = new LoginStoreLock(),
+    private readonly newSealedName: (key: string, role: 'password' | 'totp') => string = freshSealedName,
   ) {
     this.documents = new LoginDocuments(index, sealed, cipher);
   }
@@ -216,7 +240,17 @@ export class LoginDirectory {
     });
   }
 
-  /** One change, read to write. Callers hold the store lock. */
+  /**
+   * One change, read to write, ALL OR NOTHING. Callers hold the store lock.
+   *
+   * 1. New secret values are sealed under FRESH names and ADDED to the sealed document; nothing the index points
+   *    at is touched. A failure here changes nothing.
+   * 2. The index is written pointing at the new names, with the new username, label and match: THE commit. A
+   *    failure here leaves the entry exactly as it was (old username, old password), and the old ciphertext still
+   *    sealed and masked; the new ciphertext is an orphan, still masked, swept by the next change.
+   * 3. Sealed values nothing points at any more are swept. Best effort: a failure leaves orphans, still masked,
+   *    and the change has already committed.
+   */
   private async change(id: LoginEntryId, change: PutLoginEntry): Promise<LoginEntrySummary> {
     const index = await this.documents.readIndex();
     const sealed = await this.documents.readSealed();
@@ -227,28 +261,57 @@ export class LoginDirectory {
       throw new LoginEntryError('label_required', `a new saved login needs a label; ${id} does not exist yet`);
     const at = this.clock.now();
     const key = existing?.key ?? this.newKey();
-    const entries: Record<string, SealedSecret> = { ...sealed.entries };
-    let changed = false;
+    const seals: { password?: string; totp?: string } = { ...existing?.seals };
+    const added: Record<string, SealedSecret> = {};
     const seal = async (role: 'password' | 'totp', value: string | null | undefined): Promise<void> => {
       if (value === undefined) return;
-      const name = sealedName(key, role);
-      changed = true;
       if (value === null) {
-        delete entries[name];
+        delete seals[role];
         return;
       }
-      entries[name] = {
+      const previous = seals[role] === undefined ? undefined : sealed.entries[seals[role] as string];
+      const name = this.newSealedName(key, role);
+      added[name] = {
         ...(await this.documents.cipher.seal(name, value)),
-        createdAt: entries[name]?.createdAt ?? at,
+        createdAt: previous?.createdAt ?? at,
         updatedAt: at,
       };
+      seals[role] = name;
     };
     await seal('password', change.password);
     await seal('totp', change.totp === undefined ? undefined : (change.totp?.seed ?? null));
-    if (changed) await this.documents.sealed.write({ ...sealed, entries });
-    const record = nextRecord(existing, key, change, at);
-    await this.documents.index.write({ ...index, entries: { ...index.entries, [id]: record } });
+    const staged: SecretVaultDocument = { ...sealed, entries: { ...sealed.entries, ...added } };
+    if (Object.keys(added).length > 0) await this.documents.sealed.write(staged);
+    const record = nextRecord(existing, key, change, at, seals);
+    const committed: LoginIndexDocument = { ...index, entries: { ...index.entries, [id]: record } };
+    await this.documents.index.write(committed);
+    await this.sweep(committed, staged);
     return summary(id, record);
+  }
+
+  /**
+   * AT BOOT: drops sealed values the index does not point at — what a change left when the daemon stopped between
+   * staging new ciphertext and committing the index, or before its sweep. Until then they are masked like any
+   * sealed value. Never sweeps against an index that was never written or cannot be read: with no commit to trust,
+   * everything is kept (and masked). Runs under the store lock, so no change can be mid-flight.
+   */
+  async sweepUnreferenced(): Promise<number> {
+    return await this.lock.run(async () => {
+      const index = await this.documents.index.read();
+      if (index === undefined) return 0;
+      const sealed = await this.documents.readSealed();
+      const before = Object.keys(sealed.entries).length;
+      await this.sweep(index, sealed);
+      return before - Object.keys((await this.documents.readSealed()).entries).length;
+    });
+  }
+
+  /** Drops sealed values the committed index no longer points at. Best effort: an orphan is still masked. */
+  private async sweep(committed: LoginIndexDocument, sealed: SecretVaultDocument): Promise<void> {
+    const keep = referenced(committed);
+    const kept = Object.fromEntries(Object.entries(sealed.entries).filter(([name]) => keep.has(name)));
+    if (Object.keys(kept).length === Object.keys(sealed.entries).length) return;
+    await this.documents.sealed.write({ ...sealed, entries: kept }).catch(() => undefined);
   }
 
   /** A new handle for an entry. Its sealed values stay where they are, filed under the entry's key. */
@@ -270,8 +333,8 @@ export class LoginDirectory {
   }
 
   /**
-   * Removes an entry: the index first, so it is gone at once, then its sealed values. A failure after the
-   * first write leaves sealed values no entry names, which are still masked and never typed.
+   * Removes an entry: the index first (the commit), so it is gone at once, then a sweep of what nothing points at.
+   * A failure of the sweep leaves sealed values no entry names, which are still masked and never typed.
    */
   async remove(id: LoginEntryId): Promise<boolean> {
     return await this.lock.run(async () => await this.drop(id));
@@ -282,19 +345,23 @@ export class LoginDirectory {
     const record = index.entries[id];
     if (record === undefined) return false;
     const { [id]: _removed, ...rest } = index.entries;
-    await this.documents.index.write({ ...index, entries: rest });
-    const sealed = await this.documents.readSealed();
-    const {
-      [sealedName(record.key, 'password')]: _password,
-      [sealedName(record.key, 'totp')]: _totp,
-      ...kept
-    } = sealed.entries;
-    await this.documents.sealed.write({ ...sealed, entries: kept });
+    const committed: LoginIndexDocument = { ...index, entries: rest };
+    await this.documents.index.write(committed);
+    await this.sweep(
+      committed,
+      await this.documents.readSealed().catch(() => ({ v: 1 as const, cipher: '', entries: {} })),
+    );
     return true;
   }
 }
 
-function nextRecord(existing: LoginRecord | undefined, key: string, change: PutLoginEntry, at: string): LoginRecord {
+function nextRecord(
+  existing: LoginRecord | undefined,
+  key: string,
+  change: PutLoginEntry,
+  at: string,
+  seals: LoginRecord['seals'],
+): LoginRecord {
   const username = change.username === undefined ? existing?.username : (change.username ?? undefined);
   const totp: TotpParameters | undefined =
     change.totp === undefined
@@ -307,8 +374,8 @@ function nextRecord(existing: LoginRecord | undefined, key: string, change: PutL
     label: change.label ?? (existing?.label as string),
     match: [...new Set(change.match ?? existing?.match ?? [])],
     ...(username === undefined ? {} : { username }),
-    password: change.password === undefined ? (existing?.password ?? false) : change.password !== null,
-    ...(totp === undefined ? {} : { totp }),
+    seals,
+    ...(totp === undefined || seals.totp === undefined ? {} : { totp }),
     createdAt: existing?.createdAt ?? at,
     updatedAt: at,
   };
@@ -344,7 +411,8 @@ export class LoginVault {
     const named = new Set<string>();
     for (const [id, record] of Object.entries(index.entries)) {
       for (const role of ['password', 'totp'] as const) {
-        const name = sealedName(record.key, role);
+        const name = record.seals[role];
+        if (name === undefined) continue;
         const value = opened.get(name);
         if (value === undefined) continue;
         named.add(name);
@@ -369,13 +437,13 @@ export class LoginVault {
         throw new LoginEntryError('no_such_field', `${record.label} has no username saved`);
       return record.username;
     }
-    if (role === 'password' ? !record.password : record.totp === undefined)
+    const name = record.seals[role];
+    if (name === undefined || (role === 'totp' && record.totp === undefined))
       throw new LoginEntryError(
         'no_such_field',
         `${record.label} has no ${role === 'password' ? 'password' : '2FA seed'} saved`,
       );
     const sealed = await this.documents.readSealed();
-    const name = sealedName(record.key, role);
     const entry = sealed.entries[name];
     if (entry === undefined) throw new LoginEntryError('no_such_field', `${record.label} has lost its ${role}`);
     const value = (await this.documents.cipher.openAll({ [name]: entry })).get(name);

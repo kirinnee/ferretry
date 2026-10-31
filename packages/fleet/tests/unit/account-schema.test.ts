@@ -45,7 +45,7 @@ describe('AccountModelSchema', () => {
     // Assert
     should(actual.machine).deepEqual({
       agentPermissions: 'auto',
-      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
+      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
       browserMode: 'headless',
       autoResume: true,
       agendaMode: true,
@@ -701,18 +701,35 @@ describe('the agent-control switches', () => {
     const actual = parseAccountModel(input).machine.agentControl;
 
     // Assert — the three older switches default on; this one is a kill switch that defaults off.
-    should(actual).deepEqual({ terminals: false, browsers: true, files: true, ferretrySettings: false });
+    should(actual).deepEqual({
+      terminals: false,
+      browsers: true,
+      files: true,
+      ferretrySettings: false,
+      pageScripts: false,
+    });
   });
 
   it('should keep the Ferretry settings switch when the owner sets it', () => {
     // Arrange
-    const input = documentWith({ machine: { agentControl: { ferretrySettings: true } } });
+    const input = documentWith({ machine: { agentControl: { ferretrySettings: true, pageScripts: false } } });
 
     // Act
     const actual = parseAccountModel(input).machine.agentControl.ferretrySettings;
 
     // Assert
     should(actual).be.true();
+  });
+
+  it('should leave agents without Page scripts until the owner turns it on, and keep it when they do', () => {
+    // Act
+    const unset = parseAccountModel(documentWith({ machine: { agentControl: {} } })).machine.agentControl;
+    const set = parseAccountModel(documentWith({ machine: { agentControl: { pageScripts: true } } })).machine
+      .agentControl;
+
+    // Assert
+    should(unset.pageScripts).be.false();
+    should(set.pageScripts).be.true();
   });
 
   it('should refuse a switch that is not a boolean', () => {

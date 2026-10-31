@@ -1,130 +1,144 @@
 /**
- * THE HISTORY OF ONE AGENDA ITEM, read off the two places that hold it: the item's own revisions (what the
- * ferret or the owner changed) and the conversation (what the owner said about it, what the ferret answered).
- * Pure: the item view draws it, newest last, like the chat it replaces.
+ * THE HISTORY OF ONE AGENDA ITEM: the conversation ABOUT it, and nothing else. Pure: the item view draws it under the
+ * card, newest last, like a chat.
  *
- * The owner's messages are read with the protocol's one reader (`parseAgendaMessage`) — never a pattern of
- * ours — so an answer, a reply and a discussion are the forms the daemon wrote. A ferret message belongs to the
- * item when it names it as a `!A47` reference.
+ * WHAT COUNTS AS "ABOUT THIS ITEM" (the relevance rule):
+ *
+ * - THE OWNER: a user-channel row that is an agenda form naming this item (read with the protocol's one reader,
+ *   `parseAgendaMessage` — never a pattern of ours), or a plain message that cites `!A47`. The composer under an
+ *   open item always prefixes that reference, so every reply typed there qualifies. A row another ferret sent
+ *   (`peer`) is never the owner's.
+ * - THE FERRET: (a) its FINAL text of the turn that answers one of those owner rows — the last assistant text before
+ *   the next user row, so the narration between tool calls is left out; and (b) any assistant text that cites
+ *   `!A47` itself. Only assistant TEXT: tool calls, thinking, commands and notices are other row kinds and are never
+ *   read. What it said about anything else, however recent, is not this item's history.
+ * - THE ITEM ITSELF: one "Card updated to vN" line per edit. Its raise is the ferret's own message citing it (b);
+ *   nothing is made up to stand for it, so the card's words are never said twice.
  */
 
 import { type AgendaItem, type AgendaMessagePart, parseAgendaMessage } from '@ferretry/protocol';
-import { type RevisionEntry, revisionList } from './agenda-revisions.ts';
 import type { TranscriptEntry } from './session-screens.ts';
 
 /** The longest ferret message kept whole; the rest is cut and marked, the chat holds the whole. */
 export const HISTORY_FERRET_CHARS = 700;
 
 export type HistoryEvent =
-  | { readonly kind: 'raised'; readonly key: string; readonly at: number; readonly by: AgendaItem['raisedBy'] }
-  | { readonly kind: 'revision'; readonly key: string; readonly at: number; readonly entry: RevisionEntry }
-  | { readonly kind: 'owner'; readonly key: string; readonly at: number; readonly part: AgendaMessagePart }
+  /** An edit made the card version `version`. */
+  | { readonly kind: 'revision'; readonly key: string; readonly at: number; readonly version: number }
+  /** The owner's own words to the item: an answer, a note, a reply. */
   | {
-      readonly kind: 'owner-text';
+      readonly kind: 'owner';
       readonly key: string;
       readonly at: number;
       readonly text: string;
-      /** The chat's own row for what the owner said, so History draws it with the chat's own message component. */
-      readonly entry: TranscriptEntry;
+      /** The answer form it was sent as; absent for a plain reply. */
+      readonly form?: AgendaMessagePart['kind'];
+      readonly note?: string;
     }
-  | {
-      readonly kind: 'ferret';
-      readonly key: string;
-      readonly at: number;
-      readonly text: string;
-      readonly entry: TranscriptEntry;
-    };
+  /** What the ferret said to the item. */
+  | { readonly kind: 'ferret'; readonly key: string; readonly at: number; readonly text: string };
 
-const mentions = (text: string, id: AgendaItem['id']): boolean =>
-  new RegExp(`(?:^|[^\\w])!${id}(?![\\w])`, 'u').test(text);
+const citesPattern = (id: AgendaItem['id']): RegExp => new RegExp(`(?:^|[^\\w])!${id}(?![\\w])`, 'u');
 
 const cut = (text: string): string =>
   text.length > HISTORY_FERRET_CHARS ? `${text.slice(0, HISTORY_FERRET_CHARS).trimEnd()}…` : text;
 
-/** The conversation's rows about one item, in the order they were said. */
-const spoken = (id: AgendaItem['id'], entries: readonly TranscriptEntry[]): readonly HistoryEvent[] => {
-  let clock = 0;
-  return entries.flatMap((entry): readonly HistoryEvent[] => {
-    clock = entry.at ?? clock;
-    if (entry.kind === 'user') {
-      const message = parseAgendaMessage(entry.text);
-      if (message !== undefined) {
-        return message.parts
-          .filter(part => part.items.some(named => named.id === id))
-          .map(part => ({ kind: 'owner', key: `${entry.id}:${part.raw}`, at: clock, part }) as const);
-      }
-      return mentions(entry.text, id)
-        ? [{ kind: 'owner-text', key: entry.id, at: clock, text: entry.text, entry }]
-        : [];
-    }
-    if (entry.kind === 'assistant' && mentions(entry.text, id)) {
-      const text = cut(entry.text);
-      return [{ kind: 'ferret', key: entry.id, at: clock, text, entry: { ...entry, text } }];
-    }
-    return [];
-  });
+/** A plain reply without the reference the composer put in front of it: the bubble says what the owner typed. */
+const withoutLeadingReference = (text: string, id: AgendaItem['id']): string => {
+  const stripped = text.replace(new RegExp(`^\\s*!${id}(?![\\w])[\\s:,—-]*`, 'u'), '');
+  return stripped.trim() === '' ? text.trim() : stripped.trim();
 };
 
-const revisions = (item: AgendaItem): readonly HistoryEvent[] =>
-  [...revisionList(item)].reverse().map(
-    entry =>
+/** The words an answer form's bubble says when the owner added none of their own. */
+const FORM_WORDS: Readonly<Record<AgendaMessagePart['kind'], string>> = {
+  answer: '',
+  done: 'Done',
+  dismissed: 'Not needed',
+  'needs-info': 'Need more info',
+  discuss: 'Let’s talk this through',
+  re: '',
+};
+
+/** The owner's bubble for one agenda form. */
+const ownerPart = (part: AgendaMessagePart): { readonly text: string; readonly note?: string } => {
+  const text = part.text.trim();
+  if (part.kind === 'dismissed') return { text: FORM_WORDS.dismissed, ...(text === '' ? {} : { note: text }) };
+  return {
+    text: text === '' ? FORM_WORDS[part.kind] : text,
+    ...(part.note === undefined || part.note.trim() === '' ? {} : { note: part.note.trim() }),
+  };
+};
+
+/** What the owner said to the item in one user row, or nothing when the row is not about it. */
+const ownerSaid = (entry: TranscriptEntry, id: AgendaItem['id'], at: number): readonly HistoryEvent[] => {
+  if (entry.peer !== undefined) return [];
+  const message = parseAgendaMessage(entry.text);
+  if (message !== undefined) {
+    return message.parts
+      .filter(part => part.items.some(named => named.id === id))
+      .map(
+        part => ({ kind: 'owner', key: `${entry.id}:${part.raw}`, at, form: part.kind, ...ownerPart(part) }) as const,
+      )
+      .filter(event => event.text !== '');
+  }
+  return citesPattern(id).test(entry.text)
+    ? [{ kind: 'owner', key: entry.id, at, text: withoutLeadingReference(entry.text, id) }]
+    : [];
+};
+
+/** The conversation's rows about one item, in the order they were said. */
+const spoken = (id: AgendaItem['id'], entries: readonly TranscriptEntry[]): readonly HistoryEvent[] => {
+  const cites = citesPattern(id);
+  const events: HistoryEvent[] = [];
+  let clock = 0;
+  // The ferret's turn that answers an owner row about this item: its last text wins.
+  let answering = false;
+  let reply: HistoryEvent | null = null;
+  const closeTurn = (): void => {
+    if (reply !== null) events.push(reply);
+    reply = null;
+  };
+  for (const entry of entries) {
+    clock = entry.at ?? clock;
+    if (entry.kind === 'user') {
+      closeTurn();
+      const said = ownerSaid(entry, id, clock);
+      events.push(...said);
+      answering = said.length > 0;
+      continue;
+    }
+    if (entry.kind !== 'assistant' || entry.text.trim() === '') continue;
+    const text = cut(entry.text.trim());
+    const event: HistoryEvent = { kind: 'ferret', key: entry.id, at: clock, text };
+    if (cites.test(entry.text)) {
+      // Said about the item in so many words: kept whatever turn it is in, and it ends the turn's pending reply.
+      if (answering) reply = null;
+      events.push(event);
+    } else if (answering) {
+      reply = event;
+    }
+  }
+  closeTurn();
+  return events;
+};
+
+const versions = (item: AgendaItem): readonly HistoryEvent[] =>
+  (item.revisions ?? []).map(
+    (revision, index) =>
       ({
         kind: 'revision',
-        key: `revision:${entry.at}:${entry.by}`,
-        at: Date.parse(entry.at) || 0,
-        entry,
+        key: `revision:${revision.at}:${String(index)}`,
+        at: Date.parse(revision.at) || 0,
+        version: index + 2,
       }) as const,
   );
 
-/** The words a message starts with, spaces folded: two reads of one message share it, whatever one of them cut. */
-const stem = (text: string): string => text.replace(/\s+/gu, ' ').trim().replace(/…$/u, '').slice(0, 80);
-
-/** What the ferret said lately as the chat's own rows; the ids are the reader's, never the chat's. */
-export const recentEntries = (
-  messages: readonly { readonly text: string; readonly timestamp?: string }[],
-): readonly TranscriptEntry[] =>
-  messages.map((message, order) => {
-    const at = Date.parse(message.timestamp ?? '');
-    return {
-      id: `recent:${order}`,
-      kind: 'assistant',
-      text: message.text,
-      ...(Number.isFinite(at) ? { at } : {}),
-    };
-  });
-
-/** What the ferret said lately without naming the item: the lead-up to it. One the item's own reading holds is not drawn twice. */
-const lately = (recent: readonly TranscriptEntry[], held: readonly HistoryEvent[]): readonly HistoryEvent[] => {
-  const known = new Set(held.flatMap(event => (event.kind === 'ferret' ? [stem(event.text)] : [])));
-  return recent
-    .filter(entry => !known.has(stem(entry.text)))
-    .map((entry): HistoryEvent => {
-      const text = cut(entry.text);
-      return { kind: 'ferret', key: entry.id, at: entry.at ?? 0, text, entry: { ...entry, text } };
-    });
-};
-
 /**
- * The item's revisions and the conversation about it, oldest first: the item view reads top-down, newest last. The
- * item's own events (raised, edited) are small dividers between the bubbles; the bubbles are what was said — the
- * rows that name the item, and the ferret's last few messages (`recent`) that led up to it.
+ * The item's history, oldest first: the item view reads top-down, newest last. Empty when nothing was said about the
+ * item and it was never edited.
  */
-export const itemHistory = (
-  item: AgendaItem,
-  entries: readonly TranscriptEntry[],
-  recent: readonly TranscriptEntry[] = [],
-): readonly HistoryEvent[] => {
-  const said = spoken(item.id, entries);
-  const events = [...revisions(item), ...said, ...lately(recent, said)];
-  if (events.length === 0) return events;
-  const raised: HistoryEvent = {
-    kind: 'raised',
-    key: 'raised',
-    at: Date.parse(item.waitingSince) || 0,
-    by: item.raisedBy,
-  };
-  return [raised, ...events]
+export const itemHistory = (item: AgendaItem, entries: readonly TranscriptEntry[]): readonly HistoryEvent[] =>
+  [...versions(item), ...spoken(item.id, entries)]
     .map((event, order) => ({ event, order }))
     .sort((a, b) => a.event.at - b.event.at || a.order - b.order)
     .map(({ event }) => event);
-};

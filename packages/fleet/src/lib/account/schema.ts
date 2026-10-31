@@ -130,6 +130,13 @@ export const AgentControlSchema = z
      * until the owner confirms it — this switch is a kill switch, the confirmation is the guard.
      */
     ferretrySettings: z.boolean().default(false),
+    /**
+     * Whether an agent may run its own JavaScript in a page it drives (`browser.eval`, in an isolated
+     * world: docs/agent-tools.md). OFF by default, like Ferretry settings: a script can read what the
+     * page holds — on the shared agent profile, sign-ins included. Turning it on is a loosening, so it
+     * is held until the owner confirms it.
+     */
+    pageScripts: z.boolean().default(false),
   })
   .prefault({});
 export type AgentControl = z.infer<typeof AgentControlSchema>;

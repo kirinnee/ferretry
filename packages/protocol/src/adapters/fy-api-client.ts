@@ -72,6 +72,9 @@ import {
 import {
   type AnswerSessionRequest,
   AnswerSessionRequestSchema,
+  AskToStopJobsRequestSchema,
+  type AskToStopJobsResult,
+  AskToStopJobsResultSchema,
   type ComposerDraftRequest,
   ComposerDraftRequestSchema,
   type ComposerDraftResult,
@@ -139,8 +142,12 @@ import {
 } from '../lib/session-restart.ts';
 import {
   type LogPageOptions,
+  type LogSearchOptions,
+  type MessagesTailOptions,
   type SessionLogPage,
   SessionLogPageSchema,
+  type SessionLogSearch,
+  SessionLogSearchSchema,
   type SessionTranscriptPage,
   SessionTranscriptPageSchema,
 } from '../lib/session-transcript.ts';
@@ -410,10 +417,19 @@ class ValidatedLogMemory {
   }
 }
 
-/** The fleet list a read last answered, and the `etag` that names it. */
+/** The fleet list a read last answered, and the `etag` that names it. The list is deeply frozen. */
 interface ValidatedSessions {
   readonly etag: string;
   readonly sessions: readonly SessionView[];
+}
+
+/** Freezes a parsed JSON value all the way down, so one list can be shared by every reader instead of copied for each. */
+function freezeDeep<T>(value: T): T {
+  if (typeof value === 'object' && value !== null && !Object.isFrozen(value)) {
+    for (const child of Object.values(value)) freezeDeep(child);
+    Object.freeze(value);
+  }
+  return value;
 }
 
 /** A successful answer's body: none for a `204`, parsed JSON when it says so, its text otherwise. */
@@ -787,12 +803,13 @@ export class FyApiClient implements IFyApiClient {
    * Conditional, like {@link logs}: every open app re-reads the fleet on a beat, and an unchanged one
    * answers `304` instead of its whole list again (about 25 KB on a real fleet, on a metered relay).
    *
-   * One list is held per client, which is per daemon connection. A `304` answers a deep copy of it, so
-   * a caller gets a fresh value exactly as a full read would give one and cannot reach the held list
-   * through it. The held entry is captured BEFORE the request, as in {@link logs}, and a daemon that
-   * predates the tag (no `etag`) leaves nothing held, so the next read is an ordinary one.
+   * One list is held per client, which is per daemon connection. The list is parsed once and frozen all
+   * the way down, and every read answers that one frozen value: a `304` costs no parse and no copy, and
+   * a caller cannot change the held list through what it was given (a write throws). The held entry is
+   * captured BEFORE the request, as in {@link logs}, and a daemon that predates the tag (no `etag`)
+   * leaves nothing held, so the next read is an ordinary one.
    */
-  async list(): Promise<SessionView[]> {
+  async list(): Promise<readonly SessionView[]> {
     const held = this.#validatedSessions;
     const response = await this.#exchange(
       '/v1/sessions',
@@ -801,10 +818,10 @@ export class FyApiClient implements IFyApiClient {
       held !== undefined,
     );
     // Whatever is held now stays: a read that overlapped this one may already hold a newer list.
-    if (held !== undefined && response.status === 304) return structuredClone([...held.sessions]);
-    const sessions = SessionListSchema.parse(await responsePayload(response));
+    if (held !== undefined && response.status === 304) return held.sessions;
+    const sessions = freezeDeep(SessionListSchema.parse(await responsePayload(response)));
     const etag = response.headers.get('etag');
-    this.#validatedSessions = etag === null ? undefined : { etag, sessions: structuredClone(sessions) };
+    this.#validatedSessions = etag === null ? undefined : { etag, sessions };
     return sessions;
   }
 
@@ -992,6 +1009,10 @@ export class FyApiClient implements IFyApiClient {
     );
   }
 
+  askToStopJobs(id: string): Promise<AskToStopJobsResult> {
+    return this.#post(id, 'migrate/ask-to-stop-jobs', AskToStopJobsRequestSchema, {}, AskToStopJobsResultSchema);
+  }
+
   /** Restarts the ferrets `request` names now, and queues the busy ones; at most once per request id. */
   restart(request: RestartRequest, requestId?: string): Promise<RestartResult> {
     const init = jsonRequest('POST', RestartRequestSchema, request);
@@ -1139,6 +1160,19 @@ export class FyApiClient implements IFyApiClient {
     return page;
   }
 
+  /** Every place in a session's whole transcript that says `query`, oldest first. Never cached. */
+  logSearch(id: string, query: string, options: LogSearchOptions = {}): Promise<SessionLogSearch> {
+    const search = new URLSearchParams({ q: NonEmptyValueSchema.parse(query) });
+    if (options.who !== undefined) search.set('who', options.who);
+    if (options.tools === true) search.set('tools', '1');
+    if (options.limit !== undefined) search.set('limit', String(PositiveIntegerSchema.max(2_000).parse(options.limit)));
+    return this.request(
+      `/v1/sessions/${encodeURIComponent(NonEmptyValueSchema.parse(id))}/log-search?${search.toString()}`,
+      SessionLogSearchSchema,
+      options.signal === undefined ? {} : { signal: options.signal },
+    );
+  }
+
   handoff(id: string, name: string): Promise<SessionHandoff> {
     return this.request(
       `/v1/sessions/${encodeURIComponent(NonEmptyValueSchema.parse(id))}/handoffs/${SessionHandoffNameSchema.parse(name)}`,
@@ -1167,6 +1201,22 @@ export class FyApiClient implements IFyApiClient {
       `/v1/sessions/${sessionId}/messages${suffix}`,
       SessionTranscriptPageSchema,
       signal === undefined ? {} : { signal },
+    );
+  }
+
+  messagesTail(id: string, options: MessagesTailOptions = {}): Promise<SessionTranscriptPage> {
+    const sessionId = encodeURIComponent(NonEmptyValueSchema.parse(id));
+    const search = new URLSearchParams();
+    if (options.through === undefined) search.set('tail', '1');
+    else {
+      NonEmptyValueSchema.parse(options.through);
+      search.set('through', options.through);
+    }
+    if (options.limit !== undefined) search.set('limit', String(PositiveIntegerSchema.max(1_000).parse(options.limit)));
+    return this.request(
+      `/v1/sessions/${sessionId}/messages?${search.toString()}`,
+      SessionTranscriptPageSchema,
+      options.signal === undefined ? {} : { signal: options.signal },
     );
   }
 

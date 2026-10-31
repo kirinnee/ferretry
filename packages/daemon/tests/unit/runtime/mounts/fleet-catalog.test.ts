@@ -40,7 +40,7 @@ const MACHINE: FleetMachineView = {
   setUp: true,
   agentPermissions: 'auto',
   defaultRuntime: 'claude-default',
-  agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
+  agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
   tools: [],
   runtimeCount: 1,
   runningSessions: 0,

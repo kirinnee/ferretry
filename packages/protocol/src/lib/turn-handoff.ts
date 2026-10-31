@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { QueueAuthorSchema } from './session-queue.ts';
+import { QueueAuthorSchema } from './session.ts';
 
 /**
  * How the daemon hands an agent a message through a FILE, and how the app reads that hand-off back.

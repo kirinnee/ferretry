@@ -73,6 +73,7 @@ const sendRecord = {
   attachmentIds: [],
   fate: 'delivered',
   evidence: sendEvidence,
+  by: { kind: 'ferretry', feature: 'Board' },
 };
 
 const transcriptProvenance = {
@@ -139,6 +140,11 @@ const sessionCases: SchemaCase[] = [
   },
   { name: 'send cancel effect', schema: session.SendCancelEffectSchema, value: 'left_in_queue' },
   { name: 'send evidence', schema: session.SendEvidenceSchema, value: sendEvidence },
+  {
+    name: 'queue author',
+    schema: session.QueueAuthorSchema,
+    value: { kind: 'ferretry', feature: 'Board' },
+  },
   { name: 'send record', schema: session.SendRecordSchema, value: sendRecord },
   { name: 'send list', schema: session.SendListResponseSchema, value: { sends: [sendRecord] } },
   { name: 'runtime option', schema: session.RuntimeModelOptionSchema, value: { value: 'model', label: 'Model' } },
@@ -368,6 +374,34 @@ const sessionCases: SchemaCase[] = [
       detail: 'some-vendor-tool --watch',
       age: '2m',
       blocks: true,
+    },
+  },
+  {
+    name: 'in-flight background job',
+    schema: session.InflightItemSchema,
+    value: {
+      kind: 'process',
+      verdict: 'unknown',
+      title: 'A program Ferretry doesn’t recognise is running',
+      detail: 'bash /tmp/merge-all.sh 765',
+      blocks: true,
+      backgroundJob: true,
+      pid: 5101,
+    },
+  },
+  { name: 'ask to stop jobs request', schema: session.AskToStopJobsRequestSchema, value: {} },
+  {
+    name: 'agent job',
+    schema: session.AgentJobSchema,
+    value: { pid: 5101, command: 'bash /tmp/merge-all.sh 765', age: '4m' },
+  },
+  {
+    name: 'ask to stop jobs result',
+    schema: session.AskToStopJobsResultSchema,
+    value: {
+      messageId: 'migrate-jobs-5101',
+      jobs: [{ pid: 5101, command: 'bash /tmp/merge-all.sh 765' }],
+      alreadyAsked: false,
     },
   },
   {

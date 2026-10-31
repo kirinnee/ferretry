@@ -71,3 +71,37 @@ describe('FyApiClient log pages', () => {
     should(transport.calls).have.length(0);
   });
 });
+
+describe('FyApiClient log search', () => {
+  const ANSWER = { v: 1, sessionId: 'session-1', query: 'parser', file: 'f1', matches: [], truncated: false } as const;
+
+  it('should ask for the query alone by default', async () => {
+    // Arrange
+    const transport = new QueuedHttpTransport(jsonResponse(ANSWER));
+    const client = await connectClient(transport);
+
+    // Act
+    const answer = await client.logSearch('session-1', 'parser');
+
+    // Assert
+    should(answer).eql(ANSWER);
+    should(transport.calls[0]?.url).equal(`${BASE_URL}/v1/sessions/session-1/log-search?q=parser`);
+  });
+
+  it('should name whose words, tools and a limit when asked', async () => {
+    // Arrange
+    const transport = new QueuedHttpTransport(jsonResponse(ANSWER));
+    const client = await connectClient(transport);
+
+    // Act
+    await client.logSearch('session-1', 'a b', {
+      who: 'me',
+      tools: true,
+      limit: 20,
+      signal: new AbortController().signal,
+    });
+
+    // Assert
+    should(transport.calls[0]?.url).equal(`${BASE_URL}/v1/sessions/session-1/log-search?q=a+b&who=me&tools=1&limit=20`);
+  });
+});

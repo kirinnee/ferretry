@@ -155,8 +155,9 @@ export const optionAction = (option: AgendaAskOption, reply: string): InboxActio
   answerAction({ direction: 'left', does: 'choose', label: option.label }, reply) as InboxAction;
 
 /**
- * The answers this card offers, left · up · right. A to-do waiting on its ferret cannot be done yet and
- * asking again is the same request, so it keeps only an answer the ferret added (a Skip).
+ * The answers this card offers, left · up · right — a row of options in the options list's order, as the protocol
+ * lays it out (`agendaCardAnswers`). A to-do waiting on its ferret cannot be done yet and asking again is the same
+ * request, so it keeps only an answer the ferret added (a Skip).
  */
 export const cardAnswers = (item: AnswerSource): readonly AgendaCardAnswer[] => {
   const answers = agendaCardAnswers(item);
