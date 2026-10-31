@@ -276,6 +276,10 @@ describe('catalogItemReview', () => {
     const [entry] = catalogItemReview(skill([{ path: 'SKILL.md', content: `a${RLO}b${ZWSP}c\t\r\n\u0000` }]));
     expect(entry?.text).toBe('a⟨U+202E⟩b⟨U+200B⟩c\t\r\n⟨U+0000⟩');
     expect(revealHidden(String.fromCodePoint(0xe0041))).toBe('⟨U+E0041⟩');
+    // Format characters Unicode added after the explicit list: every \p{Cf} is hidden.
+    expect(revealHidden(String.fromCodePoint(0x1d173))).toBe('⟨U+1D173⟩');
+    expect(revealHidden(String.fromCodePoint(0x13430))).toBe('⟨U+13430⟩');
+    expect(revealHidden(String.fromCodePoint(0x110bd))).toBe('⟨U+110BD⟩');
   });
 
   it('shows the command line as typed, and every variable — placeholders as written', () => {

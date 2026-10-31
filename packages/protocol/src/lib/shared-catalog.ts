@@ -81,14 +81,39 @@ const utf8Length = (text: string): number => new TextEncoder().encode(text).leng
  * Characters that change how text LOOKS without being seen (Trojan Source, CVE-2021-42574): the
  * bidirectional overrides, isolates and marks; zero-width spaces, joiners and the word joiner; the soft
  * hyphen; the line and paragraph separators; the Hangul fillers; variation selectors; tag characters;
- * the byte-order mark; and the interlinear annotation marks. Written as escapes, so this source never
- * holds one itself.
+ * the byte-order mark; and the interlinear annotation marks. `\p{Cf}` adds every other format
+ * character Unicode defines (musical-symbol and Egyptian-hieroglyph format controls among them), so a
+ * character added to Unicode later is hidden too; the explicit ranges stay for the ones that are not
+ * `Cf`. Written as escapes, so this source never holds one itself.
  *
  * A catalog's name is the publisher's own text, shown beside the installer's own label for that
  * publisher. One of these could make "Anthropic" out of other letters, hide the end of a name, or make
  * two different file names look the same in the review \u2014 and the review is the control.
  */
-export const HIDDEN_CHARACTER_SOURCE = String.raw`\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B-\u200F\u2028-\u202E\u2060-\u2064\u2066-\u206F\u2800\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF9-\uFFFB\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}`;
+export const HIDDEN_CHARACTER_SOURCE = String.raw`\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B-\u200F\u2028-\u202E\u2060-\u2064\u2066-\u206F\u2800\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF9-\uFFFB\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}\p{Cf}`;
+/**
+ * Invisible and text-direction characters, and controls other than a tab, a line break and a carriage
+ * return that ends a line — a fresh global matcher each time, since `lastIndex` is state.
+ */
+export const hiddenCharacters = (): RegExp =>
+  // A carriage return is fine before a line feed (a Windows line ending) and hidden anywhere else: in a
+  // terminal `rm -rf ~ #\recho hi` shows as `echo hi`.
+  new RegExp(
+    String.raw`(?:[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F${HIDDEN_CHARACTER_SOURCE}]|\r(?!\n))`,
+    'gu',
+  );
+
+/**
+ * A file's text with each hidden character written as `⟨U+202E⟩`, so the review shows what the file
+ * holds rather than what it makes the screen look like (Trojan Source). The install writes the bytes as
+ * published; only what a person reads is marked.
+ */
+export const revealHidden = (text: string): string =>
+  text.replace(
+    hiddenCharacters(),
+    character => `⟨U+${(character.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, '0')}⟩`,
+  );
+
 /** C0 and C1 controls, except tab and line feed. */
 const CONTROLS = String.raw`\u0000-\u0008\u000B-\u001F\u007F-\u009F`;
 
@@ -170,8 +195,7 @@ const WINDOWS_DEVICE = /^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/iu;
 
 /** Why one path segment cannot be carried, or `null` when it can. */
 const segmentProblem = (segment: string): string | null => {
-  if (!SKILL_SEGMENT.test(segment))
-    return `${JSON.stringify(segment)} uses a character other than A-Z, a-z, 0-9, ., _ and -`;
+  if (!SKILL_SEGMENT.test(segment)) return 'a name in this path uses a character other than A-Z, a-z, 0-9, ., _ and -';
   if (segment.endsWith('.')) return `${segment} ends with a dot`;
   // A name a shell glob would hand a program as an option: `rm *` in that folder would read `-rf`.
   if (segment.startsWith('-')) return `${segment} starts with a dash`;
@@ -600,10 +624,13 @@ export function readSharedCatalogFile(text: string): SharedCatalogFileReading {
   const parsed = SharedCatalogFileSchema.safeParse(document);
   if (!parsed.success) {
     const first = parsed.error.issues[0];
-    const where = first === undefined || first.path.length === 0 ? '' : ` (at ${first.path.join('.')})`;
+    const where =
+      first === undefined || first.path.length === 0
+        ? ''
+        : ` (at ${first.path.map(key => revealHidden(String(key)).slice(0, 80)).join('.')})`;
     return {
       ok: false,
-      reason: `This catalog file cannot be installed from: ${first?.message ?? 'it is malformed'}${where}.`,
+      reason: `This catalog file cannot be installed from: ${revealHidden(first?.message ?? 'it is malformed').slice(0, 300)}${where}.`,
     };
   }
   return { ok: true, file: parsed.data };

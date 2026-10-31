@@ -308,6 +308,28 @@ describe('catalog file', () => {
     expect(reasons[2]).toContain('not the version the signed manifest lists');
   });
 
+  it('never repeats a file-supplied name in the sentence it refuses with', () => {
+    const long = `${'a'.repeat(250)}${RLO}${'b'.repeat(250)}`;
+    const read = readSharedCatalogFile(JSON.stringify(file([skillItem([{ path: `${long}/SKILL.md`, content: 'x' }])])));
+    const reason = read.ok ? '' : read.reason;
+    expect(reason).toContain('a name in this path uses a character other than A-Z, a-z, 0-9, ., _ and -');
+    expect(reason).not.toContain(RLO);
+    expect(reason).not.toContain(long);
+    expect(reason.length).toBeLessThan(600);
+  });
+
+  it('writes a hidden character in the field path as its marker, and bounds the path', () => {
+    const key = `bad${RLO}key`;
+    const document = { ...file([skillItem()]), [key]: 1 };
+    const read = readSharedCatalogFile(JSON.stringify(document));
+    const reason = read.ok ? '' : read.reason;
+    expect(reason).not.toContain(RLO);
+    const long = readSharedCatalogFile(JSON.stringify({ ...file([skillItem()]), [`${'k'.repeat(300)}${RLO}`]: 1 }));
+    const bounded = long.ok ? '' : long.reason;
+    expect(bounded).not.toContain(RLO);
+    expect(bounded.length).toBeLessThan(400);
+  });
+
   it('refuses a file larger than its bound before parsing it', () => {
     const read = readSharedCatalogFile(' '.repeat(SHARED_CATALOG_FILE_MAX_BYTES + 1));
     expect(read.ok ? '' : read.reason).toContain('larger than 32 MiB');
