@@ -324,6 +324,11 @@ What is different is how the daemon looks and types, and what it holds back afte
   (`GET /v1/sessions/:sid/input-requests/:id/shot`, owner only; `request.pictured` says there is one). The
   card draws each field's box on it from the browser's facts. It is let go when the request ends.
 
+- **The marker is only a lookup aid.** The node it leads to must be the element the agent's pointer resolved to:
+  the same box (the browser's own measurement), and the node on top at its centre. Every fact on the card (node,
+  attributes, box) comes from that proven node. A field that is covered, or not on screen, is refused: scroll
+  it into view and raise again.
+
 ### Typing: one write into exactly the nodes the card showed
 
 `inputType` re-checks the page against the card's facts first: the same document, the same origin, and every
@@ -331,7 +336,10 @@ node still there with the same attributes. Anything different types nothing (`ta
 value in order: focus the node, confirm the focus landed on it, select what the field holds, and insert the
 text (`Input.insertText`, which a page's script sees as ordinary input). Enter goes to the last field when
 the owner ticked it. A failure before the first insert typed nothing; one after it is `uncertain` and the
-request ends, never retried. The value crosses the worker pipe in that one request and is in no answer,
+request ends, never retried. The select, the focus proof and the insert run through an isolated world of the field's frame, where the page's
+own overrides do not exist, and the insert is the very next call after the proof. What remains is the same
+compare-then-write gap the terminal has: the page's own events (the `select` it is sent, a timer) can run in
+the moment between the proof and the insert. The value crosses the worker pipe in that one request and is in no answer,
 error or log.
 
 ### The hold on a page
@@ -347,9 +355,22 @@ A `secret` or `private` value typed into a page holds that page for the same win
   window like every other read: a next page that prints the password back shows a mask.
 - While a request is pending on a page, the agent's `browser_type`, `browser_fill_form`, `browser_press` and `browser_eval`
   on it are refused: those values are the owner's to type.
+- **The decision is made inside the page's own queue**, immediately before the act runs, for every caller:
+  a request raised or a value typed while an act waited in the queue stops it there. The check before the queue
+  only fails fast, and a check after the act still withholds a result a hold began under.
+- **Errors are reads too.** A failed page call under a hold answers with the hold; every other error message
+  passes the same redactor as a read (a page that throws the password back shows a mask), and fails closed to a
+  fixed sentence when the redactor cannot run.
 - Page holds share the terminal's registry under their own names (a hold on page `app` never seals terminal
   `app`) and are not journalled: a page does not outlive the daemon that drove it, and a page's card ends as
   interrupted on restart. GAP: the owner cannot end a page's hold early from the app; it runs its two minutes.
+
+### Password saving is off in the agent profile
+
+On every lease of the agent profile, before Chrome starts on it, the daemon forces Chrome's own preferences
+`credentials_enable_service`, `credentials_enable_autosignin` and `profile.password_manager_enabled` to false
+in `Default/Preferences`, keeping every other preference (a profile made before this rule gets it on its next
+lease). A profile whose preferences cannot be written is not handed out, so the browser does not start.
 
 ### Passkeys are off in the agent browser
 

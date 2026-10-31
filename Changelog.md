@@ -1,3 +1,9 @@
+## [4.164.0](https://github.com/kirinnee/ferretry/compare/v4.163.0...v4.164.0) (2026-10-31)
+
+### Features
+
+* **input:** saved logins — save as, one-tap use, 2FA codes (P3) ([#1094](https://github.com/kirinnee/ferretry/issues/1094)) ([fc7a543](https://github.com/kirinnee/ferretry/commit/fc7a543035574a4f75dcd53b327b1a94e68ee8ae))
+
 ## [4.163.0](https://github.com/kirinnee/ferretry/compare/v4.162.0...v4.163.0) (2026-10-31)
 
 ### Features

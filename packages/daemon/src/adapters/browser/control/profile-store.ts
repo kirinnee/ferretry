@@ -5,16 +5,17 @@ import { z } from 'zod';
 import {
   BrowserControlError,
   BrowserProfileBusyError,
+  type BrowserProfileLease,
+  type BrowserProfileLeaseRecord,
+  type BrowserProfileMetadata,
+  type BrowserProfilePort,
   compareChromeVersions,
   highestChromeVersion,
   isPositiveInteger,
   isPrimedMarker,
   parseBrowserProfileLease,
+  passwordSavingOff,
   sameBrowserProfileLease,
-  type BrowserProfileLease,
-  type BrowserProfileLeaseRecord,
-  type BrowserProfileMetadata,
-  type BrowserProfilePort,
 } from '../../../lib/browser/control/index.ts';
 
 const leaseName = 'profile.lock';
@@ -116,6 +117,18 @@ export class BrowserProfileStore implements BrowserProfilePort {
             `shared browser profile lock cannot be verified: ${singleton.detail}`,
           );
         }
+        // Chrome is not running on the profile now, and nobody else holds it: its own preferences are set here, on
+        // every lease, so a profile made before this rule gets it too. A profile that cannot be kept from saving
+        // passwords is not handed out.
+        try {
+          await this.keepPasswordsUnsaved();
+        } catch {
+          await this.releaseRecord(desired);
+          throw new BrowserControlError(
+            'launch_failed',
+            'Ferretry could not turn off password saving in the agent browser profile, so it did not start the browser',
+          );
+        }
         return this.lease(desired, recoveredDeadOwner || singleton.kind === 'stale');
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
@@ -173,6 +186,24 @@ export class BrowserProfileStore implements BrowserProfilePort {
       markPrimed: async version => await this.markPrimed(record, version),
       release: async () => await this.release(record),
     };
+  }
+
+  /** Forces Chrome's password saving off in the profile's `Default/Preferences`, keeping everything else in it. */
+  private async keepPasswordsUnsaved(): Promise<void> {
+    const directory = path.join(this.profile, 'Default');
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const file = path.join(directory, 'Preferences');
+    const existing = await readFile(file, 'utf8').then(
+      text => {
+        try {
+          return JSON.parse(text) as unknown;
+        } catch {
+          return undefined;
+        }
+      },
+      () => undefined,
+    );
+    await this.writeJson(file, passwordSavingOff(existing));
   }
 
   private async ensureProfile(chromeVersion?: string): Promise<void> {

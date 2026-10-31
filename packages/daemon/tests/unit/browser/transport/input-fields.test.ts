@@ -32,15 +32,22 @@ interface FakeElement {
   readonly frame: FakeFrame;
   marker?: string;
   box: { x: number; y: number; width: number; height: number } | null;
+  /** What the Playwright handle says the box is, when it is not what DevTools measures. */
+  claimedBox?: { x: number; y: number; width: number; height: number } | null;
   visible: boolean;
 }
 
 class FakeFrame implements InputFrame {
+  /** Where an out-of-process frame sits in the page; its own coordinates are relative to this. */
+  offset = { x: 0, y: 0 };
+  readonly id: string;
   constructor(
     readonly address: string,
     readonly sessionName: string,
     readonly outOfProcess = false,
-  ) {}
+  ) {
+    this.id = outOfProcess ? sessionName : `frame-${address}`;
+  }
   url(): string {
     return this.address;
   }
@@ -57,6 +64,15 @@ class FakeSession implements InputCdpSession {
   focusLandsOn: number | undefined;
   /** Extra nodes a marker search finds, to play a page that copies the marker. */
   extraMatches = 0;
+  /** The node that answers a hit test at its centre instead of the one there, to play something stacked on top. */
+  onTop: FakeElement | undefined;
+  /** What a page's own `select` override does when run in the page's world: focus moves to this node. */
+  pageSelectMovesFocusTo: number | undefined;
+  /** CDP calls that reached the page's own world: an evaluate with no context, a resolve with no isolated one. */
+  readonly pageWorld: string[] = [];
+  private readonly contexts = new Map<number, string>();
+  private readonly isolatedObjects = new Set<string>();
+  private nextContext = 100;
   failOn: ((method: string, params: Record<string, unknown>) => Error | undefined) | undefined;
   private searches = 0;
 
@@ -75,8 +91,22 @@ class FakeSession implements InputCdpSession {
     if (failure !== undefined) throw failure;
     const own = this.world.elements.filter(element => element.frame.sessionName === this.name);
     switch (method) {
-      case 'Page.getFrameTree':
-        return { frameTree: { frame: { loaderId: this.world.loaderId } } };
+      case 'Page.getFrameTree': {
+        const frames = this.world.frames.filter(frame => frame.sessionName === this.name);
+        const [root, ...inner] = frames;
+        return {
+          frameTree: {
+            frame: { id: root?.id, loaderId: this.world.loaderId },
+            childFrames: inner.map(frame => ({ frame: { id: frame.id }, childFrames: [] })),
+          },
+        };
+      }
+      case 'Page.createIsolatedWorld': {
+        if (params.worldName !== 'ferretry-input') throw new Error('not the trusted world');
+        this.nextContext += 1;
+        this.contexts.set(this.nextContext, String(params.frameId));
+        return { executionContextId: this.nextContext };
+      }
       case 'Target.getTargetInfo':
         return { targetInfo: { targetId: this.name } };
       case 'DOM.getDocument':
@@ -92,7 +122,31 @@ class FakeSession implements InputCdpSession {
         const hit = own.find(element => element.marker !== undefined);
         return { nodeIds: hit === undefined ? [] : [hit.backendNodeId + 1000] };
       }
+      case 'DOM.getBoxModel': {
+        const element = own.find(candidate => candidate.backendNodeId === params.backendNodeId);
+        if (element?.box == null) throw new Error('Could not compute box model.');
+        const { x, y, width, height } = this.local(element);
+        return { model: { border: this.quad ?? [x, y, x + width, y, x + width, y + height, x, y + height] } };
+      }
+      case 'DOM.getNodeForLocation': {
+        if (params.includeUserAgentShadowDOM !== false || params.ignorePointerEventsNone !== true)
+          throw new Error('the hit test must see the field, not its inner editor, through pointer-events: none');
+        const at = (element: FakeElement): boolean => {
+          if (element.box == null) return false;
+          const { x, y, width, height } = this.local(element);
+          return (
+            Number(params.x) >= x &&
+            Number(params.x) <= x + width &&
+            Number(params.y) >= y &&
+            Number(params.y) <= y + height
+          );
+        };
+        const hit = this.onTop !== undefined && at(this.onTop) ? this.onTop : own.find(at);
+        if (hit === undefined) throw new Error('No node found at given location');
+        return { backendNodeId: hit.backendNodeId, frameId: hit.frame.id };
+      }
       case 'DOM.describeNode': {
+        if (typeof params.objectId === 'string' && params.objectId.startsWith('page-')) throw new Error('not a node');
         const id =
           typeof params.nodeId === 'number'
             ? params.nodeId - 1000
@@ -108,12 +162,34 @@ class FakeSession implements InputCdpSession {
       case 'DOM.focus':
         this.focused = this.focusLandsOn ?? (params.backendNodeId as number);
         return {};
-      case 'Runtime.evaluate':
+      case 'Runtime.evaluate': {
+        if (typeof params.contextId !== 'number' || !this.contexts.has(params.contextId)) {
+          this.pageWorld.push('Runtime.evaluate');
+          return { result: { objectId: 'page-active' } };
+        }
         return { result: { objectId: 'active' } };
-      case 'DOM.resolveNode':
-        return { object: { objectId: `node-${String(params.backendNodeId)}` } };
-      case 'Runtime.callFunctionOn':
+      }
+      case 'DOM.resolveNode': {
+        const context =
+          typeof params.executionContextId === 'number' ? this.contexts.get(params.executionContextId) : undefined;
+        const element = own.find(candidate => candidate.backendNodeId === params.backendNodeId);
+        if (context === undefined) {
+          this.pageWorld.push('DOM.resolveNode');
+        } else if (element === undefined || element.frame.id !== context) {
+          throw new Error('Node with given id does not belong to the document');
+        }
+        const objectId = `${context === undefined ? 'page' : 'iso'}-node-${String(params.backendNodeId)}`;
+        if (context !== undefined) this.isolatedObjects.add(objectId);
+        return { object: { objectId } };
+      }
+      case 'Runtime.callFunctionOn': {
+        const objectId = String(params.objectId);
+        if (!this.isolatedObjects.has(objectId)) {
+          this.pageWorld.push('Runtime.callFunctionOn');
+          if (this.pageSelectMovesFocusTo !== undefined) this.focused = this.pageSelectMovesFocusTo;
+        }
         return { result: {} };
+      }
       case 'Input.insertText':
         this.typed.push({ backendNodeId: this.focused, text: String(params.text) });
         return {};
@@ -127,6 +203,16 @@ class FakeSession implements InputCdpSession {
       default:
         throw new Error(`unexpected ${method}`);
     }
+  }
+
+  /** Overrides the border quad DevTools answers with, to play an answer that is not a quad. */
+  quad: unknown;
+
+  /** An element's box in this session's own coordinates: an out-of-process frame's are relative to the frame. */
+  local(element: FakeElement): { x: number; y: number; width: number; height: number } {
+    const box = element.box as { x: number; y: number; width: number; height: number };
+    const { x, y } = element.frame.outOfProcess ? element.frame.offset : { x: 0, y: 0 };
+    return { ...box, x: box.x - x, y: box.y - y };
   }
 
   async detach(): Promise<void> {
@@ -148,6 +234,8 @@ class FakeWorld {
   viewport: Record<string, number> = { clientWidth: 800, clientHeight: 500, pageX: 0, pageY: 0 };
   /** The element each selector or ref points at. */
   readonly pointers = new Map<string, FakeElement>();
+  /** A page that overrides `setAttribute` so the marker lands on another element than the one handed to it. */
+  readonly redirects = new Map<FakeElement, FakeElement>();
 
   session(name: string): FakeSession {
     let session = this.sessions.get(name);
@@ -170,7 +258,7 @@ class FakeWorld {
       nodeName,
       attributes,
       frame,
-      box: { x: 10, y: 20, width: 100, height: 24 },
+      box: { x: 10, y: 20 + 40 * this.elements.length, width: 100, height: 24 },
       visible: true,
     };
     this.elements.push(element);
@@ -194,12 +282,14 @@ class FakeWorld {
         const handle: InputHandle = {
           ownerFrame: async () => element.frame,
           mark: async token => {
-            element.marker = token;
+            (this.redirects.get(element) ?? element).marker = token;
           },
           unmark: async () => {
             element.marker = undefined;
+            const redirected = this.redirects.get(element);
+            if (redirected !== undefined) redirected.marker = undefined;
           },
-          boundingBox: async () => element.box,
+          boundingBox: async () => (element.claimedBox === undefined ? element.box : element.claimedBox),
           isVisible: async () => element.visible,
           dispose: async () => {
             this.disposed.push(element);
@@ -384,6 +474,129 @@ describe('observeInputFields', () => {
     should(world.remembered.get('frame-target')).be.undefined();
   });
 
+  it('takes the box from the node DevTools measured and hit-tests the node at its centre', async () => {
+    const { world, user } = loginWorld();
+    user.claimedBox = { x: 10.6, y: 19.5, width: 100.9, height: 23.2 };
+    const facts = await observed(world, ['#user']);
+    should(facts.fields[0]?.box).eql({ x: 10, y: 20, w: 100, h: 24 });
+    should(facts.fields[0]?.visible).equal(true);
+    const session = world.session('page-target');
+    should(session.calls.find(call => call.method === 'DOM.getBoxModel')?.params).eql({ backendNodeId: 11 });
+    should(session.calls.find(call => call.method === 'DOM.getNodeForLocation')?.params).eql({
+      x: 60,
+      y: 32,
+      includeUserAgentShadowDOM: false,
+      ignorePointerEventsNone: true,
+    });
+  });
+
+  it('measures the border quad of a node that is rotated', async () => {
+    const { world, user } = loginWorld();
+    user.claimedBox = { x: 5, y: 10, width: 40, height: 30 };
+    world.session('page-target').quad = [5, 20, 25, 10, 45, 30, 25, 40];
+    const facts = await observed(world, ['#user']);
+    should(facts.fields[0]?.box).eql({ x: 5, y: 10, w: 40, h: 30 });
+  });
+
+  describe('refuses a field whose node is not proved to be the element the handle holds', () => {
+    const unidentified = (error: unknown) =>
+      should((error as Error).message).equal('the browser could not identify that field on the page');
+    const refused = async (world: FakeWorld): Promise<void> => {
+      await observeInputFields(world.subject, [target('#user')]).then(
+        () => should.fail(undefined, undefined, 'it should reject'),
+        unidentified,
+      );
+      should(world.remembered.get('page-target')).be.undefined();
+    };
+
+    it('when the marker was put on another node with a box of its own', async () => {
+      const { world, user, password } = loginWorld();
+      world.redirects.set(user, password);
+      await refused(world);
+      should(user.marker).be.undefined();
+      should(password.marker).be.undefined();
+    });
+
+    it('when the marker was put on another node with the same box and the element is on top', async () => {
+      const { world, user, password } = loginWorld();
+      password.box = user.box;
+      world.redirects.set(user, password);
+      await refused(world);
+    });
+
+    it('when another node sits on top of the field at its centre', async () => {
+      const { world, user, password } = loginWorld();
+      password.box = user.box;
+      world.session('page-target').onTop = password;
+      await refused(world);
+    });
+
+    it('when the hit test finds nothing at all', async () => {
+      const { world } = loginWorld();
+      world.session('page-target').failOn = method =>
+        method === 'DOM.getNodeForLocation' ? new Error('No node found at given location') : undefined;
+      await refused(world);
+    });
+
+    it('when the node has a box and the handle has none, and the other way round', async () => {
+      const { world, user } = loginWorld();
+      user.claimedBox = null;
+      await refused(world);
+      user.claimedBox = undefined;
+      world.session('page-target').failOn = method =>
+        method === 'DOM.getBoxModel' ? new Error('Could not compute box model.') : undefined;
+      await refused(world);
+    });
+
+    it('when the sizes differ by more than a pixel', async () => {
+      const { world, user } = loginWorld();
+      user.claimedBox = { x: 10, y: 20, width: 102, height: 24 };
+      await refused(world);
+      user.claimedBox = { x: 10, y: 20, width: 100, height: 22.5 };
+      await refused(world);
+    });
+
+    it('when the positions differ by more than a pixel', async () => {
+      const { world, user } = loginWorld();
+      user.claimedBox = { x: 12, y: 20, width: 100, height: 24 };
+      await refused(world);
+      user.claimedBox = { x: 10, y: 18.5, width: 100, height: 24 };
+      await refused(world);
+    });
+
+    it('when DevTools answers a box that is not a quad of numbers', async () => {
+      const { world } = loginWorld();
+      const session = world.session('page-target');
+      session.quad = [1, 2, 3];
+      await refused(world);
+      session.quad = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+      await refused(world);
+      session.quad = undefined;
+    });
+  });
+
+  it('reads an out-of-process frame in its own coordinates: sizes must agree, the place is the handle own', async () => {
+    const { world } = loginWorld();
+    const cross = new FakeFrame('https://pay.example.com/card', 'frame-target', true);
+    cross.offset = { x: 300, y: 200 };
+    const card = world.element('#card', 7, ['name', 'cardnumber'], cross);
+    card.box = { x: 310, y: 220, width: 100, height: 24 };
+    const field = (await observed(world, ['#card'])).fields[0];
+    should(field?.box).eql({ x: 310, y: 220, w: 100, h: 24 });
+    should(field?.visible).equal(true);
+    const frameSession = world.session('frame-target');
+    should(frameSession.calls.find(call => call.method === 'DOM.getNodeForLocation')?.params).containEql({
+      x: 60,
+      y: 32,
+    });
+    should(world.session('page-target').count('DOM.getNodeForLocation')).equal(0);
+    card.claimedBox = { x: 310, y: 220, width: 130, height: 24 };
+    await observeInputFields(world.subject, [target('#card')]).then(
+      () => should.fail(undefined, undefined, 'it should reject'),
+      error => should((error as Error).message).equal('the browser could not identify that field on the page'),
+    );
+  });
+
   it('reports a box of zeros and not visible for an element with no area', async () => {
     const { world, user } = loginWorld();
     user.box = null;
@@ -538,23 +751,167 @@ describe('typeInputFields', () => {
       'Page.getFrameTree',
       'DOM.describeNode',
       'DOM.describeNode',
+      'Page.getFrameTree',
+      'Page.createIsolatedWorld',
+      'DOM.resolveNode',
       'DOM.focus',
+      'Runtime.callFunctionOn',
+      'Page.getFrameTree',
       'Runtime.evaluate',
       'DOM.describeNode',
-      'DOM.resolveNode',
-      'Runtime.callFunctionOn',
       'Input.insertText',
+      'Page.getFrameTree',
+      'DOM.resolveNode',
       'DOM.focus',
+      'Runtime.callFunctionOn',
+      'Page.getFrameTree',
       'Runtime.evaluate',
       'DOM.describeNode',
-      'DOM.resolveNode',
-      'Runtime.callFunctionOn',
       'Input.insertText',
     ]);
-    should(
-      String(session.calls.find(call => call.method === 'Runtime.callFunctionOn')?.params.functionDeclaration),
-    ).containEql('select');
     should(session.keys).eql([]);
+    should(session.pageWorld).eql([]);
+  });
+
+  it('selects with the native select in an isolated world and proves focus from that world', async () => {
+    const { world, facts } = await ready();
+    should(await typeInputFields(world.subject, facts, values.slice(0, 1), false)).equal('typed');
+    const session = world.session('page-target');
+    const created = session.calls.find(call => call.method === 'Page.createIsolatedWorld');
+    should(created?.params).eql({ frameId: world.main.id, worldName: 'ferretry-input' });
+    const resolved = session.calls.find(call => call.method === 'DOM.resolveNode');
+    should(resolved?.params.backendNodeId).equal(11);
+    const select = session.calls.find(call => call.method === 'Runtime.callFunctionOn');
+    should(select?.params.objectId).equal('iso-node-11');
+    should(String(select?.params.functionDeclaration)).containEql('HTMLInputElement.prototype');
+    should(String(select?.params.functionDeclaration)).containEql('p.select.call(this)');
+    const evaluated = session.calls.find(call => call.method === 'Runtime.evaluate');
+    should(evaluated?.params.contextId).equal(resolved?.params.executionContextId);
+    should(session.pageWorld).eql([]);
+  });
+
+  it('makes every insert the very next call after the focus proof, and one isolated world per frame', async () => {
+    const { world, facts } = await ready();
+    should(await typeInputFields(world.subject, facts, values, false)).equal('typed');
+    const session = world.session('page-target');
+    const methods = session.calls.map(call => call.method);
+    methods.forEach((method, index) => {
+      if (method !== 'Input.insertText') return;
+      should(methods.slice(index - 3, index)).eql(['Page.getFrameTree', 'Runtime.evaluate', 'DOM.describeNode']);
+    });
+    should(session.count('Page.createIsolatedWorld')).equal(1);
+  });
+
+  it('is not redirected by a page whose own select moves focus to another field', async () => {
+    const { world, facts } = await ready();
+    const session = world.session('page-target');
+    session.pageSelectMovesFocusTo = 12;
+    should(await typeInputFields(world.subject, facts, values, false)).equal('typed');
+    should(session.typed).eql([
+      { backendNodeId: 11, text: 'alice@example.com' },
+      { backendNodeId: 12, text: SECRET },
+    ]);
+    should(session.pageWorld).eql([]);
+  });
+
+  it('writes nothing and answers target_changed when focus moves between the select and the proof', async () => {
+    const { world, facts } = await ready();
+    const session = world.session('page-target');
+    session.failOn = method => {
+      if (method === 'Runtime.callFunctionOn') session.focused = 12;
+      return undefined;
+    };
+    should(await typeInputFields(world.subject, facts, values, true)).equal('target_changed');
+    should(insertions(world)).equal(0);
+    should(session.count('Input.dispatchKeyEvent')).equal(0);
+  });
+
+  it('writes nothing and answers target_changed when the page navigates between the select and the proof', async () => {
+    const { world, facts } = await ready();
+    world.session('page-target').failOn = method => {
+      if (method === 'Runtime.callFunctionOn') world.loaderId = 'loader-2';
+      return undefined;
+    };
+    should(await typeInputFields(world.subject, facts, values, false)).equal('target_changed');
+    should(insertions(world)).equal(0);
+  });
+
+  it('writes nothing when nothing has focus at the proof', async () => {
+    const { world, facts } = await ready();
+    const session = world.session('page-target');
+    const original = session.send.bind(session);
+    session.send = async (method, params) =>
+      method === 'Runtime.evaluate' ? { result: { type: 'object', subtype: 'null' } } : await original(method, params);
+    should(await typeInputFields(world.subject, facts, values, false)).equal('target_changed');
+    should(insertions(world)).equal(0);
+  });
+
+  it('finds a field of a frame that shares the process in that frame own world, and proves focus from the root', async () => {
+    const { world } = loginWorld();
+    const inner = new FakeFrame('http://localhost:3000/inner', 'page-target');
+    world.element('#inner', 9, ['name', 'inner'], inner);
+    const facts = await observed(world, ['#inner']);
+    const session = world.session('page-target');
+    session.calls.length = 0;
+    should(await typeInputFields(world.subject, facts, [{ field: '#inner', text: 'x' }], false)).equal('typed');
+    should(session.typed).eql([{ backendNodeId: 9, text: 'x' }]);
+    should(session.count('Page.createIsolatedWorld')).equal(2);
+    const resolves = session.calls.filter(call => call.method === 'DOM.resolveNode');
+    should(resolves.length).equal(2);
+    const evaluated = session.calls.find(call => call.method === 'Runtime.evaluate');
+    should(evaluated?.params.contextId).equal(resolves[0]?.params.executionContextId);
+    should(session.pageWorld).eql([]);
+  });
+
+  describe('writes nothing and answers target_changed when no trusted world can hold the node', () => {
+    const cases: readonly [string, (session: FakeSession, world: FakeWorld) => void][] = [
+      [
+        'the frame tree has no frame',
+        session => {
+          const original = session.send.bind(session);
+          session.send = async (method, params) =>
+            method === 'Page.getFrameTree' && session.count('Page.getFrameTree') > 0
+              ? { frameTree: {} }
+              : await original(method, params);
+        },
+      ],
+      [
+        'the world is made without a context',
+        session => {
+          const original = session.send.bind(session);
+          session.send = async (method, params) =>
+            method === 'Page.createIsolatedWorld' ? {} : await original(method, params);
+        },
+      ],
+      [
+        'the world cannot be made for the root frame',
+        session => {
+          session.failOn = method => (method === 'Page.createIsolatedWorld' ? new Error('no world') : undefined);
+        },
+      ],
+      [
+        'no frame can resolve the node',
+        session => {
+          session.failOn = method => (method === 'DOM.resolveNode' ? new Error('gone') : undefined);
+        },
+      ],
+      [
+        'the node resolves to no object',
+        session => {
+          const original = session.send.bind(session);
+          session.send = async (method, params) =>
+            method === 'DOM.resolveNode' ? { object: {} } : await original(method, params);
+        },
+      ],
+    ];
+    for (const [name, change] of cases)
+      it(name, async () => {
+        const { world, facts } = await ready();
+        change(world.session('page-target'), world);
+        should(await typeInputFields(world.subject, facts, values, true)).equal('target_changed');
+        should(insertions(world)).equal(0);
+        should(world.session('page-target').count('DOM.focus')).equal(0);
+      });
   });
 
   it('presses Enter on the last field session only after the last value', async () => {
@@ -750,7 +1107,15 @@ describe('typeInputFields', () => {
   });
 
   it('never carries a value in anything it returns, throws, or logs, even when DevTools errors echo it', async () => {
-    for (const failing of ['DOM.focus', 'Runtime.callFunctionOn', 'Input.insertText', 'Input.dispatchKeyEvent']) {
+    for (const failing of [
+      'Page.createIsolatedWorld',
+      'DOM.resolveNode',
+      'DOM.focus',
+      'Runtime.callFunctionOn',
+      'Runtime.evaluate',
+      'Input.insertText',
+      'Input.dispatchKeyEvent',
+    ]) {
       const { world, facts } = await ready();
       world.session('page-target').failOn = method =>
         method === failing ? new Error(`bad text "${SECRET}" (${SECRET.length} chars)`) : undefined;
