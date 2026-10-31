@@ -1,4 +1,4 @@
-Settings › Accounts | | |# Input requests: typing a secret without handing it over
+# Input requests: typing a secret without handing it over
 
 An agent stuck at a password, `sudo`, OTP or 2FA prompt raises an **input request** naming its own
 terminal (a browser field comes later). The **daemon**, not the agent, records what is actually
