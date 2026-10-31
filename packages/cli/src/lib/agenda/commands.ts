@@ -8,8 +8,8 @@ import type {
   AgendaController,
   AgendaEditOptions,
   AgendaResolveOptions,
-  AgendaStepOptions,
   AgendaSnoozeOptions,
+  AgendaStepOptions,
   AgendaSurfaceOptions,
 } from './controller.ts';
 
@@ -26,12 +26,13 @@ const WRITING_GUIDE = `The reader has NOT been following this session. Write for
                  it is the notification's body (\`--ask\` says the same when it is not given as words)
   --premise      REQUIRED. The SITUATION: what is going on, so a cold reader starts here; repeat for one
                  bullet each (a --confirms card's premise is the daemon's: the held change)
-  --context      REQUIRED. WHY IT MATTERS NOW and the supporting facts (not the situation); repeat for bullets
+  --context      REQUIRED. The CONTEXT: the facts around the situation that bear on the ask; repeat for bullets
   --decided      earlier answers that bear on this item, one bullet each (repeat)
   --still-open   what is still open to decide, one bullet each (repeat); update it as the talk goes on
   --term         TERM=meaning for every codename or term of art you use (repeat)
   --question     each thing they must answer (repeat); --option gives a lone question its choices
-  --option       a choice's label; "Label: why" adds a one-line detail, --option-detail "Label=markdown" a longer one
+  --option       a choice's label, ONE word (a longer one letters them all); "Label: what it means" adds a one-line
+                 detail, --option-detail "Label=markdown" a longer one
   --recommend    your suggested decision (an option label, or the answer in words); --recommend-why
   --impact       what happens if nobody answers; --urgency by when ("before the 14:00 deploy")
   --link         a PR, file or reference worth opening (repeat)
@@ -174,7 +175,7 @@ function mountVerbs(
       .option('--premise <point>', 'the situation: what is going on; repeat for bullet points', collect, [])
       .option(
         '-c, --context <point>',
-        'why it matters now and the supporting facts; repeat for bullet points',
+        'the facts around the situation that bear on the ask; repeat for bullet points',
         collect,
         [],
       )

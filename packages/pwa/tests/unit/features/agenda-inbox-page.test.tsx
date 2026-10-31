@@ -519,25 +519,28 @@ describe('AgendaInboxPage on a phone', () => {
     await mounted.unmount();
   });
 
-  it('draws what the ferret said lately as the item’s History, read once for the open item', async () => {
+  it('draws only what was said ABOUT the item as its History, read once for the open item', async () => {
     const reads: string[] = [];
     const mounted = await mount(
       page(fakeInbox(), [twoWay], {
         phone: true,
         initialOpen: twoWay.key,
-        readRecent: async card => {
+        readConversation: async card => {
           reads.push(card.item.id);
-          return [{ text: 'Cut the release branch.' }, { text: 'Raised !A2 about shipping.' }];
+          return [
+            { id: 'a0', kind: 'assistant', text: 'Cut the release branch.', at: 1 },
+            { id: 'u1', kind: 'user', text: '!A2 is staging green?', at: 2 },
+            { id: 'a1', kind: 'assistant', text: 'Yes, all green.', at: 3 },
+          ];
         },
       }),
     );
     await flush();
     expect(reads).toEqual(['A2']);
-    expect(mounted.container.querySelector('[data-agenda-recent-toggle]')).toBeNull();
     const history = must(mounted.container.querySelector('[data-agenda-history]'), 'the History');
-    expect(history.textContent).toContain('Cut the release branch.');
-    expect(history.textContent).toContain('Raised !A2 about shipping.');
-    expect(history.querySelectorAll('[data-history="ferret"]')).toHaveLength(2);
+    expect(history.textContent).not.toContain('Cut the release branch.');
+    expect(history.querySelector('[data-history="owner"]')?.textContent).toContain('is staging green?');
+    expect(history.querySelector('[data-history="ferret"]')?.textContent).toContain('Yes, all green.');
     await mounted.unmount();
   });
 
@@ -567,7 +570,7 @@ describe('AgendaInboxPage on a phone', () => {
 
   it('draws no History when the ferret has written nothing, a failed read, or a host that cannot read', async () => {
     const quiet = await mount(
-      page(fakeInbox(), [twoWay], { phone: true, initialOpen: twoWay.key, readRecent: async () => [] }),
+      page(fakeInbox(), [twoWay], { phone: true, initialOpen: twoWay.key, readConversation: async () => [] }),
     );
     await flush();
     expect(quiet.container.querySelector('[data-agenda-history]')).toBeNull();
@@ -576,7 +579,7 @@ describe('AgendaInboxPage on a phone', () => {
       page(fakeInbox(), [twoWay], {
         phone: true,
         initialOpen: twoWay.key,
-        readRecent: async () => {
+        readConversation: async () => {
           throw new Error('offline');
         },
       }),

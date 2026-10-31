@@ -304,7 +304,7 @@ refusal — with one exception below. Agents close their own items as soon as th
 whose blocker has cleared is a bug.
 
 **The premise and the context are required.** They are what a cold reader starts from — what is going on, and
-why it matters now — so every NEW item a ferret raises must carry both:
+the facts around it — so every NEW item a ferret raises must carry both:
 
 - `fy agenda add` refuses without `--premise` and `--context` (or the same fields in `--json-file`), naming
   the flag that is missing, before anything is sent. A blank one counts as missing.

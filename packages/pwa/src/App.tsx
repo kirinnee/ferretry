@@ -239,7 +239,6 @@ import {
 } from './lib/push-enrolment.ts';
 import { frameQrDetector } from './lib/qr-frame-decoder.ts';
 import { readItemConversation } from './lib/item-conversation.ts';
-import { RECENT_MESSAGE_COUNT, type RecentMessagesMemory, readRecentMessages } from './lib/recent-messages.ts';
 import { isCarrierOutage } from './lib/relay-carrier.ts';
 import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
 import { RouterProvider, useRouter } from './lib/router.tsx';
@@ -2033,8 +2032,6 @@ function AgendaRoute({ connection }: DaemonPageProps) {
   const { navigate } = useRouter();
   const store = useAppStore();
   const inbox = useAgendaInbox();
-  // Each conversation's walk to its last messages, kept while the page is open so a re-read is one page.
-  const recentWalks = useRef<RecentMessagesMemory>(new Map()).current;
   const phone = useLayoutMode() === 'drawer';
   const machineNotifications = usePairedMachineNotifications();
   const daemonFetch = useDaemonFetch();
@@ -2081,18 +2078,6 @@ function AgendaRoute({ connection }: DaemonPageProps) {
         const target = inbox.connectionFor(card.daemonId);
         if (target === undefined) throw new Error('That machine is no longer paired with this browser.');
         return await readItemConversation(await store.clients.client(target), card.view.config.id, card.item.id);
-      }}
-      readRecent={async card => {
-        const target = inbox.connectionFor(card.daemonId);
-        if (target === undefined) throw new Error('That machine is no longer paired with this browser.');
-        const scope = daemonSessionScope(target, card.view.config.id);
-        return await readRecentMessages(
-          await store.clients.client(target),
-          card.view.config.id,
-          RECENT_MESSAGE_COUNT,
-          recentWalks,
-          daemonSessionKey(scope),
-        );
       }}
     />
   );

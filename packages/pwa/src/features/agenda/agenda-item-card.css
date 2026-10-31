@@ -1,0 +1,539 @@
+/* ==== AN OPEN AGENDA ITEM: title, ONE card, its history — all at the composer's width ========================= */
+
+/* The overlay takes the message list's own grid cell (`.fy-chat-log`, `grid-area: 1 / 1`), above the scrim: the
+   transcript underneath is inert, while the agenda row and the REAL composer below stay put and typeable. The body is
+   the one scroller. The view is a size container so its column can be measured against it (below). */
+.fy-item-view {
+  position: relative;
+  grid-area: 1 / 1;
+  z-index: 40;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--fg);
+  outline: none;
+  container-type: inline-size;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .fy-item-view {
+    animation: fy-agenda-open 160ms ease-out;
+  }
+}
+.fy-item-view__body {
+  min-height: 0;
+  flex: 1 1 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-block: var(--gap-md) var(--gap-md);
+}
+/* THE COMPOSER'S BOX, exactly: the composer's column is `min(the surface less the transcript's scrollbar strip,
+   --chat-column)` wide, centred in that strip-less width, with `--chat-input-gutter-x` inside it
+   (`.fy-chat-input__column`). The same sums, against the view's own width (`100cqw`), give this column the same
+   left edge and width — anchored from the left, so the body's own scrollbar never shifts it. */
+.fy-item-view__column {
+  --fy-view-room: calc(100cqw - var(--fy-chat-gutter, 0px));
+  --fy-view-measure: min(var(--fy-view-room), var(--chat-column, 720px));
+  box-sizing: border-box;
+  display: flex;
+  width: var(--fy-view-measure);
+  min-width: 0;
+  flex-direction: column;
+  gap: 14px;
+  margin-left: calc((var(--fy-view-room) - var(--fy-view-measure)) / 2);
+  padding-inline: var(--chat-input-gutter-x, var(--chat-gutter-x, 12px));
+}
+.kt-chat-surface[data-chat-width='full'] .fy-item-view__column {
+  --fy-view-measure: var(--fy-view-room);
+}
+.fy-item-view .fy-render {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* The head: the title and its one line, the pager floating right of the title. */
+.fy-item-view__head {
+  display: flow-root;
+}
+.fy-item-view__pager {
+  display: flex;
+  float: right;
+  align-items: center;
+  gap: 0;
+  margin: -6px 0 0 var(--gap-sm);
+}
+.fy-item-view__status {
+  display: inline-flex;
+  padding-inline: var(--gap-xs);
+}
+/* In the head only the status DOT shows; its words stay for screen readers and the hover title. */
+.fy-item-view__status .fy-agenda-pill {
+  gap: 0;
+  font-size: 0;
+}
+.fy-item-view__where {
+  padding-inline: 2px;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.fy-item-view__step {
+  display: inline-flex;
+  min-width: 36px;
+  min-height: 36px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: var(--stroke-control, var(--stroke)) solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+}
+@media (pointer: coarse) {
+  .fy-item-view__step {
+    min-height: 44px;
+  }
+}
+.fy-item-view__step:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+.fy-item-view__step:focus-visible {
+  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
+  outline-offset: -2px;
+}
+.fy-item-view__step:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.fy-item-view__title {
+  margin: 0;
+  font-size: var(--text-lg, 18px);
+  font-weight: var(--weight-strong);
+  line-height: var(--leading-tight, 1.25);
+  overflow-wrap: anywhere;
+}
+.fy-item-view__desc {
+  margin: 2px 0 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.fy-item-view__desc :is(p, .md) {
+  margin: 0;
+  color: inherit;
+}
+
+/* ---- the card ------------------------------------------------------------------------------------------------- */
+.fy-card {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 14px;
+  border: var(--stroke, 1px) solid var(--border);
+  border-radius: var(--radius-panel);
+  padding: 14px;
+  background: var(--surface);
+}
+.fy-card :is(p, ul, ol, dl) {
+  margin: 0;
+}
+.fy-card .md > :first-child {
+  margin-top: 0;
+}
+.fy-card .md > :last-child {
+  margin-bottom: 0;
+}
+.fy-card__label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  line-height: 1.6;
+  text-transform: uppercase;
+}
+
+/* The top bar: the type, then "↓ Not needed" and the version picker on the right. */
+.fy-card__top {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-sm);
+  touch-action: pan-y;
+}
+.fy-card__type {
+  flex-shrink: 0;
+  border-radius: var(--radius-pill);
+  padding: 2px 9px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+.fy-card__tools {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+.fy-card__dismiss {
+  display: inline-flex;
+  min-height: 28px;
+  flex-shrink: 0;
+  align-items: center;
+  border: var(--stroke, 1px) solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 2px 9px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fy-card__dismiss:hover:not(:disabled) {
+  color: var(--fg);
+}
+.fy-card__arrow,
+.fy-qr__arrow {
+  margin-right: 5px;
+  opacity: 0.55;
+}
+.fy-card select.fy-card__version {
+  min-width: 0;
+  min-height: 28px;
+  max-width: 11rem;
+  border: var(--stroke, 1px) solid var(--border);
+  border-radius: var(--radius-control);
+  padding: 3px 8px;
+  background: var(--surface-2, var(--bg));
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+@media (pointer: coarse) {
+  .fy-card__dismiss,
+  .fy-card__version {
+    min-height: 36px;
+  }
+}
+:is(.fy-card__dismiss, .fy-card__version, .fy-card__option-pick, .fy-card__fold-title):focus-visible {
+  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
+  outline-offset: 2px;
+}
+
+/* Premise and context: ONE soft panel, the label column on the left, the points on the right. No accent bar. */
+.fy-card__situation {
+  border-radius: var(--radius-md);
+  background: var(--surface-2, var(--bg));
+}
+.fy-card__sit-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  padding: 10px 12px;
+}
+.fy-card__sit-row + .fy-card__sit-row::before {
+  position: absolute;
+  top: 0;
+  right: 12px;
+  left: 12px;
+  height: 1px;
+  background: var(--border);
+  content: '';
+}
+.fy-card__sit-label {
+  padding-top: 1px;
+}
+.fy-card .fy-card__points {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding-left: 16px;
+  list-style: disc;
+}
+.fy-card .fy-card__points > li {
+  padding: 0;
+}
+.fy-card .fy-card__points > li::before {
+  content: none;
+}
+
+.fy-card__question {
+  font-size: 15px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.fy-card__question :is(p, .md) {
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+/* The options: each one's word (or letter), then what it means. */
+.fy-card__options {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 0;
+  list-style: none;
+}
+.fy-card__options > li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+}
+.fy-card__option-name {
+  min-width: 52px;
+  font-weight: 650;
+}
+.fy-card__option-pick {
+  border: var(--stroke, 1px) solid var(--border);
+  border-radius: var(--radius-control);
+  padding: 2px 8px;
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+.fy-card__option-meaning {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.fy-card__option-meaning > .md,
+.fy-card__option-meaning > div {
+  display: inline;
+}
+.fy-card__option-meaning :is(p) {
+  display: inline;
+}
+.fy-card__recommended {
+  margin-left: 4px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.fy-card__questions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-md);
+  padding: 0;
+  list-style: none;
+}
+
+/* The sections the ferret added: each folds, with + / − on the right. */
+.fy-card__fold {
+  border-top: var(--stroke, 1px) solid var(--border);
+  padding-top: 9px;
+}
+.fy-card__fold-title {
+  display: flex;
+  justify-content: space-between;
+  cursor: pointer;
+  list-style: none;
+}
+.fy-card__fold-title::-webkit-details-marker {
+  display: none;
+}
+.fy-card__fold-title::after {
+  color: var(--muted);
+  content: '+';
+}
+.fy-card__fold[open] > .fy-card__fold-title::after {
+  content: '−';
+}
+.fy-card__fold-body {
+  margin-top: 6px;
+  min-width: 0;
+}
+.fy-card__fold-body .fy-attn-points {
+  padding-left: 18px;
+}
+.fy-card__terms {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 12px;
+}
+.fy-card__term {
+  display: contents;
+}
+.fy-card__term > dt {
+  font-weight: 600;
+}
+.fy-card__term > dd {
+  margin: 0;
+  color: var(--muted);
+}
+.fy-card__links {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0;
+  list-style: none;
+}
+
+/* A term: a dotted underline; a tap shows what it means just under it. */
+.fy-terms-layer {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 14px;
+}
+.fy-card a[href^='#fy-term-'] {
+  border-bottom: var(--border-width) dotted var(--muted);
+  color: inherit;
+  cursor: help;
+  text-decoration: none;
+}
+.fy-card a[href^='#fy-term-']:focus-visible {
+  border-radius: var(--radius-badge);
+  outline: 2px solid var(--accent);
+}
+.fy-term-tip {
+  position: absolute;
+  z-index: 5;
+  width: 240px;
+  max-width: 100%;
+  border-radius: var(--radius-md);
+  padding: 7px 9px;
+  background: var(--fg);
+  color: var(--bg);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.fy-term-tip :is(p, .md) {
+  display: inline;
+  margin: 0;
+  color: inherit;
+  font-size: inherit;
+}
+
+/* The answer row inside the card: three equal buttons, the recommended one in the accent. */
+.fy-card .fy-qr__chip {
+  min-width: 0;
+  border: var(--stroke, 1px) solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 9px 6px;
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 13px;
+}
+.fy-card .fy-qr__chip[data-recommended],
+.fy-card .fy-qr__chip[data-recommended][data-variant='primary'],
+.fy-card .fy-qr__chip[data-recommended][data-variant='primary']:hover {
+  border-color: var(--accent);
+  background: var(--surface);
+  color: var(--accent);
+  font-weight: 600;
+}
+.fy-card .fy-qr__chip[data-agenda-send-answers] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.fy-card .fy-qr__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fy-card .fy-qr__error,
+.fy-card .fy-qr__note {
+  max-width: none;
+}
+.fy-card__old {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-sm);
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.fy-card__decision {
+  margin: 0 0 4px;
+}
+
+/* ---- the history: only the owner's messages are bubbles --------------------------------------------------- */
+.fy-hist__list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.fy-hist__ag {
+  min-width: 0;
+}
+.fy-hist__who {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.fy-hist__text {
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+.fy-hist__text :is(p, .md) {
+  margin-block: 0;
+}
+.fy-hist__me {
+  align-self: flex-end;
+  max-width: min(80%, 580px);
+  border: var(--bubble-stroke, 1px) solid var(--bubble-border, transparent);
+  border-radius: var(--bubble-radius, var(--radius-panel));
+  padding: 8px 12px;
+  background: var(--bubble-bg, var(--accent-soft));
+  color: var(--bubble-fg, var(--fg));
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.fy-hist__said {
+  display: inline;
+}
+.fy-hist__check {
+  margin-right: 4px;
+  vertical-align: -2px;
+}
+.fy-hist__note {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.fy-hist__me .fy-hist__time {
+  display: block;
+}
+.fy-hist__time {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+.fy-hist__sys {
+  align-self: center;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* A phone's head: the pager is its own short row on the right, so the title gets the whole width under it. */
+@container (max-width: 639px) {
+  .fy-item-view__pager {
+    float: none;
+    justify-content: flex-end;
+    margin: -6px 0 2px;
+  }
+}

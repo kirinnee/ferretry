@@ -80,6 +80,8 @@ const topView = (mounted: Mounted): HTMLElement =>
   must(mounted.container.querySelector<HTMLElement>('.fy-attn-deck__top [data-agenda-view]'), 'the open item');
 const head = (mounted: Mounted): HTMLElement =>
   must(mounted.container.querySelector<HTMLElement>('.fy-attn-deck__top [data-agenda-top]'), 'the item head');
+const cardTop = (mounted: Mounted): HTMLElement =>
+  must(mounted.container.querySelector<HTMLElement>('.fy-attn-deck__top [data-agenda-card-top]'), 'the card top bar');
 /** The deck's own handle on a phone: the who-and-what line (the view's head and row swipe on their own there). */
 const whoLine = (mounted: Mounted): HTMLElement =>
   must(mounted.container.querySelector<HTMLElement>('.fy-attn-deck__top [data-inbox-who]'), 'the who line');
@@ -128,7 +130,7 @@ describe('the open Inbox item', () => {
     await mounted.unmount();
   });
 
-  it('skips on a swipe down of the view’s own head — nothing is answered and the next item comes on top', async () => {
+  it('skips on a swipe down of the item’s title head — the deck’s skip: nothing is answered and the next item comes on top', async () => {
     const fake = fakeInbox();
     const mounted = await mount(page(fake, [shipIt, rebase], { initialOpen: shipIt.key }));
     const first = topView(mounted).getAttribute('data-agenda-view');
@@ -153,24 +155,22 @@ describe('the open Inbox item', () => {
     await mounted.unmount();
   });
 
-  it('leaves a drag on a phone’s item head to the view: the deck neither stamps it nor moves the card', async () => {
+  it('leaves a drag on a phone’s card top bar to the view: the deck neither stamps it nor moves the card', async () => {
     const mounted = await mount(page(fakeInbox(), [shipIt], { initialOpen: shipIt.key }));
-    await swipeFrom(head(mounted), 0, -200, false);
+    await swipeFrom(cardTop(mounted), 0, -200, false);
     expect(mounted.container.querySelector('.fy-attn-deck__top[data-swipe-direction]')).toBeNull();
     expect(mounted.container.querySelector('.fy-attn-deck__top')?.hasAttribute('data-dragging')).toBe(false);
     await mounted.unmount();
   });
 
-  it('answers ↑ and skips ↓ from the keyboard, and Escape goes back to the list', async () => {
+  it('answers ↑, says Not needed on ↓ from the keyboard (into the undo window), and Escape goes back', async () => {
     const fake = fakeInbox();
     const mounted = await mount(page(fake, [shipIt, rebase], { initialOpen: shipIt.key, phone: false }));
-    const first = topView(mounted).getAttribute('data-agenda-view');
     await key(topView(mounted), 'ArrowDown');
-    expect(pending(fake)).toEqual([]);
-    const second = topView(mounted);
-    expect(second.getAttribute('data-agenda-view')).not.toBe(first);
-    await key(second, 'ArrowUp');
-    expect(pending(fake)).toHaveLength(1);
+    expect(pending(fake)).toEqual(['Dismiss']);
+    expect(fake.commits).toEqual([]);
+    await key(topView(mounted), 'ArrowUp');
+    expect(pending(fake)).toHaveLength(2);
     await mounted.unmount();
     const back = await mount(page(fakeInbox(), [shipIt], { initialOpen: shipIt.key }));
     await key(topView(back), 'Escape');
@@ -309,9 +309,10 @@ describe('the open Inbox item’s History', () => {
       }),
     );
     await interact(() => Promise.resolve());
-    const bubbles = [...mounted.container.querySelectorAll('.fy-item-history__chat')].map(node => node.textContent);
-    expect(bubbles.some(text => text?.includes('Hold until Monday'))).toBe(true);
-    expect(bubbles.some(text => text?.includes('Asking about'))).toBe(true);
+    const owner = [...mounted.container.querySelectorAll('[data-history="owner"]')].map(node => node.textContent);
+    const ferret = [...mounted.container.querySelectorAll('[data-history="ferret"]')].map(node => node.textContent);
+    expect(owner.some(text => text?.includes('Hold until Monday'))).toBe(true);
+    expect(ferret.some(text => text?.includes('Asking about'))).toBe(true);
     expect(asked).toEqual([shipIt.key]);
     await mounted.unmount();
   });

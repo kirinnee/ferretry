@@ -134,10 +134,10 @@ describe('Agenda state machine', () => {
     should(neither).deepEqual({
       code: 'invalid',
       message:
-        'a new agenda item needs both: premise (--premise) is required: the situation, what is going on; context (--context) is required: why it matters now',
+        'a new agenda item needs both: premise (--premise) is required: the situation, what is going on; context (--context) is required: the facts around it',
     });
     should(blankContext.message).equal(
-      'a new agenda item needs both: context (--context) is required: why it matters now',
+      'a new agenda item needs both: context (--context) is required: the facts around it',
     );
     should(notice.ok).be.true();
     should(others).deepEqual([true, true, true]);

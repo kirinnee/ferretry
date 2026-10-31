@@ -11,10 +11,10 @@
  * - A row opens the item's VIEW: an OVERLAY over the MESSAGE LIST only (`agenda-item-view.tsx`) — sticky title and
  *   ask, one scrolling body, the quick replies directly above the composer. The row and the REAL composer stay
  *   visible and typeable. The transcript stays mounted underneath, so it is exactly where it was when the view
- *   closes without sending. ‹ › page through the agenda, ✕ / Esc / ↓ go back.
+ *   closes without sending. ‹ › page through the agenda, ✕ / Esc go back.
  * - While an item is open the pill and the row's chips are hidden — only the composer stays under the view — and what
- *   is typed goes with the item's reference (`withReferencePrefix`), said in the composer's placeholder ("Reply about
- *   !A5…"). ✕ or Esc is plain chat. A send, or a quick-reply tap, sends AND closes the view, and the conversation
+ *   is typed goes with the item's reference (`withReferencePrefix`), said in the composer's placeholder ("Reply to
+ *   Piper…"). ✕ or Esc is plain chat. A send, or a quick-reply tap, sends AND closes the view, and the conversation
  *   returns to the new message. A quick reply carries the composer's text as its note.
  * - The same rows, with the parked and resolved ones, are this ferret's one list in Info (`section`): the agenda has
  *   no side bar of its own.
@@ -153,7 +153,7 @@ export interface Agenda {
   readonly section: (afterOpen?: () => void) => ReactNode;
   /** The ids the next message is about: the open item. */
   readonly references: () => readonly AgendaId[];
-  /** The composer's placeholder while an item is open ("Reply about !A57…"); absent in plain chat. */
+  /** The composer's placeholder while an item is open ("Reply to Piper…"); absent in plain chat. */
   readonly placeholder: string | undefined;
   /** Wire this into the Composer: a message went, so the open item closes. */
   readonly composer: {
@@ -422,7 +422,7 @@ export const useAgenda = ({
     hostsLive,
     section,
     references: () => aboutRef.current,
-    placeholder: cardId === null || closed ? undefined : `Reply about ${agendaReference(cardId)}…`,
+    placeholder: cardId === null || closed ? undefined : `Reply to ${ferret}…`,
     composer: { onSent, ...(cardId === null ? {} : { onEscape: () => update(() => ({ card: null })) }) },
   };
 };

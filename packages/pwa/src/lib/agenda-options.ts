@@ -87,3 +87,19 @@ export const needsOptionsSection = (options: readonly LetteredOption[]): boolean
     option => option.detail !== undefined || shortLabel(option.label, option.letter, lettered) !== option.label,
   );
 };
+
+/** The longest single word the card draws as an option's name; anything longer, or two words, is drawn as a letter. */
+const ONE_WORD_CHARS = 12;
+
+/** One word, short enough to name an option on its own: "Pause", "Switch". */
+export const isOneWord = (label: string): boolean => {
+  const words = wordsOf(label);
+  return words.length === 1 && (words[0] ?? '').length <= ONE_WORD_CHARS;
+};
+
+/**
+ * Whether the card names its options by LETTER: one label that is not a single short word letters them all, so the
+ * list and its buttons read one way ("A B C"), never a mix of words and letters.
+ */
+export const cardLettered = (options: readonly { readonly label: string }[]): boolean =>
+  options.some(option => !isOneWord(option.label));

@@ -1,18 +1,15 @@
 /**
- * THE QUICK REPLIES OF AN OPEN AGENDA ITEM — ONE ROW OF EVERY ACTION, directly above the REAL composer (never
- * covering it) and on the card body's edges: at most THREE answer buttons in DIRECTION order — the ← answer, the
- * ↑ (recommended) one, the → one — then a quiet "Not needed". A direction with no answer draws NOTHING: the
- * buttons there share the width, never a hole (owner: "doesn't waste so much space"). Each is SHORT: its letter
- * ("A", "B"), or its label when that is one or two words ("Looks good"), one way per row, never wrapped; the full
- * label is its accessible name and its title. The recommended one is in the accent. A tap answers at once.
- * Options past the three swiped ones are the same buttons in full-width rows under it, tap only. Answering is
- * replying, so there is no text field here: the composer below is the one box, and what is typed in it rides an
- * answer as its note.
+ * THE ANSWER ROW OF AN OPEN AGENDA CARD — ONE ROW, at most THREE buttons, in DIRECTION order: the ← answer, the ↑
+ * (recommended) one, the → one, each the swipe that sends it. A direction with no answer draws NOTHING: the buttons
+ * there share the width, never a hole. Each is SHORT: the option's one-word name or its letter (`cardLettered`), one
+ * way per row, never wrapped; the full label is its accessible name and its title. The recommended one is in the
+ * accent. A tap answers at once. Options past the three are chosen from the card's options list, never a second row.
+ * "Not needed" is the ↓ swipe and the pill in the card's top bar, not a button here. Answering is replying, so there
+ * is no text field: the composer below the card is the one box, and what is typed in it rides an answer as its note.
  *
- * On touch the row swipes (← ↑ →) exactly as the Inbox deck does (`swipeIntent`), and ↓ SKIPS: on to the next
- * item, or back to the chat when there is none.
- * An item linked to a card the owner may close also draws "Done · closes &F12": one more answer, in the → slot
- * when it is free and in the full-width row otherwise, tap only — a swipe never closes a card.
+ * On touch the row swipes (← ↑ →) exactly as the Inbox deck does (`swipeIntent`), and ↓ is `onDown` — Not needed.
+ * An item linked to a card the owner may close also draws "Done · closes &F12" in the → slot when it is free; with
+ * all three taken it is the one button under the row, tap only — a swipe never closes a card.
  * An item answered one answer per question draws its chips beside each question; this row then holds the one
  * compact "Send answers" (and "All recommended" when every question has a pick to agree with).
  */
@@ -20,10 +17,10 @@
 import type { AgendaAskOption, AgendaCardAnswer } from '@ferretry/protocol';
 import { Check, LoaderCircle, Send } from 'lucide-react';
 import { type PointerEvent, useRef } from 'react';
-import { type AnswerDirection, answerAction, CLEAR_ACTION, optionAction } from '../../lib/agenda-answers.ts';
+import { type AnswerDirection, answerAction, CLEAR_ACTION } from '../../lib/agenda-answers.ts';
 import type { CardModel } from '../../lib/agenda-card-model.ts';
-import { DISMISS_ACTION, type InboxAction, SWIPE_SLOP_PX, type SwipeMap, swipeIntent } from '../../lib/agenda-inbox.ts';
-import { letterOf, rowLettered, shortLabel } from '../../lib/agenda-options.ts';
+import { type InboxAction, SWIPE_SLOP_PX, type SwipeMap, swipeIntent } from '../../lib/agenda-inbox.ts';
+import { cardLettered, letterOf } from '../../lib/agenda-options.ts';
 import { DoneCloseChip, DoneCloseConfirm, DoneCloseError } from './agenda-done-close.tsx';
 import type { DoneCloseView } from './use-done-close-flow.ts';
 import { isDownSwipe } from './use-down-swipe.ts';
@@ -33,6 +30,9 @@ const SWIPE_WORD: Readonly<Record<AnswerDirection, string>> = {
   up: 'swipe up',
   right: 'swipe right',
 };
+
+/** The swipe (and the arrow key) each slot answers to, drawn on its button. */
+const ARROW: Readonly<Record<AnswerDirection, string>> = { left: '←', up: '↑', right: '→' };
 
 const sameLabel = (a: string, b: string | undefined): boolean =>
   b !== undefined && a.trim().toLowerCase() === b.trim().toLowerCase();
@@ -64,8 +64,8 @@ export interface AgendaQuickRepliesProps {
   readonly doneClose?: DoneCloseView;
   /** One answer; the host adds the composer's text as its note. */
   readonly onAct: (action: InboxAction) => void;
-  /** The ↓ swipe: skip to the next item, or back to the chat when there is none. */
-  readonly onSkip: () => void;
+  /** The ↓ swipe: Not needed (the host dismisses), or nothing where the item cannot be dismissed. */
+  readonly onDown?: (() => void) | undefined;
 }
 
 interface Drag {
@@ -81,7 +81,7 @@ interface Drag {
 interface ChipProps {
   readonly label: string;
   readonly letter: string | undefined;
-  /** The row is drawn as letters (`rowLettered`), so this button is too. */
+  /** The options are named by letter (`cardLettered`), so an option's button says its letter. */
   readonly lettered: boolean;
   readonly recommended: boolean;
   readonly busy: boolean;
@@ -109,7 +109,12 @@ function Chip({ label, letter, lettered, recommended, busy, arrow, swipeable, pr
       title={label}
       type="button"
     >
-      <span className="fy-qr__label">{shortLabel(label, letter, lettered)}</span>
+      {arrow === undefined ? null : (
+        <span aria-hidden="true" className="fy-qr__arrow">
+          {ARROW[arrow]}
+        </span>
+      )}
+      <span className="fy-qr__label">{lettered && letter !== undefined ? letter : label}</span>
     </button>
   );
 }
@@ -166,7 +171,7 @@ const repliesOf = (model: CardModel, options: readonly AgendaAskOption[]): reado
 
 /** Whether the row has anything to draw: chips, a clear, a send, a waiting line or an error. */
 const hasReplies = (model: CardModel, sending: QuestionSending | undefined): boolean =>
-  model.notice || sending !== undefined || model.answers.length > 0 || model.extras.length > 0;
+  model.notice || sending !== undefined || model.answers.length > 0;
 
 export function AgendaQuickReplies({
   model,
@@ -179,7 +184,7 @@ export function AgendaQuickReplies({
   sending,
   doneClose,
   onAct,
-  onSkip,
+  onDown,
 }: AgendaQuickRepliesProps) {
   const gesture = useRef<Drag | null>(null);
   const swallow = useRef(false);
@@ -217,7 +222,7 @@ export function AgendaQuickReplies({
     if (!current.moved) return;
     swallow.current = true;
     if (isDownSwipe(current.dx, current.dy, current.width)) {
-      onSkip();
+      onDown?.();
       return;
     }
     const intent = swipeIntent(current.dx, current.dy, current.width, map);
@@ -229,18 +234,12 @@ export function AgendaQuickReplies({
   };
 
   const recommended = model.recommended;
-  // Options past the swiped three: a second, full-width row of the same buttons, tap only — never a menu.
-  const extras = model.extras.map(option => ({ option, label: option.label, letter: letterOf(options, option.label) }));
-  const canDismiss = model.dismissInMenu && !model.notice;
   const replies = repliesOf(model, options);
   const slotted = replies.length > 0 && sending === undefined && !model.notice;
-  // Every row reads one way: one long label letters the swipe row AND the rows under it.
-  const lettered = rowLettered([...replies, ...extras]);
-  // The → slot is free when the card gave fewer than three answers and the row is not the per-question one — and the
-  // row still fits ONE line with "Not needed" in it: beside two answers in words ("Need more info", "Done") it does
-  // not on a phone, so it takes the full-width row under them, as options past three do.
-  const closeInRow =
-    doneClose !== undefined && replies.length < 3 && sending === undefined && (replies.length < 2 || lettered);
+  // The row reads the way the options list does: one label that is not a single short word letters every option.
+  const lettered = cardLettered(options);
+  // "Done · closes &F12" takes the → slot when the card gave fewer than three answers; with three it sits under them.
+  const closeInRow = doneClose !== undefined && replies.length < 3 && sending === undefined;
   if (!hasReplies(model, sending) && doneClose === undefined && error === null && waitingOn === undefined) return null;
   return (
     <div
@@ -303,69 +302,13 @@ export function AgendaQuickReplies({
         ))}
         {closeInRow ? <DoneCloseChip disabled={busy} view={doneClose} /> : null}
         {sending === undefined ? null : <QuestionChips busy={busy} sending={sending} />}
-        {canDismiss ? <NotNeeded busy={busy} give={give} /> : null}
       </fieldset>
-      <MoreChoices
-        busy={busy}
-        close={closeInRow ? undefined : doneClose}
-        extras={extras}
-        give={give}
-        lettered={lettered}
-      />
+      {doneClose === undefined || closeInRow ? null : (
+        <div className="fy-qr__under" data-agenda-more-row="">
+          <DoneCloseChip disabled={busy} view={doneClose} />
+        </div>
+      )}
     </div>
-  );
-}
-
-/** "Not needed": a plain, quiet text button, last in the one row of actions. */
-function NotNeeded({ busy, give }: { busy: boolean; give: (action: InboxAction) => void }) {
-  return (
-    <button
-      className="fy-qr__dismiss"
-      data-agenda-dismiss=""
-      disabled={busy}
-      onClick={() => give(DISMISS_ACTION)}
-      type="button"
-    >
-      Not needed
-    </button>
-  );
-}
-
-/** The options past the swiped three: rows of the same buttons filling the width, tap only (no swipe reaches them). */
-function MoreChoices({
-  extras,
-  busy,
-  lettered,
-  give,
-  close,
-}: {
-  readonly close?: DoneCloseView | undefined;
-  readonly extras: readonly {
-    readonly option: AgendaAskOption;
-    readonly label: string;
-    readonly letter: string | undefined;
-  }[];
-  readonly busy: boolean;
-  readonly lettered: boolean;
-  readonly give: (action: InboxAction) => void;
-}) {
-  if (extras.length === 0 && close === undefined) return null;
-  return (
-    <fieldset aria-label="More choices" className="fy-qr__row fy-qr__more" data-agenda-more-row="">
-      {close === undefined ? null : <DoneCloseChip disabled={busy} view={close} />}
-      {extras.map(extra => (
-        <Chip
-          busy={busy}
-          key={extra.label}
-          label={extra.label}
-          letter={extra.letter}
-          lettered={lettered}
-          onTap={() => give(optionAction(extra.option, ''))}
-          recommended={false}
-          swipeable={false}
-        />
-      ))}
-    </fieldset>
   );
 }
 
