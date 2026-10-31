@@ -315,7 +315,8 @@ describe('a card of several fields', () => {
   it('reads "needs a login" for a secret AND a plain field, and keeps the old words otherwise', () => {
     expect(titleWords(login(), 'Hadi')).toBe('!A7 · Hadi needs a login');
     expect(titleWords(requestOf('plain'), 'Hadi')).toBe('!A7 · Hadi needs an answer');
-    expect(titleWords(requestOf('private'), 'Hadi')).toBe('!A7 · Hadi needs a code');
+    expect(titleWords(requestOf('private'), 'Hadi')).toBe('!A7 · Hadi needs a private value');
+    expect(titleWords(requestOf('code'), 'Hadi')).toBe('!A7 · Hadi needs a code');
     const codes = request({
       sensitivity: 'secret',
       fields: [cardField('secret', { id: 'password' }), cardField('private', { id: 'code' })],

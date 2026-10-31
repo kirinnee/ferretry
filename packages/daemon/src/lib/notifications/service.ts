@@ -1,4 +1,4 @@
-import type { AgendaItem, AgendaSnapshot } from '@ferretry/protocol';
+import { type AgendaItem, type AgendaSnapshot, type PushSubject, pushUrgencyFor } from '@ferretry/protocol';
 import { type AgendaRaisedObserver, ownerTurnItems } from '../agenda/index.ts';
 import {
   agendaNotificationAttribution,
@@ -8,6 +8,7 @@ import {
   notificationKey,
   pingNotificationPayload,
   type SessionNotificationPayload,
+  stopShows,
   stoppedNotificationPayload,
   wokeNotificationPayload,
 } from './policy.ts';
@@ -34,6 +35,11 @@ export interface NotificationServiceOptions {
    * cannot be read silences every push and leaves no trace anywhere.
    */
   readonly diagnostics?: NotificationDiagnostics;
+  /**
+   * What an item is about, for how urgently its push must reach a phone (`pushUrgencyFor`): an input card asking for a
+   * one-time code is `one-time-code`. Absent, or `other`, is a normal push.
+   */
+  readonly subjectOf?: (sessionId: string, item: AgendaItem) => PushSubject;
 }
 
 /**
@@ -44,7 +50,17 @@ export interface NotificationServiceOptions {
  * nothing else (docs/notifications.md). Each is recorded under its own identity before it is sent, so a
  * repeat of the same stop, item or notice is no second push, across restarts too.
  */
+/**
+ * The most HIGH-priority pushes this daemon sends in any rolling hour, across every ferret. Past it a push still goes,
+ * once per card as always, at normal priority: a ferret raising card after card cannot keep the owner's phone loud.
+ */
+export const HIGH_PUSHES_PER_HOUR = 6;
+const HOUR_MS = 3_600_000;
+
 export class NotificationService implements AgendaRaisedObserver {
+  /** When each recent high push was sent, oldest first: the rolling window {@link HIGH_PUSHES_PER_HOUR} counts. */
+  private readonly highSent: number[] = [];
+
   constructor(private readonly options: NotificationServiceOptions) {}
 
   /** How many devices a push would reach now: every enrolled one, whatever it filters. */
@@ -80,8 +96,11 @@ export class NotificationService implements AgendaRaisedObserver {
   async stopped(sessionId: string, stoppedAt: string, snapshot: AgendaSnapshot): Promise<void> {
     const [first, ...rest] = ownerTurnItems(snapshot.items);
     if (first === undefined) return;
-    await this.announce({ sessionId, agendaId: first.id, stoppedAt }, first, session =>
-      stoppedNotificationPayload(sessionId, session.name, [first, ...rest], snapshot),
+    await this.announce(
+      { sessionId, agendaId: first.id, stoppedAt },
+      first,
+      session => stoppedNotificationPayload(sessionId, session.name, [first, ...rest], snapshot),
+      stopShows([first, ...rest]),
     );
   }
 
@@ -107,10 +126,26 @@ export class NotificationService implements AgendaRaisedObserver {
     return (await this.options.ledger.find(key)) ?? (await this.options.ledger.find(legacyNotificationKey(key)));
   }
 
+  /**
+   * The item a push SHOWS, when its push must be high priority (a one-time code card), or nothing. Only the item the
+   * push shows decides, so a code card waiting behind another item never makes that item's push loud.
+   */
+  private urgentOf(sessionId: string, shown: AgendaItem): AgendaItem | undefined {
+    const subjectOf = this.options.subjectOf;
+    if (subjectOf === undefined || pushUrgencyFor(subjectOf(sessionId, shown)) !== 'high') return undefined;
+    // The daemon-wide cap: counted and taken in one synchronous step, so two pushes cannot both take the last slot.
+    const now = Date.parse(this.options.clock.now());
+    while (this.highSent.length > 0 && (this.highSent[0] as number) <= now - HOUR_MS) this.highSent.shift();
+    if (this.highSent.length >= HIGH_PUSHES_PER_HOUR) return undefined;
+    this.highSent.push(now);
+    return shown;
+  }
+
   private async announce(
     identity: NotificationIdentity,
     item: AgendaItem,
     compose: (session: NotificationSessionFacts) => SessionNotificationPayload,
+    shown: AgendaItem = item,
   ): Promise<void> {
     const { sessionId } = identity;
     const key = notificationKey(identity);
@@ -119,7 +154,11 @@ export class NotificationService implements AgendaRaisedObserver {
         if ((await this.recorded(key)) !== undefined) return;
         const session = await this.options.sessions.describe(sessionId);
         if (session === undefined) return;
-        const payload = compose(session);
+        const composed = compose(session);
+        // A high push gets its own tag (one per card), so the platform sounds it again rather than folding it in silently.
+        const urgent = this.urgentOf(sessionId, shown);
+        const payload: SessionNotificationPayload =
+          urgent === undefined ? composed : { ...composed, urgency: 'high', tag: `${composed.tag}:${urgent.id}` };
         const enrolled = (await this.options.push.list()).length;
         await this.options.ledger.append(
           NotificationRecordSchema.parse({
@@ -147,7 +186,10 @@ export class NotificationService implements AgendaRaisedObserver {
         let delivered: number;
         let failed: number;
         try {
-          ({ delivered, failed } = await this.options.push.notify({ payload }));
+          ({ delivered, failed } = await this.options.push.notify({
+            payload,
+            ...(urgent === undefined ? {} : { urgency: 'high' as const }),
+          }));
         } catch (error) {
           this.warn(`push ${key} was not delivered — ${errorText(error)}`);
           await this.options.ledger

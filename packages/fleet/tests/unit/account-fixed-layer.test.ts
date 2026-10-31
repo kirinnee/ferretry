@@ -897,6 +897,19 @@ describe('AGENT_TOOLS_INSTRUCTION — saved logins', () => {
   });
 });
 
+describe('AGENT_TOOLS_INSTRUCTION — one-time codes', () => {
+  it('should teach sensitivity code for a 2FA or email code, reading it from an inbox, typed only on its own sign-in', () => {
+    // Act
+    const text = AGENT_TOOLS_INSTRUCTION;
+
+    // Assert — the old "private" rule for a code is gone; the place rule is what stops a relayed code.
+    should(text).containEql('code for a 2FA/email code: you see both.');
+    should(text).containEql('terminal_send is blocked until answered (not for a code)');
+    should(text).containEql('Or read it from an inbox you have; type it only on its sign-in page.');
+    should(text).not.containEql('An echoing 2FA code: private.');
+  });
+});
+
 describe('launchInstructions', () => {
   it('should name every section the wrapper would compose for an interactive ferret, with each size, and leave its question tool in', () => {
     // Arrange

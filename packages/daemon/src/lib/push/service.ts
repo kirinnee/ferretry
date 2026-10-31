@@ -1,5 +1,6 @@
 import {
   PairedDeviceIdSchema,
+  PUSH_URGENT_TTL_SECONDS,
   type PushDeliveryResult,
   PushDeliveryResultSchema,
   type PushDeviceView,
@@ -191,9 +192,12 @@ export class PushService {
     const enrolled = await this.enrolments();
     const addressed = to === undefined ? enrolled : enrolled.filter(record => to.includes(record.id));
     const payload = JSON.stringify(dispatch.payload);
+    // A high push is about something that expires (a one-time code): it asks to be delivered now, and not at all later.
+    const urgent =
+      dispatch.urgency === 'high' ? { urgency: dispatch.urgency, ttlSeconds: PUSH_URGENT_TTL_SECONDS } : {};
     const outcomes = await Promise.all(
       addressed.map(
-        async record => await this.options.transport.deliver({ subscription: record.subscription, payload }),
+        async record => await this.options.transport.deliver({ subscription: record.subscription, payload, ...urgent }),
       ),
     );
     const expired = addressed.filter((_, index) => outcomes[index] === 'expired').map(record => record.id);

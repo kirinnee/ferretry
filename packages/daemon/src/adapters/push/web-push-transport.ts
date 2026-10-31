@@ -116,7 +116,7 @@ export class WebPushFetchTransport implements WebPushTransport {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
     try {
-      return await this.post(delivery.subscription.endpoint, body, controller);
+      return await this.post(delivery, body, controller);
     } catch {
       // Unreachable, refused, aborted — all of them say something about the network and nothing about
       // whether this browser still exists, so none of them may delete an enrolment.
@@ -126,14 +126,21 @@ export class WebPushFetchTransport implements WebPushTransport {
     }
   }
 
-  private async post(endpoint: string, body: Uint8Array, controller: AbortController): Promise<PushDeliveryOutcome> {
+  private async post(
+    delivery: PushDelivery,
+    body: Uint8Array,
+    controller: AbortController,
+  ): Promise<PushDeliveryOutcome> {
+    const { endpoint } = delivery.subscription;
     const response = await this.fetchImplementation(endpoint, {
       method: 'POST',
       headers: {
         authorization: await this.authorization(endpoint),
         'content-encoding': 'aes128gcm',
         'content-type': 'application/octet-stream',
-        ttl: `${TTL_SECONDS}`,
+        ttl: `${delivery.ttlSeconds ?? TTL_SECONDS}`,
+        // RFC 8030 §5.3. Only a push that asks for something other than `normal` says so: no header IS normal.
+        ...(delivery.urgency === undefined || delivery.urgency === 'normal' ? {} : { urgency: delivery.urgency }),
       },
       body: owned(body),
       signal: controller.signal,

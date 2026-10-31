@@ -29,7 +29,7 @@ import {
   type InputShot,
   lockWords,
 } from '@ferretry/protocol';
-import { Eye, EyeOff, ShieldAlert, ShieldCheck, ShieldQuestion, Timer } from 'lucide-react';
+import { Eye, EyeOff, Shield, ShieldAlert, ShieldCheck, ShieldQuestion, Timer } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { cancelInput, deliverInput, type InputClient, readInputShot } from '../../lib/input-api.ts';
 import {
@@ -50,6 +50,7 @@ import {
   offerUsername,
   pastedWords,
   plainFlagWords,
+  revealable,
   saveDraftProblem,
   savedBody,
   savedButtonWords,
@@ -88,8 +89,8 @@ export interface InputCardProps {
   readonly embedded?: boolean;
 }
 
-const RISK_ICON = { green: ShieldCheck, amber: ShieldQuestion, red: ShieldAlert } as const;
-const RISK_TONE = { green: 'text-ok', amber: 'text-warn', red: 'text-err' } as const;
+const RISK_ICON = { green: ShieldCheck, neutral: Shield, amber: ShieldQuestion, red: ShieldAlert } as const;
+const RISK_TONE = { green: 'text-ok', neutral: 'text-muted', amber: 'text-warn', red: 'text-err' } as const;
 
 const useNow = (fixed: number | undefined): number => {
   const [now, setNow] = useState(() => fixed ?? Date.now());
@@ -483,7 +484,7 @@ function FieldInput({
           spellCheck={false}
           value={value}
         />
-        {field.sensitivity === 'plain' ? null : (
+        {!revealable(field.sensitivity) ? null : (
           <button
             aria-label={`${revealed ? 'Hide' : 'Show'} what you typed${many ? ` in ${field.label}` : ''}`}
             aria-pressed={revealed}
@@ -604,7 +605,12 @@ function FieldSummary({
   );
 }
 
-const SENSITIVITY_WORDS = { secret: 'secret', private: 'one-time code', plain: 'not secret' } as const;
+const SENSITIVITY_WORDS = {
+  secret: 'secret',
+  private: 'private',
+  code: 'one-time code, the ferret can see it',
+  plain: 'not secret',
+} as const;
 
 function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, onRefresh }: FormProps) {
   const nodes = useRef<Nodes>(new Map());

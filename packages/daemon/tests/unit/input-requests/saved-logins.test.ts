@@ -41,6 +41,14 @@ const sudoFacts = (comm = 'sudo', argv = 'sudo -v'): InputTargetFacts => ({
   recognisedConsumer: true,
 });
 
+/** A one-time code prompt that shows what is typed, so a `code` card stays a code (a password prompt would not). */
+const otpFacts = (): InputTargetFacts =>
+  ({
+    ...sudoFacts('ssh', 'ssh bastion'),
+    echo: 'on',
+    promptLine: 'Verification code:',
+  }) as InputTargetFacts;
+
 const RAISE: InputRaise = {
   target: { kind: 'terminal', key: 'dev' },
   prompt: 'sudo wants your password',
@@ -137,6 +145,7 @@ function harness(
     sinks,
     saves,
     fills,
+    values,
     directory,
     sealed,
     everything,
@@ -468,6 +477,48 @@ describe('the next time: the card offers the saved login, and the owner taps Use
     should(sunk).not.containEql(code);
   });
 
+  it('should never RETURN a code it made for a `code` card: in no result, route or sink, and masked from text reads', async () => {
+    // Arrange — the approved pick: a daemon-made TOTP code is typed only into the observed field, never returned.
+    const h = harness({ facts: otpFacts() });
+    await h.directory.put(
+      'GITHUB',
+      PutLoginEntryRequestSchema.parse({ label: 'GitHub', totp: { seed: SEED }, totpAcknowledged: true }),
+    );
+    const { request, view } = await raised(h, { ...RAISE, prompt: 'GitHub wants the 2FA code', sensitivity: 'code' });
+    should(request.saved?.offers.map(offer => offer.fills)).deepEqual(['totp']);
+
+    // Act
+    const result = await h.service.deliver(
+      SESSION,
+      request.id,
+      saved(request.observedDigest as string, 'GITHUB'),
+      HOST,
+    );
+    const waited = await h.service.agentView(SESSION, view.id, 0);
+    const code = totpCode(SEED, { algorithm: 'SHA1', digits: 6, period: 30 }, NOW) as string;
+
+    // Assert — typed once, into the target; nowhere else, and a read of the screen shows it masked.
+    should(h.writes).deepEqual([code]);
+    should(h.values.scrub(SESSION, `Enter code: ${code}`)).equal(`Enter code: [redacted:input ${view.id}]`);
+    for (const out of [result, waited, await h.everything()]) {
+      const text = typeof out === 'string' ? out : JSON.stringify(out);
+      should(text).not.containEql(code);
+      should(text).not.containEql(SEED);
+    }
+  });
+
+  it('should leave a code the OWNER typed unmasked: it is not secret', async () => {
+    // Arrange
+    const h = harness({ facts: otpFacts() });
+    const { request } = await raised(h, { ...RAISE, prompt: 'GitHub wants the 2FA code', sensitivity: 'code' });
+
+    // Act
+    await h.service.deliver(SESSION, request.id, typed(request.observedDigest as string, '481516'), HOST);
+
+    // Assert
+    should(h.writes).deepEqual(['481516']);
+    should(h.values.scrub(SESSION, 'Enter code: 481516')).equal('Enter code: 481516');
+  });
   it('should offer nothing and still let the owner type when the saved logins cannot be read', async () => {
     const h = harness({
       logins: port => ({

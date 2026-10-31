@@ -31,8 +31,15 @@ class FakeInput implements AgentInputPort {
     this.waited.push({ sessionId, id, waitMs });
     return this.view;
   }
-  pendingOn(_sessionId: string, target: { readonly kind: string; readonly key: string }): AgendaId | undefined {
-    return this.pending.get(`${target.kind}:${target.key}`);
+  /** Pending cards that ask only for one-time codes, by `kind:key`: they do not keep the agent from typing. */
+  readonly codeOnly = new Set<string>();
+  pendingOn(
+    _sessionId: string,
+    target: { readonly kind: string; readonly key: string },
+    options?: { readonly typing?: boolean },
+  ): AgendaId | undefined {
+    const key = `${target.kind}:${target.key}`;
+    return options?.typing === true && this.codeOnly.has(key) ? undefined : this.pending.get(key);
   }
   readonly turns: string[] = [];
   async exclusive<T>(sessionId: string, work: () => Promise<T>): Promise<T> {
@@ -306,6 +313,21 @@ describe('AgentToolService — while a request is pending', () => {
     should(world.terminals.typed.get('000000000001')).equal('ls');
     should(elsewhere.summary).startWith('Sent 2 characters');
     should(after.summary).startWith('Sent 2 characters');
+  });
+
+  it('should let terminal.send through when the pending card asks only for a one-time code', async () => {
+    // Arrange — the ferret read the code from an inbox it has, and types it itself.
+    const input = new FakeInput();
+    const world = await worldWith(input);
+    input.pending.set('terminal:dev', 'A7');
+    input.codeOnly.add('terminal:dev');
+
+    // Act
+    const sent = await world.service.call(agent, { tool: 'terminal.send', name: 'dev', text: '481516' });
+
+    // Assert
+    should(sent.summary).startWith('Sent 6 characters');
+    should(world.terminals.typed.get('000000000001')).equal('481516');
   });
 });
 

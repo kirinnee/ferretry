@@ -25,7 +25,8 @@ import { MIN_SECRET_VALUE_LENGTH, SecretNameSchema, SecretStoreHealthSchema } fr
  *   username is typed where the ferret can see it anyway.
  * - `password`: SECRET. Sealed in the daemon's vault; no route, command or API returns it.
  * - `totp`: SECRET, OPT-IN. A 2FA seed, sealed the same way. The daemon makes the current code inside the
- *   use boundary and types it as a `private` value; neither the seed nor the code is ever returned.
+ *   use boundary and types it into a `code` (or `private`) field; neither the seed nor the code is ever returned (the
+ *   code's text is masked from text reads, but the ferret may see it on screen).
  *
  * ## THE SAME RULE AS EVERY OTHER SECRET: USE, NEVER READ
  *
@@ -299,7 +300,7 @@ export type RemovedLoginEntry = z.infer<typeof RemovedLoginEntrySchema>;
 
 /**
  * One saved login an input card may offer. `fills` is the field it would type (the password for a
- * `secret`, the code for a `private`, the username for a `plain`). `matched` is the DAEMON's decision that
+ * `secret`, the code for a `code` or `private`, the username for a `plain`). `matched` is the DAEMON's decision that
  * the entry is for this target: only a matched entry is the card's one-tap primary; the rest stay
  * selectable by hand. `hinted` says the ferret named it, which never makes it matched.
  */
@@ -474,9 +475,16 @@ export function loginHintSummary(site: string, hints: readonly LoginHint[]): str
     : `${found} ${LOGIN_HINT_PROPOSE} ${LOGIN_HINT_PASSKEYS_OFF}`;
 }
 
-/** The role a request's one field takes from an entry, by the request's sensitivity. */
-export function fillRoleFor(sensitivity: 'secret' | 'private' | 'plain'): LoginFieldRole {
-  return sensitivity === 'secret' ? 'password' : sensitivity === 'private' ? 'totp' : 'username';
+/**
+ * The role a request's one field takes from an entry, by the request's sensitivity: a one-time `code` (and a `private`
+ * value, which older ferrets raised for a 2FA code) takes the code the daemon makes from the entry's 2FA seed.
+ */
+export function fillRoleFor(sensitivity: 'secret' | 'private' | 'code' | 'plain'): LoginFieldRole {
+  return sensitivity === 'secret'
+    ? 'password'
+    : sensitivity === 'private' || sensitivity === 'code'
+      ? 'totp'
+      : 'username';
 }
 
 /**

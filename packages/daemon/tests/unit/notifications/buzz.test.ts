@@ -10,6 +10,7 @@ import {
   agendaSnapshot,
   type SessionStops,
 } from '../../../src/lib/agenda/index.ts';
+import { InputAgendaAdapter } from '../../../src/lib/input-requests/agenda-adapter.ts';
 import { AgendaBuzz, type BuzzSink } from '../../../src/lib/notifications/buzz.ts';
 
 const SESSION = 'session-1';
@@ -210,6 +211,49 @@ describe('AgendaBuzz deadlines', () => {
     should(sink.deadlines).deepEqual(['A1']);
   });
 
+  it('should push an input card at its raise, while its ferret still works: its expiry is its deadline', async () => {
+    // Arrange — the card exactly as the input bridge raises it: by the daemon, needed by the request's expiry.
+    const { attention: agenda, buzz, sink, snapshot } = world();
+    const card = await new InputAgendaAdapter(agenda).raise(SESSION, {
+      requestId: 'ab'.repeat(16),
+      title: 'Needs a code',
+      ask: 'Type it into the page',
+      prompt: 'GitHub wants the 2FA code',
+      blocking: false,
+      expiresAt: '2026-10-23T10:10:00.000Z',
+    });
+    if (!card.ok) throw new Error(card.message);
+    const item = snapshot().items.find(each => each.id === card.id) as AgendaItem;
+
+    // Act
+    await buzz.raised(SESSION, item, snapshot());
+
+    // Assert — one deadline push for the card now, and no stop: the ferret is still inside input_wait.
+    should(sink.deadlines).deepEqual([card.id]);
+    should(sink.stops).deepEqual([]);
+  });
+
+  it('should push an input card at its raise even when the warning window is narrower than the life of the card', async () => {
+    // Arrange — the narrowest window the setting allows, and a card that lives an hour.
+    const { attention: agenda, boards, buzz, sink, snapshot } = world({ warnHours: 0.25 });
+    await agenda.raise(SESSION, ASK, AGENT);
+    dated(boards, 'A1', '2026-10-23T11:00:00.000Z');
+    const card = await new InputAgendaAdapter(agenda).raise(SESSION, {
+      requestId: 'cd'.repeat(16),
+      title: 'Needs a secret',
+      ask: 'Type it into the terminal',
+      prompt: 'sudo wants your password',
+      blocking: true,
+      expiresAt: '2026-10-23T11:00:00.000Z',
+    });
+    if (!card.ok) throw new Error(card.message);
+
+    // Act
+    await buzz.raised(SESSION, snapshot().items.find(each => each.id === card.id) as AgendaItem, snapshot());
+
+    // Assert — the card pushes now; an ordinary item with the same deadline still waits for its window.
+    should(sink.deadlines).deepEqual([card.id]);
+  });
   it('should widen and narrow the window by its setting', async () => {
     // Arrange
     const wide = world({ warnHours: 12 });

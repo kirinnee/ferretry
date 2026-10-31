@@ -68,7 +68,7 @@ const INPUT_PROMPT = {
   maxLength: INPUT_PROMPT_MAX_LENGTH,
   description: 'What it is for. Never a secret.',
 };
-const SENSITIVITY = { type: 'string', enum: ['secret', 'private', 'plain'] };
+const SENSITIVITY = { type: 'string', enum: ['secret', 'code', 'private', 'plain'] };
 const INPUT_OPTIONS = {
   submit: {
     type: 'string',
@@ -180,7 +180,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'terminal_request_input',
     tool: 'terminal.request_input',
     description:
-      'Ask the owner to type ONE value into a terminal from a card: secret (a password; ALWAYS for sudo), private (a code that shows) or plain (you see it). Returns !A<n>; then input_wait. The terminal is unreadable ~2 min after.',
+      'Ask the owner to type ONE value into a terminal from a card: secret (a password; ALWAYS for sudo), code (a 2FA, email, SMS or device code; you see it), private (shows, not one-time) or plain (you see it). Returns !A<n>; then input_wait.',
     inputSchema: object(
       {
         name: NAME,
@@ -683,7 +683,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'browser_request_input',
     tool: 'browser.request_input',
     description:
-      'Ask the owner for a login form on ONE card; the daemon types each field: plain (an e-mail you see) or secret (a password). Then input_wait. Next page: a new card with chain.',
+      'Ask the owner for a login form on ONE card; the daemon types each field: plain (an e-mail you see), secret (a password) or code (a 2FA, email or SMS code). Then input_wait. Next page: a new card with chain.',
     inputSchema: object(
       {
         name: NAME,
