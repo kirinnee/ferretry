@@ -47,7 +47,7 @@ import { FileDaemonRestartMarker, restartMarkerPath } from '../src/adapters/daem
 import { FileRetiredArtifacts } from '../src/adapters/daemon/retired-artifacts';
 import { FileServiceStore } from '../src/adapters/daemon/service-files';
 import { TmuxSessionTerminalServer } from '../src/adapters/daemon/session-terminals';
-import { PlatformSyscallTracer } from '../src/adapters/daemon/syscall-tracer';
+import { bunTracerHost, PlatformSyscallTracer } from '../src/adapters/daemon/syscall-tracer';
 import { serveMcpOverStdio } from '../src/adapters/mcp/stdio';
 import { desktopBrowserOpener } from '../src/adapters/pair/browser-opener';
 import { QrCodeTerminal } from '../src/adapters/pair/qr-terminal';
@@ -1175,7 +1175,9 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       () =>
         new ProfileController({
           gateway: new ProtocolProfileGateway(client),
-          tracer: new PlatformSyscallTracer(),
+          tracer: new PlatformSyscallTracer(
+            bunTracerHost(resolveDaemonStateHome(world.homeDirectory, world.environment.FY_HOME, PRODUCT_NAME)),
+          ),
           out: world.io,
           progress: world.progress,
           sleep: async ms => await Bun.sleep(ms),
