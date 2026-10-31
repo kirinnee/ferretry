@@ -158,10 +158,13 @@ These are known and are not protected against today:
 - **A tmux server started before the stdin fix** keeps the first session's credential in its argv until
   that session stops. It is not restarted for you. Stop and start that session, or let it end. Each
   launch now gets a fresh credential, so a stale copy dies with its pane.
-- **The Codex sign-in callback is one host-wide port** (`localhost:1455`, then 1457). Only one person on
-  the box can be mid-Codex-sign-in at a time, and another user can block or intercept that redirect.
-  PKCE means a caught code alone cannot be redeemed. MCP servers with a fixed, provider-registered
-  callback port have the same limit.
+- **The Codex link sign-in callback is one host-wide port** (`localhost:1455`, then 1457). With
+  `browserPorts` set to anything but `random`, Ferretry signs Codex in with a device code, which opens no
+  port, and never starts the link sign-in on its own: if a device code is refused it says so and leaves
+  the link to you. The limit therefore applies only when someone picks the link sign-in on purpose (`Use a
+link instead`). Then only one person on the box can be mid-sign-in at a time, and another user can block
+  or intercept that redirect. PKCE means a caught code alone cannot be redeemed. MCP servers with a fixed,
+  provider-registered callback port have the same limit.
 - **An authenticated browser proxy** (docs/browser-proxy.md) is reached through an unauthenticated
   loopback relay while the browser runs. With step 8 its fixed relay port is fenced like the debugging
   port; without it another user could use the proxy's credentials.

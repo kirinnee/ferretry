@@ -101,6 +101,7 @@ import {
   type CodexLoginFailure,
   type CodexLoginStage,
   codexAutomaticLink,
+  codexSharedHostEnding,
   codexDelivering,
   codexEnding,
   codexProjection,
@@ -152,6 +153,12 @@ export interface DaemonHarnessLoginOptions {
   readonly portHolders: HarnessLoginPortHolders;
   /** The ports a Codex link sign-in listens on. Codex's own, unless a test names others. */
   readonly callbackPorts?: readonly number[];
+  /**
+   * Whether this host shares its loopback ports with other local users (`browserPorts` is not `random`).
+   * Read once when a flow starts. On such a host the daemon never moves a Codex flow onto the link
+   * sign-in's one fixed port by itself; a person still chooses the link on purpose. Absent means not shared.
+   */
+  readonly sharedHost?: () => Promise<boolean>;
   /**
    * Told when a sign-in completes, so an open app learns the login's state moved even though no request
    * of its own changed it — the sign-in finished in the background (docs/config-files.md "Live changes").
@@ -216,6 +223,8 @@ interface FlowRecord {
   spawned: boolean;
   /** The running child is being replaced (a Codex device code moving to a link), so its exit is not the end. */
   relaunch: boolean;
+  /** Codex only: this host shares its loopback ports, so a device code that fails is not followed by a link on its own. */
+  sharedHost: boolean;
   /** When anybody last read or acted on this flow. A flow that needs a reader ends once this goes stale. */
   readAt: number;
   disarmIdle: (() => void) | undefined;
@@ -353,7 +362,10 @@ export class HarnessLoginService {
       };
     }
     const check = await recheck().catch(
-      (): SignInCheck => ({ signedIn: false, finding: 'The store this login is kept in could not be read.' }),
+      (): SignInCheck => ({
+        signedIn: false,
+        finding: 'The store this login is kept in could not be read.',
+      }),
     );
     if (check.signedIn) {
       record.recheck = undefined;
@@ -550,6 +562,7 @@ export class HarnessLoginService {
       disarm: undefined,
       spawned: false,
       relaunch: false,
+      sharedHost: false,
       readAt: startedAt,
       disarmIdle: undefined,
       disarmLink: undefined,
@@ -627,6 +640,7 @@ export class HarnessLoginService {
         return;
       }
       await target.prepare();
+      record.sharedHost = target.harness === 'codex' && (await this.options.sharedHost?.()) === true;
       if (settled(record.stage)) return;
       let code: number;
       do {
@@ -682,9 +696,12 @@ export class HarnessLoginService {
       return;
     }
     const next = observeCodexLine(stage.stage, line);
-    // Codex could not get a device code at all: move on to the link sign-in by itself.
-    if (next.stage === 'device-unavailable') this.#switchToLink(record, codexAutomaticLink());
-    else record.stage = { harness: 'codex', stage: next };
+    // Codex could not get a device code at all: move on to the link sign-in by itself, unless the link's one
+    // fixed port is shared with other users of this host, in which case the person is told and chooses.
+    if (next.stage === 'device-unavailable') {
+      if (record.sharedHost) this.#endWith(record, codexSharedHostEnding());
+      else this.#switchToLink(record, codexAutomaticLink());
+    } else record.stage = { harness: 'codex', stage: next };
   }
 
   /** Record that the sign-in completed, unless this flow had already ended. */

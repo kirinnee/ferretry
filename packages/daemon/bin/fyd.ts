@@ -7469,6 +7469,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     deliverCallback: deliverCodexCallback,
     environment: process.env,
     timer: harnessLoginTimer,
+    sharedHost: async () => ((await declaredAccountModel())?.machine.browserPorts ?? 'random') !== 'random',
     portHolders: systemPortHolders(),
     clientName: CLIENT_NAME,
     onSignedIn: () => configChanges.announce(['credentials', 'runtimes']),
