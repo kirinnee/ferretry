@@ -1,3 +1,9 @@
+## [4.158.1](https://github.com/kirinnee/ferretry/compare/v4.158.0...v4.158.1) (2026-10-31)
+
+### Performance
+
+* **protocol:** share one frozen session list instead of deep-copying it per read ([#1129](https://github.com/kirinnee/ferretry/issues/1129)) ([5915434](https://github.com/kirinnee/ferretry/commit/5915434ae48de510f3bbcd2f59314c065c2859e9))
+
 ## [4.158.0](https://github.com/kirinnee/ferretry/compare/v4.157.0...v4.158.0) (2026-10-31)
 
 ### Features
