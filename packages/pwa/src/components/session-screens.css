@@ -3132,3 +3132,8 @@ button.fy-context-ring::after {
     animation: none;
   }
 }
+/* The board's nudge wraps on a phone: pin its mark to the first line, beside "Board", not to the middle of the wrapped row. */
+.fy-message-system[data-board-nudge] > .fy-system-icon {
+  align-self: flex-start;
+  margin-top: 0.3em;
+}

@@ -19,7 +19,7 @@ const AT = '2026-10-30T16:30:00.000Z';
 function world(
   target: SendTarget | undefined,
   kind: 'human' | 'daemon' = 'daemon',
-  options: { readonly refuse?: Error; readonly ledger?: readonly SendRecord[] } = {},
+  options: { readonly refuse?: Error; readonly ledger?: readonly SendRecord[]; readonly feature?: string } = {},
 ) {
   const enqueued: QueueRequest[] = [];
   const woken: SessionId[] = [];
@@ -63,6 +63,7 @@ function world(
       sleep: async () => undefined,
     },
     kind,
+    options.feature,
   );
   return { sends, enqueued, woken, direct };
 }
@@ -110,6 +111,24 @@ describe('a producer sending through the queue', () => {
 
     should(inChat.direct.map(request => request.sendId)).eql(['w']);
     should(inChat.enqueued).be.empty();
+  });
+
+  it('should send a board nudge to the owner’s chat as the daemon’s, naming its feature as data', async () => {
+    const inChat = world(chat, 'daemon', { feature: 'Board' });
+
+    await inChat.sends.send({
+      id: ID,
+      sendId: 'n',
+      message: '&F209 PR #1087 CI is red. Fix it, or note on the card why it can stay red.',
+    });
+
+    should(inChat.direct).have.length(1);
+    should(inChat.direct[0]).containEql({
+      sendId: 'n',
+      origin: 'daemon',
+      by: { kind: 'ferretry', feature: 'Board' },
+      message: '&F209 PR #1087 CI is red. Fix it, or note on the card why it can stay red.',
+    });
   });
 
   it('should queue a send that stops the turn first as an interrupt, keeping its place', async () => {

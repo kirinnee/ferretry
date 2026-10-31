@@ -1,13 +1,20 @@
 import { type HandoffPointer, parseFerretryNotice, parsePeerEnvelope } from '@ferretry/protocol';
 import { type ReactNode, useState } from 'react';
 import { handedOverDraft, isFerretryNoticeSend, isOwnSend, ledgerPlacementCopy } from '../lib/ledger-placement.ts';
+import { isBoardNudge } from '../lib/board-nudge.ts';
 import { parseInstructionsUpdate } from '../lib/instructions-update.ts';
 import { clockOfInstant } from '../lib/message-clock.ts';
 import { stripFraming } from '../lib/message-framing.ts';
 import type { LedgerSendRecord } from '../lib/send-ledger.ts';
 import type { AgentRunMark, TranscriptEntry } from '../lib/session-screens.ts';
 import { AgendaMessageOr, useAgendaChatReply } from './agenda-message.tsx';
-import { HandoffNoticeRow, InstructionsUpdateRow, PeerMessageRow, SystemNoticeRow } from './agent-message-rows.tsx';
+import {
+  BoardNudgeRow,
+  HandoffNoticeRow,
+  InstructionsUpdateRow,
+  PeerMessageRow,
+  SystemNoticeRow,
+} from './agent-message-rows.tsx';
 import { ChatProse } from './chat-prose.tsx';
 import { CommandRow } from './command-row.tsx';
 import {
@@ -107,6 +114,7 @@ export function TranscriptRow({
       />
     );
   if (entry.kind === 'ledger' && entry.ledger !== undefined) {
+    if (isBoardNudge(entry.ledger)) return <BoardNudgeRow entry={entry} rhythm={rhythm} text={entry.ledger.message} />;
     const noted = parseInstructionsUpdate(entry.ledger.message, entry.ledger.queue?.by);
     if (noted !== null) return <InstructionsUpdateRow entry={entry} rhythm={rhythm} update={noted} />;
     return (
@@ -145,6 +153,8 @@ export function TranscriptRow({
   if (entry.kind === 'system' && entry.event !== undefined)
     return <HarnessEventRow event={entry.event} rhythm={rhythm} />;
   if (entry.kind === 'system') return <SystemNoticeRow entry={entry} rhythm={rhythm} />;
+  if (entry.kind === 'user' && entry.send !== undefined && isBoardNudge(entry.send))
+    return <BoardNudgeRow entry={entry} rhythm={rhythm} text={entry.text} />;
   const instructions = entry.kind === 'user' ? parseInstructionsUpdate(entry.text, entry.send?.queue?.by) : null;
   if (instructions !== null) return <InstructionsUpdateRow entry={entry} rhythm={rhythm} update={instructions} />;
   if (entry.kind === 'user' && entry.send !== undefined && isFerretryNoticeSend(entry.send))
@@ -268,6 +278,14 @@ function HandoffRow({
   const { reading, source } = useHandoffReading(handoff.name);
   const notice = reading.state === 'read' ? parseFerretryNotice(reading.handoff.message) : null;
   if (notice !== null) return <HandoffNoticeRow entry={entry} notice={notice} rhythm={rhythm} />;
+  if (entry.send !== undefined && isBoardNudge(entry.send))
+    return (
+      <BoardNudgeRow
+        entry={entry}
+        rhythm={rhythm}
+        text={reading.state === 'read' ? reading.handoff.message : entry.text}
+      />
+    );
   const instructions =
     reading.state === 'read' ? parseInstructionsUpdate(reading.handoff.message, entry.send?.queue?.by) : null;
   if (instructions !== null) return <InstructionsUpdateRow entry={entry} rhythm={rhythm} update={instructions} />;
@@ -451,14 +469,22 @@ function transcriptRhythm(
   };
 }
 
+/** The board's own automatic message: a system line between speakers, not a turn of the owner's. */
+function isBoardNudgeEntry(entry: TranscriptEntry): boolean {
+  const send = entry.kind === 'ledger' ? entry.ledger : entry.kind === 'user' ? entry.send : undefined;
+  return send !== undefined && isBoardNudge(send);
+}
+
 function densityOf(entry: TranscriptEntry): 'message' | 'chrome' {
   // A message this ferret sent, or a sub-ferret it started, is a message, though a tool call carried it.
   if (entry.sent !== undefined || entry.pack !== undefined) return 'message';
+  if (isBoardNudgeEntry(entry)) return 'chrome';
   return entry.kind === 'user' || entry.kind === 'assistant' || entry.kind === 'ledger' ? 'message' : 'chrome';
 }
 
 function speakerOf(entry: TranscriptEntry): string | undefined {
   if (entry.sent !== undefined || entry.pack !== undefined) return 'assistant';
+  if (isBoardNudgeEntry(entry)) return undefined;
   // Another agent is its own speaker, so a peer message after yours reads as a change of turn.
   if (entry.kind === 'user' && entry.peer !== undefined) return `peer:${entry.peer.name}`;
   if (entry.kind === 'user' || entry.kind === 'ledger') return 'user';

@@ -71,7 +71,10 @@ export class QueueingSends {
     if (target === undefined) throw new SendRefused(`session ${request.id} does not exist`);
     const sender: SendSenderKind =
       request.origin === 'daemon' ? 'daemon' : request.senderReference !== undefined ? 'agent' : this.kind;
-    if (boardOnly({ sender }, target.mode)) return await this.ports.direct.send(request);
+    // The direct path has no queue item to say who sent it, so it carries the sender itself: otherwise the
+    // record reads as the owner's own words.
+    if (boardOnly({ sender }, target.mode))
+      return await this.ports.direct.send({ ...request, origin: 'daemon', by: this.authorOf(sender) });
     await this.ports.direct.authorize(request.id, request.attachmentIds ?? []);
     const { message } = await this.ports.queue.enqueue(request.id, {
       id: request.sendId,

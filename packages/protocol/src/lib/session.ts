@@ -86,6 +86,25 @@ export type SendUnaccountedReason = z.infer<typeof SendUnaccountedReasonSchema>;
 export const SendSenderKindSchema = z.enum(['human', 'agent', 'daemon']);
 export type SendSenderKind = z.infer<typeof SendSenderKindSchema>;
 
+/**
+ * WHO A MESSAGE IS FROM, AS DATA. The owner (2026-10-30): "there should not be any append or prepend on any
+ * feature". Who sent a message and which feature it came from are never text in its body: the app reads
+ * them from here and shows a sender chip — "Ferretry · Board", a ferret's name, nothing for the owner.
+ */
+export const QueueAuthorSchema = z.strictObject({
+  kind: z.enum(['owner', 'ferret', 'ferretry']),
+  /** A ferret's name (its callsign), for a ferret's message. */
+  name: z.string().min(1).optional(),
+  /** The part of Ferretry that sent it: Board, Warden, Agenda, Monitor, Lessons, Instructions. */
+  feature: z.string().min(1).optional(),
+  /**
+   * What the message is about, by name, for a row that says so instead of showing the words: the always-on
+   * instruction sections an `Instructions` message restates ("Board", "Notify"…).
+   */
+  sections: z.array(z.string().min(1).max(64)).min(1).max(16).optional(),
+});
+export type QueueAuthor = z.infer<typeof QueueAuthorSchema>;
+
 /** How a `queued` fate was proven. */
 export const SendQueueProofSchema = z.enum(['transcript', 'pane']);
 export type SendQueueProof = z.infer<typeof SendQueueProofSchema>;
@@ -135,6 +154,8 @@ export const SendRecordSchema = z.object({
   fromName: z.string().optional(),
   /** Who asked for it. A person retries by hand; an agent's sends are retried by the daemon. */
   senderKind: SendSenderKindSchema.optional(),
+  /** Who sent it, as data, when the send never went through the queue that would have said so (see {@link QueueAuthorSchema}). */
+  by: QueueAuthorSchema.optional(),
   replyExpected: z.boolean().optional(),
   held: z.boolean().optional(),
   withdrawn: z.boolean().optional(),

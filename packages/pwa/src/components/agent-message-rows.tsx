@@ -1,7 +1,9 @@
 import { splitFerretryNotice } from '@ferretry/protocol';
-import { Cog } from 'lucide-react';
+import { Cog, SquareKanban } from 'lucide-react';
 import { type MouseEvent, type ReactNode, useId, useState } from 'react';
+import { linkNudgePullRequests } from '../lib/board-nudge.ts';
 import { displayCallsign } from '../lib/callsign.ts';
+import { useCardPullRequests } from '../lib/card-pull-requests.tsx';
 import { clockOfInstant } from '../lib/message-clock.ts';
 import { ferretryChip, stripFraming } from '../lib/message-framing.ts';
 import type { InstructionsUpdate } from '../lib/instructions-update.ts';
@@ -285,6 +287,40 @@ export function HandoffNoticeRow({
           {details}
         </p>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * The board's own automatic message to a ferret — "&F209 PR #1087 CI is red. Fix it…" — as one compact
+ * system line: a board mark, "Board" as the sender, the sentence, and the card and PR it names as links.
+ * It is never an owner bubble: the owner did not type it.
+ */
+export function BoardNudgeRow({
+  entry,
+  rhythm,
+  text,
+}: {
+  readonly entry: TranscriptEntry;
+  readonly rhythm: Rhythm;
+  readonly text: string;
+}) {
+  const cards = useCardPullRequests();
+  const surface = useReferenceSurface();
+  return (
+    <div
+      className="fy-message fy-message-system fy-message-chrome"
+      data-board-nudge=""
+      data-transcript-kind="system"
+      role="note"
+      {...rhythm}
+    >
+      <SquareKanban aria-hidden="true" className="fy-system-icon" size={12} />
+      <span className="fy-system-label" data-sender-chip>
+        Board
+      </span>
+      <Markdown className="fy-system-text" text={linkNudgePullRequests(stripFraming(text).body, cards)} {...surface} />
+      <MessageFooter clock={clockOfInstant(entry.at)} side="other" />
     </div>
   );
 }
