@@ -397,6 +397,34 @@ describe('observeInputFields', () => {
     should((await observed(world, ['#user'])).fields[0]?.visible).equal(false);
   });
 
+  it('refuses a node the browser names with no usable id', async () => {
+    const world = new FakeWorld();
+    world.element('#odd', 0, ['type', 'password']);
+    await observeInputFields(world.subject, [target('#odd')]).then(
+      () => should.fail(undefined, undefined, 'it should reject'),
+      error => should((error as Error).message).equal('the browser could not identify that field on the page'),
+    );
+  });
+
+  it('still describes a page whose title cannot be read, with no human check guessed from it', async () => {
+    const { world } = loginWorld();
+    const page = world.page;
+    const subject = {
+      ...world.subject,
+      page: {
+        ...page,
+        title: async () => {
+          throw new Error('the page is navigating');
+        },
+      },
+    };
+
+    const result = await observeInputFields(subject, [target('#user')]);
+
+    should(result.ok).be.true();
+    should(result.ok && result.facts.challenge).be.undefined();
+  });
+
   it('flags a page that appears to ask for a human check', async () => {
     const { world } = loginWorld();
     world.frames.push(new FakeFrame('https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile', 'x'));
@@ -833,6 +861,15 @@ describe('shootInputFields', () => {
     await shootInputFields(session, factsAt({ x: 0, y: 0, w: 0, h: 0 })).then(
       () => should.fail(undefined, undefined, 'it should reject'),
       error => should((error as Error).message).equal('none of the fields has a visible area to take a picture of'),
+    );
+  });
+
+  it('refuses a picture of a page whose viewport has no size', async () => {
+    const world = new FakeWorld();
+    world.viewport = { clientWidth: 0, clientHeight: 0, pageX: 0, pageY: 0 };
+    await shootInputFields(world.session('page-target'), factsAt({ x: 10, y: 10, w: 50, h: 20 })).then(
+      () => should.fail(undefined, undefined, 'it should reject'),
+      error => should((error as Error).message).equal('the browser took no picture'),
     );
   });
 
