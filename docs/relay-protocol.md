@@ -2492,14 +2492,19 @@ The publisher answers with exactly one sealed outcome and then `4440`, as a pair
   route is reachable before a member key exists; it reads no host credential; one attempt per session,
   success or failure; **no edge to serving** — a browser that joined reconnects with `member`; the
   client latches the outcome before the close.
-- **The outcome's size says nothing, unlike a pairing's.** Both outcomes are padded with spaces to
-  exactly `MEMBER_JOIN_OUTCOME_BYTES` (24 KiB) of plaintext, which holds the largest `joined` a publisher
+- **The outcome's SIZE says nothing; its timing and what follows still do.** Both outcomes are padded
+  with spaces to exactly `MEMBER_JOIN_OUTCOME_BYTES` (24 KiB) of plaintext, which holds the largest `joined` a publisher
   can send (eight published carriers of 2 KiB addresses, a 100-character publisher name, an 80-character
-  label) with room to spare, and fits one record. `padJoinOutcome` writes it; an outcome without its pad,
-  or with anything but spaces in it, does not parse. That is also why `joined` names no catalog, only how
+  label) with room to spare, and fits one record. `padJoinOutcome` writes it; an outcome missing its `pad`
+  field, or with anything but spaces in it, does not parse (the exact length is the sender's property, which a
+  receiver may check on the record). That is also why `joined` names no catalog, only how
   many: the browser reads the names from `GET /v1/shared/me` once it has a passkey, and the publisher
-  names the passkey itself. A relay operator still sees THAT a join session happened (§10), never whether
-  it succeeded.
+  names the passkey itself. **The outcome is not hidden, and this document does not claim it is**: a
+  successful join persists before it seals, so it answers later than most refusals, and a browser that
+  joined opens a member session and registers a passkey over the same carrier seconds afterwards, while a
+  refused one does not. A relay operator who watches can infer the outcome within seconds — never the
+  code, the keys, the member's name or the catalogs. The pad removes the cheapest signal, the length of one
+  record, and nothing more.
 - **One refusal for every cause.** An unknown, spent, expired or ended code, a full publisher, the hourly
   count, a malformed field, a key that is not an Ed25519 SPKI, the all-zero box key and a proof that does
   not verify are all the same `join-refused`. A publisher with no live share still keys the channel and
@@ -2514,8 +2519,8 @@ The publisher answers with exactly one sealed outcome and then `4440`, as a pair
      failure here refuses and **spends nothing**, so a broken client never loses a code.
   2. Then **in one step with no suspension point**: find the share by the code's SHA-256 (compared in
      constant time against a dummy when nothing is live); check it is live; check room — the publisher's
-     128 members and 512 keys, the member's own 200 keys, and the hourly count of SUCCESSFUL joins and
-     redeems (60). **A refusal for room or the hourly count leaves the code live**, as a full pairing does.
+     128 members and 512 keys, the member's own 200 keys, and this SHARE's hourly count of successful
+     joins and redeems (60). **A refusal for room or the hourly count leaves the code live**, as a full pairing does.
      Then burn the code (single use) or count one use (multi use), and reserve the key's slot.
   3. Then **persist** the member and the key. Only after the write succeeds does the publisher seal
      `joined`. A write that fails refuses, and the code stays spent: the owner sees the share as used with
@@ -2530,10 +2535,15 @@ The publisher answers with exactly one sealed outcome and then `4440`, as a pair
   already **unlocked** with an earlier one, never on the key alone. A key that registered no passkey when
   its window closes is **removed** — it could never do anything — so keys pressed through a leaked
   multi-use code drain on their own instead of filling the publisher.
-- **Budgets stop floods and can never lock the real recipient out.** A code cannot be guessed, so unlike
-  pairing's five-per-code budget, **no failed attempt is counted against a code or a share**: nothing a
-  stranger sends can spend, expire or lock somebody else's code. The hourly count is of successful joins
-  only, which need a live code, so a stranger cannot spend it either. Failed attempts are bounded by the
+- **Budgets stop floods; a stranger can at most delay the real recipient, never refuse them.** A code
+  cannot be guessed, so unlike pairing's five-per-code budget, **no failed attempt is counted against a
+  code or a share**: nothing a stranger sends can spend, expire or lock somebody else's code. The hourly
+  count is of successful joins, which need a live code, and it is **per share**, so a leaked multi-use code
+  spends only its own share's hour, never another invitee's. What a leaked code CAN fill is shared room:
+  its member's 200 keys, and with three such leaks the publisher's 512. Keys that never register a passkey
+  drain when their ten-minute windows close; keys that register a throwaway passkey stay until the owner
+  ends that share and revokes its member, which is one press each. Until then a further join is refused
+  for room and its code stays live. Failed attempts are bounded by the
   carrier alone: 10 a minute per peer address on the direct carrier. **On the relay there is no per-peer
   limit worth the name** — every relayed attempt is its own rendezvous session, one attempt each — so
   relayed attempts are priced only by the rendezvous admission (30 a minute) and this section's 6
@@ -2599,7 +2609,8 @@ an unknown `t` and ends the session with `4400`.
 **What a relay operator sees of a member** is §10's list: a pre-auth session for fingerprint X at time T
 from IP Y, a handshake, sealed records, a close. It sees **that** a join or a member session happened,
 because the pre-auth slot timing and the record sizes differ from a device's, and never the code, the
-keys, the member's name, the catalogs, any content, or whether a join succeeded.
+keys, the member's name, the catalogs or any content. Whether a join succeeded it can infer from timing
+and the session that follows, as said above.
 
 ### What this tunnel does not carry
 

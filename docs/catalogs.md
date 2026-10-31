@@ -449,16 +449,17 @@ act alone (`share-catalog`), as minting a pairing code does.
 
 **Joining.** The browser opens the link, makes its member key and box key, proves the publisher against
 the fingerprint, and sends one sealed `join` record, on the direct address or the hosted relay. Every
-failure is one generic refusal, and the answer is padded so even its size does not tell a relay whether it
-worked. Checks that need nothing stored come first, so a broken client never loses a code; then, in one
+failure is one generic refusal, and the answer is padded so its size alone does not tell a relay whether it
+worked (its timing and the session that follows still can). Checks that need nothing stored come first, so a broken client never loses a code; then, in one
 step, the code is found, room is checked (a refusal for room leaves the code live), and the code is burned.
 
 - The new key then has **ten minutes to register ONE passkey**, and can do nothing else. A key that
   registered none when its window closes is removed. More passkeys for a browser are added only from a
   session already unlocked with an earlier one.
 - After that every member session needs a **member unlock** with that passkey, which lasts 30 days by
-  default (1 to 90), because a member only reads. Before the unlock nothing about the member — not even
-  their own name or catalogs — can be read.
+  default (1 to 90), because a member only reads. A key without its passkey can read nothing beyond its
+  own join answer (the member's name and how many catalogs) and the passkey's name while it registers one;
+  after the window, without the passkey, it can read nothing at all.
 - If a session is refused (`4403`), the browser keeps its key and says so: a relay could forge that close,
   so a key is only ever forgotten by the person's choice or a sealed revocation (phase 5).
 
@@ -475,7 +476,7 @@ never see each other (Q14) and never share onward (Q16).
 
 **Bounds.** 128 members and 512 member keys per publisher, 200 keys per member (so one leaked multi-use
 code fills its own member, never the publisher), 64 live shares, 64 catalogs per share, 60 successful joins
-and redeems an hour, 10 failed joins a minute per peer on the direct carrier. A full publisher refuses a
+and redeems an hour per share, 10 failed joins a minute per peer on the direct carrier. A full publisher refuses a
 join and leaves the code live. A member key unused for 90 days is removed; the member stays.
 
 ## Declared gaps

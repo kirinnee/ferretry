@@ -130,7 +130,10 @@ export const MemberRenewedRecordSchema = z.strictObject({
  */
 export const MEMBER_JOIN_OUTCOME_BYTES = 24 * 1024;
 
-/** Padding: ASCII spaces only, so it adds bytes and no meaning. */
+/**
+ * Padding: ASCII spaces only, so it adds bytes and no meaning. The schema checks the characters; the exact
+ * total length is the sender's property ({@link padJoinOutcome}), which a receiver may check on the record.
+ */
 const JoinPadSchema = z.string().regex(/^ *$/u, 'padding is spaces only').max(MEMBER_JOIN_OUTCOME_BYTES);
 
 /**

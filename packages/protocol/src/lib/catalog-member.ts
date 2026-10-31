@@ -73,11 +73,15 @@ export const MEMBER_UNLOCK_DAYS_MAX = 90;
 /** A member key nobody used for this long is removed, like an idle device; the member stays. */
 export const MEMBER_KEY_IDLE_EXPIRY_DAYS = 90;
 
-/** Join attempts per minute per carrier and peer (relayed: per rendezvous session, as pairing). */
+/**
+ * FAILED joins per minute per peer address, on the direct carrier only. On the relay every attempt is its own
+ * rendezvous session, so there is no peer to count by; the rendezvous admission prices them instead.
+ */
 export const MEMBER_JOIN_ATTEMPTS_PER_MINUTE = 10;
 /**
- * SUCCESSFUL joins and redeems per hour per publisher, whatever the carrier. Only a live code can succeed, so a
- * stranger cannot spend this; checked before the code is burned, so a refusal for it leaves the code live.
+ * SUCCESSFUL joins and redeems per hour per SHARE, whatever the carrier. Only a live code can succeed, so a
+ * stranger cannot spend this, and per share so one leaked code never spends another invitee's hour. Checked
+ * before the code is burned, so a refusal for it leaves the code live.
  */
 export const MEMBER_JOINS_PER_HOUR = 60;
 /** How many shares a list answers: the live ones, then the most recent ended ones. */
