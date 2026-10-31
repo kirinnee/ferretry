@@ -88,6 +88,7 @@ interface Probe {
   readonly stages: readonly string[];
   readonly checks: number;
   readonly frames: number;
+  readonly checkedStages: readonly string[];
   readonly violations: readonly { readonly stage: string; readonly marker: string }[];
   readonly done: boolean;
 }
@@ -184,9 +185,15 @@ describe('a sent message hands over to its transcript row in place', () => {
         for (const result of await (runsOf.get(`${path}/${harness}`) as Promise<PromiseSettledResult<Run>[]>)) {
           if (result.status === 'rejected') throw result.reason;
           const { order, pace, probe } = result.value;
-          // The run really went through every stage and was really watched while it did.
+          // The run really went through every stage and was really watched while it did: a check ran in EVERY
+          // stage it reached. A frame count stood in for that once, and on a loaded runner, with twelve runs
+          // overlapping, it came out at exactly 10 and failed a random case, though every stage had been checked.
           expect(probe.stages.at(-1)).toBe('replied');
-          expect(probe.frames).toBeGreaterThan(10);
+          expect({ order, pace, checked: [...probe.checkedStages].sort() }).toEqual({
+            order,
+            pace,
+            checked: [...new Set(probe.stages)].sort(),
+          });
           expect({ order, pace, violations: probe.violations }).toEqual({ order, pace, violations: [] });
         }
       }, 120_000);
