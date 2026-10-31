@@ -324,6 +324,11 @@ What is different is how the daemon looks and types, and what it holds back afte
   (`GET /v1/sessions/:sid/input-requests/:id/shot`, owner only; `request.pictured` says there is one). The
   card draws each field's box on it from the browser's facts. It is let go when the request ends.
 
+- **The marker is only a lookup aid.** The node it leads to must be the element the agent's pointer resolved to:
+  the same box (the browser's own measurement), and the node on top at its centre. Every fact on the card (node,
+  attributes, box) comes from that proven node. A field that is covered, or not on screen, is refused: scroll
+  it into view and raise again.
+
 ### Typing: one write into exactly the nodes the card showed
 
 `inputType` re-checks the page against the card's facts first: the same document, the same origin, and every
@@ -331,7 +336,10 @@ node still there with the same attributes. Anything different types nothing (`ta
 value in order: focus the node, confirm the focus landed on it, select what the field holds, and insert the
 text (`Input.insertText`, which a page's script sees as ordinary input). Enter goes to the last field when
 the owner ticked it. A failure before the first insert typed nothing; one after it is `uncertain` and the
-request ends, never retried. The value crosses the worker pipe in that one request and is in no answer,
+request ends, never retried. The select, the focus proof and the insert run through an isolated world of the field's frame, where the page's
+own overrides do not exist, and the insert is the very next call after the proof. What remains is the same
+compare-then-write gap the terminal has: the page's own events (the `select` it is sent, a timer) can run in
+the moment between the proof and the insert. The value crosses the worker pipe in that one request and is in no answer,
 error or log.
 
 ### The hold on a page
