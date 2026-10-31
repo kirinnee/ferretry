@@ -22,7 +22,6 @@
 import {
   SessionStatusSchema,
   TaskRefSchema,
-  WARDEN_INVESTIGATOR_MAX_SEQUENCE,
   type WardenAction,
   WardenActionSchema,
   WardenActorSchema,
@@ -35,8 +34,9 @@ import {
   WardenJevActsSchema,
   type WardenJevBefore,
   WardenJevBeforeSchema,
-  WardenJevPathSchema,
   type WardenJevPathStep,
+  WardenJevPathSchema,
+  WARDEN_INVESTIGATOR_MAX_SEQUENCE,
   WardenVerdictKindSchema,
 } from '@ferretry/protocol';
 import { z } from 'zod';

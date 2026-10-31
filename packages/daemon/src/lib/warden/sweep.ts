@@ -124,14 +124,6 @@ import {
   wardenConfigWarnings,
   wardenDetectOptions,
 } from './config.ts';
-import {
-  recordWardenAsk,
-  recordWardenJevCheck,
-  recordWardenOutcome,
-  wardenAskActor,
-  wardenHistory,
-  withDailyRollup,
-} from './daily.ts';
 import type { WardenAnomaly, WardenDetectResult } from './detect.ts';
 import { detectAnomalies, fingerprintAnomalies, isWardenScannableStatus } from './detect.ts';
 import {
@@ -157,7 +149,14 @@ import {
   type WardenFailoverState,
 } from './failover.ts';
 import { blessingViews, investigationList, retainRecords, WARDEN_STATUS_LIST_LIMIT } from './feed.ts';
-import { type WardenFocusCard, wardenResumeMessage } from './focus-card.ts';
+import {
+  recordWardenAsk,
+  recordWardenJevCheck,
+  recordWardenOutcome,
+  wardenAskActor,
+  wardenHistory,
+  withDailyRollup,
+} from './daily.ts';
 import {
   capSkipKey,
   JEV_CHECKS_SHOWN,
@@ -170,10 +169,9 @@ import {
   rememberJevBefore,
   type WardenJevCheckLog,
 } from './jev-checks.ts';
+import { type WardenFocusCard, wardenResumeMessage } from './focus-card.ts';
 import { JEV_JUDGEMENT_QUESTIONS, jevFactScalars, jevFactsOf, reachableJudgements, treeResponse } from './jev-tree.ts';
 import { leftoverBrowserCandidates } from './leftovers.ts';
-import { REFLEX_NUDGE_MESSAGE } from './liveness.ts';
-import type { ReflexEvent } from './liveness-monitor.ts';
 import {
   detectOrphanedCards,
   type OrphanTold,
@@ -182,6 +180,8 @@ import {
   type WardenCardNotice,
 } from './orphans.ts';
 import { wardenOwnerRoutes } from './owner-routes.ts';
+import { REFLEX_NUDGE_MESSAGE } from './liveness.ts';
+import type { ReflexEvent } from './liveness-monitor.ts';
 import { buildAssignedWardenPrompt, buildWardenSweepPrompt, type WardenPromptSettings } from './prompt.ts';
 import {
   buildWardenSpawnProvenance,
@@ -202,14 +202,14 @@ import {
 import type { WardenReviveService } from './revive-service.ts';
 import { resolveReviveWatch, watchRevive } from './revive-watch.ts';
 import {
-  jevHandoffKey,
   parseWardenRuntimeState,
+  jevHandoffKey,
   recordJevHandoff,
+  type WardenJevHandoff,
   recordSweepFingerprint,
   spawnSuppressionKey,
   WARDEN_HISTORY_LIMIT,
   type WardenAssignmentRecord,
-  type WardenJevHandoff,
   type WardenQueueEntryMeta,
   type WardenRuntimeState,
   wardenMayStop,
@@ -222,14 +222,14 @@ import {
   forgetPassedOn,
   guardBackingOff,
   guardHealthAfter,
-  HOURLY_CAP_SHARE,
-  jevActsFor,
-  jevJudges,
-  jevWithinBudget,
   newFlagCount,
   passedOnKey,
   prunePassedOn,
   recordGuardDecision,
+  jevActsFor,
+  jevJudges,
+  jevWithinBudget,
+  HOURLY_CAP_SHARE,
   recordJevAction,
   redactTriageSnapshot,
   retractJevAction,
