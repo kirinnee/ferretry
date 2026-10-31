@@ -269,10 +269,11 @@
   --fy-sit-bg: var(--warn-bg);
   --fy-sit-ink: var(--warn);
 }
-.fy-card .fy-card__sit-label {
+/* A board card's detail draws the same two blocks (`Situation`), so the rules name both hosts. */
+:is(.fy-card, .fy-board-detail) .fy-card__sit-label {
   color: var(--fy-sit-ink);
 }
-.fy-card .fy-card__points {
+:is(.fy-card, .fy-board-detail) .fy-card__points {
   display: flex;
   min-width: 0;
   flex-direction: column;
@@ -281,11 +282,14 @@
   padding-left: 16px;
   list-style: disc;
 }
-.fy-card .fy-card__points > li {
+:is(.fy-card, .fy-board-detail) .fy-card__points > li {
   padding: 0;
 }
-.fy-card .fy-card__points > li::before {
+:is(.fy-card, .fy-board-detail) .fy-card__points > li::before {
   content: none;
+}
+.fy-board-detail .fy-card__sit-row :is(p, ul, ol) {
+  margin: 0;
 }
 
 .fy-card__question {
@@ -400,13 +404,13 @@
   flex-direction: column;
   gap: 14px;
 }
-.fy-card a[href^='#fy-term-'] {
+:is(.fy-card, .fy-board-detail) a[href^='#fy-term-'] {
   border-bottom: var(--border-width) dotted var(--muted);
   color: inherit;
   cursor: help;
   text-decoration: none;
 }
-.fy-card a[href^='#fy-term-']:focus-visible {
+:is(.fy-card, .fy-board-detail) a[href^='#fy-term-']:focus-visible {
   border-radius: var(--radius-badge);
   outline: 2px solid var(--accent);
 }

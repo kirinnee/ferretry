@@ -1,9 +1,13 @@
-/** THE SECTIONS OF A CARD'S DETAIL: plain headed blocks in one flowing page, each drawing one fact and deciding nothing. */
+/**
+ * THE SECTIONS OF A CARD'S DETAIL: plain headed blocks in one flowing page, each drawing one fact and deciding nothing.
+ * Every text a ferret wrote (summary, premise, context, brief, How to test) is Markdown drawn by the chat's one
+ * renderer (`ChatProse`), so hypermedia blocks and references behave exactly as in a message or an agenda card.
+ */
 
 import { type BoardTaskView, formatTaskRef, type TaskRef } from '@ferretry/protocol';
 import { ExternalLink, GitBranch } from 'lucide-react';
-import { type ReactNode, useId } from 'react';
-import { Markdown } from '../../../components/markdown.tsx';
+import { type ReactNode, useId, useState } from 'react';
+import { ChatProse } from '../../../components/chat-prose.tsx';
 import {
   askOrigin,
   askWords,
@@ -13,6 +17,7 @@ import {
   isWebLink,
   linkLabel,
   prLine,
+  testSteps,
 } from '../../../lib/board-detail.ts';
 import type { RunningOnMachine } from '../../../lib/board-model.ts';
 import { ageLabel, type FerretNames } from '../../../lib/board-present.ts';
@@ -49,9 +54,58 @@ export function Avatar({ name }: { readonly name: string }) {
   );
 }
 
-export function Prose({ text, empty }: { readonly text: string; readonly empty: string }) {
-  return text.trim() === '' ? <p className="fy-board-detail__quiet">{empty}</p> : <Markdown text={text} />;
+/** A card's Markdown, drawn as the chat draws it. */
+export const cardProse = (text: string): ReactNode => <ChatProse text={text} />;
+
+export function Prose({ text }: { readonly text: string }) {
+  return <div className="fy-board-detail__prose">{cardProse(text)}</div>;
 }
+
+/**
+ * HOW TO TEST: the owner's checklist before Done. A list is drawn as numbered steps, each with a box the owner
+ * ticks as they go (on this screen only: a tick is a reminder, never a verdict); anything else is drawn whole.
+ */
+export function HowToTest({ text, renderProse }: { readonly text: string; readonly renderProse: Prose }) {
+  const parsed = testSteps(text);
+  const [ticked, setTicked] = useState<ReadonlySet<number>>(new Set());
+  if (parsed === null) return <div className="fy-board-test">{renderProse(text)}</div>;
+  const toggle = (step: number): void =>
+    setTicked(current => {
+      const next = new Set(current);
+      if (!next.delete(step)) next.add(step);
+      return next;
+    });
+  return (
+    <div className="fy-board-test" data-test-steps={parsed.steps.length}>
+      {parsed.lead === null ? null : <div className="fy-board-test__lead">{renderProse(parsed.lead)}</div>}
+      <ol className="fy-board-test__list">
+        {parsed.steps.map((step, index) => (
+          <li
+            className="fy-board-test__step"
+            data-done={ticked.has(index) ? '' : undefined}
+            // biome-ignore lint/suspicious/noArrayIndexKey: a step's place is its identity
+            key={index}
+          >
+            <input
+              aria-label={`Step ${index + 1} checked`}
+              checked={ticked.has(index)}
+              className="fy-attn-step__box"
+              data-test-tick={index}
+              onChange={() => toggle(index)}
+              type="checkbox"
+            />
+            <span aria-hidden="true" className="fy-board-test__n">
+              {index + 1}
+            </span>
+            <div className="fy-board-test__text">{renderProse(step)}</div>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+type Prose = (text: string) => ReactNode;
 
 export function AskSection({
   task,

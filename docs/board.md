@@ -32,11 +32,14 @@ ferret launched with older words is told the new ones on the owner's next messag
 name for `fy`:
 
 ```text
-Board: all work is a card (&F412) on its project's board (new repo: `fy project add .`); agenda items are !A48. Before your first edit for a new ask, have one: `fy task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<owner's words verbatim>"` (fy new/start make one). Move it: `fy task move <id> <lane> --reason "<why>"`. Blocked on owner: `fy agenda add --task <id>`; a card: `fy task depend`; outside: `fy task block`. Dropped: `fy task drop --reason`; switched: `fy task focus <id>`. Owner finds a problem: `fy task reopen <id> --to <lane> --ask "<their words>"`. Never move what a PR or release moves; only the owner closes.
+Board: all work is a card (&F412); agenda items are !A48. For a new ask, first: `fy task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<owner's exact words>" --premise <point> --context <point>` (repeatable; fy new/start make one). Before To test: `fy task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"`. Move: `fy task move <id> <lane> --reason "<why>"`. Blocked: `fy agenda add --task <id>` (owner), `fy task depend` (card), `fy task block` (else). `fy task drop --reason`, `fy task focus <id>`. Owner finds a bug: `fy task reopen <id> --to <lane> --ask "<their words>"`. PRs/releases move cards; only the owner closes.
 ```
 
 Tasks are `&F412` and agenda items are `!A48`; nothing prints the retired `#F412`
-([reference-standard.md](reference-standard.md)).
+([reference-standard.md](reference-standard.md)). The card-writing part is the owner's (2026-10-31): a title of at
+most five words, a one-line summary, premise and context as short bullets, and — before a card reaches To test — a
+How to test written for the owner ([How a card reads](#how-a-card-reads)). Registering a project by hand is no
+longer in the rule, because a ferret's first card registers its repository.
 
 ## Sub-ferrets: no moves, only reports
 
@@ -63,7 +66,7 @@ carries these two lines instead (`SUB_FERRET_INSTRUCTION`, the `sub-ferret` laun
 
 ```text
 Sub-ferret: you were started by a lead ferret. Report to it with `fy send <lead-callsign> "<message>"`; you cannot raise agenda items, notify the owner or move cards.
-Link your PR to your card: `fy task link <id> --pr <url>` (or `--branch`); add progress with `fy task note`.
+Link your PR to your card: `fy task link <id> --pr <url>` (or `--branch`); add progress with `fy task note`. Your final report says how the owner tests it.
 ```
 
 Nudges about a sub-ferret's card — the turn that closes without a PR, a reopen — go to its **lead** instead
@@ -249,6 +252,7 @@ fields plus the ones the daemon derives.
 | `ask`, `clarifications` | the owner's words verbatim and where they were said; later words are appended |
 | `premise`, `context`    | why the work exists; what a newcomer needs to know                            |
 | `terms`, `brief`        | glossary entries for the card; the full plan, or a sub-ferret's brief         |
+| `howToTest`             | how the owner checks the result before Done; empty on a card stored before it |
 | `owner`, `assignee`     | the accountable ferret; the one doing it now (none reads as the owner)        |
 | `parent`                | the lead's card, possibly on another project's board; the roll-up follows it  |
 | `dependsOn`             | cards this one waits on, each with an `until`                                 |
@@ -277,6 +281,41 @@ The view adds fields that are never stored:
 
 A card is referenced as `&F412`, an agenda item as `!A48`. The retired `#F12` is still accepted as input, and
 never printed ([reference-standard.md](reference-standard.md)).
+
+## How a card reads
+
+Every text a ferret writes on a card — `summary`, `premise`, `context`, `brief` and `howToTest` — is Markdown,
+drawn by the chat's one renderer (`ChatProse`), so `fy-render` hypermedia (mermaid, svg, html, chart, image…) and
+references (`&F412`, `!A48`, `@file`) behave exactly as in a message or an agenda card
+([fy-render.md](fy-render.md), [reference-standard.md](reference-standard.md)). The card detail reads top to bottom
+as an agenda card does, with nothing folded:
+
+1. the title, with the **summary** as one line under it;
+2. **premise** and **context** as two soft tinted blocks, each label above its points (the agenda card's own
+   `Situation` and tokens); a repeated `--premise` / `--context` is one bullet each;
+3. the owner's **ask**, verbatim, with its clarifications;
+4. **How to test**: a list is drawn as numbered steps, each with a box the owner ticks as they go (on that screen
+   only — a tick is a reminder, never a verdict); text that is not a list is drawn whole. On a card waiting to be
+   tested, **Done** and **Not good** sit right under it;
+5. the **brief**, then the **terms** — and each term is also a dotted tap tip where the card's text first uses it.
+
+A good How to test says where to go, what to do and what the owner should see, on which machine and version:
+
+```markdown
+On the Mac, once it runs v4.157:
+
+1. Open the Board and tap a card in Released · to test.
+2. Scroll to How to test, and tick each step as you check it.
+3. You should see Done and Not good right under the steps.
+```
+
+The kanban card face shows the summary as one truncated line under the title (not in the side pane, which keeps
+one short line), a small **How to test** marker when the card has one, and a quiet **no test steps** on a card in a
+`verify` lane that has none, so a missing one stands out to the lead.
+
+`fy task create` and `fy task edit` take `--how-to-test <md>` or `--how-to-test-file <path>`; any ferret that may
+edit the card may write it (it is not a re-plan). A sub-ferret cannot edit cards, so it puts the steps in its report
+and its lead writes them.
 
 ## Human and agent cards
 
@@ -447,25 +486,25 @@ shows `—` in amber.
 
 Every `fy task` verb takes `--session <id>` (act as that session instead of the ambient one) and `--json`.
 
-| Verb                                              | Does                                                                                                                                                                                                                                                              |
-| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `fy task create`                                  | make a card: `-k/--kind`, `-t/--title`, `--summary`, `--ask`, `--ask-source`, `--premise`, `--context`, `--term`, `--brief`, `--brief-file`, `--workflow`, `--depends-on`, `--parent`, `--assignee`, `--project`, `--lane`, `--file`, `--pr`, `--branch`, `--doc` |
-| `fy task show <id>`                               | print one card                                                                                                                                                                                                                                                    |
-| `fy task move <id> <lane>`                        | move it; `--reason` is required for a move back                                                                                                                                                                                                                   |
-| `fy task focus <id>`                              | attribute this session's work to the card                                                                                                                                                                                                                         |
-| `fy task skip "<why>"`                            | record that this work needs no card                                                                                                                                                                                                                               |
-| `fy task block` / `unblock`                       | mark or clear an external block                                                                                                                                                                                                                                   |
-| `fy task depend` / `undepend`                     | add or remove a dependency; `--until`, `--override <why>` (owner)                                                                                                                                                                                                 |
-| `fy task drop --reason`                           | drop a card                                                                                                                                                                                                                                                       |
-| `fy task reopen <id> --to <lane> --ask "<words>"` | reopen a finished card with the owner's new ask                                                                                                                                                                                                                   |
-| `fy task clarify <id> --source`                   | append verbatim words to the original ask                                                                                                                                                                                                                         |
-| `fy task link`                                    | attach one `--pr`, `--branch`, `--commit` or `--doc`                                                                                                                                                                                                              |
-| `fy task assign`, `note`, `order`, `file`, `edit` | assignee, a note, manual order, expected files, edit the text fields                                                                                                                                                                                              |
-| `fy task refile <id> --project`                   | move a card to another project's board; `--lane`, `--reason`                                                                                                                                                                                                      |
-| `fy board`                                        | the board; `--project <name\|all>`, `--ferret`, `--mine`, `--kind`, `--pr`, `--activity`, `--state`, `--closed`, `--query`, `--json`, `--md`                                                                                                                      |
-| `fy board lanes propose\|show\|edit`              | read or change a project's lane set; `--project`, `--rename`, `--remove`, `--into`                                                                                                                                                                                |
-| `fy board import`                                 | import the old task files ([board-import.md](board-import.md))                                                                                                                                                                                                    |
-| `fy project add <path>` / `ls`                    | register a folder as a project; list projects                                                                                                                                                                                                                     |
+| Verb                                              | Does                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fy task create`                                  | make a card: `-k/--kind`, `-t/--title`, `--summary`, `--ask`, `--ask-source`, `--premise`, `--context` (each repeatable, one bullet each), `--term`, `--brief`, `--brief-file`, `--how-to-test`, `--how-to-test-file`, `--workflow`, `--depends-on`, `--parent`, `--assignee`, `--project`, `--lane`, `--file`, `--pr`, `--branch`, `--doc` |
+| `fy task show <id>`                               | print one card                                                                                                                                                                                                                                                                                                                              |
+| `fy task move <id> <lane>`                        | move it; `--reason` is required for a move back                                                                                                                                                                                                                                                                                             |
+| `fy task focus <id>`                              | attribute this session's work to the card                                                                                                                                                                                                                                                                                                   |
+| `fy task skip "<why>"`                            | record that this work needs no card                                                                                                                                                                                                                                                                                                         |
+| `fy task block` / `unblock`                       | mark or clear an external block                                                                                                                                                                                                                                                                                                             |
+| `fy task depend` / `undepend`                     | add or remove a dependency; `--until`, `--override <why>` (owner)                                                                                                                                                                                                                                                                           |
+| `fy task drop --reason`                           | drop a card                                                                                                                                                                                                                                                                                                                                 |
+| `fy task reopen <id> --to <lane> --ask "<words>"` | reopen a finished card with the owner's new ask                                                                                                                                                                                                                                                                                             |
+| `fy task clarify <id> --source`                   | append verbatim words to the original ask                                                                                                                                                                                                                                                                                                   |
+| `fy task link`                                    | attach one `--pr`, `--branch`, `--commit` or `--doc`                                                                                                                                                                                                                                                                                        |
+| `fy task assign`, `note`, `order`, `file`, `edit` | assignee, a note, manual order, expected files, edit the text fields                                                                                                                                                                                                                                                                        |
+| `fy task refile <id> --project`                   | move a card to another project's board; `--lane`, `--reason`                                                                                                                                                                                                                                                                                |
+| `fy board`                                        | the board; `--project <name\|all>`, `--ferret`, `--mine`, `--kind`, `--pr`, `--activity`, `--state`, `--closed`, `--query`, `--json`, `--md`                                                                                                                                                                                                |
+| `fy board lanes propose\|show\|edit`              | read or change a project's lane set; `--project`, `--rename`, `--remove`, `--into`                                                                                                                                                                                                                                                          |
+| `fy board import`                                 | import the old task files ([board-import.md](board-import.md))                                                                                                                                                                                                                                                                              |
+| `fy project add <path>` / `ls`                    | register a folder as a project; list projects                                                                                                                                                                                                                                                                                               |
 
 Retired spellings print what replaced them and exit non-zero: `fy task list` is `fy board --mine` or `--all`,
 `fy task phase` and `fy task status` are `fy task move`, and `fy task feedback` is now a note.

@@ -88,6 +88,17 @@ describe('cardSegments', () => {
     expect([found?.icon, found?.text]).toEqual(['to-test', 'to test']);
   });
 
+  it('marks a card that says how to test it, and a card in To test that does not', () => {
+    const steps = card('F1', { howToTest: '1. Open it' });
+    expect(segment(steps, 'test')).toMatchObject({ text: 'How to test', icon: 'test-steps', optional: false });
+    expect(segment(steps, 'test', 'verify')?.text).toBe('How to test');
+    expect(segment(card('F1'), 'test', 'verify')).toMatchObject({ text: 'no test steps', tone: 'quiet', icon: null });
+    expect(segment(card('F1'), 'test', 'active')).toBeUndefined();
+    expect(segment(card('F1', { howToTest: '  ' }), 'test', 'active')).toBeUndefined();
+    const keys = cardSegments(steps, { names, now: NOW, category: 'verify', machine: null }).map(entry => entry.key);
+    expect(keys.slice(0, 3)).toEqual(['ref', 'activity', 'test']);
+  });
+
   it('draws the ref, the people and the machine only when there are several', () => {
     const task = card('F412', { assignee: 'mvudnuly-ec442385' });
     const keys = cardSegments(task, { names, now: NOW, category: 'active', machine: 'laptop' }).map(entry => entry.key);

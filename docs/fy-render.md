@@ -158,10 +158,12 @@ percentage on one axis cannot carry an oversized length on the other.
 ## Where a block renders, and where it cannot
 
 Rendering is gated by `MarkdownProps.enableFyRender`, which **defaults to `false`**. Exactly one
-production call site sets it: `AssistantProse` in
-`packages/pwa/src/components/transcript-row.tsx`. Every other `<Markdown>` consumer — file previews,
-warden reports, and the composer's own preview once it lands — gets the inert escaped fence
-automatically by not passing it, with no new code on those surfaces.
+production call site sets it: `ChatProse` in `packages/pwa/src/components/chat-prose.tsx`. Three
+surfaces draw through it, all of them text the owner's own ferrets (or the owner) wrote on the owner's
+daemon: an assistant's message, an agenda card, and a board card's detail (its summary, premise,
+context, brief and How to test, [board.md](board.md#how-a-card-reads)). Every other `<Markdown>`
+consumer — file previews, warden reports, and the composer's own preview once it lands — gets the
+inert escaped fence automatically by not passing it, with no new code on those surfaces.
 
 **This structural default is the whole answer to "how does it stay conversation-only".** It is not a
 rule somebody has to remember; it is a capability a surface must name deliberately.

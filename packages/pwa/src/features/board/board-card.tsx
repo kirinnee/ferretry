@@ -1,10 +1,11 @@
 /**
- * ONE BOARD CARD, TWO LINES: the title (truncated), and a meta line of short segments
- * (`&F412 · owner→assignee · ● 4m · PR ✓ · ⛓ 1 · subs 2/3`).
+ * ONE BOARD CARD: the title (truncated), its one-line summary (truncated, when it has one), and a meta line of
+ * short segments (`&F412 · ● 4m · How to test · PR ✓ · ⛓ 1 · subs 2/3 · owner→assignee`). A card waiting to be
+ * tested that says nothing about how wears a quiet "no test steps" instead.
  *
  * It is the only card renderer. The full-page Board, the phone and the per-chat side pane all draw it, and
- * `density` is the only thing that differs: `side` keeps one short line by dropping the segments that
- * are marked optional (who, shipped-in, machine).
+ * `density` is the only thing that differs: `side` keeps one short line by dropping the summary and the
+ * segments that are marked optional (who, shipped-in, machine).
  *
  * A card is a real link to its detail (`/d/<id>/board/<taskId>`). When the page can move cards it is also
  * draggable, and a "Move to…" menu does the same job from the keyboard; both end in the same `onMove`.
@@ -152,6 +153,9 @@ export function BoardCard({
         to={href}
       >
         <span className="fy-board-card__title">{task.title}</span>
+        {density === 'side' || task.summary.trim() === '' ? null : (
+          <span className="fy-board-card__summary">{task.summary}</span>
+        )}
         <span className="fy-board-card__meta">
           {lane === undefined ? null : (
             <span className="fy-board-seg" data-seg="lane" data-tone="quiet" title="Lane">

@@ -106,6 +106,18 @@
   font-size: var(--text-sm);
   font-weight: var(--weight-normal);
 }
+/* The summary: the one line under the title, in the page's ink, a step larger than the sections. */
+.fy-board-detail__summary {
+  min-width: 0;
+  color: var(--fg);
+  font-size: var(--text-md);
+  line-height: var(--leading-base);
+  overflow-wrap: anywhere;
+  --md-font-size: var(--text-md);
+}
+.fy-board-detail__summary :is(p, .md) {
+  margin: 0;
+}
 .fy-board-detail__tools {
   display: flex;
   flex: none;
@@ -347,6 +359,58 @@ fieldset.fy-board-detail__verdict {
   flex-wrap: wrap;
   align-items: center;
   gap: var(--gap-xs);
+}
+
+/* The card's own reading (premise and context, the ask, How to test, the verdict, the brief, the terms) keeps the
+   page's rhythm inside the term layer that holds it. */
+.fy-board-detail .fy-terms-layer {
+  gap: calc(var(--space-unit) * 4);
+}
+
+/* A picture or chart is drawn at its natural size, as on an agenda card, never stretched across a wide drawer. */
+.fy-board-detail .fy-render :is(.fy-render-image:not([data-fy-render-sized='true']), .fy-render-chart) {
+  max-width: min(100%, 480px);
+}
+
+/* ---- How to test: numbered steps, each with a box the owner ticks as they go ----------------------- */
+.fy-board-test {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+.fy-board-test__list {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.fy-board-test__step {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--gap-sm);
+}
+.fy-board-test__n {
+  min-width: 1.25rem;
+  color: var(--accent-strong);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-strong);
+  line-height: 1.5rem;
+  text-align: end;
+}
+.fy-board-test__text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.fy-board-test__text :is(p, .md) {
+  margin: 0;
+}
+.fy-board-test__step[data-done] > .fy-board-test__text {
+  color: var(--faint);
 }
 
 /* ---- Verdict -------------------------------------------------------------------------------------- */

@@ -821,23 +821,24 @@ describe('BOARD_INSTRUCTION', () => {
     const text = BOARD_INSTRUCTION('zz');
 
     // Assert — tasks are `&`, agenda items are `!`, and nothing prints the retired `#F`.
-    should(text).startWith(
-      "Board: all work is a card (&F412) on its project's board (new repo: `zz project add .`); agenda items are !A48.",
-    );
+    should(text).startWith('Board: all work is a card (&F412); agenda items are !A48.');
     should(text).not.containEql('#F');
-    should(text).containEql('Before your first edit for a new ask, have one:');
+    should(text).containEql('For a new ask, first:');
     should(text).containEql(
-      '`zz task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<owner\'s words verbatim>"`',
+      '`zz task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<owner\'s exact words>" --premise <point> --context <point>`',
     );
-    should(text).containEql('(zz new/start make one)');
+    should(text).containEql('(repeatable; zz new/start make one)');
+    should(text).containEql(
+      'Before To test: `zz task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"`',
+    );
     should(text).containEql('`zz task move <id> <lane> --reason "<why>"`');
-    should(text).containEql('Blocked on owner: `zz agenda add --task <id>`');
-    should(text).containEql('a card: `zz task depend`');
-    should(text).containEql('outside: `zz task block`');
+    should(text).containEql('`zz agenda add --task <id>` (owner)');
+    should(text).containEql('`zz task depend` (card)');
+    should(text).containEql('`zz task block` (else)');
     should(text).containEql('`zz task drop --reason`');
-    should(text).containEql('switched: `zz task focus <id>`');
+    should(text).containEql('`zz task focus <id>`');
     should(text).containEql('`zz task reopen <id> --to <lane> --ask "<their words>"`');
-    should(text).containEql('Never move what a PR or release moves; only the owner closes.');
+    should(text).containEql('PRs/releases move cards; only the owner closes.');
     should(text).not.containEql('`fy ');
   });
 
@@ -1036,6 +1037,7 @@ describe('SUB_FERRET_INSTRUCTION', () => {
     should(text).containEql('`zz send <lead-callsign> "<message>"`');
     should(text).containEql('`zz task link <id> --pr <url>` (or `--branch`)');
     should(text).containEql('`zz task note`');
+    should(text).containEql('Your final report says how the owner tests it.');
     should(text).not.containEql('agenda add');
     should(text).not.containEql('task move');
   });
