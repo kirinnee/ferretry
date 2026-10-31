@@ -204,7 +204,7 @@ describe('NodeSessionBrowserLauncher', () => {
     should(await new BrowserProfileStore(root).acquire({ sessionId: 'again' })).have.property('sessionId', 'again');
   });
 
-  it("should use this platform's transport when the machine's cannot be read", async () => {
+  it("should use the port when the machine's transport cannot be read: the pipe is only ever chosen", async () => {
     const chrome = await fakeChrome({ recordArguments: true });
     const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
     roots.push(root);
@@ -224,7 +224,9 @@ describe('NodeSessionBrowserLauncher', () => {
     );
     const browser = await launcher.launch({ width: 800, height: 600 });
     opened.push(browser);
-    should(await readFile(`${chrome}.args`, 'utf8')).containEql('--remote-debugging-pipe');
+    const started = await readFile(`${chrome}.args`, 'utf8');
+    should(started).match(/--remote-debugging-port=\d+/u);
+    should(started).not.containEql('--remote-debugging-pipe');
   });
 
   it('should connect its own worker client, so composition names only a runtime and an entry point', async () => {
@@ -415,9 +417,7 @@ describe('NodeSessionBrowserLauncher', () => {
     const started = await readFile(`${chrome}.args`, 'utf8');
     should(started).containEql('--headless=new');
     should(started).not.containEql('--ozone-platform=x11');
-    // DevTools on the pipe only: no port, no address, and nothing that would open one to a browser origin.
-    should(started).containEql('--remote-debugging-pipe');
-    should(started).not.match(/--remote-debugging-(?:port|address)/u);
+    // The debugging port takes no cross-origin WebSocket: only the worker, which sends no Origin.
     should(started).not.containEql('--remote-allow-origins');
   });
 
@@ -523,8 +523,7 @@ describe('NodeSessionBrowserLauncher', () => {
       should(started).containEql('--ozone-platform=x11');
       for (const flag of keptPainting) should(started).containEql(flag);
       should(started).not.match(/automation/i);
-      should(started).containEql('--remote-debugging-pipe');
-      should(started).not.match(/--remote-debugging-(?:port|address)/u);
+      should(started).containEql('--remote-debugging-address=127.0.0.1');
       should((await readFile(`${chrome}.display`, 'utf8')).trim()).equal(':42');
       // The private display refuses a client without its cookie, so the window's Chrome carries the file.
       should((await readFile(`${chrome}.xauthority`, 'utf8')).trim()).equal('/state/x11/xauthority-test');

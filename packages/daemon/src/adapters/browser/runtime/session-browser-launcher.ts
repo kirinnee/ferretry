@@ -58,7 +58,7 @@ export interface SessionBrowserModeOptions {
   readonly proxy?: () => Promise<ResolvedBrowserProxy | undefined>;
   /**
    * How the worker reaches Chrome's DevTools protocol, read at every launch like the mode. Absent, or
-   * unreadable, means this platform's default (`defaultCdpTransport`).
+   * unreadable, means the default (`defaultCdpTransport`): the port. The pipe runs only when this names it.
    */
   readonly transport?: () => Promise<CdpTransport>;
   readonly platform?: NodeJS.Platform;
@@ -91,7 +91,7 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
     // The display is a precondition too: a Linux real window with no Xvfb refuses here, before any lease.
     const platform = this.modes.platform ?? process.platform;
     const mode = await this.mode();
-    const transport = (await this.modes.transport?.().catch(() => undefined)) ?? defaultCdpTransport(platform);
+    const transport = (await this.modes.transport?.().catch(() => undefined)) ?? defaultCdpTransport();
     const proxy = await this.modes.proxy?.();
     const version = await chromeVersion(executable);
     const display = mode === 'window' && platform === 'linux' ? await this.privateDisplay() : undefined;
@@ -110,9 +110,8 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
           // HEADLESS unless the owner chose a real window. A real window keeps every page's window painting
           // while another has focus (`agentBrowserArguments`), because an agent may be driving — and a
           // person watching — any of them at once.
-          ...agentBrowserArguments(executable, lease.profile, viewport, platform, mode, {
+          ...agentBrowserArguments(executable, lease.profile, cdp, viewport, platform, mode, {
             ...(userAgent === undefined ? {} : { userAgent }),
-            cdp,
             ...(proxy === undefined
               ? {}
               : {

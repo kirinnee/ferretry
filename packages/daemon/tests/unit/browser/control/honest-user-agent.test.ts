@@ -9,6 +9,7 @@ import {
 } from '../../../../src/lib/index.ts';
 
 const VIEWPORT = { width: 1280, height: 800 };
+const PORT = { kind: 'port', port: 9222 } as const;
 const VERSION = 'Google Chrome 154.0.7558.52 ';
 
 describe('honest user agent', () => {
@@ -47,8 +48,8 @@ describe('honest user agent', () => {
     const userAgent = honestChromeUserAgent(VERSION, 'linux', 'x64') as string;
 
     // Act
-    const headless = agentBrowserArguments('chrome', '/p', VIEWPORT, 'linux', 'headless', { userAgent });
-    const window = agentBrowserArguments('chrome', '/p', VIEWPORT, 'linux', 'window', { userAgent });
+    const headless = agentBrowserArguments('chrome', '/p', PORT, VIEWPORT, 'linux', 'headless', { userAgent });
+    const window = agentBrowserArguments('chrome', '/p', PORT, VIEWPORT, 'linux', 'window', { userAgent });
 
     // Assert
     should(headless).containEql(`--user-agent=${userAgent}`);
@@ -57,7 +58,7 @@ describe('honest user agent', () => {
 
   it('should leave the launch as it was when no extras are given', () => {
     // Act
-    const plain = agentBrowserArguments('chrome', '/p', VIEWPORT, 'linux', 'headless');
+    const plain = agentBrowserArguments('chrome', '/p', PORT, VIEWPORT, 'linux', 'headless');
 
     // Assert
     should(plain.some(argument => argument.startsWith('--user-agent'))).be.false();
@@ -84,11 +85,11 @@ describe('browser proxy switches', () => {
 
   it('should be part of a launch only when a proxy is given', () => {
     // Act
-    const proxied = chromeLaunchArguments('chrome', '/p', VIEWPORT, 'linux', {
+    const proxied = chromeLaunchArguments('chrome', '/p', PORT, VIEWPORT, 'linux', {
       headless: true,
       proxy: { server: 'http://127.0.0.1:4000', bypass: [] },
     });
-    const direct = chromeLaunchArguments('chrome', '/p', VIEWPORT, 'linux', { headless: true });
+    const direct = chromeLaunchArguments('chrome', '/p', PORT, VIEWPORT, 'linux', { headless: true });
 
     // Assert
     should(proxied).containEql('--proxy-server=http://127.0.0.1:4000');

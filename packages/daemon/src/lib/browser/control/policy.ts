@@ -172,11 +172,6 @@ export function selectChromeExecutable(
 }
 
 export interface ChromeLaunchOptions {
-  /**
-   * Where Chrome opens its DevTools protocol for the agent browser's worker ({@link CdpEndpoint}); the pipe
-   * unless told otherwise. `false` opens none: the login window, which a person drives by hand.
-   */
-  readonly cdp?: CdpEndpoint | false;
   readonly initialUrl?: string;
   /**
    * Run without a window. Defaults to headless everywhere but Linux, where the browser draws into the
@@ -223,12 +218,13 @@ export type CdpTransport = 'pipe' | 'port';
 export type CdpEndpoint = { readonly kind: 'pipe' } | { readonly kind: 'port'; readonly port: number };
 
 /**
- * The transport when the machine names none. Linux is where one host is shared by several accounts, so it
- * gets the pipe nobody else can reach; a Mac is one person's desktop, where the port's `navigator.webdriver`
- * of `false` is worth more than a boundary between accounts it does not have.
+ * The transport when the machine names none: the PORT, on every platform. It is what every agent browser ran on
+ * before the pipe existed, and it keeps `navigator.webdriver` `false`. The pipe is never a default: it is
+ * turned on only by the owner choosing it for a machine, because what it buys — a boundary between accounts
+ * on a shared host — costs every page an honest `navigator.webdriver === true`.
  */
-export function defaultCdpTransport(platform: NodeJS.Platform): CdpTransport {
-  return platform === 'linux' ? 'pipe' : 'port';
+export function defaultCdpTransport(): CdpTransport {
+  return 'port';
 }
 
 function cdpArguments(endpoint: CdpEndpoint | false): readonly string[] {
@@ -254,9 +250,15 @@ function cdpArguments(endpoint: CdpEndpoint | false): readonly string[] {
  */
 export const AUTOMATION_SWITCH_PATTERN = /^--(?:enable-automation|disable-blink-features=.*AutomationControlled)/;
 
+/**
+ * Chrome's switches. `cdp` is where Chrome opens its DevTools protocol for the agent browser's worker, and is
+ * always named — there is no transport by omission; `false` opens none: the login window, which a person
+ * drives by hand.
+ */
 export function chromeLaunchArguments(
   executable: string,
   profile: string,
+  cdp: CdpEndpoint | false,
   viewport: BrowserViewport,
   platform: NodeJS.Platform,
   options: ChromeLaunchOptions = {},
@@ -266,7 +268,7 @@ export function chromeLaunchArguments(
     executable,
     ...(headless ? ['--headless=new'] : []),
     `--user-data-dir=${profile}`,
-    ...cdpArguments(options.cdp ?? { kind: 'pipe' }),
+    ...cdpArguments(cdp),
     '--no-first-run',
     '--no-default-browser-check',
     '--disable-background-mode',
@@ -307,9 +309,10 @@ export function browserLoginChromeArguments(
   return chromeLaunchArguments(
     executable,
     profile,
+    false,
     { width: BROWSER_MAX_WIDTH, height: BROWSER_MAX_HEIGHT },
     platform,
-    { cdp: false, initialUrl: browserLoginUrl },
+    { initialUrl: browserLoginUrl },
   );
 }
 
@@ -436,8 +439,6 @@ export interface AgentBrowserExtras {
   /** The honest user agent for a headless Chrome ({@link honestChromeUserAgent}); a real window ignores it. */
   readonly userAgent?: string;
   readonly proxy?: { readonly server: string; readonly bypass: readonly string[] };
-  /** Where the worker reaches the DevTools protocol; the pipe when absent. */
-  readonly cdp?: CdpEndpoint;
 }
 
 /**
@@ -449,9 +450,8 @@ export interface AgentBrowserExtras {
  *   (`DISPLAY`), on macOS it is a real window on the owner's desktop. No `--headless`, so the page sees the
  *   browser's own user agent rather than `HeadlessChrome` and renders the way a desktop Chrome does.
  *
- * Both open the DevTools protocol where `extras.cdp` says — the private pipe unless told otherwise
- * ({@link CdpTransport}): it is what the view streams and the agent tools drive through. Neither passes an
- * automation switch ({@link AUTOMATION_SWITCH_PATTERN}).
+ * Both open the DevTools protocol where `cdp` says ({@link CdpTransport}): it is what the view streams and the
+ * agent tools drive through. Neither passes an automation switch ({@link AUTOMATION_SWITCH_PATTERN}).
  *
  * `extras` (docs/browser-proxy.md): a headless browser gets the honest user agent, which is the one it would send
  * with a window — `HeadlessChrome` removed and nothing else changed; and a configured proxy adds its switches.
@@ -459,18 +459,18 @@ export interface AgentBrowserExtras {
 export function agentBrowserArguments(
   executable: string,
   profile: string,
+  cdp: CdpEndpoint,
   viewport: BrowserViewport,
   platform: NodeJS.Platform,
   mode: BrowserMode,
   extras: AgentBrowserExtras = {},
 ): readonly string[] {
-  return chromeLaunchArguments(executable, profile, viewport, platform, {
+  return chromeLaunchArguments(executable, profile, cdp, viewport, platform, {
     headless: mode === 'headless',
     keepPainting: mode === 'window',
     // Only a headless Chrome says "Headless" about itself; a real window already sends the ordinary token.
     ...(mode === 'headless' && extras.userAgent !== undefined ? { userAgent: extras.userAgent } : {}),
     ...(extras.proxy === undefined ? {} : { proxy: extras.proxy }),
-    ...(extras.cdp === undefined ? {} : { cdp: extras.cdp }),
   });
 }
 
