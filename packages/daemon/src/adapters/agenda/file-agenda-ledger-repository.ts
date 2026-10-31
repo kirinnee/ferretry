@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import {
   AGENDA_FILES,
   type AgendaFileStore,
-  readAgendaFile,
   isAgendaSessionId,
   parseAgendaLedger,
   type AgendaLedger,
@@ -21,6 +20,11 @@ export class InvalidAgendaLedgerError extends Error {
 
 /** How many sessions' parsed agendas are kept before the whole cache is dropped and refilled from disk. */
 const AGENDA_CACHE_LIMIT = 2_048;
+
+/** The files a repository reads: the agenda's store, with the identity reads the cache is proved by. */
+type IdentifiedAgendaFiles = AgendaFileStore &
+  Required<Pick<AgendaFileStore, 'identity' | 'readIdentified'>> &
+  Pick<FileAgendaFileStore, 'file'>;
 
 /** One session's agenda as last parsed: which file, how it stood, and what it said. */
 interface CachedLedger {
@@ -45,14 +49,14 @@ interface CachedLedger {
 export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
   private readonly tails = new Map<string, Promise<void>>();
   private readonly cache = new Map<string, CachedLedger>();
-  private readonly files: AgendaFileStore & Pick<FileAgendaFileStore, 'file'>;
+  private readonly files: IdentifiedAgendaFiles;
 
   /** `ready` settles when the agenda files migration has finished; no read or write goes to disk before it. */
   constructor(
     sessionDirectory: (sessionId: string) => string,
     uniqueId: () => string = randomUUID,
     private readonly ready: Promise<unknown> = Promise.resolve(),
-    files?: AgendaFileStore & Pick<FileAgendaFileStore, 'file'>,
+    files?: IdentifiedAgendaFiles,
   ) {
     this.files = files ?? new FileAgendaFileStore(sessionDirectory, uniqueId);
   }
@@ -65,18 +69,13 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
   async read(sessionId: string): Promise<AgendaLedger | null> {
     this.assertSessionId(sessionId);
     await this.ready;
-    const { identity, readIdentified } = this.files;
-    if (identity === undefined || readIdentified === undefined) {
-      const found = await readAgendaFile(this.files, sessionId, 'ledger');
-      return found === undefined ? null : this.parse(sessionId, found.name, found.text);
-    }
     // THE READER'S RULE (`readAgendaFile`): the new name when it exists, else the old one.
     for (const name of [AGENDA_FILES.ledger.current, AGENDA_FILES.ledger.legacy]) {
-      const now = await identity.call(this.files, sessionId, name);
+      const now = await this.files.identity(sessionId, name);
       if (now === undefined) continue;
       const cached = this.cache.get(sessionId);
       if (cached !== undefined && cached.name === name && cached.identity === now) return cached.ledger;
-      const read = await readIdentified.call(this.files, sessionId, name);
+      const read = await this.files.readIdentified(sessionId, name);
       if (read === undefined) continue;
       const ledger = deepFreezeJson(
         this.parse(sessionId, name, read.text) as unknown as JsonValue,

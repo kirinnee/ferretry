@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import should from 'should';
+import { FileAgendaFileStore } from '../../../src/adapters/agenda/file-agenda-file-store.ts';
 import {
   FileAgendaLedgerRepository,
   InvalidAgendaLedgerError,
@@ -41,6 +42,40 @@ const request = {
     options: [{ label: 'eu' }, { label: 'us' }],
   },
 };
+
+describe('the agenda file store, read with its identity', () => {
+  it('should read a file with the identity of the very file read, and say a missing one has neither', async () => {
+    // Arrange
+    const home = await mkdtemp(join(tmpdir(), 'ferretry-agenda-'));
+    homes.push(home);
+    const store = new FileAgendaFileStore(sessionId => join(home, 'sessions', sessionId));
+    await store.writeAtomic('session-1', 'agenda.json', '{"a":1}\n');
+
+    // Act
+    const read = await store.readIdentified('session-1', 'agenda.json');
+    const identity = await store.identity('session-1', 'agenda.json');
+    await store.writeAtomic('session-1', 'agenda.json', '{"a":2}\n');
+    const replaced = await store.identity('session-1', 'agenda.json');
+
+    // Assert
+    should(read).eql({ text: '{"a":1}\n', identity });
+    should(replaced).not.equal(identity);
+    should(await store.identity('session-1', 'attention.json')).be.undefined();
+    should(await store.readIdentified('session-1', 'attention.json')).be.undefined();
+  });
+
+  it('should refuse, not call missing, a file that cannot be read for any other reason', async () => {
+    // Arrange — the session "directory" is a regular file, so every path below it is ENOTDIR.
+    const home = await mkdtemp(join(tmpdir(), 'ferretry-agenda-'));
+    homes.push(home);
+    await writeFile(join(home, 'session-1'), 'not a directory');
+    const store = new FileAgendaFileStore(sessionId => join(home, sessionId));
+
+    // Act / Assert
+    await should(store.identity('session-1', 'agenda.json')).be.rejectedWith({ code: 'ENOTDIR' });
+    await should(store.readIdentified('session-1', 'agenda.json')).be.rejectedWith({ code: 'ENOTDIR' });
+  });
+});
 
 describe('FileAgendaLedgerRepository', () => {
   it('should see a ledger rewritten on disk outside the daemon on the next read, though it read it a moment before', async () => {
