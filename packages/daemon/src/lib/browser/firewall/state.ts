@@ -93,12 +93,13 @@ export class LoopbackFirewallWatch {
   private last: LoopbackFirewallState['state'] | undefined;
 
   constructor(
-    private readonly read: () => Promise<LoopbackFirewallState | undefined>,
+    private readonly read: (cached: boolean) => Promise<LoopbackFirewallState | undefined>,
     private readonly announce: (message: string) => void,
   ) {}
 
-  async check(): Promise<LoopbackFirewallState | undefined> {
-    const firewall = await this.read().catch(() => undefined);
+  /** `cached` lets the reader skip anything costly (the timer's tick); a browser start reads fresh. */
+  async check(cached = false): Promise<LoopbackFirewallState | undefined> {
+    const firewall = await this.read(cached).catch(() => undefined);
     const state = firewall?.state;
     if (firewall !== undefined && state !== this.last && (state !== 'applied' || this.last !== undefined)) {
       this.announce(firewall.detail);

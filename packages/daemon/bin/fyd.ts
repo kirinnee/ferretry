@@ -7293,11 +7293,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   };
   /**
    * Whether the fixed browser ports are fenced off from other local users: read on demand, so the answer
-   * follows both the setting and the host's marker. A reading for warnings, never a gate.
+   * follows both the setting and the host's marker. A reading for warnings, never a gate. `cached` takes the
+   * setting from the last configuration load instead of re-scanning the directory, for the timer.
    */
-  const loopbackFirewall = async () =>
+  const loopbackFirewall = async (cached = false) =>
     await readLoopbackFirewall(
-      async () => (await declaredAccountModel())?.machine.browserPorts ?? 'random',
+      async () =>
+        (cached ? await effectiveAccountModel() : await declaredAccountModel())?.machine.browserPorts ?? 'random',
       process.getuid?.() ?? 0,
       new FileLoopbackMarkerReader(),
       () => Date.now(),
@@ -9840,14 +9842,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         BOARD_SWEEP_INTERVAL_MS,
       ).unref();
       // The loopback firewall is re-read every five minutes, not only at a browser start, so a rule that was
-      // flushed or a check that stopped running is said out loud. Reads nothing while browserPorts is random.
+      // flushed or a check that stopped running is said out loud. First tick after five minutes, not at boot (a
+      // browser start checks at once). Reads nothing while browserPorts is random,
+      // and never re-scans the configuration directory: an idle daemon does no parsing (the idle-daemon test).
       const checkLoopbackFirewall = asActivity(
         activities,
         'loopback firewall check',
-        async () => await loopbackFirewallWatch.check(),
+        async () => await loopbackFirewallWatch.check(true),
       );
       setInterval(checkLoopbackFirewall, LOOPBACK_FIREWALL_CHECK_MS).unref();
-      setTimeout(checkLoopbackFirewall, 30_000).unref();
       // Agenda mode: the switch (the session document and its launch variable, written together like Pack's and
       // hypermedia's) and the one-time migration that turns it on for every ferret that already had open items —
       // they ARE its agenda.

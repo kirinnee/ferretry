@@ -301,6 +301,25 @@ describe('loopback firewall watch', () => {
     should(results[2]).equal(undefined);
   });
 
+  it('should tell the reader whether it may use what is cached: a tick may, a browser start may not', async () => {
+    // Arrange
+    const asked: boolean[] = [];
+    const watch = new LoopbackFirewallWatch(
+      async cached => {
+        asked.push(cached);
+        return undefined;
+      },
+      () => undefined,
+    );
+
+    // Act
+    await watch.check(true);
+    await watch.check();
+
+    // Assert
+    should(asked).eql([true, false]);
+  });
+
   it('should say a state again after the setting went random in between', async () => {
     // Arrange
     const { watch, told } = watchOf('stale', undefined, 'stale');
