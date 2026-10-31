@@ -62,6 +62,11 @@ export interface InputCardProps {
   readonly onDone: () => void;
   /** The daemon says the facts moved: the host reads the request again. */
   readonly onRefresh?: () => void;
+  /**
+   * Drawn inside an agenda item (the v5 item view or the compact card), which already has the title, the type
+   * badge and the frame: the card then draws no panel and no heading of its own, only the target and the clock.
+   */
+  readonly embedded?: boolean;
 }
 
 const RISK_ICON = { green: ShieldCheck, amber: ShieldQuestion, red: ShieldAlert } as const;
@@ -85,6 +90,7 @@ export function InputCard({
   now: fixedNow,
   onDone,
   onRefresh,
+  embedded = false,
 }: InputCardProps) {
   const headingId = useId();
   const now = useNow(fixedNow);
@@ -109,27 +115,55 @@ export function InputCard({
     }
   };
 
+  const cancelButton = (
+    <button
+      className="kt-btn min-h-[44px]"
+      data-input-cancel=""
+      disabled={cancelling}
+      onClick={() => void cancel()}
+      type="button"
+    >
+      Cancel request
+    </button>
+  );
+  const target = (
+    <p className="m-0 text-cell text-muted">
+      Goes to{' '}
+      <code className="mono text-fg" data-input-target="">
+        {targetRef(request)}
+      </code>
+    </p>
+  );
+  const expiry = (
+    <span className="ml-auto whitespace-nowrap text-meta text-faint" data-input-expiry="">
+      {expiryWords(request.expiresAt, now)}
+    </span>
+  );
+
   return (
     <section
-      aria-labelledby={headingId}
-      className="fy-input-card kt-panel flex min-w-0 flex-col gap-3 p-panel"
+      {...(embedded ? { 'aria-label': titleWords(request, agentName) } : { 'aria-labelledby': headingId })}
+      className={`fy-input-card flex min-w-0 flex-col gap-3${embedded ? '' : ' kt-panel p-panel'}`}
+      data-input-embedded={embedded ? '' : undefined}
       data-input-request={request.id}
       data-input-state={settled === null ? request.state : 'settled'}
     >
-      <header className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <h3 className="m-0 min-w-0 text-row font-semibold text-fg" data-input-title="" id={headingId}>
-          {titleWords(request, agentName)}
-        </h3>
-        <span className="ml-auto whitespace-nowrap text-meta text-faint" data-input-expiry="">
-          {expiryWords(request.expiresAt, now)}
-        </span>
-      </header>
-      <p className="m-0 text-cell text-muted">
-        Goes to{' '}
-        <code className="mono text-fg" data-input-target="">
-          {targetRef(request)}
-        </code>
-      </p>
+      {embedded ? (
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+          {target}
+          {expiry}
+        </div>
+      ) : (
+        <>
+          <header className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <h3 className="m-0 min-w-0 text-row font-semibold text-fg" data-input-title="" id={headingId}>
+              {titleWords(request, agentName)}
+            </h3>
+            {expiry}
+          </header>
+          {target}
+        </>
+      )}
 
       <div
         className="flex min-w-0 flex-col gap-1 rounded-control border border-border-strong bg-surface-2 p-3"
@@ -174,10 +208,11 @@ export function InputCard({
       )}
 
       {settled === null ? (
-        fields.map(field => (
+        fields.map((field, index) => (
           <InputFieldSection
             blocked={blocked}
             busy={cancelling}
+            cancel={index === fields.length - 1 ? cancelButton : null}
             client={client}
             field={field}
             key={field.key}
@@ -201,17 +236,9 @@ export function InputCard({
         </p>
       )}
 
-      {settled !== null ? null : (
-        <div className="flex justify-end">
-          <button
-            className="kt-btn min-h-[44px]"
-            data-input-cancel=""
-            disabled={cancelling}
-            onClick={() => void cancel()}
-            type="button"
-          >
-            Cancel request
-          </button>
+      {settled !== null || fields.length > 0 ? null : (
+        <div className="flex flex-wrap items-center justify-end gap-2" data-input-actions="">
+          {cancelButton}
         </div>
       )}
     </section>
@@ -224,11 +251,13 @@ interface FieldSectionProps {
   readonly client: InputClient;
   readonly blocked: string | undefined;
   readonly busy: boolean;
+  /** The card's Cancel, drawn in this field's action row (left of Send) when this is the last field. */
+  readonly cancel: ReactNode;
   readonly onSettled: (text: string) => void;
   readonly onRefresh: (() => void) | undefined;
 }
 
-function InputFieldSection({ request, field, client, blocked, busy, onSettled, onRefresh }: FieldSectionProps) {
+function InputFieldSection({ request, field, client, blocked, busy, cancel, onSettled, onRefresh }: FieldSectionProps) {
   const inputId = useId();
   const input = useRef<HTMLInputElement | null>(null);
   const { primary, others } = splitOffers(field.saved);
@@ -478,20 +507,23 @@ function InputFieldSection({ request, field, client, blocked, busy, onSettled, o
         </p>
       )}
 
-      {typing ? (
-        <div className="flex justify-end">
-          <button
-            className="kt-btn min-h-[44px] justify-center"
-            data-input-send=""
-            data-variant="primary"
-            disabled={off || value === '' || (save.enabled && saveReason === undefined && draftProblem !== undefined)}
-            onClick={sendTyped}
-            type="button"
-          >
-            {sending ? 'Sending…' : 'Send'}
-          </button>
+      {cancel === null && !typing ? null : (
+        <div className="flex flex-wrap items-center justify-end gap-2" data-input-actions="">
+          {cancel}
+          {typing ? (
+            <button
+              className="kt-btn min-h-[44px] justify-center"
+              data-input-send=""
+              data-variant="primary"
+              disabled={off || value === '' || (save.enabled && saveReason === undefined && draftProblem !== undefined)}
+              onClick={sendTyped}
+              type="button"
+            >
+              {sending ? 'Sending…' : 'Send'}
+            </button>
+          ) : null}
         </div>
-      ) : null}
+      )}
     </div>
   );
 }

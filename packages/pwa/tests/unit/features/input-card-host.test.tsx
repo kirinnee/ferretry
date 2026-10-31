@@ -57,7 +57,10 @@ describe('the input card host', () => {
     const view = await show(Promise.resolve(client));
 
     expect(paths).toEqual(['/v1/sessions/sess-1/input-requests']);
-    expect(view.container.querySelector('[data-input-title]')?.textContent).toBe('!A7 · Hadi needs a password');
+    const card = view.container.querySelector('[data-input-request]');
+    expect(card?.getAttribute('aria-label')).toBe('!A7 · Hadi needs a password');
+    expect(card?.hasAttribute('data-input-embedded')).toBe(true);
+    expect(view.container.querySelector('[data-input-title]')).toBeNull();
   });
 
   it('draws nothing for an item that names no request', async () => {
@@ -123,11 +126,11 @@ describe('the input card host', () => {
 
     answer = new Error('the daemon is restarting');
     await send();
-    expect(view.container.querySelector('[data-input-title]')).not.toBeNull();
+    expect(view.container.querySelector('[data-input-request]')).not.toBeNull();
 
     answer = [];
     await send();
-    expect(view.container.querySelector('[data-input-title]')).not.toBeNull();
+    expect(view.container.querySelector('[data-input-request]')).not.toBeNull();
     expect(view.container.querySelector('[data-input-gone]')).toBeNull();
 
     answer = [open()];

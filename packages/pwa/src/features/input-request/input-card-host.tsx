@@ -109,6 +109,7 @@ export function InputCardHost({
   return (
     <InputCard
       client={client}
+      embedded
       fields={fieldsOf(read.request)}
       onDone={() => {
         settled.current = true;

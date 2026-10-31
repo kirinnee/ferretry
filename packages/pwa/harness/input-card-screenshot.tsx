@@ -33,6 +33,8 @@ const run = (command: string, args: readonly string[]): void => {
 
 const PAGE_ENTRY = `
 import { createRoot } from 'react-dom/client';
+import { Markdown } from '../../src/components/markdown.tsx';
+import { AgendaItemView } from '../../src/features/agenda/agenda-item-view.tsx';
 import { InputCard } from '../../src/features/input-request/input-card.tsx';
 import { LoginsCard } from '../../src/features/secrets/logins-card.tsx';
 import { fieldsOf } from '../../src/lib/input-card.ts';
@@ -59,6 +61,28 @@ const next = withSaved(
 );
 const request = view === 'next' ? next : first;
 
+// The agenda item the daemon raises for the request (lib/input-requests/agenda-adapter.ts), drawn by the REAL v5
+// item view with the card as its form: the type badge, the header and the paging are the item view's own.
+const item = {
+  id: 'A7',
+  source: 'question',
+  sourceRef: request.id,
+  sourceSeq: 1,
+  kind: 'input',
+  title: 'Needs a secret',
+  subject: 'Needs a secret',
+  why: 'Type it into sudo',
+  context: 'sudo for the rebuild you asked for in &F131',
+  howToResolve: 'Open the card and type the value in its form. Nothing is sent until you press Send.',
+  input: { requestId: request.id },
+  neededBy: request.expiresAt,
+  blockingNow: true,
+  waitingSince: request.raisedAt,
+  raisedBy: 'agent',
+  raisedBySession: request.sessionId,
+  raisedByName: 'Hadi',
+} as never;
+
 const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
 createRoot(root).render(
@@ -67,14 +91,32 @@ createRoot(root).render(
       {view === 'logins' ? (
         <LoginsCard list={logins({ entries: [login(), ...logins().entries.slice(1)] })} onPut={quiet} onRename={quiet} onRemove={quiet} />
       ) : (
-        <InputCard
-          agentName="Hadi"
-          client={client}
-          fields={fieldsOf(request)}
-          now={NOW}
-          onDone={() => undefined}
-          request={request}
-        />
+        <div style={{ height: '100vh', display: 'grid' }}>
+          <AgendaItemView
+            busy={false}
+            error={null}
+            ferret="Hadi"
+            history={[]}
+            inputForm={
+              <InputCard
+                agentName="Hadi"
+                client={client}
+                embedded
+                fields={fieldsOf(request)}
+                now={NOW}
+                onDone={() => undefined}
+                request={request}
+              />
+            }
+            item={item}
+            now={NOW}
+            onAct={() => undefined}
+            onClose={() => undefined}
+            position={{ index: 0, total: 3 }}
+            renderProse={text => <Markdown text={text} />}
+            swipeable={false}
+          />
+        </div>
       )}
     </div>
   </div>,
@@ -124,8 +166,8 @@ const server = Bun.serve({
 });
 
 const VIEWPORTS = [
-  { name: 'phone', width: 390, height: 844, touch: true },
-  { name: 'desktop', width: 1_440, height: 900, touch: false },
+  { name: 'phone', width: 390, height: 844, shot: 1_320, touch: true },
+  { name: 'desktop', width: 1_440, height: 900, shot: 1_060, touch: false },
 ] as const;
 
 const executablePath =
@@ -135,7 +177,7 @@ try {
   for (const viewport of VIEWPORTS) {
     for (const scheme of ['light', 'dark'] as const) {
       const context = await browser.newContext({
-        viewport: { width: viewport.width, height: 2_400 },
+        viewport: { width: viewport.width, height: viewport.shot },
         colorScheme: scheme,
         reducedMotion: 'reduce',
         hasTouch: viewport.touch,
@@ -172,7 +214,7 @@ try {
           }
           const name = state === 'logins' ? 'saved-logins' : `input-card-${state}`;
           const target = join(outDir, `${name}-${viewport.name}-${scheme}.png`);
-          await page.locator('#root > div').screenshot({ path: target });
+          await page.screenshot({ path: target, fullPage: state === 'logins' });
           process.stdout.write(`📸 ${target}\n`);
         }
       } finally {

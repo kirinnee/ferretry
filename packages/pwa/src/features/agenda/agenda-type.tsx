@@ -8,6 +8,7 @@ import { type AgendaItem, type AgendaKind, agendaCardKind } from '@ferretry/prot
 import {
   BadgeCheck,
   CircleCheck,
+  KeyRound,
   ListChecks,
   ListTodo,
   type LucideIcon,
@@ -39,7 +40,12 @@ const META: Readonly<Record<AgendaKind, Omit<AgendaTypeMeta, 'kind'>>> = {
   },
   info: { tone: 'note', label: 'Note', hint: 'Nothing to decide — read it, then say got it', icon: StickyNote },
   reply: { tone: 'reply', label: 'Reply', hint: 'Write back in your own words', icon: MessageCircleReply },
-  input: { tone: 'reply', label: 'Reply', hint: 'Write back in your own words', icon: MessageCircleReply },
+  input: {
+    tone: 'approval',
+    label: 'Input',
+    hint: 'Fill it in below — Ferretry types it where it is asked for',
+    icon: KeyRound,
+  },
 };
 
 export const agendaTypeMeta = (item: Pick<AgendaItem, 'kind' | 'ask' | 'steps'>): AgendaTypeMeta => {

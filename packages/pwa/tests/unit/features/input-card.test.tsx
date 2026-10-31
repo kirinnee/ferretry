@@ -443,3 +443,60 @@ describe('when the daemon refuses', () => {
     expect(view.q('[data-input-save] [role="alert"]')?.textContent).toBe('Give it a label.');
   });
 });
+
+describe('the action row and the embedded card', () => {
+  it('draws Cancel request and Send in ONE row, Cancel first, when typing', async () => {
+    const { q } = await show(request());
+    const row = must(q('[data-input-actions]'), 'the action row');
+
+    expect([...row.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Cancel request', 'Send']);
+    expect(q('[data-input-actions] [data-input-cancel]')).not.toBeNull();
+    expect(row.parentElement?.querySelectorAll('[data-input-actions]')).toHaveLength(1);
+  });
+
+  it('keeps Cancel request in the action row on a one-tap card, with no Send until typing', async () => {
+    const { q } = await show(withSaved(saved({ offers: [offer()] })));
+    const row = must(q('[data-input-actions]'), 'the action row');
+
+    expect([...row.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Cancel request']);
+  });
+
+  it('draws no panel and no heading of its own inside an agenda item, and names itself for a reader', async () => {
+    const value = request();
+    const view = await mount(
+      <InputCard
+        agentName="Hadi"
+        client={fakeClient(answerDelivered).client}
+        embedded
+        fields={fieldsOf(value)}
+        now={NOW}
+        onDone={() => undefined}
+        request={value}
+      />,
+    );
+    mounted.push(view);
+    const card = must(view.container.querySelector('[data-input-request]'), 'the card');
+
+    expect(card.className).not.toContain('kt-panel');
+    expect(card.getAttribute('aria-label')).toBe('!A7 · Hadi needs a password');
+    expect(view.container.querySelector('[data-input-title]')).toBeNull();
+    expect(view.container.querySelector('[data-input-target]')?.textContent).toBe('%terminal:deploy');
+    expect(view.container.querySelector('[data-input-expiry]')?.textContent).toBe('4m 00s left');
+  });
+
+  it('still offers Cancel request on its own row when there is no field to draw', async () => {
+    const value = request();
+    const view = await mount(
+      <InputCard
+        client={fakeClient(answerDelivered).client}
+        fields={[]}
+        now={NOW}
+        onDone={() => undefined}
+        request={value}
+      />,
+    );
+    mounted.push(view);
+    const row = must(view.container.querySelector('[data-input-actions]'), 'the action row');
+    expect([...row.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Cancel request']);
+  });
+});

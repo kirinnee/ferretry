@@ -19,7 +19,7 @@ describe('the type of an agenda item', () => {
     expect(named({ kind: 'review' })).toMatchObject({ label: 'Review', tone: 'review' });
     expect(named({ kind: 'info' })).toMatchObject({ label: 'Note', tone: 'note' });
     expect(named({ kind: 'reply' })).toMatchObject({ label: 'Reply', tone: 'reply' });
-    expect(named({ kind: 'input' })).toMatchObject({ label: 'Reply', tone: 'reply' });
+    expect(named({ kind: 'input' })).toMatchObject({ label: 'Input', tone: 'approval' });
   });
 
   test('calls a task with steps a to-do', () => {
