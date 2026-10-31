@@ -130,17 +130,18 @@ describe('the open Inbox item', () => {
     await mounted.unmount();
   });
 
-  it('skips on a swipe down of the item’s title head — the deck’s skip: nothing is answered and the next item comes on top', async () => {
+  it('says Not needed on a swipe down of the item’s title head — into the undo window — and the next item comes on top', async () => {
     const fake = fakeInbox();
     const mounted = await mount(page(fake, [shipIt, rebase], { initialOpen: shipIt.key }));
     const first = topView(mounted).getAttribute('data-agenda-view');
     await swipeFrom(head(mounted), 0, 200);
-    expect(pending(fake)).toEqual([]);
+    expect(pending(fake)).toEqual(['Dismiss']);
+    expect(fake.commits).toEqual([]);
     expect(topView(mounted).getAttribute('data-agenda-view')).not.toBe(first);
     await mounted.unmount();
   });
 
-  it('stamps what a drag would do while it is held: ← the first option, ↓ Skip', async () => {
+  it('stamps what a drag would do while it is held: ← the first option, ↓ Not needed', async () => {
     const mounted = await mount(page(fakeInbox(), [shipIt], { initialOpen: shipIt.key }));
     await swipeFrom(whoLine(mounted), -200, 0, false);
     const up = must(mounted.container.querySelector('.fy-attn-deck__top[data-swipe-direction]'), 'the card mid-drag');
@@ -150,7 +151,7 @@ describe('the open Inbox item', () => {
     await swipeFrom(whoLine(mounted), 0, 200, false);
     const down = must(mounted.container.querySelector('.fy-attn-deck__top[data-swipe-direction]'), 'the card mid-drag');
     expect(down.getAttribute('data-swipe-direction')).toBe('down');
-    expect(down.getAttribute('data-swipe-answer')).toBe('Skip');
+    expect(down.getAttribute('data-swipe-answer')).toBe('Not needed');
     expect(down.hasAttribute('data-swipe-committed')).toBe(true);
     await mounted.unmount();
   });
@@ -249,7 +250,7 @@ describe('the Inbox list says who and what', () => {
   });
 });
 
-describe('the deck that skips', () => {
+describe('the deck: ↓ is Not needed, Skip a tap', () => {
   const targets = swipeTargets(agendaItem('A1', { ask: choices('Yes', 'No') }));
 
   it('reads a mostly-downward drag as a skip only when the deck can skip', () => {
@@ -264,13 +265,14 @@ describe('the deck that skips', () => {
     expect(dragOffset(0, 80, targets)).toEqual({ dx: 0, dy: 0 });
   });
 
-  it('skips the focused card on ↓ and says so to a screen reader, and flies it down with motion on', async () => {
+  it('says Not needed on ↓ and flies the card down; Skip is a tap, never a swipe', async () => {
     const skipped: string[] = [];
+    const acted: string[] = [];
     const cards = [inboxCard(agendaItem('A1', { ask: choices('Ship', 'Hold') }))];
     const mounted = await mount(
       <AgendaSwipeDeck
         cards={cards}
-        onAct={() => undefined}
+        onAct={(_card, action) => acted.push(action.kind)}
         onSkip={card => skipped.push(card.item.id)}
         reducedMotion={false}
         renderCard={(card, _act, skip) => (
@@ -281,14 +283,14 @@ describe('the deck that skips', () => {
       />,
     );
     const frame = must(mounted.container.querySelector<HTMLElement>('[data-agenda-frame]'), 'the frame');
-    expect(frame.textContent).toContain('Arrow down: skip.');
+    expect(frame.textContent).toContain('Arrow down: not needed.');
     // The card's own row, in the options list's order: the first option on ←.
     expect(frame.textContent).toContain('Arrow left: Ship.');
     await key(frame, 'ArrowDown');
-    expect(skipped).toEqual(['A1']);
+    expect([acted, skipped]).toEqual([['dismiss'], []]);
     expect(mounted.container.querySelector('.fy-attn-deck__leaving')?.getAttribute('data-direction')).toBe('down');
     await interact(() => must(mounted.container.querySelector<HTMLButtonElement>('[data-skip-here]'), 'skip').click());
-    expect(skipped).toEqual(['A1', 'A1']);
+    expect(skipped).toEqual(['A1']);
     await mounted.unmount();
   });
 });

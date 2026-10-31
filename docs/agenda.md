@@ -350,8 +350,9 @@ its card, `&F12`), and the machine. A row whose item is about a different card t
   - **← ↑ →** send the card's answers, which mean the same everywhere (the deck, the card, the item view, what the
     CLI prints): a row of options is in the **options list's order** — the first ←, the second ↑, the third →
     (two options: ← and →) — wherever the recommendation sits;
-  - **↓ on the deck skips** to the next item: nothing is sent and the item stays open. On the card itself (its top
-    bar or its answer row) ↓ is **Not needed**.
+  - **↓ is Not needed**, everywhere — the deck, the card's top bar and answer row, the ↓ key — into the same undo
+    window as any answer. A notice has no ↓ (it is cleared, not dismissed).
+  - **Skip is a tap, never a swipe**: the item's › moves on to the next one; nothing is sent and the item stays open.
 
   A held drag is stamped with what letting go would do (there is no hint line under the card). Every answer
   goes into the same undo window as a tap. Reduced motion (the OS preference or Settings › Appearance › Motion) drops

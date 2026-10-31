@@ -302,7 +302,7 @@ describe(`attention lifecycle (SIT, ${useInProcess ? 'in-process' : 'compiled bi
       should(added.out).containEql('agenda !A5 recorded');
       should(listed.out).containEql('Approve the OCI work-login plan');
       should(listed.out).containEql('Work login plan');
-      should(listed.out).containEql('answers: ← Changes · ↑ Defaults');
+      should(listed.out).containEql('answers: ← Defaults · → Changes');
       should(listed.out).containEql('recommended: Defaults');
       should(listed.out).containEql('impact: You stay logged out — by today');
       should(listed.out).containEql('terms: OCI = Oracle Cloud Infrastructure');
@@ -358,7 +358,7 @@ describe(`attention lifecycle (SIT, ${useInProcess ? 'in-process' : 'compiled bi
     should(added.code).equal(0, added.err);
     should(listed.out).containEql('!A6  [agent-raised]  Release');
     should(listed.out).containEql('ask: Ship the release now?');
-    should(listed.out).containEql('answers: ← No · → Yes');
+    should(listed.out).containEql('answers: ← Yes · → No');
     should(answered.code).equal(0, answered.err);
     should(history.out).containEql('chose "Yes"');
   });
