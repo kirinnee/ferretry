@@ -7,3 +7,11 @@ declare module '*/ferretry-loopback-firewall.service' {
   const text: string;
   export default text;
 }
+declare module '*/ferretry-loopback-firewall-verify.service' {
+  const text: string;
+  export default text;
+}
+declare module '*/ferretry-loopback-firewall-verify.timer' {
+  const text: string;
+  export default text;
+}

@@ -20,7 +20,11 @@ interface Run {
   readonly err: string;
 }
 
-/** A temp conf dir, run dir and a fake `nft` on PATH that records its arguments and stdin per call. */
+/**
+ * A temp conf dir, run dir, fake `/proc/net`, and fake `nft` and `runuser` on PATH. The fake nft records each
+ * transaction and keeps the applied table in a state file that `list table` prints back; the fake runuser
+ * answers a probe from FAKE_CONNECTABLE and never opens a socket.
+ */
 class Rig {
   readonly confDir: string;
   readonly conf: string;
@@ -28,6 +32,9 @@ class Rig {
   readonly marker: string;
   readonly bin: string;
   readonly calls: string;
+  readonly proc: string;
+  readonly state: string;
+  readonly probes: string;
 
   constructor(readonly root: string) {
     this.confDir = join(root, 'etc');
@@ -36,6 +43,9 @@ class Rig {
     this.marker = join(this.runDir, 'loopback-firewall.json');
     this.bin = join(root, 'bin');
     this.calls = join(root, 'nft-calls');
+    this.proc = join(root, 'proc-net');
+    this.state = join(root, 'nft-state');
+    this.probes = join(root, 'probes');
   }
 
   static async create(): Promise<Rig> {
@@ -43,20 +53,51 @@ class Rig {
     await mkdir(rig.confDir, { mode: 0o755 });
     await mkdir(rig.bin);
     await mkdir(rig.calls);
+    await mkdir(rig.proc);
     const nft = join(rig.bin, 'nft');
     await writeFile(
       nft,
       [
         '#!/usr/bin/env bash',
         'set -eu',
+        'if [ "${1:-}" = list ]; then',
+        '  [ -f "${FAKE_NFT_STATE}" ] || { echo "Error: No such file or directory" >&2; exit 1; }',
+        '  cat "${FAKE_NFT_STATE}"',
+        '  exit 0',
+        'fi',
         'n="$(find "${FAKE_NFT_CALLS}" -name "*.stdin" | wc -l)"',
         'cat >"${FAKE_NFT_CALLS}/${n}.stdin"',
         'echo "$*" >"${FAKE_NFT_CALLS}/${n}.args"',
         '[ -z "${FAKE_NFT_FAIL:-}" ] || { echo "Error: rejected by the fake nft" >&2; exit 1; }',
+        'if grep -q "^table inet ferretry {" "${FAKE_NFT_CALLS}/${n}.stdin"; then',
+        '  tail -n +3 "${FAKE_NFT_CALLS}/${n}.stdin" | { grep -v "skuid != ${FAKE_NFT_DROP_UID:-none} " || true; } >"${FAKE_NFT_STATE}"',
+        'else',
+        '  rm -f "${FAKE_NFT_STATE}"',
+        'fi',
         '',
       ].join('\n'),
     );
     await chmod(nft, 0o755);
+    const runuser = join(rig.bin, 'runuser');
+    await writeFile(
+      runuser,
+      [
+        '#!/usr/bin/env bash',
+        'set -eu',
+        'user="$2"',
+        'shift 3',
+        'if [ "$1" = timeout ]; then',
+        '  port="${@: -1}"',
+        '  echo "${user} ${port}" >>"${FAKE_PROBES}"',
+        '  case " ${FAKE_CONNECTABLE:-} " in *" ${port} "*) exit 0 ;; esac',
+        '  exit 1',
+        'fi',
+        '[ -z "${FAKE_RUNUSER_FAIL:-}" ] || exit 1',
+        'exit 0',
+        '',
+      ].join('\n'),
+    );
+    await chmod(runuser, 0o755);
     return rig;
   }
 
@@ -69,6 +110,10 @@ class Rig {
     const env: Record<string, string | undefined> = {
       PATH: `${this.bin}:${process.env.PATH ?? ''}`,
       FAKE_NFT_CALLS: this.calls,
+      FAKE_NFT_STATE: this.state,
+      FAKE_PROBES: this.probes,
+      FERRETRY_RUNUSER: join(this.bin, 'runuser'),
+      FERRETRY_PROC_NET: this.proc,
       FERRETRY_FIREWALL_CONF: this.conf,
       FERRETRY_FIREWALL_RUN_DIR: this.runDir,
       ...extraEnv,
@@ -84,6 +129,28 @@ class Rig {
   async nftInputs(): Promise<readonly string[]> {
     const names = (await readdir(this.calls)).filter(name => name.endsWith('.stdin')).sort();
     return Promise.all(names.map(name => readFile(join(this.calls, name), 'utf8')));
+  }
+
+  async listen(...ports: readonly number[]): Promise<void> {
+    const header = '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode';
+    const line = (port: number, index: number, state: string): string =>
+      `   ${index}: 0100007F:${port.toString(16).toUpperCase().padStart(4, '0')} 00000000:0000 ${state} 00000000:00000000 00:00000000 00000000  1000        0 1`;
+    const lines = ports.map((port, index) => line(port, index, '0A'));
+    // an established socket on a port nobody listens on must not count as a listener
+    lines.push(line(40000, ports.length, '01'));
+    await writeFile(join(this.proc, 'tcp'), [header, ...lines, ''].join('\n'));
+    await writeFile(join(this.proc, 'tcp6'), `${header}\n`);
+  }
+
+  async probed(): Promise<readonly string[]> {
+    const text = await Bun.file(this.probes)
+      .text()
+      .catch(() => '');
+    return text.split('\n').filter(Boolean);
+  }
+
+  async markerJson(): Promise<Record<string, unknown>> {
+    return JSON.parse(await readFile(this.marker, 'utf8')) as Record<string, unknown>;
   }
 
   async marked(): Promise<boolean> {
@@ -427,20 +494,23 @@ describe.skipIf(process.getuid?.() === 0)('running as root', () => {
   const FIXED_NFT = ['/usr/sbin/nft', '/sbin/nft', '/usr/bin/nft'];
   const root = { FERRETRY_FIREWALL_TEST_UID: '0' };
 
-  for (const override of ['FERRETRY_FIREWALL_CONF', 'FERRETRY_FIREWALL_RUN_DIR', 'FERRETRY_NFT']) {
+  const OVERRIDES = [
+    'FERRETRY_FIREWALL_CONF',
+    'FERRETRY_FIREWALL_RUN_DIR',
+    'FERRETRY_NFT',
+    'FERRETRY_RUNUSER',
+    'FERRETRY_PROC_NET',
+  ];
+  const cleared = Object.fromEntries(OVERRIDES.map(name => [name, undefined]));
+
+  for (const override of OVERRIDES) {
     it(`should refuse ${override}, applying and writing nothing`, async () => {
       // Arrange
       await rig.writeConf('user 1001\n');
-      const env = {
-        ...root,
-        FERRETRY_FIREWALL_CONF: undefined,
-        FERRETRY_FIREWALL_RUN_DIR: undefined,
-        FERRETRY_NFT: undefined,
-        [override]: override === 'FERRETRY_NFT' ? join(rig.bin, 'nft') : rig.conf,
-      };
+      const env = { ...root, ...cleared, [override]: rig.conf };
 
       // Act
-      const result = rig.run([], env);
+      const result = rig.run(['--verify'], env);
 
       // Assert
       should(result.code).equal(1);
@@ -463,7 +533,7 @@ describe.skipIf(process.getuid?.() === 0)('running as root', () => {
 
   it('should never take nft from PATH', async () => {
     // Arrange: the fake nft heads PATH, and no override is set
-    const env = { ...root, FERRETRY_FIREWALL_CONF: undefined, FERRETRY_FIREWALL_RUN_DIR: undefined };
+    const env = { ...root, ...cleared };
     const fixed = await Promise.all(FIXED_NFT.map(path => Bun.file(path).exists()));
 
     // Act
@@ -473,7 +543,7 @@ describe.skipIf(process.getuid?.() === 0)('running as root', () => {
     // this user does not own, and either way the fake on PATH is never run
     should(result.code).equal(1);
     if (fixed.some(Boolean)) should(result.err).not.containEql('no nft found');
-    else should(result.err).containEql('no nft found in /usr/sbin, /sbin or /usr/bin');
+    else should(result.err).containEql('no nft found in /usr/sbin /sbin /usr/bin');
     should(await rig.nftInputs()).deepEqual([]);
     should(await rig.marked()).be.false();
   });
@@ -621,4 +691,243 @@ describe('stopping', () => {
     should(result.code).not.equal(0);
     should(await rig.marked()).be.true();
   });
+});
+
+describe('verifying', () => {
+  const ISO = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/;
+
+  it('should re-apply when the table is gone, then record every listed user as ok', async () => {
+    // Arrange
+    await rig.writeConf('user 1001\nuser 1002 30000 30001 30002\n');
+
+    // Act
+    const result = rig.run(['--verify']);
+
+    // Assert
+    should(result.code).equal(0);
+    should(await rig.nftInputs()).deepEqual([
+      ruleset(rule('20004, 20005, 20006', 1001), rule('30000, 30001, 30002', 1002)),
+    ]);
+    const marker = await rig.markerJson();
+    should(marker.perUser).deepEqual({ '1001': 'ok', '1002': 'ok' });
+    should(marker.verifiedAt).match(ISO);
+    should(marker.appliedAt).match(ISO);
+    should(marker.version).equal(1);
+    should(marker.base).equal(20000);
+    should(marker.entries).deepEqual([
+      { uid: 1001, ports: [20004, 20005, 20006] },
+      { uid: 1002, ports: [30000, 30001, 30002] },
+    ]);
+  });
+
+  it('should not re-apply when every rule is already listed, and keep appliedAt', async () => {
+    // Arrange
+    await rig.writeConf('user 1001\n');
+    should(rig.run().code).equal(0);
+    const before = (await rig.markerJson()).appliedAt;
+    await Bun.sleep(1100);
+
+    // Act
+    const result = rig.run(['--verify']);
+
+    // Assert
+    should(result.code).equal(0);
+    should(await rig.nftInputs()).have.length(1);
+    const marker = await rig.markerJson();
+    should(marker.appliedAt).equal(before);
+    should(marker.perUser).deepEqual({ '1001': 'ok' });
+    should(Date.parse(marker.verifiedAt as string)).be.greaterThan(Date.parse(before as string));
+  });
+
+  it('should read a rule that nft lists with its consecutive ports as a range', async () => {
+    // Arrange
+    await rig.writeConf('user 1001\n');
+    await writeFile(
+      rig.state,
+      'table inet ferretry {\n  chain output {\n    oif "lo" tcp dport 20004-20006 meta skuid != 1001 reject with tcp reset\n  }\n}\n',
+    );
+
+    // Act
+    const result = rig.run(['--verify']);
+
+    // Assert
+    should(result.code).equal(0);
+    should(await rig.nftInputs()).deepEqual([]);
+    should((await rig.markerJson()).perUser).deepEqual({ '1001': 'ok' });
+  });
+
+  it('should mark a user missing when the rule is still not listed after a re-apply', async () => {
+    // Arrange
+    await rig.writeConf('user 1001\nuser 1002\n');
+    await rig.listen(20004, 20008);
+
+    // Act
+    const result = rig.run(['--verify'], { FAKE_NFT_DROP_UID: '1002' });
+
+    // Assert
+    should(result.code).equal(0);
+    should(await rig.nftInputs()).have.length(1);
+    should((await rig.markerJson()).perUser).deepEqual({ '1001': 'ok', '1002': 'missing' });
+    should(result.err).containEql('uid 1002: missing');
+    should(await rig.probed()).deepEqual(['nobody 20004']);
+  });
+
+  it('should mark a user failed when an unprivileged probe connects to a port that has a listener', async () => {
+    // Arrange
+    await rig.writeConf('user 1001\nuser 1002\n');
+    await rig.listen(20005, 20009);
+
+    // Act
+    const result = rig.run(['--verify'], { FAKE_CONNECTABLE: '20005' });
+
+    // Assert
+    should(result.code).equal(0);
+    should((await rig.markerJson()).perUser).deepEqual({ '1001': 'failed', '1002': 'ok' });
+    should(result.err).containEql('uid 1001: failed');
+  });
+
+  it('should probe only ports with a LISTEN socket, as nobody, and not fail a port nobody listens on', async () => {
+    // Arrange
+    await rig.writeConf('user 1001\n');
+    await rig.listen(20004, 20006);
+
+    // Act
+    const result = rig.run(['--verify'], { FAKE_CONNECTABLE: '20005' });
+
+    // Assert: 20005 would connect, but nothing listens there, so it is never probed
+    should(result.code).equal(0);
+    should(await rig.probed()).deepEqual(['nobody 20004', 'nobody 20006']);
+    should((await rig.markerJson()).perUser).deepEqual({ '1001': 'ok' });
+  });
+
+  it('should treat a user as ok when none of their ports has a listener', async () => {
+    // Arrange
+    await rig.writeConf('user 1001\n');
+    await rig.listen();
+
+    // Act
+    const result = rig.run(['--verify']);
+
+    // Assert
+    should(result.code).equal(0);
+    should(await rig.probed()).deepEqual([]);
+    should((await rig.markerJson()).perUser).deepEqual({ '1001': 'ok' });
+  });
+
+  it('should record an empty perUser for an empty conf', async () => {
+    // Arrange
+    await rig.writeConf('# nobody yet\n');
+
+    // Act
+    const result = rig.run(['--verify']);
+
+    // Assert
+    should(result.code).equal(0);
+    should((await rig.markerJson()).perUser).deepEqual({});
+  });
+
+  it('should leave a marker that is valid JSON, world-readable, with no temp file left', async () => {
+    // Arrange
+    await rig.writeConf('user 1001\n');
+
+    // Act
+    rig.run(['--verify']);
+
+    // Assert
+    should(Object.keys(await rig.markerJson())).deepEqual([
+      'version',
+      'appliedAt',
+      'base',
+      'verifiedAt',
+      'perUser',
+      'entries',
+    ]);
+    should((await stat(rig.marker)).mode & 0o777).equal(0o644);
+    should(await readdir(rig.runDir)).deepEqual(['loopback-firewall.json']);
+  });
+
+  it('should refuse, writing nothing, when the probe account is a uid the conf lists', async () => {
+    // Arrange
+    const nobody = Bun.spawnSync(['id', '-u', 'nobody']).stdout.toString().trim();
+    await rig.writeConf(`user ${nobody} 30000 30001 30002\n`);
+
+    // Act
+    const result = rig.run(['--verify']);
+
+    // Assert
+    should(result.code).equal(1);
+    should(result.err).containEql('which');
+    should(result.err).containEql('lists, so nothing was verified');
+    should(await rig.nftInputs()).deepEqual([]);
+    should(await rig.marked()).be.false();
+  });
+
+  it('should refuse, writing nothing, when it cannot run a command as the probe account', async () => {
+    // Arrange
+    await rig.writeConf('user 1001\n');
+
+    // Act
+    const result = rig.run(['--verify'], { FAKE_RUNUSER_FAIL: '1' });
+
+    // Assert
+    should(result.code).equal(1);
+    should(result.err).containEql('cannot run a probe as nobody');
+    should(await rig.nftInputs()).deepEqual([]);
+    should(await rig.marked()).be.false();
+  });
+
+  it('should refuse a bad conf exactly as apply does, touching nothing', async () => {
+    // Arrange
+    await rig.writeConf('user 999\n');
+
+    // Act
+    const result = rig.run(['--verify']);
+
+    // Assert
+    should(result.code).equal(1);
+    should(result.err).containEql('uid 999 is below 1000');
+    should(await rig.nftInputs()).deepEqual([]);
+    should(await rig.marked()).be.false();
+  });
+
+  it('should keep the old marker when the re-apply is rejected by nft', async () => {
+    // Arrange
+    await rig.writeConf('user 1001\n');
+    should(rig.run().code).equal(0);
+    await rm(rig.state);
+    const before = await readFile(rig.marker, 'utf8');
+
+    // Act
+    const result = rig.run(['--verify'], { FAKE_NFT_FAIL: '1' });
+
+    // Assert
+    should(result.code).not.equal(0);
+    should(await readFile(rig.marker, 'utf8')).equal(before);
+  });
+
+  it.skipIf(process.getuid?.() === 0)(
+    'should as root take nft, runuser, timeout and bash only from fixed directories, never PATH',
+    async () => {
+      // Arrange: fake nft and runuser head PATH; no override is set
+      await rig.writeConf('user 1001\n');
+      const env = {
+        FERRETRY_FIREWALL_TEST_UID: '0',
+        FERRETRY_FIREWALL_CONF: undefined,
+        FERRETRY_FIREWALL_RUN_DIR: undefined,
+        FERRETRY_NFT: undefined,
+        FERRETRY_RUNUSER: undefined,
+        FERRETRY_PROC_NET: undefined,
+      };
+
+      // Act
+      const result = rig.run(['--verify'], env);
+
+      // Assert: whichever fixed tool or conf check stops it, the fakes on PATH were never run
+      should(result.code).equal(1);
+      should(result.err).match(/no (nft|runuser|timeout|bash) found in|not a regular file|not owned by root/);
+      should(await rig.nftInputs()).deepEqual([]);
+      should(await rig.probed()).deepEqual([]);
+      should(await rig.marked()).be.false();
+    },
+  );
 });

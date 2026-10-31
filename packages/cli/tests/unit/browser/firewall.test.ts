@@ -5,7 +5,12 @@ import { registerBrowserCommands } from '../../../src/lib/browser/command';
 import type { IBrowserRunner } from '../../../src/lib/browser/controller';
 import { registerFirewallCommands } from '../../../src/lib/browser/firewall';
 
-const FILES = { script: '#!/usr/bin/env bash\necho hi\n', unit: '[Unit]\nDescription=x\n' };
+const FILES = {
+  script: '#!/usr/bin/env bash\necho hi\n',
+  unit: '[Unit]\nDescription=x\n',
+  verifyUnit: '[Unit]\nDescription=v\n',
+  timer: '[Timer]\nOnBootSec=1min\n',
+};
 
 function harness(prepare: (program: Command) => void = () => {}) {
   const lines: string[] = [];
@@ -30,6 +35,20 @@ describe('fy browser firewall', () => {
     should(lines.map(line => `${line}\n`)).deepEqual([FILES.script]);
   });
 
+  it.each([
+    ['verify-unit', FILES.verifyUnit],
+    ['timer', FILES.timer],
+  ])('should print the %s the same way', async (verb, file) => {
+    // Arrange
+    const { lines, run } = harness();
+
+    // Act
+    await run('browser', 'firewall', verb);
+
+    // Assert
+    should(lines.map(line => `${line}\n`)).deepEqual([file]);
+  });
+
   it('should print the unit the same way', async () => {
     // Arrange
     const { lines, run } = harness();
@@ -46,7 +65,7 @@ describe('fy browser firewall', () => {
     const lines: string[] = [];
     const program = new Command().exitOverride();
     registerBrowserCommands(program, { run: async () => 0 });
-    registerFirewallCommands(program, { script: 'no newline', unit: 'u\n' }, { report: line => lines.push(line) });
+    registerFirewallCommands(program, { ...FILES, script: 'no newline' }, { report: line => lines.push(line) });
 
     // Act
     await program.parseAsync(['node', 'fy', 'browser', 'firewall', 'script']);
@@ -74,7 +93,9 @@ describe('fy browser firewall', () => {
     should((groups[0] as Command).commands.map(command => command.name()).sort()).deepEqual([
       'entry',
       'script',
+      'timer',
       'unit',
+      'verify-unit',
     ]);
     should(lines).deepEqual(['[Unit]\nDescription=x']);
   });
