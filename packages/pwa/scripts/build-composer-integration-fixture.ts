@@ -10,21 +10,28 @@
  * `--entry <path>` (relative to the package) builds another scene against the same stylesheet — the
  * all-machines list's (`tests/integration/fixtures/all-machines-scene.tsx`) uses it.
  *
- * BUILT ONCE PER TEST RUN. About twenty visual test files each asked for a build of their own, ~3.3 s
- * apiece, almost all of it the same Tailwind stylesheet. Each output is now kept under the run's
- * temporary directory (`scripts/test/swept.sh` gives every run its own), keyed by a hash (itself kept for the run) of everything
- * a build can read: this package's sources and fixtures, every workspace package's `src`, the Tailwind
- * and Vite configs and the lockfile. The stylesheet is shared by every scene; a scene's bundle by every
- * file that asks for it. A changed input is a new key, so a hit is always a build of the same inputs.
- * Writes land through a rename, so two test processes asking at once never read half a file.
- * `FY_FIXTURE_CACHE=off` builds every time.
+ * BUILT ONCE PER KEY. About twenty visual test files each asked for a build of their own, ~3.3 s
+ * apiece, almost all of it the same Tailwind stylesheet. Each output is now kept under the temporary
+ * directory, keyed by a hash of everything a build can read (`sceneInputPatterns` in
+ * `tests/integration/support/fixture-inputs.ts`: sources, fixtures and the support files they import,
+ * configs, manifests, the lockfile, `NODE_ENV` and the Bun version). The hash is recomputed on every ask
+ * and never stored, so an edited input is a new key whether or not the run has a temporary directory of
+ * its own (`scripts/test/swept.sh` gives CI one; a local harness run shares `/tmp`). The stylesheet is
+ * shared by every scene; a scene's bundle by every file that asks for it. Writes land through a rename,
+ * so two test processes asking at once never read half a file. `FY_FIXTURE_CACHE=off` builds every time.
  */
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { isAbsolute, join, resolve } from 'node:path';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { isAbsolute, resolve } from 'node:path';
 import postcss from 'postcss';
 import tailwindcss from 'tailwindcss';
 import tailwindConfig from '../tailwind.config.ts';
+import {
+  cachedText,
+  cacheRootFor,
+  hashFixtureInputs,
+  sceneInputEnv,
+  sceneInputPatterns,
+} from '../tests/integration/support/fixture-inputs.ts';
 
 const packageRoot = resolve(import.meta.dir, '..');
 
@@ -45,63 +52,20 @@ const entryAt = Bun.argv.indexOf('--entry');
 const entry = entryAt === -1 ? 'tests/integration/fixtures/composer-editor-scene.tsx' : Bun.argv[entryAt + 1];
 if (entry === undefined) throw new Error('❌ --entry needs a path');
 
-/** A hash of every file a build can read, in a fixed order. */
-const inputsHash = async (): Promise<string> => {
-  const workspace = resolve(packageRoot, '../..');
-  const hasher = new Bun.CryptoHasher('sha256');
-  const patterns = [
-    'packages/*/src/**',
-    'packages/pwa/tests/integration/fixtures/**',
-    'packages/pwa/*.config.ts',
-    'packages/pwa/scripts/build-composer-integration-fixture.ts',
-    'bun.lock',
-  ];
-  const files: string[] = [];
-  for (const pattern of patterns)
-    for await (const file of new Bun.Glob(pattern).scan({ cwd: workspace, onlyFiles: true })) files.push(file);
-  for (const file of files.sort()) {
-    hasher.update(file);
-    hasher.update(new Uint8Array(await Bun.file(join(workspace, file)).arrayBuffer()));
-  }
-  return hasher.digest('hex').slice(0, 24);
-};
-
-/**
- * The inputs hash itself is kept for the run too: reading ~22 MB of sources to hash them cost about as much
- * as a cache hit saves, once per scene. Sources do not change mid-run, and the run's temporary directory is
- * its own, so a hash written once stays true.
- */
-const knownInputsHash = async (): Promise<string> => {
-  const directory = join(tmpdir(), 'ferretry-fixture-cache');
-  const path = join(directory, 'inputs.hash');
-  const hit = (await readFile(path, 'utf8').catch(() => '')).trim();
-  if (hit !== '') return hit;
-  const hash = await inputsHash();
-  await mkdir(directory, { recursive: true });
-  const partial = `${path}.${process.pid}.partial`;
-  await writeFile(partial, hash, 'utf8');
-  await rename(partial, path);
-  return hash;
-};
-
 const cacheRoot =
   process.env.FY_FIXTURE_CACHE === 'off'
     ? undefined
-    : join(tmpdir(), 'ferretry-fixture-cache', await knownInputsHash());
+    : cacheRootFor(
+        await hashFixtureInputs({
+          workspace: resolve(packageRoot, '../..'),
+          patterns: sceneInputPatterns,
+          env: sceneInputEnv(),
+        }),
+      );
 
-/** `make()`'s text, from the cache when this run already made it. */
-const cached = async (name: string, make: () => Promise<string>): Promise<string> => {
-  if (cacheRoot === undefined) return await make();
-  const path = join(cacheRoot, name);
-  const hit = await readFile(path, 'utf8').catch(() => undefined);
-  if (hit !== undefined) return hit;
-  const text = await make();
-  await mkdir(cacheRoot, { recursive: true });
-  const partial = `${path}.${process.pid}.partial`;
-  await writeFile(partial, text, 'utf8');
-  await rename(partial, path);
-  return text;
-};
+/** `make()`'s text, from the cache when this key already made it. */
+const cached = async (name: string, make: () => Promise<string>): Promise<string> =>
+  cacheRoot === undefined ? await make() : await cachedText(cacheRoot, name, make);
 
 // Bun inlines the `@import` graph; Tailwind then expands `@tailwind` exactly as the Vite build does,
 // so utility classes (`hidden`, `sr-only`, …) behave as they ship.
