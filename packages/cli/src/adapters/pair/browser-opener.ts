@@ -158,7 +158,5 @@ export const desktopBrowserOpener = (stateHome: string): IBrowserOpener =>
     stateHome,
     retentionMs: REDIRECT_PAGE_LIFETIME_MS,
     schedule: holdProcessOpen,
-    onExit: run => {
-      onProcessExit(process, run);
-    },
+    onExit: onProcessExit.bind(undefined, process),
   });
