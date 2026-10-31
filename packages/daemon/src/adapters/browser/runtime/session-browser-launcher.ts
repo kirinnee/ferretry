@@ -102,7 +102,14 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
                 }),
           }),
         ],
-        env: defined(browserEnvironment(display, this.environment)),
+        // The window's cookie rides with its display: a Chrome without it is refused by the private X server.
+        env: defined(
+          browserEnvironment(
+            display,
+            this.environment,
+            display === undefined ? undefined : this.modes.display?.authority(),
+          ),
+        ),
         stdin: 'ignore',
         stdout: 'ignore',
         stderr: 'pipe',

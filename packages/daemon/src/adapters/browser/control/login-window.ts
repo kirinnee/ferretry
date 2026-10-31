@@ -26,6 +26,8 @@ export interface BrowserLoginRuntime {
   readonly hostname: string;
   readonly sshUser: string;
   display(): Promise<string>;
+  /** The Xauthority file clients of `display()` must present; `undefined` if the display demands none. */
+  authority(): string | undefined;
   chromeExecutable(): string;
   x11vncExecutable(): string;
   timeoutExecutable(): string;
@@ -160,9 +162,10 @@ export class BrowserLoginWindowService implements BrowserLoginLifecycle {
       await this.profile.assertChromeVersionCompatible(chromeVersion);
       await lease.cleanupStaleChromeLocks();
       const display = await runtime.display();
+      const authority = runtime.authority();
       chrome = runtime.spawn(
         browserLoginChromeArguments(chromeExecutable, lease.profile, runtime.platform),
-        browserEnvironment(display, runtime.environmentSource),
+        browserEnvironment(display, runtime.environmentSource, authority),
       );
       await lease.updateChromePid(chrome.pid, chromeVersion);
       await runtime.waitForChrome(lease.profile, chrome);
@@ -172,7 +175,7 @@ export class BrowserLoginWindowService implements BrowserLoginLifecycle {
       const vncArgv = x11vncLaunchArguments(runtime.x11vncExecutable(), display, port, passwordFile, minutes * 60);
       vnc = runtime.spawn(
         vncSupervisorArguments(runtime.timeoutExecutable(), minutes * 60, vncArgv),
-        browserEnvironment(display, runtime.environmentSource),
+        browserEnvironment(display, runtime.environmentSource, authority),
       );
       await runtime.waitForVnc(port, vnc);
       const openedAt = new Date(runtime.now()).toISOString();

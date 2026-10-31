@@ -54,7 +54,7 @@ describe.if(process.platform === 'linux')('the agent browser as a real window, i
       },
     });
     base = `http://127.0.0.1:${String(site.port)}`;
-    display = new XvfbDisplay({ executable: () => xvfb ?? undefined });
+    display = new XvfbDisplay({ authorityDirectory: join(root, 'x11'), executable: () => xvfb ?? undefined });
     browser = new BrowserSessionService(
       { get: async id => (id === 's1' ? {} : undefined) },
       new NodeSessionBrowserLauncher(

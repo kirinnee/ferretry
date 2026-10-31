@@ -30,6 +30,11 @@ browser draws, not what an agent may do with it, so it applies at once.
   window's display, which is served over VNC. A Linux host with no Xvfb refuses to start the browser with
   one sentence naming the install command (`sudo apt-get install -y xvfb`, or your manager's) or "set
   Browser mode back to Headless". The dev shell carries Xvfb on Linux.
+- **Other users on the host cannot see it.** The display's unix socket is reachable by every local account,
+  so the Xvfb is started with `-auth` and a random cookie kept in a `0600` file under the daemon's own
+  `0700` state directory (`browser/x11/`); the browser and the login window's x11vnc are handed it through
+  `XAUTHORITY`, and the file is removed when the daemon stops. Without the cookie another user could
+  screenshot the window or type into it.
 - **The same profile.** Both modes use the machine's one persistent agent profile, so what you sign in to
   in a Real window stays signed in, for you and for your agents, until you sign out.
 

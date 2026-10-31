@@ -47,10 +47,17 @@ export function normalizeBrowserUrl(input: string): string {
   return url.href;
 }
 
-/** Keeps browser process environments narrow and makes display ownership explicit. */
+/**
+ * Keeps browser process environments narrow and makes display ownership explicit.
+ *
+ * `authority` is the Xauthority file holding the cookie the private display demands. It is set
+ * explicitly and never inherited: the host's own `XAUTHORITY` belongs to the operator's desktop, and
+ * a client without this one is refused by the display.
+ */
 export function browserEnvironment(
   display: string | undefined,
   source: Readonly<Record<string, string | undefined>>,
+  authority?: string,
 ): Record<string, string | undefined> {
   const result: Record<string, string | undefined> = {};
   for (const key of [
@@ -68,6 +75,7 @@ export function browserEnvironment(
     if (source[key] !== undefined) result[key] = source[key];
   }
   if (display !== undefined) result.DISPLAY = display;
+  if (authority !== undefined) result.XAUTHORITY = authority;
   return result;
 }
 

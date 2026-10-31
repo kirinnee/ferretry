@@ -40,6 +40,19 @@ describe('browser control policy', () => {
     should(browserEnvironment(undefined, { FY_TOKEN: 'secret' })).deepEqual({});
   });
 
+  it("should give an X client the private display's cookie file and never the host's own", () => {
+    // Act
+    const actual = browserEnvironment(
+      ':99',
+      { PATH: '/bin', XAUTHORITY: '/home/operator/.Xauthority' },
+      '/state/x11/xauthority',
+    );
+
+    // Assert
+    should(actual).deepEqual({ PATH: '/bin', DISPLAY: ':99', XAUTHORITY: '/state/x11/xauthority' });
+    should(browserEnvironment(':99', { XAUTHORITY: '/home/operator/.Xauthority' })).deepEqual({ DISPLAY: ':99' });
+  });
+
   it('should select Chrome deterministically and fail closed when it is unavailable', () => {
     // Act + Assert
     should(chromeExecutableCandidates('darwin')[0]).match(/Google Chrome/);

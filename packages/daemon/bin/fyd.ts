@@ -6280,7 +6280,7 @@ function createBrowserLoginWorld(paths: FoundationPaths, closeAgentBrowsers: () 
   const profile = new BrowserProfileStore(paths.home);
   const which = (name: string) => () => Bun.which(name, { PATH: process.env.PATH }) ?? undefined;
   const runtime = new NodeBrowserLoginRuntime({
-    display: new XvfbDisplay({ executable: which('Xvfb') }),
+    display: new XvfbDisplay({ executable: which('Xvfb'), authorityDirectory: profile.displayDirectory }),
     secretsDirectory: profile.browserDirectory,
     x11vncExecutable: which('x11vnc'),
     timeoutExecutable: which('timeout'),
@@ -7271,6 +7271,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   // The agent browser's own private display for a Linux real window (see `DaemonWorld.agentBrowserDisplay`).
   // Nothing is spawned until a real-window launch asks for it; a host without Xvfb is told what to install.
   const agentBrowserDisplay = new XvfbDisplay({
+    authorityDirectory: new BrowserProfileStore(paths.home).displayDirectory,
     executable: () => Bun.which('Xvfb', { PATH: process.env.PATH }) ?? undefined,
     missing: () => xvfbMissingMessage(command => Bun.which(command, { PATH: process.env.PATH }) !== null),
   });
