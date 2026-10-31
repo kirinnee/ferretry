@@ -1,6 +1,7 @@
 export * from './interrupted-launch.ts';
 export * from './policy.ts';
 export * from './retry.ts';
+export * from './revive-view.ts';
 export * from './service.ts';
 export * from './settings.ts';
 export * from './types.ts';

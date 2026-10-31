@@ -510,3 +510,76 @@ describe('DaemonFleetStore — when a machine was last read', () => {
     should(store.fleet(daemonA.daemonId).readAt).equal(1_000);
   });
 });
+
+describe('DaemonFleetStore keeps what an action published against an older read', () => {
+  const stopped = session('revive-me', { status: 'stopped' });
+  const starting = session('revive-me', { status: 'starting' });
+
+  it('does not put a stopped view back over the starting one a Resume just published', async () => {
+    const port = new RecordingPort();
+    const store = new DaemonFleetStore(port);
+    const scope = daemonSessionScope(daemonA, 'revive-me');
+    const first = store.hydrate(daemonA);
+    port.lists[0]?.resolve([stopped]);
+    await first;
+
+    // A list read leaves while the session is still stopped…
+    const second = store.hydrate(daemonA);
+    // …the owner presses Resume and its answer is published…
+    should(store.upsertSession(daemonA.daemonId, starting)).be.true();
+    // …and the older answer lands afterwards.
+    port.lists[1]?.resolve([stopped]);
+    await second;
+
+    should(store.session(scope)?.state.status).equal('starting');
+  });
+
+  it('does not lose a session published while a list read was out, nor bring back one removed', async () => {
+    const port = new RecordingPort();
+    const store = new DaemonFleetStore(port);
+    const first = store.hydrate(daemonA);
+    port.lists[0]?.resolve([session('gone'), session('kept')]);
+    await first;
+
+    const second = store.hydrate(daemonA);
+    store.upsertSession(daemonA.daemonId, session('fresh', { status: 'starting' }));
+    store.removeSession(daemonSessionScope(daemonA, 'gone'));
+    port.lists[1]?.resolve([session('gone'), session('kept')]);
+    await second;
+
+    const ids = store.fleet(daemonA.daemonId).sessions?.map(view => view.config.id);
+    should(ids).deepEqual(['fresh', 'kept']);
+  });
+
+  it('still takes a newer read once nothing has been published since it left', async () => {
+    const port = new RecordingPort();
+    const store = new DaemonFleetStore(port);
+    const scope = daemonSessionScope(daemonA, 'revive-me');
+    const first = store.hydrate(daemonA);
+    port.lists[0]?.resolve([stopped]);
+    await first;
+    store.upsertSession(daemonA.daemonId, starting);
+
+    const second = store.hydrate(daemonA);
+    port.lists[1]?.resolve([session('revive-me', { status: 'running' })]);
+    await second;
+
+    should(store.session(scope)?.state.status).equal('running');
+  });
+
+  it('does not let a single-session read that left before the publish replace it', async () => {
+    const port = new RecordingPort();
+    const store = new DaemonFleetStore(port);
+    const scope = daemonSessionScope(daemonA, 'revive-me');
+    const first = store.hydrate(daemonA);
+    port.lists[0]?.resolve([stopped]);
+    await first;
+
+    const read = store.fetchSession(daemonA, scope);
+    store.upsertSession(daemonA.daemonId, starting);
+    port.gets[0]?.resolve(stopped);
+    await read;
+
+    should(store.session(scope)?.state.status).equal('starting');
+  });
+});

@@ -61,6 +61,7 @@
         "harness/board-agenda-screenshot.ts",
         "harness/board-scope-screenshot.ts",
         "harness/phone-chat-screenshot.ts",
+        "harness/revive-button-screenshot.tsx",
         "harness/phone-chat-page.tsx",
         "harness/board-chat-page.tsx",
         "harness/board-one-done-screenshot.ts",
