@@ -22,7 +22,7 @@ function commandHarness() {
   };
   const program = new Command().exitOverride().configureOutput({ writeOut: () => {}, writeErr: () => {} });
   registerBrowserCommands(program, runner);
-  return { calls, run: (...argv: string[]) => program.parseAsync(['node', 'fy', ...argv]) };
+  return { calls, program, run: (...argv: string[]) => program.parseAsync(['node', 'fy', ...argv]) };
 }
 
 function controllerHarness(
@@ -79,7 +79,13 @@ describe('fy browser firewall entry', () => {
 
     // Assert
     should(harness.calls).deepEqual([ENTRY]);
-    await should(harness.run('browser', 'firewall', 'entry', '--session', 's')).be.rejected();
+    const entry = harness.program.commands
+      .find(command => command.name() === 'browser')
+      ?.commands.find(command => command.name() === 'firewall')
+      ?.commands.find(command => command.name() === 'entry');
+    should(entry?.options.map(option => option.long)).deepEqual([]);
+    await harness.run('browser', 'firewall', 'entry', '--session', 's');
+    should(harness.calls[1]).deepEqual(ENTRY);
   });
 });
 
