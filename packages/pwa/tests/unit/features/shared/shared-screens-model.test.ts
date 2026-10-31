@@ -15,7 +15,7 @@ import {
   UNLOCK_THEN_LINK,
   windowAnnouncement,
   withdrawnSummary,
-  WITHDRAWN_INSTALLED,
+  withdrawnInstalledLine,
 } from '../../../../src/features/shared/shared-screens-model.ts';
 import {
   JOIN_REFUSED_SENTENCE,
@@ -165,10 +165,10 @@ describe('opening a link with a key already here', () => {
 describe('withdrawnSummary', () => {
   it('counts the withdrawn items nobody installed here, in plain words', () => {
     expect(withdrawnSummary([{ itemId: 'a' }], new Map()).rest).toBe(
-      '1 item was withdrawn by the publisher. It cannot be installed.',
+      "1 item was withdrawn by the publisher. It can't be installed.",
     );
     expect(withdrawnSummary([{ itemId: 'a' }, { itemId: 'b' }], new Map()).rest).toBe(
-      '2 items were withdrawn by the publisher. They cannot be installed.',
+      "2 items were withdrawn by the publisher. They can't be installed.",
     );
   });
   it('says nothing when nothing was withdrawn', () => {
@@ -179,8 +179,10 @@ describe('withdrawnSummary', () => {
     expect(summary.installed).toHaveLength(1);
     expect(summary.installed[0]?.itemId).toBe('a');
     expect(summary.installed[0]?.name).not.toContain('\u202E');
-    expect(summary.rest).toBe('1 item was withdrawn by the publisher. It cannot be installed.');
-    expect(WITHDRAWN_INSTALLED).toBe('Withdrawn by the publisher · it keeps working; no more updates');
+    expect(summary.rest).toBe("1 more item was withdrawn by the publisher. It can't be installed.");
+    expect(withdrawnInstalledLine('pdf-merge')).toBe(
+      "pdf-merge was withdrawn by the publisher. If you installed it, it keeps working but gets no updates; it can't be installed again.",
+    );
   });
   it('never invents a name for an item it knows only by id', () => {
     expect(withdrawnSummary([{ itemId: 'zzz' }], new Map([['other', 'x']])).installed).toEqual([]);

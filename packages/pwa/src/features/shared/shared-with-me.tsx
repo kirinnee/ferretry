@@ -43,7 +43,7 @@ import {
   RENAME,
   SAVE_NAME,
   TRY_AGAIN,
-  WITHDRAWN_INSTALLED,
+  withdrawnInstalledLine,
   withdrawnSummary,
   WORKING,
 } from './shared-screens-model.ts';
@@ -444,7 +444,7 @@ function WithdrawnNote({
           className="m-0 break-words text-meta text-muted"
           data-shared-withdrawn-installed={item.itemId}
         >
-          {item.name} · {WITHDRAWN_INSTALLED}
+          {withdrawnInstalledLine(item.name)}
         </p>
       ))}
       {summary.rest === null ? null : <p className="m-0 text-meta text-muted">{summary.rest}</p>}

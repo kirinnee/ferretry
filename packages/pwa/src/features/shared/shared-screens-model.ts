@@ -10,7 +10,6 @@ import type { SharedCatalogManifestEntry, ShareLinkSeed } from '@ferretry/protoc
 import { revealHidden } from '@ferretry/protocol';
 import { fingerprintHead, type MemberSubscription } from '../../lib/member-keys.ts';
 import type { Attempt, RedeemOutcome, SharedBrowse, SharedCatalogView } from './shared-controller.ts';
-import { plural } from '../catalogs/catalog-review-model.ts';
 import {
   JOIN_REFUSED_SENTENCE,
   type PasskeyWindow,
@@ -111,13 +110,15 @@ export function itemLine(entry: SharedCatalogManifestEntry): ItemLine {
   };
 }
 
-export const WITHDRAWN_INSTALLED = 'Withdrawn by the publisher · it keeps working; no more updates';
+/** One sentence for a withdrawn item one of this person's machines installed: what still works, and what does not. */
+export const withdrawnInstalledLine = (name: string): string =>
+  `${name} was withdrawn by the publisher. If you installed it, it keeps working but gets no updates; it can't be installed again.`;
 
 /** What a catalog says of the items its publisher took out. The signed list keeps their ids, never their names. */
 export interface WithdrawnSummary {
   /** Items one of this person's machines installed: named from the machine's own record. */
   readonly installed: readonly { readonly itemId: string; readonly name: string }[];
-  /** How many more were withdrawn, said once, or `null`. */
+  /** How many more were withdrawn, said once ("more" when an installed one is named above it), or `null`. */
   readonly rest: string | null;
 }
 
@@ -135,7 +136,7 @@ export function withdrawnSummary(
     rest:
       others === 0
         ? null
-        : `${plural(others, 'item')} ${others === 1 ? 'was' : 'were'} withdrawn by the publisher. ${others === 1 ? 'It' : 'They'} cannot be installed.`,
+        : `${others} ${mine.length > 0 ? 'more ' : ''}${others === 1 ? 'item was' : 'items were'} withdrawn by the publisher. ${others === 1 ? 'It' : 'They'} can't be installed.`,
   };
 }
 

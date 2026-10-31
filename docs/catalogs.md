@@ -603,7 +603,8 @@ and version have to equal the entry the person tapped, otherwise it is refused (
 lists, so it was not opened.") and nothing from it is shown. **Withdrawn items are said, not hidden**: each catalog
 block counts them ("2 items were withdrawn by the publisher") and offers none. An item a paired machine installed that is
 now withdrawn is matched by item id against that machine's install records and named from the record (the list names
-withdrawn items by id only): "Withdrawn by the publisher · it keeps working; no more updates". With no machine to read,
+withdrawn items by id only), in one sentence: "pdf-merge was withdrawn by the publisher. If you installed it, it keeps
+working but gets no updates; it can't be installed again." The count then says "1 more item". With no machine to read,
 only the count shows. A name the publisher chose is shown with hidden and format characters marked. An item opens in the phase 1c review, and
 **Install on a machine** hands the signed manifest and item to the member's **own** daemon's install preview, which
 verifies them again. The offline library is phase 3 and is not built.

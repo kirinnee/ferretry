@@ -431,9 +431,9 @@ describe('withdrawn items', () => {
     );
     await settle();
     expect(q(`[data-shared-withdrawn-installed="${GONE}"]`)?.textContent).toBe(
-      'pdf-tools · Withdrawn by the publisher · it keeps working; no more updates',
+      "pdf-tools was withdrawn by the publisher. If you installed it, it keeps working but gets no updates; it can't be installed again.",
     );
-    expect(q('[data-shared-withdrawn]')?.textContent).toContain('1 item was withdrawn by the publisher.');
+    expect(q('[data-shared-withdrawn]')?.textContent).toContain('1 more item was withdrawn by the publisher.');
     await view.unmount();
   });
 });
