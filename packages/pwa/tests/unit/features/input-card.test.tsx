@@ -72,6 +72,16 @@ describe('the card', () => {
     expect(q('[data-input-risk]')?.getAttribute('data-input-risk')).toBe('green');
   });
 
+  it('says how long the target is hidden from the ferret after typing, and why', async () => {
+    const short = await show(request({ lock: { seconds: 10, reason: 'hidden-terminal' } }));
+    expect(short.q('[data-input-lock]')?.textContent).toBe(
+      'Hidden from the ferret for 10 s after typing. The terminal hides typing and a known program is reading it.',
+    );
+    const long = await show(request({ lock: { seconds: 120, reason: 'not-proven' } }));
+    expect(long.q('[data-input-lock]')?.textContent).toContain('for 2 minutes after typing');
+    expect((await show(request())).q('[data-input-lock]')).toBeNull();
+  });
+
   it('types into a masked field that autofill and spellcheck leave alone', async () => {
     const { q } = await show(request());
     const field = must(q<HTMLInputElement>('[data-input-value]'), 'the field');

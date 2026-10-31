@@ -256,8 +256,9 @@ rows, an escape payload or a program that echoes it differently all defeat a mat
 
 ### The pane quarantine
 
-When a `secret` is delivered the terminal is **quarantined** for `INPUT_QUARANTINE_SECONDS` (120) from
-the write:
+When a `secret` is delivered the terminal is **quarantined** from the write for its **lock**: `INPUT_QUARANTINE_SECONDS`
+(120), or `INPUT_SHORT_LOCK_SECONDS` (10) when the daemon proved the target hides what is typed (see
+[how long the lock lasts](#how-long-the-lock-lasts)):
 
 - **Nobody reads it through an ordinary tool.** `terminal.read` and `terminal.wait` are refused with a
   `conflict` error that says when the quarantine ends, for the agent **and for the owner's ordinary
@@ -314,6 +315,38 @@ the write:
 - **Raise-time rules**: nothing is refused for its target. A `secret` on a terminal that echoes, or whose
   echo is unknown, is allowed and flagged amber; the quarantine hides the pane, including what echoed, and
   the facts are checked again at delivery (the compare-and-enqueue check below). A `private` code is allowed and flagged amber, with the same quarantine.
+
+### How long the lock lasts
+
+The owner chose an **adaptive** lock (!A149). The card shows its length and why ("Hidden from the ferret for 10 s
+after typing. …"), from `request.lock` (`InputLockSchema`: `seconds` and a fixed `reason`); the agent learns the
+seconds (`lockSeconds`). It is decided only from what the daemon observed (`packages/daemon/src/lib/input-requests/lock.ts`):
+
+| Reason            | Lock  | When                                                                                                                                                                                                               |
+| ----------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `hidden-terminal` | 10 s  | A terminal with echo off and a recognised program reading it (the card's own facts).                                                                                                                               |
+| `proven-field`    | 10 s  | Every secret field a visible, uncovered password input on a secure page, in the page's own origin, no human check, AND a saved login's facts for that very field identity: masked, no echo after submit, moved on. |
+| `probed-field`    | 10 s  | The same fields, and the daemon's **dummy probe** at raise came back clean.                                                                                                                                        |
+| `code`            | 120 s | A one-time code (`private`): it shows as it is typed.                                                                                                                                                              |
+| `not-proven`      | 120 s | Anything else, including every probe that did not run cleanly.                                                                                                                                                     |
+
+- **Masking does not shorten.** The redaction window stays 10 minutes whatever the lock; the owner can still end a
+  lock early or reveal.
+- **A card never shortens at the write.** The lock is decided again from the facts seen at Send and the longer of
+  that and the card's is used.
+- **A terminal's OBSERVED facts never shorten it** (a program the ferret placed can carry the right name; see Login
+  recipes). Only the card's own echo-off and recognised-program facts do, as approved.
+- **The dummy probe** runs on a page card only, after the field picture and before the owner is asked, inside the
+  page's own queue: a throwaway value (a tilde and five random characters, short of any usual minimum length) is typed
+  into each password field the way the owner's will be, everything a ferret's read could return is searched for it
+  (visible text, accessibility snapshot, markup), and each field is emptied with Backspace. It is never run on a
+  terminal (a wrong password can lock an account), never on a card with a one-time code, never on a field whose
+  `autocomplete` says one-time-code or whose `inputmode` is numeric, tel or decimal, and it never presses Enter or
+  blurs. If the page fires ANY request or shows another document while it runs, a field does not empty, the page
+  cannot be read whole or the browser cannot report requests, the probe is `aborted` and the lock stays 120 s.
+- **Limits.** A page could reflect a value only after a delay longer than the probe, or only on submit; the facts of
+  an earlier sign-in (`proven-field`) cover what happened after a real submit on the same field identity. The probe's
+  request listener sees the page's own requests, not a service worker's.
 
 The daemon holds each delivered `secret` in RAM, for the window above, and masks it as
 `[redacted:input !A7]` wherever it scrubs text: the operator's screen, transcript and journal reads,

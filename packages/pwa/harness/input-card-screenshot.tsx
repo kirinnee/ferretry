@@ -88,6 +88,7 @@ const google = fakeRequest({
     }),
   ],
   risk: { level: 'red', reason: 'Not secret: the ferret can see this value.' },
+  lock: { seconds: 10, reason: 'probed-field' },
   observed: page([
     browserField('email', { field: { tag: 'input', type: 'email' } }),
     browserField('password', { backendNodeId: 8, field: { tag: 'input', type: 'password' } }),
@@ -100,6 +101,7 @@ const chain = fakeRequest({
   sensitivity: 'private',
   fields: [field('private', { id: 'code', label: '2FA code', risk: CODE_RISK })],
   risk: CODE_RISK,
+  lock: { seconds: 120, reason: 'code' },
   chain: 'A7',
   step: 2,
   observed: page([browserField('code', { field: { tag: 'input', type: 'text', autocomplete: 'one-time-code' } })]),
@@ -159,7 +161,7 @@ createRoot(root).render(
   <div className="kt-shell flex min-h-full flex-col items-center bg-bg p-3">
     <div className="w-full max-w-[640px]">
       {view === 'logins' ? (
-        <LoginsCard list={signInLogins()} onPut={quiet} onRename={quiet} onRemove={quiet} />
+        <LoginsCard list={signInLogins()} onPut={quiet} onRename={quiet} onRemove={quiet} onDecide={quiet} />
       ) : (
         <div style={{ height: '100vh', display: 'grid' }}>
           <AgendaItemView

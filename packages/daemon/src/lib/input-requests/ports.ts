@@ -93,6 +93,16 @@ export interface InputTargetPort {
   shoot?(sessionId: string, target: InputTarget, facts: InputTargetFacts): Promise<InputShot | undefined>;
   /** The document a session's page shows now (a page target only), or nothing when it cannot be told. */
   document?(sessionId: string, key: string): Promise<string | undefined>;
+  /**
+   * The dummy probe (a page target only; lock.ts): types a throwaway value into the named password fields, looks for
+   * it in every read of the page and empties them again. `aborted` for anything but a clean run. Never a terminal.
+   */
+  probe?(
+    sessionId: string,
+    target: InputTarget,
+    facts: InputTargetFacts,
+    fieldIds: readonly string[],
+  ): Promise<'hidden' | 'shown' | 'aborted'>;
 }
 
 /**

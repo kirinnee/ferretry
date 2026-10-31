@@ -505,6 +505,22 @@ export class BrowserWorkerClient implements BrowserAutomation {
     }
   }
 
+  /** The dummy probe; any failure or odd answer is `aborted`, which only keeps the lock long. */
+  async inputProbe(
+    pageId: string,
+    expected: BrowserInputFacts,
+    fieldIds: readonly string[],
+    dummy: string,
+  ): Promise<'hidden' | 'shown' | 'aborted'> {
+    try {
+      const raw = await this.request(BROWSER_INPUT_WORKER_METHODS.probe, { pageId, expected, fieldIds, dummy });
+      const outcome = (raw as { outcome?: unknown } | null)?.outcome;
+      return outcome === 'hidden' || outcome === 'shown' ? outcome : 'aborted';
+    } catch {
+      return 'aborted';
+    }
+  }
+
   /**
    * Joins ONE page's screencast. Viewers of the same page that arrive while its start is still in
    * flight await the SAME request: reporting success off the back of an attempt that has not landed

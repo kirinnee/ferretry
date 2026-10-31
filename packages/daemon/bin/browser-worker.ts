@@ -53,6 +53,7 @@ import { DownloadStage } from '../src/lib/browser/transport/download-stage.ts';
 import type { BrowserInputFacts, BrowserInputValue } from '../src/lib/browser/transport/input-contracts.ts';
 import {
   describeInputDocument,
+  probeInputFields,
   readInputText,
   type InputablePage,
   type InputCdpSession,
@@ -571,6 +572,22 @@ async function inputType(params: Readonly<Record<string, unknown>>): Promise<Rec
   }
 }
 
+/** The dummy probe: anything malformed or failing is `aborted`, which only ever makes the lock longer. */
+async function inputProbe(params: Readonly<Record<string, unknown>>): Promise<Record<string, unknown>> {
+  try {
+    const page = targetPage(params.pageId);
+    const expected = browserFactsParam(params.expected);
+    if (!Array.isArray(params.fieldIds) || !params.fieldIds.every(id => typeof id === 'string'))
+      return { outcome: 'aborted' };
+    if (typeof params.dummy !== 'string' || params.dummy === '') return { outcome: 'aborted' };
+    return {
+      outcome: await probeInputFields(inputSubject(page), expected, params.fieldIds as string[], params.dummy),
+    };
+  } catch {
+    return { outcome: 'aborted' };
+  }
+}
+
 /** A page that always exists, so a listing is never empty: Chrome's own first tab, or a new one. */
 async function anyPage(): Promise<Page> {
   return livePages()[0] ?? (await requireContext().newPage());
@@ -923,6 +940,8 @@ async function act(request: Request): Promise<Record<string, unknown>> {
     }
     case 'inputType':
       return await inputType(params);
+    case 'inputProbe':
+      return await inputProbe(params);
     case 'pointer': {
       const page = targetPage(params.pageId);
       const outcome = await performPointerAct(page as unknown as PointerPage, pointerActParam(params.act));

@@ -256,6 +256,9 @@ const bodyFor = (digest: string, over: Partial<InputDeliverBody> = {}, value = V
   ...over,
 });
 
+const buildWorld = (overrides: Partial<World> = {}) => build(overrides);
+const raisedIn = async (over: Partial<World> = {}, raise: InputRaise = RAISE) => await raised(over, raise);
+
 async function raised(over: Partial<World> = {}, raise: InputRaise = RAISE) {
   const built = build(over);
   const view = await built.service.raise(SESSION, raise);
@@ -285,6 +288,7 @@ describe('InputRequestService.raise', () => {
       id: 'A1',
       state: 'pending',
       observed: { consumer: 'sudo', echo: 'off', recognised: true },
+      lockSeconds: 10,
       note: 'Waiting for the owner on A1.',
     });
     should(w.cards[0]?.title).equal('Needs a secret');
@@ -1280,6 +1284,12 @@ describe('the pane quarantine: a terminal a secret was typed into is kept from a
   const WINDOW = 120_000;
   const STARTED = 'surface.input_quarantined';
   const ENDED = 'surface.input_quarantine_ended';
+  // These are about the hold itself at its FULL window: a terminal the daemon has not proven hides typing (a program
+  // it does not recognise) is held the whole 120 s. A proven one's short lock is in lock-service.test.ts.
+  const UNPROVEN = { ...FACTS, recognisedConsumer: false };
+  const build = (over: Partial<World> = {}) => buildWorld({ facts: UNPROVEN, ...over });
+  const raised = async (over: Partial<World> = {}, raise: InputRaise = RAISE) =>
+    await raisedIn({ facts: UNPROVEN, ...over }, raise);
 
   it('should hold the terminal under all its names once a secret is typed, and journal names and an end time only', async () => {
     const { w, service, quarantine, id, digest } = await raised({ names: NAMES });

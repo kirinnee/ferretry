@@ -73,6 +73,17 @@ export class InputTargetRouter implements InputTargetPort {
     return await this.browser?.document?.(sessionId, key);
   }
 
+  /** Only a page is ever probed: a terminal's program could count a wrong password, so it is never typed at for a test. */
+  async probe(
+    sessionId: string,
+    target: InputTarget,
+    facts: InputTargetFacts,
+    fieldIds: readonly string[],
+  ): Promise<'hidden' | 'shown' | 'aborted'> {
+    if (target.kind !== 'browser' || this.browser?.probe === undefined) return 'aborted';
+    return await this.browser.probe(sessionId, target, facts, fieldIds);
+  }
+
   async shoot(sessionId: string, target: InputTarget, facts: InputTargetFacts): Promise<InputShot | undefined> {
     // A terminal's card draws its own text; only a page is pictured.
     return target.kind === 'browser' ? await this.browser?.shoot?.(sessionId, target, facts) : undefined;

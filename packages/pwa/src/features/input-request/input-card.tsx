@@ -22,8 +22,14 @@
  * value NEVER passes through this app: tapping a login sends its handle and the daemon types it.
  */
 
-import type { InputRequest, InputSavedOffer, InputShot } from '@ferretry/protocol';
-import { Eye, EyeOff, ShieldAlert, ShieldCheck, ShieldQuestion } from 'lucide-react';
+import {
+  INPUT_LOCK_WORDS,
+  type InputRequest,
+  type InputSavedOffer,
+  type InputShot,
+  lockWords,
+} from '@ferretry/protocol';
+import { Eye, EyeOff, ShieldAlert, ShieldCheck, ShieldQuestion, Timer } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { cancelInput, deliverInput, type InputClient, readInputShot } from '../../lib/input-api.ts';
 import {
@@ -244,6 +250,15 @@ export function InputCard({
         >
           <Risk aria-hidden="true" className="mt-0.5 shrink-0" size={16} />
           <span>{request.risk.reason}</span>
+        </p>
+      )}
+
+      {request.lock === undefined ? null : (
+        <p className="m-0 flex items-start gap-2 text-cell text-muted" data-input-lock={request.lock.seconds}>
+          <Timer aria-hidden="true" className="mt-0.5 shrink-0" size={16} />
+          <span>
+            Hidden from the ferret for {lockWords(request.lock)} after typing. {INPUT_LOCK_WORDS[request.lock.reason]}
+          </span>
         </p>
       )}
 
