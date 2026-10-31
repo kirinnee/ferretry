@@ -19,15 +19,39 @@ import { mkdir, rm, stat, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import {
   BROWSER_MODIFIERS,
+  type BrowserElementTarget,
   type BrowserInputEvent,
   type BrowserModifier,
   type BrowserMouseButton,
   BrowserPageLifecycleRequestSchema,
   type BrowserTarget,
+  InputTargetFactsSchema,
 } from '@ferretry/protocol';
-import { type Browser, type BrowserContext, type CDPSession, chromium, type Page } from 'playwright-core';
+import {
+  type Browser,
+  type BrowserContext,
+  type CDPSession,
+  chromium,
+  type ElementHandle,
+  type Locator,
+  type Page,
+} from 'playwright-core';
 import { recogniseBrowserChallenge } from '../src/lib/browser/transport/challenge.ts';
 import { DownloadStage } from '../src/lib/browser/transport/download-stage.ts';
+import type { BrowserInputFacts, BrowserInputValue } from '../src/lib/browser/transport/input-contracts.ts';
+import {
+  describeInputDocument,
+  INPUT_MARKER,
+  type InputablePage,
+  type InputCdpSession,
+  InputFrameSessions,
+  type InputHandle,
+  type InputLocator,
+  type InputSubject,
+  observeInputFields,
+  shootInputFields,
+  typeInputFields,
+} from '../src/lib/browser/transport/input-fields.ts';
 import {
   browserElementParam,
   browserTargetParam,
@@ -46,6 +70,7 @@ import {
   runLifecycleRequest,
   type WaitablePage,
 } from '../src/lib/browser/transport/page-lifecycle.ts';
+import { disablePasskeys } from '../src/lib/browser/transport/passkeys.ts';
 import { performPointerAct, type PointerPage, pointerActParam } from '../src/lib/browser/transport/pointer-acts.ts';
 import { type PointerPosition, pointerAfter, pointerSequence } from '../src/lib/browser/transport/pointer.ts';
 
@@ -100,6 +125,8 @@ const dialogs = new PageDialogs();
 const consoles = new Map<string, ConsoleLog>();
 const networks = new Map<string, NetworkLog>();
 const emulations = new Map<string, PageEmulation>();
+/** Which DevTools session owns each frame the input bridge has looked at, per page. */
+const inputSessions = new Map<string, InputFrameSessions>();
 /** The last title a page answered with: `page.title()` hangs while a dialog is open. */
 const titles = new WeakMap<Page, string>();
 const TITLE_WAIT_MS = 750;
@@ -232,6 +259,10 @@ function registerPage(page: Page): void {
     if (pageStates.get(page)?.state !== 'error') setPageState(page, 'ready');
   });
   page.on('crash', () => setPageState(page, 'error', 'the page crashed'));
+  // Every page, popups included, finds no passkey: the owner's card supplies a password instead.
+  void pageSession(page)
+    .then(async session => await disablePasskeys(session as unknown as InputCdpSession))
+    .catch(() => undefined);
   page.on('requestfailed', request => {
     try {
       if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
@@ -247,6 +278,8 @@ function registerPage(page: Page): void {
     consoles.delete(id);
     networks.delete(id);
     emulations.delete(id);
+    inputSessions.get(id)?.release();
+    inputSessions.delete(id);
     const cast = screencasts.get(id);
     screencasts.delete(id);
     if (cast) void cast.detach().catch(() => undefined);
@@ -361,6 +394,119 @@ async function challengeOf(page: Page): Promise<{ challenge?: { provider: string
     return {};
   }
 }
+
+/** What the marker script sees of an element: all it is made to do is set or remove one attribute. */
+type MarkableElement = { setAttribute(name: string, value: string): void; removeAttribute(name: string): void };
+
+function inputHandleOf(handle: ElementHandle): InputHandle {
+  const run = handle as unknown as {
+    evaluate(
+      work: (element: MarkableElement, argument: readonly string[]) => void,
+      argument: readonly string[],
+    ): Promise<void>;
+  };
+  return {
+    ownerFrame: async () => await handle.ownerFrame(),
+    mark: async token =>
+      await run.evaluate(
+        (element, [name, value]) => element.setAttribute(name as string, value as string),
+        [INPUT_MARKER, token],
+      ),
+    unmark: async () =>
+      await run.evaluate((element, [name]) => element.removeAttribute(name as string), [INPUT_MARKER]),
+    boundingBox: async () => await handle.boundingBox(),
+    isVisible: async () => await handle.isVisible(),
+    dispose: async () => await handle.dispose(),
+  };
+}
+
+function inputLocatorOf(locator: Locator): InputLocator {
+  return {
+    first: () => inputLocatorOf(locator.first()),
+    count: async () => await locator.count(),
+    elementHandle: async options => {
+      const handle = await locator.elementHandle(options);
+      return handle === null ? null : inputHandleOf(handle);
+    },
+  };
+}
+
+/** The page as the input bridge sees it: Playwright for the element, DevTools for the node. */
+function inputSubject(page: Page): InputSubject {
+  const key = pageId(page);
+  let sessions = inputSessions.get(key);
+  if (sessions === undefined) {
+    sessions = new InputFrameSessions();
+    inputSessions.set(key, sessions);
+  }
+  return {
+    pageId: key,
+    page: {
+      locator: (selector: string) => inputLocatorOf(page.locator(selector)),
+      isClosed: () => page.isClosed(),
+      url: () => safeUrl(page),
+      title: async () => await safeTitle(page),
+      mainFrame: () => page.mainFrame(),
+      frames: () => page.frames(),
+    } as unknown as InputablePage,
+    cdp: {
+      page: async () => (await pageSession(page)) as unknown as InputCdpSession,
+      frame: async frame => (await page.context().newCDPSession(frame as never)) as unknown as InputCdpSession,
+    },
+    sessions,
+  };
+}
+
+/** The input bridge's browser facts or values, as the worker receives them: parsed, because it trusts no line. */
+function browserFactsParam(value: unknown): BrowserInputFacts {
+  const parsed = InputTargetFactsSchema.safeParse(value);
+  if (!parsed.success || parsed.data.kind !== 'browser') throw new Error('facts are not browser facts');
+  return parsed.data;
+}
+
+function inputPointers(value: unknown): { readonly id: string; readonly target: BrowserElementTarget }[] {
+  if (!Array.isArray(value) || value.length === 0) throw new Error('fields are required');
+  return value.map(item => {
+    const raw = (item ?? {}) as Record<string, unknown>;
+    const target = browserElementParam(raw.target);
+    if (typeof raw.id !== 'string' || raw.id === '' || target === undefined)
+      throw new Error('a field needs an id and a target');
+    return { id: raw.id, target };
+  });
+}
+
+/**
+ * The one write of an owner's values. EVERYTHING is caught here and answers a word, because `answer` would
+ * put an error's first line on the wire and a value must never ride in one.
+ */
+async function inputType(params: Readonly<Record<string, unknown>>): Promise<Record<string, unknown>> {
+  let page: Page;
+  try {
+    page = targetPage(params.pageId);
+  } catch {
+    return { outcome: 'target_gone' };
+  }
+  let expected: BrowserInputFacts;
+  let values: BrowserInputValue[];
+  try {
+    expected = browserFactsParam(params.expected);
+    if (!Array.isArray(params.values)) throw new Error('values are required');
+    values = params.values.map(item => {
+      const raw = (item ?? {}) as Record<string, unknown>;
+      if (typeof raw.field !== 'string' || typeof raw.text !== 'string')
+        throw new Error('a value needs a field and text');
+      return { field: raw.field, text: raw.text };
+    });
+  } catch {
+    return { outcome: 'target_changed' };
+  }
+  try {
+    return { outcome: await typeInputFields(inputSubject(page), expected, values, params.submit === true) };
+  } catch {
+    return { outcome: 'uncertain' };
+  }
+}
+
 /** A page that always exists, so a listing is never empty: Chrome's own first tab, or a new one. */
 async function anyPage(): Promise<Page> {
   return livePages()[0] ?? (await requireContext().newPage());
@@ -669,6 +815,23 @@ async function act(request: Request): Promise<Record<string, unknown>> {
       });
       return await acted(page, typed.passwordField ? { passwordField: true } : {});
     }
+    case 'inputDocument':
+      return { document: await describeInputDocument(inputSubject(targetPage(params.pageId))) };
+    case 'inputObserve':
+      return {
+        observation: await observeInputFields(inputSubject(targetPage(params.pageId)), inputPointers(params.fields)),
+      };
+    case 'inputShot': {
+      const page = targetPage(params.pageId);
+      return {
+        shot: await shootInputFields(
+          (await pageSession(page)) as unknown as InputCdpSession,
+          browserFactsParam(params.facts),
+        ),
+      };
+    }
+    case 'inputType':
+      return await inputType(params);
     case 'pointer': {
       const page = targetPage(params.pageId);
       const outcome = await performPointerAct(page as unknown as PointerPage, pointerActParam(params.act));
