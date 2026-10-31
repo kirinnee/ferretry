@@ -10,6 +10,7 @@ import type {
   BoardTaskResponse,
   BoardTaskView,
   LaneSet,
+  WorkRelatedResponse,
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import should from 'should';
@@ -22,6 +23,8 @@ import {
 } from '../../../src/lib/board/board-controllers';
 import type { IBoardGateway, IBoardOutput, SessionDirectoryEntry } from '../../../src/lib/board/ports';
 import type { ITextFileReader } from '../../../src/lib/tasks/ports';
+import { RelatedCheck } from '../../../src/lib/work-search/related';
+import { CapturingOutput, FakeWorkSearchGateway, taskHit } from '../work-search/fixtures';
 import {
   card,
   DENISHA,
@@ -1134,5 +1137,124 @@ describe('the v1 spellings', () => {
 
     // Act + Assert
     should(await refusal(() => controller.listShim({}))).match(/--mine needs a session/u);
+  });
+});
+
+describe('fy task create — related work', () => {
+  const base = { kind: 'feature', title: 'Search the board', ask: 'make search easy', askSource: 'chat://1' };
+
+  const related = (matches: WorkRelatedResponse['matches'] | undefined) => {
+    const searchGateway = new FakeWorkSearchGateway();
+    searchGateway.relatedAnswer = matches === undefined ? undefined : { matches };
+    const searchOutput = new CapturingOutput();
+    const log: string[] = [];
+    const gateway = new FakeGateway();
+    const controller = new BoardController({
+      gateway,
+      output: {
+        success: message => log.push(`ok: ${message}`),
+        report: message => log.push(`report: ${message}`),
+        diagnostic: message => log.push(`diag: ${message}`),
+      },
+      files: new FakeFiles(),
+      binary: 'fy',
+      environmentSessionId: DENISHA,
+      related: new RelatedCheck(searchGateway, searchOutput, 'fy'),
+    });
+    return { controller, gateway, log, searchGateway, searchOutput };
+  };
+
+  const strong = [{ strength: 'strong' as const, hit: taskHit() }];
+
+  it('should refuse a strong duplicate, create nothing, and list the matches and the ways out', async () => {
+    // Arrange
+    const { controller, gateway, searchGateway } = related(strong);
+
+    // Act
+    const message = await refusal(() => controller.create([], base));
+
+    // Assert
+    should(gateway.createCalls).eql([]);
+    should(searchGateway.relatedCalls[0]).eql({
+      request: { kind: 'task', title: 'Search the board', ask: 'make search easy' },
+      as: DENISHA,
+    });
+    should(message).containEql('&F303');
+    should(message).containEql('fy task create … --related F12');
+    should(message).containEql('fy task create … --new');
+  });
+
+  it('should create anyway with --new, and not even ask', async () => {
+    // Arrange
+    const { controller, gateway, searchGateway } = related(strong);
+
+    // Act
+    await controller.create([], { ...base, new: true });
+
+    // Assert
+    should(gateway.createCalls).have.length(1);
+    should(searchGateway.relatedCalls).eql([]);
+  });
+
+  it('should note an existing card instead of creating with --related', async () => {
+    // Arrange
+    const { controller, gateway, log, searchGateway } = related(strong);
+
+    // Act
+    await controller.create([], { ...base, related: 'F12' });
+
+    // Assert
+    should(gateway.createCalls).eql([]);
+    should(searchGateway.relatedCalls).eql([]);
+    should(gateway.actCalls).have.length(1);
+    should(gateway.actCalls[0]?.id).equal('F12');
+    should(gateway.actCalls[0]?.request).containEql({ action: 'note' });
+    should(JSON.stringify(gateway.actCalls[0]?.request)).containEql('Search the board — make search easy');
+    should(log).containEql('ok: Added to &F12 instead of a new card');
+  });
+
+  it('should refuse --new together with --related, and a related id that is no card', async () => {
+    // Arrange
+    const { controller, gateway } = related(strong);
+
+    // Act + Assert
+    should(await refusal(() => controller.create([], { ...base, new: true, related: 'F12' }))).match(/not both/u);
+    should(await refusal(() => controller.create([], { ...base, related: 'junk' }))).match(/--related id/u);
+    should(gateway.createCalls).eql([]);
+  });
+
+  it('should print the matches as JSON, and still create nothing, on a strong match with --json', async () => {
+    // Arrange
+    const { controller, gateway, searchOutput } = related(strong);
+
+    // Act
+    await refusal(() => controller.create([], { ...base, json: true }));
+
+    // Assert
+    should(gateway.createCalls).eql([]);
+    should(JSON.parse(searchOutput.lines[0] ?? '').related[0].hit.id).equal('F303');
+  });
+
+  it('should create on weak matches alone', async () => {
+    // Arrange
+    const { controller, gateway } = related([{ strength: 'weak', hit: taskHit() }]);
+
+    // Act
+    await controller.create([], base);
+
+    // Assert
+    should(gateway.createCalls).have.length(1);
+  });
+
+  it('should create with one dim line when the daemon has no search yet', async () => {
+    // Arrange
+    const { controller, gateway, searchOutput } = related(undefined);
+
+    // Act
+    await controller.create([], base);
+
+    // Assert
+    should(gateway.createCalls).have.length(1);
+    should(searchOutput.notices).eql(['related check skipped: this daemon has no search yet']);
   });
 });

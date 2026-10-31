@@ -834,6 +834,27 @@ export const MCP_LESSON_TOOLS: readonly (McpToolDefinition & { readonly lessonTo
 ];
 
 /**
+ * The `search_work` tool: cards and agenda items by what they say, so a ferret finds the work that already
+ * covers its idea before filing a second one. Read-only; the daemon decides what the caller may see.
+ */
+export const MCP_SEARCH_TOOLS: readonly (McpToolDefinition & { readonly searchTool: true })[] = [
+  {
+    name: 'search_work',
+    searchTool: true,
+    description:
+      'Search cards and all agenda items by words or an id (F303, A3). Search first; update or link a match, not a duplicate.',
+    inputSchema: object(
+      {
+        query: { type: 'string', minLength: 1, maxLength: 200 },
+        kind: { type: 'string', enum: ['task', 'agenda'] },
+        open: { type: 'boolean', description: 'Only open work.' },
+      },
+      ['query'],
+    ),
+  },
+];
+
+/**
  * The `instructions` tool: which of its own system-prompt sections this ferret launched with, and how the
  * owner turns each on — the `fy instructions` report. Answered by the server from the launch environment
  * it inherited, the one the wrapper composed the prompt from, so nothing goes to the daemon.

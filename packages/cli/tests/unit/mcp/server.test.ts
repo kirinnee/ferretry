@@ -7,11 +7,14 @@ import {
   type AgentLessonToolResult,
   type AgentToolCall,
   type AgentToolResult,
+  type WorkSearchQueryInput,
+  type WorkSearchResponse,
 } from '@ferretry/protocol';
 import should from 'should';
 import type { BrowserWait, TerminalWait } from '../../../src/lib/agent-tools/client';
 import { McpServer } from '../../../src/lib/mcp/server';
-import { MCP_CONFIG_TOOLS, MCP_LESSON_TOOLS, MCP_TOOLS } from '../../../src/lib/mcp/tools';
+import { agendaHit, response, taskHit } from '../work-search/fixtures';
+import { MCP_CONFIG_TOOLS, MCP_LESSON_TOOLS, MCP_SEARCH_TOOLS, MCP_TOOLS } from '../../../src/lib/mcp/tools';
 
 function harness(
   answer: (call: AgentToolCall | TerminalWait | BrowserWait) => Promise<AgentToolResult> = async () => ({
@@ -20,6 +23,7 @@ function harness(
   options: {
     config?: (call: AgentConfigToolCall) => Promise<AgentConfigToolResult>;
     lessons?: (call: AgentLessonToolCall) => Promise<AgentLessonToolResult>;
+    search?: (query: WorkSearchQueryInput) => Promise<WorkSearchResponse>;
     instructions?: string;
     environment?: Readonly<Record<string, string>>;
   } = {},
@@ -27,6 +31,7 @@ function harness(
   const calls: (AgentToolCall | TerminalWait | BrowserWait)[] = [];
   const configCalls: AgentConfigToolCall[] = [];
   const lessonCalls: AgentLessonToolCall[] = [];
+  const searchCalls: WorkSearchQueryInput[] = [];
   const server = new McpServer(
     {
       call: async call => {
@@ -49,6 +54,10 @@ function harness(
         lessonCalls.push(call);
         return await (options.lessons ?? (async () => ({ summary: 'filed as a new lesson', outcome: 'filed' })))(call);
       },
+      search: async query => {
+        searchCalls.push(query);
+        return await (options.search ?? (async () => response([])))(query);
+      },
     },
     {
       name: 'ferretry',
@@ -59,7 +68,7 @@ function harness(
   );
   const request = async (method: string, params?: unknown, id: number | string = 1) =>
     await server.handle({ jsonrpc: '2.0', id, method, ...(params === undefined ? {} : { params }) });
-  return { server, calls, configCalls, lessonCalls, request };
+  return { server, calls, configCalls, lessonCalls, searchCalls, request };
 }
 
 const toolCall = (name: string, args?: Record<string, unknown>) => ({
@@ -145,6 +154,7 @@ describe('McpServer — the tools', () => {
       'config_validate',
       'config_write',
       'lessons_suggest',
+      'search_work',
       'instructions',
     ]);
     should(names.every(name => /^[a-zA-Z0-9_-]{1,64}$/u.test(name))).be.true();
@@ -152,6 +162,7 @@ describe('McpServer — the tools', () => {
     should(MCP_TOOLS.map(tool => tool.tool)).deepEqual([...AGENT_TOOL_NAMES]);
     should(MCP_CONFIG_TOOLS.map(tool => tool.configTool)).deepEqual(['config.read', 'config.validate', 'config.write']);
     should(MCP_LESSON_TOOLS.map(tool => tool.lessonTool)).deepEqual(['lessons.suggest']);
+    should(MCP_SEARCH_TOOLS.map(tool => tool.name)).deepEqual(['search_work']);
   });
 
   it('should carry secretHint on terminal_request_input as a hint the owner still taps', async () => {
@@ -367,7 +378,7 @@ describe('McpServer — the tools', () => {
 
   it('should keep the tools list inside the budget every agent pays for it, every turn', () => {
     // Arrange — a runtime that loads every schema (Codex) carries this whole list in each prompt.
-    const listed = [...MCP_TOOLS, ...MCP_CONFIG_TOOLS, ...MCP_LESSON_TOOLS].map(
+    const listed = [...MCP_TOOLS, ...MCP_CONFIG_TOOLS, ...MCP_LESSON_TOOLS, ...MCP_SEARCH_TOOLS].map(
       ({ name, description, inputSchema }) => ({ name, description, inputSchema }),
     );
 
@@ -804,6 +815,87 @@ describe('McpServer — the lessons tool', () => {
     });
     should(await odd.request('tools/call', toolCall('lessons_suggest', { rule: 'a rule', scope: 'global' }))).match({
       result: { isError: true, content: [{ text: 'a bare string' }] },
+    });
+  });
+});
+
+describe('McpServer — the search tool', () => {
+  it('should be listed with a required query, and read-only text as its answer', async () => {
+    // Arrange
+    const { request } = harness();
+
+    // Act
+    const answer = (await request('tools/list')) as {
+      result: { tools: { name: string; inputSchema: { required?: string[] } }[] };
+    };
+
+    // Assert
+    const tool = answer.result.tools.find(candidate => candidate.name === 'search_work');
+    should(tool?.inputSchema.required).deepEqual(['query']);
+  });
+
+  it('should ask the daemon with the query, kind and open flag, and answer one line per hit', async () => {
+    // Arrange
+    const { request, searchCalls } = harness(undefined, {
+      search: async () => response([taskHit(), agendaHit({ sessionId: 'mvgt2oz9' })], 5),
+    });
+
+    // Act
+    const answer = (await request(
+      'tools/call',
+      toolCall('search_work', { query: ' relay ', kind: 'agenda', open: true }),
+    )) as { result: { content: { text: string }[] } };
+
+    // Assert
+    should(searchCalls).deepEqual([{ q: 'relay', kind: 'agenda', open: true }]);
+    const lines = answer.result.content[0]?.text.split('\n') ?? [];
+    should(lines[0]).startWith('&F303 task [In progress] Work search');
+    should(lines[0]).containEql('make search easy and fast');
+    should(lines[1]).startWith('!A3 agenda [open] (agenda of mvgt2oz9) Pick a relay');
+    should(lines[2]).equal('(2 of 5 shown; narrow it with kind or open)');
+  });
+
+  it('should say so when nothing matches, and leave kind and open out of the query when not given', async () => {
+    // Arrange
+    const { request, searchCalls } = harness();
+
+    // Act
+    const answer = await request('tools/call', toolCall('search_work', { query: 'nothing here' }));
+
+    // Assert
+    should(searchCalls).deepEqual([{ q: 'nothing here', open: false }]);
+    should(answer).match({ result: { content: [{ text: /No cards or agenda items match/u }] } });
+  });
+
+  it('should refuse arguments it does not take before asking the daemon', async () => {
+    // Arrange
+    const { request, searchCalls } = harness();
+
+    // Act
+    const none = await request('tools/call', toolCall('search_work', {}));
+    const badKind = await request('tools/call', toolCall('search_work', { query: 'a', kind: 'both' }));
+    const extra = await request('tools/call', toolCall('search_work', { query: 'a', project: 'x' }));
+
+    // Assert
+    should(searchCalls).deepEqual([]);
+    should(none).match({ result: { isError: true } });
+    should(badKind).match({ result: { isError: true } });
+    should(extra).match({ result: { isError: true } });
+  });
+
+  it('should hand a thrown refusal back as a tool error', async () => {
+    // Arrange
+    const { request } = harness(undefined, {
+      search: async () => {
+        throw new Error('daemon unreachable');
+      },
+    });
+
+    // Act + Assert
+    should(await request('tools/call', toolCall('search_work', { query: 'a' }))).deepEqual({
+      jsonrpc: '2.0',
+      id: 1,
+      result: { content: [{ type: 'text', text: 'daemon unreachable' }], isError: true },
     });
   });
 });

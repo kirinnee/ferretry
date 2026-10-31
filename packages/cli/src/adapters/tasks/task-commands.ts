@@ -75,6 +75,8 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
     .option('--pr <url>', 'a pull request link (repeatable)', collect, [])
     .option('--branch <branch>', 'the branch it is built on')
     .option('--doc <path>', 'a document link (repeatable)', collect, [])
+    .option('--related <id>', 'a card this belongs to: add it there as a note and create nothing')
+    .option('--new', 'create even if a card on the same thing exists')
     .action(async (titleWords: string[], options: TaskCreateFlags) => {
       await board.create(titleWords, options);
     });

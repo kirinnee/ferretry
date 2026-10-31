@@ -771,7 +771,8 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql(
       '`zz agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<the ask>"` (required)',
     );
-    should(text).containEql('Title ≤40, ask ≤120.');
+    // Search before filing: an existing item is updated or linked, not duplicated.
+    should(text).containEql('Search first (`zz search`); update or link a match instead of adding a duplicate.');
     should(text).containEql('no "as above", ticket/PR numbers, paths, acronyms');
     should(text).containEql('`--term "X=meaning"`');
     should(text).containEql('`--decided`=settled, `--still-open`=left');
@@ -832,9 +833,9 @@ describe('BOARD_INSTRUCTION', () => {
     should(text).not.containEql('#F');
     should(text).containEql('New ask, first:');
     should(text).containEql(
-      '`zz task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>`',
+      '`zz task create -k <kind> -t "<≤5 words>" --ask "<exact words>" --premise <point> --context <point>`',
     );
-    should(text).containEql('(zz new/start make one)');
+    should(text).containEql('Search first (`zz search`); update or link a match instead of adding a duplicate.');
     should(text).containEql(
       'Before To test: `zz task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"`',
     );
@@ -846,8 +847,6 @@ describe('BOARD_INSTRUCTION', () => {
     should(text).containEql('`zz agenda add --task <id>` (owner)');
     should(text).containEql('`zz task depend` (card)');
     should(text).containEql('`zz task block` (else)');
-    should(text).containEql('`zz task drop --reason`');
-    should(text).containEql('`zz task focus <id>`');
     should(text).containEql('`zz task reopen <id> --to <lane> --ask "<their words>"`');
     should(text).containEql("Owner's bug:");
     should(text).containEql('Starts, PRs, merges, releases, `zz signal done` self-move; owner closes.');

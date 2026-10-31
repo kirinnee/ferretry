@@ -73,7 +73,7 @@ Always inline: never publish an artifact, page, gist or link to explain, unless 
 Make it a short story the reader drives: step-through Next buttons, sliders, tap to reveal. One idea per step, short labels, gentle motion (honour prefers-reduced-motion).
 Write a fenced block whose info string is exactly fy-render: line 1 `type: <type>`, line 2 `alt: <one-line description>`, then a line `---`, then the payload.
 - mermaid: Mermaid source (flowchart TB, sequenceDiagram, …): top-down, short labels; auto-themed, so no %%{init}%% or colours.
-- svg: one self-contained <svg>…</svg> (CSS animation welcome); no script, foreignObject or external links.
+- svg: one self-contained <svg>…</svg>; no script, foreignObject or external links.
 - html: a fragment with inline CSS and <script> for interaction (runs isolated); load nothing from the network.
 - chart: JSON/YAML {kind: bar|line|area|pie|…, x: […], series: [{name, data}]}; full spec: `fy render guide chart`.
 - map, image, video, audio, pdf: `fy render guide <type>`.
@@ -85,7 +85,7 @@ alt: How a request flows
 flowchart TB
   Phone --> Relay --> Daemon
 ```
-Renders inline in chat. Chat only: never write fy-render into files, docs, commits or PRs.
+Chat only: never write fy-render into files, docs, commits or PRs.
 ````
 
 ## The supported forms

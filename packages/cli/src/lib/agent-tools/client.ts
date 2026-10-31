@@ -15,6 +15,10 @@ import {
   type SurfaceControlView,
   SurfaceControlViewSchema,
   type SurfaceKind,
+  WORK_SEARCH_PATH,
+  type WorkSearchQueryInput,
+  type WorkSearchResponse,
+  WorkSearchResponseSchema,
 } from '@ferretry/protocol';
 import { FY_CLIENT_HEADER, FY_CLIENT_NAME, FY_SESSION_ID_HEADER } from '../session/connection.ts';
 
@@ -147,6 +151,19 @@ export class AgentToolsClient {
       AGENT_LESSONS_PATH,
       AgentLessonToolResultSchema,
       { method: 'POST', body: JSON.stringify(call), headers: this.agentHeaders() },
+      TOOL_REQUEST_TIMEOUT_MS,
+    );
+  }
+
+  /** `search_work`: the shared work search, read as the person this process is (the agent route has no search). */
+  async search(query: WorkSearchQueryInput): Promise<WorkSearchResponse> {
+    const parameters = new URLSearchParams({ q: query.q });
+    if (query.kind !== undefined) parameters.set('kind', query.kind);
+    if (query.open === true) parameters.set('open', 'true');
+    return await this.gateways.person.request(
+      `${WORK_SEARCH_PATH}?${parameters.toString()}`,
+      WorkSearchResponseSchema,
+      { method: 'GET', headers: this.personHeaders() },
       TOOL_REQUEST_TIMEOUT_MS,
     );
   }

@@ -26,6 +26,7 @@ import { AgendaBriefInput } from '../src/adapters/agenda/brief-input';
 import { SessionCredentialGateway } from '../src/adapters/agent-tools/session-credential-gateway';
 import { registerBoardCommands } from '../src/adapters/board/board-commands';
 import { FyBoardGateway } from '../src/adapters/board/fy-board-gateway';
+import { FyWorkSearchGateway } from '../src/adapters/work-search/fy-work-search-gateway';
 import { registerBoardImportCommand } from '../src/adapters/board-import/board-import-command';
 import { FyBoardImportGateway } from '../src/adapters/board-import/fy-board-import-gateway';
 import { FyLaneGateway } from '../src/adapters/board-lanes/fy-lane-gateway';
@@ -85,6 +86,9 @@ import { StandaloneRelease } from '../src/adapters/update/standalone-release';
 import { ProtocolDaemonUpdateView } from '../src/adapters/update/update-view';
 import { registerAgendaCommands } from '../src/lib/agenda/commands';
 import { AgendaController } from '../src/lib/agenda/controller';
+import { registerWorkSearchCommands } from '../src/lib/work-search/commands';
+import { WorkSearchController } from '../src/lib/work-search/controller';
+import { RelatedCheck } from '../src/lib/work-search/related';
 import { ProtocolAgendaGateway } from '../src/lib/agenda/gateway';
 import {
   AgentToolsClient,
@@ -885,6 +889,11 @@ function accountCommandDeps(world: CliWorld, client: SharedDaemonClient): Accoun
   };
 }
 
+/** The related-work check a create asks before it files: the same daemon search `fy search` reads. */
+function relatedCheck(world: CliWorld, client: SharedDaemonClient): RelatedCheck {
+  return new RelatedCheck(new FyWorkSearchGateway(client), world.io, BINARY_NAME);
+}
+
 /**
  * One line per command group. **Append here; never rewrite another group's line.**
  *
@@ -905,6 +914,7 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         new AgendaBriefInput(world.cwd),
         undefined,
         { interactive: () => world.io.interactive(), ask: async message => await world.prompt.ask(message) },
+        relatedCheck(world, client),
       ),
       async (words, options) => await runNotify(notifyPorts, words, options),
     );
@@ -1011,6 +1021,7 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       files: new BunTextFileReader(),
       binary: BINARY_NAME,
       environmentSessionId: ownSessionId,
+      related: relatedCheck(world, client),
     });
     registerTaskCommands(program, { board });
     registerBoardCommands(program, board);
@@ -1389,6 +1400,16 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
           clientName: BINARY_NAME,
           clientVersion: pkg.version,
         }),
+    ),
+  ({ program, world, client, ownSessionId }) =>
+    registerWorkSearchCommands(
+      program,
+      new WorkSearchController({
+        gateway: new FyWorkSearchGateway(client),
+        output: world.io,
+        binary: BINARY_NAME,
+        environmentSessionId: ownSessionId,
+      }),
     ),
 ];
 

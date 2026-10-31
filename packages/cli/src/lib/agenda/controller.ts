@@ -6,6 +6,7 @@ import {
   agendaBriefRequiredProblems,
   DAEMON_FEATURES,
   formatTaskRef,
+  parseTaskRef,
   type TaskRef,
 } from '@ferretry/protocol';
 import { type AnswerFlags, parseAnswer } from './answer.ts';
@@ -17,6 +18,7 @@ import {
   type EditFlags,
   parseBriefFile,
 } from './brief.ts';
+import type { RelatedCheck } from '../work-search/related.ts';
 import { type CardFlag, resolveCardFlag } from './card-flag.ts';
 import type { IAgendaBriefInput, IAgendaGateway, IAgendaOutput, IAgendaPrompt } from './ports.ts';
 import { agendaReference, parseAgendaReference } from './reference.ts';
@@ -65,6 +67,10 @@ export interface AgendaAddOptions extends AgendaCommandOptions, Omit<BriefFlags,
   readonly bodyFile?: string;
   /** `--offer-close`: the owner's tap may also close the card the item belongs to. */
   readonly offerClose?: boolean;
+  /** `--new`: raise it even when the related-work check found a strong match. */
+  readonly new?: boolean;
+  /** `--related <id>`: a card to tie the item to, or an agenda item to edit instead of raising a duplicate. */
+  readonly related?: string;
 }
 
 /** Flags that reword an open item. */
@@ -134,6 +140,8 @@ export class AgendaController {
     private readonly now: () => number = Date.now,
     /** Asks `clear --agents` for its yes; absent, only `--yes` goes ahead. */
     private readonly prompt?: IAgendaPrompt,
+    /** Asks the daemon whether a new item duplicates one; absent, adds are never checked. */
+    private readonly related?: RelatedCheck,
   ) {}
 
   /** Said once on stderr by the deprecated `attention` spelling; stdout stays the command's own. */
@@ -173,7 +181,8 @@ export class AgendaController {
 
   async add(words: readonly string[], options: AgendaAddOptions): Promise<void> {
     const [file, body] = await this.#inputs(options.jsonFile, options.bodyFile);
-    const flag = resolveCardFlag(words, options);
+    const pointer = this.#relatedPointer(options);
+    const flag = resolveCardFlag(words, pointer.card === undefined ? options : { ...options, task: pointer.card });
     const composed = composeAddRequest(
       flag.words,
       {
@@ -185,6 +194,10 @@ export class AgendaController {
       file,
     );
     requireBrief(composed);
+    if (pointer.item !== undefined) return await this.#editInstead(pointer.item, composed, options);
+    if (flag.card === undefined && pointer.card === undefined && options.new !== true) {
+      await this.#guardRelated(composed, options);
+    }
     const carded = flag.card === undefined ? composed : await this.#withCard(composed, flag.card);
     const request = options.offerClose === true ? await this.#withOfferClose(carded) : carded;
     const sessionId = this.#target(options);
@@ -197,6 +210,66 @@ export class AgendaController {
     const raised = onlyNewId(before, after);
     const verb = raised === undefined ? 'agenda item recorded' : `agenda ${agendaReference(raised)} recorded`;
     this.#report(after, options, () => renderAgendaMutation(verb, undefined, after, raised));
+  }
+
+  /** `--related`: a card (tie the item to it) or an agenda item (edit it instead); never both, never with `--new`. */
+  #relatedPointer(options: AgendaAddOptions): { card?: string; item?: AgendaId } {
+    const typed = options.related?.trim() ?? '';
+    if (typed === '') return {};
+    if (options.new === true) throw new Error('pass --new or --related <id>, not both');
+    if (parseTaskRef(typed).ok) {
+      if (typeof options.task === 'string') throw new Error('pass --task <card> or --related <card>, not both');
+      return { card: typed };
+    }
+    return { item: parseAgendaReference(typed) };
+  }
+
+  async #guardRelated(
+    request: Extract<AgendaActionRequest, { action: 'add' }>,
+    options: AgendaAddOptions,
+  ): Promise<void> {
+    if (this.related === undefined) return;
+    const binary = this.related.binary;
+    const ask = request.why === request.subject ? request.subject : `${request.subject}\n${request.why}`;
+    await this.related.guard('agenda', request.title ?? request.subject, ask, {
+      as: this.#actor(options),
+      json: options.json,
+      choices: [
+        `${binary} agenda add … --related A3   the match is yours: prints the ${binary} agenda edit that rewords it`,
+        `${binary} agenda add … --related F12  tie it to a card instead of raising a new item`,
+        `${binary} agenda add … --new          it really is separate; raise it anyway`,
+        `${binary} send <callsign> "…"         the match is another ferret's: ask them`,
+      ],
+    });
+  }
+
+  /** `--related A3`: nothing is raised. Your own item gets the `edit` that rewords it; another ferret's is theirs to change. */
+  async #editInstead(
+    id: AgendaId,
+    request: Extract<AgendaActionRequest, { action: 'add' }>,
+    options: AgendaAddOptions,
+  ): Promise<void> {
+    const sessionId = this.#target(options);
+    const reference = agendaReference(id);
+    const binary = this.related?.binary ?? 'fy';
+    if ((await this.gateway.snapshot(sessionId)).items.some(item => item.id === id)) {
+      const title = request.title === undefined ? '' : ` --title ${shellQuote(request.title)}`;
+      this.out.success(
+        `${reference} is already yours, so nothing was raised. Reword it instead:\n${binary} agenda edit ${id}${title} --summary ${shellQuote(request.subject)}`,
+      );
+      return;
+    }
+    const owner = await this.related?.agendaOwner(id, this.#actor(options));
+    if (owner === undefined) throw new Error(`no agenda item ${reference} in your agenda; nothing was raised`);
+    throw new Error(
+      `${reference} belongs to ${owner.callsign}, so it is theirs to change and nothing was raised. Ask them: ${binary} send ${owner.callsign} "<what to change>"`,
+    );
+  }
+
+  /** The session the related check speaks as: the one the command runs inside, else the one `--session` names. */
+  #actor(options: AgendaCommandOptions): string | undefined {
+    const typed = options.session?.trim() ?? '';
+    return typed !== '' ? typed : this.ownSessionId?.trim() || undefined;
   }
 
   async edit(reference: string, options: AgendaEditOptions): Promise<void> {
@@ -442,6 +515,9 @@ function describeClear(result: AgendaClearAgentsResult): string {
   const ferrets = result.sessions === 1 ? 'ferret' : 'ferrets';
   return `${result.cleared} open agenda ${items} on ${result.sessions} agent ${ferrets}`;
 }
+
+/** One shell word, single-quoted, so a title with spaces or quotes pastes back as typed. */
+const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
 
 /** The options minus `--by`, which is read separately into `neededBy`. */
 function withoutBy<T extends { readonly by?: string }>(options: T): Omit<T, 'by'> {

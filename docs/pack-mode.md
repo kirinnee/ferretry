@@ -41,7 +41,7 @@ called `fy`:
 
 ```text
 Pack mode: you may hand self-contained parts of your task to sub-ferrets — other agents, each on the model that suits its part. Prefer them over your built-in subagents for real work; do small things yourself. Pick each model by the Routing line below.
-1. `fy recommend` lists the models usable now, most quota first, with the command to start each.
+1. `fy recommend` lists the models usable now, most quota first.
 2. `fy new --runtime <runtime> --model <model> [--effort <level>] --name "<short task title>" "<complete brief>"` starts one (`fy new --auto "<brief>"` lets Ferretry choose). Always pass `--name` (2–5 Title Case words). The brief is all it knows: say what to do, where, and what to report.
 3. If it refuses (out_of_quota, not_logged_in, cli_missing, probe_failed, …), read the reason and start the next candidate. limit_reached or depth_exceeded: do the work yourself.
 4. `fy wait <id>` blocks until it finishes and prints its result. Check it, then combine the results yourself.

@@ -413,10 +413,20 @@ Ferretry's own settings, then how to notify the owner and, in agenda mode, raise
 
 The wrapper appends each ferret's own sections to that same value at launch — hypermedia, Pack mode and
 the lessons teaching, each when its switch is on ([hypermedia.md](hypermedia.md#delivered-as-system-instructions-per-ferret)).
+
 The server's own `initialize` instructions are one line; `lessons_suggest` files a lesson through
 `POST /v1/agent/lessons` ([learning.md](learning.md)); `instructions` answers, from the environment the
 server inherited, which of those sections this ferret launched with — the `fy instructions` report
 ([hypermedia.md](hypermedia.md#delivered-as-system-instructions-per-ferret)).
+
+`search_work` {`query`, `kind`?, `open`?} is `fy search` for a ferret: cards and agenda items by what they say
+(or an id like F303 or A3), one text line per hit — id, kind, standing, title, the matching line. It calls
+`GET /v1/search` through the person gateway the MCP server already holds (the route is operator-minimum plus
+`fleet:use`, and an agent's own credential is not that), so it adds no route of its own. The ferret is told
+to search before it files (the board and agenda sections end their opening with the same rule), and
+`fy task create` / `fy agenda add` run the daemon's related check themselves
+(`POST /v1/search/related`): a strong match refuses the create unless `--new` (or `--related <id>`) says what to
+do instead. A daemon without `work.search.1` answers 404 and the create goes ahead with one dim line.
 
 MCP tool names use `_` (`terminal_open`), because provider tool APIs refuse `.`; each maps one-to-one to
 the wire tool (`terminal.open`). A refusal comes back as a tool result with `isError: true` and the
