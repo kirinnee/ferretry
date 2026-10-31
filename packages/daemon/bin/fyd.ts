@@ -284,6 +284,7 @@ import {
   NodeConversationLinker,
   NodeDataChannelEngine,
   NodeForeignHistoryFiles,
+  NodeGzip,
   NodePairingCryptography,
   NodeSessionBrowserLauncher,
   NodeSkillFiles,
@@ -12224,6 +12225,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     ...createdSubsystems,
     health: { ...createdSubsystems.health, legacyWire: () => legacyWire.snapshot() },
     legacyWire,
+    compressor: new NodeGzip(),
   };
   // Registered BEFORE the address is bound, like every other acquisition: from here on the daemon can
   // be asked to put an X server, a Chrome and a VNC listener on this host, and whatever it took must

@@ -1227,6 +1227,25 @@ describe('the mounted daemon surface', () => {
     should(firstLiteral).be.below(firstPattern);
   });
 
+  it('should compress only the audited GET routes, so every other answer — and every new one — stays plain', () => {
+    // BREACH: a compressed answer's length depends on its content, so an answer that can carry a secret, a
+    // token, a digest of one, a pairing code or input-request material is never gzipped
+    // (`lib/api/compression.ts`). Compression is OPT-IN: this is the whole set, so adding a route to it fails
+    // here until its author has audited the body and listed it, and a route nobody audited is never compressed.
+    // Arrange
+    const routes = mountedDaemonRoutes(base, subsystems());
+
+    // Act
+    const compressed = routes
+      .filter(route => route.method === 'GET' && route.compress === true)
+      .map(route => route.path)
+      .sort();
+
+    // Assert — the fleet list and the board list: names, states, work text and launch-instruction hashes.
+    should(compressed).eql(['/v1/board', '/v1/sessions']);
+    should(routes.filter(route => route.method !== 'GET' && route.compress === true)).eql([]);
+  });
+
   it('should dispatch a base feed and a subsystem route through the same dispatcher', async () => {
     // Arrange
     // REFRESHED FIRST, exactly as the composition root does before it binds an address. A service

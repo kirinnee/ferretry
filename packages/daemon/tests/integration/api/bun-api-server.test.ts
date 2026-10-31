@@ -1,9 +1,17 @@
 import { afterEach, describe, it } from 'bun:test';
+import { request as httpRequest } from 'node:http';
+import { gunzipSync } from 'node:zlib';
 import type { VersionSkew } from '@ferretry/protocol';
 import { FyApiClient } from '@ferretry/protocol/client';
 import should from 'should';
 import { z } from 'zod';
-import { BunApiServer, BunHttpServe, type HostServeOptions, toApiRequest } from '../../../src/adapters/api/index.ts';
+import {
+  BunApiServer,
+  BunHttpServe,
+  type HostServeOptions,
+  NodeGzip,
+  toApiRequest,
+} from '../../../src/adapters/api/index.ts';
 import {
   ApiDispatcher,
   ApiError,
@@ -208,6 +216,61 @@ describe('BunApiServer', () => {
     should(response.status).equal(418);
     should(response.headers.get('cache-control')).equal('no-store');
     should(await response.text()).equal('short and stout');
+  });
+
+  it('should send a large JSON answer as gzip to a caller that asks, and the same bytes to one that does not', async () => {
+    // Arrange
+    const big = {
+      rows: Array.from({ length: 400 }, (_, index) => ({ index, name: `session-${index}`, state: 'running' })),
+    };
+    const route: ApiRoute = {
+      method: 'GET',
+      path: '/big',
+      minimum: 'none',
+      compress: true,
+      handle: async () => jsonResponse(big),
+    };
+    const http = new ApiDispatcher(
+      new ApiRouter([route]),
+      CREDENTIALS,
+      NO_GOVERNED_ROUTES_GUARD,
+      undefined,
+      undefined,
+      undefined,
+      new NodeGzip(),
+    );
+    const sockets = new ApiSocketDispatcher(new ApiRouter([]), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
+    const handle = await new BunApiServer().listen({ http, sockets, corsOrigins: [] }, BIND);
+    running.push(handle);
+    const raw = (acceptEncoding: string) =>
+      new Promise<{ readonly headers: Record<string, string | string[] | undefined>; readonly body: Buffer }>(
+        (resolve, reject) => {
+          const outgoing = httpRequest(
+            `${handle.url}/big`,
+            { headers: { 'accept-encoding': acceptEncoding } },
+            incoming => {
+              const chunks: Buffer[] = [];
+              incoming.on('data', (chunk: Buffer) => chunks.push(chunk));
+              incoming.on('end', () => resolve({ headers: incoming.headers, body: Buffer.concat(chunks) }));
+            },
+          );
+          outgoing.on('error', reject);
+          outgoing.end();
+        },
+      );
+
+    // Act
+    const asked = await raw('gzip');
+    const plain = await raw('identity');
+
+    // Assert
+    should(asked.headers['content-encoding']).equal('gzip');
+    should(String(asked.headers.vary)).match(/accept-encoding/i);
+    should(plain.headers['content-encoding']).be.undefined();
+    should(String(plain.headers.vary)).match(/accept-encoding/i);
+    should(gunzipSync(asked.body).toString('utf8')).equal(plain.body.toString('utf8'));
+    should(asked.body.length).be.below(plain.body.length);
+    should(asked.headers.etag).equal(plain.headers.etag);
   });
 
   it('should deliver a request body to the handler', async () => {

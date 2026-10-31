@@ -349,6 +349,14 @@ export interface ApiRoute extends ScopedRoute {
    *  entire value is freshness. */
   readonly noStore?: boolean;
   /**
+   * Set when a `GET` answer has been audited to hold no secret, token, digest of one, pairing code or
+   * input-request material, and is big enough to be worth compressing (`compression.ts`, BREACH). It is
+   * OPT-IN, so a route nobody audited — including every one added later — is never compressed, and it
+   * is separate from `noStore`: the session list is `noStore` for freshness and is exactly the answer
+   * worth compressing.
+   */
+  readonly compress?: true;
+  /**
    * An older spelling of a route, kept for older clients until the agenda removal release
    * (docs/agenda.md § Compatibility). The dispatcher records every hit on one (the legacy-use counter), so
    * the release that removes it can wait for a quiet fortnight. It changes nothing about who may reach the

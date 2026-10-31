@@ -170,3 +170,18 @@ export function partitionTunnelBody(body: string, budgetBytes: number): readonly
   parts.push(body.slice(start));
   return parts;
 }
+
+/**
+ * HOW A COMPRESSED ANSWER CROSSES THE TUNNEL (`docs/relay-protocol.md` §14, "A compressed answer").
+ *
+ * A `res` body is a string, so gzip bytes travel as unpadded base64url under these two response
+ * headers, and a caller asks for them with an ordinary `accept-encoding` request header. Nothing in
+ * the envelope changed — `res` is a strict object, so a new key would be a breaking change — and a
+ * client that never asks never receives one: it gets the plain body it always did. Both ends read the
+ * same two names and two values from here, which is what keeps a daemon and an app from disagreeing
+ * about how to tell a compressed body from a plain one.
+ */
+export const TUNNEL_CONTENT_ENCODING_HEADER = 'content-encoding' as const;
+export const TUNNEL_GZIP_ENCODING = 'gzip' as const;
+export const TUNNEL_TRANSFER_ENCODING_HEADER = 'content-transfer-encoding' as const;
+export const TUNNEL_BASE64URL_TRANSFER = 'base64url' as const;

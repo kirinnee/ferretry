@@ -1760,14 +1760,81 @@ length plus an ordinal, so it never changes for a transcript that is only append
 is `cache-control: private, max-age=31536000, immutable` with a strong `etag` over session, handle and
 size; a request whose `if-none-match` names it is answered `304`. It is governed exactly like `/logs`.
 
-`GET /v1/sessions` — the fleet list every open app re-reads on a beat, about 25 KB on a real fleet —
-is conditional the same way. Its tag is a digest of the exact JSON served, so it moves when any field
+`GET /v1/sessions` — the fleet list every open app re-reads on a beat, about 1.7 MB on a fleet with forty
+running sessions — is conditional the same way. Its tag is a digest of the exact JSON served, so it moves when any field
 of any session moves (a status, a name, a turn count, `journalSequence`), and is computed from the
 body the route already built. The client holds the one last list per connection and answers a `304`
 with a fresh copy of it. A daemon that predates the tag sends no `etag`, and the client holds
 nothing and reads in full as before.
 
-**A live feed starts where the reader already is**, for the same reason. A session view carries
+**A running session's view moves with its transcript** (its context-usage fields follow the last
+turn), so on a fleet with many running sessions the list genuinely changes on most beats and most reads
+are a `200`, not a `304`. That is the tag telling the truth, not a tag that never matches: the tag is
+deterministic, it does not depend on when the list was read, and two reads with nothing changed between
+them are a `304` on the second. It is deliberately NOT derived from a version counter. Building the
+list reads each running session's transcript tail, so no version is cheaper than the body, and a tag
+that skipped the build could answer `304` for a list that had moved. What a large, changing list costs
+on the wire is what the next paragraph removes.
+
+**A compressed answer** (`gzip`). Only a caller that sends `accept-encoding: gzip` in a `req`'s `headers`
+may be answered with the gzip bytes of the body the route would have sent, as unpadded base64url in
+`body`, under two response headers. **A request that names no `accept-encoding` — every app and every
+relay client that predates this — is never answered compressed, by any route.** The framing:
+
+```json
+{
+  "t": "res",
+  "id": 7,
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "etag": "\"…\"",
+    "content-encoding": "gzip",
+    "content-transfer-encoding": "base64url"
+  },
+  "body": "<base64url of the gzip bytes>"
+}
+```
+
+The rules, each of which is a reason it can be trusted:
+
+- **Nothing in the envelope changed.** `res` is a strict object, so a new key would be a breaking change
+  (the version-skew rule). Negotiation rides in free-form `headers`, which makes the change additive on
+  both sides: an older daemon ignores `accept-encoding` and answers plain, and an older app never sends
+  it and is never answered compressed. Neither end can be sent something it cannot read. The names and
+  values are `TUNNEL_*` in `@ferretry/protocol`, read by both ends.
+- **A relayed answer is not a browser fetch**, so nothing decodes it for the app. `RelayClientSession.request`
+  asks for gzip itself (where `DecompressionStream` exists), decodes before it returns, and removes the two
+  headers, so every caller reads the plain text the route wrote. A body that claims compression and is
+  unreadable rejects the request; it is never returned as if it were the answer.
+- **Compression happens before sealing.** The daemon gzips once, in the dispatcher, and the tunnel seals
+  the bytes it is handed, on the direct carrier and the relayed one alike. Plain HTTP (`curl`, `fy`) takes
+  the same bytes as an ordinary `Content-Encoding: gzip` body that its client decodes.
+- **The decoded bytes are the plain answer, and the tag does not change with the encoding.** The `etag` is
+  the digest of the plain body, so a client that learned it over one encoding revalidates over the
+  other, and a `304` is decided before anything is compressed. The 32 MiB bound is on the body as it
+  travels, which is the base64url text.
+- **Only an answer worth compressing is.** A route that opted in (below), `GET`, `200`,
+  `application/json`, at least 8 KiB. An error, a `304`, a text answer and everything a `POST` returns are
+  never compressed, and a route that cannot gain from compression sends the answer it always did. A
+  response that varies by encoding carries `Vary: Accept-Encoding`.
+- **Nothing is compressed unless its route was audited and opted in (BREACH).** Compress-then-encrypt
+  makes a record's length depend on its content, so an answer that carries a secret, a token or the
+  digest of one, a pairing code or input-request material beside text a caller can influence lets an
+  observer of sizes recover it a byte at a time. A list of routes that must NOT be compressed is wrong
+  the day someone adds a route and forgets it, so the default is off and the set that is on is the
+  short, audited one: `GET /v1/sessions` (the fleet list: names, states, context counters and the
+  hashes of launch-instruction sections, which authorise nothing) and `GET /v1/board` (the board list:
+  work-item titles, states and the people's own work text). Every other route — passkeys, secrets, the
+  security settings, pairing codes and devices, fleet credentials and MCP authorisation, the tunnel,
+  push subscriptions, the browser sign-in window and state, file, diff and attachment bytes, session
+  transcripts, messages, logs and any input request — answers plain, and so does any route added
+  later. The route flag is `compress: true`; `tests/unit/runtime/mounts/surface.test.ts` pins the exact
+  set, so enlarging it is a visible change that has to say what its body can hold. Every credential this
+  daemon mints is also the answer to a `POST`, which is never compressed whatever the route says. A
+  terminal or event stream is never compressed either: see below.
+
+**A live feed starts where the reader already is**, to spend fewer bytes in the same way. A session view carries
 `journalSequence`, the journal's last sequence read just before its documents, and a reader that has
 the view opens `/v1/events?sessionId=…&after=<journalSequence>` rather than `after=0`: replaying a
 long session's history was ~370 KB per 1000 events on every chat open, for events the page never
@@ -2137,9 +2204,10 @@ active terminal, as "What a stream session costs" says).
 
 **What is not done, and why.**
 
-- **No compression.** The relay sees every record's size, and compressing a terminal's output before
-  sealing it would make those sizes depend on what is ON the screen — the compress-then-encrypt length
-  side channel. Deltas get most of the byte saving without giving an observer that oracle.
+- **No compression of a stream.** The relay sees every record's size, and compressing a terminal's output
+  before sealing it would make those sizes depend on what is ON the screen — the compress-then-encrypt
+  length side channel. Deltas get most of the byte saving without giving an observer that oracle. A
+  request answer is a different case with a different answer: see "A compressed answer" in §14.
 - **The capture is still a poll, and each write is still a tmux process** (about 2.3 ms each). A
   capture — like every other READ the daemon asks tmux — now travels over one long-lived control-mode
   client (`adapters/tmux/control-tmux-process.ts`), attached `ignore-size` so it takes no part in any

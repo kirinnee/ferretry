@@ -232,8 +232,11 @@ function wantsSocket(request: Request): boolean {
   return request.headers.get('upgrade')?.toLowerCase() === 'websocket';
 }
 
+/** The dispatcher's answer as a `Response`: the gzip bytes under `Content-Encoding` when it attached them. */
 function toResponse(response: ApiResponse): Response {
-  return new Response(response.body, { status: response.status, headers: Object.fromEntries(response.headers) });
+  const headers = Object.fromEntries(response.headers);
+  if (response.gzip === undefined) return new Response(response.body, { status: response.status, headers });
+  return new Response(response.gzip, { status: response.status, headers: { ...headers, 'content-encoding': 'gzip' } });
 }
 
 const CORS_METHODS = new Set(['DELETE', 'GET', 'PATCH', 'POST']);

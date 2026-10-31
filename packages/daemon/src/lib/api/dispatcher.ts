@@ -32,6 +32,7 @@ import {
   queryValue,
   type RouteParameters,
 } from './http.ts';
+import { compressed, type ResponseCompressor } from './compression.ts';
 import { errorResponse, jsonResponse, methodNotAllowedResponse, noStore, unknownRouteResponse } from './responses.ts';
 import type {
   ApiRoute,
@@ -454,6 +455,8 @@ export class ApiDispatcher {
     private readonly stepUps?: StepUpWitness,
     /** Where a request that reached a `legacy: true` route is counted. Absent where nothing counts. */
     private readonly legacyUse?: LegacyWireUseRecorder,
+    /** Where a large `GET` answer is gzipped. Absent where nothing compresses (tests, tables that serve no list). */
+    private readonly compressor?: ResponseCompressor,
   ) {}
 
   async dispatch(request: ApiRequest): Promise<ApiResponse> {
@@ -468,7 +471,8 @@ export class ApiDispatcher {
     if (authorized.kind === 'unrouted') return unknownRouteResponse(request.method, request.path);
     if (authorized.kind === 'refused') return authorized.response;
     if (authorized.route.legacy === true) this.#countLegacyUse(authorized.route, request);
-    return await run(authorized.route, authorized.context);
+    const response = await run(authorized.route, authorized.context);
+    return await compressed(request, response, this.compressor, authorized.route.compress === true);
   }
 
   /** Counted only once the caller is authorized, so a probe of an older route is not "a client still uses it". */

@@ -153,6 +153,7 @@ export function boardRoutes(board: BoardSubsystem): readonly ApiRoute[] {
       minimum: 'operator',
       capability: fleet,
       noStore: true,
+      compress: true,
       handle: async context => await answer(async () => await board.board(boardQueryOf(context))),
     },
     {

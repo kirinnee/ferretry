@@ -7,8 +7,10 @@
  */
 
 import { describe, it } from 'bun:test';
+import { randomBytes } from 'node:crypto';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { MAX_TUNNEL_BODY_BYTES } from '@ferretry/protocol';
-import { MAX_PLAINTEXT_BYTES, toBase64Url, utf8Bytes } from '@ferretry/relay';
+import { fromBase64Url, MAX_PLAINTEXT_BYTES, toBase64Url, utf8Bytes } from '@ferretry/relay';
 import should from 'should';
 import { type ApiResponse, BodyTooLargeError } from '../../../src/lib/api/http.ts';
 import {
@@ -193,6 +195,55 @@ describe('the session tunnel envelope', () => {
       for (const message of messages)
         should(encodeTunnelMessage(message).byteLength).not.be.greaterThan(MAX_PLAINTEXT_BYTES);
       should(reassemble(messages)).equal(body);
+    });
+
+    describe('a compressed answer', () => {
+      const compressedResponse = (text: string): ApiResponse => ({
+        ...response(text),
+        gzip: new Uint8Array(gzipSync(text)),
+      });
+      const decode = (messages: readonly RelayTunnelDaemonMessage[]): string => {
+        const bytes = fromBase64Url(reassemble(messages));
+        return gunzipSync(bytes ?? new Uint8Array()).toString('utf8');
+      };
+
+      it('should carry the gzip bytes as base64url under the two headers, in the one record that fits', () => {
+        const text = JSON.stringify({ rows: Array.from({ length: 800 }, (_, index) => ({ index })) });
+        const messages = tunnelResponseMessages(6, compressedResponse(text));
+
+        should(messages).have.length(1);
+        should(messages[0]).containDeep({
+          t: 'res',
+          id: 6,
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+            'content-encoding': 'gzip',
+            'content-transfer-encoding': 'base64url',
+          },
+        });
+        should(decode(messages)).equal(text);
+      });
+
+      it('should cut a large compressed answer into parts that each fit, and decode to the plain text', () => {
+        // Random-looking text does not compress, so the encoded body is genuinely larger than one record.
+        const text = JSON.stringify({ blob: toBase64Url(randomBytes(3 * MAX_PLAINTEXT_BYTES)) });
+        const messages = tunnelResponseMessages(7, compressedResponse(text));
+
+        should(messages.length).be.greaterThan(2);
+        should(messages[0]).containDeep({ t: 'res', id: 7, more: true, headers: { 'content-encoding': 'gzip' } });
+        for (const message of messages.slice(1)) should(message).have.property('t', 'res-more');
+        for (const message of messages)
+          should(encodeTunnelMessage(message).byteLength).not.be.greaterThan(MAX_PLAINTEXT_BYTES);
+        should(decode(messages)).equal(text);
+      });
+
+      it('should say nothing of an encoding for an answer that was not compressed', () => {
+        const [message] = tunnelResponseMessages(8, response('{"ok":true}'));
+
+        should(message).have.property('headers');
+        should(JSON.stringify(message)).not.match(/content-encoding|content-transfer-encoding/u);
+      });
     });
 
     it('should refuse, with the size named, an answer larger than one session carries', () => {
