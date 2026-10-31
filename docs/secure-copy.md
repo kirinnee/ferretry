@@ -141,10 +141,12 @@ without ever reading it. It is the same input request, with the store as the des
 - **GAP: a replaced value stops being masked.** The live redactor masks what the store holds, so after a paste
   replaces a secret the OLD value (often still valid after minting a new token) is no longer masked in old
   scrollback. Revoke the old credential when you replace it.
-- **GAP: this is consent, not a boundary against the agent.** Agents still hold the host token
-  ([secrets](secrets.md) GAP), so an agent can already run `fy secret set` with no card, and `fy secret ls`
-  already tells it which names exist. The exact-NAME rule decides what the owner is asked; it does not stop an
-  agent that bypasses `secure.paste`. Closing that is the per-session token work, separately.
+- **A paste is the only way a ferret writes the store.** The secrets routes (`POST /v1/secrets`,
+  `DELETE /v1/secrets/:name`, saved logins, copy-in and copy-out) refuse a ferret outright, so `fy secret set`
+  from inside a ferret is answered with a sentence pointing here, and the owner's card is the only way in.
+  The owner's own `fy` at a shell and the app's secret form are not refused. The refusal reads the caller
+  the daemon derived, so it holds against an honest or confused agent; one that forges its identity is the
+  per-session token work, separately ([secrets](secrets.md) threat model).
 
 ### Approving in advance
 
