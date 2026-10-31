@@ -88,17 +88,19 @@ export class WorkIndex {
   /** How many documents hold each core token, for how much a shared word says. */
   private readonly coreFrequency = new Map<string, number>();
   private readonly byId = new Map<string, Set<string>>();
-  /** Every token, sorted; rebuilt on the first prefix lookup after a change. */
-  private vocabulary: readonly string[] | undefined;
+  /**
+   * Every token, sorted, for prefix lookups. A new token waits in {@link added} and is merged in by the next
+   * lookup (linear, not a re-sort); a removed one stays as a harmless stale entry with no posting until
+   * stale entries are half the list, when the next lookup rebuilds it.
+   */
+  private vocabulary: readonly string[] = [];
+  private added: string[] = [];
+  private stale = 0;
 
   get size(): { readonly tasks: number; readonly agenda: number } {
     let tasks = 0;
     for (const { document } of this.documents.values()) if (document.kind === 'task') tasks += 1;
     return { tasks, agenda: this.documents.size - tasks };
-  }
-
-  has(key: string): boolean {
-    return this.documents.has(key);
   }
 
   keys(): IterableIterator<string> {
@@ -129,7 +131,7 @@ export class WorkIndex {
       if (posting === undefined) {
         posting = new Map();
         this.postings.set(token, posting);
-        this.vocabulary = undefined;
+        this.added.push(token);
       }
       posting.set(document.key, weight);
     }
@@ -152,7 +154,7 @@ export class WorkIndex {
       posting?.delete(key);
       if (posting?.size === 0) {
         this.postings.delete(token);
-        this.vocabulary = undefined;
+        this.stale += 1;
       }
     }
     for (const token of indexed.core) {
@@ -297,12 +299,34 @@ export class WorkIndex {
   }
 
   private sortedVocabulary(): readonly string[] {
-    this.vocabulary ??= [...this.postings.keys()].sort();
+    if (this.stale * 2 > this.vocabulary.length + this.added.length) {
+      this.vocabulary = [...this.postings.keys()].sort();
+      this.added = [];
+      this.stale = 0;
+    } else if (this.added.length > 0) {
+      this.vocabulary = mergeSorted(this.vocabulary, [...new Set(this.added)].sort());
+      this.added = [];
+    }
     return this.vocabulary;
   }
 }
 
 const rank = (strength: WorkRelatedStrength): number => (strength === 'strong' ? 1 : 0);
+
+/** Two sorted lists as one, a word in both kept once. */
+const mergeSorted = (left: readonly string[], right: readonly string[]): readonly string[] => {
+  const merged: string[] = [];
+  let at = 0;
+  let other = 0;
+  while (at < left.length || other < right.length) {
+    const next =
+      other >= right.length || (at < left.length && (left[at] ?? '') <= (right[other] ?? ''))
+        ? left[at++]
+        : right[other++];
+    if (next !== undefined && merged[merged.length - 1] !== next) merged.push(next);
+  }
+  return merged;
+};
 
 const lowerBound = (sorted: readonly string[], value: string): number => {
   let low = 0;
@@ -346,9 +370,8 @@ const hitOf = (document: WorkDocument, score: number, tokens: readonly string[],
 const matchOf = (document: WorkDocument, tokens: readonly string[]): WorkHit['match'] => {
   for (const field of MATCH_ORDER) {
     const found = document.fields.find(candidate => candidate.field === field);
-    if (found === undefined) continue;
-    if (tokensOf(found.text).some(word => tokens.some(token => word.startsWith(token))))
-      return { field, line: matchLine(found.text, tokens) };
+    const line = found === undefined ? undefined : matchLine(found.text, tokens);
+    if (line !== undefined) return { field, line };
   }
   return { field: 'title', line: document.identity.title };
 };

@@ -15,7 +15,7 @@ import {
 } from '../../../src/lib/work-search/index.ts';
 import { card, PROJECT, templateLanes } from '../board/support.ts';
 
-export { card };
+export { card, PROJECT };
 
 export const NOW_MS = Date.parse('2026-10-30T10:00:00.000Z');
 export const DAY_MS = 86_400_000;

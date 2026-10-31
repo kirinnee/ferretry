@@ -153,33 +153,34 @@ describe('GET /v1/search', () => {
     const { calls, search } = recording();
     const open = await dispatcher(search);
 
+    const related = { method: 'POST', path: '/v1/search/related', body: JSON.stringify({ kind: 'task', title: 'x' }) };
+
     // Act
     const answers = await Promise.all(
-      [{ headers: human }, { loopback: true, privilegedLoopback: true }].map(
-        async carried =>
-          await open.dispatch({
-            ...request({ path: '/v1/search', query: [['q', 'cards']], ...carried }),
-            member: MEMBER,
-          }),
-      ),
+      [{ headers: human }, { loopback: true, privilegedLoopback: true }].flatMap(carried => [
+        open.dispatch({ ...request({ path: '/v1/search', query: [['q', 'cards']], ...carried }), member: MEMBER }),
+        open.dispatch({ ...request({ ...related, ...carried }), member: MEMBER }),
+      ]),
     );
 
     // Assert
-    should(answers.map(answer => answer.status)).eql([403, 403]);
+    should(answers.map(answer => answer.status)).eql([403, 403, 403, 403]);
     should(calls).eql([]);
   });
 
   it('should refuse a caller with no credential', async () => {
     // Arrange
     const { calls, search } = recording();
+    const open = await dispatcher(search);
 
     // Act
-    const response = await (
-      await dispatcher(search)
-    ).dispatch(request({ path: '/v1/search', query: [['q', 'cards']] }));
+    const searched = await open.dispatch(request({ path: '/v1/search', query: [['q', 'cards']] }));
+    const related = await open.dispatch(
+      request({ method: 'POST', path: '/v1/search/related', body: JSON.stringify({ kind: 'task', title: 'x' }) }),
+    );
 
     // Assert
-    should(response.status).equal(401);
+    should([searched.status, related.status]).eql([401, 401]);
     should(calls).eql([]);
   });
 });

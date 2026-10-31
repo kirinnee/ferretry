@@ -120,6 +120,9 @@ export class FileBoardStore implements BoardStore {
   async write<T>(id: BoardTaskId, decide: (current: BoardTask | undefined) => Promise<BoardWrite<T>>): Promise<T> {
     return await this.serial.run(`board:card:${id}`, async () => {
       const loaded = await this.load();
+      // A hand edit the watch has not reported yet is read first, so this write is decided on it and never
+      // silently overwrites it (one stat per write).
+      await this.catchUp(id, loaded);
       if (loaded.quarantined.has(id)) {
         throw new BoardUnavailableError(`card ${id} is quarantined; refusing to overwrite the damaged file`);
       }
@@ -128,9 +131,10 @@ export class FileBoardStore implements BoardStore {
       if (decision.task.id !== id)
         throw new BoardUnavailableError(`a write to ${id} tried to store ${decision.task.id}`);
       const task = BoardTaskSchema.parse(decision.task);
-      await this.files.writeTextAtomic(this.fileOf(id), `${JSON.stringify(task, null, 2)}\n`);
+      const written = `${JSON.stringify(task, null, 2)}\n`;
+      await this.files.writeTextAtomic(this.fileOf(id), written);
       loaded.cards.set(id, task);
-      await this.remember(id);
+      await this.remember(id, written);
       return decision.result;
     });
   }
@@ -203,31 +207,39 @@ export class FileBoardStore implements BoardStore {
 
   /** One card file read again after it changed under the store; whether the board's copy moved. */
   private async reread(id: BoardTaskId, loaded: Loaded): Promise<boolean> {
-    return await this.serial.run(`board:card:${id}`, async () => {
-      // Asked again inside the section: a write of our own that raced the watch has remembered its file by now.
-      if ((await this.files.identity?.(this.fileOf(id))) === this.identities.get(id)) return false;
-      const before = loaded.cards.get(id);
-      const fresh = new Map<BoardTaskId, BoardTask>();
-      const problem = await this.parseCard(id, fresh);
-      const card = fresh.get(id);
-      if (card !== undefined) {
-        loaded.cards.set(id, card);
-        loaded.quarantined.delete(id);
-        return true;
-      }
-      if (problem === undefined) return false;
-      loaded.cards.delete(id);
-      loaded.quarantined.set(id, clip(problem));
-      this.diagnostics.warn(`board card ${id} is quarantined: ${problem}`);
-      return before !== undefined;
-    });
+    // Asked again inside the section: a write of our own that raced the watch has remembered its file by now.
+    return await this.serial.run(`board:card:${id}`, async () => await this.catchUp(id, loaded));
   }
 
-  /** Records the identity of the card file as it stands now. */
-  private async remember(id: BoardTaskId): Promise<void> {
-    const now = await this.files.identity?.(this.fileOf(id));
-    if (now === undefined) this.identities.delete(id);
-    else this.identities.set(id, now);
+  /** Inside card `id`'s section: re-reads its file when it is not the one this store last read or wrote. */
+  private async catchUp(id: BoardTaskId, loaded: Loaded): Promise<boolean> {
+    if (this.files.identity === undefined) return false;
+    if ((await this.files.identity(this.fileOf(id))) === this.identities.get(id)) return false;
+    const before = loaded.cards.get(id);
+    const fresh = new Map<BoardTaskId, BoardTask>();
+    const problem = await this.parseCard(id, fresh);
+    const card = fresh.get(id);
+    if (card !== undefined) {
+      loaded.cards.set(id, card);
+      loaded.quarantined.delete(id);
+      return true;
+    }
+    if (problem === undefined) return false;
+    loaded.cards.delete(id);
+    loaded.quarantined.set(id, clip(problem));
+    this.diagnostics.warn(`board card ${id} is quarantined: ${problem}`);
+    return before !== undefined;
+  }
+
+  /**
+   * Records the identity of the file this store just wrote — read back with its bytes, so an edit that landed
+   * between the rename and this read is never taken for ours: it stays unremembered, and the next scan or
+   * write reads it.
+   */
+  private async remember(id: BoardTaskId, written: string): Promise<void> {
+    const read = await this.files.readTextIdentified?.(this.fileOf(id));
+    if (read !== undefined && read.text === written) this.identities.set(id, read.identity);
+    else this.identities.delete(id);
   }
 
   private fileOf(id: BoardTaskId): string {

@@ -92,6 +92,18 @@ describe('the work search index', () => {
     should(ids(index, 'snoo agenda')).eql([]);
   });
 
+  it('should leave out a document that has one word and not the other', () => {
+    // Arrange: each word is in two documents, and only one document has both
+    const index = indexOf(
+      cardDoc({ id: 'F1', title: 'Relay carrier' }),
+      cardDoc({ id: 'F2', title: 'Relay pairing' }),
+      cardDoc({ id: 'F3', title: 'Pairing codes' }),
+    );
+
+    // Act / Assert
+    should(ids(index, 'relay pairing')).eql(['F2']);
+  });
+
   it('should need every word, and narrow by kind and by open', () => {
     // Arrange
     const index = indexOf(
@@ -226,5 +238,159 @@ describe('the related check', () => {
   it('should find nothing for unrelated work', () => {
     // Act / Assert
     should(board().related('Speech to text cleanup', 'dictation punctuation', NOW_MS, 5)).eql([]);
+  });
+});
+
+describe('what an agenda item says once it is addressed', () => {
+  const open = item({ id: 'A1', subject: 'Pick a backend', ask: { kind: 'open-question' } as never });
+
+  it.each([
+    ['a choice', { kind: 'multiple-choice', choice: 'Postgres' }, 'postgres', 'Pick'],
+    ['an answer', { kind: 'open-question', answer: 'use sqlite please' }, 'sqlite', 'Pick'],
+    ['words of the owner’s own', { kind: 'other', answer: 'neither, use files' }, 'neither', 'Pick'],
+    ['a clarification', { kind: 'answer-review', verdict: 'clarify', clarification: 'which region' }, 'region', 'Pick'],
+  ] as const)('should find it by %s', (_, response, word) => {
+    // Arrange
+    const asked =
+      response.kind === 'multiple-choice'
+        ? item({
+            id: 'A1',
+            subject: 'Pick a backend',
+            ask: { kind: 'multiple-choice', options: [{ label: 'Postgres' }, { label: 'Files' }] } as never,
+          })
+        : response.kind === 'other'
+          ? item({
+              id: 'A1',
+              subject: 'Pick a backend',
+              ask: { kind: 'multiple-choice', options: [{ label: 'Postgres' }, { label: 'Files' }] } as never,
+            })
+          : response.kind === 'answer-review'
+            ? item({ id: 'A1', subject: 'Pick a backend', ask: { kind: 'answer-review' } as never })
+            : open;
+    const resolved = addressed(asked, { response: response as never });
+
+    // Act
+    const index = indexOf(ledgerDocuments(ledger('lead', [], [resolved]), same, NOW_MS));
+
+    // Assert
+    should(index.search(query(word), NOW_MS).hits.map(hit => [hit.id, hit.match.field])).eql([['A1', 'resolution']]);
+  });
+
+  it('should add nothing to find for an answer that has no words', () => {
+    // Arrange
+    const asked = item({ id: 'A1', subject: 'Pick a backend', ask: { kind: 'permission' } as never });
+    const resolved = addressed(asked, { response: { kind: 'permission', decision: 'approve' } as never });
+
+    // Act
+    const [document] = ledgerDocuments(ledger('lead', [], [resolved]), same, NOW_MS);
+
+    // Assert
+    should(document?.fields.map(field => field.field)).not.containEql('resolution');
+  });
+
+  it('should stand as what was done with it', () => {
+    // Arrange
+    const dismissed = addressed(item({ id: 'A1' }), { disposition: 'dismissed' });
+    const done = addressed(item({ id: 'A2', subject: 'Pick a relay' }));
+
+    // Act
+    const index = indexOf(ledgerDocuments(ledger('lead', [], [dismissed, done]), same, NOW_MS));
+
+    // Assert
+    should(
+      index
+        .search(query('pick'), NOW_MS)
+        .hits.map(hit => [hit.id, hit.state, hit.standing])
+        .sort(),
+    ).eql([
+      ['A1', 'closed', 'dismissed'],
+      ['A2', 'closed', 'addressed'],
+    ]);
+  });
+});
+
+describe('the match line', () => {
+  it('should cut a long line around the word that matched', () => {
+    // Arrange
+    const long = `${'lead in words '.repeat(12)}the relay carrier ${'trailing words '.repeat(12)}`;
+    const index = indexOf(cardDoc({ id: 'F1', title: 'Board', summary: long }));
+
+    // Act
+    const line = index.search(query('relay'), NOW_MS).hits[0]?.match.line ?? '';
+
+    // Assert
+    should(line.startsWith('…')).be.true();
+    should(line.endsWith('…')).be.true();
+    should(line).containEql('relay carrier');
+    should(line.length).be.below(145);
+  });
+
+  it('should fall back to the first line when the words matched only as an id', () => {
+    // Arrange
+    const index = indexOf(cardDoc({ id: 'F12', title: 'Board store' }));
+
+    // Act
+    const hit = index.search(query('F12 f12'), NOW_MS).hits[0];
+
+    // Assert
+    should(hit?.match).eql({ field: 'title', line: 'Board store' });
+  });
+});
+
+describe('the index as it changes', () => {
+  it('should keep a word another document still holds when one is taken out', () => {
+    // Arrange
+    const index = indexOf(cardDoc({ id: 'F1', title: 'Relay carrier' }), cardDoc({ id: 'F2', title: 'Relay pairing' }));
+
+    // Act
+    index.remove('task:F1');
+
+    // Assert
+    should(ids(index, 'relay')).eql(['F2']);
+    should(index.related('Relay pairing', '', NOW_MS, 5).map(match => match.hit.id)).eql(['F2']);
+  });
+
+  it('should find a prefix of a word added after the last lookup, and forget one taken out', () => {
+    // Arrange
+    const index = indexOf(cardDoc({ id: 'F1', title: 'Relay carrier' }));
+    should(ids(index, 'carr')).eql(['F1']);
+
+    // Act
+    index.put(cardDoc({ id: 'F2', title: 'Carriage return' })!);
+    const both = ids(index, 'carr').sort();
+    index.remove('task:F1');
+    index.remove('task:F2');
+    index.put(cardDoc({ id: 'F3', title: 'Carrot cake' })!);
+
+    // Assert
+    should(both).eql(['F1', 'F2']);
+    should(ids(index, 'carr')).eql(['F3']);
+  });
+
+  it('should narrow to one project and keep agenda items, which have none', () => {
+    // Arrange
+    const index = indexOf(
+      cardDoc({ id: 'F1', title: 'Relay here' }),
+      cardDoc({ id: 'F2', title: 'Relay there', projectId: '22222222-2222-4222-8222-222222222222' }),
+      ledgerDocuments(ledger('lead', [item({ id: 'A1', subject: 'Relay question' })]), same, NOW_MS),
+    );
+
+    // Act / Assert
+    should(ids(index, 'relay', { project: '22222222-2222-4222-8222-222222222222' }).sort()).eql(['A1', 'F2']);
+  });
+
+  it('should order equally strong related matches by how close, then how recent', () => {
+    // Arrange
+    const older = [
+      { seq: 1, at: at(NOW_MS - DAY_MS), actor: { kind: 'owner' as const }, type: 'created' as const, laneId: 'todo' },
+    ];
+    const index = indexOf(
+      cardDoc({ id: 'F1', title: 'Agenda focus view', history: older }),
+      cardDoc({ id: 'F2', title: 'Agenda focus view' }),
+      cardDoc({ id: 'F3', title: 'Agenda focus view mode' }),
+    );
+
+    // Act / Assert
+    should(index.related('Agenda focus view', '', NOW_MS, 5).map(match => match.hit.id)).eql(['F2', 'F1', 'F3']);
   });
 });

@@ -133,9 +133,8 @@ const responseText = (item: ResolvedAgendaItem): string | undefined => {
   const response = item.response;
   if (response === undefined) return undefined;
   if (response.kind === 'multiple-choice') return response.choice;
-  if (response.kind === 'open-question') return response.answer;
+  if (response.kind === 'open-question' || response.kind === 'other') return response.answer;
   if (response.kind === 'answer-review' && response.verdict === 'clarify') return response.clarification;
-  if (response.kind === 'other' && 'text' in response && typeof response.text === 'string') return response.text;
   return undefined;
 };
 

@@ -47,22 +47,17 @@ export const normalizePhrase = (text: string): string => tokensOf(text).join(' '
 const MATCH_LINE_LENGTH = 140;
 
 /**
- * The line of `text` that holds the first of `tokens`, cut to {@link MATCH_LINE_LENGTH} around it: what a
- * result row shows under its title. Falls back to the first line when no token is on any line (a prefix
- * match inside a longer word still counts, so this is rare).
+ * The line of `text` that holds the first word beginning with one of `tokens`, cut to
+ * {@link MATCH_LINE_LENGTH} around it: what a result row shows under its title. `undefined` when no line
+ * holds one, so the caller can try the next field.
  */
-export const matchLine = (text: string, tokens: readonly string[]): string => {
-  const lines = text
-    .split(/\r?\n/u)
-    .map(line => line.trim())
-    .filter(line => line.length > 0);
-  if (lines.length === 0) return '';
-  for (const line of lines) {
-    const words = [...line.matchAll(WORD)];
-    const hit = words.find(word => tokens.some(token => normalizeToken(word[0]).startsWith(token)));
+export const matchLine = (text: string, tokens: readonly string[]): string | undefined => {
+  for (const raw of text.split(/\r?\n/u)) {
+    const line = raw.trim();
+    const hit = [...line.matchAll(WORD)].find(word => tokens.some(token => normalizeToken(word[0]).startsWith(token)));
     if (hit !== undefined) return around(line, hit.index ?? 0);
   }
-  return around(lines[0] ?? '', 0);
+  return undefined;
 };
 
 const around = (line: string, at: number): string => {

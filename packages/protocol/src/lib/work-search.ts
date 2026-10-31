@@ -112,7 +112,12 @@ export const WorkSearchResponseSchema = z.strictObject({
 });
 export type WorkSearchResponse = z.infer<typeof WorkSearchResponseSchema>;
 
-/** "Is what I am about to file already somebody's?" — the new title and ask, weighed against open work. */
+/**
+ * "Is what I am about to file already somebody's?" — the new title and ask, weighed against open work.
+ *
+ * `kind` says what is being filed; it does NOT narrow the matches. A card is as often the duplicate of an
+ * agenda item as of another card, so the answer always spans both kinds.
+ */
 export const WorkRelatedRequestSchema = z.strictObject({
   kind: WorkKindSchema,
   title: z.string().trim().min(1).max(MAX_WORK_RELATED_TEXT_LENGTH),

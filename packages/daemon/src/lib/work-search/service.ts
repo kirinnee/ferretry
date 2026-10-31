@@ -146,13 +146,16 @@ export class WorkSearchService {
 
   /** Everything again, from the sources: the first build, and every change of the secret values. */
   private async rebuild(epoch: string): Promise<void> {
+    // Not current until it is whole: a build that fails part-way (a vault that will not open) leaves no epoch,
+    // so the next search builds everything again instead of answering from half an index.
+    this.epoch = undefined;
     for (const key of [...this.index.keys()]) this.index.remove(key);
     this.seenCards.clear();
     this.seenLedgers.clear();
     this.laneSets.clear();
-    this.epoch = epoch;
     await this.refreshCards();
     await this.refreshSessions(await this.ports.agenda.sessions());
+    this.epoch = epoch;
     this.lastSweepMs = this.ports.now();
   }
 

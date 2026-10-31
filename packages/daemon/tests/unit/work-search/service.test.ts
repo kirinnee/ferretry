@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import { type BoardTask, WorkSearchQuerySchema } from '@ferretry/protocol';
 import should from 'should';
 import { WORK_SEARCH_SWEEP_MS } from '../../../src/lib/work-search/index.ts';
-import { card, FakeRedaction, FakeSources, item, ledger, NOW_MS, service } from './support.ts';
+import { card, FakeRedaction, FakeSources, item, ledger, NOW_MS, PROJECT, service } from './support.ts';
 
 const q = (text: string, rest: Record<string, unknown> = {}) => WorkSearchQuerySchema.parse({ q: text, ...rest });
 
@@ -152,6 +152,97 @@ describe('the work search service', () => {
 
     // Assert
     should(answer.matches.map(match => [match.strength, match.hit.id])).eql([['strong', 'F38']]);
+  });
+});
+
+describe('the work search service when something fails or moves', () => {
+  it('should build everything again after a build that failed part-way, agenda items included', async () => {
+    // Arrange: the vault will not open for the first build
+    const sources = new FakeSources(
+      [card({ id: 'F1', title: 'Relay card' })],
+      [ledger('lead', [item({ id: 'A1', subject: 'Relay question' })])],
+    );
+    const redaction = new FakeRedaction();
+    const { search } = service(sources, { redaction });
+    const opens = redaction.batch.bind(redaction);
+    let failures = 1;
+    redaction.batch = async work => {
+      if (failures-- > 0) throw new Error('the vault will not open');
+      return await opens(work);
+    };
+
+    // Act
+    const first = await search.search(q('relay')).then(
+      () => 'answered',
+      (error: unknown) => (error as Error).message,
+    );
+    const second = await search.search(q('relay'));
+
+    // Assert
+    should(first).equal('the vault will not open');
+    should(second.hits.map(hit => hit.id).sort()).eql(['A1', 'F1']);
+  });
+
+  it('should warm in the background and say so when it cannot', async () => {
+    // Arrange
+    const sources = new FakeSources([card({ id: 'F1', title: 'Relay card' })]);
+    const redaction = new FakeRedaction();
+    redaction.epoch = async () => {
+      throw new Error('no vault');
+    };
+    const { search, warnings } = service(sources, { redaction });
+
+    // Act
+    search.warm();
+    await search.settled();
+    await Promise.resolve();
+
+    // Assert
+    should(warnings.join('\n')).containEql('could not build its index: no vault');
+  });
+
+  it('should forget a card that left the board', async () => {
+    // Arrange
+    const sources = new FakeSources([card({ id: 'F1', title: 'Relay card' })]);
+    const { search } = service(sources);
+    await search.search(q('relay'));
+
+    // Act
+    sources.cardsById.delete('F1');
+
+    // Assert
+    should((await search.search(q('relay'))).hits).eql([]);
+  });
+
+  it('should re-index the cards of a board whose lanes are renamed', async () => {
+    // Arrange
+    let now = NOW_MS;
+    // A card on a board with no lanes stands under its lane id, and is left alone by the rename.
+    const sources = new FakeSources([
+      card({ id: 'F1', title: 'Relay card', laneId: 'implement' }),
+      card({ id: 'F2', title: 'Relay elsewhere', projectId: '22222222-2222-4222-8222-222222222222', laneId: 'doing' }),
+    ]);
+    const { search } = service(sources, { now: () => now });
+    const before = (await search.search(q('relay card'))).hits[0]?.standing;
+
+    // Act
+    const lanes = sources.lanes.get(PROJECT)!;
+    sources.lanes.set(PROJECT, {
+      ...lanes,
+      version: lanes.version + 1,
+      lanes: lanes.lanes.map(lane => (lane.id === 'implement' ? { ...lane, name: 'Building' } : lane)),
+    });
+    now += WORK_SEARCH_SWEEP_MS;
+    await search.search(q('relay'));
+    await search.settled();
+
+    // Assert
+    should(before).equal('In progress');
+    const after = (await search.search(q('relay'))).hits.map(hit => [hit.id, hit.standing]).sort();
+    should(after).eql([
+      ['F1', 'Building'],
+      ['F2', 'doing'],
+    ]);
   });
 });
 
