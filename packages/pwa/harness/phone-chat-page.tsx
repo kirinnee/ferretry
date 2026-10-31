@@ -45,6 +45,7 @@ const params = new URLSearchParams(window.location.search);
 const idle = params.get('turn') === 'idle';
 const withInfo = params.get('info');
 const alone = params.has('alone');
+const status = params.get('status') ?? 'running';
 
 const A55 = {
   id: 'A55',
@@ -93,7 +94,7 @@ const SESSION = {
   },
   state: {
     id: ID,
-    status: 'running',
+    status,
     turn: 40,
     startedAt: ago(600),
     lastActivityAt: ago(1),

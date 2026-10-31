@@ -1,3 +1,31 @@
+## [4.187.1](https://github.com/kirinnee/ferretry/compare/v4.187.0...v4.187.1) (2026-10-31)
+
+### Fixes
+
+* **pwa:** no band above the composer in a chat with no agenda ([#1212](https://github.com/kirinnee/ferretry/issues/1212)) ([a14cb7a](https://github.com/kirinnee/ferretry/commit/a14cb7a2e6d69dd24e806e8851a763d475ed2792))
+
+## [4.187.0](https://github.com/kirinnee/ferretry/compare/v4.186.0...v4.187.0) (2026-10-31)
+
+### Features
+
+* **pwa:** name and filter by daemon on the Warden page ([#1200](https://github.com/kirinnee/ferretry/issues/1200)) ([a0ef4e4](https://github.com/kirinnee/ferretry/commit/a0ef4e40fa1b882e1f833478cf3ee5b5ebb96a5b))
+
+### Fixes
+
+* **pwa:** one rule decides every Resume button ([#1202](https://github.com/kirinnee/ferretry/issues/1202)) ([4013ddb](https://github.com/kirinnee/ferretry/commit/4013ddbe1587df5ec31d33ed83e883c1bfac0018))
+
+## [4.186.0](https://github.com/kirinnee/ferretry/compare/v4.185.0...v4.186.0) (2026-10-31)
+
+### Features
+
+* **account:** fy account and account_hint/account_propose (R0-B) ([#1194](https://github.com/kirinnee/ferretry/issues/1194)) ([3160b47](https://github.com/kirinnee/ferretry/commit/3160b47206ad766bf31c9c4e82aa4d8d1fb6e72e))
+* Ferretry-sent chat messages draw as one system row ([#1193](https://github.com/kirinnee/ferretry/issues/1193)) ([e5cfa9d](https://github.com/kirinnee/ferretry/commit/e5cfa9d23d92519833363ebf6ee8e6eab9d9a41b))
+* **pwa:** split Settings Secrets into Secrets, Accounts and Secure copy (R0-A) ([#1195](https://github.com/kirinnee/ferretry/issues/1195)) ([1ab25cb](https://github.com/kirinnee/ferretry/commit/1ab25cb9595f73b2aa1284da668b4246b8da0d36))
+
+### Fixes
+
+* **notifications:** read pre-rename ledger lines again, so the phone buzzes ([#1198](https://github.com/kirinnee/ferretry/issues/1198)) ([2f785a4](https://github.com/kirinnee/ferretry/commit/2f785a4631af1cfead4db56a1cf91a6465219281)), closes [#943](https://github.com/kirinnee/ferretry/issues/943)
+
 ## [4.185.0](https://github.com/kirinnee/ferretry/compare/v4.184.0...v4.185.0) (2026-10-31)
 
 ### Features

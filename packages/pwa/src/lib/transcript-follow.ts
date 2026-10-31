@@ -101,9 +101,10 @@ export type ScrollVerdict = 'detach' | 'reengage' | 'stay';
  * What one scroll event means for follow.
  *
  * DETACH needs all three of: scrollTop actually went backwards (1px of slack, for fractional-DPR
- * metrics); a person did it; and neither the content nor the viewport shrank this frame. Each guards
- * a measured false positive — a removed footer, a squeezed viewport and the browser's own scroll
- * anchoring all lower `scrollTop` with nobody touching anything.
+ * metrics); a person did it; and the content did not shrink and the viewport did not change height this frame.
+ * Each guards a measured false positive — a removed footer, a squeezed viewport, a viewport that GREW (the Jump
+ * pill's row leaving, the keyboard closing: the browser clamps `scrollTop` to the new, lower maximum) and the
+ * browser's own scroll anchoring all lower `scrollTop` with nobody touching anything.
  *
  * RE-ENGAGE needs the reader inside the band AND not moving up. A finger delivers a drag as many
  * small moves; the first ones of any scroll-up start inside the band, and re-engaging there froze a
@@ -115,8 +116,9 @@ export const scrollVerdict = (
   state: { readonly following: boolean; readonly byReader: boolean },
 ): ScrollVerdict => {
   const movedUp = metrics.scrollTop < memory.lastScrollTop - 1;
-  const shrank = metrics.scrollHeight < memory.scrollHeight - 1 || metrics.clientHeight < memory.clientHeight - 1;
-  if (movedUp && state.byReader && !shrank && state.following) return 'detach';
+  const resized =
+    metrics.scrollHeight < memory.scrollHeight - 1 || Math.abs(metrics.clientHeight - memory.clientHeight) > 1;
+  if (movedUp && state.byReader && !resized && state.following) return 'detach';
   if (!movedUp && !state.following && gapFromBottom(metrics) <= TRANSCRIPT_REENGAGE_PX) return 'reengage';
   return 'stay';
 };

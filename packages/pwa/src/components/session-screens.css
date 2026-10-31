@@ -1265,23 +1265,17 @@ button.fy-receipt {
 [data-phone-workspace] .kt-chat-surface {
   --chat-ground: var(--bg, var(--fy-surface));
 }
-/* THE PILL'S OWN ROW. It sits under the scroller in the host's column, never over it: it used to float
-   across the scroller's bottom edge, so the last row of a table or a code block in the newest message sat
-   hidden under it (owner, 2026-10-31: "jump to latest clips the table"). A row of its own takes its height
-   from the scroller, so nothing the reader is looking at can be behind it.
-
-   THE ROW NEVER CHANGES SIZE. It used to appear with the pill and collapse without it, so approaching the
-   bottom resized the scroller, which moved scrollTop, which the follow model read as the reader scrolling up:
-   detach, pill back, row back, repeat (owner: "scrolling to the bottom will trigger a strong flicker"). While
-   the pill is hidden an invisible twin (`.fy-jump-latest-reserve`) holds exactly its box. */
+/* THE PILL'S OWN ROW, when there is no agenda row to share. It sits under the scroller in the host's column, never
+   over it: it used to float across the scroller's bottom edge, so the last row of a table or a code block in the
+   newest message sat hidden under it (owner, 2026-10-31: "jump to latest clips the table"). It exists only while the
+   pill does — an always-there row was the band above the composer in a chat with nothing to say. */
 .fy-jump-latest-shell {
   display: flex;
   flex: none;
   justify-content: center;
   padding: var(--flow-2) var(--flow-4);
 }
-.fy-jump-latest,
-.fy-jump-latest-reserve {
+.fy-jump-latest {
   /* The ↓ glyph and the words sit on one baseline, and the pill never wraps on a phone. */
   align-items: center;
   border: var(--stroke-control) solid transparent;
@@ -1303,9 +1297,6 @@ button.fy-receipt {
   color: var(--accent-fg);
   cursor: pointer;
   pointer-events: auto;
-}
-.fy-jump-latest-reserve {
-  visibility: hidden;
 }
 @keyframes fy-jump-latest-in {
   from {

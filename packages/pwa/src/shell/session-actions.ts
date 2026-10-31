@@ -17,6 +17,7 @@
  */
 
 import type { SessionStatus, SessionView } from '@ferretry/protocol';
+import { reviveOffer } from './revive-offer.ts';
 import { TERMINAL_STATUSES } from './status-mark.tsx';
 
 export type SessionAction = 'interrupt' | 'stop' | 'resume' | 'rename' | 'migrate';
@@ -54,10 +55,11 @@ export const sessionActionSpecs = (view: SessionView, canMutate: boolean): reado
   const status = view.state.status;
   const terminal = TERMINAL_STATUSES.has(status);
   const killFailed = isKillFailed(status);
+  const resumable = reviveOffer(view, true).offered;
 
   const specs: SessionActionSpec[] = [];
   if (!terminal) specs.push({ action: 'interrupt', label: 'Interrupt turn' });
-  if (terminal && !killFailed) specs.push({ action: 'resume', label: 'Resume session' });
+  if (resumable) specs.push({ action: 'resume', label: 'Resume session' });
   if (!terminal || killFailed) specs.push({ action: 'stop', label: 'Stop session', danger: true });
   specs.push({ action: 'rename', label: 'Rename…' });
   specs.push({ action: 'migrate', label: 'Move account + relaunch…', danger: true });

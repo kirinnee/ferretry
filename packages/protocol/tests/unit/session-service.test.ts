@@ -230,6 +230,11 @@ const sessionCases: SchemaCase[] = [
   { name: 'launch instructions', schema: session.SessionLaunchInstructionsSchema, value: launchInstructions },
   { name: 'outdated instructions', schema: session.SessionOutdatedSchema, value: { sections: ['tools', 'pack'] } },
   {
+    name: 'revive verdict',
+    schema: session.SessionReviveSchema,
+    value: { revivable: true, reason: 'It was stopped. Resume relaunches its CLI on the same conversation.' },
+  },
+  {
     name: 'session context',
     schema: session.SessionContextSchema,
     value: { usedTokens: 118_000, windowTokens: 1_000_000, percent: 11.8, at: '2026-10-30T08:00:00.000Z' },

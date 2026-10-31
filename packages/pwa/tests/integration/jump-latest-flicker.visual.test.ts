@@ -159,20 +159,31 @@ describe('jump to latest while scrolling to the bottom', () => {
             await framesSettled(tab);
             if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${name}-${scheme}-${turn}-bottom.png`) });
 
-            // The scroller never changes size, whether or not the pill is up.
-            expect(new Set(samples.map(sample => sample.height)).size).toBe(1);
+            // The pill's row leaves with the pill, so the scroller grows ONCE on arrival, and never shrinks back.
+            const heights = [...new Set(samples.map(sample => sample.height))];
+            expect(heights.length).toBeLessThanOrEqual(2);
+            const shrank = samples.filter(
+              (sample, index) => index > 0 && sample.height < (samples[index - 1]?.height ?? 0),
+            );
+            expect(shrank).toEqual([]);
             // The pill leaves once on the way down and never comes back.
             const flips = samples.filter((sample, index) => index > 0 && sample.pill !== samples[index - 1]?.pill);
             expect(flips.length).toBeLessThanOrEqual(1);
-            // The offset only ever moves down: nothing is clamped back up.
+            // The offset only ever moves down, except in the frame the scroller grew and the browser clamped it: that
+            // is not the reader scrolling up (it must not detach them, which would bring the pill straight back).
             const back = samples.filter(
-              (sample, index) => index > 0 && sample.top < (samples[index - 1]?.top ?? 0) - 1,
+              (sample, index) =>
+                index > 0 &&
+                sample.top < (samples[index - 1]?.top ?? 0) - 1 &&
+                sample.height <= (samples[index - 1]?.height ?? 0),
             );
             expect(back).toEqual([]);
             // And the reader ends on the tail, following, with no pill.
             const last = samples.at(-1);
             expect(last?.pill).toBe(false);
             expect(last?.gap ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(1);
+            // With the pill gone nothing is left of its row: no band above the composer.
+            expect(await tab.locator('.fy-jump-latest-shell').count()).toBe(0);
           } finally {
             await context.close();
           }

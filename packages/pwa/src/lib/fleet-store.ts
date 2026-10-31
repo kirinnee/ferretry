@@ -156,6 +156,13 @@ interface DaemonEntry {
   /** How many list reads this connection has started, and the newest one whose answer was published. */
   listStarted: number;
   listCommitted: number;
+  /**
+   * WHEN EACH SESSION WAS LAST WRITTEN, on a counter that moves with every write. A read remembers the
+   * counter when it STARTS and may replace a session only if nothing wrote it since: an answer that left
+   * before a Resume was published must not put the old "stopped" view back over the "starting" one.
+   */
+  writeClock: number;
+  readonly wroteAt: Map<string, number>;
 }
 
 /**
@@ -268,13 +275,14 @@ export class DaemonFleetStore {
     this.#patchSlice(entry.daemonId, { status: 'loading' });
     entry.listStarted += 1;
     const sequence = entry.listStarted;
+    const startedAt = entry.writeClock;
     // Only the newest read may publish, so a late answer never replaces a fresher one.
     const publishes = (): boolean => this.#isCurrent(entry) && sequence > entry.listCommitted;
     const read = this.#port.list(daemon).then(
       list => {
         if (publishes()) {
           entry.listCommitted = sequence;
-          this.#commitList(entry.daemonId, list);
+          this.#commitList(entry, list, startedAt);
         }
         return list;
       },
@@ -326,13 +334,15 @@ export class DaemonFleetStore {
     const existing = entry.sessionInflight.get(key);
     if (existing !== undefined) return existing;
 
+    const startedAt = entry.writeClock;
     const request = this.#port
       .get(daemon, scope.sessionId)
       .then(view => {
         // The daemon's answer is untrusted: folding a different session in
         // under this scope would silently corrupt the row the caller asked for.
         if (view.config.id !== scope.sessionId) throw new Error('daemon returned another session');
-        if (this.#isCurrent(entry)) this.#upsert(entry.daemonId, view);
+        if (this.#isCurrent(entry) && (entry.wroteAt.get(view.config.id) ?? 0) <= startedAt)
+          this.#upsert(entry.daemonId, view);
         return view;
       })
       .finally(() => {
@@ -351,6 +361,7 @@ export class DaemonFleetStore {
    */
   upsertSession(daemonId: DaemonId, view: SessionView): boolean {
     if (!this.#entries.has(daemonId)) return false;
+    this.#stamp(daemonId, view.config.id);
     return this.#upsert(daemonId, view);
   }
 
@@ -360,6 +371,7 @@ export class DaemonFleetStore {
     if (current.sessions === null) return false;
     const sessions = current.sessions.filter(view => view.config.id !== scope.sessionId);
     if (sessions.length === current.sessions.length) return false;
+    this.#stamp(scope.daemonId, scope.sessionId);
     this.#patchSlice(scope.daemonId, { sessions, byId: indexById(sessions) });
     return true;
   }
@@ -376,6 +388,7 @@ export class DaemonFleetStore {
     const keys = Object.keys(patch) as readonly (keyof SessionState)[];
     if (keys.length === 0) return false;
     if (keys.every(key => Object.is(view.state[key], patch[key]))) return false;
+    this.#stamp(scope.daemonId, scope.sessionId);
     return this.#upsert(scope.daemonId, { ...view, state: { ...view.state, ...patch } });
   }
 
@@ -409,6 +422,8 @@ export class DaemonFleetStore {
       sessionInflight: new Map(),
       listStarted: 0,
       listCommitted: 0,
+      writeClock: 0,
+      wroteAt: new Map(),
     };
     this.#entries.set(daemon.daemonId, entry);
     return entry;
@@ -429,12 +444,38 @@ export class DaemonFleetStore {
     return hadEntry;
   }
 
-  #commitList(daemonId: DaemonId, list: readonly SessionView[]): void {
+  /**
+   * Notes that this session was just written by someone who KNOWS its state (an action's own answer, a
+   * removal), so a read that started earlier cannot overwrite it. A read's own answer is not stamped:
+   * two reads race fairly, and the next poll settles them.
+   */
+  #stamp(daemonId: DaemonId, sessionId: string): void {
+    const entry = this.#entries.get(daemonId);
+    if (entry === undefined) return;
+    entry.writeClock += 1;
+    entry.wroteAt.set(sessionId, entry.writeClock);
+  }
+
+  #commitList(entry: DaemonEntry, list: readonly SessionView[], startedAt: number): void {
+    const daemonId = entry.daemonId;
     const previous = this.fleet(daemonId);
-    const sessions = list.map(view => {
-      const old = previous.byId.get(view.config.id);
-      return old !== undefined && sameView(old, view) ? old : view;
-    });
+    const newer = (id: string): boolean => (entry.wroteAt.get(id) ?? 0) > startedAt;
+    const listed = new Set<string>();
+    const sessions: SessionView[] = [];
+    for (const view of list) {
+      const id = view.config.id;
+      listed.add(id);
+      const old = previous.byId.get(id);
+      // Written (or removed) since this read left: what is held is newer than this answer.
+      if (newer(id)) {
+        if (old !== undefined) sessions.push(old);
+        continue;
+      }
+      sessions.push(old !== undefined && sameView(old, view) ? old : view);
+    }
+    // A session published while this read was out is not in its answer, and is not lost by it.
+    const heldNewer = (previous.sessions ?? []).filter(view => !listed.has(view.config.id) && newer(view.config.id));
+    sessions.unshift(...heldNewer);
     this.#patchSlice(daemonId, {
       sessions,
       byId: indexById(sessions),

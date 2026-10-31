@@ -92,6 +92,7 @@ export * from './session-mcp.ts';
 export * from './session-permission.ts';
 export * from './session-processes.ts';
 export * from './session-queue.ts';
+export * from './session-revive.ts';
 export * from './session-restart.ts';
 export * from './session-search.ts';
 export * from './session-transcript.ts';

@@ -107,11 +107,23 @@ describe('SessionTopBar', () => {
       expect(view.container.querySelector(gone)).toBeNull();
   });
 
+  test('on a phone it draws the one lifecycle button the page hands it, beside ⓘ', async () => {
+    view = await mount(
+      <SessionTopBar
+        actions={<button data-resume="" type="button" />}
+        compact
+        onToggleInfo={() => undefined}
+        session={sessionView('s1', { state: { status: 'stopped' } })}
+      />,
+    );
+    expect(view.container.querySelector('[data-session-actions] [data-resume]')).not.toBeNull();
+  });
+
   test('on a phone it is the title, status, ⓘ and the menu — and nothing else', async () => {
     let opened = 0;
     view = await mount(
       <SessionTopBar
-        actions={<button data-lifecycle="" type="button" />}
+        actions={null}
         compact
         menu={<button data-menu="" type="button" />}
         onOpenSessions={() => (opened += 1)}

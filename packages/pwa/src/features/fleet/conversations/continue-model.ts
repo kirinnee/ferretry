@@ -18,7 +18,7 @@
 
 import type { ConversationImportQuery, Harness, ImportableConversation, SessionView } from '@ferretry/protocol';
 import { displayCallsign } from '../../../lib/callsign.ts';
-import { isTerminalSessionStatus } from '../../../lib/session-screens.ts';
+import { reviveOffer } from '../../../shell/revive-offer.ts';
 import {
   type DateFilter,
   type FerretMark,
@@ -141,7 +141,7 @@ export const continueEntries = (
   const since = sinceInstant(search.date, now);
   const wanted = words(search.text);
   for (const view of sessions) {
-    if (!isTerminalSessionStatus(view.state.status) || described.has(view.config.id)) continue;
+    if (!reviveOffer(view, true).offered || described.has(view.config.id)) continue;
     if (source !== 'all' && source !== 'ferretry' && view.config.harness !== source) continue;
     const ferret = ferretMark(view);
     if (since !== undefined && Date.parse(sessionActivityAt(view)) < Date.parse(since)) continue;
@@ -161,5 +161,5 @@ export const keptConversationAction = (
   sessions: readonly SessionView[],
 ): 'resume' | 'open' => {
   const owner = sessions.find(view => view.config.id === row.adoptedBy);
-  return owner !== undefined && isTerminalSessionStatus(owner.state.status) ? 'resume' : 'open';
+  return owner !== undefined && reviveOffer(owner, true).offered ? 'resume' : 'open';
 };

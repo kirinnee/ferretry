@@ -19,15 +19,14 @@ describe('JumpToLatest with a row of its own', () => {
     view = await mount(<JumpToLatest count={3} onJump={() => (jumps += 1)} shown />);
     const button = must(pill(view.container), 'the pill');
     expect(button.textContent).toContain('3 new — jump to latest');
-    expect(view.container.querySelector('.fy-jump-latest-reserve')).toBeNull();
+    expect(button.hasAttribute('data-jump-hosted')).toBe(false);
     await interact(() => button.click());
     expect(jumps).toBe(1);
   });
 
-  test('keeps an invisible twin of the row while the pill is hidden', async () => {
+  test('draws no row at all while the pill is hidden, so nothing sits above the composer', async () => {
     view = await mount(<JumpToLatest onJump={() => undefined} shown={false} />);
-    expect(pill(view.container)).toBeNull();
-    expect(view.container.querySelector('.fy-jump-latest-reserve')).not.toBeNull();
+    expect(view.container.childElementCount).toBe(0);
   });
 });
 
@@ -50,6 +49,6 @@ describe('JumpToLatest drawn in a host row', () => {
     document.body.appendChild(host);
     view = await mount(<JumpToLatest host={host} onJump={() => undefined} shown={false} />);
     expect(host.childElementCount).toBe(0);
-    expect(view.container.querySelector('.fy-jump-latest-reserve')).toBeNull();
+    expect(view.container.childElementCount).toBe(0);
   });
 });

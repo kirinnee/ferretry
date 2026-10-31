@@ -43,6 +43,8 @@ export interface WardenNotice {
 
 export interface WardenOverviewProps {
   readonly connection: DaemonConnection;
+  /** The daemon's name, when the page shows more than one to choose from: it heads the section and its errors. */
+  readonly machineName?: string;
   readonly status: WardenReadState<WardenStatusView>;
   readonly attention: WardenReadState<WardenAgendaView>;
   /** This daemon's sessions, for names; `null` while not read yet. */
@@ -63,6 +65,7 @@ export interface WardenOverviewProps {
 
 export function WardenOverview({
   connection,
+  machineName,
   status,
   attention: agenda,
   sessions = null,
@@ -85,12 +88,24 @@ export function WardenOverview({
     <div
       className={`${INSIGHTS_COLUMN_CLASS} flex min-w-0 flex-col gap-md pb-8 pt-3 sm:pt-4`}
       data-daemon={connection.daemonId}
+      {...(machineName === undefined ? {} : { role: 'region', 'aria-label': `Warden on ${machineName}` })}
     >
       <header className="flex min-w-0 flex-col gap-sm">
         <div className="flex flex-wrap items-center justify-between gap-x-md gap-y-sm">
           <h2 className="m-0 flex items-center gap-sm text-title font-semibold leading-tight text-fg">
             <ShieldCheck size={18} className="text-accent" aria-hidden="true" />
             Warden
+            {machineName !== undefined && (
+              <>
+                {' '}
+                <span className="text-faint" aria-hidden="true">
+                  ·
+                </span>{' '}
+                <span className="min-w-0 truncate" data-warden-machine="">
+                  {machineName}
+                </span>
+              </>
+            )}
           </h2>
           <div className="flex flex-wrap gap-sm">
             <button
@@ -116,7 +131,7 @@ export function WardenOverview({
             </RouteLink>
           </div>
         </div>
-        <StatusSummary status={status} now={now} />
+        <StatusSummary status={status} now={now} machineName={machineName} />
         {notice !== null && (
           <p
             role={notice.tone === 'err' ? 'alert' : 'status'}
@@ -152,7 +167,15 @@ export function WardenOverview({
   );
 }
 
-function StatusSummary({ status, now }: { readonly status: WardenReadState<WardenStatusView>; readonly now: number }) {
+function StatusSummary({
+  status,
+  now,
+  machineName,
+}: {
+  readonly status: WardenReadState<WardenStatusView>;
+  readonly now: number;
+  readonly machineName: string | undefined;
+}) {
   if (status.status === 'loading')
     return (
       <p role="status" className="m-0 flex items-center gap-xs text-ui text-muted">
@@ -163,7 +186,9 @@ function StatusSummary({ status, now }: { readonly status: WardenReadState<Warde
   if (status.status === 'error')
     return (
       <div role="alert" className="rounded-control border border-err-border bg-err-bg px-cell-x py-row-y">
-        <p className="m-0 text-row font-semibold text-err">Warden status unavailable</p>
+        <p className="m-0 text-row font-semibold text-err">
+          Warden status unavailable{machineName === undefined ? '' : ` on ${machineName}`}
+        </p>
         <p className="m-0 mt-xs text-meta leading-base text-muted">
           {status.reason}. This is unknown, not an all-clear.
         </p>

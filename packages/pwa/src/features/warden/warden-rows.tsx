@@ -71,8 +71,8 @@ export function InvestigationList({
                 <span className={TIME_CLASS} title={row.at === undefined ? undefined : fullTime(row.at)}>
                   {compactAgo(row.at, now)}
                 </span>
-                <span className="inline-flex min-w-0 flex-1 items-baseline gap-xs text-cell leading-base">
-                  <span className={row.named ? 'mono shrink-0 text-fg-soft' : 'shrink-0 text-muted'}>
+                <span className="inline-flex min-w-0 flex-1 items-baseline gap-xs text-cell leading-base sm:min-w-[9rem]">
+                  <span className={row.named ? 'mono min-w-0 truncate text-fg-soft' : 'min-w-0 truncate text-muted'}>
                     {row.investigator}
                   </span>
                   {row.sessionId !== undefined && (

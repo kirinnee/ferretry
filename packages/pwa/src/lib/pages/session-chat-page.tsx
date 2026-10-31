@@ -993,64 +993,67 @@ export function SessionChatPage({
    * where moving to another login lives on every width. Stop still asks first: choosing it, from either
    * place, turns the bar's buttons into Confirm stop and Cancel.
    */
-  const barActions = actions.filter(
-    spec => spec.action === 'interrupt' || spec.action === 'resume' || (spec.action === 'stop' && !compact),
+  const barActions = actions.filter(spec =>
+    compact
+      ? spec.action === 'resume'
+      : spec.action === 'interrupt' || spec.action === 'resume' || spec.action === 'stop',
   );
   const barLabel = (spec: SessionActionSpec): string =>
     spec.action === 'interrupt' ? 'Interrupt' : spec.action === 'resume' ? 'Start' : 'Stop';
-  const lifecycleActions = confirmStop ? (
-    <>
-      <Button
-        data-session-action="confirm-stop"
-        disabled={pendingAction !== null}
-        onClick={() => void runAction('stop')}
-        size="sm"
-        type="button"
-        variant="danger"
-      >
-        {pendingAction === 'stop' ? 'Stopping…' : 'Confirm stop'}
-      </Button>
-      <Button onClick={() => setConfirmStop(false)} size="sm" type="button" variant="ghost">
-        Cancel
-      </Button>
-    </>
-  ) : compact ? (
-    // A PHONE'S LIFECYCLE BUTTON IS AN ICON, the same size and weight as ⓘ and Actions beside it: the
-    // outlined "Interrupt" box was the fattest thing in the bar and pushed the agent's name aside. The
-    // word moves to the label and the tooltip; the glyph (⏸ / ▶) carries the action.
-    barActions.map(spec => {
-      const Icon = spec.action === 'resume' ? Play : Pause;
-      return (
-        <button
-          aria-label={pendingAction === spec.action ? `${barLabel(spec)}…` : spec.label}
-          className="fy-session-bar__icon"
+  const lifecycleActions =
+    confirmStop && !compact ? (
+      <>
+        <Button
+          data-session-action="confirm-stop"
+          disabled={pendingAction !== null}
+          onClick={() => void runAction('stop')}
+          size="sm"
+          type="button"
+          variant="danger"
+        >
+          {pendingAction === 'stop' ? 'Stopping…' : 'Confirm stop'}
+        </Button>
+        <Button onClick={() => setConfirmStop(false)} size="sm" type="button" variant="ghost">
+          Cancel
+        </Button>
+      </>
+    ) : barActions.length === 0 ? null : compact ? (
+      // A PHONE'S LIFECYCLE BUTTON IS AN ICON, the same size and weight as ⓘ and Actions beside it: the
+      // outlined "Interrupt" box was the fattest thing in the bar and pushed the agent's name aside. The
+      // word moves to the label and the tooltip; the glyph (⏸ / ▶) carries the action.
+      barActions.map(spec => {
+        const Icon = spec.action === 'resume' ? Play : Pause;
+        return (
+          <button
+            aria-label={pendingAction === spec.action ? `${barLabel(spec)}…` : spec.label}
+            className="fy-session-bar__icon"
+            data-session-action={spec.action}
+            disabled={pendingAction !== null}
+            key={spec.action}
+            onClick={() => void runAction(spec.action)}
+            title={spec.label}
+            type="button"
+          >
+            <Icon aria-hidden="true" size={18} />
+          </button>
+        );
+      })
+    ) : (
+      barActions.map(spec => (
+        <Button
+          aria-label={spec.label}
           data-session-action={spec.action}
           disabled={pendingAction !== null}
           key={spec.action}
           onClick={() => void runAction(spec.action)}
-          title={spec.label}
+          size="sm"
           type="button"
+          variant={spec.danger ? 'danger' : 'outline'}
         >
-          <Icon aria-hidden="true" size={18} />
-        </button>
-      );
-    })
-  ) : (
-    barActions.map(spec => (
-      <Button
-        aria-label={spec.label}
-        data-session-action={spec.action}
-        disabled={pendingAction !== null}
-        key={spec.action}
-        onClick={() => void runAction(spec.action)}
-        size="sm"
-        type="button"
-        variant={spec.danger ? 'danger' : 'outline'}
-      >
-        {pendingAction === spec.action ? `${barLabel(spec)}…` : barLabel(spec)}
-      </Button>
-    ))
-  );
+          {pendingAction === spec.action ? `${barLabel(spec)}…` : barLabel(spec)}
+        </Button>
+      ))
+    );
   const actionAlert = (
     <div className={actionError === null ? 'sr-only' : 'm-0 px-3 py-1 text-ui text-err'} role="alert">
       {actionError === null ? '' : `Session action failed: ${actionError}`}
@@ -1229,7 +1232,7 @@ export function SessionChatPage({
   });
   // THE BAR'S ONE OVERFLOW (`session-top-bar.tsx`): on a phone Interrupt is the top of ▾ — a phone's bar is ☰,
   // the name, one status dot, the theme icon, ⓘ and ▾. The theme picker is the bar's own icon, not a form in ▾.
-  const interruptSpec = barActions.find(spec => spec.action === 'interrupt');
+  const interruptSpec = actions.find(spec => spec.action === 'interrupt');
   const barOverflowActions: readonly SessionActionContribution<CoreActionContext>[] = [
     // Search: Ctrl/Cmd-F on a keyboard, and this row — the phone's way in, the 🔍 of ▾.
     ...(conversationSearch === undefined

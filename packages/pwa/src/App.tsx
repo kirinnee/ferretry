@@ -12,11 +12,14 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
+import type { ChatSearchPort } from './components/chat-search.tsx';
 import { composerSuggestionSwitches } from './components/composer-autocomplete.ts';
 import { ImportedHistoryPage } from './components/imported-history-page.tsx';
 import type { SendCancel, SendRetry, SendSubmit } from './components/ledger-message.tsx';
 import { liveStreamState } from './components/live-stream-indicator.tsx';
 import { NewSessionPage } from './components/new-session-page.tsx';
+import { QueueActionsContext } from './components/queue-actions-context.tsx';
+import { QueuePage } from './components/queue-page.tsx';
 import {
   type SessionEventStreamControl,
   type SessionEventStreamEnvironment,
@@ -37,12 +40,10 @@ import {
 import { SessionsPage } from './components/sessions-page.tsx';
 import type { SendDismiss, SendExpand } from './components/settled-send-note.tsx';
 import type { TranscriptHistoryControl } from './components/transcript-history-row.tsx';
-import type { ChatSearchPort } from './components/chat-search.tsx';
-import { useAgendaSessionActions } from './features/agenda/agenda-session-actions.tsx';
-import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
-import { TERMINAL_STATUSES } from './shell/status-mark.tsx';
 import { AgendaInboxComposer } from './features/agenda/agenda-inbox-composer.tsx';
 import { AgendaInboxPage } from './features/agenda/agenda-inbox-page.tsx';
+import { useAgendaSessionActions } from './features/agenda/agenda-session-actions.tsx';
+import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { BoardOriginProvider, useBoardOrigin } from './features/board/board-origin.tsx';
 import { BoardPage } from './features/board/board-page.tsx';
 import { LinkBehaviourProvider } from './features/browser/external-link.tsx';
@@ -90,9 +91,10 @@ import { PairingScreen } from './features/pairing/pairing-screen.tsx';
 import { JoinScreen } from './features/shared/join-screen.tsx';
 import { SharedEntry } from './features/shared/shared-entry.tsx';
 import { SharedWithMe } from './features/shared/shared-with-me.tsx';
-import { ProjectDetailPage } from './features/projects/project-detail.tsx';
 import { LaneEditorPage } from './features/projects/lane-editor.tsx';
+import { ProjectDetailPage } from './features/projects/project-detail.tsx';
 import { ProjectsPage } from './features/projects/projects-page.tsx';
+import { queueContribution } from './features/queue-view/queue-action.ts';
 import { restartFerrets } from './features/restart-outdated/restart-outdated-api.ts';
 import { RestartOverlayProvider } from './features/restart-outdated/restart-overlay.tsx';
 import { ActionToast } from './features/session-actions/action-toast.tsx';
@@ -128,18 +130,18 @@ import { StepUpDialog, UNLOCK_COPY } from './features/step-up/step-up-dialog.tsx
 import { useStuckMessageActions } from './features/stuck-messages/use-stuck-message-actions.tsx';
 import { useAskWardenActions } from './features/warden/ask-warden.tsx';
 import { WardenOverviewSurface } from './features/warden/warden-overview-surface.tsx';
+import { WardenTotalsSurface } from './features/warden/warden-totals-surface.tsx';
 import { useWhatsNewEntry, useWhatsNewHost, WhatsNewProvider } from './features/whats-new/whats-new-host.tsx';
 import { WhatsNewSheet } from './features/whats-new/whats-new-sheet.tsx';
 import { useAccountPickerSlice } from './hooks/use-account-picker.ts';
 import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.ts';
-import { useAppViewport } from './hooks/use-app-viewport.ts';
-import { type BoardMachine, useBoard } from './hooks/use-board.ts';
-import { useChatTasksUrl } from './hooks/use-chat-tasks-url.ts';
 import { useAgendaSession, useAgendaSnapshot } from './hooks/use-agenda.ts';
-import { agendaClearPort } from './lib/agenda-clear-agents.ts';
 import { AgendaInboxContext, useAgendaInbox, useAgendaInboxModel, useInboxMachines } from './hooks/use-agenda-inbox.ts';
 import { useAgendaReplies } from './hooks/use-agenda-replies.ts';
+import { useAppViewport } from './hooks/use-app-viewport.ts';
+import { type BoardMachine, useBoard } from './hooks/use-board.ts';
 import { useCarrierPreferences, useTunnelService, useTunnelSwitches } from './hooks/use-carrier-preferences.ts';
+import { useChatTasksUrl } from './hooks/use-chat-tasks-url.ts';
 import { useConfigChangeFeed } from './hooks/use-config-change-feed.ts';
 import { useConnectionHealth } from './hooks/use-connection-health.ts';
 import { useInputModality } from './hooks/use-input-modality.ts';
@@ -173,13 +175,15 @@ import {
 } from './hooks/use-service-worker-update.ts';
 import { useSttSettings } from './hooks/use-stt-settings.ts';
 import { useTheme } from './hooks/use-theme.ts';
-import { type MachineSource, machineDisplayOrder } from './lib/all-machines.ts';
-import { AgendaWireProbes } from './lib/agenda-wire-react.tsx';
+import { useWardenDaemonScope } from './hooks/use-warden-daemon-scope.ts';
+import { agendaClearPort } from './lib/agenda-clear-agents.ts';
 import { agendaTargetFromSearch } from './lib/agenda-inbox.ts';
+import { inboxSourceFromSearch } from './lib/agenda-inbox-list.ts';
+import { AgendaWireProbes } from './lib/agenda-wire-react.tsx';
+import { type MachineSource, machineDisplayOrder } from './lib/all-machines.ts';
+import { transcriptIsCurrent } from './lib/background-fresh.ts';
 import { NO_BOARD_FILTERS } from './lib/board-model.ts';
 import { boardBadgeCount } from './lib/board-phone.ts';
-import { inboxSourceFromSearch } from './lib/agenda-inbox-list.ts';
-import { transcriptIsCurrent } from './lib/background-fresh.ts';
 import { boardPorts } from './lib/board-ports.ts';
 import { DEFAULT_CARRIER_PREFERENCE } from './lib/carrier-preference.ts';
 import type { DaemonConnectionRecord } from './lib/connections.ts';
@@ -188,6 +192,7 @@ import { type DaemonSessionScope, daemonSessionKey, daemonSessionScope } from '.
 import { browserFleetFeedEnvironment } from './lib/fleet-feed.ts';
 import { projectKeyFor } from './lib/fleet-grouping.ts';
 import { installBanner } from './lib/install-prompt.ts';
+import { itemSince, readItemConversation } from './lib/item-conversation.ts';
 import { placeLedgerRows } from './lib/ledger-placement.ts';
 import { createLiveActivityHub } from './lib/live-activity-feed.ts';
 import { moveMachine } from './lib/machine-order.ts';
@@ -201,21 +206,21 @@ import type {
 import { installPortraitLock } from './lib/orientation-lock.ts';
 import {
   type BoardPageProps,
-  type QueuePageProps,
   type DaemonPageProps,
   PageHost,
   type PageHostSlots,
   type ProjectDetailPageProps,
+  type QueuePageProps,
   type SessionChatPageProps,
 } from './lib/pages/page-host.tsx';
 import {
   connectionPickerPath,
   daemonAgendaPath,
-  daemonQueuePath,
+  daemonBoardForFerretPath,
   daemonLearningPath,
   daemonProjectPath,
+  daemonQueuePath,
   daemonSessionsPath,
-  daemonBoardForFerretPath,
   daemonSettingsPath,
   daemonWardenPath,
   isDaemonless,
@@ -226,9 +231,7 @@ import {
   sharedPath,
 } from './lib/pages/routes.ts';
 import { SessionChatPage } from './lib/pages/session-chat-page.tsx';
-import { WardenPage } from './lib/pages/warden-page.tsx';
-import { QueuePage } from './components/queue-page.tsx';
-import { queueContribution } from './features/queue-view/queue-action.ts';
+import { WardenPage, type WardenSurfaceProps } from './lib/pages/warden-page.tsx';
 import { browserQrScanHost, type QrDetectorLike, type QrScanHost } from './lib/pair-scan.ts';
 import { type PairingArrival, pairingArrival } from './lib/pairing.ts';
 import { useRenderTiming } from './lib/performance/main-thread.ts';
@@ -243,14 +246,12 @@ import {
   supportsWebPush,
 } from './lib/push-enrolment.ts';
 import { frameQrDetector } from './lib/qr-frame-decoder.ts';
-import { itemSince, readItemConversation } from './lib/item-conversation.ts';
 import { isCarrierOutage } from './lib/relay-carrier.ts';
 import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
 import { RouterProvider, useRouter } from './lib/router.tsx';
 import { chatScrollSlot } from './lib/scroll-memory.ts';
 import { type LedgerSendRecord, ledgerFeed, parseLedgerSendsResponse, readLedgerSends } from './lib/send-ledger.ts';
 import { joinOutbox, joinQueue, queueActions, readSessionQueue } from './lib/send-queue.ts';
-import { QueueActionsContext } from './components/queue-actions-context.tsx';
 import type { CachedTranscript } from './lib/session-cache.ts';
 import {
   type AppStore,
@@ -295,6 +296,7 @@ import {
   type SessionsBarPresentation,
   type SessionsBarUpdate,
 } from './shell/sessions-bar.tsx';
+import { TERMINAL_STATUSES } from './shell/status-mark.tsx';
 import { ThemeToggle } from './shell/theme-toggle.tsx';
 
 /**
@@ -2015,7 +2017,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
   );
 }
 
-function WardenOverviewRoute({ connection }: DaemonPageProps) {
+function WardenOverviewRoute({ connection, machineName }: WardenSurfaceProps) {
   const store = useAppStore();
   const { navigate } = useRouter();
   const fleet = useSyncExternalStore(
@@ -2025,19 +2027,39 @@ function WardenOverviewRoute({ connection }: DaemonPageProps) {
   return (
     <WardenOverviewSurface
       connection={connection}
+      {...(machineName === undefined ? {} : { machineName })}
       sessions={fleet.daemons.get(connection.daemonId)?.sessions ?? null}
       onNavigate={navigate}
     />
   );
 }
 
-const WARDEN_SLOTS = { Overview: WardenOverviewRoute } as const;
+const WARDEN_SLOTS = { Overview: WardenOverviewRoute, Totals: WardenTotalsSurface } as const;
 
+/** The Warden reads every paired machine, in the order and by the names the sessions bar shows them. */
 function WardenRoute({ connection }: DaemonPageProps) {
   const { navigate } = useRouter();
+  const store = useAppStore();
+  const { connections } = useConnectionSnapshot();
+  const savedOrder = useMachineOrder(store.controls).saved;
+  const { remembered, remember } = useWardenDaemonScope(store.controls);
+  const machines = useMemo(
+    () =>
+      machineDisplayOrder(connections, savedOrder).map(record => ({
+        connection: record,
+        name: distinctDaemonName(record, connections),
+      })),
+    [connections, savedOrder],
+  );
   return (
     <InsightsFrame current="warden" daemonId={connection.daemonId} onNavigate={navigate}>
-      <WardenPage connection={connection} slots={WARDEN_SLOTS} />
+      <WardenPage
+        connection={connection}
+        slots={WARDEN_SLOTS}
+        machines={machines}
+        remembered={remembered}
+        onRemember={remember}
+      />
     </InsightsFrame>
   );
 }
