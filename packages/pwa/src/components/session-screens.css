@@ -1258,30 +1258,22 @@ button.fy-receipt {
   }
 }
 /* THE GROUND THE CHAT SITS ON, for anything that has to fade into it. A desktop pane is the surface
-   (workspace.css `.fy-ws-pane`); a phone's workspace is the page ground. The jump pill's strip used to
-   fade to the surface everywhere, so on a phone it drew a pale band over the text that read as broken. */
+   (workspace.css `.fy-ws-pane`); a phone's workspace is the page ground. */
 .kt-chat-surface {
   --chat-ground: var(--fy-surface);
 }
 [data-phone-workspace] .kt-chat-surface {
   --chat-ground: var(--bg, var(--fy-surface));
 }
+/* THE PILL'S OWN ROW. It sits under the scroller in the host's column, never over it: it used to float
+   across the scroller's bottom edge, so the last row of a table or a code block in the newest message sat
+   hidden under it (owner, 2026-10-31: "jump to latest clips the table"). A row of its own takes its height
+   from the scroller while it shows, so nothing the reader is looking at can be behind it. */
 .fy-jump-latest-shell {
-  align-items: end;
-  background: linear-gradient(
-    to top,
-    var(--chat-ground, var(--fy-surface)),
-    color-mix(in srgb, var(--chat-ground, var(--fy-surface)) 85%, transparent) 45%,
-    transparent
-  );
-  bottom: 0;
   display: flex;
+  flex: none;
   justify-content: center;
-  left: 0;
-  padding: var(--flow-5) var(--flow-4) var(--flow-2);
-  pointer-events: none;
-  position: absolute;
-  right: 0;
+  padding: var(--flow-2) var(--flow-4);
 }
 .fy-jump-latest {
   background: var(--fy-accent);
