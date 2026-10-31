@@ -155,6 +155,34 @@ describe('BottomSheet', () => {
     await sheetMount.unmount();
   });
 
+  it('ignores a pointer click on the backdrop that did not begin there, but honours one that did', async () => {
+    let closes = 0;
+    const sheetMount = await mount(sheet({ open: true, onClose: () => (closes += 1) }));
+    const backdrop = backdropOf(sheetMount.container);
+    const pointerClick = () => backdrop.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+
+    // The click a browser synthesizes from the touch that opened this sheet.
+    await interact(pointerClick);
+    expect(closes).toBe(0);
+
+    await interact(() => firePointer(backdrop, 'pointerdown'));
+    await interact(pointerClick);
+    expect(closes).toBe(1);
+
+    await interact(pointerClick);
+    expect(closes).toBe(1);
+
+    await interact(() => firePointer(backdrop, 'pointerdown'));
+    await interact(() => firePointer(backdrop, 'pointercancel'));
+    await interact(pointerClick);
+    expect(closes).toBe(1);
+
+    await interact(() => backdrop.click());
+    expect(closes).toBe(2);
+
+    await sheetMount.unmount();
+  });
+
   it('closes on Escape from inside', async () => {
     let closes = 0;
     const sheetMount = await mount(sheet({ open: true, onClose: () => (closes += 1) }));
