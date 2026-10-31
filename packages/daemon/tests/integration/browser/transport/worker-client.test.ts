@@ -685,7 +685,8 @@ describe('browser worker client — the input bridge', () => {
     const refused = await client.inputType('refuses', facts, [{ field: 'password', text: 'x' }], true);
 
     // Assert
-    for (const failure of [observed, pictured, documented, refound, read]) should(failure.code).equal('upstream_failed');
+    for (const failure of [observed, pictured, documented, refound, read])
+      should(failure.code).equal('upstream_failed');
     should(garbled).equal('uncertain');
     should(refused).equal('uncertain');
   });
