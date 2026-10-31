@@ -892,7 +892,7 @@ describe('AGENT_TOOLS_INSTRUCTION — saved logins', () => {
     const text = AGENT_TOOLS_INSTRUCTION;
 
     // Assert
-    should(text).containEql('Read account_hint before sign-in; account_propose fixes after.');
+    should(text).containEql('account_hint before sign-in; account_propose to fix it after.');
     should(text).not.containEql('Before a web sign-in, login_hint says how and where.');
   });
 });
