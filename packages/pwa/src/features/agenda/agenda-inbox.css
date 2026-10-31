@@ -1203,7 +1203,7 @@
   position: relative;
   min-width: 0;
   overflow: hidden;
-  border: 1px solid var(--border-soft);
+  border: var(--stroke) solid var(--border-soft);
   border-radius: var(--radius-control);
   background: var(--surface);
 }
