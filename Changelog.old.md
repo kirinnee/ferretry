@@ -1,3 +1,9 @@
+## [4.155.1](https://github.com/kirinnee/ferretry/compare/v4.155.0...v4.155.1) (2026-10-31)
+
+### Fixes
+
+* **security:** keep the syscall trace and CLI version probe out of the shared tmp ([#1110](https://github.com/kirinnee/ferretry/issues/1110)) ([a594ea1](https://github.com/kirinnee/ferretry/commit/a594ea10e107dd333c7ada1cd3dd9d59285e3a28))
+
 ## [4.155.0](https://github.com/kirinnee/ferretry/compare/v4.154.0...v4.155.0) (2026-10-31)
 
 ### Features

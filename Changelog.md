@@ -1,3 +1,15 @@
+## [4.156.0](https://github.com/kirinnee/ferretry/compare/v4.155.1...v4.156.0) (2026-10-31)
+
+### Features
+
+* **pwa:** stack and tint the agenda card's premise and context ([#1114](https://github.com/kirinnee/ferretry/issues/1114)) ([2f5883c](https://github.com/kirinnee/ferretry/commit/2f5883c8babe28e3ad992b90a0dc31275e042f98))
+
+### Fixes
+
+* **cli:** keep the pairing link out of argv when opening a browser ([#1111](https://github.com/kirinnee/ferretry/issues/1111)) ([5bd09db](https://github.com/kirinnee/ferretry/commit/5bd09db38caaba92e6a8dfe891eff8a0db5cdce1))
+* **cli:** send local credentials only to a loopback listener this user owns ([#1112](https://github.com/kirinnee/ferretry/issues/1112)) ([5df3a0b](https://github.com/kirinnee/ferretry/commit/5df3a0bbaa95f3f3809e2d9a837fab9a1e682fab))
+* **daemon:** authenticate the private Xvfb displays with an MIT-MAGIC-COOKIE ([#1113](https://github.com/kirinnee/ferretry/issues/1113)) ([c96b567](https://github.com/kirinnee/ferretry/commit/c96b5675f7ae1c9ce9948fa7d90f6318287f8b02))
+
 ## [4.155.1](https://github.com/kirinnee/ferretry/compare/v4.155.0...v4.155.1) (2026-10-31)
 
 ### Fixes
