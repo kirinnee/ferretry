@@ -22,9 +22,15 @@ import { type ActablePage, BROWSER_PROBE_TIMEOUT_MS, browserElementOf } from './
  * DevTools session these calls touch, so each rule is tested with fakes and no browser.
  *
  * THE BROWSER DECIDES, THE PAGE IS NOT ASKED. The agent's pointer (a ref or a selector) only says where to
- * look. The node, its frame, its attributes and the document come from DevTools; the only thing the page's own
- * script is made to do is carry a one-time marker attribute on the element, so the element can be found again
- * by DevTools, and the marker is always taken off.
+ * look. The node, its frame, its attributes, its box and the document come from DevTools; the only thing the
+ * page's own script is made to do is carry a one-time marker attribute on the element, so DevTools can look the
+ * element up. The marker is a lookup aid and never evidence: the node it leads to is proved to be the element
+ * the handle holds (same box, and the node on top at its centre) before any fact is taken, and it is always
+ * taken off.
+ *
+ * NOTHING THE PAGE CONTROLS RUNS BETWEEN THE LAST PROOF AND THE INSERT. The write selects and checks focus
+ * through an isolated world of the field's frame, whose prototypes the page cannot reach, and `Input.insertText`
+ * is the very next call after the final proof.
  *
  * A VALUE NEVER LEAVES. It reaches {@link typeInputFields} and goes to `Input.insertText`; it is not logged, not
  * in any error this file throws or returns, and not in the answer, which is one of four words.
@@ -118,7 +124,13 @@ export interface InputSubject {
 
 /** The attribute that marks the one element being looked at, so DevTools can find it again. */
 export const INPUT_MARKER = 'data-fy-input';
-const SELECT_CONTENTS = 'function () { if (typeof this.select === "function") this.select(); }';
+/** The world the write runs its few scripts in: created by DevTools per frame, so the page's overrides are not in it. */
+const ISOLATED_WORLD = 'ferretry-input';
+/** Selects what a field holds with the browser's own `select`, not whatever `select` the page put on the element. */
+const SELECT_CONTENTS =
+  'function () { const p = this instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; if (typeof p.select === "function") p.select.call(this); }';
+/** How far the handle's box and the node's box may differ and still be the same element, in CSS pixels. */
+const BOX_TOLERANCE_PX = 1;
 /**
  * The element that has focus, looked for through the documents it can sit in: a field in a same-origin
  * iframe or an open shadow root is not `document.activeElement` itself, its host is. A frame the page may
@@ -269,7 +281,7 @@ async function sessionOwning(
   }
 }
 
-/** The element's node, found by DevTools from the marker alone, or a refusal when it is not exactly one. */
+/** The node carrying the marker, or a refusal when it is not exactly one. The caller still has to prove it is the element. */
 async function findMarked(session: InputCdpSession, token: string): Promise<Record<string, unknown>> {
   await ask(session, 'DOM.getDocument', { depth: 0 });
   const search = await ask(session, 'DOM.performSearch', {
@@ -289,6 +301,67 @@ async function findMarked(session: InputCdpSession, token: string): Promise<Reco
   } finally {
     await session.send('DOM.discardSearchResults', { searchId }).catch(() => undefined);
   }
+}
+
+interface Box {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+}
+
+/** A node's border box as DevTools measures it, in CSS pixels; `undefined` for a node with no box or an answer that is not one. */
+async function measuredBox(session: InputCdpSession, backendNodeId: number): Promise<Box | undefined> {
+  let border: unknown;
+  try {
+    border = objectOf(objectOf(await ask(session, 'DOM.getBoxModel', { backendNodeId })).model).border;
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(border) || border.length !== 8) return undefined;
+  const points = border as readonly unknown[];
+  if (!points.every(point => typeof point === 'number' && Number.isFinite(point))) return undefined;
+  const xs = [0, 2, 4, 6].map(index => points[index] as number);
+  const ys = [1, 3, 5, 7].map(index => points[index] as number);
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+}
+
+const nearly = (left: number, right: number): boolean => Math.abs(left - right) <= BOX_TOLERANCE_PX;
+
+/**
+ * Proves the node DevTools found is the element the handle holds, and answers the box every fact about the
+ * field is drawn from. The node's own box must match the handle's — in size, and in place too unless the
+ * field is in a frame of its own, whose coordinates are frame-local and so only agree in size — and the node
+ * on top at the centre of that box must be this node. A node with no box agrees only with a handle that has
+ * none. Anything else is a refusal: the marker led somewhere else, or something sits over the field.
+ */
+async function provenBox(
+  session: InputCdpSession,
+  backendNodeId: number,
+  claimed: { readonly x: number; readonly y: number; readonly width: number; readonly height: number } | null,
+  samePlace: boolean,
+): Promise<Box> {
+  const proven = await measuredBox(session, backendNodeId);
+  if (proven === undefined || claimed === null) {
+    if (proven === undefined && claimed === null) return { x: 0, y: 0, w: 0, h: 0 };
+    throw new Error(REFUSALS.unidentified);
+  }
+  if (!nearly(proven.w, claimed.width) || !nearly(proven.h, claimed.height)) throw new Error(REFUSALS.unidentified);
+  if (samePlace && (!nearly(proven.x, claimed.x) || !nearly(proven.y, claimed.y)))
+    throw new Error(REFUSALS.unidentified);
+  if (proven.w > 0 && proven.h > 0) {
+    // The node's UA internals answer as the field itself, so ask for the field and not for its inner editor.
+    const top = await ask(session, 'DOM.getNodeForLocation', {
+      x: Math.floor(proven.x + proven.w / 2),
+      y: Math.floor(proven.y + proven.h / 2),
+      includeUserAgentShadowDOM: false,
+      ignorePointerEventsNone: true,
+    }).catch(() => ({}) as Record<string, unknown>);
+    if (top.backendNodeId !== backendNodeId) throw new Error(REFUSALS.unidentified);
+  }
+  return samePlace ? proven : { x: claimed.x, y: claimed.y, w: proven.w, h: proven.h };
 }
 
 /** Looks at one field: its frame, node, attributes and box. `undefined` when the element is not on the page. */
@@ -323,16 +396,16 @@ async function observeField(
     const info = objectOf(objectOf(await ask(session, 'Target.getTargetInfo')).targetInfo);
     const frameId = typeof info.targetId === 'string' ? oneLine(info.targetId, FRAME_ID_LIMIT) : '';
     if (frameId === '') throw new Error(REFUSALS.unidentified);
+    const box = await provenBox(session, backendNodeId, await handle.boundingBox().catch(() => null), !owned);
+    const visible = (await handle.isVisible().catch(() => false)) && box.w > 0 && box.h > 0;
     subject.sessions.remember(frameId, session, owned);
-    const box = (await handle.boundingBox().catch(() => null)) ?? { x: 0, y: 0, width: 0, height: 0 };
-    const visible = (await handle.isVisible().catch(() => false)) && box.width > 0 && box.height > 0;
     return {
       fieldId: pointer.id,
       frameOrigin: originOfUrl(frame.url()),
       frameId,
       backendNodeId,
       field: inputFieldAttributes(node),
-      box: { x: box.x, y: box.y, w: box.width, h: box.height },
+      box,
       visible,
     };
   } finally {
@@ -399,23 +472,84 @@ async function checkUnchanged(
   return known;
 }
 
-/** Focuses the node and proves the page's focus is on it, not on something else the page moved focus to. */
-async function focusExactly(session: InputCdpSession, backendNodeId: number): Promise<void> {
-  await session.send('DOM.focus', { backendNodeId });
-  const active = objectOf(objectOf(await ask(session, 'Runtime.evaluate', { expression: ACTIVE_ELEMENT })).result);
+/** The ids of the frames a session owns, its root first: the main frame, or an out-of-process frame's own top. */
+function frameIdsOf(tree: unknown): string[] {
+  const ids: string[] = [];
+  const walk = (entry: unknown): void => {
+    const node = objectOf(entry);
+    const id = objectOf(node.frame).id;
+    if (typeof id === 'string' && id !== '') ids.push(id);
+    if (Array.isArray(node.childFrames)) for (const child of node.childFrames as readonly unknown[]) walk(child);
+  };
+  walk(tree);
+  return ids;
+}
+
+/** A field as an object of the trusted world, and the context of its session's root frame for the focus proof. */
+interface TrustedField {
+  readonly objectId: string;
+  readonly rootContextId: number;
+}
+
+/** The isolated worlds made for one write, one per session and frame, so a card of several fields makes each once. */
+class IsolatedWorlds {
+  private readonly made = new Map<InputCdpSession, Map<string, number>>();
+
+  private async worldOf(session: InputCdpSession, frameId: string): Promise<number> {
+    let frames = this.made.get(session);
+    if (frames === undefined) {
+      frames = new Map();
+      this.made.set(session, frames);
+    }
+    const known = frames.get(frameId);
+    if (known !== undefined) return known;
+    const created = await ask(session, 'Page.createIsolatedWorld', { frameId, worldName: ISOLATED_WORLD });
+    const contextId = created.executionContextId;
+    if (typeof contextId !== 'number') throw new Refusal();
+    frames.set(frameId, contextId);
+    return contextId;
+  }
+
+  /** Resolves the node in the first frame of the session whose world can hold it; a refusal when none can. */
+  async resolve(session: InputCdpSession, backendNodeId: number): Promise<TrustedField> {
+    const frames = frameIdsOf(objectOf(await ask(session, 'Page.getFrameTree')).frameTree);
+    const [root] = frames;
+    if (root === undefined) throw new Refusal();
+    const rootContextId = await this.worldOf(session, root);
+    for (const frameId of frames) {
+      try {
+        const executionContextId = await this.worldOf(session, frameId);
+        const resolved = objectOf(
+          objectOf(await ask(session, 'DOM.resolveNode', { backendNodeId, executionContextId })).object,
+        );
+        if (typeof resolved.objectId === 'string') return { objectId: resolved.objectId, rootContextId };
+      } catch {
+        // This frame cannot hold the node (or is gone); the next may.
+      }
+    }
+    throw new Refusal();
+  }
+}
+
+/**
+ * The last look before an insert, from the trusted world only: the document is still the one the owner was
+ * shown, and the focused element — walked through same-origin frames and open shadow roots — is the approved
+ * node. Nothing the page can override runs here, and the insert is the very next call.
+ */
+async function proveFocus(
+  subject: InputSubject,
+  expected: BrowserInputFacts,
+  session: InputCdpSession,
+  rootContextId: number,
+  backendNodeId: number,
+): Promise<void> {
+  if ((await navigationIdOf(await subject.cdp.page())) !== expected.navigationId) throw new Refusal();
+  const active = objectOf(
+    objectOf(await ask(session, 'Runtime.evaluate', { expression: ACTIVE_ELEMENT, contextId: rootContextId })).result,
+  );
   if (typeof active.objectId !== 'string') throw new Refusal();
   const node = objectOf((await ask(session, 'DOM.describeNode', { objectId: active.objectId })).node);
   if (node.backendNodeId !== backendNodeId) throw new Refusal();
-}
-
-async function selectContents(session: InputCdpSession, backendNodeId: number): Promise<void> {
-  const resolved = objectOf(objectOf(await ask(session, 'DOM.resolveNode', { backendNodeId })).object);
-  if (typeof resolved.objectId !== 'string') throw new Refusal();
-  await session.send('Runtime.callFunctionOn', {
-    objectId: resolved.objectId,
-    functionDeclaration: SELECT_CONTENTS,
-    returnByValue: true,
-  });
 }
 
 async function pressEnter(session: InputCdpSession): Promise<void> {
@@ -427,8 +561,10 @@ async function pressEnter(session: InputCdpSession): Promise<void> {
 /**
  * The one write. The page is checked against `expected` first — the same document and origin, and every
  * expected node answering with the same tag and attributes — and NOTHING is written if anything differs
- * (`target_changed`, or `target_gone` for a closed page). Then, for each value in order: focus the node, prove
- * the focus landed there, select what it holds, insert the text. Enter goes to the last field when `submit`.
+ * (`target_changed`, or `target_gone` for a closed page). Then, for each value in order: resolve the node in
+ * an isolated world of its frame, focus it, select what it holds with the browser's own `select`, prove from
+ * that world that the document is unchanged and the focus is on the node, and insert the text. Enter goes to
+ * the last field when `submit`.
  *
  * A failure before the first text is inserted writes nothing (`target_changed`); one at or after it may have
  * written part of the values (`uncertain`). Nothing is retried, and no error leaves this function: the answer
@@ -444,12 +580,20 @@ export async function typeInputFields(
   let began = false;
   try {
     const known = await checkUnchanged(subject, expected, values);
+    const worlds = new IsolatedWorlds();
     let last: InputCdpSession | undefined;
     for (const value of values) {
       const target = known.get(value.field);
       if (target === undefined) throw new Refusal();
-      await focusExactly(target.session, target.field.backendNodeId);
-      await selectContents(target.session, target.field.backendNodeId);
+      const { backendNodeId } = target.field;
+      const trusted = await worlds.resolve(target.session, backendNodeId);
+      await target.session.send('DOM.focus', { backendNodeId });
+      await target.session.send('Runtime.callFunctionOn', {
+        objectId: trusted.objectId,
+        functionDeclaration: SELECT_CONTENTS,
+        returnByValue: true,
+      });
+      await proveFocus(subject, expected, target.session, trusted.rootContextId, backendNodeId);
       began = true;
       await target.session.send('Input.insertText', { text: value.text });
       last = target.session;
