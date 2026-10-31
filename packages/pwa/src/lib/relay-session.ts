@@ -836,7 +836,9 @@ export class RelayClientSession {
     signal?: AbortSignal,
   ): Promise<RelayTunnelAnswer> {
     // A relayed answer is not a browser fetch, so this side asks for gzip itself and decodes it below.
-    const message = { ...asked, headers: { ...acceptEncodingHeader(), ...asked.headers } };
+    // Only a `GET` is ever answered compressed, so nothing else carries the header.
+    const asking = asked.method === 'GET' ? acceptEncodingHeader() : {};
+    const message = Object.keys(asking).length === 0 ? asked : { ...asked, headers: { ...asking, ...asked.headers } };
     if (this.#failure !== undefined) throw this.#failure;
     signal?.throwIfAborted();
     if (this.#phase !== 'serving') {
