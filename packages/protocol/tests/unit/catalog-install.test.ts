@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
   CATALOG_INSTALL_REFUSALS,
+  catalogInstallsPath,
   CatalogInstallPreviewIdSchema,
   CatalogInstallRequestSchema,
   CatalogInstallTargetSchema,
@@ -46,5 +47,12 @@ describe('catalog install wire', () => {
 
   it('keeps every refusal distinct', () => {
     expect(new Set(CATALOG_INSTALL_REFUSALS).size).toBe(CATALOG_INSTALL_REFUSALS.length);
+  });
+});
+
+describe('catalog install paths', () => {
+  it('names each scope’s apply route and its preview route', () => {
+    expect(catalogInstallsPath('project')).toBe('/v1/catalog-installs/project');
+    expect(catalogInstallsPath('runtime', true)).toBe('/v1/catalog-installs/runtime/preview');
   });
 });

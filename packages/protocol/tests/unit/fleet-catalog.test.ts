@@ -451,6 +451,41 @@ describe('the account-model catalogue wire contract', () => {
     should(parsed).deepEqual(changes.map(() => true));
   });
 
+  it('should accept a catalog.install of an MCP server or a skill, and refuse any other kind of component', () => {
+    // Arrange
+    const installedFrom = {
+      publisher: `fy_daemon_${'p'.repeat(43)}`,
+      publisherName: 'kirin-box',
+      catalogId: `cat_${'c'.repeat(22)}`,
+      catalogName: 'Catalog',
+      itemId: `itm_${'i'.repeat(22)}`,
+      kind: 'skill',
+      name: 'pdf-tools',
+      version: 1,
+      digest: `sha256:${'a'.repeat(64)}`,
+    };
+    const install = (component: unknown) =>
+      catalog.FleetAccountChangeSchema.safeParse({
+        kind: 'catalog.install',
+        name: 'pdf-tools',
+        component,
+        files: [{ path: 'SKILL.md', content: '# pdf\n' }],
+        profile: 'work',
+        installedFrom,
+        replace: false,
+      }).success;
+
+    // Act
+    const actual = [
+      install({ kind: 'skills', items: ['pdf-tools'] }),
+      install({ kind: 'mcp', url: 'https://mcp.example.com/x' }),
+      install({ kind: 'hooks', harness: 'claude' }),
+    ];
+
+    // Assert
+    should(actual).deepEqual([true, true, false]);
+  });
+
   it('should accept a runtime.put naming which half of a dual login it runs, and leave it optional', () => {
     // Act
     const named = catalog.FleetAccountChangeSchema.safeParse({
