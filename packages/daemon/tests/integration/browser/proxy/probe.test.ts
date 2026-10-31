@@ -157,4 +157,24 @@ describe('the proxy probe, against loopback fakes', () => {
       },
     );
   });
+
+  it('says a SOCKS5 sign-in it cannot send is an auth failure, without dialling out', async () => {
+    const port = await listen(createServer(client => client.once('data', () => client.write(Buffer.from([5, 2])))));
+    should(await plain.run({ endpoint: through(port, 'socks5'), credentials: { username: '', password: 'x' } })).eql({
+      ok: false,
+      errorClass: 'auth',
+    });
+  });
+
+  it('names a SOCKS5 proxy that will not open the connection a proxy failure', async () => {
+    const port = await listen(
+      createServer(client => {
+        client.once('data', () => {
+          client.write(Buffer.from([5, 0]));
+          client.once('data', () => client.write(Buffer.from([5, 5, 0, 1, 0, 0, 0, 0, 0, 0])));
+        });
+      }),
+    );
+    should(await plain.run({ endpoint: through(port, 'socks5') })).eql({ ok: false, errorClass: 'proxy' });
+  });
 });
