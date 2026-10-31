@@ -1,3 +1,9 @@
+## [4.165.0](https://github.com/kirinnee/ferretry/compare/v4.164.0...v4.165.0) (2026-10-31)
+
+### Features
+
+* **input:** cards of several fields, each with its own sensitivity (P2) ([#1134](https://github.com/kirinnee/ferretry/issues/1134)) ([03fc192](https://github.com/kirinnee/ferretry/commit/03fc1923817aec6f34169708aac7f423c6d0c784))
+
 ## [4.164.0](https://github.com/kirinnee/ferretry/compare/v4.163.0...v4.164.0) (2026-10-31)
 
 ### Features
