@@ -1,4 +1,4 @@
-import { stat } from 'node:fs/promises';
+import { chmod, mkdir, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterAll, describe, it } from 'bun:test';
 import should from 'should';
@@ -16,7 +16,7 @@ async function credentials(mint: () => string = () => 'minted-token') {
   const paths = createFoundationPaths(resolveStateHome({ fyHome: home, homeDirectory: home }));
   const files = new StateFileSystem(paths);
   await files.ensureDirectory(paths.home, 0o700);
-  return { paths, files, subject: new StateApiCredentials(paths, files, mint) };
+  return { paths, files, subject: new StateApiCredentials(paths, files, { mint }) };
 }
 
 afterAll(async () => {
@@ -70,11 +70,13 @@ describe('StateApiCredentials', () => {
     // Arrange
     const issued = { count: 0 };
     const { paths, files } = await credentials();
-    const first = new StateApiCredentials(paths, files, () => {
-      issued.count += 1;
-      return `token-${issued.count}`;
+    const first = new StateApiCredentials(paths, files, {
+      mint: () => {
+        issued.count += 1;
+        return `token-${issued.count}`;
+      },
     });
-    const second = new StateApiCredentials(paths, files, () => 'a-different-token');
+    const second = new StateApiCredentials(paths, files, { mint: () => 'a-different-token' });
 
     // Act
     const before = await first.load();
@@ -123,5 +125,116 @@ describe('StateApiCredentials', () => {
     // Assert
     should(loaded.admin).equal('minted-token');
     should((await files.readText(join(paths.home, 'api-token')))?.trim()).equal('minted-token');
+  });
+
+  it('should make a token file with group or other bits owner-only again on every boot', async () => {
+    // A restore, a copy or an older release can leave a token readable by other accounts; the daemon
+    // is the one place that can close that before it serves a request.
+    // Arrange
+    const { paths, files, subject } = await credentials();
+    const admin = join(paths.home, 'api-token');
+    const warden = join(paths.home, 'api-warden-token');
+    await writeFile(admin, 'stored-admin\n');
+    await writeFile(warden, 'stored-warden\n');
+    await chmod(admin, 0o644);
+    await chmod(warden, 0o666);
+
+    // Act
+    const loaded = await subject.load();
+
+    // Assert
+    should(loaded).deepEqual({ admin: 'stored-admin', warden: 'stored-warden' });
+    should((await stat(admin)).mode & 0o777).equal(0o600);
+    should((await stat(warden)).mode & 0o777).equal(0o600);
+    should(await files.readText(admin)).equal('stored-admin\n');
+  });
+
+  it('should refuse a token file that is a symbolic link, without reading through it', async () => {
+    // Arrange
+    const { paths, subject } = await credentials();
+    const elsewhere = join(paths.home, 'elsewhere');
+    await writeFile(elsewhere, 'planted-token\n');
+    await symlink(elsewhere, join(paths.home, 'api-token'));
+
+    // Act
+    const failure = await subject.load().then(
+      () => undefined,
+      (error: Error) => error,
+    );
+
+    // Assert
+    should(failure?.message).equal(
+      `refusing daemon token at ${join(paths.home, 'api-token')}: it is not a regular file`,
+    );
+  });
+
+  it('should refuse a token that is not a regular file', async () => {
+    // Arrange
+    const { paths, subject } = await credentials();
+    await mkdir(join(paths.home, 'api-warden-token'));
+
+    // Act
+    const failure = await subject.load().then(
+      () => undefined,
+      (error: Error) => error,
+    );
+
+    // Assert
+    should(failure?.message).equal(
+      `refusing daemon token at ${join(paths.home, 'api-warden-token')}: it is not a regular file`,
+    );
+  });
+
+  it('should refuse a token file owned by another account', async () => {
+    // Arrange
+    const { paths, files } = await credentials();
+    await writeFile(join(paths.home, 'api-token'), 'someone-elses\n');
+    const own = process.getuid?.() ?? 0;
+    const subject = new StateApiCredentials(paths, files, { uid: () => own + 1 });
+
+    // Act
+    const failure = await subject.load().then(
+      () => undefined,
+      (error: Error) => error,
+    );
+
+    // Assert
+    should(failure?.name).equal('ApiTokenFileError');
+    should(failure?.message).equal(
+      `refusing daemon token at ${join(paths.home, 'api-token')}: it is not owned by this account (uid ${own + 1})`,
+    );
+  });
+
+  it('should skip the ownership check on a host that has no uids', async () => {
+    // Arrange
+    const { paths, files } = await credentials();
+    await writeFile(join(paths.home, 'api-token'), 'stored\n');
+    const subject = new StateApiCredentials(paths, files, { uid: () => undefined });
+
+    // Act
+    const loaded = await subject.load();
+
+    // Assert
+    should(loaded.admin).equal('stored');
+  });
+
+  it('should not swallow an inspection failure other than a missing file', async () => {
+    // Arrange
+    const { paths, files } = await credentials();
+    const denied = Object.assign(new Error('permission denied'), { code: 'EACCES' });
+    const subject = new StateApiCredentials(paths, files, {
+      inspect: async () => {
+        throw denied;
+      },
+    });
+
+    // Act
+    const failure = await subject.load().then(
+      () => undefined,
+      (error: Error) => error,
+    );
+
+    // Assert
+    should(failure).equal(denied);
   });
 });

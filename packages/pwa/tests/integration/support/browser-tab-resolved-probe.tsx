@@ -42,6 +42,38 @@ const states: Readonly<Record<string, BrowserStateView>> = {
   },
   stopped: { state: 'stopped' },
   'running-direct': { state: 'running', startedAt: '2026-10-30T08:00:00.000Z' },
+  'firewall-missing': {
+    state: 'stopped',
+    firewall: {
+      state: 'missing',
+      detail:
+        'the loopback firewall is missing: ask the host admin to add `user 1001` to /etc/ferretry/loopback-firewall.conf and run `sudo systemctl restart ferretry-loopback-firewall`',
+    },
+  },
+  'firewall-stale': {
+    state: 'stopped',
+    firewall: {
+      state: 'stale',
+      detail:
+        'the loopback firewall is stale: ask the host admin to add `user 1001 20004 20005 20006` to /etc/ferretry/loopback-firewall.conf and run `sudo systemctl restart ferretry-loopback-firewall`',
+    },
+  },
+  'firewall-failed': {
+    state: 'stopped',
+    firewall: {
+      state: 'failed',
+      detail:
+        'the loopback firewall failed its check: another user on this host could connect to this account’s browser ports; ask the host admin to look at `sudo journalctl -u ferretry-loopback-firewall-verify` and fix the rules',
+    },
+  },
+  'firewall-unverified': {
+    state: 'stopped',
+    firewall: {
+      state: 'unverified',
+      detail:
+        'the 5-minute firewall check is not running: ask the host admin to run `sudo systemctl enable --now ferretry-loopback-firewall-verify.timer`',
+    },
+  },
 };
 
 const typeInto = async (field: HTMLInputElement, value: string): Promise<void> => {

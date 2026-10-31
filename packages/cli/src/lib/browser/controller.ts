@@ -1,4 +1,11 @@
-import { BrowserActionResultSchema, BrowserProxyTestResultSchema, BrowserStatusSchema } from '@ferretry/protocol';
+import {
+  BrowserActionResultSchema,
+  BrowserProxyTestResultSchema,
+  BrowserStatusSchema,
+  FleetMachineViewSchema,
+  type LoopbackFirewallMarker,
+  loopbackFirewallEntry,
+} from '@ferretry/protocol';
 import { BrowserLoginStatusSchema, renderLoginStatus } from './login.ts';
 import { renderBrowserAction, renderBrowserStatus, renderProxyTest, screenshotPayload } from './render.ts';
 import { browserRequest } from './request.ts';
@@ -15,6 +22,10 @@ const jsonInit = (request: BrowserRequest): RequestInit =>
 export interface BrowserContext {
   /** The session this CLI runs inside; used when `--session` was not given. */
   readonly selfSessionId?: string;
+  /** This process's user id: the firewall entry is about THIS user. */
+  readonly uid?: number;
+  /** The loopback firewall marker the host admin's script wrote, or `undefined` when there is none. */
+  readonly loopbackMarker?: () => Promise<LoopbackFirewallMarker | undefined>;
 }
 
 /** What the command surface needs from the controller. */
@@ -37,6 +48,7 @@ export class BrowserController implements IBrowserRunner {
 
   async run(command: BrowserCommand): Promise<number> {
     if (command.command === 'proxy') return this.#proxyTest(command);
+    if (command.command === 'firewall') return this.#firewallEntry(command);
     try {
       this.io.success(await this.#execute(command));
       return 0;
@@ -68,7 +80,30 @@ export class BrowserController implements IBrowserRunner {
     return 1;
   }
 
-  async #execute(command: Exclude<BrowserCommand, { command: 'proxy' }>): Promise<string> {
+  /**
+   * The line THIS user gives the host admin for the loopback firewall. A random setting has nothing to allow, which
+   * is an answer said in one sentence with exit 1 and no stack.
+   */
+  async #firewallEntry(command: Extract<BrowserCommand, { command: 'firewall' }>): Promise<number> {
+    try {
+      const uid = this.context.uid;
+      if (uid === undefined) throw new Error('this system gives no user id, so there is no firewall entry to print');
+      const request = browserRequest(command);
+      const machine = await this.gateway.request(request.path, FleetMachineViewSchema, jsonInit(request));
+      const entry = loopbackFirewallEntry(machine.browserPorts ?? 'random', uid, await this.context.loopbackMarker?.());
+      if (entry.ok) {
+        this.io.success(entry.line);
+        return 0;
+      }
+      this.io.error(entry.reason);
+    } catch (error) {
+      this.io.error(errorText(error));
+    }
+    this.io.setExitCode(1);
+    return 1;
+  }
+
+  async #execute(command: Exclude<BrowserCommand, { command: 'proxy' } | { command: 'firewall' }>): Promise<string> {
     const request = browserRequest(command, this.context.selfSessionId);
     const init = jsonInit(request);
 

@@ -43,6 +43,7 @@ import {
 } from '@ferretry/fleet';
 import type {
   BrowserMode,
+  BrowserPortsSetting,
   FleetAccountChange,
   FleetAgentControl,
   FleetComponentInput,
@@ -705,6 +706,28 @@ function putMachineSettings(
     }
   }
 
+  // A client that predates Browser ports leaves it out, and leaves it as it is.
+  if (change.browserPorts !== undefined) {
+    const previous = model.machine.browserPorts;
+    if (JSON.stringify(change.browserPorts) !== JSON.stringify(previous)) {
+      draft.machine.browserPorts = change.browserPorts;
+      parts.push(`the browser ports to ${browserPortsWords(change.browserPorts)}`);
+      consequences.push(
+        'Applies the next time the browser or the login window starts; a browser already running keeps its ports until it stops.',
+      );
+    }
+  }
+
+  // A client that predates the firewall policy leaves it out, and leaves it as it is.
+  if (
+    change.browserFirewallFailure !== undefined &&
+    change.browserFirewallFailure !== model.machine.browserFirewallFailure
+  ) {
+    draft.machine.browserFirewallFailure = change.browserFirewallFailure;
+    parts.push(`the loopback firewall failure policy to ${change.browserFirewallFailure}`);
+    consequences.push('Applies the next time the browser starts; a browser already running is not stopped.');
+  }
+
   // A client that predates Auto-resume leaves it out, and leaves it as it is.
   const autoResume = change.autoResume ?? model.machine.autoResume;
   if (autoResume !== model.machine.autoResume) {
@@ -720,6 +743,18 @@ function putMachineSettings(
     parts.push(`agenda mode for new ferrets ${agendaMode ? 'on' : 'off'}`);
     // Recorded on each ferret as it starts: a ferret that exists keeps the switch it has.
     consequences.push('Applies to ferrets started after this; ferrets that already exist keep their own switch.');
+  }
+
+  // A client that predates the public usage feed leaves it out, and leaves it as it is.
+  const publicUsageFeed = change.publicUsageFeed ?? model.machine.publicUsageFeed;
+  if (publicUsageFeed !== model.machine.publicUsageFeed) {
+    draft.machine.publicUsageFeed = publicUsageFeed;
+    parts.push(`the public usage feed ${publicUsageFeed ? 'on' : 'off'}`);
+    consequences.push(
+      publicUsageFeed
+        ? 'Applies at once: any process on this host, and anything that reaches the daemon, can read quota percentages and account labels at /usage and /metrics without a credential.'
+        : 'Applies at once: /usage and /metrics answer as paths the daemon does not have.',
+    );
   }
 
   if (parts.length === 0) return 'Keep machine settings the same';
@@ -1189,4 +1224,11 @@ function disabledBlock(change: { readonly reason?: string | undefined; readonly 
     ...(change.reason === undefined ? {} : { reason: change.reason }),
     ...(change.until === undefined ? {} : { until: change.until }),
   };
+}
+
+/** The product's words for a Browser ports setting (docs/config-files.md). */
+function browserPortsWords(setting: BrowserPortsSetting): string {
+  if (setting === 'random') return 'random';
+  if (setting === 'per-user') return 'per-user (derived from the user id)';
+  return `cdp ${setting.cdp}, relay ${setting.relay}, vnc ${setting.vnc}`;
 }

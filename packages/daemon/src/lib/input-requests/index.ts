@@ -9,5 +9,6 @@ export * from './quarantine.ts';
 export * from './saved-logins.ts';
 export * from './service.ts';
 export * from './session-lock.ts';
+export * from './target-router.ts';
 export * from './terminal-modes.ts';
 export * from './terminal-target.ts';

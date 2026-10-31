@@ -1,8 +1,18 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { NUDGE_MESSAGES, TRIAGE_CRITERIA } from '../../../src/lib/speedups/jev.ts';
 import type { WardenRuntimeState } from '../../../src/lib/warden/index.ts';
-import { at, enabled, harness, JEV_INVESTIGATE, JEV_SKIP, NOW, session, unattended } from './sweep-harness.ts';
+import {
+  at,
+  enabled,
+  harness,
+  JEV_INVESTIGATE,
+  type JevScript,
+  NOW,
+  no,
+  session,
+  unattended,
+  yes,
+} from './sweep-harness.ts';
 
 /**
  * Every LLM investigation records what Jev did about its flag first — checked it and handed it on, was
@@ -32,6 +42,12 @@ const stuck = () =>
     },
   });
 
+/** Jev: the stuck command is a real wait, no longer a reasonable one — nudge it, 93% sure. */
+const NUDGE: JevScript = {
+  answers: { waiting_on_real: yes(0.93), wait_reasonable: no(0.93) },
+  nudge: { id: 'stuck_command', confidence: 0.93 },
+};
+
 const report = (verdict: string, action: string): string =>
   `Verdict: ${verdict}\n\n# Warden report — s1 (teammate :s1, -)\n\n- **Anomaly kind:** unattended_question\n\n## Summary\n- **Recommended action:** ${action}\n- **Outcome:** done\n`;
 
@@ -45,7 +61,14 @@ describe('what Jev did before an investigation', () => {
     const status = await subject.service.status();
 
     // Assert
-    const jev = { verdict: 'handed_on', why: 'unsure', at: at(0), confidence: 0.9, costUsd: 0.001 };
+    const jev = {
+      verdict: 'handed_on',
+      why: 'not_sure_enough',
+      node: 'waiting_on_real',
+      at: at(0),
+      confidence: 0.5,
+      costUsd: 0.001,
+    };
     should(subject.state().investigations?.[0]).match({ targetId: 's1', origin: 'jev', jev });
     should(subject.state().investigations?.[0]?.jev).not.have.property('reason');
     should(status.investigations[0]).match({ targetSession: 's1', jev });
@@ -211,14 +234,7 @@ describe('what Jev did before an investigation', () => {
   it('should say a failed call, and an act of Jev’s that did not settle the flag', async () => {
     // Arrange
     const failed = harness({ config: layers(true), fleet: [unattended('s1')], guard: [new Error('socket hang up')] });
-    const nudge = {
-      ...JEV_SKIP,
-      verdict: 'nudge' as const,
-      confidence: 0.93,
-      reason: TRIAGE_CRITERIA.nudge,
-      nudge: { id: 'stuck_command' as const, message: NUDGE_MESSAGES.stuck_command, confidence: 0.93 },
-    };
-    const refused = harness({ config: layers(true), fleet: [stuck()], guard: [nudge], remedyFails: 'nudge' });
+    const refused = harness({ config: layers(true), fleet: [stuck()], guard: [NUDGE], remedyFails: 'nudge' });
 
     // Act
     await failed.service.run({ force: false });
@@ -250,14 +266,7 @@ describe('what Jev did before an investigation', () => {
           subprocessKey: 'pid:40',
         },
       });
-    const nudge = {
-      ...JEV_SKIP,
-      verdict: 'nudge' as const,
-      confidence: 0.93,
-      reason: TRIAGE_CRITERIA.nudge,
-      nudge: { id: 'stuck_command' as const, message: NUDGE_MESSAGES.stuck_command, confidence: 0.93 },
-    };
-    const subject = harness({ config: layers(true), fleet: [stuckAt()], guard: [nudge], now: () => now });
+    const subject = harness({ config: layers(true), fleet: [stuckAt()], guard: [NUDGE], now: () => now });
     await subject.service.run({ force: false });
 
     // Act
@@ -289,14 +298,7 @@ describe('what Jev did before an investigation', () => {
           subprocessKey: 'pid:40',
         },
       });
-    const nudge = {
-      ...JEV_SKIP,
-      verdict: 'nudge' as const,
-      confidence: 0.93,
-      reason: TRIAGE_CRITERIA.nudge,
-      nudge: { id: 'stuck_command' as const, message: NUDGE_MESSAGES.stuck_command, confidence: 0.93 },
-    };
-    const subject = harness({ config: layers(true), fleet: [stuckAt()], guard: [nudge], now: () => now });
+    const subject = harness({ config: layers(true), fleet: [stuckAt()], guard: [NUDGE], now: () => now });
     await subject.service.run({ force: false });
     subject.setState({ ...subject.state(), jevBefore: {} });
 

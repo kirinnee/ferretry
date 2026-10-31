@@ -9,7 +9,9 @@ import {
   INPUT_DEFAULT_EXPIRY_SECONDS,
   INPUT_JOURNAL_EVENT_TYPES,
   INPUT_MAX_EXPIRY_SECONDS,
+  INPUT_MAX_FIELDS,
   INPUT_PAD_BUCKET_BYTES,
+  INPUT_SINGLE_FIELD_ID,
   INPUT_VALUE_MAX_BYTES,
   InputAgentViewSchema,
   InputAuditDetailSchema,
@@ -22,9 +24,13 @@ import {
   InputRequestListSchema,
   InputRequestSchema,
   InputTargetFactsSchema,
+  inputRaiseFields,
   inputValueProblem,
   padInputValue,
+  savedRolesOf,
+  strongestSensitivity,
   unpadInputValue,
+  worstRisk,
 } from '../../src/lib/input-request.ts';
 
 const ID = 'b'.repeat(32);
@@ -48,12 +54,27 @@ const BROWSER_FACTS = {
   pageId: 'page-1',
   origin: 'https://github.com',
   secure: true,
-  frameOrigin: 'https://github.com',
   navigationId: 'nav-9',
-  backendNodeId: 77,
-  field: { tag: 'input', type: 'password', autocomplete: 'current-password', name: 'password' },
-  box: { x: 10, y: 20, w: 300, h: 40 },
-  visible: true,
+  fields: [
+    {
+      fieldId: 'email',
+      frameOrigin: 'https://github.com',
+      frameId: 'frame-main',
+      backendNodeId: 76,
+      field: { tag: 'input', type: 'email', autocomplete: 'username', name: 'login' },
+      box: { x: 10, y: 0, w: 300, h: 40 },
+      visible: true,
+    },
+    {
+      fieldId: 'password',
+      frameOrigin: 'https://github.com',
+      frameId: 'frame-main',
+      backendNodeId: 77,
+      field: { tag: 'input', type: 'password', autocomplete: 'current-password', name: 'password' },
+      box: { x: 10, y: 20, w: 300, h: 40 },
+      visible: true,
+    },
+  ],
 } as const;
 
 const REQUEST = {
@@ -63,6 +84,7 @@ const REQUEST = {
   target: { kind: 'terminal', key: 'dev' },
   prompt: 'sudo for the rebuild',
   sensitivity: 'secret',
+  fields: [{ id: 'value', label: 'Password', sensitivity: 'secret' }],
   submit: 'owner-default',
   raisedAt: AT,
   expiresAt: '2026-10-30T09:10:00.000Z',
@@ -119,11 +141,105 @@ describe('raising an input request', () => {
     should(InputRaiseSchema.safeParse({ ...base, expiresInSeconds: INPUT_MAX_EXPIRY_SECONDS }).success).be.true();
     should(
       InputRaiseSchema.safeParse({
-        ...base,
-        target: { kind: 'browser', key: 'app', selector: 'x'.repeat(513) },
+        target: { kind: 'browser', key: 'app' },
+        prompt: 'p',
+        fields: [{ id: 'email', sensitivity: 'plain', element: { kind: 'selector', selector: 'x'.repeat(513) } }],
       }).success,
     ).be.false();
     should(INPUT_DEFAULT_EXPIRY_SECONDS).be.below(INPUT_MAX_EXPIRY_SECONDS);
+  });
+});
+
+describe('a card of several fields', () => {
+  const base = { target: { kind: 'browser', key: 'app' }, prompt: 'Google login' } as const;
+  const email = {
+    id: 'email',
+    label: 'Email',
+    sensitivity: 'plain',
+    element: { kind: 'selector', selector: '#e' },
+  } as const;
+  const password = { id: 'password', sensitivity: 'secret', element: { kind: 'ref', ref: 'e12' } } as const;
+
+  it('should name one sensitivity for one value, or fields for several, never both or neither', () => {
+    should(InputRaiseSchema.safeParse({ ...base, fields: [email, password] }).success).be.true();
+    should(InputRaiseSchema.safeParse({ ...base, sensitivity: 'secret', fields: [email] }).success).be.false();
+    should(InputRaiseSchema.safeParse(base).success).be.false();
+  });
+
+  it('should refuse two fields with one id, more fields than a card holds, and an id that is not a short word', () => {
+    should(InputRaiseSchema.safeParse({ ...base, fields: [email, email] }).success).be.false();
+    should(
+      InputRaiseSchema.safeParse({
+        ...base,
+        fields: Array.from({ length: INPUT_MAX_FIELDS + 1 }, (_, index) => ({ ...email, id: `f${index}` })),
+      }).success,
+    ).be.false();
+    for (const id of ['Email', '1st', 'e mail', 'x'.repeat(33)])
+      should(InputRaiseSchema.safeParse({ ...base, fields: [{ ...email, id }] }).success).be.false();
+    should(InputRaiseSchema.safeParse({ ...base, fields: [{ ...email, label: 'a\nb' }] }).success).be.false();
+  });
+
+  it('should read a one-value raise as one field called value', () => {
+    should(inputRaiseFields({ sensitivity: 'private' })).deepEqual([
+      { id: INPUT_SINGLE_FIELD_ID, sensitivity: 'private' },
+    ]);
+    should(inputRaiseFields({ fields: [email] })).deepEqual([email]);
+  });
+
+  it('should record the most careful sensitivity and draw the worst risk', () => {
+    should(strongestSensitivity([email, password])).equal('secret');
+    should(strongestSensitivity([{ sensitivity: 'plain' }, { sensitivity: 'private' }])).equal('private');
+    const red = { level: 'red', reason: 'r' } as const;
+    const amber = { level: 'amber', reason: 'a' } as const;
+    should(worstRisk([amber, undefined, red])).equal(red);
+    should(worstRisk([undefined])).be.undefined();
+  });
+
+  it('should deliver each typed field padded on its own, a saved login for the rest, and never a bare padded beside them', () => {
+    const typed = { field: 'email', padded: padInputValue('me@example.com') };
+    const head = { deliveryId: DELIVERY, observedDigest: DIGEST, submit: true };
+
+    should(InputDeliverBodySchema.safeParse({ ...head, fields: [typed] }).success).be.true();
+    should(InputDeliverBodySchema.safeParse({ ...head, fields: [typed], entry: 'GOOGLE_COM' }).success).be.true();
+    should(InputDeliverBodySchema.safeParse({ ...head, fields: [typed], padded: typed.padded }).success).be.false();
+    should(InputDeliverBodySchema.safeParse({ ...head, fields: [typed, typed] }).success).be.false();
+    should(InputDeliverBodySchema.safeParse({ ...head, fields: [{ ...typed, value: 'x' }] }).success).be.false();
+    should(
+      InputDeliverBodySchema.safeParse({ ...head, fields: [typed], save: { entry: 'GOOGLE_COM', label: 'Google' } })
+        .success,
+    ).be.true();
+    should(
+      InputDeliverBodySchema.safeParse({
+        ...head,
+        fields: [typed],
+        entry: 'GOOGLE_COM',
+        save: { entry: 'GOOGLE_COM', label: 'Google' },
+      }).success,
+    ).be.false();
+  });
+
+  it('should keep a login card as ONE saved login: the plain field as the username, the secret as the password', () => {
+    should([...(savedRolesOf([email, password]) ?? [])]).deepEqual([
+      ['email', 'username'],
+      ['password', 'password'],
+    ]);
+    should([...(savedRolesOf([email, password, { id: 'code', sensitivity: 'private' }]) ?? [])]).deepEqual([
+      ['email', 'username'],
+      ['password', 'password'],
+    ]);
+    should(savedRolesOf([{ id: 'code', sensitivity: 'private' }])).be.undefined();
+    should(savedRolesOf([email, { ...email, id: 'user' }])).be.undefined();
+    should(savedRolesOf([password, { ...password, id: 'again' }])).be.undefined();
+  });
+
+  it('should carry per-field facts for a page, each naming its own frame and element', () => {
+    should(InputTargetFactsSchema.safeParse({ ...BROWSER_FACTS, fields: [] }).success).be.false();
+    should(
+      InputTargetFactsSchema.safeParse({ ...BROWSER_FACTS, challenge: { provider: 'recaptcha' } }).success,
+    ).be.true();
+    should(InputRequestSchema.safeParse({ ...REQUEST, fields: [] }).success).be.false();
+    should(InputRequestSchema.safeParse({ ...REQUEST, step: 1 }).success).be.false();
+    should(InputRequestSchema.safeParse({ ...REQUEST, chain: 'A6', step: 2 }).success).be.true();
   });
 });
 
@@ -411,7 +527,9 @@ describe('the schemas that must never hold a value', () => {
   });
 
   it('should hold the value in exactly one place: the deliver body, padded', () => {
-    should(propertyNames(InputDeliverBodySchema).filter(property => VALUE_LIKE.test(property))).deepEqual(['padded']);
+    should([...new Set(propertyNames(InputDeliverBodySchema).filter(property => VALUE_LIKE.test(property)))]).deepEqual(
+      ['padded'],
+    );
   });
 
   it('should reject a value smuggled into any of them', () => {
@@ -430,6 +548,34 @@ describe('the schemas that must never hold a value', () => {
 
   it('should audit only events the closed audit list knows', () => {
     for (const event of INPUT_AUDIT_EVENTS) should(AUDIT_EVENTS).containEql(event);
+  });
+
+  it('should take a browser card of several fields, each naming one element, and refuse a field with a value', () => {
+    const raise = {
+      tool: 'browser.request_input',
+      name: 'app',
+      prompt: 'Google login',
+      fields: [
+        { id: 'email', label: 'Email', sensitivity: 'plain', selector: '#identifierId' },
+        { id: 'password', sensitivity: 'secret', ref: 'e12' },
+      ],
+    };
+
+    should(AgentToolCallSchema.parse(raise).tool).equal('browser.request_input');
+    should(
+      AgentToolCallSchema.safeParse({ ...raise, fields: [{ ...raise.fields[0], text: 'me@x' }] }).success,
+    ).be.false();
+    should(
+      AgentToolCallSchema.safeParse({ ...raise, fields: [{ id: 'email', sensitivity: 'plain' }] }).success,
+    ).be.false();
+    should(
+      AgentToolCallSchema.safeParse({
+        ...raise,
+        fields: [{ id: 'email', sensitivity: 'plain', selector: 'a', ref: 'e1' }],
+      }).success,
+    ).be.false();
+    should(AgentToolCallSchema.safeParse({ ...raise, fields: [raise.fields[0], raise.fields[0]] }).success).be.false();
+    should(AgentToolCallSchema.safeParse({ ...raise, fields: Array(5).fill(raise.fields[0]) }).success).be.false();
   });
 
   it('should accept the two agent input tools and refuse an unknown field on either', () => {

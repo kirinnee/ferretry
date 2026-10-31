@@ -28,6 +28,8 @@ import {
   laneLayoutFromTemplate,
   laneLayoutProblems,
   laneOf,
+  laneUse,
+  LANE_CATEGORY_USE,
   laneTargets,
   needsOwner,
   nextLane,
@@ -386,6 +388,44 @@ describe('lane emphasis', () => {
         lane('closed', 'closed', { ownerGate: true }),
       ]),
     ).deepEqual(["a verify lane is the owner's action, so its emphasis is action"]);
+  });
+});
+
+describe('when a card belongs in a lane', () => {
+  const useOf = (name: keyof typeof LANE_TEMPLATES, id: string): string => {
+    const found = LANE_TEMPLATES[name].lanes.find(candidate => candidate.id === id);
+    return laneUse(found as Lane);
+  };
+
+  it('should say it in words for every category, so any lane name is covered', () => {
+    should(Object.keys(LANE_CATEGORY_USE).sort()).deepEqual([...LANE_CATEGORIES].sort());
+    for (const category of LANE_CATEGORIES) should(laneUse({ category })).startWith(LANE_CATEGORY_USE[category]);
+  });
+
+  it('should tell a plan lane the owner gates from the lane the building happens in', () => {
+    should(useOf('pr-release-verify', 'plan')).equal(
+      'you are planning or designing it; the owner approves before it moves on; moves in when a session starts on it',
+    );
+    should(useOf('pr-release-verify', 'implement')).equal(
+      'you are building it now; moves in when a session starts on it or a PR opens or a PR is ready',
+    );
+  });
+
+  it('should name what moves a card into a shipped, verify and closed lane, and who passes the gate', () => {
+    should(useOf('pr-release-verify', 'merged')).equal('merged, waiting for a release; moves in when the PR merges');
+    should(useOf('pr-release-verify', 'released')).equal(
+      'the owner tests it; moves in when a release ships it; the owner moves it on',
+    );
+    should(useOf('pr-release-verify', 'closed')).equal('finished; only the owner closes it');
+    should(useOf('quick', 'to-test')).equal(
+      'the owner tests it; moves in when the PR merges or a release ships it or `fy signal done`; the owner moves it on',
+    );
+  });
+
+  it('should say a ferret moves a card into an active lane nothing enters by itself, and a backlog lane needs nothing', () => {
+    should(useOf('ops', 'fix')).equal('you are building it now; move it here yourself');
+    should(useOf('writing', 'draft')).equal('you are building it now; move it here yourself');
+    should(useOf('ops', 'todo')).equal('not started yet');
   });
 });
 

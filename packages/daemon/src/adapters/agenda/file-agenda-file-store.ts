@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import type { Stats } from 'node:fs';
+import { mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { type AgendaFileStore, isAgendaSessionId } from '../../lib/agenda/index.ts';
+
+/** Which file this is and how it stands: a rename, an edit or a rewrite changes it. */
+const identityOf = (information: Stats): string =>
+  `${String(information.dev)}:${String(information.ino)}:${String(information.size)}:${String(information.mtimeMs)}:${String(information.ctimeMs)}`;
 
 /** A session's agenda files, as plain files in its own directory. */
 export class FileAgendaFileStore implements AgendaFileStore {
@@ -21,6 +26,35 @@ export class FileAgendaFileStore implements AgendaFileStore {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
       throw error;
+    }
+  }
+
+  async identity(sessionId: string, name: string): Promise<string | undefined> {
+    try {
+      return identityOf(await stat(this.file(sessionId, name)));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      throw error;
+    }
+  }
+
+  async readIdentified(
+    sessionId: string,
+    name: string,
+  ): Promise<{ readonly text: string; readonly identity: string } | undefined> {
+    let handle: Awaited<ReturnType<typeof open>>;
+    try {
+      handle = await open(this.file(sessionId, name), 'r');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      throw error;
+    }
+    try {
+      // The identity of the DESCRIPTOR read, not of whatever the name points at a moment later.
+      const identity = identityOf(await handle.stat());
+      return { text: await handle.readFile('utf8'), identity };
+    } finally {
+      await handle.close();
     }
   }
 

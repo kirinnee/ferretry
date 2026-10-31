@@ -19,6 +19,7 @@ import {
   type BrowserWaitCondition,
   browserReadModeOf,
   browserTargetOf,
+  INPUT_SINGLE_FIELD_ID,
   COPY_HANDLE_PREFIX,
   type CopyMeta,
   copyHandle,
@@ -28,6 +29,7 @@ import {
   type SurfaceControlView,
   type SurfaceKind,
   type SurfaceOpener,
+  strongestSensitivity,
 } from '@ferretry/protocol';
 import { AGENT_FILE_LIMITS, AgentFileError, type AgentFiles, extensionOf, sizeWords } from '../agent-files/index.ts';
 import type { AuditSink } from '../audit/types.ts';
@@ -505,15 +507,38 @@ export class AgentToolService {
         const view = await this.inputPort(caller).raise(sessionId, {
           target: { kind: 'terminal', key: surface.name ?? surface.id },
           prompt: call.prompt,
-          sensitivity: call.sensitivity,
-          submit: call.submit ?? 'offer-owner',
-          ...(call.expiresInSeconds === undefined ? {} : { expiresInSeconds: call.expiresInSeconds }),
-          ...(call.blocking === undefined ? {} : { blocking: call.blocking }),
-          ...(call.chain === undefined ? {} : { chain: call.chain }),
-          ...(call.secretHint === undefined ? {} : { secretHint: call.secretHint }),
+          ...(call.label === undefined
+            ? { sensitivity: call.sensitivity }
+            : { fields: [{ id: INPUT_SINGLE_FIELD_ID, label: call.label, sensitivity: call.sensitivity }] }),
+          ...raiseOptions(call),
         });
         return {
           summary: `Asked the owner for the value (!${view.id}) for ${reference}. Wait with input.wait; do not type there yourself.`,
+          input: view,
+        };
+      }
+      case 'browser.request_input': {
+        if (caller.kind !== 'agent')
+          throw new AgentToolError(
+            'bad_request',
+            'Only an agent asks its owner for values; you already have the page.',
+          );
+        const view = await this.inputPort(caller).raise(sessionId, {
+          target: { kind: 'browser', key: surface.name ?? surface.id },
+          prompt: call.prompt,
+          fields: call.fields.map(field => ({
+            id: field.id,
+            ...(field.label === undefined ? {} : { label: field.label }),
+            sensitivity: field.sensitivity,
+            element:
+              field.ref === undefined
+                ? { kind: 'selector' as const, selector: field.selector ?? '' }
+                : { kind: 'ref' as const, ref: field.ref },
+          })),
+          ...raiseOptions(call),
+        });
+        return {
+          summary: `Asked the owner for ${plural(call.fields.length, 'value')} (!${view.id}) for ${reference}. Wait with input.wait; do not type into those fields yourself.`,
           input: view,
         };
       }
@@ -1267,6 +1292,8 @@ function callFacts(call: AgentToolCall): AuditDetail {
       };
     case 'terminal.request_input':
       return { sensitivity: call.sensitivity };
+    case 'browser.request_input':
+      return { sensitivity: strongestSensitivity(call.fields), fields: call.fields.length };
     case 'input.wait':
       return { timeoutMs: call.timeoutMs ?? AGENT_TOOL_DEFAULT_WAIT_MS };
     case 'secure.copy':
@@ -1361,6 +1388,19 @@ function callFacts(call: AgentToolCall): AuditDetail {
     default:
       return {};
   }
+}
+
+/** What both request tools pass on unchanged: who presses Enter, how long the card lives, whether it pings, what it follows. */
+function raiseOptions(
+  call: Extract<AgentToolCall, { readonly tool: 'terminal.request_input' | 'browser.request_input' }>,
+) {
+  return {
+    submit: call.submit ?? ('offer-owner' as const),
+    ...(call.expiresInSeconds === undefined ? {} : { expiresInSeconds: call.expiresInSeconds }),
+    ...(call.blocking === undefined ? {} : { blocking: call.blocking }),
+    ...(call.chain === undefined ? {} : { chain: call.chain }),
+    ...(call.secretHint === undefined ? {} : { secretHint: call.secretHint }),
+  };
 }
 
 /** What a capture caught, in one sentence: where from, how long, and whether it was already seen. */

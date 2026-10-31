@@ -9,6 +9,7 @@ import {
   JEV_INVESTIGATE,
   JEV_SKIP,
   journalTypes,
+  no,
   session,
   triageable,
 } from './sweep-harness.ts';
@@ -27,7 +28,8 @@ describe('a sweep raises the owner’s card', () => {
     const subject = harness({
       config: jevOnly(),
       fleet: [triageable('s1')],
-      guard: [{ ...JEV_INVESTIGATE, confidence: 0.42, reason: 'its reset passed but it never resumed' }],
+      // Parked on its quota, so the one question left is Jev's: did it finish on purpose? 42% sure it did not.
+      guard: [{ answers: { finished_on_purpose: no(0.42) } }],
       settings: { machineName: () => 'kirin-box' },
     });
 
@@ -39,9 +41,14 @@ describe('a sweep raises the owner’s card', () => {
     should(subject.state().jevHandoffs?.[jevHandoffKey('s1', 'quota_reset_passed')]).match({
       at: at(0),
       status: 'rate_limited',
-      why: 'unsure',
+      why: 'not_sure_enough',
       confidence: 0.42,
-      reason: 'its reset passed but it never resumed',
+      node: 'finished_on_purpose',
+      path: [
+        { node: 'running', kind: 'fact', answer: 'no' },
+        { node: 'finished_on_purpose', kind: 'judgement', answer: 'no', confidence: 0.42 },
+        { node: 'quota_or_provider', kind: 'fact', answer: 'yes' },
+      ],
     });
     should(subject.board('s1')).deepEqual([escalated('quota_reset_passed')]);
     should(subject.raises[0]?.request).match({
@@ -49,8 +56,13 @@ describe('a sweep raises the owner’s card', () => {
       notice: true,
       ping: true,
       title: 's1 can resume now',
-      why: 'Jev looked and was not sure what to do (42% sure).',
+      why: 'Jev could not answer “Did it finish on purpose?” surely enough (42% sure, below your bar).',
     });
+    // Self-contained: the facts the daemon saw and Jev's own answers are on the card.
+    should(JSON.stringify(subject.raises[0]?.request)).containEql(
+      'What the daemon saw: Is the agent program running: no; Is it out of quota, or is its provider down: yes.',
+    );
+    should(JSON.stringify(subject.raises[0]?.request)).containEql('Did it finish on purpose: no (42% sure)');
     should(subject.state().notified).deepEqual({ 's1|warden:ask:quota_reset_passed': at(0) });
     should(subject.raises[0]?.request.premise).containEql('on kirin-box');
     should(journalTypes(subject).filter(type => type === 'fleet.warden_escalated')).have.length(1);
@@ -160,7 +172,7 @@ describe('a sweep counts the owner being asked', () => {
     const subject = harness({
       config: jevOnly(),
       fleet: [triageable('s1')],
-      guard: [{ ...JEV_INVESTIGATE, confidence: 0.42 }],
+      guard: [{ otherwise: no(0.42) }],
     });
 
     // Act

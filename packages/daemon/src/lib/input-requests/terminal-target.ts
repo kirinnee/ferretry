@@ -3,7 +3,7 @@ import { hexInputChunks, terminalPaneTarget } from '../terminal/runtime-policy.t
 import type { TmuxCommandPort } from '../tmux/contracts.ts';
 import { PANE_PROOF_FORMAT, parsePaneSighting } from '../tmux/pane-proof.ts';
 import { digestFacts, digestLine } from './digest.ts';
-import type { InputTargetPort, ObserveResult, TypeResult } from './ports.ts';
+import type { ObserveResult, TerminalInputTargetPort, TypeResult } from './ports.ts';
 import { recognisedConsumer } from './recognised.ts';
 import type { ProgramRunner, TerminalModes } from './terminal-modes.ts';
 
@@ -97,7 +97,7 @@ export function parseForeground(output: string): InputForeground | undefined {
  * value and Enter, so a write that did not complete cleanly is `uncertain` (the value may be sitting in a
  * hidden buffer) and is never retried.
  */
-export class TmuxInputTarget implements InputTargetPort {
+export class TmuxInputTarget implements TerminalInputTargetPort {
   constructor(
     private readonly tmux: TmuxCommandPort,
     private readonly terminals: TerminalLocator,

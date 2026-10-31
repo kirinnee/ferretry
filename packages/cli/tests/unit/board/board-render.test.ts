@@ -427,6 +427,7 @@ describe('renderCard', () => {
         { term: 'lane', meaning: 'a column' },
       ],
       brief: 'rename it everywhere',
+      howToTest: '1. Run fy task show\n2. See the new name',
       rollup: {
         children: 2,
         byCategory: { backlog: 1, active: 1, review: 0, shipped: 0, verify: 0, closed: 0 },
@@ -487,6 +488,10 @@ describe('renderCard', () => {
     should(lines).containEql('Context').and.containEql('  see &F3');
     should(lines).containEql('Terms').and.containEql('  widget  the thing').and.containEql('  lane    a column');
     should(lines).containEql('Brief').and.containEql('  rename it everywhere');
+    should(lines)
+      .containEql('How to test')
+      .and.containEql('  1. Run fy task show')
+      .and.containEql('  2. See the new name');
   });
 
   it('should list the children with their lane and activity under a roll-up heading', () => {
@@ -513,6 +518,14 @@ describe('renderCard', () => {
 
     // Assert
     should(lines).containEql('Children — 0 children, 0 active');
+  });
+
+  it('should leave How to test out for a card without one', () => {
+    // Act
+    const text = renderCard(card(), lanes, [], names);
+
+    // Assert
+    should(text).not.match(/How to test/u);
   });
 
   it('should leave the children section out for a card with none', () => {

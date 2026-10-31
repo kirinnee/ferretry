@@ -657,9 +657,7 @@ describe('hypermedia teaching', () => {
     should(teaching).containEql('Do not overdo it');
     // The owner's three asks: reach for it when teaching, keep it inline, and tell it interactively.
     should(teaching).startWith('Hypermedia: when you teach, explain, compare or walk through');
-    should(teaching).containEql(
-      'never publish an artifact, page, gist or link to explain something unless the owner asks',
-    );
+    should(teaching).containEql('never publish an artifact, page, gist or link to explain, unless asked');
     should(teaching).containEql('step-through Next buttons');
     should(teaching).containEql('prefers-reduced-motion');
     // The theme is the reader's: a ferret never paints a chart or a diagram.
@@ -761,21 +759,23 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).startWith('Agenda mode: ONLY for what the owner alone can give: info, a decision or action.');
     // The agenda is never a tracker: testing and checking ride the board's Done / Not good, and only a Not good result opens an item.
     should(text).containEql('Never track work ("please test/verify")');
-    should(text).containEql("the board's Done / Not good covers it");
-    should(text).containEql('after a Not good, open one only if you need something from them.');
+    should(text).containEql('the board covers it (Done/Not good)');
+    should(text).containEql('after a Not good, open one only if you need input.');
+    // An owner's question is answered in chat AND on the agenda as one info item, so a missed reply is not a missed answer.
+    should(text).containEql("Owner's question: ALSO answer as a `--kind info` item.");
     should(text).containEql('One item per ask:');
     // Premise and context are part of the one command, and required: every item is read cold.
     should(text).containEql(
       '`zz agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<the ask>"` (required)',
     );
     should(text).containEql('Title ≤40, ask ≤120.');
-    should(text).containEql('no "as above", ticket/PR numbers, paths, unexplained acronyms');
+    should(text).containEql('no "as above", ticket/PR numbers, paths, acronyms');
     should(text).containEql('`--term "X=meaning"`');
     should(text).containEql('`--decided` = settled, `--still-open` = left');
-    should(text).containEql('`--body`: hypermedia (fy-render).');
+    should(text).containEql('`--body`: hypermedia.');
     should(text).containEql('`--kind todo|yesno|permission|choice|review|info`');
     // Each item stands alone, in full Markdown, and each option is a short letter-able label plus a one-line reason.
-    should(text).containEql('Each item stands ALONE: Markdown,');
+    should(text).containEql('Items stand ALONE: Markdown,');
     should(text).containEql('Choice: 2–3 `--option "Label: why"`; `--recommend <label> --recommend-why <line>`');
     should(text).containEql('To-do: `--step "<md>"`');
     // When it is needed: it blocks now, will block later, or by a time.
@@ -786,10 +786,10 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql('"[answer to !A3 …]" is the answer;');
     // A reply PARKS the item: the ferret brings it back by refreshing the WHOLE card with edit, or closes it.
     should(text).containEql('"[re !A3 …]" is chat, parking it:');
-    should(text).containEql('reopen with `zz agenda edit <id>` refreshing --summary/--premise/--context, else done it');
+    should(text).containEql('reopen with `zz agenda edit <id>` refreshing summary/premise/context, else done it');
     should(text).not.containEql('agenda surface');
     // Every item stays current, in the turn the facts changed: edited or closed, never left stale.
-    should(text).containEql('KEEP ITEMS CURRENT this turn');
+    should(text).containEql('KEEP CURRENT this turn');
     should(text).containEql('`edit` if changed');
     should(text).containEql('`done` if settled');
     should(text).containEql('`ls` = open');
@@ -819,23 +819,29 @@ describe('BOARD_INSTRUCTION', () => {
     const text = BOARD_INSTRUCTION('zz');
 
     // Assert — tasks are `&`, agenda items are `!`, and nothing prints the retired `#F`.
-    should(text).startWith(
-      "Board: all work is a card (&F412) on its project's board (new repo: `zz project add .`); agenda items are !A48.",
-    );
+    should(text).startWith('Board: all work is a card (&F412); agenda items are !A48.');
     should(text).not.containEql('#F');
-    should(text).containEql('Before your first edit for a new ask, have one:');
+    should(text).containEql('New ask, first:');
     should(text).containEql(
-      '`zz task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<owner\'s words verbatim>"`',
+      '`zz task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>`',
     );
     should(text).containEql('(zz new/start make one)');
+    should(text).containEql(
+      'Before To test: `zz task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"`',
+    );
     should(text).containEql('`zz task move <id> <lane> --reason "<why>"`');
-    should(text).containEql('Blocked on owner: `zz agenda add --task <id>`');
-    should(text).containEql('a card: `zz task depend`');
-    should(text).containEql('outside: `zz task block`');
+    should(text).containEql(
+      'Lane by the work (`zz board lanes show`): plan → plan lane (owner OKs leaving), build → active:',
+    );
+    should(text).containEql('Blocked is no lane:');
+    should(text).containEql('`zz agenda add --task <id>` (owner)');
+    should(text).containEql('`zz task depend` (card)');
+    should(text).containEql('`zz task block` (else)');
     should(text).containEql('`zz task drop --reason`');
-    should(text).containEql('switched: `zz task focus <id>`');
+    should(text).containEql('`zz task focus <id>`');
     should(text).containEql('`zz task reopen <id> --to <lane> --ask "<their words>"`');
-    should(text).containEql('Never move what a PR or release moves; only the owner closes.');
+    should(text).containEql("Owner's bug:");
+    should(text).containEql('Starts, PRs, merges, releases, `zz signal done` self-move; owner closes.');
     should(text).not.containEql('`fy ');
   });
 
@@ -843,7 +849,7 @@ describe('BOARD_INSTRUCTION', () => {
     // Assert
     should(AGENT_INSTRUCTION('fy')).endWith(`\n\n${NOTIFY_INSTRUCTION('fy')}\n\n${BOARD_INSTRUCTION('fy')}`);
     should(FERRET_SECTIONS('fy').map(section => section.id)).not.containEql('board');
-    should(BOARD_INSTRUCTION('fy').length).be.below(660);
+    should(BOARD_INSTRUCTION('fy').length).be.below(760);
   });
 });
 
@@ -1034,6 +1040,8 @@ describe('SUB_FERRET_INSTRUCTION', () => {
     should(text).containEql('`zz send <lead-callsign> "<message>"`');
     should(text).containEql('`zz task link <id> --pr <url>` (or `--branch`)');
     should(text).containEql('`zz task note`');
+    should(text).containEql('Your final report says how the owner tests it.');
+    should(text).containEql('Your card moves itself: start, PR, merge, `zz signal done`.');
     should(text).not.containEql('agenda add');
     should(text).not.containEql('task move');
   });

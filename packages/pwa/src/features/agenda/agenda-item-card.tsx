@@ -84,8 +84,8 @@ function Section({
   );
 }
 
-/** PREMISE and CONTEXT as two tinted blocks: each label above its points. */
-function Situation({
+/** PREMISE and CONTEXT as two tinted blocks: each label above its points. A board card draws the same two. */
+export function Situation({
   premise,
   context,
   renderProse,

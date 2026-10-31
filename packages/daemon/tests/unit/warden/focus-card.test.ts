@@ -52,6 +52,17 @@ describe('focusCardBrief', () => {
     );
   });
 
+  it('should not tell a sub-ferret to move its card: the card moves itself', () => {
+    // Act
+    const text = focusCardBrief({ ...focus(), subFerret: true });
+
+    // Assert
+    should(text).endWith(
+      'Carry on with &F1: your card moves itself (start, PR, merge, `fy signal done`); note why if you stop.',
+    );
+    should(text).not.containEql('task move');
+  });
+
   it('should quote every clarification verbatim', () => {
     // Arrange
     const task = cardView({

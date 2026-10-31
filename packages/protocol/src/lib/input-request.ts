@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AgendaIdSchema } from './agenda.ts';
+import { BrowserChallengeProviderSchema, BrowserRefSchema } from './browser-target.ts';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 import { InputSavedSchema, LOGIN_LABEL_MAX_LENGTH, LoginEntryIdSchema } from './login-entries.ts';
 import { SurfaceKeySchema, SurfaceKindSchema } from './surface-names.ts';
@@ -74,32 +75,125 @@ export type InputSensitivity = z.infer<typeof InputSensitivitySchema>;
 export const InputSubmitModeSchema = z.enum(['agent', 'offer-owner', 'owner-default']);
 export type InputSubmitMode = z.infer<typeof InputSubmitModeSchema>;
 
-/** Where the value goes. A browser target names the field; the daemon, not the agent, observes what it is. */
+/** Where the value goes. A browser's fields each name their own element; the daemon, not the agent, observes what it is. */
 export const InputTargetSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('terminal'), key: SurfaceKeySchema }),
-  z.strictObject({ kind: z.literal('browser'), key: SurfaceKeySchema, selector: boundedLine(512) }),
+  z.strictObject({ kind: z.literal('browser'), key: SurfaceKeySchema }),
 ]);
 export type InputTarget = z.infer<typeof InputTargetSchema>;
 
-/** Exactly what an agent may say when it raises a request: nothing in it was observed. */
-export const InputRaiseSchema = z.strictObject({
-  target: InputTargetSchema,
-  prompt: z.string().trim().min(1).max(INPUT_PROMPT_MAX_LENGTH),
+/** The most fields one card holds: a login's username, password and code, and one spare. */
+export const INPUT_MAX_FIELDS = 4;
+/** The longest label an agent may give a field ("Email", "Password"). */
+export const INPUT_FIELD_LABEL_MAX_LENGTH = 60;
+/** The id a request with one field gives it when the agent names none. */
+export const INPUT_SINGLE_FIELD_ID = 'value';
+
+/** A field's id within its card: a short lowercase word, so a deliver can say which value is which. */
+export const InputFieldIdSchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9_]{0,31}$/u, 'a field id is a short lowercase word: letters, digits and underscores');
+export type InputFieldId = z.infer<typeof InputFieldIdSchema>;
+
+const FieldLabelSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(INPUT_FIELD_LABEL_MAX_LENGTH)
+  .regex(/^[^\p{Cc}\p{Cf}]*$/u, 'must be one line with no control characters');
+
+/**
+ * The element a browser field names, the way every browser act names one: a snapshot's `ref` or a selector.
+ * It is the agent's POINTER, never a fact: the daemon resolves it and observes what is actually there.
+ */
+export const InputFieldElementSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('selector'), selector: boundedLine(512) }),
+  z.strictObject({ kind: z.literal('ref'), ref: BrowserRefSchema }),
+]);
+export type InputFieldElement = z.infer<typeof InputFieldElementSchema>;
+
+/**
+ * One value a card asks for, as the agent raises it. Each field carries its own sensitivity, so a login is
+ * "Email (plain, the ferret can see it)" + "Password (secret)" on ONE card. A terminal takes exactly one field
+ * (its prompts come one at a time: a second is a chained request); a browser field names its element.
+ */
+export const InputFieldRaiseSchema = z.strictObject({
+  id: InputFieldIdSchema,
+  label: FieldLabelSchema.optional(),
   sensitivity: InputSensitivitySchema,
-  submit: InputSubmitModeSchema.default('offer-owner'),
-  /** Seconds the request lives; the default and the cap are above. */
-  expiresInSeconds: z.number().int().min(30).max(INPUT_MAX_EXPIRY_SECONDS).optional(),
-  /** Pings the owner (default for `secret`). */
-  blocking: z.boolean().optional(),
-  /** A follow-up in a multi-step login: the card it follows. */
-  chain: AgendaIdSchema.optional(),
-  /**
-   * The saved login the ferret expects to be used. A HINT only: the daemon decides what matches the target,
-   * a hint never makes an entry the one-tap choice, and the answer is the same whether such an entry exists.
-   */
-  secretHint: LoginEntryIdSchema.optional(),
+  element: InputFieldElementSchema.optional(),
 });
+export type InputFieldRaise = z.infer<typeof InputFieldRaiseSchema>;
+
+const fieldsProblem = (fields: readonly { readonly id: string }[]): string | undefined =>
+  new Set(fields.map(field => field.id)).size === fields.length ? undefined : 'each field needs its own id';
+
+/**
+ * Exactly what an agent may say when it raises a request: nothing in it was observed. A one-value request
+ * names its `sensitivity`; a card of several values names its `fields` instead.
+ */
+export const InputRaiseSchema = z
+  .strictObject({
+    target: InputTargetSchema,
+    prompt: z.string().trim().min(1).max(INPUT_PROMPT_MAX_LENGTH),
+    sensitivity: InputSensitivitySchema.optional(),
+    fields: z.array(InputFieldRaiseSchema).min(1).max(INPUT_MAX_FIELDS).optional(),
+    submit: InputSubmitModeSchema.default('offer-owner'),
+    /** Seconds the request lives; the default and the cap are above. */
+    expiresInSeconds: z.number().int().min(30).max(INPUT_MAX_EXPIRY_SECONDS).optional(),
+    /** Pings the owner (default when a field is `secret`). */
+    blocking: z.boolean().optional(),
+    /** A follow-up in a multi-step login: the card it follows. */
+    chain: AgendaIdSchema.optional(),
+    /**
+     * The saved login the ferret expects to be used. A HINT only: the daemon decides what matches the target,
+     * a hint never makes an entry the one-tap choice, and the answer is the same whether such an entry exists.
+     */
+    secretHint: LoginEntryIdSchema.optional(),
+  })
+  .superRefine((raise, context) => {
+    if ((raise.sensitivity === undefined) === (raise.fields === undefined))
+      context.addIssue({ code: 'custom', message: 'name the sensitivity of one value, or the fields of several' });
+    const problem = raise.fields === undefined ? undefined : fieldsProblem(raise.fields);
+    if (problem !== undefined) context.addIssue({ code: 'custom', path: ['fields'], message: problem });
+  });
 export type InputRaise = z.infer<typeof InputRaiseSchema>;
+
+/**
+ * Which fields of a card "Save as" keeps, and as what, so a login's username and password are kept together in
+ * ONE saved login: a `plain` field as the username, a `secret` as the password. A one-time code is never
+ * saved (its seed is, from Settings). `undefined` when the card cannot be kept as one login: nothing to keep,
+ * or two usernames or two passwords.
+ */
+export function savedRolesOf(
+  fields: readonly { readonly id: string; readonly sensitivity: InputSensitivity }[],
+): ReadonlyMap<string, 'username' | 'password'> | undefined {
+  const roles = new Map<string, 'username' | 'password'>();
+  for (const field of fields) {
+    if (field.sensitivity === 'private') continue;
+    const role = field.sensitivity === 'secret' ? 'password' : 'username';
+    if ([...roles.values()].includes(role)) return undefined;
+    roles.set(field.id, role);
+  }
+  return roles.size === 0 ? undefined : roles;
+}
+
+/** A raise's fields: its own, or the one value a `sensitivity` names. */
+export function inputRaiseFields(raise: Pick<InputRaise, 'sensitivity' | 'fields'>): readonly InputFieldRaise[] {
+  if (raise.fields !== undefined) return raise.fields;
+  return [{ id: INPUT_SINGLE_FIELD_ID, sensitivity: raise.sensitivity ?? 'secret' }];
+}
+
+const SENSITIVITY_RANK: Readonly<Record<InputSensitivity, number>> = { plain: 0, private: 1, secret: 2 };
+
+/** The most careful sensitivity among some fields: what the card, the journal and the audit record as the request's. */
+export function strongestSensitivity(fields: readonly { readonly sensitivity: InputSensitivity }[]): InputSensitivity {
+  return fields.reduce<InputSensitivity>(
+    (strongest, field) =>
+      SENSITIVITY_RANK[field.sensitivity] > SENSITIVITY_RANK[strongest] ? field.sensitivity : strongest,
+    'plain',
+  );
+}
 
 /** The pane the value goes to, as {@link PANE_PROOF_FORMAT} proved it (daemon-side `pane-proof.ts`). */
 export const InputPaneProofSchema = z.strictObject({
@@ -150,14 +244,14 @@ const BrowserFieldSchema = z.strictObject({
   inputmode: boundedLine(32).optional(),
 });
 
-const BrowserFactsSchema = z.strictObject({
-  kind: z.literal('browser'),
-  pageId: boundedLine(128),
-  /** scheme + host + port from the browser itself, never from the agent. */
-  origin: boundedLine(256),
-  secure: z.boolean(),
+/** One field of a page as the daemon found it: the element the agent pointed at, resolved by the browser. */
+export const InputBrowserFieldFactsSchema = z.strictObject({
+  /** The card's field this element is for. */
+  fieldId: InputFieldIdSchema,
+  /** The origin of the frame the element is in; the card flags one that is not the page's own. */
   frameOrigin: boundedLine(256),
-  navigationId: boundedLine(128),
+  /** The frame the element is in, as the browser names it: the write goes there and nowhere else. */
+  frameId: boundedLine(128),
   backendNodeId: PositiveIntegerSchema,
   field: BrowserFieldSchema,
   box: z.strictObject({
@@ -167,6 +261,21 @@ const BrowserFactsSchema = z.strictObject({
     h: z.number().finite().nonnegative(),
   }),
   visible: z.boolean(),
+});
+export type InputBrowserFieldFacts = z.infer<typeof InputBrowserFieldFactsSchema>;
+
+const BrowserFactsSchema = z.strictObject({
+  kind: z.literal('browser'),
+  pageId: boundedLine(128),
+  /** scheme + host + port from the browser itself, never from the agent. */
+  origin: boundedLine(256),
+  /** https, or a page on this machine (`http://localhost`): what is typed does not cross a network in the clear. */
+  secure: z.boolean(),
+  /** The document the fields belong to: a navigation since the card was drawn changes it. */
+  navigationId: boundedLine(128),
+  fields: z.array(InputBrowserFieldFactsSchema).min(1).max(INPUT_MAX_FIELDS),
+  /** The page appears to be asking for a human check: the owner completes it (`browser_ask_owner`), never Ferretry. */
+  challenge: z.strictObject({ provider: BrowserChallengeProviderSchema }).optional(),
 });
 
 /**
@@ -234,6 +343,32 @@ export const InputRiskSchema = z.strictObject({
 export type InputRisk = z.infer<typeof InputRiskSchema>;
 
 /**
+ * One value on the card, as the owner reads it: what the agent called it, how careful the daemon is with it,
+ * the element it goes into (a browser field) and its own risk flag. A `plain` field is always red: the ferret
+ * can see that value, and the card says so beside it.
+ */
+export const InputRequestFieldSchema = z.strictObject({
+  id: InputFieldIdSchema,
+  label: FieldLabelSchema,
+  sensitivity: InputSensitivitySchema,
+  element: InputFieldElementSchema.optional(),
+  /** Absent while the daemon is re-observing. */
+  risk: InputRiskSchema.optional(),
+});
+export type InputRequestField = z.infer<typeof InputRequestFieldSchema>;
+
+const RISK_RANK: Readonly<Record<InputRisk['level'], number>> = { green: 0, amber: 1, red: 2 };
+
+/** The worst of some fields' risks: what the card's header flag says. `undefined` when none is known yet. */
+export function worstRisk(risks: readonly (InputRisk | undefined)[]): InputRisk | undefined {
+  return risks.reduce<InputRisk | undefined>(
+    (worst, risk) =>
+      risk === undefined ? worst : worst === undefined || RISK_RANK[risk.level] > RISK_RANK[worst.level] ? risk : worst,
+    undefined,
+  );
+}
+
+/**
  * THE REQUEST, as the owner's card reads it. `observed` is absent while the daemon is re-observing after
  * a restart: Send stays disabled until it is back.
  */
@@ -245,13 +380,18 @@ export const InputRequestSchema = z.strictObject({
   agendaItemId: AgendaIdSchema,
   target: InputTargetSchema,
   prompt: z.string().trim().min(1).max(INPUT_PROMPT_MAX_LENGTH),
+  /** The most careful of the fields' sensitivities: what the journal and the audit record. */
   sensitivity: InputSensitivitySchema,
+  /** The values the card asks for, in the order the daemon types them. A terminal's request has exactly one. */
+  fields: z.array(InputRequestFieldSchema).min(1).max(INPUT_MAX_FIELDS),
   submit: InputSubmitModeSchema,
   raisedAt: InstantSchema,
   expiresAt: InstantSchema,
   chain: AgendaIdSchema.optional(),
+  /** Which step of a chained login this is: 2 for the card that follows the first. Absent for a lone card. */
+  step: z.number().int().min(2).max(16).optional(),
   observed: InputTargetFactsSchema.optional(),
-  /** The risk flag for what was observed; absent while the daemon is re-observing. */
+  /** The worst of the fields' risk flags; absent while the daemon is re-observing. */
   risk: InputRiskSchema.optional(),
   /** A digest of the facts the card showed; deliver refuses `target_changed` when it no longer matches. */
   observedDigest: Digest.optional(),
@@ -288,8 +428,12 @@ export type InputAgentView = z.infer<typeof InputAgentViewSchema>;
 /**
  * `POST /v1/sessions/:sid/input-requests/:id/deliver`. The one schema with a value, carried only inside
  * the sealed carrier. `padded` is {@link padInputValue}'s output, so the relay's size view reveals a
- * bucket, not a length. Exactly one of `padded` or `entry`: a saved login is named, and the DAEMON
- * resolves its value inside the use boundary, so a saved value never passes through the app.
+ * bucket, not a length. A saved login is named (`entry`), and the DAEMON resolves its value inside the use
+ * boundary, so a saved value never passes through the app.
+ *
+ * A card of one field sends `padded` or `entry`. A card of several sends `fields` (each typed value, padded
+ * on its own) and may add `entry` to fill the fields it did not type from a saved login; between them every
+ * field is covered exactly once, which the daemon checks before it types anything.
  */
 export const InputDeliverBodySchema = z
   .strictObject({
@@ -300,7 +444,21 @@ export const InputDeliverBodySchema = z
       .min(1)
       .max(INPUT_VALUE_MAX_BYTES + 2 * INPUT_PAD_BUCKET_BYTES)
       .optional(),
-    /** A saved login, by its handle: the daemon types the field the request needs from it. */
+    /** Each typed value of a card with several fields, by the field it goes into. */
+    fields: z
+      .array(
+        z.strictObject({
+          field: InputFieldIdSchema,
+          padded: z
+            .string()
+            .min(1)
+            .max(INPUT_VALUE_MAX_BYTES + 2 * INPUT_PAD_BUCKET_BYTES),
+        }),
+      )
+      .min(1)
+      .max(INPUT_MAX_FIELDS)
+      .optional(),
+    /** A saved login, by its handle: the daemon types the fields the request needs from it. */
     entry: LoginEntryIdSchema.optional(),
     /** Press Enter / submit after typing. */
     submit: z.boolean(),
@@ -321,11 +479,21 @@ export const InputDeliverBodySchema = z
       .optional(),
   })
   .superRefine((body, context) => {
-    if ((body.padded === undefined) === (body.entry === undefined)) {
-      context.addIssue({ code: 'custom', message: 'send exactly one of padded or entry' });
+    if (body.padded !== undefined && (body.entry !== undefined || body.fields !== undefined)) {
+      context.addIssue({ code: 'custom', message: 'padded is the one value of a one-field card: send it alone' });
     }
-    if (body.save !== undefined && body.padded === undefined) {
-      context.addIssue({ code: 'custom', message: 'save keeps a typed value', path: ['save'] });
+    if (body.padded === undefined && body.entry === undefined && body.fields === undefined) {
+      context.addIssue({ code: 'custom', message: 'send a value: padded, fields or a saved entry' });
+    }
+    if (body.fields !== undefined) {
+      const problem = fieldsProblem(body.fields.map(typed => ({ id: typed.field })));
+      if (problem !== undefined) context.addIssue({ code: 'custom', path: ['fields'], message: problem });
+    }
+    if (
+      body.save !== undefined &&
+      ((body.padded === undefined && body.fields === undefined) || body.entry !== undefined)
+    ) {
+      context.addIssue({ code: 'custom', message: 'save keeps values you typed, not a saved login', path: ['save'] });
     }
   });
 export type InputDeliverBody = z.infer<typeof InputDeliverBodySchema>;

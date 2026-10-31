@@ -2,6 +2,7 @@ export * from './actor.ts';
 export * from './authentication.ts';
 export * from './body.ts';
 export * from './capability.ts';
+export * from './compression.ts';
 export * from './dispatcher.ts';
 export * from './error.ts';
 export * from './http.ts';

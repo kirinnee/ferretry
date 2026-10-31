@@ -1,12 +1,12 @@
-import type { BoardProject, LaneSet, LaneSetChangeResponse } from '@ferretry/protocol';
+import { type BoardProject, type LaneSet, type LaneSetChangeResponse, laneUse } from '@ferretry/protocol';
 
-/** The lanes in order, with each one's id so a person can name it in `--rename` and `--remove`. */
+/** The lanes in order: each one's id (to name it in `--rename`, `--remove` and `task move`) and when a card belongs there. */
 export function renderLaneSet(laneSet: LaneSet, projectName: string): string {
   const state =
     laneSet.confirmedBy === null ? `proposed by ${laneSet.proposedBy}, not yet confirmed` : 'confirmed by the owner';
   const rows = laneSet.lanes.map(lane => {
     const gate = lane.ownerGate === true ? ', owner-gated' : '';
-    return `  ${lane.id}\t${lane.name}\t(${lane.category}${gate})`;
+    return `  ${lane.id}\t${lane.name}\t(${lane.category}${gate})\tuse when: ${laneUse(lane)}`;
   });
   return [`${projectName} lanes, version ${String(laneSet.version)} — ${state}`, ...rows].join('\n');
 }

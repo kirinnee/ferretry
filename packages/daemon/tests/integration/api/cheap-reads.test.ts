@@ -14,6 +14,7 @@ import { fleetEventSocketRoutes, sessionRoutes } from '../../../src/lib/runtime/
 import { type FleetEventSource, FleetEventStreamService } from '../../../src/lib/session/events/index.ts';
 import type { StoredSessionEvent } from '../../../src/lib/session/reads/index.ts';
 import { sessionDirectory, sessionView } from '../../unit/runtime/mounts/support.ts';
+import { bearerSocket } from '../../support/bearer-socket.ts';
 import { waitFor } from '../support/wait-for.ts';
 
 /**
@@ -103,9 +104,7 @@ async function serve(views: readonly SessionView[], journal: Journal): Promise<A
 
 /** The frames one feed socket received, parsed as the protocol parses them. */
 function follow(handle: ApiServerHandle, query: string) {
-  const socket = new WebSocket(
-    `${handle.url.replace('http://', 'ws://')}/v1/events?${query}&token=${CREDENTIALS.admin}`,
-  );
+  const socket = bearerSocket(`${handle.url.replace('http://', 'ws://')}/v1/events?${query}`, CREDENTIALS.admin);
   const frames: FyEventStreamFrame[] = [];
   socket.addEventListener('message', event =>
     frames.push(FyEventStreamFrameSchema.parse(JSON.parse(String(event.data)))),

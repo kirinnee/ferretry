@@ -137,3 +137,16 @@ export const refineBrowserScreenshot = (
   if (value.fullPage === true && (value.selector ?? value.ref) !== undefined)
     context.addIssue({ code: 'custom', message: 'a screenshot is of the full page or of one element, not both' });
 };
+
+/** Who is asking the person on a page to prove they are human, as far as the page shows it. */
+export const BrowserChallengeProviderSchema = z.enum([
+  'cloudflare',
+  'recaptcha',
+  'hcaptcha',
+  'google',
+  'datadome',
+  'arkose',
+  'perimeterx',
+  'other',
+]);
+export type BrowserChallengeProvider = z.infer<typeof BrowserChallengeProviderSchema>;

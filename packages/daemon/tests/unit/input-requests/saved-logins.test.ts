@@ -81,8 +81,8 @@ function harness(
   const service = new InputRequestService({
     target: {
       observe: async () => ({ ok: true, facts }),
-      type: async (_session, _target, text) => {
-        writes.push(text);
+      type: async (_session, _target, values) => {
+        writes.push(...values.map(value => value.text));
         return 'typed';
       },
     },

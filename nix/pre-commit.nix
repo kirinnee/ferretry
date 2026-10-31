@@ -300,7 +300,7 @@ pre-commit-lib.run {
       enable = true;
       name = "Executable shell scripts";
       entry = validator "scripts/validate/executable-shells.sh";
-      files = ".*\\.sh$";
+      files = "(.*\\.sh|^scripts/host/ferretry-loopback-firewall)$";
       pass_filenames = false;
       language = "system";
     };
@@ -327,7 +327,7 @@ pre-commit-lib.run {
       enable = true;
       name = "Shellcheck";
       entry = "${packages.shellcheck}/bin/shellcheck";
-      files = ".*\\.sh$";
+      files = "(.*\\.sh|^scripts/host/ferretry-loopback-firewall)$";
       pass_filenames = true;
       language = "system";
     };

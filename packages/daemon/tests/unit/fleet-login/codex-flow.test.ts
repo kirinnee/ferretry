@@ -19,6 +19,7 @@ import {
   codexDelivering,
   codexEnding,
   codexProjection,
+  codexSharedHostEnding,
   decideCodexSubmit,
   observeCodexLine,
 } from '../../../src/lib/fleet-login/codex-flow.ts';
@@ -396,6 +397,17 @@ describe('Codex’s link sign-in stages', () => {
     should(CODEX_LINK_START).deepEqual({ stage: 'linking' });
     should(codexAutomaticLink()).deepEqual({ stage: 'linking', automatic: true });
     should(codexDelivering()).deepEqual({ stage: 'finishing' });
+  });
+
+  it('should say why no link was started on its own, and what to do, when the host is shared', () => {
+    // Act
+    const actual = codexSharedHostEnding();
+
+    // Assert
+    should(actual.stage).equal('failed');
+    should(actual.reason).containEql('1455 or 1457').and.containEql('shared host');
+    should(actual.remedy).containEql('choose the link sign-in yourself');
+    should(actual).not.have.property('lastCode');
   });
 
   it('should move a device flow on when Codex could not get a device code, before or after part of one', () => {

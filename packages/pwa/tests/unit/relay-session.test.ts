@@ -11,6 +11,7 @@
  */
 
 import { describe, it } from 'bun:test';
+import { gzipSync } from 'node:zlib';
 import { MAX_TUNNEL_BODY_BYTES, OLDER_DAEMON_SENTENCE } from '@ferretry/protocol';
 import {
   CREDIT_WINDOW_FRAMES,
@@ -22,6 +23,7 @@ import {
   RELAY_CLOSE_CODES,
   RELAY_LIMITS,
   SESSION_PROTOCOL_ID,
+  toBase64Url,
   utf8Bytes,
 } from '@ferretry/relay';
 import should from 'should';
@@ -415,6 +417,69 @@ describe('a serving relay session', () => {
     await session.receiveBinary(await daemon.record({ t: 'res-more', id: 3, body: 'cd', more: true }));
     await session.receiveBinary(await daemon.record({ t: 'res-more', id: 3, body: 'ef' }));
     should(await third).eql({ kind: 'response', status: 200, headers: {}, body: 'abcdef' });
+  });
+
+  it('should ask for gzip, let a caller override it, and read a compressed answer back as the plain text', async () => {
+    const { session, daemon, socket } = await serving();
+    const text = JSON.stringify({ rows: Array.from({ length: 400 }, (_, index) => ({ index, name: `row ${index}` })) });
+    const wire = toBase64Url(new Uint8Array(gzipSync(text)));
+    const first = session.request({ method: 'GET', path: '/v1/sessions' });
+    const second = session.request({ method: 'GET', path: '/v1/other', headers: { 'accept-encoding': 'identity' } });
+    await settle();
+    const sent: { readonly t?: string; readonly headers?: Record<string, string> }[] = [];
+    for (const frame of socket.sent.slice(1))
+      sent.push((await daemon.receive(frame as Uint8Array)) as (typeof sent)[number]);
+    should(sent.filter(record => record.t === 'req').map(record => record.headers?.['accept-encoding'])).eql([
+      'gzip',
+      'identity',
+    ]);
+
+    await session.receiveBinary(
+      await daemon.record({
+        t: 'res',
+        id: 1,
+        status: 200,
+        headers: {
+          etag: '"t"',
+          'content-encoding': 'gzip',
+          'content-transfer-encoding': 'base64url',
+        },
+        body: wire.slice(0, 40),
+        more: true,
+      }),
+    );
+    await session.receiveBinary(await daemon.record({ t: 'res-more', id: 1, body: wire.slice(40) }));
+    await session.receiveBinary(await daemon.record({ t: 'res', id: 2, status: 200, body: 'plain' }));
+
+    // The caller sees what the route wrote: the encoding headers are consumed here, the others are kept.
+    should(await first).eql({ kind: 'response', status: 200, headers: { etag: '"t"' }, body: text });
+    should((await second).body).equal('plain');
+  });
+
+  it('should refuse a compressed answer that cannot be read, never hand back the encoded text', async () => {
+    const { session, daemon } = await serving();
+    const headers = { 'content-encoding': 'gzip', 'content-transfer-encoding': 'base64url' };
+    const notBase64 = failure(session.request({ method: 'GET', path: '/a' }));
+    await session.receiveBinary(await daemon.record({ t: 'res', id: 1, status: 200, headers, body: 'not base64!' }));
+    should((await notBase64).message).match(/base64url/u);
+
+    const notGzip = failure(session.request({ method: 'GET', path: '/b' }));
+    await session.receiveBinary(
+      await daemon.record({ t: 'res', id: 2, status: 200, headers, body: toBase64Url(utf8Bytes('plain, not gzip')) }),
+    );
+    should((await notGzip).message).match(/decompressed/u);
+
+    const unknown = failure(session.request({ method: 'GET', path: '/c' }));
+    await session.receiveBinary(
+      await daemon.record({
+        t: 'res',
+        id: 3,
+        status: 200,
+        headers: { 'content-encoding': 'gzip', 'content-transfer-encoding': 'base32' },
+        body: 'x',
+      }),
+    );
+    should((await unknown).message).match(/cannot read/u);
   });
 
   it('should refuse a second acceptance and an answer to a request it never sent', async () => {
@@ -893,7 +958,7 @@ describe('a relay session carrying a body larger than one record', () => {
     await drain();
     await daemon.receive(socket.sent[1] as Uint8Array);
     const record = (await daemon.receive(socket.sent[2] as Uint8Array)) as Record<string, unknown>;
-    should(record).eql({ t: 'req', id: 1, method: 'GET', path: '/v1/small' });
+    should(record).eql({ t: 'req', id: 1, method: 'GET', path: '/v1/small', headers: { 'accept-encoding': 'gzip' } });
     await session.receiveBinary(await daemon.record({ t: 'res', id: 1, status: 200 }));
     await answer;
   });
