@@ -31,8 +31,9 @@ export interface NotificationServiceOptions {
   readonly serial: NotificationSerialExecutor;
   readonly clock: NotificationClock;
   /**
-   * Where a push that could not be made is said. Announcing stays total, so without it a ledger that
-   * cannot be read silences every push and leaves no trace anywhere.
+   * Told what became of every push: made, or failed and why. Announcing stays total, so without it a
+   * push that cannot be made leaves no trace outside the ledger — and none at all when the ledger is
+   * what fails. The daemon logs each failure and reports the newest in `fy doctor`.
    */
   readonly diagnostics?: NotificationDiagnostics;
   /**
@@ -191,7 +192,7 @@ export class NotificationService implements AgendaRaisedObserver {
             ...(urgent === undefined ? {} : { urgency: 'high' as const }),
           }));
         } catch (error) {
-          this.warn(`push ${key} was not delivered — ${errorText(error)}`);
+          this.tell(diagnostics => diagnostics.failed(key, errorText(error)));
           await this.options.ledger
             .append(
               NotificationRecordSchema.parse({
@@ -207,6 +208,7 @@ export class NotificationService implements AgendaRaisedObserver {
             .catch(() => undefined);
           return;
         }
+        this.tell(diagnostics => diagnostics.made(key, { delivered, failed }));
         await this.options.ledger
           .append(
             NotificationRecordSchema.parse({
@@ -220,12 +222,13 @@ export class NotificationService implements AgendaRaisedObserver {
           )
           .catch(() => undefined);
       })
-      .catch((error: unknown) => this.warn(`push ${key} was not made — ${errorText(error)}`));
+      .catch((error: unknown) => this.tell(diagnostics => diagnostics.failed(key, errorText(error))));
   }
 
-  private warn(message: string): void {
+  private tell(say: (diagnostics: NotificationDiagnostics) => void): void {
+    if (this.options.diagnostics === undefined) return;
     try {
-      this.options.diagnostics?.warn(message);
+      say(this.options.diagnostics);
     } catch {
       // Saying a push failed must never be what fails.
     }
