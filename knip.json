@@ -91,6 +91,7 @@
         "harness/context-outdated-screenshot.tsx",
         "harness/convert-sheet-screenshot.tsx",
         "harness/approval-card-screenshot.tsx",
+        "harness/input-card-screenshot.tsx",
         "harness/question-form-screenshot.tsx",
         "harness/question-stepper-screenshot.tsx",
         "harness/dialog-card-screenshot.tsx",

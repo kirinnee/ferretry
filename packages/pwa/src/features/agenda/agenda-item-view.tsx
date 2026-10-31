@@ -69,6 +69,8 @@ export interface AgendaItemViewProps {
    * replies' place, and the arrow keys answer nothing.
    */
   readonly settled?: ReactNode;
+  /** The form an `input` item is answered with (`InputCardHost`): in the body, and no quick replies. */
+  readonly inputForm?: ReactNode;
 }
 
 /** The option a question's recommendation names, or '' when it names none. */
@@ -106,6 +108,7 @@ export function AgendaItemView({
   closeLabel = 'Back to the chat',
   quoteScope = null,
   settled,
+  inputForm,
 }: AgendaItemViewProps) {
   const root = useRef<HTMLElement | null>(null);
   const quote = useQuoteMenu(root, quoteScope);
@@ -265,12 +268,17 @@ export function AgendaItemView({
             renderProse={renderProse}
             {...(onProgress === undefined ? {} : { onProgress })}
           />
+          {inputForm !== undefined && item.kind === 'input' ? (
+            <div className="fy-item-view__input" data-agenda-input-form="">
+              {inputForm}
+            </div>
+          ) : null}
           <AgendaItemHistory events={history} ferret={ferret} now={now} />
         </div>
       </div>
       {settled !== undefined ? (
         settled
-      ) : (
+      ) : inputForm !== undefined && item.kind === 'input' ? null : (
         <AgendaQuickReplies
           busy={busy}
           error={error}

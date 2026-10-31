@@ -1,0 +1,674 @@
+/**
+ * Settings › Secrets › Saved logins: the password manager the input card places values from.
+ *
+ * WRITE-ONLY, like the secrets above it. A person can add an entry, change what it is for, replace its
+ * password, add or remove a 2FA seed, rename its handle and delete it. Nothing here can show a value: the
+ * list says WHICH secret fields an entry holds (password ✓, 2FA ✓), never what they are, and a password or
+ * seed field is a fresh empty box every time.
+ *
+ * A DAMAGED STORE IS NOT AN EMPTY ONE. It gets its own message, because a person told "no saved logins" over
+ * a store the daemon simply could not read will type them all again.
+ */
+
+import {
+  LOGIN_PASSWORD_MIN_LENGTH,
+  LOGIN_TOTP_WARNING,
+  type LoginEntryList,
+  type LoginEntrySummary,
+  type PutLoginEntryRequest,
+} from '@ferretry/protocol';
+import { AlertTriangle, Check, LockKeyhole, Pencil, Plus, ShieldPlus, Trash2, X } from 'lucide-react';
+import { type FormEvent, type ReactNode, useId, useState } from 'react';
+import { normalizeHandle } from '../../lib/input-card.ts';
+import {
+  addTotpBody,
+  canAddLogin,
+  editLoginBody,
+  fieldWords,
+  handleFromLabel,
+  MATCH_HELP,
+  matchText,
+  newLoginBody,
+  newLoginProblem,
+  passwordProblem,
+  removeTotpBody,
+  replacePasswordBody,
+  seedProblem,
+} from '../../lib/login-form.ts';
+
+/** A write reports whether it took, so a form clears only when the daemon accepted it. */
+type Write = Promise<boolean> | boolean;
+
+export interface LoginsCardProps {
+  readonly list: LoginEntryList;
+  readonly busy?: string | null;
+  readonly error?: string | null;
+  readonly onPut: (id: string, body: PutLoginEntryRequest) => Write;
+  readonly onRename: (id: string, to: string) => Write;
+  readonly onRemove: (id: string) => Write;
+}
+
+const INPUT = 'kt-input min-h-[44px] w-full rounded-control border border-border bg-surface-2 px-2 text-fg';
+
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  readonly label: string;
+  readonly hint?: string;
+  readonly children: (id: string) => ReactNode;
+}) {
+  const id = useId();
+  return (
+    <div className="flex min-w-0 flex-1 flex-col gap-1">
+      <label htmlFor={id} className="text-cell font-medium text-fg">
+        {label}
+      </label>
+      {children(id)}
+      {hint !== undefined && <p className="m-0 text-meta leading-base text-faint">{hint}</p>}
+    </div>
+  );
+}
+
+function Problem({ children }: { readonly children: string | undefined }) {
+  if (children === undefined) return null;
+  return (
+    <p role="alert" className="m-0 text-meta text-err" data-login-problem="">
+      {children}
+    </p>
+  );
+}
+
+function AddLoginForm({
+  held,
+  busy,
+  onPut,
+  onClose,
+}: {
+  readonly held: readonly string[];
+  readonly busy: boolean;
+  readonly onPut: LoginsCardProps['onPut'];
+  readonly onClose: () => void;
+}) {
+  const [label, setLabel] = useState('');
+  const [id, setId] = useState('');
+  const [idEdited, setIdEdited] = useState(false);
+  const [match, setMatch] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const draft = { label, id, match, username, password };
+  const problem = newLoginProblem(draft, held);
+  const ready = canAddLogin(draft, held) && !busy;
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (!ready) return;
+    void Promise.resolve(onPut(id, newLoginBody(draft))).then(ok => {
+      setPassword('');
+      if (ok) onClose();
+    });
+  };
+
+  return (
+    <form
+      className="flex min-w-0 flex-col gap-2 rounded-control border border-border-strong bg-surface-2 p-3"
+      aria-label="Add a saved login"
+      data-login-add=""
+      onSubmit={submit}
+    >
+      <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
+        <Field label="Label">
+          {fieldId => (
+            <input
+              id={fieldId}
+              className={INPUT}
+              value={label}
+              placeholder="GitHub (kirinnee)"
+              autoComplete="off"
+              data-login-new-label=""
+              onChange={event => {
+                setLabel(event.target.value);
+                if (!idEdited) setId(handleFromLabel(event.target.value));
+              }}
+            />
+          )}
+        </Field>
+        <Field label="Handle" hint="The name the CLI and cards use.">
+          {fieldId => (
+            <input
+              id={fieldId}
+              className={`${INPUT} mono`}
+              value={id}
+              placeholder="GITHUB_KIRINNEE"
+              autoComplete="off"
+              autoCapitalize="characters"
+              spellCheck={false}
+              data-login-new-id=""
+              onChange={event => {
+                setIdEdited(true);
+                setId(normalizeHandle(event.target.value));
+              }}
+            />
+          )}
+        </Field>
+      </div>
+      <Field label="Used for" hint={MATCH_HELP}>
+        {fieldId => (
+          <input
+            id={fieldId}
+            className={`${INPUT} mono`}
+            value={match}
+            placeholder="github.com"
+            autoComplete="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            data-login-new-match=""
+            onChange={event => setMatch(event.target.value)}
+          />
+        )}
+      </Field>
+      <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
+        <Field label="Username (optional)" hint="Not secret: the ferret can see it.">
+          {fieldId => (
+            <input
+              id={fieldId}
+              className={INPUT}
+              value={username}
+              autoComplete="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              data-login-new-username=""
+              onChange={event => setUsername(event.target.value)}
+            />
+          )}
+        </Field>
+        <Field label="Password" hint="Write-only. It is never shown again.">
+          {fieldId => (
+            <input
+              id={fieldId}
+              type="password"
+              className={INPUT}
+              value={password}
+              autoComplete="new-password"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              data-login-new-password=""
+              onChange={event => setPassword(event.target.value)}
+            />
+          )}
+        </Field>
+      </div>
+      <Problem>{problem}</Problem>
+      <div className="flex flex-wrap gap-2">
+        <button type="submit" className="kt-btn min-h-[44px]" data-variant="primary" disabled={!ready}>
+          <Plus size={14} aria-hidden="true" /> {busy ? 'Saving…' : 'Add login'}
+        </button>
+        <button type="button" className="kt-btn min-h-[44px]" onClick={onClose}>
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
+type RowMode = 'view' | 'edit' | 'password' | 'rename' | 'totp' | 'delete';
+
+function LoginRow({
+  entry,
+  held,
+  busy,
+  onPut,
+  onRename,
+  onRemove,
+}: {
+  readonly entry: LoginEntrySummary;
+  readonly held: readonly string[];
+  readonly busy: boolean;
+  readonly onPut: LoginsCardProps['onPut'];
+  readonly onRename: LoginsCardProps['onRename'];
+  readonly onRemove: LoginsCardProps['onRemove'];
+}) {
+  const [mode, setMode] = useState<RowMode>('view');
+  const [label, setLabel] = useState(entry.label);
+  const [match, setMatch] = useState(matchText(entry.match));
+  const [username, setUsername] = useState(entry.username ?? '');
+  const [password, setPassword] = useState('');
+  const [seed, setSeed] = useState('');
+  const [acknowledged, setAcknowledged] = useState(false);
+  const [handle, setHandle] = useState(entry.id);
+
+  const close = () => {
+    setMode('view');
+    setPassword('');
+    setSeed('');
+    setAcknowledged(false);
+  };
+  /** Runs a write and returns to the row only if the daemon took it; a password or seed box never survives. */
+  const run = (write: Write) =>
+    void Promise.resolve(write).then(ok => {
+      setPassword('');
+      setSeed('');
+      if (ok) close();
+    });
+
+  const edit = editLoginBody(entry, { label, match, username });
+  const seedWrong = seedProblem(seed);
+  const totp = addTotpBody(seed, acknowledged);
+  const passwordWrong = passwordProblem(password);
+  const renameTarget = handle.trim();
+  const renameWrong =
+    renameTarget === entry.id || renameTarget === ''
+      ? undefined
+      : held.includes(renameTarget)
+        ? `${renameTarget} already exists.`
+        : undefined;
+
+  return (
+    <li
+      className="flex min-w-0 flex-col gap-2 rounded-control border border-border-strong bg-surface-2 px-3 py-2"
+      data-login={entry.id}
+      data-login-mode={mode}
+    >
+      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="min-w-0 truncate text-ui font-semibold text-fg" data-login-label="">
+          {entry.label}
+        </span>
+        <span className="mono text-meta text-faint">{entry.id}</span>
+        <span className="text-meta text-muted" data-login-fields="">
+          {fieldWords(entry).join(' · ')}
+        </span>
+      </div>
+      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-meta text-muted">
+        <span data-login-match="">
+          {entry.match.length === 0 ? 'matches nothing yet' : `for ${matchText(entry.match)}`}
+        </span>
+        {entry.username !== undefined && <span data-login-username="">user {entry.username}</span>}
+      </div>
+
+      {mode === 'view' && (
+        <div className="flex flex-wrap gap-2" data-login-actions="">
+          <button
+            type="button"
+            className="kt-btn min-h-[44px]"
+            disabled={busy}
+            onClick={() => setMode('edit')}
+            aria-label={`Edit ${entry.label}`}
+          >
+            <Pencil size={14} aria-hidden="true" /> Edit
+          </button>
+          <button
+            type="button"
+            className="kt-btn min-h-[44px]"
+            disabled={busy}
+            onClick={() => setMode('password')}
+            aria-label={`Replace password for ${entry.label}`}
+          >
+            <LockKeyhole size={14} aria-hidden="true" /> Replace password
+          </button>
+          {entry.fields.totp ? (
+            <button
+              type="button"
+              className="kt-btn min-h-[44px]"
+              disabled={busy}
+              onClick={() => run(onPut(entry.id, removeTotpBody()))}
+              aria-label={`Remove 2FA from ${entry.label}`}
+            >
+              <X size={14} aria-hidden="true" /> Remove 2FA
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="kt-btn min-h-[44px]"
+              disabled={busy}
+              onClick={() => setMode('totp')}
+              aria-label={`Add 2FA seed to ${entry.label}`}
+            >
+              <ShieldPlus size={14} aria-hidden="true" /> Add 2FA seed
+            </button>
+          )}
+          <button
+            type="button"
+            className="kt-btn min-h-[44px]"
+            disabled={busy}
+            onClick={() => setMode('rename')}
+            aria-label={`Rename handle of ${entry.label}`}
+          >
+            Rename handle
+          </button>
+          <button
+            type="button"
+            className="kt-btn min-h-[44px]"
+            data-variant="danger"
+            disabled={busy}
+            onClick={() => setMode('delete')}
+            aria-label={`Delete ${entry.label}`}
+          >
+            <Trash2 size={14} aria-hidden="true" /> Delete
+          </button>
+        </div>
+      )}
+
+      {mode === 'edit' && (
+        <form
+          className="flex min-w-0 flex-col gap-2"
+          aria-label={`Edit ${entry.label}`}
+          onSubmit={event => {
+            event.preventDefault();
+            if (edit !== undefined && !busy) run(onPut(entry.id, edit));
+          }}
+        >
+          <Field label="Label">
+            {fieldId => (
+              <input
+                id={fieldId}
+                className={INPUT}
+                value={label}
+                autoComplete="off"
+                data-login-edit-label=""
+                onChange={event => setLabel(event.target.value)}
+              />
+            )}
+          </Field>
+          <Field label="Used for" hint={MATCH_HELP}>
+            {fieldId => (
+              <input
+                id={fieldId}
+                className={`${INPUT} mono`}
+                value={match}
+                autoComplete="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                data-login-edit-match=""
+                onChange={event => setMatch(event.target.value)}
+              />
+            )}
+          </Field>
+          <Field label="Username" hint="Empty removes it.">
+            {fieldId => (
+              <input
+                id={fieldId}
+                className={INPUT}
+                value={username}
+                autoComplete="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                data-login-edit-username=""
+                onChange={event => setUsername(event.target.value)}
+              />
+            )}
+          </Field>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="submit"
+              className="kt-btn min-h-[44px]"
+              data-variant="primary"
+              disabled={edit === undefined || busy}
+            >
+              <Check size={14} aria-hidden="true" /> Save changes
+            </button>
+            <button type="button" className="kt-btn min-h-[44px]" onClick={close}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+
+      {mode === 'password' && (
+        <form
+          className="flex min-w-0 flex-col gap-2"
+          aria-label={`Replace password for ${entry.label}`}
+          onSubmit={event => {
+            event.preventDefault();
+            if (password.length >= LOGIN_PASSWORD_MIN_LENGTH && !busy)
+              run(onPut(entry.id, replacePasswordBody(password)));
+          }}
+        >
+          <Field label="New password" hint="Write-only. The old one is replaced, never shown.">
+            {fieldId => (
+              <input
+                id={fieldId}
+                type="password"
+                className={INPUT}
+                value={password}
+                autoComplete="new-password"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                data-login-replace-password=""
+                onChange={event => setPassword(event.target.value)}
+              />
+            )}
+          </Field>
+          <Problem>{passwordWrong}</Problem>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="submit"
+              className="kt-btn min-h-[44px]"
+              data-variant="primary"
+              disabled={password.length < LOGIN_PASSWORD_MIN_LENGTH || busy}
+            >
+              Replace password
+            </button>
+            <button type="button" className="kt-btn min-h-[44px]" onClick={close}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+
+      {mode === 'totp' && (
+        <form
+          className="flex min-w-0 flex-col gap-2"
+          aria-label={`Add 2FA seed to ${entry.label}`}
+          data-login-totp=""
+          onSubmit={event => {
+            event.preventDefault();
+            if (totp !== undefined && !busy) run(onPut(entry.id, totp));
+          }}
+        >
+          <p
+            className="m-0 flex gap-2 rounded-control border border-warn bg-warn/10 p-2 text-cell leading-base text-fg"
+            data-login-totp-warning=""
+          >
+            <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warn" aria-hidden="true" />
+            <span>{LOGIN_TOTP_WARNING}</span>
+          </p>
+          <label className="flex items-start gap-2 text-cell text-fg">
+            <input
+              type="checkbox"
+              className="mt-1 h-5 w-5"
+              checked={acknowledged}
+              data-login-totp-ack=""
+              onChange={event => setAcknowledged(event.target.checked)}
+            />
+            <span>I understand, keep the 2FA seed with this password.</span>
+          </label>
+          <Field label="2FA seed" hint="The base32 setup key an authenticator shows. Write-only.">
+            {fieldId => (
+              <input
+                id={fieldId}
+                type="password"
+                className={`${INPUT} mono`}
+                value={seed}
+                autoComplete="off"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                data-login-totp-seed=""
+                onChange={event => setSeed(event.target.value)}
+              />
+            )}
+          </Field>
+          <Problem>{seedWrong}</Problem>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="submit"
+              className="kt-btn min-h-[44px]"
+              data-variant="primary"
+              disabled={totp === undefined || busy}
+            >
+              Add 2FA seed
+            </button>
+            <button type="button" className="kt-btn min-h-[44px]" onClick={close}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+
+      {mode === 'rename' && (
+        <form
+          className="flex min-w-0 flex-col gap-2"
+          aria-label={`Rename handle of ${entry.label}`}
+          onSubmit={event => {
+            event.preventDefault();
+            if (renameTarget !== entry.id && renameWrong === undefined && renameTarget !== '' && !busy)
+              run(onRename(entry.id, renameTarget));
+          }}
+        >
+          <Field label="Handle" hint="Values follow the rename; nothing is re-typed.">
+            {fieldId => (
+              <input
+                id={fieldId}
+                className={`${INPUT} mono`}
+                value={handle}
+                autoComplete="off"
+                autoCapitalize="characters"
+                spellCheck={false}
+                data-login-rename-handle=""
+                onChange={event => setHandle(normalizeHandle(event.target.value))}
+              />
+            )}
+          </Field>
+          <Problem>{renameWrong}</Problem>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="submit"
+              className="kt-btn min-h-[44px]"
+              data-variant="primary"
+              disabled={renameTarget === entry.id || renameTarget === '' || renameWrong !== undefined || busy}
+            >
+              Rename
+            </button>
+            <button type="button" className="kt-btn min-h-[44px]" onClick={close}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+
+      {mode === 'delete' && (
+        <fieldset className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0" data-login-confirm="">
+          <legend className="sr-only">{`Delete ${entry.label}?`}</legend>
+          <p className="m-0 text-cell leading-base text-fg">
+            Delete <strong>{entry.label}</strong>? Its password{entry.fields.totp ? ' and 2FA seed are' : ' is'} removed
+            from this machine. This cannot be undone.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="kt-btn min-h-[44px]"
+              data-variant="danger"
+              disabled={busy}
+              data-login-confirm-delete=""
+              onClick={() => run(onRemove(entry.id))}
+            >
+              <Trash2 size={14} aria-hidden="true" /> Delete it
+            </button>
+            <button type="button" className="kt-btn min-h-[44px]" onClick={close}>
+              Keep it
+            </button>
+          </div>
+        </fieldset>
+      )}
+    </li>
+  );
+}
+
+export function LoginsCard({ list, busy = null, error = null, onPut, onRename, onRemove }: LoginsCardProps) {
+  const [adding, setAdding] = useState(false);
+  const held = list.entries.map(entry => entry.id);
+  const working = busy !== null;
+
+  return (
+    <section
+      className="kt-panel flex flex-col gap-3 p-panel"
+      aria-labelledby="logins-heading"
+      data-testid="logins-card"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 id="logins-heading" className="m-0 flex items-center gap-1.5 text-row font-semibold text-fg">
+          <LockKeyhole size={16} className="text-accent" aria-hidden="true" />
+          Saved logins
+        </h2>
+        <span className="rounded-control bg-surface-2 px-2 py-0.5 text-meta font-medium text-faint">write-only</span>
+      </div>
+      <p className="m-0 text-cell leading-base text-muted">
+        Passwords an input card can type for you with one tap. A password is sealed on this machine and never shown
+        again; the ferret never holds it.
+      </p>
+
+      {list.health === 'damaged' ? (
+        <div
+          role="alert"
+          className="flex gap-2 rounded-control border border-warn bg-warn/10 p-3"
+          data-testid="logins-damaged"
+        >
+          <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warn" aria-hidden="true" />
+          <div className="min-w-0">
+            <p className="m-0 text-ui font-semibold text-fg">This daemon cannot read its saved logins</p>
+            {list.diagnosis !== undefined && (
+              <p className="m-0 mt-1 text-cell leading-base text-muted">{list.diagnosis}</p>
+            )}
+            <p className="m-0 mt-1 text-meta leading-base text-warn">
+              It is not empty. Do not add these again until it is readable, or you will write over entries that are
+              still there.
+            </p>
+          </div>
+        </div>
+      ) : list.entries.length === 0 ? (
+        <p className="m-0 text-ui text-faint" data-testid="logins-empty">
+          No saved logins on this daemon yet.
+        </p>
+      ) : (
+        <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Saved logins">
+          {list.entries.map(entry => (
+            <LoginRow
+              key={entry.id}
+              entry={entry}
+              held={held}
+              busy={working}
+              onPut={onPut}
+              onRename={onRename}
+              onRemove={onRemove}
+            />
+          ))}
+        </ul>
+      )}
+
+      {error !== null && (
+        <p role="alert" className="m-0 text-ui text-err" data-testid="logins-error">
+          {error}
+        </p>
+      )}
+
+      {list.health !== 'damaged' &&
+        (adding ? (
+          <AddLoginForm held={held} busy={working} onPut={onPut} onClose={() => setAdding(false)} />
+        ) : (
+          <div>
+            <button
+              type="button"
+              className="kt-btn min-h-[44px]"
+              data-login-add-open=""
+              onClick={() => setAdding(true)}
+            >
+              <Plus size={14} aria-hidden="true" /> Add a saved login
+            </button>
+          </div>
+        ))}
+    </section>
+  );
+}
