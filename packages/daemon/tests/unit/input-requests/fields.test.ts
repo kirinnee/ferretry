@@ -85,6 +85,8 @@ function build(options: { facts?: InputTargetFacts; entries?: LoginEntrySummary[
   const cards: InputCard[] = [];
   const told: string[] = [];
   const fills: { id: string; role: LoginFieldRole }[] = [];
+  const saves: { entry: string; label: string; match: string | undefined; fields: object }[] = [];
+  const kept: string[] = [];
   let facts: InputTargetFacts = options.facts ?? PAGE;
   let card = 1;
   let id = 1;
@@ -96,7 +98,7 @@ function build(options: { facts?: InputTargetFacts; entries?: LoginEntrySummary[
       fills.push({ id: entry, role });
       return role === 'username' ? EMAIL : PASSWORD;
     },
-    save: async () => undefined,
+    save: async (entry, label, match, fields) => void saves.push({ entry, label, match, fields }),
   };
   const page = {
     observe: async (_session: string, _target: InputTarget, fields: readonly InputTargetField[]) => {
@@ -132,7 +134,7 @@ function build(options: { facts?: InputTargetFacts; entries?: LoginEntrySummary[
       quarantine: async () => undefined,
       quarantines: async () => [],
     },
-    audit: { record: async () => undefined, saved: async () => undefined },
+    audit: { record: async () => undefined, saved: async entry => void kept.push(entry.field) },
     clock,
     ids: { requestId: () => (id++).toString(16).padStart(32, '0') },
     timers: { after: async () => await new Promise<void>(() => undefined) },
@@ -150,6 +152,8 @@ function build(options: { facts?: InputTargetFacts; entries?: LoginEntrySummary[
     closed,
     told,
     fills,
+    saves,
+    kept,
     values,
     setFacts: (next: InputTargetFacts) => {
       facts = next;
@@ -245,7 +249,12 @@ describe('a card of several fields', () => {
     const digest = request.observedDigest ?? '';
 
     const missing = await refused(
-      service.deliver(SESSION, request.id, send(digest, { fields: [{ field: 'email', padded: padInputValue(EMAIL) }] }), HOST),
+      service.deliver(
+        SESSION,
+        request.id,
+        send(digest, { fields: [{ field: 'email', padded: padInputValue(EMAIL) }] }),
+        HOST,
+      ),
     );
     const unknown = await refused(
       service.deliver(
@@ -260,7 +269,9 @@ describe('a card of several fields', () => {
         HOST,
       ),
     );
-    const bare = await refused(service.deliver(SESSION, request.id, send(digest, { padded: padInputValue(EMAIL) }), HOST));
+    const bare = await refused(
+      service.deliver(SESSION, request.id, send(digest, { padded: padInputValue(EMAIL) }), HOST),
+    );
 
     should(missing.message).equal('fill every field before Send: password is empty');
     should(unknown.message).equal('that field is not on this card');
@@ -332,7 +343,7 @@ describe('a card of several fields', () => {
     ]);
   });
 
-  it('should offer only saved logins that hold every field, and never offer to save from such a card', async () => {
+  it('should offer only saved logins that hold every field, and suggest saving the card as one login', async () => {
     const entry = (id: string, username: string | undefined): LoginEntrySummary => ({
       id,
       label: id.toLowerCase(),
@@ -342,11 +353,13 @@ describe('a card of several fields', () => {
       createdAt: 'a',
       updatedAt: 'a',
     });
-    const { request } = await raisedLogin({ entries: [entry('GOOGLE_COM', 'kirin'), entry('PASSWORD_ONLY', undefined)] });
+    const { request } = await raisedLogin({
+      entries: [entry('GOOGLE_COM', 'kirin'), entry('PASSWORD_ONLY', undefined)],
+    });
 
     should(request.saved?.offers.map(offer => [offer.id, offer.matched])).eql([['GOOGLE_COM', true]]);
-    should(request.saved?.suggest).be.undefined();
-    should(request.saved?.saves).be.undefined();
+    should(request.saved?.suggest).eql({ id: 'GOOGLE_COM', label: 'google_com' });
+    should(request.saved?.saves).equal('password');
   });
 
   it('should refuse a terminal card of two fields and a terminal field that names an element', async () => {
@@ -371,7 +384,9 @@ describe('a card of several fields', () => {
       }),
     );
 
-    should(two.message).equal('a terminal shows one prompt at a time: ask for one value, then raise the next with chain');
+    should(two.message).equal(
+      'a terminal shows one prompt at a time: ask for one value, then raise the next with chain',
+    );
     should(pointed.message).equal('a terminal field names no element: the value goes to its prompt');
   });
 
@@ -386,7 +401,12 @@ describe('a card of several fields', () => {
     const [request] = await service.list(HOST);
     if (request === undefined) throw new Error('no request');
 
-    await service.deliver(SESSION, request.id, send(request.observedDigest ?? '', { padded: padInputValue(PASSWORD) }), HOST);
+    await service.deliver(
+      SESSION,
+      request.id,
+      send(request.observedDigest ?? '', { padded: padInputValue(PASSWORD) }),
+      HOST,
+    );
 
     should(request.fields[0]?.label).equal('Passphrase');
     should(writes[0]?.values).eql([{ field: 'value', text: PASSWORD }]);
@@ -533,5 +553,158 @@ describe('InputTargetRouter', () => {
     ).equal('target_changed');
     should(await router.type(SESSION, dev, [{ field: 'value', text: 'only' }], true, FACTS)).equal('typed');
     should(terminalWrites).eql(['only']);
+  });
+});
+
+describe('review regressions: a card of several fields', () => {
+  it('should keep a visible text field amber for a secret even when autocomplete says it is for a password', async () => {
+    for (const autocomplete of ['current-password', 'new-password']) {
+      const facts: PageFacts = {
+        ...PAGE,
+        fields: [pageField('email'), pageField('password', { field: { tag: 'input', type: 'text', autocomplete } })],
+      };
+      const { request } = await raisedLogin({ facts });
+
+      should(request.fields[1]?.risk).eql({
+        level: 'amber',
+        reason: 'This is not a password field, so the value will show on the page.',
+      });
+    }
+  });
+
+  it('should refuse a chain to a card that is not one of this session’s input requests', async () => {
+    const { service } = build();
+    const unknown = await refused(service.raise(SESSION, { ...LOGIN, chain: 'A9' as AgendaId }));
+    await service.raise(SESSION, LOGIN);
+    // A1 is this session's card; another session may not claim to continue it.
+    const foreign = await refused(service.raise('mvv6b4qw-0000other', { ...LOGIN, chain: 'A1' as AgendaId }));
+
+    should(unknown.message).equal(
+      'chain names A9, which is not an input request of this session; raise this card without chain',
+    );
+    should(foreign.code).equal('bad_request');
+    should(await service.list(HOST)).have.length(1);
+  });
+
+  it('should name a page whose origin is opaque by what the browser said', async () => {
+    const { view } = await raisedLogin({ facts: { ...PAGE, origin: 'null' } });
+
+    should(view.observed).eql({ consumer: 'null' });
+  });
+
+  it('should refuse a saved login beside a Send that already typed every field', async () => {
+    const { service, request, writes, fills } = await raisedLogin();
+
+    const error = await refused(
+      service.deliver(
+        SESSION,
+        request.id,
+        send(request.observedDigest ?? '', {
+          fields: [
+            { field: 'email', padded: padInputValue(EMAIL) },
+            { field: 'password', padded: padInputValue(PASSWORD) },
+          ],
+          entry: 'GOOGLE_COM',
+        }),
+        HOST,
+      ),
+    );
+
+    should(error.message).equal('every field was typed, so there is nothing for the saved login to fill');
+    should(writes).eql([]);
+    should(fills).eql([]);
+  });
+});
+
+describe('Save as on a login card', () => {
+  const both = (email = EMAIL, password = PASSWORD) => [
+    { field: 'email', padded: padInputValue(email) },
+    { field: 'password', padded: padInputValue(password) },
+  ];
+
+  it('should keep the username and the password together in ONE save, and record one kept field each', async () => {
+    const { service, request, saves, kept, writes } = await raisedLogin();
+
+    const result = await service.deliver(
+      SESSION,
+      request.id,
+      send(request.observedDigest ?? '', { fields: both(), save: { entry: 'GOOGLE_COM', label: 'Google' } }),
+      HOST,
+    );
+
+    should(result.saved).eql({ entry: 'GOOGLE_COM', ok: true });
+    should(saves).eql([
+      {
+        entry: 'GOOGLE_COM',
+        label: 'Google',
+        match: 'accounts.google.com',
+        fields: { username: EMAIL, password: PASSWORD },
+      },
+    ]);
+    should(kept).eql(['username', 'password']);
+    should(writes.length).equal(1);
+  });
+
+  it('should refuse the whole Send before typing when a kept password is too short or a field was not typed', async () => {
+    const short = await raisedLogin();
+    const tooShort = await refused(
+      short.service.deliver(
+        SESSION,
+        short.request.id,
+        send(short.request.observedDigest ?? '', {
+          fields: both(EMAIL, 'abc'),
+          save: { entry: 'GOOGLE_COM', label: 'Google' },
+        }),
+        HOST,
+      ),
+    );
+    const part = await raisedLogin();
+    const partly = await refused(
+      part.service.deliver(
+        SESSION,
+        part.request.id,
+        send(part.request.observedDigest ?? '', {
+          fields: [{ field: 'email', padded: padInputValue(EMAIL) }],
+          save: { entry: 'GOOGLE_COM', label: 'Google' },
+        }),
+        HOST,
+      ),
+    );
+
+    should(tooShort.message).containEql('a saved password is at least');
+    should(partly.code).equal('bad_request');
+    should([...short.writes, ...part.writes, ...short.saves, ...part.saves]).eql([]);
+  });
+
+  it('should refuse to keep a card of two passwords as one login', async () => {
+    const { service, request, writes } = await raisedLogin(
+      {},
+      {
+        ...LOGIN,
+        fields: [
+          { id: 'old', sensitivity: 'secret', element: { kind: 'ref', ref: 'e1' } },
+          { id: 'password', sensitivity: 'secret', element: { kind: 'ref', ref: 'e2' } },
+        ],
+      },
+    );
+
+    const error = await refused(
+      service.deliver(
+        SESSION,
+        request.id,
+        send(request.observedDigest ?? '', {
+          fields: [
+            { field: 'old', padded: padInputValue(PASSWORD) },
+            { field: 'password', padded: padInputValue(PASSWORD) },
+          ],
+          save: { entry: 'GOOGLE_COM', label: 'Google' },
+        }),
+        HOST,
+      ),
+    );
+
+    should(error.message).containEql('cannot be kept as one saved login');
+    should(request.saved?.saves).be.undefined();
+    should(writes).eql([]);
   });
 });

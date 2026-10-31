@@ -27,6 +27,7 @@ import {
   inputRaiseFields,
   inputValueProblem,
   padInputValue,
+  savedRolesOf,
   strongestSensitivity,
   unpadInputValue,
   worstRisk,
@@ -204,8 +205,31 @@ describe('a card of several fields', () => {
     should(InputDeliverBodySchema.safeParse({ ...head, fields: [typed, typed] }).success).be.false();
     should(InputDeliverBodySchema.safeParse({ ...head, fields: [{ ...typed, value: 'x' }] }).success).be.false();
     should(
-      InputDeliverBodySchema.safeParse({ ...head, fields: [typed], save: { entry: 'X', label: 'x' } }).success,
+      InputDeliverBodySchema.safeParse({ ...head, fields: [typed], save: { entry: 'GOOGLE_COM', label: 'Google' } })
+        .success,
+    ).be.true();
+    should(
+      InputDeliverBodySchema.safeParse({
+        ...head,
+        fields: [typed],
+        entry: 'GOOGLE_COM',
+        save: { entry: 'GOOGLE_COM', label: 'Google' },
+      }).success,
     ).be.false();
+  });
+
+  it('should keep a login card as ONE saved login: the plain field as the username, the secret as the password', () => {
+    should([...(savedRolesOf([email, password]) ?? [])]).deepEqual([
+      ['email', 'username'],
+      ['password', 'password'],
+    ]);
+    should([...(savedRolesOf([email, password, { id: 'code', sensitivity: 'private' }]) ?? [])]).deepEqual([
+      ['email', 'username'],
+      ['password', 'password'],
+    ]);
+    should(savedRolesOf([{ id: 'code', sensitivity: 'private' }])).be.undefined();
+    should(savedRolesOf([email, { ...email, id: 'user' }])).be.undefined();
+    should(savedRolesOf([password, { ...password, id: 'again' }])).be.undefined();
   });
 
   it('should carry per-field facts for a page, each naming its own frame and element', () => {

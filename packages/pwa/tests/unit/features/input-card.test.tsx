@@ -842,3 +842,73 @@ describe('where the values of several fields may live', () => {
     expect(view.q('[data-input-failure]')?.textContent).toContain('will not type twice');
   });
 });
+
+describe('the card, review regressions', () => {
+  it('shows every field and its flag above a matched saved login, before anything can be sent', async () => {
+    const amber = {
+      level: 'amber',
+      reason: 'This is not a password field, so the value will show on the page.',
+    } as const;
+    const card = withSaved(saved({ offers: [offer({ username: 'kirin' })] }), {
+      target: { kind: 'browser', key: 'app' },
+      sensitivity: 'secret',
+      fields: [
+        field('plain', { id: 'email', label: 'Email' }),
+        field('secret', { id: 'password', label: 'Password', risk: amber }),
+      ],
+      risk: { level: 'red', reason: 'Not secret: the ferret can see this value.' },
+    });
+    const view = await show(card);
+
+    const summary = must(view.q('[data-input-field-summary]'), 'the field summary');
+    const use = must(view.q('[data-input-offer]'), 'the saved-login button');
+    expect(view.q('[data-input-value]')).toBeNull();
+    expect(summary.querySelector('[data-input-summary-field="email"] [data-input-plain]')?.textContent).toBe(
+      'Not secret: the ferret can see this value.',
+    );
+    expect(
+      summary.querySelector('[data-input-summary-field="password"] [data-input-field-risk="amber"]')?.textContent,
+    ).toBe(amber.reason);
+    // The flags come first in the card, then the button that would send without typing.
+    expect(summary.compareDocumentPosition(use) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+describe('the card, Save as on a login card', () => {
+  const loginCard = (overrides: Partial<InputRequest> = {}) =>
+    withSaved(saved({ match: 'accounts.google.com', suggest: { id: 'GOOGLE_COM', label: 'Google' } }), {
+      target: { kind: 'browser', key: 'app' },
+      sensitivity: 'secret',
+      fields: [field('plain', { id: 'email', label: 'Email' }), field('secret', { id: 'password', label: 'Password' })],
+      ...overrides,
+    });
+
+  it('keeps the username and the password together, sent once with the card', async () => {
+    const view = await show(loginCard());
+    await typeInto(view.q('[data-input-field="email"] [data-input-value]'), 'kirin@example.test');
+    await typeInto(view.q('[data-input-field="password"] [data-input-value]'), SECRET);
+
+    await click(view.q('[data-input-save-tick]'));
+    await click(view.q('[data-input-send]'));
+    await settle();
+
+    const body = deliver(view.calls).body as { save?: unknown; fields: { field: string; padded: string }[] };
+    expect(body.save).toEqual({ entry: 'GOOGLE_COM', label: 'Google' });
+    expect(body.fields.map(typed => [typed.field, unpadInputValue(typed.padded)])).toEqual([
+      ['email', 'kirin@example.test'],
+      ['password', SECRET],
+    ]);
+  });
+
+  it('can send a short password but not save it, and offers no Save on a card the daemon cannot keep', async () => {
+    const view = await show(loginCard());
+    await typeInto(view.q('[data-input-field="email"] [data-input-value]'), 'kirin@example.test');
+    await typeInto(view.q('[data-input-field="password"] [data-input-value]'), 'abc');
+
+    expect(must(view.q<HTMLInputElement>('[data-input-save-tick]'), 'the tick').disabled).toBe(true);
+    expect(view.q('[data-input-save-reason]')?.textContent).toBe(SAVE_TOO_SHORT);
+
+    const unsaved = await show(loginCard({ saved: saved({ saves: undefined, suggest: undefined }) }));
+    expect(unsaved.q('[data-input-save]')).toBeNull();
+  });
+});

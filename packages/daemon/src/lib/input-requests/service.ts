@@ -34,11 +34,12 @@ import {
   LOGIN_PASSWORD_MIN_LENGTH,
   LOGIN_USERNAME_MAX_LENGTH,
   type LoginEntryId,
+  savedRolesOf,
   strongestSensitivity,
   unpadInputValue,
   worstRisk,
 } from '@ferretry/protocol';
-import { LoginEntryError } from '../secrets/logins.ts';
+import { LoginEntryError, type LoginFieldValues } from '../secrets/logins.ts';
 import { digestFacts } from './digest.ts';
 import type { EphemeralValues } from './ephemeral-values.ts';
 import { InputRequestError } from './errors.ts';
@@ -59,7 +60,7 @@ import type {
   TypeResult,
 } from './ports.ts';
 import type { QuarantineHold, QuarantineRegistry } from './quarantine.ts';
-import { savedFieldFor, savedForFields, targetMatchKey } from './saved-logins.ts';
+import { savedForFields, targetMatchKey } from './saved-logins.ts';
 import { SessionLock } from './session-lock.ts';
 
 /**
@@ -107,7 +108,11 @@ const FINAL = new Set<InputRequest['state']>(['delivered', 'refused', 'expired',
 const TITLES = { secret: 'Needs a secret', private: 'Needs a code', plain: 'Needs an answer' } as const;
 const LOGIN_TITLE = 'Needs a login';
 /** What a field is called on the card when the agent gave it no label. */
-const FIELD_LABELS: Readonly<Record<InputSensitivity, string>> = { secret: 'Password', private: 'Code', plain: 'Value' };
+const FIELD_LABELS: Readonly<Record<InputSensitivity, string>> = {
+  secret: 'Password',
+  private: 'Code',
+  plain: 'Value',
+};
 /** The longest a chain is counted: a login is a few steps, not a loop. */
 const MAX_STEP = 16;
 
@@ -239,12 +244,18 @@ export class InputRequestService {
   }
 
   /**
-   * Which step of a login a chained card is: one more than the card it follows, when that card is one of this
-   * session's. A chain to a card this daemon no longer holds (it restarted) still reads as a second step.
+   * Which step of a login a chained card is: one more than the card it follows. The card it follows must be one
+   * of THIS session's input requests that this daemon holds: another session's card, an unknown one, or one from
+   * before a restart is refused, so a card never claims to continue a login it is not part of.
    */
   private stepAfter(sessionId: string, chain: AgendaId): number {
     const before = this.byCard(sessionId, chain);
-    return Math.min(MAX_STEP, (before?.request.step ?? 1) + 1);
+    if (before === undefined)
+      throw new InputRequestError(
+        'bad_request',
+        `chain names ${chain}, which is not an input request of this session; raise this card without chain`,
+      );
+    return Math.min(MAX_STEP, (before.request.step ?? 1) + 1);
   }
 
   /** What the agent reads about its request: where it stands, never the value. Waits up to `waitMs` for a final state. */
@@ -284,7 +295,10 @@ export class InputRequestService {
     const prompt = (await this.deps.redact(request.prompt)).slice(0, INPUT_PROMPT_MAX_LENGTH);
     // A label is the agent's words as much as the prompt is, and could carry a value just the same.
     const fields = await Promise.all(
-      request.fields.map(async field => ({ ...field, label: (await this.deps.redact(field.label)).slice(0, 60).trim() || FIELD_LABELS[field.sensitivity] })),
+      request.fields.map(async field => ({
+        ...field,
+        label: (await this.deps.redact(field.label)).slice(0, 60).trim() || FIELD_LABELS[field.sensitivity],
+      })),
     );
     const saved = await this.savedView(held);
     const withSaved = saved === undefined ? { ...request, prompt, fields } : { ...request, prompt, fields, saved };
@@ -670,8 +684,7 @@ export class InputRequestService {
       const typed = typedValues(request, body);
       if (body.entry !== undefined && this.deps.logins === undefined)
         throw new InputRequestError('bad_request', 'this daemon keeps no saved logins; type the value instead');
-      const single = request.fields.length === 1 ? typed.get((request.fields[0] as InputRequestField).id) : undefined;
-      if (body.save !== undefined && single !== undefined) this.guardSave(request, single);
+      const kept = body.save === undefined ? undefined : this.guardSave(request, typed);
       const changed = (): InputRequestError => targetChanged(request.target.kind);
       if (body.observedDigest !== request.observedDigest) return await fail('target_changed', changed());
       const submitted = body.submit && request.submit !== 'agent';
@@ -723,9 +736,7 @@ export class InputRequestService {
       await this.settle(hold);
       hold = undefined;
       const saved =
-        body.save === undefined || single === undefined
-          ? undefined
-          : await this.save(held, body.save, single, by, body.deliveryId);
+        body.save === undefined || kept === undefined ? undefined : await this.save(held, body.save, kept, by);
       await this.finish(held, 'delivered', undefined, by, {
         closeCard: true,
         tellAgent: true,
@@ -752,25 +763,38 @@ export class InputRequestService {
    * "Save as" is checked before anything is typed, so a save that could never happen refuses the whole
    * Send with nothing typed rather than typing and then failing to keep it.
    */
-  private guardSave(request: InputRequest, value: string): void {
-    const field = savedFieldFor(request.sensitivity);
+  private guardSave(request: InputRequest, typed: ReadonlyMap<string, string>): LoginFieldValues {
     if (this.deps.logins === undefined)
       throw new InputRequestError('bad_request', 'this daemon keeps no saved logins; send without saving');
-    if (field === undefined)
+    const roles = savedRolesOf(request.fields);
+    if (roles === undefined)
       throw new InputRequestError(
         'bad_request',
-        'a one-time code is not saved; add the 2FA seed to a saved login in Settings instead',
+        request.fields.every(field => field.sensitivity === 'private')
+          ? 'a one-time code is not saved; add the 2FA seed to a saved login in Settings instead'
+          : 'this card cannot be kept as one saved login (it has two usernames or two passwords); send without saving',
       );
-    if (field === 'password' && [...value].length < LOGIN_PASSWORD_MIN_LENGTH)
-      throw new InputRequestError(
-        'bad_request',
-        `a saved password is at least ${LOGIN_PASSWORD_MIN_LENGTH} characters, so it can be masked safely; send it without saving`,
-      );
-    if (
-      field === 'username' &&
-      (value.trim() === '' || value.length > LOGIN_USERNAME_MAX_LENGTH || /\p{Cc}/u.test(value))
-    )
-      throw new InputRequestError('bad_request', 'that value cannot be kept as a username; send it without saving');
+    const kept: { username?: string; password?: string } = {};
+    for (const [id, role] of roles) {
+      const value = typed.get(id);
+      if (value === undefined)
+        throw new InputRequestError(
+          'bad_request',
+          'Save as keeps the values you typed: type every field it keeps, or send without saving',
+        );
+      if (role === 'password' && [...value].length < LOGIN_PASSWORD_MIN_LENGTH)
+        throw new InputRequestError(
+          'bad_request',
+          `a saved password is at least ${LOGIN_PASSWORD_MIN_LENGTH} characters, so it can be masked safely; send it without saving`,
+        );
+      if (
+        role === 'username' &&
+        (value.trim() === '' || value.length > LOGIN_USERNAME_MAX_LENGTH || /\p{Cc}/u.test(value))
+      )
+        throw new InputRequestError('bad_request', 'that value cannot be kept as a username; send it without saving');
+      kept[role] = value;
+    }
+    return kept;
   }
 
   /** The value a saved login types for one field. Refuses with the entry's name, never its value. */
@@ -793,21 +817,20 @@ export class InputRequestService {
   }
 
   /**
-   * Keeps the typed value in a saved login once it has been typed. A failure never undoes the delivery: it
-   * says what happened in a fixed sentence and the owner can save it from Settings. The record is KEPT.
+   * Keeps the typed values in a saved login once they have been typed, in ONE change: a login card's username and
+   * password land together. A failure never undoes the delivery: it says what happened in a fixed sentence and
+   * the owner can save it from Settings. The record is KEPT, one per field kept.
    */
   private async save(
     held: Held,
     save: NonNullable<InputDeliverBody['save']>,
-    value: string,
+    kept: LoginFieldValues,
     by: InputActor,
-    _deliveryId: string,
   ): Promise<NonNullable<InputDeliverResult['saved']>> {
-    const field = savedFieldFor(held.request.sensitivity);
     const logins = this.deps.logins;
-    if (field === undefined || logins === undefined) return { entry: save.entry, ok: false, problem: 'not saved' };
+    if (logins === undefined) return { entry: save.entry, ok: false, problem: 'not saved' };
     try {
-      await logins.save(save.entry, save.label, held.matchKey, field, value);
+      await logins.save(save.entry, save.label, held.matchKey, kept);
     } catch {
       return {
         entry: save.entry,
@@ -815,9 +838,12 @@ export class InputRequestService {
         problem: 'The value was typed, but Ferretry could not keep it; save it from Settings › Secrets.',
       };
     }
-    await this.deps.audit
-      .saved({ sessionId: held.request.sessionId, requestId: held.request.id, actor: by, entry: save.entry, field })
-      .catch(() => undefined);
+    for (const field of ['username', 'password'] as const) {
+      if (kept[field] === undefined) continue;
+      await this.deps.audit
+        .saved({ sessionId: held.request.sessionId, requestId: held.request.id, actor: by, entry: save.entry, field })
+        .catch(() => undefined);
+    }
     return { entry: save.entry, ok: true };
   }
 
@@ -1135,7 +1161,11 @@ function typedValues(request: InputRequest, body: InputDeliverBody): Map<string,
       throw new InputRequestError('bad_request', 'this card asks for several values: send each by its field');
     take(request.fields[0], body.padded);
   }
-  for (const each of body.fields ?? []) take(request.fields.find(field => field.id === each.field), each.padded);
+  for (const each of body.fields ?? [])
+    take(
+      request.fields.find(field => field.id === each.field),
+      each.padded,
+    );
   const missing = request.fields.filter(field => !typed.has(field.id));
   if (missing.length > 0 && body.entry === undefined)
     throw new InputRequestError(
@@ -1143,7 +1173,10 @@ function typedValues(request: InputRequest, body: InputDeliverBody): Map<string,
       `fill every field before Send: ${missing.map(field => field.id).join(', ')} ${missing.length === 1 ? 'is' : 'are'} empty`,
     );
   if (missing.length === 0 && body.entry !== undefined && body.padded === undefined && body.fields !== undefined)
-    throw new InputRequestError('bad_request', 'every field was typed, so there is nothing for the saved login to fill');
+    throw new InputRequestError(
+      'bad_request',
+      'every field was typed, so there is nothing for the saved login to fill',
+    );
   return typed;
 }
 
@@ -1180,8 +1213,6 @@ function riskOf(field: Pick<InputRequestField, 'id' | 'sensitivity'>, facts: Inp
 }
 
 const PAGE_PRIVATE_FLAG = 'This code will show on the page; Ferretry hides the page from the ferret for 2 minutes.';
-const PASSWORD_AUTOCOMPLETE = new Set(['current-password', 'new-password']);
-
 /**
  * A page field's flag, worst first: the field the agent named is missing or hidden, the page is not secure (http
  * crosses the network in the clear), the field sits in a frame from another site, or a secret is going into a
@@ -1193,16 +1224,18 @@ function pageRiskOf(
 ): InputRisk {
   const found = facts.fields.find(each => each.fieldId === field.id);
   if (found === undefined || !found.visible)
-    return { level: 'amber', reason: 'Ferretry could not see this field on the page, so the value may land somewhere unexpected.' };
+    return {
+      level: 'amber',
+      reason: 'Ferretry could not see this field on the page, so the value may land somewhere unexpected.',
+    };
   if (!facts.secure)
     return { level: 'amber', reason: 'The page is not https, so the value crosses the network unencrypted.' };
   if (found.frameOrigin !== facts.origin)
     return { level: 'amber', reason: 'This field is inside a frame from another site, not the page itself.' };
   if (field.sensitivity === 'private') return { level: 'amber', reason: PAGE_PRIVATE_FLAG };
-  const password =
-    found.field.type === 'password' ||
-    (found.field.autocomplete !== undefined && PASSWORD_AUTOCOMPLETE.has(found.field.autocomplete));
-  if (!password)
+  // Only a password input masks what is typed. `autocomplete="current-password"` is a hint about the field's role
+  // and leaves a text input showing the value, so it never earns green.
+  if (found.field.type?.toLowerCase() !== 'password')
     return { level: 'amber', reason: 'This is not a password field, so the value will show on the page.' };
   return { level: 'green', reason: 'A password field on a secure page, as the browser reported it.' };
 }

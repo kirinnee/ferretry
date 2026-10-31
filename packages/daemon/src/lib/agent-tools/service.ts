@@ -18,31 +18,31 @@ import {
   type BrowserTargetFields,
   type BrowserWaitCondition,
   browserReadModeOf,
+  browserTargetOf,
   INPUT_SINGLE_FIELD_ID,
   type InputAgentView,
-  browserTargetOf,
-  strongestSensitivity,
   type SurfaceController,
   type SurfaceControlRequest,
   type SurfaceControlView,
   type SurfaceKind,
   type SurfaceOpener,
+  strongestSensitivity,
 } from '@ferretry/protocol';
 import { AGENT_FILE_LIMITS, AgentFileError, type AgentFiles, extensionOf, sizeWords } from '../agent-files/index.ts';
 import type { AuditSink } from '../audit/types.ts';
 import {
-  BrowserSessionError,
   type BrowserFileAction,
   type BrowserLifecycleOutcome,
   type BrowserPageAction,
+  BrowserSessionError,
   type BrowserSubsystem,
   pendingDialogOf,
 } from '../browser/runtime/index.ts';
 import { BrowserTransportError } from '../browser/transport/worker-protocol.ts';
 import type { AgentControlPolicy } from '../fleet/agent-control.ts';
 import { InputRequestError } from '../input-requests/errors.ts';
-import type { TextRedactor } from '../secrets/redaction.ts';
 import { TerminalMountError, type TerminalSubsystem } from '../runtime/mounts/terminals.ts';
+import type { TextRedactor } from '../secrets/redaction.ts';
 import type { SurfaceControl } from './control.ts';
 import {
   auditHost,
@@ -457,7 +457,10 @@ export class AgentToolService {
       }
       case 'browser.request_input': {
         if (caller.kind !== 'agent')
-          throw new AgentToolError('bad_request', 'Only an agent asks its owner for values; you already have the page.');
+          throw new AgentToolError(
+            'bad_request',
+            'Only an agent asks its owner for values; you already have the page.',
+          );
         const view = await this.inputPort(caller).raise(sessionId, {
           target: { kind: 'browser', key: surface.name ?? surface.id },
           prompt: call.prompt,

@@ -728,7 +728,12 @@ describe('AgentToolService — browser.request_input', () => {
           target: { kind: 'browser', key: 'app' },
           prompt: 'Google login for the console',
           fields: [
-            { id: 'email', label: 'Email', sensitivity: 'plain', element: { kind: 'selector', selector: '#identifierId' } },
+            {
+              id: 'email',
+              label: 'Email',
+              sensitivity: 'plain',
+              element: { kind: 'selector', selector: '#identifierId' },
+            },
             { id: 'password', sensitivity: 'secret', element: { kind: 'ref', ref: 'e12' } },
           ],
           submit: 'offer-owner',

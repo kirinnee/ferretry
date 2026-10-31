@@ -9,7 +9,8 @@
  *   - a saved login the daemon matched to this target is ONE TAP: "Use saved <label>". Tapping it is the owner's
  *     permission; nothing is ever sent on its own. Only a `matched` offer is that button, never a hinted one;
  *   - otherwise (or after "Type a different one") one masked field per value, each with a local eye that is not
- *     remembered, "Press Enter for me", and "Save as" when this kind of value is ever kept (a card of ONE field);
+ *     remembered, "Press Enter for me", and "Save as" when the value is ever kept (one value, or a login
+ *     card's username and password kept together);
  *   - the other saved logins stay selectable by hand under "Choose another saved login".
  *
  * A CARD OF SEVERAL FIELDS (a login's email and password) is ONE Send: it waits until every field is typed, and
@@ -26,6 +27,8 @@ import { Eye, EyeOff, ShieldAlert, ShieldCheck, ShieldQuestion } from 'lucide-re
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { cancelInput, deliverInput, type InputClient } from '../../lib/input-api.ts';
 import {
+  cardOffersSave,
+  cardSaveBlock,
   chainWords,
   defaultSubmit,
   expiryWords,
@@ -38,10 +41,8 @@ import {
   normalizeHandle,
   observedWords,
   offersPressEnter,
-  offersSave,
   offerUsername,
   plainFlagWords,
-  saveBlock,
   saveDraftProblem,
   savedBody,
   savedButtonWords,
@@ -320,8 +321,6 @@ function FieldInput({
 }: FieldInputProps) {
   const inputId = useId();
   const attributes = fieldAttributes(field.sensitivity, revealed);
-  const riskLine = fieldRiskLine(request, field);
-  const RiskIcon = riskLine === undefined ? null : RISK_ICON[riskLine.level];
 
   // React detaches a ref BEFORE passive cleanups run, so the field is emptied when it is detached.
   const attach = useCallback(
@@ -380,6 +379,21 @@ function FieldInput({
           {problem}
         </p>
       )}
+      <FieldFlags field={field} request={request} />
+    </div>
+  );
+}
+
+/**
+ * A field's own flags: the red "the ferret can see this" of a plain field and the daemon's risk for the rest. Drawn
+ * with the field when it is typed AND in the field summary above a saved login's button, so a one-tap send never
+ * goes out with a warning the owner was not shown.
+ */
+function FieldFlags({ field, request }: { readonly field: InputCardField; readonly request: InputRequest }) {
+  const riskLine = fieldRiskLine(request, field);
+  const RiskIcon = riskLine === undefined ? null : RISK_ICON[riskLine.level];
+  return (
+    <>
       {field.sensitivity === 'plain' ? (
         <p className="m-0 flex items-start gap-2 text-meta text-err" data-input-plain="">
           <ShieldAlert aria-hidden="true" className="mt-0.5 shrink-0" size={14} />
@@ -395,9 +409,33 @@ function FieldInput({
           <span>{riskLine.reason}</span>
         </p>
       )}
-    </div>
+    </>
   );
 }
+
+/** Each field a saved login would fill, by name, with its flags: what the owner sees instead of the inputs. */
+function FieldSummary({
+  fields,
+  request,
+}: {
+  readonly fields: readonly InputCardField[];
+  readonly request: InputRequest;
+}) {
+  return (
+    <ul className="m-0 flex min-w-0 list-none flex-col gap-2 p-0" data-input-field-summary="">
+      {fields.map(field => (
+        <li className="flex min-w-0 flex-col gap-1" data-input-summary-field={field.key} key={field.key}>
+          <span className="text-cell font-medium text-fg">
+            {field.label} <span className="font-normal text-muted">· {SENSITIVITY_WORDS[field.sensitivity]}</span>
+          </span>
+          <FieldFlags field={field} request={request} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+const SENSITIVITY_WORDS = { secret: 'secret', private: 'one-time code', plain: 'not secret' } as const;
 
 function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, onRefresh }: FormProps) {
   const nodes = useRef<Nodes>(new Map());
@@ -411,9 +449,9 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
   // A send the daemon never answered keeps its id, so pressing Send again cannot type twice.
   const pending = useRef<string | null>(null);
 
-  // "Save as" keeps ONE typed value: a card of several fields offers none.
+  // "Save as" keeps the one typed value, or a login card's username and password together.
   const only = fields.length === 1 ? fields[0] : undefined;
-  const [save, setSave] = useState(() => initialSaveDraft(only?.saved));
+  const [save, setSave] = useState(() => initialSaveDraft(request.saved));
   const many = only === undefined;
 
   const clear = useCallback((): void => {
@@ -432,9 +470,9 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
 
   const off = blocked !== undefined || sending || busy;
   const value = only === undefined ? '' : (values[only.key] ?? '');
-  const saving = only !== undefined && offersSave(only);
-  const existing = updatedEntry(only?.saved, save.id);
-  const saveReason = only === undefined ? undefined : saveBlock(only, value);
+  const saving = cardOffersSave(request, fields);
+  const existing = updatedEntry(request.saved, save.id);
+  const saveReason = cardSaveBlock(request, fields, values);
   const draftProblem = saveDraftProblem(save);
   const ready = typedReady(fields, values);
 
@@ -476,7 +514,7 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
   const sendTyped = (): void =>
     void send(deliveryId =>
       only === undefined
-        ? typedFieldsBody({ request, fields, values, submit, deliveryId })
+        ? typedFieldsBody({ request, fields, values, submit, deliveryId, save })
         : typedBody({ request, field: only, value, submit, save, deliveryId }),
     );
 
@@ -528,6 +566,8 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
           ))}
         </div>
       ) : null}
+
+      {primary === undefined || typing ? null : <FieldSummary fields={fields} request={request} />}
 
       {primary === undefined || typing ? null : (
         <div className="flex flex-wrap items-stretch gap-2">

@@ -67,7 +67,7 @@ through the input tool; the generic add refuses it.
   and risk), the strongest sensitivity, expiry, `chain` and `step`, the facts and their digest while
   observed, the state and the outcome.
 - **`InputDeliverBodySchema`**: `deliveryId` (a UUID), `observedDigest`, the value(s), `submit`, and
-  `save` (`{ entry, label }`, one typed value only). A one-field card sends **exactly one of** `padded`
+  `save` (`{ entry, label }`, typed values only). A one-field card sends **exactly one of** `padded`
   or `entry` (a saved login's handle). A card of several sends `fields` (`[{ field, padded }]`, each
   value padded on its own) and may add `entry` for the fields it did not type.
 - **`InputAgentViewSchema`**: what the agent learns: state, whether Enter was pressed, `source`
@@ -105,12 +105,21 @@ beside the field) and "Password" (`secret`) on one card, and the daemon types ea
   next is a new card with `chain`. A terminal field may carry a `label` ("Passphrase").
 - **Every field is covered before anything is typed**: typed, or filled from ONE saved login by its role
   (`plain` → the username, `secret` → the password, `private` → the 2FA code). Only a saved login that
-  holds every field's value is offered, and "Save as" keeps one typed value, so a card of several does
-  not offer it.
+  holds every field's value is offered.
+- **"Save as" keeps a login card as ONE saved login**, in one change under the store-wide lock: the `plain`
+  field as the username and the `secret` one as the password (`savedRolesOf`). A one-time code is never
+  kept. A card with two usernames or two passwords cannot be kept as one login and does not offer it, and
+  every field it keeps must be typed (not filled from a saved login). The kept record is written once per
+  field kept.
 - **One write**: the target adapter gets the values in field order and types them under one binding
   check, with Enter (submit) after the last. Each value that is not `plain` is masked before it is typed.
 - **A login on two pages is two cards**: the second names the first in `chain` and reads "Step 2 · after
-  !A7" (`request.step`). Submit is per card, so each step chooses its own.
+  !A7" (`request.step`). Submit is per card, so each step chooses its own. `chain` must name one of the
+  SAME session's input requests that this daemon holds; another session's card or an unknown one is refused.
+- **Only a password input is green.** `autocomplete="current-password"` or `"new-password"` says what a field
+  is for, not that it hides what is typed: a text input carrying it stays amber.
+- **With a saved login on offer, the card still lists every field** with its flag (the red "not secret" of a
+  `plain` field, the daemon's risk of the rest) above the one-tap button, so nothing is sent unseen.
 - A page's card does not survive a daemon restart: its elements are the agent's words and are not
   journalled, so the card ends as interrupted and the agent raises it again.
 
@@ -161,14 +170,14 @@ card draws what the **daemon** observed (`sudo` is reading it, typing is hidden)
 **agent** wrote small, and carries a **risk flag** with one fixed sentence that says what the risk is
 (`request.risk`: a level and a reason; the sentence never contains terminal text):
 
-| Level | When                                                                                                                      |
-| ----- | ------------------------------------------------------------------------------------------------------------------------- |
-| green | A `secret`, echo off, and a recognised program (`sudo`, `ssh`, `gpg` and so on).                                          |
-| amber | A `secret` with echo on (the value will show on screen), echo unknown, an unrecognised program or the bare shell.         |
-| amber | A `private` code (it echoes): "This code will show on screen while the terminal is hidden from the ferret for 2 minutes." |
+| Level | When                                                                                                                                                                        |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| green | A `secret`, echo off, and a recognised program (`sudo`, `ssh`, `gpg` and so on).                                                                                            |
+| amber | A `secret` with echo on (the value will show on screen), echo unknown, an unrecognised program or the bare shell.                                                           |
+| amber | A `private` code (it echoes): "This code will show on screen while the terminal is hidden from the ferret for 2 minutes."                                                   |
 | amber | A page field: the page is not https, the field is in a frame from another site, a `secret` is going into a field that is not a password field, or the field cannot be seen. |
-| green | A page's `secret` going into a password field on a secure page.                                                          |
-| red   | A `plain` value: "Not secret: the ferret can see this value."                                                             |
+| green | A page's `secret` going into a password field on a secure page.                                                                                                             |
+| red   | A `plain` value: "Not secret: the ferret can see this value."                                                                                                               |
 
 The flag is computed from what the daemon observed, when the request is raised and again when it is
 restored. Send is available at every level. The only refusals are a control character or line break in
@@ -324,6 +333,13 @@ the target's key (`sudo@kirin-box` → `SUDO_KIRIN_BOX`, "sudo on kirin-box"; a 
   (`saved: { ok: false }`); the owner can save it from Settings.
 - **It is recorded as a change to the secret store**: a KEPT `secrets.changed` record (`login-save`) with
   the handle and the field, exactly as `fy secret set` is audited. Never the value.
+- **One change at a time, for the whole store.** Every saved login shares the same two files, and a change
+  reads both, seals and writes both back whole. Every change — a card's "Save as", a Settings edit, a rename,
+  a delete, `fy secret entry` — runs its read, merge and write in one store-wide queue (`LoginStoreLock`), so
+  two that overlap both land and every acknowledged secret stays masked. A per-entry or per-session lock would
+  not be enough: the files are shared.
+- **A username and a password from one card are kept together** (`LoginDirectory.saveFields`, one change), so a
+  login card never leaves an entry with half of what was typed. The one-field card saves the one field it has.
 
 ### The next time: one tap
 
@@ -441,7 +457,7 @@ default**, revocable, and audited on every use. Until then every placement is a 
 | ----- | ------------------------------------------------------------------------------------------- | ----------- |
 | P0    | This contract and the schemas                                                               | done        |
 | P1    | Terminal secret and plain: service, agent tools, deliver and cancel, quarantine, `fy input` | done        |
-| P2    | The app card, cards of several fields, `chain` steps                                       | this change |
+| P2    | The app card, cards of several fields, `chain` steps                                        | this change |
 | P3    | Saved logins (one tap), "Save as", 2FA codes, `fy secret entry`, Settings › Saved logins    | done        |
 | P4    | Browser fields, and the agent-instruction extension for the browser                         | later       |
 | P5    | Multi-step chains, consumer configuration, a per-daemon remote cap                          | later       |
