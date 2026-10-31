@@ -87,6 +87,18 @@ describe('SecureCopyService capturing what a command prints', () => {
     should(copy.from).eql({ kind: 'command', program: './fake??[2Jvercel', path: '/work/s1/fake??[2Jvercel' });
   });
 
+  it('should mark a cut path, turn a line separator into ?, and say when this account could swap the program', async () => {
+    const { service, runner } = world();
+    const long = `/home/k/${'d/'.repeat(600)}vercel`;
+    runner.outcome = { ...runner.outcome, program: long, replaceable: true };
+
+    const { copy } = await service.capture('s1', command(['ver\u2028cel']));
+
+    should(copy.from.program).equal('ver?cel');
+    should(copy.from.path).equal(`${long.slice(0, 1023)}…`);
+    should(copy.from.replaceable).be.true();
+  });
+
   it('should record which file printed the value, as the runner found it, for the owner to see', async () => {
     const { service, runner } = world();
     runner.outcome = { ...runner.outcome, program: '/home/kirin/.bun/bin/vercel' };

@@ -1,5 +1,5 @@
 import { afterAll, describe, it } from 'bun:test';
-import { chmod, mkdir, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, realpath, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { SecretUseRequestSchema } from '@ferretry/protocol';
 import should from 'should';
@@ -259,7 +259,55 @@ describe('the child runner, finding the program it runs', () => {
     const result = await runner.run(spec(['./bin/hello'], folder));
 
     // Assert
-    should(result).match({ outcome: 'exited', program: join(bin, 'hello') });
+    should(result).match({ outcome: 'exited', program: join(await realpath(bin), 'hello') });
+  });
+
+  it("should walk .. from the folder's real location, as the kernel does, never through a symlink", async () => {
+    // Arrange — work/link points at real/sub; ../tools/hello is real/tools/hello, never work/tools/hello.
+    const folder = await tempDirectory('runner-symlink');
+    await mkdir(join(folder, 'real', 'sub'), { recursive: true });
+    await mkdir(join(folder, 'real', 'tools'));
+    await writeFile(join(folder, 'real', 'tools', 'hello'), '#!/bin/sh\necho real\n');
+    await chmod(join(folder, 'real', 'tools', 'hello'), 0o755);
+    await mkdir(join(folder, 'work'));
+    await symlink(join(folder, 'real', 'sub'), join(folder, 'work', 'link'));
+    const runner = new BunSecretChildRunner(() => ({ PATH: '/nonexistent' }));
+
+    // Act
+    const result = await runner.run(spec(['../tools/hello'], join(folder, 'work', 'link')));
+
+    // Assert
+    should(result).match({
+      outcome: 'exited',
+      stdout: 'real\n',
+      program: join(await realpath(folder), 'real', 'tools', 'hello'),
+    });
+  });
+
+  it('should say a program this account could swap is replaceable, and a system one is not', async () => {
+    // Arrange
+    const { folder, bin } = await folderWithProgram('runner-replaceable');
+    const runner = new BunSecretChildRunner(() => ({ PATH: `${bin}:${process.env.PATH ?? ''}` }));
+
+    // Act
+    const own = await runner.run(spec(['hello'], folder));
+    const system = await runner.run(spec(['sh', '-c', 'true'], folder));
+
+    // Assert
+    should(own.replaceable).be.true();
+    should(system.replaceable).be.undefined();
+  });
+
+  it('should report a name too long to look up as a spawn failure, not throw', async () => {
+    // Arrange
+    const { folder } = await folderWithProgram('runner-long');
+    const runner = new BunSecretChildRunner();
+
+    // Act
+    const result = await runner.run(spec(['x'.repeat(5_000)], folder));
+
+    // Assert
+    should(result.outcome).equal('spawn_failed');
   });
 
   it('should report a bare name the PATH does not hold as a spawn failure, naming no program', async () => {

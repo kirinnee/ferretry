@@ -129,6 +129,8 @@ export interface SecretChildOutcome {
    * names a path), absolute. What was spawned, not what was asked for; absent when nothing ran.
    */
   readonly program?: string;
+  /** This account could change that file or put another in its place (it or its folder is writable). */
+  readonly replaceable?: true;
   readonly exitCode?: number;
   readonly stdout: string;
   readonly stderr: string;

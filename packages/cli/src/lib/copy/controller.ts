@@ -8,6 +8,7 @@ import {
   type PasteRule,
   type PasteRuleCreate,
 } from '@ferretry/protocol';
+import { showUntrusted } from '../input/render.ts';
 import type { CopyPorts } from './ports.ts';
 
 /** Options every `fy copy` command accepts. */
@@ -82,7 +83,7 @@ function renderRule(rule: PasteRule): string {
 }
 
 function renderCopy(copy: CopyMeta): string {
-  const from = copy.from.origin ?? copy.from.path ?? copy.from.program ?? copy.from.kind;
+  const from = showUntrusted(copy.from.origin ?? copy.from.path ?? copy.from.program ?? copy.from.kind);
   return `${copy.handle}  ${copy.state}  ${String(copy.length)} chars from ${from}  until ${copy.expiresAt}  pasted ${String(copy.uses)}${copy.exposure.transcript === 'found' ? '  [seen by the ferret before it was sealed]' : ''}`;
 }
 

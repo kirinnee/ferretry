@@ -9,7 +9,7 @@ import type { InputRequestService } from '../../../../src/lib/input-requests/ser
 import { inputRequestRoutes } from '../../../../src/lib/runtime/mounts/input-requests.ts';
 import { bodyReads, jsonBody, request } from '../../api/support.ts';
 import { FACTS, inputRequestService, RAISE, SESSION } from '../../input-requests/support.ts';
-import { agentIn, CREDENTIALS, GRANTED, human, withoutSecretsConfigure } from './support.ts';
+import { agentIn, CREDENTIALS, GRANTED, human, withoutGrant, withoutSecretsConfigure } from './support.ts';
 
 /**
  * The owner's input-request routes, driven through the real router and authorization boundary with the
@@ -337,10 +337,11 @@ describe('the picture of a page request', () => {
 
 describe('allowing a paste into the secret store', () => {
   /** A service whose one request goes where the case says; it records each delivery and holds no value. */
-  function store(kind: 'secret' | 'terminal', guard: CapabilityGuard) {
+  function store(kind: 'secret' | 'terminal' | 'browser', guard: CapabilityGuard) {
     const delivered: string[] = [];
     const service = {
-      targetOf: () => (kind === 'secret' ? { kind, key: 'VERCEL_TOKEN' } : { kind, key: 'dev' }),
+      targetOf: () =>
+        kind === 'secret' ? { kind, key: 'VERCEL_TOKEN' } : { kind, key: kind === 'browser' ? 'app' : 'dev' },
       deliver: async (_session: string, requestId: string) => {
         delivered.push(requestId);
         return { id: requestId, deliveryId: crypto.randomUUID(), state: 'delivered', submitted: false };
@@ -389,6 +390,22 @@ describe('allowing a paste into the secret store', () => {
 
     should(answers.map(answer => answer.status)).eql([200, 200]);
     should([granted.delivered, terminal.delivered]).eql([[REQUEST], [REQUEST]]);
+  });
+
+  it('should need the browser grant to allow a value into a page, and not for a terminal', async () => {
+    const page = store('browser', withoutGrant({ capability: 'browser', axis: 'use' }));
+    const terminal = store('terminal', withoutGrant({ capability: 'browser', axis: 'use' }));
+    const granted = store('browser', GRANTED);
+
+    const answers = [
+      await page.dispatch.dispatch(post(path(REQUEST, 'deliver'), allow)),
+      await terminal.dispatch.dispatch(post(path(REQUEST, 'deliver'), allow)),
+      await granted.dispatch.dispatch(post(path(REQUEST, 'deliver'), allow)),
+    ];
+
+    should(answers.map(answer => answer.status)).eql([403, 200, 200]);
+    should(String(jsonBody(answers[0] as never).error)).containEql('needs the browser permission');
+    should([page.delivered.length, terminal.delivered.length, granted.delivered.length]).eql([0, 1, 1]);
   });
 
   it('should refuse a store paste when the daemon cannot say who is asking', async () => {

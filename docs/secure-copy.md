@@ -117,7 +117,12 @@ value comes from the copy (`InputRaise.source`), so the card, the daemon-observe
 - **Into a page field** it is one field of the input bridge's page request: the card says "into a field on
   <host>", the daemon observes the field and the page's origin, the write is the bridge's own guarded one, and
   the page is held afterwards like any typed secret (pictures refused while held). It needs the `browser`
-  switch, as any page tool does; a rule for `browser:<origin>` pastes unasked only into a password field.
+  switch, as any page tool does, and allowing it from a device needs `browser.use` too. A rule for
+  `browser:<origin>` names the TOP page, so it pastes unasked only where the card would be green for every field:
+  a visible, uncovered password field of that page itself (not a frame from another site), on https, with no
+  challenge showing. Anything the card would flag waits for the owner.
+  **GAP:** once the page's hold ends, a page script (`browser.eval`, with scripts on) can read the field's value,
+  so a page paste shares the value with whatever the page runs; a rule for a page is that trust, given ahead.
 - **Audit**: `input.delivered` with `source: sealed` and the copy's name, never the value.
 
 ### Into the secret store
@@ -178,9 +183,10 @@ without ever reading it. It is the same input request, with the store as the des
 - **The card names the file that printed it.** The child runner finds the program once, on the command's own
   PATH, runs that very file, and the copy records its path (`from.path`), so the card, `fy input answer` and
   `fy copy ls` show WHICH `gh` printed the value: `/usr/bin/gh`, or one in `~/.local/bin` the ferret could
-  have written. A rule still matches on the bare name. **GAP:** a ferret runs as the same user as the daemon, so
-  it can write a `gh` into any user-writable folder on that PATH; the path on the card is how the owner tells,
-  not a lock.
+  have written. A program given by a path is found from the folder's real location, so a symlinked folder cannot
+  point `../x` at another file. A rule matches the bare name only for a program the daemon found AND that this
+  account cannot change: if the file or its folder is writable (`~/.local/bin`, `~/.bun/bin`, the session's own
+  folder), the copy is `replaceable` and every paste of it asks the owner, whose card shows the path.
 - **The secret store is never written by a rule** unless that rule names the exact secret NAME: `secret:<NAME>`
   has no pattern and no wildcard, so a rule for `VERCEL_TOKEN` never writes `VERCEL_TOKEN_2`.
 - **A plan**: `secure.preapprove` raises ONE card listing the pastes the agent plans, each with its route and

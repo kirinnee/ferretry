@@ -136,6 +136,11 @@ export const CopyOriginSchema = z.strictObject({
    * `vercel` printed the value (`/usr/local/bin/vercel`, or one in a folder the ferret could have written to).
    */
   path: boundedLine(1024).optional(),
+  /**
+   * The account the daemon (and every ferret) runs as could change that file or put another in its place: its
+   * file or its folder is writable. A pre-approval rule never matches such a program; the owner is asked.
+   */
+  replaceable: z.literal(true).optional(),
   /** The surface it was read from, for a page or clipboard copy. */
   surface: SurfaceKeySchema.optional(),
 });

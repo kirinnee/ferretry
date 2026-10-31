@@ -80,6 +80,8 @@ async function world(
         stdout: options.stdout ?? `${TOKEN}\n`,
         stderr: '',
         truncated: false,
+        // The vercel the daemon found on its PATH, in a folder no ferret can write.
+        program: '/usr/bin/vercel',
       }),
     },
     folders: { folderOf: async () => '/work' },
@@ -211,11 +213,15 @@ describe('pasting a secure copy as an input request', () => {
     should(w.cards).eql([
       {
         title: 'Wants to paste a secure copy',
-        ask: `Allow pasting sealed:vercel (${String(TOKEN.length)} characters from vercel) into the terminal. You type nothing.`,
+        ask: `Allow pasting sealed:vercel (${String(TOKEN.length)} characters from /usr/bin/vercel) into the terminal. You type nothing.`,
       },
     ]);
     should(request?.sensitivity).equal('secret');
-    should(request?.source).eql({ kind: 'sealed', name: 'vercel', from: { kind: 'command', program: 'vercel' } });
+    should(request?.source).eql({
+      kind: 'sealed',
+      name: 'vercel',
+      from: { kind: 'command', program: 'vercel', path: '/usr/bin/vercel' },
+    });
     should(w.events.map(event => event.sealed)).eql(['vercel']);
   });
 
@@ -401,7 +407,9 @@ describe('a paste the owner approved in advance', () => {
     const view = await w.service.raise(SESSION, PASTE);
 
     should(view.state).equal('pending');
-    should(w.rules.reserve(SESSION, { kind: 'command', program: 'vercel' }, VERCEL)).equal(rule.id);
+    should(w.rules.reserve(SESSION, { kind: 'command', program: 'vercel', path: '/usr/bin/vercel' }, VERCEL)).equal(
+      rule.id,
+    );
   });
 });
 
@@ -558,7 +566,7 @@ describe('a paste saved as a secret', () => {
     await replacing.service.raise(SESSION, INTO_STORE);
 
     should(fresh.cards[0]?.ask).equal(
-      `Allow pasting sealed:vercel (${String(TOKEN.length)} characters from vercel) into the secret VERCEL_TOKEN. You type nothing.`,
+      `Allow pasting sealed:vercel (${String(TOKEN.length)} characters from /usr/bin/vercel) into the secret VERCEL_TOKEN. You type nothing.`,
     );
     should(replacing.cards[0]?.ask).containEql('into the secret VERCEL_TOKEN, replacing its value.');
     should((await fresh.pending())?.risk?.level).equal('green');
@@ -700,11 +708,11 @@ describe('a paste into a field on a page', () => {
   };
 
   /** The real page target over a fake browser that records what it was asked to type. */
-  function browser() {
+  function browser(facts: BrowserInputFacts = PAGE) {
     const typed: { field: string; text: string }[] = [];
     const port: BrowserInputFieldsPort = {
       inputDocument: async () => ({ navigationId: 'loader-1' }),
-      inputObserve: async () => ({ ok: true, facts: PAGE }),
+      inputObserve: async () => ({ ok: true, facts }),
       inputShot: async () => ({ pngBase64: 'AAAA', clip: { x: 0, y: 0, w: 10, h: 10 } }),
       inputType: async (_pageId, _expected, values) => {
         typed.push(...values);
@@ -727,7 +735,7 @@ describe('a paste into a field on a page', () => {
     await w.service.deliver(SESSION, request?.id ?? '', w.allow(request?.observedDigest ?? ''), OWNER);
 
     should(w.cards[0]?.ask).equal(
-      `Allow pasting sealed:vercel (${String(TOKEN.length)} characters from vercel) into a field on vercel.com. You type nothing.`,
+      `Allow pasting sealed:vercel (${String(TOKEN.length)} characters from /usr/bin/vercel) into a field on vercel.com. You type nothing.`,
     );
     should(page.typed).eql([{ field: 'value', text: TOKEN }]);
     should(w.service.pageHeld(SESSION, ['app'])).match({ documents: ['loader-1'] });
@@ -748,5 +756,31 @@ describe('a paste into a field on a page', () => {
 
     should(view.state).equal('delivered');
     should(page.typed).eql([{ field: 'value', text: TOKEN }]);
+  });
+
+  it('should wait for the owner under a rule for the page origin whenever the card would flag the field', async () => {
+    const [only] = PAGE.fields;
+    if (only === undefined) throw new Error('no field');
+    const flagged: readonly BrowserInputFacts[] = [
+      // A password field inside a frame from another site, on the very page the rule names.
+      { ...PAGE, fields: [{ ...only, frameOrigin: 'https://evil.example' }] },
+      { ...PAGE, fields: [{ ...only, visible: false }] },
+      { ...PAGE, fields: [{ ...only, covered: true }] },
+      { ...PAGE, challenge: { provider: 'recaptcha' } } as BrowserInputFacts,
+    ];
+
+    const outcomes = [];
+    for (const facts of flagged) {
+      const page = browser(facts);
+      const w = await world({ target: page.target });
+      await w.rules.create(
+        { kind: 'owner', actor: { kind: 'host' } },
+        { from: { kind: 'command', program: 'vercel' }, to: { kind: 'browser', origin: 'https://vercel.com' } },
+      );
+      await w.capture();
+      outcomes.push({ state: (await w.service.raise(SESSION, INTO_FIELD)).state, typed: page.typed.length });
+    }
+
+    should(outcomes).eql(flagged.map(() => ({ state: 'pending', typed: 0 })));
   });
 });

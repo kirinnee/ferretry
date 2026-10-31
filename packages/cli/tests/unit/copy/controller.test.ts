@@ -198,6 +198,15 @@ describe('fy copy', () => {
 
     should(said[0]).startWith('sealed:vercel  live  24 chars from /home/k/.bun/bin/vercel  until');
   });
+
+  it('should spell out a character in a path that could draw something else on the screen', async () => {
+    const { controller, said, gateway } = rig();
+    gateway.copies = async () => [{ ...COPY, from: { ...COPY.from, path: '/tmp/\u202eevil' } }];
+
+    await controller.list({ session: 's1' });
+
+    should(said[0]).not.containEql('\u202e');
+  });
 });
 
 describe('fy copy --json and empty listings', () => {

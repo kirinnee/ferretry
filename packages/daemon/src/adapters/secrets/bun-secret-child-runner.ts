@@ -1,4 +1,6 @@
-import { resolve } from 'node:path';
+import { constants } from 'node:fs';
+import { access, realpath } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
 import type { SecretChildOutcome, SecretChildRunner, SecretChildSpec } from '../../lib/index.ts';
 
 /**
@@ -94,11 +96,21 @@ export class BunSecretChildRunner implements SecretChildRunner {
 
     const env = { ...environment, ...spec.env };
     // Found once, on the child's own PATH, and that very file is what runs: what the outcome names as the
-    // program is what was spawned, never a second lookup that could find something else.
-    const file = program.includes('/')
-      ? resolve(spec.cwd, program)
-      : Bun.which(program, { PATH: env.PATH ?? '', cwd: spec.cwd });
+    // program is what was spawned, never a second lookup that could find something else. A path is taken from
+    // the folder's REAL location, as the kernel would walk `..` from it, so a symlinked folder cannot point it
+    // at another file. A lookup that fails (no such folder, a name too long) is a spawn failure like any other.
+    let file: string | null;
+    let replaceable: boolean;
+    try {
+      file = program.includes('/')
+        ? resolve(await realpath(spec.cwd), program)
+        : Bun.which(program, { PATH: env.PATH ?? '', cwd: spec.cwd });
+      replaceable = file !== null && (await writable(file));
+    } catch {
+      return { outcome: 'spawn_failed', stdout: '', stderr: '', truncated: false };
+    }
     if (file === null) return { outcome: 'spawn_failed', stdout: '', stderr: '', truncated: false };
+    const ran = { program: file, ...(replaceable ? { replaceable: true as const } : {}) };
     let child: Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
     try {
       child = Bun.spawn([file, ...rest], {
@@ -133,10 +145,10 @@ export class BunSecretChildRunner implements SecretChildRunner {
       // A killed child has no exit status worth reporting: naming one would claim the program chose
       // to end that way, when in fact this daemon ended it.
       if (timedOut || exited === ABANDONED)
-        return { outcome: 'timeout', program: file, stdout: stdout.text, stderr: stderr.text, truncated: true };
+        return { outcome: 'timeout', ...ran, stdout: stdout.text, stderr: stderr.text, truncated: true };
       return {
         outcome: 'exited',
-        program: file,
+        ...ran,
         exitCode: exited,
         stdout: stdout.text,
         stderr: stderr.text,
@@ -146,4 +158,17 @@ export class BunSecretChildRunner implements SecretChildRunner {
       clearTimeout(timeout);
     }
   }
+}
+
+/**
+ * Whether this account could change the program, or put another in its place: the file itself, or the folder
+ * holding it, is writable. A ferret runs as this same account, so such a program is one it could have replaced.
+ */
+async function writable(file: string): Promise<boolean> {
+  const can = async (path: string): Promise<boolean> =>
+    await access(path, constants.W_OK).then(
+      () => true,
+      () => false,
+    );
+  return (await can(file)) || (await can(dirname(file)));
 }
