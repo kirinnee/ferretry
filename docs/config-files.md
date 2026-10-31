@@ -45,7 +45,7 @@ that is not there). Three rules, in order:
 2. **Loosening waits for the owner.** An edit that loosens what the machine may spend or what agents may do
    is HELD and the tighter version stays in effect: a Warden layer that spends switched on (Jev, LLM),
    a cap raised, something it may now do alone, its concurrency raised or its cadence shortened; lesson mining turned on or its caps raised; Pack mode switched on, Jev choosing sub-ferret models, a sub-ferret limit or depth raised; an agent control turned on (Ferretry
-   settings included); Agent permissions set to `skip`; dictated text sent to a provider. Tightening always
+   settings and Page scripts included); Agent permissions set to `skip`; dictated text sent to a provider. Tightening always
    applies at once. Deleting a file is an edit to its defaults and is judged the same way. The owner confirms
    a held edit by its etag — at the machine with `fy config confirm <file>`, in the app with a passkey
    proved for that act (`loosen-config`), or by answering **Allow** on the agenda card a ferret raised with

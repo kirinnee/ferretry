@@ -29,6 +29,7 @@ the page and end with it. The reference grammar is unchanged — see
 `browser.pdf(name, saveAs?, overwrite?)` ·
 `browser.hover` · `browser.drag` · `browser.mouse` · `browser.press` · `browser.scroll` · `browser.select` · `browser.check` ·
 `browser.fill_form` · `browser.highlight` (see [Pointer and keys](#pointer-and-keys)) ·
+`browser.eval(name, function, target?, timeoutMs?)` (owner-gated: [Page scripts](#page-scripts-owner-gated)) ·
 `browser.close(name)` · `browser.ask_owner(name, message?)`.
 
 A **target** is exactly one of a `ref`, a `selector`, or — for a click only — a point `x`, `y`; see
@@ -148,6 +149,39 @@ worker parses the action again with the same schema).
   `--text Terms` / `--by 0,-600` / `--pages 1`, `… select app e5 uk`, `… check app e6 --off`,
   `… highlight app e2` / `--clear`. `fill_form` is on the wire and in MCP only.
 - An MCP client that sends `clear: false` is read as having left it out; `checked: false` is kept.
+
+## Page scripts (owner-gated)
+
+`browser.eval` runs an agent's **own JavaScript function** in a page it drives: `() => …`, or `(element) => …`
+with a ref or selector, at most 4 KiB, stopped after `timeoutMs` (5 s by default, 10 s at most). The answer is
+the value as JSON, or its string when it is not serialisable, clipped to 64 KiB and scrubbed by the vault
+redactor like every other page text. `fy browser page eval <name> <function> [--of <target>]`; `browser_eval` over MCP.
+
+- **Off until the owner turns it on.** It needs "What agents may control › **Page scripts**"
+  (`machine.agentControl.pageScripts`, default `false`) as well as Browsers. Turning it on is a loosening, so
+  it is **held until the owner confirms it** ([config-files.md](config-files.md)): an agent that edits
+  `machine.yaml` itself only ever makes a held edit. The owner turns it on in the app (Settings › a machine ›
+  What agents may control › Page scripts), with `fy machine set agent-control scripts on`, or in
+  `machine.yaml`; off applies at once. While it is off the tool is still listed, and a call is refused with
+  exactly those ways to turn it on. The switch holds for a **person's** call too, so a paired device with the
+  browser grant cannot reach the shared profile's sign-ins through a script.
+- **A world of its own.** The function runs in an isolated world Ferretry creates on the page's main frame
+  (DevTools `Page.createIsolatedWorld`, then `Runtime.evaluate`): it shares the page's **DOM** but none of
+  its JavaScript, so the page's own variables, patched built-ins and framework state are not visible to it,
+  and nothing the page defines can change what it reports. Being DevTools' own evaluation, it is not refused
+  by the page's Content Security Policy. An element crosses into that world by a one-time
+  `data-ferretry-script` attribute, removed afterwards whatever happened — the page can see it for the length
+  of the call.
+- **The usual rules.** Own pages only; the takeover guard runs inside the page's queue (409 `taken_over`); a
+  dialog the script opens is reported like any act's; the driving marker goes up. The audit records the
+  function's **length**, the target (ref, clipped selector), the timeout and the **length** of the answer —
+  never the function or what it returned.
+- **Honest limit.** Even isolated, a script reads what the page holds: its DOM, its non-HttpOnly cookies and
+  its `localStorage`. On the shared agent profile that can include sign-ins to every site the owner signed
+  that profile in to. That is why it is off by default and why turning it on waits for the owner.
+- **Still refused.** Raw DevTools access (it reaches every session's pages and the profile's HttpOnly
+  cookies); running in the page's own world (a hostile page could tamper with what the agent reads); a
+  navigation `initScript` and network route mocking (the same power, persisting across navigations).
 
 ## Routes
 

@@ -195,6 +195,7 @@ class LeasedBrowser implements BrowserAutomation {
     this.worker.upload(pageId, target, paths, mode);
   download: BrowserAutomation['download'] = (pageId, downloadId) => this.worker.download(pageId, downloadId);
   pdf: BrowserAutomation['pdf'] = pageId => this.worker.pdf(pageId);
+  evaluate: BrowserAutomation['evaluate'] = (pageId, script) => this.worker.evaluate(pageId, script);
   back: BrowserAutomation['back'] = pageId => this.worker.back(pageId);
   forward: BrowserAutomation['forward'] = pageId => this.worker.forward(pageId);
   reload: BrowserAutomation['reload'] = pageId => this.worker.reload(pageId);

@@ -22,9 +22,11 @@ import {
   type BrowserLifecycleOutcome,
   type BrowserFileAction,
   type BrowserFileResult,
+  type BrowserScriptResult,
   type BrowserOpenOptions,
   type BrowserPageAction,
   BrowserSessionError,
+  type PageScript,
   type BrowserSubsystem,
   type RecordedSurfaceEvent,
   type Scrub,
@@ -141,6 +143,10 @@ class FakeBrowserPages implements Pick<
   readonly actions: BrowserPageAction[] = [];
   /** Every file action, exactly as the agent-tools service built it. */
   readonly fileActions: BrowserFileAction[] = [];
+  /** Every page script, exactly as the agent-tools service built it. */
+  readonly scripts: PageScript[] = [];
+  /** What the next script answers, as text. */
+  scriptAnswer = '"done"';
   /** Downloads every act reports the page to have started. */
   downloads: readonly BrowserDownloadNotice[] | undefined;
   /** What a download or a PDF stages, when a case wants something other than the defaults. */
@@ -303,6 +309,27 @@ class FakeBrowserPages implements Pick<
     return action.action === 'upload' ? { status, result } : { status, result, staged: this.staged };
   }
 
+  async scriptOnPage(
+    sessionId: string,
+    key: string,
+    script: PageScript,
+    guard?: BrowserActGuard,
+  ): Promise<BrowserScriptResult> {
+    this.fail();
+    await guard?.();
+    const page = this.page(sessionId, key);
+    this.acts.push(`${sessionId}:${page.id}:eval`);
+    this.scripts.push(script);
+    const status = (await this.status(sessionId)) as Extract<BrowserStatus, { readonly state: 'running' }>;
+    const result = {
+      ...this.snapshot(sessionId),
+      ...(this.actedUrl === undefined ? {} : { url: this.actedUrl }),
+      ...(this.pendingDialog === undefined ? {} : { dialog: this.pendingDialog }),
+      actedPageId: page.id,
+    };
+    return { status, result, text: this.scriptAnswer };
+  }
+
   async closePage(sessionId: string, key: string, guard?: BrowserActGuard): Promise<void> {
     this.fail();
     await guard?.();
@@ -420,6 +447,7 @@ export function agentToolWorld() {
     files,
     audit,
     redactor,
+    binaryName: 'fy',
     clock,
     sleep: async milliseconds => {
       slept.push(milliseconds);

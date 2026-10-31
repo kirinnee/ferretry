@@ -38,6 +38,7 @@ import {
   typeInto,
   uploadFiles,
 } from '../src/lib/browser/transport/page-acts.ts';
+import { runPageScript } from '../src/lib/browser/transport/page-script.ts';
 import {
   ConsoleLog,
   NetworkLog,
@@ -104,7 +105,17 @@ const emulations = new Map<string, PageEmulation>();
 const titles = new WeakMap<Page, string>();
 const TITLE_WAIT_MS = 750;
 /** The acts that can be stuck behind a dialog the page opened. */
-const DIALOG_RACED = new Set(['navigate', 'click', 'type', 'read', 'screenshot', 'back', 'forward', 'reload']);
+const DIALOG_RACED = new Set([
+  'navigate',
+  'click',
+  'type',
+  'read',
+  'screenshot',
+  'back',
+  'forward',
+  'reload',
+  'evaluate',
+]);
 
 function send(record: unknown): void {
   process.stdout.write(`${JSON.stringify(record)}\n`);
@@ -444,7 +455,7 @@ async function racing(request: Request): Promise<Record<string, unknown>> {
     throw new Error(
       `a ${pending?.type ?? 'browser'} dialog is open on this page; answer it with browser.dialog before taking a screenshot`,
     );
-  return await acted(page, request.method === 'read' ? { text: '' } : {});
+  return await acted(page, request.method === 'read' || request.method === 'evaluate' ? { text: '' } : {});
 }
 
 /** One lifecycle request: a dialog answer, a bounded wait, a log read or an emulation. */
@@ -712,6 +723,23 @@ async function act(request: Request): Promise<Record<string, unknown>> {
         : [];
       await uploadFiles(page, await cdpOf(page), target, paths, params.mode === 'drop' ? 'drop' : 'input');
       return await acted(page);
+    }
+    case 'evaluate': {
+      const page = targetPage(params.pageId);
+      const target = browserElementParam(params.target);
+      const ran = await runPageScript(
+        page,
+        await cdpOf(page),
+        {
+          source: text(params.source, 'source'),
+          ...(target === undefined ? {} : { target }),
+          ...(typeof params.timeoutMs === 'number' && Number.isFinite(params.timeoutMs)
+            ? { timeoutMs: params.timeoutMs }
+            : {}),
+        },
+        () => crypto.randomUUID(),
+      );
+      return await acted(page, { text: ran.text });
     }
     case 'download': {
       const page = targetPage(params.pageId);

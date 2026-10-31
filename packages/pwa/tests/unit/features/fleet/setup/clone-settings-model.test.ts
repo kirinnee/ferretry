@@ -92,7 +92,7 @@ describe('sourceItemSummary', () => {
 
   it('says no controls, and the automatic runtime, when nothing is on and no runtime resolves', () => {
     const machine = machineView({
-      agentControl: { terminals: false, browsers: false, files: false, ferretrySettings: false },
+      agentControl: { terminals: false, browsers: false, files: false, ferretrySettings: false, pageScripts: false },
       defaultRuntime: null,
     });
     expect(sourceItemSummary('controls', filesOf(), machine, null)).toBe('no controls · default runtime automatic');
@@ -489,13 +489,13 @@ describe('controlsChange', () => {
     const source = machineView({
       agentPermissions: 'skip',
       defaultRuntime: null,
-      agentControl: { terminals: false, browsers: true, files: false, ferretrySettings: true },
+      agentControl: { terminals: false, browsers: true, files: false, ferretrySettings: true, pageScripts: false },
     });
     expect(controlsChange(source)).toEqual({
       kind: 'machine.settings',
       agentPermissions: 'skip',
       defaultRuntime: null,
-      agentControl: { terminals: false, browsers: true, files: false, ferretrySettings: true },
+      agentControl: { terminals: false, browsers: true, files: false, ferretrySettings: true, pageScripts: false },
     });
   });
 });

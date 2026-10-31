@@ -16,7 +16,7 @@ const machine: FleetMachineView = {
   setUp: true,
   agentPermissions: 'auto',
   defaultRuntime: 'claude-default',
-  agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
+  agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
   browserMode: 'headless',
   browserProxy: {
     url: 'http://proxy.example.test:8080',

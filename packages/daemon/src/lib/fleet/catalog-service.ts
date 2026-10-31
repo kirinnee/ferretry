@@ -138,6 +138,7 @@ const AGENT_CONTROL_KINDS: readonly (keyof FleetAgentControl)[] = [
   'browsers',
   'files',
   'ferretrySettings',
+  'pageScripts',
 ];
 
 /** Whether `next` turns ON a kind `current` did not already allow — the half of a write that ever

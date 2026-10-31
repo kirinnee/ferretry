@@ -174,6 +174,7 @@ const AGENT_CONTROL_WORDS: Readonly<Record<keyof AgentControl, string>> = {
   browsers: 'browsers',
   files: 'project files',
   ferretrySettings: 'Ferretry settings',
+  pageScripts: 'page scripts',
 };
 
 const raised = (before: number, after: number, what: string): readonly string[] =>

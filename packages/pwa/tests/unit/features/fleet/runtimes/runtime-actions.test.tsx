@@ -514,7 +514,7 @@ describe('Runtime actions: Remove', () => {
         kind: 'machine.settings',
         agentPermissions: 'auto',
         defaultRuntime: 'claude-agent',
-        agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
+        agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
       },
       { kind: 'runtime.remove', name: 'claude-default' },
     ]);
