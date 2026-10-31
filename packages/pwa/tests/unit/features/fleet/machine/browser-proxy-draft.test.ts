@@ -65,7 +65,8 @@ describe('browser proxy draft', () => {
       passwordSecret: 'PROXY_PASSWORD',
     });
     expect(name.ok).toBe(false);
-    if (!name.ok) expect(name.problem).toStartWith('The username box takes the NAME of a stored secret');
+    if (!name.ok)
+      expect(name.problem).toBe('The username secret name takes capital letters, digits and _, like PROXY_USER.');
   });
 
   it('accepts a pasted ${secret:NAME} reference as the name', () => {

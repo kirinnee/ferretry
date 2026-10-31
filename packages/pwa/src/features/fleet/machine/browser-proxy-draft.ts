@@ -51,7 +51,7 @@ export function settingOf(
     if (name !== '' && !isSecretName(name)) {
       return {
         ok: false,
-        problem: `The ${field} box takes the NAME of a stored secret (capital letters, digits and _, like PROXY_${field === 'username' ? 'USER' : 'PASSWORD'}), not the ${field} itself. Paste the real ${field} into the box below these two to store it; the name then fills in here.`,
+        problem: `The ${field} secret name takes capital letters, digits and _, like PROXY_${field === 'username' ? 'USER' : 'PASSWORD'}.`,
       };
     }
   }

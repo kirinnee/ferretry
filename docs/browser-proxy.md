@@ -42,11 +42,13 @@ browserProxy:
 - **The address never carries a user name or password.** `fy config check` and the app refuse
   `http://user:pass@host`. Credentials are `${secret:NAME}` references to the machine's secret store
   ([secrets.md](secrets.md): `fy secret set NAME`), so the value is in neither the file nor the app, and
-  nothing here can read it back. The app's two credential boxes take the secret's **name**; below them a
-  write-only field takes the pasted username or password and stores it under that name through
-  `POST /v1/secrets` (the value goes to the daemon, is never returned and is cleared from the form once
-  stored), then fills the name box. The store keeps values of at least 8 characters (a redaction rule), so a
-  shorter username cannot be stored that way and the app says so rather than sending it.
+  nothing here can read it back. The app has write-only **Username** and **Password** fields: what is typed is stored through
+  `POST /v1/secrets` under `PROXY_USER` / `PROXY_PASSWORD` (the value goes to the daemon, is never returned and is
+  cleared from the form once stored), and the setting points at that name. Once stored, a field shows
+  **Stored · Replace · Remove** instead of a box, never the value; Remove detaches it from the proxy and leaves the
+  secret in the store (Settings › Secrets deletes it). A small **Use a different stored secret** link opens the two
+  secret-name boxes. The store keeps values of at least 8 characters (a redaction rule), so a shorter one gets a
+  one-line error on that field and is never sent.
 - **Applied at launch.** The browser reads the setting every time it starts, so a change applies the next
   time it starts; a browser already running keeps its network route until it stops (it stops after 15 idle
   minutes, or with `fy browser stop`).

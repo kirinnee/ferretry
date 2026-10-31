@@ -1,25 +1,28 @@
 import type { BrowserProxySetting, FleetMachineView } from '@ferretry/protocol';
-import { useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Button } from '../../../shell/primitives.tsx';
 import type { SetupAccess } from '../setup/setup-access.ts';
 import { SetupNote, SetupSection } from '../setup/setup-ui.tsx';
 import { ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
-import { putSecret } from '../../secrets/secrets-api.ts';
+import { listSecrets, putSecret } from '../../secrets/secrets-api.ts';
 import { testBrowserProxy } from './browser-proxy-api.ts';
 import { type BrowserProxyDraft, draftOf, isSecretName, nameTyped, settingOf } from './browser-proxy-draft.ts';
-import { BrowserProxySecretField, type StoreOutcome } from './browser-proxy-secret-field.tsx';
+import { BrowserProxyCredential, type StoreOutcome } from './browser-proxy-credential.tsx';
 import { BrowserProxyTestBlock } from './browser-proxy-test-block.tsx';
 import type { ProxyTestShown } from './browser-proxy-test-result.tsx';
 import { machineSettings } from './machine-settings.ts';
 
 /**
  * "Browser proxy" (docs/browser-proxy.md): where the agent browser sends its traffic. Empty means direct.
- * The form holds the NAMES of secrets, never a username or password: those live in the secret store
- * (`fy secret set NAME`) and the browser reads them when it starts.
+ * The form holds the NAMES of secrets, never a username or password: a typed credential goes straight to the
+ * machine's secret store (write-only) and the browser reads it when it starts.
  *
  * "Test proxy" asks the daemon to try one request through the proxy: the one being edited when it differs
  * from the saved one, else the saved one. The daemon resolves the secrets; nothing is saved by a test.
  */
+const DEFAULT_USER = 'PROXY_USER';
+const DEFAULT_PASSWORD = 'PROXY_PASSWORD';
+
 export function BrowserProxySection({
   machine,
   machineName,
@@ -34,13 +37,30 @@ export function BrowserProxySection({
   /** `false` while the machine does not answer: a test could not run. */
   readonly online?: boolean;
 }) {
-  const { changes } = access;
+  const { changes, read } = access;
   const ids = useId();
   const saved = machine.browserProxy ?? null;
   const [draft, setDraft] = useState<BrowserProxyDraft>(draftOf(saved));
   const [testing, setTesting] = useState(false);
   const [shown, setShown] = useState<ProxyTestShown | null>(null);
   const testRun = useRef(0);
+  const [existing, setExisting] = useState<ReadonlySet<string> | null>(null);
+  const [expert, setExpert] = useState(
+    [draftOf(saved).usernameSecret, draftOf(saved).passwordSecret].some(
+      name => name !== '' && name !== DEFAULT_USER && name !== DEFAULT_PASSWORD,
+    ),
+  );
+  useEffect(() => {
+    if (machine.browserProxy === undefined) return;
+    let live = true;
+    void read(client => listSecrets(client)).then(outcome => {
+      if (live && outcome.kind === 'done' && outcome.value.health === 'ready')
+        setExisting(new Set(outcome.value.secrets.map(secret => secret.name)));
+    });
+    return () => {
+      live = false;
+    };
+  }, [read, machine.browserProxy]);
   // Whatever a test said is about the proxy as it was: an edit makes it stale, and an answer still on its
   // way for the old text is dropped.
   const forgetTest = (): void => {
@@ -77,7 +97,7 @@ export function BrowserProxySection({
       setTesting(false);
       setShown({
         kind: 'refused',
-        sentence: 'Nothing was tried yet. Fix the problem in the note just above, then test again.',
+        sentence: wanted.problem,
       });
       return;
     }
@@ -98,13 +118,19 @@ export function BrowserProxySection({
         );
       });
   };
-  // A value is stored under the name in the box when it is a name, else under a default; the box then shows it.
-  const storeUnder = (box: string, fallback: string): string =>
-    isSecretName(nameTyped(box)) ? nameTyped(box) : fallback;
+  const nameFor = (box: string, fallback: string): string => (isSecretName(nameTyped(box)) ? nameTyped(box) : fallback);
   const store = async (name: string, value: string): Promise<StoreOutcome> => {
-    const outcome = await access.act(client => putSecret(client, name, value));
-    return outcome.kind === 'done' ? { kind: 'stored', name } : { kind: 'refused', sentence: outcome.sentence };
+    const outcome = await read(client => putSecret(client, name, value));
+    if (outcome.kind !== 'done') return { kind: 'refused', sentence: outcome.sentence };
+    setExisting(current => new Set([...(current ?? []), name]));
+    return { kind: 'stored', name };
   };
+  // Until the list has been read, only what was saved is taken to be there.
+  const isStored = (box: string, savedName: string): boolean => {
+    const name = nameTyped(box);
+    return isSecretName(name) && (existing === null ? name === savedName : existing.has(name));
+  };
+  const savedNames = draftOf(saved);
   const apply = (browserProxy: NonNullable<typeof saved> | null): void => {
     void changes.apply(machineSettings(machine, { browserProxy })).then(result => {
       if (result.kind === 'refused') return;
@@ -115,7 +141,10 @@ export function BrowserProxySection({
   const testHint =
     !typed && saved === null
       ? 'Type a proxy address to test it.'
-      : `Tries one request through the proxy from ${machineName}, using the stored secrets. ${dirty && typed ? 'It tests what is typed above, saved or not. ' : ''}Nothing is saved.`;
+      : `Tries one request through the proxy from ${machineName}.`;
+  // One half of a username/password pair is not yet a mistake: the other is still to be filled in.
+  const halfPair = (draft.usernameSecret === '') !== (draft.passwordSecret === '');
+  const testRefused = shown?.kind === 'refused';
 
   return (
     <SetupSection title="Browser proxy" name="browser-proxy">
@@ -157,59 +186,72 @@ export function BrowserProxySection({
           onChange={event => edit({ bypass: event.target.value })}
         />
       </div>
-      <div className="flex min-w-0 flex-col gap-1">
-        <label htmlFor={`${ids}-username`} className="text-ui font-semibold text-fg">
-          Username secret (optional)
-        </label>
-        <input
-          id={`${ids}-username`}
-          className="kt-input min-w-0 font-mono"
-          autoComplete="off"
-          autoCapitalize="characters"
-          autoCorrect="off"
-          spellCheck={false}
-          placeholder="PROXY_USER"
-          value={draft.usernameSecret}
-          data-browser-proxy-username=""
-          onChange={event => edit({ usernameSecret: event.target.value })}
-        />
-        <label htmlFor={`${ids}-password`} className="text-ui font-semibold text-fg">
-          Password secret (optional)
-        </label>
-        <input
-          id={`${ids}-password`}
-          className="kt-input min-w-0 font-mono"
-          autoComplete="off"
-          autoCapitalize="characters"
-          autoCorrect="off"
-          spellCheck={false}
-          placeholder="PROXY_PASSWORD"
-          value={draft.passwordSecret}
-          data-browser-proxy-password=""
-          onChange={event => edit({ passwordSecret: event.target.value })}
-        />
-        <p className="m-0 text-meta leading-base text-muted">
-          These two boxes take the NAME of a stored secret, never the username or password itself. Paste the real value
-          below and {machineName} stores it under that name (or run <code>fy secret set NAME</code> there).
-        </p>
-        <BrowserProxySecretField
-          what="username"
-          name={storeUnder(draft.usernameSecret, 'PROXY_USER')}
-          machineName={machineName}
-          online={online}
-          store={value => store(storeUnder(draft.usernameSecret, 'PROXY_USER'), value)}
-          onStored={name => edit({ usernameSecret: name })}
-        />
-        <BrowserProxySecretField
-          what="password"
-          name={storeUnder(draft.passwordSecret, 'PROXY_PASSWORD')}
-          machineName={machineName}
-          online={online}
-          store={value => store(storeUnder(draft.passwordSecret, 'PROXY_PASSWORD'), value)}
-          onStored={name => edit({ passwordSecret: name })}
-        />
+      <BrowserProxyCredential
+        what="Username"
+        stored={isStored(draft.usernameSecret, savedNames.usernameSecret)}
+        online={online}
+        store={value => store(nameFor(draft.usernameSecret, DEFAULT_USER), value)}
+        onStored={name => edit({ usernameSecret: name })}
+        onRemove={() => edit({ usernameSecret: '' })}
+      />
+      <BrowserProxyCredential
+        what="Password"
+        stored={isStored(draft.passwordSecret, savedNames.passwordSecret)}
+        online={online}
+        store={value => store(nameFor(draft.passwordSecret, DEFAULT_PASSWORD), value)}
+        onStored={name => edit({ passwordSecret: name })}
+        onRemove={() => edit({ passwordSecret: '' })}
+      />
+      <div className="flex min-w-0 flex-col gap-2">
+        <button
+          type="button"
+          className="w-fit cursor-pointer border-0 bg-transparent p-0 text-meta text-muted underline"
+          aria-expanded={expert}
+          data-browser-proxy-expert=""
+          onClick={() => setExpert(open => !open)}
+        >
+          Use a different stored secret
+        </button>
+        {expert ? (
+          <>
+            <div className="flex min-w-0 flex-col gap-1">
+              <label htmlFor={`${ids}-username`} className="text-ui font-semibold text-fg">
+                Username secret name
+              </label>
+              <input
+                id={`${ids}-username`}
+                className="kt-input min-w-0 font-mono"
+                autoComplete="off"
+                autoCapitalize="characters"
+                autoCorrect="off"
+                spellCheck={false}
+                placeholder={DEFAULT_USER}
+                value={draft.usernameSecret}
+                data-browser-proxy-username=""
+                onChange={event => edit({ usernameSecret: event.target.value })}
+              />
+            </div>
+            <div className="flex min-w-0 flex-col gap-1">
+              <label htmlFor={`${ids}-password`} className="text-ui font-semibold text-fg">
+                Password secret name
+              </label>
+              <input
+                id={`${ids}-password`}
+                className="kt-input min-w-0 font-mono"
+                autoComplete="off"
+                autoCapitalize="characters"
+                autoCorrect="off"
+                spellCheck={false}
+                placeholder={DEFAULT_PASSWORD}
+                value={draft.passwordSecret}
+                data-browser-proxy-password=""
+                onChange={event => edit({ passwordSecret: event.target.value })}
+              />
+            </div>
+          </>
+        ) : null}
       </div>
-      {wanted.ok ? null : (
+      {wanted.ok || halfPair || testRefused ? null : (
         <SetupNote tone="warn" name="browser-proxy-problem" live>
           {wanted.problem}
         </SetupNote>
