@@ -1,3 +1,9 @@
+## [4.168.1](https://github.com/kirinnee/ferretry/compare/v4.168.0...v4.168.1) (2026-10-31)
+
+### Fixes
+
+* **secrets:** refuse a ferret every write to the secret store ([#1162](https://github.com/kirinnee/ferretry/issues/1162)) ([54b36d0](https://github.com/kirinnee/ferretry/commit/54b36d088adc627275c3661da216008c4dcb800d))
+
 ## [4.168.0](https://github.com/kirinnee/ferretry/compare/v4.167.0...v4.168.0) (2026-10-31)
 
 ### Features

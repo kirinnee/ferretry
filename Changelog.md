@@ -1,3 +1,9 @@
+## [4.168.2](https://github.com/kirinnee/ferretry/compare/v4.168.1...v4.168.2) (2026-10-31)
+
+### Fixes
+
+* **pwa:** give Jump to latest its own row so it never hides the last block ([#1163](https://github.com/kirinnee/ferretry/issues/1163)) ([ac60600](https://github.com/kirinnee/ferretry/commit/ac60600b0b4af08ce21c76d8ba89610d69481599))
+
 ## [4.168.1](https://github.com/kirinnee/ferretry/compare/v4.168.0...v4.168.1) (2026-10-31)
 
 ### Fixes
