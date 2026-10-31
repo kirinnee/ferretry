@@ -621,7 +621,7 @@ describe('ContextRailBody — catalogs', () => {
     expect(root.querySelector('[data-context-mcp="github"] [data-catalog-installed-from]')).not.toBeNull();
     expect(root.querySelector('[data-context-mcp="linear"] [data-catalog-installed-from]')).toBeNull();
     expect(root.querySelectorAll('[data-catalog-add-to]')).toHaveLength(6);
-    mounted?.render(
+    await mounted?.render(
       <StoreProvider store={store}>
         <ContextRailBody
           sessionId="session-a"
