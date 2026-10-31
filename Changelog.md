@@ -1,3 +1,13 @@
+## [4.147.0](https://github.com/kirinnee/ferretry/compare/v4.146.0...v4.147.0) (2026-10-31)
+
+### Features
+
+* **pwa:** side-panel board is human-only by default, with a full-chat expand ([#1076](https://github.com/kirinnee/ferretry/issues/1076)) ([be7fe8f](https://github.com/kirinnee/ferretry/commit/be7fe8fbf02713a97a3e99d0fe891719d88b2080))
+
+### Fixes
+
+* **board:** keep lanes right: re-resolve Unfiled cards, quick gets To test, done never stalls ([#1079](https://github.com/kirinnee/ferretry/issues/1079)) ([89321e2](https://github.com/kirinnee/ferretry/commit/89321e2601b7b761d67d2e4b8b993c306f682b7c))
+
 ## [4.146.0](https://github.com/kirinnee/ferretry/compare/v4.145.0...v4.146.0) (2026-10-30)
 
 ### Features
