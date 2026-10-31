@@ -434,6 +434,23 @@ export class AgentToolService {
     });
   }
 
+  /**
+   * Records a session credential refused for naming another session in `x-ferretry-session-id`.
+   *
+   * The SAME event the authorization boundary writes for it on every other route
+   * (`session.credential-refused`), naming the session the credential named and never the credential —
+   * and a different event from `agent.tool`, so it is never folded away under an ordinary refusal.
+   */
+  async refusedSessionClaim(sessionId: string, route: string): Promise<void> {
+    await this.ports.audit.record({
+      event: 'session.credential-refused',
+      actor: { kind: 'host' },
+      subject: sessionId,
+      outcome: 'refused',
+      detail: { by: 'agent', reason: 'session_mismatch', route },
+    });
+  }
+
   /** Every live driving marker, standing takeover and hand-over of one kind in one session. */
   async controlView(sessionId: string, surface: SurfaceKind): Promise<SurfaceControlView> {
     return await this.alive(sessionId, surface, await this.ports.control.view(sessionId, surface));

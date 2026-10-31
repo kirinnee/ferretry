@@ -377,13 +377,17 @@ release. It is also a **bearer class** of its own, `session`, beside the admin a
   accepted on `x-fy-session-capability`, the agent tools' header, until that pane is next launched.
 - **It names its session.** The session comes from the credential, never from `x-ferretry-session-id`.
   Absent, the header is not needed; present and naming another session, the request is
-  `401 session_mismatch` and a `session.credential-refused` record (or, on the agent tools' route, an
-  `agent.tool` refusal) names the session the credential named — never the credential.
+  `401 session_mismatch` and a `session.credential-refused` record — on every route, the agent tools'
+  included — names the session the credential named, never the credential.
 - **Revocation.** The lookup reads only ACTIVE sessions: a session that stops, completes, fails or is
   deleted is no longer consulted, so its credential names nobody from that moment. Every pane launch
   rotates it. A daemon restart keeps the hashes of sessions still running, because their panes survive it.
-- **Advertised.** `GET /v1/health` lists `session.credential.1`. A client that sees it presents this
-  credential and never falls back to the admin token, whatever the answer.
+- **From this machine only.** A session-shaped bearer is looked up only when the request arrived on the
+  privileged loopback carrier; from the tunnel, a LAN bind or any other remote carrier it is a stranger's,
+  answered without a lookup. A live and a dead credential get the same `401 unauthorized`.
+- **Not advertised yet.** `session.credential.1` is defined, and `GET /v1/health` will list it once routes
+  accept the credential. A client that sees it presents this credential and never falls back to the
+  admin token, whatever the answer — so listing it now would cut a ferret off from `fy send`.
 
 **What this release does NOT change yet.** A session bearer reaches nothing it could not reach before:
 on every route the authorization boundary authenticates it is refused — `401`, exactly as a stranger —

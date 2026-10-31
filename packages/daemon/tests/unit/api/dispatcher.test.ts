@@ -1934,8 +1934,14 @@ describe('a ferret session credential at the boundary', () => {
     return { ...directory, dispatcher };
   }
 
+  /** As a pane presents it: from this machine, over the privileged loopback carrier. */
   const asSession = (path: string, credential: string, headers: Readonly<Record<string, string>> = {}) =>
-    request({ path, loopback: true, headers: { authorization: `Bearer ${credential}`, ...headers } });
+    request({
+      path,
+      loopback: true,
+      privilegedLoopback: true,
+      headers: { authorization: `Bearer ${credential}`, ...headers },
+    });
 
   it('should refuse a session credential on every route it authenticates, as if it were anonymous', async () => {
     // Until the route table says per route who may call it, the one route a session credential reaches is
@@ -1961,7 +1967,6 @@ describe('a ferret session credential at the boundary', () => {
       [401, 'unauthorized'],
       [401, 'unauthorized'],
     ]);
-    should(responses.map(response => jsonBody(response).error)).matchEach(/POST \/v1\/agent\/tools/u);
     should(asked).deepEqual([S1, S1, S1]);
     should(refusals).deepEqual([]);
   });
@@ -1996,6 +2001,48 @@ describe('a ferret session credential at the boundary', () => {
     // Assert
     should(response.status).equal(401);
     should(jsonBody(response).code).equal('unauthorized');
+  });
+
+  it('should answer a live and a dead session credential in the same words, so neither is an oracle', async () => {
+    // Arrange
+    const { dispatcher } = served(unreachable('/v1/sessions', 'authenticated'));
+
+    // Act
+    const live = await dispatcher.dispatch(asSession('/v1/sessions', S1));
+    const dead = await dispatcher.dispatch(asSession('/v1/sessions', STOPPED));
+    const stranger = await dispatcher.dispatch(request({ path: '/v1/sessions', privilegedLoopback: true }));
+
+    // Assert
+    should(live.status).equal(dead.status);
+    should(jsonBody(live)).deepEqual(jsonBody(dead));
+    should(jsonBody(live)).deepEqual(jsonBody(stranger));
+  });
+
+  it('should never look a session credential up when it arrived from anywhere but this machine', async () => {
+    // A pane presents its credential from this host only. From a remote carrier — the tunnel listener, a LAN
+    // bind, a locally bound proxy that cannot prove the peer is this machine — it is a stranger's bearer:
+    // no session reads, no liveness answer, and no audit record a header could make it write.
+    // Arrange
+    const { dispatcher, asked, refusals } = served(unreachable('/v1/sessions', 'authenticated'));
+    const remote = (headers: Readonly<Record<string, string>> = {}) =>
+      request({ path: '/v1/sessions', loopback: false, headers: { authorization: `Bearer ${S1}`, ...headers } });
+    const unprovenLoopback = request({
+      path: '/v1/sessions',
+      loopback: true,
+      privilegedLoopback: false,
+      headers: { authorization: `Bearer ${S1}` },
+    });
+
+    // Act
+    const plain = await dispatcher.dispatch(remote());
+    const relabelled = await dispatcher.dispatch(remote({ [SESSION_ID_HEADER]: 's-2' }));
+    const proxied = await dispatcher.dispatch(unprovenLoopback);
+
+    // Assert
+    should([plain.status, relabelled.status, proxied.status]).deepEqual([401, 401, 401]);
+    should(jsonBody(relabelled).code).equal('unauthorized');
+    should(asked).deepEqual([]);
+    should(refusals).deepEqual([]);
   });
 
   it("should answer a stopped session's credential as anonymous, whatever header it carries", async () => {

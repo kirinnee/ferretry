@@ -53,12 +53,6 @@ import type { ApiRouter } from './router.ts';
 /** The pane's own session id, so an in-pane caller is attributed to itself rather than to the
  *  shared token it holds. */
 export const SESSION_ID_HEADER = 'x-ferretry-session-id';
-/**
- * The one route a ferret session's own credential may use on this daemon, until the route table says
- * per route who may call it. It is a public route that reads the credential itself — the bearer, or the
- * older `x-fy-session-capability` header — so the boundary below never serves a session credential.
- */
-export const SESSION_CREDENTIAL_ROUTE = 'POST /v1/agent/tools';
 /** Client self-identification (`cli`), which is what tells `admin-cli` from `admin-ui`. */
 export const CLIENT_HEADER = 'x-ferretry-client';
 /**
@@ -118,9 +112,11 @@ export type RouteAuthorization<TRoute extends ScopedRoute> =
  *
  * A FERRET SESSION'S CREDENTIAL is authenticated at step 1 and refused straight after it, on every route
  * this boundary authenticates: it names its own session, so `x-ferretry-session-id` naming another one is
- * `401 session_mismatch` (audited), and otherwise it is answered as anonymous. The one route that takes it
- * (`SESSION_CREDENTIAL_ROUTE`) is public and reads it itself, so a session credential reaches nothing it
- * could not reach before — docs/agent-tools.md § "The ferret session credential".
+ * `401 session_mismatch` (audited), and otherwise it is answered exactly as anonymous. The one route that
+ * takes it (`POST /v1/agent/tools`) is public and reads it itself, so a session credential reaches nothing
+ * it could not reach before — docs/agent-tools.md § "The ferret session credential". It is looked up only
+ * when the request arrived on this machine's privileged loopback carrier: from anywhere else it is a
+ * stranger's bearer, unasked about.
  */
 /**
  * An app from before device keys redeeming a pairing code over plain HTTP.
@@ -212,8 +208,9 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
 
   // A FERRET SESSION'S CREDENTIAL STOPS HERE, before the route is so much as named back to it. Its actor is
   // the session it was minted for, so a header naming any other session is a forged attribution — refused
-  // and audited. Otherwise it is answered exactly as anonymous: no route this boundary authenticates takes
-  // one yet, and widening that is a per-route decision (`AuthenticatedCredential` keeps it out of handlers).
+  // and audited. Otherwise it is answered in a stranger's very words, so the answer says nothing about
+  // whether the value is live: no route this boundary authenticates takes one yet, and widening that is a
+  // per-route decision (`AuthenticatedCredential` keeps it out of handlers).
   if (authentication.tokenClass === 'session') {
     const claimed = headerValue(request, SESSION_ID_HEADER)?.trim() ?? '';
     if (claimed !== '' && claimed !== authentication.sessionId)
@@ -230,14 +227,7 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
           route: `${request.method} ${request.path}`,
         },
       };
-    return {
-      kind: 'refused',
-      response: errorResponse(
-        401,
-        `a ferret session credential is accepted only by ${SESSION_CREDENTIAL_ROUTE} on this daemon`,
-        'unauthorized',
-      ),
-    };
+    return { kind: 'refused', response: errorResponse(401, 'unauthorized', 'unauthorized') };
   }
 
   if (lookup.kind === 'not-found') return { kind: 'unrouted' };
@@ -417,13 +407,19 @@ const servedPublicly = (route: ScopedRoute): boolean => route.minimum === 'none'
  * Asked ONLY where the boundary will authenticate — never for a public route, which reads whatever
  * credential it takes itself (the agent tools do, through this same directory), so one request is looked
  * up once. Never for a device's session or a member's either: neither carries a bearer of its own.
+ *
+ * ONLY FOR A REQUEST THAT ARRIVED ON THIS MACHINE'S PRIVILEGED LOOPBACK CARRIER. A pane presents its
+ * credential from this host and from nowhere else, so a session-shaped bearer from a remote carrier — the
+ * tunnel listener, a LAN bind — is a stranger's, answered from its shape: it costs no session reads, and
+ * says nothing about whether a leaked value is still live.
  */
 export async function presentedSession<TRoute extends ScopedRoute>(
   router: ApiRouter<TRoute>,
   credentials: ApiCredentials,
   request: ApiRequest,
 ): Promise<PresentedToken['session']> {
-  if (request.device !== undefined || request.member !== undefined) return undefined;
+  if (request.privilegedLoopback !== true || request.device !== undefined || request.member !== undefined)
+    return undefined;
   const bearer = bearerToken(headerValue(request, 'authorization'));
   if (!isSessionCredential(bearer)) return undefined;
   const lookup = router.lookup(request.method, request.path);

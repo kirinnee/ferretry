@@ -158,7 +158,7 @@ async function agentOf(
   // is an attribution the credential does not back, so it is refused rather than quietly overruled.
   const claimed = headerValue(context.request, SESSION_ID_HEADER)?.trim() ?? '';
   if (claimed !== '' && claimed !== identity.sessionId) {
-    await service.refusedCaller('session id header names another session');
+    await service.refusedSessionClaim(identity.sessionId, 'POST /v1/agent/tools');
     throw new ApiError(
       401,
       `this session credential names its own session, and ${SESSION_ID_HEADER} names a different one; drop the header — the daemon reads who you are from the credential`,

@@ -97,8 +97,10 @@ describe('the agent tools route', () => {
     should(bodyClaim.status).equal(400);
     should(world.terminals.typed.size).equal(0);
     should(world.audit.entries[0]).match({
+      event: 'session.credential-refused',
+      subject: 's2',
       outcome: 'refused',
-      detail: { by: 'agent', reason: 'session id header names another session' },
+      detail: { by: 'agent', reason: 'session_mismatch', route: 'POST /v1/agent/tools' },
     });
   });
 
