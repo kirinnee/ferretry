@@ -146,6 +146,43 @@ describe('createSessionDirectory', () => {
     should(f.projected).eql([]);
   });
 
+  it('should not parse an unchanged pair of documents twice, and parse a changed one again', async () => {
+    // Arrange — a reader that hands out the same frozen values until a file changes, as the storage does.
+    let looks = 0;
+    const counted = <T extends object>(value: T): T =>
+      new Proxy(Object.freeze(value), {
+        get: (target, key) => {
+          if (key !== 'then') looks += 1;
+          return Reflect.get(target, key);
+        },
+      });
+    const id = parseSessionId('live-0');
+    const config = counted(sessionView(id).config);
+    let state = counted(sessionView(id).state);
+    const subject = createSessionDirectory({
+      sessions: () => [indexed('live-0', 'running')],
+      find: () => indexed('live-0', 'running'),
+      readConfig: async () => config,
+      readState: async () => state,
+      directory: () => '/state/sessions/live-0',
+      ended: () => false,
+      yieldToLoop: async () => undefined,
+    });
+    should(await subject.has('live-0')).be.true();
+    const parsed = looks;
+
+    // Act
+    const again = await subject.has('live-0');
+    const unchangedLooks = looks - parsed;
+    state = counted({ ...sessionView(id).state, status: 'not-a-status' } as never);
+    const changed = subject.has('live-0');
+
+    // Assert
+    should(again).be.true();
+    should(unchangedLooks).equal(0);
+    await should(changed).be.rejectedWith({ name: 'SessionReadError', failure: 'unusable' });
+  });
+
   it('should answer nothing for an unindexed session and refuse an unusable reference', async () => {
     const subject = directory(fleet(1, 0));
     should(await subject.get('nobody')).be.undefined();
