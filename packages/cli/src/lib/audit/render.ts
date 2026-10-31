@@ -52,6 +52,7 @@ const EVENT_WORDS: Readonly<Record<AuditEvent, string>> = {
   'input.quarantine_ended': 'A terminal that a ferret was kept out of was opened up again',
   'input.quarantine_revealed': 'A viewer chose to see a terminal a ferret was kept out of',
   'link.opened': 'A link was opened in this computer’s browser',
+  'session.credential-refused': "A ferret's own session credential was refused",
 };
 
 const pad = (value: number): string => String(value).padStart(2, '0');

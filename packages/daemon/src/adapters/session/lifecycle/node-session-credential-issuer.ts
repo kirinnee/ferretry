@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { SESSION_CREDENTIAL_PREFIX } from '../../../lib/api/authentication.ts';
 import type { SessionCredential, SessionCredentialIssuer } from '../../../lib/session/lifecycle/index.ts';
 
 /**
@@ -8,12 +9,16 @@ import type { SessionCredential, SessionCredentialIssuer } from '../../../lib/se
  */
 const CREDENTIAL_BYTES = 32;
 
-/** Base64url so the value survives an environment variable, a header and a JSON document unescaped. */
+/**
+ * Base64url so the value survives an environment variable, a header and a JSON document unescaped, behind
+ * the `fys_` prefix that lets the daemon tell a session credential from its shape alone when one arrives
+ * as a bearer. The hash is of the whole value, prefix included.
+ */
 export class NodeSessionCredentialIssuer implements SessionCredentialIssuer {
   constructor(private readonly random: (size: number) => Buffer = randomBytes) {}
 
   issue(): SessionCredential {
-    const capability = this.random(CREDENTIAL_BYTES).toString('base64url');
+    const capability = `${SESSION_CREDENTIAL_PREFIX}${this.random(CREDENTIAL_BYTES).toString('base64url')}`;
     return { capability, hash: createHash('sha256').update(capability, 'utf8').digest('hex') };
   }
 }

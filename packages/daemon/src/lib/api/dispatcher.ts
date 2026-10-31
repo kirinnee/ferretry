@@ -1,12 +1,13 @@
 import {
   FY_VERSION_HEADER,
   OLDER_APP_SENTENCE,
-  UNLOCK_REQUIRED_CODE,
   STEP_UP_REQUIRED_CODE,
   type StepUpAct,
   type StepUpRequiredBody,
   stepUpSkippableAtMachine,
+  UNLOCK_REQUIRED_CODE,
 } from '@ferretry/protocol';
+import type { LegacyWireUseRecorder } from '../legacy-wire/ports.ts';
 import { type ApiActor, resolveApiActor, type TokenClass } from './actor.ts';
 import {
   type ApiCredentials,
@@ -14,6 +15,10 @@ import {
   authenticate,
   bearerToken,
   isPreKeyDeviceToken,
+  isSessionCredential,
+  type PresentedToken,
+  presentToken,
+  type SessionCredentialRefusal,
 } from './authentication.ts';
 import {
   type CallerGovernance,
@@ -23,7 +28,7 @@ import {
   NO_STEP_UP_WITNESS,
   type StepUpWitness,
 } from './capability.ts';
-import type { LegacyWireUseRecorder } from '../legacy-wire/ports.ts';
+import { compressed, type ResponseCompressor } from './compression.ts';
 import { ApiError } from './error.ts';
 import {
   type ApiRequest,
@@ -33,7 +38,6 @@ import {
   headerValue,
   type RouteParameters,
 } from './http.ts';
-import { compressed, type ResponseCompressor } from './compression.ts';
 import { errorResponse, jsonResponse, methodNotAllowedResponse, noStore, unknownRouteResponse } from './responses.ts';
 import type {
   ApiRoute,
@@ -49,6 +53,12 @@ import type { ApiRouter } from './router.ts';
 /** The pane's own session id, so an in-pane caller is attributed to itself rather than to the
  *  shared token it holds. */
 export const SESSION_ID_HEADER = 'x-ferretry-session-id';
+/**
+ * The one route a ferret session's own credential may use on this daemon, until the route table says
+ * per route who may call it. It is a public route that reads the credential itself — the bearer, or the
+ * older `x-fy-session-capability` header — so the boundary below never serves a session credential.
+ */
+export const SESSION_CREDENTIAL_ROUTE = 'POST /v1/agent/tools';
 /** Client self-identification (`cli`), which is what tells `admin-cli` from `admin-ui`. */
 export const CLIENT_HEADER = 'x-ferretry-client';
 /**
@@ -66,7 +76,12 @@ export const WARDEN_CAPABILITY_HEADER = 'x-fy-warden-capability';
 /** What the authorization boundary decided about one request. */
 export type RouteAuthorization<TRoute extends ScopedRoute> =
   | { readonly kind: 'authorized'; readonly route: TRoute; readonly context: RouteContext }
-  | { readonly kind: 'refused'; readonly response: ApiResponse }
+  | {
+      readonly kind: 'refused';
+      readonly response: ApiResponse;
+      /** Present when a session credential was refused for what it claimed — the dispatcher audits it. */
+      readonly sessionRefusal?: SessionCredentialRefusal;
+    }
   /**
    * No route in THIS table claims the path, and the caller was authenticated, so saying so leaks
    * nothing. What it means is the caller's to decide: the request/response dispatcher answers 404,
@@ -100,6 +115,12 @@ export type RouteAuthorization<TRoute extends ScopedRoute> =
  * 4. ask the operator's capability grant, which can only take away;
  * 5. ask the administrator's warden-remedy authorizer, and ONLY for a caller the token class already
  *    proved to be a warden.
+ *
+ * A FERRET SESSION'S CREDENTIAL is authenticated at step 1 and refused straight after it, on every route
+ * this boundary authenticates: it names its own session, so `x-ferretry-session-id` naming another one is
+ * `401 session_mismatch` (audited), and otherwise it is answered as anonymous. The one route that takes it
+ * (`SESSION_CREDENTIAL_ROUTE`) is public and reads it itself, so a session credential reaches nothing it
+ * could not reach before — docs/agent-tools.md § "The ferret session credential".
  */
 /**
  * An app from before device keys redeeming a pairing code over plain HTTP.
@@ -125,6 +146,11 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
   remedies?: WardenRemedyAuthorizer,
   /** Whose passkey step-up is live. Absent means nobody holds one, which can only refuse more. */
   stepUps: StepUpWitness = NO_STEP_UP_WITNESS,
+  /**
+   * What the session directory said about a session-shaped bearer ({@link presentedSession}), looked up
+   * before this synchronous boundary. Absent is "not one, or names no active session": anonymous.
+   */
+  session?: PresentedToken['session'],
 ): RouteAuthorization<TRoute> {
   // A MEMBER IS REFUSED BY THE MAIN TABLE BEFORE ANYTHING ELSE, the public shortcut included: a member session
   // is served by the member route table alone, and an anonymous route here is still a route a member may not use.
@@ -142,7 +168,7 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
   // remedy and authorizer unconsulted, which is the loudest possible version of the failure this axis
   // exists to prevent. Such a route is served the long way instead: authentication still refuses an
   // anonymous caller, and a warden still has to satisfy the remedy.
-  if (lookup.kind === 'matched' && lookup.route.minimum === 'none' && lookup.route.wardenRemedy === undefined) {
+  if (lookup.kind === 'matched' && servedPublicly(lookup.route)) {
     if (lookup.route.privilegedOnly === true && request.privilegedLoopback !== true)
       return {
         kind: 'refused',
@@ -163,7 +189,10 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
       ? credentials.devices?.has(device.deviceId) === true
         ? { kind: 'authenticated', tokenClass: 'device', deviceId: device.deviceId }
         : { kind: 'anonymous' }
-      : authenticate(credentials, { bearer });
+      : authenticate(credentials, {
+          ...(bearer === undefined ? {} : { bearer }),
+          ...(session === undefined ? {} : { session }),
+        });
   // THERE ARE NO SOCKET TICKETS ANY MORE. They existed so a browser — which cannot put a header on a
   // WebSocket — could authenticate an upgrade with a short-lived bearer value bought over HTTP. A
   // browser now opens every stream inside a session its device key opened, so no URL ever carries a
@@ -180,6 +209,36 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
           ? errorResponse(426, OLDER_APP_SENTENCE, 'app_outdated')
           : errorResponse(401, 'unauthorized', 'unauthorized'),
     };
+
+  // A FERRET SESSION'S CREDENTIAL STOPS HERE, before the route is so much as named back to it. Its actor is
+  // the session it was minted for, so a header naming any other session is a forged attribution — refused
+  // and audited. Otherwise it is answered exactly as anonymous: no route this boundary authenticates takes
+  // one yet, and widening that is a per-route decision (`AuthenticatedCredential` keeps it out of handlers).
+  if (authentication.tokenClass === 'session') {
+    const claimed = headerValue(request, SESSION_ID_HEADER)?.trim() ?? '';
+    if (claimed !== '' && claimed !== authentication.sessionId)
+      return {
+        kind: 'refused',
+        response: errorResponse(
+          401,
+          `this session credential names its own session, and ${SESSION_ID_HEADER} names a different one; drop the header — the daemon reads who you are from the credential`,
+          'session_mismatch',
+        ),
+        sessionRefusal: {
+          reason: 'session_mismatch',
+          sessionId: authentication.sessionId,
+          route: `${request.method} ${request.path}`,
+        },
+      };
+    return {
+      kind: 'refused',
+      response: errorResponse(
+        401,
+        `a ferret session credential is accepted only by ${SESSION_CREDENTIAL_ROUTE} on this daemon`,
+        'unauthorized',
+      ),
+    };
+  }
 
   if (lookup.kind === 'not-found') return { kind: 'unrouted' };
   if (lookup.kind === 'method-not-allowed')
@@ -346,6 +405,45 @@ function claimFreshStepUp(device: RouteContext['request']['device'], stepUps: St
   };
 }
 
+/**
+ * Whether a route is served before authentication is attempted — the public shortcut. One that declares
+ * a warden remedy is not: it asks for a check the shortcut would skip past.
+ */
+const servedPublicly = (route: ScopedRoute): boolean => route.minimum === 'none' && route.wardenRemedy === undefined;
+
+/**
+ * The asynchronous half of authentication: what the session directory says about a session-shaped bearer.
+ *
+ * Asked ONLY where the boundary will authenticate — never for a public route, which reads whatever
+ * credential it takes itself (the agent tools do, through this same directory), so one request is looked
+ * up once. Never for a device's session or a member's either: neither carries a bearer of its own.
+ */
+export async function presentedSession<TRoute extends ScopedRoute>(
+  router: ApiRouter<TRoute>,
+  credentials: ApiCredentials,
+  request: ApiRequest,
+): Promise<PresentedToken['session']> {
+  if (request.device !== undefined || request.member !== undefined) return undefined;
+  const bearer = bearerToken(headerValue(request, 'authorization'));
+  if (!isSessionCredential(bearer)) return undefined;
+  const lookup = router.lookup(request.method, request.path);
+  if (lookup.kind === 'matched' && servedPublicly(lookup.route)) return undefined;
+  return (await presentToken(credentials, bearer)).session;
+}
+
+/** Tells the audit log about a refused session credential. A write that fails never changes the answer. */
+export async function recordSessionRefusal(
+  credentials: ApiCredentials,
+  refusal: SessionCredentialRefusal | undefined,
+): Promise<void> {
+  if (refusal === undefined) return;
+  try {
+    await credentials.sessions?.refused?.(refusal);
+  } catch {
+    // The audit log reports its own failures; a refusal is answered either way.
+  }
+}
+
 /** What the remedy axis had to say about one request: nothing, a proven authority, or a refusal. */
 type WardenRemedyOutcome =
   | { readonly kind: 'absent' }
@@ -482,9 +580,13 @@ export class ApiDispatcher {
       this.guard,
       this.remedies,
       this.stepUps,
+      await presentedSession(this.router, this.credentials, request),
     );
     if (authorized.kind === 'unrouted') return unknownRouteResponse(request.method, request.path);
-    if (authorized.kind === 'refused') return authorized.response;
+    if (authorized.kind === 'refused') {
+      await recordSessionRefusal(this.credentials, authorized.sessionRefusal);
+      return authorized.response;
+    }
     if (authorized.route.legacy === true) this.#countLegacyUse(authorized.route, request);
     const response = await run(authorized.route, authorized.context);
     return await compressed(request, response, this.compressor, authorized.route.compress === true);

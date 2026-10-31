@@ -48,6 +48,13 @@ machine) and `steppedUp` (does this device hold a passkey step-up right now). To
 `!governed`; the two stay separate fields because they are different questions, and a UI that derived one
 from the other would have to be rewritten the day a third caller class appears.
 
+### A ferret session's own credential is not a device
+
+A ferret pane's `FY_SESSION_TOKEN` (`Authorization: Bearer fys_…`) is a bearer class of its own, `session`
+([agent-tools.md](agent-tools.md#the-ferret-session-credential)). It is not a grant holder: grants stay
+about remote devices, and a session credential never goes through `decideCapability`. Today the
+authorization boundary refuses it on every route it authenticates, so it reaches only the agent tools.
+
 ## "Loopback" means how the request arrived
 
 This is the single detail that decides whether the design is sound rather than a hole.

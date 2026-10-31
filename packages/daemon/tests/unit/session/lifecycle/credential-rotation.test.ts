@@ -1,5 +1,15 @@
 import { describe, it } from 'bun:test';
+import { createHash } from 'node:crypto';
 import should from 'should';
+import { NodeSessionCredentialIssuer } from '../../../../src/adapters/session/lifecycle/node-session-credential-issuer.ts';
+import { CredentialAgentIdentities } from '../../../../src/lib/agent-tools/policy.ts';
+import {
+  authenticate,
+  isSessionCredential,
+  presentToken,
+  SESSION_CREDENTIAL_PREFIX,
+  secretsMatch,
+} from '../../../../src/lib/api/authentication.ts';
 import { SessionCredentialRotation } from '../../../../src/lib/session/lifecycle/credential-rotation.ts';
 import type {
   SessionCapabilityHashStore,
@@ -87,5 +97,68 @@ describe('SessionCredentialRotation', () => {
     // Act + Assert — a hash with no plaintext behind it would admit a pane holding nothing.
     await should(subject.rotate(ID)).be.rejectedWith('environment rename failed');
     should(hashes.recorded).deepEqual([]);
+  });
+});
+
+describe('the prefixed session credential, across a rotation', () => {
+  const sha256 = (value: string) => createHash('sha256').update(value, 'utf8').digest('hex');
+  /** What a pane launched before the prefix holds: 43 base64url characters and nothing in front. */
+  const UNPREFIXED = 'u'.repeat(43);
+
+  /** The real issuer and rotation over in-memory stores, read back through the real lookup. */
+  function rotating() {
+    const order: string[] = [];
+    const environment = new MemoryEnvironment(order);
+    const hashes = new RecordingHashes(order);
+    environment.documents.set(ID, { FY_SESSION_BOARD_CAPABILITY: UNPREFIXED });
+    let stored = sha256(UNPREFIXED);
+    const subject = new SessionCredentialRotation({
+      credentials: new NodeSessionCredentialIssuer(),
+      environment,
+      hashes: {
+        record: async (id, hash) => {
+          await hashes.record(id, hash);
+          stored = hash;
+        },
+      },
+    });
+    const identities = new CredentialAgentIdentities(
+      { snapshot: async () => [{ id: ID, name: null, active: true, sessionCapabilityHash: stored }] },
+      sha256,
+      secretsMatch,
+    );
+    const directory = { resolve: async (capability: string) => await identities.resolve(capability) };
+    const asBearer = async (value: string) =>
+      authenticate(
+        { admin: 'admin-secret', sessions: directory },
+        await presentToken({ admin: 'admin-secret', sessions: directory }, value),
+      );
+    return { environment, subject, identities, asBearer };
+  }
+
+  it('should keep the value a running pane holds working on its header until that pane is relaunched', async () => {
+    // Arrange
+    const { identities, asBearer } = rotating();
+
+    // Act / Assert — accepted where it always was; never as a bearer, which needs the prefix.
+    should(await identities.resolve(UNPREFIXED)).deepEqual({ sessionId: ID });
+    should(await asBearer(UNPREFIXED)).deepEqual({ kind: 'anonymous' });
+  });
+
+  it('should mint a prefixed credential at the launch, and the old value then names nothing', async () => {
+    // Arrange
+    const { environment, subject, identities, asBearer } = rotating();
+
+    // Act
+    const hash = await subject.rotate(ID);
+    const minted = environment.documents.get(ID)?.FY_SESSION_BOARD_CAPABILITY ?? '';
+
+    // Assert — the prefix and 43 base64url characters, hashed whole.
+    should(isSessionCredential(minted)).be.true();
+    should(minted).startWith(SESSION_CREDENTIAL_PREFIX);
+    should(hash).equal(sha256(minted));
+    should(await identities.resolve(minted)).deepEqual({ sessionId: ID });
+    should(await asBearer(minted)).deepEqual({ kind: 'authenticated', tokenClass: 'session', sessionId: ID });
+    should(await identities.resolve(UNPREFIXED)).be.undefined();
   });
 });

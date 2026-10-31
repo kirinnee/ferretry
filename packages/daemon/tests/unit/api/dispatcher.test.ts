@@ -16,6 +16,8 @@ import {
   NO_GOVERNED_ROUTES_GUARD,
   NO_STEP_UP_WITNESS,
   SESSION_ID_HEADER,
+  type SessionCredentialDirectory,
+  type SessionCredentialRefusal,
   type SocketRoute,
   type StepUpWitness,
   WARDEN_CAPABILITY_HEADER,
@@ -1887,5 +1889,195 @@ describe('ApiDispatcher legacy-use counting', () => {
 
     // Assert
     should(response.status).equal(200);
+  });
+});
+
+describe('a ferret session credential at the boundary', () => {
+  /** s-1's credential, in the shape every launch now mints. */
+  const S1 = `fys_${'a'.repeat(43)}`;
+  /** A credential whose session has stopped: the directory no longer answers for it. */
+  const STOPPED = `fys_${'b'.repeat(43)}`;
+
+  /** The directory the daemon wires, as a test can see it: what it was asked and what it was told. */
+  function sessionsDirectory() {
+    const asked: string[] = [];
+    const refusals: SessionCredentialRefusal[] = [];
+    const sessions: SessionCredentialDirectory = {
+      resolve: async capability => {
+        asked.push(capability);
+        return capability === S1 ? { sessionId: 's-1' } : undefined;
+      },
+      refused: async refusal => {
+        refusals.push(refusal);
+      },
+    };
+    return { sessions, asked, refusals };
+  }
+
+  /** A route that must never be reached by these cases: reaching it is the failure. */
+  const unreachable = (path: string, minimum: CredentialMinimum): ApiRoute => ({
+    method: 'GET',
+    path,
+    minimum,
+    handle: async () => {
+      throw new Error(`a session credential reached ${path}`);
+    },
+  });
+
+  function served(...routes: readonly ApiRoute[]) {
+    const directory = sessionsDirectory();
+    const dispatcher = new ApiDispatcher(
+      new ApiRouter(routes),
+      { ...credentials, sessions: directory.sessions },
+      NO_GOVERNED_ROUTES_GUARD,
+    );
+    return { ...directory, dispatcher };
+  }
+
+  const asSession = (path: string, credential: string, headers: Readonly<Record<string, string>> = {}) =>
+    request({ path, loopback: true, headers: { authorization: `Bearer ${credential}`, ...headers } });
+
+  it('should refuse a session credential on every route it authenticates, as if it were anonymous', async () => {
+    // Until the route table says per route who may call it, the one route a session credential reaches is
+    // the public agent-tools route, which reads it itself. Every minimum is covered, so "operator" — which
+    // the admin token and a device meet — cannot be met by one by accident.
+    // Arrange
+    const { dispatcher, asked, refusals } = served(
+      unreachable('/v1/authenticated', 'authenticated'),
+      unreachable('/v1/operator', 'operator'),
+      unreachable('/v1/admin', 'admin-token'),
+    );
+
+    // Act
+    const responses = await Promise.all(
+      ['/v1/authenticated', '/v1/operator', '/v1/admin'].map(
+        async path => await dispatcher.dispatch(asSession(path, S1)),
+      ),
+    );
+
+    // Assert — the credential WAS recognised (one lookup each), and refused all the same, unaudited.
+    should(responses.map(response => [response.status, jsonBody(response).code])).deepEqual([
+      [401, 'unauthorized'],
+      [401, 'unauthorized'],
+      [401, 'unauthorized'],
+    ]);
+    should(responses.map(response => jsonBody(response).error)).matchEach(/POST \/v1\/agent\/tools/u);
+    should(asked).deepEqual([S1, S1, S1]);
+    should(refusals).deepEqual([]);
+  });
+
+  it('should not let a session header relabel a session credential, and audit the attempt', async () => {
+    // The credential names its session. A header naming another one is a forged attribution: refused as
+    // `session_mismatch`, and the audit log is told which session the CREDENTIAL named.
+    // Arrange
+    const { dispatcher, refusals } = served(unreachable('/v1/sessions', 'operator'));
+
+    // Act
+    const relabelled = await dispatcher.dispatch(asSession('/v1/sessions', S1, { [SESSION_ID_HEADER]: 's-2' }));
+    const agreeing = await dispatcher.dispatch(asSession('/v1/sessions', S1, { [SESSION_ID_HEADER]: 's-1' }));
+
+    // Assert — agreeing earns nothing either: it is still a session credential on a route that takes none.
+    should(relabelled.status).equal(401);
+    should(jsonBody(relabelled).code).equal('session_mismatch');
+    should(agreeing.status).equal(401);
+    should(jsonBody(agreeing).code).equal('unauthorized');
+    should(refusals).deepEqual([{ reason: 'session_mismatch', sessionId: 's-1', route: 'GET /v1/sessions' }]);
+  });
+
+  it('should not let a warden capability or a client header make a session credential anything else', async () => {
+    // Arrange
+    const { dispatcher } = served(unreachable('/v1/sessions', 'authenticated'));
+
+    // Act
+    const response = await dispatcher.dispatch(
+      asSession('/v1/sessions', S1, { [WARDEN_CAPABILITY_HEADER]: 'cap-7', [CLIENT_HEADER]: 'cli' }),
+    );
+
+    // Assert
+    should(response.status).equal(401);
+    should(jsonBody(response).code).equal('unauthorized');
+  });
+
+  it("should answer a stopped session's credential as anonymous, whatever header it carries", async () => {
+    // Arrange
+    const { dispatcher, refusals } = served(unreachable('/v1/sessions', 'authenticated'));
+
+    // Act
+    const response = await dispatcher.dispatch(asSession('/v1/sessions', STOPPED, { [SESSION_ID_HEADER]: 's-2' }));
+
+    // Assert — not `session_mismatch`: a credential that names no live session names nobody to mismatch.
+    should(response.status).equal(401);
+    should(jsonBody(response).code).equal('unauthorized');
+    should(refusals).deepEqual([]);
+  });
+
+  it('should not name a route back to a session credential, known or unknown', async () => {
+    // Arrange
+    const { dispatcher } = served(unreachable('/v1/sessions', 'authenticated'));
+
+    // Act
+    const unknown = await dispatcher.dispatch(asSession('/v1/nowhere', S1));
+    const wrongVerb = await dispatcher.dispatch(
+      request({ method: 'DELETE', path: '/v1/sessions', headers: { authorization: `Bearer ${S1}` } }),
+    );
+
+    // Assert — 401 rather than 404 or 405, exactly as for a stranger.
+    should([unknown.status, wrongVerb.status]).deepEqual([401, 401]);
+  });
+
+  it('should leave a public route to read its own credential, so the directory is asked once, there', async () => {
+    // Arrange
+    const { dispatcher, asked } = served(echo('/v1/public', 'none'));
+
+    // Act
+    const response = await dispatcher.dispatch(asSession('/v1/public', S1));
+
+    // Assert
+    should(response.status).equal(200);
+    should(jsonBody(response).actor).be.null();
+    should(asked).deepEqual([]);
+  });
+
+  it('should keep the admin token the admin token, beside a session-shaped header or none', async () => {
+    // The honest-client path every pane from before this release still takes: admin bearer plus the
+    // pane's session id is the peer, exactly as before.
+    // Arrange
+    const { dispatcher, asked } = served(echo('/v1/sessions', 'operator'));
+
+    // Act
+    const response = await dispatcher.dispatch(
+      request({ path: '/v1/sessions', headers: { authorization: 'Bearer admin-secret', [SESSION_ID_HEADER]: 's-1' } }),
+    );
+
+    // Assert
+    should(jsonBody(response).actor).equal('peer:s-1');
+    should(asked).deepEqual([]);
+  });
+
+  it('should refuse a session credential on the socket table too, and audit a relabel there', async () => {
+    // Arrange
+    const directory = sessionsDirectory();
+    const upgrade: SocketRoute = {
+      method: 'GET',
+      path: '/v1/sessions/:id/stream',
+      minimum: 'authenticated',
+      accept: async () => {
+        throw new Error('a session credential reached a socket');
+      },
+    };
+    const sockets = new ApiSocketDispatcher(
+      new ApiRouter([upgrade]),
+      { ...credentials, sessions: directory.sessions },
+      NO_GOVERNED_ROUTES_GUARD,
+    );
+
+    // Act
+    const plain = await sockets.upgrade(asSession('/v1/sessions/x/stream', S1));
+    const relabelled = await sockets.upgrade(asSession('/v1/sessions/x/stream', S1, { [SESSION_ID_HEADER]: 's-2' }));
+
+    // Assert
+    should(plain.outcome === 'refused' && plain.response.status).equal(401);
+    should(relabelled.outcome === 'refused' && jsonBody(relabelled.response).code).equal('session_mismatch');
+    should(directory.refusals).have.length(1);
   });
 });

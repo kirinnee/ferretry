@@ -113,6 +113,13 @@ export const DAEMON_FEATURES = {
    * NAMED BUT NOT YET REPORTED ({@link NOT_YET_REPORTED}): the card ships in the app first.
    */
   phoneApproval: 'input.phone-approval.1',
+  /**
+   * A ferret session's own credential is a bearer class (docs/agent-tools.md § "The ferret session
+   * credential"): `Authorization: Bearer fys_…` names its session, and `x-ferretry-session-id` may only
+   * agree. A client that sees this name presents that credential and NEVER falls back to the host's admin
+   * token, whatever the answer — a refusal from this daemon is the answer, not a sign it is old.
+   */
+  sessionCredential: 'session.credential.1',
 } as const;
 
 export type DaemonFeature = (typeof DAEMON_FEATURES)[keyof typeof DAEMON_FEATURES];

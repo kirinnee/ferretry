@@ -381,6 +381,27 @@ describe('session lifecycle policy', () => {
     should(() => lifecycleSessionId('../escape')).throw(/path-safe/u);
   });
 
+  it('should hand a pane its credential under the documented name too, derived from the stored one', () => {
+    // FY_SESSION_TOKEN is the credential's documented name; FY_SESSION_BOARD_CAPABILITY stays for one release.
+    // Derived at every launch, so a stored value under the new name can never name a different credential.
+    // Arrange
+    const id = parseSessionId('session-1');
+
+    // Act
+    const both = sessionPaneEnvironment(id, { FY_SESSION_BOARD_CAPABILITY: 'fys_current' }, 'auto');
+    const stale = sessionPaneEnvironment(
+      id,
+      { FY_SESSION_BOARD_CAPABILITY: 'fys_current', FY_SESSION_TOKEN: 'fys_previous' },
+      'auto',
+    );
+    const none = sessionPaneEnvironment(id, { FY_SESSION_TOKEN: 'fys_previous' }, 'auto');
+
+    // Assert
+    should(both).match({ FY_SESSION_BOARD_CAPABILITY: 'fys_current', FY_SESSION_TOKEN: 'fys_current' });
+    should(stale).match({ FY_SESSION_BOARD_CAPABILITY: 'fys_current', FY_SESSION_TOKEN: 'fys_current' });
+    should(none).not.have.property('FY_SESSION_TOKEN');
+  });
+
   it('should give every pane its own session id, derived from the record rather than from the store', () => {
     // A pane that cannot name itself cannot be attributed: the CLI sends this value as
     // `x-ferretry-session-id`, and the send domain takes `from` from the actor that header produces.
@@ -400,6 +421,7 @@ describe('session lifecycle policy', () => {
       FY_HYPERMEDIA: '0',
       FY_SESSION_BOARD_CAPABILITY: 'secret',
       TASK_BOARD: 'board-7',
+      FY_SESSION_TOKEN: 'secret',
       FY_SESSION_ID: 'session-1',
     });
     should(contradicted).deepEqual({ FY_HYPERMEDIA: '0', FY_SESSION_ID: 'session-1' });

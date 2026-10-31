@@ -112,10 +112,17 @@ export class ManualClock {
   }
 }
 
-/** Two sessions' credentials, so a case can present one and try to reach the other. */
+/** s1's credential as a pane launched since the `fys_` prefix holds it — the shape a bearer must have. */
+export const PREFIXED_S1 = `fys_${'s'.repeat(43)}`;
+
+/**
+ * Two sessions' credentials, so a case can present one and try to reach the other. s1's older value has no
+ * prefix (a pane launched before it); its newer one does.
+ */
 const CAPABILITIES: Readonly<Record<string, AgentIdentity>> = {
   'cap-s1': { sessionId: 's1', name: 'Hadi' },
   'cap-s2': { sessionId: 's2' },
+  [PREFIXED_S1]: { sessionId: 's1', name: 'Hadi' },
 };
 
 const identities: AgentIdentityResolver = { resolve: async capability => CAPABILITIES[capability] };

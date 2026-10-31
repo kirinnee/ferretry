@@ -2,6 +2,7 @@ import type { AgendaAgentClearer, AgendaRepliesSubsystem, AgendaService } from '
 import type { AgentToolService } from '../../agent-tools/service.ts';
 import type { AgentIdentityResolver } from '../../agent-tools/types.ts';
 import type { AnalyticsIngestionLoop } from '../../analytics/ingestion.ts';
+import type { ApiCredentials } from '../../api/authentication.ts';
 import type { CapabilityGuard } from '../../api/capability.ts';
 import type { ResponseCompressor } from '../../api/compression.ts';
 import { ApiDispatcher } from '../../api/dispatcher.ts';
@@ -44,7 +45,7 @@ import { agendaRoutes, type DirectNotificationSubsystem } from './agenda.ts';
 import { agendaClearRoutes } from './agenda-clear.ts';
 import { configFilesConfirmations } from './agenda-confirms.ts';
 import { agentControlledRoutes, agentControlledSockets } from './agent-control.ts';
-import { agentToolRoutes } from './agent-tools.ts';
+import { agentToolRoutes, sessionCredentialDirectory } from './agent-tools.ts';
 import { type AnalyticsSubsystem, analyticsRoutes } from './analytics.ts';
 import { type AnalyticsPricingSubsystem, analyticsPricingRoutes } from './analytics-pricing.ts';
 import { type AuditSubsystem, auditRoutes } from './audit.ts';
@@ -742,6 +743,17 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
   );
 }
 
+/**
+ * The host's credentials plus a ferret session's own, looked up through the agent tools' resolver — the
+ * one lookup the agent route already makes — and audited when refused.
+ */
+function withSessionCredentials(base: DaemonApiDependencies, subsystems: MountedSubsystems): ApiCredentials {
+  return {
+    ...base.credentials,
+    sessions: sessionCredentialDirectory(subsystems.agentTools.identities, subsystems.audit.log),
+  };
+}
+
 /** The dispatcher the transport adapter serves, over the full mounted surface. */
 export function createMountedDispatcher(base: DaemonApiDependencies, subsystems: MountedSubsystems): ApiDispatcher {
   // The guard is the SUBSYSTEM itself, so the answer a route enforces and the answer the report shows
@@ -760,7 +772,7 @@ export function createMountedDispatcher(base: DaemonApiDependencies, subsystems:
         subsystems.performance.clock,
       ),
     ),
-    base.credentials,
+    withSessionCredentials(base, subsystems),
     subsystems.grants,
     undefined,
     subsystems.stepUp,
@@ -811,7 +823,7 @@ export function createMountedSocketDispatcher(
 ): ApiSocketDispatcher {
   return new ApiSocketDispatcher(
     new ApiRouter([...mountedSocketRoutes(subsystems), ...carriers]),
-    base.credentials,
+    withSessionCredentials(base, subsystems),
     // The SAME guard the request/response table uses. A terminal socket that skipped it would let a
     // browser drive a shell this machine had refused to let it open.
     subsystems.grants,

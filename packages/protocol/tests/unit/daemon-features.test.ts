@@ -61,6 +61,11 @@ describe('daemon features', () => {
     should(hasFeature({ features: daemonFeatureList() }, DAEMON_FEATURES.accountsSignIns)).be.false();
   });
 
+  it('should name the ferret session credential, so a client never falls back to the admin token where it is', () => {
+    should(DAEMON_FEATURES.sessionCredential).equal('session.credential.1');
+    should(daemonFeatureList()).containEql('session.credential.1');
+  });
+
   it('should offer a feature only when the daemon listed it', () => {
     // Arrange
     const listed = { features: [DAEMON_FEATURES.packIdea4000] };

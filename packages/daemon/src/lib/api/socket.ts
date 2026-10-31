@@ -15,7 +15,7 @@
 
 import type { ApiCredentials } from './authentication.ts';
 import type { CapabilityGuard, StepUpWitness } from './capability.ts';
-import { authorizeRequest } from './dispatcher.ts';
+import { authorizeRequest, presentedSession, recordSessionRefusal } from './dispatcher.ts';
 import { ApiError } from './error.ts';
 import type { ApiRequest, ApiResponse } from './http.ts';
 import { errorResponse } from './responses.ts';
@@ -222,9 +222,13 @@ export class ApiSocketDispatcher {
       this.guard,
       this.remedies,
       this.stepUps,
+      await presentedSession(this.router, this.credentials, request),
     );
     if (authorized.kind === 'unrouted') return { outcome: 'unclaimed' };
-    if (authorized.kind === 'refused') return { outcome: 'refused', response: authorized.response };
+    if (authorized.kind === 'refused') {
+      await recordSessionRefusal(this.credentials, authorized.sessionRefusal);
+      return { outcome: 'refused', response: authorized.response };
+    }
     try {
       // A paired device's stream is tracked by the SESSION that opened it, which ends it on revocation;
       // no plain-HTTP upgrade can carry a device at all any more.

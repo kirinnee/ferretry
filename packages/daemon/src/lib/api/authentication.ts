@@ -11,10 +11,18 @@ import type { CapabilityGrants } from '@ferretry/protocol';
  * token in this header; it now proves a key inside a session, and the tunnel attaches the proven
  * identity as `ApiRequest.device`. Nothing a request can send resolves to a device, so a stolen or
  * replayed value has no door left to fit.
+ *
+ * A FERRET SESSION'S OWN CREDENTIAL is the third bearer (`sessions`, docs/agent-tools.md § "The ferret
+ * session credential"): the one the daemon mints into each agent pane and keeps only a hash of.
  */
 export interface ApiCredentials {
   readonly admin: string;
   readonly warden?: string;
+  /**
+   * Which ACTIVE session a session credential was minted for — absent on a daemon that runs no sessions,
+   * where no session credential can authenticate anything: fail closed.
+   */
+  readonly sessions?: SessionCredentialDirectory;
   /**
    * Which devices are paired THIS INSTANT — consulted for a session's device, never to resolve one.
    *
@@ -37,16 +45,90 @@ export interface PairedDeviceDirectory {
   grants?(deviceId: string): CapabilityGrants | undefined;
 }
 
-/** What a request presented, read from its `Authorization` header and from nowhere else. A token in
- *  a URL reaches argv, shell history and every proxy's access log, so no query parameter is read. */
-export interface PresentedToken {
-  readonly bearer?: string;
+/**
+ * Where a session credential is looked up: the ONE lookup the agent tools already use
+ * (`CredentialAgentIdentities`), so the bearer and the `x-fy-session-capability` header can never
+ * disagree about which session a value names.
+ *
+ * It hashes the presented value and compares it, in constant time, with the stored hash of every ACTIVE
+ * session — a stopped, ended or deleted session's hash is not consulted, which is what revokes it. Only a
+ * hash is ever held, so nothing here can hand a credential back.
+ */
+export interface SessionCredentialDirectory {
+  resolve(capability: string): Promise<{ readonly sessionId: string } | undefined>;
+  /** Told about a refused session credential, so a forged attribution leaves a trace. Never throws into the request. */
+  refused?(refusal: SessionCredentialRefusal): Promise<void>;
 }
 
+/** A session credential the boundary refused, as the audit log is told it. Nothing the caller sent but the claim. */
+export interface SessionCredentialRefusal {
+  readonly reason: 'session_mismatch';
+  /** The session the CREDENTIAL names. */
+  readonly sessionId: string;
+  /** `METHOD path` of the refused request. */
+  readonly route: string;
+}
+
+/**
+ * What a request presented, read from its `Authorization` header and from nowhere else. A token in
+ * a URL reaches argv, shell history and every proxy's access log, so no query parameter is read.
+ */
+export interface PresentedToken {
+  readonly bearer?: string;
+  /**
+   * The directory's answer for a session-shaped `bearer`, looked up by {@link presentToken} before the
+   * synchronous boundary runs — never anything a request sent. It names the value it answered for, and
+   * {@link authenticate} uses it only for that exact bearer.
+   */
+  readonly session?: { readonly capability: string; readonly sessionId: string };
+}
+
+/**
+ * Who a request proved itself to be.
+ *
+ * `session` is a ferret session's own credential, and it names its session: the actor comes from it,
+ * never from `x-ferretry-session-id`.
+ */
 export type Authentication =
   | { readonly kind: 'anonymous' }
   | { readonly kind: 'authenticated'; readonly tokenClass: 'admin' | 'warden' }
-  | { readonly kind: 'authenticated'; readonly tokenClass: 'device'; readonly deviceId: string };
+  | { readonly kind: 'authenticated'; readonly tokenClass: 'device'; readonly deviceId: string }
+  | { readonly kind: 'authenticated'; readonly tokenClass: 'session'; readonly sessionId: string };
+
+/**
+ * What every session credential minted from now on starts with, so a bearer can be told to be one from
+ * its shape alone — without hashing it against every session. The value after it is 32 random bytes,
+ * base64url: 43 characters.
+ */
+export const SESSION_CREDENTIAL_PREFIX = 'fys_';
+
+/**
+ * Whether a bearer has the shape of a session credential — the prefix and exactly 43 base64url characters.
+ *
+ * Only such a value is ever looked up as a bearer: anything else is answered from its shape, so a wrong
+ * prefix or length costs a caller nothing it could time. A pane started before the prefix holds an
+ * unprefixed value; that is still accepted where it always was, on `x-fy-session-capability`, and stops
+ * mattering the next time that pane is launched, because every launch mints a prefixed one.
+ */
+export function isSessionCredential(bearer: string | undefined): bearer is string {
+  return bearer !== undefined && /^fys_[A-Za-z0-9_-]{43}$/u.test(bearer);
+}
+
+/**
+ * Reads what a request presented, asking the session directory about a session-shaped bearer.
+ *
+ * This is the asynchronous half of authentication, and the only one: it runs before the boundary, which
+ * is synchronous, and hands it the answer. A directory that fails is "nobody can say", which leaves the
+ * bearer unresolved and so anonymous — fail closed.
+ */
+export async function presentToken(credentials: ApiCredentials, bearer: string | undefined): Promise<PresentedToken> {
+  if (bearer === undefined) return {};
+  if (!isSessionCredential(bearer) || credentials.sessions === undefined) return { bearer };
+  const resolved = await credentials.sessions.resolve(bearer).catch(() => undefined);
+  return resolved === undefined
+    ? { bearer }
+    : { bearer, session: { capability: bearer, sessionId: resolved.sessionId } };
+}
 
 /**
  * Compares two secrets without leaking WHERE they differ through timing.
@@ -81,6 +163,10 @@ export function bearerToken(authorization: string | undefined): string | undefin
  * the configured token directly, so a daemon that failed to mint a token — configured token `''` —
  * accepted `Authorization: Bearer` from anyone, silently turning the whole API public. Here an
  * empty configured secret can never match, so a token-less daemon serves only its public routes.
+ *
+ * A session credential authenticates only as the session the directory named for THAT value
+ * ({@link presentToken}); one it named nothing for — unknown, rotated, or its session no longer active —
+ * is anonymous, exactly like a wrong admin token.
  */
 export function authenticate(credentials: ApiCredentials, presented: PresentedToken): Authentication {
   const admin = credentials.admin;
@@ -91,6 +177,14 @@ export function authenticate(credentials: ApiCredentials, presented: PresentedTo
     return { kind: 'authenticated', tokenClass: 'admin' };
   if (warden !== undefined && warden !== '' && candidates.some(candidate => secretsMatch(candidate, warden)))
     return { kind: 'authenticated', tokenClass: 'warden' };
+  const session = presented.session;
+  if (
+    session !== undefined &&
+    isSessionCredential(presented.bearer) &&
+    secretsMatch(presented.bearer, session.capability) &&
+    session.sessionId.trim() !== ''
+  )
+    return { kind: 'authenticated', tokenClass: 'session', sessionId: session.sessionId };
   return { kind: 'anonymous' };
 }
 
@@ -106,5 +200,16 @@ export function isPreKeyDeviceToken(bearer: string | undefined): boolean {
   return bearer !== undefined && /^fy_device_[A-Za-z0-9_-]{43}$/u.test(bearer);
 }
 
-/** A request that DID authenticate, and as which kind of caller. */
-export type AuthenticatedCredential = Extract<Authentication, { readonly kind: 'authenticated' }>;
+/**
+ * A request that DID authenticate, and as which kind of caller — as a route handler is handed it.
+ *
+ * A SESSION CREDENTIAL IS NOT ONE OF THESE YET, and that is enforced here rather than promised: the
+ * boundary refuses a session credential on every route it authenticates, so no handler can be reached by
+ * one, and this type says so — every `tokenClass` check in a handler stays exhaustive over what it can
+ * actually be handed. Widening this is the change that lets a session credential reach a route, and it
+ * makes the compiler name every handler that must then decide.
+ */
+export type AuthenticatedCredential = Exclude<
+  Extract<Authentication, { readonly kind: 'authenticated' }>,
+  { readonly tokenClass: 'session' }
+>;

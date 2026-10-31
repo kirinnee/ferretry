@@ -9,13 +9,21 @@ import {
 import { AgentToolError, type AgentToolService } from '../../agent-tools/service.ts';
 import type { AgentIdentityResolver, AgentToolCaller } from '../../agent-tools/types.ts';
 import { isHumanAdminActor } from '../../api/actor.ts';
+import {
+  bearerToken,
+  isSessionCredential,
+  type SessionCredentialDirectory,
+  secretsMatch,
+} from '../../api/authentication.ts';
 import { parseBody } from '../../api/body.ts';
 import { grantRefusalCode } from '../../api/capability.ts';
+import { SESSION_ID_HEADER } from '../../api/dispatcher.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, headerValue } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import { auditActorOf } from '../../audit/policy.ts';
+import type { AuditSink } from '../../audit/types.ts';
 import { decideTerminalOpener } from '../../terminal/ownership.ts';
 
 /**
@@ -29,9 +37,14 @@ import { decideTerminalOpener } from '../../terminal/ownership.ts';
  * authority and nothing more. It is served only over a privileged loopback carrier (`privilegedOnly`):
  * a paired device, or anything arriving through the relay, is refused before the handler runs.
  *
- * There is no session id in its path, its body (the call schema is strict, so a `sessionId` field is
- * refused) or any header it reads, so the only way to act as a session here is to hold that session's
- * secret. A refused credential or body is audited too, so guessing leaves a trace.
+ * There is no session id in its path or its body (the call schema is strict, so a `sessionId` field is
+ * refused), and the session is the credential's: `x-ferretry-session-id` may only agree with it — one
+ * naming another session is `401 session_mismatch`. So the only way to act as a session here is to hold
+ * that session's secret. A refused credential or body is audited too, so guessing leaves a trace.
+ *
+ * The credential arrives as `Authorization: Bearer fys_…` (the ferret session credential,
+ * docs/agent-tools.md) or on `x-fy-session-capability`, where a pane started before the `fys_` prefix
+ * still presents its unprefixed value until its next launch. Both are the one lookup.
  *
  * ## A PERSON'S ROUTES NAME THE SESSION, AND REFUSE AN AGENT
  *
@@ -53,6 +66,37 @@ import { decideTerminalOpener } from '../../terminal/ownership.ts';
  * no browser ever sends it, and that package is what a browser bundle is built from.
  */
 export const AGENT_SESSION_CAPABILITY_HEADER = 'x-fy-session-capability';
+
+/** The longest route the security log is told, within its one-line text bound. */
+const AUDITED_ROUTE_LENGTH = 160;
+
+/**
+ * The ferret session credential as the authorization boundary asks about it.
+ *
+ * The SAME resolver this route uses, so a value names one session whichever door it arrives at — the
+ * bearer on any route, or `x-fy-session-capability` here — and a refusal is written to the security log
+ * naming the session the credential named, never the credential.
+ */
+export function sessionCredentialDirectory(
+  identities: AgentIdentityResolver,
+  audit: AuditSink,
+): SessionCredentialDirectory {
+  return {
+    resolve: async capability => {
+      const identity = await identities.resolve(capability);
+      return identity === undefined ? undefined : { sessionId: identity.sessionId };
+    },
+    refused: async refusal => {
+      await audit.record({
+        event: 'session.credential-refused',
+        actor: { kind: 'host' },
+        subject: refusal.sessionId,
+        outcome: 'refused',
+        detail: { by: 'agent', reason: refusal.reason, route: refusal.route.slice(0, AUDITED_ROUTE_LENGTH) },
+      });
+    },
+  };
+}
 
 /** HTTP status for each refusal. A takeover is a 409: the call was fine and the surface is busy. */
 const STATUS: Readonly<Record<AgentToolError['code'], number>> = {
@@ -84,7 +128,19 @@ async function agentOf(
   identities: AgentIdentityResolver,
   context: RouteContext,
 ): Promise<AgentToolCaller> {
-  const capability = headerValue(context.request, AGENT_SESSION_CAPABILITY_HEADER)?.trim() ?? '';
+  // Only a session-shaped bearer is one: this route has always ignored any other `Authorization` value.
+  const bearer = bearerToken(headerValue(context.request, 'authorization'));
+  const presented = isSessionCredential(bearer) ? bearer : undefined;
+  const header = headerValue(context.request, AGENT_SESSION_CAPABILITY_HEADER)?.trim() ?? '';
+  if (presented !== undefined && header !== '' && !secretsMatch(presented, header)) {
+    await service.refusedCaller('two different session credentials');
+    throw new ApiError(
+      401,
+      `this request carries two different session credentials, as a bearer and in ${AGENT_SESSION_CAPABILITY_HEADER}; send one`,
+      'unauthorized',
+    );
+  }
+  const capability = presented ?? header;
   if (capability === '') {
     await service.refusedCaller('no session credential');
     throw new ApiError(
@@ -97,6 +153,17 @@ async function agentOf(
   if (identity === undefined) {
     await service.refusedCaller('unknown session credential');
     throw new ApiError(403, 'the session credential names no running session on this machine', 'forbidden');
+  }
+  // The credential says which session this is. A header can only agree; one that names another session
+  // is an attribution the credential does not back, so it is refused rather than quietly overruled.
+  const claimed = headerValue(context.request, SESSION_ID_HEADER)?.trim() ?? '';
+  if (claimed !== '' && claimed !== identity.sessionId) {
+    await service.refusedCaller('session id header names another session');
+    throw new ApiError(
+      401,
+      `this session credential names its own session, and ${SESSION_ID_HEADER} names a different one; drop the header — the daemon reads who you are from the credential`,
+      'session_mismatch',
+    );
   }
   return {
     kind: 'agent',
