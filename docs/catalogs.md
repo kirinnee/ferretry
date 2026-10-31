@@ -414,8 +414,9 @@ as JSON on stderr, so a script never skips the review a person would have read.
 
 ## Members (phase 2)
 
-**Status: the contract (2a) is written; nothing serves it yet.** Phase 2b builds the publisher's side,
-2c the app's. The wire is `packages/protocol/src/lib/catalog-member.ts` and
+**Status: the contract (2a) is written; 2b-1 serves the publisher's half of it.** The relay's `join` and
+`member` records, the member route table, member passkeys and closing a revoked member's live sessions are
+2b-2; the app is 2c. The wire is `packages/protocol/src/lib/catalog-member.ts` and
 `packages/relay/src/lib/member-session.ts`; the session records are
 [relay-protocol.md](relay-protocol.md) §14 "Member sessions", which also fixes the exact order of a join's
 checks.
@@ -479,6 +480,34 @@ code fills its own member, never the publisher), 64 live shares, 64 catalogs per
 and redeems an hour per share, 10 failed joins a minute per peer on the direct carrier. A full publisher refuses a
 join and leaves the code live. A member key unused for 90 days is removed; the member stays.
 
+### Built in 2b-1: shares and members on the publisher
+
+The publisher daemon keeps two files, `state/catalogs/members.json` and `shares.json` (directory 0700, files
+0600, atomic writes, a `schemaVersion`, zod-checked on read; a damaged file is an error, never reset). Only the
+SHA-256 of a code is stored.
+
+- **Admission** (`catalog-members/admission.ts`) is relay-protocol §14 step 2 as one synchronous function:
+  constant-time find against every share and a dummy, live/expired/ended, room (128 members, 512 keys, 200 per
+  member), the share's hourly count (60), burn or count a use, reserve a key slot. Room and hourly refusals
+  leave the code live. `commit` and `release` finish a reservation; a failed persist leaves the code spent.
+- **Redeem rules (owner decision Q5).** A single-use code burns before it is compared with the redeeming
+  browser's member; another member, or a code made for a new member, is refused and the owner is told
+  (`catalog.share.cross-member`). A multi-use code counts a use only when the redeem adds a catalog, and a
+  different member's browser is refused without counting.
+- **Sweep.** Passkey-less keys are removed when their 600 s window closes and idle keys after 90 days; a timer
+  adapter calls the pure sweep every minute.
+- **Owner routes**, all `sharing.use`: `POST/GET /v1/catalog-shares`, `DELETE /v1/catalog-shares/:shareId`,
+  `GET /v1/catalog-members`, `PATCH|DELETE /v1/catalog-members/:memberId`, and `DELETE` of one browser or one
+  catalog of a member. A ferret may list and nothing else. Minting needs a fresh `share-catalog` passkey from a
+  governed caller, claimed atomically. The code and link appear ONLY in the mint's answer. Minting is refused
+  (`share_link_unavailable`, 503) when the daemon has no address another person could open, so no code is
+  spent on a link that only works on this machine.
+- **Revoke writes first** and is idempotent. Closing a removed member's live sessions is a no-op port until 2b-2.
+  Deleting a catalog also removes it from every member and share.
+- **CLI.** `fy catalog share <catalog...> (--member <name> | --to <person>) --expires 15m|1h|3h|8h|1d
+[--multi [--cap N]]` prints the link once with a locally drawn QR; `fy catalog shares`, `fy catalog unshare`,
+  `fy member ls|rename|revoke|forget-key|take`. `--json` prints one payload; the code is in the mint's only.
+
 ## Declared gaps
 
 What this does **not** protect against, said plainly (more in design §4.8):
@@ -524,9 +553,9 @@ What this does **not** protect against, said plainly (more in design §4.8):
 
 ## What is built
 
-| Phase                                                                                                        | State                                                                                                                                                                                                                                                                                                                        |
-| ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **0. The contract**: items, manifests, files, canonical JSON, signing and checking, the review, the warnings | **Built.**                                                                                                                                                                                                                                                                                                                   |
-| **1. Signed catalog files**: make catalogs, export a file, install it on another machine with the review     | **Built**: the publisher side (`fy catalog`, the owner routes, the `sharing` capability), the installer side (`fy catalog install`, the install routes, a passkey per install), and the app screens (Add to catalog, Settings › Sharing › Catalogs, Install from a file). The next phase is 2 (members, live), once decided. |
-| **2. Members, live**: shares and codes, joining, member passkeys, the member route table, revoke             | **2a contract written** ([Members](#members-phase-2), relay-protocol §14 "Member sessions"). Next: 2b the publisher side, 2c the app, 2d the end-to-end test.                                                                                                                                                                |
-| 3–7. The offline library, public catalogs, revoke clean-up, hosted artifacts, passkey-locked ones            | Designed ([design/catalogs.md](design/catalogs.md) §6), not started.                                                                                                                                                                                                                                                         |
+| Phase                                                                                                        | State                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **0. The contract**: items, manifests, files, canonical JSON, signing and checking, the review, the warnings | **Built.**                                                                                                                                                                                                                                                                                                                                                                                                      |
+| **1. Signed catalog files**: make catalogs, export a file, install it on another machine with the review     | **Built**: the publisher side (`fy catalog`, the owner routes, the `sharing` capability), the installer side (`fy catalog install`, the install routes, a passkey per install), and the app screens (Add to catalog, Settings › Sharing › Catalogs, Install from a file). The next phase is 2 (members, live), once decided.                                                                                    |
+| **2. Members, live**: shares and codes, joining, member passkeys, the member route table, revoke             | **2a contract written** ([Members](#members-phase-2), relay-protocol §14 "Member sessions"). **2b-1 built**: shares, members, the owner routes and `fy catalog share` / `fy member` ([Built in 2b-1](#built-in-2b-1-shares-and-members-on-the-publisher)). Next: 2b-2 (relay `join`/`member` records, the member route table, member passkeys, closing sessions on revoke), 2c the app, 2d the end-to-end test. |
+| 3–7. The offline library, public catalogs, revoke clean-up, hosted artifacts, passkey-locked ones            | Designed ([design/catalogs.md](design/catalogs.md) §6), not started.                                                                                                                                                                                                                                                                                                                                            |

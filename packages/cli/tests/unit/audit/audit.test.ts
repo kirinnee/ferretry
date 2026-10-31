@@ -93,6 +93,15 @@ describe('audit render', () => {
     expect(lines.join('\n')).toContain('Passkey confirmation failed');
     expect(lines.join('\n')).not.toContain('Password confirmation');
     expect(lines.join('\n')).toContain('A secret was used');
+    for (const phrase of [
+      'A catalog share code was made',
+      'A catalog share code was ended',
+      'A person who reads shared catalogs was removed',
+      'One browser of a person who reads shared catalogs was removed',
+      'A shared catalog was taken away from a person',
+      "A share code made for one person was used by another person's browser",
+    ])
+      expect(lines.join('\n')).toContain(phrase);
   });
 
   it('should show who, the outcome and what it was done to', () => {

@@ -442,6 +442,42 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     subject: 'id',
     responseFields: { revision: ['signedManifest', 'manifest', 'revision'], itemIds: ['items', '*', 'itemId'] },
   },
+  // Sharing a catalog (docs/catalogs.md § Members). A mint's answer carries the code and the link, so the rule names
+  // the few identifier-shaped facts it keeps and nothing else: never the code, the link or the digest.
+  {
+    method: 'POST',
+    path: '/v1/catalog-shares',
+    event: 'catalog.share.minted',
+    responseFields: {
+      shareId: ['share', 'shareId'],
+      memberId: ['share', 'memberId'],
+      catalogIds: ['share', 'catalogIds', '*'],
+      uses: ['share', 'uses', 'kind'],
+      expiresAt: ['share', 'expiresAt'],
+    },
+  },
+  { method: 'DELETE', path: '/v1/catalog-shares/:shareId', event: 'catalog.share.ended', subject: 'shareId' },
+  {
+    method: 'DELETE',
+    path: '/v1/catalog-members/:memberId',
+    event: 'catalog.member.revoked',
+    subject: 'memberId',
+    responseFields: { keysRemoved: ['keysRemoved'], sharesEnded: ['sharesEnded'] },
+  },
+  {
+    method: 'DELETE',
+    path: '/v1/catalog-members/:memberId/keys/:keyId',
+    event: 'catalog.member.key-removed',
+    subject: 'memberId',
+    responseFields: { keyId: ['keyId'] },
+  },
+  {
+    method: 'DELETE',
+    path: '/v1/catalog-members/:memberId/catalogs/:catalogId',
+    event: 'catalog.member.catalog-removed',
+    subject: 'memberId',
+    responseFields: { catalogId: ['catalogId'] },
+  },
   { method: 'POST', path: '/v1/worktrees/remove', event: 'worktree.removed' },
   { method: 'POST', path: '/v1/browser/login', event: 'browser.opened', detail: { action: 'sign-in-window' } },
   // A proxy test makes this machine dial a proxy with the stored credentials, so it is kept by name: only whether

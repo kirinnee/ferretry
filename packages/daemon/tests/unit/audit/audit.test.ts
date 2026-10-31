@@ -707,6 +707,71 @@ describe('auditedRoutes', () => {
     should(JSON.stringify(logged)).not.match(/secret name|files/u);
   });
 
+  it('should record sharing and member changes by id, and never the code, the link or a label', async () => {
+    // Arrange
+    const SHARE = `shr_${'S'.repeat(22)}`;
+    const MEMBER = `mbr_${'M'.repeat(22)}`;
+    const KEY = `mk_${'K'.repeat(22)}`;
+    const CAT = `cat_${'A'.repeat(22)}`;
+    const CODE = `fy_share_${'z'.repeat(22)}`;
+    const LINK = `https://app.example/join#v1;url=x;share=${CODE}`;
+    const answers: Record<string, unknown> = {
+      'POST /v1/catalog-shares': {
+        share: {
+          shareId: SHARE,
+          memberId: MEMBER,
+          memberLabel: 'Some Person With Spaces',
+          catalogIds: [CAT],
+          uses: { kind: 'single' },
+          expiresAt: '2026-01-01T00:00:00.000Z',
+        },
+        code: CODE,
+        link: LINK,
+      },
+      'DELETE /v1/catalog-shares/:shareId': { shareId: SHARE },
+      'DELETE /v1/catalog-members/:memberId': { memberId: MEMBER, keysRemoved: 2, sharesEnded: 1 },
+      'DELETE /v1/catalog-members/:memberId/keys/:keyId': { memberId: MEMBER, keyId: KEY },
+      'DELETE /v1/catalog-members/:memberId/catalogs/:catalogId': { memberId: MEMBER, catalogId: CAT },
+    };
+    const { journal, routes } = decorated(
+      Object.fromEntries(Object.entries(answers).map(([key, body]) => [key, async () => jsonResponse(body)] as const)),
+    );
+    const api = await dispatcher(routes);
+
+    // Act
+    for (const [method, path] of [
+      ['POST', '/v1/catalog-shares'],
+      ['DELETE', `/v1/catalog-shares/${SHARE}`],
+      ['DELETE', `/v1/catalog-members/${MEMBER}`],
+      ['DELETE', `/v1/catalog-members/${MEMBER}/keys/${KEY}`],
+      ['DELETE', `/v1/catalog-members/${MEMBER}/catalogs/${CAT}`],
+    ] as const)
+      await api.dispatch(request({ method, path, headers: ADMIN, loopback: true, body: '{}' }));
+
+    // Assert
+    const logged = records(journal);
+    should(logged.map(record => record.event)).deepEqual([
+      'catalog.share.minted',
+      'catalog.share.ended',
+      'catalog.member.revoked',
+      'catalog.member.key-removed',
+      'catalog.member.catalog-removed',
+    ]);
+    should(logged[0]?.detail).containEql({
+      shareId: SHARE,
+      memberId: MEMBER,
+      catalogIds: CAT,
+      uses: 'single',
+      expiresAt: '2026-01-01T00:00:00.000Z',
+    });
+    should(logged[1]?.subject).equal(SHARE);
+    should(logged[2]?.subject).equal(MEMBER);
+    should(logged[2]?.detail).containEql({ keysRemoved: 2, sharesEnded: 1 });
+    should(logged[3]?.detail).containEql({ keyId: KEY });
+    should(logged[4]?.detail).containEql({ catalogId: CAT });
+    should(JSON.stringify(logged) + journal.lines.join('\n')).not.match(/fy_share_|Some Person|app\.example|share=/u);
+  });
+
   it('should record a catalog change with no ids when the answer is not JSON', async () => {
     // Arrange
     const { journal, routes } = decorated({

@@ -8,7 +8,7 @@ const lower = (value: string): string => value.toLowerCase();
  * A name matching more than one entry is refused with the ids, rather than the first being picked: the
  * commands that use this withdraw and delete.
  */
-function pick<T extends { readonly name: string }>(
+export function pick<T extends { readonly name: string }>(
   entries: readonly T[],
   idOf: (entry: T) => string,
   wanted: string,

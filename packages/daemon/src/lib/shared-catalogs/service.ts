@@ -91,6 +91,13 @@ export interface SharedCatalogDeps {
   readonly now: () => number;
   /** The most an exported file may hold. A reader refuses more, so the file is not made. Defaults to the contract's. */
   readonly exportMaxBytes?: number;
+  /** The people a catalog is shared with: told when a catalog is deleted so none keeps a name for it. */
+  readonly membership?: CatalogMembership;
+}
+
+/** What the member side does when a catalog goes (`CatalogMemberService.forgetCatalog`). */
+export interface CatalogMembership {
+  forgetCatalog(catalogId: string): Promise<void>;
 }
 
 /** A source read and frozen as far as a preview goes. */
@@ -209,7 +216,11 @@ export class SharedCatalogService {
 
   remove(catalogId: string): Promise<DeletedCatalog> {
     return this.#serially(async () => {
-      await this.deps.documents.write(withoutCatalog(await this.deps.documents.read(), catalogId));
+      const next = withoutCatalog(await this.deps.documents.read(), catalogId);
+      // BEFORE the catalog's own file changes: a failure in between leaves people without a catalog that still
+      // exists, never holding a name for one that is gone.
+      await this.deps.membership?.forgetCatalog(catalogId);
+      await this.deps.documents.write(next);
       return { catalogId };
     });
   }
