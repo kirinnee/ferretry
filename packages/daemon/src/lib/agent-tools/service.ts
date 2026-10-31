@@ -18,8 +18,11 @@ import {
   type BrowserTargetFields,
   type BrowserWaitCondition,
   browserReadModeOf,
-  type InputAgentView,
   browserTargetOf,
+  COPY_HANDLE_PREFIX,
+  type CopyMeta,
+  copyHandle,
+  type InputAgentView,
   type SurfaceController,
   type SurfaceControlRequest,
   type SurfaceControlView,
@@ -29,18 +32,19 @@ import {
 import { AGENT_FILE_LIMITS, AgentFileError, type AgentFiles, extensionOf, sizeWords } from '../agent-files/index.ts';
 import type { AuditSink } from '../audit/types.ts';
 import {
-  BrowserSessionError,
   type BrowserFileAction,
   type BrowserLifecycleOutcome,
   type BrowserPageAction,
+  BrowserSessionError,
   type BrowserSubsystem,
   pendingDialogOf,
 } from '../browser/runtime/index.ts';
 import { BrowserTransportError } from '../browser/transport/worker-protocol.ts';
 import type { AgentControlPolicy } from '../fleet/agent-control.ts';
 import { InputRequestError } from '../input-requests/errors.ts';
-import type { TextRedactor } from '../secrets/redaction.ts';
 import { TerminalMountError, type TerminalSubsystem } from '../runtime/mounts/terminals.ts';
+import type { TextRedactor } from '../secrets/redaction.ts';
+import { SecureCopyError } from '../secure-copy/errors.ts';
 import type { SurfaceControl } from './control.ts';
 import {
   auditHost,
@@ -52,7 +56,7 @@ import {
   surfaceReference,
   terminalInput,
 } from './policy.ts';
-import type { AgentInputPort, AgentToolCaller, AgentToolClock, ResolvedSurface } from './types.ts';
+import type { AgentCopyPort, AgentInputPort, AgentToolCaller, AgentToolClock, ResolvedSurface } from './types.ts';
 
 /**
  * Why a tool call was not carried out, in words an agent can act on.
@@ -120,6 +124,8 @@ export interface AgentToolPorts {
    * every way the terminal is known. An agent's read and wait are refused while it is quarantined.
    */
   readonly quarantinedUntil?: (sessionId: string, names: readonly (string | undefined)[]) => number | undefined;
+  /** Secure copies (docs/secure-copy.md); absent where none are wired, which refuses the `secure.*` tools. */
+  readonly copy?: AgentCopyPort;
 }
 
 /** The tools that change what a person would see, and so put up the driving marker. */
@@ -191,9 +197,20 @@ type LifecycleCall = Extract<
 /** How far up a popup's opener chain ownership is followed. */
 const MAX_OPENER_DEPTH = 8;
 
-/** The kind of surface a call is about; `input.wait` is about a request, not a surface. */
+/** The kind of surface a call is about; `input.wait` is about a request and `secure.*` about a copy, not a surface. */
 const kindOf = (call: AgentToolCall): SurfaceKind | undefined =>
-  call.tool === 'input.wait' ? undefined : call.tool.startsWith('terminal.') ? 'terminal' : 'browser';
+  call.tool === 'input.wait' || call.tool.startsWith('secure.')
+    ? undefined
+    : call.tool.startsWith('terminal.')
+      ? 'terminal'
+      : 'browser';
+
+/**
+ * Which "What agents may control" switch a call needs: its surface's, and for a secure copy the switch of what it
+ * reads — running a command is terminal control, reading a page is browser control.
+ */
+const switchOf = (call: AgentToolCall): SurfaceKind | undefined =>
+  call.tool === 'secure.copy' ? (call.source.kind === 'command' ? 'terminal' : 'browser') : kindOf(call);
 
 const plural = (count: number, word: string): string => `${String(count)} ${word}${count === 1 ? '' : 's'}`;
 
@@ -228,7 +245,7 @@ export class AgentToolService {
     const facts: CallFacts = {};
     let result: AgentToolResult;
     try {
-      const kind = kindOf(call);
+      const kind = switchOf(call);
       if (caller.kind === 'agent' && kind !== undefined && !(await this.ports.policy.allows(kind)))
         throw new AgentToolError('forbidden', controlRefusal(kind));
       if (caller.kind === 'agent' && FILE_TOOLS.has(call.tool) && !(await this.ports.policy.allows('files')))
@@ -364,6 +381,33 @@ export class AgentToolService {
           summary: `Opened ${kind}${surfaceReference('browser', call.name)} at ${page.url}${handedNote(call.askOwner)}.`,
         };
       }
+      case 'secure.copy': {
+        const captured = await this.copyPort().capture(sessionId, {
+          name: call.name,
+          source: call.source,
+          ...(call.expiresInSeconds === undefined ? {} : { expiresInSeconds: call.expiresInSeconds }),
+        });
+        facts.detail = { copyLength: captured.copy.length, transcript: captured.copy.exposure.transcript };
+        return {
+          summary: copiedSummary(captured.copy),
+          copies: [captured.copy],
+          ...(captured.command === undefined ? {} : { command: captured.command }),
+        };
+      }
+      case 'secure.list': {
+        const copies = this.copyPort().list(sessionId);
+        return {
+          summary:
+            copies.length === 0
+              ? 'This session holds no copies.'
+              : liveCopies(copies.filter(copy => copy.state === 'live').length),
+          copies: [...copies],
+        };
+      }
+      case 'secure.discard': {
+        const copy = this.copyPort().discard(sessionId, bareCopyName(call.handle));
+        return { summary: `${copy.handle} is ${copy.state}: its value is gone from the daemon.`, copies: [copy] };
+      }
       case 'input.wait': {
         const input = this.inputPort(caller);
         const view = await input.agentView(sessionId, call.id, call.timeoutMs ?? AGENT_TOOL_DEFAULT_WAIT_MS);
@@ -400,7 +444,10 @@ export class AgentToolService {
           | 'browser.tabs'
           | 'terminal.open'
           | 'browser.open'
-          | 'input.wait';
+          | 'input.wait'
+          | 'secure.copy'
+          | 'secure.list'
+          | 'secure.discard';
       }
     >,
     surface: ResolvedSurface,
@@ -863,6 +910,12 @@ export class AgentToolService {
     return this.ports.scrub === undefined ? text : this.ports.scrub(sessionId, text);
   }
 
+  private copyPort(): AgentCopyPort {
+    if (this.ports.copy === undefined)
+      throw new AgentToolError('unavailable', 'Secure copy is not available on this daemon.');
+    return this.ports.copy;
+  }
+
   private inputPort(caller: AgentToolCaller): AgentInputPort {
     if (caller.kind !== 'agent')
       throw new AgentToolError('bad_request', 'Only an agent raises or waits on an input request.');
@@ -1166,6 +1219,15 @@ function callFacts(call: AgentToolCall): AuditDetail {
       return { sensitivity: call.sensitivity };
     case 'input.wait':
       return { timeoutMs: call.timeoutMs ?? AGENT_TOOL_DEFAULT_WAIT_MS };
+    case 'secure.copy':
+      // The copy's name and where it came from; never a command's arguments, which may hold anything.
+      return {
+        copy: copyHandle(call.name),
+        source: call.source.kind,
+        ...(call.source.kind === 'command' ? { args: call.source.argv.length - 1 } : {}),
+      };
+    case 'secure.discard':
+      return { copy: copyHandle(bareCopyName(call.handle)) };
     case 'browser.dialog':
       return {
         action: call.action,
@@ -1243,6 +1305,18 @@ function callFacts(call: AgentToolCall): AuditDetail {
     default:
       return {};
   }
+}
+
+/** What a capture caught, in one sentence: where from, how long, and whether it was already seen. */
+function copiedSummary(copy: CopyMeta): string {
+  const from = copy.from.origin ?? copy.from.program ?? copy.from.kind;
+  const seen =
+    copy.exposure.transcript === 'found'
+      ? ' WARNING: this value was already in your transcript before it was sealed, so it is NOT protected; tell the owner it should be rotated.'
+      : copy.exposure.pageReadBeforeCapture === true
+        ? ' You read this page before sealing it, so the value may already be in your context.'
+        : '';
+  return `Sealed ${plural(copy.length, 'character')} from ${from} as ${copy.handle}, until ${copy.expiresAt}. You cannot read it; paste it by handle.${seen}`;
 }
 
 /** Where an input request stands, in one sentence an agent can act on. */
@@ -1450,6 +1524,7 @@ function shown(surface: SurfaceKind, rows: readonly (AgentSurface | undefined)[]
  */
 function translate(error: unknown): AgentToolError | undefined {
   if (error instanceof AgentToolError) return error;
+  if (error instanceof SecureCopyError) return new AgentToolError(error.code, error.message);
   if (error instanceof InputRequestError)
     return new AgentToolError(error.code === 'gone' ? 'not_found' : error.code, error.message);
   if (error instanceof TerminalMountError) return new AgentToolError(error.code, error.message);
@@ -1504,3 +1579,11 @@ function humanCheckNote(answer: BrowserActionResult, pageId: string): string {
   if (page?.challenge === undefined) return '';
   return ' The page appears to be showing a human check (a captcha or a "checking your browser" page). Do not try to solve or get around it: ask your owner to take the page over in Ferretry and solve it themselves, then carry on.';
 }
+
+/** "This session holds 2 live copies." */
+const liveCopies = (count: number): string =>
+  `This session holds ${String(count)} live ${count === 1 ? 'copy' : 'copies'}.`;
+
+/** A copy's name as a call wrote it: `sealed:vercel` and `vercel` are one copy, whether or not the wire parsed it. */
+const bareCopyName = (handle: string): string =>
+  handle.startsWith(COPY_HANDLE_PREFIX) ? handle.slice(COPY_HANDLE_PREFIX.length) : handle;

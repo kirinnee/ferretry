@@ -49,6 +49,7 @@ export * from './foreign-history.ts';
 export * from './grants.ts';
 export * from './input-request.ts';
 export * from './login-entries.ts';
+export * from './secure-copy.ts';
 export * from './handover.ts';
 export * from './harness-login.ts';
 export * from './harness-update.ts';

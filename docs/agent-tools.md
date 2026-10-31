@@ -42,6 +42,8 @@ The wire body is `AgentToolCallSchema` (`packages/protocol/src/lib/agent-tools.t
 
 A single value at a prompt (a password, passphrase, one-time or 2FA code) is `terminal.request_input`, not `terminal.ask_owner`: the owner types it on a card (or `fy input answer`), and the agent never receives it ([input-requests.md](input-requests.md)). `fy input ls|answer|cancel` is the owner's command and refuses to run inside a ferret.
 
+A value the agent must move but not see (a token it just minted, a key a command prints) is `secure.copy`: the daemon captures it as `sealed:<name>`, masks it everywhere it scrubs text, and the agent learns only its source, length and expiry. `secure.list` shows the session's copies and `secure.discard` lets go of one. Pasting a copy is an owner-approved input request ([secure-copy.md](secure-copy.md)).
+
 The MCP names swap the dot for an underscore: `terminal_open`, `terminal_ask_owner`, `browser_ask_owner`, …
 
 A terminal opens the owner's own login shell (zsh, bash, fish …), not `/bin/sh`; a `command` is typed into it

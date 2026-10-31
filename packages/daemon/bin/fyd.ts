@@ -319,6 +319,7 @@ import {
   stackSamplerEnabled,
   systemLegacyWireTimers,
   TmuxPaneSnapshot,
+  TranscriptFileExposure,
   TunnelProxyProbe,
   type ViewerSocket,
   WebCryptoPasskeyCrypto,
@@ -640,8 +641,9 @@ import {
   AgendaService,
   AgendaTurnNudge,
   AgendaWaker,
-  type AgentInputPort,
+  type AgentCopyPort,
   AgentFiles,
+  type AgentInputPort,
   AgentSendFailureNotifier,
   AgentToolService,
   ANALYTICS_BACKSTOP_MS,
@@ -1012,6 +1014,7 @@ import {
   type SecretSubsystem,
   SecretUseService,
   SecretVault,
+  SecureCopyService,
   SecuritySettingsService,
   SelfRestartCoordinator,
   SendDraftRefused,
@@ -5998,6 +6001,7 @@ function createAgentToolsSubsystem(input: {
   readonly files: AgentFiles;
   /** The vault redactor every operator read is scrubbed by; a page's text goes through it too. */
   readonly redactor: Pick<SecretRedactor, 'batch'>;
+  readonly copy: AgentCopyPort;
 }): MountedSubsystems['agentTools'] {
   const clock = { now: () => Date.now() };
   const control = new SurfaceControl(
@@ -6031,12 +6035,21 @@ function createAgentToolsSubsystem(input: {
       input: input.input,
       scrub: input.scrub,
       quarantinedUntil: input.quarantinedUntil,
+      copy: input.copy,
       redactor: input.redactor,
       clock,
       sleep: async milliseconds => await Bun.sleep(milliseconds),
     }),
     identities: agentIdentities(input.storage),
   };
+}
+
+/** The folder a session works in, from its own document; nothing when the session is unknown. */
+async function sessionFolder(storage: DaemonStorage, sessionId: string): Promise<string | undefined> {
+  const id = tryParseSessionId(sessionId);
+  if (id === undefined || storage.findSession(id) === undefined) return undefined;
+  const config = SessionConfigSchema.safeParse(await storage.readConfig(id).catch(() => undefined));
+  return config.success ? config.data.cwd : undefined;
 }
 
 /** How often a request that outlived its time is found and ended, so its card does not wait for the next event. */
@@ -9850,6 +9863,31 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         logins: new InputLoginAdapter(loginDirectory, loginVault),
       });
       inputRequests = inputRequestService;
+      // Secure copy (docs/secure-copy.md): a value an agent may name and never read. It lives in this process's
+      // memory only and is masked by the same registry as a value typed for the owner, from the moment it is read.
+      const secureCopies = new SecureCopyService({
+        clock: { now: () => Date.now() },
+        runner: new BunSecretChildRunner(),
+        folders: { folderOf: async sessionId => await sessionFolder(storage, sessionId) },
+        exposure: new TranscriptFileExposure(createTranscriptFileResolver(storage)),
+        masking: justTyped,
+        redact: async text => await secretRedactor.redact(text),
+      });
+      setInterval(
+        asActivity(activities, 'secure-copies', async () => {
+          secureCopies.purge();
+          for (const sessionId of secureCopies.sessions()) {
+            const id = tryParseSessionId(sessionId);
+            const state =
+              id === undefined || storage.findSession(id) === undefined
+                ? undefined
+                : SessionStateSchema.safeParse(await storage.readState(id).catch(() => undefined));
+            if (state === undefined || (state.success && INPUT_ENDED_SESSION_STATUSES.has(state.data.status)))
+              secureCopies.drop(sessionId);
+          }
+        }),
+        INPUT_REQUEST_SWEEP_MS,
+      ).unref();
       const sweepInputRequests = asActivity(
         activities,
         'input-requests',
@@ -11329,14 +11367,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           input: inputRequestService,
           scrub: (sessionId, text) => inputRequestService.scrub(sessionId, text),
           quarantinedUntil: (sessionId, names) => inputRequestService.quarantinedUntil(sessionId, names),
+          copy: secureCopies,
           files: new AgentFiles({
             fs: new NodeAgentFilesystem(),
-            folderOf: async sessionId => {
-              const id = tryParseSessionId(sessionId);
-              if (id === undefined || storage.findSession(id) === undefined) return undefined;
-              const config = SessionConfigSchema.safeParse(await storage.readConfig(id).catch(() => undefined));
-              return config.success ? config.data.cwd : undefined;
-            },
+            folderOf: async sessionId => await sessionFolder(storage, sessionId),
             readAttachment: async (sessionId, attachmentId) => {
               const { attachment, bytes } = await attachmentStore.download(sessionId, attachmentId);
               return { filename: attachment.filename, bytes };

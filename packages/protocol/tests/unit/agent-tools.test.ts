@@ -145,6 +145,9 @@ describe('agent tool schemas', () => {
       { tool: 'browser.highlight', name: 'app', clear: true },
       { tool: 'browser.close', name: 'app' },
       { tool: 'browser.ask_owner', name: 'app' },
+      { tool: 'secure.copy', name: 'token', source: { kind: 'command', argv: ['gh'] } },
+      { tool: 'secure.list' },
+      { tool: 'secure.discard', handle: 'sealed:token' },
     ];
 
     // Act

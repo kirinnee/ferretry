@@ -1,4 +1,15 @@
-import type { AgendaId, AuditActor, InputAgentView, InputRaise, SurfaceKind, SurfaceOpener } from '@ferretry/protocol';
+import type {
+  AgendaId,
+  AuditActor,
+  CopyCapture,
+  CopyCommandReport,
+  CopyMeta,
+  CopyName,
+  InputAgentView,
+  InputRaise,
+  SurfaceKind,
+  SurfaceOpener,
+} from '@ferretry/protocol';
 
 /**
  * WHO IS CALLING A TOOL — derived by the route, never stated by the caller.
@@ -80,4 +91,17 @@ export interface AgentInputPort {
   pendingOn(sessionId: string, target: { readonly kind: SurfaceKind; readonly key: string }): AgendaId | undefined;
   /** Runs `work` as one turn in the session, so a send or close and a raise or secure write never interleave. */
   exclusive<T>(sessionId: string, work: () => Promise<T>): Promise<T>;
+}
+
+/**
+ * What the agent tools ask of secure copy (docs/secure-copy.md): capture a value under a name, list the session's
+ * copies, discard one. It throws `SecureCopyError` for a refusal. Nothing it returns carries a value.
+ */
+export interface AgentCopyPort {
+  capture(
+    sessionId: string,
+    request: CopyCapture,
+  ): Promise<{ readonly copy: CopyMeta; readonly command?: CopyCommandReport }>;
+  list(sessionId: string): readonly CopyMeta[];
+  discard(sessionId: string, name: CopyName): CopyMeta;
 }

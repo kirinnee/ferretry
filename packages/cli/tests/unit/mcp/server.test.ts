@@ -192,6 +192,46 @@ describe('McpServer — the tools', () => {
     ]);
   });
 
+  it('should send secure_copy as its wire call and answer with the copy, never a value', async () => {
+    // Arrange
+    const { calls, request } = harness(async () => ({
+      summary: 'Sealed 40 characters from gh as sealed:token.',
+      copies: [
+        {
+          handle: 'sealed:token',
+          name: 'token',
+          from: { kind: 'command', program: 'gh' },
+          length: 40,
+          lines: 1,
+          capturedAt: '2026-10-31T09:00:00.000Z',
+          expiresAt: '2026-10-31T10:00:00.000Z',
+          state: 'live',
+          exposure: { transcript: 'found' },
+          uses: 0,
+        },
+      ],
+      command: { outcome: 'exited', exitCode: 0, stderr: 'warning: [sealed:token]' },
+    }));
+
+    // Act
+    const answer = (await request(
+      'tools/call',
+      toolCall('secure_copy', { name: 'token', source: { kind: 'command', argv: ['gh', 'auth', 'token'] } }),
+    )) as { result: { content: { text: string }[] } };
+
+    // Assert
+    should(calls).deepEqual([
+      { tool: 'secure.copy', name: 'token', source: { kind: 'command', argv: ['gh', 'auth', 'token'] } },
+    ]);
+    should(answer.result.content[0]?.text).equal(
+      [
+        'Sealed 40 characters from gh as sealed:token.',
+        '  sealed:token  live  40 chars from gh  until 2026-10-31T10:00:00.000Z  [already in your transcript: not protected]',
+        'stderr (masked): warning: [sealed:token]',
+      ].join('\n'),
+    );
+  });
+
   it('should send each tool as its wire call, and answer with the daemon’s words', async () => {
     // Arrange
     const { calls, request } = harness(async () => ({ summary: 'Opened %terminal:dev.', output: 'ready' }));
@@ -324,8 +364,9 @@ describe('McpServer — the tools', () => {
 
     // Assert — 20.0 KB measured with refs, page lifecycle and file tools, ~27.4 KB once pointer and keys land
     // (#F199): a runtime that defers MCP schemas (Claude) pays only the names; one that loads them all
-    // (Codex) pays this. 30 KB is the ceiling; owner-gated groups are listed only while they are on.
-    should(bytes).be.below(30_000);
+    // (Codex) pays this. 29.8 KB measured with the input bridge and saved logins; 30.8 KB once secure copy's three
+    // tools land (#F230, kept to about 1 KB). 32 KB is the ceiling; owner-gated groups are listed only while they are on.
+    should(bytes).be.below(32_000);
     should(longest).be.belowOrEqual(300);
   });
 

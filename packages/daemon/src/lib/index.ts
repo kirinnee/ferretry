@@ -81,6 +81,7 @@ export * from './relay/index.ts';
 export * from './runtime/index.ts';
 export * from './scratch/index.ts';
 export * from './secrets/index.ts';
+export * from './secure-copy/index.ts';
 export * from './security/index.ts';
 export * from './session/attach/index.ts';
 export * from './session/auto-resume/index.ts';
