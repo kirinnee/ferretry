@@ -478,7 +478,8 @@ never see each other (Q14) and never share onward (Q16).
 **Bounds.** 128 members and 512 member keys per publisher, 200 keys per member (so one leaked multi-use
 code fills its own member, never the publisher), 64 live shares, 64 catalogs per share, 60 successful joins
 and redeems an hour per share, 10 failed joins a minute per peer on the direct carrier. A full publisher refuses a
-join and leaves the code live. A member key unused for 90 days is removed; the member stays.
+join and leaves the code live. A member key unused for 90 days is removed; the member stays. Until the sweep reaches it, such a key is already
+refused (`4403`) and opening a session never refreshes it: one predicate decides both.
 
 ### Built in 2b-1: shares and members on the publisher
 
@@ -552,10 +553,12 @@ now has `join` and `member` ([relay-protocol.md](relay-protocol.md) §14 "Member
 - **Redeem** awaits the write of the burn before it answers anything — a Q5 refusal and a redeem that
   adds nothing included — and commits or releases its reservation in a `finally`.
 - **Revoke closes sessions.** Removing a browser, revoking a member or deleting a catalog ends the
-  member's live sessions with `4403`, after the write. The idle and passkey-less sweep that 2b-1 built runs in the
+  member's live sessions with `4403`, after the write. A browser that **leaves** (`DELETE /v1/shared/me/keys/self`)
+  gets its `200` first and then `4440` (concluded), never `4403`, so it can tell "I left" from "I was refused";
+  the key's other sessions end with `4403`. The idle and passkey-less sweep that 2b-1 built runs in the
   daemon and now has sessions to close.
 - **Audit** ([audit.md](audit.md)): `catalog.member.joined`, `catalog.member.passkey-added` (both kept),
-  `catalog.member.unlocked` and `catalog.member.join-refused` (general). Never the code, a key or a proof.
+  `catalog.member.unlocked` and `catalog.member.join-refused` (general; at most one a minute per carrier, with a `count`). Never the code, a key or a proof.
 - **Not in 2b-2:** the app (2c) and the end-to-end test with a real browser (2d). Known limit: after a
   revoke the member's rows in `member-passkeys.json` are not removed when the member is (the closer is not told
   key ids), which is harmless because every request re-checks the key.

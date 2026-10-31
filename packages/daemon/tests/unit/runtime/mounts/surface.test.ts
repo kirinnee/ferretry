@@ -1582,7 +1582,12 @@ describe('the mounted daemon surface', () => {
 });
 
 describe('the member sessions and the main table', () => {
-  const member = { memberId: 'mbr_AAAAAAAAAAAAAAAAAAAAAA', keyId: 'mk_AAAAAAAAAAAAAAAAAAAAAA', appSession: 'app-1' };
+  const member = {
+    memberId: 'mbr_AAAAAAAAAAAAAAAAAAAAAA',
+    keyId: 'mk_AAAAAAAAAAAAAAAAAAAAAA',
+    appSession: 'app-1',
+    sessionId: 's1',
+  };
   const refuse = (): never => {
     throw new Error('a request without a member reached the member side');
   };
@@ -1600,6 +1605,7 @@ describe('the member sessions and the main table', () => {
       removeKey: never,
     },
     passkeys: {} as SharedRouteDeps['passkeys'],
+    sessions: { spare: () => () => undefined },
     catalogs: { catalogs: never, signedManifest: never, frozenItem: never },
     publisher: () => ({ daemonId: '', daemonName: '', carriers: [] }),
     audit: { record: async () => undefined },

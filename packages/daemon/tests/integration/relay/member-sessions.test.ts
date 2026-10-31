@@ -79,6 +79,7 @@ import { RelayLink, type RelayLinkSocket } from '../../../src/lib/relay/index.ts
 import { tunnelMemberRequest } from '../../../src/lib/relay/tunnel.ts';
 import { directCarrierSocketRoute } from '../../../src/lib/runtime/mounts/direct-carrier.ts';
 import { ChallengeLedger } from '../../../src/lib/step-up/registry.ts';
+import type { StoredPasskey } from '../../../src/lib/step-up/types.ts';
 import { request } from '../../unit/api/support.ts';
 
 const relayCrypto = new WebCryptoRelayCrypto();
@@ -90,6 +91,7 @@ const BOX_KEY = toBase64Url(new Uint8Array(32).fill(7));
 const field = (record: { readonly message: Record<string, unknown> } | undefined, name: string): unknown =>
   record?.message[name];
 const CLIENT_NAME = 'Firefox on a Mac';
+const CREDENTIAL = new TextEncoder().encode('credential-one');
 const MINUTE = 60_000;
 const MINT: CatalogShareMintRequest = {
   catalogIds: [CATALOG],
@@ -143,6 +145,7 @@ async function publisher() {
     },
   };
   const live = new LiveMemberSessions();
+  const stored: StoredPasskey[] = [];
   const members = new CatalogMemberService({
     members: new FileCatalogMembersStore(paths, files),
     shares: new FileCatalogSharesStore(paths, files),
@@ -166,22 +169,35 @@ async function publisher() {
   });
   const passkeys = new MemberPasskeyService({
     store: {
-      list: async () => [],
-      holder: async () => undefined,
-      add: async () => {
-        throw new Error('this suite registers no passkey');
+      list: async keyId => stored.filter(row => row.deviceId === keyId),
+      holder: async credentialId => stored.find(row => row.credentialId === credentialId)?.deviceId,
+      add: async passkey => {
+        stored.push(passkey);
       },
-      updateSignCount: async () => false,
-      forgetDevice: async () => undefined,
+      updateSignCount: async () => true,
+      forgetDevice: async keyId => {
+        stored.splice(0, stored.length, ...stored.filter(row => row.deviceId !== keyId));
+      },
     },
+    // This suite owns no authenticator: any well-formed ceremony is taken as done, so a key can be unlocked.
     verifier: {
-      verifyRegistration: async () => ({ ok: false, reason: 'no authenticator in this suite' }),
-      verifyAssertion: async () => ({ ok: false, reason: 'no authenticator in this suite' }),
+      verifyRegistration: async () => ({
+        ok: true,
+        credentialId: CREDENTIAL,
+        algorithm: -7,
+        publicKeySpki: new Uint8Array(32).fill(7),
+        signCount: 0,
+        origin: APP_ORIGIN,
+      }),
+      verifyAssertion: async () => ({ ok: true, signCount: 1, origin: APP_ORIGIN }),
     },
     challenges: new ChallengeLedger(),
     random: { bytes: length => crypto.getRandomValues(new Uint8Array(length)) },
     clock: { nowMs: () => clock.now },
-    members: { passkeyAdded: async keyId => await members.passkeyAdded(keyId) },
+    members: {
+      passkeyAdded: async keyId => await members.passkeyAdded(keyId),
+      access: async keyId => await members.access(keyId),
+    },
     catalogNames: async () => new Map([[CATALOG, 'Workshop']]),
     allowedOrigins: () => [APP_ORIGIN],
     relyingPartyName: 'Ferretry',
@@ -192,6 +208,7 @@ async function publisher() {
   const dispatcher = new MemberDispatcher({
     members,
     passkeys,
+    sessions: live,
     catalogs: {
       catalogs: async () => [{ id: CATALOG, name: 'Workshop', revision: 3 }],
       signedManifest: async () => {
@@ -497,6 +514,27 @@ async function ask(peer: Peer, id: number, method: string, path: string, body?: 
   return { status: res.status, body: JSON.parse(res.body) as { code?: string } & Record<string, unknown> };
 }
 
+/** Registers the key's one passkey inside its window and unlocks it, as the app does, on an open member session. */
+async function unlock(peer: Peer): Promise<void> {
+  const text = (value: Uint8Array | string) => Buffer.from(value).toString('base64url');
+  const credentialId = text(CREDENTIAL);
+  await ask(peer, 101, 'POST', '/v1/shared/passkeys/options', { origin: APP_ORIGIN });
+  const registered = await ask(peer, 102, 'POST', '/v1/shared/passkeys', {
+    credentialId,
+    clientDataJSON: text('client'),
+    attestationObject: text('attestation'),
+  });
+  should(registered.status).equal(201);
+  await ask(peer, 103, 'POST', '/v1/shared/unlock/options', { origin: APP_ORIGIN });
+  const unlocked = await ask(peer, 104, 'POST', '/v1/shared/unlock', {
+    credentialId,
+    clientDataJSON: text('client'),
+    authenticatorData: text('authenticator'),
+    signature: text('signature'),
+  });
+  should(unlocked.status).equal(200);
+}
+
 /** Joins with a fresh code and answers who the publisher made. */
 async function joined(carrier: Carrier, rig: Publisher, who: Browser) {
   const minted = await rig.members.mint(MINT);
@@ -642,13 +680,70 @@ for (const build of [directCarrier, relayCarrier]) {
       await sendMember(peer, who, response.keyId);
       await peer.recordsAfter(1);
 
-      // Act — the window the join reported has passed
+      // Act — the window the join reported has passed, with no passkey made
       rig.clock.now = Date.parse(response.passkeyWindowEndsAt) + MINUTE;
       const options = await ask(peer, 1, 'POST', '/v1/shared/passkeys/options', { origin: APP_ORIGIN });
 
-      // Assert
-      should(options.status).equal(403);
-      should(options.body.code).equal('member_registration_closed');
+      // Assert — a key with no passkey whose window has closed is over: the request is refused as a
+      // browser that is no longer here, and the same key cannot open another session
+      should(options.status).equal(401);
+      const again = await carrier.open();
+      await sendMember(again, who, response.keyId);
+      await again.until(() => again.closeCodes().includes(RELAY_CLOSE_CODES.authRejected));
+    });
+
+    it('should refuse a key idle for 91 days at the door, and not let opening a session revive it', async () => {
+      // Arrange — a key that registered its passkey, so only idleness can end it
+      const rig = await publisher();
+      const carrier = build(rig);
+      const who = await browser();
+      const { response } = await joined(carrier, rig, who);
+      const first = await carrier.open();
+      await sendMember(first, who, response.keyId);
+      await first.recordsAfter(1);
+      await unlock(first);
+
+      // Act — 91 days later, before any sweep has run
+      rig.clock.now += 91 * 24 * 60 * MINUTE;
+      const late = await carrier.open();
+      await sendMember(late, who, response.keyId);
+      await late.until(() => late.closeCodes().includes(RELAY_CLOSE_CODES.authRejected));
+      const retry = await carrier.open();
+      await sendMember(retry, who, response.keyId);
+      await retry.until(() => retry.closeCodes().includes(RELAY_CLOSE_CODES.authRejected));
+
+      // Assert — nothing was answered, and the refusals did not refresh the key's last use
+      should((await late.records()).length).equal(0);
+      should((await retry.records()).length).equal(0);
+    });
+
+    it("should answer a leave with its 200 and then conclude with 4440, never 4403, ending the key's other tab", async () => {
+      // Arrange — one key, two tabs, the first one unlocked
+      const rig = await publisher();
+      const carrier = build(rig);
+      const who = await browser();
+      const { response } = await joined(carrier, rig, who);
+      const leaving = await carrier.open();
+      await sendMember(leaving, who, response.keyId);
+      await leaving.recordsAfter(1);
+      await unlock(leaving);
+      const otherTab = await carrier.open();
+      await sendMember(otherTab, who, response.keyId);
+      await otherTab.recordsAfter(1);
+
+      // Act
+      const left = await ask(leaving, 201, 'DELETE', '/v1/shared/me/keys/self');
+
+      // Assert — the browser got its 200 and then a conclusion: it can tell "I left" from "I was refused"
+      should(left.status).equal(200);
+      should(left.body).containDeep({ keyId: response.keyId });
+      await leaving.until(() => leaving.closeCodes().includes(RELAY_SESSION_CONCLUDED_CLOSE_CODE));
+      should(leaving.closeCodes()).not.containEql(RELAY_CLOSE_CODES.authRejected);
+
+      // Assert — the key is gone, so its other tab is refused the ordinary way
+      await otherTab.until(() => otherTab.closeCodes().includes(RELAY_CLOSE_CODES.authRejected));
+      should(rig.live.size).equal(0);
+      should((await rig.members.listMembers()).members[0]?.keys).deepEqual([]);
     });
 
     it('should end an unknown key and a bad proof with the same 4403', async () => {
@@ -686,7 +781,7 @@ for (const build of [directCarrier, relayCarrier]) {
       await peer.recordsAfter(1);
       const inFlight = tunnelMemberRequest(
         { method: 'POST', path: '/v1/shared/passkeys/options', body: JSON.stringify({ origin: APP_ORIGIN }) },
-        { memberId: response.memberId, keyId: response.keyId, appSession: APP_SESSION },
+        { memberId: response.memberId, keyId: response.keyId, appSession: APP_SESSION, sessionId: 'in-flight' },
         'in-flight',
       );
       should(rig.live.size).equal(1);

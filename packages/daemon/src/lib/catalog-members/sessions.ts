@@ -4,6 +4,8 @@ interface Live {
   readonly memberId: string;
   readonly keyId: string;
   readonly end: () => void;
+  readonly sessionId: string;
+  spared: boolean;
 }
 
 /**
@@ -18,8 +20,8 @@ export class LiveMemberSessions implements MemberSessionCloser {
   readonly #live = new Set<Live>();
 
   /** A member session opened. Returns the call for when it ends; the end is idempotent. */
-  track(memberId: string, keyId: string, end: () => void): () => void {
-    const entry: Live = { memberId, keyId, end };
+  track(memberId: string, keyId: string, end: () => void, sessionId: string): () => void {
+    const entry: Live = { memberId, keyId, end, sessionId, spared: false };
     this.#live.add(entry);
     return () => {
       this.#live.delete(entry);
@@ -34,8 +36,18 @@ export class LiveMemberSessions implements MemberSessionCloser {
     this.#close(entry => entry.memberId === memberId);
   }
 
+  /** A spared session is left for its own route to conclude: it is the one asking for its key to go. */
   async closeKey(memberId: string, keyId: string): Promise<void> {
-    this.#close(entry => entry.memberId === memberId && entry.keyId === keyId);
+    this.#close(entry => entry.memberId === memberId && entry.keyId === keyId && !entry.spared);
+  }
+
+  /** Keeps `closeKey` from ending this session until the returned call; `closeMember` still ends it. */
+  spare(sessionId: string): () => void {
+    const spared = [...this.#live].filter(entry => entry.sessionId === sessionId);
+    for (const entry of spared) entry.spared = true;
+    return () => {
+      for (const entry of spared) entry.spared = false;
+    };
   }
 
   /** Ended from a copy: ending a session releases its entry, which must not disturb this walk. */

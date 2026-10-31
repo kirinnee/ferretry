@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { sweepMembers } from '../../../src/lib/catalog-members/sweep.ts';
+import { keyExpired, sweepMembers } from '../../../src/lib/catalog-members/sweep.ts';
 import { DAY, iso, keyId, memberId, membersDoc, MINUTE, storedKey, storedMember, T0 } from './support.ts';
 
 const WINDOW = 10 * MINUTE;
@@ -197,5 +197,25 @@ describe('sweepMembers: the document', () => {
 
     // Assert
     should(document.members[0]?.keys).have.length(1);
+  });
+});
+
+describe('keyExpired', () => {
+  it('should be the same verdict the sweep removes on, whichever reason ended the key', () => {
+    // Arrange
+    const keys = [
+      storedKey(1, { passkeyCount: 0, passkeyWindowEndsAt: iso(T0) }),
+      storedKey(2, { lastSeenAt: iso(T0 - 90 * DAY) }),
+      storedKey(3, { lastSeenAt: iso(T0 - 90 * DAY + 1) }),
+      storedKey(4, { passkeyCount: 0, passkeyWindowEndsAt: iso(T0 + 1) }),
+    ];
+
+    // Act
+    const verdicts = keys.map(key => keyExpired(key, T0));
+    const removed = sweepMembers(membersDoc(storedMember(1, { keys })), T0).removed.map(entry => entry.keyId);
+
+    // Assert
+    should(verdicts).eql([true, true, false, false]);
+    should(removed).eql([keyId(1), keyId(2)]);
   });
 });

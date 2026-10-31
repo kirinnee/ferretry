@@ -99,6 +99,8 @@ type Attempted = { readonly joined: MemberJoinedResponse } | { readonly why: str
 
 export class MemberJoinGate {
   readonly #budget = new FailedJoinBudget();
+  /** Per carrier: when a refusal was last written, and how many were left out since. */
+  readonly #written = new Map<string, { at: number; folded: number }>();
 
   constructor(private readonly deps: MemberJoinDeps) {}
 
@@ -175,12 +177,23 @@ export class MemberJoinGate {
     };
   }
 
+  /**
+   * A flood of bad codes must not flood the general audit store: one entry per carrier per minute, the first at
+   * once, each saying how many refusals it stands for. What is left out rides on the next entry written.
+   */
   async #refused(carrier: MemberJoinCarrier, why: string): Promise<void> {
+    const now = this.deps.now();
+    const last = this.#written.get(carrier.kind);
+    if (last !== undefined && now - last.at < MINUTE_MS) {
+      last.folded += 1;
+      return;
+    }
+    this.#written.set(carrier.kind, { at: now, folded: 0 });
     await this.#record({
       event: 'catalog.member.join-refused',
       actor: { kind: 'anonymous' },
       outcome: 'refused',
-      detail: { carrier: carrier.kind, reason: why },
+      detail: { carrier: carrier.kind, reason: why, count: (last?.folded ?? 0) + 1 },
     });
   }
 

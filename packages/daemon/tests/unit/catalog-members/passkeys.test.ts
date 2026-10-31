@@ -96,7 +96,13 @@ const accessOf = (n = 1, overrides: Partial<MemberAccess> = {}): MemberAccess =>
   ...overrides,
 });
 
-const callerOf = (access: MemberAccess = accessOf(), appSession = 'tab-one') => ({ access, appSession });
+/** The key as the service knows it now: what the last caller built, unless a case says it is gone. */
+const KNOWN = new Map<string, MemberAccess>();
+
+const callerOf = (access: MemberAccess = accessOf(), appSession = 'tab-one') => {
+  KNOWN.set(access.keyId, access);
+  return { access, appSession };
+};
 
 const registrationBody = async (authenticator: Authenticator, credentialId = CREDENTIAL_ID) => {
   const made = await registration(authenticator, {
@@ -140,6 +146,7 @@ function fixture(
   const audited: AuditEntry[] = [];
   const added: string[] = [];
   const config = { days: options.days ?? 30 };
+  const view = { gone: false };
   const service = new MemberPasskeyService({
     store,
     verifier: passkeyVerifier(webCrypto),
@@ -152,6 +159,7 @@ function fixture(
         added.push(id);
         return added.length;
       },
+      access: async id => (view.gone ? undefined : KNOWN.get(id)),
     },
     catalogNames: async () => options.names ?? new Map([[catalogId(1), 'Spring Pack']]),
     allowedOrigins: () => options.origins ?? [ORIGIN, OTHER_ORIGIN],
@@ -165,7 +173,7 @@ function fixture(
       },
     },
   });
-  return { clock, store, ledger, challenges, service, audited, added, config };
+  return { clock, store, ledger, challenges, service, audited, added, config, view };
 }
 
 type Fixture = ReturnType<typeof fixture>;
@@ -517,6 +525,104 @@ describe('MemberPasskeyService', () => {
       should(options.ok).be.true();
       should(added).eql({ ok: false, refusal: 'not-verified' });
       should(f.store.rows.map(row => row.deviceId)).eql([keyId(1)]);
+    });
+  });
+
+  describe('register, raced', () => {
+    it('should store exactly one passkey when two sessions of one key register at once', async () => {
+      // Arrange
+      const f = fixture();
+      const [one, two] = [callerOf(accessOf(), 'tab-one'), callerOf(accessOf(), 'tab-two')];
+      await f.service.registrationOptions(one, ORIGIN);
+      await f.service.registrationOptions(two, ORIGIN);
+      const first = await registrationBody(await es256Authenticator(), CREDENTIAL_ID);
+      const second = await registrationBody(await es256Authenticator(), SECOND_ID);
+
+      // Act
+      const outcomes = await Promise.all([f.service.register(one, first), f.service.register(two, second)]);
+
+      // Assert
+      should(outcomes.map(outcome => outcome.ok)).eql([true, false]);
+      should(outcomes[1]).eql({ ok: false, refusal: 'registration-closed' });
+      should(f.store.rows).length(1);
+      should(f.added).eql([keyId(1)]);
+    });
+
+    it('should let a different key register while another key is mid-registration', async () => {
+      // Arrange
+      const f = fixture();
+      const [one, two] = [callerOf(accessOf(1)), callerOf(accessOf(2))];
+      await f.service.registrationOptions(one, ORIGIN);
+      await f.service.registrationOptions(two, ORIGIN);
+      const first = await registrationBody(await es256Authenticator(), CREDENTIAL_ID);
+      const second = await registrationBody(await es256Authenticator(), SECOND_ID);
+
+      // Act
+      const outcomes = await Promise.all([f.service.register(one, first), f.service.register(two, second)]);
+
+      // Assert
+      should(outcomes.map(outcome => outcome.ok)).eql([true, true]);
+      should(f.store.rows.map(row => row.deviceId).sort()).eql([keyId(1), keyId(2)]);
+    });
+
+    it('should keep serving a key after a registration that threw, and forget its place in line', async () => {
+      // Arrange
+      const f = fixture();
+      const caller = callerOf();
+      await f.service.registrationOptions(caller, ORIGIN);
+      const body = await registrationBody(await es256Authenticator());
+      const add = f.store.add.bind(f.store);
+      f.store.add = async () => {
+        throw new Error('disk is full');
+      };
+
+      // Act
+      const failed = await f.service.register(caller, body).then(
+        () => 'answered',
+        (error: unknown) => (error as Error).message,
+      );
+      f.store.add = add;
+      await f.service.registrationOptions(caller, ORIGIN);
+      const retried = await f.service.register(caller, body);
+
+      // Assert
+      should(failed).equal('disk is full');
+      should(retried.ok).be.true();
+    });
+
+    it('should refuse, and leave no row behind, when the key is removed while the attestation is verified', async () => {
+      // Arrange
+      const f = fixture();
+      const caller = callerOf();
+      await f.service.registrationOptions(caller, ORIGIN);
+      const body = await registrationBody(await es256Authenticator());
+      f.store.holder = async () => {
+        f.view.gone = true;
+        return undefined;
+      };
+
+      // Act
+      const added = await f.service.register(caller, body);
+
+      // Assert
+      should(added).eql({ ok: false, refusal: 'registration-closed' });
+      should(f.store.rows).eql([]);
+      should(f.added).eql([]);
+    });
+
+    it('should refuse a registration for a key that is already gone', async () => {
+      // Arrange
+      const f = fixture();
+      const caller = callerOf();
+      await f.service.registrationOptions(caller, ORIGIN);
+      f.view.gone = true;
+
+      // Act
+      const added = await f.service.register(caller, await registrationBody(await es256Authenticator()));
+
+      // Assert
+      should(added).eql({ ok: false, refusal: 'registration-closed' });
+      should(f.store.rows).eql([]);
     });
   });
 

@@ -9,7 +9,7 @@ import {
 
 const ATTEMPT: MemberJoinAttempt = { code: 'c', clientName: 'n', memberKey: 'k', boxKey: 'b', prove: async () => true };
 const REQUEST = { method: 'GET', path: '/v1/shared/me' } as ApiRequest;
-const MEMBER = { memberId: 'mbr_1', keyId: 'mk_1', appSession: 'app' };
+const MEMBER = { memberId: 'mbr_1', keyId: 'mk_1', appSession: 'app', sessionId: 'session-1' };
 
 describe('DeferredMemberSessions: before the member side is bound', () => {
   it('should refuse every join, know no key and register no session', async () => {

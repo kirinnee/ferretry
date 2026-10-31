@@ -232,7 +232,7 @@ describe('ApiDispatcher authorization', () => {
   it('should refuse a shared-catalog member on every route of this table, a public one and an admin token included', async () => {
     // A member session is served by the member route table alone. The main table refuses it before the
     // public shortcut, before authentication and before the route's own scope is read.
-    const MEMBER = { memberId: 'mbr_x', keyId: 'mk_x', appSession: 'app-one' } as const;
+    const MEMBER = { memberId: 'mbr_x', keyId: 'mk_x', appSession: 'app-one', sessionId: 'relay-1' } as const;
     const dispatcher = dispatcherFor(
       echo('/healthz', 'none'),
       echo('/v1/sessions', 'operator'),

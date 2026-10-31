@@ -12343,7 +12343,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           path: paths.catalogMemberUnlocks,
           owner: CatalogMemberKeyIdSchema,
         }),
-        members: { passkeyAdded: async keyId => await catalogMembers.passkeyAdded(keyId) },
+        members: {
+          passkeyAdded: async keyId => await catalogMembers.passkeyAdded(keyId),
+          access: async keyId => await catalogMembers.access(keyId),
+        },
         catalogNames: sharedCatalogNames,
         allowedOrigins: () => facts().origins(),
         relyingPartyName: 'Ferretry',
@@ -12371,6 +12374,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           dispatcher: new MemberDispatcher({
             members: catalogMembers,
             passkeys: memberPasskeys,
+            sessions: memberConnections,
             catalogs: {
               catalogs: async () =>
                 (await sharedCatalogs.list()).catalogs.map(({ id, name, revision }) => ({ id, name, revision })),

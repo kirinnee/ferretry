@@ -1330,7 +1330,10 @@ export class RelayLink {
           }),
         };
       }
-      if (this.#live(session)) this.#answer(session, request.id, response);
+      if (this.#live(session)) {
+        this.#answer(session, request.id, response);
+        if (response.endsSession === true && member !== undefined) this.#conclude(session);
+      }
     } finally {
       session.running -= 1;
       this.#startNext(session);
@@ -1517,7 +1520,12 @@ export class RelayLink {
       this.#refuseMember(session);
       return;
     }
-    const member: SessionMember = { memberId: filed.memberId, keyId: claim.keyId, appSession: claim.appSession };
+    const member: SessionMember = {
+      memberId: filed.memberId,
+      keyId: claim.keyId,
+      appSession: claim.appSession,
+      sessionId: session.sessionId.text,
+    };
     const release = await members.open(member, () => {
       // Said exactly as an unknown browser is, so the carrier cannot tell a revoke apart.
       if (this.#live(session))

@@ -40,7 +40,7 @@ export class MemberGateway implements RelayMemberSessions {
 
   async open(member: SessionMember, end: () => void): Promise<(() => void) | undefined> {
     // Registered BEFORE the key is read again, so a revoke landing between the two finds this session to close.
-    const release = this.deps.live.track(member.memberId, member.keyId, end);
+    const release = this.deps.live.track(member.memberId, member.keyId, end, member.sessionId);
     const access = await this.deps.members.access(member.keyId).catch(() => undefined);
     if (access === undefined || access.memberId !== member.memberId) {
       release();

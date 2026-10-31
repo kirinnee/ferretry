@@ -22,7 +22,7 @@ const NOW = T0;
 const UNLOCKED_UNTIL = T0 + 30 * 24 * 60 * 60 * 1_000;
 const ITEM = `itm_${'B'.repeat(22)}`;
 const CODE = `fy_share_${'C'.repeat(22)}`;
-const SESSION = { memberId: memberId(1), keyId: keyId(1), appSession: 'app-session-1' };
+const SESSION = { memberId: memberId(1), keyId: keyId(1), appSession: 'app-session-1', sessionId: 'session-1' };
 
 const access = (overrides: Partial<MemberAccess> = {}): MemberAccess => ({
   memberId: memberId(1),
@@ -82,6 +82,7 @@ interface Rig {
     catalogs: Error | undefined;
     release: boolean;
     signing: Error | undefined;
+    removal: Error | undefined;
   };
 }
 
@@ -101,6 +102,7 @@ function rig(): Rig {
     catalogs: undefined,
     release: false,
     signing: undefined,
+    removal: undefined,
   };
   const catalogs: Rig['catalogs'] = [{ id: catalogId(1), name: 'Alpha', revision: 3 }];
   let outcome: unknown;
@@ -160,10 +162,19 @@ function rig(): Rig {
       },
       removeKey: async (member, key) => {
         calls.push(`removeKey:${member}:${key}`);
+        if (failing.removal !== undefined) throw failing.removal;
         return {} as never;
       },
     },
     passkeys,
+    sessions: {
+      spare: sessionId => {
+        calls.push(`spare:${sessionId}`);
+        return () => {
+          calls.push(`unspare:${sessionId}`);
+        };
+      },
+    },
     catalogs: reader,
     publisher: () => ({ daemonId: DAEMON_ID, daemonName: 'studio', carriers: [] }),
     audit: {
@@ -294,6 +305,7 @@ describe('the member dispatcher at its boundary', () => {
     should(outside.status).equal(404);
     should(wrongVerb.status).equal(405);
     should(wrongVerb.headers.get('allow')).equal('GET');
+    for (const answer of [unknown, outside, wrongVerb]) should(answer.headers.get('cache-control')).equal('no-store');
     should(calls).deepEqual([]);
   });
 
@@ -840,5 +852,47 @@ describe('DELETE /v1/shared/me/keys/self', () => {
 
     // Assert
     should(response.status).equal(200);
+  });
+
+  it('should answer 200 and ask for the session to end, sparing it only while its own key is removed', async () => {
+    // Arrange
+    const { dispatcher, calls } = rig();
+
+    // Act
+    const response = await call(dispatcher, 'DELETE', '/v1/shared/me/keys/self');
+
+    // Assert — this session is spared around the removal, so the removal cannot close it as a refusal
+    should(response.status).equal(200);
+    should(response.endsSession).equal(true);
+    should(calls.filter(entry => /^(spare|unspare|removeKey)/.test(entry))).deepEqual([
+      'spare:session-1',
+      `removeKey:${memberId(1)}:${keyId(1)}`,
+      'unspare:session-1',
+    ]);
+  });
+
+  it('should stop sparing the session even when the removal throws, and not ask for it to end', async () => {
+    // Arrange
+    const { dispatcher, calls, failing } = rig();
+    failing.removal = new Error('members disk full');
+
+    // Act
+    const response = await call(dispatcher, 'DELETE', '/v1/shared/me/keys/self');
+
+    // Assert
+    should(response.status).equal(500);
+    should(response.endsSession).be.undefined();
+    should(calls).containEql('unspare:session-1');
+  });
+
+  it('should ask nothing of the session on any other route', async () => {
+    // Arrange
+    const { dispatcher } = rig();
+
+    // Act
+    const response = await call(dispatcher, 'GET', ME);
+
+    // Assert
+    should(response.endsSession).be.undefined();
   });
 });

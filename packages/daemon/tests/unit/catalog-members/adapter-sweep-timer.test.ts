@@ -57,7 +57,22 @@ describe('MemberSweepTimer', () => {
     clock.tick();
     await settle();
 
-    should(sweeps).equal(2);
+    should(sweeps).equal(3);
+  });
+
+  it('sweeps once at start, before the first interval, so an already-ended key does not wait for it', async () => {
+    const clock = new ManualClock();
+    let sweeps = 0;
+    new MemberSweepTimer(
+      clock,
+      async () => {
+        sweeps += 1;
+      },
+      () => undefined,
+    ).start(3_600_000);
+    await settle();
+
+    should(sweeps).equal(1);
   });
 
   it('reports a sweep that throws and still runs the next one', async () => {
@@ -74,7 +89,6 @@ describe('MemberSweepTimer', () => {
       error => reported.push(error),
     ).start(10);
 
-    clock.tick();
     await settle();
     clock.tick();
     await settle();

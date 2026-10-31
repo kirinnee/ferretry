@@ -57,3 +57,6 @@ export function sweepMembers(document: MembersDocument, now: number): Swept {
   });
   return { members: changed ? { ...document, members } : document, removed };
 }
+
+/** True when time has ended this key: the sweep removes it, and until it does nothing may use or revive it. */
+export const keyExpired = (key: StoredMemberKey, now: number): boolean => why(key, now) !== undefined;

@@ -4408,7 +4408,9 @@ describe('a member request session', () => {
 
     should((await clientRead(harnessed.wire, opened.channel)).message).deepEqual(AUTHENTICATED);
     should(calls.keyLookups).deepEqual([MEMBER_KEY_ID]);
-    should(calls.opened).deepEqual([{ memberId: MEMBER_ID, keyId: MEMBER_KEY_ID, appSession: APP_SESSION }]);
+    should(calls.opened).deepEqual([
+      { memberId: MEMBER_ID, keyId: MEMBER_KEY_ID, appSession: APP_SESSION, sessionId: sessionOne().text },
+    ]);
     should(live(harnessed.timers, LEASE_MS)).not.be.undefined();
     should(live(harnessed.timers, RENEW_AT_MS)).not.be.undefined();
     should(harnessed.link.report().sessions).equal(1);
@@ -4439,12 +4441,51 @@ describe('a member request session', () => {
       memberId: MEMBER_ID,
       keyId: MEMBER_KEY_ID,
       appSession: APP_SESSION,
+      sessionId: sessionOne().text,
     });
     should(calls.dispatched[0]?.device).be.undefined();
     should(calls.dispatched[0]?.loopback).be.false();
     should(calls.dispatched[0]?.privilegedLoopback).be.false();
     should(calls.dispatched[0]?.headers.has('authorization')).be.false();
     should(calls.dispatched[0]?.transcriptHash).not.be.undefined();
+  });
+
+  it('should seal the answer of a route that ends its session FIRST, then conclude with 4440 and never 4403', async () => {
+    // Arrange — leaving: the route removed its own key, and says the session ends with its answer.
+    const { calls, harnessed, opened, channel } = await memberSession({
+      dispatch: async () => ({ ...json(200, { keyId: MEMBER_KEY_ID }), endsSession: true }),
+    });
+    const authenticated = await clientRead(harnessed.wire, opened.channel);
+
+    // Act
+    await clientSend(harnessed.link, channel, { t: 'req', id: 8, method: 'DELETE', path: '/v1/shared/me/keys/self' });
+
+    // Assert — the 200 crossed, sealed, and only then the session concluded
+    const answer = await clientRead(harnessed.wire, authenticated.state);
+    should(answer.message).containDeep({
+      t: 'res',
+      id: 8,
+      status: 200,
+      body: JSON.stringify({ keyId: MEMBER_KEY_ID }),
+    });
+    const last = controlOf(harnessed.wire.frames.at(-1));
+    should(last).containDeep({ t: 'closed', code: RELAY_SESSION_CONCLUDED_CLOSE_CODE });
+    should(harnessed.wire.frames.filter(frame => controlOf(frame)?.t === 'closed')).have.length(1);
+    should(calls.released).equal(1);
+    should(harnessed.link.report().sessions).equal(0);
+  });
+
+  it('should keep a member session open after an ordinary answer', async () => {
+    // Arrange
+    const { harnessed, opened, channel } = await memberSession({ dispatch: async () => json(200, {}) });
+    const authenticated = await clientRead(harnessed.wire, opened.channel);
+
+    // Act
+    await clientSend(harnessed.link, channel, { t: 'req', id: 9, method: 'GET', path: '/v1/shared/me' });
+    await clientRead(harnessed.wire, authenticated.state);
+
+    // Assert
+    should(harnessed.link.report().sessions).equal(1);
   });
 
   it('should answer 500 when the member table throws, and keep the session', async () => {

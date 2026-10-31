@@ -49,6 +49,7 @@ import type { AuditEntry } from '../audit/types.ts';
 import { CatalogRefusal, type CatalogRefusalCode } from '../shared-catalogs/refusal.ts';
 import type { MemberPasskeyOutcome, MemberPasskeyRefusal, MemberPasskeyService } from './passkeys.ts';
 import type { MemberAuditSink } from './ports.ts';
+import type { LiveMemberSessions } from './sessions.ts';
 import { CATALOG_MEMBER_STATUS, CatalogMemberRefusal } from './refusal.ts';
 import type { CatalogMemberService, MemberAccess } from './service.ts';
 
@@ -68,6 +69,7 @@ export interface SharedRouteDeps {
     'ready' | 'access' | 'admitRedeem' | 'commitRedeem' | 'release' | 'removeKey'
   >;
   readonly passkeys: MemberPasskeyService;
+  readonly sessions: Pick<LiveMemberSessions, 'spare'>;
   readonly catalogs: SharedCatalogReader;
   readonly publisher: () => SharedPublisher;
   readonly audit: MemberAuditSink;
@@ -80,6 +82,7 @@ export interface SharedRouteContext {
   readonly params: RouteParameters;
   readonly access: MemberAccess;
   readonly appSession: string;
+  readonly sessionId: string;
 }
 
 /** A member route. `needs` says what the browser must have proved; there is no way to say "nothing". */
@@ -272,8 +275,14 @@ export function sharedRoutes(deps: SharedRouteDeps): readonly SharedRoute[] {
       method: 'DELETE',
       path: '/v1/shared/me/keys/self',
       needs: 'unlocked',
-      handle: async ({ access }) => {
-        await deps.members.removeKey(access.memberId, access.keyId);
+      handle: async ({ access, sessionId }) => {
+        // This session carries the request, so it is not closed from under its own answer: the link concludes it.
+        const unspare = deps.sessions.spare(sessionId);
+        try {
+          await deps.members.removeKey(access.memberId, access.keyId);
+        } finally {
+          unspare();
+        }
         await record({
           event: 'catalog.member.key-removed',
           actor: { kind: 'anonymous' },
@@ -281,7 +290,7 @@ export function sharedRoutes(deps: SharedRouteDeps): readonly SharedRoute[] {
           outcome: 'succeeded',
           detail: { memberLabel: access.label, keyId: access.keyId, by: 'member' },
         });
-        return jsonResponse({ keyId: access.keyId });
+        return { ...jsonResponse({ keyId: access.keyId }), endsSession: true };
       },
     },
   ];
@@ -318,9 +327,9 @@ export class MemberDispatcher {
     const member = request.member;
     if (member === undefined) return errorResponse(401, 'unauthorized', 'unauthorized');
     const lookup = this.#router.lookup(request.method, request.path);
-    if (lookup.kind === 'not-found') return unknownRouteResponse(request.method, request.path);
+    if (lookup.kind === 'not-found') return noStore(unknownRouteResponse(request.method, request.path));
     if (lookup.kind === 'method-not-allowed')
-      return methodNotAllowedResponse(request.method, request.path, lookup.allowed);
+      return noStore(methodNotAllowedResponse(request.method, request.path, lookup.allowed));
     try {
       // Re-read on EVERY request: a revoked key or catalog takes effect on the next one, not at session end.
       const access = await this.deps.members.access(member.keyId);
@@ -328,7 +337,13 @@ export class MemberDispatcher {
       if (lookup.route.needs === 'unlocked' && this.deps.passkeys.unlockExpiresAt(access.keyId) === undefined)
         return noStore(errorResponse(403, 'unlock with your passkey first', 'member_locked'));
       return noStore(
-        await lookup.route.handle({ request, params: lookup.params, access, appSession: member.appSession }),
+        await lookup.route.handle({
+          request,
+          params: lookup.params,
+          access,
+          appSession: member.appSession,
+          sessionId: member.sessionId,
+        }),
       );
     } catch (error) {
       return noStore(failed(error));

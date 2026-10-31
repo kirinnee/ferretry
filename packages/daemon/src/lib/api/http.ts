@@ -102,6 +102,8 @@ export interface SessionMember {
   readonly memberId: string;
   readonly keyId: string;
   readonly appSession: string;
+  /** The session that carries it, which a route may ask to have spared while it removes its own key. */
+  readonly sessionId: string;
 }
 
 export interface ApiResponse {
@@ -122,6 +124,11 @@ export interface ApiResponse {
    * what the route said; the transport that sends this adds `Content-Encoding: gzip`.
    */
   readonly gzip?: Uint8Array;
+  /**
+   * Set by a member route that is the last thing its session does (leaving): the answer is sealed first,
+   * then the session concludes with `4440`, so the app can tell "I left" from "I was refused".
+   */
+  readonly endsSession?: true;
 }
 
 /**

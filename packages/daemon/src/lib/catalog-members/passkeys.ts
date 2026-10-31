@@ -67,7 +67,11 @@ export interface MemberPasskeyDeps {
   readonly random: StepUpRandom;
   readonly clock: StepUpClock;
   readonly unlocks?: UnlockLedgerPort;
-  readonly members: { passkeyAdded(keyId: string): Promise<number> };
+  readonly members: {
+    passkeyAdded(keyId: string): Promise<number>;
+    /** The key as it stands now; nothing when it was removed or time ended it. */
+    access(keyId: string): Promise<MemberAccess | undefined>;
+  };
   /** The names of the catalogs by id, for the passkey's account name. Read per call. */
   readonly catalogNames: () => Promise<ReadonlyMap<string, string>>;
   readonly allowedOrigins: () => readonly string[];
@@ -96,6 +100,8 @@ export class MemberPasskeyService {
   /** When each member key last unlocked. Read back by {@link restore}, so a restart does not ask again. */
   readonly #unlockedAt = new Map<string, number>();
   #persisting: Promise<unknown> = Promise.resolve();
+  /** The registration in flight per key: one key adds its passkeys one at a time. */
+  readonly #registering = new Map<string, Promise<void>>();
 
   constructor(private readonly deps: MemberPasskeyDeps) {}
 
@@ -167,13 +173,40 @@ export class MemberPasskeyService {
     caller: MemberPasskeyCaller,
     registration: Omit<PasskeyRegistration, 'confirmation'>,
   ): Promise<MemberPasskeyOutcome<PasskeyView>> {
-    const { access } = caller;
     const now = this.deps.clock.nowMs();
     // Spent FIRST, whatever happens next: a challenge is answered once.
     const challenge = this.deps.challenges.take(subjectOf(caller), 'register', now);
+    return await this.#exclusively(
+      caller.access.keyId,
+      async () => await this.#register(caller, registration, challenge, now),
+    );
+  }
+
+  /** Runs `work` after every earlier one of this key finished, whatever way it finished. */
+  async #exclusively<T>(keyId: string, work: () => Promise<T>): Promise<T> {
+    const done = (this.#registering.get(keyId) ?? Promise.resolve()).then(work);
+    const tail = done.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.#registering.set(keyId, tail);
+    void tail.then(() => {
+      if (this.#registering.get(keyId) === tail) this.#registering.delete(keyId);
+    });
+    return await done;
+  }
+
+  async #register(
+    caller: MemberPasskeyCaller,
+    registration: Omit<PasskeyRegistration, 'confirmation'>,
+    challenge: Uint8Array | undefined,
+    now: number,
+  ): Promise<MemberPasskeyOutcome<PasskeyView>> {
+    // The key as it is now, not as the request saw it: it may have gone, or its window closed, while this queued.
+    const access = await this.deps.members.access(caller.access.keyId);
+    if (access === undefined) return refuse('registration-closed');
     const held = await this.deps.store.list(access.keyId);
     if (held.length >= MAX_PASSKEYS_PER_DEVICE) return refuse('too-many-passkeys');
-    // Asked again rather than trusted from the options call: the window can close in between.
     if (!(await this.mayRegister(access))) return refuse('registration-closed');
     if (challenge === undefined) return refuse('not-verified');
     const clientDataJSON = fromBase64Url(registration.clientDataJSON);
@@ -199,6 +232,10 @@ export class MemberPasskeyService {
       origin: verdict.origin,
       createdAt: instant(now),
     };
+    // Once more, immediately before the add: the verify above is the slow part, and a key removed meanwhile
+    // must not leave a passkey row behind.
+    const current = await this.deps.members.access(access.keyId);
+    if (current === undefined || !(await this.mayRegister(current))) return refuse('registration-closed');
     await this.deps.store.add(stored);
     await this.deps.members.passkeyAdded(access.keyId);
     await this.deps.audit

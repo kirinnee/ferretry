@@ -452,7 +452,7 @@ describe('MemberJoinGate: the failed-join budget', () => {
     should(result).eql({ ok: false });
     should(proofs.count).equal(0);
     should(calls).eql([]);
-    should(reasons(audit).at(-1)).equal('budget');
+    should(audit.map(entry => entry.detail?.count)).eql([1]);
   });
 
   it('should count a refusal for the budget no further than the ten it already spent', async () => {
@@ -529,6 +529,91 @@ describe('MemberJoinGate: the failed-join budget', () => {
       should(reasons(audit)).not.containEql('budget');
     });
   }
+});
+
+describe('MemberJoinGate: the refusal audit is coalesced', () => {
+  const refuse = async (gate: MemberJoinGate, carrier: MemberJoinCarrier, times: number): Promise<void> => {
+    for (let index = 0; index < times; index += 1)
+      await gate.join(attemptOf('fy_share_BBBBBBBBBBBBBBBBBBBBBB', index + 1).attempt, carrier);
+  };
+
+  it('should write the first refusal at once, and fold a flood into that one entry', async () => {
+    // Arrange
+    const r = await rig();
+    const { gate, audit } = build(r);
+
+    // Act
+    await refuse(gate, RELAY, 200);
+
+    // Assert
+    should(audit).have.length(1);
+    should(audit[0]).containDeep({
+      event: 'catalog.member.join-refused',
+      outcome: 'refused',
+      detail: { carrier: 'relay', count: 1 },
+    });
+  });
+
+  it('should carry what was folded on the next entry, once a minute has passed', async () => {
+    // Arrange
+    const r = await rig();
+    const { gate, audit } = build(r);
+    await refuse(gate, RELAY, 6);
+
+    // Act
+    r.clock.now = T0 + MINUTE;
+    await refuse(gate, RELAY, 1);
+    await refuse(gate, RELAY, 3);
+
+    // Assert — five folded plus the one that stands in front: six; the three after it fold again
+    should(audit.map(entry => entry.detail?.count)).eql([1, 6]);
+  });
+
+  it('should fold a refusal one moment short of the minute, and write the one at the minute', async () => {
+    // Arrange
+    const r = await rig();
+    const { gate, audit } = build(r);
+    await refuse(gate, RELAY, 1);
+
+    // Act
+    r.clock.now = T0 + MINUTE - 1;
+    await refuse(gate, RELAY, 1);
+    const before = audit.length;
+    r.clock.now = T0 + MINUTE;
+    await refuse(gate, RELAY, 1);
+
+    // Assert
+    should(before).equal(1);
+    should(audit.map(entry => entry.detail?.count)).eql([1, 2]);
+  });
+
+  it('should keep a window for each carrier, so a flood on one never hides the other', async () => {
+    // Arrange
+    const r = await rig();
+    const { gate, audit } = build(r);
+
+    // Act
+    await refuse(gate, RELAY, 5);
+    await refuse(gate, TUNNEL, 5);
+    await refuse(gate, DIRECT, 5);
+
+    // Assert
+    should(audit.map(entry => entry.detail?.carrier)).eql(['relay', 'tunnel', 'direct']);
+  });
+
+  it('should fold the refusals the budget makes, and count them when the minute is over', async () => {
+    // Arrange
+    const r = await rig();
+    const { gate, audit } = build(r);
+    await refuse(gate, DIRECT, MEMBER_JOIN_ATTEMPTS_PER_MINUTE + 4);
+
+    // Act
+    r.clock.now = T0 + MINUTE;
+    await refuse(gate, DIRECT, 1);
+
+    // Assert — fourteen in the first minute: one written, thirteen folded, then the fifteenth
+    should(audit.map(entry => entry.detail?.count)).eql([1, MEMBER_JOIN_ATTEMPTS_PER_MINUTE + 4]);
+  });
 });
 
 describe('FailedJoinBudget', () => {

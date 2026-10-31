@@ -7,7 +7,7 @@ import type { MemberAccess } from '../../../src/lib/catalog-members/service.ts';
 import type { MemberJoinAttempt } from '../../../src/lib/relay/member-port.ts';
 import { keyId, memberId, storedKey } from './support.ts';
 
-const MEMBER: SessionMember = { memberId: memberId(1), keyId: keyId(1), appSession: 'app-1' };
+const MEMBER: SessionMember = { memberId: memberId(1), keyId: keyId(1), appSession: 'app-1', sessionId: 'session-1' };
 const ACCESS: MemberAccess = {
   memberId: memberId(1),
   keyId: keyId(1),

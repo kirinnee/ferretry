@@ -2533,7 +2533,8 @@ The publisher answers with exactly one sealed outcome and then `4440`, as a pair
 - **As built.** The link seals the outcome through `padJoinOutcome`; an outcome that cannot be padded is the
   refusal, never an unpadded record. The session is `concluding` before the join is judged, so a second
   record is refused rather than racing a spent attempt, and the `4440` follows the sealed answer whatever
-  it was. The per-peer budget counts FAILED joins only (10 a minute) and is keyed by the socket's client
+  it was. The audit trail is bounded too: a refused join is written at once when it is the first in a quiet
+  minute, and the rest of that minute's refusals on the carrier are folded into one entry with a `count`. The per-peer budget counts FAILED joins only (10 a minute) and is keyed by the socket's client
   address on the direct carrier; a relayed or tunnelled join has no per-peer key. The publisher awaits the
   write of the burn before it seals ANY outcome, a refusal included, and commits or releases the
   reservation in a `finally`, so a failed write never leaves a slot held for its thirty-second lapse.
@@ -2554,7 +2555,11 @@ The publisher answers with exactly one sealed outcome and then `4440`, as a pair
   drain when their ten-minute windows close; keys that register a throwaway passkey stay until the owner
   ends that share and revokes its member, which is one press each. Until then a further join is refused
   for room and its code stays live. Failed attempts are bounded by the
-  carrier alone: 10 a minute per peer address on the direct carrier. **On the relay there is no per-peer
+  carrier alone: 10 a minute per peer address on the direct carrier. That budget is per peer ADDRESS, so peers
+  behind one NAT, or behind a local reverse proxy that presents one address, share it: a neighbour's flood can make
+  a real recipient's attempt a sealed refusal. The refusal spends nothing, the code stays live, and the recipient
+  retries (or joins over the relay). The window between checking the budget and recording a failure is bounded
+  by the pre-credential slots, so a burst can overshoot the ten by at most the slots still open. **On the relay there is no per-peer
   limit worth the name** — every relayed attempt is its own rendezvous session, one attempt each — so
   relayed attempts are priced only by the rendezvous admission (30 a minute) and this section's 6
   pre-credential slots. The residual is the one stated for every pre-credential session: a relayed flood

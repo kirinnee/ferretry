@@ -76,7 +76,7 @@ import type {
 } from './ports.ts';
 import { pruneShares } from './prune.ts';
 import { CatalogMemberRefusal } from './refusal.ts';
-import { sweepMembers, type RemovedKey } from './sweep.ts';
+import { keyExpired, sweepMembers, type RemovedKey } from './sweep.ts';
 import { listedShares, memberView, shareView } from './views.ts';
 
 export interface CatalogMemberDeps {
@@ -616,21 +616,25 @@ export class CatalogMemberService {
             : member,
         ),
       };
-      const changed = members.members.some((member, index) => member !== state.members.members[index]);
-      if (changed) await this.#applyMembers(members, state.members);
+      const affected = state.members.members.filter(member => member.catalogIds.includes(catalogId));
+      if (affected.length > 0) await this.#applyMembers(members, state.members);
       const before = this.#loaded().shares;
       const shares = this.#withoutCatalog(before, catalogId, () => true);
       if (shares !== before) await this.#applyShares(shares, before);
+      // After the writes, like a removal: a session that was reading the catalog stops with it.
+      for (const member of affected) await this.deps.sessions.closeMember(member.memberId);
     });
   }
 
   // ── The member's own session (phase 2b-2) ──────────────────────────────────────────────────────────
 
-  /** One browser as it stands NOW, or `undefined` when its key, its member or the store is gone. */
+  /** One browser as it stands NOW, or `undefined` when its key, its member or the store is gone, or time ended the key. */
   async access(keyId: string): Promise<MemberAccess | undefined> {
     await this.ready();
+    const now = this.deps.now();
     for (const member of this.#loaded().members.members) {
       const key = member.keys.find(entry => entry.keyId === keyId);
+      if (key !== undefined && keyExpired(key, now)) return undefined;
       if (key !== undefined)
         return {
           memberId: member.memberId,
@@ -653,7 +657,7 @@ export class CatalogMemberService {
       const state = this.#loaded();
       const now = this.deps.now();
       const found = this.#find(state.members, keyId);
-      if (found === undefined) return;
+      if (found === undefined || keyExpired(found.key, now)) return;
       const seen = found.key.lastSeenAt === undefined ? undefined : Date.parse(found.key.lastSeenAt);
       if (seen !== undefined && now - seen < LAST_SEEN_GRANULARITY_MS) return;
       await this.#applyMembers(

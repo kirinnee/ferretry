@@ -28,7 +28,12 @@ const DEVICE_ID = `fy_device_id_${'a'.repeat(22)}`;
 const APP_SESSION = toBase64Url(new Uint8Array(16).fill(1));
 const PROOF = toBase64Url(new Uint8Array(64).fill(2));
 const DEVICE = { deviceId: DEVICE_ID, appSession: APP_SESSION } as const;
-const MEMBER = { memberId: `mbr_${'a'.repeat(22)}`, keyId: `mk_${'b'.repeat(22)}`, appSession: APP_SESSION } as const;
+const MEMBER = {
+  memberId: `mbr_${'a'.repeat(22)}`,
+  keyId: `mk_${'b'.repeat(22)}`,
+  appSession: APP_SESSION,
+  sessionId: 'session-1',
+} as const;
 
 const request = (patch: Record<string, unknown> = {}): unknown => ({
   t: 'req',
