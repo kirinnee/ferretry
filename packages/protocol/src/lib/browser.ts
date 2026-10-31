@@ -1,6 +1,24 @@
 import { z } from 'zod';
 import { SurfaceNameSchema } from './agent-tools.ts';
 import {
+  BROWSER_MAX_FIND_CHARS,
+  BROWSER_MAX_HEIGHT,
+  BROWSER_MAX_WIDTH,
+  BROWSER_MIN_HEIGHT,
+  BROWSER_MIN_WIDTH,
+  BROWSER_MAX_SNAPSHOT_DEPTH,
+  BrowserChallengeProviderSchema,
+  BrowserCoordinateSchema,
+  BrowserModifierSchema,
+  BrowserMouseButtonSchema,
+  BrowserReadModeSchema,
+  BrowserRefSchema,
+  BrowserScreenshotFormatSchema,
+  refineBrowserRead,
+  refineBrowserScreenshot,
+  refineBrowserTarget,
+} from './browser-target.ts';
+import {
   BROWSER_MAX_SCROLL_TEXT_CHARS,
   BrowserMouseActionSchema,
   BrowserPressKeysSchema,
@@ -14,24 +32,6 @@ import {
   refineBrowserMouse,
   refineBrowserScroll,
 } from './browser-pointer.ts';
-import {
-  BROWSER_MAX_FIND_CHARS,
-  BROWSER_MAX_HEIGHT,
-  BROWSER_MAX_SNAPSHOT_DEPTH,
-  BROWSER_MAX_WIDTH,
-  BROWSER_MIN_HEIGHT,
-  BROWSER_MIN_WIDTH,
-  BrowserChallengeProviderSchema,
-  BrowserCoordinateSchema,
-  BrowserModifierSchema,
-  BrowserMouseButtonSchema,
-  BrowserReadModeSchema,
-  BrowserRefSchema,
-  BrowserScreenshotFormatSchema,
-  refineBrowserRead,
-  refineBrowserScreenshot,
-  refineBrowserTarget,
-} from './browser-target.ts';
 import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
 import { SECRET_REFERENCE_SOURCE } from './secrets.ts';
 import { SurfaceOpenerSchema } from './surface.ts';
@@ -104,7 +104,7 @@ export function browserProxyUrlProblem(value: string): string | undefined {
   return undefined;
 }
 
-const BROWSER_PROXY_BYPASS_ENTRY = /^[A-Za-z0-9*._:/<>[\]-]{1,253}$/u;
+const BROWSER_PROXY_BYPASS_ENTRY = /^[A-Za-z0-9*._:/<>\[\]-]{1,253}$/u;
 const BROWSER_PROXY_SECRET_REFERENCE = new RegExp(`^${SECRET_REFERENCE_SOURCE}$`, 'u');
 
 const BrowserProxySecretReferenceSchema = z

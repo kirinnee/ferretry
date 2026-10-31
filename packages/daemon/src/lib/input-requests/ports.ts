@@ -4,6 +4,7 @@ import type {
   InputAuditDetail,
   InputAuditEvent,
   InputEvent,
+  InputFieldElement,
   InputQuarantineEvent,
   InputTarget,
   InputTargetFacts,
@@ -15,8 +16,8 @@ import type {
 /**
  * THE SEAMS THE INPUT-REQUEST SERVICE STANDS ON (docs/input-requests.md).
  *
- * Nothing here has a place to put a value except {@link InputTargetPort.type}'s `text`, which is the
- * one write; every other port is told ids, names, states and flags.
+ * Nothing here has a place to put a value except the `text` {@link InputTargetPort.type} is handed, which is
+ * the one write; every other port is told ids, names, states and flags.
  */
 
 export type ObserveResult =
@@ -35,15 +36,50 @@ export type ObserveResult =
  */
 export type TypeResult = 'typed' | 'target_gone' | 'target_changed' | 'uncertain';
 
-/** Looks at, and types into, the surface a request names. The daemon observes; the agent never states a fact. */
+/** A field as the target needs it to find where a value goes: its id and, on a page, the element the agent named. */
+export interface InputTargetField {
+  readonly id: string;
+  readonly element?: InputFieldElement;
+}
+
+/** One value to type, by the field it goes into. The only place a value crosses a port. */
+export interface InputFieldValue {
+  readonly field: string;
+  readonly text: string;
+}
+
+/**
+ * Looks at, and types into, the surface a request names. The daemon observes; the agent never states a fact.
+ * A reusable seam: anything that must put a value the owner supplied into a terminal or a page field goes
+ * through it, so the binding check below runs for every such write.
+ */
 export interface InputTargetPort {
-  /** What is at the target right now. A terminal answers pane proof, foreground program, echo and the cursor row. */
-  observe(sessionId: string, target: InputTarget): Promise<ObserveResult>;
   /**
-   * ONE write of `text` with Enter appended when `submit`, in a single command. `expected` is what the card
-   * showed: an adapter that finds anything about the target different (the pane, the foreground program, echo,
-   * the prompt) writes nothing and answers `target_changed`, or `target_gone` when it cannot find it.
+   * What is at the target right now, for these fields. A terminal answers pane proof, foreground program, echo
+   * and the cursor row; a page answers its origin and, per field, the element the browser resolved.
    */
+  observe(sessionId: string, target: InputTarget, fields: readonly InputTargetField[]): Promise<ObserveResult>;
+  /**
+   * The values, each into its own field in order, with Enter after the last when `submit`. `expected` is what
+   * the card showed: an adapter that finds anything about the target different (the pane, the foreground
+   * program, echo, the prompt, the page's document, a field's element) writes nothing and answers
+   * `target_changed`, or `target_gone` when it cannot find it.
+   */
+  type(
+    sessionId: string,
+    target: InputTarget,
+    values: readonly InputFieldValue[],
+    submit: boolean,
+    expected: InputTargetFacts,
+  ): Promise<TypeResult>;
+}
+
+/**
+ * A terminal's own adapter: one prompt, so one value, in ONE write of `text` with Enter appended when
+ * `submit`, in a single command. The router ({@link InputTargetRouter}) adapts it to {@link InputTargetPort}.
+ */
+export interface TerminalInputTargetPort {
+  observe(sessionId: string, target: InputTarget): Promise<ObserveResult>;
   type(
     sessionId: string,
     target: InputTarget,

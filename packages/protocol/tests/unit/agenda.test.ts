@@ -1,15 +1,15 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
-  AGENDA_URGENT_WAKE_MS,
   AgendaActionRequestSchema,
   AgendaClearableFieldSchema,
+  AGENDA_URGENT_WAKE_MS,
   AgendaItemSchema,
   AgendaParkedSchema,
   agendaBadgeCount,
+  agendaWakeAt,
   agendaBriefRequiredProblems,
   agendaNoticeProblems,
-  agendaWakeAt,
 } from '../../src/lib/agenda.ts';
 import { agendaTurn } from '../../src/lib/agenda-card.ts';
 

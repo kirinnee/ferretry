@@ -6,7 +6,9 @@ import {
   type AgentConfigToolName,
   type AgentLessonToolName,
   type AgentToolName,
+  INPUT_FIELD_LABEL_MAX_LENGTH,
   INPUT_MAX_EXPIRY_SECONDS,
+  INPUT_MAX_FIELDS,
   INPUT_PROMPT_MAX_LENGTH,
   BROWSER_CONSOLE_LEVELS,
   BROWSER_CPU_THROTTLE_MAX,
@@ -37,7 +39,7 @@ export interface McpToolDefinition {
 
 const NAME = {
   type: 'string',
-  description: 'The name, e.g. "dev" (as in %terminal:dev / %browser:app). An id from a list works too.',
+  description: 'The name, as in %terminal:dev or %browser:app; an id from a list works too.',
 };
 const NEW_NAME = {
   type: 'string',
@@ -60,6 +62,31 @@ const REF = {
   description: 'An element ref from browser_read mode "snapshot", e.g. "e12". Use this or selector.',
 };
 const COORDINATE = { type: 'number', minimum: 0, description: 'Viewport CSS pixels.' };
+const INPUT_PROMPT = {
+  type: 'string',
+  maxLength: INPUT_PROMPT_MAX_LENGTH,
+  description: 'What it is for. Never a secret.',
+};
+const SENSITIVITY = { type: 'string', enum: ['secret', 'private', 'plain'] };
+const INPUT_OPTIONS = {
+  submit: {
+    type: 'string',
+    enum: ['agent', 'offer-owner', 'owner-default'],
+    description: 'Who presses Enter; the card offers it by default.',
+  },
+  expiresInSeconds: {
+    type: 'integer',
+    minimum: 30,
+    maximum: INPUT_MAX_EXPIRY_SECONDS,
+  },
+  blocking: { type: 'boolean', description: 'Ping the owner.' },
+  chain: { type: 'string', description: 'The card this login step follows, like A7.' },
+  secretHint: {
+    type: 'string',
+    description: 'A saved login you expect, e.g. SUDO_KIRIN_BOX; a hint.',
+  },
+};
+
 
 const object = (properties: Record<string, unknown>, required: readonly string[] = []) => ({
   type: 'object',
@@ -153,41 +180,14 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'terminal_request_input',
     tool: 'terminal.request_input',
     description:
-      'Ask the owner to type ONE value into a terminal on a card: secret (a password or passphrase; ALWAYS for sudo), private (an echoing code) or plain (you see it). Returns !A<n>; then call input_wait. You never hold a secret; the terminal is unreadable for about two minutes after.',
+      'Ask the owner to type ONE value into a terminal from a card: secret (a password; ALWAYS for sudo), private (a code that shows) or plain (you see it). Returns !A<n>; then input_wait. The terminal is unreadable ~2 min after.',
     inputSchema: object(
       {
         name: NAME,
-        prompt: {
-          type: 'string',
-          maxLength: INPUT_PROMPT_MAX_LENGTH,
-          description:
-            'What the value is for, in a plain sentence, e.g. "sudo password to install the package". Never a secret.',
-        },
-        sensitivity: {
-          type: 'string',
-          enum: ['secret', 'private', 'plain'],
-          description:
-            'secret: a password or passphrase; the terminal must have echo off. plain: a username, e-mail, hostname or y/N, which you may see. private (a code that shows on screen) is not supported in terminals yet: ask the owner in chat.',
-        },
-        submit: {
-          type: 'string',
-          enum: ['agent', 'offer-owner', 'owner-default'],
-          description:
-            'Who presses Enter after the value is typed: "agent" (you do), "offer-owner" (the card offers it; the default), "owner-default" (it is on by default).',
-        },
-        expiresInSeconds: {
-          type: 'integer',
-          minimum: 30,
-          maximum: INPUT_MAX_EXPIRY_SECONDS,
-          description: 'How long the card waits; 600 by default.',
-        },
-        blocking: { type: 'boolean', description: 'You are stopped until it is answered: also ping the owner.' },
-        chain: { type: 'string', description: 'A follow-up in a multi-step login: the card it follows, like A7.' },
-        secretHint: {
-          type: 'string',
-          description:
-            'The saved login you expect the owner to use, by handle, e.g. SUDO_KIRIN_BOX; a hint only, the owner still taps. It is the same whether or not such a login exists.',
-        },
+        prompt: INPUT_PROMPT,
+        sensitivity: SENSITIVITY,
+        label: { type: 'string', maxLength: INPUT_FIELD_LABEL_MAX_LENGTH },
+        ...INPUT_OPTIONS,
       },
       ['name', 'prompt', 'sensitivity'],
     ),
@@ -196,7 +196,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'input_wait',
     tool: 'input.wait',
     description:
-      'Wait for the owner to answer an input card (!A<n>) you raised. Returns where it stands (pending, delivered, refused, expired or cancelled), and for a delivered one the terminal text with the value masked. It never returns the value.',
+      'Wait for the owner to answer your input card (!A<n>): where it stands, and once delivered the screen with the value masked. Never the value.',
     inputSchema: object(
       {
         id: { type: 'string', description: 'The card, like !A7.' },
@@ -639,6 +639,36 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     description:
       'Hand a page to the owner when you need them to act in it (a login, a captcha, a payment, a consent screen): their tab comes forward with "Your turn here". Then wait; read the page to see when they are done.',
     inputSchema: object({ name: NAME, message: ASK_MESSAGE }, ['name']),
+  },
+  {
+    name: 'browser_request_input',
+    tool: 'browser.request_input',
+    description:
+      'Ask the owner for a login form on ONE card; the daemon types each field: plain (an e-mail you see) or secret (a password). Returns !A<n>; then input_wait. Next page: a new card with chain.',
+    inputSchema: object(
+      {
+        name: NAME,
+        prompt: INPUT_PROMPT,
+        fields: {
+          type: 'array',
+          minItems: 1,
+          maxItems: INPUT_MAX_FIELDS,
+          items: object(
+            {
+              id: { type: 'string', description: 'e.g. email' },
+              label: { type: 'string', maxLength: INPUT_FIELD_LABEL_MAX_LENGTH },
+              sensitivity: SENSITIVITY,
+              ref: { type: 'string', description: 'e.g. e12, or a selector' },
+              selector: { type: 'string' },
+            },
+            ['id', 'sensitivity'],
+          ),
+        },
+        submit: INPUT_OPTIONS.submit,
+        chain: INPUT_OPTIONS.chain,
+      },
+      ['name', 'prompt', 'fields'],
+    ),
   },
 ];
 

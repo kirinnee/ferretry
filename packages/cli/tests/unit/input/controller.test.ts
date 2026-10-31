@@ -76,7 +76,7 @@ describe('fy input answer', () => {
     await new InputController(ports).answer('!A7', options);
 
     // Assert
-    should(out.messages).deepEqual(['Not sent: the terminal is no longer the one the card showed.']);
+    should(out.messages).deepEqual(['Not sent: the target is no longer the one the card showed.']);
     should(out.all()).not.containEql(VALUE);
   });
 
@@ -178,7 +178,7 @@ describe('fy input answer', () => {
 
   it('should not press Enter in a browser field unless asked', async () => {
     // Arrange
-    const browser = request({ target: { kind: 'browser', key: 'app', selector: '#password' } });
+    const browser = request({ target: { kind: 'browser', key: 'app' } });
     const first = rig({}, new FakeInputGateway([browser]));
     const second = rig({}, new FakeInputGateway([browser]));
 

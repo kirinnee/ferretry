@@ -696,3 +696,77 @@ describe('AgentToolService — a nested input view is sealed where it is publish
     should(result.input?.observed?.consumer).equal(CANARY);
   });
 });
+
+describe('AgentToolService — browser.request_input', () => {
+  const login: AgentToolCall = {
+    tool: 'browser.request_input',
+    name: 'app',
+    prompt: 'Google login for the console',
+    fields: [
+      { id: 'email', label: 'Email', sensitivity: 'plain', selector: '#identifierId' },
+      { id: 'password', sensitivity: 'secret', ref: 'e12' },
+    ],
+  };
+
+  it('should raise one card for the page, each field naming its element, defaulting submit to offer-owner', async () => {
+    // Arrange
+    const input = new FakeInput();
+    const world = agentToolWorld({ input });
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+
+    // Act
+    const asked = await world.service.call(agent, login);
+
+    // Assert
+    should(asked.summary).equal(
+      'Asked the owner for 2 values (!A7) for %browser:app. Wait with input.wait; do not type into those fields yourself.',
+    );
+    should(input.raised).deepEqual([
+      {
+        sessionId: 's1',
+        raise: {
+          target: { kind: 'browser', key: 'app' },
+          prompt: 'Google login for the console',
+          fields: [
+            { id: 'email', label: 'Email', sensitivity: 'plain', element: { kind: 'selector', selector: '#identifierId' } },
+            { id: 'password', sensitivity: 'secret', element: { kind: 'ref', ref: 'e12' } },
+          ],
+          submit: 'offer-owner',
+        },
+      },
+    ]);
+  });
+
+  it('should refuse a person: they already have the page', async () => {
+    // Arrange
+    const input = new FakeInput();
+    const world = agentToolWorld({ input });
+    await world.service.call(person, { tool: 'browser.open', name: 'app' });
+
+    // Act
+    const error = await refusal(world.service.call(person, login));
+
+    // Assert
+    should(error.code).equal('bad_request');
+    should(input.raised).deepEqual([]);
+  });
+
+  it('should label a terminal value when the agent names one', async () => {
+    // Arrange
+    const input = new FakeInput();
+    const world = await worldWith(input);
+
+    // Act
+    await world.service.call(agent, {
+      tool: 'terminal.request_input',
+      name: 'dev',
+      prompt: 'the key passphrase',
+      sensitivity: 'secret',
+      label: 'Passphrase',
+    });
+
+    // Assert
+    should(input.raised[0]?.raise.fields).deepEqual([{ id: 'value', label: 'Passphrase', sensitivity: 'secret' }]);
+    should(input.raised[0]?.raise.sensitivity).be.undefined();
+  });
+});

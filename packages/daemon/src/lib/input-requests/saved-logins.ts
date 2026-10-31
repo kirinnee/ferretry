@@ -7,6 +7,7 @@ import {
   type LoginEntrySummary,
   type LoginFieldRole,
   LoginMatchSchema,
+  strongestSensitivity,
   suggestedLoginId,
   suggestedLoginLabel,
 } from '@ferretry/protocol';
@@ -125,4 +126,28 @@ export function savedFor(
     ...(saves === undefined ? {} : { saves }),
     offers,
   };
+}
+
+/**
+ * What a card of one or more fields may offer. One field is {@link savedFor}. Several are filled from ONE
+ * entry, so only an entry that holds every field's value is offered (a login with a username and a password
+ * for "Email" + "Password"), and nothing is ever saved from such a card: "Save as" keeps one typed value.
+ */
+export function savedForFields(
+  fields: readonly { readonly sensitivity: InputSensitivity }[],
+  matchKey: string | undefined,
+  entries: readonly LoginEntrySummary[],
+  hint: string | undefined,
+): InputSaved {
+  const [only] = fields;
+  if (fields.length === 1 && only !== undefined) return savedFor(only.sensitivity, matchKey, entries, hint);
+  const roles = fields.map(field => fillRoleFor(field.sensitivity));
+  const complete = entries.filter(entry => roles.every(role => holds(entry, role)));
+  const { suggest: _suggest, saves: _saves, ...offered } = savedFor(
+    strongestSensitivity(fields),
+    matchKey,
+    complete,
+    hint,
+  );
+  return offered;
 }

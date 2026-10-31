@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { SessionOutdatedSchema } from '../../src/lib/session.ts';
 import * as restart from '../../src/lib/session-restart.ts';
+import { SessionOutdatedSchema } from '../../src/lib/session.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 
 const AT = '2026-10-30T01:00:00.000Z';

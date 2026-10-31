@@ -9,7 +9,13 @@ import {
 } from '@ferretry/protocol';
 import { parseAgendaReference } from '../agenda/reference.ts';
 import type { InputPorts } from './ports.ts';
-import { describeInputReason, inputTargetReference, renderInputFacts, renderInputList } from './render.ts';
+import {
+  describeInputReason,
+  inputTargetReference,
+  renderInputFacts,
+  renderInputList,
+  showUntrusted,
+} from './render.ts';
 
 /** Options every input command accepts. */
 export interface InputCommandOptions {
@@ -117,6 +123,9 @@ export class InputController {
     if (request.observed === undefined || request.observedDigest === undefined) {
       throw new Error(`!${request.agendaItemId} is still being re-checked after a restart: try again in a moment`);
     }
+    if (saveAs !== undefined && request.fields.length > 1) {
+      throw new Error(`!${request.agendaItemId} asks for several values: --save-as keeps one, so it cannot be used here`);
+    }
     if (saveAs !== undefined && request.saved?.saves === undefined) {
       throw new Error(`!${request.agendaItemId} cannot be saved: this kind of value is never kept in a saved login`);
     }
@@ -127,6 +136,18 @@ export class InputController {
     if (named !== undefined) {
       this.ports.out.diagnostic(`using the saved login ${named}`);
       body = { ...base, entry: named };
+    } else if (request.fields.length > 1) {
+      const fields: { field: string; padded: string }[] = [];
+      for (const field of request.fields) {
+        const flag = field.sensitivity === 'plain' ? ', not secret: the ferret can see it' : '';
+        const value = await this.ports.prompt.askHidden(
+          `${showUntrusted(field.label)} for !${request.agendaItemId} (hidden${flag}): `,
+        );
+        const problem = inputValueProblem(value, field.sensitivity);
+        if (problem !== undefined) throw new Error(`${field.id}: ${problem}`);
+        fields.push({ field: field.id, padded: padInputValue(value) });
+      }
+      body = { ...base, fields };
     } else {
       const value = await this.ports.prompt.askHidden(`value for !${request.agendaItemId} (hidden): `);
       const problem = inputValueProblem(value, request.sensitivity);

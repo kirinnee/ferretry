@@ -1,6 +1,19 @@
 import { z } from 'zod';
 import { AgendaIdSchema } from './agenda.ts';
 import {
+  BROWSER_MAX_FIND_CHARS,
+  BROWSER_MAX_SNAPSHOT_DEPTH,
+  BrowserCoordinateSchema,
+  BrowserModifierSchema,
+  BrowserMouseButtonSchema,
+  BrowserReadModeSchema,
+  BrowserRefSchema,
+  BrowserScreenshotFormatSchema,
+  refineBrowserRead,
+  refineBrowserScreenshot,
+  refineBrowserTarget,
+} from './browser-target.ts';
+import {
   BROWSER_CONSOLE_MAX_LIMIT,
   BROWSER_DIALOG_PROMPT_MAX_CHARS,
   BROWSER_NETWORK_FILTER_MAX_CHARS,
@@ -29,19 +42,6 @@ import {
   refineBrowserMouse,
   refineBrowserScroll,
 } from './browser-pointer.ts';
-import {
-  BROWSER_MAX_FIND_CHARS,
-  BROWSER_MAX_SNAPSHOT_DEPTH,
-  BrowserCoordinateSchema,
-  BrowserModifierSchema,
-  BrowserMouseButtonSchema,
-  BrowserReadModeSchema,
-  BrowserRefSchema,
-  BrowserScreenshotFormatSchema,
-  refineBrowserRead,
-  refineBrowserScreenshot,
-  refineBrowserTarget,
-} from './browser-target.ts';
 import { InstantSchema } from './common.ts';
 import type { AgentConfigToolName } from './config-files.ts';
 import {
