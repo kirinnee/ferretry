@@ -56,14 +56,21 @@ const harness = () => {
   };
   const scheduler = new Scheduler();
   const sent: string[] = [];
+  const permits: Array<(() => boolean) | undefined> = [];
   const bridge = new TerminalStreamBridge(
     gapped,
     's',
     't',
-    { send: bytes => sent.push(new TextDecoder().decode(bytes)), close: () => undefined },
+    {
+      send: (bytes, permit) => {
+        permits.push(permit);
+        return sent.push(new TextDecoder().decode(bytes));
+      },
+      close: () => undefined,
+    },
     scheduler,
   );
-  return { state, scheduler, sent, bridge, gapped };
+  return { state, scheduler, sent, permits, bridge, gapped };
 };
 
 describe('the one publication gate, at the real bridge', () => {
@@ -126,6 +133,45 @@ describe('the one publication gate, at the real bridge', () => {
     await turn();
 
     should(h.sent.join('')).not.containEql('hunter2');
+  });
+
+  // R9-1
+  it('should hand the transport a permit that turns false once a hold begins, for a full frame', async () => {
+    const h = harness();
+
+    await h.bridge.open();
+    const permit = h.permits[0];
+
+    should(permit?.()).equal(true);
+    h.state.heldUntil = 30_000;
+    should(permit?.()).equal(false);
+  });
+
+  // R9-1
+  it('should hand the transport a permit that turns false once a hold begins, for a delta frame', async () => {
+    const h = harness();
+    h.bridge.fromClient(JSON.stringify({ type: 'resize', cols: 100, rows: 5 }));
+    await turn();
+    await h.bridge.open();
+    h.state.screen = pane(['$ ls -l', '', '', '', '']);
+
+    h.scheduler.callback?.();
+    await turn();
+    const permit = h.permits[1];
+
+    should(h.sent).have.length(2);
+    should(permit?.()).equal(true);
+    h.state.heldUntil = 30_000;
+    should(permit?.()).equal(false);
+  });
+
+  it('should keep a notice permitted while the hold lasts', async () => {
+    const h = harness();
+    h.state.heldUntil = 30_000;
+
+    await h.bridge.open();
+
+    should(h.permits[0]?.()).equal(true);
   });
 
   it('should leave a capture alone when no hold applies, and a notice already drawn as it is', async () => {

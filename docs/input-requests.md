@@ -179,8 +179,10 @@ the write:
   keeps it on the response, and every carrier calls it (`finalised`) as the last synchronous step before the bytes
   leave: the direct HTTP server and the relay tunnel (which the relay link and the direct carrier both use), so no
   await sits between the final check and the wire. The relay link also asks once more after the record is
-  queued and sealed, because those are awaits: an answer whose last word changed in the meantime is dropped unsent,
-  and its session ends so no sequence number is reused. Only the write to the socket itself remains, which is the
+  queued and sealed, because those are awaits: an answer, or a terminal stream frame (the bridge hands the
+  downstream a permit with every frame, true while its capture may still be shown), whose last word changed in the
+  meantime is dropped unsent, and its session ends so no sequence number is reused. The viewer reconnects and is
+  shown the quarantine notice. Only the write to the socket itself remains, which is the
   declared compare-and-enqueue gap.
 - **Every projection of what the daemon saw is covered.** While a pane is quarantined the prompt line, the
   program name and the argv in the owner's list, the agent's view and a restored request are replaced with a

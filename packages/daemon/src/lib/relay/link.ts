@@ -1506,7 +1506,7 @@ export class RelayLink {
    */
   #downstream(session: LinkSession): SocketDownstream {
     return {
-      send: frame => this.#sendStream(session, frame),
+      send: (frame, permit) => this.#sendStream(session, frame, permit),
       close: (code, reason) => this.#closeStream(session, code, reason),
       // HONESTLY, and this is the load-bearing one. Every stream policy in this daemon reads this
       // number to decide whether a viewer is behind; a relay that answered `0` would report a viewer
@@ -1535,7 +1535,7 @@ export class RelayLink {
    * producer the viewer had it, so one that skips a redraw the viewer already holds would never resend
    * a picture that was in fact thrown away.
    */
-  #sendStream(session: LinkSession, frame: string | Uint8Array): number | undefined {
+  #sendStream(session: LinkSession, frame: string | Uint8Array, permit?: () => boolean): number | undefined {
     if (session.phase !== 'streaming') return -1;
     const droppable = typeof frame !== 'string';
     const size = droppable ? frame.byteLength : frame.length;
@@ -1550,7 +1550,7 @@ export class RelayLink {
       this.#closeStream(session, RELAY_STREAM_CLOSES.oversize.code, RELAY_STREAM_CLOSES.oversize.reason);
       return -1;
     }
-    this.#queue(session, message, true);
+    this.#queue(session, message, true, permit);
     return size;
   }
 
@@ -1834,7 +1834,11 @@ export class RelayLink {
         // the old words. It is dropped unsent and its sequence number is never spent again: the
         // session ends, its keys die with it, and the peer asks anew for an answer that is true now.
         if (pending.permit?.() === false) {
-          this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'an answer changed before it left');
+          this.#endSession(
+            session.sessionId,
+            RELAY_CLOSE_CODES.protocolError,
+            'what it was about to send changed before it left',
+          );
           return;
         }
         session.waiting.shift();

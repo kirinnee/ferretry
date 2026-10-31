@@ -105,7 +105,13 @@ can take seconds. The daemon keeps that wait off its main thread, so it stays re
   main thread used to, and sends the answer back in small pieces, so the main thread only ever receives
   one piece at a time. The conversation index (which proves each message against the bytes it came
   from) is built in the worker too, from the bytes the worker itself read. The thread holds about
-  23 MiB on its own. Measured on a 100 MB transcript without a memory cap, the longest the main thread
+  23 MiB on its own. **It stays warm for 10 minutes after its last answer** (`PARSE_IDLE_MS`; it used
+  to end after 30 s, so the first messages read of a big session after a pause folded the whole
+  transcript again — 3.4–3.6 s). While warm, a read only folds what was appended. The memory it keeps
+  is bounded by size, not by that time: the conversation index holds at most 64 MiB of rows
+  (`DEFAULT_CONVERSATION_INDEX_BYTES`), forgetting the least recently read session first, so an idle
+  thread is about 23 MiB plus at most 64 MiB. A thread that holds an open window is kept for 6 hours,
+  as before. Measured on a 100 MB transcript without a memory cap, the longest the main thread
   was held went from 60–130 ms to under 40 ms. The guard is `io-pressure-transcript.test.ts`, which
   also runs with memory capped and prints each path's longest block on a `TRANSCRIPT-BUDGET` line.
 - `fyd --check` lists `session-index`, `analytics-index` and `transcript-parse` with the other workers.
