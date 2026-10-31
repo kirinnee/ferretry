@@ -1,4 +1,4 @@
-import type { AgendaItem, AgendaSnapshot } from '@ferretry/protocol';
+import { type AgendaItem, type AgendaSnapshot, type PushSubject, pushUrgencyFor } from '@ferretry/protocol';
 import { type AgendaRaisedObserver, ownerTurnItems } from '../agenda/index.ts';
 import {
   agendaNotificationAttribution,
@@ -34,6 +34,11 @@ export interface NotificationServiceOptions {
    * cannot be read silences every push and leaves no trace anywhere.
    */
   readonly diagnostics?: NotificationDiagnostics;
+  /**
+   * What an item is about, for how urgently its push must reach a phone (`pushUrgencyFor`): an input card asking for a
+   * one-time code is `one-time-code`. Absent, or `other`, is a normal push.
+   */
+  readonly subjectOf?: (sessionId: string, item: AgendaItem) => PushSubject;
 }
 
 /**
@@ -80,8 +85,11 @@ export class NotificationService implements AgendaRaisedObserver {
   async stopped(sessionId: string, stoppedAt: string, snapshot: AgendaSnapshot): Promise<void> {
     const [first, ...rest] = ownerTurnItems(snapshot.items);
     if (first === undefined) return;
-    await this.announce({ sessionId, agendaId: first.id, stoppedAt }, first, session =>
-      stoppedNotificationPayload(sessionId, session.name, [first, ...rest], snapshot),
+    await this.announce(
+      { sessionId, agendaId: first.id, stoppedAt },
+      first,
+      session => stoppedNotificationPayload(sessionId, session.name, [first, ...rest], snapshot),
+      [first, ...rest],
     );
   }
 
@@ -107,10 +115,21 @@ export class NotificationService implements AgendaRaisedObserver {
     return (await this.options.ledger.find(key)) ?? (await this.options.ledger.find(legacyNotificationKey(key)));
   }
 
+  /**
+   * The first of these items whose push must be high priority (a one-time code waiting), or nothing. A stop counts
+   * every item waiting on the owner: a code among them expires whichever item the push opens.
+   */
+  private urgentOf(sessionId: string, items: readonly AgendaItem[]): AgendaItem | undefined {
+    const subjectOf = this.options.subjectOf;
+    if (subjectOf === undefined) return undefined;
+    return items.find(item => pushUrgencyFor(subjectOf(sessionId, item)) === 'high');
+  }
+
   private async announce(
     identity: NotificationIdentity,
     item: AgendaItem,
     compose: (session: NotificationSessionFacts) => SessionNotificationPayload,
+    items: readonly AgendaItem[] = [item],
   ): Promise<void> {
     const { sessionId } = identity;
     const key = notificationKey(identity);
@@ -119,7 +138,11 @@ export class NotificationService implements AgendaRaisedObserver {
         if ((await this.recorded(key)) !== undefined) return;
         const session = await this.options.sessions.describe(sessionId);
         if (session === undefined) return;
-        const payload = compose(session);
+        const composed = compose(session);
+        // A high push gets its own tag (one per card), so the platform sounds it again rather than folding it in silently.
+        const urgent = this.urgentOf(sessionId, items);
+        const payload: SessionNotificationPayload =
+          urgent === undefined ? composed : { ...composed, urgency: 'high', tag: `${composed.tag}:${urgent.id}` };
         const enrolled = (await this.options.push.list()).length;
         await this.options.ledger.append(
           NotificationRecordSchema.parse({
@@ -147,7 +170,10 @@ export class NotificationService implements AgendaRaisedObserver {
         let delivered: number;
         let failed: number;
         try {
-          ({ delivered, failed } = await this.options.push.notify({ payload }));
+          ({ delivered, failed } = await this.options.push.notify({
+            payload,
+            ...(urgent === undefined ? {} : { urgency: 'high' as const }),
+          }));
         } catch (error) {
           this.warn(`push ${key} was not delivered — ${errorText(error)}`);
           await this.options.ledger

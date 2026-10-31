@@ -120,6 +120,34 @@ export const VapidPublicKeyResponseSchema = z.object({
 });
 export type VapidPublicKeyResponse = z.infer<typeof VapidPublicKeyResponseSchema>;
 
+/**
+ * HOW URGENTLY A PUSH SERVICE SHOULD DELIVER A MESSAGE (RFC 8030 §5.3, the `Urgency` header). A push service may
+ * hold a `normal` message while a phone saves battery; `high` asks it not to. Whether a service honours it is its own
+ * choice (docs/notifications.md, "High priority").
+ */
+export const PUSH_URGENCIES = ['very-low', 'low', 'normal', 'high'] as const;
+export const PushUrgencySchema = z.enum(PUSH_URGENCIES);
+export type PushUrgency = z.infer<typeof PushUrgencySchema>;
+
+/**
+ * What a push is about, as far as how fast it must reach a phone. A one-time code is waited on for minutes, not
+ * hours (the owner's ask: "for 2FA notification, please make it high priority"). The approve-on-phone card adds its
+ * own subject here and nothing else changes.
+ */
+export type PushSubject = 'one-time-code' | 'other';
+const URGENT_SUBJECTS: ReadonlySet<PushSubject> = new Set(['one-time-code']);
+
+/** THE ONE RULE: which pushes are high priority. Everything else stays `normal`, which is also what an absent header means. */
+export function pushUrgencyFor(subject: PushSubject): PushUrgency {
+  return URGENT_SUBJECTS.has(subject) ? 'high' : 'normal';
+}
+
+/**
+ * How long a push service holds a HIGH push it could not deliver: a one-time code card lives ten minutes by default
+ * (`INPUT_DEFAULT_EXPIRY_SECONDS`), so a buzz later than that is about a code that has expired.
+ */
+export const PUSH_URGENT_TTL_SECONDS = 600;
+
 const PushPayloadBaseShape = {
   version: z.literal(1),
   eventKey: z.string().min(1),
@@ -128,6 +156,12 @@ const PushPayloadBaseShape = {
   tag: z.string().min(1),
   url: z.string().min(1),
   count: PositiveIntegerSchema,
+  /**
+   * A high-priority push: the service worker asks the platform to keep it on screen and to sound again. Only `high`
+   * travels; an absent key is every other push. A service worker older than this field reads the payload as one it
+   * did not compose and still shows a plain "something is waiting" notification, never nothing.
+   */
+  urgency: z.literal('high').optional(),
 };
 
 /**

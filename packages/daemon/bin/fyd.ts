@@ -9900,6 +9900,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         new AccountModelConversationListPolicy(declaredAccountModel),
       );
       const wardenPaths = createWardenPaths(paths.home);
+      // Built after the agenda it reads and writes; an owner's dismissal heard before then has nothing to cancel, and a
+      // push composed before then is a normal one.
+      let inputRequests: InputRequestService | undefined;
       const notifications = new NotificationService({
         ledger: new FileNotificationDeliveryLedger(paths, stateFiles),
         sessions: {
@@ -9918,6 +9921,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         serial: new KeyedSerialExecutor(),
         clock,
         diagnostics: { warn: message => void process.stderr.write(`notifications: ${message}\n`) },
+        // An input card asking for a one-time code is pushed at high priority (pushUrgencyFor).
+        subjectOf: (sessionId, item) =>
+          item.input === undefined
+            ? 'other'
+            : (inputRequests?.pushSubjectOf(sessionId, item.input.requestId) ?? 'other'),
       });
       // ONE agenda service for this opened store, shared by the route a person answers on and by
       // the warden sweep that raises and clears its own escalations. Two would each hold their own
@@ -10088,8 +10096,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // Read lazily: the service is built just below, and this is only called after it commits.
         { raise: async (...parameters) => await agenda.raise(...parameters) },
       );
-      // Built after the agenda it reads and writes; an owner's dismissal heard before then has nothing to cancel.
-      let inputRequests: InputRequestService | undefined;
       const agenda = new AgendaService(
         agendaBoards,
         clock,

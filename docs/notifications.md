@@ -95,6 +95,31 @@ A title is an agent's own words, so it must never read as the daemon's new-devic
 that reads as that alert is labelled, as `Ferret “…”`: any spelling, case or punctuation, and Cyrillic, Greek
 and accented look-alikes (`agendaNotificationTitle`). Every other title is as written.
 
+### High priority
+
+The owner asked for it: a push about a **one-time code** waiting on an input card (sensitivity `code`,
+[input requests](input-requests.md#one-time-codes-code)) is high priority. That is a stop with a code card among the
+items waiting, or a code card's deadline. One rule decides it, `pushUrgencyFor` (`packages/protocol/src/lib/push.ts`):
+`one-time-code` is high, everything else normal. The approve-on-phone card joins it by adding its subject there.
+
+What a high push does, and who honours it:
+
+| Part                                               | Set by         | Honoured by                                                                                                                                                                                      |
+| -------------------------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Urgency: high` header (RFC 8030)                  | the daemon     | the push service, if it chooses: Google's FCM (Chrome on Android) documents that it delivers a high push at once, waking a dozing phone; other services, Apple's included, decide for themselves |
+| `TTL: 600` (a code card's life) instead of 4 weeks | the daemon     | every push service: a push not delivered in ten minutes is dropped, because its code has expired                                                                                                 |
+| `requireInteraction`                               | service worker | Chrome and Edge on desktop keep it on screen until it is acted on; Android and iOS ignore it                                                                                                     |
+| `renotify` with a tag per card, `silent: false`    | service worker | Chrome and Edge sound it again even when an earlier push for the ferret is showing                                                                                                               |
+| `vibrate`                                          | service worker | Chrome on Android; ignored elsewhere                                                                                                                                                             |
+
+**iOS has no "time-sensitive" option for a web app.** The interruption level (time-sensitive, which can break through
+a Focus mode) is an option for native apps only; Web Push on iOS and iPadOS exposes none, so Ferretry does not and
+cannot set it. A Focus mode can still hold a code push on an iPhone.
+
+The payload says `urgency: "high"` and never the code, the value or anything typed: only what an ordinary push says
+(the push service is a third party). A service worker older than this field cannot read the payload and shows its
+plain "something is waiting in your Inbox" notification instead: never nothing.
+
 ## Where a tap goes
 
 The push's `url` is relative to the machine's own pages: `/session/<id>?attention=A3`
@@ -260,3 +285,6 @@ every push from v4.116.0 until it was read again, and a push that cannot be made
   notice that should have been an item.
 - **Page-level notifications for a new item.** A device with no push enrolment learns about an item only
   from the unread mark while the app is open.
+- **An input card has no push of its own.** A code card buzzes (at high priority) when its ferret stops or when its
+  deadline comes near, like any item. A ferret still inside `input_wait` has not stopped, so the owner is not pushed
+  until it does.

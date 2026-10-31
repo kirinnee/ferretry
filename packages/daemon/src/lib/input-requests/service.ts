@@ -33,6 +33,7 @@ import {
   type InputShot,
   type InputTarget,
   type InputTargetFacts,
+  type PushSubject,
   loginDomainsOf,
   type LoginObserved,
   inputRaiseFields,
@@ -515,6 +516,16 @@ export class InputRequestService {
   /** `text` with any value delivered to this session in the redaction window masked, for an agent's terminal reads. */
   scrub(sessionId: string, text: string): string {
     return this.deps.values.scrub(sessionId, text);
+  }
+
+  /**
+   * What a request's push is about (`pushUrgencyFor`): a pending card whose strongest field is a one-time `code` is
+   * `one-time-code`, and is pushed at high priority; anything else, or a request this daemon does not hold, is `other`.
+   */
+  pushSubjectOf(sessionId: string, requestId: string): PushSubject {
+    const held = this.held.get(requestId);
+    if (held === undefined || held.request.sessionId !== sessionId || isFinal(held.request)) return 'other';
+    return held.request.sensitivity === 'code' ? 'one-time-code' : 'other';
   }
 
   /**

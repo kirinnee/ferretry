@@ -97,6 +97,7 @@ function fixture(
     readonly push?: Push;
     readonly callLog?: string[];
     readonly warnings?: string[];
+    readonly subjectOf?: ConstructorParameters<typeof NotificationService>[0]['subjectOf'];
   } = {},
 ) {
   const callLog = options.callLog ?? [];
@@ -115,6 +116,7 @@ function fixture(
       serial: new KeyedSerialExecutor(),
       clock: { now: () => AT },
       ...(options.warnings === undefined ? {} : { diagnostics: { warn: message => options.warnings?.push(message) } }),
+      ...(options.subjectOf === undefined ? {} : { subjectOf: options.subjectOf }),
     }),
   };
 }
@@ -516,5 +518,48 @@ describe('NotificationRecordSchema across the agenda rename', () => {
     should(
       NotificationRecordSchema.safeParse({ ...base, key: `agenda:${OTHER}:A1:ping`, origin: 'agenda' }).success,
     ).be.false();
+  });
+});
+
+describe('NotificationService high priority', () => {
+  /** A2 is an input card asking for a one-time code; nothing else is. */
+  const codeCard = (_session: string, candidate: { readonly id: string }) =>
+    candidate.id === 'A2' ? ('one-time-code' as const) : ('other' as const);
+
+  it('should push a stop with a one-time code waiting at high priority, under a tag of its own', async () => {
+    // Arrange
+    const world = fixture({ subjectOf: codeCard });
+
+    // Act
+    await world.service.stopped(SESSION, AT, twoWaiting);
+
+    // Assert
+    should(world.push.dispatches[0]?.urgency).equal('high');
+    should(world.push.dispatches[0]?.payload).containDeep({ urgency: 'high', tag: `attention-${SESSION}:A2` });
+  });
+
+  it('should push everything else as before: no urgency, the shared tag', async () => {
+    // Arrange
+    const world = fixture({ subjectOf: codeCard });
+
+    // Act
+    await world.service.stopped(SESSION, AT, snapshot);
+
+    // Assert
+    should(world.push.dispatches[0]?.urgency).be.undefined();
+    should(world.push.dispatches[0]?.payload).not.have.property('urgency');
+    should(world.push.dispatches[0]?.payload.tag).equal(`attention-${SESSION}`);
+  });
+
+  it('should push a code card past its deadline at high priority too', async () => {
+    // Arrange
+    const world = fixture({ subjectOf: codeCard });
+    const code = AgendaItemSchema.parse({ ...due, id: 'A2' });
+
+    // Act
+    await world.service.deadline(SESSION, code, snapshot);
+
+    // Assert
+    should(world.push.dispatches[0]?.urgency).equal('high');
   });
 });

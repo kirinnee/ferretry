@@ -1,4 +1,4 @@
-import type { BrowserPushSubscription, PushErrorCode, PushNotificationPayload } from '@ferretry/protocol';
+import type { BrowserPushSubscription, PushErrorCode, PushNotificationPayload, PushUrgency } from '@ferretry/protocol';
 
 /**
  * WEB PUSH, AND WHY A SUBSCRIPTION IS NOT A SECOND KIND OF DEVICE.
@@ -67,6 +67,10 @@ export interface PushDelivery {
   readonly subscription: BrowserPushSubscription;
   /** The JSON body the service worker receives, already composed and validated. */
   readonly payload: string;
+  /** The `Urgency` header (RFC 8030); absent sends none, which a push service reads as `normal`. */
+  readonly urgency?: PushUrgency;
+  /** How long the push service may hold it undelivered; absent is the transport's own (the longest). */
+  readonly ttlSeconds?: number;
 }
 
 /**
@@ -94,6 +98,8 @@ export interface WebPushTransport {
  */
 export interface PushDispatch {
   readonly payload: PushNotificationPayload;
+  /** How urgently every device should be reached (`pushUrgencyFor`); absent is `normal`. */
+  readonly urgency?: PushUrgency;
 }
 
 export interface PushClock {

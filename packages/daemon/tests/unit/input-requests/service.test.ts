@@ -2251,3 +2251,18 @@ describe('a one-time code (`code`): visible, never locked, never masked when the
     should(secret.service.pendingOn(SESSION, at, { typing: true })).equal('A1');
   });
 });
+
+describe('what a request push is about', () => {
+  it('should call a pending code card a one-time code, and every other card, or a settled one, other', async () => {
+    // Arrange
+    const code = await raised({}, { ...RAISE, sensitivity: 'code' });
+    const secret = await raised({}, RAISE);
+
+    // Act / Assert
+    should(code.service.pushSubjectOf(SESSION, code.id)).equal('one-time-code');
+    should(code.service.pushSubjectOf('another-session', code.id)).equal('other');
+    should(secret.service.pushSubjectOf(SESSION, secret.id)).equal('other');
+    await code.service.cancel(SESSION, code.id, HOST);
+    should(code.service.pushSubjectOf(SESSION, code.id)).equal('other');
+  });
+});
