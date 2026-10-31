@@ -169,8 +169,10 @@ thing only the owner can decide or do on the agenda, as its own item (`fy agenda
 [agenda.md](agenda.md)); with it off, it is told only the notify rule above. A new ferret starts with it
 on unless the machine default (below) is turned off.
 
-The section (`AGENDA_INSTRUCTION` in `@ferretry/fleet`, about 1,000 characters, capped at 1,300 by a
-test) names the verbs and flags `fy agenda` takes — its one `agenda add` example carries `--premise` and
+The section (`AGENDA_INSTRUCTION` in `@ferretry/fleet`, about 1,050 characters, capped at 1,300 by a
+test) opens with the rule that the agenda is only for what the owner alone can give — information, a decision or an
+action — and never tracks or checks work (no "please test/verify" items: the board's Done / Not good covers that,
+and a Not good result is what opens a new item; [agenda.md](agenda.md)), names the verbs and flags `fy agenda` takes — its one `agenda add` example carries `--premise` and
 `--context`, which every new item requires ([agenda.md](agenda.md#rules-the-writing-keeps)) — what `--blocking`,
 `--will-block` and `--by` mean, and that `"[answer to !A3 …]"` is an answer while `"[re !A3 …]"` is chat that
 parks the item as replied (bring it back with `fy agenda edit` refreshing the whole card — `--summary`, `--premise` and `--context` — else `done` it —

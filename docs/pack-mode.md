@@ -70,7 +70,7 @@ and the longest routing prompt:
 | Ferretry settings (short "Set up" skill) | 478        | 120      | every agent runtime         |
 | Notify (`fy notify`, the Inbox)          | 303        | 76       | every agent runtime         |
 | Board (`fy task`, cards)                 | 640        | 160      | every agent runtime         |
-| Agenda (`fy agenda`, with steps)         | 1,040      | 260      | `FY_AGENDA=1`               |
+| Agenda (`fy agenda`, with steps)         | 1,045      | 262      | `FY_AGENDA=1`               |
 | Hypermedia                               | 1,503      | 376      | `FY_HYPERMEDIA=1`           |
 | Pack mode                                | 1,003      | 251      | `FY_PACK=1`                 |
 | Its routing line                         | ≤ 1,210    | ≤ 303    | `FY_PACK=1`                 |
@@ -308,7 +308,7 @@ to report back. Enforced by the daemon from the caller's session identity, not b
   itself started a deeper session holds the same authority over that one.
 - **Prompt:** a sub-ferret's fixed layer is the tools and settings rules plus two lines (`SUB_FERRET_INSTRUCTION`):
   report to your lead with `fy send`; link your PR to your card. The Notify, Board and Agenda mode paragraphs are left
-  out. Sizes with the default binary name: **lead 2230 characters** (3274 with Agenda mode on), **sub-ferret 1560**.
+  out. Sizes with the default binary name: **lead 2230 characters** (3276 with Agenda mode on), **sub-ferret 1560**.
   `FY_SUB_FERRET=1` is derived from `parent` at each launch; a running ferret is told the changed always-on section on the
   owner's next message like any other ([launch-settings.md](launch-settings.md#instructions-that-changed-since-the-launch)).
 - **Nudges** about a sub-ferret's card (the turn-check, a reopen, the GitHub watcher's and sweep's) go to its lead.
