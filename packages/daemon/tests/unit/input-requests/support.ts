@@ -73,7 +73,7 @@ export function inputRequestService(
       quarantine: async () => undefined,
       quarantines: async () => [],
     },
-    audit: { record: async () => undefined, saved: async () => undefined },
+    audit: { record: async () => undefined, saved: async () => undefined, stored: async () => undefined },
     clock,
     ids: { requestId: () => (id++).toString(16).padStart(32, '0') },
     timers: { after: async () => await new Promise<void>(() => undefined) },

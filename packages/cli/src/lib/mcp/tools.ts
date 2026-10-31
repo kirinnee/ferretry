@@ -6,13 +6,13 @@ import {
   type AgentConfigToolName,
   type AgentLessonToolName,
   type AgentToolName,
-  INPUT_MAX_EXPIRY_SECONDS,
-  INPUT_MAX_FIELDS,
-  INPUT_PROMPT_MAX_LENGTH,
   BROWSER_CONSOLE_LEVELS,
   BROWSER_CPU_THROTTLE_MAX,
   BROWSER_EMULATED_PERMISSIONS,
   BROWSER_RESOURCE_TYPES,
+  INPUT_MAX_EXPIRY_SECONDS,
+  INPUT_MAX_FIELDS,
+  INPUT_PROMPT_MAX_LENGTH,
   LESSON_RULE_MAX_CHARS,
   TERMINAL_KEYS,
 } from '@ferretry/protocol';
@@ -43,7 +43,7 @@ const NAME = {
 const NEW_NAME = {
   type: 'string',
   pattern: '^[a-z][a-z0-9-]{0,31}$',
-  description: 'A short name you choose, e.g. "dev" or "app": a lowercase letter, then letters, digits or dashes.',
+  description: 'A short name you choose, e.g. "dev" or "app".',
 };
 const ASK_OWNER = {
   type: ['boolean', 'string'],
@@ -685,6 +685,51 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
         chain: INPUT_OPTIONS.chain,
       },
       ['name', 'prompt', 'fields'],
+    ),
+  },
+  {
+    name: 'secure_copy',
+    tool: 'secure.copy',
+    description:
+      "Seal a command's stdout (a token) as sealed:<name>; you see its length, never the value. Seal before reading it.",
+    inputSchema: object(
+      {
+        name: { type: 'string' },
+        source: { type: 'object', description: '{"kind":"command","argv":["gh","auth","token"]}' },
+      },
+      ['name', 'source'],
+    ),
+  },
+  { name: 'secure_list', tool: 'secure.list', description: 'List copies.', inputSchema: object({}) },
+  {
+    name: 'secure_discard',
+    tool: 'secure.discard',
+    description: 'Drop a copy.',
+    inputSchema: object({ handle: { type: 'string' } }, ['handle']),
+  },
+  {
+    name: 'secure_paste',
+    tool: 'secure.paste',
+    description: 'Paste sealed:<name> into your terminal, or save it as a secret, once allowed; then input_wait.',
+    inputSchema: object(
+      {
+        handle: { type: 'string' },
+        to: {
+          type: 'object',
+          description: '{"kind":"terminal","name":"dev"} or {"kind":"secret","name":"VERCEL_TOKEN"}',
+        },
+        prompt: { type: 'string' },
+      },
+      ['handle', 'to', 'prompt'],
+    ),
+  },
+  {
+    name: 'secure_preapprove',
+    tool: 'secure.preapprove',
+    description: 'Ask the owner to approve planned pastes in advance.',
+    inputSchema: object(
+      { items: { type: 'array', description: '[{from:{kind,program|origin},to:{kind,program|origin},why}]' } },
+      ['items'],
     ),
   },
 ];

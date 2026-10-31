@@ -46,6 +46,22 @@ describe('untrusted text on the owner’s screen', () => {
     should(lines).containEql('its prompt line: password:\\x9b8m\\x7f\\x0afake');
   });
 
+  it('should name a paste into the secret store by the secret, and say when it replaces one', async () => {
+    const into = (exists: boolean) =>
+      shown({
+        target: { kind: 'secret', key: 'VERCEL_TOKEN' },
+        observed: { kind: 'secret', name: 'VERCEL_TOKEN', exists },
+        source: { kind: 'sealed', name: 'vercel', from: { kind: 'command', program: 'gh' } },
+      } as never);
+
+    const fresh = await into(false);
+    const replacing = await into(true);
+
+    should(fresh[0]).containEql('into the secret VERCEL_TOKEN');
+    should(fresh).containEql('it adds the new secret VERCEL_TOKEN');
+    should(replacing).containEql('it REPLACES the value VERCEL_TOKEN holds now');
+  });
+
   it('should spell out a restored prompt in the list', () => {
     const text = renderInputList({ requests: [request({ prompt: 'again\u001b]0;pwned\u0007‮' })] }, NOW);
 

@@ -19,6 +19,7 @@ import {
   applyAgendaCommand,
   applyAgendaCommandToSession,
   canDismissAgenda,
+  DAEMON_AGENDA_CAUSES,
   type EditAgendaPatch,
   emptyAgendaLedger,
   isActiveAgenda,
@@ -785,7 +786,7 @@ describe('Agenda state machine', () => {
     should(parseAgendaLedger(unknownLifecycle, SESSION_ID)).be.null();
   });
 
-  it.each(['source-reconciliation', 'warden-escalation', 'system', 'harness-prompt'] as const)(
+  it.each([...DAEMON_AGENDA_CAUSES])(
     'should decode a stored item raised by the %s daemon cause with that cause intact',
     cause => {
       // Arrange

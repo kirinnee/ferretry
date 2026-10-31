@@ -6,6 +6,7 @@ import {
   type AgendaCardAnswer,
   type AgendaClearableField,
   type AgendaConfirms,
+  type AgendaCopyPlanRef,
   type AgendaDisposition,
   type AgendaErrorCode,
   type AgendaHistoryEntry,
@@ -39,12 +40,18 @@ import {
 /** Agent-raised requests are capped separately so automatic sources retain board capacity. */
 export const MAX_AGENT_AGENDA_PER_SESSION = 10;
 
-export type DaemonAgendaCause =
-  | 'source-reconciliation'
-  | 'warden-escalation'
-  | 'system'
-  | 'harness-prompt'
-  | 'input-request';
+/** Every cause the daemon raises an item for: ONE list, so the type and the ledger's parser cannot disagree. */
+export const DAEMON_AGENDA_CAUSES = [
+  'source-reconciliation',
+  'warden-escalation',
+  'system',
+  'harness-prompt',
+  'input-request',
+  'secure-copy',
+] as const;
+export type DaemonAgendaCause = (typeof DAEMON_AGENDA_CAUSES)[number];
+const isDaemonAgendaCause = (value: unknown): value is DaemonAgendaCause =>
+  (DAEMON_AGENDA_CAUSES as readonly unknown[]).includes(value);
 
 /**
  * Provenance is a tagged value, not a user-supplied collection of nullable fields. The daemon
@@ -112,6 +119,8 @@ export interface RaiseAgendaRequest extends AgendaBrief, AgendaCardFields {
   readonly task?: TaskRef;
   /** The input request an `input` card presents (`AgendaInputRef`); only the daemon raises one. */
   readonly input?: AgendaInputRef;
+  /** The paste plan a card presents (`AgendaCopyPlanRef`); only the daemon raises one. */
+  readonly copyPlan?: AgendaCopyPlanRef;
   /** The owner's one tap may close `task` too (`DAEMON_FEATURES.agendaOfferClose`); needs a card. */
   readonly offerClose?: true;
 }
@@ -632,6 +641,7 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
       ...(request.confirms === undefined ? {} : { confirms: request.confirms }),
       ...(request.task === undefined ? {} : { task: request.task }),
       ...(request.input === undefined ? {} : { input: request.input }),
+      ...(request.copyPlan === undefined ? {} : { copyPlan: request.copyPlan }),
       ...(request.offerClose === true ? { offerClose: true as const } : {}),
     },
     actor,
@@ -729,6 +739,13 @@ function addressById(
     if (target.item.kind === 'input') {
       return failure('use_input_form', `${command.id} is answered in its input form, not as an agenda answer`);
     }
+    // A paste plan is answered by the owner's plan route, which makes its rules: an agenda answer would make none.
+    if (target.item.copyPlan !== undefined) {
+      return failure(
+        'use_input_form',
+        `${command.id} is a paste plan: answer it on its card, or with fy copy plan approve`,
+      );
+    }
     // An answer to a confirmation is the owner's decision about a configuration change: never a ferret's.
     if (target.item.confirms !== undefined && command.actor.kind !== 'human') {
       return failure(
@@ -795,16 +812,7 @@ function parseAgendaActor(value: unknown): AgendaActor | null {
   ) {
     return { kind: 'agent', sessionId: raw.sessionId, name: raw.name };
   }
-  if (
-    raw.kind === 'daemon' &&
-    (raw.cause === 'source-reconciliation' ||
-      raw.cause === 'warden-escalation' ||
-      raw.cause === 'system' ||
-      raw.cause === 'harness-prompt' ||
-      raw.cause === 'input-request')
-  ) {
-    return { kind: 'daemon', cause: raw.cause };
-  }
+  if (raw.kind === 'daemon' && isDaemonAgendaCause(raw.cause)) return { kind: 'daemon', cause: raw.cause };
   return null;
 }
 

@@ -157,6 +157,16 @@ describe('agent tool schemas', () => {
         prompt: 'GitHub login',
         fields: [{ id: 'password', sensitivity: 'secret', ref: 'e7' }],
       },
+      { tool: 'secure.copy', name: 'token', source: { kind: 'command', argv: ['gh'] } },
+      { tool: 'secure.list' },
+      { tool: 'secure.discard', handle: 'sealed:token' },
+      { tool: 'secure.paste', handle: 'sealed:token', to: { kind: 'terminal', name: 'dev' }, prompt: 'the token' },
+      {
+        tool: 'secure.preapprove',
+        items: [
+          { from: { kind: 'command', program: 'gh' }, to: { kind: 'terminal', program: 'vercel' }, why: 'token' },
+        ],
+      },
     ];
 
     // Act
@@ -168,6 +178,18 @@ describe('agent tool schemas', () => {
       'terminal.wait',
       ...tools.AGENT_TOOL_NAMES.slice(5),
     ]);
+  });
+
+  it('should paste into a terminal by its name or into the secret store by a secret name, nowhere else', () => {
+    const paste = (to: unknown) => ({ tool: 'secure.paste', handle: 'sealed:token', to, prompt: 'the token' });
+
+    should(tools.AgentToolCallSchema.safeParse(paste({ kind: 'secret', name: 'VERCEL_TOKEN' })).success).be.true();
+    for (const to of [
+      { kind: 'secret', name: 'vercel_token' },
+      { kind: 'secret', name: 'VERCEL_TOKEN', exists: true },
+      { kind: 'vault', name: 'VERCEL_TOKEN' },
+    ])
+      should(tools.AgentToolCallSchema.safeParse(paste(to)).success).be.false();
   });
 
   it('should take a page script as a bounded function, with at most one element, and refuse everything else', () => {

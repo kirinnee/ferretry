@@ -102,6 +102,7 @@
         "harness/migrate-ask-screenshot.tsx",
         "harness/approval-card-screenshot.tsx",
         "harness/input-card-screenshot.tsx",
+        "harness/secure-copy-screenshot.tsx",
         "harness/question-form-screenshot.tsx",
         "harness/question-stepper-screenshot.tsx",
         "harness/dialog-card-screenshot.tsx",

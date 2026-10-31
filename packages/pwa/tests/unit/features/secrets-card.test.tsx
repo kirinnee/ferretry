@@ -339,7 +339,9 @@ describe('SecretsSurface', () => {
               schema: { parse: (value: unknown) => unknown },
               init?: { method?: string },
             ) => {
-              if (!path.startsWith(`${SECRETS_PATH}/logins`)) calls.push(`${init?.method ?? 'GET'} ${path}`);
+              // The saved logins and the paste rules below the secrets read their own lists; these cases are about the secrets.
+              if (!path.startsWith(`${SECRETS_PATH}/logins`) && !path.startsWith('/v1/copy-rules'))
+                calls.push(`${init?.method ?? 'GET'} ${path}`);
               if (init?.method === undefined) return schema.parse(list());
               return schema.parse({ name: 'TOKEN', createdAt: AT, updatedAt: AT });
             },
@@ -372,7 +374,9 @@ describe('SecretsSurface', () => {
               schema: { parse: (value: unknown) => unknown },
               init?: { method?: string },
             ) => {
-              if (!path.startsWith(`${SECRETS_PATH}/logins`)) calls.push(`${init?.method ?? 'GET'} ${path}`);
+              // The saved logins and the paste rules below the secrets read their own lists; these cases are about the secrets.
+              if (!path.startsWith(`${SECRETS_PATH}/logins`) && !path.startsWith('/v1/copy-rules'))
+                calls.push(`${init?.method ?? 'GET'} ${path}`);
               if (init?.method === 'DELETE') {
                 deleted = true;
                 return schema.parse({ name: 'ANTHROPIC_API_KEY', removed: true });

@@ -17,7 +17,9 @@ const compact = (value: string, width: number): string => {
 
 /** How a target is cited: the same `%terminal:dev` an owner types and reads everywhere. */
 export function inputTargetReference(request: InputRequest): string {
-  return `%${request.target.kind}:${request.target.key}`;
+  return request.target.kind === 'secret'
+    ? `the secret ${request.target.key}`
+    : `%${request.target.kind}:${request.target.key}`;
 }
 
 function remaining(request: InputRequest, now: number): string {
@@ -52,7 +54,17 @@ export function renderInputFacts(request: InputRequest): string[] {
   if (request.risk !== undefined) lines.push(`risk ${request.risk.level}: ${showUntrusted(request.risk.reason)}`);
   const login = matchedLogin(request);
   if (login !== undefined) lines.push(`a saved login matches: ${login.text} (answer with --secret ${login.id})`);
+  if (request.source !== undefined) {
+    const from = request.source.from.origin ?? request.source.from.program ?? request.source.from.kind;
+    lines.push(
+      `pastes the secure copy sealed:${request.source.name}, captured from ${showUntrusted(from)}: nothing to type`,
+    );
+  }
   const observed = request.observed;
+  if (observed?.kind === 'secret')
+    lines.push(
+      observed.exists ? `it REPLACES the value ${observed.name} holds now` : `it adds the new secret ${observed.name}`,
+    );
   if (observed?.kind === 'terminal') {
     lines.push(
       `reading the terminal now: ${showUntrusted(observed.foreground.comm)}${observed.recognisedConsumer ? '' : ' (not a program known to ask for secrets)'}`,
@@ -83,6 +95,7 @@ const REASONS: Readonly<Record<InputReason, string>> = {
   agent_cancelled: 'the agent cancelled it',
   check_failures: 'too many checks failed',
   expired: 'it expired',
+  copy_gone: 'the secure copy it was to paste is gone',
 };
 
 /** The sentence for a closed reason. */

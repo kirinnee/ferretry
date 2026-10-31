@@ -1,6 +1,6 @@
 import type { AuditActor, AuditDetail } from '@ferretry/protocol';
 import type { AuditSink } from '../audit/types.ts';
-import type { InputAudit, InputAuditEntry, InputSaveAuditEntry } from './ports.ts';
+import type { InputAudit, InputAuditEntry, InputSaveAuditEntry, InputStoreAuditEntry } from './ports.ts';
 
 /**
  * Writes an input request's audit record to the daemon's audit log: the event, who acted and names and
@@ -19,6 +19,7 @@ export class InputAuditAdapter implements InputAudit {
       ...Object.fromEntries(Object.entries(entry.detail).filter(([, value]) => value !== undefined)),
       ...(entry.requestId === undefined ? {} : { requestId: entry.requestId }),
       ...(entry.actor.kind === 'agent' ? { by: 'agent' } : {}),
+      ...(entry.actor.kind === 'rule' ? { by: 'rule', rule: entry.actor.ruleId } : {}),
     };
     await this.sink.record({
       event: entry.event,
@@ -41,6 +42,27 @@ export class InputAuditAdapter implements InputAudit {
       subject: entry.entry,
       outcome: 'succeeded',
       detail: { action: 'login-save', field: entry.field, requestId: entry.requestId, session: entry.sessionId },
+    });
+  }
+
+  /**
+   * A secure copy pasted into the secret store is a change to it, so it is KEPT exactly as `fy secret set` is: event
+   * `secrets.changed`, the secret's NAME as the subject, and whether it replaced one; never the value. A paste the
+   * owner approved in advance is recorded as the rule's; a write that was cut off is kept too, as `paste-uncertain`,
+   * because the store may hold the copy now.
+   */
+  async stored(entry: InputStoreAuditEntry): Promise<void> {
+    await this.sink.record({
+      event: 'secrets.changed',
+      actor: entry.actor.kind === 'device' ? entry.actor : { kind: 'host' },
+      subject: entry.name,
+      outcome: entry.uncertain === true ? 'failed' : 'succeeded',
+      detail: {
+        action: entry.uncertain === true ? 'paste-uncertain' : entry.replaced ? 'paste-replace' : 'paste',
+        requestId: entry.requestId,
+        session: entry.sessionId,
+        ...(entry.actor.kind === 'rule' ? { by: 'rule', rule: entry.actor.ruleId } : {}),
+      },
     });
   }
 }

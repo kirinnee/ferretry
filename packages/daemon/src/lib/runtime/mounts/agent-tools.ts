@@ -186,6 +186,10 @@ function refusedFileTool(context: RouteContext): ApiError | undefined {
 async function personCall(service: AgentToolService, kind: SurfaceKind, context: RouteContext): Promise<ApiResponse> {
   const caller = personOf(context);
   const call = await parseBody(context.request, AgentToolCallSchema);
+  // A secure copy is an agent's (docs/secure-copy.md): a command copy runs a program on this machine, so no
+  // person's surface route may carry one, whatever grant it was reached with. The owner uses `fy copy`.
+  if (call.tool.startsWith('secure.'))
+    throw new ApiError(400, `${call.tool} is an agent's tool, not one a person's surface route takes`, 'bad_request');
   if (kindOf(call) !== kind)
     throw new ApiError(400, `this route takes ${kind} tools; ${call.tool} is not one`, 'bad_request');
   if (FILE_TOOLS.has(call.tool)) {

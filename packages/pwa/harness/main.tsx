@@ -31,6 +31,7 @@ import type {
   PairedDevicesView,
   PairingCodeMintResponse,
   PasskeysView,
+  PasteRuleList,
   PinSnapshot,
   ProjectInfo,
   SecretList,
@@ -1811,6 +1812,22 @@ const HARNESS_DOCTOR: DoctorReport = {
  * no route that returns one, so there is nothing for a harness to invent. What a review is looking
  * at is a name, an instant, a mask, and a configured reference that does not resolve.
  */
+/** Settings › Secrets › Pastes approved in advance: one route, a count and an end; never a value. */
+const COPY_RULES_READY: PasteRuleList = {
+  rules: [
+    {
+      id: '1'.repeat(32),
+      from: { kind: 'command', program: 'gh' },
+      to: { kind: 'terminal', program: 'vercel' },
+      remaining: 3,
+      used: 1,
+      createdAt: '2026-07-31T11:00:00.000Z',
+      createdBy: { kind: 'host' },
+      expiresAt: '2026-08-01T11:00:00.000Z',
+    },
+  ],
+};
+
 const SAVED_LOGINS_READY: LoginEntryList = {
   v: 1,
   health: 'ready',
@@ -2048,7 +2065,11 @@ const HARNESS_SECRET_CLIENT: SecretClientFactory = async connection => {
   if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
   return {
     request: (async (path: string) =>
-      path === '/v1/secrets/logins' ? SAVED_LOGINS_READY : SECRETS_READY) as SecretClient['request'],
+      path === '/v1/secrets/logins'
+        ? SAVED_LOGINS_READY
+        : path === '/v1/copy-rules'
+          ? COPY_RULES_READY
+          : SECRETS_READY) as SecretClient['request'],
   };
 };
 
@@ -2935,6 +2956,8 @@ const HARNESS_DAEMON_READS: Readonly<Record<string, unknown>> = {
   '/v1/secrets': SECRETS_READY,
   // Saved logins: one GitHub login with a username, and sudo on this machine with a 2FA seed; never a value.
   '/v1/secrets/logins': SAVED_LOGINS_READY,
+  // Secure copy: one paste approved in advance, so Settings › Secrets shows the section with a rule in it.
+  '/v1/copy-rules': COPY_RULES_READY,
   // The session workspace's "This folder" rail: one open signal and one answered, and its skills.
   '/v1/sessions/harness-workspace/attention': {
     v: 1,
