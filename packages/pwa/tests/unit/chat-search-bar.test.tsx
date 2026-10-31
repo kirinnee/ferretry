@@ -150,7 +150,7 @@ describe('the chat search bar', () => {
     await interact(() => chip('Only Lizzette').click());
     await settle();
     await interact(() =>
-      must(mounted?.container.querySelector<HTMLInputElement>('input[type="checkbox"]'), 'tools').click(),
+      must(mounted?.container.querySelector<HTMLButtonElement>('[data-search-tools]'), 'tools').click(),
     );
     await settle();
 

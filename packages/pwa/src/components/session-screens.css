@@ -1402,18 +1402,26 @@ button.fy-receipt {
   outline: var(--focus-width) solid var(--focus-color);
   outline-offset: var(--focus-offset);
 }
+/* Who and what, in ONE row that scrolls sideways rather than wrapping, so the bar is two rows on a phone. */
 .fy-chat-search__filters {
   align-items: center;
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px 12px;
+  flex-wrap: nowrap;
+  gap: 4px;
   margin-inline: auto;
   max-width: var(--chat-column, 760px);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
   width: 100%;
+}
+.fy-chat-search__filters::-webkit-scrollbar {
+  display: none;
 }
 .fy-chat-search__who {
   border: 0;
   display: inline-flex;
+  flex: none;
   gap: 4px;
   margin: 0;
   padding: 0;
@@ -1424,26 +1432,19 @@ button.fy-receipt {
   border-radius: var(--radius-badge);
   color: var(--fy-muted);
   cursor: pointer;
+  flex: none;
   font-size: 12px;
   padding: 3px 10px;
+  white-space: nowrap;
 }
 .fy-chat-search__chip[aria-pressed='true'] {
   background: color-mix(in srgb, var(--fy-accent) 14%, transparent);
   border-color: var(--fy-accent);
   color: var(--fy-fg);
 }
-.fy-chat-search__chip:focus-visible,
-.fy-chat-search__tools input:focus-visible {
+.fy-chat-search__chip:focus-visible {
   outline: var(--focus-width) solid var(--focus-color);
   outline-offset: var(--focus-offset);
-}
-.fy-chat-search__tools {
-  align-items: center;
-  color: var(--fy-muted);
-  cursor: pointer;
-  display: inline-flex;
-  font-size: 12px;
-  gap: 6px;
 }
 .fy-chat-search__note {
   color: var(--fy-muted);

@@ -302,17 +302,15 @@ export function ChatSearch({ port, transcript, agentName, onClose, focusSignal =
             </button>
           ))}
         </fieldset>
-        <label className="fy-chat-search__tools">
-          <input
-            checked={state.tools}
-            onChange={event => {
-              const tools = event.currentTarget.checked;
-              setState(current => ({ ...current, tools }));
-            }}
-            type="checkbox"
-          />
+        <button
+          aria-pressed={state.tools}
+          className="fy-chat-search__chip"
+          data-search-tools=""
+          onClick={() => setState(current => ({ ...current, tools: !current.tools }))}
+          type="button"
+        >
           Tools &amp; thinking
-        </label>
+        </button>
       </div>
       {state.status === 'error' && state.error !== null ? (
         <p className="fy-chat-search__note" role="alert">

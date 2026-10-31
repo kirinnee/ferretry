@@ -214,6 +214,14 @@ describe('searching a long chat and jumping to a match', () => {
           expect(placed.text).toContain('Question 420:');
           expect(placed.inView).toBe(true);
           expect(placed.painted).toBe(1);
+          // The bar is two rows: the box, and who and what in ONE row that scrolls sideways when it must.
+          const filterTops = await tab.evaluate(() =>
+            [...document.querySelectorAll('.fy-chat-search__chip')].map(chip =>
+              Math.round(chip.getBoundingClientRect().top),
+            ),
+          );
+          expect(filterTops.length).toBe(4);
+          expect(new Set(filterTops).size).toBe(1);
           await shoot(tab, `${name}-${scheme}-search`);
 
           // Many matches: the newest first, Enter walks back, and every step stays on its own row.
