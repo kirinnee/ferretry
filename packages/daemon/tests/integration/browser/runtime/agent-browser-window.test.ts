@@ -63,7 +63,9 @@ describe.if(process.platform === 'linux')('the agent browser as a real window, i
         node,
         { FY_CHROME_BIN: chrome, PATH: process.env.PATH, HOME: process.env.HOME },
         undefined,
-        { mode: async () => 'window', display, platform: 'linux' },
+        // Over the loopback PORT: the transport whose `navigator.webdriver` stays false. Chrome sets it for the
+        // DevTools pipe (the Linux default), which agent-browser-chrome.test.ts drives in a real Chrome.
+        { mode: async () => 'window', display, platform: 'linux', transport: async () => 'port' },
       ),
       () => Date.now(),
     );

@@ -1,8 +1,11 @@
-import { existsSync } from 'node:fs';
+import { closeSync, existsSync } from 'node:fs';
 import { createServer } from 'node:net';
 import type { BrowserMode, BrowserProxyStatus } from '@ferretry/protocol';
 import {
   agentBrowserArguments,
+  type CdpEndpoint,
+  type CdpTransport,
+  defaultCdpTransport,
   honestChromeUserAgent,
   BrowserControlError,
   type BrowserProfilePort,
@@ -11,17 +14,27 @@ import {
 } from '../../../lib/browser/control/index.ts';
 import { browserProxyStatus, proxyEndpoint, type ResolvedBrowserProxy } from '../../../lib/browser/proxy/index.ts';
 import type { BrowserSessionLauncher, BrowserWorkerProgram } from '../../../lib/browser/runtime/index.ts';
-import type { BrowserAutomation } from '../../../lib/browser/transport/index.ts';
+import { type BrowserAutomation, CDP_PIPE_ENDPOINT } from '../../../lib/browser/transport/index.ts';
 import type { BrowserDisplayPort } from '../control/login-runtime.ts';
 import { ProxySignInRelay } from '../proxy/sign-in-relay.ts';
-import { BrowserWorkerClient, type WorkerClientOptions } from '../transport/worker-client.ts';
+import { BrowserWorkerClient, type CdpPipeEnds, type WorkerClientOptions } from '../transport/worker-client.ts';
 
 /** Launches the machine's ONE agent Chrome — in the machine's Browser mode (headless by default; a real
  * window when the owner asked for one), over the dedicated agent profile, shared by every session — and the
  * worker that drives it. The profile lease is held until both
  * Chrome and the worker are gone, so a login window can never open over a live automation browser —
  * and a lease kept because cleanup could not be confirmed closes the profile to EVERY later launch,
- * this same session's retry included; only confirmed cleanup or dead-owner recovery frees it. */
+ * this same session's retry included; only confirmed cleanup or dead-owner recovery frees it.
+ *
+ * The worker reaches Chrome over the machine's DevTools transport (`CdpTransport`). Over the PIPE
+ * (`CDP_PIPE_SWITCH`) Chrome is spawned with its fds 3 and 4 wired, the daemon's ends become the worker's
+ * fds 3 and 4, and the daemon then closes its own copies: nothing on this host — another account included —
+ * has an address to drive the owner's signed-in profile through, and there is no free-port probe for anyone
+ * to race. Over a PORT, Chrome listens on loopback and the worker connects to it once it answers. Either
+ * way the daemon spawns Chrome itself, so it holds the real child: the pid on the lease, the exit it waits
+ * on and the process it reaps are Chrome's own. A worker that dies takes the pipe's only other end with it;
+ * Chrome reads end-of-file and quits, and the browser is torn down and started fresh on the next need
+ * rather than reattached — a pipe, unlike a port, cannot be reconnected to. */
 /** Who holds the agent profile's lease: the machine's agent browser, not any one session. */
 const AGENT_BROWSER_HOLDER = 'agent-browser';
 
@@ -43,6 +56,11 @@ export interface SessionBrowserModeOptions {
    * elsewhere straight out of this machine. `undefined` means no proxy.
    */
   readonly proxy?: () => Promise<ResolvedBrowserProxy | undefined>;
+  /**
+   * How the worker reaches Chrome's DevTools protocol, read at every launch like the mode. Absent, or
+   * unreadable, means this platform's default (`defaultCdpTransport`).
+   */
+  readonly transport?: () => Promise<CdpTransport>;
   readonly platform?: NodeJS.Platform;
   /** The daemon-owned directory the worker stages downloads and PDFs in (the file tools read them from here). */
   readonly stageDirectory?: string;
@@ -73,14 +91,16 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
     // The display is a precondition too: a Linux real window with no Xvfb refuses here, before any lease.
     const platform = this.modes.platform ?? process.platform;
     const mode = await this.mode();
+    const transport = (await this.modes.transport?.().catch(() => undefined)) ?? defaultCdpTransport(platform);
     const proxy = await this.modes.proxy?.();
     const version = await chromeVersion(executable);
     const display = mode === 'window' && platform === 'linux' ? await this.privateDisplay() : undefined;
     const lease = await this.profile.acquire({ sessionId: AGENT_BROWSER_HOLDER });
     let chrome: ReturnType<typeof Bun.spawn> | undefined;
     let relay: ProxySignInRelay | undefined;
+    let pipe: CdpPipeEnds | undefined;
     try {
-      const port = await freePort();
+      const cdp: CdpEndpoint = transport === 'pipe' ? { kind: 'pipe' } : { kind: 'port', port: await freePort() };
       if (proxy?.credentials !== undefined) {
         relay = await ProxySignInRelay.start(proxyEndpoint(proxy.setting.url), proxy.credentials);
       }
@@ -90,8 +110,9 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
           // HEADLESS unless the owner chose a real window. A real window keeps every page's window painting
           // while another has focus (`agentBrowserArguments`), because an agent may be driving — and a
           // person watching — any of them at once.
-          ...agentBrowserArguments(executable, lease.profile, port, viewport, platform, mode, {
+          ...agentBrowserArguments(executable, lease.profile, viewport, platform, mode, {
             ...(userAgent === undefined ? {} : { userAgent }),
+            cdp,
             ...(proxy === undefined
               ? {}
               : {
@@ -110,21 +131,36 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
             display === undefined ? undefined : this.modes.display?.authority(),
           ),
         ),
-        stdin: 'ignore',
-        stdout: 'ignore',
-        stderr: 'pipe',
+        // Over the pipe, fds 3 and 4 are the DevTools protocol (`--remote-debugging-pipe`): Chrome reads
+        // requests on 3 and writes replies and events on 4. Stderr is drained for the launch diagnostic.
+        stdio: cdp.kind === 'pipe' ? ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'] : ['ignore', 'ignore', 'pipe'],
       });
+      if (cdp.kind === 'pipe') pipe = cdpPipeEnds(chrome);
       const diagnostics = collectTail(chrome.stderr as ReadableStream<Uint8Array>);
+      // Recorded BEFORE anything else can fail: from here on, the Chrome holding the profile is this pid.
       await lease.updateChromePid(chrome.pid, version);
-      const endpoint = `http://127.0.0.1:${port}`;
-      await waitForCdp(endpoint, chrome, diagnostics);
-      const worker = await this.connectWorker({
-        runtime: this.workerRuntime,
-        workerEntry: this.worker.kind === 'executable' ? this.worker.path : this.worker.entry,
-        endpoint,
-        workerExecutable: this.worker.kind === 'executable',
-        ...(this.modes.stageDirectory === undefined ? {} : { stageDirectory: this.modes.stageDirectory }),
-      });
+      const endpoint = cdp.kind === 'pipe' ? CDP_PIPE_ENDPOINT : `http://127.0.0.1:${cdp.port}`;
+      if (cdp.kind === 'port') await waitForCdp(endpoint, chrome, diagnostics);
+      let worker: BrowserWorkerClient;
+      try {
+        worker = await this.connectWorker({
+          runtime: this.workerRuntime,
+          workerEntry: this.worker.kind === 'executable' ? this.worker.path : this.worker.entry,
+          endpoint,
+          ...(pipe === undefined ? {} : { cdpPipe: pipe }),
+          workerExecutable: this.worker.kind === 'executable',
+          readyTimeoutMs: WORKER_ATTACH_TIMEOUT_MS,
+          ...(this.modes.stageDirectory === undefined ? {} : { stageDirectory: this.modes.stageDirectory }),
+        });
+      } catch (error) {
+        throw await attachFailure(error, chrome, diagnostics);
+      } finally {
+        // The worker has its own copies now, or never will. Closing the daemon's is what lets Chrome see
+        // end-of-file when the worker goes, and is what keeps the pipe between exactly two processes.
+        // Forgotten once closed, so the failure path below never closes a descriptor reused since.
+        if (pipe !== undefined) closePipe(pipe);
+        pipe = undefined;
+      }
       return new LeasedBrowser(
         worker,
         chrome,
@@ -134,10 +170,11 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
         proxy === undefined ? undefined : browserProxyStatus(proxy.setting),
       );
     } catch (error) {
+      if (pipe !== undefined) closePipe(pipe);
       // A failed launch owns the same ordering obligation as a close: the browser it started is still
       // holding this profile, so the lease is released only once that Chrome is CONFIRMED gone — and
-      // never on the strength of a signal alone. SIGKILL first because a Chrome that never reached its
-      // debugging endpoint has no clean shutdown left to perform. Retaining the lease is the safe
+      // never on the strength of a signal alone. SIGKILL first because a Chrome its worker never attached
+      // to — or that never reached its debugging endpoint — has no clean shutdown left to perform. Retaining the lease is the safe
       // outcome and never the reported one: the caller still gets the error that failed the launch —
       // and the obvious retry of that same session is refused by the store like anyone else, because
       // the Chrome this record still names may be the one that would not die.
@@ -185,8 +222,10 @@ class LeasedBrowser implements BrowserAutomation {
     readonly proxy?: BrowserProxyStatus,
   ) {
     // Either child settling means the SESSION is over: the worker without Chrome drives nothing, and
-    // Chrome without its worker is an unreachable window still holding the profile. So both mean the
-    // same teardown, and the one that survived is what teardown exists to kill.
+    // Chrome without its worker is an unreachable window still holding the profile — the pipe died with
+    // the worker, and nothing can attach to Chrome again. So both mean the same teardown, and the one that
+    // survived is what teardown exists to kill. The browser service then launches a fresh pair on the
+    // next need: a worker crash is a browser restart, never a reattach.
     this.unexpectedExit = Promise.race([worker.unexpectedExit, chrome.exited]).then(async code => {
       await this.stop();
       return code;
@@ -229,7 +268,7 @@ class LeasedBrowser implements BrowserAutomation {
     return this.teardown;
   }
   private async teardownOnce(): Promise<void> {
-    // The worker first: it owns the CDP connection and closes Chrome cleanly when it still can. Its
+    // The worker first: it holds the CDP connection and closes Chrome cleanly when it still can. Its
     // own close already escalates until the worker process is really gone and FAILS ONLY when it could
     // not confirm that, so the answer is kept rather than swallowed: a worker still standing is a
     // browser still reachable, whatever happened to Chrome.
@@ -349,6 +388,49 @@ async function waitForCdp(
   throw new BrowserControlError(
     'launch_failed',
     `Chrome did not expose its private debugging endpoint (${why})${said === '' ? '' : `: ${said}`}`,
+  );
+}
+
+/**
+ * How long a freshly spawned Chrome and its worker get to finish the DevTools handshake — over the pipe that
+ * is Chrome's whole start-up, which a port spends polling its endpoint instead, so it gets that budget.
+ */
+const WORKER_ATTACH_TIMEOUT_MS = 25_000;
+
+/** How long a Chrome whose worker could not attach gets to show that it is the one that died. */
+const CHROME_EXIT_GRACE_MS = 250;
+
+/**
+ * The daemon's ends of Chrome's DevTools pipe — numbers, because both slots were spawned as `'pipe'`. Reading
+ * `stdio` hands them to the caller to close; Bun creates them close-on-exec, so no other child this daemon
+ * starts inherits an end by accident.
+ */
+function cdpPipeEnds(chrome: ReturnType<typeof Bun.spawn>): CdpPipeEnds {
+  const [, , , toChrome, fromChrome] = chrome.stdio as unknown as readonly [null, null, null, number, number];
+  return { toChrome, fromChrome };
+}
+
+/** Closes the daemon's ends of the pipe. Called exactly once per launch, never on a descriptor reused since. */
+function closePipe(pipe: CdpPipeEnds): void {
+  closeSync(pipe.toChrome);
+  closeSync(pipe.fromChrome);
+}
+
+/**
+ * Why a worker could not attach, told as Chrome's failure when Chrome is what died: a Chrome that exits closes
+ * its end of the pipe, the worker's handshake fails on it, and "the worker failed" alone would hide the
+ * browser's own words about why it would not start.
+ */
+async function attachFailure(
+  error: unknown,
+  chrome: ReturnType<typeof Bun.spawn>,
+  diagnostics: () => string,
+): Promise<unknown> {
+  if (!(await exitedWithin(chrome, CHROME_EXIT_GRACE_MS))) return error;
+  const said = diagnostics();
+  return new BrowserControlError(
+    'launch_failed',
+    `Chrome exited with code ${chrome.exitCode ?? 'unknown'} before its worker could attach${said === '' ? '' : `: ${said}`}`,
   );
 }
 

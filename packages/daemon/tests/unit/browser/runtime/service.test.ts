@@ -672,6 +672,38 @@ describe('the machine agent browser — its life', () => {
     should(await died.service.status('s1')).match({ state: 'stopped' });
   });
 
+  it('should start a fresh browser on the next need after its worker dies, never reuse the dead one', async () => {
+    // A worker that dies takes Chrome's DevTools pipe with it, and a pipe cannot be reattached: the only
+    // recovery is a new Chrome and a new worker, started by whatever needs the browser next.
+    // Arrange
+    const launched: Tabs[] = [];
+    const service = new BrowserSessionService(
+      { get: async id => (known.has(id) ? {} : undefined) },
+      {
+        launch: async () => {
+          const tabs = new Tabs();
+          launched.push(tabs);
+          return tabs.automation;
+        },
+      },
+      () => Date.parse('2026-10-16T10:00:00.000Z'),
+    );
+    await service.openPage('s1', 'app');
+
+    // Act
+    (launched[0] as Tabs).die();
+    await Bun.sleep(0);
+    const stopped = await service.status('s1');
+    const reopened = await service.openPage('s1', 'app');
+
+    // Assert — stopped in between, then a second launch serves the page; the dead browser is never asked.
+    should(stopped).match({ state: 'stopped' });
+    should(launched).have.length(2);
+    should(reopened).match({ name: 'app' });
+    should((launched[1] as Tabs).calls.some(call => call.startsWith('new'))).be.true();
+    should(await service.status('s1')).match({ state: 'running' });
+  });
+
   it('should name a launch failure, passing the browser’s own refusal through', async () => {
     const plain = new BrowserSessionService(
       { get: async () => ({}) },

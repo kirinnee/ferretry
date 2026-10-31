@@ -2,6 +2,8 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   AUTOMATION_SWITCH_PATTERN,
+  CDP_PIPE_SWITCH,
+  defaultCdpTransport,
   agentBrowserArguments,
   BrowserControlError,
   browserEnvironment,
@@ -72,16 +74,16 @@ describe('browser control policy', () => {
 
   it('should retain the Linux browser fingerprint while making human login unreachable over CDP', () => {
     // Act
-    const agent = chromeLaunchArguments('/chrome', '/profile', 9222, { width: 1280, height: 800 }, 'linux');
+    const agent = chromeLaunchArguments('/chrome', '/profile', { width: 1280, height: 800 }, 'linux');
     const human = browserLoginChromeArguments('/chrome', '/profile', 'linux');
 
     // Assert
-    should(agent).containEql('--remote-debugging-address=127.0.0.1');
+    should(agent).containEql('--remote-debugging-pipe');
     should(agent).containEql('--no-sandbox');
     should(agent).containEql('--password-store=basic');
     should(human.some(argument => argument.startsWith('--remote-debugging'))).be.false();
     should(human).containEql('https://accounts.google.com/');
-    should(chromeLaunchArguments('/chrome', '/profile', 1, { width: 320, height: 240 }, 'darwin')).containEql(
+    should(chromeLaunchArguments('/chrome', '/profile', { width: 320, height: 240 }, 'darwin')).containEql(
       '--headless=new',
     );
   });
@@ -152,8 +154,8 @@ describe('browser control policy', () => {
 
   it('should run a Linux browser headless, without the X11 platform, only when asked to', () => {
     // Act
-    const headed = chromeLaunchArguments('/chrome', '/profile', 1, { width: 320, height: 240 }, 'linux');
-    const headless = chromeLaunchArguments('/chrome', '/profile', 1, { width: 320, height: 240 }, 'linux', {
+    const headed = chromeLaunchArguments('/chrome', '/profile', { width: 320, height: 240 }, 'linux');
+    const headless = chromeLaunchArguments('/chrome', '/profile', { width: 320, height: 240 }, 'linux', {
       headless: true,
     });
 
@@ -191,14 +193,66 @@ describe('browser control policy', () => {
     ]);
   });
 
+  it('should give the agent browser no debugging port on the pipe — its default — in any mode, with any extras', () => {
+    // Every account on the host can reach a loopback port, and the DevTools protocol asks nobody who they
+    // are: a port hands the owner's signed-in profile to all of them. The pipe has no address at all.
+    const viewport = { width: 1280, height: 800 };
+    const extras = { userAgent: 'Mozilla/5.0', proxy: { server: 'http://127.0.0.1:1', bypass: ['<local>'] } };
+    for (const platform of ['linux', 'darwin'] as const) {
+      for (const mode of ['headless', 'window'] as const) {
+        for (const argv of [
+          agentBrowserArguments('/chrome', '/profile', viewport, platform, mode),
+          agentBrowserArguments('/chrome', '/profile', viewport, platform, mode, extras),
+          agentBrowserArguments('/chrome', '/profile', viewport, platform, mode, { ...extras, cdp: { kind: 'pipe' } }),
+        ]) {
+          should(argv.filter(argument => /^--remote-debugging-(?:port|address)/.test(argument))).deepEqual([]);
+          should(argv.filter(argument => argument.startsWith('--remote-debugging'))).deepEqual([CDP_PIPE_SWITCH]);
+          should(argv.filter(argument => argument.startsWith('--remote-allow-origins'))).deepEqual([]);
+        }
+      }
+    }
+  });
+
+  it('should open a loopback debugging port, and no pipe, when the machine asks for the port', () => {
+    const argv = agentBrowserArguments('/chrome', '/profile', { width: 1280, height: 800 }, 'linux', 'window', {
+      cdp: { kind: 'port', port: 9222 },
+    });
+
+    should(argv.filter(argument => argument.startsWith('--remote-debugging'))).deepEqual([
+      '--remote-debugging-address=127.0.0.1',
+      '--remote-debugging-port=9222',
+    ]);
+    should(argv.filter(argument => AUTOMATION_SWITCH_PATTERN.test(argument))).deepEqual([]);
+  });
+
+  it('should default to the pipe where hosts are shared by several accounts, and to the port on a Mac', () => {
+    should(defaultCdpTransport('linux')).equal('pipe');
+    should(defaultCdpTransport('darwin')).equal('port');
+    should(defaultCdpTransport('win32')).equal('port');
+  });
+
+  it('should allow the DevTools pipe and still refuse every switch that says or hides automation', () => {
+    // The pipe is the transport, not a switch Ferretry adds to announce automation or to hide it.
+    should(AUTOMATION_SWITCH_PATTERN.test(CDP_PIPE_SWITCH)).be.false();
+    should(CDP_PIPE_SWITCH).equal('--remote-debugging-pipe');
+    // What a driver such as Playwright adds when IT launches Chrome — and what hides automation — stay out.
+    for (const forbidden of [
+      '--enable-automation',
+      '--disable-blink-features=AutomationControlled',
+      '--disable-blink-features=IdleDetection,AutomationControlled',
+    ]) {
+      should(AUTOMATION_SWITCH_PATTERN.test(forbidden)).be.true();
+    }
+  });
+
   it('should launch the agent browser headless or as a real window, never with an automation switch', () => {
     // Act
     const viewport = { width: 1280, height: 800 };
     const launches = {
-      linuxHeadless: agentBrowserArguments('/chrome', '/profile', 9222, viewport, 'linux', 'headless'),
-      linuxWindow: agentBrowserArguments('/chrome', '/profile', 9222, viewport, 'linux', 'window'),
-      macHeadless: agentBrowserArguments('/chrome', '/profile', 9222, viewport, 'darwin', 'headless'),
-      macWindow: agentBrowserArguments('/chrome', '/profile', 9222, viewport, 'darwin', 'window'),
+      linuxHeadless: agentBrowserArguments('/chrome', '/profile', viewport, 'linux', 'headless'),
+      linuxWindow: agentBrowserArguments('/chrome', '/profile', viewport, 'linux', 'window'),
+      macHeadless: agentBrowserArguments('/chrome', '/profile', viewport, 'darwin', 'headless'),
+      macWindow: agentBrowserArguments('/chrome', '/profile', viewport, 'darwin', 'window'),
     };
     const keepPainting = [
       '--disable-backgrounding-occluded-windows',
@@ -206,11 +260,10 @@ describe('browser control policy', () => {
       '--disable-background-timer-throttling',
     ];
 
-    // Assert — every mode keeps the loopback debugging port the view streams through, and none says or
-    // hides that it is automated.
+    // Assert — every mode opens the DevTools protocol on the private pipe the view streams through, and none
+    // says or hides that it is automated.
     for (const argv of Object.values(launches)) {
-      should(argv).containEql('--remote-debugging-address=127.0.0.1');
-      should(argv).containEql('--remote-debugging-port=9222');
+      should(argv).containEql(CDP_PIPE_SWITCH);
       should(argv).containEql('--user-data-dir=/profile');
       should(argv.filter(argument => AUTOMATION_SWITCH_PATTERN.test(argument))).deepEqual([]);
       should(argv.filter(argument => /automation/i.test(argument))).deepEqual([]);

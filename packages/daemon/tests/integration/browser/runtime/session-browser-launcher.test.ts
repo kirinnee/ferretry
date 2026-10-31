@@ -22,6 +22,9 @@ const INJECTED_WORKER: BrowserWorkerProgram = { kind: 'source', entry: '/worker.
 
 /** The shipped launcher gives a Chrome that ignores SIGTERM two seconds before SIGKILL; these cases only need the escalation. */
 const SHORT_SHUTDOWN = { shutdownTimeoutMs: 250 };
+/** The machine's DevTools transport, named outright where a case is about one of them. */
+const PIPE = { transport: async () => 'pipe' as const };
+const PORT = { transport: async () => 'port' as const };
 
 const roots: string[] = [];
 const opened: BrowserAutomation[] = [];
@@ -32,12 +35,47 @@ afterEach(async () => {
 });
 
 /**
- * A Chrome stand-in that answers `--version` and then serves the private debugging endpoint.
+ * What the Chrome stand-in runs, by transport. Given `--port=N` (the launcher asked for a debugging port) it
+ * serves the endpoint the launcher polls. Otherwise it speaks the DevTools protocol on the pipe a real Chrome
+ * gets with `--remote-debugging-pipe` — requests in on fd 3, replies out on fd 4, every message
+ * NUL-terminated — and listens nowhere; a reply names the method it answers, so a worker can prove it reached
+ * THIS Chrome. `--quit-on-pipe-end` is the real Chrome's behaviour when the last holder of the other end
+ * goes; the default stays up, so a case whose injected worker holds no end is not racing a Chrome that quit.
+ */
+const FAKE_CHROME_PROGRAM = `const fs = require('fs');
+if (process.argv.includes('--ignore-term')) process.on('SIGTERM', () => {});
+const port = process.argv.find(argument => argument.startsWith('--port='));
+if (port !== undefined) {
+  require('http').createServer((q, s) => { s.writeHead(200, { 'content-type': 'application/json' }); s.end('{}'); })
+    .listen(Number(port.slice('--port='.length)), '127.0.0.1');
+  return;
+}
+const replies = fs.createWriteStream('', { fd: 4 });
+replies.on('error', () => {});
+let pending = '';
+const requests = fs.createReadStream('', { fd: 3, encoding: 'utf8' });
+requests.on('data', chunk => {
+  pending += chunk;
+  for (let end = pending.indexOf('\\0'); end !== -1; end = pending.indexOf('\\0')) {
+    const { id, method } = JSON.parse(pending.slice(0, end));
+    pending = pending.slice(end + 1);
+    replies.write(JSON.stringify({ id, result: { product: 'FakeChrome/150.0', method } }) + '\\0');
+  }
+});
+requests.on('error', () => {});
+requests.on('end', () => {
+  if (process.argv.includes('--quit-on-pipe-end')) process.exit(0);
+});
+setInterval(() => {}, 60_000);
+`;
+
+/**
+ * A Chrome stand-in that answers `--version` and then speaks the DevTools protocol on its pipe.
  *
- * `exec` IS LOAD-BEARING. Without it the shell forks the server and stays as the parent, so the pid
- * the launcher holds is the shell's: killing it reaps the shell and orphans a listening server that
- * outlives the whole test run. `exec` replaces the shell, so the pid the launcher kills — SIGTERM
- * then SIGKILL on a clean close, SIGKILL first on a failed launch — is the server itself, and the pid
+ * `exec` IS LOAD-BEARING. Without it the shell forks the stand-in and stays as the parent, so the pid
+ * the launcher holds is the shell's: killing it reaps the shell and orphans a stand-in that outlives
+ * the whole test run. `exec` replaces the shell, so the pid the launcher kills — SIGTERM then
+ * SIGKILL on a clean close, SIGKILL first on a failed launch — is the stand-in itself, and the pid
  * these cases assert against is a process the kernel really did remove.
  *
  * `ignoreTerm` makes it survive SIGTERM the way a wedged browser does. That is what turns "the
@@ -46,18 +84,27 @@ afterEach(async () => {
  * the polite request.
  */
 async function fakeChrome(
-  options: { readonly ignoreTerm?: boolean; readonly recordArguments?: boolean; readonly version?: string } = {},
+  options: {
+    readonly ignoreTerm?: boolean;
+    readonly recordArguments?: boolean;
+    readonly version?: string;
+    readonly quitsWhenPipeCloses?: boolean;
+  } = {},
 ): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'ferretry-session-browser-'));
   roots.push(root);
   const file = join(root, 'chrome');
-  const trap = options.ignoreTerm ? "process.on('SIGTERM',()=>{});" : '';
+  await writeFile(join(root, 'fake-chrome.cjs'), FAKE_CHROME_PROGRAM);
+  const flags = [
+    ...(options.ignoreTerm ? ['--ignore-term'] : []),
+    ...(options.quitsWhenPipeCloses ? ['--quit-on-pipe-end'] : []),
+  ].join(' ');
   await writeFile(
     file,
     `#!/bin/sh
 if [ "$1" = "--version" ]; then echo 'Google Chrome ${options.version ?? '150.0'}'; exit 0; fi
 ${options.recordArguments ? `printf '%s\\n' "$@" > "${file}.args"\n` : ''}${options.recordArguments ? `printf '%s\\n' "\${DISPLAY-unset}" > "${file}.display"\nprintf '%s\\n' "\${XAUTHORITY-unset}" > "${file}.xauthority"\n` : ''}port=$(printf '%s\\n' "$@" | sed -n 's/--remote-debugging-port=//p')
-exec node -e "${trap}require('http').createServer((q,s)=>{s.writeHead(200,{'content-type':'application/json'});s.end('{}')}).listen(process.argv[1],'127.0.0.1')" "$port"
+exec node "${join(root, 'fake-chrome.cjs')}" ${flags} \${port:+--port=$port}
 `,
   );
   await chmod(file, 0o700);
@@ -93,7 +140,7 @@ function alive(pid: number): boolean {
 }
 
 describe('NodeSessionBrowserLauncher', () => {
-  it('should lease a profile, wait for the private CDP endpoint, and release both worker and Chrome', async () => {
+  it('should lease a profile, hand the worker the DevTools pipe, and release both worker and Chrome', async () => {
     const chrome = await fakeChrome();
     const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
     roots.push(root);
@@ -111,16 +158,73 @@ describe('NodeSessionBrowserLauncher', () => {
       { FY_CHROME_BIN: chrome, DISPLAY: ':99', PATH: process.env.PATH, HOME: process.env.HOME },
       async options => {
         calls.push(`worker:${options.endpoint}`);
+        should(options.cdpPipe?.toChrome).be.a.Number();
+        should(options.cdpPipe?.fromChrome).be.a.Number();
         return worker as never;
       },
+      PIPE,
     );
     const browser = await launcher.launch({ width: 800, height: 600 });
     // Registered before the first assertion: a case that fails here must still not leave Chrome up.
     opened.push(browser);
-    should(calls[0]).match(/^worker:http:\/\/127\.0\.0\.1:/);
+    should(calls[0]).equal('worker:pipe');
     await browser.close();
     should(calls).containEql('worker-close');
     should(await new BrowserProfileStore(root).acquire({ sessionId: 'again' })).have.property('sessionId', 'again');
+  });
+
+  it('should keep the port transport: wait for the private CDP endpoint, then hand the worker its URL', async () => {
+    // The port is still a choice a machine can make (it keeps `navigator.webdriver` false), so it must
+    // still work end to end: a loopback port Chrome answers on, and no pipe handed to anyone.
+    const chrome = await fakeChrome({ recordArguments: true });
+    const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
+    roots.push(root);
+    const calls: string[] = [];
+    const worker = { unexpectedExit: new Promise<number>(() => undefined), close: async () => undefined };
+    const launcher = new NodeSessionBrowserLauncher(
+      new BrowserProfileStore(root),
+      INJECTED_WORKER,
+      process.execPath,
+      environment(chrome),
+      async options => {
+        calls.push(`worker:${options.endpoint}`);
+        should(options.cdpPipe).be.undefined();
+        return worker as never;
+      },
+      PORT,
+    );
+    const browser = await launcher.launch({ width: 800, height: 600 });
+    opened.push(browser);
+    should(calls[0]).match(/^worker:http:\/\/127\.0\.0\.1:\d+$/u);
+    const started = await readFile(`${chrome}.args`, 'utf8');
+    should(started).containEql('--remote-debugging-address=127.0.0.1');
+    should(started).match(/--remote-debugging-port=\d+/u);
+    should(started).not.containEql('--remote-debugging-pipe');
+    await browser.close();
+    should(await new BrowserProfileStore(root).acquire({ sessionId: 'again' })).have.property('sessionId', 'again');
+  });
+
+  it("should use this platform's transport when the machine's cannot be read", async () => {
+    const chrome = await fakeChrome({ recordArguments: true });
+    const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
+    roots.push(root);
+    const worker = { unexpectedExit: new Promise<number>(() => undefined), close: async () => undefined };
+    const launcher = new NodeSessionBrowserLauncher(
+      new BrowserProfileStore(root),
+      INJECTED_WORKER,
+      process.execPath,
+      environment(chrome),
+      async () => worker as never,
+      {
+        platform: 'linux',
+        transport: async () => {
+          throw new Error('machine.yaml is mid-write');
+        },
+      },
+    );
+    const browser = await launcher.launch({ width: 800, height: 600 });
+    opened.push(browser);
+    should(await readFile(`${chrome}.args`, 'utf8')).containEql('--remote-debugging-pipe');
   });
 
   it('should connect its own worker client, so composition names only a runtime and an entry point', async () => {
@@ -147,6 +251,116 @@ describe('NodeSessionBrowserLauncher', () => {
 
     // Assert — the answer came back through the worker's own protocol, so the whole chain is live.
     should(snapshot).have.property('activePageId', 'p1');
+  });
+
+  describe('the DevTools pipe', () => {
+    /** Starts the launcher's OWN worker client against a fake Chrome, keeping the worker so a case can kill it. */
+    function pipeLauncher(
+      root: string,
+      chrome: string,
+      workers: BrowserWorkerClient[] = [],
+    ): NodeSessionBrowserLauncher {
+      return new NodeSessionBrowserLauncher(
+        new BrowserProfileStore(root),
+        WORKER_ENTRY,
+        process.execPath,
+        environment(chrome),
+        async options => {
+          const worker = await BrowserWorkerClient.connect(options);
+          workers.push(worker);
+          return worker;
+        },
+        { ...SHORT_SHUTDOWN, ...PIPE },
+      );
+    }
+
+    it('should drive Chrome over the pipe it wired, with no debugging port and no port probe', async () => {
+      // Arrange — every fetch the launch makes is recorded: the old launch polled a loopback port for
+      // `/json/version`, a probe another account on the host could have answered first.
+      const chrome = await fakeChrome({ recordArguments: true });
+      const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
+      roots.push(root);
+      const realFetch = globalThis.fetch;
+      const probed: string[] = [];
+      globalThis.fetch = (async (input: string | URL | Request) => {
+        probed.push(String(input));
+        throw new Error('no network in this case');
+      }) as unknown as typeof fetch;
+
+      // Act
+      let browser: BrowserAutomation;
+      try {
+        browser = await pipeLauncher(root, chrome).launch({ width: 800, height: 600 });
+      } finally {
+        globalThis.fetch = realFetch;
+      }
+      opened.push(browser);
+      const answered = await browser.navigate('p1', 'cdp-round-trip');
+
+      // Assert — the worker's request reached Chrome and came back over the pipe, after the launch, so the
+      // pipe runs from the worker to Chrome; and nothing was listening or probed on the way.
+      should(decodeURIComponent(answered.url)).containEql('"chrome":"FakeChrome/150.0"');
+      should(probed).deepEqual([]);
+      const started = await readFile(`${chrome}.args`, 'utf8');
+      should(started.split('\n')).containEql('--remote-debugging-pipe');
+      should(started).not.match(/--remote-debugging-(?:port|address)/u);
+    });
+
+    it('should keep no end of the pipe itself, so Chrome sees it close when the worker holds none', async () => {
+      // Arrange — an injected worker that never takes its ends, and a Chrome that quits on end-of-file the
+      // way a real one does. Chrome can only read end-of-file if the DAEMON closed its own copies too: a
+      // daemon that kept them would be a third holder of the protocol, and a Chrome that outlived its worker.
+      const chrome = await fakeChrome({ quitsWhenPipeCloses: true });
+      const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
+      roots.push(root);
+      const launcher = new NodeSessionBrowserLauncher(
+        new BrowserProfileStore(root),
+        INJECTED_WORKER,
+        process.execPath,
+        environment(chrome),
+        async () => ({ unexpectedExit: new Promise<number>(() => undefined), close: async () => undefined }) as never,
+        PIPE,
+      );
+      const browser = await launcher.launch({ width: 800, height: 600 });
+      opened.push(browser);
+      const chromePid = await leasedChromePid(root);
+
+      // Act — nothing here signals Chrome: it is the closed pipe alone that ends it.
+      const code = await browser.unexpectedExit;
+
+      // Assert
+      should(code).equal(0);
+      should(alive(chromePid)).be.false();
+      should(await new BrowserProfileStore(root).acquire({ sessionId: 'again' })).have.property('sessionId', 'again');
+    });
+
+    it('should restart the browser when its worker crashes — a fresh Chrome, never a reattach', async () => {
+      // Arrange — a real worker over a real pipe, and a Chrome that quits when the pipe closes.
+      const chrome = await fakeChrome({ quitsWhenPipeCloses: true });
+      const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
+      roots.push(root);
+      const workers: BrowserWorkerClient[] = [];
+      const launcher = pipeLauncher(root, chrome, workers);
+      const first = await launcher.launch({ width: 800, height: 600 });
+      opened.push(first);
+      const firstChrome = await leasedChromePid(root);
+
+      // Act — the worker dies without a word: the only end of the pipe besides Chrome's goes with it.
+      process.kill((workers[0] as BrowserWorkerClient).pid, 'SIGKILL');
+      await first.unexpectedExit;
+      const second = await launcher.launch({ width: 800, height: 600 });
+      opened.push(second);
+
+      // Assert — the first pair is gone and the profile was freed for the second, which is a new Chrome
+      // and a new worker that answer over a new pipe.
+      should(alive(firstChrome)).be.false();
+      should(alive((workers[0] as BrowserWorkerClient).pid)).be.false();
+      const secondChrome = await leasedChromePid(root);
+      should(secondChrome).not.equal(firstChrome);
+      should(workers).have.length(2);
+      const answered = await second.navigate('p1', 'cdp-round-trip');
+      should(decodeURIComponent(answered.url)).containEql('"chrome":"FakeChrome/150.0"');
+    });
   });
 
   it('should refuse a missing worker with its remedy before it leases the profile or starts Chrome', async () => {
@@ -201,7 +415,9 @@ describe('NodeSessionBrowserLauncher', () => {
     const started = await readFile(`${chrome}.args`, 'utf8');
     should(started).containEql('--headless=new');
     should(started).not.containEql('--ozone-platform=x11');
-    // The debugging port takes no cross-origin WebSocket: only the worker, which sends no Origin.
+    // DevTools on the pipe only: no port, no address, and nothing that would open one to a browser origin.
+    should(started).containEql('--remote-debugging-pipe');
+    should(started).not.match(/--remote-debugging-(?:port|address)/u);
     should(started).not.containEql('--remote-allow-origins');
   });
 
@@ -307,7 +523,8 @@ describe('NodeSessionBrowserLauncher', () => {
       should(started).containEql('--ozone-platform=x11');
       for (const flag of keptPainting) should(started).containEql(flag);
       should(started).not.match(/automation/i);
-      should(started).containEql('--remote-debugging-address=127.0.0.1');
+      should(started).containEql('--remote-debugging-pipe');
+      should(started).not.match(/--remote-debugging-(?:port|address)/u);
       should((await readFile(`${chrome}.display`, 'utf8')).trim()).equal(':42');
       // The private display refuses a client without its cookie, so the window's Chrome carries the file.
       should((await readFile(`${chrome}.xauthority`, 'utf8')).trim()).equal('/state/x11/xauthority-test');
@@ -632,7 +849,42 @@ describe('NodeSessionBrowserLauncher', () => {
     should(await leasedChromePid(root)).equal(first);
   });
 
-  it('should say why Chrome did not start when it exits before exposing its debugging endpoint', async () => {
+  it('should say why Chrome did not start when it exits before its worker attaches', async () => {
+    // Arrange — a Chrome that answers --version, then dies saying why on stderr.
+    const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
+    roots.push(root);
+    const chromeDir = await mkdtemp(join(tmpdir(), 'ferretry-session-browser-'));
+    roots.push(chromeDir);
+    const chrome = join(chromeDir, 'chrome');
+    await writeFile(
+      chrome,
+      `#!/bin/sh
+if [ "$1" = "--version" ]; then echo 'Google Chrome 150.0'; exit 0; fi
+echo 'Failed to move to new namespace' >&2
+exit 7
+`,
+    );
+    await chmod(chrome, 0o700);
+    const launcher = new NodeSessionBrowserLauncher(
+      new BrowserProfileStore(root),
+      INJECTED_WORKER,
+      process.execPath,
+      environment(chrome),
+      // What a real worker reports when the Chrome it was handed closed the pipe under it.
+      async () => {
+        throw new BrowserTransportError('launch_failed', 'browser worker failed: Chrome closed its DevTools pipe', 503);
+      },
+      PIPE,
+    );
+
+    // Act + Assert — Chrome's own words, not the worker's echo of them.
+    await should(launcher.launch({ width: 800, height: 600 })).be.rejectedWith(
+      /^Chrome exited with code 7 before its worker could attach: Failed to move to new namespace$/u,
+    );
+    should(await new BrowserProfileStore(root).acquire({ sessionId: 'again' })).have.property('sessionId', 'again');
+  });
+
+  it('should say why Chrome did not start when it exits before exposing its debugging port', async () => {
     // Arrange — a Chrome that answers --version, then dies saying why on stderr.
     const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
     roots.push(root);
@@ -656,6 +908,7 @@ exit 7
       async () => {
         throw new Error('the worker must not be reached');
       },
+      PORT,
     );
 
     // Act + Assert

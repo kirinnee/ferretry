@@ -172,7 +172,11 @@ export function selectChromeExecutable(
 }
 
 export interface ChromeLaunchOptions {
-  readonly cdp?: boolean;
+  /**
+   * Where Chrome opens its DevTools protocol for the agent browser's worker ({@link CdpEndpoint}); the pipe
+   * unless told otherwise. `false` opens none: the login window, which a person drives by hand.
+   */
+  readonly cdp?: CdpEndpoint | false;
   readonly initialUrl?: string;
   /**
    * Run without a window. Defaults to headless everywhere but Linux, where the browser draws into the
@@ -193,29 +197,76 @@ export interface ChromeLaunchOptions {
 }
 
 /**
- * Switches that tell every page it is being automated (`navigator.webdriver`, the "controlled by
- * automated test software" bar), or that hide that it is. NEITHER kind is ever passed: the agent
- * browser is driven over its loopback debugging port, which no page can see, so the browser a site meets
- * is the ordinary Chrome it is — not a disguised one. Named so the tests can hold every mode to it.
+ * The DevTools PIPE: Chrome reads requests on its fd 3 and writes replies and events on its fd 4, and only the
+ * daemon and the worker it hands the other ends to hold them.
+ *
+ * Unlike a debugging port it has no address. The protocol has no authentication at all, so a
+ * `--remote-debugging-port` — even one bound to 127.0.0.1 — is a full remote control of the owner's signed-in
+ * profile for every account on the host: any local user can connect to it and read cookies, run script in any
+ * page, or drive a session. Picking a free port first does not help either, because another user can take it
+ * between the probe and Chrome's own bind and serve a fake endpoint the worker would then trust. A pipe has
+ * nothing to find, connect to or squat; the file descriptors are inherited, and nobody else has them.
  */
-export const AUTOMATION_SWITCH_PATTERN =
-  /^--(?:enable-automation|disable-blink-features=.*AutomationControlled|remote-debugging-pipe)/;
+export const CDP_PIPE_SWITCH = '--remote-debugging-pipe';
+
+/**
+ * How the agent browser's worker reaches Chrome's DevTools protocol, and what each costs:
+ *
+ * - `pipe` ({@link CDP_PIPE_SWITCH}) — reachable by nobody else on the host; Chrome reports
+ *   `navigator.webdriver === true` to every page.
+ * - `port` — a loopback port: `navigator.webdriver` stays `false`, and every account on the host can drive
+ *   the profile through it.
+ */
+export type CdpTransport = 'pipe' | 'port';
+
+/** Where Chrome opens its DevTools protocol: the pipe, or a loopback port with this number. */
+export type CdpEndpoint = { readonly kind: 'pipe' } | { readonly kind: 'port'; readonly port: number };
+
+/**
+ * The transport when the machine names none. Linux is where one host is shared by several accounts, so it
+ * gets the pipe nobody else can reach; a Mac is one person's desktop, where the port's `navigator.webdriver`
+ * of `false` is worth more than a boundary between accounts it does not have.
+ */
+export function defaultCdpTransport(platform: NodeJS.Platform): CdpTransport {
+  return platform === 'linux' ? 'pipe' : 'port';
+}
+
+function cdpArguments(endpoint: CdpEndpoint | false): readonly string[] {
+  if (endpoint === false) return [];
+  if (endpoint.kind === 'pipe') return [CDP_PIPE_SWITCH];
+  return ['--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${endpoint.port}`];
+}
+
+/**
+ * Switches Ferretry would pass to ANNOUNCE automation (`--enable-automation`: the "controlled by automated
+ * test software" bar) or to HIDE it (the `AutomationControlled` blink switch, which turns
+ * `navigator.webdriver` back off). NEITHER kind is ever passed, so the browser a site meets is the Chrome it
+ * is — not a disguised one. Named so the tests can hold every mode to it. `--enable-automation` is also what
+ * a driver such as Playwright adds by default when IT launches Chrome, which is one reason the daemon
+ * launches Chrome itself.
+ *
+ * {@link CDP_PIPE_SWITCH} is deliberately NOT one of them: it is the TRANSPORT, the only one no other account
+ * on the host can reach. It is not invisible, and this says so rather than pretend: Chrome itself turns on
+ * `navigator.webdriver` for any browser started with the DevTools pipe, so every page the agent browser opens
+ * reads `navigator.webdriver === true` (over the loopback port it stays `false`: {@link CdpTransport}). That is
+ * Chrome telling the truth about a browser that IS driven — the honest-client rule is about what Ferretry
+ * adds or hides, and the answer is still nothing.
+ */
+export const AUTOMATION_SWITCH_PATTERN = /^--(?:enable-automation|disable-blink-features=.*AutomationControlled)/;
 
 export function chromeLaunchArguments(
   executable: string,
   profile: string,
-  cdpPort: number,
   viewport: BrowserViewport,
   platform: NodeJS.Platform,
   options: ChromeLaunchOptions = {},
 ): readonly string[] {
-  const cdp = options.cdp !== false;
   const headless = options.headless ?? platform !== 'linux';
   const arguments_ = [
     executable,
     ...(headless ? ['--headless=new'] : []),
     `--user-data-dir=${profile}`,
-    ...(cdp ? ['--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${cdpPort}`] : []),
+    ...cdpArguments(options.cdp ?? { kind: 'pipe' }),
     '--no-first-run',
     '--no-default-browser-check',
     '--disable-background-mode',
@@ -256,7 +307,6 @@ export function browserLoginChromeArguments(
   return chromeLaunchArguments(
     executable,
     profile,
-    0,
     { width: BROWSER_MAX_WIDTH, height: BROWSER_MAX_HEIGHT },
     platform,
     { cdp: false, initialUrl: browserLoginUrl },
@@ -386,6 +436,8 @@ export interface AgentBrowserExtras {
   /** The honest user agent for a headless Chrome ({@link honestChromeUserAgent}); a real window ignores it. */
   readonly userAgent?: string;
   readonly proxy?: { readonly server: string; readonly bypass: readonly string[] };
+  /** Where the worker reaches the DevTools protocol; the pipe when absent. */
+  readonly cdp?: CdpEndpoint;
 }
 
 /**
@@ -397,8 +449,9 @@ export interface AgentBrowserExtras {
  *   (`DISPLAY`), on macOS it is a real window on the owner's desktop. No `--headless`, so the page sees the
  *   browser's own user agent rather than `HeadlessChrome` and renders the way a desktop Chrome does.
  *
- * Both keep the loopback debugging port: it is what the view streams and the agent tools drive through.
- * Neither passes an automation switch ({@link AUTOMATION_SWITCH_PATTERN}).
+ * Both open the DevTools protocol where `extras.cdp` says — the private pipe unless told otherwise
+ * ({@link CdpTransport}): it is what the view streams and the agent tools drive through. Neither passes an
+ * automation switch ({@link AUTOMATION_SWITCH_PATTERN}).
  *
  * `extras` (docs/browser-proxy.md): a headless browser gets the honest user agent, which is the one it would send
  * with a window — `HeadlessChrome` removed and nothing else changed; and a configured proxy adds its switches.
@@ -406,18 +459,18 @@ export interface AgentBrowserExtras {
 export function agentBrowserArguments(
   executable: string,
   profile: string,
-  cdpPort: number,
   viewport: BrowserViewport,
   platform: NodeJS.Platform,
   mode: BrowserMode,
   extras: AgentBrowserExtras = {},
 ): readonly string[] {
-  return chromeLaunchArguments(executable, profile, cdpPort, viewport, platform, {
+  return chromeLaunchArguments(executable, profile, viewport, platform, {
     headless: mode === 'headless',
     keepPainting: mode === 'window',
     // Only a headless Chrome says "Headless" about itself; a real window already sends the ordinary token.
     ...(mode === 'headless' && extras.userAgent !== undefined ? { userAgent: extras.userAgent } : {}),
     ...(extras.proxy === undefined ? {} : { proxy: extras.proxy }),
+    ...(extras.cdp === undefined ? {} : { cdp: extras.cdp }),
   });
 }
 
