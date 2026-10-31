@@ -64,7 +64,13 @@ describe('metric formatting', () => {
 
 describe('metric columns', () => {
   it('puts the metric first and keeps count to sessions only', () => {
-    expect(analyticsColumnsFor('sum', 'cost_usd').map(column => column.key)).toEqual(['group', 'metric', 'sessions']);
+    expect(analyticsColumnsFor('sum', 'cost_usd').map(column => column.key)).toEqual([
+      'group',
+      'metric',
+      'costNow',
+      'total',
+      'sessions',
+    ]);
     expect(analyticsColumnsFor('sum').map(column => column.key)).toContain('cost');
     expect(analyticsColumnsFor('count', 'cost_usd').map(column => column.key)).toEqual(['group', 'sessions']);
   });
@@ -108,7 +114,7 @@ describe('AnalyticsResultTable with a metric', () => {
     expect(body).not.toContain('$0.00');
     expect(renderer.root.findAllByProps({ 'data-analytics-result-list': '' }).length).toBeGreaterThan(0);
     const headers = renderer.root.findAllByType('th').map(node => textOf(node));
-    expect(headers.slice(0, 3)).toEqual(['Model', 'Equivalent API cost', 'Sessions']);
+    expect(headers.slice(0, 3)).toEqual(['Model', 'Equivalent API cost', "At today's prices"]);
   });
 
   it('falls back to the whole ledger for a count, which has no metric column', () => {

@@ -30,6 +30,7 @@ const MEASURES: readonly AnalyticsMeasureKey[] = [
   'cacheWrite1hInputTokens',
   'reasoningTokens',
   'equivalentApiCostUsdMicros',
+  'equivalentApiCostCurrentUsdMicros',
   'turns',
   'durationMs',
   'activeDurationMs',
@@ -83,7 +84,14 @@ function measure(values: readonly (number | null)[], aggregation: AnalyticsAggre
   if (aggregation === 'count') return { value: null, known: 0, total: 0 };
   const known = values.filter((value): value is number => value !== null);
   if (known.length !== values.length || known.length === 0) {
-    return { value: null, known: known.length, total: values.length };
+    const lowerBound =
+      aggregation === 'sum' && known.length > 0 ? known.reduce((total, value) => total + value, 0) : null;
+    return {
+      value: null,
+      known: known.length,
+      total: values.length,
+      ...(lowerBound === null ? {} : { knownSum: lowerBound }),
+    };
   }
   const sum = known.reduce((total, value) => total + value, 0);
   const value =
@@ -330,10 +338,64 @@ describe('merging analytics answers across machines', () => {
       const row = merged.kind === 'aggregate' ? merged.results[0]! : undefined;
 
       // Assert — the fleet's active time is unknown for B's session, and so is the per-turn ratio
-      should(row!.activeDurationMs).deepEqual({ value: null, known: 1, total: 2 });
+      should(row!.activeDurationMs).deepEqual({ value: null, known: 1, total: 2, knownSum: 600_000 });
       should(row!.turns).deepEqual({ value: 20, known: 2, total: 2 });
       should(analyticsMetricValue(row!, 'duration_active_seconds_per_turn')).be.null();
       should(reversed.kind === 'aggregate' && reversed.results[0]!.activeDurationMs).deepEqual(row!.activeDurationMs);
+    });
+
+    it('should carry a sum lower bound across machines instead of dropping what each one stated', () => {
+      // Arrange — A states 100 for one session and 5 for a gap; B states 40 outright
+      const part = (cost: AnalyticsMeasure, costGaps?: Record<string, number>): AnalyticsResponse => {
+        const base = answer(
+          [
+            {
+              labels: {},
+              values: Object.fromEntries(MEASURES.map(key => [key, 0])) as Record<AnalyticsMeasureKey, number>,
+              status: 'completed',
+            },
+          ],
+          [],
+          'sum',
+        );
+        return AnalyticsResponseSchema.parse({
+          ...base,
+          results: (base.kind === 'aggregate' ? base.results : []).map(row => ({
+            ...row,
+            equivalentApiCostUsdMicros: cost,
+            ...(costGaps === undefined ? {} : { costGaps }),
+          })),
+        });
+      };
+      const a = part({ value: null, known: 1, total: 2, knownSum: 100 }, { unknown_pricing_model: 1 });
+      const b = part({ value: 40, known: 3, total: 3 });
+      const c = part({ value: null, known: 0, total: 1 }, { transcript_damaged: 1, unknown_pricing_model: 2 });
+
+      // Act
+      const merged = mergeAnalyticsResponses([a, b, c]);
+      const reversed = mergeAnalyticsResponses([c, b, a]);
+      const row = merged.kind === 'aggregate' ? merged.results[0]! : undefined;
+
+      // Assert
+      should(row!.equivalentApiCostUsdMicros).deepEqual({ value: null, known: 4, total: 6, knownSum: 140 });
+      should(row!.costGaps).deepEqual({ unknown_pricing_model: 3, transcript_damaged: 1 });
+      should(reversed.kind === 'aggregate' && reversed.results[0]!.equivalentApiCostUsdMicros).deepEqual(
+        row!.equivalentApiCostUsdMicros,
+      );
+    });
+
+    it('should leave a complete merged sum without a lower bound', () => {
+      // Arrange
+      const zero = Object.fromEntries(MEASURES.map(key => [key, 3])) as Record<AnalyticsMeasureKey, number>;
+      const one = answer([{ labels: {}, values: zero, status: 'completed' }], [], 'sum');
+
+      // Act
+      const merged = mergeAnalyticsResponses([one, one]);
+
+      // Assert
+      const row = merged.kind === 'aggregate' ? merged.results[0]! : undefined;
+      should(row!.equivalentApiCostUsdMicros).deepEqual({ value: 6, known: 2, total: 2 });
+      should(row!.costGaps).be.undefined();
     });
 
     it('should read the per-turn ratio as unknown when an unmerged answer lacks active time', () => {

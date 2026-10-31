@@ -262,6 +262,22 @@ whether a session can be priced; the first was already handled, the other three 
 `packages/daemon/tests/unit/models/pricing.test.ts` prices a session for every priced fleet model under
 each of those spellings.
 
+### One row per model: the short tier names
+
+A transcript may say `opus`, `sonnet` or `haiku` where another says `claude-opus-5-5`. Those three words
+are the Anthropic catalog's tier slots (`tiers`), so they are **aliases of the model that catalog pins**:
+`opus` prices and groups as `claude-opus-5-5`, and Analytics shows one row for it. Another catalog that
+lists a model literally called `opus` (Microsoft Foundry does) does not make a second identity — only the
+maker's own catalog decides what a tier name means (`anthropicTierAliases` in
+`packages/daemon/src/lib/models/pricing.ts`; tests in `tests/unit/models/pricing.test.ts`).
+
+### Unpriced is a gap in the evidence, not in the catalog
+
+When a group reads "≥ $412.50 · 10 unpriced", the catalog had a rate for every one of its sessions. The
+unpriced ones have no usable transcript (not found, unreadable, damaged, still being written), no model name
+or incomplete token counts; the row says which, by count. The catalog's `validFrom` is 1970-01-01 by design —
+a verified price is taken to hold back to the model's launch — so no session predates a rate's window.
+
 ### How a price reaches analytics
 
 How a priced session is then queried — metrics, labels, ranges and the merge across machines — is

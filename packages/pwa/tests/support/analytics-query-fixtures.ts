@@ -20,6 +20,7 @@ export const group = (
   cacheWrite1hInputTokens: measure(0, 5, 5),
   reasoningTokens: measure(null, 0, 5),
   equivalentApiCostUsdMicros: measure(12_340_000, 5, 5),
+  equivalentApiCostCurrentUsdMicros: measure(12_340_000, 5, 5),
   turns: measure(40, 5, 5),
   durationMs: measure(7_200_000, 5, 5),
   activeDurationMs: measure(3_725_000, 5, 5),
