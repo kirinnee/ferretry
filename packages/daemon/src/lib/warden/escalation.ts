@@ -61,9 +61,11 @@ import {
   type AgendaTerm,
   MAX_AGENDA_DETAIL_LENGTH,
   MAX_AGENDA_REASON_LENGTH,
+  type WardenJevPathStep,
   type WardenLayerStatus,
 } from '@ferretry/protocol';
-import { wardenAnomalySubject, type WardenAnomaly, type WardenAnomalyKind } from './detect.ts';
+import { type WardenAnomaly, type WardenAnomalyKind, wardenAnomalySubject } from './detect.ts';
+import { jevNodeQuestion, jevPathFacts, jevPathLine } from './jev-tree.ts';
 import type { WardenOwnerRoute } from './owner-routes.ts';
 import { wardenTeammateToken } from './prompt.ts';
 import type { WardenVerdictSpawn } from './reports.ts';
@@ -420,13 +422,18 @@ function jevLine(handoff: {
   readonly confidence: number;
   readonly recommends?: string;
   readonly failure?: string;
+  readonly node?: string;
 }): string {
   const sure = pct(handoff.confidence);
+  const question = handoff.node === undefined ? undefined : jevNodeQuestion(handoff.node);
   switch (handoff.why) {
     case 'unsure':
       return `Jev looked and was not sure what to do (${sure} sure).`;
     case 'not_sure_enough':
-      return `Jev leaned one way but was only ${sure} sure, below your bar.`;
+      // The decision tree names the ONE question Jev could not answer surely: that is the owner's to answer.
+      return question === undefined
+        ? `Jev leaned one way but was only ${sure} sure, below your bar.`
+        : `Jev could not answer “${question}” surely enough (${sure} sure, below your bar).`;
     case 'never_alone':
     case 'not_allowed':
       return `Jev would ${handoff.recommends ?? 'act on'} it (${sure} sure), but the Warden may not do that alone.`;
@@ -447,9 +454,17 @@ function jevLine(handoff: {
   }
 }
 
+/** What the daemon saw and how Jev's questions were answered, for a card that must stand on its own. */
+function jevPathLines(path: readonly WardenJevPathStep[] | undefined): readonly string[] {
+  if (path === undefined || path.length === 0) return [];
+  const facts = jevPathFacts(path);
+  return [...(facts === '' ? [] : [`What the daemon saw: ${facts}.`]), `Jev’s questions: ${jevPathLine(path)}.`];
+}
+
 const JEV_TERM: AgendaTerm = {
   term: 'Jev',
-  meaning: 'The Warden’s quick first look at a flag: a small model that says leave it, act, or unsure.',
+  meaning:
+    'The Warden’s quick first look at a flag: a small model asked a few yes/no questions, each with how sure it is.',
 };
 
 /** The reason a notification is raised, with everything its text needs. */
@@ -502,6 +517,7 @@ function whyNow(
         why,
         lines: [
           why,
+          ...jevPathLines(reason.handoff.path),
           reason.handoff.reason === undefined ? undefined : `Jev said: “${flatten(reason.handoff.reason)}”`,
           `No investigation follows: ${layerOff(reason.layers.llm, 'investigations')}.`,
         ],

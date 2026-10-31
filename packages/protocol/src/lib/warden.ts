@@ -894,6 +894,26 @@ export type WardenJevCheckWhy = z.infer<typeof WardenJevCheckWhySchema>;
 export const WardenJevCheckRouteSchema = z.enum(['investigation', 'owner']);
 export type WardenJevCheckRoute = z.infer<typeof WardenJevCheckRouteSchema>;
 
+/** How many steps a Jev path can hold: the decision tree is at most five questions deep, with room to grow. */
+export const WARDEN_JEV_PATH_MAX = 12;
+
+/**
+ * One question on the path Jev's decision tree took (`daemon/src/lib/warden/jev-tree.ts`): the node, who
+ * answered it — the daemon from what it observes (`fact`), or Jev (`judgement`) — the yes or no, and, for
+ * Jev's own answers, how sure it was. No text: the node id names the question.
+ */
+export const WardenJevPathStepSchema = z.object({
+  node: z.string().min(1).max(64),
+  kind: z.enum(['fact', 'judgement']),
+  answer: z.enum(['yes', 'no']),
+  /** Jev's confidence in `answer`. Judgements only: a fact is observed, not guessed. */
+  confidence: z.number().min(0).max(1).optional(),
+});
+export type WardenJevPathStep = z.infer<typeof WardenJevPathStepSchema>;
+
+/** The path of one check, root first. */
+export const WardenJevPathSchema = z.array(WardenJevPathStepSchema).max(WARDEN_JEV_PATH_MAX);
+
 /**
  * One of Jev's checks, as the Warden keeps it beside its reports: the ferret, the flag, what Jev made of
  * it, how sure it was and what the call cost. Deliberately no text — no reason, no transcript, no screen —
@@ -916,6 +936,10 @@ export const WardenJevCheckSchema = z.object({
   confidence: z.number().min(0).max(1),
   /** What the call cost, in US dollars; `0` when there was none. */
   costUsd: NonNegativeFiniteSchema,
+  /** The decision tree's path to the answer, root first. Absent when nothing was walked, or from an older daemon. */
+  path: WardenJevPathSchema.optional(),
+  /** `not_sure_enough`: the node whose answer was below the bar — the question the owner is asked. */
+  node: z.string().min(1).max(64).optional(),
 });
 export type WardenJevCheck = z.infer<typeof WardenJevCheckSchema>;
 
@@ -965,6 +989,10 @@ export const WardenJevBeforeSchema = z.object({
   at: InstantSchema.optional(),
   confidence: z.number().min(0).max(1).optional(),
   costUsd: NonNegativeFiniteSchema.optional(),
+  /** The decision tree's path, as the check recorded it. */
+  path: WardenJevPathSchema.optional(),
+  /** The node Jev was not sure enough of. */
+  node: z.string().min(1).max(64).optional(),
 });
 export type WardenJevBefore = z.infer<typeof WardenJevBeforeSchema>;
 
