@@ -301,17 +301,23 @@ The questions above, answered for it ([design/catalogs.md](design/catalogs.md) �
 
 `sharing.configure` governs only whether a remote caller may re-grant `sharing`. Both axes are on by
 default; the operator password is the opt-in layer. That is the daemon-wide document and a device paired
-from this release on. **A device paired before Sharing existed gets Sharing as it holds Pairing** (owner decision
-2026-10-31): Pairing hands another device control of this machine, Sharing hands people read access to chosen
-catalogs, so a device holding Pairing could already give a new device everything, Sharing included. Its stored
-record fills `sharing` from its own `pairing` (`CAPABILITY_FOLLOWS` in `state-pairing-repository.ts`). A daemon
-that already ran the release which filled Sharing OFF is repaired once at boot (`sharing-follows-pairing.ts`): a
-device holding Pairing on both axes, with Sharing off, whose Sharing **no grant-journal record ever names**, gets
-Sharing on both axes, and each repair is recorded in that journal as `daemon:sharing-follows-pairing`, so it
-happens once and a Sharing somebody turned off by hand is never undone. The whole journal is read for this; a
-journal over 8 MiB, or one with a line or a file that will not read, repairs nothing and says so at boot. Any other
-device is turned on in the app by a device that holds Sharing and may manage devices, or at the machine with
-`fy device grant <device> sharing --use`.
+from this release on. A device paired **before** Sharing existed reads it as off (the narrowing rule below), and a
+device can only widen what it holds, so only the machine could turn Sharing on. **One widening is made on purpose,
+once, at boot** (owner decision 2026-10-31: sharing must start without a command at the machine;
+`sharing-follows-pairing.ts`). A device gets Sharing on both axes only when ALL of these hold:
+
+- its stored record has **every other capability fully on** and Sharing fully off — a device that held everything
+  before Sharing existed, what it would hold if it were paired today (the owner's phone);
+- the daemon-wide document is readable and has **Pairing fully on** (the operator's gate on handing out access);
+- **no grant-journal record ever names its Sharing** — a Sharing set by hand is never undone;
+- **no grant-journal record names the device at all since Sharing shipped** (v4.177.0): whoever changed it since
+  saw Sharing and decided.
+
+Each repair is recorded in the grant journal as `daemon:sharing-follows-pairing`, after its write, so it happens
+once and `fy daemon config history` says why; a write whose record failed is said at boot. The whole journal is
+read; a journal over 8 MiB, or a line or a file that will not read, repairs nothing and says so. A device that
+held less than everything is never widened by this. It can be turned on in the app (Settings › Devices) by a
+device that has Sharing and may manage devices, or at the machine with `fy device grant <device> sharing --use`.
 
 Each instance above cites a command. **Verify a cited command exists before adding one**, and verify it a
 second way: `rg -n --fixed-strings "fy daemon adopt"`. Not `rg -r` — that is `--replace`, so
@@ -560,9 +566,9 @@ from. This is the version-skew rule in `packages/protocol/src/lib/version-skew.t
   capability it is) and writes the document back once, whole. The `upgrade-grants` unit test keeps a
   committed `devices.json` exactly as v4.172.x wrote it (seven capabilities) and strips each capability this
   build knows from a full record in turn, so a capability added without thought for old records fails there.
-  **One capability FOLLOWS an older one instead:** `sharing` reads as the record's own `pairing` (see "Capability
-  eight was added"), so the owner's phone keeps working without a command. Any other device: in the app by a
-  device that holds it and may manage devices, or at the machine with `fy device grant <device> sharing --use`.
+  **Devices paired before `sharing` existed therefore start with Sharing OFF**, except the one boot repair for a
+  device that held every other capability (see "Capability eight was added"). Any other device: in the app by a
+  device that has Sharing and may manage devices, or at the machine with `fy device grant <device> sharing --use`.
 
 ### Changing a device's grants
 

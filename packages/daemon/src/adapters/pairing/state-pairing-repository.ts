@@ -38,33 +38,10 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const namesEveryCapability = (grants: unknown): boolean =>
   isRecord(grants) && DAEMON_CAPABILITIES.every(capability => capability in grants);
 
-/**
- * A capability that, in a record written before it existed, takes the value of an OLDER, stronger one rather
- * than off. `sharing` follows `pairing`: a device that may hand another device control of this machine could
- * already give one everything, Sharing included, so giving it Sharing widens nothing it could not arrange
- * (owner decision 2026-10-31; docs/grants.md). Every other capability a record predates reads as off.
- */
-export const CAPABILITY_FOLLOWS: Readonly<
-  Partial<Record<(typeof DAEMON_CAPABILITIES)[number], (typeof DAEMON_CAPABILITIES)[number]>>
-> = {
-  sharing: 'pairing',
-};
-
-const isGrant = (value: unknown): value is { use: boolean; configure: boolean } =>
-  isRecord(value) && typeof value.use === 'boolean' && typeof value.configure === 'boolean';
-
-/**
- * Fills each capability a stored record predates: with the grant of the capability it follows when that is
- * stored and well formed, otherwise with off. Anything else is left for the schema to judge.
- */
+/** Fills each capability a stored record predates with off. Anything else is left for the schema to judge. */
 function fillMissingCapabilities(grants: unknown): unknown {
   if (!isRecord(grants)) return grants;
-  const filled = DAEMON_CAPABILITIES.map(capability => {
-    const leader = CAPABILITY_FOLLOWS[capability];
-    const inherited = leader === undefined ? undefined : grants[leader];
-    return [capability, isGrant(inherited) ? { use: inherited.use, configure: inherited.configure } : CAPABILITY_OFF];
-  });
-  return { ...Object.fromEntries(filled), ...grants };
+  return { ...Object.fromEntries(DAEMON_CAPABILITIES.map(capability => [capability, CAPABILITY_OFF])), ...grants };
 }
 
 const DeviceRecordSchema = z.strictObject({
@@ -78,8 +55,7 @@ const DeviceRecordSchema = z.strictObject({
   publicKey: DeviceKeySchema,
   // A record written before per-device grants reads as LIMITED (fleet.use only), a narrowing and
   // therefore safe — so the document stays at schema 2. A record written before a CAPABILITY existed
-  // reads that capability as off, for the same reason — or, for one that FOLLOWS a stronger capability
-  // (sharing follows pairing), as that one reads. Every write carries the whole field.
+  // reads that capability as off, for the same reason. Every write carries the whole field.
   grants: z.preprocess(fillMissingCapabilities, CapabilityGrantsSchema).default(LIMITED_DEVICE_GRANTS),
   /** When `publicKey` last replaced an earlier one. Absent until a first rotation. */
   keyRotatedAt: InstantSchema.optional(),

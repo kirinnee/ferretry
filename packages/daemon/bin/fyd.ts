@@ -8980,6 +8980,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // A repair must never stop the daemon starting: a failure here is a boot sentence, and changes nothing more.
       const sharingRepair: SharingRepairOutcome = await repairSharingFromPairing({
         devices: pairingService,
+        daemonWide: () => grants.enforced(),
         journal: new JournalGrantAudit(paths.grantAudit, stateFiles),
         audit: new JournalGrantAudit(paths.grantAudit, stateFiles),
         clock: new SystemGrantClock(),
@@ -12864,7 +12865,11 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   const repair = pairing.sharingRepair;
   if (repair?.kind === 'repaired' && repair.deviceIds.length > 0)
     world.notices.state(
-      `Sharing was turned on for ${repair.deviceIds.length} paired device${repair.deviceIds.length === 1 ? '' : 's'} that already held Pairing; recorded in \`${CLIENT_NAME} daemon config history\``,
+      `Sharing was turned on for ${repair.deviceIds.length} paired device${repair.deviceIds.length === 1 ? '' : 's'} that held every other capability from before Sharing existed; recorded in \`${CLIENT_NAME} daemon config history\``,
+    );
+  if (repair?.kind === 'repaired' && repair.unrecorded.length > 0)
+    world.notices.state(
+      `Sharing was turned on for ${repair.unrecorded.join(', ')}, but the grant journal could not record it`,
     );
   if (repair?.kind === 'skipped')
     world.notices.state(

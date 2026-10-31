@@ -196,12 +196,11 @@ What exists on the machine that makes a catalog. Everything here needs the **`sh
 
 ### Making and exporting a catalog
 
-> **Upgrading.** A device paired before Sharing existed gets **Sharing exactly as it holds Pairing**: the
-> owner's phone, which holds Pairing, has Sharing on with nothing to run; a limited device has it off. Pairing
-> is the stronger power (control of the machine), so this widens nothing a device could not already arrange
-> ([grants.md](grants.md#capability-eight-was-added-sharing)). Any other device can have it turned on in the app
-> (Settings › Devices) by a device that holds it and may manage devices, or at the machine with
-> `fy device grant <device> sharing --use`. The host's own `fy catalog` commands are not
+> **Upgrading.** A device that held **every** capability before Sharing existed — the owner's phone — gets
+> Sharing on once, at the first boot of this release, with nothing to run: what it would hold if it were paired
+> today (owner decision; [grants.md](grants.md#capability-eight-was-added-sharing) says exactly when). Any other
+> device can have it turned on in the app (Settings › Devices) by a device that has Sharing on and may manage
+> devices, or at the machine with `fy device grant <device> sharing --use`. The host's own `fy catalog` commands are not
 > governed by a device grant and work at once. See [grants.md](grants.md#changing-a-devices-grants).
 
 ```text

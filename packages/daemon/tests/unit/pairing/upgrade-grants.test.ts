@@ -3,7 +3,6 @@ import { join } from 'node:path';
 import { DAEMON_CAPABILITIES, type DaemonCapability, FULL_DEVICE_GRANTS } from '@ferretry/protocol';
 import should from 'should';
 import { NodePairingCryptography, StatePairingRepository } from '../../../src/adapters/pairing/index.ts';
-import { CAPABILITY_FOLLOWS } from '../../../src/adapters/pairing/state-pairing-repository.ts';
 import { createFoundationPaths, PairingDeviceRegistry, resolveStateHome } from '../../../src/lib/index.ts';
 
 /**
@@ -27,12 +26,6 @@ const OLD_RELEASE_CAPABILITIES: readonly DaemonCapability[] = [
 const PHONE = 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa';
 const TABLET = 'fy_device_id_bbbbbbbbbbbbbbbbbbbbbb';
 const OFF = { use: false, configure: false };
-
-/** What a record that lacks `capability` reads it as: the grant of the capability it follows, when stored, or off. */
-const predated = (capability: DaemonCapability, stored: Record<string, unknown>): unknown => {
-  const leader = CAPABILITY_FOLLOWS[capability];
-  return leader !== undefined && stored[leader] !== undefined ? stored[leader] : OFF;
-};
 
 /** A state home held in memory: a file port with exactly the two calls the repository makes. */
 function home() {
@@ -70,7 +63,7 @@ describe('a daemon upgraded onto the devices.json of the release before it', () 
     for (const device of document.devices) should(Object.keys(device.grants)).deepEqual([...OLD_RELEASE_CAPABILITIES]);
   });
 
-  it('should start on the fixture and read every device with the capabilities it predates off, or following the one they follow', async () => {
+  it('should start on the fixture and read every device with the capabilities it predates switched off', async () => {
     // Arrange
     const state = home();
     const repository = await seed(state, await fixtureText());
@@ -82,16 +75,11 @@ describe('a daemon upgraded onto the devices.json of the release before it', () 
     // Assert
     const newer = DAEMON_CAPABILITIES.filter(capability => !OLD_RELEASE_CAPABILITIES.includes(capability));
     should(newer.length).be.above(0);
-    const stored = JSON.parse(await fixtureText()) as { devices: { id: string; grants: Record<string, unknown> }[] };
     for (const id of [PHONE, TABLET]) {
       const grants = registry.get(id)?.grants;
-      const before = stored.devices.find(device => device.id === id)?.grants ?? {};
       should(Object.keys(grants ?? {}).sort()).deepEqual([...DAEMON_CAPABILITIES].sort());
-      for (const capability of newer) should(grants?.[capability]).deepEqual(predated(capability, before));
+      for (const capability of newer) should(grants?.[capability]).deepEqual(OFF);
     }
-    // Sharing follows Pairing: the owner's phone (Pairing on) gets it, the limited tablet does not.
-    should(registry.get(PHONE)?.grants.sharing).deepEqual({ use: true, configure: true });
-    should(registry.get(TABLET)?.grants.sharing).deepEqual(OFF);
     should(registry.get(PHONE)?.grants.fleet).deepEqual({ use: true, configure: true });
     should(registry.get(TABLET)?.grants.terminal).deepEqual(OFF);
   });
@@ -139,7 +127,7 @@ describe('a daemon upgraded onto the devices.json of the release before it', () 
     should(state.store.get(state.devicesPath)).equal(written);
   });
 
-  it('should open a record that lacks any one capability, whichever it is, as off or as the one it follows, the rest kept', async () => {
+  it('should open a record that lacks any one capability, whichever it is, with that one off and the rest kept', async () => {
     for (const missing of DAEMON_CAPABILITIES) {
       // Arrange
       const state = home();
@@ -157,15 +145,13 @@ describe('a daemon upgraded onto the devices.json of the release before it', () 
       // Assert
       for (const device of opened.devices) {
         for (const capability of DAEMON_CAPABILITIES) {
-          should(device.grants[capability]).deepEqual(
-            capability === missing ? predated(missing, without) : { use: true, configure: true },
-          );
+          should(device.grants[capability]).deepEqual(capability === missing ? OFF : { use: true, configure: true });
         }
       }
     }
   });
 
-  it('should read a record with no capabilities at all as every capability off, a follower included', async () => {
+  it('should read a record with no capabilities at all as every capability off', async () => {
     // Arrange
     const state = home();
     const document = JSON.parse(await fixtureText()) as { devices: { grants: Record<string, unknown> }[] };
@@ -179,17 +165,6 @@ describe('a daemon upgraded onto the devices.json of the release before it', () 
     for (const device of opened.devices) {
       for (const capability of DAEMON_CAPABILITIES) should(device.grants[capability]).deepEqual(OFF);
     }
-  });
-
-  it('should never let a follower copy a malformed leader', async () => {
-    // Arrange: Sharing is missing and Pairing is not a grant at all.
-    const state = home();
-    const document = JSON.parse(await fixtureText()) as { devices: { grants: Record<string, unknown> }[] };
-    for (const device of document.devices) device.grants = { ...device.grants, pairing: { use: 'yes' } };
-    const repository = await seed(state, JSON.stringify(document));
-
-    // Act + Assert: the document is refused for Pairing; Sharing was never filled from it.
-    await should(repository.open('workstation')).be.rejected();
   });
 
   it('should still refuse a record whose grants are wrong rather than guess, and a stored capability that is not one', async () => {
