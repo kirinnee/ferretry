@@ -17,6 +17,20 @@ import {
   refineBrowserScreenshot,
   refineBrowserTarget,
 } from './browser-target.ts';
+import {
+  BROWSER_MAX_SCROLL_TEXT_CHARS,
+  BrowserMouseActionSchema,
+  BrowserPressKeysSchema,
+  BrowserScrollDeltaSchema,
+  BrowserScrollPagesSchema,
+  BrowserSelectValuesSchema,
+  browserDragShape,
+  browserFormFieldsOf,
+  refineBrowserDrag,
+  refineBrowserHighlight,
+  refineBrowserMouse,
+  refineBrowserScroll,
+} from './browser-pointer.ts';
 import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
 import { SECRET_REFERENCE_SOURCE } from './secrets.ts';
 import { SurfaceOpenerSchema } from './surface.ts';
@@ -326,6 +340,8 @@ export const BrowserPageActionSnapshotSchema = BrowserPageSnapshotSchema.safeExt
   actedPageId: z.string().min(1).max(BROWSER_MAX_PAGE_ID_LENGTH),
   /** Downloads the page started since the last act reported any. Absent when there are none. */
   downloads: z.array(BrowserDownloadNoticeSchema).max(BROWSER_MAX_DOWNLOAD_NOTICES).optional(),
+  /** The act typed into a password field — a real secret never belongs in a tool call. */
+  passwordField: z.literal(true).optional(),
 });
 export type BrowserPageActionSnapshot = z.infer<typeof BrowserPageActionSnapshotSchema>;
 
@@ -384,9 +400,11 @@ export const BrowserStatusSchema = z.union([
 ]);
 export type BrowserStatus = z.infer<typeof BrowserStatusSchema>;
 
+const BrowserSelectorSchema = z.string().min(1).max(BROWSER_MAX_SELECTOR_LENGTH);
+
 /** The element an act names: a ref from a snapshot, or a selector. */
 const BrowserTargetShape = {
-  selector: z.string().min(1).max(BROWSER_MAX_SELECTOR_LENGTH).optional(),
+  selector: BrowserSelectorSchema.optional(),
   ref: BrowserRefSchema.optional(),
 };
 
@@ -443,6 +461,51 @@ export const BrowserActionSchema = z.discriminatedUnion('action', [
     })
     .superRefine(refineBrowserTarget({ point: false, required: false }))
     .superRefine(refineBrowserScreenshot),
+  z
+    .strictObject({
+      action: z.literal('hover'),
+      ...BrowserTargetShape,
+      x: BrowserCoordinateSchema.optional(),
+      y: BrowserCoordinateSchema.optional(),
+    })
+    .superRefine(refineBrowserTarget({ point: true, required: true })),
+  z
+    .strictObject({ action: z.literal('drag'), ...browserDragShape(BrowserSelectorSchema) })
+    .superRefine(refineBrowserDrag),
+  z
+    .strictObject({
+      action: z.literal('mouse'),
+      mouseAction: BrowserMouseActionSchema,
+      x: BrowserCoordinateSchema.optional(),
+      y: BrowserCoordinateSchema.optional(),
+      button: BrowserMouseButtonSchema.optional(),
+      deltaX: BrowserScrollDeltaSchema.optional(),
+      deltaY: BrowserScrollDeltaSchema.optional(),
+    })
+    .superRefine((value, context) => refineBrowserMouse({ ...value, action: value.mouseAction }, context)),
+  z
+    .strictObject({ action: z.literal('press'), keys: BrowserPressKeysSchema, ...BrowserTargetShape })
+    .superRefine(refineBrowserTarget({ point: false, required: false })),
+  z
+    .strictObject({
+      action: z.literal('scroll'),
+      ...BrowserTargetShape,
+      text: z.string().min(1).max(BROWSER_MAX_SCROLL_TEXT_CHARS).optional(),
+      deltaX: BrowserScrollDeltaSchema.optional(),
+      deltaY: BrowserScrollDeltaSchema.optional(),
+      pages: BrowserScrollPagesSchema.optional(),
+    })
+    .superRefine(refineBrowserScroll),
+  z
+    .strictObject({ action: z.literal('select'), ...BrowserTargetShape, values: BrowserSelectValuesSchema })
+    .superRefine(refineBrowserTarget({ point: false, required: true })),
+  z
+    .strictObject({ action: z.literal('check'), ...BrowserTargetShape, checked: z.boolean() })
+    .superRefine(refineBrowserTarget({ point: false, required: true })),
+  z.strictObject({ action: z.literal('fill-form'), fields: browserFormFieldsOf(BrowserSelectorSchema) }),
+  z
+    .strictObject({ action: z.literal('highlight'), ...BrowserTargetShape, clear: z.literal(true).optional() })
+    .superRefine(refineBrowserHighlight),
   z.strictObject({ action: z.literal('back') }),
   z.strictObject({ action: z.literal('forward') }),
   z.strictObject({ action: z.literal('reload') }),
@@ -461,6 +524,7 @@ export type BrowserAction = z.infer<typeof BrowserActionSchema>;
 const BrowserResultPageSchema = BrowserPageSnapshotSchema.safeExtend({
   actedPageId: z.string().min(1).max(BROWSER_MAX_PAGE_ID_LENGTH).optional(),
   downloads: z.array(BrowserDownloadNoticeSchema).max(BROWSER_MAX_DOWNLOAD_NOTICES).optional(),
+  passwordField: z.literal(true).optional(),
 });
 
 /** Actual action responses carry status plus an optional shape-specific result. */

@@ -173,10 +173,13 @@ export function normalizeWorkerActionSnapshot(value: unknown): WorkerSnapshotRes
   const snapshot = normalizeWorkerSnapshot(value);
   if (!snapshot.ok) return snapshot;
   const downloads = normalizeWorkerDownloads(asRecord(value)['downloads']);
+  // Only the exact value means anything: the worker found a password input.
+  const passwordField = asRecord(value)['passwordField'] === true;
   return parsed(BrowserPageActionSnapshotSchema, {
     ...snapshot.value,
     actedPageId,
     ...(downloads.length === 0 ? {} : { downloads }),
+    ...(passwordField ? { passwordField: true as const } : {}),
   });
 }
 

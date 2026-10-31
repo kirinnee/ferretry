@@ -225,6 +225,44 @@ describe('McpServer — the tools', () => {
     should(empty).match({ result: { isError: true } });
   });
 
+  it('should offer the pointer and keys tools, and send them as their wire calls', async () => {
+    // Arrange
+    const { calls, request } = harness();
+    const names = MCP_TOOLS.map(tool => tool.name);
+
+    // Act
+    await request('tools/call', toolCall('browser_hover', { name: 'app', ref: 'e2' }));
+    await request(
+      'tools/call',
+      toolCall('browser_drag', { name: 'app', fromX: 1, fromY: 2, toX: 3, toY: 4, steps: 9 }),
+    );
+    await request('tools/call', toolCall('browser_mouse', { name: 'app', action: 'wheel', deltaY: 300 }));
+    await request('tools/call', toolCall('browser_press', { name: 'app', keys: ['Enter'] }));
+    await request('tools/call', toolCall('browser_scroll', { name: 'app', pages: -1 }));
+    await request('tools/call', toolCall('browser_select', { name: 'app', ref: 'e3', values: ['uk'] }));
+    await request('tools/call', toolCall('browser_check', { name: 'app', ref: 'e4', checked: false }));
+    await request('tools/call', toolCall('browser_fill_form', { name: 'app', fields: [{ ref: 'e5', text: 'a' }] }));
+    await request('tools/call', toolCall('browser_highlight', { name: 'app', clear: true }));
+    await request('tools/call', toolCall('browser_highlight', { name: 'app', ref: 'e2', clear: false }));
+
+    // Assert
+    for (const name of ['hover', 'drag', 'mouse', 'press', 'scroll', 'select', 'check', 'fill_form', 'highlight'])
+      should(names).containEql(`browser_${name}`);
+    should(calls).deepEqual([
+      { tool: 'browser.hover', name: 'app', ref: 'e2' },
+      { tool: 'browser.drag', name: 'app', fromX: 1, fromY: 2, toX: 3, toY: 4, steps: 9 },
+      { tool: 'browser.mouse', name: 'app', action: 'wheel', deltaY: 300 },
+      { tool: 'browser.press', name: 'app', keys: ['Enter'] },
+      { tool: 'browser.scroll', name: 'app', pages: -1 },
+      { tool: 'browser.select', name: 'app', ref: 'e3', values: ['uk'] },
+      // A false `checked` is the question "untick it", so it travels; a false `clear` is a flag left out.
+      { tool: 'browser.check', name: 'app', ref: 'e4', checked: false },
+      { tool: 'browser.fill_form', name: 'app', fields: [{ ref: 'e5', text: 'a' }] },
+      { tool: 'browser.highlight', name: 'app', clear: true },
+      { tool: 'browser.highlight', name: 'app', ref: 'e2' },
+    ]);
+  });
+
   it('should send a JPEG screenshot as a JPEG', async () => {
     const { request } = harness(async () => ({
       summary: 'A screenshot of %browser:app.',

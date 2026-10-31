@@ -34,6 +34,30 @@ const node = Bun.which('node');
 const WORKER = join(import.meta.dir, '../../../../bin/browser-worker.ts');
 const sessions = new Set(['s1', 's2']);
 
+/** A page with one thing for each pointer-and-keys tool to do, each writing what it saw into a log. */
+const POINTER_PAGE = `<html><body style="margin:0;min-height:3200px">
+<div id="hov" style="position:absolute;left:20px;top:20px;width:120px;height:40px;background:#ddd"
+  onmouseover="document.getElementById('log').textContent+='hover;'">hover me</div>
+<div id="src" draggable="true" style="position:absolute;left:20px;top:80px;width:80px;height:40px;background:#9cf"
+  ondragstart="event.dataTransfer.setData('text','x')">drag me</div>
+<div id="dst" style="position:absolute;left:200px;top:80px;width:120px;height:40px;background:#fc9"
+  ondragover="event.preventDefault()" ondrop="event.preventDefault();document.getElementById('log').textContent+='dropped;'">drop here</div>
+<div id="pad" style="position:absolute;left:20px;top:140px;width:400px;height:60px;background:#cfc"
+  onmousedown="window.dragging=true;document.getElementById('log').textContent+='down;'"
+  onmousemove="if(window.dragging)window.moved=(window.moved||0)+1"
+  onmouseup="document.getElementById('log').textContent+='up:'+(window.moved>1?'moved':'still')+';';window.dragging=false"
+  onwheel="document.getElementById('log').textContent+='wheel:'+Math.sign(event.deltaY)+';'">pad</div>
+<input id="k" style="position:absolute;left:20px;top:220px" onkeydown="if(!['Control','Shift','Alt','Meta'].includes(event.key))document.getElementById('log').textContent+='key:'+event.key+(event.ctrlKey?'+ctrl':'')+';'">
+<select id="s" style="position:absolute;left:20px;top:260px" onchange="document.getElementById('log').textContent+='picked:'+this.value+';'">
+  <option value="">choose</option><option value="uk">United Kingdom</option><option value="us">United States</option></select>
+<input id="cb" type="checkbox" style="position:absolute;left:20px;top:300px" onchange="document.getElementById('log').textContent+='checked:'+this.checked+';'">
+<input id="fn" style="position:absolute;left:20px;top:340px">
+<input id="pw" type="password" style="position:absolute;left:20px;top:380px">
+<p id="log" style="position:absolute;left:20px;top:420px"></p>
+<p id="end" style="position:absolute;left:20px;top:2800px">The end of the page</p>
+<script>addEventListener('scroll',()=>{if(scrollY>100)document.getElementById('log').textContent+='scrolled;'})</script>
+</body></html>`;
+
 let root = '';
 let site: ReturnType<typeof Bun.serve>;
 let browser: BrowserSessionService;
@@ -98,6 +122,7 @@ beforeAll(async () => {
         return new Response('a,b\n1,2\n', {
           headers: { 'content-type': 'text/csv', 'content-disposition': 'attachment; filename="data.csv"' },
         });
+      if (url.pathname === '/pointer') return new Response(POINTER_PAGE, { headers: { 'content-type': 'text/html' } });
       if (url.pathname === '/form')
         return new Response(
           '<html><body><label>Name <input id="n"></label>' +
@@ -440,4 +465,149 @@ describe('the machine agent browser, in a real Chrome', () => {
     should(bytes.subarray(0, 4).toString('latin1')).equal('%PDF');
     await tools.call(agent('s1'), { tool: 'browser.close', name: 'print' });
   }, 90_000);
+});
+
+describe('the pointer and keys tools, in a real Chrome', () => {
+  /** Open the pointer page, run the act, and answer what the page logged. */
+  async function onPointerPage(name: string, act: () => Promise<unknown>): Promise<string> {
+    await tools.call(agent('s1'), { tool: 'browser.open', name, url: `${base}/pointer` });
+    try {
+      await act();
+      return (await tools.call(agent('s1'), { tool: 'browser.read', name, selector: '#log' })).output ?? '';
+    } finally {
+      await tools.call(agent('s1'), { tool: 'browser.close', name });
+    }
+  }
+  const call = (call: Parameters<AgentToolService['call']>[1]) => tools.call(agent('s1'), call);
+
+  it('should hover an element and a point', async () => {
+    const logged = await onPointerPage('hover', async () => {
+      await call({ tool: 'browser.hover', name: 'hover', selector: '#hov' });
+    });
+    should(logged).containEql('hover;');
+  }, 60_000);
+
+  it('should drag element to element, and point to point with the mouse', async () => {
+    const dropped = await onPointerPage('drag-el', async () => {
+      await call({ tool: 'browser.drag', name: 'drag-el', fromSelector: '#src', toSelector: '#dst' });
+    });
+    const dragged = await onPointerPage('drag-pt', async () => {
+      await call({ tool: 'browser.drag', name: 'drag-pt', fromX: 40, fromY: 160, toX: 380, toY: 160, steps: 12 });
+    });
+    should(dropped).containEql('dropped;');
+    should(dragged).containEql('down;up:moved;');
+  }, 60_000);
+
+  it('should move, press, release and wheel the mouse', async () => {
+    const logged = await onPointerPage('mouse', async () => {
+      await call({ tool: 'browser.mouse', name: 'mouse', action: 'move', x: 100, y: 160 });
+      await call({ tool: 'browser.mouse', name: 'mouse', action: 'down' });
+      await call({ tool: 'browser.mouse', name: 'mouse', action: 'up' });
+      await call({ tool: 'browser.mouse', name: 'mouse', action: 'wheel', deltaY: 200 });
+    });
+    should(logged).containEql('down;up:still;');
+    should(logged).containEql('wheel:1;');
+  }, 60_000);
+
+  it('should press chords on a focused element', async () => {
+    const logged = await onPointerPage('press', async () => {
+      await call({ tool: 'browser.press', name: 'press', selector: '#k', keys: ['Enter', 'Control+a', 'ArrowDown'] });
+    });
+    should(logged).equal('key:Enter;key:a+ctrl;key:ArrowDown;');
+  }, 60_000);
+
+  it('should scroll to an element, to a text, by a distance and by screens', async () => {
+    // A page hears its own scroll on a later frame — a wheel scroll lands later still — so the log is
+    // watched until the page reports it, not read once straight after the act.
+    const scrolled = async (name: string): Promise<void> =>
+      await waitFor(
+        async () => ((await call({ tool: 'browser.read', name, selector: '#log' })).output ?? '').includes('scrolled;'),
+        `${name} to report its scroll`,
+        { within: 10_000, every: 50 },
+      );
+    const toElement = await onPointerPage('scroll-el', async () => {
+      await call({ tool: 'browser.scroll', name: 'scroll-el', selector: '#end' });
+      await scrolled('scroll-el');
+    });
+    const toText = await onPointerPage('scroll-text', async () => {
+      await call({ tool: 'browser.scroll', name: 'scroll-text', text: 'The end of the page' });
+      await scrolled('scroll-text');
+    });
+    const byDistance = await onPointerPage('scroll-by', async () => {
+      await call({ tool: 'browser.scroll', name: 'scroll-by', deltaY: 600 });
+      await scrolled('scroll-by');
+    });
+    const byPages = await onPointerPage('scroll-pages', async () => {
+      await call({ tool: 'browser.scroll', name: 'scroll-pages', pages: 1 });
+      await scrolled('scroll-pages');
+    });
+    for (const logged of [toElement, toText, byDistance, byPages]) should(logged).containEql('scrolled;');
+  }, 60_000);
+
+  it('should select an option by value and by label', async () => {
+    const byValue = await onPointerPage('select-value', async () => {
+      await call({ tool: 'browser.select', name: 'select-value', selector: '#s', values: ['uk'] });
+    });
+    const byLabel = await onPointerPage('select-label', async () => {
+      await call({ tool: 'browser.select', name: 'select-label', selector: '#s', values: ['United States'] });
+    });
+    should(byValue).equal('picked:uk;');
+    should(byLabel).equal('picked:us;');
+  }, 60_000);
+
+  it('should tick a box and untick it', async () => {
+    const logged = await onPointerPage('check', async () => {
+      await call({ tool: 'browser.check', name: 'check', selector: '#cb', checked: true });
+      await call({ tool: 'browser.check', name: 'check', selector: '#cb', checked: false });
+    });
+    should(logged).equal('checked:true;checked:false;');
+  }, 60_000);
+
+  it('should fill a form, and say so when a field was a password', async () => {
+    let plain = '';
+    let secret = '';
+    const logged = await onPointerPage('form', async () => {
+      plain = (
+        await call({
+          tool: 'browser.fill_form',
+          name: 'form',
+          fields: [
+            { selector: '#fn', text: 'hadi' },
+            { selector: '#cb', checked: true },
+            { selector: '#s', option: 'uk' },
+          ],
+        })
+      ).summary;
+      secret = (
+        await call({
+          tool: 'browser.fill_form',
+          name: 'form',
+          fields: [{ selector: '#pw', text: 'not-a-real-secret' }],
+        })
+      ).summary;
+    });
+    should(logged).containEql('checked:true;');
+    should(logged).containEql('picked:uk;');
+    should(plain).not.containEql('password');
+    should(secret).containEql('password field');
+    should(secret).containEql('browser_ask_owner');
+  }, 60_000);
+
+  it('should flag a password field typed into, and none other', async () => {
+    await tools.call(agent('s1'), { tool: 'browser.open', name: 'typed', url: `${base}/pointer` });
+    const secret = await call({ tool: 'browser.type', name: 'typed', selector: '#pw', text: 'not-a-real-secret' });
+    const plain = await call({ tool: 'browser.type', name: 'typed', selector: '#fn', text: 'hadi' });
+    await tools.call(agent('s1'), { tool: 'browser.close', name: 'typed' });
+    should(secret.summary).containEql('password field');
+    should(plain.summary).not.containEql('password');
+  }, 60_000);
+
+  it('should outline an element and clear the outline', async () => {
+    await tools.call(agent('s1'), { tool: 'browser.open', name: 'light', url: `${base}/pointer` });
+    const lit = await call({ tool: 'browser.highlight', name: 'light', selector: '#hov' });
+    const cleared = await call({ tool: 'browser.highlight', name: 'light', clear: true });
+    await tools.call(agent('s1'), { tool: 'browser.close', name: 'light' });
+    should(lit.summary).startWith('Done on %browser:light');
+    should(cleared.summary).startWith('Done on %browser:light');
+  }, 60_000);
 });

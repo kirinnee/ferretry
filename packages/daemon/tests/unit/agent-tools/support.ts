@@ -153,6 +153,8 @@ class FakeBrowserPages implements Pick<
   readText: string | undefined;
   /** Where every act reports the page to be, when a case wants an address other than the page's own. */
   actedUrl: string | undefined;
+  /** Whether every act reports that it put text in a password field. */
+  passwordField = false;
   failure: unknown;
   private minted = 0;
 
@@ -216,6 +218,7 @@ class FakeBrowserPages implements Pick<
       ...(this.downloads === undefined ? {} : { downloads: [...this.downloads] }),
       actedPageId: page.id,
       ...(this.pendingDialog === undefined ? {} : { dialog: this.pendingDialog }),
+      ...(this.passwordField ? { passwordField: true as const } : {}),
     };
     if (action.action === 'read') {
       const text =

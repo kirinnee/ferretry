@@ -23,6 +23,7 @@ import type { WorkerStagedFile } from './worker-protocol.ts';
 
 /** What an act answers: the page list, and the dialog the acted page is waiting on, if it has one. */
 export type BrowserPageActed = BrowserPageActionSnapshot & { readonly dialog?: BrowserDialogInfo };
+import type { PointerAct } from './pointer-acts.ts';
 
 /**
  * The machine's agent browser, seen from the daemon. One implementation drives a real browser worker;
@@ -47,6 +48,8 @@ export interface BrowserAutomation {
     text: string,
     options?: BrowserTypeOptions,
   ): Promise<BrowserPageActed>;
+  /** Hovers, drags, moves the mouse, presses keys, scrolls, selects, ticks, fills a form or highlights. */
+  pointer(pageId: string, act: PointerAct): Promise<BrowserPageActed>;
   /**
    * The visible text (the default), the accessibility tree (`a11y`, YAML), or a `snapshot`: that tree
    * with a ref beside every element — of the page, or of one element of it.

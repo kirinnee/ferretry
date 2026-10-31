@@ -46,6 +46,7 @@ import {
   runLifecycleRequest,
   type WaitablePage,
 } from '../src/lib/browser/transport/page-lifecycle.ts';
+import { performPointerAct, type PointerPage, pointerActParam } from '../src/lib/browser/transport/pointer-acts.ts';
 import { type PointerPosition, pointerAfter, pointerSequence } from '../src/lib/browser/transport/pointer.ts';
 
 const endpoint = process.argv[2];
@@ -662,11 +663,16 @@ async function act(request: Request): Promise<Record<string, unknown>> {
       const page = targetPage(params.pageId);
       const target = browserElementParam(legacyTarget(params));
       if (target === undefined) throw new Error('target is required');
-      await typeInto(page, target, typeof params.text === 'string' ? params.text : '', {
+      const typed = await typeInto(page, target, typeof params.text === 'string' ? params.text : '', {
         ...(params.submit === true ? { submit: true } : {}),
         ...(params.slowly === true ? { slowly: true } : {}),
       });
-      return await acted(page);
+      return await acted(page, typed.passwordField ? { passwordField: true } : {});
+    }
+    case 'pointer': {
+      const page = targetPage(params.pageId);
+      const outcome = await performPointerAct(page as unknown as PointerPage, pointerActParam(params.act));
+      return await acted(page, outcome.passwordField ? { passwordField: true } : {});
     }
     case 'read': {
       const page = targetPage(params.pageId);

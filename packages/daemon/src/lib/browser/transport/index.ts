@@ -7,6 +7,7 @@ export * from './frame-governor.ts';
 export * from './input.ts';
 export * from './page-acts.ts';
 export * from './page-lifecycle.ts';
+export * from './pointer-acts.ts';
 export * from './pointer.ts';
 export * from './viewer-contracts.ts';
 export * from './viewer-stream.ts';

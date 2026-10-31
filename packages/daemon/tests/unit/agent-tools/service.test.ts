@@ -8,7 +8,7 @@ import {
   browserUnavailable,
   TerminalMountError,
 } from '../../../src/lib/index.ts';
-import { AGENT_TOOL_MAX_OUTPUT_CHARS } from '@ferretry/protocol';
+import { AGENT_TOOL_MAX_OUTPUT_CHARS, type AgentToolCall } from '@ferretry/protocol';
 import { agent, agentToolWorld, otherAgent, person, SNAPSHOT } from './support.ts';
 
 const refusal = async (work: Promise<unknown>): Promise<AgentToolError> => {
@@ -911,6 +911,216 @@ describe('AgentToolService — refs, points and what a page shows', () => {
       { tool: 'browser.navigate', by: 'agent', surface: '%browser:app', history: 'reload' },
       { tool: 'browser.screenshot', by: 'agent', surface: '%browser:app', ref: 'e4', format: 'jpeg' },
     ]);
+  });
+});
+
+describe('AgentToolService — pointer and keys', () => {
+  it('should hand each pointer tool to the browser as the action that carries it', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+
+    // Act
+    await world.service.call(agent, { tool: 'browser.hover', name: 'app', ref: 'e2' });
+    await world.service.call(agent, { tool: 'browser.hover', name: 'app', x: 3, y: 4 });
+    await world.service.call(agent, { tool: 'browser.drag', name: 'app', fromRef: 'e2', toSelector: '#bin' });
+    await world.service.call(agent, {
+      tool: 'browser.drag',
+      name: 'app',
+      fromX: 1,
+      fromY: 2,
+      toX: 90,
+      toY: 2,
+      steps: 5,
+    });
+    await world.service.call(agent, { tool: 'browser.mouse', name: 'app', action: 'wheel', deltaY: 400 });
+    await world.service.call(agent, { tool: 'browser.press', name: 'app', keys: ['Control+a', 'Delete'], ref: 'e4' });
+    await world.service.call(agent, { tool: 'browser.scroll', name: 'app', text: 'Terms' });
+    await world.service.call(agent, { tool: 'browser.scroll', name: 'app', pages: -2 });
+    await world.service.call(agent, { tool: 'browser.select', name: 'app', ref: 'e4', values: ['uk'] });
+    await world.service.call(agent, { tool: 'browser.check', name: 'app', ref: 'e5', checked: false });
+    await world.service.call(agent, {
+      tool: 'browser.fill_form',
+      name: 'app',
+      fields: [
+        { ref: 'e4', text: 'hadi' },
+        { selector: '#tos', checked: true },
+      ],
+    });
+    await world.service.call(agent, { tool: 'browser.highlight', name: 'app', ref: 'e2' });
+    await world.service.call(agent, { tool: 'browser.highlight', name: 'app', clear: true });
+
+    // Assert
+    should(world.browser.actions).deepEqual([
+      { action: 'hover', ref: 'e2' },
+      { action: 'hover', x: 3, y: 4 },
+      { action: 'drag', fromRef: 'e2', toSelector: '#bin' },
+      { action: 'drag', fromX: 1, fromY: 2, toX: 90, toY: 2, steps: 5 },
+      { action: 'mouse', mouseAction: 'wheel', deltaY: 400 },
+      { action: 'press', keys: ['Control+a', 'Delete'], ref: 'e4' },
+      { action: 'scroll', text: 'Terms' },
+      { action: 'scroll', pages: -2 },
+      { action: 'select', ref: 'e4', values: ['uk'] },
+      { action: 'check', ref: 'e5', checked: false },
+      {
+        action: 'fill-form',
+        fields: [
+          { ref: 'e4', text: 'hadi' },
+          { selector: '#tos', checked: true },
+        ],
+      },
+      { action: 'highlight', ref: 'e2' },
+      { action: 'highlight', clear: true },
+    ]);
+  });
+
+  it('should refuse every pointer tool on a page a person took over, and touch nothing', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+    await world.service.control('s1', 'browser', { action: 'takeover', key: 'app' }, { by: 'local' }, person);
+    const calls: AgentToolCall[] = [
+      { tool: 'browser.hover', name: 'app', ref: 'e1' },
+      { tool: 'browser.drag', name: 'app', fromRef: 'e1', toRef: 'e2' },
+      { tool: 'browser.mouse', name: 'app', action: 'up' },
+      { tool: 'browser.press', name: 'app', keys: ['Enter'] },
+      { tool: 'browser.scroll', name: 'app', pages: 1 },
+      { tool: 'browser.select', name: 'app', ref: 'e1', values: ['a'] },
+      { tool: 'browser.check', name: 'app', ref: 'e1', checked: true },
+      { tool: 'browser.fill_form', name: 'app', fields: [{ ref: 'e1', text: 'a' }] },
+      { tool: 'browser.highlight', name: 'app', clear: true },
+    ];
+
+    // Act
+    const refused = await Promise.all(calls.map(call => refusal(world.service.call(agent, call))));
+
+    // Assert
+    should(refused.map(error => error.code)).deepEqual(calls.map(() => 'taken_over'));
+    should(world.browser.acts).deepEqual([]);
+  });
+
+  it('should audit counts, lengths, refs and flags, never typed text, key names, options or values', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    const secret = 'correct-horse-battery-staple';
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+
+    // Act
+    await world.service.call(agent, { tool: 'browser.hover', name: 'app', ref: 'e2' });
+    await world.service.call(agent, {
+      tool: 'browser.drag',
+      name: 'app',
+      fromX: 1,
+      fromY: 2,
+      toX: 3,
+      toY: 4,
+      steps: 8,
+    });
+    await world.service.call(agent, { tool: 'browser.mouse', name: 'app', action: 'down', button: 'right' });
+    await world.service.call(agent, {
+      tool: 'browser.press',
+      name: 'app',
+      keys: [secret.slice(0, 1), 'Control+Shift+K'],
+    });
+    await world.service.call(agent, { tool: 'browser.scroll', name: 'app', text: secret });
+    await world.service.call(agent, { tool: 'browser.scroll', name: 'app', ref: 'e9' });
+    await world.service.call(agent, { tool: 'browser.scroll', name: 'app', deltaY: 600 });
+    await world.service.call(agent, {
+      tool: 'browser.select',
+      name: 'app',
+      ref: 'e4',
+      values: [secret, 'United States'],
+    });
+    await world.service.call(agent, { tool: 'browser.check', name: 'app', ref: 'e5', checked: false });
+    await world.service.call(agent, {
+      tool: 'browser.fill_form',
+      name: 'app',
+      fields: [
+        { ref: 'e4', text: secret },
+        { ref: 'e5', option: secret },
+        { ref: 'e6', value: secret },
+      ],
+    });
+    await world.service.call(agent, { tool: 'browser.highlight', name: 'app', clear: true });
+
+    // Assert
+    should(JSON.stringify(world.audit.entries)).not.containEql(secret);
+    should(JSON.stringify(world.audit.entries)).not.containEql('Control+Shift+K');
+    should(JSON.stringify(world.audit.entries)).not.containEql('United States');
+    should(world.audit.entries.slice(1).map(entry => entry.detail)).deepEqual([
+      { tool: 'browser.hover', by: 'agent', surface: '%browser:app', ref: 'e2' },
+      { tool: 'browser.drag', by: 'agent', surface: '%browser:app', from: 'point', to: 'point', steps: 8 },
+      { tool: 'browser.mouse', by: 'agent', surface: '%browser:app', mouse: 'down', button: 'right' },
+      { tool: 'browser.press', by: 'agent', surface: '%browser:app', keys: 2 },
+      { tool: 'browser.scroll', by: 'agent', surface: '%browser:app', scroll: 'text', textLength: secret.length },
+      { tool: 'browser.scroll', by: 'agent', surface: '%browser:app', scroll: 'element', ref: 'e9' },
+      { tool: 'browser.scroll', by: 'agent', surface: '%browser:app', scroll: 'distance' },
+      { tool: 'browser.select', by: 'agent', surface: '%browser:app', ref: 'e4', values: 2 },
+      { tool: 'browser.check', by: 'agent', surface: '%browser:app', ref: 'e5', checked: false },
+      { tool: 'browser.fill_form', by: 'agent', surface: '%browser:app', fields: 3, textLength: secret.length },
+      { tool: 'browser.highlight', by: 'agent', surface: '%browser:app', clear: true },
+    ]);
+  });
+
+  it('should say a password field was filled, tell the agent to hand secrets to the owner, and audit the flag', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+    world.browser.passwordField = true;
+
+    // Act
+    const typed = await world.service.call(agent, {
+      tool: 'browser.type',
+      name: 'app',
+      selector: '#password',
+      text: 'hunter2',
+    });
+    const filled = await world.service.call(agent, {
+      tool: 'browser.fill_form',
+      name: 'app',
+      fields: [{ selector: '#password', text: 'hunter2' }],
+    });
+
+    // Assert
+    for (const answer of [typed, filled]) {
+      should(answer.summary).containEql('password field');
+      should(answer.summary).containEql('browser_ask_owner');
+    }
+    should(filled.summary).containEql('filled');
+    should(JSON.stringify(world.audit.entries)).not.containEql('hunter2');
+    should(world.audit.entries.slice(-2).map(entry => entry.detail?.passwordField)).deepEqual([true, true]);
+  });
+
+  it('should not mention a password field, or flag the audit, when none was written to', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+
+    // Act
+    const answer = await world.service.call(agent, {
+      tool: 'browser.fill_form',
+      name: 'app',
+      fields: [{ ref: 'e4', text: 'hadi' }],
+    });
+
+    // Assert
+    should(answer.summary).not.containEql('password');
+    should(world.audit.entries.at(-1)?.detail).not.have.property('passwordField');
+  });
+
+  it('should mask a vault secret in the address a pointer act reports', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    world.redactor.values.set('sk_live_51Hx', 'STRIPE_KEY');
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+    world.browser.actedUrl = 'https://example.test/?key=sk_live_51Hx';
+
+    // Act
+    const answer = await world.service.call(agent, { tool: 'browser.scroll', name: 'app', pages: 1 });
+
+    // Assert
+    should(answer.summary).containEql('key=[redacted:STRIPE_KEY]');
+    should(answer.summary).not.containEql('sk_live_51Hx');
   });
 });
 

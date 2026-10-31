@@ -190,6 +190,18 @@ describe('browser worker snapshots', () => {
     should(accepted.ok && accepted.value.actedPageId).equal('p1');
   });
 
+  it('should carry the password-field flag only when the worker says exactly true', () => {
+    // Act
+    const flagged = normalizeWorkerActionSnapshot({ ...snapshotReply(), actedPageId: 'p1', passwordField: true });
+    const stringy = normalizeWorkerActionSnapshot({ ...snapshotReply(), actedPageId: 'p1', passwordField: 'true' });
+    const absent = normalizeWorkerActionSnapshot({ ...snapshotReply(), actedPageId: 'p1' });
+
+    // Assert
+    should(flagged.ok && flagged.value.passwordField).equal(true);
+    should(stringy.ok && 'passwordField' in stringy.value).be.false();
+    should(absent.ok && 'passwordField' in absent.value).be.false();
+  });
+
   it('should refuse a snapshot with no usable or no matching active page', () => {
     // Act & Assert
     should(normalizeWorkerSnapshot(undefined)).deepEqual({

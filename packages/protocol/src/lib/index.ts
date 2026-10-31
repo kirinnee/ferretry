@@ -24,6 +24,7 @@ export * from './board-projects.ts';
 export * from './board-refs.ts';
 export * from './browser.ts';
 export * from './browser-target.ts';
+export * from './browser-pointer.ts';
 export * from './browser-login.ts';
 export * from './browser-page-lifecycle.ts';
 export * from './browser-stream.ts';

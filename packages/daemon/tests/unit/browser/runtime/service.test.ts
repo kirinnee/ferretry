@@ -9,6 +9,7 @@ import type {
 import should from 'should';
 import {
   type BrowserIdlePolicy,
+  type BrowserPageAction,
   BrowserSessionError,
   BrowserSessionService,
   pendingDialogOf,
@@ -77,6 +78,7 @@ class Tabs {
       return { ...this.acted('click', pageId), ...(this.dialog === undefined ? {} : { dialog: this.dialog }) };
     },
     type: async pageId => this.acted('type', pageId),
+    pointer: async (pageId, act) => this.acted(`pointer-${act.action}`, pageId),
     read: async (pageId, options) => ({ ...this.acted(`read-${options?.mode ?? 'text'}`, pageId), text: 'hello' }),
     screenshot: async pageId => ({ ...this.acted('screenshot', pageId), screenshotBase64: 'iVBOR' }),
     upload: async pageId => this.acted('upload', pageId),
@@ -208,6 +210,18 @@ describe('the machine agent browser — one Chrome, pages by session', () => {
       { action: 'screenshot' },
     ] as const)
       await service.actOnPage('s1', 'app', action);
+    const pointerActions: BrowserPageAction[] = [
+      { action: 'hover', ref: 'e1' },
+      { action: 'drag', fromRef: 'e1', toRef: 'e2' },
+      { action: 'mouse', mouseAction: 'up' },
+      { action: 'press', keys: ['Enter'] },
+      { action: 'scroll', pages: 1 },
+      { action: 'select', ref: 'e1', values: ['a'] },
+      { action: 'check', ref: 'e1', checked: true },
+      { action: 'fill-form', fields: [{ ref: 'e1', text: 'a' }] },
+      { action: 'highlight', clear: true },
+    ];
+    for (const action of pointerActions) await service.actOnPage('s1', 'app', action);
     const foreign = await failure(service.actOnPage('s1', other.id, { action: 'click', selector: 'a' }));
 
     // Assert — every act went to s1's page; s2's page of the same name was never touched.
@@ -217,6 +231,9 @@ describe('the machine agent browser — one Chrome, pages by session', () => {
       `type:${app.id}`,
       `read-a11y:${app.id}`,
       `screenshot:${app.id}`,
+      ...['hover', 'drag', 'mouse', 'press', 'scroll', 'select', 'check', 'fill-form', 'highlight'].map(
+        kind => `pointer-${kind}:${app.id}`,
+      ),
     ]);
     should(foreign).match({ code: 'not_found' });
   });
