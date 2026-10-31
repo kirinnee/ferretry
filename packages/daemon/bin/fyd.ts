@@ -584,7 +584,6 @@ import { type RuntimeNamesPort, resolveStartAccount } from '../src/lib/fleet/sta
 import { polledDirectoryLimitations } from '../src/lib/performance/fallbacks.ts';
 import { withSystemCallsign } from '../src/lib/runtime/mounts/system-session-control.ts';
 import { ProcessHistory, SessionProcessService } from '../src/lib/session/processes/index.ts';
-import { isSubFerret, nudgeTarget } from '../src/lib/sub-ferret/index.ts';
 import { OpenUrlService } from '../src/lib/system/open-url.ts';
 
 /** The ordinary revive a send uses, as the auto-resume pass sees it. */
