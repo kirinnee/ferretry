@@ -730,6 +730,24 @@ const CASES: readonly MethodCase[] = [
     expected: { kind: 'refused', targetAgent: 'codex-a', reason: 'Too new.' },
   },
   {
+    name: 'asking the agent to stop its background jobs after a refused migration',
+    invoke: client => client.askToStopJobs(SESSION_ID),
+    verb: 'POST',
+    path: '/v1/sessions/session-1/migrate/ask-to-stop-jobs',
+    body: {},
+    response: () =>
+      Response.json({
+        messageId: 'migrate-jobs-5101',
+        jobs: [{ pid: 5101, command: 'bash ./merge-all.sh 765', age: '4m' }],
+        alreadyAsked: false,
+      }),
+    expected: {
+      messageId: 'migrate-jobs-5101',
+      jobs: [{ pid: 5101, command: 'bash ./merge-all.sh 765', age: '4m' }],
+      alreadyAsked: false,
+    },
+  },
+  {
     name: 'rename with a name',
     invoke: client => client.rename(SESSION_ID, 'Cover Typed Methods'),
     verb: 'POST',

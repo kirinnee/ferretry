@@ -55,6 +55,7 @@ import {
   type Advertisement,
   type AgendaItem,
   type AnalyticsPricingRate,
+  type AskToStopJobsResult,
   type AutoResumeSummary,
   CONFIG_ACCEPTED_FILE,
   type ConversionPreview,
@@ -663,6 +664,8 @@ import {
   adoptedTranscriptProvenance,
   advertisesForeignAddress,
   agendaBlockNotice,
+  agentJobsMessage,
+  agentJobsMessageId,
   agentSpokenName,
   answerArguments,
   answerOf,
@@ -4641,6 +4644,11 @@ interface SessionMigrateParts {
   /** The SAME service the revive uses — see `createSessionResumeSubsystem`. */
   readonly resume: SessionResumeService;
   readonly preflight: MigrationPreflight;
+  /**
+   * Puts one Ferretry-authored message in the session's queue — the only thing a refused migration's
+   * "ask the agent to stop its background jobs" does. `created` is false when `messageId` was queued before.
+   */
+  readonly askAgent: (id: SessionId, message: { readonly id: string; readonly text: string }) => Promise<boolean>;
   readonly reports: MigrationReportStore;
   readonly planner: SessionPlanner;
   readonly accounts: AccountInventoryPort;
@@ -5006,6 +5014,26 @@ async function decideRelaunchConversation(
  * attempted and not verified would not be.
  */
 function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigrateSubsystem {
+  /** The preflight's look at a session, shared by the move and by the ask that clears its way. */
+  const inspect = async (id: SessionId, { config, state, tmuxSession }: MigrateSubject) =>
+    await parts.preflight.inspect(
+      {
+        sessionId: id,
+        harness: config.harness,
+        tmuxSession,
+        status: state.status,
+        turn: state.turn,
+        // The state document's own record of the tool calls this session has open.
+        openTools: state.openTools ?? [],
+        ...(state.subprocessSince === undefined ? {} : { subprocessSince: state.subprocessSince }),
+      },
+      // The session's OWN transcript, resolved from the provenance its start recorded. A session
+      // with none reads as an empty tail, which classifies every open tool `unknown` and refuses
+      // the migration — the same fail-closed answer this call gave before, now reached only when
+      // the evidence is genuinely absent rather than always.
+      await parts.transcripts.tail({ sessionId: id, harness: config.harness === 'codex' ? 'codex' : 'claude' }),
+    );
+
   /** Both documents plus the tmux address, or a stated refusal. A session whose pair does not parse
    *  is one nothing may restamp: the write would merge new fields over a document already broken. */
   const subject = async (id: SessionId): Promise<MigrateSubject> => {
@@ -5182,23 +5210,7 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
           'Re-run with --allow-context-downgrade to accept that.',
         { downgrade: { model: plan.model, targetWindow: plan.contextWindow, currentWindow: window } },
       );
-    const report = await parts.preflight.inspect(
-      {
-        sessionId: id,
-        harness: config.harness,
-        tmuxSession,
-        status: state.status,
-        turn: state.turn,
-        // The state document's own record of the tool calls this session has open.
-        openTools: state.openTools ?? [],
-        ...(state.subprocessSince === undefined ? {} : { subprocessSince: state.subprocessSince }),
-      },
-      // The session's OWN transcript, resolved from the provenance its start recorded. A session
-      // with none reads as an empty tail, which classifies every open tool `unknown` and refuses
-      // the migration — the same fail-closed answer this call gave before, now reached only when
-      // the evidence is genuinely absent rather than always.
-      await parts.transcripts.tail({ sessionId: id, harness: config.harness === 'codex' ? 'codex' : 'claude' }),
-    );
+    const report = await inspect(id, { config, state, tmuxSession });
     const decision = parts.preflight.gate(report, { force: request.forceInflight });
     if (!decision.proceed)
       throw new SessionMigrateError('refused', `${decision.reason}\n${parts.preflight.summarize(report)}`, {
@@ -5429,7 +5441,26 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
     return id;
   };
 
+  /**
+   * LOOKS AGAIN rather than trusting the refusal the person saw: jobs finish, and the agent must be told
+   * about the ones running now. It asks about the agent's own blocking jobs only, and queues nothing at all
+   * when there are none — a message about work that already ended would only confuse the agent.
+   */
+  const askToStopJobs = async (id: SessionId): Promise<AskToStopJobsResult> => {
+    const report = await inspect(id, await subject(id));
+    const jobs = parts.preflight.agentJobs(report);
+    if (jobs.length === 0)
+      throw new SessionMigrateError(
+        'no_jobs',
+        'none of the agent’s own background jobs is in the way any more — run the safety check again',
+      );
+    const messageId = agentJobsMessageId(jobs);
+    const created = await parts.askAgent(id, { id: messageId, text: agentJobsMessage(jobs) });
+    return { messageId, jobs: [...jobs], alreadyAsked: !created };
+  };
+
   return {
+    askToStopJobs: async reference => await askToStopJobs(existing(reference)),
     conversionPreview: async (reference, request) => await conversionPreview(existing(reference), request),
     migrate: async (reference, request) => {
       const id = tryParseSessionId(reference);
@@ -9872,6 +9903,18 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sessions,
         resume,
         preflight,
+        // Sent as the person's (`human`), like the Instructions message, so it is typed into an interactive
+        // session too; WHO it is from is the `by` — Ferretry · Migrate — never text in it.
+        askAgent: async (id, message) => {
+          const { created } = await sessionQueue.enqueue(id, {
+            id: message.id,
+            sender: 'human',
+            by: { kind: 'ferretry', feature: 'Migrate' },
+            text: message.text,
+          });
+          void queueDeliverer.enqueued(id).catch(() => undefined);
+          return created;
+        },
         reports: new FileMigrationReportStore(id => createSessionPaths(paths, id).directory),
         planner,
         accounts,

@@ -98,6 +98,7 @@
         "harness/send-status-unknown-screenshot.tsx",
         "harness/context-outdated-screenshot.tsx",
         "harness/convert-sheet-screenshot.tsx",
+        "harness/migrate-ask-screenshot.tsx",
         "harness/approval-card-screenshot.tsx",
         "harness/question-form-screenshot.tsx",
         "harness/question-stepper-screenshot.tsx",

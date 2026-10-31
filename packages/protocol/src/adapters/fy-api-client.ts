@@ -72,6 +72,9 @@ import {
 import {
   type AnswerSessionRequest,
   AnswerSessionRequestSchema,
+  AskToStopJobsRequestSchema,
+  type AskToStopJobsResult,
+  AskToStopJobsResultSchema,
   type ComposerDraftRequest,
   ComposerDraftRequestSchema,
   type ComposerDraftResult,
@@ -990,6 +993,10 @@ export class FyApiClient implements IFyApiClient {
       { agent, ...(model === undefined ? {} : { model }) },
       ConversionPreviewSchema,
     );
+  }
+
+  askToStopJobs(id: string): Promise<AskToStopJobsResult> {
+    return this.#post(id, 'migrate/ask-to-stop-jobs', AskToStopJobsRequestSchema, {}, AskToStopJobsResultSchema);
   }
 
   /** Restarts the ferrets `request` names now, and queues the busy ones; at most once per request id. */

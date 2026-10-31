@@ -50,6 +50,11 @@ function isHarnessCli(values: readonly string[]): boolean {
   return HARNESS_NAME.test(stem(target)) || HARNESS_PATH.test(target);
 }
 
+/** Whether a command line runs a harness CLI (`claude`, `codex`, a wrapper named after one, or its script). */
+export function isHarnessCommand(argv: string): boolean {
+  return isHarnessCli(tokensOf(argv));
+}
+
 /** `fy mcp serve`, however the runtime was spelled: `fy`, `/nix/store/…/bin/fy`, `bun …/fy.ts`. */
 function isToolsServer(values: readonly string[], binaryName: string): boolean {
   const at = values.findIndex(value => stem(value) === binaryName);

@@ -59,16 +59,19 @@ export function descendantsOf(rootPid: number, rows: readonly ProcRow[]): readon
 
 /**
  * Maps observable process rows into migration inventory entries. A row {@link identifyKnownProcesses}
- * recognised as the agent's own is safe to stop: the restart relaunches it with the CLI.
+ * recognised as the agent's own is safe to stop: the restart relaunches it with the CLI. One
+ * `identifyAgentJobs` traced to the agent's tool shell carries that shell as `toolShell`.
  */
 export function inventoryProcesses(
   rows: readonly ProcRow[],
   cwdByPid: ReadonlyMap<number, string | undefined>,
   known: ReadonlyMap<number, KnownProcess> = new Map(),
   listening: ReadonlySet<number> = new Set(),
+  jobs: ReadonlyMap<number, number> = new Map(),
 ): readonly ProcessInfo[] {
   return rows.map(row => {
     const own = known.get(row.pid);
+    const toolShell = jobs.get(row.pid);
     return {
       pid: row.pid,
       argv: row.argv,
@@ -78,6 +81,7 @@ export function inventoryProcesses(
       ...(own === undefined ? {} : { known: own }),
       ppid: row.ppid,
       ...(listening.has(row.pid) ? { listening: true as const } : {}),
+      ...(own === undefined && toolShell !== undefined ? { toolShell } : {}),
     };
   });
 }

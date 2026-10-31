@@ -1,5 +1,6 @@
 import { readdir, readFile, readlink } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
+import { identifyAgentJobs } from '../../lib/migrate/agent-jobs.ts';
 import { type ConfiguredServersPort, configuredServersOf } from '../../lib/migrate/configured-servers.ts';
 import { identifyKnownProcesses } from '../../lib/migrate/harness-provenance.ts';
 import type { ProcessObservation } from '../../lib/migrate/inflight-report.ts';
@@ -266,7 +267,8 @@ export class PaneProcessInventory implements ProcessInventoryPort {
       // Only what provenance left unexplained: the harness and its own helpers are never servers to keep.
       const unexplained = rows.filter(row => !known.has(row.pid)).map(row => row.pid);
       const listening = (await this.probe.listening?.(unexplained).catch(() => undefined)) ?? new Set();
-      return { kind: 'observed', processes: inventoryProcesses(rows, cwdByPid, known, listening) };
+      const jobs = identifyAgentJobs(rows, panePid, known);
+      return { kind: 'observed', processes: inventoryProcesses(rows, cwdByPid, known, listening, jobs) };
     } catch (error) {
       return unobservable(`the pane could not be inspected: ${detail(error)}`);
     }

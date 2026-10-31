@@ -845,6 +845,7 @@ describe('the mounted daemon surface', () => {
       3 + // restarting the ferrets with out-of-date instructions: the restart, the status and clearing the queue (docs/launch-settings.md)
       1 + // a Restart's stale-settings read: would a relaunch change what this session runs on
       1 + // a cross-harness move's preview: what converting the conversation would carry (docs/migration-cross-harness.md)
+      1 + // a refused migration's remedy: ask the agent to stop its own background jobs (docs/ferret-messages.md)
       3 + // existing conversations kept as ferrets: the listing, one conversation's preview and the adoption
       3 + // the model catalogs: the list, a check for a newer published one, and a read of the models Ollama has installed (docs/model-catalog.md)
       9 + // lessons: the default's write, Apply's preview and write, the per-ferret switch and its list, and the scan's estimate, start, read and cancel (a ferret's own door is `none`)
@@ -1036,6 +1037,7 @@ describe('the mounted daemon surface', () => {
       'GET /v1/sessions/:sessionId/relaunch-settings',
       'POST /v1/sessions/:sessionId/conversion-preview',
       'POST /v1/sessions/:sessionId/migrate',
+      'POST /v1/sessions/:sessionId/migrate/ask-to-stop-jobs',
       'POST /v1/restarts',
       'GET /v1/restarts',
       'DELETE /v1/restarts',
