@@ -89,4 +89,14 @@ describe.each<Order>(['publisher first', 'installer first'])('both halves of fy 
     await program.parseAsync(['node', 'fy', 'catalog', 'ls', '--json']);
     should(() => JSON.parse(out.text)).not.throw();
   });
+
+  it('should hold one --json on the shared command and pass it to the installer verbs too', async () => {
+    const { program, installOut } = build(order);
+    const shared = program.commands.find(command => command.name() === 'catalog');
+    should(shared?.options.filter(option => option.long === '--json')).have.length(1);
+    await program.parseAsync(['node', 'fy', 'catalog', '--json', 'installs']);
+    should(() => JSON.parse(installOut.successes[0] ?? '')).not.throw();
+    await program.parseAsync(['node', 'fy', 'catalogs', 'installs', '--json']);
+    should(() => JSON.parse(installOut.successes[1] ?? '')).not.throw();
+  });
 });

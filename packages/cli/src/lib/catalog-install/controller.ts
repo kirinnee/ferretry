@@ -38,6 +38,12 @@ export interface CatalogInstallOptions {
   readonly unbound: readonly string[];
   readonly older?: boolean;
   readonly yes?: boolean;
+  readonly json?: boolean;
+}
+
+/** `--json`: stdout carries exactly one protocol payload; the preview, when there is one, goes to stderr. */
+export interface CatalogInstallJsonOption {
+  readonly json?: boolean;
 }
 
 /** A sentence for the person, thrown inside the controller and printed once at its edge. */
@@ -60,7 +66,8 @@ export class CatalogInstallController {
         target,
         ...(options.older === true ? { allowOlder: true as const } : {}),
       });
-      this.deps.out.report(renderPreview(preview));
+      if (options.json === true) this.deps.out.diagnostic(JSON.stringify({ phase: 'preview', preview }));
+      else this.deps.out.report(renderPreview(preview));
       const secretBindings = await this.#bindings(preview, bindFlags);
       if (
         !(await this.#confirm(
@@ -73,6 +80,10 @@ export class CatalogInstallController {
         previewId: preview.previewId,
         secretBindings,
       });
+      if (options.json === true) {
+        this.deps.out.success(JSON.stringify(installed, null, 2));
+        return;
+      }
       this.deps.out.success(
         `Installed ${installed.install.provenance.name} (${installed.install.installId}) in ${installed.install.destination}.`,
       );
@@ -80,13 +91,15 @@ export class CatalogInstallController {
     });
   }
 
-  async installs(): Promise<void> {
+  async installs(options: CatalogInstallJsonOption = {}): Promise<void> {
     await this.#guarded(async () => {
-      this.deps.out.report(renderInstalls((await this.deps.gateway.catalogInstalls()).installs));
+      const list = await this.deps.gateway.catalogInstalls();
+      if (options.json === true) this.deps.out.success(JSON.stringify(list, null, 2));
+      else this.deps.out.report(renderInstalls(list.installs));
     });
   }
 
-  async uninstall(installId: string, options: { readonly yes?: boolean }): Promise<void> {
+  async uninstall(installId: string, options: { readonly yes?: boolean } & CatalogInstallJsonOption): Promise<void> {
     await this.#guarded(async () => {
       const found = (await this.deps.gateway.catalogInstalls()).installs.find(
         install => install.installId === installId,
@@ -95,7 +108,11 @@ export class CatalogInstallController {
         throw new Stop(`No install ${installId}. List them with: ${this.deps.binaryName} catalog installs`);
       if (!(await this.#confirm(`Remove ${found.provenance.name} from ${found.destination}?`, options.yes))) return;
       const removed = await this.deps.gateway.removeCatalogInstall(found.target.scope, installId);
-      this.deps.out.success(`Removed ${removed.provenance.name} from ${removed.destination}.`);
+      this.deps.out.success(
+        options.json === true
+          ? JSON.stringify(removed, null, 2)
+          : `Removed ${removed.provenance.name} from ${removed.destination}.`,
+      );
     });
   }
 

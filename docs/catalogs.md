@@ -397,14 +397,18 @@ Installing is two steps and every route has exactly one capability. A project wr
 ```
 fy catalog install <file> [--item <name>]
     ( --project <root> --harness claude|codex | --runtime <r> --profile <p> )
-    [--bind PLACEHOLDER=MY_SECRET]... [--unbound PLACEHOLDER]... [--older] [--yes]
-fy catalog installs
-fy catalog uninstall <installId> [--yes]
+    [--bind PLACEHOLDER=MY_SECRET]... [--unbound PLACEHOLDER]... [--older] [--yes] [--json]
+fy catalog installs [--json]
+fy catalog uninstall <installId> [--yes] [--json]
 ```
 
 `install` checks the file's size before reading it, previews, prints the **whole** review (every file,
 command and warning), asks for each placeholder you did not name (or fails when it cannot ask), asks
 y/N unless `--yes`, then applies. When the daemon wants a passkey it says so and changes nothing.
+
+With `--json` (on the verb, or on `fy catalog` itself), stdout carries exactly one protocol payload: the
+applied install with its notes, the install list, or what was removed. The preview still goes out in full,
+as JSON on stderr, so a script never skips the review a person would have read.
 
 ## Declared gaps
 

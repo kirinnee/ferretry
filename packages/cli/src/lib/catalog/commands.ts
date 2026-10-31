@@ -34,8 +34,9 @@ export function registerCatalogCommands(program: Command, controller: CatalogCon
   const catalog = (program.commands.find(command => command.name() === 'catalog') ?? program.command('catalog'))
     .alias('catalogs')
     .description('publish skills and MCP setups as a catalog, and export it as a signed file')
-    .option('--json', JSON_HELP)
     .addHelpText('after', `\n${OVERVIEW}`);
+  // The install half may have made the shared command, `--json` included; never add a flag twice.
+  if (!catalog.options.some(option => option.long === '--json')) catalog.option('--json', JSON_HELP);
 
   const merged = <T extends CatalogCommandOptions>(command: Command): T => ({
     ...(catalog.opts() as T),
