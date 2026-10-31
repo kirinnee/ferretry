@@ -1051,8 +1051,8 @@ function SessionRoute({
   useRenderTiming(store.performance, 'session');
   // What the chat's Tasks tab needs to open a card over the chat, the same two the Board page is given.
   const boardTasks = useMemo(
-    () => ({ agenda: store.attention, ports: boardPorts(daemon => store.clients.client(daemon)) }),
-    [store.attention, store.clients],
+    () => ({ agenda: store.attention, ports: boardPorts(daemon => store.clients.client(daemon), daemonFetch) }),
+    [store.attention, store.clients, daemonFetch],
   );
   // Memoised on the router rather than rebuilt per render: the deck remounts when its dependencies
   // object changes identity, and a remount mid-session tears down a live shell. Every attach is a
@@ -2147,7 +2147,11 @@ function BoardRoute({ connection, taskId }: BoardPageProps) {
     (search: string) => navigate(`${window.location.pathname}${search === '' ? '' : `?${search}`}`, { replace: true }),
     [navigate],
   );
-  const ports = useMemo(() => boardPorts(daemon => store.clients.client(daemon)), [store.clients]);
+  const daemonFetch = useDaemonFetch();
+  const ports = useMemo(
+    () => boardPorts(daemon => store.clients.client(daemon), daemonFetch),
+    [store.clients, daemonFetch],
+  );
   return (
     <BoardPage
       agenda={store.attention}
