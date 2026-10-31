@@ -52,6 +52,7 @@ import { ProtocolResetInventory } from '../src/adapters/daemon/reset-inventory';
 import { FileResetTrees } from '../src/adapters/daemon/reset-trees';
 import { FileDaemonRestartMarker, restartMarkerPath } from '../src/adapters/daemon/restart-marker';
 import { FileRetiredArtifacts } from '../src/adapters/daemon/retired-artifacts';
+import { privateRuntimeDirectory } from '../src/adapters/daemon/runtime-directory';
 import { FileServiceStore } from '../src/adapters/daemon/service-files';
 import { TmuxSessionTerminalServer } from '../src/adapters/daemon/session-terminals';
 import { bunTracerHost, PlatformSyscallTracer } from '../src/adapters/daemon/syscall-tracer';
@@ -591,13 +592,15 @@ function daemonBinaryVersion(path: string): string | undefined {
  */
 function resolveWorldDaemonLayout(world: CliWorld): DaemonLayout {
   const environment = world.environment;
+  const userId = typeof process.getuid === 'function' ? process.getuid() : 0;
   return resolveDaemonLayout({
     platform: process.platform,
     homeDirectory: resolveUserHome(environment),
     stateHome: environment.FY_HOME,
     configHome: environment.XDG_CONFIG_HOME,
     stateDirectory: environment.XDG_STATE_HOME,
-    userId: typeof process.getuid === 'function' ? process.getuid() : 0,
+    runtimeDirectory: privateRuntimeDirectory(environment.XDG_RUNTIME_DIR, userId),
+    userId,
     daemonName: DAEMON_NAME,
     product: PRODUCT_NAME,
     searchPath: environment.PATH ?? '',

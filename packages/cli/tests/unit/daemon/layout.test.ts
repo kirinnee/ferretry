@@ -205,6 +205,66 @@ describe('daemon layout', () => {
       },
     );
 
+    it.each([
+      {
+        name: 'systemd',
+        platform: 'linux',
+        expected: '/run/user/1000/.1000.systemd.fyd.service.target.lifecycle.lock',
+      },
+      {
+        name: 'launchd',
+        platform: 'darwin',
+        expected: '/run/user/1000/.1000.launchd.com.ferretry.fyd.target.lifecycle.lock',
+      },
+    ])(
+      'should keep the $name manager-target claim in the private runtime directory, never in shared /tmp',
+      ({ platform, expected }) => {
+        // Act
+        const actual = layout({ platform, runtimeDirectory: '/run/user/1000' });
+
+        // Assert — a name in the shared sticky /tmp can be pre-created by another user to block every
+        // lifecycle command; the per-user 0700 directory cannot. Only the target claim moves: the rest
+        // sit beside the artifacts they protect, in the user's own home.
+        should(actual.lifecycleLocks[0]).equal(expected);
+        should(actual.lifecycleLocks.filter(lock => lock.startsWith('/tmp/'))).deepEqual([]);
+        should(actual.lifecycleLocks.slice(1)).deepEqual(layout({ platform }).lifecycleLocks.slice(1));
+      },
+    );
+
+    it.each([
+      { name: 'unset', runtimeDirectory: undefined },
+      { name: 'blank', runtimeDirectory: '   ' },
+    ])('should fall back to the shared /tmp name when the runtime directory is $name', ({ runtimeDirectory }) => {
+      // Act
+      const actual = layout({ platform: 'linux', runtimeDirectory });
+
+      // Assert — the pre-existing name, which an older fy still takes during an upgrade.
+      should(actual.lifecycleLocks[0]).equal('/tmp/.1000.systemd.fyd.service.target.lifecycle.lock');
+    });
+
+    it('should refuse a runtime directory that is not an absolute path, as it would any other directory', () => {
+      // Act
+      let caught: unknown;
+      try {
+        layout({ runtimeDirectory: 'run/user/1000' });
+      } catch (error) {
+        caught = error;
+      }
+
+      // Assert
+      should(caught).be.instanceof(InvalidDaemonEnvironmentError);
+      should((caught as InvalidDaemonEnvironmentError).field).equal('XDG_RUNTIME_DIR');
+    });
+
+    it('should give two environments of one user one target claim when they share a runtime directory', () => {
+      // Arrange — different config homes mean different unit paths, but one user manager and one unit.
+      const first = layout({ platform: 'linux', configHome: '/tmp/config-one', runtimeDirectory: '/run/user/1000' });
+      const second = layout({ platform: 'linux', configHome: '/tmp/config-two', runtimeDirectory: '/run/user/1000' });
+
+      // Assert
+      should(first.lifecycleLocks[0]).equal(second.lifecycleLocks[0]);
+    });
+
     it('should keep the direct claim across different XDG_STATE_HOME values on a host with no manager', () => {
       // Arrange — snapshot/root ownership changes, but the daemon these verbs launch and stop serves
       // the same state home.

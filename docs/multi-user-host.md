@@ -172,8 +172,6 @@ link instead`). Then only one person on the box can be mid-sign-in at a time, an
   account labels.
 - **Loopback callers are not rate-limited**, so another user can slow a daemon down. They still can't
   authenticate.
-- **`fy daemon` lifecycle commands use a lock at a fixed name in `/tmp`.** Another user can make those
-  commands wait about two minutes and then refuse (a nuisance, not a takeover).
 - **Downloads and screenshots** are written with the user's umask into the working tree. Keep work
   under the user's `0700` home.
 - **Chrome runs with `--no-sandbox` on Linux.** It is not a cross-user hole by itself, but a renderer
