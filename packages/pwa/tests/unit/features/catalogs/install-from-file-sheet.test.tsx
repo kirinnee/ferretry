@@ -10,6 +10,8 @@ import { crypto, mcpItem, newIdentity, signedFile, skillItem } from '../../../su
 import { INSTALL_ID, installPreview, installRecord } from '../../../support/catalog-views.ts';
 import { click, settle } from '../../../support/dom-form.ts';
 import { interact, mount } from '../../../support/dom.ts';
+import { runAsync } from '../../../support/react.ts';
+import { settleUntil } from '../../../support/settle.ts';
 
 const connection = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.example.test', deviceId: 'token-a' });
 const q = (selector: string): HTMLElement | null => document.querySelector<HTMLElement>(selector);
@@ -104,6 +106,15 @@ const choose = async (selector: string, value: string): Promise<void> => {
 const tap = async (selector: string) => {
   await click(q(selector));
   await settle();
+};
+/** The sheet's own busy labels: while one shows, the daemon's answer has not landed yet. */
+const BUSY = new Set(['Reading…', 'Installing…']);
+const idle = (): boolean =>
+  ![...document.querySelectorAll('button')].some(button => BUSY.has(button.textContent ?? ''));
+/** Taps a button that asks the daemon, then waits for the answer itself: one tick is not enough on a loaded runner. */
+const answer = async (selector: string) => {
+  await tap(selector);
+  await settleUntil(idle, `the answer after tapping ${selector}`, runAsync);
 };
 const pickItem = async (itemId: string) => await tap(`[data-catalog-file-item="${itemId}"] input`);
 const pickRuntime = async () => {
@@ -227,7 +238,7 @@ describe('the review and the install', () => {
     await giveText(fileText);
     await pickItem(MCP_ID);
     await pickRuntime();
-    await tap('[data-catalog-preview]');
+    await answer('[data-catalog-preview]');
     const confirm = q('[data-catalog-confirm]')?.textContent ?? '';
     expect(confirm).toContain("Kirin's catalog · kirin-box");
     expect(confirm).toContain('Into');
@@ -252,7 +263,7 @@ describe('the review and the install', () => {
     await choose('[data-catalog-secret="ACME_REGION"] select', '\u0000unbound');
     expect(q('[data-catalog-install]')?.hasAttribute('disabled')).toBe(false);
 
-    await tap('[data-catalog-install]');
+    await answer('[data-catalog-install]');
     expect(fake.calls.at(-1)).toMatchObject({
       path: '/v1/catalog-installs/runtime',
       body: { secretBindings: { ACME_TOKEN: 'ACME_TOKEN', ACME_REGION: null } },
@@ -270,7 +281,7 @@ describe('the review and the install', () => {
     await giveText(fileText);
     await pickItem(MCP_ID);
     await pickRuntime();
-    await tap('[data-catalog-preview]');
+    await answer('[data-catalog-preview]');
     const buttons = [...document.querySelectorAll<HTMLElement>('[data-catalog-confirm] button[aria-expanded]')];
     expect(buttons.length).toBe(2);
     for (const button of buttons) {
@@ -301,11 +312,11 @@ describe('the review and the install', () => {
     await giveText(fileText);
     await pickItem(MCP_ID);
     await pickRuntime();
-    await tap('[data-catalog-preview]');
+    await answer('[data-catalog-preview]');
     expect(q('[data-catalog-secrets]')).toBeNull();
     expect(q('[data-catalog-first-seen]')).toBeNull();
     expect(q('[data-catalog-install]')?.hasAttribute('disabled')).toBe(false);
-    await tap('[data-catalog-install]');
+    await answer('[data-catalog-install]');
     expect(q('[data-catalog-installed]')).not.toBeNull();
     expect(q('[data-catalog-note]')).toBeNull();
     await view.unmount();
@@ -321,7 +332,7 @@ describe('the review and the install', () => {
     await giveText(fileText);
     await pickItem(MCP_ID);
     await pickRuntime();
-    await tap('[data-catalog-preview]');
+    await answer('[data-catalog-preview]');
     expect(q('[data-catalog-secrets]')?.textContent).toContain('could not be read');
     expect(q('[data-catalog-secret="ACME_TOKEN"] select')?.querySelectorAll('option').length).toBe(2);
     await view.unmount();
@@ -342,7 +353,7 @@ describe('the review and the install', () => {
     await choose('[data-catalog-scope]', 'project');
     await choose('[data-catalog-project]', '/work/proj');
     await choose('[data-catalog-harness]', 'claude');
-    await tap('[data-catalog-preview]');
+    await answer('[data-catalog-preview]');
     expect(fake.calls.at(-1)?.path).toBe('/v1/catalog-installs/project/preview');
     expect(q('[data-catalog-confirm]')?.textContent).toContain('project proj, Claude');
     expect(q('[data-catalog-allow-older]')).toBeNull();
@@ -361,7 +372,7 @@ describe('refusals', () => {
 
   it('refuses a review that names another publisher than the verified file, and shows no review', async () => {
     const { view } = await ready({ [RUNTIME_PREVIEW]: () => installPreview() });
-    await tap('[data-catalog-preview]');
+    await answer('[data-catalog-preview]');
     expect(q('[data-catalog-failure]')?.textContent).toContain('somewhere other than the file says');
     expect(q('[data-catalog-confirm]')).toBeNull();
     expect(q('[data-catalog-install]')).toBeNull();
@@ -373,7 +384,7 @@ describe('refusals', () => {
       [RUNTIME_PREVIEW]: () =>
         agreeingPreview({ warnings: [{ code: 'first-publisher', text: 'A grey box that says it again.' }] }),
     });
-    await tap('[data-catalog-preview]');
+    await answer('[data-catalog-preview]');
     const confirm = q('[data-catalog-confirm]')?.textContent ?? '';
     expect(confirm).not.toContain('A grey box that says it again.');
     expect(confirm).toContain('First install from this publisher');
@@ -390,7 +401,7 @@ describe('refusals', () => {
         return agreeingPreview();
       },
     });
-    await tap('[data-catalog-preview]');
+    await answer('[data-catalog-preview]');
     expect(text()).toContain('older version than the one you have');
     await tap('[data-catalog-allow-older]');
     expect(fake.calls.filter(call => call.path.endsWith('/preview')).at(-1)?.body).toMatchObject({ allowOlder: true });
@@ -407,8 +418,8 @@ describe('refusals', () => {
         return agreeingPreview();
       },
     });
-    await tap('[data-catalog-preview]');
-    await tap('[data-catalog-preview-again]');
+    await answer('[data-catalog-preview]');
+    await answer('[data-catalog-preview-again]');
     expect(calls).toBe(2);
     expect(q('[data-catalog-confirm]')).not.toBeNull();
     expect(q('[data-catalog-failure]')).toBeNull();
@@ -422,8 +433,8 @@ describe('refusals', () => {
         throw new FyHttpError('step up', 403, 'grant_step_up_required');
       },
     });
-    await tap('[data-catalog-preview]');
-    await tap('[data-catalog-install]');
+    await answer('[data-catalog-preview]');
+    await answer('[data-catalog-install]');
     expect(text()).toContain('passkey wasn’t confirmed');
     expect(q('[data-catalog-installed]')).toBeNull();
     expect(q('[data-catalog-confirm]')).not.toBeNull();
@@ -432,11 +443,11 @@ describe('refusals', () => {
 
   it('forgets the review when the item or place changes', async () => {
     const { view } = await ready({ [RUNTIME_PREVIEW]: () => agreeingPreview() });
-    await tap('[data-catalog-preview]');
+    await answer('[data-catalog-preview]');
     expect(q('[data-catalog-confirm]')).not.toBeNull();
     await pickItem(SKILL_ID);
     expect(q('[data-catalog-confirm]')).toBeNull();
-    await tap('[data-catalog-preview]');
+    await answer('[data-catalog-preview]');
     await choose('[data-catalog-scope]', 'runtime');
     expect(q('[data-catalog-confirm]')).toBeNull();
     await view.unmount();
@@ -585,8 +596,8 @@ describe('what the file supplies', () => {
     await giveText(fileText);
     await pickItem(MCP_ID);
     await pickRuntime();
-    await tap('[data-catalog-preview]');
-    await tap('[data-catalog-install]');
+    await answer('[data-catalog-preview]');
+    await answer('[data-catalog-install]');
     expect(q('[data-catalog-note]')?.textContent).not.toContain(raw);
     expect(q('[data-catalog-note] mark')).not.toBeNull();
     await view.unmount();
@@ -597,7 +608,7 @@ describe('what the file supplies', () => {
     await giveText(fileText);
     await pickItem(MCP_ID);
     await pickRuntime();
-    await tap('[data-catalog-preview]');
+    await answer('[data-catalog-preview]');
     expect(q('[data-catalog-failure]')?.textContent).toContain('somewhere other than the file says');
     expect(q('[data-catalog-confirm]')).toBeNull();
     await view.unmount();
@@ -639,10 +650,10 @@ describe('an item a member already opened', () => {
       [RUNTIME_APPLY]: () => ({ install: installRecord('mcp', 'acme-mcp'), notes: [] }),
     });
     await pickRuntime();
-    await tap('[data-catalog-preview]');
+    await answer('[data-catalog-preview]');
     expect(q('[data-catalog-confirm]')).not.toBeNull();
     expect(fake.calls.some(call => `${call.method} ${call.path}` === RUNTIME_APPLY)).toBe(false);
-    await tap('[data-catalog-install]');
+    await answer('[data-catalog-install]');
     expect(fake.calls.some(call => `${call.method} ${call.path}` === RUNTIME_APPLY)).toBe(true);
     await view.unmount();
   });
