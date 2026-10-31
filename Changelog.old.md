@@ -1,3 +1,9 @@
+## [4.177.0](https://github.com/kirinnee/ferretry/compare/v4.176.0...v4.177.0) (2026-10-31)
+
+### Features
+
+* **catalogs:** publish catalogs and export a signed file (phase 1a) ([#1171](https://github.com/kirinnee/ferretry/issues/1171)) ([0ef68cb](https://github.com/kirinnee/ferretry/commit/0ef68cb026b0aa2cd6d7ea8289dd6c8abc545b25))
+
 ## [4.176.0](https://github.com/kirinnee/ferretry/compare/v4.175.0...v4.176.0) (2026-10-31)
 
 ### Features
