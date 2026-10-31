@@ -394,7 +394,7 @@ describe('HarnessProcessProvenance', () => {
           return [];
         },
       },
-      undefined,
+      null,
     );
 
     // Act
