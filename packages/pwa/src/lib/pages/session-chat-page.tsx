@@ -748,7 +748,9 @@ export function SessionChatPage({
   // navigation that carries a target, the reset runs first and the new target wins.
   // biome-ignore lint/correctness/useExhaustiveDependencies: the pairing, the session id and the navigation re-arm the same target
   useEffect(() => {
-    if (agendaTarget !== null) showAgenda(agendaTarget, true);
+    // Expanding the board pushes a history entry, so the same `?attention=` arrives under a new key: that is the
+    // board's own navigation, not a request for the item, and answering it would collapse the board it just opened.
+    if (agendaTarget !== null && !boardFullRef.current) showAgenda(agendaTarget, true);
   }, [agendaTarget, agendaTargetKey, showAgenda, connection, session.config.id]);
 
   const publish = useCallback(

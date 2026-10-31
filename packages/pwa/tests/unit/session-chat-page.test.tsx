@@ -3021,13 +3021,34 @@ describe('SessionChatPage', () => {
       test('showing an item while the board is expanded collapses the board, so the item is not hidden behind it', async () => {
         const expansions: boolean[] = [];
         const setExpanded = (next: boolean) => void expansions.push(next);
-        const { page, rerender } = mount(boardAndAgenda(true, setExpanded));
+        const { page } = mount(boardAndAgenda(true, setExpanded));
         try {
           await flush();
           expect(boardFull(page.root)).toHaveLength(1);
-          rerender(boardAndAgenda(true, setExpanded, { agendaTarget: 'A3', agendaTargetKey: 'entry-1' }));
+          run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onAgendaOpen('A3', null));
           await flush();
           expect(expansions).toEqual([false]);
+        } finally {
+          run(() => page.unmount());
+        }
+      });
+
+      test('expanding the board stays expanded when the address still names the item (#B86 flicker)', async () => {
+        // Expanding PUSHES a history entry, so the router hands the page a new entry key with the same `?attention=`.
+        // That is the board's own navigation, not a request to show the item: it must not collapse the board again.
+        const expansions: boolean[] = [];
+        const setExpanded = (next: boolean) => void expansions.push(next);
+        const { page, rerender } = mount(
+          boardAndAgenda(false, setExpanded, { agendaTarget: 'A3', agendaTargetKey: 'entry-1' }),
+        );
+        try {
+          await flush();
+          expect(page.root.findAllByType(AgendaItemView)).toHaveLength(1);
+          rerender(boardAndAgenda(true, setExpanded, { agendaTarget: 'A3', agendaTargetKey: 'entry-2' }));
+          await flush();
+          expect(expansions).toEqual([]);
+          expect(boardFull(page.root)).toHaveLength(1);
+          expect(page.root.findAllByType(AgendaItemView)).toHaveLength(0);
         } finally {
           run(() => page.unmount());
         }
@@ -3037,9 +3058,9 @@ describe('SessionChatPage', () => {
         const { page, rerender } = mount(boardAndAgenda(true, () => undefined));
         try {
           await flush();
-          rerender(boardAndAgenda(true, () => undefined, { agendaTarget: 'A3', agendaTargetKey: 'entry-1' }));
+          run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onAgendaOpen('A3', null));
           await flush();
-          rerender(boardAndAgenda(false, () => undefined, { agendaTarget: 'A3', agendaTargetKey: 'entry-1' }));
+          rerender(boardAndAgenda(false, () => undefined));
           await flush();
           expect(boardFull(page.root)).toHaveLength(0);
           expect(page.root.findAllByType(AgendaItemView)).toHaveLength(1);
