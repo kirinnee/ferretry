@@ -76,7 +76,7 @@ createRoot(root).render(
         <DaemonSettingsFrame
           connection={connection}
           name="studio"
-          panel={view}
+          {...(view === 'tabs' ? {} : { panel: view })}
           onOpenPanel={() => undefined}
           readWardenStatus={nothing as never}
           createWardenClient={nothing as never}
@@ -112,7 +112,7 @@ run('./node_modules/.bin/tailwindcss', [
 ]);
 
 const wanted = process.argv[3]?.split(',');
-const STATES = (['secrets', 'accounts', 'secure-copy', 'ai-logins'] as const).filter(
+const STATES = (['secrets', 'accounts', 'secure-copy', 'ai-logins', 'tabs'] as const).filter(
   state => wanted === undefined || wanted.includes(state),
 );
 
@@ -161,7 +161,11 @@ try {
         for (const state of STATES) {
           await page.goto(`${server.url}?theme=studio-${scheme}&view=${state}`);
           const surface =
-            state === 'ai-logins' ? page.locator('[data-ai-logins]') : page.locator('[data-daemon-settings-frame]');
+            state === 'ai-logins'
+              ? page.locator('[data-ai-logins]')
+              : state === 'tabs'
+                ? page.locator('[data-daemon-panel="secrets"]')
+                : page.locator('[data-daemon-settings-frame]');
           await surface.waitFor({ state: 'visible' });
           const where = `${state} at ${viewport.name}/${scheme}`;
           const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
