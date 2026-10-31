@@ -177,6 +177,34 @@ const actionsStatus = (): WardenStatusView =>
   });
 
 describe('WardenOverview', () => {
+  it('should name the daemon it reads in its heading, and leave the heading bare without one', async () => {
+    // Arrange
+    const named = await render({ machineName: 'Liftoff EC2' });
+    const bare = await render();
+    try {
+      // Assert
+      expect(named.container.querySelector('h2')?.textContent).toBe('Warden · Liftoff EC2');
+      expect(named.container.querySelector('[data-warden-machine]')?.textContent).toBe('Liftoff EC2');
+      expect(named.container.querySelector('[aria-label="Warden on Liftoff EC2"]')).not.toBeNull();
+      expect(bare.container.querySelector('h2')?.textContent).toBe('Warden');
+      expect(bare.container.querySelector('[data-warden-machine]')).toBeNull();
+    } finally {
+      await named.unmount();
+      await bare.unmount();
+    }
+  });
+
+  it('should say which daemon a failed status is about', async () => {
+    // Arrange
+    const view = await render({ machineName: 'Liftoff MBP', status: { status: 'error', reason: 'offline' } });
+    try {
+      // Assert
+      expect(view.container.querySelector('[role="alert"]')?.textContent).toContain('Liftoff MBP');
+    } finally {
+      await view.unmount();
+    }
+  });
+
   it('should say it is reading while the status is loading, and count nothing while the feed loads', async () => {
     // Arrange
     const view = await render({ status: { status: 'loading' }, attention: { status: 'loading' } });

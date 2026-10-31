@@ -43,6 +43,7 @@ export type WardenOverviewClientFactory = (connection: DaemonConnection) => Prom
 
 export interface WardenOverviewSurfaceProps {
   readonly connection: DaemonConnection;
+  readonly machineName?: string;
   readonly sessions?: readonly SessionView[] | null;
   readonly onNavigate?: (to: string) => void;
   /** Test and harness seam; production uses the carrier-routed client. */
@@ -63,6 +64,7 @@ export function WardenOverviewSurface(props: WardenOverviewSurfaceProps) {
 
 function WardenOverviewBody({
   connection,
+  machineName,
   sessions = null,
   onNavigate,
   createClient: injected,
@@ -142,6 +144,7 @@ function WardenOverviewBody({
     <>
       <WardenOverview
         connection={connection}
+        {...(machineName === undefined ? {} : { machineName })}
         status={status}
         attention={agenda}
         sessions={sessions}

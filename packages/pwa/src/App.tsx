@@ -145,6 +145,7 @@ import { useLayoutMode } from './hooks/use-layout-mode.ts';
 import { useLiveClock } from './hooks/use-live-clock.ts';
 import { useMachineNotifications } from './hooks/use-machine-notifications.ts';
 import { useMachineOrder } from './hooks/use-machine-order.ts';
+import { useWardenDaemonScope } from './hooks/use-warden-daemon-scope.ts';
 import { type ListedMachine, useMachineSources } from './hooks/use-machine-sources.ts';
 import {
   browserFleetPollEnvironment,
@@ -221,7 +222,7 @@ import {
   setupPath,
 } from './lib/pages/routes.ts';
 import { SessionChatPage } from './lib/pages/session-chat-page.tsx';
-import { WardenPage } from './lib/pages/warden-page.tsx';
+import { WardenPage, type WardenSurfaceProps } from './lib/pages/warden-page.tsx';
 import { QueuePage } from './components/queue-page.tsx';
 import { queueContribution } from './features/queue-view/queue-action.ts';
 import { browserQrScanHost, type QrDetectorLike, type QrScanHost } from './lib/pair-scan.ts';
@@ -1934,7 +1935,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
   );
 }
 
-function WardenOverviewRoute({ connection }: DaemonPageProps) {
+function WardenOverviewRoute({ connection, machineName }: WardenSurfaceProps) {
   const store = useAppStore();
   const { navigate } = useRouter();
   const fleet = useSyncExternalStore(
@@ -1944,6 +1945,7 @@ function WardenOverviewRoute({ connection }: DaemonPageProps) {
   return (
     <WardenOverviewSurface
       connection={connection}
+      {...(machineName === undefined ? {} : { machineName })}
       sessions={fleet.daemons.get(connection.daemonId)?.sessions ?? null}
       onNavigate={navigate}
     />
@@ -1952,11 +1954,30 @@ function WardenOverviewRoute({ connection }: DaemonPageProps) {
 
 const WARDEN_SLOTS = { Overview: WardenOverviewRoute } as const;
 
+/** The Warden reads every paired machine, in the order and by the names the sessions bar shows them. */
 function WardenRoute({ connection }: DaemonPageProps) {
   const { navigate } = useRouter();
+  const store = useAppStore();
+  const { connections } = useConnectionSnapshot();
+  const savedOrder = useMachineOrder(store.controls).saved;
+  const { remembered, remember } = useWardenDaemonScope(store.controls);
+  const machines = useMemo(
+    () =>
+      machineDisplayOrder(connections, savedOrder).map(record => ({
+        connection: record,
+        name: distinctDaemonName(record, connections),
+      })),
+    [connections, savedOrder],
+  );
   return (
     <InsightsFrame current="warden" daemonId={connection.daemonId} onNavigate={navigate}>
-      <WardenPage connection={connection} slots={WARDEN_SLOTS} />
+      <WardenPage
+        connection={connection}
+        slots={WARDEN_SLOTS}
+        machines={machines}
+        remembered={remembered}
+        onRemember={remember}
+      />
     </InsightsFrame>
   );
 }

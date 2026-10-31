@@ -74,6 +74,7 @@ const ALTERED_DEVICE_CONTROLS: DeviceControls = {
   sessionsList: 'current',
   sessionsMode: 'auto',
   machineOrder: ['b', 'a'],
+  wardenDaemon: 'daemon-b',
   suggestionKeys: 'both',
   skillSuggestions: false,
   composerVimMode: true,
@@ -133,6 +134,7 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
       suggestionKeys: 'ladder',
       skillSuggestions: true,
       machineOrder: [],
+      wardenDaemon: null,
       composerVimMode: false,
       // A payload written before links had a home opens them in the reader's browser.
       openLinksIn: 'browser',
@@ -772,5 +774,17 @@ describe('the Sessions bar kind filter', () => {
     should(read(undefined)).be.null();
     for (const kind of ['all', 'auto', 'interactive'] as const) should(read(kind)).equal(kind);
     should(read('headless')).be.null();
+  });
+});
+
+describe('the Warden page daemon filter', () => {
+  it('is All (null) by default, keeps a named daemon, and refuses anything else', () => {
+    const read = (wardenDaemon: unknown) =>
+      parseControlsRecord(stored({ v: CONTROLS_VERSION, device: { wardenDaemon } })).device.wardenDaemon;
+    should(read(undefined)).be.null();
+    should(read('daemon-b')).equal('daemon-b');
+    should(read('')).be.null();
+    should(read('   ')).be.null();
+    should(read(7)).be.null();
   });
 });
