@@ -1,3 +1,9 @@
+## [4.177.2](https://github.com/kirinnee/ferretry/compare/v4.177.1...v4.177.2) (2026-10-31)
+
+### Fixes
+
+* **pwa:** stop the jump-to-latest flicker at the bottom of a chat ([#1180](https://github.com/kirinnee/ferretry/issues/1180)) ([8418b45](https://github.com/kirinnee/ferretry/commit/8418b454a4d64b37f574ad9171429b863fca850e))
+
 ## [4.177.1](https://github.com/kirinnee/ferretry/compare/v4.177.0...v4.177.1) (2026-10-31)
 
 ### Fixes

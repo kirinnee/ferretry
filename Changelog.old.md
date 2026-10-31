@@ -1,3 +1,11 @@
+## [4.177.1](https://github.com/kirinnee/ferretry/compare/v4.177.0...v4.177.1) (2026-10-31)
+
+### Fixes
+
+* **agenda:** a bare Got it on an info item no longer wakes the ferret ([#1178](https://github.com/kirinnee/ferretry/issues/1178)) ([ae589bd](https://github.com/kirinnee/ferretry/commit/ae589bd4ae4dc9892990141a9b0157a8fa2b0016))
+* **cli:** give fy catalog install, installs and uninstall real --json output ([#1177](https://github.com/kirinnee/ferretry/issues/1177)) ([ce29952](https://github.com/kirinnee/ferretry/commit/ce2995275d2112da31e132fd248dd451ec501bb9))
+* **test:** wait for a daemon's tmux client to leave before kill-server ([#1179](https://github.com/kirinnee/ferretry/issues/1179)) ([82f7d85](https://github.com/kirinnee/ferretry/commit/82f7d85b936a94177bc73c2e772ce5726d0c2c76))
+
 ## [4.177.0](https://github.com/kirinnee/ferretry/compare/v4.176.0...v4.177.0) (2026-10-31)
 
 ### Features
