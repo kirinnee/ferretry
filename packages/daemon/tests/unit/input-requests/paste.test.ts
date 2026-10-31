@@ -452,3 +452,50 @@ describe('a paste raised with named fields', () => {
     should((await w.pending())?.fields.map(field => field.sensitivity)).eql(['secret']);
   });
 });
+
+describe('a pre-approved paste into a page', () => {
+  const page = (type: string): InputTargetFacts => ({
+    kind: 'browser',
+    pageId: 'page-1',
+    origin: 'https://vercel.com',
+    secure: true,
+    navigationId: 'nav-1',
+    fields: [
+      {
+        fieldId: 'token',
+        frameOrigin: 'https://vercel.com',
+        frameId: 'frame-1',
+        backendNodeId: 7,
+        field: { tag: 'input', type },
+        box: { x: 0, y: 0, w: 200, h: 32 },
+        visible: true,
+      },
+    ],
+  });
+  const INTO_PAGE: InputRaise = {
+    target: { kind: 'browser', key: 'app' },
+    prompt: 'the Vercel token for the env page',
+    fields: [{ id: 'token', sensitivity: 'secret', element: { kind: 'ref', ref: 'e3' } }],
+    submit: 'offer-owner',
+    source: { kind: 'sealed', name: 'vercel' },
+  };
+  const RULE = {
+    from: { kind: 'command', program: 'vercel' },
+    to: { kind: 'browser', origin: 'https://vercel.com' },
+  } as const;
+
+  it('should paste at once into a password field the rule names, and wait for the owner on a text field', async () => {
+    const hidden = await world({ facts: page('password') });
+    await hidden.rules.create({ kind: 'owner', actor: { kind: 'host' } }, RULE);
+    await hidden.capture();
+    const shown = await world({ facts: page('text') });
+    await shown.rules.create({ kind: 'owner', actor: { kind: 'host' } }, RULE);
+    await shown.capture();
+
+    const pasted = await hidden.service.raise(SESSION, INTO_PAGE);
+    const waiting = await shown.service.raise(SESSION, INTO_PAGE);
+
+    should([pasted.state, waiting.state]).eql(['delivered', 'pending']);
+    should([hidden.writes, shown.writes]).eql([[TOKEN], []]);
+  });
+});
