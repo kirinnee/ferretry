@@ -31,7 +31,7 @@ describe('disablePasskeys', () => {
             protocol: 'ctap2',
             transport: 'usb',
             hasResidentKey: false,
-            hasUserVerification: false,
+            hasUserVerification: true,
             isUserVerified: false,
             automaticPresenceSimulation: true,
           },

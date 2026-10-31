@@ -5,11 +5,15 @@ import type { InputCdpSession } from './input-fields.ts';
  * browser dialog nobody is there to answer or waits on one; the agent browser signs in with a password the
  * owner types into a card, so a page must find no passkey and fall back to that.
  *
- * It adds a virtual authenticator that can neither remember a credential nor verify a user, and whose
- * every touch is a bad one. Then `PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()` is
- * false, so a site does not offer a passkey, and `navigator.credentials.get` and `create` with a
- * `publicKey` fail at once with a `NotAllowedError` instead of waiting. Nothing about the browser's
- * identity changes: no user agent, no fingerprint.
+ * It adds a virtual authenticator that cannot keep a credential, that says it can verify a user but never
+ * has, and whose every touch is a bad one. Then `PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()`
+ * is false, so a site does not offer a passkey, and `navigator.credentials.get` and `create` with a
+ * `publicKey` fail at once with a `NotAllowedError` instead of waiting, whatever the site asks for. The
+ * claim to verify matters: an authenticator that cannot verify still registers a key when the site only
+ * prefers or discourages verification, which would leave a site holding a key nobody has. The one request
+ * left waiting is `authenticatorAttachment: 'platform'`, which registers nothing and which a site only
+ * makes after the check above said no. Nothing about the browser's identity changes: no user agent, no
+ * fingerprint.
  *
  * NEVER BREAKS A PAGE. Any step that fails is dropped and the page goes on as it was.
  */
@@ -21,7 +25,7 @@ export async function disablePasskeys(session: InputCdpSession): Promise<void> {
         protocol: 'ctap2',
         transport: 'usb',
         hasResidentKey: false,
-        hasUserVerification: false,
+        hasUserVerification: true,
         isUserVerified: false,
         automaticPresenceSimulation: true,
       },
