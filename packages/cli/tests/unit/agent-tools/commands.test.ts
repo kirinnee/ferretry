@@ -212,6 +212,70 @@ describe('fy browser page', () => {
     ]);
   });
 
+  it('should turn every pointer and keys verb into its tool call', async () => {
+    // Arrange
+    const { calls, run } = harness();
+
+    // Act
+    await run('browser', 'page', 'hover', 'app', 'e3');
+    await run('browser', 'page', 'hover', 'app', '10,20');
+    await run('browser', 'page', 'drag', 'app', 'e1', '#bin');
+    await run('browser', 'page', 'drag', 'app', '1,2', '300,2', '--steps', '25');
+    await run('browser', 'page', 'press', 'app', 'Control+a', 'Delete', '--on', 'e4');
+    await run('browser', 'page', 'scroll', 'app', '--to', 'e9');
+    await run('browser', 'page', 'scroll', 'app', '--text', 'Terms');
+    await run('browser', 'page', 'scroll', 'app', '--by', '0,-600');
+    await run('browser', 'page', 'scroll', 'app', '--pages', '1.5');
+    await run('browser', 'page', 'select', 'app', 'e5', 'uk', 'United States');
+    await run('browser', 'page', 'check', 'app', 'e6');
+    await run('browser', 'page', 'check', 'app', '#tos', '--off');
+    await run('browser', 'page', 'highlight', 'app', 'e2');
+    await run('browser', 'page', 'highlight', 'app', '--clear');
+
+    // Assert
+    should(calls).deepEqual(
+      [
+        { tool: 'browser.hover', name: 'app', ref: 'e3' },
+        { tool: 'browser.hover', name: 'app', x: 10, y: 20 },
+        { tool: 'browser.drag', name: 'app', fromRef: 'e1', toSelector: '#bin' },
+        { tool: 'browser.drag', name: 'app', fromX: 1, fromY: 2, toX: 300, toY: 2, steps: 25 },
+        { tool: 'browser.press', name: 'app', keys: ['Control+a', 'Delete'], ref: 'e4' },
+        { tool: 'browser.scroll', name: 'app', ref: 'e9' },
+        { tool: 'browser.scroll', name: 'app', text: 'Terms' },
+        { tool: 'browser.scroll', name: 'app', deltaX: 0, deltaY: -600 },
+        { tool: 'browser.scroll', name: 'app', pages: 1.5 },
+        { tool: 'browser.select', name: 'app', ref: 'e5', values: ['uk', 'United States'] },
+        { tool: 'browser.check', name: 'app', ref: 'e6', checked: true },
+        { tool: 'browser.check', name: 'app', selector: '#tos', checked: false },
+        { tool: 'browser.highlight', name: 'app', ref: 'e2' },
+        { tool: 'browser.highlight', name: 'app', clear: true },
+      ].map(call => ({ kind: 'call', call })),
+    );
+  });
+
+  it('should refuse a bad distance, or a point where only an element will do, before calling anything', async () => {
+    // Arrange
+    const { calls, run } = harness();
+    const refused = (work: Promise<unknown>) =>
+      work.then(
+        () => undefined,
+        (error: unknown) => (error as Error).message,
+      );
+
+    // Act
+    const messages = [
+      await refused(run('browser', 'page', 'scroll', 'app', '--by', '10')),
+      await refused(run('browser', 'page', 'scroll', 'app', '--by', 'a,b')),
+      await refused(run('browser', 'page', 'scroll', 'app', '--pages', 'lots')),
+      await refused(run('browser', 'page', 'select', 'app', '1,2', 'uk')),
+      await refused(run('browser', 'page', 'press', 'app', 'a', '--on', '1,2')),
+    ];
+
+    // Assert
+    should(messages.every(message => message !== undefined)).be.true();
+    should(calls).deepEqual([]);
+  });
+
   it('should refuse a point where only an element will do, before calling anything', async () => {
     // Arrange
     const { calls, run } = harness();

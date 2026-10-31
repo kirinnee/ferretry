@@ -21,6 +21,7 @@ import {
   type BrowserScreenshotOptions,
   type BrowserTypeOptions,
   type BrowserUploadMode,
+  type PointerAct,
   WorkerLineAssembler,
   type WorkerStagedFile,
   type WorkerSnapshotResult,
@@ -222,6 +223,10 @@ export class BrowserWorkerClient implements BrowserAutomation {
     options: BrowserTypeOptions = {},
   ): Promise<BrowserPageActed> {
     return this.action('type', { pageId, target, text, ...options });
+  }
+
+  pointer(pageId: string, act: PointerAct): Promise<BrowserPageActed> {
+    return this.action('pointer', { pageId, act });
   }
 
   async read(pageId: string, options: BrowserReadOptions = {}): Promise<BrowserPageActed & { readonly text: string }> {

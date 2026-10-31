@@ -146,6 +146,7 @@ class FakeBrowser {
     },
     click: async pageId => this.act('click', pageId),
     type: async pageId => this.act('type', pageId),
+    pointer: async (pageId, act) => this.act(`pointer-${act.action}`, pageId),
     read: async (pageId, options) => ({
       ...this.act(`read-${options?.mode ?? 'text'}`, pageId),
       text: 'Sign in to continue',

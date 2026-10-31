@@ -72,7 +72,26 @@ export interface BrowserSessionDirectory {
 /** What can be done to ONE named page: the agent tools' browser verbs. */
 export type BrowserPageAction = Extract<
   BrowserAction,
-  { readonly action: 'navigate' | 'click' | 'type' | 'read' | 'screenshot' | 'back' | 'forward' | 'reload' }
+  {
+    readonly action:
+      | 'navigate'
+      | 'click'
+      | 'type'
+      | 'read'
+      | 'screenshot'
+      | 'back'
+      | 'forward'
+      | 'reload'
+      | 'hover'
+      | 'drag'
+      | 'mouse'
+      | 'press'
+      | 'scroll'
+      | 'select'
+      | 'check'
+      | 'fill-form'
+      | 'highlight';
+  }
 >;
 
 /** What a lifecycle request answered, and the dialog the page is waiting on afterwards, if it has one. */
@@ -594,6 +613,16 @@ export class BrowserSessionService implements BrowserSubsystem {
           ...(action.format === undefined ? {} : { format: action.format }),
         });
       }
+      case 'hover':
+      case 'drag':
+      case 'mouse':
+      case 'press':
+      case 'scroll':
+      case 'select':
+      case 'check':
+      case 'fill-form':
+      case 'highlight':
+        return await run.driver.pointer(pageId, action);
       case 'back':
         return await run.driver.back(pageId);
       case 'forward':

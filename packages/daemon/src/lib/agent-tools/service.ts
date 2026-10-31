@@ -112,7 +112,33 @@ const DRIVING_TOOLS: ReadonlySet<AgentToolCall['tool']> = new Set([
   'browser.click',
   'browser.type',
   'browser.upload',
+  'browser.hover',
+  'browser.drag',
+  'browser.mouse',
+  'browser.press',
+  'browser.scroll',
+  'browser.select',
+  'browser.check',
+  'browser.fill_form',
+  'browser.highlight',
 ]);
+
+/** The browser tools that act on a page (every browser tool but list, open, close and ask_owner). */
+type PageToolName =
+  | 'browser.navigate'
+  | 'browser.click'
+  | 'browser.type'
+  | 'browser.read'
+  | 'browser.screenshot'
+  | 'browser.hover'
+  | 'browser.drag'
+  | 'browser.mouse'
+  | 'browser.press'
+  | 'browser.scroll'
+  | 'browser.select'
+  | 'browser.check'
+  | 'browser.fill_form'
+  | 'browser.highlight';
 
 /** The tools that move a file between a page and the session's folder: they need the `files` switch as well as `browser`. */
 const FILE_TOOLS: ReadonlySet<AgentToolCall['tool']> = new Set(['browser.upload', 'browser.download', 'browser.pdf']);
@@ -353,7 +379,7 @@ export class AgentToolService {
       case 'browser.pdf':
         return await this.files(caller, call, surface, reference, facts);
       default:
-        return await this.browse(caller, call, surface, reference);
+        return await this.browse(caller, call, surface, reference, facts);
     }
   }
 
@@ -494,12 +520,10 @@ export class AgentToolService {
 
   private async browse(
     caller: AgentToolCaller,
-    call: Extract<
-      AgentToolCall,
-      { readonly tool: 'browser.navigate' | 'browser.click' | 'browser.type' | 'browser.read' | 'browser.screenshot' }
-    >,
+    call: Extract<AgentToolCall, { readonly tool: PageToolName }>,
     surface: ResolvedSurface,
     reference: string,
+    facts: CallFacts,
   ): Promise<AgentToolResult> {
     const answer: BrowserActionResult = await this.ports.browser.actOnPage(
       caller.sessionId,
@@ -524,6 +548,8 @@ export class AgentToolService {
     const at = read.url === undefined ? '' : ` (now at ${read.url})`;
     const check =
       humanCheckNote(answer, surface.id) + dialogNote(dialog, read.dialog) + downloadsNote(started, read.names);
+    const secret = 'result' in answer && answer.result.passwordField === true ? passwordNote(call.tool) : '';
+    if (secret !== '') facts.detail = { ...facts.detail, passwordField: true };
     if (read.text !== undefined && call.tool === 'browser.read') {
       const mode = browserReadModeOf(call);
       if (call.find !== undefined && read.text === '')
@@ -539,7 +565,7 @@ export class AgentToolService {
         screenshotBase64: page.screenshotBase64,
         ...(page.screenshotFormat === 'jpeg' ? { screenshotFormat: 'jpeg' as const } : {}),
       };
-    return { summary: `Done on ${reference}${at}.${check}` };
+    return { summary: `Done on ${reference}${at}.${secret}${check}` };
   }
 
   /**
@@ -992,6 +1018,46 @@ function callFacts(call: AgentToolCall): AuditDetail {
       return call.id === undefined ? {} : { download: call.id };
     case 'browser.pdf':
       return {};
+    case 'browser.hover':
+      return targetFacts(call);
+    case 'browser.drag':
+      return {
+        from: dragEndFacts(call.fromRef, call.fromSelector, call.fromX),
+        to: dragEndFacts(call.toRef, call.toSelector, call.toX),
+        ...(call.steps === undefined ? {} : { steps: call.steps }),
+      };
+    case 'browser.mouse':
+      return {
+        mouse: call.action,
+        ...(call.x === undefined ? {} : { point: true }),
+        ...(call.button === undefined ? {} : { button: call.button }),
+      };
+    case 'browser.press':
+      return { keys: call.keys.length, ...targetFacts(call) };
+    case 'browser.scroll':
+      return {
+        scroll:
+          call.text !== undefined
+            ? 'text'
+            : call.pages !== undefined
+              ? 'pages'
+              : call.deltaX === undefined && call.deltaY === undefined
+                ? 'element'
+                : 'distance',
+        ...targetFacts(call),
+        ...(call.text === undefined ? {} : { textLength: call.text.length }),
+      };
+    case 'browser.select':
+      return { ...targetFacts(call), values: call.values.length };
+    case 'browser.check':
+      return { ...targetFacts(call), checked: call.checked };
+    case 'browser.fill_form':
+      return {
+        fields: call.fields.length,
+        textLength: call.fields.reduce((sum, field) => sum + (field.text?.length ?? 0), 0),
+      };
+    case 'browser.highlight':
+      return call.clear === true ? { clear: true } : targetFacts(call);
     default:
       return {};
   }
@@ -1018,6 +1084,13 @@ function dialogNote(dialog: BrowserDialogInfo | undefined, scrubbedMessage: stri
   return ` A ${dialog.type} dialog is waiting on this page: "${scrubbedMessage ?? ''}". The page can do nothing until it is answered: use browser.dialog with accept or dismiss (it is dismissed on its own after 30 seconds).`;
 }
 
+/** One end of a drag, for the audit: a ref, a short selector, or only that it was a point. */
+function dragEndFacts(ref: string | undefined, selector: string | undefined, x: number | undefined): string {
+  if (ref !== undefined) return ref;
+  if (selector !== undefined) return `selector:${auditSelector(selector)}`;
+  return x === undefined ? 'unknown' : 'point';
+}
+
 /** What an act pointed at, for the audit: a ref, a short selector, or only that it was a point. */
 function targetFacts(fields: BrowserTargetFields): AuditDetail {
   if (fields.ref !== undefined) return { ref: fields.ref };
@@ -1027,16 +1100,8 @@ function targetFacts(fields: BrowserTargetFields): AuditDetail {
 }
 
 /** The browser's own action for an agent tool's call. */
-function pageActionOf(
-  call: Extract<
-    AgentToolCall,
-    { readonly tool: 'browser.navigate' | 'browser.click' | 'browser.type' | 'browser.read' | 'browser.screenshot' }
-  >,
-): BrowserPageAction {
-  const element = {
-    ...(call.tool !== 'browser.navigate' && call.selector !== undefined ? { selector: call.selector } : {}),
-    ...(call.tool !== 'browser.navigate' && call.ref !== undefined ? { ref: call.ref } : {}),
-  };
+function pageActionOf(call: Extract<AgentToolCall, { readonly tool: PageToolName }>): BrowserPageAction {
+  const element = elementOfCall(call);
   switch (call.tool) {
     case 'browser.navigate':
       return call.url === undefined ? { action: call.history ?? 'reload' } : { action: 'navigate', url: call.url };
@@ -1073,6 +1138,35 @@ function pageActionOf(
         ...(call.fullPage === true ? { fullPage: true } : {}),
         ...(call.format === undefined ? {} : { format: call.format }),
       };
+    case 'browser.hover':
+      return { action: 'hover', ...element, ...pointOf(call) };
+    case 'browser.drag': {
+      const { tool: _tool, name: _name, ...ends } = call;
+      return { action: 'drag', ...ends };
+    }
+    case 'browser.mouse': {
+      const { tool: _tool, name: _name, action: mouseAction, ...rest } = call;
+      return { action: 'mouse', mouseAction, ...rest };
+    }
+    case 'browser.press':
+      return { action: 'press', keys: call.keys, ...element };
+    case 'browser.scroll':
+      return {
+        action: 'scroll',
+        ...element,
+        ...(call.text === undefined ? {} : { text: call.text }),
+        ...(call.deltaX === undefined ? {} : { deltaX: call.deltaX }),
+        ...(call.deltaY === undefined ? {} : { deltaY: call.deltaY }),
+        ...(call.pages === undefined ? {} : { pages: call.pages }),
+      };
+    case 'browser.select':
+      return { action: 'select', ...element, values: call.values };
+    case 'browser.check':
+      return { action: 'check', ...element, checked: call.checked };
+    case 'browser.fill_form':
+      return { action: 'fill-form', fields: call.fields };
+    case 'browser.highlight':
+      return { action: 'highlight', ...element, ...(call.clear === true ? { clear: true as const } : {}) };
   }
 }
 
@@ -1106,6 +1200,28 @@ function downloadsNote(downloads: readonly BrowserDownloadNotice[], names: reado
       return ` A download started: ${name}, ${sizeWords(notice.size ?? 0)} — save it with browser_download (id ${notice.id}).`;
     })
     .join('');
+}
+
+/** The element fields of a page tool's call, if it carries any. */
+function elementOfCall(call: object): { selector?: string; ref?: string } {
+  const { selector, ref } = call as { selector?: unknown; ref?: unknown };
+  return {
+    ...(typeof selector === 'string' ? { selector } : {}),
+    ...(typeof ref === 'string' ? { ref } : {}),
+  };
+}
+
+function pointOf(call: { readonly x?: number | undefined; readonly y?: number | undefined }) {
+  return call.x === undefined || call.y === undefined ? {} : { x: call.x, y: call.y };
+}
+
+/**
+ * Told when an act put text in a password field. A real secret never belongs in a tool call: it would
+ * sit in the agent's transcript. The owner types it, on a page handed to them.
+ */
+function passwordNote(tool: PageToolName): string {
+  const wrote = tool === 'browser.fill_form' ? 'filled' : 'typed into';
+  return ` That act ${wrote} a password field. A real secret must never go in a tool call: hand the page to the owner with browser_ask_owner so they type it themselves.`;
 }
 
 /** Told after a snapshot: the refs in it are what every act accepts. */

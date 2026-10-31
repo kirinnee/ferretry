@@ -36,6 +36,8 @@ class FakePage implements ActablePage {
   /** A count that throws, as Playwright can for a ref it cannot parse against the page. */
   countThrows = false;
   failMouse = false;
+  /** The `type` attribute each selector's element carries; none for an unlisted one. */
+  readonly types = new Map<string, string>();
   text = 'Welcome back';
   snapshot = SNAPSHOT;
   /** Whether the element is a file input. */
@@ -66,6 +68,7 @@ class FakePage implements ActablePage {
       press: async key => {
         page.calls.push(`press ${selector} ${key}`);
       },
+      getAttribute: async name => (name === 'type' ? (page.types.get(selector) ?? null) : null),
       innerText: async () => {
         page.calls.push(`innerText ${selector}`);
         return page.text;
@@ -224,6 +227,21 @@ describe('browser page acts — type', () => {
 
     // Assert
     should(page.calls).deepEqual(['fill #q ""', 'pressSequentially #q "abc"']);
+  });
+
+  it('should say a password field is one, and not flag any other', async () => {
+    // Arrange
+    const page = new FakePage();
+    page.types.set('#pw', ' Password ');
+    page.types.set('#q', 'search');
+
+    // Act
+    const secret = await typeInto(page, { kind: 'selector', selector: '#pw' }, 'x');
+    const plain = await typeInto(page, { kind: 'selector', selector: '#q' }, 'x');
+
+    // Assert
+    should(secret).deepEqual({ passwordField: true });
+    should(plain).deepEqual({ passwordField: false });
   });
 });
 

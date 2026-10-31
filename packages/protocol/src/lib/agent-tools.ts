@@ -27,6 +27,20 @@ import {
   BrowserRequestIdSchema,
   BrowserResourceTypeSchema,
 } from './browser-page-lifecycle.ts';
+import {
+  BROWSER_MAX_SCROLL_TEXT_CHARS,
+  BrowserMouseActionSchema,
+  BrowserPressKeysSchema,
+  BrowserScrollDeltaSchema,
+  BrowserScrollPagesSchema,
+  BrowserSelectValuesSchema,
+  browserDragShape,
+  browserFormFieldsOf,
+  refineBrowserDrag,
+  refineBrowserHighlight,
+  refineBrowserMouse,
+  refineBrowserScroll,
+} from './browser-pointer.ts';
 import { InstantSchema } from './common.ts';
 import type { AgentConfigToolName } from './config-files.ts';
 
@@ -434,6 +448,86 @@ export const AgentToolCallSchema = z.discriminatedUnion('tool', [
     saveAs: SaveAsSchema.optional(),
     overwrite: z.literal(true).optional(),
   }),
+  z
+    .strictObject({
+      tool: z.literal('browser.hover'),
+      name: SurfaceKeySchema,
+      ...ElementTargetShape,
+      x: BrowserCoordinateSchema.optional(),
+      y: BrowserCoordinateSchema.optional(),
+    })
+    .superRefine(refineBrowserTarget({ point: true, required: true })),
+  z
+    .strictObject({
+      tool: z.literal('browser.drag'),
+      name: SurfaceKeySchema,
+      ...browserDragShape(SelectorSchema),
+    })
+    .superRefine(refineBrowserDrag),
+  z
+    .strictObject({
+      tool: z.literal('browser.mouse'),
+      name: SurfaceKeySchema,
+      action: BrowserMouseActionSchema,
+      x: BrowserCoordinateSchema.optional(),
+      y: BrowserCoordinateSchema.optional(),
+      button: BrowserMouseButtonSchema.optional(),
+      deltaX: BrowserScrollDeltaSchema.optional(),
+      deltaY: BrowserScrollDeltaSchema.optional(),
+    })
+    .superRefine(refineBrowserMouse),
+  z
+    .strictObject({
+      tool: z.literal('browser.press'),
+      name: SurfaceKeySchema,
+      keys: BrowserPressKeysSchema,
+      /** Focus this element first. */
+      ...ElementTargetShape,
+    })
+    .superRefine(refineBrowserTarget({ point: false, required: false })),
+  z
+    .strictObject({
+      tool: z.literal('browser.scroll'),
+      name: SurfaceKeySchema,
+      ...ElementTargetShape,
+      /** Scroll the first place this text shows up into view. */
+      text: z.string().min(1).max(BROWSER_MAX_SCROLL_TEXT_CHARS).optional(),
+      deltaX: BrowserScrollDeltaSchema.optional(),
+      deltaY: BrowserScrollDeltaSchema.optional(),
+      /** Screens: 1 is one screen down, -1 one screen up. */
+      pages: BrowserScrollPagesSchema.optional(),
+    })
+    .superRefine(refineBrowserScroll),
+  z
+    .strictObject({
+      tool: z.literal('browser.select'),
+      name: SurfaceKeySchema,
+      ...ElementTargetShape,
+      values: BrowserSelectValuesSchema,
+    })
+    .superRefine(refineBrowserTarget({ point: false, required: true })),
+  z
+    .strictObject({
+      tool: z.literal('browser.check'),
+      name: SurfaceKeySchema,
+      ...ElementTargetShape,
+      /** `true` ticks, `false` unticks. */
+      checked: z.boolean(),
+    })
+    .superRefine(refineBrowserTarget({ point: false, required: true })),
+  z.strictObject({
+    tool: z.literal('browser.fill_form'),
+    name: SurfaceKeySchema,
+    fields: browserFormFieldsOf(SelectorSchema),
+  }),
+  z
+    .strictObject({
+      tool: z.literal('browser.highlight'),
+      name: SurfaceKeySchema,
+      ...ElementTargetShape,
+      clear: z.literal(true).optional(),
+    })
+    .superRefine(refineBrowserHighlight),
   z.strictObject({ tool: z.literal('browser.close'), name: SurfaceKeySchema }),
   z.strictObject({
     tool: z.literal('browser.ask_owner'),
@@ -494,6 +588,15 @@ export const AGENT_TOOL_NAMES: readonly AgentToolName[] = [
   'browser.upload',
   'browser.download',
   'browser.pdf',
+  'browser.hover',
+  'browser.drag',
+  'browser.mouse',
+  'browser.press',
+  'browser.scroll',
+  'browser.select',
+  'browser.check',
+  'browser.fill_form',
+  'browser.highlight',
   'browser.close',
   'browser.ask_owner',
 ];

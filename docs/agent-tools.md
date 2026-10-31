@@ -26,7 +26,10 @@ the page and end with it. The reference grammar is unchanged — see
 `browser.console(name, level?, since?, limit?)` · `browser.network(name, action: list | get, id?, filter?, types?)` ·
 `browser.emulate(name, viewport?, media?, geolocation?, locale?, timezone?, cpuThrottle?, network?, permissions?, reset?)` ·
 `browser.upload(name, target, files, mode?)` · `browser.download(name, id?, saveAs?, overwrite?)` ·
-`browser.pdf(name, saveAs?, overwrite?)` · `browser.close(name)` · `browser.ask_owner(name, message?)`.
+`browser.pdf(name, saveAs?, overwrite?)` ·
+`browser.hover` · `browser.drag` · `browser.mouse` · `browser.press` · `browser.scroll` · `browser.select` · `browser.check` ·
+`browser.fill_form` · `browser.highlight` (see [Pointer and keys](#pointer-and-keys)) ·
+`browser.close(name)` · `browser.ask_owner(name, message?)`.
 
 A **target** is exactly one of a `ref`, a `selector`, or — for a click only — a point `x`, `y`; see
 [Refs and targets](#refs-and-targets). `history` is `back`, `forward` or `reload`.
@@ -107,6 +110,44 @@ Six tools for what happens around a page rather than on it. Each is `fy browser 
 On the command line: `fy browser page dialog app accept --text hi`, `… tabs`, `… tabs adopt p7 popup`,
 `… wait app --text "Welcome" --timeout 60000`, `… console app --level warning --since 40`, `… network app`,
 `… network app r12`, `… emulate app --viewport 390x844 --color-scheme dark`, `… emulate app --reset`.
+
+## Pointer and keys
+
+Nine more tools drive the pointer and the keyboard. They are the same agent-tool path as a click — the
+browser switch, the session's own pages, the takeover guard (a taken-over page is a `409 taken_over`), the
+driving marker and exactly one audit record — and their grammar is one file,
+`packages/protocol/src/lib/browser-pointer.ts`, shared by the wire tool and the browser's own action (the
+worker parses the action again with the same schema).
+
+| Tool                                                             | Does                                                                                                                                                                                    | Bounds                                           |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| `browser.hover(name, target)`                                    | Moves the pointer over an element, or to a point                                                                                                                                        |                                                  |
+| `browser.drag(name, from…, to…, steps?)`                         | Element to element with Playwright's `dragTo` (HTML5 drag and drop), or point to point (`fromX/fromY` → `toX/toY`) with the mouse down, `steps` moves, up — for a slider, canvas or map | `steps` 1–100 (10); never an element and a point |
+| `browser.mouse(name, action, x?, y?, button?, deltaX?, deltaY?)` | `move` (needs a point), `down`, `up` (optional `button`), `wheel` (needs a delta)                                                                                                       | delta ±20,000                                    |
+| `browser.press(name, keys, target?)`                             | Presses each chord in order, focusing the element first when one is named                                                                                                               | ≤ 32 keys of ≤ 40 characters                     |
+| `browser.scroll(name, target \| text \| deltaX/deltaY \| pages)` | Into view, to a text, by pixels or by screens — exactly one                                                                                                                             | pixels ±20,000; pages ±20; text 256              |
+| `browser.select(name, target, values)`                           | Picks options by value or by label                                                                                                                                                      | ≤ 64 values of ≤ 256                             |
+| `browser.check(name, target, checked)`                           | Ticks or unticks; `checked: false` is meaningful and is never read as "left out"                                                                                                        |                                                  |
+| `browser.fill_form(name, fields)`                                | Per field, a target and exactly one of `text`, `checked`, `option`, `value`                                                                                                             | ≤ 32 fields; ≤ 64 KiB of text in all             |
+| `browser.highlight(name, target \| clear)`                       | An outline the person watching sees; `clear: true` removes it                                                                                                                           |                                                  |
+
+- **A key is a closed grammar**: zero or more distinct modifiers (`Alt`, `Control`, `ControlOrMeta`, `Meta`,
+  `Shift`), then a named key (`Enter`, `Tab`, `Escape`, `ArrowDown`, `F1`–`F12`, …) or one printable character:
+  `Enter`, `a`, `Control+Shift+K`, `Control++`. Anything else is refused before the first key is pressed.
+- **Scrolling does not need a viewport**: a distance or a number of screens scrolls the page itself; a text
+  scrolls to its first place and says so when it is not on the page.
+- **A password field is flagged, not blocked.** When `browser.type` or `browser.fill_form` writes into an
+  `input type=password`, the worker notices, the answer says it was a password field and that **a real
+  secret must never go in a tool call** — it would sit in the agent's transcript — and to hand the page to the
+  owner with `browser_ask_owner` so they type it. The audit record carries `passwordField: true`.
+- **Audit facts are counts, lengths, refs and flags**: `keys: 2`, `values: 1`, `fields: 3` with the total
+  `textLength`, a drag as `from`/`to` (a ref, a clipped selector or `point`), `checked`. Never a key name,
+  an option, a value or typed text.
+- The CLI has a verb for each but `fill_form`: `fy browser page hover app e3`, `… drag app e1 '#bin'`,
+  `… drag app 1,2 300,2 --steps 25`, `… press app Control+a Delete --on e4`, `… scroll app --to e9` /
+  `--text Terms` / `--by 0,-600` / `--pages 1`, `… select app e5 uk`, `… check app e6 --off`,
+  `… highlight app e2` / `--clear`. `fill_form` is on the wire and in MCP only.
+- An MCP client that sends `clear: false` is read as having left it out; `checked: false` is kept.
 
 ## Routes
 

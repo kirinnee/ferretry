@@ -72,6 +72,14 @@ function decimal(value: string, option: string): number {
   return parsed;
 }
 
+/** A number that may be negative or fractional: a scroll distance or a count of screens. */
+function signedNumber(value: string, option: string): number {
+  const parsed = Number(value);
+  if (value.trim() === '' || !Number.isFinite(parsed))
+    throw new AgentToolsCommandError(`${option} must be a number, not "${value}"`);
+  return parsed;
+}
+
 /** A repeatable option that also takes a comma list: `--type xhr,fetch --type script`. */
 const collect = (value: string, previous: string[] = []): string[] => [
   ...previous,
@@ -80,6 +88,20 @@ const collect = (value: string, previous: string[] = []): string[] => [
     .map(part => part.trim())
     .filter(part => part !== ''),
 ];
+/** `--by dx,dy` as the scroll tool's deltas. */
+function distanceArgument(value: string): { readonly deltaX: number; readonly deltaY: number } {
+  const [x, y, ...rest] = value.split(',');
+  if (x === undefined || y === undefined || rest.length > 0)
+    throw new AgentToolsCommandError(`--by must be two numbers, dx,dy, not "${value}"`);
+  return { deltaX: signedNumber(x, '--by'), deltaY: signedNumber(y, '--by') };
+}
+
+/** One end of a drag: a target's fields under `from…` or `to…`. */
+function prefixed(prefix: 'from' | 'to', target: ReturnType<typeof targetArgument>): Record<string, string | number> {
+  return Object.fromEntries(
+    Object.entries(target).map(([key, value]) => [`${prefix}${key.charAt(0).toUpperCase()}${key.slice(1)}`, value]),
+  );
+}
 
 const HISTORY_STEPS: ReadonlySet<string> = new Set(['back', 'forward', 'reload']);
 
@@ -307,6 +329,101 @@ export function registerBrowserPageCommands(program: Command, runner: IAgentTool
         );
       },
     );
+
+  verb('hover', 'move the pointer over an element in a page, or a point in it')
+    .argument('<name>', 'the page’s name or id')
+    .argument('<target>', 'a ref from read --snapshot (e12), a point (120,340), or a selector')
+    .action(async (name: string, target: string, options: SessionOption) => {
+      await call({ tool: 'browser.hover', name, ...targetArgument(target) }, options);
+    });
+
+  verb('drag', 'drag from one element to another, or from one point to another')
+    .argument('<name>', 'the page’s name or id')
+    .argument('<from>', 'where it starts: a ref (e12), a point (120,340), or a selector')
+    .argument('<to>', 'where it ends, the same kind of target')
+    .option('--steps <n>', 'by points only: how many moves on the way (1 to 100)')
+    .action(async (name: string, from: string, to: string, options: SessionOption & { steps?: string }) => {
+      await call(
+        {
+          tool: 'browser.drag',
+          name,
+          ...prefixed('from', targetArgument(from)),
+          ...prefixed('to', targetArgument(to)),
+          ...(options.steps === undefined ? {} : { steps: wholeNumber(options.steps, '--steps') }),
+        },
+        options,
+      );
+    });
+
+  verb('press', 'press keys in a page, e.g. Enter, ArrowDown, Control+Shift+K; never a secret')
+    .argument('<name>', 'the page’s name or id')
+    .argument('<keys...>', 'one to 32 keys, pressed in order')
+    .option('--on <target>', 'focus this element first: a ref or a selector')
+    .action(async (name: string, keys: string[], options: SessionOption & { on?: string }) => {
+      await call(
+        {
+          tool: 'browser.press',
+          name,
+          keys,
+          ...(options.on === undefined ? {} : elementArgument(options.on)),
+        },
+        options,
+      );
+    });
+
+  verb('scroll', 'scroll a page: to an element, to a text, by pixels, or by screens')
+    .argument('<name>', 'the page’s name or id')
+    .option('--to <target>', 'scroll this element into view: a ref or a selector')
+    .option('--text <text>', 'scroll to the first place this text shows')
+    .option('--by <dx,dy>', 'scroll by this many pixels, e.g. 0,600 or 0,-600')
+    .option('--pages <n>', 'scroll by screens: 1 is one down, -1 one up')
+    .action(
+      async (name: string, options: SessionOption & { to?: string; text?: string; by?: string; pages?: string }) => {
+        await call(
+          {
+            tool: 'browser.scroll',
+            name,
+            ...(options.to === undefined ? {} : elementArgument(options.to)),
+            ...(options.text === undefined ? {} : { text: options.text }),
+            ...(options.by === undefined ? {} : distanceArgument(options.by)),
+            ...(options.pages === undefined ? {} : { pages: signedNumber(options.pages, '--pages') }),
+          },
+          options,
+        );
+      },
+    );
+
+  verb('select', 'choose options of a select element, by value or label')
+    .argument('<name>', 'the page’s name or id')
+    .argument('<target>', 'a ref from read --snapshot (e12), or a selector')
+    .argument('<values...>', 'the options to choose')
+    .action(async (name: string, target: string, values: string[], options: SessionOption) => {
+      await call({ tool: 'browser.select', name, ...elementArgument(target), values }, options);
+    });
+
+  verb('check', 'tick a checkbox or radio button, or untick it with --off')
+    .argument('<name>', 'the page’s name or id')
+    .argument('<target>', 'a ref from read --snapshot (e12), or a selector')
+    .option('--off', 'untick instead of tick')
+    .action(async (name: string, target: string, options: SessionOption & { off?: boolean }) => {
+      await call({ tool: 'browser.check', name, ...elementArgument(target), checked: options.off !== true }, options);
+    });
+
+  verb('highlight', 'outline an element so the person watching sees it, or remove the outline with --clear')
+    .argument('<name>', 'the page’s name or id')
+    .argument('[target]', 'a ref from read --snapshot (e12), or a selector')
+    .option('--clear', 'remove the outline')
+    .action(async (name: string, target: string | undefined, options: SessionOption & { clear?: boolean }) => {
+      await call(
+        {
+          tool: 'browser.highlight',
+          name,
+          ...(target === undefined ? {} : elementArgument(target)),
+          ...(options.clear === true ? { clear: true } : {}),
+        },
+        options,
+      );
+    });
 
   verb('read', 'print a page’s visible text, its accessibility tree, or a snapshot with refs')
     .argument('<name>', 'the page’s name or id')

@@ -432,6 +432,139 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     ),
   },
   {
+    name: 'browser_hover',
+    tool: 'browser.hover',
+    description: 'Move the pointer over an element (ref or selector) or a point (x, y): menus, tooltips, hover states.',
+    inputSchema: object({ name: NAME, ref: REF, selector: SELECTOR, x: COORDINATE, y: COORDINATE }, ['name']),
+  },
+  {
+    name: 'browser_drag',
+    tool: 'browser.drag',
+    description:
+      'Drag from one element to another (fromRef/fromSelector to toRef/toSelector): drag and drop. Or from a point to a point (fromX, fromY to toX, toY, in steps): sliders, canvases, maps.',
+    inputSchema: object(
+      {
+        name: NAME,
+        fromRef: REF,
+        fromSelector: SELECTOR,
+        fromX: COORDINATE,
+        fromY: COORDINATE,
+        toRef: REF,
+        toSelector: SELECTOR,
+        toX: COORDINATE,
+        toY: COORDINATE,
+        steps: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 100,
+          description: 'Points only: moves on the way. 10 by default.',
+        },
+      },
+      ['name'],
+    ),
+  },
+  {
+    name: 'browser_mouse',
+    tool: 'browser.mouse',
+    description:
+      'Low-level mouse: action move (x, y), down or up (button), or wheel (deltaX, deltaY up to ±20000 pixels). Give x, y to move there first.',
+    inputSchema: object(
+      {
+        name: NAME,
+        action: { type: 'string', enum: ['move', 'down', 'up', 'wheel'] },
+        x: COORDINATE,
+        y: COORDINATE,
+        button: { type: 'string', enum: ['left', 'right', 'middle'] },
+        deltaX: { type: 'number', minimum: -20000, maximum: 20000 },
+        deltaY: { type: 'number', minimum: -20000, maximum: 20000 },
+      },
+      ['name', 'action'],
+    ),
+  },
+  {
+    name: 'browser_press',
+    tool: 'browser.press',
+    description:
+      'Press up to 32 keys in order, e.g. ["Enter"], ["ArrowDown"], ["Control+Shift+K"]. Modifiers Alt, Control, ControlOrMeta, Meta, Shift, then a named key or one character. ref/selector focuses an element first. Never a secret.',
+    inputSchema: object(
+      {
+        name: NAME,
+        keys: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 32 },
+        ref: REF,
+        selector: SELECTOR,
+      },
+      ['name', 'keys'],
+    ),
+  },
+  {
+    name: 'browser_scroll',
+    tool: 'browser.scroll',
+    description:
+      'Scroll one way: an element into view (ref or selector), to the first place a text shows, by deltaX/deltaY pixels, or by pages (1 is a screen down, -1 up; up to ±20).',
+    inputSchema: object(
+      {
+        name: NAME,
+        ref: REF,
+        selector: SELECTOR,
+        text: { type: 'string' },
+        deltaX: { type: 'number', minimum: -20000, maximum: 20000 },
+        deltaY: { type: 'number', minimum: -20000, maximum: 20000 },
+        pages: { type: 'number', minimum: -20, maximum: 20 },
+      },
+      ['name'],
+    ),
+  },
+  {
+    name: 'browser_select',
+    tool: 'browser.select',
+    description: 'Choose options of a select (ref or selector), by value or label. Up to 64.',
+    inputSchema: object(
+      { name: NAME, ref: REF, selector: SELECTOR, values: { type: 'array', items: { type: 'string' }, minItems: 1 } },
+      ['name', 'values'],
+    ),
+  },
+  {
+    name: 'browser_check',
+    tool: 'browser.check',
+    description: 'Tick (checked true) or untick (false) a checkbox or radio button (ref or selector).',
+    inputSchema: object({ name: NAME, ref: REF, selector: SELECTOR, checked: { type: 'boolean' } }, [
+      'name',
+      'checked',
+    ]),
+  },
+  {
+    name: 'browser_fill_form',
+    tool: 'browser.fill_form',
+    description:
+      'Fill up to 32 fields in one call. Each: ref or selector, plus exactly one of text, checked, option (select), value (slider, date, colour). Never a secret: a password field is flagged.',
+    inputSchema: object(
+      {
+        name: NAME,
+        fields: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 32,
+          items: object({
+            ref: REF,
+            selector: SELECTOR,
+            text: { type: 'string' },
+            checked: { type: 'boolean' },
+            option: { type: 'string' },
+            value: { type: 'string' },
+          }),
+        },
+      },
+      ['name', 'fields'],
+    ),
+  },
+  {
+    name: 'browser_highlight',
+    tool: 'browser.highlight',
+    description:
+      'Outline an element (ref or selector) so the person watching sees what you mean. clear: true removes it.',
+    inputSchema: object({ name: NAME, ref: REF, selector: SELECTOR, clear: { type: 'boolean' } }, ['name']),
+  },
+  {
     name: 'browser_close',
     tool: 'browser.close',
     description: 'Close a page.',
