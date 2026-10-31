@@ -151,9 +151,13 @@ one-time.
     passphrase, passwd, Passwort, Kennwort, contraseña, mot de passe, credential, secret, "pw:", PIN), whatever else
     the line says;
   - the terminal reads with typing hidden, unless its program asks for 2FA codes (ssh, scp, sftp, mosh, the aws,
-    gcloud, az and vault CLIs), proved from the file it RUNS (`/proc/<pid>/exe`, Linux only: on macOS nothing proves the
-    program, so an echo-off code prompt there is always a secret) and only when no part of that file's path is owned by this account or open to anyone (the secure-copy
-    rule: a name in `ps` can be rewritten and a shell copied to `~/bin/ssh`), and the prompt line the daemon read from the pane asks for a code (verification code,
+    gcloud, az and vault CLIs), proved for EVERY process of the terminal's foreground group (an ssh `LocalCommand` or a pipeline led by ssh is
+    not one) from the file it RUNS (`/proc/<pid>/exe`, Linux only: on macOS nothing proves the program, so an
+    echo-off code prompt there is always a secret), and only when that file is what a system folder resolves the
+    name to (`/usr/bin`, `/bin`, `/usr/local/bin`, `/run/current-system/sw/bin`,
+    `/nix/var/nix/profiles/default/bin`) and no part of that entry is owned by this account or open to anyone (the
+    secure-copy rule). A name in `ps` can be rewritten, a shell copied to `~/bin/ssh`, and anyone may add a shell to
+    the Nix store, so none of those is proof, and the prompt line the daemon read from the pane asks for a code (verification code,
     one-time, OTP, 2FA, authenticator, "code:") and says none of password, passphrase, PIN, token or secret; a
     shell's `read -s` is never a code;
   - the ferret's own prompt, or the field's label or id, says password, passphrase or PIN.
