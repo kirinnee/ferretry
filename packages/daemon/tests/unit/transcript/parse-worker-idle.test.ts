@@ -2,11 +2,11 @@
  * THE PARSE THREAD OUTLIVES A QUIET HALF MINUTE, SO THE NEXT READ FINDS ITS CONVERSATION INDEX WARM.
  *
  * The thread holds every session's folded conversation; ending it at 30 s made the first messages read
- * after a pause fold the whole transcript again. These cases drive a stand-in thread under fake timers:
+ * after a pause fold the whole transcript again. These cases drive a stand-in thread on a clock it turns by hand:
  * it is still the same thread 31 s and nine minutes after the last answer, it ends once the idle time is
  * up, and a read after that starts a new one.
  */
-import { afterEach, beforeEach, describe, it, jest } from 'bun:test';
+import { afterEach, beforeEach, describe, it } from 'bun:test';
 import should from 'should';
 import {
   PARSE_IDLE_MS,
@@ -38,12 +38,46 @@ class AnsweringThread implements TranscriptParseThread {
   }
 }
 
+/** A clock the test turns by hand: the host's timers are set and cleared on it, never on the real one. */
+class ManualTimers {
+  #now = 0;
+  #next = 1;
+  readonly #due = new Map<number, { at: number; run: () => void }>();
+
+  set = (run: () => void, ms = 0): number => {
+    const id = this.#next++;
+    this.#due.set(id, { at: this.#now + ms, run });
+    return id;
+  };
+
+  clear = (id: number | undefined): void => {
+    if (id !== undefined) this.#due.delete(id);
+  };
+
+  advance(ms: number): void {
+    const until = this.#now + ms;
+    for (;;) {
+      const next = [...this.#due.entries()].filter(([, each]) => each.at <= until).sort((a, b) => a[1].at - b[1].at)[0];
+      if (next === undefined) break;
+      this.#due.delete(next[0]);
+      this.#now = next[1].at;
+      next[1].run();
+    }
+    this.#now = until;
+  }
+}
+
 describe('TranscriptParseWorker idle', () => {
+  const real = { set: globalThis.setTimeout, clear: globalThis.clearTimeout };
+  let timers: ManualTimers;
   beforeEach(() => {
-    jest.useFakeTimers();
+    timers = new ManualTimers();
+    globalThis.setTimeout = timers.set as unknown as typeof setTimeout;
+    globalThis.clearTimeout = timers.clear as unknown as typeof clearTimeout;
   });
   afterEach(() => {
-    jest.useRealTimers();
+    globalThis.setTimeout = real.set;
+    globalThis.clearTimeout = real.clear;
   });
 
   function subject() {
@@ -66,7 +100,7 @@ describe('TranscriptParseWorker idle', () => {
     await read();
 
     // Act
-    jest.advanceTimersByTime(31_000);
+    timers.advance(31_000);
     await read();
 
     // Assert — a thread started for the second read would have folded the transcript again.
@@ -81,9 +115,9 @@ describe('TranscriptParseWorker idle', () => {
     await read();
 
     // Act
-    jest.advanceTimersByTime(PARSE_IDLE_MS - 1);
+    timers.advance(PARSE_IDLE_MS - 1);
     const justBefore = threads[0]?.terminated;
-    jest.advanceTimersByTime(1);
+    timers.advance(1);
 
     // Assert
     should(justBefore).be.false();
@@ -95,7 +129,7 @@ describe('TranscriptParseWorker idle', () => {
     // Arrange
     const { parse, threads, read } = subject();
     await read();
-    jest.advanceTimersByTime(PARSE_IDLE_MS);
+    timers.advance(PARSE_IDLE_MS);
 
     // Act
     await read();
@@ -110,11 +144,11 @@ describe('TranscriptParseWorker idle', () => {
     // Arrange
     const { parse, threads, read } = subject();
     await read();
-    jest.advanceTimersByTime(PARSE_IDLE_MS - 1_000);
+    timers.advance(PARSE_IDLE_MS - 1_000);
     await read();
 
     // Act
-    jest.advanceTimersByTime(PARSE_IDLE_MS - 1_000);
+    timers.advance(PARSE_IDLE_MS - 1_000);
 
     // Assert
     should(threads).have.length(1);
