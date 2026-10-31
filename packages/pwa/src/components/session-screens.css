@@ -1300,6 +1300,38 @@ button.fy-receipt {
   gap: 6px;
   white-space: nowrap;
 }
+/* THE TOP OF THE TRANSCRIPT: older messages loading, a button to load them, or the conversation's start.
+   One height in every state, so a change of state never moves the messages under the reader. */
+.fy-transcript-history {
+  align-items: center;
+  color: var(--fy-muted);
+  display: flex;
+  font-size: 12px;
+  justify-content: center;
+  min-height: 40px;
+  padding-block: var(--flow-2);
+}
+.fy-transcript-history__note {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+.fy-transcript-history__button {
+  background: transparent;
+  border: var(--stroke-control) solid var(--fy-border);
+  border-radius: var(--radius-control);
+  color: var(--fy-fg);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 6px 12px;
+}
+.fy-transcript-history__button:hover {
+  border-color: var(--fy-muted);
+}
+.fy-transcript-history__button:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: var(--focus-offset);
+}
 /* THE COMPACT COMPOSER: one rounded row — ＋, the growing line, 🎙, send — and one small status line
  * under it. Focus is the row's border stepping up to the strong border, never a heavy accent ring. */
 .fy-composer {

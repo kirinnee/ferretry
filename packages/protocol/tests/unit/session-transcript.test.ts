@@ -39,6 +39,11 @@ const cases: SchemaCase[] = [
   // passing while the row it embeds drifted — and the row is the half a fork request is built from.
   { name: 'transcript message', schema: transcript.SessionTranscriptMessageSchema, value: message },
   { name: 'transcript page', schema: transcript.SessionTranscriptPageSchema, value: page },
+  {
+    name: 'log page',
+    schema: transcript.SessionLogPageSchema,
+    value: { v: 1, sessionId: 's1', log: '[09:08:07] user/message: hi', start: 4096, file: 'Zm9vYmFy' },
+  },
 ];
 
 describe('the session transcript read protocol', () => {

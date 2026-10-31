@@ -80,3 +80,35 @@ export const SessionTranscriptPageSchema = z.strictObject({
   nextCursor: z.string().min(1).nullable(),
 });
 export type SessionTranscriptPage = z.infer<typeof SessionTranscriptPageSchema>;
+
+/**
+ * One page of a session's transcript as the chat renders it — `GET /v1/sessions/:id/log-page`.
+ *
+ * `log` is the very text of `logs`: one event per line, scrubbed, with its image markers. What a page
+ * adds is where it sits. `start` is the byte of the transcript the page begins at, always a record
+ * boundary, and asking for the page `before` it reads the history just older than this one, until a
+ * page begins at `0` and the conversation is whole. `file` is an opaque token for the transcript file
+ * the page was read from: an older page asked for under it is refused with `log_cursor_stale` once the
+ * session's transcript is a different file, because offsets in one file name nothing in another.
+ *
+ * Both are positions, not evidence, and nothing here is a fork coordinate — that is `messages`.
+ */
+export const SessionLogPageSchema = z.strictObject({
+  v: z.literal(1),
+  sessionId: z.string().min(1),
+  log: z.string(),
+  start: z.number().int().nonnegative(),
+  file: z.string().min(1),
+});
+export type SessionLogPage = z.infer<typeof SessionLogPageSchema>;
+
+/** Which page `logPage` reads: the tail when `before` is absent. */
+export interface LogPageOptions {
+  /** The byte the page ends before: the `start` of the page the caller already holds. */
+  readonly before?: number;
+  /** The lowest byte the page may begin at, for filling a gap between two pages; needs `before`. */
+  readonly from?: number;
+  readonly limit?: number;
+  /** The `file` token an earlier page carried. */
+  readonly file?: string;
+}

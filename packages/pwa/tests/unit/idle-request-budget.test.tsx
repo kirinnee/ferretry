@@ -164,6 +164,10 @@ const countingClient = (daemonId: DaemonId, counter: RouteCounter): FyApiClient 
       counter.add('GET /v1/sessions/:id/logs');
       return '';
     },
+    logPage: async (sessionId: string) => {
+      counter.add('GET /v1/sessions/:id/log-page');
+      return { v: 1, sessionId, log: '', start: 0, file: 'transcript' };
+    },
     wardenStatus: async () => {
       counter.add('GET /v1/warden/status');
       throw new Error('no warden in this fixture');
@@ -435,7 +439,7 @@ describe('the idle request budget', () => {
       // Assert — the feed was opened and stayed open: one subscription, never a reconnection storm.
       console.info(verdict('session page', measured));
       should(measured.perMinute).be.belowOrEqual(SESSION_PAGE_BUDGET, verdict('session page', measured));
-      should(measured.counter.counts.get('GET /v1/sessions/:id/logs') ?? 0).be.above(0);
+      should(measured.counter.counts.get('GET /v1/sessions/:id/log-page') ?? 0).be.above(0);
     },
     CASE_TIMEOUT_MS,
   );

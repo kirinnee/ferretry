@@ -40,7 +40,7 @@ import type {
 } from './session.ts';
 import type { ForkSessionOutcome, ForkSessionRequest } from './session-fork.ts';
 import type { SessionLiveActivity, SessionTranscriptMoved } from './session-live.ts';
-import type { SessionTranscriptPage } from './session-transcript.ts';
+import type { LogPageOptions, SessionLogPage, SessionTranscriptPage } from './session-transcript.ts';
 import type { TranscriptImageDownload } from './transcript-images.ts';
 import type { MachineSkillsInventory, SessionSkillsInventory, SkillFile } from './skills-inventory.ts';
 import type { SessionHandoff } from './turn-handoff.ts';
@@ -242,6 +242,14 @@ export interface IFyApiClient {
   attachTarget(id: string): Promise<SessionAttachTarget>;
   snapshot(id: string, scope?: SnapshotScope): Promise<string>;
   logs(id: string, turn?: number): Promise<string>;
+  /**
+   * One page of a session's transcript as the chat renders it: the tail, or with `before` the page
+   * just older than the history the caller holds. Ask again `before` the page's own `start` for the
+   * one before that; a page that starts at `0` is the beginning of the conversation. Pass the `file`
+   * an earlier page carried, so a page of another file is refused (`log_cursor_stale`) rather than
+   * stitched on. An older daemon answers `unknown_route`.
+   */
+  logPage(id: string, options?: LogPageOptions): Promise<SessionLogPage>;
   /**
    * Read one session's durable conversation as rows a caller can fork through. This is NOT `logs`
    * with structure: the cursor and each row's binding are OPAQUE DAEMON-ISSUED BYTES, stored and sent

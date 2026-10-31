@@ -36,6 +36,7 @@ import {
 } from './components/session-workspace-model.ts';
 import { SessionsPage } from './components/sessions-page.tsx';
 import type { SendDismiss, SendExpand } from './components/settled-send-note.tsx';
+import type { TranscriptHistoryControl } from './components/transcript-history-row.tsx';
 import { useAgendaSessionActions } from './features/agenda/agenda-session-actions.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { TERMINAL_STATUSES } from './shell/status-mark.tsx';
@@ -258,6 +259,7 @@ import {
 } from './lib/store.tsx';
 import type { SpeechAssets } from './lib/stt/on-device-voices.ts';
 import { createSurfaceEventHub } from './lib/surface-control.ts';
+import type { TranscriptHistoryStatus } from './lib/transcript-history.ts';
 import { tunnelNote } from './lib/tunnel-service.ts';
 import {
   AppBar,
@@ -1161,6 +1163,12 @@ function SessionRoute({
   const [error, setError] = useState<string | null>(null);
   /** The daemon can prove no transcript is this session's: Chat cannot fill and no send can be confirmed. */
   const [transcriptUnbound, setTranscriptUnbound] = useState(false);
+  /** What the top of the chat offers: older messages to load, the first message, or nothing to page. */
+  const [historyStatus, setHistoryStatus] = useState<TranscriptHistoryStatus>('unavailable');
+  const history = useMemo<TranscriptHistoryControl>(
+    () => ({ status: historyStatus, loadOlder: () => void refreshControl.current?.loadOlder() }),
+    [historyStatus],
+  );
   /** The highest event sequence this browser has actually received. `0` means none yet. */
   const [liveCursor, setLiveCursor] = useState(0);
   /**
@@ -1292,6 +1300,7 @@ function SessionRoute({
     store.backgroundFresh.setOpen(cacheScope);
     setError(null);
     setTranscriptUnbound(false);
+    setHistoryStatus('unavailable');
     const inMemory = store.sessionCache.peekTranscript(cacheScope);
     drawCached(inMemory);
     // Not in memory (a reload): the stored copy, unless the daemon has answered first.
@@ -1316,6 +1325,12 @@ function SessionRoute({
               void store.attention.revalidate(connection, agendaScope).catch(() => undefined);
               return await api.logs(id);
             },
+            // The tail is read as a page, so the reader can scroll up past it (`lib/transcript-history.ts`).
+            logPage: async (id, options) => {
+              if (options === undefined)
+                void store.attention.revalidate(connection, agendaScope).catch(() => undefined);
+              return await api.logPage(id, options);
+            },
             get: async id => await store.fleet.fetchSession(connection, { daemonId, sessionId: id }),
             sends: async id => await readLedgerSends(api, id),
             queue: async id => await readSessionQueue(api, id),
@@ -1328,6 +1343,7 @@ function SessionRoute({
             setEntries(next);
           },
           onLog: log => store.sessionCache.saveTranscript(cacheScope, { log }, generation),
+          onHistory: setHistoryStatus,
           onSends: rows => {
             store.sessionCache.saveTranscript(cacheScope, { sends: rows }, generation);
             ledger.onSends(parseLedgerSendsResponse(rows));
@@ -1649,6 +1665,7 @@ function SessionRoute({
             // reference surface as a fleet with nobody in it.
             daemonSessions={fleetSlice?.sessions ?? undefined}
             entries={placedEntries}
+            history={history}
             onRetry={retrySend}
             onCancel={cancelSend}
             onSubmit={submitSend}
