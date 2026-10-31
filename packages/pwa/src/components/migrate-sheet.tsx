@@ -643,7 +643,9 @@ export function MigrateSheet({
         </form>
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto scroll-thin px-panel pb-5">
-          <div className="mx-auto grid w-full max-w-2xl gap-4 py-4">
+          {/* `minmax(0, 1fr)`, not the grid's `auto` track: an auto track grows to its longest unbroken line —
+              a daemon command, a job's argv — and on a phone that pushed the cards past the sheet's gutter. */}
+          <div className="mx-auto grid w-full max-w-2xl grid-cols-[minmax(0,1fr)] gap-4 py-4">
             {phase === 'refused' && failure ? (
               <section
                 aria-labelledby={`${headingId}-refused-heading`}
@@ -834,7 +836,7 @@ function AgentJobsAsk({
       </ul>
       {asked !== null || ask.state === 'cleared' ? null : (
         <Button
-          className="mt-3 min-h-[44px] w-full justify-center sm:w-auto"
+          className="!h-auto !whitespace-normal mt-3 min-h-[44px] w-full justify-center py-2 text-center sm:w-auto"
           data-agent-jobs-ask-button=""
           disabled={ask.state === 'asking'}
           onClick={onAsk}

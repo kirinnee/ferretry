@@ -168,6 +168,25 @@ try {
           await ask.scrollIntoViewIfNeeded();
           const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
           if (overflow > 0) fail(`${state}/${viewport.name}/${scheme} scrolls sideways by ${overflow}px`);
+          // The card must keep the sheet's side gutter: a grid track that grows to its longest unbroken line
+          // pushes it past the edge while the page itself never scrolls sideways.
+          const edges = await page.evaluate(() => {
+            const box = document.querySelector('[data-agent-jobs-ask]')?.closest('section')?.getBoundingClientRect();
+            return box === undefined ? null : { left: box.left, right: window.innerWidth - box.right };
+          });
+          process.stdout.write(`   card gutter ${state}/${viewport.name}/${scheme}: ${JSON.stringify(edges)}\n`);
+          if (edges === null || edges.left < 8 || edges.right < 8)
+            fail(`${state}/${viewport.name}/${scheme} card runs into the edge: ${JSON.stringify(edges)}`);
+          // Nothing inside the card may be wider than the card: a nowrap button label is the usual offender.
+          const spill = await page.evaluate(() => {
+            const card = document.querySelector('[data-agent-jobs-ask]');
+            if (card === null) return [];
+            const right = card.getBoundingClientRect().right;
+            return [...card.querySelectorAll<HTMLElement>('button, p')]
+              .filter(node => node.scrollWidth > node.clientWidth + 1 || node.getBoundingClientRect().right > right + 1)
+              .map(node => (node.textContent ?? '').trim().slice(0, 30));
+          });
+          if (spill.length > 0) fail(`${state}/${viewport.name}/${scheme} spills out of the card: ${spill.join(', ')}`);
           const floor = viewport.touch ? 44 : 24;
           const small = await page.evaluate(
             minimum =>
