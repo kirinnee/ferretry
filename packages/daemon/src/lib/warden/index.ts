@@ -11,6 +11,7 @@ export * from './failover.ts';
 export * from './feed.ts';
 export * from './focus-card.ts';
 export * from './jev-checks.ts';
+export * from './jev-tree.ts';
 export * from './leftovers.ts';
 export * from './liveness.ts';
 export * from './liveness-monitor.ts';

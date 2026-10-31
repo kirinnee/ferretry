@@ -22,6 +22,7 @@
 import {
   SessionStatusSchema,
   TaskRefSchema,
+  WARDEN_INVESTIGATOR_MAX_SEQUENCE,
   type WardenAction,
   WardenActionSchema,
   WardenActorSchema,
@@ -34,7 +35,8 @@ import {
   WardenJevActsSchema,
   type WardenJevBefore,
   WardenJevBeforeSchema,
-  WARDEN_INVESTIGATOR_MAX_SEQUENCE,
+  WardenJevPathSchema,
+  type WardenJevPathStep,
   WardenVerdictKindSchema,
 } from '@ferretry/protocol';
 import { z } from 'zod';
@@ -270,6 +272,10 @@ export interface WardenJevHandoff {
   readonly recommends?: string;
   readonly reason?: string;
   readonly failure?: string;
+  /** The decision tree's path (`jev-tree.ts`), root first: the facts the daemon saw and Jev's answers. */
+  readonly path?: readonly WardenJevPathStep[];
+  /** The node Jev was not sure enough of: the question the owner is asked. */
+  readonly node?: string;
 }
 
 const JevHandoffSchema = z.object({
@@ -280,6 +286,8 @@ const JevHandoffSchema = z.object({
   recommends: z.string().min(1).optional(),
   reason: z.string().min(1).optional(),
   failure: z.string().min(1).optional(),
+  path: WardenJevPathSchema.optional(),
+  node: z.string().min(1).max(64).optional(),
 }) satisfies z.ZodType<unknown, WardenJevHandoff>;
 
 /** How many hand-ons the state keeps: newest first, the rest dropped. */

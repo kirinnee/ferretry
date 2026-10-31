@@ -4,9 +4,11 @@
  *
  * ═══ JEV IS THE FIRST RESPONDER ═══
  *
- * Jev answers one question about a flag — "what should happen now?" — and its vocabulary is `leave`,
- * one of the acts that fit the flag ({@link JEV_ACTS_BY_KIND}: nudge, resume, restart, failover, stop),
- * or `unsure` (`speedups/jev.ts`). What it says is believed only as far as {@link firstResponse} allows:
+ * Jev walks a decision tree of yes/no questions about a flag (`jev-tree.ts`): the daemon answers the facts,
+ * Jev the judgements, and the leaf it reaches is `leave` or one of the acts that fit the flag
+ * ({@link JEV_ACTS_BY_KIND}: nudge, resume, restart, failover, stop). The tree holds every answer on its path
+ * to the leaf's bar and names the first one below it; the leaf it reaches is believed only as far as
+ * {@link firstResponse} allows:
  *
  * - `leave` at or above `guard.threshold` clears the flag, exactly as an investigation's LEAVE does;
  * - an act is CARRIED OUT only when Jev is at least as sure as the owner's bar for that act
@@ -49,18 +51,20 @@
  */
 
 import type {
+  WardenCap,
   WardenCaps,
-  WardenJevBefore,
   WardenGuardFailureCode,
   WardenInvestigationOrigin,
+  WardenJevAct,
+  WardenJevActs,
+  WardenJevBefore,
+  WardenLayerStatus,
+  WardenLayers,
+  WardenMayActAlone,
   WardenSavings,
   WardenSpend,
-  WardenCap,
-  WardenLayers,
-  WardenLayerStatus,
   WardenTriageReason,
 } from '@ferretry/protocol';
-import type { WardenJevAct, WardenJevActs, WardenMayActAlone } from '@ferretry/protocol';
 import type { TriageActVerdict, TriageDecision, TriageSnapshot } from '../speedups/jev.ts';
 import { type WardenAnomaly, type WardenAnomalyKind, wardenAnomalySubject } from './detect.ts';
 import { instantMs } from './time.ts';
