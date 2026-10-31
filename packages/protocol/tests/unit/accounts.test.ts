@@ -192,6 +192,23 @@ describe('the version 2 index and the store’s rules', () => {
     expect(AccountIndexDocumentSchema.safeParse(document).success).toBe(false);
   });
 
+  it('should refuse more accounts, or more sign-ins in all, than the store keeps', () => {
+    // Arrange
+    const many = Object.fromEntries(Array.from({ length: 257 }, (_, n) => [`A${String(n)}`, account(n)]));
+    const spread = Object.fromEntries(
+      Array.from({ length: 513 }, (_, n) => [SI(n), signIn(n % 33, terminal(`tool${String(n)}`, 'kirin-box'))]),
+    );
+    const owners = Object.fromEntries(Array.from({ length: 33 }, (_, n) => [`A${String(n)}`, account(n)]));
+
+    // Act / Assert
+    expect(AccountIndexDocumentSchema.safeParse(index(many, {})).error?.issues[0]?.message).toContain(
+      'at most 256 accounts',
+    );
+    expect(AccountIndexDocumentSchema.safeParse(index(owners, spread)).error?.issues[0]?.message).toContain(
+      'at most 512 sign-ins',
+    );
+  });
+
   it('should refuse more sign-ins on one account than the limit', () => {
     const signIns = Object.fromEntries(
       Array.from({ length: MAX_SIGN_INS_PER_ACCOUNT + 1 }, (_, n) => [
@@ -378,7 +395,17 @@ const LIST: AccountList = AccountListSchema.parse({
       autoApplyRecipe: true,
       proposals: [{ id: 'rp_0123456789abcdef', recipe: 'x', why: 'y', sessionId: 's', proposedAt: AT }],
     }),
-    signInSummary(3, 'VERCEL_WORK', site(['vercel.com'])),
+    signInSummary(3, 'VERCEL_WORK', site(['vercel.com']), {
+      observed: [
+        {
+          at: 'vercel.com',
+          surface: 'page',
+          identity: '0123456789abcdef',
+          since: AT,
+          masked: { value: true, observedAt: AT, count: 3 },
+        },
+      ],
+    }),
     signInSummary(4, 'UNRELATED', site(['vercel.com.evil.example'])),
   ],
 });
@@ -481,6 +508,7 @@ describe('what a ferret may learn about signing in (account.hint)', () => {
     expect(summaryText).toContain('<<<recipe\nContinue with Google, then [[GOOGLE]].\nrecipe>>>');
     expect(summaryText).toContain('account_propose and the sign-in id');
     expect(summaryText).toContain('passkeys are off');
+    expect(summaryText).toContain('Seen: vercel.com: password field (seen 3×, 2026-10-31).');
     expect(accountHintSummary('nothing.example', [])).toContain('No account for nothing.example');
   });
 });

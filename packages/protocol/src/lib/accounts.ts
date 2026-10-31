@@ -813,19 +813,18 @@ function placesOf(
   const domains = unique((record.domains ?? match).filter(domain => LoginDomainSchema.safeParse(domain).success));
   const places: Place[] = [];
   if (domains.length + match.length > 0) places.push({ kind: 'site', domains, match });
-  let dropped = keys.length - valid.length;
+  // A valid `tool@host` key is always a valid terminal place (the same character rules, and the key keeps its length);
+  // the whole document is checked once more before the migration answers.
   for (const key of valid) {
     const at = key.indexOf('@');
     if (at === -1) continue;
     const tool = key.slice(0, at);
     const target = key.slice(at + 1);
-    const place = TerminalPlaceSchema.safeParse(
+    places.push(
       isRemoteTool(tool) ? { kind: 'terminal', tool, host, dest: target } : { kind: 'terminal', tool, host: target },
     );
-    if (place.success) places.push(place.data);
-    else dropped += 1;
   }
-  return { places, dropped };
+  return { places, dropped: keys.length - valid.length };
 }
 
 /**
