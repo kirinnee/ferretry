@@ -405,7 +405,7 @@ describe('the file board store on a filesystem that cannot report identities', (
 
   it('should still read and write, and notice nothing it cannot prove', async () => {
     // Arrange
-    const { tasks, store } = await fixture(plain);
+    const { tasks, store, open } = await fixture(plain);
     await store.write('F1', async () => ({ task: card({ title: 'Board store' }), result: undefined }));
     await store.read();
     await writeFile(join(tasks, 'F1.json'), json(card({ title: 'Edited by hand' })));
@@ -417,6 +417,8 @@ describe('the file board store on a filesystem that cannot report identities', (
     // Assert
     should(changed).eql([]);
     should((await store.read()).cards[0]?.title).equal('Board store');
+    // A fresh store reads the files as they are, without identities to remember.
+    should((await open().read()).cards.map(entry => entry.title)).eql(['Board store']);
   });
 
   it('should notice nothing before the board was first read', async () => {
