@@ -149,7 +149,7 @@ export const WardenSweepIntervalSchema = z.literal(WARDEN_SWEEP_INTERVALS);
 export type WardenSweepInterval = z.infer<typeof WardenSweepIntervalSchema>;
 
 /** The leave bar's range: Jev may leave a flag alone only when it is at least this sure. */
-export const WARDEN_GUARD_THRESHOLD_RANGE = { min: 0.7, max: 0.95 } as const;
+export const WARDEN_GUARD_THRESHOLD_RANGE = { min: 0.3, max: 0.95 } as const;
 
 /**
  * Jev, as the Warden calls it. The endpoint, model and price are settings rather than constants because
@@ -177,12 +177,12 @@ export const WardenCapsSchema = z.object({
 export type WardenCaps = z.infer<typeof WardenCapsSchema>;
 
 /**
- * How sure Jev must be to carry out each act ALONE — riskier acts ask for more. Jev may leave a flag at
- * `guard.threshold`; every act here is held to its own, higher, bar. `1` means Jev never does that act
- * alone (the flag goes on to an investigation or to the owner). There is no failover row: Jev cannot
+ * How sure Jev must be to carry out each act ALONE. Jev may leave a flag at `guard.threshold`; every
+ * act here is held to its own bar — by default the same as the leave bar, except a stop, a notch higher
+ * because it is the most disruptive. `1` means Jev never does that act alone (the flag goes on to an investigation or to the owner). There is no failover row: Jev cannot
  * name the login to move to, so a failover it recommends always goes on.
  */
-export const WARDEN_JEV_ACT_THRESHOLD_RANGE = { min: 0.8, max: 1 } as const;
+export const WARDEN_JEV_ACT_THRESHOLD_RANGE = { min: 0.3, max: 1 } as const;
 const JevActThresholdSchema = z
   .number()
   .min(WARDEN_JEV_ACT_THRESHOLD_RANGE.min)
@@ -198,7 +198,7 @@ export type WardenJevActs = z.infer<typeof WardenJevActsSchema>;
 export type WardenJevAct = keyof WardenJevActs;
 
 /** The bars a new machine — or a settings document from before they existed — holds Jev to. */
-export const DEFAULT_WARDEN_JEV_ACTS: WardenJevActs = { nudge: 0.9, resume: 0.93, restart: 0.95, stop: 0.98 };
+export const DEFAULT_WARDEN_JEV_ACTS: WardenJevActs = { nudge: 0.7, resume: 0.7, restart: 0.7, stop: 0.8 };
 
 /**
  * What an investigation's verdict — or Jev, when it is sure enough — may do without asking. `stop` is off unless the owner turns it on.

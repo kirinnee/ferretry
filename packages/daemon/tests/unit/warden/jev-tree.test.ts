@@ -1,5 +1,4 @@
 import { describe, it } from 'bun:test';
-import { DEFAULT_WARDEN_JEV_ACTS } from '@ferretry/protocol';
 import should from 'should';
 import type { JevJudgement, JevYesNo } from '../../../src/lib/speedups/jev.ts';
 import {
@@ -54,10 +53,13 @@ const judgement = (
   ...extra,
 });
 
+/** The bars are pinned, not read from the defaults: these rows test the tree, not what ships. */
+const BARS = { nudge: 0.9, resume: 0.93, restart: 0.95, stop: 0.98 };
+
 /** Every act allowed alone, every act offered: only the bars decide. */
 const policy = (overrides: Partial<JevResponderPolicy> = {}): JevResponderPolicy => ({
   leaveThreshold: 0.85,
-  acts: DEFAULT_WARDEN_JEV_ACTS,
+  acts: BARS,
   mayActAlone: { nudge: true, resume: true, restart: true, failover: true, stop: true, closeLeftovers: true },
   offered: ['nudge', 'resume', 'restart', 'failover', 'stop'],
   ...overrides,
@@ -361,7 +363,7 @@ describe('acting on the tree', () => {
     should(
       treeResponse(facts(), restart, policy({ mayActAlone: { ...policy().mayActAlone, restart: false } })).outcome,
     ).match({ kind: 'escalate', why: 'not_allowed', recommends: 'restart' });
-    should(treeResponse(facts(), restart, policy({ acts: { ...DEFAULT_WARDEN_JEV_ACTS, restart: 1 } })).outcome).match({
+    should(treeResponse(facts(), restart, policy({ acts: { ...BARS, restart: 1 } })).outcome).match({
       kind: 'escalate',
       why: 'never_alone',
       recommends: 'restart',

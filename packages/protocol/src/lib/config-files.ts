@@ -227,7 +227,7 @@ export const DEFAULT_WARDEN_CONFIG: WardenConfig = {
   revive: DEFAULT_WARDEN_REVIVE,
   layers: { jev: false, llm: false },
   // Jev costs $0.042 per million input tokens, output free (docs.typesafe.ai/models.md, checked 2026-10-29).
-  guard: { threshold: 0.85, model: 'jev-latest', usdPerMillionInputTokens: 0.042 },
+  guard: { threshold: 0.7, model: 'jev-latest', usdPerMillionInputTokens: 0.042 },
   caps: { jevUsdPerDay: 0.5, investigationUsdPerDay: 2, maxInvestigationsPerHour: 6 },
   mayActAlone: { nudge: true, resume: true, restart: true, failover: true, stop: false, closeLeftovers: true },
   jevActs: DEFAULT_WARDEN_JEV_ACTS,

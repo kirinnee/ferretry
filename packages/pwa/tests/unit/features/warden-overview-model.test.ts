@@ -145,7 +145,7 @@ describe('wardenStatusLine', () => {
     expect(line).toEqual({
       lead: 'Rules + Jev + LLM',
       parts: [
-        'Jev clears at ≥0.85',
+        'Jev clears at ≥0.70',
         'claude-sonnet-5-5 investigations',
         'every 2 min',
         '$0.42 of $2.50 today',

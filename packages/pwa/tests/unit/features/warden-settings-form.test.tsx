@@ -212,8 +212,10 @@ describe('WardenSettingsForm', () => {
 
     // Assert
     expect(last(changes).layers).toEqual({ jev: true, llm: false });
+    expect(slider.props.min).toBe(0.3);
+    expect(slider.props.step).toBe(0.05);
     expect(last(changes).guard.threshold).toBe(0.9);
-    expect(text(renderer)).toContain('0.90');
+    expect(text(renderer)).toContain('90%');
     expect(text(renderer)).toContain('sent to TypeSafe AI (Jev)');
     expect(text(renderer)).toContain('Jev cap ($/day)');
     expect(text(renderer)).toContain('stays quiet for (min)');
@@ -399,7 +401,7 @@ const jevRow = (renderer: ReactTestRenderer, act: string) => {
 };
 
 describe('What Jev may do alone', () => {
-  it('should show one slider per act, from 80% to 100%, only while the Jev layer is on', () => {
+  it('should show one slider per act, from 30% to 100%, only while the Jev layer is on', () => {
     // Arrange
     const on = render(<Harness initial={wardenConfig(BOTH)} changes={[]} />);
     const off = render(<Harness initial={wardenConfig(LLM)} changes={[]} />);
@@ -410,13 +412,13 @@ describe('What Jev may do alone', () => {
     // Assert
     expect(text(on)).toContain('What Jev may do alone');
     expect(text(on)).toContain('Otherwise the flag goes to an investigation, or to you.');
-    expect(rows.map(row => flat(row.shown))).toEqual(['90%', '93%', '95%', '98%']);
+    expect(rows.map(row => flat(row.shown))).toEqual(['70%', '70%', '70%', '80%']);
     for (const { slider } of rows) {
-      expect(slider.props.min).toBe(0.8);
+      expect(slider.props.min).toBe(0.3);
       expect(slider.props.max).toBe(1);
-      expect(slider.props.step).toBe(0.01);
+      expect(slider.props.step).toBe(0.05);
     }
-    expect(rows[0]?.slider.props['aria-valuetext']).toBe('90% sure');
+    expect(rows[0]?.slider.props['aria-valuetext']).toBe('70% sure');
     expect(text(off)).not.toContain('What Jev may do alone');
     expect(off.root.findAll(node => node.props?.['data-warden-jev-act'] !== undefined)).toHaveLength(0);
     run(() => on.unmount());
@@ -433,11 +435,11 @@ describe('What Jev may do alone', () => {
 
     // Assert
     const stop = jevRow(renderer, 'stop');
-    expect(last(changes).jevActs).toEqual({ nudge: 0.9, resume: 0.93, restart: 0.95, stop: 1 });
+    expect(last(changes).jevActs).toEqual({ nudge: 0.7, resume: 0.7, restart: 0.7, stop: 1 });
     expect(wardenConfigPatchFrom(wardenConfig(BOTH), last(changes))).toEqual({ jevActs: { stop: 1 } });
     expect(flat(stop.shown)).toBe('Never');
     expect(stop.slider.props['aria-valuetext']).toBe('Never alone');
-    expect(flat(jevRow(renderer, 'nudge').shown)).toBe('90%');
+    expect(flat(jevRow(renderer, 'nudge').shown)).toBe('70%');
     run(() => renderer.unmount());
   });
 
