@@ -66,6 +66,10 @@ import {
   type FleetCredentialList,
   FY_DEFAULT_DAEMON_PORT,
   type Harness,
+  type InputEvent,
+  InputEventSchema,
+  type InputQuarantineEvent,
+  InputQuarantineEventSchema,
   ioPressureView,
   type LearningConfig,
   localOnlyNotice,
@@ -499,6 +503,8 @@ import { ProcIoPressure } from '../src/adapters/system/proc-io-pressure.ts';
 import { SystemdUserSliceReader } from '../src/adapters/system/user-slice-reader.ts';
 import {
   ManagedTerminalService,
+  RedactingTerminalStreamService,
+  runProgram,
   systemLoginShell,
   TerminalRuntimeError,
   TerminalServiceError,
@@ -572,7 +578,6 @@ import {
   SessionCards,
   type SessionLivenessSource,
 } from '../src/lib/board/index.ts';
-import { isSubFerret, nudgeTarget } from '../src/lib/sub-ferret/index.ts';
 import { GitHubWatcher, UnfiledRefiler } from '../src/lib/board-github/index.ts';
 import { BoardImporter, LaneSetImportProjects, type TaskAssigneeCandidate } from '../src/lib/board-import/index.ts';
 import {
@@ -597,6 +602,7 @@ import { type RuntimeNamesPort, resolveStartAccount } from '../src/lib/fleet/sta
 import { polledDirectoryLimitations } from '../src/lib/performance/fallbacks.ts';
 import { withSystemCallsign } from '../src/lib/runtime/mounts/system-session-control.ts';
 import { ProcessHistory, SessionProcessService } from '../src/lib/session/processes/index.ts';
+import { isSubFerret, nudgeTarget } from '../src/lib/sub-ferret/index.ts';
 import { OpenUrlService } from '../src/lib/system/open-url.ts';
 
 /** The ordinary revive a send uses, as the auto-resume pass sees it. */
@@ -643,6 +649,7 @@ import {
   AgendaService,
   AgendaTurnNudge,
   AgendaWaker,
+  type AgentInputPort,
   AgentFiles,
   AgentSendFailureNotifier,
   AgentToolService,
@@ -775,6 +782,8 @@ import {
   dialledRelayUrl,
   directCarrierSocketRoute,
   doneMarkerCertifiesTurn,
+  EphemeralAwareRedactor,
+  EphemeralValues,
   EventLoopLagMeter,
   type ExecutableResolverPort,
   effectiveAnalyticsPricing,
@@ -829,6 +838,11 @@ import {
   INSTRUCTIONS_FEATURE,
   InferredLaneProposer,
   InitialAttachmentError,
+  InputAgendaAdapter,
+  InputAgentNotifierAdapter,
+  InputAuditAdapter,
+  InputCardClosedObserver,
+  InputRequestService,
   InstructionRefresh,
   type InterruptedLaunchOutcome,
   InterruptedLaunchReconciler,
@@ -940,6 +954,7 @@ import {
   previousConversation,
   publishableDirectCarrier,
   QUEUE_ANSWER_WAIT_MS,
+  QuarantineRegistry,
   QueueDeliverer,
   QueueingSends,
   QueueRefused,
@@ -1101,6 +1116,7 @@ import {
   StructuredQuestionService,
   SttEnhancementService,
   type SttEnhancementSubsystem,
+  SttyTerminalModes,
   SurfaceControl,
   SystemCallsignIssuer,
   searchTranscript,
@@ -1121,7 +1137,10 @@ import {
   type TerminalRuntimePort,
   type TerminalSessionResolver,
   type TerminalSubsystem,
+  type TextRedactor,
+  type TmuxCommandPort,
   TmuxController,
+  TmuxInputTarget,
   type TmuxLaunchGuard,
   type TranscriptEvent,
   type TranscriptFileResolver,
@@ -6015,6 +6034,9 @@ function createAgentToolsSubsystem(input: {
   readonly browser: MountedSubsystems['browser'];
   readonly audit: AuditLog;
   readonly policy: AgentControlPolicy;
+  readonly input: AgentInputPort;
+  readonly scrub: (sessionId: string, text: string) => string;
+  readonly quarantinedUntil: (sessionId: string, names: readonly (string | undefined)[]) => number | undefined;
   readonly files: AgentFiles;
   /** The vault redactor every operator read is scrubbed by; a page's text goes through it too. */
   readonly redactor: Pick<SecretRedactor, 'batch'>;
@@ -6048,6 +6070,9 @@ function createAgentToolsSubsystem(input: {
       policy: input.policy,
       files: input.files,
       audit: input.audit,
+      input: input.input,
+      scrub: input.scrub,
+      quarantinedUntil: input.quarantinedUntil,
       redactor: input.redactor,
       binaryName: CLIENT_NAME,
       clock,
@@ -6055,6 +6080,105 @@ function createAgentToolsSubsystem(input: {
     }),
     identities: agentIdentities(input.storage),
   };
+}
+
+/** How often a request that outlived its time is found and ended, so its card does not wait for the next event. */
+const INPUT_REQUEST_SWEEP_MS = 15_000;
+
+const INPUT_ENDED_SESSION_STATUSES: ReadonlySet<string> = new Set(['completed', 'failed', 'stopped']);
+
+/**
+ * The input bridge: tmux and the kernel for what a terminal is doing, the agenda for the owner's form, and
+ * the session journal and audit log for names and flags. Nothing built here stores a value except the
+ * service's own in-memory map of values to scrub.
+ */
+function createInputRequestService(input: {
+  readonly storage: DaemonStorage;
+  readonly terminals: TerminalRuntimePort;
+  readonly tmux: TmuxCommandPort;
+  readonly agenda: AgendaService;
+  readonly agentReplies: AgendaReplyBatcher;
+  readonly audit: AuditLog;
+  readonly values: EphemeralValues;
+  readonly quarantine: QuarantineRegistry;
+  readonly redact: (text: string) => Promise<string>;
+}): InputRequestService {
+  const clock = { now: () => Date.now() };
+  return new InputRequestService({
+    target: new TmuxInputTarget(
+      input.tmux,
+      {
+        locate: async (sessionId, key) =>
+          (await input.terminals.list()).find(
+            record => record.ownerId === sessionId && (record.name === key || record.id === key),
+          ),
+      },
+      new SttyTerminalModes(process.platform, runProgram),
+      runProgram,
+    ),
+    agenda: new InputAgendaAdapter(input.agenda),
+    notifier: new InputAgentNotifierAdapter(
+      async (sessionId, key, message) => await input.agentReplies.add(sessionId, key, message),
+    ),
+    journal: {
+      publish: async (sessionId, event) => {
+        const id = tryParseSessionId(sessionId);
+        if (id !== undefined) await input.storage.append(id, event.type, { ...event });
+      },
+      quarantine: async (sessionId, event) => {
+        const id = tryParseSessionId(sessionId);
+        if (id !== undefined) await input.storage.append(id, event.type, { ...event });
+      },
+      quarantines: async sessionId => {
+        const id = tryParseSessionId(sessionId);
+        const events: InputQuarantineEvent[] = [];
+        if (id === undefined || input.storage.findSession(id) === undefined) return events;
+        for (let after = 0; ; ) {
+          const page = await input.storage.replay(id, after, 10_000);
+          for (const recorded of page.events) {
+            const parsed = recorded.type.startsWith('surface.input_quarantine')
+              ? InputQuarantineEventSchema.safeParse(recorded.data)
+              : undefined;
+            if (parsed?.success === true) events.push(parsed.data);
+          }
+          if (!page.hasMore || page.nextSequence === undefined) return events;
+          after = page.nextSequence;
+        }
+      },
+      history: async sessionId => {
+        const id = tryParseSessionId(sessionId);
+        const events: InputEvent[] = [];
+        if (id === undefined || input.storage.findSession(id) === undefined) return events;
+        for (let after = 0; ; ) {
+          const page = await input.storage.replay(id, after, 10_000);
+          for (const recorded of page.events) {
+            const parsed = recorded.type.startsWith('surface.input_')
+              ? InputEventSchema.safeParse(recorded.data)
+              : undefined;
+            if (parsed?.success === true) events.push(parsed.data);
+          }
+          if (!page.hasMore || page.nextSequence === undefined) return events;
+          after = page.nextSequence;
+        }
+      },
+    },
+    audit: new InputAuditAdapter(input.audit),
+    clock,
+    ids: { requestId: () => crypto.randomUUID().replaceAll('-', '') },
+    timers: { after: async milliseconds => await Bun.sleep(milliseconds) },
+    sessions: {
+      ended: async sessionId => {
+        const id = tryParseSessionId(sessionId);
+        if (id === undefined || input.storage.findSession(id) === undefined) return true;
+        const state = SessionStateSchema.safeParse(await input.storage.readState(id));
+        return state.success && INPUT_ENDED_SESSION_STATUSES.has(state.data.status);
+      },
+      all: async () => input.storage.listSessions().map(session => session.id),
+    },
+    values: input.values,
+    quarantine: input.quarantine,
+    redact: input.redact,
+  });
 }
 
 /** Who an agent is, from the session credential it presents — the one resolver every agent route uses. */
@@ -6126,6 +6250,8 @@ function createTerminalSubsystem(
   storage: DaemonStorage,
   runtime: TerminalRuntimePort,
   clock: MillisecondClockPort,
+  redactor: TextRedactor,
+  quarantine: QuarantineRegistry,
 ): TerminalSubsystem {
   const sessions: TerminalSessionResolver = {
     resolve: async reference => {
@@ -6192,8 +6318,18 @@ function createTerminalSubsystem(
      * frame, bounds unwritten input, and drops output for a viewer that has stopped reading — the
      * mount hands it a socket and nothing more.
      */
-    stream: async (sessionId, terminalId, downstream) =>
-      new TerminalStreamBridge(service, sessionId, terminalId, downstream, terminalScheduler),
+    stream: async (sessionId, terminalId, downstream, options) =>
+      new TerminalStreamBridge(
+        new RedactingTerminalStreamService(
+          service,
+          redactor,
+          options?.reveal === true ? undefined : (session, terminal) => quarantine.until(session, [terminal]),
+        ),
+        sessionId,
+        terminalId,
+        downstream,
+        terminalScheduler,
+      ),
   };
 }
 
@@ -7091,10 +7227,17 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   // child printed is a mask by the time anybody sees it. Read `lib/secrets/redaction.ts` for what
   // that does and does not promise — in particular that a value an agent deliberately transformed is
   // not recognisable, and this is not a defence against one that is trying.
-  const secretRedactor = new SecretRedactor(secretVault);
   // Its own executor: a learning verdict must not queue behind another document's transaction, and the
   // snapshots share no file.
   const learningBoard = new LearningSerialExecutor();
+  // The values the daemon has just typed for the owner are masked at the SAME boundary as a vault secret:
+  // every read below that takes this redactor (screen, transcript, journal, processes) hides them too.
+  const justTyped = new EphemeralValues({ now: () => Date.now() });
+  const secretRedactor = new EphemeralAwareRedactor(new SecretRedactor(secretVault), justTyped);
+  // The terminals a secret was just typed into, kept from an agent and from a viewer for a window.
+  const quarantined = new QuarantineRegistry({ now: () => Date.now() });
+  // Held whole until the journal has been replayed: a restart must not open a terminal the last run closed.
+  quarantined.lock();
   // ONE executor for the callsign ledger. It is what makes a claim atomic across concurrent starts:
   // the read-modify-write of that one file must never interleave with another start's.
   const callsignClaims = new KeyedSerialExecutor();
@@ -9755,6 +9898,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // Read lazily: the service is built just below, and this is only called after it commits.
         { raise: async (...parameters) => await agenda.raise(...parameters) },
       );
+      // Built after the agenda it reads and writes; an owner's dismissal heard before then has nothing to cancel.
+      let inputRequests: InputRequestService | undefined;
       const agenda = new AgendaService(
         agendaBoards,
         clock,
@@ -9774,6 +9919,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           new AgendaReplyDelivery(agendaReplies, CLIENT_NAME),
           // A board that now leaves an idle ferret stopped on the owner, or an item whose deadline is near.
           agendaBuzz,
+          // The owner dismissing an input card without its form cancels the request behind it.
+          new InputCardClosedObserver(async (sessionId, id) => await inputRequests?.cardDismissed(sessionId, id)),
           // The owner's answer to a harness question, typed into its form. DETACHED: a drive watches the
           // pane for seconds, and the answer is already on the board.
           {
@@ -9828,6 +9975,27 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       });
       setInterval(sweepDeadlines, AGENDA_DEADLINE_SWEEP_MS).unref();
       setTimeout(sweepDeadlines, 30_000).unref();
+      // An agent stuck at a password prompt asks the owner through an agenda card (docs/input-requests.md). The value
+      // lives only in this process's memory and in the one tmux write; the journal and the audit log carry names and flags.
+      const inputRequestService = createInputRequestService({
+        storage,
+        terminals,
+        tmux,
+        agenda,
+        agentReplies: agendaReplies,
+        audit: auditLog,
+        values: justTyped,
+        quarantine: quarantined,
+        redact: async text => await secretRedactor.redact(text),
+      });
+      inputRequests = inputRequestService;
+      const sweepInputRequests = asActivity(
+        activities,
+        'input-requests',
+        async () => await inputRequestService.sweep(),
+      );
+      void asActivity(activities, 'input-requests-restore', async () => await inputRequestService.restore())();
+      setInterval(sweepInputRequests, INPUT_REQUEST_SWEEP_MS).unref();
       // The board's own sweep (`lib/board/sweep.ts`): each minute a stale card's ferret is nudged, and a dependent
       // card's assignee told it can go ahead, through the ordinary send path. Nobody is sent board news.
       const boardSweep = new BoardSweep({
@@ -10491,7 +10659,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // with its last known word rather than a "Checking" that would outlive the read.
       credentialList = async () => await fleetCredentials.list({ settled: true });
       paneLimits = async () => await storagePaneLimits(storage, Date.now());
-      const terminalSubsystem = createTerminalSubsystem(storage, terminals, { now: () => Date.now() });
+      const terminalSubsystem = createTerminalSubsystem(
+        storage,
+        terminals,
+        { now: () => Date.now() },
+        secretRedactor,
+        quarantined,
+      );
       // A session browser nobody watches or drives stops after this long, so a forgotten one does not
       // hold the one shared profile away from every other session.
       const browserService = new BrowserSessionService(sessions, browserLauncher, () => Date.now(), {
@@ -11297,6 +11471,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         terminals: terminalSubsystem,
         browserLogin,
         browser: browserHost,
+        inputRequests: inputRequestService,
         browserProxy: {
           tester: new BrowserProxyTester({
             saved: async () => (await declaredAccountModel())?.machine.browserProxy,
@@ -11313,6 +11488,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           browser: browserHost,
           audit: auditLog,
           policy: agentControl,
+          input: inputRequestService,
+          scrub: (sessionId, text) => inputRequestService.scrub(sessionId, text),
+          quarantinedUntil: (sessionId, names) => inputRequestService.quarantinedUntil(sessionId, names),
           files: new AgentFiles({
             fs: new NodeAgentFilesystem(),
             folderOf: async sessionId => {

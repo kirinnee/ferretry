@@ -31,6 +31,13 @@ const EVENT_WORDS: Readonly<Record<AuditEvent, string>> = {
   'agent.prompted': 'An agent was given a message',
   'agent.tool': 'An agent drove a terminal or browser',
   'surface.control': 'A person took over or handed back a terminal or browser',
+  'input.requested': 'A ferret asked for a value to be typed',
+  'input.delivered': 'A value was typed into a terminal or page for a ferret',
+  'input.refused': 'A value for a ferret was not typed',
+  'input.expired': 'A request for a value ran out of time',
+  'input.cancelled': 'A request for a value was cancelled',
+  'input.quarantine_ended': 'A terminal that a ferret was kept out of was opened up again',
+  'input.quarantine_revealed': 'A viewer chose to see a terminal a ferret was kept out of',
   'link.opened': 'A link was opened in this computer’s browser',
 };
 

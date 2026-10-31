@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { DISMISS_ACTION, type InboxAction } from '../../src/lib/agenda-inbox.ts';
-import { withComposerNote } from '../../src/lib/agenda-reply.ts';
+import { composerNoteFor, inputDraftDiscarded, withComposerNote } from '../../src/lib/agenda-reply.ts';
 
 const pick: Extract<InboxAction, { kind: 'respond' }> = {
   kind: 'respond',
@@ -41,5 +41,30 @@ describe('withComposerNote', () => {
     expect(withComposerNote(own, 'extra')).toBe(own);
     const discuss: InboxAction = { kind: 'discuss', label: 'Discuss' };
     expect(withComposerNote(discuss, 'extra')).toBe(discuss);
+  });
+});
+
+describe('composerNoteFor', () => {
+  it('never lets the composer ride on an input card, whose owner may have a password in it', () => {
+    const note = composerNoteFor({ kind: 'input' }, 'hunter2-PASSWORD');
+
+    expect(note).toBe('');
+    expect(withComposerNote(DISMISS_ACTION, note)).toBe(DISMISS_ACTION);
+  });
+
+  it('hands the composer through for every other kind of item', () => {
+    expect(composerNoteFor({ kind: 'task' }, 'already shipped')).toBe('already shipped');
+  });
+});
+
+describe('inputDraftDiscarded', () => {
+  it('empties the composer for an input card with anything in it, spaces included', () => {
+    expect(inputDraftDiscarded({ kind: 'input' }, 'hunter2')).toBe(true);
+    expect(inputDraftDiscarded({ kind: 'input' }, '   ')).toBe(true);
+  });
+
+  it('leaves an empty composer, and every other kind, alone', () => {
+    expect(inputDraftDiscarded({ kind: 'input' }, '')).toBe(false);
+    expect(inputDraftDiscarded({ kind: 'task' }, 'text')).toBe(false);
   });
 });

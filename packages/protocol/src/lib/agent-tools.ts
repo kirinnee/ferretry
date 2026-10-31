@@ -43,6 +43,17 @@ import {
 } from './browser-pointer.ts';
 import { InstantSchema } from './common.ts';
 import type { AgentConfigToolName } from './config-files.ts';
+import { AgendaIdSchema } from './agenda.ts';
+import {
+  INPUT_MAX_EXPIRY_SECONDS,
+  INPUT_PROMPT_MAX_LENGTH,
+  InputAgentViewSchema,
+  InputSensitivitySchema,
+  InputSubmitModeSchema,
+} from './input-request.ts';
+import { SurfaceKeySchema, SurfaceKindSchema, SurfaceNameSchema } from './surface-names.ts';
+
+export * from './surface-names.ts';
 
 /**
  * AGENT TOOLS — the wire an agent (and a script, and a person) drives terminals and browser pages
@@ -109,35 +120,6 @@ export const AGENT_TOOL_MAX_UPLOAD_CALL_BYTES = 200 * 1024 * 1024;
 export const AGENT_TOOL_MAX_DOWNLOAD_BYTES = 500 * 1024 * 1024;
 /** The longest sentence an agent may leave the owner when it hands a surface over. */
 export const AGENT_TOOL_MAX_ASK_CHARS = 280;
-
-/**
- * A surface's human name: a lowercase letter, then up to 31 lowercase letters, digits or dashes.
- *
- * NEVER TWELVE HEX CHARACTERS, because that is what a terminal ID looks like, and `%terminal:<key>`
- * accepts either: a name that could also be an id would make one reference mean two shells.
- */
-export const SURFACE_NAME_PATTERN = /^[a-z][a-z0-9-]{0,31}$/u;
-const TERMINAL_ID_SHAPE = /^[a-f0-9]{12}$/u;
-
-export const SurfaceNameSchema = z
-  .string()
-  .regex(SURFACE_NAME_PATTERN, 'a name is a lowercase letter, then up to 31 lowercase letters, digits or dashes')
-  .refine(value => !TERMINAL_ID_SHAPE.test(value), 'a name may not look like a terminal id (twelve hex characters)');
-export type SurfaceName = z.infer<typeof SurfaceNameSchema>;
-
-/**
- * How a call names an EXISTING surface: its name, or the id the daemon minted for it (`%terminal:`
- * references written before names existed still work). A `%terminal:` / `%browser:` prefix is
- * accepted and dropped, so an agent can pass a reference exactly as a person wrote it.
- */
-export const SurfaceKeySchema = z
-  .string()
-  .trim()
-  .transform(value => value.replace(/^%(?:terminal|browser):/u, ''))
-  .pipe(z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u, 'not a surface name or id'));
-
-export const SurfaceKindSchema = z.enum(['terminal', 'browser']);
-export type SurfaceKind = z.infer<typeof SurfaceKindSchema>;
 
 /**
  * The keys `terminal.send` can press, by name. A closed list rather than raw escape sequences: the
@@ -254,6 +236,27 @@ export const AgentToolCallSchema = z.discriminatedUnion('tool', [
     })
     .refine(call => (call.text === undefined) !== (call.exit === undefined), 'wait for text or for exit, not both'),
   z.strictObject({ tool: z.literal('terminal.close'), name: SurfaceKeySchema }),
+  z.strictObject({
+    tool: z.literal('terminal.request_input'),
+    name: SurfaceKeySchema,
+    /** What the owner is told the value is for: shown as "the agent says", never as fact. */
+    prompt: z.string().trim().min(1).max(INPUT_PROMPT_MAX_LENGTH),
+    sensitivity: InputSensitivitySchema,
+    submit: InputSubmitModeSchema.optional(),
+    expiresInSeconds: z.number().int().min(30).max(INPUT_MAX_EXPIRY_SECONDS).optional(),
+    blocking: z.boolean().optional(),
+    chain: AgendaIdSchema.optional(),
+  }),
+  z.strictObject({
+    tool: z.literal('input.wait'),
+    /** The card raised by `*.request_input`, written `!A7` or `A7`. */
+    id: z
+      .string()
+      .trim()
+      .transform(value => value.replace(/^!/u, ''))
+      .pipe(AgendaIdSchema),
+    timeoutMs: z.number().int().min(100).max(AGENT_TOOL_MAX_WAIT_MS).optional(),
+  }),
   z.strictObject({
     tool: z.literal('terminal.ask_owner'),
     name: SurfaceKeySchema,
@@ -568,6 +571,7 @@ const REPEATABLE_AGENT_TOOLS: ReadonlySet<string> = new Set<AgentToolName | Agen
   'terminal.list',
   'terminal.read',
   'terminal.wait',
+  'input.wait',
   'browser.list',
   'browser.read',
   'browser.screenshot',
@@ -591,6 +595,8 @@ export const AGENT_TOOL_NAMES: readonly AgentToolName[] = [
   'terminal.wait',
   'terminal.close',
   'terminal.ask_owner',
+  'terminal.request_input',
+  'input.wait',
   'browser.list',
   'browser.open',
   'browser.navigate',
@@ -656,6 +662,8 @@ export const AgentToolResultSchema = z.strictObject({
   /** The screenshot's image type. Absent means PNG. */
   screenshotFormat: BrowserScreenshotFormatSchema.optional(),
   surfaces: z.array(AgentSurfaceSchema).optional(),
+  /** `*.request_input` and `input.wait` only: where the request stands. */
+  input: InputAgentViewSchema.optional(),
 });
 export type AgentToolResult = z.infer<typeof AgentToolResultSchema>;
 

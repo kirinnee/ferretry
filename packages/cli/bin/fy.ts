@@ -142,6 +142,9 @@ import {
   registerImportCommands,
   registerNewCommand,
 } from '../src/lib/import/index.ts';
+import { registerInputCommands } from '../src/lib/input/commands';
+import { InputController } from '../src/lib/input/controller';
+import { ProtocolInputGateway } from '../src/lib/input/gateway';
 import { registerInstructionsCommands } from '../src/lib/instructions/commands';
 import { registerLearningCommands } from '../src/lib/learning/commands';
 import { LearningController } from '../src/lib/learning/controller';
@@ -881,6 +884,20 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       async (words, options) => await runNotify(notifyPorts, words, options),
     );
   },
+  ({ program, world, client, ownSessionId }) =>
+    registerInputCommands(
+      program,
+      new InputController({
+        gateway: new ProtocolInputGateway(client),
+        out: world.io,
+        prompt: world.prompt,
+        interactive: world.interactive,
+        ownSessionId,
+        agentCredential: world.environment.FY_SESSION_BOARD_CAPABILITY,
+        now: () => Date.now(),
+        newDeliveryId: () => crypto.randomUUID(),
+      }),
+    ),
   ({ program, world, client, ownSessionId }) =>
     registerPinCommands(program, new PinController(new ProtocolPinGateway(client), world.io, ownSessionId)),
   ({ program, world, client }) =>

@@ -2,6 +2,9 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   configuredReferences,
+  coverageOf,
+  mergeRanges,
+  secretCoverage,
   earnedRecipes,
   expandSecretReferences,
   recipeOrigin,
@@ -197,5 +200,31 @@ describe('redaction refuses to destroy the text it is protecting', () => {
 
   it('should skip an empty value in JSON too', () => {
     should(redactJsonValue({ note: 'plain text' }, values({ BROKEN: '' }))).deepEqual({ note: 'plain text' });
+  });
+});
+
+describe('where known secrets sit in a text', () => {
+  it('should answer the positions of every occurrence, overlapping ones merged, and never a value', () => {
+    should(coverageOf('aXbXb', ['X'])).deepEqual([
+      { start: 1, end: 2 },
+      { start: 3, end: 4 },
+    ]);
+    should(coverageOf('abcdef', ['abc', 'cde'])).deepEqual([{ start: 0, end: 5 }]);
+    should(coverageOf('abc', [''])).deepEqual([]);
+    should(coverageOf('abc', ['zz'])).deepEqual([]);
+  });
+
+  it('should merge touching and nested ranges', () => {
+    should(
+      mergeRanges([
+        { start: 4, end: 6 },
+        { start: 0, end: 4 },
+        { start: 1, end: 2 },
+      ]),
+    ).deepEqual([{ start: 0, end: 6 }]);
+  });
+
+  it('should cover the values of a secret map', () => {
+    should(secretCoverage(`x ${TOKEN} y`, values({ TOKEN }))).deepEqual([{ start: 2, end: 2 + TOKEN.length }]);
   });
 });

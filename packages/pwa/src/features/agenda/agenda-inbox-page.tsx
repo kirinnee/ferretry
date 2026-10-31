@@ -68,7 +68,7 @@ import {
   skipSelection,
   stepSelection,
 } from '../../lib/agenda-inbox-list.ts';
-import { withComposerNote } from '../../lib/agenda-reply.ts';
+import { composerNoteFor, inputDraftDiscarded, withComposerNote } from '../../lib/agenda-reply.ts';
 import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
 import type { ModeFilter } from '../../lib/controls.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
@@ -166,9 +166,10 @@ const scopeOf = (card: InboxCard) => daemonSessionScope({ daemonId: card.daemonI
  */
 const answerWithDraft = (host: Pick<CardHostProps, 'inbox' | 'onNavigate'>, card: InboxCard, action: InboxAction) => {
   const composer = composerQuoteTarget(scopeOf(card));
-  const sent = withComposerNote(action, composer?.draft() ?? '');
+  const draft = composer?.draft() ?? '';
+  const sent = withComposerNote(action, composerNoteFor(card.item, draft));
   answerCard(host, card, sent);
-  if (sent !== action) composer?.replaceDraft('');
+  if (sent !== action || inputDraftDiscarded(card.item, draft)) composer?.replaceDraft('');
 };
 
 const copyWriter = browserClipboardWriter();

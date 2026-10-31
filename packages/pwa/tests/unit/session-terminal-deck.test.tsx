@@ -1174,3 +1174,124 @@ describe('SessionTerminalDeck on screen', () => {
     run(() => page.unmount());
   });
 });
+
+describe('SessionTerminalDeck quarantine', () => {
+  const until = '2026-10-30T10:02:00.000Z';
+
+  /** The button whose visible text is `label` — these two are worded, not icon buttons. */
+  const textButton = (page: Rendered, label: string) =>
+    page.root
+      .findAll(node => node.type === 'button')
+      .find(node => (node.props as { children?: unknown }).children === label);
+
+  const pressText = (page: Rendered, label: string): void => {
+    const button = textButton(page, label);
+    if (button === undefined) throw new Error(`no "${label}" button`);
+    (button.props as { onClick: () => void }).onClick();
+  };
+
+  const quarantinedDeck = (key: string) => {
+    const ended: string[] = [];
+    let held = [{ key, until }];
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST, { name: 'dev' })]), {
+      quarantines: async () => ({ quarantines: held }),
+      endQuarantine: async (_daemon, _scope, ended_key) => {
+        ended.push(ended_key);
+        held = [];
+        return { ended: true };
+      },
+    });
+    return { deck, ended };
+  };
+
+  test('offers both choices when the open terminal is quarantined, by its name or its id', async () => {
+    for (const key of ['dev', FIRST]) {
+      const { deck } = quarantinedDeck(key);
+      const page = mount(
+        <SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />,
+      );
+      await settle();
+      expect(textButton(page, 'Show anyway')).toBeDefined();
+      expect(textButton(page, 'End quarantine')).toBeDefined();
+      expect(json(page)).toContain('hidden from the ferret');
+      run(() => page.unmount());
+    }
+  });
+
+  test('shows nothing about a quarantine on another terminal, or none at all', async () => {
+    const { deck } = quarantinedDeck('someone-else');
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    await settle();
+    expect(textButton(page, 'Show anyway')).toBeUndefined();
+    expect(textButton(page, 'End quarantine')).toBeUndefined();
+    run(() => page.unmount());
+  });
+
+  test('"Show anyway" reconnects only this viewer with reveal on, and offers it once', async () => {
+    const { deck } = quarantinedDeck('dev');
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    await settle();
+    expect(deck.reveals).toEqual([false]);
+
+    run(() => pressText(page, 'Show anyway'));
+    await settle();
+    expect(deck.reveals).toEqual([false, true]);
+    expect(deck.sockets[0]?.closes[0]?.code).toBe(1000);
+    expect(textButton(page, 'Show anyway')).toBeUndefined();
+    expect(textButton(page, 'End quarantine')).toBeDefined();
+    run(() => page.unmount());
+  });
+
+  test('"End quarantine" posts the end route for the listed key, then reconnects without reveal', async () => {
+    const { deck, ended } = quarantinedDeck('dev');
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    await settle();
+
+    await runAsync(async () => {
+      pressText(page, 'End quarantine');
+      await Promise.resolve();
+    });
+    await settle();
+    expect(ended).toEqual(['dev']);
+    expect(deck.reveals).toEqual([false, false]);
+    expect(deck.sockets).toHaveLength(2);
+    expect(textButton(page, 'End quarantine')).toBeUndefined();
+    run(() => page.unmount());
+  });
+
+  test('says so and keeps the quarantine when the daemon refuses to end it', async () => {
+    const { deck } = quarantinedDeck('dev');
+    deck.dependencies.endQuarantine = async () => {
+      throw new DaemonResponseError(403, 'only the owner can end a quarantine');
+    };
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    await settle();
+    await runAsync(async () => {
+      pressText(page, 'End quarantine');
+      await Promise.resolve();
+    });
+    await settle();
+    expect(json(page)).toContain('only the owner can end a quarantine');
+    expect(textButton(page, 'End quarantine')).toBeDefined();
+    expect(deck.sockets).toHaveLength(1);
+    run(() => page.unmount());
+  });
+
+  test('stops reading quarantines when the deck goes away', async () => {
+    let reads = 0;
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]), {
+      quarantines: async () => {
+        reads += 1;
+        return { quarantines: [] };
+      },
+    });
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    await settle();
+    expect(reads).toBe(1);
+    run(() => page.unmount());
+    await runAsync(async () => {
+      await new Promise(resolve => setTimeout(resolve, 5_200));
+    });
+    expect(reads).toBe(1);
+  });
+});

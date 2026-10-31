@@ -9,6 +9,7 @@ import {
   type ApiSurface,
   admitPendingSocketFrame,
   errorResponse,
+  finalised,
   headersFrom,
   MAX_REQUEST_BODY_BYTES,
   queryFrom,
@@ -234,9 +235,10 @@ function wantsSocket(request: Request): boolean {
 
 /** The dispatcher's answer as a `Response`: the gzip bytes under `Content-Encoding` when it attached them. */
 function toResponse(response: ApiResponse): Response {
-  const headers = Object.fromEntries(response.headers);
-  if (response.gzip === undefined) return new Response(response.body, { status: response.status, headers });
-  return new Response(response.gzip, { status: response.status, headers: { ...headers, 'content-encoding': 'gzip' } });
+  const final = finalised(response);
+  const headers = Object.fromEntries(final.headers);
+  if (final.gzip === undefined) return new Response(final.body, { status: final.status, headers });
+  return new Response(final.gzip, { status: final.status, headers: { ...headers, 'content-encoding': 'gzip' } });
 }
 
 const CORS_METHODS = new Set(['DELETE', 'GET', 'PATCH', 'POST']);

@@ -1,20 +1,22 @@
 import {
   AGENDA_SCHEMA_VERSION,
+  AGENDA_URGENT_WAKE_MS,
   type AgendaAsk,
   type AgendaBrief,
+  type AgendaCardAnswer,
   type AgendaClearableField,
   type AgendaConfirms,
-  type AgendaCardAnswer,
   type AgendaDisposition,
   type AgendaErrorCode,
   type AgendaHistoryEntry,
   type AgendaId,
+  type AgendaInputRef,
   type AgendaItem,
   AgendaItemSchema,
   type AgendaKind,
+  type AgendaResponse,
   type AgendaRevisableField,
   type AgendaRevision,
-  type AgendaResponse,
   type AgendaSnapshot,
   type AgendaSource,
   type AgendaUndelivered,
@@ -22,14 +24,13 @@ import {
   agendaBriefRequiredProblems,
   agendaNoticeProblems,
   agendaOfferCloseProblems,
-  AGENDA_URGENT_WAKE_MS,
   agendaOptionDetailProblems,
   agendaWakeAt,
   MAX_AGENDA_DETAIL_LENGTH,
   MAX_AGENDA_HISTORY,
   MAX_AGENDA_PER_SESSION,
-  MAX_AGENDA_REVISIONS,
   MAX_AGENDA_RESOLUTIONS,
+  MAX_AGENDA_REVISIONS,
   type ResolvedAgendaItem,
   ResolvedAgendaItemSchema,
   type TaskRef,
@@ -38,7 +39,12 @@ import {
 /** Agent-raised requests are capped separately so automatic sources retain board capacity. */
 export const MAX_AGENT_AGENDA_PER_SESSION = 10;
 
-export type DaemonAgendaCause = 'source-reconciliation' | 'warden-escalation' | 'system' | 'harness-prompt';
+export type DaemonAgendaCause =
+  | 'source-reconciliation'
+  | 'warden-escalation'
+  | 'system'
+  | 'harness-prompt'
+  | 'input-request';
 
 /**
  * Provenance is a tagged value, not a user-supplied collection of nullable fields. The daemon
@@ -104,6 +110,8 @@ export interface RaiseAgendaRequest extends AgendaBrief, AgendaCardFields {
   readonly confirms?: AgendaConfirms;
   /** The board card the item belongs to, kept on the item as sent (`DAEMON_FEATURES.agendaTask`). */
   readonly task?: TaskRef;
+  /** The input request an `input` card presents (`AgendaInputRef`); only the daemon raises one. */
+  readonly input?: AgendaInputRef;
   /** The owner's one tap may close `task` too (`DAEMON_FEATURES.agendaOfferClose`); needs a card. */
   readonly offerClose?: true;
 }
@@ -623,6 +631,7 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
       ...(request.ping === true ? { ping: true as const } : {}),
       ...(request.confirms === undefined ? {} : { confirms: request.confirms }),
       ...(request.task === undefined ? {} : { task: request.task }),
+      ...(request.input === undefined ? {} : { input: request.input }),
       ...(request.offerClose === true ? { offerClose: true as const } : {}),
     },
     actor,
@@ -716,6 +725,10 @@ function addressById(
     return failure('forbidden', 'an agent or daemon may resolve only an agenda item it raised');
   }
   if (command.action === 'answer') {
+    // The input form answers an input card, because the value never travels as an agenda answer.
+    if (target.item.kind === 'input') {
+      return failure('use_input_form', `${command.id} is answered in its input form, not as an agenda answer`);
+    }
     // An answer to a confirmation is the owner's decision about a configuration change: never a ferret's.
     if (target.item.confirms !== undefined && command.actor.kind !== 'human') {
       return failure(
@@ -734,7 +747,11 @@ function addressById(
   // A structured ask may still be RESOLVED without its response: the owner can reply in words instead
   // of picking (the note carries them to the ferret), and the raising ferret closes its own item once
   // the matter settled some other way. An answer, when given, must still match the ask.
-  return addressed(ledger, target, command.actor, command.note ?? null, command.at, disposition, change, response);
+  //
+  // THE EXCEPTION IS AN INPUT CARD: the owner's field next to it may hold a password, and the app sends
+  // whatever is in the composer with Resolve or Dismiss. Only the daemon's own status words are kept.
+  const note = target.item.kind === 'input' && command.actor.kind !== 'daemon' ? null : (command.note ?? null);
+  return addressed(ledger, target, command.actor, note, command.at, disposition, change, response);
 }
 
 function resolveSource(ledger: AgendaLedger, command: ResolveSourceCommand): AgendaMutation {
@@ -783,7 +800,8 @@ function parseAgendaActor(value: unknown): AgendaActor | null {
     (raw.cause === 'source-reconciliation' ||
       raw.cause === 'warden-escalation' ||
       raw.cause === 'system' ||
-      raw.cause === 'harness-prompt')
+      raw.cause === 'harness-prompt' ||
+      raw.cause === 'input-request')
   ) {
     return { kind: 'daemon', cause: raw.cause };
   }

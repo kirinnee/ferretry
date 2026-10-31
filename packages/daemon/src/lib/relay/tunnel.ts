@@ -49,6 +49,7 @@ import {
   type ApiRequest,
   type ApiResponse,
   BodyTooLargeError,
+  finalised,
   headersFrom,
   queryFrom,
   type SessionDevice,
@@ -512,7 +513,8 @@ const RES_MORE_ENVELOPE = encodeTunnelMessage({ t: 'res-more', id: MAX_TUNNEL_RE
  * apply to what is actually sent. The compression happened before this, and the channel seals what it is
  * handed: compress-then-encrypt. The envelope is unchanged — see {@link TUNNEL_GZIP_ENCODING}.
  */
-export function tunnelResponseMessages(id: number, response: ApiResponse): readonly RelayTunnelDaemonMessage[] {
+export function tunnelResponseMessages(id: number, answer: ApiResponse): readonly RelayTunnelDaemonMessage[] {
+  const response = finalised(answer);
   const compressed = response.gzip !== undefined;
   const headers = {
     ...Object.fromEntries(response.headers),

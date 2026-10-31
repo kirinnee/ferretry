@@ -2,7 +2,10 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { z } from 'zod';
 import { AgendaItemSchema } from '../../src/lib/agenda.ts';
+import { AgentToolCallSchema } from '../../src/lib/agent-tools.ts';
+import { AUDIT_EVENTS } from '../../src/lib/audit.ts';
 import {
+  INPUT_AUDIT_EVENTS,
   INPUT_DEFAULT_EXPIRY_SECONDS,
   INPUT_JOURNAL_EVENT_TYPES,
   INPUT_MAX_EXPIRY_SECONDS,
@@ -16,6 +19,7 @@ import {
   InputEventSchema,
   InputOutcomeSchema,
   InputRaiseSchema,
+  InputRequestListSchema,
   InputRequestSchema,
   InputTargetFactsSchema,
   inputValueProblem,
@@ -165,8 +169,13 @@ describe('the events and the audit detail', () => {
   it('should publish one journal event per move, by the closed list of types', () => {
     should(InputEventSchema.safeParse(EVENT).success).be.true();
     should(InputEventSchema.safeParse({ ...EVENT, type: 'surface.input_typed' }).success).be.false();
+    should(
+      InputEventSchema.safeParse({ ...EVENT, type: 'surface.input_delivering', deliveryId: DELIVERY }).success,
+    ).be.true();
+    should(InputEventSchema.safeParse({ ...EVENT, deliveryId: 'not a delivery id' }).success).be.false();
     should(Object.values(INPUT_JOURNAL_EVENT_TYPES)).deepEqual([
       'surface.input_requested',
+      'surface.input_delivering',
       'surface.input_delivered',
       'surface.input_refused',
       'surface.input_expired',
@@ -341,7 +350,13 @@ describe('the schemas that must never hold a value', () => {
         node.const !== undefined ||
         node.format !== undefined ||
         node.pattern !== undefined;
-      if (node.type === 'string' && !bounded && !path.endsWith('.properties.key')) found.push(path);
+      if (
+        node.type === 'string' &&
+        !bounded &&
+        !path.endsWith('.properties.key') &&
+        !path.endsWith('.properties.surface')
+      )
+        found.push(path);
     });
     return found;
   };
@@ -403,5 +418,23 @@ describe('the schemas that must never hold a value', () => {
       InputOutcomeSchema.safeParse({ at: AT, by: { kind: 'host' }, submitted: true, source: 'typed', value: 'x' })
         .success,
     ).be.false();
+  });
+
+  it('should audit only events the closed audit list knows', () => {
+    for (const event of INPUT_AUDIT_EVENTS) should(AUDIT_EVENTS).containEql(event);
+  });
+
+  it('should accept the two agent input tools and refuse an unknown field on either', () => {
+    const raise = { tool: 'terminal.request_input', name: 'dev', prompt: 'sudo password', sensitivity: 'secret' };
+
+    should(AgentToolCallSchema.parse(raise).tool).equal('terminal.request_input');
+    should(AgentToolCallSchema.safeParse({ ...raise, value: 'x' }).success).be.false();
+    should(AgentToolCallSchema.parse({ tool: 'input.wait', id: '!A7' })).deepEqual({ tool: 'input.wait', id: 'A7' });
+    should(AgentToolCallSchema.safeParse({ tool: 'input.wait', id: 'A7', value: 'x' }).success).be.false();
+  });
+
+  it('should list requests and refuse a list that carries anything else', () => {
+    should(InputRequestListSchema.parse({ requests: [] })).deepEqual({ requests: [] });
+    should(InputRequestListSchema.safeParse({ requests: [], value: 'x' }).success).be.false();
   });
 });

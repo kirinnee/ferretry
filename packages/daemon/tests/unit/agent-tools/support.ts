@@ -15,6 +15,7 @@ import {
   AgentFileError,
   type AgentIdentity,
   type AgentIdentityResolver,
+  type AgentToolPorts,
   AgentToolService,
   type AuditEntry,
   type AuditSink,
@@ -39,7 +40,10 @@ import { FakeTerminals } from '../runtime/mounts/support.ts';
 /** Every audit record written, in order. */
 class RecordingAudit implements AuditSink {
   readonly entries: AuditEntry[] = [];
+  /** Runs while a record is being written: a case suspends the audit here. */
+  during: (() => void | Promise<void>) | undefined;
   async record(entry: AuditEntry): Promise<void> {
+    await this.during?.();
     this.entries.push(entry);
   }
 }
@@ -79,7 +83,7 @@ class FakeRedactor implements Pick<TextRedactor, 'batch'> {
     this.batches += 1;
     const mask = (text: string): string =>
       [...this.values].reduce((masked, [value, name]) => masked.split(value).join(`[redacted:${name}]`), text);
-    return work({ text: mask, data: value => value });
+    return work({ text: mask, data: value => value, cover: () => [] });
   }
 }
 
@@ -427,7 +431,7 @@ class FakeAgentFiles implements Pick<AgentFiles, 'prepareUpload' | 'save'> {
 }
 
 /** A whole agent-tools domain over fakes, with every collaborator exposed for assertions. */
-export function agentToolWorld() {
+export function agentToolWorld(extra: Pick<AgentToolPorts, 'input' | 'scrub' | 'quarantinedUntil'> = {}) {
   const terminals = new FakeTerminals(['s1', 's2']);
   const browser = new FakeBrowserPages();
   const audit = new RecordingAudit();
@@ -449,6 +453,7 @@ export function agentToolWorld() {
     redactor,
     binaryName: 'fy',
     clock,
+    ...extra,
     sleep: async milliseconds => {
       slept.push(milliseconds);
       clock.ms += milliseconds;

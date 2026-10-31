@@ -15,8 +15,10 @@ import { type ApiResponse, decodeParameter } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import type { SocketDownstream, SocketHandler, SocketRoute } from '../../api/socket.ts';
+import type { InputRequestService } from '../../input-requests/service.ts';
 import { decideTerminalOpener } from '../../terminal/ownership.ts';
 import { TerminalPolicyError } from '../../terminal/policy.ts';
+import { answered, ownerOf } from './input-requests.ts';
 
 /**
  * Independent shell terminals attached to a session's working directory.
@@ -72,7 +74,12 @@ export interface TerminalSubsystem {
    * route in `src/lib` may not import one. The mount decides who may stream and which terminal; the
    * composition root supplies the thing that turns pane bytes into frames.
    */
-  stream(sessionId: string, terminalId: string, downstream: SocketDownstream): Promise<SocketHandler>;
+  stream(
+    sessionId: string,
+    terminalId: string,
+    downstream: SocketDownstream,
+    options?: { readonly reveal?: boolean },
+  ): Promise<SocketHandler>;
 }
 
 /**
@@ -267,7 +274,10 @@ export function terminalRoutes(subsystem: TerminalSubsystem): readonly ApiRoute[
  * hand a client a close code that cannot tell "it is gone" from "the daemon broke", and would let an
  * unauthenticated peer probe which terminals exist by timing how fast the socket dies.
  */
-export function terminalSocketRoutes(subsystem: TerminalSubsystem): readonly SocketRoute[] {
+export function terminalSocketRoutes(
+  subsystem: TerminalSubsystem,
+  quarantine?: Pick<InputRequestService, 'revealed'>,
+): readonly SocketRoute[] {
   return [
     {
       method: 'GET',
@@ -278,7 +288,9 @@ export function terminalSocketRoutes(subsystem: TerminalSubsystem): readonly Soc
         const sessionId = pathSessionId(context);
         const terminalId = pathTerminalId(context);
         await subsystem.get(sessionId, terminalId).catch(reraise);
-        return async downstream => await subsystem.stream(sessionId, terminalId, downstream);
+        const reveal = quarantine !== undefined && context.request.query.get('reveal')?.[0] === '1';
+        if (reveal) await quarantine.revealed(ownerOf(context), sessionId, terminalId).catch(answered);
+        return async downstream => await subsystem.stream(sessionId, terminalId, downstream, { reveal });
       },
     },
   ];

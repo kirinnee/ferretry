@@ -467,3 +467,23 @@
   background: var(--warn-bg);
   color: var(--warn);
 }
+
+.kt-webterm__quarantine {
+  display: flex;
+  min-width: 0;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  border-bottom: var(--border-width) solid var(--warn-border);
+  padding: 4px 10px 5px;
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-size: var(--chrome-font-size);
+  line-height: 1.4;
+}
+
+.kt-webterm__quarantine > span {
+  min-width: 0;
+  flex: 1 1 16rem;
+}

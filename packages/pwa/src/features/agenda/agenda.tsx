@@ -33,7 +33,7 @@ import { agendaCounts, agendaItems } from '../../lib/agenda-chat.ts';
 import type { DaemonAgendaClient } from '../../lib/agenda-client.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
 import { actionSentence, snoozeAction, UNSNOOZE_ACTION } from '../../lib/agenda-inbox.ts';
-import { withComposerNote } from '../../lib/agenda-reply.ts';
+import { composerNoteFor, inputDraftDiscarded, withComposerNote } from '../../lib/agenda-reply.ts';
 import { sendAgendaAction } from '../../lib/agenda-send.ts';
 import { sortAgenda } from '../../lib/agenda-status.ts';
 import type { AgendaLoadStatus } from '../../lib/agenda-store.ts';
@@ -232,8 +232,9 @@ export const useAgenda = ({
     });
   }, []);
 
-  const act = (item: AgendaItem, action: InboxAction, note: string): void => {
+  const act = (item: AgendaItem, action: InboxAction, composer: string): void => {
     if (client === undefined || busy.get(item.id) === null) return;
+    const note = composerNoteFor(item, composer);
     const sent = withComposerNote(action, note);
     setCard(item.id, null);
     setAnnouncement('');
@@ -241,7 +242,7 @@ export const useAgenda = ({
       () => {
         setCard(item.id, undefined);
         setAnnouncement(actionSentence(sent, item.id));
-        if (note.trim() !== '') spendDraft(scope);
+        if (note.trim() !== '' || inputDraftDiscarded(item, composer)) spendDraft(scope);
         // The answer is a message in the conversation: the view closes and the chat returns to it.
         update(current => (current.card === item.id ? { card: null } : {}));
         onAnswered?.();

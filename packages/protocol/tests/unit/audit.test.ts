@@ -43,7 +43,7 @@ describe('audit schemas', () => {
 
     // Act / Assert
     for (const event of future) should(audit.AuditEventSchema.parse(event)).equal(event);
-    should(audit.AUDIT_EVENTS).have.length(28);
+    should(audit.AUDIT_EVENTS).have.length(35);
     should(audit.AuditEventSchema.parse('security.changed')).equal('security.changed');
     should(audit.AuditEventSchema.parse('device.key-rotated')).equal('device.key-rotated');
   });

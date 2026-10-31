@@ -6,6 +6,8 @@ import {
   type AgentConfigToolName,
   type AgentLessonToolName,
   type AgentToolName,
+  INPUT_MAX_EXPIRY_SECONDS,
+  INPUT_PROMPT_MAX_LENGTH,
   BROWSER_CONSOLE_LEVELS,
   BROWSER_CPU_THROTTLE_MAX,
   BROWSER_EMULATED_PERMISSIONS,
@@ -146,6 +148,62 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     description:
       'Hand a terminal to the owner when you need them to act in it (a password, a code, "press Enter"): their tab comes forward with "Your turn here". Then wait; read the terminal to see when they are done.',
     inputSchema: object({ name: NAME, message: ASK_MESSAGE }, ['name']),
+  },
+  {
+    name: 'terminal_request_input',
+    tool: 'terminal.request_input',
+    description:
+      'Ask the owner to type ONE value into a terminal on a card: secret (a password or passphrase; ALWAYS for sudo), private (an echoing code) or plain (you see it). Returns !A<n>; then call input_wait. You never hold a secret; the terminal is unreadable for about two minutes after.',
+    inputSchema: object(
+      {
+        name: NAME,
+        prompt: {
+          type: 'string',
+          maxLength: INPUT_PROMPT_MAX_LENGTH,
+          description:
+            'What the value is for, in a plain sentence, e.g. "sudo password to install the package". Never a secret.',
+        },
+        sensitivity: {
+          type: 'string',
+          enum: ['secret', 'private', 'plain'],
+          description:
+            'secret: a password or passphrase; the terminal must have echo off. plain: a username, e-mail, hostname or y/N, which you may see. private (a code that shows on screen) is not supported in terminals yet: ask the owner in chat.',
+        },
+        submit: {
+          type: 'string',
+          enum: ['agent', 'offer-owner', 'owner-default'],
+          description:
+            'Who presses Enter after the value is typed: "agent" (you do), "offer-owner" (the card offers it; the default), "owner-default" (it is on by default).',
+        },
+        expiresInSeconds: {
+          type: 'integer',
+          minimum: 30,
+          maximum: INPUT_MAX_EXPIRY_SECONDS,
+          description: 'How long the card waits; 600 by default.',
+        },
+        blocking: { type: 'boolean', description: 'You are stopped until it is answered: also ping the owner.' },
+        chain: { type: 'string', description: 'A follow-up in a multi-step login: the card it follows, like A7.' },
+      },
+      ['name', 'prompt', 'sensitivity'],
+    ),
+  },
+  {
+    name: 'input_wait',
+    tool: 'input.wait',
+    description:
+      'Wait for the owner to answer an input card (!A<n>) you raised. Returns where it stands (pending, delivered, refused, expired or cancelled), and for a delivered one the terminal text with the value masked. It never returns the value.',
+    inputSchema: object(
+      {
+        id: { type: 'string', description: 'The card, like !A7.' },
+        timeoutMs: {
+          type: 'integer',
+          minimum: 100,
+          maximum: AGENT_TOOL_MAX_WAIT_MS,
+          description: 'How long to wait in this call; call again to keep waiting.',
+        },
+      },
+      ['id'],
+    ),
   },
   {
     name: 'browser_list',

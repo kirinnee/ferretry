@@ -20,11 +20,13 @@
  */
 
 import type { SecretName } from '@ferretry/protocol';
-import { redactJsonValue, redactSecretValues } from './policy.ts';
+import { redactJsonValue, redactSecretValues, secretCoverage, type TextRange } from './policy.ts';
 import type { SecretVault } from './vault.ts';
 
+export type { TextRange };
+
 /**
- * The values of one vault open, as two pure functions.
+ * The values of one vault open, as three pure functions.
  *
  * Valid ONLY while the `batch` that handed it over is running: a scrub kept past that throws rather
  * than masking with values the daemon has since let go of. So the work given to `batch` is
@@ -33,6 +35,8 @@ import type { SecretVault } from './vault.ts';
 export interface Scrub {
   text(text: string): string;
   data(value: unknown): unknown;
+  /** WHERE `text` holds a known value: merged ranges of UTF-16 offsets, never the value. For masking by position. */
+  cover(text: string): readonly TextRange[];
 }
 
 /**
@@ -50,6 +54,7 @@ export interface TextRedactor {
 const IDENTITY_SCRUB: Scrub = {
   text: text => text,
   data: value => value,
+  cover: () => [],
 };
 
 /** A redactor for a daemon with no secret store wired: it has nothing to scrub and says so by
@@ -83,6 +88,7 @@ export class SecretRedactor implements TextRedactor {
       return work({
         text: text => redactSecretValues(text, values()),
         data: value => redactJsonValue(value, values()),
+        cover: text => secretCoverage(text, values()),
       });
     } finally {
       // Revoked, so a scrub that escaped its work holds nothing.

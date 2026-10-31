@@ -3,9 +3,12 @@ import { FY_REQUEST_ID_HEADER, type TerminalListView, type TerminalView } from '
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import {
+  browserTerminalStreamAttach,
   closeSessionTerminal,
   consoleInputChunks,
   createSessionTerminal,
+  endSessionQuarantine,
+  listSessionQuarantines,
   listSessionTerminals,
   renameSessionTerminal,
   terminalLimitLabel,
@@ -185,5 +188,50 @@ describe('typing into the Console', () => {
   it('never splits a surrogate pair across two writes', () => {
     expect(consoleInputChunks('ab😀c', 3)).toEqual(['ab', '😀c']);
     expect(consoleInputChunks('')).toEqual([]);
+  });
+});
+
+describe('terminal quarantine transport', () => {
+  it('reads the session quarantines from its own daemon and parses what comes back', async () => {
+    const quarantines = [{ key: 'dev', until: '2026-10-30T10:02:00.000Z' }];
+    const { calls, fetcher } = recorder({ quarantines });
+    expect(await listSessionQuarantines(daemonA, scopeA, fetcher)).toEqual({ quarantines });
+    expect(calls[0]?.url).toBe('https://a.example.test/v1/sessions/shared%2Fsession/input-quarantines');
+    expect(calls[0]?.init?.method ?? 'GET').toBe('GET');
+    await expect(
+      listSessionQuarantines(daemonA, scopeA, recorder({ quarantines: [{ key: 'dev' }] }).fetcher),
+    ).rejects.toThrow();
+    await expect(listSessionQuarantines(daemonA, scopeB, fetcher)).rejects.toThrow(
+      'terminal scope must belong to the requested daemon',
+    );
+  });
+
+  it('ends one quarantine by key as a mutation, and fails when the daemon did not end it', async () => {
+    const { calls, fetcher } = recorder({ ended: true });
+    await endSessionQuarantine(daemonA, scopeA, 'dev', fetcher);
+    expect(calls[0]?.url).toBe('https://a.example.test/v1/sessions/shared%2Fsession/input-quarantines/dev/end');
+    expect(calls[0]?.init?.method).toBe('POST');
+    expect(new Headers(calls[0]?.init?.headers).get(FY_REQUEST_ID_HEADER)).not.toBeNull();
+    await expect(endSessionQuarantine(daemonA, scopeA, 'dev', recorder({ ended: false }).fetcher)).rejects.toThrow(
+      'daemon did not end the quarantine',
+    );
+  });
+
+  it('asks the stream for reveal=1 only when a viewer chose to see a quarantined pane', async () => {
+    const seen: { path: string; query?: readonly (readonly [string, string])[] }[] = [];
+    const attach = browserTerminalStreamAttach((async (_daemon: unknown, request: (typeof seen)[number]) => {
+      seen.push(request);
+      return { onStreamClosed: () => undefined, sendStream: () => undefined, closeStream: () => undefined };
+    }) as never);
+    const handlers = {
+      onOpen: () => undefined,
+      onBytes: () => undefined,
+      onClosed: () => undefined,
+      onRefused: () => undefined,
+    };
+    await attach(daemonA, scopeA, TERMINAL_ID, handlers);
+    await attach(daemonA, scopeA, TERMINAL_ID, handlers, { reveal: true });
+    expect(seen[0]?.query).toBeUndefined();
+    expect(seen[1]?.query).toEqual([['reveal', '1']]);
   });
 });

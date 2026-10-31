@@ -33,7 +33,7 @@
  * rather than leaving an empty box.
  */
 
-import type { TerminalListView, TerminalView } from '@ferretry/protocol';
+import type { InputQuarantine, InputQuarantineList, TerminalListView, TerminalView } from '@ferretry/protocol';
 import { Check, Clipboard, Pencil, Plus, RefreshCw, SquareTerminal, Trash2, X } from 'lucide-react';
 import {
   type FormEvent,
@@ -72,8 +72,11 @@ import {
   browserTerminalStreamAttach,
   closeSessionTerminal,
   createSessionTerminal,
+  endSessionQuarantine,
+  listSessionQuarantines,
   listSessionTerminals,
   renameSessionTerminal,
+  type TerminalAttachOptions,
   type TerminalStream,
   type TerminalStreamHandlers,
   type TerminalStreamOpener,
@@ -114,7 +117,15 @@ export interface TerminalDeckDependencies {
     scope: DaemonSessionScope,
     id: string,
     handlers: TerminalStreamHandlers,
+    options?: TerminalAttachOptions,
   ): Promise<TerminalStream>;
+  /**
+   * The terminals of this session the daemon is keeping from the agent right now (a secret was just
+   * typed into them). Absent means the deck shows no quarantine controls.
+   */
+  quarantines?(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<InputQuarantineList>;
+  /** Ends one quarantine early, by the key the listing gave. */
+  endQuarantine?(daemon: DaemonConnection, scope: DaemonSessionScope, key: string): Promise<unknown>;
   loadXterm(): Promise<XtermModules>;
   /** Subscribes to the document theme attributes and returns its cleanup. */
   watchTheme(repaint: () => void): () => void;
@@ -149,6 +160,8 @@ export const browserTerminalDeckDependencies = (
   rename: (daemon, scope, id, title) => renameSessionTerminal(daemon, scope, id, title, fetcher),
   close: (daemon, scope, id) => closeSessionTerminal(daemon, scope, id, fetcher),
   attach: browserTerminalStreamAttach(openStream),
+  quarantines: (daemon, scope) => listSessionQuarantines(daemon, scope, fetcher),
+  endQuarantine: (daemon, scope, key) => endSessionQuarantine(daemon, scope, key, fetcher),
   loadXterm: async () => {
     const [xterm, fit] = await Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit')]);
     return { Terminal: xterm.Terminal, FitAddon: fit.FitAddon };
@@ -223,6 +236,15 @@ const passInput = (data: string): string => data;
  * `terminal` off, or a passkey confirmation may be needed, and "HTTP 403" tells a person neither. The
  * daemon's own sentence — which names the command that changes it — is kept after the guidance.
  */
+const sameQuarantines = (left: readonly InputQuarantine[], right: readonly InputQuarantine[]): boolean =>
+  left.length === right.length &&
+  left.every((item, index) => item.key === right[index]?.key && item.until === right[index]?.until);
+
+const quarantineEnd = (until: string): string => {
+  const at = new Date(until);
+  return Number.isNaN(at.getTime()) ? until : at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+
 const failure = (error: unknown): string => {
   const grant = grantRefusalNotice(error);
   if (grant !== null)
@@ -296,6 +318,10 @@ interface TerminalCanvasProps {
   readonly terminal: TerminalView;
   readonly active: boolean;
   readonly scrollback: number;
+  /** Ask the daemon to show THIS viewer the pane although it is quarantined. Never persisted. */
+  readonly reveal: boolean;
+  /** Bumped to reconnect this viewer's stream without changing anything else, e.g. after a quarantine ends. */
+  readonly reconnectVersion: number;
   readonly dependencies: TerminalDeckDependencies;
   readonly onLink: (state: TerminalLinkState) => void;
   readonly onSelection: (selection: string) => void;
@@ -316,6 +342,8 @@ function TerminalCanvas({
   terminal,
   active,
   scrollback,
+  reveal,
+  reconnectVersion,
   dependencies,
   onLink,
   onSelection,
@@ -530,51 +558,58 @@ function TerminalCanvas({
     // so every teardown path has to survive the await: a tab switched away from mid-attach must not
     // leave a stream nobody is watching.
     void dependencies
-      .attach(connection, scope, terminal.id, {
-        onOpen: () => {
-          if (disposed) return;
-          attemptRef.current = 0;
-          endQuiet();
-          onLinkRef.current('live');
-          globalThis.requestAnimationFrame(() => {
-            if (disposed || stream === null) return;
-            // An unmeasurable host reports 80x24, which would resize the shell under every other viewer.
-            if (hostRef.current === null || hostRef.current.clientWidth < 1 || hostRef.current.clientHeight < 1) return;
-            try {
-              fit.fit();
-              sendResize(lastResizeRef, stream, xterm.cols, xterm.rows);
-            } catch {
-              // A zero-sized retained pane is fitted by ResizeObserver later.
+      .attach(
+        connection,
+        scope,
+        terminal.id,
+        {
+          onOpen: () => {
+            if (disposed) return;
+            attemptRef.current = 0;
+            endQuiet();
+            onLinkRef.current('live');
+            globalThis.requestAnimationFrame(() => {
+              if (disposed || stream === null) return;
+              // An unmeasurable host reports 80x24, which would resize the shell under every other viewer.
+              if (hostRef.current === null || hostRef.current.clientWidth < 1 || hostRef.current.clientHeight < 1)
+                return;
+              try {
+                fit.fit();
+                sendResize(lastResizeRef, stream, xterm.cols, xterm.rows);
+              } catch {
+                // A zero-sized retained pane is fitted by ResizeObserver later.
+              }
+            });
+          },
+          onBytes: bytes => {
+            if (!disposed) xterm.write(bytes);
+          },
+          onClosed: code => {
+            if (disposed) return;
+            // THE STREAM'S OWN CODE, NEVER THE SESSION'S. On a relay the meaningful code arrives in a
+            // sealed `stream-close` record and a `4440` follows it as expected teardown; handing that
+            // `4440` here would read as "retry" against a stream the daemon deliberately ended, and
+            // the reader would watch a shell reopen and die at the backoff cap forever.
+            if (!shouldReopenTerminalStream(code)) {
+              // The daemon has judged this client. Retrying asks it the same
+              // question, so the reader is told instead of watching a loop.
+              endQuiet();
+              onLinkRef.current('refused');
+              return;
             }
-          });
-        },
-        onBytes: bytes => {
-          if (!disposed) xterm.write(bytes);
-        },
-        onClosed: code => {
-          if (disposed) return;
-          // THE STREAM'S OWN CODE, NEVER THE SESSION'S. On a relay the meaningful code arrives in a
-          // sealed `stream-close` record and a `4440` follows it as expected teardown; handing that
-          // `4440` here would read as "retry" against a stream the daemon deliberately ended, and
-          // the reader would watch a shell reopen and die at the backoff cap forever.
-          if (!shouldReopenTerminalStream(code)) {
-            // The daemon has judged this client. Retrying asks it the same
-            // question, so the reader is told instead of watching a loop.
+            retryLater();
+          },
+          onRefused: () => {
+            // §14 gives `stream-refused` a status so "it is gone" can be told from "the daemon broke".
+            // It is final for this attempt, so it reaches the state that says so rather than the retry
+            // that would ask a permanent 403 the same question at fifteen-second intervals forever.
+            if (disposed) return;
             endQuiet();
             onLinkRef.current('refused');
-            return;
-          }
-          retryLater();
+          },
         },
-        onRefused: () => {
-          // §14 gives `stream-refused` a status so "it is gone" can be told from "the daemon broke".
-          // It is final for this attempt, so it reaches the state that says so rather than the retry
-          // that would ask a permanent 403 the same question at fifteen-second intervals forever.
-          if (disposed) return;
-          endQuiet();
-          onLinkRef.current('refused');
-        },
-      })
+        { reveal },
+      )
       .then(attached => {
         if (disposed) {
           attached.close(1000, 'terminal tab detached');
@@ -604,7 +639,7 @@ function TerminalCanvas({
       // A reopen inside the quiet window is not a pane going idle: the next run decides what the lamp says.
       if (quietRef.current === undefined) onLinkRef.current('idle');
     };
-  }, [active, connection, dependencies, readyVersion, reopenVersion, scope, terminal.id]);
+  }, [active, connection, dependencies, readyVersion, reopenVersion, reconnectVersion, reveal, scope, terminal.id]);
 
   return (
     // `role="application"` is the honest answer to "what IS this element": a
@@ -650,6 +685,9 @@ export function SessionTerminalDeck({
   const [busy, setBusy] = useState(false);
   const fullscreen = useFullscreen<HTMLElement>();
   const [error, setError] = useState<string | null>(null);
+  const [quarantines, setQuarantines] = useState<readonly InputQuarantine[]>([]);
+  const [revealed, setRevealed] = useState<ReadonlySet<string>>(new Set());
+  const [reconnectVersion, setReconnectVersion] = useState(0);
 
   const refresh = useCallback(async () => {
     try {
@@ -678,6 +716,34 @@ export function SessionTerminalDeck({
     return () => clearInterval(timer);
   }, [refresh]);
 
+  // A quarantine is light to read and the deck has no other way to learn that one began, so it is read
+  // on the same cadence as the listing for as long as the deck is on screen, and not at all afterwards.
+  useEffect(() => {
+    const read = dependencies.quarantines;
+    if (read === undefined || !streaming) return;
+    let stopped = false;
+    const poll = async (): Promise<void> => {
+      try {
+        const next = (await read(connection, scope)).quarantines;
+        if (stopped) return;
+        setQuarantines(current => (sameQuarantines(current, next) ? current : next));
+        // A reveal belongs to the quarantine it was asked for; the next one starts hidden again.
+        setRevealed(current => {
+          const kept = new Set([...current].filter(key => next.some(quarantine => quarantine.key === key)));
+          return kept.size === current.size ? current : kept;
+        });
+      } catch {
+        // The listing's own error banner already reports an unreachable daemon.
+      }
+    };
+    void poll();
+    const timer = setInterval(() => void poll(), 5_000);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [connection, dependencies, scope, streaming]);
+
   const listed = list?.terminals ?? [];
   // A solo body shows its one shell or nothing; it never falls back to whichever shell is first.
   const terminals = solo ? listed.filter(terminal => terminal.id === focusTerminalId) : listed;
@@ -698,6 +764,38 @@ export function SessionTerminalDeck({
   const activeLink = active === null ? 'idle' : (link[active.id] ?? 'idle');
   const ownership = ownershipOf(active);
   const standing = describeCoControl(activeLink, active?.viewers ?? 0, ownership);
+  const quarantineOf = (terminal: TerminalView): InputQuarantine | undefined =>
+    quarantines.find(item => item.key === terminal.id || item.key === terminal.name);
+  const activeQuarantine = active === null ? undefined : quarantineOf(active);
+  const activeRevealed = activeQuarantine !== undefined && revealed.has(activeQuarantine.key);
+
+  const showAnyway = (): void => {
+    if (activeQuarantine === undefined) return;
+    const { key } = activeQuarantine;
+    setRevealed(current => new Set(current).add(key));
+  };
+
+  const endQuarantine = async (): Promise<void> => {
+    const end = dependencies.endQuarantine;
+    if (active === null || activeQuarantine === undefined || end === undefined || busy) return;
+    const { key } = activeQuarantine;
+    setBusy(true);
+    try {
+      await end(connection, scope, key);
+      setQuarantines(current => current.filter(item => item.key !== key));
+      setRevealed(current => {
+        const rest = new Set(current);
+        rest.delete(key);
+        return rest;
+      });
+      setReconnectVersion(version => version + 1);
+      setError(null);
+    } catch (caught) {
+      setError(failure(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const createTerminal = async (): Promise<void> => {
     if (busy || atSessionCap || atGlobalCap) return;
@@ -960,6 +1058,37 @@ export function SessionTerminalDeck({
             {standing.sharing}
           </p>
 
+          {activeQuarantine === undefined ? null : (
+            <div className="kt-webterm__quarantine" data-quarantine="" role="status">
+              <span id={`web-terminal-quarantine-${activeQuarantine.key}`}>
+                {activeRevealed
+                  ? `This terminal is hidden from the ferret until ${quarantineEnd(activeQuarantine.until)}. It is shown to you on this screen only.`
+                  : `A secret was just typed here, so this terminal is hidden from the ferret and from this screen until ${quarantineEnd(activeQuarantine.until)}.`}
+              </span>
+              {activeRevealed ? null : (
+                <Button
+                  aria-describedby={`web-terminal-quarantine-${activeQuarantine.key}`}
+                  onClick={showAnyway}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  Show anyway
+                </Button>
+              )}
+              <Button
+                aria-describedby={`web-terminal-quarantine-${activeQuarantine.key}`}
+                disabled={busy}
+                onClick={() => void endQuarantine()}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                End quarantine
+              </Button>
+            </div>
+          )}
+
           <div className="kt-webterm__stage">
             {terminals.map(terminal => (
               <div
@@ -986,6 +1115,8 @@ export function SessionTerminalDeck({
                       current[terminal.id] === value ? current : { ...current, [terminal.id]: value },
                     )
                   }
+                  reconnectVersion={reconnectVersion}
+                  reveal={revealed.has(quarantineOf(terminal)?.key ?? '')}
                   scope={scope}
                   scrollback={list?.limits.scrollbackLines ?? 5_000}
                   terminal={terminal}

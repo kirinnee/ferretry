@@ -336,7 +336,7 @@ async function seedHome(home: string, port: number): Promise<void> {
 const SESSION_ID = 'wire-1';
 /** The callsign the seeded session answers to. Taken from the shipped pool so the suggestion route
  *  is proved to skip a name it would otherwise have offered. */
-const SEEDED_CALLSIGN = DEFAULT_CALLSIGN_POOL[0]!;
+const SEEDED_CALLSIGN = DEFAULT_CALLSIGN_POOL.at(0) ?? 'Jev';
 
 /**
  * A real session in the state home, written through the daemon's own storage.
@@ -4700,7 +4700,7 @@ describe('daemon boot lifecycle', () => {
     // The upgrade was authenticated by the bearer header alone, with no credential in the URL,
     // and the first frame is the pane as tmux would draw it: a complete redraw,
     // because nothing has been sent before it to be a delta against.
-    should(frames[0]).equal('\u001b[3J\u001b[2J\u001b[Hready $ \u001b[1;9H');
+    should(frames[0]).equal('\u001b[3J\u001b[2J\u001b[Hready $\u001b[1;9H');
     // The keystrokes reached the real pane through the lifecycle service.
     should(runtime.written).deepEqual(['echo hi\r']);
     // The resize control frame was parsed with the protocol's own schema and applied to the pane, so

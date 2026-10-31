@@ -15,17 +15,17 @@ import {
   type AgendaEntry,
   type AgendaLedger,
   type AgendaMutation,
+  agendaSnapshot,
   applyAgendaCommand,
   applyAgendaCommandToSession,
-  agendaSnapshot,
   canDismissAgenda,
   type EditAgendaPatch,
   emptyAgendaLedger,
   isActiveAgenda,
   isWardenEscalationAgenda,
   MAX_AGENT_AGENDA_PER_SESSION,
-  parseAgendaLedger,
   parkOwnerReplies,
+  parseAgendaLedger,
   type RaiseAgendaRequest,
 } from '../../../src/lib/agenda/state-machine.ts';
 
@@ -3094,6 +3094,82 @@ describe('Agenda state machine: option details', () => {
     should(same.changed).be.false();
     should(replaced.item?.optionDetails).deepEqual([{ label: 'Wait', detail: 'Later.' }]);
     should(cleared.item?.optionDetails).be.undefined();
+  });
+});
+
+describe('Agenda state machine — an input card never keeps free text from the owner', () => {
+  const INPUT_DAEMON: AgendaActor = { kind: 'daemon', cause: 'input-request' };
+  const inputCard = () => {
+    const { ask: _ask, ...plain } = request();
+    return succeeded(
+      applyAgendaCommandToSession(null, SESSION_ID, {
+        action: 'raise',
+        actor: INPUT_DAEMON,
+        request: {
+          ...plain,
+          source: 'question',
+          sourceRef: 'a'.repeat(32),
+          kind: 'input',
+          title: 'Needs a secret',
+          input: { requestId: 'a'.repeat(32) },
+        } as RaiseAgendaRequest,
+        at: FIRST,
+      }),
+    );
+  };
+
+  for (const action of ['resolve', 'dismiss'] as const) {
+    it(`should drop the note a human sends with ${action}, since the composer may hold a password`, () => {
+      // Arrange
+      const created = inputCard();
+
+      // Act
+      const closed = succeeded(
+        applyAgendaCommand(created.ledger, { action, actor: HUMAN, id: 'A1', note: 'hunter2-PASSWORD', at: SECOND }),
+      );
+
+      // Assert
+      should(JSON.stringify(closed.ledger)).not.containEql('hunter2-PASSWORD');
+      should(closed.snapshot.resolved[0]?.resolutionNote ?? null).be.null();
+    });
+  }
+
+  it('should keep the daemon’s own status words on the card', () => {
+    // Arrange
+    const created = inputCard();
+
+    // Act
+    const closed = succeeded(
+      applyAgendaCommand(created.ledger, {
+        action: 'resolve',
+        actor: INPUT_DAEMON,
+        id: 'A1',
+        note: 'The owner typed the value.',
+        at: SECOND,
+      }),
+    );
+
+    // Assert
+    should(closed.snapshot.resolved[0]?.resolutionNote).equal('The owner typed the value.');
+  });
+
+  it('should still keep a human’s note on an ordinary card', () => {
+    // Arrange
+    const created = raised();
+
+    // Act
+    const closed = succeeded(
+      applyAgendaCommand(created.ledger, {
+        action: 'resolve',
+        actor: HUMAN,
+        id: 'A1',
+        note: 'Done by hand.',
+        at: SECOND,
+      }),
+    );
+
+    // Assert
+    should(closed.snapshot.resolved[0]?.resolutionNote).equal('Done by hand.');
   });
 });
 

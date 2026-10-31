@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import { AgendaIdSchema } from './agenda.ts';
-import { SurfaceKeySchema, SurfaceKindSchema } from './agent-tools.ts';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 import { SecretNameSchema } from './secrets.ts';
+import { SurfaceKeySchema, SurfaceKindSchema } from './surface-names.ts';
 
 /**
  * THE INPUT REQUEST: the contract between an agent stuck at a password, sudo, one-time-code or 2FA prompt
@@ -25,6 +25,11 @@ export const INPUT_MAX_EXPIRY_SECONDS = 3_600;
 /** How long a delivered value stays masked from reads: the default and the cap. */
 export const INPUT_DEFAULT_REDACTION_SECONDS = 600;
 export const INPUT_MAX_REDACTION_SECONDS = 3_600;
+/**
+ * How long a terminal is QUARANTINED after the daemon types a secret into it: the agent's reads of it are
+ * refused and the owner's viewer shows a cover instead of the screen. The owner can end it sooner.
+ */
+export const INPUT_QUARANTINE_SECONDS = 120;
 /** Per session: requests open at once, and raises an hour. Past either, the raise is refused with a sentence. */
 export const INPUT_MAX_PENDING_PER_SESSION = 3;
 export const INPUT_MAX_RAISES_PER_HOUR = 20;
@@ -182,8 +187,6 @@ export type InputRequestState = z.infer<typeof InputRequestStateSchema>;
 export const INPUT_REASONS = [
   'target_changed',
   'target_gone',
-  'echo_on',
-  'not_secret_field',
   'insecure_origin',
   'interrupted',
   'owner_declined',
@@ -214,6 +217,18 @@ export const InputOutcomeSchema = z.strictObject({
 export type InputOutcome = z.infer<typeof InputOutcomeSchema>;
 
 /**
+ * HOW RISKY THE VALUE IS TO TYPE where it is going, as a flag on the card and never a refusal: the owner
+ * decides. green = typing hidden and a program known to ask for secrets; amber = it may show on screen, or
+ * the program is not known to ask; red = not a secret, the ferret can see it. `reason` is one sentence.
+ */
+export const INPUT_RISK_LEVELS = ['green', 'amber', 'red'] as const;
+export const InputRiskSchema = z.strictObject({
+  level: z.enum(INPUT_RISK_LEVELS),
+  reason: boundedLine(240),
+});
+export type InputRisk = z.infer<typeof InputRiskSchema>;
+
+/**
  * THE REQUEST, as the owner's card reads it. `observed` is absent while the daemon is re-observing after
  * a restart: Send stays disabled until it is back.
  */
@@ -231,6 +246,8 @@ export const InputRequestSchema = z.strictObject({
   expiresAt: InstantSchema,
   chain: AgendaIdSchema.optional(),
   observed: InputTargetFactsSchema.optional(),
+  /** The risk flag for what was observed; absent while the daemon is re-observing. */
+  risk: InputRiskSchema.optional(),
   /** A digest of the facts the card showed; deliver refuses `target_changed` when it no longer matches. */
   observedDigest: Digest.optional(),
   state: InputRequestStateSchema,
@@ -280,8 +297,6 @@ export const InputDeliverBodySchema = z
     submit: z.boolean(),
     /** Save a typed value to the secret store under this name (only for a typed `secret`). */
     saveAs: SecretNameSchema.optional(),
-    /** The owner ticked "I trust this program" on an amber card. */
-    trustProgram: z.literal(true).optional(),
   })
   .superRefine((body, context) => {
     if ((body.padded === undefined) === (body.secretName === undefined)) {
@@ -303,6 +318,10 @@ export const InputDeliverResultSchema = z.strictObject({
 });
 export type InputDeliverResult = z.infer<typeof InputDeliverResultSchema>;
 
+/** `GET /v1/input-requests` and `GET /v1/sessions/:sessionId/input-requests`: the requests still open, newest last. */
+export const InputRequestListSchema = z.strictObject({ requests: z.array(InputRequestSchema) });
+export type InputRequestList = z.infer<typeof InputRequestListSchema>;
+
 /** `POST …/cancel`: the owner declines. */
 export const InputCancelBodySchema = z.strictObject({});
 export type InputCancelBody = z.infer<typeof InputCancelBodySchema>;
@@ -317,17 +336,19 @@ export const INPUT_ERROR_CODES = {
   alreadyDelivered: 'already_delivered',
   /** 410: the request expired or was cancelled. */
   gone: 'gone',
-  /** 409: `secret` and the TTY echoes (or cannot be probed). */
-  echoOn: 'echo_on',
   /** 409: an input request is pending on the surface an agent tried to type into. */
   inputPending: 'input_pending',
   /** 429: too many pending or recent requests. */
   rateLimited: 'rate_limited',
+  /** 409: an agent read a terminal the daemon just typed a secret into; the read is refused until the window ends. */
+  quarantined: 'quarantined',
 } as const;
 
 /** The session-journal events a request is published as; the payload is {@link InputEventSchema}. */
 export const INPUT_JOURNAL_EVENT_TYPES = {
   requested: 'surface.input_requested',
+  /** Written BEFORE the one write, so a restart knows a value may have been typed and never types it again. */
+  delivering: 'surface.input_delivering',
   delivered: 'surface.input_delivered',
   refused: 'surface.input_refused',
   expired: 'surface.input_expired',
@@ -335,6 +356,7 @@ export const INPUT_JOURNAL_EVENT_TYPES = {
 } as const;
 export const InputJournalEventTypeSchema = z.enum([
   INPUT_JOURNAL_EVENT_TYPES.requested,
+  INPUT_JOURNAL_EVENT_TYPES.delivering,
   INPUT_JOURNAL_EVENT_TYPES.delivered,
   INPUT_JOURNAL_EVENT_TYPES.refused,
   INPUT_JOURNAL_EVENT_TYPES.expired,
@@ -354,7 +376,11 @@ export const InputEventSchema = z.strictObject({
   sessionId: boundedLine(128),
   target: z.strictObject({ kind: SurfaceKindSchema, key: SurfaceKeySchema }),
   sensitivity: InputSensitivitySchema,
+  /** Who presses Enter, so a restart can rebuild a pending request. */
+  submit: InputSubmitModeSchema.optional(),
   state: InputRequestStateSchema,
+  /** The attempt a `delivering` event starts: an id, never the value. */
+  deliveryId: InputDeliveryIdSchema.optional(),
   submitted: z.boolean().optional(),
   source: z.enum(['typed', 'saved']).optional(),
   reason: InputReasonSchema.optional(),
@@ -363,6 +389,36 @@ export const InputEventSchema = z.strictObject({
 });
 export type InputEvent = z.infer<typeof InputEventSchema>;
 
+/**
+ * The journal event that keeps a quarantine across a restart: the terminal's names (its key and its id, because
+ * a reader may hold either), when the window ends, and nothing else. `ended` closes the window early.
+ *
+ * `hold` is an opaque id for one hold. A later `started` with the same `hold` replaces its end time (or, with
+ * `unresolved`, says a write may be in flight and the hold has none), and an `ended` with it lets go of that
+ * hold alone, so an attempt that failed, or an owner ending one delivered value, never lifts another hold.
+ */
+export const INPUT_QUARANTINE_EVENT_TYPES = {
+  started: 'surface.input_quarantined',
+  ended: 'surface.input_quarantine_ended',
+} as const;
+export const InputQuarantineEventSchema = z.strictObject({
+  type: z.enum([INPUT_QUARANTINE_EVENT_TYPES.started, INPUT_QUARANTINE_EVENT_TYPES.ended]),
+  sessionId: boundedLine(128),
+  names: z.array(SurfaceKeySchema).min(1).max(4),
+  hold: boundedLine(128),
+  /** The write under this hold may be in flight or may have landed: it holds until a later event for the same hold settles it. */
+  unresolved: z.literal(true).optional(),
+  until: InstantSchema,
+  at: InstantSchema,
+});
+export type InputQuarantineEvent = z.infer<typeof InputQuarantineEventSchema>;
+
+/** One terminal that is quarantined now and when its window ends, as the owner's client reads it. */
+export const InputQuarantineSchema = z.strictObject({ key: SurfaceKeySchema, until: InstantSchema });
+export type InputQuarantine = z.infer<typeof InputQuarantineSchema>;
+export const InputQuarantineListSchema = z.strictObject({ quarantines: z.array(InputQuarantineSchema) });
+export type InputQuarantineList = z.infer<typeof InputQuarantineListSchema>;
+
 /** The audit events this feature writes (general store, activity). Wired into `AUDIT_EVENTS` by the daemon PR. */
 export const INPUT_AUDIT_EVENTS = [
   'input.requested',
@@ -370,6 +426,8 @@ export const INPUT_AUDIT_EVENTS = [
   'input.refused',
   'input.expired',
   'input.cancelled',
+  'input.quarantine_ended',
+  'input.quarantine_revealed',
 ] as const;
 export const InputAuditEventSchema = z.enum(INPUT_AUDIT_EVENTS);
 export type InputAuditEvent = z.infer<typeof InputAuditEventSchema>;
@@ -382,6 +440,8 @@ export const InputAuditDetailSchema = z.strictObject({
   targetKind: SurfaceKindSchema,
   consumer: boundedLine(160).optional(),
   sensitivity: InputSensitivitySchema,
+  /** The terminal a quarantine was about: its name, never what was typed there. */
+  surface: SurfaceKeySchema.optional(),
   recognised: z.boolean().optional(),
   source: z.enum(['typed', 'saved']).optional(),
   secretName: SecretNameSchema.optional(),

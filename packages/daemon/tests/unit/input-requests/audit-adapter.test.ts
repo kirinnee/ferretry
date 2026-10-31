@@ -1,0 +1,67 @@
+import { describe, it } from 'bun:test';
+import should from 'should';
+import type { AuditEntry } from '../../../src/lib/audit/types.ts';
+import { InputAuditAdapter } from '../../../src/lib/input-requests/audit-adapter.ts';
+import type { InputAuditEntry } from '../../../src/lib/input-requests/ports.ts';
+
+const entry = (over: Partial<InputAuditEntry>): InputAuditEntry => ({
+  event: 'input.delivered',
+  sessionId: 's1',
+  actor: { kind: 'host' },
+  requestId: 'r'.repeat(32),
+  detail: { targetKind: 'terminal', consumer: 'sudo', sensitivity: 'secret', submitted: true },
+  ...over,
+});
+
+async function written(over: Partial<InputAuditEntry>): Promise<AuditEntry> {
+  const records: AuditEntry[] = [];
+  await new InputAuditAdapter({ record: async record => void records.push(record) }).record(entry(over));
+  const [record] = records;
+  if (record === undefined) throw new Error('nothing written');
+  return record;
+}
+
+describe('InputAuditAdapter', () => {
+  it('should record the owner at the machine as the host, with names and flags only', async () => {
+    const record = await written({});
+
+    should(record).eql({
+      event: 'input.delivered',
+      actor: { kind: 'host' },
+      subject: 's1',
+      outcome: 'succeeded',
+      detail: {
+        targetKind: 'terminal',
+        consumer: 'sudo',
+        sensitivity: 'secret',
+        submitted: true,
+        requestId: 'r'.repeat(32),
+      },
+    });
+  });
+
+  it('should record a paired device by its id', async () => {
+    const record = await written({ actor: { kind: 'device', deviceId: 'phone-1' } });
+
+    should(record.actor).eql({ kind: 'device', deviceId: 'phone-1' });
+  });
+
+  it('should record an agent as the host and say it was an agent', async () => {
+    const record = await written({ event: 'input.cancelled', actor: { kind: 'agent' } });
+
+    should(record.actor).eql({ kind: 'host' });
+    should(record.detail?.by).equal('agent');
+  });
+
+  it('should record an expiry as the daemon acting on its own, and a refusal as refused', async () => {
+    const expired = await written({ event: 'input.expired', actor: { kind: 'daemon' } });
+    const refused = await written({
+      event: 'input.refused',
+      detail: { targetKind: 'terminal', sensitivity: 'secret', reason: 'target_changed' },
+    });
+
+    should(expired.cause).equal('daemon');
+    should(refused.outcome).equal('refused');
+    should(refused.detail?.reason).equal('target_changed');
+  });
+});

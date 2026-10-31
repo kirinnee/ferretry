@@ -83,6 +83,7 @@ unreached GET /v1/sessions/:sessionId/tasks # CORRECT: an empty compatibility st
 unreached GET /v1/sessions/:sessionId/agenda # CORRECT: dialed by the PWA (lib/agenda-wire.ts) and the CLI (lib/agenda/gateway.ts) behind the agenda.wire.1 choice this pass cannot follow
 unreached POST /v1/sessions/:sessionId/agenda # CORRECT: dialed by the PWA (lib/agenda-wire.ts) and the CLI (lib/agenda/gateway.ts, lib/notify/gateway.ts) behind the agenda.wire.1 choice this pass cannot follow
 unreached GET /v1/warden/agenda # CORRECT: dialed by the PWA warden overview (lib/agenda-wire.ts) behind the agenda.wire.1 choice this pass cannot follow
+unreached GET /v1/input-requests # CORRECT: the machine-wide list of open requests, read by the app's input card (P2 of docs/input-requests.md); the CLI lists one session's
 unreached GET /v1/sessions/:sessionId/attention # CORRECT: the older spelling, dialed only for a daemon without agenda.wire.1 (same choice); kept for older clients until the agenda removal release
 unreached POST /v1/sessions/:sessionId/attention # CORRECT: the older spelling, dialed only for a daemon without agenda.wire.1 (same choice); kept for older clients until the agenda removal release
 

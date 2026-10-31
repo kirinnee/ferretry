@@ -33,7 +33,9 @@ import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
  * agent in auto mode runs commands, so "which device told it what to do" belongs to this history. Both
  * are activity, folded per device and session per window. `agent.tool` is one agent tool call on a
  * terminal or browser page, named by tool and surface name with lengths only — never the typed text —
- * and `surface.control` a person taking a surface over from an agent or handing it back.
+ * and `surface.control` a person taking a surface over from an agent or handing it back. The `input.*`
+ * events are the secure input bridge (docs/input-requests.md): a request raised, delivered, refused,
+ * expired or cancelled, named by the program or host that reads it and never by what was typed.
  * `link.opened` is a web address handed to this computer’s own browser, named by host only.
  */
 export const AUDIT_EVENTS = [
@@ -64,6 +66,13 @@ export const AUDIT_EVENTS = [
   'agent.prompted',
   'agent.tool',
   'surface.control',
+  'input.requested',
+  'input.delivered',
+  'input.refused',
+  'input.expired',
+  'input.cancelled',
+  'input.quarantine_ended',
+  'input.quarantine_revealed',
   'link.opened',
 ] as const;
 export const AuditEventSchema = z.enum(AUDIT_EVENTS);

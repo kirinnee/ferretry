@@ -1,6 +1,7 @@
 import {
   AGENT_TOOL_DEFAULT_READ_LINES,
   AGENT_TOOL_DEFAULT_WAIT_MS,
+  type AgendaId,
   type AgentSurface,
   type AgentToolCall,
   type AgentToolResult,
@@ -17,9 +18,10 @@ import {
   type BrowserTargetFields,
   type BrowserWaitCondition,
   browserReadModeOf,
+  type InputAgentView,
   browserTargetOf,
-  type SurfaceControlRequest,
   type SurfaceController,
+  type SurfaceControlRequest,
   type SurfaceControlView,
   type SurfaceKind,
   type SurfaceOpener,
@@ -36,6 +38,7 @@ import {
 } from '../browser/runtime/index.ts';
 import { BrowserTransportError } from '../browser/transport/worker-protocol.ts';
 import type { AgentControlPolicy } from '../fleet/agent-control.ts';
+import { InputRequestError } from '../input-requests/errors.ts';
 import type { TextRedactor } from '../secrets/redaction.ts';
 import { TerminalMountError, type TerminalSubsystem } from '../runtime/mounts/terminals.ts';
 import type { SurfaceControl } from './control.ts';
@@ -50,7 +53,7 @@ import {
   surfaceReference,
   terminalInput,
 } from './policy.ts';
-import type { AgentToolCaller, AgentToolClock, ResolvedSurface } from './types.ts';
+import type { AgentInputPort, AgentToolCaller, AgentToolClock, ResolvedSurface } from './types.ts';
 
 /**
  * Why a tool call was not carried out, in words an agent can act on.
@@ -74,6 +77,13 @@ export class AgentToolError extends Error {
     super(message);
     this.name = 'AgentToolError';
   }
+}
+
+/** What a result that carries pane-derived text was read from. */
+interface PaneBinding {
+  readonly caller: AgentToolCaller;
+  readonly surface: ResolvedSurface;
+  readonly reference: string;
 }
 
 /** How often a wait looks again. */
@@ -104,6 +114,15 @@ export interface AgentToolPorts {
   readonly binaryName: string;
   readonly clock: AgentToolClock;
   readonly sleep: (milliseconds: number) => Promise<void>;
+  /** The owner's input requests; absent where none are wired, which refuses the two input tools. */
+  readonly input?: AgentInputPort;
+  /** Masks the values the daemon just typed out of any screen text handed to the agent. */
+  readonly scrub?: (sessionId: string, text: string) => string;
+  /**
+   * When the quarantine on a terminal ends (epoch milliseconds), or nothing when it is not quarantined. `names` are
+   * every way the terminal is known. An agent's read and wait are refused while it is quarantined.
+   */
+  readonly quarantinedUntil?: (sessionId: string, names: readonly (string | undefined)[]) => number | undefined;
 }
 
 /** The tools that change what a person would see, and so put up the driving marker. */
@@ -159,6 +178,7 @@ interface PageReading {
 /** What a call learned that the audit should keep, beside what the call itself said. */
 interface CallFacts {
   surface?: ResolvedSurface;
+  pane?: ResolvedSurface;
   detail?: AuditDetail;
 }
 
@@ -175,7 +195,9 @@ type LifecycleCall = Extract<
 /** How far up a popup's opener chain ownership is followed. */
 const MAX_OPENER_DEPTH = 8;
 
-const kindOf = (call: AgentToolCall): SurfaceKind => (call.tool.startsWith('terminal.') ? 'terminal' : 'browser');
+/** The kind of surface a call is about; `input.wait` is about a request, not a surface. */
+const kindOf = (call: AgentToolCall): SurfaceKind | undefined =>
+  call.tool === 'input.wait' ? undefined : call.tool.startsWith('terminal.') ? 'terminal' : 'browser';
 
 const plural = (count: number, word: string): string => `${String(count)} ${word}${count === 1 ? '' : 's'}`;
 
@@ -203,26 +225,55 @@ const openedByAgent = (openedBy: SurfaceOpener | undefined, sessionId: string): 
 export class AgentToolService {
   constructor(private readonly ports: AgentToolPorts) {}
 
+  /** The pane each pane-derived result was read from, so the transport can ask once more at the last moment. */
+  private readonly bindings = new WeakMap<AgentToolResult, PaneBinding>();
+
   async call(caller: AgentToolCaller, call: AgentToolCall): Promise<AgentToolResult> {
     const facts: CallFacts = {};
+    let result: AgentToolResult;
     try {
-      if (caller.kind === 'agent' && !(await this.ports.policy.allows(kindOf(call))))
-        throw new AgentToolError('forbidden', controlRefusal(kindOf(call)));
+      const kind = kindOf(call);
+      if (caller.kind === 'agent' && kind !== undefined && !(await this.ports.policy.allows(kind)))
+        throw new AgentToolError('forbidden', controlRefusal(kind));
       if (caller.kind === 'agent' && FILE_TOOLS.has(call.tool) && !(await this.ports.policy.allows('files')))
         throw new AgentToolError('forbidden', controlRefusal('files'));
       // Page scripts are the owner's to allow for EVERY caller: a paired device with the browser grant
       // must not read the shared profile's sign-ins through a script while the owner has them off.
       if (call.tool === 'browser.eval' && !(await this.ports.policy.allows('scripts')))
         throw new AgentToolError('forbidden', pageScriptsRefusal(this.ports.binaryName));
-      const result = await this.dispatch(caller, call, facts);
+      result = await this.dispatch(caller, call, facts);
       await this.record(caller, call, facts, 'succeeded');
-      return result;
     } catch (error) {
       const refusal = translate(error);
       const failed = refusal === undefined || refusal.code === 'upstream_failed';
       await this.record(caller, call, facts, failed ? 'failed' : 'refused');
       throw refusal ?? error;
     }
+    const pane = facts.pane ?? facts.surface;
+    if (pane === undefined || (result.output === undefined && result.input?.observed === undefined)) return result;
+    this.bindings.set(result, {
+      caller,
+      surface: pane,
+      reference: surfaceReference(pane.surface, pane.name ?? pane.id),
+    });
+    return this.publish(result);
+  }
+
+  /**
+   * The last step before anything leaves the daemon: a hold that began during the capture, the redaction or the
+   * audit record is honoured here, synchronously. Screen text is refused; the foreground facts of a nested input
+   * view are dropped. A transport calls it again right before it serialises, so a hold taken after the service
+   * answered still wins; a result that read no pane passes through.
+   */
+  publish(result: AgentToolResult): AgentToolResult {
+    const bound = this.bindings.get(result);
+    if (bound === undefined) return result;
+    if (result.output !== undefined) this.assertReadable(bound.caller, bound.surface, bound.reference);
+    if (result.input?.observed === undefined) return result;
+    if (this.ports.quarantinedUntil?.(bound.caller.sessionId, [bound.surface.name, bound.surface.id]) === undefined)
+      return result;
+    const { observed: _hidden, ...input } = result.input;
+    return { ...result, input };
   }
 
   /**
@@ -321,8 +372,21 @@ export class AgentToolService {
           summary: `Opened ${kind}${surfaceReference('browser', call.name)} at ${page.url}${handedNote(call.askOwner)}.`,
         };
       }
+      case 'input.wait': {
+        const input = this.inputPort(caller);
+        const view = await input.agentView(sessionId, call.id, call.timeoutMs ?? AGENT_TOOL_DEFAULT_WAIT_MS);
+        if (view.observed === undefined) return { summary: inputSummary(view), input: view };
+        facts.pane = await this.paneOf(input, sessionId, call.id);
+        if (facts.pane !== undefined) return { summary: inputSummary(view), input: view };
+        const { observed: _unbound, ...unbound } = view;
+        return { summary: inputSummary(view), input: unbound };
+      }
       default: {
-        const surface = await this.resolve(sessionId, kindOf(call), call.name);
+        const surface = await this.resolve(
+          sessionId,
+          call.tool.startsWith('terminal.') ? 'terminal' : 'browser',
+          call.name,
+        );
         facts.surface = surface;
         if (caller.kind === 'agent') await this.assertAgentMay(sessionId, surface);
         const result = await this.act(caller, call, surface, facts);
@@ -337,7 +401,15 @@ export class AgentToolService {
     caller: AgentToolCaller,
     call: Exclude<
       AgentToolCall,
-      { readonly tool: 'terminal.list' | 'browser.list' | 'browser.tabs' | 'terminal.open' | 'browser.open' }
+      {
+        readonly tool:
+          | 'terminal.list'
+          | 'browser.list'
+          | 'browser.tabs'
+          | 'terminal.open'
+          | 'browser.open'
+          | 'input.wait';
+      }
     >,
     surface: ResolvedSurface,
     facts: CallFacts,
@@ -345,21 +417,51 @@ export class AgentToolService {
     const { sessionId } = caller;
     const reference = surfaceReference(surface.surface, surface.name ?? surface.id);
     switch (call.tool) {
-      case 'terminal.send': {
-        await this.ports.terminals.write(sessionId, surface.id, terminalInput(call.text, call.keys));
-        const parts = [
-          ...(call.text === undefined ? [] : [plural(call.text.length, 'character')]),
-          ...(call.keys === undefined ? [] : [plural(call.keys.length, 'key')]),
-        ];
-        return { summary: `Sent ${parts.join(' and ')} to ${reference}.` };
-      }
+      case 'terminal.send':
+        // The check and the keystrokes are one turn in the session: a request cannot be raised on this
+        // pane between them, and the secure write cannot land in the middle of them.
+        return await this.exclusively(sessionId, async () => {
+          const pending = this.ports.input?.pendingOn(sessionId, { kind: 'terminal', key: surface.name ?? surface.id });
+          if (pending !== undefined)
+            throw new AgentToolError(
+              'conflict',
+              `an input request is pending on ${reference}; wait for !${pending} (input.wait) and do not type there yourself`,
+            );
+          await this.ports.terminals.write(sessionId, surface.id, terminalInput(call.text, call.keys));
+          const parts = [
+            ...(call.text === undefined ? [] : [plural(call.text.length, 'character')]),
+            ...(call.keys === undefined ? [] : [plural(call.keys.length, 'key')]),
+          ];
+          return { summary: `Sent ${parts.join(' and ')} to ${reference}.` };
+        });
       case 'terminal.read': {
+        this.assertReadable(caller, surface, reference);
         const lines = call.lines ?? AGENT_TOOL_DEFAULT_READ_LINES;
-        const output = clipOutput(await this.ports.terminals.text(sessionId, surface.id, lines));
+        const output = clipOutput(await this.readText(caller, surface, reference, lines));
         return { summary: `The last ${plural(lines, 'line')} of ${reference}.`, output };
       }
       case 'terminal.wait':
         return await this.wait(caller, call, surface, reference);
+      case 'terminal.request_input': {
+        if (caller.kind !== 'agent')
+          throw new AgentToolError(
+            'bad_request',
+            'Only an agent asks its owner for a value; you already have the terminal.',
+          );
+        const view = await this.inputPort(caller).raise(sessionId, {
+          target: { kind: 'terminal', key: surface.name ?? surface.id },
+          prompt: call.prompt,
+          sensitivity: call.sensitivity,
+          submit: call.submit ?? 'offer-owner',
+          ...(call.expiresInSeconds === undefined ? {} : { expiresInSeconds: call.expiresInSeconds }),
+          ...(call.blocking === undefined ? {} : { blocking: call.blocking }),
+          ...(call.chain === undefined ? {} : { chain: call.chain }),
+        });
+        return {
+          summary: `Asked the owner for the value (!${view.id}) for ${reference}. Wait with input.wait; do not type there yourself.`,
+          input: view,
+        };
+      }
       case 'terminal.ask_owner':
       case 'browser.ask_owner':
         if (caller.kind !== 'agent')
@@ -369,9 +471,11 @@ export class AgentToolService {
           summary: `Asked the owner to take over ${reference}${call.message === undefined ? '' : ' and told them what to do'}. Wait for them: read the surface to see when they are done.`,
         };
       case 'terminal.close':
-        await this.ports.terminals.close(sessionId, surface.id);
-        this.ports.control.forget(sessionId, surface);
-        return { summary: `Closed ${reference}.` };
+        return await this.exclusively(sessionId, async () => {
+          await this.ports.terminals.close(sessionId, surface.id);
+          this.ports.control.forget(sessionId, surface);
+          return { summary: `Closed ${reference}.` };
+        });
       case 'browser.close':
         await this.ports.browser.closePage(sessionId, surface.id, this.browserGuard(caller, surface));
         this.ports.control.forget(sessionId, surface);
@@ -564,7 +668,10 @@ export class AgentToolService {
       const mode = browserReadModeOf(call);
       if (call.find !== undefined && read.text === '')
         return { summary: `Nothing in the snapshot of ${reference} contains that text${at}.${check}`, output: '' };
-      const output = mode === 'text' ? clipOutput(read.text) : clipReading(read.text);
+      const output =
+        mode === 'text'
+          ? clipOutput(this.masked(caller.sessionId, read.text))
+          : clipReading(this.masked(caller.sessionId, read.text));
       const clipped = output.length < read.text.length ? CLIPPED_SNAPSHOT_NOTE : '';
       const refs = mode === 'snapshot' ? REFS_NOTE : '';
       return { summary: `Read ${reference}${at}.${refs}${clipped}${check}`, output };
@@ -717,16 +824,20 @@ export class AgentToolService {
     reference: string,
   ): Promise<AgentToolResult> {
     const { sessionId } = caller;
+    this.assertReadable(caller, surface, reference);
     const deadline = this.ports.clock.now() + (call.timeoutMs ?? AGENT_TOOL_DEFAULT_WAIT_MS);
     const tail = async (): Promise<string> =>
-      clipOutput(await this.ports.terminals.text(sessionId, surface.id, WAIT_TAIL_LINES));
+      clipOutput(await this.readText(caller, surface, reference, WAIT_TAIL_LINES));
     for (;;) {
       await this.ports.sleep(AGENT_TOOL_POLL_MS);
       if (caller.kind === 'agent') await this.assertFree(sessionId, surface);
+      this.assertReadable(caller, surface, reference);
+      // The predicate sees what the agent may see: a value the daemon just typed is masked BEFORE the match,
+      // so neither "matched" nor "not matched" can tell the agent whether a guess is in the hidden text.
       const matched =
         call.text === undefined
           ? await this.ended(sessionId, surface)
-          : (await this.ports.terminals.text(sessionId, surface.id, WAIT_SEARCH_LINES)).includes(call.text);
+          : (await this.readText(caller, surface, reference, WAIT_SEARCH_LINES)).includes(call.text);
       if (matched === 'closed') return { summary: `${reference} closed while waiting.`, matched: true };
       if (matched) {
         const what = call.text === undefined ? 'The command ended' : 'The text appeared';
@@ -735,6 +846,71 @@ export class AgentToolService {
       if (this.ports.clock.now() >= deadline)
         return { summary: `Still waiting on ${reference}: the wait timed out.`, matched: false, output: await tail() };
     }
+  }
+
+  /**
+   * An agent does not read a terminal the daemon just typed a secret into: masking can only hide a value it can
+   * recognise, so the terminal is closed to the agent's eyes until the window ends. Typing stays allowed.
+   */
+  private assertReadable(caller: AgentToolCaller, surface: ResolvedSurface, reference: string): void {
+    const until = this.ports.quarantinedUntil?.(caller.sessionId, [surface.name, surface.id]);
+    if (until === undefined) return;
+    const when = new Date(until).toISOString();
+    throw new AgentToolError(
+      'conflict',
+      caller.kind === 'agent'
+        ? `${reference} is quarantined until ${when}: the owner's secret was just typed there, so you cannot read it for a short while. You can still send keys. Try again after that time, or ask the owner.`
+        : `${reference} is quarantined until ${when}: a secret was just typed there. Read it in the terminal viewer with "Show anyway", or end the quarantine there, or try again after that time.`,
+    );
+  }
+
+  /**
+   * The screen text a caller may be given. A read is the one place text leaves the daemon, so the quarantine
+   * is checked again after the capture comes back: a secret typed while the capture was in flight must not
+   * be published by a read that began before it.
+   */
+  private async readText(
+    caller: AgentToolCaller,
+    surface: ResolvedSurface,
+    reference: string,
+    lines: number,
+  ): Promise<string> {
+    const text = await this.ports.terminals.text(caller.sessionId, surface.id, lines);
+    this.assertReadable(caller, surface, reference);
+    return this.masked(caller.sessionId, text);
+  }
+
+  /** The terminal a pending request is on: the one it is pending on, among the session's own. */
+  private async paneOf(input: AgentInputPort, sessionId: string, id: AgendaId): Promise<ResolvedSurface | undefined> {
+    const { terminals } = await this.ports.terminals.list(sessionId);
+    for (const terminal of terminals) {
+      const names = [terminal.name, terminal.id];
+      if (names.some(key => key !== undefined && input.pendingOn(sessionId, { kind: 'terminal', key }) === id))
+        return {
+          surface: 'terminal',
+          id: terminal.id,
+          ...(terminal.name === undefined ? {} : { name: terminal.name }),
+        };
+    }
+    return undefined;
+  }
+
+  /** Runs `work` as one turn in the session when input requests are wired; just runs it where they are not. */
+  private async exclusively<T>(sessionId: string, work: () => Promise<T>): Promise<T> {
+    return this.ports.input === undefined ? await work() : await this.ports.input.exclusive(sessionId, work);
+  }
+
+  /** Screen text with the values the daemon just typed masked; text unchanged where no mask is wired. */
+  private masked(sessionId: string, text: string): string {
+    return this.ports.scrub === undefined ? text : this.ports.scrub(sessionId, text);
+  }
+
+  private inputPort(caller: AgentToolCaller): AgentInputPort {
+    if (caller.kind !== 'agent')
+      throw new AgentToolError('bad_request', 'Only an agent raises or waits on an input request.');
+    if (this.ports.input === undefined)
+      throw new AgentToolError('unavailable', 'Input requests are not available on this machine.');
+    return this.ports.input;
   }
 
   /** Whether the shell is back in the foreground — or the terminal itself is gone. */
@@ -951,10 +1127,11 @@ export class AgentToolService {
   ): Promise<void> {
     const surface = facts.surface;
     const key = surface === undefined ? ('name' in call ? call.name : undefined) : (surface.name ?? surface.id);
+    const kind = kindOf(call);
     const detail: AuditDetail = {
       tool: call.tool,
       by: caller.kind,
-      ...(key === undefined ? {} : { surface: surfaceReference(kindOf(call), key) }),
+      ...(key === undefined || kind === undefined ? {} : { surface: surfaceReference(kind, key) }),
       ...callFacts(call),
       ...facts.detail,
     };
@@ -1027,6 +1204,10 @@ function callFacts(call: AgentToolCall): AuditDetail {
         ...(call.fullPage === true ? { fullPage: true } : {}),
         ...(call.format === undefined ? {} : { format: call.format }),
       };
+    case 'terminal.request_input':
+      return { sensitivity: call.sensitivity };
+    case 'input.wait':
+      return { timeoutMs: call.timeoutMs ?? AGENT_TOOL_DEFAULT_WAIT_MS };
     case 'browser.dialog':
       return {
         action: call.action,
@@ -1109,6 +1290,25 @@ function callFacts(call: AgentToolCall): AuditDetail {
       return call.clear === true ? { clear: true } : targetFacts(call);
     default:
       return {};
+  }
+}
+
+/** Where an input request stands, in one sentence an agent can act on. */
+function inputSummary(view: InputAgentView): string {
+  const card = `!${view.id}`;
+  switch (view.state) {
+    case 'pending':
+      return `${card} is still waiting for the owner. Wait again with input.wait; do not type there yourself.`;
+    case 'delivering':
+      return `${card}: the owner's value is being typed now. Wait again with input.wait.`;
+    case 'delivered':
+      return `${card}: the owner typed the value${view.submitted === true ? ' and pressed Enter' : ''}. Read the terminal to see what happened.`;
+    case 'refused':
+      return `${card} was refused${view.reason === undefined ? '' : ` (${view.reason})`}: the value was not typed. Look at the terminal, then raise a new request if it is still needed.`;
+    case 'expired':
+      return `${card} expired without an answer.`;
+    case 'cancelled':
+      return `${card} was cancelled${view.reason === undefined ? '' : ` (${view.reason})`}.`;
   }
 }
 
@@ -1298,6 +1498,8 @@ function shown(surface: SurfaceKind, rows: readonly (AgentSurface | undefined)[]
  */
 function translate(error: unknown): AgentToolError | undefined {
   if (error instanceof AgentToolError) return error;
+  if (error instanceof InputRequestError)
+    return new AgentToolError(error.code === 'gone' ? 'not_found' : error.code, error.message);
   if (error instanceof TerminalMountError) return new AgentToolError(error.code, error.message);
   if (error instanceof AgentFileError) return new AgentToolError(error.code, error.message);
   if (error instanceof BrowserTransportError) return fromWorker(error);

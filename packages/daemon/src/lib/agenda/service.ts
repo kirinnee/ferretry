@@ -32,6 +32,7 @@ const DAEMON_TITLES: Readonly<Record<DaemonAgendaCause, string>> = {
   'warden-escalation': 'A ferret needs a human',
   system: 'Needs you',
   'harness-prompt': 'The ferret is waiting on you',
+  'input-request': 'Needs a secret',
 };
 
 const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u;

@@ -87,6 +87,15 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
     'audited per takeover and hand back by the agent-tools service',
   'POST /v1/sessions/:sessionId/surfaces/browser/control':
     'audited per takeover and hand back by the agent-tools service',
+  'GET /v1/input-requests': 'a read; carries no value',
+  'GET /v1/sessions/:sessionId/input-requests': 'a read; carries no value',
+  'POST /v1/sessions/:sessionId/input-requests/:requestId/deliver':
+    'audited by the input-request service: input.delivered or input.refused, names and flags only, never the value',
+  'POST /v1/sessions/:sessionId/input-requests/:requestId/cancel':
+    'audited by the input-request service: input.cancelled, names and flags only',
+  'GET /v1/sessions/:sessionId/input-quarantines': 'a read; names and end times only',
+  'POST /v1/sessions/:sessionId/input-quarantines/:key/end':
+    'audited by the input-request service: input.quarantine_ended, names and flags only',
   'DELETE /v1/sessions/:sessionId/terminals/:terminalId':
     'closes a terminal, which removes access rather than adding it',
   'POST /v1/learning/proposals/:id': 'accepts or declines a learning suggestion for a skill file; reaches nobody',

@@ -237,6 +237,9 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
   }
 
   /**
+   * The rows keep their trailing spaces (`-N`): tmux trims them otherwise, and a value typed with a trailing
+   * space must still be found, and covered, cell for cell, before the screen is masked.
+   *
    * The pane and its geometry in ONE tmux invocation: `capture-pane` then `display-message`, joined by
    * tmux's own `;`, so the rows and the cursor are read in the same server turn and cost one process
    * rather than two. A capture is taken after every keystroke and on every poll, so the spawn it saves
@@ -248,6 +251,7 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
       'capture-pane',
       '-p',
       '-e',
+      '-N',
       '-S',
       `-${String(Math.max(0, Math.trunc(historyLines)))}`,
       '-t',
@@ -265,7 +269,8 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
 
   /**
    * The pane's last `lines` lines as plain text — no colour codes, wrapped lines joined — which is what
-   * an agent reads. Trailing blank rows are the unused bottom of the screen, not output, so they go.
+   * an agent reads. Trailing blank ROWS are the unused bottom of the screen, not output, so they go. The
+   * spaces ending the last line stay: a value typed with trailing spaces must still match when it is masked.
    */
   async text(record: TerminalRecord, lines: number): Promise<string> {
     const result = await this.tmux.execute([
@@ -278,7 +283,9 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
       terminalPaneTarget(record),
     ]);
     if (result.code !== 0) throw new TerminalRuntimeError('terminal no longer exists');
-    return result.stdout.replace(/\s+$/u, '');
+    const rows = result.stdout.split('\n');
+    while (rows.length > 0 && /^\s*$/u.test(rows.at(-1) ?? '')) rows.pop();
+    return rows.join('\n');
   }
 
   /** The name of the program in the pane's foreground — the shell itself when nothing is running. */

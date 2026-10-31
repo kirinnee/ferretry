@@ -4,6 +4,8 @@ import {
   type CreateTerminalRequest,
   CreateTerminalRequestSchema,
   FY_REQUEST_ID_HEADER,
+  type InputQuarantineList,
+  InputQuarantineListSchema,
   RenameTerminalRequestSchema,
   SESSION_CONSOLE_INPUT_MAX,
   SessionConsoleInputRequestSchema,
@@ -136,6 +138,40 @@ export const closeSessionTerminal = async (
   return closed;
 };
 
+/** Lists the terminals of a session that were just handed a secret and are hidden from the agent. */
+export const listSessionQuarantines = async (
+  daemon: DaemonConnection,
+  scope: DaemonSessionScope,
+  fetcher: DaemonFetch = browserFetch,
+): Promise<InputQuarantineList> =>
+  InputQuarantineListSchema.parse(
+    await terminalJson(
+      daemon,
+      scope,
+      `/v1/sessions/${encodeURIComponent(scope.sessionId)}/input-quarantines`,
+      { method: 'GET' },
+      fetcher,
+    ),
+  );
+
+/** Ends one quarantine early, by the terminal's key or id; the daemon audits who ended it. */
+export const endSessionQuarantine = async (
+  daemon: DaemonConnection,
+  scope: DaemonSessionScope,
+  key: string,
+  fetcher: DaemonFetch = browserFetch,
+): Promise<void> => {
+  const body = await terminalJson(
+    daemon,
+    scope,
+    `/v1/sessions/${encodeURIComponent(scope.sessionId)}/input-quarantines/${encodeURIComponent(key)}/end`,
+    { method: 'POST' },
+    fetcher,
+  );
+  if ((body as { ended?: unknown } | null)?.ended !== true)
+    throw new DaemonResponseError(502, 'daemon did not end the quarantine');
+};
+
 /**
  * Splits input into writes the daemon accepts, never between the two halves of a surrogate pair — a
  * paste of emoji cut there would type two replacement characters into the agent's pane.
@@ -222,7 +258,13 @@ export type TerminalStreamAttach = (
   scope: DaemonSessionScope,
   terminalId: string,
   handlers: TerminalStreamHandlers,
+  options?: TerminalAttachOptions,
 ) => Promise<TerminalStream>;
+
+/** `reveal` asks the daemon to show THIS viewer a quarantined terminal. It is per connection and audited. */
+export interface TerminalAttachOptions {
+  readonly reveal?: boolean;
+}
 
 /** Opens one §14 stream session on whichever carrier reaches the daemon. */
 export type TerminalStreamOpener = (
@@ -261,12 +303,13 @@ const relayTerminalStream = (session: RelayClientSession, handlers: TerminalStre
  */
 export const browserTerminalStreamAttach =
   (openStream: TerminalStreamOpener): TerminalStreamAttach =>
-  async (daemon, scope, terminalId, handlers) => {
+  async (daemon, scope, terminalId, handlers, options = {}) => {
     assertScopeDaemon(daemon, scope);
     // COMPOSED AT THE CALL, credential-free, so the route-agreement gate sees this dial: it recognises a request by the path written in the call's own arguments, and behind a
     // helper it would report the terminal stream as reached by no client at all.
     const session = await openStream(daemon, {
       path: `${terminalPath(scope, terminalId)}/stream`,
+      ...(options.reveal === true ? { query: [['reveal', '1']] as const } : {}),
       onData: frame => onStreamFrame(frame, handlers),
     }).catch(relayAttachFailure(handlers));
     return relayTerminalStream(session, handlers);

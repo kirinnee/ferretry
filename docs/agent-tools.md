@@ -18,6 +18,7 @@ the page and end with it. The reference grammar is unchanged — see
 
 `terminal.list` · `terminal.open(name, folder?, command?, askOwner?)` · `terminal.send(name, text?, keys?)` ·
 `terminal.read(name, lines?)` · `terminal.wait(name, text | exit, timeoutMs?)` · `terminal.close(name)` · `terminal.ask_owner(name, message?)` ·
+`terminal.request_input(name, prompt, sensitivity, submit?, expiresInSeconds?, blocking?, chain?)` · `input.wait(id, timeoutMs?)` ·
 `browser.list` · `browser.open(name, url?, incognito?, askOwner?)` · `browser.navigate(name, url | history)` ·
 `browser.click(name, target, button?, double?, modifiers?)` · `browser.type(name, target, text, submit?, slowly?)` ·
 `browser.read(name, mode: text | a11y | snapshot, target?, find?, depth?, boxes?)` ·
@@ -39,6 +40,8 @@ The wire body is `AgentToolCallSchema` (`packages/protocol/src/lib/agent-tools.t
 `AgentToolResultSchema`. The same actions are `fy terminal …` and `fy browser page …`
 (`fy browser page open <name> [url] --incognito`; `fy terminal open <name> --ask [message]`;
 `fy terminal ask <name> [message]`).
+
+A single value at a prompt (a password, passphrase, one-time or 2FA code) is `terminal.request_input`, not `terminal.ask_owner`: the owner types it on a card (or `fy input answer`), and the agent never receives it ([input-requests.md](input-requests.md)). `fy input ls|answer|cancel` is the owner's command and refuses to run inside a ferret.
 
 The MCP names swap the dot for an underscore: `terminal_open`, `terminal_ask_owner`, `browser_ask_owner`, …
 

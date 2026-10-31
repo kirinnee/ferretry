@@ -34,6 +34,7 @@ export * from './harness-update/index.ts';
 export * from './housekeeping/index.ts';
 export * from './imports/index.ts';
 export * from './index-writes.ts';
+export * from './input-requests/index.ts';
 export * from './instant.ts';
 export * from './iso-instant.ts';
 export * from './journal.ts';

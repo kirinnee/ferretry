@@ -233,6 +233,7 @@ describe('TmuxTerminalRuntime', () => {
       'capture-pane',
       '-p',
       '-e',
+      '-N',
       '-S',
       '-2000',
       '-t',
@@ -351,7 +352,7 @@ describe('TmuxTerminalRuntime against the real tmux', () => {
       // Act — wait for the shell to run the line it was given.
       const captured = await waitForValue(async () => {
         const seen = await subject.capture(created, 200);
-        return seen.lines.some(line => line.endsWith('red\u001b[39m')) ? seen : undefined;
+        return seen.lines.some(line => line.trimEnd().endsWith('red\u001b[39m')) ? seen : undefined;
       }, 'the pane to show the red line');
 
       // Assert
@@ -361,7 +362,7 @@ describe('TmuxTerminalRuntime against the real tmux', () => {
       should(captured.historySize).equal(0);
       // Each row carries its own colour codes and resets them at its end — which is what lets one row be
       // repainted alone.
-      should(captured.lines.some(line => line.endsWith('\u001b[31mred\u001b[39m'))).be.true();
+      should(captured.lines.some(line => line.trimEnd().endsWith('\u001b[31mred\u001b[39m'))).be.true();
       should(captured.cursorY).be.within(0, 7);
       should(captured.lines[captured.cursorY]).startWith('$');
     } finally {

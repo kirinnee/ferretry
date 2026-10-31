@@ -1,10 +1,13 @@
 import {
   type AgentToolCall,
   AgentToolCallSchema,
+  type AgentToolResult,
   type SurfaceController,
   SurfaceControlRequestSchema,
   type SurfaceKind,
 } from '@ferretry/protocol';
+import { AgentToolError, type AgentToolService } from '../../agent-tools/service.ts';
+import type { AgentIdentityResolver, AgentToolCaller } from '../../agent-tools/types.ts';
 import { isHumanAdminActor } from '../../api/actor.ts';
 import { parseBody } from '../../api/body.ts';
 import { grantRefusalCode } from '../../api/capability.ts';
@@ -12,8 +15,6 @@ import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, headerValue } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
-import { AgentToolError, type AgentToolService } from '../../agent-tools/service.ts';
-import type { AgentIdentityResolver, AgentToolCaller } from '../../agent-tools/types.ts';
 import { auditActorOf } from '../../audit/policy.ts';
 import { decideTerminalOpener } from '../../terminal/ownership.ts';
 
@@ -132,7 +133,21 @@ function controllerOf(context: RouteContext): SurfaceController {
   return credential?.tokenClass === 'device' ? { by: 'human', deviceId: credential.deviceId } : { by: 'local' };
 }
 
-const kindOf = (call: AgentToolCall): SurfaceKind => (call.tool.startsWith('terminal.') ? 'terminal' : 'browser');
+/** The kind a person's route must match; `input.wait` is about a request, so no per-kind route takes it. */
+const kindOf = (call: AgentToolCall): SurfaceKind | undefined =>
+  call.tool === 'input.wait' ? undefined : call.tool.startsWith('terminal.') ? 'terminal' : 'browser';
+
+/** A hold taken since the service answered still wins, now and again as the dispatcher sends the body. */
+function published(service: AgentToolService, result: AgentToolResult): ApiResponse {
+  const spell = (): ApiResponse => {
+    try {
+      return jsonResponse(service.publish(result));
+    } catch (error) {
+      return answered(error);
+    }
+  };
+  return { ...spell(), late: spell };
+}
 
 async function agentCall(
   service: AgentToolService,
@@ -144,7 +159,7 @@ async function agentCall(
     await service.refusedCaller('not a tool call');
     throw error;
   });
-  return jsonResponse(await service.call(caller, call).catch(answered));
+  return published(service, await service.call(caller, call).catch(answered));
 }
 
 /** The tools that move a file between a page and the session's folder. */
@@ -177,7 +192,7 @@ async function personCall(service: AgentToolService, kind: SurfaceKind, context:
     const refusal = refusedFileTool(context);
     if (refusal !== undefined) throw refusal;
   }
-  return jsonResponse(await service.call(caller, call).catch(answered));
+  return published(service, await service.call(caller, call).catch(answered));
 }
 
 async function control(service: AgentToolService, kind: SurfaceKind, context: RouteContext): Promise<ApiResponse> {

@@ -70,7 +70,11 @@ describe('ConversationFacetContributor', () => {
       reader(async () => digest),
       {
         batch: async work =>
-          work({ text: text => text.replace('secret TOKEN', '[redacted:TOKEN]'), data: value => value }),
+          work({
+            text: text => text.replace('secret TOKEN', '[redacted:TOKEN]'),
+            data: value => value,
+            cover: () => [],
+          }),
       },
     );
 

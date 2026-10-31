@@ -1,3 +1,4 @@
+import type { AgendaAgentClearer, AgendaRepliesSubsystem, AgendaService } from '../../agenda/index.ts';
 import type { AgentToolService } from '../../agent-tools/service.ts';
 import type { AgentIdentityResolver } from '../../agent-tools/types.ts';
 import type { AnalyticsIngestionLoop } from '../../analytics/ingestion.ts';
@@ -8,7 +9,6 @@ import type { ApiRoute } from '../../api/route.ts';
 import { ApiRouter } from '../../api/router.ts';
 import { type DaemonApiDependencies, daemonApiRoutes } from '../../api/server.ts';
 import { ApiSocketDispatcher, type SocketRoute } from '../../api/socket.ts';
-import type { AgendaAgentClearer, AgendaRepliesSubsystem, AgendaService } from '../../agenda/index.ts';
 import type { AuditedRoutesSubsystem } from '../../audit/index.ts';
 import { auditedRoutes, auditedSocketRoutes } from '../../audit/routes.ts';
 import type { BrowserLoginLifecycle } from '../../browser/control/index.ts';
@@ -17,6 +17,8 @@ import type { AgentControlPolicy } from '../../fleet/agent-control.ts';
 import type { FleetRefreshLoop } from '../../fleet-refresh/index.ts';
 import type { HandoverReconcileLoop } from '../../handover/index.ts';
 import type { HarnessUpdateSubsystem } from '../../harness-update/index.ts';
+import type { InputRequestService } from '../../input-requests/service.ts';
+import type { LegacyWireUseRecorder } from '../../legacy-wire/index.ts';
 import { observedRoutes } from '../../performance/observed-routes.ts';
 import type { PerformanceProbe } from '../../performance/recorder.ts';
 import type { PinService } from '../../pins/index.ts';
@@ -25,6 +27,7 @@ import type { SecuritySettingsService } from '../../security/index.ts';
 import type { SessionFilesystem } from '../../session/filesystem/index.ts';
 import type { MonitorLoop } from '../../session/monitor/types.ts';
 import type { SessionObserverHost } from '../../session/observer/host.ts';
+import type { QueueDeliverer } from '../../session/queue/deliverer.ts';
 import type { OperatorReadService } from '../../session/reads/index.ts';
 import type { SessionRuntimeSubsystem } from '../../session/runtime-control/types.ts';
 import type { LegacySendReproof } from '../../session/send/reproof.ts';
@@ -35,19 +38,19 @@ import type { TunnelSwitchPort } from '../../tunnel/index.ts';
 import type { DaemonUpdateSubsystem } from '../../update/index.ts';
 import type { MillisecondClockPort } from '../boot.ts';
 import type { PublishedCarrierView } from '../published-carriers.ts';
+import { agendaRoutes, type DirectNotificationSubsystem } from './agenda.ts';
+import { agendaClearRoutes } from './agenda-clear.ts';
+import { configFilesConfirmations } from './agenda-confirms.ts';
 import { agentControlledRoutes, agentControlledSockets } from './agent-control.ts';
 import { agentToolRoutes } from './agent-tools.ts';
 import { type AnalyticsSubsystem, analyticsRoutes } from './analytics.ts';
 import { type AnalyticsPricingSubsystem, analyticsPricingRoutes } from './analytics-pricing.ts';
-import { agendaRoutes, type DirectNotificationSubsystem } from './agenda.ts';
-import { agendaClearRoutes } from './agenda-clear.ts';
-import { configFilesConfirmations } from './agenda-confirms.ts';
 import { type AuditSubsystem, auditRoutes } from './audit.ts';
+import { type BoardSubsystem, boardRoutes } from './board.ts';
 import { type BoardProjectsSubsystem, boardProjectRoutes } from './board-projects.ts';
 import { type BrowserMountedSubsystem, browserLoginRoutes, browserSocketRoutes } from './browser-login.ts';
 import { type BrowserProxySubsystem, browserProxyRoutes } from './browser-proxy.ts';
 import { carrierRoutes } from './carriers.ts';
-import { type BoardSubsystem, boardRoutes } from './board.ts';
 import { type CatalogSubsystem, catalogRoutes } from './catalogs.ts';
 import { type CgroupSubsystem, cgroupRoutes } from './cgroups.ts';
 import { type ConfigFilesSubsystem, configFilesRoutes } from './config-files.ts';
@@ -66,8 +69,8 @@ import { type FleetSetupSubsystem, fleetSetupRoutes } from './fleet-setup.ts';
 import { type ForeignHistorySubsystem, foreignHistoryRoutes } from './foreign-history.ts';
 import { type GrantSubsystem, grantRoutes } from './grants.ts';
 import { harnessUpdateRoutes } from './harness-update.ts';
-import type { LegacyWireUseRecorder } from '../../legacy-wire/index.ts';
 import { type DaemonHealthSubsystem, daemonHealthRoutes } from './health.ts';
+import { inputRequestRoutes } from './input-requests.ts';
 import { type LearningSubsystem, learningRoutes } from './learning.ts';
 import { type LegacyTaskSubsystem, legacyTaskRoutes } from './legacy-tasks.ts';
 import { type McpInventorySubsystem, mcpInventoryRoutes } from './mcp-inventory.ts';
@@ -77,7 +80,6 @@ import { type NameSubsystem, nameRoutes } from './names.ts';
 import { type PackSubsystem, packRoutes } from './pack.ts';
 import { type DeviceGrantSubsystem, type PairingSubsystem, pairingRoutes } from './pairing.ts';
 import { type PerformanceSubsystem, performanceRoutes } from './performance.ts';
-
 import { pinRoutes } from './pins.ts';
 import { type PushSubscriptionSubsystem, pushRoutes } from './push.ts';
 import { type RecommendSubsystem, recommendRoutes } from './recommend.ts';
@@ -85,6 +87,7 @@ import { type ScratchGcSubsystem, scratchGcRoutes } from './scratch-gc.ts';
 import { type SecretSubsystem, secretRoutes } from './secrets.ts';
 import { securityRoutes } from './security.ts';
 import { type SessionAddressBook, sessionAddressedRoutes, sessionAddressedSockets } from './session-addressing.ts';
+import { type SessionAgendaModeSubsystem, sessionAgendaModeRoutes } from './session-agenda-mode.ts';
 import { type SessionAnswerSubsystem, sessionAnswerRoutes } from './session-answer.ts';
 import { type SessionAttachSubsystem, sessionAttachRoutes } from './session-attach.ts';
 import { type SessionAttachmentSubsystem, sessionAttachmentRoutes } from './session-attachments.ts';
@@ -94,18 +97,16 @@ import { type SessionDialogSubsystem, sessionDialogRoutes } from './session-dial
 import { type SessionMediaRoot, sessionFilesystemRoutes } from './session-filesystem.ts';
 import { type SessionForkSubsystem, sessionForkRoutes } from './session-fork.ts';
 import { type SessionHandoverSubsystem, sessionHandoverRoutes } from './session-handover.ts';
-import { type SessionAgendaModeSubsystem, sessionAgendaModeRoutes } from './session-agenda-mode.ts';
 import { type SessionHypermediaSubsystem, sessionHypermediaRoutes } from './session-hypermedia.ts';
 import { type SessionMcpSubsystem, sessionMcpRoutes } from './session-mcp.ts';
 import { type SessionMigrateSubsystem, sessionMigrateRoutes } from './session-migrate.ts';
-import { type SessionRestartSubsystem, sessionRestartRoutes } from './session-restart.ts';
 import { type SessionPermissionSubsystem, sessionPermissionRoutes } from './session-permission.ts';
 import { type SessionProcessSubsystem, sessionProcessRoutes } from './session-processes.ts';
 import { sessionReadRoutes } from './session-reads.ts';
 import { type SessionRenameSubsystem, sessionRenameRoutes } from './session-rename.ts';
+import { type SessionRestartSubsystem, sessionRestartRoutes } from './session-restart.ts';
 import { type SessionResumeSubsystem, sessionResumeRoutes } from './session-resume.ts';
 import { sessionRuntimeRoutes } from './session-runtime.ts';
-import type { QueueDeliverer } from '../../session/queue/deliverer.ts';
 import { type SessionSendSubsystem, sessionSendRoutes } from './session-send.ts';
 import { type SessionSignalSubsystem, sessionSignalRoutes } from './session-signal.ts';
 import { type SessionDirectorySubsystem, sessionRoutes } from './sessions.ts';
@@ -378,6 +379,8 @@ export interface MountedSubsystems {
   /** Terminals and browser pages driven by name — by an agent through its own session credential, and
    *  by a person through the CLI or the app — with take over / hand back. */
   readonly agentTools: { readonly service: AgentToolService; readonly identities: AgentIdentityResolver };
+  /** The owner's answers to an agent's request for a password, a code or an answer (docs/input-requests.md). */
+  readonly inputRequests: InputRequestService;
   /** Free teammate callsigns, for composing a session title before starting one. */
   readonly names: NameSubsystem;
   /** The learning review board: the evidence the daemon holds, and a human's verdict on each rule
@@ -648,6 +651,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // The agent's route is a fixed literal under `/v1/agent`, and a person's are under
         // `/v1/sessions/:sessionId/surfaces`, which no other subsystem uses: none can shadow or be shadowed.
         ...agentToolRoutes(subsystems.agentTools.service, subsystems.agentTools.identities),
+        ...inputRequestRoutes(subsystems.inputRequests),
         ...terminalRoutes(subsystems.terminals),
         // The login window is a fixed literal under `/v1/browser`, which no other subsystem uses, so it
         // can neither shadow nor be shadowed. Its per-session refusal is a deeper pattern ending in the
@@ -748,7 +752,7 @@ export function mountedSocketRoutes(subsystems: MountedSubsystems): readonly Soc
         // Fixed literal first; it cannot shadow the deeper terminal pattern and makes the fleet feed's
         // optional session filter one route rather than a second dispatcher.
         ...fleetEventSocketRoutes(subsystems.fleetEvents, subsystems.sessions, subsystems.configChanges),
-        ...terminalSocketRoutes(subsystems.terminals),
+        ...terminalSocketRoutes(subsystems.terminals, subsystems.inputRequests),
         ...browserSocketRoutes(subsystems.browser),
       ]),
     ),

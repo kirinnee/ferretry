@@ -1165,6 +1165,8 @@ export const AgendaErrorCodeSchema = z.enum([
   'read-only',
   'full',
   'corrupt',
+  /** The generic answer was used on a `kind: 'input'` card: the input form answers it. */
+  'use_input_form',
 ]);
 export type AgendaErrorCode = z.infer<typeof AgendaErrorCodeSchema>;
 

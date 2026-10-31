@@ -31,3 +31,18 @@ export const withReferences = (text: string, ids: readonly AgendaItem['id'][]): 
   const missing = [...new Set(ids)].filter(id => !new RegExp(`(?:^|\\s)!${id}(?=$|[\\s.,;:!?)])`, 'u').test(text));
   return missing.length === 0 ? text : `${missing.map(id => `!${id}`).join(' ')} ${text}`;
 };
+
+/**
+ * What the composer may add to an action on an item. An input card's owner may have a password in the composer
+ * (the input form sits next to it), so nothing from the composer rides on Resolve or Dismiss for that kind.
+ */
+export const composerNoteFor = (item: Pick<AgendaItem, 'kind'>, composer: string): string =>
+  item.kind === 'input' ? '' : composer;
+
+/**
+ * Whether answering this item must empty the composer even though none of it rides along. An input card's
+ * answer takes no note, so the draft would otherwise stay in the composer and ride on the NEXT ordinary
+ * action: a password pasted there by mistake would reach the agenda history one card later.
+ */
+export const inputDraftDiscarded = (item: Pick<AgendaItem, 'kind'>, composer: string): boolean =>
+  item.kind === 'input' && composer !== '';

@@ -128,6 +128,39 @@ export function redactSecretValues(text: string, values: ReadonlyMap<SecretName,
   return result;
 }
 
+/** A half-open run `[start, end)` of UTF-16 offsets in a text. */
+export interface TextRange {
+  readonly start: number;
+  readonly end: number;
+}
+
+/** The ranges of `text` that hold any of `needles`, overlapping ones merged, in order. A position, never a value. */
+export function coverageOf(text: string, needles: readonly string[]): readonly TextRange[] {
+  const found: TextRange[] = [];
+  for (const needle of needles) {
+    if (needle === '') continue;
+    for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + 1))
+      found.push({ start: at, end: at + needle.length });
+  }
+  return mergeRanges(found);
+}
+
+/** Sorted ranges with every overlapping or touching pair joined. */
+export function mergeRanges(ranges: readonly TextRange[]): readonly TextRange[] {
+  const merged: TextRange[] = [];
+  for (const range of [...ranges].sort((a, b) => a.start - b.start || a.end - b.end)) {
+    const last = merged.at(-1);
+    if (last !== undefined && range.start <= last.end)
+      merged[merged.length - 1] = { start: last.start, end: Math.max(last.end, range.end) };
+    else merged.push(range);
+  }
+  return merged;
+}
+
+/** Where `text` holds any known secret value: the positions {@link redactSecretValues} would replace, and nothing else. */
+export function secretCoverage(text: string, values: ReadonlyMap<SecretName, string>): readonly TextRange[] {
+  return coverageOf(text, [...values.values()]);
+}
 /** JSON data with every string inside it scrubbed, structure untouched, so a redacted tool result is
  *  still the shape its reader parses. */
 export function redactJsonValue(value: unknown, values: ReadonlyMap<SecretName, string>): unknown {
