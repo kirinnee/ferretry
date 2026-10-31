@@ -326,3 +326,25 @@ describe('loopbackFirewallEntry', () => {
     });
   });
 });
+
+describe('perUserBrowserPorts against the root script fixture', () => {
+  const FIXTURE = `${import.meta.dir}/../../../../scripts/host/per-user-ports.fixtures.json`;
+
+  it('should give the same ports as the bash derivation for every case', async () => {
+    // Arrange
+    const fixture = (await Bun.file(FIXTURE).json()) as {
+      cases: { uid: number; base: number; ports: { cdp: number; relay: number; vnc: number }; refused?: boolean }[];
+    };
+
+    // Act
+    const actual = fixture.cases.map(({ uid, base }) => perUserBrowserPorts(uid, base));
+
+    // Assert
+    should(fixture.cases.length).be.above(0);
+    fixture.cases.forEach((expected, index) => {
+      const result = actual[index];
+      if (expected.refused === true) should(result?.ok).be.false();
+      else should(result).deepEqual({ ok: true, ports: expected.ports });
+    });
+  });
+});
