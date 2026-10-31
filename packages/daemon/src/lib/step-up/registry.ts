@@ -84,11 +84,16 @@ export class StepUpRegistry {
     };
   }
 
-  /** Records a verified step-up and returns when it lapses. */
-  grant(subject: StepUpSubject, nowMs: number): number {
+  /**
+   * Records a verified step-up and returns when it lapses. `fresh` is whether the passkey was proved FOR
+   * AN ACT (a step-up): the unlock opens the machine and is never one (`fresh: false`), so it can never
+   * be spent on an act that adds access.
+   */
+  grant(subject: StepUpSubject, nowMs: number, fresh = true): number {
     const held: HeldStepUp = { grantedAtMs: nowMs };
     this.#held.set(key(subject), held);
-    this.#fresh.set(key(subject), nowMs);
+    if (fresh) this.#fresh.set(key(subject), nowMs);
+    else this.#fresh.delete(key(subject));
     return this.#endOf(held);
   }
 
@@ -129,6 +134,16 @@ export class StepUpRegistry {
       nowMs - provedAtMs < PASSKEY_CHALLENGE_TTL_SECONDS * 1_000 &&
       this.held(subject, nowMs)
     );
+  }
+
+  /**
+   * Takes this copy's fresh proof if it holds one, in ONE step: of two acts racing on one proof exactly
+   * one gets `true`. Nothing awaits between the check and the spend.
+   */
+  claimFresh(subject: StepUpSubject, nowMs: number): boolean {
+    if (!this.freshlyHeld(subject, nowMs)) return false;
+    this.#fresh.delete(key(subject));
+    return true;
   }
 
   /** An act that adds access was admitted on this copy's fresh proof: the next one needs another. */

@@ -14,10 +14,14 @@ const DAEMON = `fy_daemon_${'A'.repeat(43)}`;
 
 const idOf = (n: number) => `cip_${String(n).padStart(22, '0')}` as HeldPreview['previewId'];
 
-function held(n: number, createdAt = 1_000): HeldPreview {
+const CALLER = 'device:dev_a';
+const OTHER = 'device:dev_b';
+
+function held(n: number, createdAt = 1_000, caller = CALLER): HeldPreview {
   const item = skillItem(DAEMON);
   return {
     previewId: idOf(n),
+    caller,
     createdAt,
     expiresAt: createdAt + TTL,
     item,
@@ -40,15 +44,15 @@ function held(n: number, createdAt = 1_000): HeldPreview {
 }
 
 describe('previews waiting for a yes', () => {
-  it('keeps sixteen by default', () => {
-    should(CATALOG_PREVIEW_MAX_KEPT).equal(16);
+  it('keeps eight per caller by default', () => {
+    should(CATALOG_PREVIEW_MAX_KEPT).equal(8);
   });
 
   it('finds a preview it holds, with the item that was reviewed', () => {
     const previews = new CatalogPreviews(TTL);
     previews.put(held(1), 1_000);
 
-    const lookup = previews.get(idOf(1), 2_000);
+    const lookup = previews.get(idOf(1), CALLER, 2_000);
 
     should(lookup.kind).equal('found');
     if (lookup.kind === 'found') should(lookup.preview.item.name).equal('pdf-tools');
@@ -56,15 +60,15 @@ describe('previews waiting for a yes', () => {
   });
 
   it('does not know an id it never held', () => {
-    should(new CatalogPreviews(TTL).get(idOf(9), 0)).deepEqual({ kind: 'unknown' });
+    should(new CatalogPreviews(TTL).get(idOf(9), CALLER, 0)).deepEqual({ kind: 'unknown' });
   });
 
   it('is found one tick before the expiry and expired at the expiry', () => {
     const previews = new CatalogPreviews(TTL);
     previews.put(held(1), 1_000);
 
-    should(previews.get(idOf(1), 1_000 + TTL - 1).kind).equal('found');
-    should(previews.get(idOf(1), 1_000 + TTL)).deepEqual({ kind: 'expired' });
+    should(previews.get(idOf(1), CALLER, 1_000 + TTL - 1).kind).equal('found');
+    should(previews.get(idOf(1), CALLER, 1_000 + TTL)).deepEqual({ kind: 'expired' });
   });
 
   it('is spent by one consume, so the same yes cannot apply twice', () => {
@@ -73,7 +77,7 @@ describe('previews waiting for a yes', () => {
 
     previews.consume(idOf(1));
 
-    should(previews.get(idOf(1), 1_001)).deepEqual({ kind: 'unknown' });
+    should(previews.get(idOf(1), CALLER, 1_001)).deepEqual({ kind: 'unknown' });
     should(previews.size).equal(0);
     should(() => previews.consume(idOf(1))).not.throw();
   });
@@ -85,9 +89,30 @@ describe('previews waiting for a yes', () => {
     previews.put(held(3), 1_000);
 
     should(previews.size).equal(2);
-    should(previews.get(idOf(1), 1_001).kind).equal('unknown');
-    should(previews.get(idOf(2), 1_001).kind).equal('found');
-    should(previews.get(idOf(3), 1_001).kind).equal('found');
+    should(previews.get(idOf(1), CALLER, 1_001).kind).equal('unknown');
+    should(previews.get(idOf(2), CALLER, 1_001).kind).equal('found');
+    should(previews.get(idOf(3), CALLER, 1_001).kind).equal('found');
+  });
+
+  it('answers unknown to a caller that did not review it, as if it did not exist', () => {
+    const previews = new CatalogPreviews(TTL);
+    previews.put(held(1), 1_000);
+
+    should(previews.get(idOf(1), OTHER, 1_001)).deepEqual({ kind: 'unknown' });
+    should(previews.get(idOf(1), CALLER, 1_001).kind).equal('found');
+  });
+
+  it("keeps a bound per caller, so one caller cannot evict another one's preview", () => {
+    const previews = new CatalogPreviews(TTL, 2);
+    previews.put(held(1, 1_000, OTHER), 1_000);
+    for (const n of [2, 3, 4, 5]) previews.put(held(n), 1_000);
+
+    should(previews.get(idOf(1), OTHER, 1_001).kind).equal('found');
+    should(previews.get(idOf(2), CALLER, 1_001).kind).equal('unknown');
+    should(previews.get(idOf(3), CALLER, 1_001).kind).equal('unknown');
+    should(previews.get(idOf(4), CALLER, 1_001).kind).equal('found');
+    should(previews.get(idOf(5), CALLER, 1_001).kind).equal('found');
+    should(previews.size).equal(3);
   });
 
   it('forgets one only after it has been expired for a whole lifetime, so a late apply still reads "expired"', () => {
@@ -95,9 +120,9 @@ describe('previews waiting for a yes', () => {
     previews.put(held(1), 1_000);
 
     previews.put(held(2, 2_000), 1_000 + TTL + TTL);
-    should(previews.get(idOf(1), 1_000 + TTL + TTL).kind).equal('expired');
+    should(previews.get(idOf(1), CALLER, 1_000 + TTL + TTL).kind).equal('expired');
 
     previews.put(held(3, 3_000), 1_000 + TTL + TTL + TTL + 1);
-    should(previews.get(idOf(1), 1_000 + TTL + TTL + TTL + 1).kind).equal('unknown');
+    should(previews.get(idOf(1), CALLER, 1_000 + TTL + TTL + TTL + 1).kind).equal('unknown');
   });
 });

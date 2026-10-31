@@ -14,7 +14,9 @@ describe('FsCatalogFileReader', () => {
       const reader = new FsCatalogFileReader();
 
       should(await reader.size(file)).equal(6);
-      should(await reader.read(file)).equal('héllo');
+      should(await reader.read(file, 6)).equal('héllo');
+      await should(reader.read(file, 5)).be.rejectedWith(/grew past 5 bytes/u);
+      await should(reader.read(join(dir, 'missing'), 5)).be.rejected();
       await mkdir(join(dir, 'sub'));
       await should(reader.size(join(dir, 'sub'))).be.rejectedWith(/is not a file/u);
       await should(reader.size(join(dir, 'missing'))).be.rejected();

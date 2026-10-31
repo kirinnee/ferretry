@@ -9,9 +9,14 @@
  * WHO MAY. A ferret may preview and list: it writes nothing. It may NOT install or remove — an item is
  * instructions a ferret would follow and a program this machine would run, and a ferret that could add
  * one could hand itself a way around everything else. That is the owner's act, refused before a body is
- * read. A governed device installs only with a passkey proved for THIS act (`catalog-install`), even inside
- * an unlock; the machine's own `fy` is ungoverned and its CLI asks y/N instead. Removing never asks for a
- * passkey: taking something away is the safe direction.
+ * read. A governed device installs only with a passkey proved for THIS act (`catalog-install`) — never
+ * the unlock's, which opens the machine and is not a proof for an act — and the proof is CLAIMED
+ * atomically at admission, so one confirmation buys one install even when two applies race. The machine's
+ * own `fy` is ungoverned and its CLI asks y/N instead. Removing never asks for a passkey: taking
+ * something away is the safe direction.
+ *
+ * A PREVIEW BELONGS TO ITS CALLER. It is applied only by the caller that reviewed it (a paired device, the
+ * host, or a ferret), so one caller cannot apply, or evict, what another reviewed.
  *
  * The deeper `preview` paths are registered before the scope paths so no pattern shadows another.
  */
@@ -40,17 +45,22 @@ import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import { CatalogInstallRefusalError } from '../../catalog-installs/ports.ts';
 import { CatalogInstallStateError } from '../../catalog-installs/store.ts';
 import type { CatalogInstallPreviewRequest, CatalogInstallRequest } from '@ferretry/protocol';
+import type { CatalogCaller } from '../../catalog-installs/service.ts';
 import { FleetCatalogRefusal, type FreshStepUpContext } from '../../fleet/catalog-service.ts';
 
 /** The seven acts, from the parsed request to the answer the caller sees. */
 export interface CatalogInstallSubsystem {
   list(): Promise<CatalogInstallList>;
-  preview(scope: CatalogInstallScope, request: CatalogInstallPreviewRequest): Promise<CatalogInstallPreview>;
+  preview(
+    scope: CatalogInstallScope,
+    request: CatalogInstallPreviewRequest,
+    caller: CatalogCaller,
+  ): Promise<CatalogInstallPreview>;
   apply(
     scope: CatalogInstallScope,
     request: CatalogInstallRequest,
+    caller: CatalogCaller,
     governance: CallerGovernance | undefined,
-    freshStepUp: FreshStepUpContext,
   ): Promise<CatalogInstalled>;
   remove(
     scope: CatalogInstallScope,
@@ -64,6 +74,7 @@ const FILESYSTEM_USE: CapabilityDemand = { capability: 'filesystem', axis: 'use'
 const FILESYSTEM_CONFIGURE: CapabilityDemand = { capability: 'filesystem', axis: 'configure' };
 const FLEET_USE: CapabilityDemand = { capability: 'fleet', axis: 'use' };
 const FLEET_CONFIGURE: CapabilityDemand = { capability: 'fleet', axis: 'configure' };
+const SECRETS_USE: CapabilityDemand = { capability: 'secrets', axis: 'use' };
 
 const demandFor = (scope: CatalogInstallScope): CapabilityDemand =>
   scope === 'project' ? FILESYSTEM_CONFIGURE : FLEET_CONFIGURE;
@@ -103,9 +114,24 @@ function ownerOnly(context: RouteContext, act: string): void {
   if (isAgentCaller(context)) throw new ApiError(403, `a ferret cannot ${act}; the owner does`, 'forbidden');
 }
 
-/** The refusal for a governed caller with no passkey proved for this act, or `undefined` when it may go on. */
-function needsPasskey(context: RouteContext, scope: CatalogInstallScope): ApiResponse | undefined {
-  if (context.governance?.governed !== true || context.presentation?.freshStepUp === true) return undefined;
+/**
+ * Who is asking, as a preview and its apply must agree: a paired device by its id, any ferret as one
+ * caller, and the host's own shell as another. Derived from the credential, never from the body.
+ */
+function callerOf(context: RouteContext): CatalogCaller {
+  const credential = context.credential;
+  const id =
+    credential?.tokenClass === 'device' ? `device:${credential.deviceId}` : isAgentCaller(context) ? 'agents' : 'host';
+  // The same rule as listing secrets: the `secrets` capability's `use` axis for this caller.
+  return { id, mayListSecrets: context.governance?.decide(SECRETS_USE).allowed === true };
+}
+
+/**
+ * Claims the passkey proof for this act, atomically, and answers the refusal when a governed caller holds
+ * none (or someone else already spent it). `undefined` means it may go on; an ungoverned caller needs none.
+ */
+function claimPasskey(context: RouteContext, scope: CatalogInstallScope): ApiResponse | undefined {
+  if (context.governance?.governed !== true || context.claimFreshStepUp?.() === true) return undefined;
   return jsonResponse(
     {
       error: 'installing from a catalog needs a passkey confirmation for it, from this device',
@@ -135,7 +161,7 @@ const previewHandler =
     const request = await parseBody(context.request, CatalogInstallPreviewRequestSchema, {
       maxBytes: CATALOG_INSTALL_PREVIEW_MAX_BODY_BYTES,
     });
-    return await answer(() => subsystem.preview(scope, request));
+    return await answer(() => subsystem.preview(scope, request, callerOf(context)));
   };
 
 const applyHandler =
@@ -143,11 +169,9 @@ const applyHandler =
   async context => {
     ownerOnly(context, 'install from a catalog');
     const request = await parseBody(context.request, CatalogInstallRequestSchema);
-    const refusal = needsPasskey(context, scope);
+    const refusal = claimPasskey(context, scope);
     if (refusal !== undefined) return refusal;
-    const installed = await answer(() => subsystem.apply(scope, request, context.governance, freshStepUpOf(context)));
-    context.spendFreshStepUp?.();
-    return installed;
+    return await answer(() => subsystem.apply(scope, request, callerOf(context), context.governance));
   };
 
 const removeHandler =

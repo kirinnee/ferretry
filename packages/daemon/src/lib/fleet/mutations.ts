@@ -6,6 +6,7 @@
  * whole-config replacement can differ from what was previewed in ways nobody reads, while "add this
  * runtime" has one meaning and one derivation.
  */
+import { posix } from 'node:path';
 import {
   type AccountModel,
   AccountModelSchema,
@@ -47,6 +48,7 @@ import type {
   BrowserPortsSetting,
   FleetAccountChange,
   FleetAgentControl,
+  FleetCatalogInstallChange,
   FleetComponentInput,
   FleetEnvInput,
   FleetRunningSession,
@@ -82,21 +84,17 @@ export class FleetMutationRefusal extends Error {
 // model has is checked once, in its own words.
 
 /** The changes that derive a new configuration. Sign-out, setup and clone run their own executors. */
-export type AccountPlanChange = Exclude<
-  FleetAccountChange,
-  { kind: 'credential.signout' } | { kind: 'setup.import' } | { kind: 'clone.import' }
->;
+export type AccountPlanChange =
+  | Exclude<FleetAccountChange, { kind: 'credential.signout' } | { kind: 'setup.import' } | { kind: 'clone.import' }>
+  | FleetCatalogInstallChange;
 
 /** The kinds that are not a configuration edit. */
-const EXECUTED_KINDS: ReadonlySet<FleetAccountChange['kind']> = new Set([
-  'credential.signout',
-  'setup.import',
-  'clone.import',
-]);
+const EXECUTED_KINDS: ReadonlySet<string> = new Set(['credential.signout', 'setup.import', 'clone.import']);
 
 /** Whether this change derives a new configuration (and so goes through the plan and its apply). */
-export const isAccountPlanChange = (change: FleetAccountChange): change is AccountPlanChange =>
-  !EXECUTED_KINDS.has(change.kind);
+export const isAccountPlanChange = (
+  change: FleetAccountChange | FleetCatalogInstallChange,
+): change is AccountPlanChange => !EXECUTED_KINDS.has(change.kind);
 
 /** One component document a change writes, relative to the asset tree. */
 export interface AccountComponentFile {
@@ -1069,7 +1067,14 @@ function installCatalogItem(
   draft.components[kind][change.name] = { ...built.component, installedFrom: origin };
   if (kind === 'skills') {
     const folder = skillSourceReference(change.name);
-    for (const file of change.files) files.push({ file: `${folder}/${file.path}`, content: file.content });
+    for (const file of change.files) {
+      // Defence in depth: the installer's schema already refuses these spellings, and a write that
+      // resolves anywhere but inside this skill's own folder is refused here whatever called us.
+      const landed = posix.normalize(`${folder}/${file.path}`);
+      if (file.path === '' || !landed.startsWith(`${folder}/`) || landed === `${folder}/`)
+        refuse(`${JSON.stringify(file.path)} is not a file inside the skill's own folder`);
+      files.push({ file: landed, content: file.content });
+    }
   }
   const reference = `${kind}/${change.name}` as const;
   const layers = (draft.profiles[change.profile] as { layers: string[] }).layers;

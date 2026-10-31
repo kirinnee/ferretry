@@ -318,6 +318,7 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
       spendFreshStepUp: () => {
         if (request.device !== undefined) stepUps.spendFresh?.(request.device);
       },
+      claimFreshStepUp: () => request.device !== undefined && stepUps.claimFresh?.(request.device) === true,
     },
   };
 }

@@ -203,26 +203,38 @@ Installing is two steps and every route has exactly one capability. A project wr
 - **The preview** runs the checks above in that order. Each refusal has its own code and a plain
   sentence (`CATALOG_INSTALL_REFUSALS`); the first one to fail is the one reported. The body is refused
   past 16 MiB before it is parsed. The answer is the full review, the publisher (with `firstSeen`),
-  where it would land in words, and every placeholder with `held`: whether B holds a secret of that
-  name. `replaces` is set only when B's own record shows the same publisher, catalog and item at the same
+  where it would land in words, and every placeholder. `held` (whether B holds a secret of that name) is
+  told only to a caller who may list secret names (`secrets.use`, as `GET /v1/secrets` asks); to any other
+  it is left out, so a preview never tells which names exist. `replaces` is set only when B's own record shows the same publisher, catalog and item at the same
   target; another publisher's item of the same name is never replaced.
-- **Previews live in memory** only, a few at a time, for 600 seconds. A preview is bound to the item's
-  digest and the target, and an apply consumes it.
+- **Previews live in memory** only, for 600 seconds, up to 8 per caller. A preview is bound to the item's
+  digest, the target **and the caller that reviewed it** (a paired device by its id, the machine's own
+  shell as the host, a ferret as an agent): another caller's apply is `catalog_preview_unknown`, and one
+  caller can never push another's preview out. An apply consumes it.
 - **The apply** takes `{previewId, secretBindings}`. The bindings name **exactly** the preview's
   placeholders. Each maps to one of B's own secrets (it must exist) or to `null` (unbound). Nothing is
-  bound silently, so a mismatch is `catalog_bindings_invalid`. A `null` for a name B does hold a
-  secret for is refused too: say which one you mean. A project server gets `${NAME}` in `.mcp.json`
-  (the variable must be set in the ferret's environment, and the apply says so); a runtime server gets
-  `${secret:NAME}`. No secret value crosses any route.
+  bound silently, so a mismatch is `catalog_bindings_invalid`. **`null` leaves the variable OUT** of what is
+  written (the project `.mcp.json` and the runtime component alike), the install records it as unbound,
+  and the apply's notes say "NAME is not set. The program runs without it until you bind one of your
+  secrets to it." An unbound placeholder is never filled by a secret of the same name. A bound project
+  server gets `${OWN}` in `.mcp.json` (the variable must be set in the ferret's environment, and the apply
+  says so); a bound runtime server gets `${secret:OWN}`. No secret value crosses any route.
 - **It writes only through existing paths**: the project `.mcp.json` compare-and-swap, a project skill
   folder (a new port that never follows a symbolic link and refuses one on the path), and for a runtime
-  the fleet catalogue (`catalog.install`: the component, its skill files and the profile entry are one
-  change). Anything already at the destination that B's install record did not write is
+  the fleet catalogue (an INTERNAL change, `catalog.install`: the component, its skill files and the
+  profile entry are one change). That kind is not in the wire schema, so `POST /v1/fleet/proposals`
+  refuses it; only the installer produces one, after its checks. The fleet executor also resolves every
+  file path and refuses any write outside the skill's own folder in the assets directory. Anything already at the destination that B's install record did not write is
   `catalog_install_conflict`. An update replaces an install only when every file it wrote still has the
-  hash B recorded; a file edited by hand is a conflict that says so. Keeping your edits is phase 3.
+  hash B recorded (files are compared by exact relative path); a file edited by hand is a conflict that
+  says so. A runtime component is compared by a hash of what it holds, recorded at install, so a hand
+  edit is found even when its provenance is kept. B records the resolved project folder and root, so a
+  removal needs no re-derivation from the spelling the install used. Keeping your edits is phase 3.
 - **A passkey for every install.** An apply from a governed caller needs a fresh step-up for the act
-  `catalog-install` (`403 grant_step_up_required` otherwise), and it is spent on success. An update asks
-  too. **Removing never asks.** A loopback caller is ungoverned: the CLI asks y/N instead.
+  `catalog-install` (`403 grant_step_up_required` otherwise). **The unlock is not that proof**: it
+  opens the machine, and only a passkey proved for this act counts. The proof is claimed atomically at
+  admission, so one confirmation buys one install even when two applies race, and it is **not** given
+  back when the install is then refused: ask again. An update asks too. **Removing never asks.** A loopback caller is ungoverned: the CLI asks y/N instead.
 - **A ferret may preview and list, but never install or remove**: it is refused with `403 forbidden`
   , because an install is code that will run.
 - **What "pinned" means.** The first install from a catalog records the publisher's fingerprint, and

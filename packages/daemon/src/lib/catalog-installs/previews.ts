@@ -1,5 +1,5 @@
 /**
- * Previews waiting for a yes: in memory only, bounded by count and by age. A preview holds the verified
+ * Previews waiting for a yes: in memory only, bounded by count (per caller) and by age. A preview holds the verified
  * item itself, so an apply installs exactly the bytes that were reviewed — it never reads them again from
  * a caller. A restart forgets them all, which is the point: a decision is made against one running daemon.
  */
@@ -10,11 +10,13 @@ import type {
   SharedCatalogItem,
 } from '@ferretry/protocol';
 
-/** The most previews kept at once; the oldest is dropped for a new one. */
-export const CATALOG_PREVIEW_MAX_KEPT = 16;
+/** The most previews kept for ONE caller; that caller's oldest is dropped for a new one. */
+export const CATALOG_PREVIEW_MAX_KEPT = 8;
 
 export interface HeldPreview {
   readonly previewId: CatalogInstallPreviewId;
+  /** Who asked: only this caller may apply it. See `callerOf` in the mount. */
+  readonly caller: string;
   readonly createdAt: number;
   readonly expiresAt: number;
   readonly item: SharedCatalogItem;
@@ -38,19 +40,21 @@ export class CatalogPreviews {
     private readonly maxKept: number = CATALOG_PREVIEW_MAX_KEPT,
   ) {}
 
-  /** Keep `preview`, dropping what has been expired for a whole lifetime and then the oldest over the bound. */
+  /**
+   * Keep `preview`, dropping what has been expired for a whole lifetime and then, over the bound, the
+   * oldest of THE SAME CALLER's — so one caller can never push another's preview out.
+   */
   put(preview: HeldPreview, now: number): void {
     for (const [id, held] of this.#held) if (now - held.expiresAt > this.ttlMs) this.#held.delete(id);
     this.#held.set(preview.previewId, preview);
-    while (this.#held.size > this.maxKept) {
-      const oldest = this.#held.keys().next().value as string;
-      this.#held.delete(oldest);
-    }
+    const mine = [...this.#held.values()].filter(held => held.caller === preview.caller);
+    for (const stale of mine.slice(0, Math.max(0, mine.length - this.maxKept))) this.#held.delete(stale.previewId);
   }
 
-  get(previewId: string, now: number): PreviewLookup {
+  /** A preview is only ever found by the caller that asked for it; anyone else is told it is unknown. */
+  get(previewId: string, caller: string, now: number): PreviewLookup {
     const held = this.#held.get(previewId);
-    if (held === undefined) return { kind: 'unknown' };
+    if (held === undefined || held.caller !== caller) return { kind: 'unknown' };
     return now >= held.expiresAt ? { kind: 'expired' } : { kind: 'found', preview: held };
   }
 

@@ -64,6 +64,7 @@ import type {
   FleetAccountChangePreview,
   FleetAccountChangeView,
   FleetAgentControl,
+  FleetCatalogInstallChange,
   FleetCatalogFormat,
   FleetCatalogRefusalCode,
   FleetComponentCatalog,
@@ -77,6 +78,7 @@ import type {
   FleetRuntimeCatalog,
   SessionStatus,
 } from '@ferretry/protocol';
+import { FleetCatalogInstallChangeSchema } from '@ferretry/protocol';
 import type { CallerGovernance, CapabilityPresentation } from '../api/capability.ts';
 import { ApiError } from '../api/error.ts';
 import {
@@ -354,6 +356,8 @@ const PROPOSAL_CODES = {
   exhausted: 'fleet_change_refused',
 } as const satisfies Record<FleetProposalRefusal['problem'], FleetCatalogRefusalCode>;
 
+const COMMITTED: ReadonlySet<string> = new Set(['committed', 'committed-with-history-failure']);
+
 /** Configuration and component documents are private: they name everything a runtime runs with. */
 const DOCUMENT_MODE = 0o600;
 
@@ -362,8 +366,6 @@ const errorMessage = (error: unknown): string =>
 
 /** The change as a view repeats it: a component's text is reported by size, never echoed back. */
 function stagedChange(change: FleetAccountChange): FleetAccountChange {
-  if (change.kind === 'catalog.install')
-    return { ...change, files: change.files.map(file => ({ path: file.path, content: '' })) };
   if (change.kind !== 'component.put' || change.content === undefined) return change;
   const { content: _reportedBySize, ...rest } = change;
   return rest;
@@ -516,6 +518,39 @@ export class FleetCatalogService {
       }),
     );
     return this.#view(record);
+  }
+
+  /**
+   * Install one verified catalog item: stage it, check the configuration has not moved, and apply it
+   * in this one call. It never enters the proposal store, so `/v1/fleet/proposals` can neither stage,
+   * read nor apply it — its only caller is the catalog installer, after the installer's own checks
+   * (signature, digest, publisher pin, passkey, no ferret). The same `fleet.configure` decision as an
+   * ordinary apply still has to come with it.
+   */
+  async installCatalogItem(
+    change: FleetCatalogInstallChange,
+    governance: CallerGovernance | undefined,
+  ): Promise<FleetAccountChangeOutcome> {
+    if (governance === undefined) {
+      throw new ApiError(403, 'this daemon cannot say whether this caller may change the fleet', 'forbidden');
+    }
+    // The same rules the installer applied, again, so no caller of this method can hand the executor a
+    // path or a provenance the installer would not have produced.
+    const checked = FleetCatalogInstallChangeSchema.safeParse(change);
+    if (!checked.success)
+      throw new FleetCatalogRefusal(
+        'fleet_change_refused',
+        checked.error.issues[0]?.message ?? 'this is not a change the catalog installer makes',
+      );
+    const reading = await this.#read();
+    const staged = await this.#stagePlan(reading, change);
+    await this.#assertCurrent({ revision: reading.revision });
+    const outcome = await this.#execute({ payload: staged.payload, mutation: change });
+    if (outcome.outcome === 'applied' && !COMMITTED.has(outcome.apply.outcome)) {
+      const failed = outcome.apply as { readonly reason?: string };
+      throw new FleetCatalogRefusal('fleet_change_failed', failed.reason ?? 'the change did not land');
+    }
+    return outcome;
   }
 
   /** `GET /v1/fleet/proposals/:id`. */
@@ -896,7 +931,7 @@ export class FleetCatalogService {
   /** Refuse a change whose configuration moved since it was reviewed. */
   /** Refuses a change whose configuration moved since it was reviewed; otherwise answers the model
    *  AS IT IS RIGHT NOW, so `apply` never judges the fresh-step-up rule against a stale one. */
-  async #assertCurrent(record: ChangeRecord): Promise<AccountModel> {
+  async #assertCurrent(record: Pick<ChangeRecord, 'revision'>): Promise<AccountModel> {
     const reading = await this.#read(true);
     if (reading.revision !== record.revision) {
       throw new FleetCatalogRefusal(
@@ -907,7 +942,10 @@ export class FleetCatalogService {
     return reading.model;
   }
 
-  async #execute(record: ChangeRecord): Promise<FleetAccountChangeOutcome> {
+  async #execute(record: {
+    readonly payload: ChangePayload;
+    readonly mutation: FleetAccountChange | FleetCatalogInstallChange;
+  }): Promise<FleetAccountChangeOutcome> {
     const payload = record.payload;
     if (payload.kind === 'apply') {
       try {

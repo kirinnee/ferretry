@@ -9,11 +9,12 @@ import {
 } from '@ferretry/protocol';
 import should from 'should';
 import type { AuthenticatedCredential } from '../../../../src/lib/api/authentication.ts';
-import type { CallerGovernance } from '../../../../src/lib/api/capability.ts';
+import type { CallerGovernance, CapabilityDemand } from '../../../../src/lib/api/capability.ts';
 import { ApiError } from '../../../../src/lib/api/error.ts';
 import type { RouteContext } from '../../../../src/lib/api/route.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { CatalogInstallRefusalError } from '../../../../src/lib/catalog-installs/ports.ts';
+import type { CatalogCaller } from '../../../../src/lib/catalog-installs/service.ts';
 import { CatalogInstallStateError } from '../../../../src/lib/catalog-installs/store.ts';
 import { FleetCatalogRefusal } from '../../../../src/lib/fleet/catalog-service.ts';
 import {
@@ -37,7 +38,10 @@ interface Caller {
   readonly actor: string;
   readonly credential: AuthenticatedCredential;
   readonly governed: boolean;
-  readonly fresh?: boolean;
+  /** How many passkey proofs for the act this device holds (default none). */
+  readonly proofs?: number;
+  /** What the governance says to a `secrets.use` demand (default: allowed). */
+  readonly mayListSecrets?: boolean;
 }
 
 const HOST: Caller = {
@@ -50,7 +54,7 @@ const DEVICE: Caller = {
   credential: { kind: 'authenticated', tokenClass: 'device', deviceId: 'd1' },
   governed: true,
 };
-const FRESH_DEVICE: Caller = { ...DEVICE, fresh: true };
+const FRESH_DEVICE: Caller = { ...DEVICE, proofs: 1 };
 const FERRET: Caller = {
   actor: 'peer:s1',
   credential: { kind: 'authenticated', tokenClass: 'admin' },
@@ -59,6 +63,7 @@ const FERRET: Caller = {
 
 interface Call {
   readonly act: string;
+  readonly caller?: CatalogCaller;
   readonly scope?: CatalogInstallScope;
   readonly argument?: unknown;
   readonly governance?: CallerGovernance;
@@ -72,18 +77,18 @@ class FakeInstalls implements CatalogInstallSubsystem {
     this.#record({ act: 'list' });
     return { installs: [] };
   }
-  async preview(scope: CatalogInstallScope, req: unknown) {
-    this.#record({ act: 'preview', scope, argument: req });
+  async preview(scope: CatalogInstallScope, req: unknown, caller: CatalogCaller) {
+    this.#record({ act: 'preview', scope, argument: req, caller });
     return PREVIEW_ANSWER;
   }
   async apply(
     scope: CatalogInstallScope,
     req: unknown,
+    caller: CatalogCaller,
     governance: CallerGovernance | undefined,
-    freshStepUp: { readonly spend: () => void },
   ) {
-    this.#record({ act: 'apply', scope, argument: req, ...(governance === undefined ? {} : { governance }) });
-    void freshStepUp;
+    this.#record({ act: 'apply', scope, argument: req, caller, ...(governance === undefined ? {} : { governance }) });
+    await Promise.resolve();
     return INSTALLED_ANSWER;
   }
   async remove(scope: CatalogInstallScope, installId: string, governance: CallerGovernance | undefined) {
@@ -105,6 +110,7 @@ interface Answer {
   readonly body: Record<string, unknown>;
   readonly code?: string;
   readonly spent: number;
+  readonly claimed: number;
 }
 
 async function drive(
@@ -115,10 +121,12 @@ async function drive(
   caller: Caller = HOST,
   headers: Record<string, string> = {},
   reads = bodyReads(),
+  proofs: { left: number } = { left: caller.proofs ?? 0 },
 ): Promise<Answer> {
   const found = new ApiRouter(catalogInstallRoutes(subsystem)).lookup(method, path);
   if (found.kind !== 'matched') throw new Error(`no route ${method} ${path}`);
   let spent = 0;
+  let claimed = 0;
   const context: RouteContext = {
     request: request({
       method,
@@ -130,13 +138,25 @@ async function drive(
     params: found.params,
     actor: caller.actor,
     credential: caller.credential,
-    governance: { governed: caller.governed, decide: () => ({ allowed: true, refusal: 'granted' }) },
+    governance: {
+      governed: caller.governed,
+      decide: (demand: CapabilityDemand) =>
+        demand.capability === 'secrets' && caller.mayListSecrets === false
+          ? { allowed: false, refusal: 'denied' }
+          : { allowed: true, refusal: 'granted' },
+    } as CallerGovernance,
     presentation: {
       loopback: !caller.governed,
       adminToken: caller.credential.tokenClass === 'admin',
       actor: caller.actor,
-      stepUp: caller.fresh === true,
-      freshStepUp: caller.fresh === true,
+      stepUp: false,
+      freshStepUp: false,
+    },
+    claimFreshStepUp: () => {
+      if (proofs.left <= 0) return false;
+      proofs.left -= 1;
+      claimed += 1;
+      return true;
     },
     spendFreshStepUp: () => {
       spent += 1;
@@ -144,10 +164,10 @@ async function drive(
   };
   try {
     const response = await found.route.handle(context);
-    return { status: response.status, body: jsonBody(response) as Record<string, unknown>, spent };
+    return { status: response.status, body: jsonBody(response) as Record<string, unknown>, spent, claimed };
   } catch (error) {
     if (!(error instanceof ApiError)) throw error;
-    return { status: error.status, body: { error: error.message }, code: error.code, spent };
+    return { status: error.status, body: { error: error.message }, code: error.code, spent, claimed };
   }
 }
 
@@ -332,24 +352,71 @@ describe('the passkey for this act', () => {
     });
   }
 
-  it('applies for a device that proved it, and spends it after the install landed', async () => {
+  it('applies for a device that proved it, claiming the proof once, at admission', async () => {
     const installs = new FakeInstalls();
 
     const answer = await drive(installs, 'POST', '/v1/catalog-installs/project', APPLY, FRESH_DEVICE);
 
     should(answer.status).equal(200);
-    should(answer.spent).equal(1);
+    should(answer.claimed).equal(1);
     should(installs.calls[0]?.governance?.governed).equal(true);
   });
 
-  it('keeps the proof when the install is refused', async () => {
+  it('lets one proof buy one install even when two applies race for it', async () => {
+    const installs = new FakeInstalls();
+    const proofs = { left: 1 };
+
+    const [first, second] = await Promise.all([
+      drive(installs, 'POST', '/v1/catalog-installs/project', APPLY, DEVICE, {}, bodyReads(), proofs),
+      drive(installs, 'POST', '/v1/catalog-installs/runtime', APPLY, DEVICE, {}, bodyReads(), proofs),
+    ]);
+
+    should([first.status, second.status].sort()).deepEqual([200, 403]);
+    should(first.claimed + second.claimed).equal(1);
+    should(installs.calls.filter(call => call.act === 'apply')).have.length(1);
+  });
+
+  it('asks again for the proof once it is spent: it is not refunded when the install is refused', async () => {
     const installs = new FakeInstalls();
     installs.failure = new CatalogInstallRefusalError('catalog_install_conflict', 'in the way');
+    const proofs = { left: 1 };
 
-    const answer = await drive(installs, 'POST', '/v1/catalog-installs/project', APPLY, FRESH_DEVICE);
+    const refused = await drive(
+      installs,
+      'POST',
+      '/v1/catalog-installs/project',
+      APPLY,
+      DEVICE,
+      {},
+      bodyReads(),
+      proofs,
+    );
+    const again = await drive(installs, 'POST', '/v1/catalog-installs/project', APPLY, DEVICE, {}, bodyReads(), proofs);
 
-    should(answer.status).equal(409);
-    should(answer.spent).equal(0);
+    should(refused.status).equal(409);
+    should(again.status).equal(403);
+    should(again.body.code).equal(STEP_UP_REQUIRED_CODE);
+  });
+
+  it('does not count the unlock (no proof for the act) as one, and names the act it wants', async () => {
+    const installs = new FakeInstalls();
+
+    const answer = await drive(installs, 'POST', '/v1/catalog-installs/runtime', APPLY, { ...DEVICE, proofs: 0 });
+
+    should(answer.status).equal(403);
+    should(answer.body.demand).deepEqual(demand.runtime);
+    should(answer.claimed).equal(0);
+    should(installs.calls).deepEqual([]);
+  });
+
+  it('claims no proof from the machine itself, which is ungoverned', async () => {
+    const answer = await drive(new FakeInstalls(), 'POST', '/v1/catalog-installs/project', APPLY, {
+      ...HOST,
+      proofs: 1,
+    });
+
+    should(answer.status).equal(200);
+    should(answer.claimed).equal(0);
   });
 
   it('never asks for one to remove, which is the safe direction', async () => {
@@ -381,6 +448,41 @@ describe('the passkey for this act', () => {
       should(answer.code).equal('invalid_install_id');
     }
     should(installs.calls).deepEqual([]);
+  });
+});
+
+describe('who is asking, as a preview and its apply must agree', () => {
+  const callerOfApply = async (caller: Caller) => {
+    const installs = new FakeInstalls();
+    await drive(installs, 'POST', '/v1/catalog-installs/project', APPLY, { ...caller, proofs: 1 });
+    return installs.calls[0]?.caller;
+  };
+
+  it('names a paired device by its id', async () => {
+    should(await callerOfApply(DEVICE)).deepEqual({ id: 'device:d1', mayListSecrets: true });
+  });
+
+  it('names the machine’s own shell as the host', async () => {
+    should(await callerOfApply(HOST)).deepEqual({ id: 'host', mayListSecrets: true });
+  });
+
+  it('names every ferret as one caller on a preview', async () => {
+    const installs = new FakeInstalls();
+
+    await drive(installs, 'POST', '/v1/catalog-installs/project/preview', await previewBody(), FERRET);
+
+    should(installs.calls[0]?.caller).deepEqual({ id: 'agents', mayListSecrets: true });
+  });
+
+  it('says a caller may not list secret names when the grants do not let it', async () => {
+    const installs = new FakeInstalls();
+
+    await drive(installs, 'POST', '/v1/catalog-installs/project/preview', await previewBody(), {
+      ...DEVICE,
+      mayListSecrets: false,
+    });
+
+    should(installs.calls[0]?.caller).deepEqual({ id: 'device:d1', mayListSecrets: false });
   });
 });
 

@@ -6,10 +6,13 @@ export type ICatalogInstallGateway = Pick<
   'previewCatalogInstall' | 'applyCatalogInstall' | 'catalogInstalls' | 'removeCatalogInstall'
 >;
 
-/** Reading a catalog file: its size first, so an oversized file is never read at all. */
+/**
+ * Reading a catalog file: its size first, so an oversized file is never read at all. The read is bounded
+ * too (at most `maxBytes`, refused if the file is longer), because the size can change after it was asked.
+ */
 export interface ICatalogFileReader {
   size(path: string): Promise<number>;
-  read(path: string): Promise<string>;
+  read(path: string, maxBytes: number): Promise<string>;
 }
 
 /** Terminal output used by `fy catalog install`. */

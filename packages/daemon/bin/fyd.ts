@@ -12144,7 +12144,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           mcpFiles: new FileMcpProjectFiles(),
           skillFiles: new FileProjectSkillFiles(),
           runtimeSkills: new FileRuntimeSkillAssets(join(paths.fleet, 'assets', 'skills')),
-          fleet: mounted.fleetCatalog,
+          fleet: fleetCatalog,
           secretNames: async () => new Set((await secretDirectory.list()).map(secret => secret.name)),
           now: () => millisecondClock.now(),
           mint: prefix => `${prefix}_${randomBytes(16).toString('base64url')}`,

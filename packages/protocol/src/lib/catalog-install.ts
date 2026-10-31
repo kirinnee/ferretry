@@ -111,10 +111,15 @@ export const CatalogProvenanceSchema = z.strictObject({
 });
 export type CatalogProvenance = z.infer<typeof CatalogProvenanceSchema>;
 
-/** One secret the item asks for, and whether B holds a secret of that same name (it is never bound for you). */
+/**
+ * One secret the item asks for, and whether B holds a secret of that same name (it is never bound for you).
+ * `held` is OPTIONAL BECAUSE IT IS A DISCLOSURE: it tells the caller which secret NAMES exist on this
+ * machine, which only a caller who may list secrets (`secrets.use`, as `GET /v1/secrets` asks) is told.
+ * For any other caller it is left out, and the review still lists every placeholder.
+ */
 export const CatalogInstallSecretSchema = z.strictObject({
   placeholder: SecretNameSchema,
-  held: z.boolean(),
+  held: z.boolean().optional(),
 });
 export type CatalogInstallSecret = z.infer<typeof CatalogInstallSecretSchema>;
 
@@ -138,9 +143,10 @@ export type CatalogInstallPreview = z.infer<typeof CatalogInstallPreviewSchema>;
 
 /**
  * `POST /v1/catalog-installs/<scope>`: apply one preview. `secretBindings` names EVERY placeholder the
- * preview listed, each mapped to one of the installer's own secrets or to `null` (left unbound: the
- * install lands, and a launch is refused with the existing "missing secret" sentence until it is set).
- * Nobody gets "it used my key" without having chosen it.
+ * preview listed, each mapped to one of the installer's own secrets or to `null`. `null` LEAVES THE
+ * VARIABLE OUT of what is written: the install lands, the program runs without it, and the apply's notes
+ * say so. An unbound placeholder is never filled by a secret of the same name — nobody gets "it used my
+ * key" without having chosen it.
  */
 export const CatalogInstallRequestSchema = z.strictObject({
   previewId: CatalogInstallPreviewIdSchema,

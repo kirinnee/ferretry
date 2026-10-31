@@ -38,6 +38,21 @@ export const CatalogInstallRecordSchema = z.strictObject({
   key: z.string().min(1).max(4_200),
   files: z.array(CatalogInstalledFileSchema),
   secretBindings: CatalogSecretBindingsSchema,
+  /**
+   * A project skill's folder, relative to `root`, and the normalised root it was written under. Removal
+   * works from these, never from the words in `destination`, so a root spelled with `/./` or a trailing
+   * slash removes what was written.
+   */
+  root: z.string().min(1).max(4_096).optional(),
+  folder: z.string().min(1).max(4_096).optional(),
+  /**
+   * A runtime install: the SHA-256 of the stored component in its canonical form, taken when it landed. A
+   * hand edit (`fy config`) changes it even though the component still says where it came from.
+   */
+  componentSha256: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/u)
+    .optional(),
 });
 export type CatalogInstallRecord = z.infer<typeof CatalogInstallRecordSchema>;
 

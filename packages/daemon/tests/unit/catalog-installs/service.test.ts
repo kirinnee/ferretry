@@ -487,12 +487,12 @@ describe('catalog install apply: secret bindings', () => {
     should(error.message).match(/no secret called MISSING/u);
   });
 
-  it('should refuse leaving a placeholder unbound while a secret of that name exists', async () => {
+  it('should install an unbound placeholder even when a secret of that name exists, and not use that secret', async () => {
     const r = rig();
     r.secrets.add('ACME_TOKEN');
-    const error = await refusal(apply(r, await preview(r), { ACME_TOKEN: null }));
-    should(error.code).equal('catalog_bindings_invalid');
-    should(error.message).match(/Bind it on purpose/u);
+    const done = await apply(r, await preview(r), { ACME_TOKEN: null });
+    should(done.install.secretBindings).eql({ ACME_TOKEN: null });
+    should(r.mcp.text).not.match(/ACME_TOKEN/u);
   });
 
   it('should write ${OWN} for a project and ${secret:OWN} for a runtime', async () => {
@@ -511,15 +511,34 @@ describe('catalog install apply: secret bindings', () => {
     should(runtime.install.secretBindings).eql({ ACME_TOKEN: 'ACME_TOKEN_OWN' });
   });
 
-  it('should leave an unbound placeholder as itself, never as somebody’s secret', async () => {
+  const UNSET = 'ACME_TOKEN is not set. The program runs without it until you bind one of your secrets to it.';
+
+  it('should leave an unbound placeholder OUT of a project .mcp.json, record it, and say so', async () => {
     const r = rig();
-    await apply(r, await preview(r), { ACME_TOKEN: null });
-    const file = JSON.parse(r.mcp.text ?? '{}') as { mcpServers: Record<string, { env: Record<string, string> }> };
-    should(file.mcpServers['acme-mcp']?.env.ACME_TOKEN).equal('${ACME_TOKEN}');
-    await apply(r, await preview(r, runtimeTarget()), { ACME_TOKEN: null }, 'runtime');
+    const done = await apply(r, await preview(r), { ACME_TOKEN: null });
+    const file = JSON.parse(r.mcp.text ?? '{}') as { mcpServers: Record<string, { env?: Record<string, string> }> };
+    should(Object.keys(file.mcpServers['acme-mcp']?.env ?? {})).eql([]);
+    should(r.mcp.text).not.match(/\$\{/u);
+    should(done.install.secretBindings).eql({ ACME_TOKEN: null });
+    should(done.notes).containEql(UNSET);
+  });
+
+  it('should leave an unbound placeholder OUT of a runtime component, never as somebody’s secret', async () => {
+    const r = rig();
+    r.secrets.add('ACME_TOKEN');
+    const done = await apply(r, await preview(r, runtimeTarget()), { ACME_TOKEN: null }, 'runtime');
     const change = r.fleet.proposed.at(-1);
-    if (change?.kind !== 'catalog.install' || !('env' in change.component)) throw new Error('shape');
-    should(change.component.env?.ACME_TOKEN).equal(secretRef('ACME_TOKEN'));
+    if (change?.kind !== 'catalog.install' || change.component.kind !== 'mcp') throw new Error('shape');
+    should('env' in change.component).be.false();
+    should(JSON.stringify(change.component)).not.match(/ACME_TOKEN/u);
+    should(done.install.secretBindings).eql({ ACME_TOKEN: null });
+    should(done.notes).containEql(UNSET);
+  });
+
+  it('should say nothing about a placeholder that is bound', async () => {
+    const r = rig();
+    const done = await apply(r, await preview(r), { ACME_TOKEN: 'ACME_TOKEN_OWN' });
+    should(done.notes.join(' ')).not.match(/is not set/u);
   });
 
   it('should refuse, for a project, a secret name that is no environment variable', async () => {
@@ -922,7 +941,7 @@ describe('catalog install: a runtime', () => {
     should(change.replace).be.false();
     should(change.installedFrom.name).equal('acme-mcp');
     should(r.fleet.applied).eql(['change-1']);
-    should(installed.notes[0]).match(/layer of profile work/u);
+    should(installed.notes.at(-1)).match(/layer of profile work/u);
     should(r.store.state.installs[0]?.files).eql([]);
   });
 
@@ -971,12 +990,12 @@ describe('catalog install: a runtime', () => {
 
   it('should refuse a name that is already a component of ours that nobody installed from a catalog', async () => {
     const r = rig();
-    r.fleet.components.set('mcp', [{ name: 'acme-mcp' }]);
+    r.fleet.components.set('mcp', [{ name: 'acme-mcp', detail: {} }]);
     const error = await refusal(
       r.service.preview('runtime', await request(alice, mcpItem(alice.daemonId), runtimeTarget())),
     );
     should(error.code).equal('catalog_install_conflict');
-    r.fleet.components.set('skills', [{ name: 'pdf-tools' }]);
+    r.fleet.components.set('skills', [{ name: 'pdf-tools', detail: {} }]);
     const skill = await refusal(
       r.service.preview('runtime', await request(alice, skillItem(alice.daemonId), runtimeTarget())),
     );
@@ -986,7 +1005,7 @@ describe('catalog install: a runtime', () => {
   it('should refuse replacing a component that was edited since (its provenance is gone)', async () => {
     const r = rig();
     await installMcp(r, { ACME_TOKEN: null }, runtimeTarget());
-    r.fleet.components.set('mcp', [{ name: 'acme-mcp' }]);
+    r.fleet.components.set('mcp', [{ name: 'acme-mcp', detail: {} }]);
     const v2 = mcpItem(alice.daemonId, { itemVersion: 2 });
     const error = await refusal(r.service.preview('runtime', await request(alice, v2, runtimeTarget())));
     should(error.code).equal('catalog_install_conflict');
@@ -1044,7 +1063,7 @@ describe('catalog install: a runtime', () => {
   it('should refuse to remove a component that was edited since it was installed', async () => {
     const r = rig();
     const { installed } = await installMcp(r, { ACME_TOKEN: null }, runtimeTarget());
-    r.fleet.components.set('mcp', [{ name: 'acme-mcp' }]);
+    r.fleet.components.set('mcp', [{ name: 'acme-mcp', detail: {} }]);
     const error = await refusal(r.service.remove('runtime', installed.install.installId, GOVERNANCE, STEP_UP));
     should(error.code).equal('catalog_install_conflict');
     should(error.message).match(/so it was not removed/u);
@@ -1065,5 +1084,174 @@ describe('catalog install: a runtime', () => {
     await r.service.remove('runtime', installed.install.installId, GOVERNANCE, STEP_UP);
     should(r.fleet.proposed.filter(change => change.kind === 'component.remove')).have.length(0);
     should(r.folders.folders.size).equal(0);
+  });
+});
+
+describe('catalog install: previews belong to the caller who asked', () => {
+  const BOB = { id: 'device:dev_b', mayListSecrets: true };
+  const apply = (as: ReturnType<Rig['as']>, previewId: string) =>
+    as.apply('project', { previewId, secretBindings: {} }, GOVERNANCE, STEP_UP);
+
+  it('should refuse another caller’s apply as an unknown preview, and leave it for its owner', async () => {
+    const r = rig();
+    const preview = await r.service.preview(
+      'project',
+      await request(alice, skillItem(alice.daemonId), projectTarget()),
+    );
+    const error = await refusal(apply(r.as(BOB), preview.previewId));
+    should(error.code).equal('catalog_preview_unknown');
+    should(r.store.state.installs).eql([]);
+    await apply(r.service, preview.previewId);
+    should(r.store.state.installs).have.length(1);
+  });
+
+  it('should give each caller its own bound, so one caller cannot push another’s preview out', async () => {
+    const r = rig({ maxKept: 2 });
+    const asked = await request(alice, skillItem(alice.daemonId), projectTarget());
+    const bobs = await r.as(BOB).preview('project', asked);
+    const first = await r.service.preview('project', asked);
+    await r.service.preview('project', asked);
+    await r.service.preview('project', asked);
+    should((await refusal(apply(r.service, first.previewId))).code).equal('catalog_preview_unknown');
+    await apply(r.as(BOB), bobs.previewId);
+    should(r.store.state.installs).have.length(1);
+  });
+});
+
+describe('catalog install: secret names are only told to a caller who may list them', () => {
+  it('should report whether a secret of that name is held to a caller who may list secrets', async () => {
+    const r = rig();
+    r.secrets = new Set(['ACME_TOKEN']);
+    const preview = await r
+      .as({ id: 'host', mayListSecrets: true })
+      .preview('project', await request(alice, mcpItem(alice.daemonId), projectTarget()));
+    should(preview.secrets).eql([{ placeholder: 'ACME_TOKEN', held: true }]);
+  });
+
+  it('should leave `held` out for any other caller, whether or not the secret exists', async () => {
+    const r = rig();
+    const other = r.as({ id: 'agents', mayListSecrets: false });
+    const asked = await request(alice, mcpItem(alice.daemonId), projectTarget());
+    for (const names of [['ACME_TOKEN'], []]) {
+      r.secrets = new Set(names);
+      const preview = await other.preview('project', asked);
+      should(preview.secrets).eql([{ placeholder: 'ACME_TOKEN' }]);
+      should('held' in (preview.secrets[0] ?? {})).be.false();
+    }
+  });
+});
+
+describe('catalog install: a target is one place however it is spelled', () => {
+  it('should remove a project skill installed through a root spelled with a trailing slash', async () => {
+    const r = rig();
+    const { installed } = await installSkill(r, skillItem(alice.daemonId), projectTarget('claude', '/work/app/'));
+    should(r.folders.folders.get(`${ROOT}/.claude/skills/pdf-tools`)?.has('SKILL.md')).be.true();
+    const record = r.store.state.installs[0];
+    should(record?.root).equal(ROOT);
+    should(record?.folder).equal('.claude/skills/pdf-tools');
+    await r.service.remove('project', installed.install.installId, GOVERNANCE, STEP_UP);
+    should(r.folders.folders.size).equal(0);
+    should(r.store.state.installs).eql([]);
+  });
+
+  it('should treat two spellings of one project root as the same install to replace', async () => {
+    const r = rig();
+    await installSkill(r, skillItem(alice.daemonId), projectTarget('claude', '/work/app/'));
+    const v2 = skillItem(alice.daemonId, { itemVersion: 2 });
+    const preview = await r.service.preview('project', await request(alice, v2, projectTarget('claude', ROOT)));
+    should(preview.replaces?.version).equal(1);
+  });
+
+  it('should treat a runtime’s id and its name as the same install to replace', async () => {
+    const r = rig();
+    await installSkill(r, skillItem(alice.daemonId), runtimeTarget('rt-claude'));
+    const v2 = skillItem(alice.daemonId, { itemVersion: 2 });
+    const preview = await r.service.preview('runtime', await request(alice, v2, runtimeTarget('claude-work')));
+    should(preview.replaces?.version).equal(1);
+  });
+
+  it('should compare folder files exactly: a file that merely ends the same is not the recorded one', async () => {
+    const r = rig();
+    await installSkill(r);
+    r.folders.folders.get(`${ROOT}/.claude/skills/pdf-tools`)?.set('sub/SKILL.md', '# pdf tools\n');
+    const error = await refusal(
+      r.service.preview(
+        'project',
+        await request(alice, skillItem(alice.daemonId, { itemVersion: 2 }), projectTarget()),
+      ),
+    );
+    should(error.code).equal('catalog_install_conflict');
+    should(error.message).match(/sub\/SKILL\.md is here but no install of ours wrote it/u);
+  });
+});
+
+describe('catalog install: a replace is guarded by the reading that was checked', () => {
+  const v1 = () =>
+    skillItem(alice.daemonId, {
+      files: [
+        { path: 'SKILL.md', content: '# v1\n' },
+        { path: 'old.md', content: 'old' },
+      ],
+    });
+  const v2 = () => skillItem(alice.daemonId, { itemVersion: 2, files: [{ path: 'SKILL.md', content: '# v2\n' }] });
+
+  it('should replace a runtime skill whose stale file a person already deleted', async () => {
+    const r = rig();
+    await installSkill(r, v1(), runtimeTarget());
+    r.folders.folders.get('runtime/pdf-tools')?.delete('old.md');
+    await installSkill(r, v2(), runtimeTarget());
+    should([...(r.folders.folders.get('runtime/pdf-tools')?.keys() ?? [])]).eql(['SKILL.md']);
+  });
+
+  it('should refuse as a conflict when the folder changes under the removal of a stale file', async () => {
+    const r = rig();
+    await installSkill(r, v1(), runtimeTarget());
+    const preview = await r.service.preview('runtime', await request(alice, v2(), runtimeTarget()));
+    r.folders.racing = true;
+    const error = await refusal(
+      r.service.apply('runtime', { previewId: preview.previewId, secretBindings: {} }, GOVERNANCE, STEP_UP),
+    );
+    should(error.code).equal('catalog_install_conflict');
+  });
+});
+
+describe('catalog install: a runtime component is judged by what it holds, not by where it says it came from', () => {
+  const edited = (r: Rig) => {
+    const current = r.fleet.components.get('mcp')?.[0];
+    r.fleet.components.set('mcp', [
+      { ...current, name: 'acme-mcp', detail: { ...(current?.detail as object), edited: 1 } },
+    ]);
+  };
+
+  it('should refuse replacing a component edited by hand even though its provenance is kept', async () => {
+    const r = rig();
+    await installMcp(r, { ACME_TOKEN: null }, runtimeTarget());
+    edited(r);
+    should(r.fleet.components.get('mcp')?.[0]?.installedFrom).not.be.undefined();
+    const error = await refusal(
+      r.service.preview('runtime', await request(alice, mcpItem(alice.daemonId, { itemVersion: 2 }), runtimeTarget())),
+    );
+    should(error.message).match(/edited on this machine/u);
+  });
+
+  it('should refuse removing a component edited by hand even though its provenance is kept', async () => {
+    const r = rig();
+    const { installed } = await installMcp(r, { ACME_TOKEN: null }, runtimeTarget());
+    edited(r);
+    const error = await refusal(r.service.remove('runtime', installed.install.installId, GOVERNANCE, STEP_UP));
+    should(error.message).match(/so it was not removed/u);
+  });
+
+  it('should not call a component edited when only the order of its keys changed', async () => {
+    const r = rig();
+    await installMcp(r, { ACME_TOKEN: null }, runtimeTarget());
+    const current = r.fleet.components.get('mcp')?.[0];
+    const reordered = Object.fromEntries(Object.entries(current?.detail as object).reverse());
+    r.fleet.components.set('mcp', [{ ...current, name: 'acme-mcp', detail: reordered }]);
+    const preview = await r.service.preview(
+      'runtime',
+      await request(alice, mcpItem(alice.daemonId, { itemVersion: 2 }), runtimeTarget()),
+    );
+    should(preview.replaces?.version).equal(1);
   });
 });

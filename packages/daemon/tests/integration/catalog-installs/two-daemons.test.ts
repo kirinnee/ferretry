@@ -14,7 +14,14 @@ import { CatalogInstallRefusalError } from '../../../src/lib/catalog-installs/po
 import { CatalogInstallService } from '../../../src/lib/catalog-installs/service.ts';
 import { createFoundationPaths, resolveStateHome } from '../../../src/lib/index.ts';
 import { crypto, mcpItem, newIdentity, publish, skillItem } from '../../support/catalog-fixtures.ts';
-import { FakeFleet, FakeFolders, GOVERNANCE, STEP_UP } from '../../unit/catalog-installs/service-support.ts';
+import {
+  AsCaller,
+  CALLER,
+  FakeFleet,
+  FakeFolders,
+  GOVERNANCE,
+  STEP_UP,
+} from '../../unit/catalog-installs/service-support.ts';
 
 /**
  * Two machines that share nothing but a file. Machine A signs a catalog and its file is carried over as
@@ -46,7 +53,7 @@ async function machineB() {
   const paths = createFoundationPaths(resolveStateHome({ fyHome: home, homeDirectory: home }));
   const folders = new FakeFolders();
   let minted = 0;
-  const service = new CatalogInstallService({
+  const inner = new CatalogInstallService({
     crypto,
     store: new FileCatalogInstallStore(paths, new StateFileSystem(paths)),
     projectRoots: async () => [project],
@@ -61,7 +68,7 @@ async function machineB() {
       return `${prefix}_${String(minted).padStart(22, 'b')}`;
     },
   });
-  return { home, project, paths, service };
+  return { home, project, paths, service: new AsCaller(inner, CALLER) };
 }
 
 /** What crosses between the machines: text, and nothing else. */

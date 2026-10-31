@@ -262,6 +262,11 @@ export class StepUpService {
     return this.deps.registry.freshlyHeld(subject, this.deps.clock.nowMs());
   }
 
+  /** Takes the fresh proof for an act, atomically: of concurrent acts on one proof, one gets `true`. */
+  claimFresh(subject: StepUpSubject): boolean {
+    return this.deps.registry.claimFresh(subject, this.deps.clock.nowMs());
+  }
+
   /** Spends the fresh proof an act that adds access was admitted on. */
   spendFresh(subject: StepUpSubject): void {
     this.deps.registry.spendFresh(subject);
@@ -429,7 +434,7 @@ export class StepUpService {
     if (!done.ok) return done;
     this.#unlockedAt.set(device.deviceId, now);
     await this.#persistUnlocks();
-    this.deps.registry.grant(device, now);
+    this.deps.registry.grant(device, now, false);
     const settings = this.deps.settings?.();
     const unlockedUntil = instant(settings === undefined ? now : this.#unlockedUntil(device.deviceId, settings));
     return { ok: true, value: done.rotated ? { unlockedUntil, keyRotated: true } : { unlockedUntil } };

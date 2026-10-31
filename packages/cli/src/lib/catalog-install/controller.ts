@@ -160,7 +160,7 @@ export class CatalogInstallController {
     });
     if (size > SHARED_CATALOG_FILE_MAX_BYTES)
       throw new Stop('This catalog file is larger than 32 MiB, so it was not read.');
-    const text = await this.deps.files.read(path).catch((error: unknown) => {
+    const text = await this.deps.files.read(path, SHARED_CATALOG_FILE_MAX_BYTES).catch((error: unknown) => {
       throw new Stop(`Cannot read ${path}: ${(error as Error).message}`);
     });
     const reading = readSharedCatalogFile(text);

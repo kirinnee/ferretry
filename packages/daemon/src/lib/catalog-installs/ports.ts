@@ -56,6 +56,9 @@ export interface ProjectSkillFiles {
 /** The skill folders of this machine's fleet (`<fleet>/assets/skills/<name>`). The fleet service writes; this reads and prunes. */
 export interface RuntimeSkillAssets {
   inspect(name: string): Promise<SkillFolderReading>;
-  /** Delete exactly these files (the caller already checked their hashes), then the folder if it is empty. */
-  remove(name: string, paths: readonly string[]): Promise<void>;
+  /**
+   * Delete exactly the files `expected` names, each only if it still has the hash the caller VERIFIED
+   * (the guard is the caller's reading, not one taken here), then the folder if it is empty.
+   */
+  remove(name: string, expected: ReadonlyMap<string, string | null>): Promise<void>;
 }

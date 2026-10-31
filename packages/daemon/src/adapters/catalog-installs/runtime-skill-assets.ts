@@ -9,10 +9,7 @@ export class FileRuntimeSkillAssets implements RuntimeSkillAssets {
     return await inspectSkillFolder(this.skillsDirectory, name);
   }
 
-  async remove(name: string, paths: readonly string[]): Promise<void> {
-    const reading = await inspectSkillFolder(this.skillsDirectory, name);
-    if (!reading.exists) return;
-    const expected = new Map<string, string | null>(paths.map(path => [path, reading.files.get(path) ?? null]));
-    await applySkillFolder(this.skillsDirectory, name, { write: [], remove: paths, expected });
+  async remove(name: string, expected: ReadonlyMap<string, string | null>): Promise<void> {
+    await applySkillFolder(this.skillsDirectory, name, { write: [], remove: [...expected.keys()], expected });
   }
 }

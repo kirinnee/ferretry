@@ -110,6 +110,12 @@ export interface RouteContext {
    * succeeded, so one passkey confirmation adds one device. A no-op for a caller with no proven device.
    */
   readonly spendFreshStepUp?: () => void;
+  /**
+   * Takes this caller's FRESH proof at ADMISSION, in one step, and answers whether it held one: of two
+   * requests racing on one proof exactly one is answered `true`, so one confirmation buys one act. A
+   * caller with no proven device holds none. The proof is not refunded when the act then refuses.
+   */
+  readonly claimFreshStepUp?: () => boolean;
 }
 
 /**

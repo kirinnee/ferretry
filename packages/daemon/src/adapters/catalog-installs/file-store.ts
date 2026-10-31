@@ -10,10 +10,8 @@ import {
 
 export const CATALOG_INSTALLS_DOCUMENT = 'catalog-installs.json';
 
-const CATALOG_INSTALLS_MODE = 0o600;
-
 /**
- * `<FY_HOME>/state/catalog-installs.json`, `0600`, written by temp + rename. DAMAGED IS NOT EMPTY: a file that
+ * `<FY_HOME>/state/catalog-installs.json`, `0600` from the first byte: the port opens its temporary file with mode `0600` and renames it into place, so the file is never wider than that, even for an instant. DAMAGED IS NOT EMPTY: a file that
  * will not parse raises, because answering "no installs" would forget every pin and every hash. Only a
  * state home that never installed anything answers the empty state. No part of the file reaches a message.
  */
@@ -46,6 +44,5 @@ export class FileCatalogInstallStore implements CatalogInstallStore {
 
   async write(state: CatalogInstallState): Promise<void> {
     await this.files.writeTextAtomic(this.path, `${JSON.stringify(state, undefined, 2)}\n`);
-    await this.files.setMode(this.path, CATALOG_INSTALLS_MODE);
   }
 }

@@ -1,4 +1,4 @@
-import { readFile, stat } from 'node:fs/promises';
+import { open, stat } from 'node:fs/promises';
 import type { ICatalogFileReader } from '../../lib/catalog-install/ports.ts';
 
 export class FsCatalogFileReader implements ICatalogFileReader {
@@ -8,7 +8,20 @@ export class FsCatalogFileReader implements ICatalogFileReader {
     return stats.size;
   }
 
-  async read(path: string): Promise<string> {
-    return await readFile(path, 'utf8');
+  async read(path: string, maxBytes: number): Promise<string> {
+    const handle = await open(path, 'r');
+    try {
+      const buffer = Buffer.alloc(maxBytes + 1);
+      let filled = 0;
+      while (filled < buffer.length) {
+        const { bytesRead } = await handle.read(buffer, filled, buffer.length - filled, null);
+        if (bytesRead === 0) break;
+        filled += bytesRead;
+      }
+      if (filled > maxBytes) throw new Error(`${path} grew past ${maxBytes} bytes while being read`);
+      return buffer.toString('utf8', 0, filled);
+    } finally {
+      await handle.close();
+    }
   }
 }

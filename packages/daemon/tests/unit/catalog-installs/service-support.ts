@@ -1,15 +1,24 @@
 import type {
+  CatalogInstalled,
+  CatalogInstallPreview,
   CatalogInstallPreviewRequest,
+  CatalogInstallRequest,
+  CatalogInstallScope,
   CatalogInstallTarget,
   FleetAccountChange,
   FleetAccountChangeView,
+  FleetCatalogInstallChange,
   FleetComponentCatalog,
   FleetLayeredProfileCatalog,
   FleetRuntimeCatalog,
 } from '@ferretry/protocol';
 import type { DaemonIdentity } from '@ferretry/relay';
 import type { CallerGovernance } from '../../../src/lib/api/capability.ts';
-import { CatalogInstallService, type CatalogInstallServiceDeps } from '../../../src/lib/catalog-installs/service.ts';
+import {
+  type CatalogCaller,
+  CatalogInstallService,
+  type CatalogInstallServiceDeps,
+} from '../../../src/lib/catalog-installs/service.ts';
 import {
   type CatalogInstallState,
   type CatalogInstallStore,
@@ -35,6 +44,32 @@ import { crypto, publish, type Published } from '../../support/catalog-fixtures.
 export const GOVERNANCE = { governed: false } as unknown as CallerGovernance;
 export const STEP_UP: FreshStepUpContext = { presentation: undefined, spend: () => undefined };
 export const ROOT = '/work/app';
+export const CALLER: CatalogCaller = { id: 'device:dev_a', mayListSecrets: true };
+
+/** The service as ONE caller sees it: the caller is fixed, so a case reads as the two steps it is. */
+export class AsCaller {
+  constructor(
+    private readonly inner: CatalogInstallService,
+    readonly caller: CatalogCaller,
+  ) {}
+
+  preview(scope: CatalogInstallScope, request: CatalogInstallPreviewRequest): Promise<CatalogInstallPreview> {
+    return this.inner.preview(scope, request, this.caller);
+  }
+
+  apply(
+    scope: CatalogInstallScope,
+    request: CatalogInstallRequest,
+    governance: CallerGovernance | undefined,
+    _stepUp?: FreshStepUpContext,
+  ): Promise<CatalogInstalled> {
+    return this.inner.apply(scope, request, this.caller, governance);
+  }
+
+  list: CatalogInstallService['list'] = () => this.inner.list();
+  remove: CatalogInstallService['remove'] = (scope, installId, governance, stepUp) =>
+    this.inner.remove(scope, installId, governance, stepUp);
+}
 
 const sha = async (text: string): Promise<string> =>
   Array.from(await crypto.sha256(new TextEncoder().encode(text)), byte => byte.toString(16).padStart(2, '0')).join('');
@@ -118,18 +153,19 @@ class FakeRuntimeSkills implements RuntimeSkillAssets {
     return this.folders.read(`runtime/${name}`);
   }
 
-  async remove(name: string, paths: readonly string[]): Promise<void> {
-    await this.folders.change(`runtime/${name}`, { write: [], remove: paths, expected: new Map() });
+  async remove(name: string, expected: ReadonlyMap<string, string | null>): Promise<void> {
+    await this.folders.change(`runtime/${name}`, { write: [], remove: [...expected.keys()], expected });
   }
 }
 
 interface FakeComponent {
   name: string;
+  detail?: unknown;
   installedFrom?: { digest: string };
 }
 
 export class FakeFleet {
-  readonly proposed: FleetAccountChange[] = [];
+  readonly proposed: (FleetAccountChange | FleetCatalogInstallChange)[] = [];
   readonly applied: string[] = [];
   readonly components = new Map<'mcp' | 'skills', FakeComponent[]>([
     ['mcp', []],
@@ -163,14 +199,14 @@ export class FakeFleet {
       this.proposed.push(change);
       return { id: `change-${this.proposed.length}` } as FleetAccountChangeView;
     },
-    apply: async id => {
-      this.applied.push(id);
+    installCatalogItem: async change => {
+      this.proposed.push(change);
+      this.applied.push(`change-${this.proposed.length}`);
       if (this.failApply !== undefined) throw this.failApply;
-      const change = this.proposed[Number(id.slice('change-'.length)) - 1] as FleetAccountChange;
-      if (change.kind === 'catalog.install') {
+      {
         const kind = change.component.kind === 'mcp' ? 'mcp' : 'skills';
         const list = (this.components.get(kind) ?? []).filter(component => component.name !== change.name);
-        list.push({ name: change.name, installedFrom: change.installedFrom });
+        list.push({ name: change.name, detail: change.component, installedFrom: change.installedFrom });
         this.components.set(kind, list);
         for (const file of change.files) {
           const folder = this.assets.folders.get(`runtime/${change.name}`) ?? new Map<string, string>();
@@ -178,6 +214,12 @@ export class FakeFleet {
           this.assets.folders.set(`runtime/${change.name}`, folder);
         }
       }
+      return { outcome: 'executed', executor: 'setup', summary: 'done' };
+    },
+    apply: async id => {
+      this.applied.push(id);
+      if (this.failApply !== undefined) throw this.failApply;
+      const change = this.proposed[Number(id.slice('change-'.length)) - 1] as FleetAccountChange;
       if (change.kind === 'component.remove')
         this.components.set(
           change.componentKind as 'mcp' | 'skills',
@@ -191,7 +233,10 @@ export class FakeFleet {
 }
 
 export interface Rig {
-  readonly service: CatalogInstallService;
+  readonly service: AsCaller;
+  /** The service itself, for a case that is about who is calling. */
+  readonly inner: CatalogInstallService;
+  as(caller: CatalogCaller): AsCaller;
   readonly store: MemoryStore;
   readonly mcp: FakeMcpFiles;
   readonly folders: FakeFolders;
@@ -219,7 +264,9 @@ export function rig(options: { maxKept?: number } = {}): Rig {
     clock,
     secrets: new Set(['ACME_TOKEN_OWN', 'OTHER']),
     roots: [ROOT, '/work/app/'],
-    service: undefined as unknown as CatalogInstallService,
+    service: undefined as unknown as AsCaller,
+    inner: undefined as unknown as CatalogInstallService,
+    as: undefined as unknown as Rig['as'],
   };
   const service = new CatalogInstallService(
     {
@@ -239,7 +286,11 @@ export function rig(options: { maxKept?: number } = {}): Rig {
     },
     previews,
   );
-  return Object.assign(state, { service });
+  return Object.assign(state, {
+    service: new AsCaller(service, CALLER),
+    inner: service,
+    as: (caller: CatalogCaller) => new AsCaller(service, caller),
+  });
 }
 
 export const projectTarget = (harness: 'claude' | 'codex' = 'claude', projectRoot = ROOT): CatalogInstallTarget => ({

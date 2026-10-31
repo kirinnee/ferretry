@@ -83,6 +83,45 @@ describe('StepUpRegistry fresh proof (acts that add access)', () => {
     should(registry.freshlyHeld(phoneOtherTab, NOW)).be.false();
   });
 
+  it('should hold a step-up that is not a proof for an act (the unlock), and forget an older proof', () => {
+    // Arrange
+    const registry = openRegistry();
+    registry.grant(phone, NOW);
+
+    // Act
+    registry.grant(phone, NOW + 1, false);
+
+    // Assert
+    should(registry.held(phone, NOW + 1)).be.true();
+    should(registry.freshlyHeld(phone, NOW + 1)).be.false();
+  });
+
+  it('should hand one fresh proof to exactly one of two acts that race for it', () => {
+    // Arrange
+    const registry = openRegistry();
+    registry.grant(phone, NOW);
+
+    // Act — nothing awaits between the check and the spend, so the second finds it gone.
+    const claims = [registry.claimFresh(phone, NOW), registry.claimFresh(phone, NOW)];
+
+    // Assert
+    should(claims).deepEqual([true, false]);
+    should(registry.held(phone, NOW)).be.true();
+    registry.grant(phone, NOW + 1);
+    should(registry.claimFresh(phone, NOW + 1)).be.true();
+  });
+
+  it('should claim no proof that was never given, that lapsed, or that another tab holds', () => {
+    // Arrange
+    const registry = openRegistry();
+    registry.grant(phone, NOW);
+
+    // Act / Assert
+    should(registry.claimFresh(phoneOtherTab, NOW)).be.false();
+    should(registry.claimFresh(laptop, NOW)).be.false();
+    should(registry.claimFresh(phone, NOW + PASSKEY_CHALLENGE_TTL_SECONDS * 1_000)).be.false();
+  });
+
   it('should spend the fresh proof on one act and keep the step-up, until the next passkey', () => {
     // Arrange
     const registry = openRegistry();

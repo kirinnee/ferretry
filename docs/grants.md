@@ -311,7 +311,9 @@ the owner turned on `stepUpOnActions`, which asks for a passkey again per act in
 with the unlock turned off always asks per act. **Adding access always asks:** minting a pairing code,
 widening another device, and turning "what agents may control" (terminals/browsers/files, T) back ON
 want a passkey proved for that one act, from any device, unlocked or not
-([design/zero-trust.md](design/zero-trust.md) B6) — turning one of those three OFF never does. At the
+([design/zero-trust.md](design/zero-trust.md) B6) — turning one of those three OFF never does. So does
+**installing from a catalog** (act `catalog-install`, [catalogs.md](catalogs.md)): the unlock never counts
+as that proof, and the proof is claimed atomically at admission so one passkey buys one install. At the
 machine, nothing is asked.
 
 **The app asks only for the machine on screen.** With several machines paired, every page reads all of

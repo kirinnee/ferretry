@@ -225,6 +225,8 @@ export interface StepUpWitness {
   freshlyHeld?(subject: SessionDevice): boolean;
   /** Spends that proof. */
   spendFresh?(subject: SessionDevice): void;
+  /** Takes that proof atomically: of concurrent acts on one proof, exactly one is answered `true`. */
+  claimFresh?(subject: SessionDevice): boolean;
 }
 
 /**

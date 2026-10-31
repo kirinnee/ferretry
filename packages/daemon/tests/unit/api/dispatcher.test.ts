@@ -1650,6 +1650,65 @@ describe('spending a single-use step-up', () => {
     should(spent).be.empty();
   });
 
+  describe('claiming the fresh proof at admission', () => {
+    const claimingRoute = (claimed: boolean[]): ApiRoute => ({
+      method: 'POST',
+      path: '/v1/claims',
+      minimum: 'operator',
+      capability: { capability: 'fleet', axis: 'use' },
+      handle: async context => {
+        claimed.push(context.claimFreshStepUp?.() === true);
+        return jsonResponse({});
+      },
+    });
+    const claimWitness = (proofs: { left: number }): StepUpWitness => ({
+      held: () => true,
+      claimFresh: () => {
+        if (proofs.left <= 0) return false;
+        proofs.left -= 1;
+        return true;
+      },
+    });
+    const dispatcherFor = (claimed: boolean[], witnessed: StepUpWitness) =>
+      new ApiDispatcher(
+        new ApiRouter([claimingRoute(claimed)]),
+        credentials,
+        guardDeciding({ allowed: true, refusal: 'granted' }),
+        undefined,
+        witnessed,
+      );
+
+    it('should hand a route the device’s proof once, and nothing the second time', async () => {
+      const claimed: boolean[] = [];
+      const dispatcher = dispatcherFor(claimed, claimWitness({ left: 1 }));
+
+      await dispatcher.dispatch(request({ method: 'POST', path: '/v1/claims', device: DEVICE }));
+      await dispatcher.dispatch(request({ method: 'POST', path: '/v1/claims', device: DEVICE }));
+
+      should(claimed).deepEqual([true, false]);
+    });
+
+    it('should hold no proof for a caller with no device, even when the witness has one', async () => {
+      const claimed: boolean[] = [];
+      const dispatcher = dispatcherFor(claimed, claimWitness({ left: 1 }));
+
+      await dispatcher.dispatch(
+        request({ method: 'POST', path: '/v1/claims', headers: { authorization: 'Bearer admin-secret' } }),
+      );
+
+      should(claimed).deepEqual([false]);
+    });
+
+    it('should hold no proof when the witness cannot claim one', async () => {
+      const claimed: boolean[] = [];
+      const dispatcher = dispatcherFor(claimed, { held: () => true });
+
+      await dispatcher.dispatch(request({ method: 'POST', path: '/v1/claims', device: DEVICE }));
+
+      should(claimed).deepEqual([false]);
+    });
+  });
+
   it('should serve an allowed stepped-up act when the witness has nothing to spend', async () => {
     const served = await dispatcherWithGuard(guardDeciding({ allowed: true, refusal: 'granted', steppedUp: true }), {
       held: () => true,

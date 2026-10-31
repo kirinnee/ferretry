@@ -37,6 +37,7 @@ import {
   catalogItemWarnings,
   catalogSecretPlaceholders,
   type FleetComponentInput,
+  type FleetComponentView,
   mcpServerRefusal,
   type SessionMcpServer,
   type SharedCatalogItem,
@@ -75,7 +76,10 @@ export interface CatalogInstallServiceDeps {
   readonly mcpFiles: McpProjectFiles;
   readonly skillFiles: ProjectSkillFiles;
   readonly runtimeSkills: RuntimeSkillAssets;
-  readonly fleet: Pick<FleetCatalogService, 'runtimes' | 'profiles' | 'components' | 'propose' | 'apply'>;
+  readonly fleet: Pick<
+    FleetCatalogService,
+    'runtimes' | 'profiles' | 'components' | 'propose' | 'apply' | 'installCatalogItem'
+  >;
   /** The NAMES of the secrets this machine holds. Never a value. */
   secretNames(): Promise<ReadonlySet<string>>;
   now(): number;
@@ -86,6 +90,26 @@ export interface CatalogInstallServiceDeps {
 const SECRET_PLACEHOLDER = /^\$\{secret:([A-Za-z0-9_.-]+)\}$/u;
 const ENV_VARIABLE = /^[A-Z_][A-Z0-9_]*$/u;
 const PROJECT_MCP_FILE = '.mcp.json';
+
+/** The caller of a preview or an apply, as the mount identified it. */
+export interface CatalogCaller {
+  /** Who asked: a preview can only be applied by the same one. */
+  readonly id: string;
+  /** Whether this caller may list secret names (`secrets.use`); only then does a review say which are held. */
+  readonly mayListSecrets: boolean;
+}
+
+/** JSON with every object's keys sorted, so the same value always has the same text. */
+const canonical = (value: unknown): string => {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (typeof value === 'object' && value !== null)
+    return `{${Object.entries(value)
+      .filter(([, entry]) => entry !== undefined)
+      .toSorted(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${canonical(entry)}`)
+      .join(',')}}`;
+  return JSON.stringify(value);
+};
 
 const hexOf = (bytes: Uint8Array): string => Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
 
@@ -110,7 +134,25 @@ interface Destination {
 
 interface ResolvedTarget {
   readonly destination: Destination;
+  /** A project target's normalised root. */
+  readonly root?: string;
 }
+
+/** What is at the destination now: the install this replaces, and the folder reading that VERIFIED it. */
+interface DestinationState {
+  readonly replaces: CatalogInstallRecord | undefined;
+  readonly reading: SkillFolderReading | undefined;
+}
+
+/** What a write landed: the files it recorded, what to tell the person, and the runtime component's hash. */
+interface Written {
+  readonly files: CatalogInstalledFile[];
+  readonly notes: string[];
+  readonly componentSha256?: string;
+}
+
+const UNBOUND_NOTE = (placeholder: string): string =>
+  `${placeholder} is not set. The program runs without it until you bind one of your secrets to it.`;
 
 interface Judged {
   readonly replaces: CatalogInstallRecord | undefined;
@@ -148,10 +190,14 @@ export class CatalogInstallService {
   }
 
   /** Verify in the contract's order and answer the review. Writes nothing, changes no state. */
-  async preview(scope: CatalogInstallScope, request: CatalogInstallPreviewRequest): Promise<CatalogInstallPreview> {
-    const { item, target } = request;
-    if (target.scope !== scope)
-      refuse('catalog_target_unknown', `this asks for a ${scope} install but names a ${target.scope} target`);
+  async preview(
+    scope: CatalogInstallScope,
+    request: CatalogInstallPreviewRequest,
+    caller: CatalogCaller,
+  ): Promise<CatalogInstallPreview> {
+    const { item } = request;
+    if (request.target.scope !== scope)
+      refuse('catalog_target_unknown', `this asks for a ${scope} install but names a ${request.target.scope} target`);
     // 1. The signature: the manifest was signed by the machine it names.
     const manifest = await verifySignedCatalogManifest(this.deps.crypto, request.signedManifest);
     if (!manifest.ok) return refuse('catalog_signature_invalid', manifest.reason);
@@ -169,6 +215,7 @@ export class CatalogInstallService {
       version: item.itemVersion,
       digest: line.value.digest,
     };
+    const target = await this.#canonicalTarget(request.target);
     const state = await this.deps.store.read();
     const allowOlder = request.allowOlder === true;
     // 3–5. The publisher pin, the revision, the version.
@@ -178,15 +225,16 @@ export class CatalogInstallService {
     // 7. The target is one this machine knows.
     const resolved = await this.#resolveTarget(item, target);
     // 8. Nothing sits at the destination that we did not put there, and what we did put there is untouched.
-    const replaces = await this.#destinationState(item, target, resolved, state, judged.replaces);
+    const { replaces } = await this.#destinationState(item, target, resolved, state, judged.replaces);
     const placeholders = catalogSecretPlaceholders(item);
-    const held = await this.deps.secretNames();
+    const held = caller.mayListSecrets ? await this.deps.secretNames() : undefined;
     const now = this.deps.now();
     const previewId = this.deps.mint('cip') as HeldPreview['previewId'];
     const expiresAt = now + CATALOG_INSTALL_PREVIEW_TTL_SECONDS * 1000;
     this.#previews.put(
       {
         previewId,
+        caller: caller.id,
         createdAt: now,
         expiresAt,
         item,
@@ -206,7 +254,9 @@ export class CatalogInstallService {
       target,
       destination: resolved.destination.words,
       review: [...catalogItemReview(item)],
-      secrets: placeholders.map(placeholder => ({ placeholder, held: held.has(placeholder) })),
+      secrets: placeholders.map(placeholder =>
+        held === undefined ? { placeholder } : { placeholder, held: held.has(placeholder) },
+      ),
       warnings: [...judged.warnings, ...catalogItemWarnings(item)],
       ...(replaces === undefined
         ? {}
@@ -214,15 +264,18 @@ export class CatalogInstallService {
     };
   }
 
-  /** Install exactly the reviewed item. The caller has already proved the passkey step-up where one is due. */
+  /**
+   * Install exactly the reviewed item, for the caller that reviewed it. The mount has already claimed the
+   * passkey proof where one is due.
+   */
   async apply(
     scope: CatalogInstallScope,
     request: CatalogInstallRequest,
+    caller: CatalogCaller,
     governance: CallerGovernance | undefined,
-    freshStepUp: FreshStepUpContext,
   ): Promise<CatalogInstalled> {
     return await this.#inTurn(async () => {
-      const lookup = this.#previews.get(request.previewId, this.deps.now());
+      const lookup = this.#previews.get(request.previewId, caller.id, this.deps.now());
       if (lookup.kind === 'unknown')
         return refuse(
           'catalog_preview_unknown',
@@ -245,11 +298,17 @@ export class CatalogInstallService {
       const state = await this.deps.store.read();
       const judged = this.#judge(state, held.provenance, held.revision, held.target, held.allowOlder);
       const resolved = await this.#resolveTarget(held.item, held.target);
-      const replaces = await this.#destinationState(held.item, held.target, resolved, state, judged.replaces);
+      const { replaces, reading } = await this.#destinationState(
+        held.item,
+        held.target,
+        resolved,
+        state,
+        judged.replaces,
+      );
       const written =
         held.target.scope === 'project'
-          ? await this.#writeProject(held, held.target, resolved, request.secretBindings)
-          : await this.#writeRuntime(held, held.target, request.secretBindings, replaces, governance, freshStepUp);
+          ? await this.#writeProject(held, resolved, request.secretBindings, replaces, reading)
+          : await this.#writeRuntime(held, held.target, request.secretBindings, replaces, reading, governance);
       const installedAt = new Date(this.deps.now()).toISOString();
       const record: CatalogInstallRecord = {
         installId: this.deps.mint('cin') as CatalogInstallRecord['installId'],
@@ -260,6 +319,9 @@ export class CatalogInstallService {
         key: resolved.destination.key,
         files: written.files,
         secretBindings: request.secretBindings,
+        ...(resolved.root === undefined ? {} : { root: resolved.root }),
+        ...(resolved.destination.folder === undefined ? {} : { folder: resolved.destination.folder }),
+        ...(written.componentSha256 === undefined ? {} : { componentSha256: written.componentSha256 }),
       };
       await this.deps.store.write({
         schemaVersion: state.schemaVersion,
@@ -304,7 +366,7 @@ export class CatalogInstallService {
       const record = state.installs.find(install => install.installId === installId && install.target.scope === scope);
       if (record === undefined)
         return refuse('catalog_install_unknown', `There is no ${scope} install ${installId} on this machine.`);
-      if (record.target.scope === 'project') await this.#removeProject(record, record.target);
+      if (record.target.scope === 'project') await this.#removeProject(record);
       else await this.#removeRuntime(record, governance, freshStepUp);
       await this.deps.store.write({ ...state, installs: state.installs.filter(install => install !== record) });
       return { installId: record.installId, provenance: record.provenance, destination: record.destination };
@@ -418,6 +480,7 @@ export class CatalogInstallService {
         );
       if (item.kind === 'mcp')
         return {
+          root: wanted,
           destination: {
             key: `project:${wanted}/${PROJECT_MCP_FILE}#${item.name}`,
             words: `the server ${item.name} in ${wanted}/${PROJECT_MCP_FILE}`,
@@ -426,6 +489,7 @@ export class CatalogInstallService {
       const folder = `${target.harness === 'claude' ? '.claude' : '.agents'}/skills/${item.name}`;
       const count = item.kind === 'skill' ? item.skill.files.length : 0;
       return {
+        root: wanted,
         destination: {
           key: `project:${wanted}/${folder}`,
           words: `${wanted}/${folder}/ (${count} file${count === 1 ? '' : 's'})`,
@@ -470,18 +534,25 @@ export class CatalogInstallService {
     resolved: ResolvedTarget,
     state: CatalogInstallState,
     replaces: CatalogInstallRecord | undefined,
-  ): Promise<CatalogInstallRecord | undefined> {
+  ): Promise<DestinationState> {
     const holder = state.installs.find(install => install.key === resolved.destination.key);
     if (holder !== undefined && holder !== replaces)
       refuse(
         'catalog_install_conflict',
         `${resolved.destination.words} already holds ${holder.provenance.name} from ${holder.provenance.publisherName}'s ${holder.provenance.catalogName}. Remove that first (install ${holder.installId}).`,
       );
+    const root = resolved.root as string;
     if (target.scope === 'project') {
-      if (item.kind === 'mcp') await this.#checkProjectMcp(target.projectRoot, item.name, replaces);
-      else await this.#checkProjectSkill(target.projectRoot, resolved.destination.folder as string, replaces);
-    } else await this.#checkRuntime(item, replaces);
-    return replaces;
+      if (item.kind === 'mcp') {
+        await this.#checkProjectMcp(root, item.name, replaces);
+        return { replaces, reading: undefined };
+      }
+      const folder = resolved.destination.folder as string;
+      const reading = await this.#inspectProjectSkill(root, folder);
+      this.#checkFolder(reading, replaces, `${folder}/`, `${folder}/`);
+      return { replaces, reading };
+    }
+    return { replaces, reading: await this.#checkRuntime(item, replaces) };
   }
 
   async #checkProjectMcp(root: string, name: string, replaces: CatalogInstallRecord | undefined): Promise<void> {
@@ -502,12 +573,11 @@ export class CatalogInstallService {
       );
   }
 
-  async #checkProjectSkill(root: string, folder: string, replaces: CatalogInstallRecord | undefined): Promise<void> {
-    const reading = await this.#inspectProjectSkill(root, folder);
-    this.#checkFolder(reading, replaces, `${folder}/`);
-  }
-
-  async #checkRuntime(item: SharedCatalogItem, replaces: CatalogInstallRecord | undefined): Promise<void> {
+  /** The runtime side of step 8. Answers the skill folder as it was READ, so the write is guarded by that very reading. */
+  async #checkRuntime(
+    item: SharedCatalogItem,
+    replaces: CatalogInstallRecord | undefined,
+  ): Promise<SkillFolderReading | undefined> {
     const kind = item.kind === 'mcp' ? 'mcp' : 'skills';
     const group = (await this.deps.fleet.components()).kinds.find(candidate => candidate.kind === kind);
     const component = group?.components.find(candidate => candidate.name === item.name);
@@ -517,24 +587,42 @@ export class CatalogInstallService {
           'catalog_install_conflict',
           `${item.name} is already a ${kind === 'mcp' ? 'server' : 'skill'} on this machine, and no install of ours put it there.`,
         );
-      if (component.installedFrom?.digest !== replaces?.provenance.digest)
+      if ((await this.#componentHash(component)) !== replaces?.componentSha256)
         refuse(
           'catalog_install_conflict',
           `${item.name} was edited on this machine since it was installed, so it was not replaced.`,
         );
     }
-    if (item.kind === 'skill')
-      this.#checkFolder(await this.deps.runtimeSkills.inspect(item.name), replaces, `${item.name}/`);
+    if (item.kind !== 'skill') return undefined;
+    const reading = await this.deps.runtimeSkills.inspect(item.name);
+    this.#checkFolder(reading, replaces, `skills/${item.name}/`, `${item.name}/`);
+    return reading;
+  }
+
+  /**
+   * What an install recorded under `prefix` (a folder's path in the record), by the file's path inside
+   * that folder. Exact: a file is only ever the one the record names, never one that merely ends the same.
+   */
+  #recorded(record: CatalogInstallRecord | undefined, prefix: string): Map<string, string> {
+    const recorded = new Map<string, string>();
+    for (const file of record?.files ?? [])
+      if (file.path.startsWith(prefix)) recorded.set(file.path.slice(prefix.length), file.sha256);
+    return recorded;
   }
 
   /** A folder holds only files an earlier install of ours wrote, each unchanged (a missing one is not an edit). */
-  #checkFolder(reading: SkillFolderReading, replaces: CatalogInstallRecord | undefined, where: string): void {
+  #checkFolder(
+    reading: SkillFolderReading,
+    replaces: CatalogInstallRecord | undefined,
+    prefix: string,
+    where: string,
+  ): void {
     if (!reading.exists || reading.files.size === 0) return;
     if (replaces === undefined)
       refuse('catalog_install_conflict', `${where} already holds files that no install of ours put there.`);
-    const recorded = new Map(replaces?.files.map(file => [file.path, file.sha256]));
+    const recorded = this.#recorded(replaces, prefix);
     for (const [path, hash] of reading.files) {
-      const expected = [...recorded].find(([name]) => name.endsWith(`/${path}`))?.[1];
+      const expected = recorded.get(path);
       if (expected === undefined)
         refuse('catalog_install_conflict', `${where}${path} is here but no install of ours wrote it.`);
       if (expected !== hash)
@@ -557,47 +645,40 @@ export class CatalogInstallService {
         `${extra.join(', ')} ${extra.length === 1 ? 'is' : 'are'} not something this item asks for.`,
       );
     for (const [placeholder, secret] of Object.entries(bindings)) {
-      if (secret === null) {
-        if (own.has(placeholder))
-          refuse(
-            'catalog_bindings_invalid',
-            `You hold a secret called ${placeholder}, and leaving ${placeholder} unbound would still use it. Bind it on purpose (${placeholder} to ${placeholder}), or choose another of yours.`,
-          );
-        continue;
-      }
+      if (secret === null) continue;
       if (!own.has(secret))
         refuse('catalog_bindings_invalid', `You have no secret called ${secret}, so ${placeholder} cannot use it.`);
     }
     if (held.target.scope !== 'project') return;
-    for (const [placeholder, secret] of Object.entries(bindings)) {
-      const variable = secret ?? placeholder;
-      if (!ENV_VARIABLE.test(variable))
+    for (const secret of Object.values(bindings))
+      if (secret !== null && !ENV_VARIABLE.test(secret))
         refuse(
           'catalog_bindings_invalid',
-          `A project's ${PROJECT_MCP_FILE} can only read an environment variable, and ${variable} is not a name one can have (upper-case letters, digits and _). Install it into a runtime, or pick a secret with such a name.`,
+          `A project's ${PROJECT_MCP_FILE} can only read an environment variable, and ${secret} is not a name one can have (upper-case letters, digits and _). Install it into a runtime, or pick a secret with such a name.`,
         );
-    }
   }
 
   // ── Project writes ──────────────────────────────────────────────────────────────────────────────
 
   async #writeProject(
     held: HeldPreview,
-    target: Extract<CatalogInstallTarget, { scope: 'project' }>,
     resolved: ResolvedTarget,
     bindings: CatalogSecretBindings,
-  ): Promise<{ files: CatalogInstalledFile[]; notes: string[] }> {
+    replaces: CatalogInstallRecord | undefined,
+    verified: SkillFolderReading | undefined,
+  ): Promise<Written> {
     const { item } = held;
-    if (item.kind === 'mcp') return await this.#writeProjectMcp(item, target, bindings);
+    const root = resolved.root as string;
+    if (item.kind === 'mcp') return await this.#writeProjectMcp(item, root, bindings);
     if (item.kind !== 'skill') return refuse('catalog_not_installable', `${item.name} cannot be installed.`);
     const folder = resolved.destination.folder as string;
-    const reading = await this.#inspectProjectSkill(target.projectRoot, folder);
+    const reading = verified as SkillFolderReading;
     const next = new Set(item.skill.files.map(file => file.path));
-    const stale = [...reading.files.keys()].filter(path => !next.has(path));
+    const stale = this.#staleFiles(replaces, `${folder}/`, next, reading);
     const expected = new Map<string, string | null>();
     for (const path of [...next, ...stale]) expected.set(path, reading.files.get(path) ?? null);
     try {
-      await this.deps.skillFiles.apply(target.projectRoot, folder, {
+      await this.deps.skillFiles.apply(root, folder, {
         write: item.skill.files,
         remove: stale,
         expected,
@@ -616,16 +697,30 @@ export class CatalogInstallService {
     };
   }
 
+  /** Files a replaced install wrote that the new item no longer has, and that are still on disk as read. */
+  #staleFiles(
+    replaces: CatalogInstallRecord | undefined,
+    prefix: string,
+    next: ReadonlySet<string>,
+    reading: SkillFolderReading,
+  ): string[] {
+    return [...this.#recorded(replaces, prefix).keys()].filter(path => !next.has(path) && reading.files.has(path));
+  }
+
   async #writeProjectMcp(
     item: Extract<SharedCatalogItem, { kind: 'mcp' }>,
-    target: Extract<CatalogInstallTarget, { scope: 'project' }>,
+    root: string,
     bindings: CatalogSecretBindings,
-  ): Promise<{ files: CatalogInstalledFile[]; notes: string[] }> {
+  ): Promise<Written> {
     const notes: string[] = [];
     const server = this.#server(item, value => {
       const placeholder = SECRET_PLACEHOLDER.exec(value)?.[1];
       if (placeholder === undefined) return value;
-      const variable = bindings[placeholder] ?? placeholder;
+      const variable = bindings[placeholder];
+      if (!variable) {
+        notes.push(UNBOUND_NOTE(placeholder));
+        return undefined;
+      }
       notes.push(
         `${item.name} reads \${${variable}} from its environment. A project's ${PROJECT_MCP_FILE} cannot use Ferretry's secrets, so give the ferret a variable called ${variable}.`,
       );
@@ -633,7 +728,7 @@ export class CatalogInstallService {
     });
     const refusal = mcpServerRefusal('project', server);
     if (refusal !== null) refuse('catalog_not_installable', refusal);
-    const { path, reading, document } = await this.#readProjectMcp(target.projectRoot);
+    const { path, reading, document } = await this.#readProjectMcp(root);
     const entry = projectEntry(server);
     const servers = (document.mcpServers ?? {}) as Record<string, unknown>;
     const text = renderMcpProjectFile({ ...document, mcpServers: { ...servers, [item.name]: entry } });
@@ -649,13 +744,11 @@ export class CatalogInstallService {
     };
   }
 
-  async #removeProject(
-    record: CatalogInstallRecord,
-    target: Extract<CatalogInstallTarget, { scope: 'project' }>,
-  ): Promise<void> {
+  async #removeProject(record: CatalogInstallRecord): Promise<void> {
+    const root = record.root as string;
     const first = record.files[0];
     if (first?.entry !== undefined) {
-      const { path, reading, document } = await this.#readProjectMcp(target.projectRoot);
+      const { path, reading, document } = await this.#readProjectMcp(root);
       const servers = (document.mcpServers ?? {}) as Record<string, unknown>;
       if (!Object.hasOwn(servers, first.entry)) return;
       if ((await this.#hash(JSON.stringify(servers[first.entry]))) !== first.sha256)
@@ -672,11 +765,11 @@ export class CatalogInstallService {
       }
       return;
     }
-    const folder = record.destination.slice(target.projectRoot.length + 1).split('/ (')[0] as string;
-    const reading = await this.#inspectProjectSkill(target.projectRoot, folder);
-    const { remove, expected } = this.#removal(record, reading, `${folder}/`);
+    const folder = record.folder as string;
+    const reading = await this.#inspectProjectSkill(root, folder);
+    const { remove, expected } = this.#removal(record, reading, `${folder}/`, `${folder}/`);
     try {
-      await this.deps.skillFiles.apply(target.projectRoot, folder, { write: [], remove, expected });
+      await this.deps.skillFiles.apply(root, folder, { write: [], remove, expected });
     } catch (error) {
       throw this.#folderRefusal(error);
     }
@@ -702,14 +795,13 @@ export class CatalogInstallService {
   }
 
   /** The folder files of `record` still on disk, each unchanged (else a conflict), as a delete list with its guards. */
-  #removal(record: CatalogInstallRecord, reading: SkillFolderReading, where: string) {
+  #removal(record: CatalogInstallRecord, reading: SkillFolderReading, prefix: string, where: string) {
     const remove: string[] = [];
     const expected = new Map<string, string | null>();
-    for (const file of record.files) {
-      const relative = file.path.slice(file.path.indexOf('/', file.path.indexOf('skills/') + 7) + 1);
+    for (const [relative, sha256] of this.#recorded(record, prefix)) {
       const now = reading.files.get(relative);
       if (now === undefined) continue;
-      if (now !== file.sha256)
+      if (now !== sha256)
         refuse(
           'catalog_install_conflict',
           `${where}${relative} was edited on this machine since it was installed, so nothing was removed.`,
@@ -739,17 +831,24 @@ export class CatalogInstallService {
     target: Extract<CatalogInstallTarget, { scope: 'runtime' }>,
     bindings: CatalogSecretBindings,
     replaces: CatalogInstallRecord | undefined,
+    verified: SkillFolderReading | undefined,
     governance: CallerGovernance | undefined,
-    freshStepUp: FreshStepUpContext,
-  ): Promise<{ files: CatalogInstalledFile[]; notes: string[] }> {
+  ): Promise<Written> {
     const { item } = held;
     let component: FleetComponentInput;
     let files: { path: string; content: string }[] = [];
+    const notes: string[] = [];
     if (item.kind === 'artifact') return refuse('catalog_not_installable', `${item.name} cannot be installed.`);
     if (item.kind === 'mcp') {
       const server = this.#server(item, value => {
         const placeholder = SECRET_PLACEHOLDER.exec(value)?.[1];
-        return placeholder === undefined ? value : `\${secret:${bindings[placeholder] ?? placeholder}}`;
+        if (placeholder === undefined) return value;
+        const secret = bindings[placeholder];
+        if (!secret) {
+          notes.push(UNBOUND_NOTE(placeholder));
+          return undefined;
+        }
+        return `\${secret:${secret}}`;
       });
       const refusal = mcpServerRefusal('login', server);
       if (refusal !== null) refuse('catalog_not_installable', refusal);
@@ -766,24 +865,37 @@ export class CatalogInstallService {
       component = { kind: 'skills', items: [item.name] };
       files = item.skill.files.map(file => ({ path: file.path, content: file.content }));
     }
-    const change = await this.deps.fleet.propose({
-      kind: 'catalog.install',
-      name: item.name,
-      component,
-      files,
-      profile: target.profile,
-      installedFrom: held.provenance,
-      replace: replaces !== undefined,
-    });
-    await this.deps.fleet.apply(change.id, governance, freshStepUp);
-    if (item.kind === 'skill' && replaces !== undefined) {
+    await this.deps.fleet.installCatalogItem(
+      {
+        kind: 'catalog.install',
+        name: item.name,
+        component,
+        files,
+        profile: target.profile,
+        installedFrom: held.provenance,
+        replace: replaces !== undefined,
+      },
+      governance,
+    );
+    if (item.kind === 'skill') {
       const next = new Set(item.skill.files.map(file => file.path));
-      const stale = replaces.files
-        .map(file => file.path.slice(`skills/${item.name}/`.length))
-        .filter(path => !next.has(path));
-      if (stale.length > 0) await this.deps.runtimeSkills.remove(item.name, stale);
+      const reading = verified as SkillFolderReading;
+      const stale = this.#staleFiles(replaces, `skills/${item.name}/`, next, reading);
+      if (stale.length > 0)
+        try {
+          await this.deps.runtimeSkills.remove(
+            item.name,
+            new Map(stale.map(path => [path, reading.files.get(path) as string])),
+          );
+        } catch (error) {
+          throw this.#folderRefusal(error);
+        }
     }
+    const stored = (await this.deps.fleet.components()).kinds
+      .find(group => group.kind === (item.kind === 'mcp' ? 'mcp' : 'skills'))
+      ?.components.find(candidate => candidate.name === item.name);
     return {
+      componentSha256: await this.#componentHash(stored as FleetComponentView),
       files:
         item.kind === 'skill'
           ? await Promise.all(
@@ -793,7 +905,10 @@ export class CatalogInstallService {
               })),
             )
           : [],
-      notes: [`It is a layer of profile ${target.profile}, so ${target.runtime} gets it the next time it starts.`],
+      notes: [
+        ...notes,
+        `It is a layer of profile ${target.profile}, so ${target.runtime} gets it the next time it starts.`,
+      ],
     };
   }
 
@@ -806,15 +921,15 @@ export class CatalogInstallService {
     const name = record.provenance.name;
     const group = (await this.deps.fleet.components()).kinds.find(candidate => candidate.kind === kind);
     const component = group?.components.find(candidate => candidate.name === name);
-    if (component !== undefined && component.installedFrom?.digest !== record.provenance.digest)
+    if (component !== undefined && (await this.#componentHash(component)) !== record.componentSha256)
       refuse(
         'catalog_install_conflict',
         `${name} was edited on this machine since it was installed, so it was not removed.`,
       );
-    let paths: string[] = [];
+    let removal: { remove: string[]; expected: Map<string, string | null> } | undefined;
     if (kind === 'skills') {
       const reading = await this.deps.runtimeSkills.inspect(name);
-      paths = this.#removal(record, reading, `${name}/`).remove;
+      removal = this.#removal(record, reading, `skills/${name}/`, `${name}/`);
     }
     if (component !== undefined) {
       const change = await this.deps.fleet.propose({
@@ -825,21 +940,44 @@ export class CatalogInstallService {
       });
       await this.deps.fleet.apply(change.id, governance, freshStepUp);
     }
-    if (paths.length > 0) await this.deps.runtimeSkills.remove(name, paths);
+    if (removal !== undefined && removal.remove.length > 0)
+      await this.deps.runtimeSkills.remove(name, removal.expected);
   }
 
   // ── Small things ────────────────────────────────────────────────────────────────────────────────
 
-  /** The item's server with every environment value passed through `value`. */
-  #server(item: Extract<SharedCatalogItem, { kind: 'mcp' }>, value: (text: string) => string): SessionMcpServer {
+  /** The item's server with every environment value passed through `value`; one that answers `undefined` is left out. */
+  #server(
+    item: Extract<SharedCatalogItem, { kind: 'mcp' }>,
+    value: (text: string) => string | undefined,
+  ): SessionMcpServer {
     const setup = item.mcp;
     if (setup.transport === 'url') return { transport: 'url', url: setup.url, oauth: setup.auth === 'oauth' };
     return {
       transport: 'command',
       command: setup.command,
       args: [...setup.args],
-      env: Object.fromEntries(Object.entries(setup.env).map(([name, text]) => [name, value(text)])),
+      env: Object.fromEntries(
+        Object.entries(setup.env).flatMap(([name, text]) => {
+          const written = value(text);
+          return written === undefined ? [] : [[name, written]];
+        }),
+      ),
     };
+  }
+
+  /** A stored component's hash in its canonical form: what it holds, however it is spelled on disk. */
+  async #componentHash(component: FleetComponentView): Promise<string> {
+    return await this.#hash(canonical(component.detail));
+  }
+
+  /** The target as this machine spells it, so two spellings of one place are one place (`sameTarget`, the key). */
+  async #canonicalTarget(target: CatalogInstallTarget): Promise<CatalogInstallTarget> {
+    if (target.scope === 'project') return { ...target, projectRoot: withoutTrailingSlash(target.projectRoot) };
+    const runtime = (await this.deps.fleet.runtimes()).runtimes.find(
+      candidate => candidate.name === target.runtime || candidate.id === target.runtime,
+    );
+    return runtime === undefined ? target : { ...target, runtime: runtime.name };
   }
 
   async #hash(text: string): Promise<string> {
