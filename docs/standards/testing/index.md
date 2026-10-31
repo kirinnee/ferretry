@@ -639,7 +639,9 @@ by name against the host `PATH`. Three rules now hold, and each has a mechanism 
   creates a tmux socket still kills its own server in `afterAll`/`finally`; the sweep is the net, not
   the cleanup. A fixture that also booted a daemon on that socket waits for the daemon to EXIT before
   `kill-server`: tmux 3.6a, told to exit in the same instant a daemon's control client loses its
-  daemon, keeps both the server and the client running for good
+  daemon, keeps both the server and the client running for good. The daemon's exit is not enough: its
+  control client detaches a moment AFTER it, so the fixture also waits until no client of the socket is
+  left before `kill-server` (a client still there after 10 s is killed and named)
   (`packages/cli/tests/integration/support/supervised-daemon-teardown.ts` owns that order).
 - **A silent run is killed and described.** `scripts/ci/test.sh` runs the unit and integration
   `bun test` under `scripts/test/stall-watch.ts`. If the run prints nothing for
