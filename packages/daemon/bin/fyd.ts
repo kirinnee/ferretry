@@ -1282,6 +1282,8 @@ import {
   withOutdated,
   withRevive,
   xvfbMissingMessage,
+  repairSharingFromPairing,
+  type SharingRepairOutcome,
 } from '../src/lib/index.ts';
 import {
   admitChild,
@@ -1729,6 +1731,8 @@ export interface DaemonWorld {
     readonly unlockNotice?: string | undefined;
     /** Bearer-token grants a pre-device-key `devices.json` held and this boot dropped. */
     readonly droppedBearerGrants: number;
+    /** What the Sharing-follows-Pairing repair did this boot (docs/grants.md), for the boot trail. */
+    readonly sharingRepair?: SharingRepairOutcome;
   }>;
   /**
    * The DIRECT carrier: the socket route a browser that can reach this address opens its sessions on.
@@ -8971,7 +8975,17 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       );
       // Read back before anything is served, so a device unlocked before the restart is not asked again.
       const unlockNotice = await stepUp.restore();
+      // Sharing follows Pairing for a device paired before Sharing existed (docs/grants.md): repaired once,
+      // recorded in the grant journal, before any device is served. It fails closed on a journal it cannot read whole.
+      // A repair must never stop the daemon starting: a failure here is a boot sentence, and changes nothing more.
+      const sharingRepair: SharingRepairOutcome = await repairSharingFromPairing({
+        devices: pairingService,
+        journal: new JournalGrantAudit(paths.grantAudit, stateFiles),
+        audit: new JournalGrantAudit(paths.grantAudit, stateFiles),
+        clock: new SystemGrantClock(),
+      }).catch((): SharingRepairOutcome => ({ kind: 'skipped', reason: 'failed' }));
       return {
+        sharingRepair,
         credentials,
         push,
         stepUp,
@@ -12846,6 +12860,15 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   if (pairing.droppedBearerGrants > 0)
     world.notices.state(
       `${pairing.droppedBearerGrants} paired device${pairing.droppedBearerGrants === 1 ? '' : 's'} from before device keys ${pairing.droppedBearerGrants === 1 ? 'was' : 'were'} removed; pair ${pairing.droppedBearerGrants === 1 ? 'it' : 'them'} again with \`${CLIENT_NAME} pair\``,
+    );
+  const repair = pairing.sharingRepair;
+  if (repair?.kind === 'repaired' && repair.deviceIds.length > 0)
+    world.notices.state(
+      `Sharing was turned on for ${repair.deviceIds.length} paired device${repair.deviceIds.length === 1 ? '' : 's'} that already held Pairing; recorded in \`${CLIENT_NAME} daemon config history\``,
+    );
+  if (repair?.kind === 'skipped')
+    world.notices.state(
+      `Sharing was not turned on for devices paired before it existed: the grant journal could not be read whole (${repair.reason}). Turn it on per device with \`${CLIENT_NAME} device grant <device> sharing --use\``,
     );
   const idleExpired = await pairing.subsystem.expireIdleDevices();
   if (idleExpired > 0)

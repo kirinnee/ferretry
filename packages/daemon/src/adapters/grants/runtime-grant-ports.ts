@@ -7,6 +7,8 @@ import type {
   GrantClock,
   GrantDocumentPort,
   SerialExecutor,
+  SharingRepairJournal,
+  WholeJournal,
 } from '../../lib/index.ts';
 
 /** The daemon configuration document, seen as the one thing the grant subsystem needs from it. */
@@ -67,7 +69,7 @@ export class SystemGrantClock implements GrantClock {
  * IT LIVES IN THE STATE HOME, so it is keyed by daemon by construction: one daemon's record can never
  * be read as another's, because a state home has exactly one owner.
  */
-export class JournalGrantAudit implements GrantAuditPort {
+export class JournalGrantAudit implements GrantAuditPort, SharingRepairJournal {
   constructor(
     private readonly path: string,
     private readonly files: FileSystemPort,
@@ -119,6 +121,28 @@ export class JournalGrantAudit implements GrantAuditPort {
       else entries.push(parsed);
     }
     return { entries: entries.reverse().slice(0, limit), unreadable, truncated: from > 0 };
+  }
+
+  /**
+   * Every record in the journal, or `too-large` past `maxBytes` — for a decision that must not miss an old
+   * record (the Sharing repair, `sharing-follows-pairing.ts`). Unreadable lines are counted, as `recent` does.
+   */
+  async readAll(maxBytes: number): Promise<WholeJournal> {
+    const information = await this.files.information(this.path);
+    if (information === undefined) return { kind: 'read', entries: [], unreadable: 0 };
+    if (information.size > maxBytes) return { kind: 'too-large' };
+    const bytes = await this.files.readSlice(this.path, 0, information.size);
+    // A file that exists but would not read back is NOT an empty history: whatever it holds is unknown.
+    if (bytes === undefined) return { kind: 'read', entries: [], unreadable: 1 };
+    let unreadable = 0;
+    const entries: GrantAuditEntry[] = [];
+    for (const line of new TextDecoder().decode(bytes).split('\n')) {
+      if (line.trim() === '') continue;
+      const parsed = readAuditLine(line, this.kind);
+      if (parsed === undefined) unreadable += 1;
+      else entries.push(parsed);
+    }
+    return { kind: 'read', entries, unreadable };
   }
 }
 

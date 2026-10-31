@@ -301,8 +301,17 @@ The questions above, answered for it ([design/catalogs.md](design/catalogs.md) Â
 
 `sharing.configure` governs only whether a remote caller may re-grant `sharing`. Both axes are on by
 default; the operator password is the opt-in layer. That is the daemon-wide document and a device paired
-from this release on. A device paired **before** this release holds Sharing off until the owner turns it on
-(`fy device grant <device> sharing --use`), because its stored record never said anything about it.
+from this release on. **A device paired before Sharing existed gets Sharing as it holds Pairing** (owner decision
+2026-10-31): Pairing hands another device control of this machine, Sharing hands people read access to chosen
+catalogs, so a device holding Pairing could already give a new device everything, Sharing included. Its stored
+record fills `sharing` from its own `pairing` (`CAPABILITY_FOLLOWS` in `state-pairing-repository.ts`). A daemon
+that already ran the release which filled Sharing OFF is repaired once at boot (`sharing-follows-pairing.ts`): a
+device holding Pairing on both axes, with Sharing off, whose Sharing **no grant-journal record ever names**, gets
+Sharing on both axes, and each repair is recorded in that journal as `daemon:sharing-follows-pairing`, so it
+happens once and a Sharing somebody turned off by hand is never undone. The whole journal is read for this; a
+journal over 8 MiB, or one with a line or a file that will not read, repairs nothing and says so at boot. Any other
+device is turned on in the app by a device that holds Sharing and may manage devices, or at the machine with
+`fy device grant <device> sharing --use`.
 
 Each instance above cites a command. **Verify a cited command exists before adding one**, and verify it a
 second way: `rg -n --fixed-strings "fy daemon adopt"`. Not `rg -r` â€” that is `--replace`, so
@@ -551,8 +560,9 @@ from. This is the version-skew rule in `packages/protocol/src/lib/version-skew.t
   capability it is) and writes the document back once, whole. The `upgrade-grants` unit test keeps a
   committed `devices.json` exactly as v4.172.x wrote it (seven capabilities) and strips each capability this
   build knows from a full record in turn, so a capability added without thought for old records fails there.
-  **Devices paired before `sharing` existed therefore start with Sharing OFF.** To turn it on for one, at
-  the machine: `fy device grant <device> sharing --use` (add `--configure` to let it re-grant Sharing).
+  **One capability FOLLOWS an older one instead:** `sharing` reads as the record's own `pairing` (see "Capability
+  eight was added"), so the owner's phone keeps working without a command. Any other device: in the app by a
+  device that holds it and may manage devices, or at the machine with `fy device grant <device> sharing --use`.
 
 ### Changing a device's grants
 
