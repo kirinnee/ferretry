@@ -148,3 +148,17 @@ describe('EphemeralValues for a secure copy', () => {
     should(values.heldCount()).equal(0);
   });
 });
+
+describe('EphemeralValues when a session ends', () => {
+  it('should let go of typed values at once, and keep a copy masked for its after-mask window only', () => {
+    const values = build();
+    values.hold('s1', 'typed-value', 'A1');
+    values.holdUntil('s1', 'sealed-value', '[sealed:t]', clock.ms + 3_600_000);
+
+    values.drop('s1');
+
+    should(values.scrubAll('typed-value sealed-value')).equal('typed-value [sealed:t]');
+    clock.ms += COPY_AFTER_MASK_SECONDS * 1000;
+    should(values.scrubAll('sealed-value')).equal('sealed-value');
+  });
+});

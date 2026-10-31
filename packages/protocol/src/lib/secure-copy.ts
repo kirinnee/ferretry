@@ -29,6 +29,8 @@ export const COPY_MAX_LIVE_PER_SESSION = 10;
 export const COPY_MAX_CAPTURES_PER_HOUR = 20;
 /** The longest value a copy holds, in UTF-8 bytes. */
 export const COPY_VALUE_MAX_BYTES = 16_384;
+/** The shortest value a copy holds: a shorter one would be masked wherever it appears and read as "seen" by chance. */
+export const COPY_VALUE_MIN_CHARS = 4;
 /** A command capture: at most this many arguments, each this long, and this long to run. */
 export const COPY_COMMAND_MAX_ARGS = 64;
 export const COPY_COMMAND_MAX_ARG_CHARS = 4_096;

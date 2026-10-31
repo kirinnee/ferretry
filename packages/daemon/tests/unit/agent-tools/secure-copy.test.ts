@@ -158,6 +158,7 @@ describe('the secure.* agent tools', () => {
         args: 3,
         copyLength: TOKEN.length,
         transcript: 'clean',
+        program: 'vercel',
       },
       { tool: 'secure.discard', by: 'agent', copy: 'sealed:vercel' },
     ]);
