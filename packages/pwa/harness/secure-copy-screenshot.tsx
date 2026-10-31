@@ -98,7 +98,7 @@ const pasteItem = {
 } as never;
 
 const planItem = {
-  id: 'A8', source: 'question', sourceRef: plan.id, sourceSeq: 2, kind: 'info',
+  id: 'A8', source: 'question', sourceRef: plan.id, sourceSeq: 2, kind: 'permission', copyPlan: { planId: plan.id },
   title: 'Asks to approve pastes in advance',
   subject: 'Allow these 2 pastes once each, without asking, until 2026-08-05 11:58 UTC?',
   why: 'Allow these 2 pastes once each, without asking, until 2026-08-05 11:58 UTC?',

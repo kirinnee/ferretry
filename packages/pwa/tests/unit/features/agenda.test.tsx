@@ -899,17 +899,23 @@ describe('Edit on a lane-proposal card in the conversation', () => {
   });
 });
 
-describe('a paste plan behind a daemon notice', () => {
-  test('is offered to the item view for a daemon notice, and to no other card', async () => {
+describe('a paste plan card', () => {
+  test('is offered to the item view for a card that carries a plan, and to no other card', async () => {
     const daemon = mount({
-      snapshot: board([item('A1', { kind: 'info', raisedBy: 'daemon' } as Partial<AgendaItem>)]),
+      snapshot: board([
+        item('A1', {
+          kind: 'permission',
+          raisedBy: 'daemon',
+          copyPlan: { planId: 'b'.repeat(32) },
+        } as Partial<AgendaItem>),
+      ]),
       focus: { target: 'A1' as AgendaId, seq: 1 },
     });
     expect(daemon.root.findByType(AgendaItemView).props.planForm).toBeDefined();
     run(() => daemon.unmount());
 
     const agent = mount({
-      snapshot: board([item('A1', { kind: 'info', raisedBy: 'agent' } as Partial<AgendaItem>)]),
+      snapshot: board([item('A1', { kind: 'permission', raisedBy: 'daemon' } as Partial<AgendaItem>)]),
       focus: { target: 'A1' as AgendaId, seq: 1 },
     });
     expect(agent.root.findByType(AgendaItemView).props.planForm).toBeUndefined();

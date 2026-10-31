@@ -8,7 +8,7 @@
  */
 
 import type { CopyRouteFrom, CopyRouteTo, PasteRule, PasteRuleCreate } from '@ferretry/protocol';
-import { ArrowRight, Plus, ShieldCheck, Trash2 } from 'lucide-react';
+import { Plus, ShieldCheck, Trash2 } from 'lucide-react';
 import { type FormEvent, type ReactNode, useId, useState } from 'react';
 import { fromWords, ruleFromForm, ruleLimits, toWords } from '../../lib/secure-copy.ts';
 
@@ -196,10 +196,6 @@ function AddRuleForm({
           )}
         </Field>
       </div>
-      <p className="m-0 text-meta leading-base text-faint">
-        Matched on what Ferretry sees, never on what the ferret says: the program a copy came from, and the program or
-        page reading the destination. A program is known only by its name, so approve routes into programs you know.
-      </p>
       {problem !== undefined && (
         <p role="alert" className="m-0 text-meta text-err" data-copy-rule-problem="">
           {problem}
@@ -232,10 +228,12 @@ function RuleRow({
       data-copy-rule={rule.id}
     >
       <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <p className="m-0 flex min-w-0 flex-wrap items-center gap-1.5 text-ui text-fg">
-          <span className="min-w-0 break-words">{fromWords(rule.from)}</span>
-          <ArrowRight size={14} className="shrink-0 text-faint" aria-label="into" />
-          <span className="min-w-0 break-words font-medium">{toWords(rule.to)}</span>
+        <p className="m-0">
+          <span className="min-w-0 break-words text-ui text-fg" data-copy-route="">
+            {fromWords(rule.from)}
+            {'\u00a0→ '}
+            <span className="font-medium">{toWords(rule.to)}</span>
+          </span>
         </p>
         <p className="m-0 text-meta text-faint" data-copy-rule-limits="">
           {ruleLimits(rule)}
@@ -269,11 +267,7 @@ export function CopyRulesCard({ rules, busy = false, error = null, onAdd, onRemo
           Pastes approved in advance
         </h2>
       </div>
-      <p className="m-0 text-cell leading-base text-muted">
-        A ferret can seal a value it must not see, like a token it just created, and paste it by name. Each paste asks
-        you on a card, unless you approved its route here. Approved pastes still show in the log, and happen only where
-        typing is hidden.
-      </p>
+      <p className="m-0 text-cell text-muted">Pastes allowed without asking. Every paste is still logged.</p>
       {rules.length === 0 ? (
         <p className="m-0 text-ui text-faint" data-testid="copy-rules-empty">
           No pastes are approved in advance: every paste asks you.

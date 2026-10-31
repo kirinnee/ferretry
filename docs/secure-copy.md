@@ -135,8 +135,9 @@ value comes from the copy (`InputRaise.source`), so the card, the daemon-observe
   the store is the next phase (SC2b); until then a `secret:` rule matches nothing.
 - **A plan**: `secure.preapprove` raises ONE card listing the pastes the agent plans, each with its route and
   the agent's reason (shown as its words). The owner allows some or all with `fy copy plan approve <id> 1 3`
-  (none declines); each allowed item becomes a rule for that session allowing one paste until the plan's
-  expiry, which the card states (two hours by default, a day at most: a longer route is the owner's to add as a
+  (none declines), or ticks them on the card, a permission card whose own Allow and Decline answer it (the
+  generic agenda answer is refused). Each allowed item becomes a rule for that session allowing one paste until
+  the plan's expiry, which the card states (two hours by default, a day at most: a longer route is the owner's to add as a
   rule). Two answers arriving together make the rules once. Closing the card approves nothing. Plans live in RAM: a restart forgets them.
 - **The rules file** (`<state>/secure-copy/rules.json`) holds routes and counts, never a value. One that cannot
   be read is NO rules: every paste then asks the owner.

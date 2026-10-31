@@ -49,7 +49,7 @@ describe('the paste plan card', () => {
   it("lists each planned route with the ferret's words, all ticked, and says until when", async () => {
     const { q, text } = await card(PLAN, async () => 'ok');
 
-    expect(text()).toContain('Hadi plans 2 pastes of values it cannot see');
+    expect(text()).toContain('Each ticked paste goes through once, without asking, until 2026-08-05 11:58 UTC.');
     expect(text()).toContain('2026-08-05 11:58 UTC');
     expect(q('[data-copy-plan-item="1"]')?.textContent).toContain('a field on https://vercel.com');
     expect(q('[data-copy-plan-item="1"] [data-copy-plan-why]')?.textContent).toBe('Hadi says: “the build token”');
@@ -76,11 +76,10 @@ describe('the paste plan card', () => {
   it('declines with no items, and keeps Allow off with none ticked', async () => {
     const answered: (readonly number[])[] = [];
     const single = { ...PLAN, items: [PLAN.items[0] as CopyPlan['items'][number]] };
-    const { q, text } = await card(single, async items => {
+    const { q } = await card(single, async items => {
       answered.push(items);
       return 'Declined: each paste will ask you.';
     });
-    expect(text()).toContain('Hadi plans one paste');
     expect(q('[data-copy-plan-allow]')?.textContent).toBe('Allow it');
     await click(q('[data-copy-plan-tick="0"]'));
     expect(q('[data-copy-plan-allow]')?.hasAttribute('disabled')).toBe(true);
@@ -110,14 +109,14 @@ describe('the paste plan card', () => {
   });
 });
 
-const host = async (answer: (call: Call) => unknown, itemId = 'A8', onDone?: () => void) => {
+const host = async (answer: (call: Call) => unknown, planId = 'b'.repeat(32), onDone?: () => void) => {
   const fake = fakeClient(answer);
   const view = await mount(
     <CopyPlanHost
       agentName="Hadi"
       connection={CONNECTION}
       createClient={async () => fake.client}
-      item={{ id: itemId as never }}
+      item={{ copyPlan: { planId } }}
       sessionId="sess-1"
       {...(onDone === undefined ? {} : { onDone })}
     />,
@@ -132,7 +131,7 @@ describe('the paste plan host', () => {
     let done = 0;
     const { q, calls } = await host(
       call => (call.method === 'GET' ? { plans: [PLAN] } : { ...PLAN, state: 'approved', approved: [0, 1] }),
-      'A8',
+      PLAN.id,
       () => {
         done += 1;
       },
@@ -154,13 +153,13 @@ describe('the paste plan host', () => {
       <CopyPlanHost
         connection={CONNECTION}
         createClient={async () => fake.client}
-        item={{ id: 'A8' as never }}
+        item={{ copyPlan: { planId: PLAN.id } }}
         sessionId="sess-1"
       />,
     );
     mounted.push(view);
     await settle();
-    expect(view.container.textContent).toContain('The ferret plans 2 pastes');
+    expect(view.container.textContent).toContain('The ferret says: “the deploy token”');
     await click(view.container.querySelector('[data-copy-plan-decline]'));
     await settle();
 
@@ -170,7 +169,7 @@ describe('the paste plan host', () => {
   });
 
   it('draws nothing for a card with no plan behind it, or when the plans cannot be read', async () => {
-    const other = await host(() => ({ plans: [PLAN] }), 'A9');
+    const other = await host(() => ({ plans: [PLAN] }), 'c'.repeat(32));
     const broken = await host(() => {
       throw new Error('no route');
     });

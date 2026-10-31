@@ -161,7 +161,7 @@ const renderInboxCard = (
 );
 
 /**
- * The form an `input` card is answered with, the paste plan behind a daemon notice, or nothing for any other kind
+ * The form an `input` card is answered with, the form of a paste plan's card, or nothing for any other kind
  * (or a machine that is not paired here).
  */
 const inputFormFor = (
@@ -169,7 +169,7 @@ const inputFormFor = (
   card: InboxCard,
 ): { readonly inputForm?: ReactNode; readonly planForm?: ReactNode } => {
   const connection = inbox.connectionFor(card.daemonId);
-  if (connection !== undefined && card.item.kind === 'info' && card.item.raisedBy === 'daemon')
+  if (connection !== undefined && card.item.copyPlan !== undefined)
     return {
       planForm: (
         <CopyPlanHost

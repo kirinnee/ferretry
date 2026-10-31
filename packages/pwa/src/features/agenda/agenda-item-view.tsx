@@ -71,7 +71,7 @@ export interface AgendaItemViewProps {
   readonly settled?: ReactNode;
   /** The form an `input` item is answered with (`InputCardHost`): drawn in the card, in the answer row's place. */
   readonly inputForm?: ReactNode;
-  /** A ferret's paste plan behind a daemon notice (`CopyPlanHost`): drawn in the card above its answer row. */
+  /** A ferret's paste plan (`CopyPlanHost`): drawn in the card, in the answer row's place. */
   readonly planForm?: ReactNode;
 }
 

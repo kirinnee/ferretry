@@ -98,7 +98,7 @@ export interface AgendaCardProps {
   readonly onOpenDetail?: () => void;
   /** The form an `input` item is answered with (`InputCardHost`): drawn in the answer bar's place. */
   readonly inputForm?: ReactNode;
-  /** A ferret's paste plan behind a daemon notice (`CopyPlanHost`): drawn above the answer bar, which stays. */
+  /** A ferret's paste plan (`CopyPlanHost`): drawn in the answer bar's place, its Allow and Decline are the answer. */
   readonly planForm?: ReactNode;
 }
 
@@ -252,12 +252,11 @@ export function AgendaCard({
           Not sent: {error}
         </p>
       )}
-      {planForm === undefined ? null : (
+      {planForm !== undefined ? (
         <div className="fy-attn-card__input" data-agenda-plan-form="">
           {planForm}
         </div>
-      )}
-      {inputForm !== undefined && item.kind === 'input' ? (
+      ) : inputForm !== undefined && item.kind === 'input' ? (
         <div className="fy-attn-card__input" data-agenda-input-form="">
           {inputForm}
         </div>

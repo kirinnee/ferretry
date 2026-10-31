@@ -6,7 +6,6 @@
  */
 
 import type { CopyPlan } from '@ferretry/protocol';
-import { ArrowRight } from 'lucide-react';
 import { useState } from 'react';
 import { fromWords, toWords } from '../../lib/secure-copy.ts';
 
@@ -51,10 +50,8 @@ export function CopyPlanCard({ plan, agentName, onAnswer }: CopyPlanCardProps) {
 
   return (
     <div className="flex min-w-0 flex-col gap-3" data-copy-plan={plan.id}>
-      <p className="m-0 text-cell leading-base text-muted">
-        {agentName} plans {plan.items.length === 1 ? 'one paste' : `${String(plan.items.length)} pastes`} of values it
-        cannot see. Each one you tick goes through <strong className="text-fg">once</strong>, without asking, until{' '}
-        <span className="mono">{when(plan.expiresAt)}</span>, and only where typing is hidden. The rest ask you.
+      <p className="m-0 text-cell text-muted">
+        Each ticked paste goes through once, without asking, until <span className="mono">{when(plan.expiresAt)}</span>.
       </p>
       <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Planned pastes">
         {plan.items.map((item, index) => {
@@ -75,10 +72,10 @@ export function CopyPlanCard({ plan, agentName, onAnswer }: CopyPlanCardProps) {
                 type="checkbox"
               />
               <label className="flex min-w-0 flex-1 cursor-pointer flex-col gap-1" htmlFor={id}>
-                <span className="flex min-w-0 flex-wrap items-center gap-1.5 text-ui text-fg">
-                  <span className="min-w-0 break-words">{fromWords(item.from)}</span>
-                  <ArrowRight size={14} className="shrink-0 text-faint" aria-label="into" />
-                  <span className="min-w-0 break-words font-medium">{toWords(item.to)}</span>
+                <span className="min-w-0 break-words text-ui text-fg" data-copy-route="">
+                  {fromWords(item.from)}
+                  {'\u00a0→ '}
+                  <span className="font-medium">{toWords(item.to)}</span>
                 </span>
                 <span className="text-meta text-faint" data-copy-plan-why="">
                   {agentName} says: “{item.why}”

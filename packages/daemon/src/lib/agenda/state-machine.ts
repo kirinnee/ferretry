@@ -6,6 +6,7 @@ import {
   type AgendaCardAnswer,
   type AgendaClearableField,
   type AgendaConfirms,
+  type AgendaCopyPlanRef,
   type AgendaDisposition,
   type AgendaErrorCode,
   type AgendaHistoryEntry,
@@ -118,6 +119,8 @@ export interface RaiseAgendaRequest extends AgendaBrief, AgendaCardFields {
   readonly task?: TaskRef;
   /** The input request an `input` card presents (`AgendaInputRef`); only the daemon raises one. */
   readonly input?: AgendaInputRef;
+  /** The paste plan a card presents (`AgendaCopyPlanRef`); only the daemon raises one. */
+  readonly copyPlan?: AgendaCopyPlanRef;
   /** The owner's one tap may close `task` too (`DAEMON_FEATURES.agendaOfferClose`); needs a card. */
   readonly offerClose?: true;
 }
@@ -638,6 +641,7 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
       ...(request.confirms === undefined ? {} : { confirms: request.confirms }),
       ...(request.task === undefined ? {} : { task: request.task }),
       ...(request.input === undefined ? {} : { input: request.input }),
+      ...(request.copyPlan === undefined ? {} : { copyPlan: request.copyPlan }),
       ...(request.offerClose === true ? { offerClose: true as const } : {}),
     },
     actor,
@@ -734,6 +738,13 @@ function addressById(
     // The input form answers an input card, because the value never travels as an agenda answer.
     if (target.item.kind === 'input') {
       return failure('use_input_form', `${command.id} is answered in its input form, not as an agenda answer`);
+    }
+    // A paste plan is answered by the owner's plan route, which makes its rules: an agenda answer would make none.
+    if (target.item.copyPlan !== undefined) {
+      return failure(
+        'use_input_form',
+        `${command.id} is a paste plan: answer it on its card, or with fy copy plan approve`,
+      );
     }
     // An answer to a confirmation is the owner's decision about a configuration change: never a ferret's.
     if (target.item.confirms !== undefined && command.actor.kind !== 'human') {

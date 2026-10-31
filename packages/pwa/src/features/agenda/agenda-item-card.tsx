@@ -51,7 +51,7 @@ export interface AgendaItemCardProps {
   readonly settled?: ReactNode;
   /** The form an `input` item is answered with (`InputCardHost`): drawn in the answer row's place. */
   readonly inputForm?: ReactNode;
-  /** A ferret's paste plan behind a daemon notice (`CopyPlanHost`): drawn above the answer row, which stays. */
+  /** A ferret's paste plan (`CopyPlanHost`): drawn in the answer row's place, its Allow and Decline are the answer. */
   readonly planForm?: ReactNode;
 }
 
@@ -440,11 +440,6 @@ export function AgendaItemCard({
           <TermsList renderProse={renderProse} terms={terms} />
         </Section>
       )}
-      {planForm === undefined || settled !== undefined ? null : (
-        <div className="fy-card__input" data-agenda-plan-form="">
-          {planForm}
-        </div>
-      )}
       {!latest ? (
         <p className="fy-card__old" data-agenda-old-version="">
           <span>Showing v{shown}.</span>
@@ -463,6 +458,10 @@ export function AgendaItemCard({
       ) : isInput ? (
         <div className="fy-card__input" data-agenda-input-form="">
           {inputForm}
+        </div>
+      ) : planForm !== undefined ? (
+        <div className="fy-card__input" data-agenda-plan-form="">
+          {planForm}
         </div>
       ) : (
         <AgendaQuickReplies

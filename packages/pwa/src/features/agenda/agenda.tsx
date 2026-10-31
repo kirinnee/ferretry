@@ -371,7 +371,7 @@ export const useAgenda = ({
           position={paged >= 0 ? { index: paged, total: openItems.length } : { index: 0, total: 1 }}
           quoteScope={scope}
           renderProse={proseText => <ChatProse copyable={copyWriter} text={proseText} />}
-          {...(cardItem.kind === 'info' && cardItem.raisedBy === 'daemon'
+          {...(cardItem.copyPlan !== undefined
             ? {
                 planForm: (
                   <CopyPlanHost

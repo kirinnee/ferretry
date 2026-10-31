@@ -1,7 +1,7 @@
 /**
- * The paste plan behind a daemon's `info` card, fetched: the plan is read from the daemon (`/v1/copy-plans`) by the
- * card it raised, never from the card's text. A card with no plan behind it (any other daemon notice, or a plan a
- * restart forgot) draws nothing here and stays an ordinary card.
+ * The paste plan a card points at (`copyPlan`), fetched: the plan is read from the daemon (`/v1/copy-plans`) by its
+ * id, never from the card's text. A plan the daemon no longer holds (answered elsewhere, expired, or forgotten by a
+ * restart) draws nothing; the card can still be closed.
  */
 
 import type { AgendaItem, CopyPlan } from '@ferretry/protocol';
@@ -14,7 +14,7 @@ import { CopyPlanCard } from './copy-plan-card.tsx';
 export interface CopyPlanHostProps {
   readonly connection: DaemonConnection;
   readonly sessionId: string;
-  readonly item: Pick<AgendaItem, 'id'>;
+  readonly item: Pick<AgendaItem, 'copyPlan'>;
   readonly agentName?: string;
   /** Hands in a client in place of the app store's (the harness and tests). */
   readonly createClient?: (connection: DaemonConnection) => Promise<CopyClient>;
@@ -39,7 +39,9 @@ export function CopyPlanHost({
     void createClient(connection)
       .then(async client => {
         const { plans } = await listPlans(client);
-        const plan = plans.find(candidate => candidate.sessionId === sessionId && candidate.agendaItemId === item.id);
+        const plan = plans.find(
+          candidate => candidate.sessionId === sessionId && candidate.id === item.copyPlan?.planId,
+        );
         if (current && plan !== undefined) setFound({ client, plan });
       })
       // A plan that cannot be read leaves the card as it is: approving is never the only way to answer it.
@@ -47,7 +49,7 @@ export function CopyPlanHost({
     return () => {
       current = false;
     };
-  }, [connection, createClient, sessionId, item.id]);
+  }, [connection, createClient, sessionId, item.copyPlan?.planId]);
 
   if (found === null) return null;
   return (

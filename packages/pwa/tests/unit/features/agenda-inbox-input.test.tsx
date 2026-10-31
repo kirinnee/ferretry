@@ -53,15 +53,22 @@ describe('an input card in the Inbox', () => {
   });
 });
 
-describe('a daemon notice in the Inbox', () => {
-  const notice = (raisedBy: 'daemon' | 'agent') =>
-    inboxCard(agendaItem('A8', { kind: 'info', ask: undefined, raisedBy } as never));
+describe('a paste plan card in the Inbox', () => {
+  const notice = (planned: boolean) =>
+    inboxCard(
+      agendaItem('A8', {
+        kind: 'permission',
+        ask: undefined,
+        raisedBy: 'daemon',
+        ...(planned ? { copyPlan: { planId: 'b'.repeat(32) } } : {}),
+      } as never),
+    );
 
-  const draw = async (raisedBy: 'daemon' | 'agent', connected = true) => {
+  const draw = async (planned: boolean, connected = true) => {
     const fake = fakeInbox();
     const view = await mount(
       <InboxHarness
-        cards={[notice(raisedBy)]}
+        cards={[notice(planned)]}
         fake={fake}
         render={inbox => (
           <AgendaNeedsYou
@@ -79,9 +86,9 @@ describe('a daemon notice in the Inbox', () => {
     return view;
   };
 
-  it('carries the paste plan slot for a daemon notice from a machine paired here, and none otherwise', async () => {
-    expect((await draw('daemon')).container.querySelector('[data-agenda-plan-form]')).not.toBeNull();
-    expect((await draw('agent')).container.querySelector('[data-agenda-plan-form]')).toBeNull();
-    expect((await draw('daemon', false)).container.querySelector('[data-agenda-plan-form]')).toBeNull();
+  it('carries the plan form for a card with a plan from a machine paired here, and none otherwise', async () => {
+    expect((await draw(true)).container.querySelector('[data-agenda-plan-form]')).not.toBeNull();
+    expect((await draw(false)).container.querySelector('[data-agenda-plan-form]')).toBeNull();
+    expect((await draw(true, false)).container.querySelector('[data-agenda-plan-form]')).toBeNull();
   });
 });
