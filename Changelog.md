@@ -1,3 +1,10 @@
+## [4.155.0](https://github.com/kirinnee/ferretry/compare/v4.154.0...v4.155.0) (2026-10-31)
+
+### Features
+
+* **browser:** run an agent's own script in a page, behind the owner's Page scripts switch ([#1108](https://github.com/kirinnee/ferretry/issues/1108)) ([a68b6f1](https://github.com/kirinnee/ferretry/commit/a68b6f1c23b96fcdffd3402d2d0cb667cab0e586))
+* **pwa:** agenda card v6 — one card at the composer's width, premise and context, a History about the item only ([#1109](https://github.com/kirinnee/ferretry/issues/1109)) ([94a1aa7](https://github.com/kirinnee/ferretry/commit/94a1aa718e876447a99b897d454cd6f5f7b3a546))
+
 ## [4.154.0](https://github.com/kirinnee/ferretry/compare/v4.153.0...v4.154.0) (2026-10-31)
 
 ### Features
