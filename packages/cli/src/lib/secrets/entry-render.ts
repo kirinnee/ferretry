@@ -1,10 +1,31 @@
-import type { LoginEntryList, LoginEntrySummary } from '@ferretry/protocol';
+import {
+  type LoginEntryList,
+  type LoginEntrySummary,
+  type LoginHintList,
+  loginDomainsOf,
+  loginHintSummary,
+  loginMethodOf,
+  loginMethodSentence,
+} from '@ferretry/protocol';
 
 const mark = (present: boolean): string => (present ? '✓' : '–');
 
 /** What an entry holds, as names: which secret fields exist, never what they contain. */
 function renderLoginEntryFields(entry: LoginEntrySummary): string {
   return `password ${mark(entry.fields.password)}  2FA ${mark(entry.fields.totp)}`;
+}
+
+/** How an entry signs in, naming the provider's saved login it goes via by its label when it still exists. */
+function signInWords(entry: LoginEntrySummary, entries: readonly LoginEntrySummary[]): string {
+  const method = loginMethodOf(entry);
+  const via = method.via === undefined ? undefined : entries.find(other => other.id === method.via);
+  const words = loginMethodSentence(method, via?.label);
+  return method.via !== undefined && via === undefined ? `${words} (via ${method.via}, which is gone)` : words;
+}
+
+/** `fy secret entry hint`: the same words a ferret's `login_hint` reads. */
+export function renderLoginHint(hint: LoginHintList): string {
+  return loginHintSummary(hint.site, hint.hints);
 }
 
 /** The one-line outcome of a put or rename. */
@@ -27,6 +48,8 @@ export function renderLoginEntryList(list: LoginEntryList): string {
       [
         `${entry.label}  [${entry.id}]`,
         `    match: ${entry.match.length === 0 ? '(nothing: never offered first)' : entry.match.join(', ')}`,
+        `    sign-in: ${signInWords(entry, list.entries)}`,
+        `    login domains: ${loginDomainsOf(entry).length === 0 ? '(none)' : loginDomainsOf(entry).join(', ')}`,
         ...(entry.username === undefined ? [] : [`    username: ${entry.username}`]),
         `    fields: ${renderLoginEntryFields(entry)}`,
       ].join('\n'),

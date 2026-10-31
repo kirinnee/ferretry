@@ -3,6 +3,8 @@ import {
   LoginEntryListSchema,
   type LoginEntrySummary,
   LoginEntrySummarySchema,
+  type LoginHintList,
+  LoginHintListSchema,
   type PutLoginEntryRequest,
   PutLoginEntryRequestSchema,
   type RemovedLoginEntry,
@@ -45,6 +47,13 @@ export class ProtocolLoginEntryGateway implements ILoginEntryGateway {
       headers: JSON_HEADERS,
       body: JSON.stringify(RenameLoginEntryRequestSchema.parse({ to })),
     });
+  }
+
+  async hint(site: string): Promise<LoginHintList> {
+    return await this.client.request(
+      `${LOGIN_ENTRIES_PATH}/hint?site=${encodeURIComponent(site)}`,
+      LoginHintListSchema,
+    );
   }
 
   async remove(id: string): Promise<RemovedLoginEntry> {

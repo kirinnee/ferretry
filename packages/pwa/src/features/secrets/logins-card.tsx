@@ -12,6 +12,7 @@
 
 import {
   LOGIN_PASSWORD_MIN_LENGTH,
+  LOGIN_SSO_NAME_MAX_LENGTH,
   LOGIN_TOTP_WARNING,
   type LoginEntryList,
   type LoginEntrySummary,
@@ -23,17 +24,25 @@ import { normalizeHandle } from '../../lib/input-card.ts';
 import {
   addTotpBody,
   canAddLogin,
+  DOMAINS_HELP,
+  domainsWords,
   editLoginBody,
   fieldWords,
   handleFromLabel,
   MATCH_HELP,
+  METHOD_OPTIONS,
   matchText,
+  methodWords,
   newLoginBody,
   newLoginProblem,
   passwordProblem,
   removeTotpBody,
   replacePasswordBody,
   seedProblem,
+  type SignInDraft,
+  signInDraftOf,
+  signInProblem,
+  viaChoices,
 } from '../../lib/login-form.ts';
 
 /** A write reports whether it took, so a form clears only when the daemon accepted it. */
@@ -71,6 +80,98 @@ function Field({
   );
 }
 
+/** The sign-in method, the provider login it goes via, and the login domains: the same three fields on add and edit. */
+function SignInFields({
+  draft,
+  choices,
+  kind,
+  onChange,
+}: {
+  readonly draft: SignInDraft;
+  readonly choices: readonly { readonly id: string; readonly label: string }[];
+  readonly kind: 'new' | 'edit';
+  readonly onChange: (next: SignInDraft) => void;
+}) {
+  const data = (name: string) => ({ [`data-login-${kind}-${name}`]: '' });
+  return (
+    <>
+      <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
+        <Field label="Sign-in method">
+          {fieldId => (
+            <select
+              id={fieldId}
+              className={INPUT}
+              value={draft.method}
+              {...data('method')}
+              onChange={event => {
+                const method = event.target.value as SignInDraft['method'];
+                onChange({ ...draft, method, via: method === 'password' ? '' : draft.via });
+              }}
+            >
+              {METHOD_OPTIONS.map(option => (
+                <option key={option.kind} value={option.kind}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          )}
+        </Field>
+        {draft.method === 'sso' && (
+          <Field label="SSO provider">
+            {fieldId => (
+              <input
+                id={fieldId}
+                className={INPUT}
+                value={draft.ssoName}
+                placeholder="Okta"
+                maxLength={LOGIN_SSO_NAME_MAX_LENGTH}
+                autoComplete="off"
+                {...data('sso-name')}
+                onChange={event => onChange({ ...draft, ssoName: event.target.value })}
+              />
+            )}
+          </Field>
+        )}
+      </div>
+      {draft.method !== 'password' && (
+        <Field label="Via (provider's login)">
+          {fieldId => (
+            <select
+              id={fieldId}
+              className={INPUT}
+              value={draft.via}
+              {...data('via')}
+              onChange={event => onChange({ ...draft, via: event.target.value })}
+            >
+              <option value="">None</option>
+              {choices.map(choice => (
+                <option key={choice.id} value={choice.id}>
+                  {choice.label}
+                </option>
+              ))}
+            </select>
+          )}
+        </Field>
+      )}
+      <Field label="Login domain(s)" hint={DOMAINS_HELP}>
+        {fieldId => (
+          <input
+            id={fieldId}
+            className={`${INPUT} mono`}
+            value={draft.domains}
+            placeholder="app.vercel.com"
+            autoComplete="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            {...data('domains')}
+            onChange={event => onChange({ ...draft, domains: event.target.value })}
+          />
+        )}
+      </Field>
+    </>
+  );
+}
+
 function Problem({ children }: { readonly children: string | undefined }) {
   if (children === undefined) return null;
   return (
@@ -81,12 +182,12 @@ function Problem({ children }: { readonly children: string | undefined }) {
 }
 
 function AddLoginForm({
-  held,
+  entries,
   busy,
   onPut,
   onClose,
 }: {
-  readonly held: readonly string[];
+  readonly entries: readonly LoginEntrySummary[];
   readonly busy: boolean;
   readonly onPut: LoginsCardProps['onPut'];
   readonly onClose: () => void;
@@ -97,7 +198,9 @@ function AddLoginForm({
   const [match, setMatch] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const draft = { label, id, match, username, password };
+  const [signIn, setSignIn] = useState<SignInDraft>(() => signInDraftOf(undefined, entries));
+  const held = entries.map(entry => entry.id);
+  const draft = { label, id, match, username, password, ...signIn };
   const problem = newLoginProblem(draft, held);
   const ready = canAddLogin(draft, held) && !busy;
 
@@ -168,6 +271,7 @@ function AddLoginForm({
           />
         )}
       </Field>
+      <SignInFields draft={signIn} choices={viaChoices(entries, undefined)} kind="new" onChange={setSignIn} />
       <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
         <Field label="Username (optional)" hint="Not secret: the ferret can see it.">
           {fieldId => (
@@ -217,14 +321,14 @@ type RowMode = 'view' | 'edit' | 'password' | 'rename' | 'totp' | 'delete';
 
 function LoginRow({
   entry,
-  held,
+  entries,
   busy,
   onPut,
   onRename,
   onRemove,
 }: {
   readonly entry: LoginEntrySummary;
-  readonly held: readonly string[];
+  readonly entries: readonly LoginEntrySummary[];
   readonly busy: boolean;
   readonly onPut: LoginsCardProps['onPut'];
   readonly onRename: LoginsCardProps['onRename'];
@@ -238,6 +342,8 @@ function LoginRow({
   const [seed, setSeed] = useState('');
   const [acknowledged, setAcknowledged] = useState(false);
   const [handle, setHandle] = useState(entry.id);
+  const [signIn, setSignIn] = useState<SignInDraft>(() => signInDraftOf(entry, entries));
+  const held = entries.map(each => each.id);
 
   const close = () => {
     setMode('view');
@@ -253,7 +359,8 @@ function LoginRow({
       if (ok) close();
     });
 
-  const edit = editLoginBody(entry, { label, match, username });
+  const edit = editLoginBody(entry, { label, match, username, ...signIn });
+  const signInWrong = signInProblem(signIn);
   const seedWrong = seedProblem(seed);
   const totp = addTotpBody(seed, acknowledged);
   const passwordWrong = passwordProblem(password);
@@ -285,6 +392,16 @@ function LoginRow({
           {entry.match.length === 0 ? 'matches nothing yet' : `for ${matchText(entry.match)}`}
         </span>
         {entry.username !== undefined && <span data-login-username="">user {entry.username}</span>}
+      </div>
+      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-meta text-muted">
+        <span className="min-w-0 break-words" data-login-method="">
+          {methodWords(entry, entries)}
+        </span>
+        {domainsWords(entry) !== undefined && (
+          <span className="min-w-0 break-words" data-login-domains="">
+            {domainsWords(entry)}
+          </span>
+        )}
       </div>
 
       {mode === 'view' && (
@@ -385,6 +502,7 @@ function LoginRow({
               />
             )}
           </Field>
+          <SignInFields draft={signIn} choices={viaChoices(entries, entry.id)} kind="edit" onChange={setSignIn} />
           <Field label="Username" hint="Empty removes it.">
             {fieldId => (
               <input
@@ -399,6 +517,7 @@ function LoginRow({
               />
             )}
           </Field>
+          <Problem>{signInWrong}</Problem>
           <div className="flex flex-wrap gap-2">
             <button
               type="submit"
@@ -408,7 +527,14 @@ function LoginRow({
             >
               <Check size={14} aria-hidden="true" /> Save changes
             </button>
-            <button type="button" className="kt-btn min-h-[44px]" onClick={close}>
+            <button
+              type="button"
+              className="kt-btn min-h-[44px]"
+              onClick={() => {
+                setSignIn(signInDraftOf(entry, entries));
+                close();
+              }}
+            >
               Cancel
             </button>
           </div>
@@ -589,7 +715,6 @@ function LoginRow({
 
 export function LoginsCard({ list, busy = null, error = null, onPut, onRename, onRemove }: LoginsCardProps) {
   const [adding, setAdding] = useState(false);
-  const held = list.entries.map(entry => entry.id);
   const working = busy !== null;
 
   return (
@@ -638,7 +763,7 @@ export function LoginsCard({ list, busy = null, error = null, onPut, onRename, o
             <LoginRow
               key={entry.id}
               entry={entry}
-              held={held}
+              entries={list.entries}
               busy={working}
               onPut={onPut}
               onRename={onRename}
@@ -656,7 +781,7 @@ export function LoginsCard({ list, busy = null, error = null, onPut, onRename, o
 
       {list.health !== 'damaged' &&
         (adding ? (
-          <AddLoginForm held={held} busy={working} onPut={onPut} onClose={() => setAdding(false)} />
+          <AddLoginForm entries={list.entries} busy={working} onPut={onPut} onClose={() => setAdding(false)} />
         ) : (
           <div>
             <button

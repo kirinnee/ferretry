@@ -23,6 +23,7 @@ import {
   sendBlock,
   shotBoxes,
   showsHeaderRisk,
+  signInWords,
   splitOffers,
   targetRef,
   titleWords,
@@ -39,6 +40,7 @@ import {
   request,
   requestOf,
   saved,
+  savedSignIn,
   withSaved,
 } from '../../support/input-fixtures.ts';
 
@@ -530,5 +532,16 @@ describe('the boxes drawn on a page shot', () => {
     expect(shotBoxes(card, fieldsOf(card), shot)).toEqual([]);
     expect(shotBoxes(request(), fieldsOf(request()), shot)).toEqual([]);
     expect(shotBoxes(card, fieldsOf(card), { ...shot, clip: { x: 0, y: 0, w: 0, h: 10 } })).toEqual([]);
+  });
+});
+
+describe('signInWords', () => {
+  it('is the sign-in sentence of a provider login, and nothing for a password one', () => {
+    expect(signInWords(savedSignIn())).toBe("Sign in with Google via 'Google (kirin@…)'");
+    expect(signInWords(saved())).toBeUndefined();
+    expect(signInWords(undefined)).toBeUndefined();
+    expect(signInWords(saved({ signIn: { id: 'ACME', label: 'Acme', method: { kind: 'sso', name: 'Okta' } } }))).toBe(
+      'Sign in with Okta (SSO)',
+    );
   });
 });

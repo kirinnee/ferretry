@@ -5,6 +5,8 @@ import {
   remoteHostOf,
   savedFieldFor,
   savedFor,
+  savedForFields,
+  signInFor,
   shortHost,
   targetMatchKey,
 } from '../../../src/lib/input-requests/saved-logins.ts';
@@ -116,5 +118,67 @@ describe('what a card offers', () => {
     should(savedFieldFor('secret')).equal('password');
     should(savedFieldFor('plain')).equal('username');
     should(savedFieldFor('private')).be.undefined();
+  });
+});
+
+describe('a page card matches where an entry signs in', () => {
+  const google = entry('GOOGLE_KIRIN', ['accounts.google.com'], { label: 'Google (kirin@)', username: 'kirin@x.test' });
+  const vercel = entry('VERCEL', ['vercel.com'], {
+    label: 'Vercel',
+    method: { kind: 'google', via: 'GOOGLE_KIRIN' },
+    domains: ['vercel.com'],
+    fields: { password: false, totp: false },
+  });
+  const app = entry('APP', ['app.example.com'], { domains: ['login.example.com'] });
+
+  it("should make the provider's login the one tap on the provider's page", () => {
+    const saved = savedFor('secret', 'accounts.google.com', [google, vercel, app], undefined);
+    should(saved.offers.find(offer => offer.id === 'GOOGLE_KIRIN')?.matched).be.true();
+    should(saved.signIn).be.undefined();
+  });
+
+  it('should match a page by the login domain, not by what the entry is for', () => {
+    should(savedFor('secret', 'login.example.com', [app], undefined).offers[0]?.matched).be.true();
+    should(savedFor('secret', 'app.example.com', [app], undefined).offers[0]?.matched).be.false();
+  });
+
+  it('should match a login domain exactly: a parent, a child or a look-alike is not it', () => {
+    for (const key of [
+      'google.com',
+      'evil.accounts.google.com',
+      'accounts.google.com.evil.test',
+      'accounts-google.com',
+    ])
+      should(savedFor('secret', key, [google], undefined).offers[0]?.matched).be.false();
+  });
+
+  it('should still match an entry from before login domains by its web hosts', () => {
+    const old = entry('GITHUB', ['github.com']);
+    should(savedFor('secret', 'github.com', [old], undefined).offers[0]?.matched).be.true();
+  });
+
+  it('should keep matching a terminal by what the entry is for', () => {
+    const sudo = entry('SUDO', ['sudo@kirin-box'], { domains: [] });
+    should(savedFor('secret', 'sudo@kirin-box', [sudo], undefined).offers[0]?.matched).be.true();
+  });
+
+  it('should say on the card how a site that goes via a provider signs in, never offering the provider here', () => {
+    const saved = savedFor('secret', 'vercel.com', [google, vercel], undefined);
+    should(saved.signIn).deepEqual({
+      id: 'VERCEL',
+      label: 'Vercel',
+      method: { kind: 'google', via: 'GOOGLE_KIRIN' },
+      via: { id: 'GOOGLE_KIRIN', label: 'Google (kirin@)' },
+    });
+    should(saved.offers.some(offer => offer.matched)).be.false();
+    should(signInFor('sudo@kirin-box', [google, vercel])).be.undefined();
+  });
+
+  it('should say it on a card of several fields too', () => {
+    const fields = [
+      { id: 'email', sensitivity: 'plain' as const },
+      { id: 'password', sensitivity: 'secret' as const },
+    ];
+    should(savedForFields(fields, 'vercel.com', [google, vercel], undefined).signIn?.via?.id).equal('GOOGLE_KIRIN');
   });
 });

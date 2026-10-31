@@ -24,6 +24,7 @@ import {
   LOGIN_LABEL_MAX_LENGTH,
   LOGIN_PASSWORD_MIN_LENGTH,
   LoginEntryIdSchema,
+  loginMethodSentence,
   padInputValue,
 } from '@ferretry/protocol';
 import { grantRefusalNotice } from './grants.ts';
@@ -96,6 +97,10 @@ export const splitOffers = (saved: InputSaved | undefined): SplitOffers => {
   const primary = offers.find(offer => offer.matched);
   return { primary, others: offers.filter(offer => offer !== primary) };
 };
+
+/** The one line on a card whose saved login signs in through a provider, or `undefined` for a password. */
+export const signInWords = (saved: InputSaved | undefined): string | undefined =>
+  saved?.signIn === undefined ? undefined : loginMethodSentence(saved.signIn.method, saved.signIn.via?.label);
 
 /** The button words for a saved login: `Use saved sudo on kirin-box`. */
 export const savedButtonWords = (offer: InputSavedOffer): string => `Use saved ${offer.label}`;

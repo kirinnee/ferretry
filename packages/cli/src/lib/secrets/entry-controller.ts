@@ -6,12 +6,20 @@ import {
   LOGIN_USERNAME_MAX_LENGTH,
   LoginEntryIdSchema,
   type LoginEntrySummary,
+  type LoginMethod,
+  LoginMethodKindSchema,
+  LoginMethodSchema,
+  LOGIN_METHODS,
   LoginMatchSchema,
+  loginHintSite,
+  loginMethodOf,
+  namesPasskey,
+  normalizedLoginDomain,
   type PutLoginEntryRequest,
   TotpSeedSchema,
 } from '@ferretry/protocol';
 import type { LoginEntryPorts } from './entry-ports.ts';
-import { renderLoginEntryLine, renderLoginEntryList } from './entry-render.ts';
+import { renderLoginEntryLine, renderLoginEntryList, renderLoginHint } from './entry-render.ts';
 
 export interface LoginEntryListOptions {
   readonly json?: boolean | undefined;
@@ -24,6 +32,10 @@ export interface LoginEntryAddOptions {
   readonly username?: string | undefined;
   /** `--no-password` is `false`: an entry with no password yet. */
   readonly password?: boolean | undefined;
+  readonly method?: string | undefined;
+  readonly ssoName?: string | undefined;
+  readonly via?: string | undefined;
+  readonly domain?: readonly string[] | undefined;
 }
 
 /** `fy secret entry edit`. Each flag names a field to change; a field not named is kept. */
@@ -37,6 +49,15 @@ export interface LoginEntryEditOptions {
   /** `--totp`: prompt for a seed; `--no-totp` is `false` and removes it. */
   readonly totp?: boolean | undefined;
   readonly iUnderstandTotp?: boolean | undefined;
+  readonly method?: string | undefined;
+  readonly ssoName?: string | undefined;
+  /** `--via ID` is the handle; `--no-via` is `false`. */
+  readonly via?: string | false | undefined;
+  readonly domain?: readonly string[] | undefined;
+}
+
+export interface LoginEntryHintOptions {
+  readonly json?: boolean | undefined;
 }
 
 export interface LoginEntryRemoveOptions {
@@ -68,6 +89,42 @@ function matches(values: readonly string[]): string[] {
       );
     return parsed.data;
   });
+}
+
+function domains(values: readonly string[]): string[] {
+  return values.map(value => {
+    const host = normalizedLoginDomain(value);
+    if (host === undefined)
+      throw new Error(`"${value}" is not a web host a sign-in happens on, like accounts.google.com`);
+    return host;
+  });
+}
+
+/** The method flags, over what the entry has now: `--via` alone keeps the method, `--method` alone keeps a via. */
+function method(
+  current: LoginMethod | undefined,
+  options: {
+    readonly method?: string | undefined;
+    readonly ssoName?: string | undefined;
+    readonly via?: string | false | undefined;
+  },
+): LoginMethod | undefined {
+  if (options.method === undefined && options.ssoName === undefined && options.via === undefined) return undefined;
+  if (options.method !== undefined && namesPasskey(options.method))
+    throw new Error('passkeys are off: a saved login signs in with a password or a provider (google, github, ...)');
+  const kind = LoginMethodKindSchema.safeParse((options.method ?? current?.kind ?? 'password').trim().toLowerCase());
+  if (!kind.success) throw new Error(`--method is one of ${LOGIN_METHODS.join(', ')}`);
+  const via = options.via === false ? undefined : options.via === undefined ? current?.via : handle(options.via);
+  const name = options.ssoName ?? (kind.data === 'sso' ? current?.name : undefined);
+  const parsed = LoginMethodSchema.safeParse({
+    kind: kind.data,
+    ...(name === undefined ? {} : { name: name.trim() }),
+    ...(via === undefined || kind.data === 'password' ? {} : { via }),
+  });
+  if (!parsed.success) throw new Error(parsed.error.issues.map(issue => issue.message).join('; '));
+  if (options.via !== undefined && options.via !== false && kind.data === 'password')
+    throw new Error('--via is for a provider method: add --method google (or github, microsoft, apple, sso)');
+  return parsed.data;
 }
 
 /** Said without the value: a problem with a typed password never repeats what was typed. */
@@ -105,6 +162,9 @@ export class LoginEntryController {
     };
     if (options.username !== undefined)
       body.username = oneLine(options.username, '--username', LOGIN_USERNAME_MAX_LENGTH);
+    const chosen = method(undefined, options);
+    if (chosen !== undefined) body.method = chosen;
+    if (options.domain !== undefined) body.domains = domains(options.domain);
     if ((await this.#find(handleId)) !== undefined)
       throw new Error(`${handleId} already exists: change it with \`secret entry edit ${handleId}\``);
     if (options.password !== false) body.password = await this.#askPassword(`password for ${handleId} (hidden): `);
@@ -119,9 +179,15 @@ export class LoginEntryController {
       options.match === undefined &&
       options.username === undefined &&
       options.password !== true &&
-      options.totp === undefined
+      options.totp === undefined &&
+      options.method === undefined &&
+      options.ssoName === undefined &&
+      options.via === undefined &&
+      options.domain === undefined
     )
-      throw new Error('nothing to change: name a field (--label, --match, --username, --password, --totp ...)');
+      throw new Error(
+        'nothing to change: name a field (--label, --match, --method, --via, --domain, --username, --password, --totp ...)',
+      );
     const body: PutLoginEntryRequest = {};
     if (options.label !== undefined) body.label = oneLine(options.label, '--label', LOGIN_LABEL_MAX_LENGTH);
     if (options.match !== undefined) body.match = matches(options.match);
@@ -129,8 +195,11 @@ export class LoginEntryController {
     else if (options.username !== undefined)
       body.username = oneLine(options.username, '--username', LOGIN_USERNAME_MAX_LENGTH);
     if (options.totp === false) body.totp = null;
-    if ((await this.#find(handleId)) === undefined)
-      throw new Error(`no saved login ${handleId} (see \`secret entry ls\`)`);
+    if (options.domain !== undefined) body.domains = domains(options.domain);
+    const existing = await this.#find(handleId);
+    if (existing === undefined) throw new Error(`no saved login ${handleId} (see \`secret entry ls\`)`);
+    const chosen = method(loginMethodOf(existing), options);
+    if (chosen !== undefined) body.method = chosen;
     if (options.password === true) body.password = await this.#askPassword(`new password for ${handleId} (hidden): `);
     if (options.totp === true) {
       body.totp = { seed: await this.#askSeed(options.iUnderstandTotp === true) };
@@ -138,6 +207,14 @@ export class LoginEntryController {
     }
     const saved = await this.ports.gateway.put(handleId, body);
     this.ports.out.success(`Updated ${renderLoginEntryLine(saved)}`);
+  }
+
+  /** What a ferret's `login_hint` is told about a site: never a value, nor which secret fields exist. */
+  async hint(site: string, options: LoginEntryHintOptions): Promise<void> {
+    const key = loginHintSite(site);
+    if (key === undefined) throw new Error(`"${site}" is not a site: use a host like github.com, or a URL`);
+    const hint = await this.ports.gateway.hint(key);
+    this.ports.out.success(options.json === true ? JSON.stringify(hint, null, 2) : renderLoginHint(hint));
   }
 
   async rename(id: string, to: string): Promise<void> {

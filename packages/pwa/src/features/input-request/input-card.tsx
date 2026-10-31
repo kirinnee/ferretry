@@ -52,6 +52,7 @@ import {
   sendBlock,
   shotBoxes,
   showsHeaderRisk,
+  signInWords,
   splitOffers,
   targetRef,
   titleWords,
@@ -593,6 +594,7 @@ const SENSITIVITY_WORDS = { secret: 'secret', private: 'one-time code', plain: '
 function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, onRefresh }: FormProps) {
   const nodes = useRef<Nodes>(new Map());
   const { primary, others } = splitOffers(request.saved);
+  const signInLine = signInWords(request.saved);
   const [values, setValues] = useState<Readonly<Record<string, string>>>({});
   const [revealed, setRevealed] = useState<Readonly<Record<string, boolean>>>({});
   const [typing, setTyping] = useState(primary === undefined);
@@ -719,6 +721,12 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
           ))}
         </div>
       ) : null}
+
+      {signInLine === undefined ? null : (
+        <p className="m-0 text-cell text-muted" data-input-sign-in="">
+          {signInLine}
+        </p>
+      )}
 
       {primary === undefined || typing ? null : <FieldSummary fields={fields} request={request} />}
 

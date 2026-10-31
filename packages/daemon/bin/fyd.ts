@@ -6112,6 +6112,8 @@ function createAgentToolsSubsystem(input: {
   readonly copy: AgentCopyPort;
   readonly plans: AgentPlanPort;
   readonly copyPages: AgentCopyPagesPort;
+  /** The saved logins' directory (never the vault): `login.hint` reads labels, methods and domains from it. */
+  readonly logins: Pick<LoginDirectory, 'list'>;
 }): MountedSubsystems['agentTools'] {
   const clock = { now: () => Date.now() };
   const control = new SurfaceControl(
@@ -6148,6 +6150,7 @@ function createAgentToolsSubsystem(input: {
       copy: input.copy,
       plans: input.plans,
       copyPages: input.copyPages,
+      logins: input.logins,
       redactor: input.redactor,
       binaryName: CLIENT_NAME,
       clock,
@@ -11789,6 +11792,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
           plans: { propose: async (sessionId, items, expires) => await copyPlans.propose(sessionId, items, expires) },
           copyPages: copyPageRecords,
+          logins: loginDirectory,
           files: new AgentFiles({
             fs: new NodeAgentFilesystem(),
             folderOf: async sessionId => await sessionFolder(storage, sessionId),

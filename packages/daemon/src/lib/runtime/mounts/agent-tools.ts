@@ -135,7 +135,11 @@ function controllerOf(context: RouteContext): SurfaceController {
 
 /** The kind a person's route must match; `input.wait` is about a request, so no per-kind route takes it. */
 const kindOf = (call: AgentToolCall): SurfaceKind | undefined =>
-  call.tool === 'input.wait' ? undefined : call.tool.startsWith('terminal.') ? 'terminal' : 'browser';
+  call.tool === 'input.wait' || call.tool === 'login.hint'
+    ? undefined
+    : call.tool.startsWith('terminal.')
+      ? 'terminal'
+      : 'browser';
 
 /** A hold taken since the service answered still wins, now and again as the dispatcher sends the body. */
 function published(service: AgentToolService, result: AgentToolResult): ApiResponse {

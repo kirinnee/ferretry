@@ -3,10 +3,13 @@ import {
   type InputSaved,
   type InputSavedOffer,
   type InputSensitivity,
+  type InputSignIn,
   type InputTargetFacts,
   type LoginEntrySummary,
   type LoginFieldRole,
   LoginMatchSchema,
+  loginDomainsOf,
+  loginMethodOf,
   savedRolesOf,
   strongestSensitivity,
   suggestedLoginId,
@@ -21,6 +24,10 @@ import {
  * can be read (`ssh@build.example.com`), because the password is the remote one. A page's key is its
  * origin's host (`github.com`). Matching is EXACT: a look-alike host or another program is not a match, so
  * it is never the one-tap choice — though the owner can still pick any entry by hand.
+ *
+ * A TERMINAL key is matched against what an entry is for (`match`). A PAGE's host is matched against where the
+ * entry SIGNS IN (its login domains: `accounts.google.com` for a Google login), so the provider's page is where
+ * the provider's password is the one-tap choice, and the site that sends the ferret there is not.
  */
 
 const REMOTE_PROGRAMS = new Set(['ssh', 'scp', 'sftp']);
@@ -82,6 +89,38 @@ export function savedFieldFor(sensitivity: InputSensitivity): Exclude<LoginField
   return sensitivity === 'private' ? undefined : sensitivity === 'secret' ? 'password' : 'username';
 }
 
+/** Whether an entry is for this target's key: a terminal by `match`, a page by its login domains. Exact. */
+export function entryIsFor(entry: LoginEntrySummary, matchKey: string | undefined): boolean {
+  if (matchKey === undefined) return false;
+  return matchKey.includes('@') ? entry.match.includes(matchKey) : loginDomainsOf(entry).includes(matchKey);
+}
+
+/**
+ * How the entry this target is for signs in, when it is NOT a password: the owner's card says "Sign in with Google
+ * via …". An entry is for it by its login domains or by what it is for, so a site that only sends the ferret to a
+ * provider still says so.
+ */
+export function signInFor(
+  matchKey: string | undefined,
+  entries: readonly LoginEntrySummary[],
+): InputSignIn | undefined {
+  if (matchKey === undefined) return undefined;
+  const entry = entries.find(
+    candidate =>
+      loginMethodOf(candidate).kind !== 'password' &&
+      (entryIsFor(candidate, matchKey) || candidate.match.includes(matchKey)),
+  );
+  if (entry === undefined) return undefined;
+  const method = loginMethodOf(entry);
+  const via = method.via === undefined ? undefined : entries.find(candidate => candidate.id === method.via);
+  return {
+    id: entry.id,
+    label: entry.label,
+    method,
+    ...(via === undefined ? {} : { via: { id: via.id, label: via.label } }),
+  };
+}
+
 function holds(entry: LoginEntrySummary, role: LoginFieldRole): boolean {
   return role === 'username' ? entry.username !== undefined : entry.fields[role];
 }
@@ -105,7 +144,7 @@ export function savedFor(
       label: entry.label,
       ...(entry.username === undefined ? {} : { username: entry.username }),
       fills: role,
-      matched: matchKey !== undefined && entry.match.includes(matchKey),
+      matched: entryIsFor(entry, matchKey),
       ...(hint === entry.id ? { hinted: true } : {}),
     }))
     .sort(
@@ -115,18 +154,20 @@ export function savedFor(
         left.label.localeCompare(right.label),
     );
   const saves = savedFieldFor(sensitivity);
-  const existing = matchKey === undefined ? undefined : entries.find(entry => entry.match.includes(matchKey));
+  const existing = entries.find(entry => entryIsFor(entry, matchKey));
   const suggest =
     existing !== undefined
       ? { id: existing.id, label: existing.label }
       : matchKey !== undefined
         ? { id: suggestedLoginId(matchKey), label: suggestedLoginLabel(matchKey) }
         : undefined;
+  const signIn = signInFor(matchKey, entries);
   return {
     ...(matchKey === undefined ? {} : { match: matchKey }),
     ...(suggest === undefined || saves === undefined ? {} : { suggest }),
     ...(saves === undefined ? {} : { saves }),
     offers,
+    ...(signIn === undefined ? {} : { signIn }),
   };
 }
 
@@ -152,12 +193,14 @@ export function savedForFields(
     saves: _saves,
     ...offered
   } = savedFor(strongestSensitivity(fields), matchKey, complete, hint);
+  const signIn = signInFor(matchKey, entries);
+  const withSignIn = signIn === undefined ? offered : { ...offered, signIn };
   const kept = savedRolesOf(fields);
-  if (kept === undefined) return offered;
+  if (kept === undefined) return withSignIn;
   // The entry Save as would update is one this target already matches, not only one that can fill the card.
   const { suggest } = savedFor('secret', matchKey, entries, hint);
   return {
-    ...offered,
+    ...withSignIn,
     ...(suggest === undefined ? {} : { suggest }),
     saves: [...kept.values()].includes('password') ? 'password' : 'username',
   };

@@ -51,6 +51,7 @@ describe('the secret routes', () => {
       'POST /v1/secrets/imports/:importId',
       'POST /v1/secrets/exports/:importId',
       'GET /v1/secrets/logins',
+      'GET /v1/secrets/logins/hint',
       'PUT /v1/secrets/logins/:id',
       'POST /v1/secrets/logins/:id/rename',
       'DELETE /v1/secrets/logins/:id',

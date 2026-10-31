@@ -89,6 +89,101 @@ export const TotpSeedSchema = z
   .pipe(z.string().regex(/^[A-Z2-7]{16,128}$/u, 'a base32 2FA seed of 16 to 128 characters'));
 
 /**
+ * WHERE THE SIGN-IN HAPPENS: a web host, exactly as a page's origin names it (`app.vercel.com`,
+ * `accounts.google.com`, `localhost:8443`). Separate from `match`, which says what the entry is FOR (the site
+ * the work is on). A page card's one-tap choice is an entry whose login domain is the page's host EXACTLY:
+ * no wildcard, no parent domain, no look-alike.
+ */
+export const LoginDomainSchema = z
+  .string()
+  .max(260)
+  .regex(/^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?(?::[0-9]{1,5})?$/u, 'a web host, lowercase, like app.vercel.com');
+export type LoginDomain = z.infer<typeof LoginDomainSchema>;
+
+/** The host a person typed or pasted (`https://App.Vercel.com/login` → `app.vercel.com`), or `undefined`. */
+export function normalizedLoginDomain(text: string): LoginDomain | undefined {
+  const trimmed = text.trim();
+  if (trimmed === '') return undefined;
+  let host: string;
+  try {
+    host = new URL(/^[a-z][a-z0-9+.-]*:\/\//iu.test(trimmed) ? trimmed : `https://${trimmed}`).host.toLowerCase();
+  } catch {
+    return undefined;
+  }
+  return LoginDomainSchema.safeParse(host).success ? host : undefined;
+}
+
+/** The web hosts among what an entry matches: the login domains an entry kept before it had its own. */
+export function webHostsOf(match: readonly string[]): readonly LoginDomain[] {
+  return match.filter(target => !target.includes('@') && LoginDomainSchema.safeParse(target).success);
+}
+
+/**
+ * HOW A SAVED LOGIN SIGNS IN. `password` types what the entry holds. An identity-provider method means the site
+ * signs in through that provider ("Continue with Google"): the ferret clicks it, and the PROVIDER's page is
+ * filled from the provider's own saved login, named by `via` (this site → the "Google (kirin@…)" entry).
+ *
+ * THERE IS NO PASSKEY METHOD, and an `sso` name that says passkey, WebAuthn or a security key is refused: the
+ * agent browser has passkeys switched off (docs/input-requests.md, "Passkeys are off"), so a login that needs
+ * one is the owner's hands, never a saved login.
+ */
+export const LOGIN_METHODS = ['password', 'google', 'github', 'microsoft', 'apple', 'sso'] as const;
+export const LoginMethodKindSchema = z.enum(LOGIN_METHODS);
+export type LoginMethodKind = z.infer<typeof LoginMethodKindSchema>;
+export const LOGIN_SSO_NAME_MAX_LENGTH = 40;
+
+/** What the owner reads for each method, in the app, the CLI and the agent's hint. */
+export const LOGIN_METHOD_LABELS: Readonly<Record<LoginMethodKind, string>> = {
+  password: 'Password',
+  google: 'Sign in with Google',
+  github: 'Sign in with GitHub',
+  microsoft: 'Sign in with Microsoft',
+  apple: 'Sign in with Apple',
+  sso: 'Other SSO',
+};
+
+/** Words that name a passkey or a hardware authenticator: never a saved login's method. */
+const PASSKEY_WORDS =
+  /pass\s*-?\s*key|web\s*-?\s*authn|fido|u2f|security\s*-?\s*key|hardware\s*-?\s*key|yubi\s*-?\s*key/iu;
+
+/** Whether a sign-in method's name means a passkey: the store refuses it. */
+export const namesPasskey = (text: string): boolean => PASSKEY_WORDS.test(text);
+
+export const LoginMethodSchema = z
+  .strictObject({
+    kind: LoginMethodKindSchema,
+    /** `sso` only: the provider's name as the site's button says it ("Okta", "Company SSO"). */
+    name: oneLine(LOGIN_SSO_NAME_MAX_LENGTH)
+      .refine(name => !namesPasskey(name), 'passkeys are off: a saved login signs in with a password or a provider')
+      .optional(),
+    /** An identity-provider method only: the saved login of that provider, whose page it fills. */
+    via: LoginEntryIdSchema.optional(),
+  })
+  .superRefine((method, context) => {
+    if (method.kind === 'sso' && method.name === undefined)
+      context.addIssue({ code: 'custom', path: ['name'], message: 'name the SSO provider, as its button says it' });
+    if (method.kind !== 'sso' && method.name !== undefined)
+      context.addIssue({ code: 'custom', path: ['name'], message: 'only other SSO takes a name' });
+    if (method.kind === 'password' && method.via !== undefined)
+      context.addIssue({ code: 'custom', path: ['via'], message: 'a password sign-in is not via another login' });
+  });
+export type LoginMethod = z.infer<typeof LoginMethodSchema>;
+
+/** The method an entry reads as: one saved before methods existed signs in with its password. */
+export const PASSWORD_METHOD: LoginMethod = { kind: 'password' };
+
+/** "Sign in with Google", "Sign in with Okta (SSO)" or "Password", without the provider entry. */
+export function loginMethodWords(method: LoginMethod): string {
+  return method.kind === 'sso' ? `Sign in with ${method.name ?? 'SSO'} (SSO)` : LOGIN_METHOD_LABELS[method.kind];
+}
+
+/** The same, naming the provider's saved login: `Sign in with Google via 'Google (kirin@…)'`. */
+export function loginMethodSentence(method: LoginMethod, viaLabel: string | undefined): string {
+  const words = loginMethodWords(method);
+  return viaLabel === undefined || method.kind === 'password' ? words : `${words} via '${viaLabel}'`;
+}
+
+/**
  * Everything a client may learn about a saved login. `username` is plain and may be shown; `fields` says
  * which secret fields exist, never what they hold.
  */
@@ -96,6 +191,10 @@ export const LoginEntrySummarySchema = z.strictObject({
   id: LoginEntryIdSchema,
   label: oneLine(LOGIN_LABEL_MAX_LENGTH),
   match: z.array(LoginMatchSchema).max(LOGIN_MATCH_MAX).readonly(),
+  /** How it signs in; absent reads as {@link PASSWORD_METHOD} (an older daemon). */
+  method: LoginMethodSchema.optional(),
+  /** Where the sign-in happens; absent reads as the web hosts of `match` ({@link loginDomainsOf}). */
+  domains: z.array(LoginDomainSchema).max(LOGIN_MATCH_MAX).readonly().optional(),
   username: oneLine(LOGIN_USERNAME_MAX_LENGTH).optional(),
   fields: z.strictObject({ password: z.boolean(), totp: z.boolean() }),
   /** How the code is made, present exactly when `fields.totp`. */
@@ -104,6 +203,14 @@ export const LoginEntrySummarySchema = z.strictObject({
   updatedAt: InstantSchema,
 });
 export type LoginEntrySummary = z.infer<typeof LoginEntrySummarySchema>;
+
+/** How an entry signs in, reading an entry from before methods as a password one. */
+export const loginMethodOf = (entry: Pick<LoginEntrySummary, 'id' | 'method'>): LoginMethod =>
+  entry.method ?? PASSWORD_METHOD;
+
+/** Where an entry signs in, reading an entry from before login domains as its web `match` hosts. */
+export const loginDomainsOf = (entry: Pick<LoginEntrySummary, 'match' | 'domains'>): readonly LoginDomain[] =>
+  entry.domains ?? webHostsOf(entry.match);
 
 /** `GET /v1/secrets/logins`. A damaged store says so; it is never an empty list. */
 export const LoginEntryListSchema = z.strictObject({
@@ -123,6 +230,9 @@ export const PutLoginEntryRequestSchema = z
   .strictObject({
     label: oneLine(LOGIN_LABEL_MAX_LENGTH).optional(),
     match: z.array(LoginMatchSchema).max(LOGIN_MATCH_MAX).optional(),
+    /** The whole method, replaced: `{ kind: 'password' }` goes back to a password sign-in. */
+    method: LoginMethodSchema.optional(),
+    domains: z.array(LoginDomainSchema).max(LOGIN_MATCH_MAX).optional(),
     username: oneLine(LOGIN_USERNAME_MAX_LENGTH).nullable().optional(),
     password: z
       .string()
@@ -169,6 +279,22 @@ export const InputSavedOfferSchema = z.strictObject({
 });
 export type InputSavedOffer = z.infer<typeof InputSavedOfferSchema>;
 
+/** A saved login named by another: its handle and its label, never what it holds. */
+export const LoginEntryRefSchema = z.strictObject({ id: LoginEntryIdSchema, label: oneLine(LOGIN_LABEL_MAX_LENGTH) });
+export type LoginEntryRef = z.infer<typeof LoginEntryRefSchema>;
+
+/**
+ * How the saved login this target is for signs in, when it is not a plain password: the card says "Sign in with
+ * Google via 'Google (kirin@…)'", so the owner sees the ferret should be on the provider's page, not typing here.
+ */
+export const InputSignInSchema = z.strictObject({
+  id: LoginEntryIdSchema,
+  label: oneLine(LOGIN_LABEL_MAX_LENGTH),
+  method: LoginMethodSchema,
+  via: LoginEntryRefSchema.optional(),
+});
+export type InputSignIn = z.infer<typeof InputSignInSchema>;
+
 /**
  * What an input card knows about saved logins, as the owner reads it (never the agent): the target's key
  * the daemon worked out, the entry "Save as" would suggest, and the entries that can fill the field,
@@ -180,8 +306,109 @@ export const InputSavedSchema = z.strictObject({
   /** Which field a typed value would be saved as; absent when this kind of value is never saved (a code). */
   saves: LoginFieldRoleSchema.optional(),
   offers: z.array(InputSavedOfferSchema).max(MAX_LOGIN_ENTRIES).readonly(),
+  /** The matched entry signs in through a provider: what the card says about it. */
+  signIn: InputSignInSchema.optional(),
 });
 export type InputSaved = z.infer<typeof InputSavedSchema>;
+
+/**
+ * WHAT A FERRET MAY LEARN ABOUT SIGNING IN TO A SITE (`login_hint`, `fy secret entry hint`): the saved logins for
+ * it, by their NON-SECRET metadata only — handle, label, method, login domains, the plain username, and the
+ * provider entry a method goes via. Never a password, a seed, a code, or even which secret fields exist.
+ *
+ * `role` says why an entry is listed: `site` — it is for this site (`match` or a login domain is the site,
+ * exactly); `provider` — a listed entry signs in via it, so its domains are where the ferret will be sent.
+ */
+export const LoginHintSchema = z.strictObject({
+  id: LoginEntryIdSchema,
+  label: oneLine(LOGIN_LABEL_MAX_LENGTH),
+  role: z.enum(['site', 'provider']),
+  method: LoginMethodSchema,
+  via: LoginEntryRefSchema.optional(),
+  domains: z.array(LoginDomainSchema).max(LOGIN_MATCH_MAX).readonly(),
+  username: oneLine(LOGIN_USERNAME_MAX_LENGTH).optional(),
+});
+export type LoginHint = z.infer<typeof LoginHintSchema>;
+
+/** `GET /v1/secrets/logins/hint?site=`. `passkeys` is always off: say so wherever a hint is read. */
+export const LoginHintListSchema = z.strictObject({
+  v: z.literal(1),
+  site: LoginMatchSchema,
+  hints: z.array(LoginHintSchema).max(MAX_LOGIN_ENTRIES).readonly(),
+  passkeys: z.literal('off'),
+});
+export type LoginHintList = z.infer<typeof LoginHintListSchema>;
+
+/** The site a hint is asked for: a host, a URL or a `program@host`, as a key a saved login could match. */
+export function loginHintSite(text: string): LoginMatch | undefined {
+  const trimmed = text.trim().toLowerCase();
+  if (LoginMatchSchema.safeParse(trimmed).success) return trimmed;
+  return normalizedLoginDomain(trimmed);
+}
+
+/** The entry another names, when it still exists. */
+function refTo(entries: readonly LoginEntrySummary[], id: LoginEntryId | undefined): LoginEntrySummary | undefined {
+  return id === undefined ? undefined : entries.find(entry => entry.id === id);
+}
+
+/** One entry as a hint: the non-secret projection, nothing else. */
+function hintOf(entry: LoginEntrySummary, role: LoginHint['role'], entries: readonly LoginEntrySummary[]): LoginHint {
+  const method = loginMethodOf(entry);
+  const via = refTo(entries, method.via);
+  return {
+    id: entry.id,
+    label: entry.label,
+    role,
+    method,
+    ...(via === undefined ? {} : { via: { id: via.id, label: via.label } }),
+    domains: [...loginDomainsOf(entry)],
+    ...(entry.username === undefined ? {} : { username: entry.username }),
+  };
+}
+
+/**
+ * The saved logins for a site: entries that match it or sign in on it, EXACTLY (no wildcard, no parent domain),
+ * then the provider entries those go via. Each is listed once, a site entry before a provider one.
+ */
+export function loginHintsFor(site: LoginMatch, entries: readonly LoginEntrySummary[]): readonly LoginHint[] {
+  const forSite = entries.filter(entry => entry.match.includes(site) || loginDomainsOf(entry).includes(site));
+  const listed = new Set(forSite.map(entry => entry.id));
+  const providers: LoginEntrySummary[] = [];
+  for (const entry of forSite) {
+    const via = refTo(entries, loginMethodOf(entry).via);
+    if (via !== undefined && !listed.has(via.id)) {
+      listed.add(via.id);
+      providers.push(via);
+    }
+  }
+  return [
+    ...forSite.map(entry => hintOf(entry, 'site', entries)),
+    ...providers.map(entry => hintOf(entry, 'provider', entries)),
+  ];
+}
+
+/** One hint as a line a ferret reads: what to click, where the sign-in happens, and the username. */
+export function loginHintLine(hint: LoginHint): string {
+  const where = hint.domains.length === 0 ? '' : ` on ${hint.domains.join(', ')}`;
+  const who = hint.username === undefined ? '' : `, username ${hint.username}`;
+  const how =
+    hint.method.kind === 'password'
+      ? 'password'
+      : `${loginMethodSentence(hint.method, hint.via?.label)}: click that button, then request input on the provider's page`;
+  return `'${hint.label}' (${hint.id}${hint.role === 'provider' ? ', provider' : ''}): ${how}${where}${who}.`;
+}
+
+/** The sentence every hint ends with. */
+export const LOGIN_HINT_PASSKEYS_OFF = 'Use the password or provider flow; passkeys are off, never create one.';
+
+/** What `login_hint` and `fy secret entry hint` say: each entry's line, or that none is saved, and the passkey rule. */
+export function loginHintSummary(site: string, hints: readonly LoginHint[]): string {
+  const found =
+    hints.length === 0
+      ? `No saved login for ${site}; request the values as usual and the owner can save them.`
+      : `Saved logins for ${site}: ${hints.map(loginHintLine).join(' ')}`;
+  return `${found} ${LOGIN_HINT_PASSKEYS_OFF}`;
+}
 
 /** The role a request's one field takes from an entry, by the request's sensitivity. */
 export function fillRoleFor(sensitivity: 'secret' | 'private' | 'plain'): LoginFieldRole {

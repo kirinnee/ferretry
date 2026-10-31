@@ -4,7 +4,7 @@
  *
  *   bun harness/input-card-screenshot.tsx [out-dir] [states]   # writes input-card-*.png, input-p2-*.png, saved-logins-*.png
  *
- * `states` is a comma list (first,next,google,chain,logins) when only some are wanted.
+ * `states` is a comma list (first,next,google,chain,signin,logins) when only some are wanted.
  *
  * Fake fixtures only (`tests/support/input-fixtures.ts`): no real account, no real daemon, and the typed value
  * is a made-up phrase. Two card states are captured. "first" is the first time a password is asked for: a
@@ -41,7 +41,7 @@ import { AgendaItemView } from '../../src/features/agenda/agenda-item-view.tsx';
 import { InputCard } from '../../src/features/input-request/input-card.tsx';
 import { LoginsCard } from '../../src/features/secrets/logins-card.tsx';
 import { fieldsOf } from '../../src/lib/input-card.ts';
-import { NOW, browserField, field, login, logins, offer, request as fakeRequest, saved, withSaved } from '../../tests/support/input-fixtures.ts';
+import { NOW, browserField, field, offer, request as fakeRequest, saved, savedSignIn, signInLogins, withSaved } from '../../tests/support/input-fixtures.ts';
 
 const view = new URLSearchParams(location.search).get('view');
 const refuse = async () => {
@@ -62,10 +62,10 @@ const next = withSaved(
     ],
   }),
 );
-const page = (fields) => ({
+const page = (fields, origin = 'https://accounts.google.com') => ({
   kind: 'browser',
   pageId: 'page-1',
-  origin: 'https://accounts.google.com',
+  origin,
   secure: true,
   navigationId: 'nav-1',
   fields,
@@ -104,8 +104,32 @@ const chain = fakeRequest({
   step: 2,
   observed: page([browserField('code', { field: { tag: 'input', type: 'text', autocomplete: 'one-time-code' } })]),
 });
-const request = { first, next, google, chain }[view] ?? first;
-const subject = view === 'google' || view === 'chain' ? 'Sign in to Google' : 'Type it into sudo';
+// The ferret asked for a password on Vercel's own page, but Vercel signs in with Google: the card says so, and the
+// Google login is NOT the one tap here (it is matched only on accounts.google.com), just selectable by hand.
+const signin = fakeRequest({
+  target: { kind: 'browser', key: 'app' },
+  prompt: 'Sign in to Vercel',
+  sensitivity: 'secret',
+  fields: [
+    field('secret', {
+      id: 'password',
+      label: 'Password',
+      risk: { level: 'green', reason: 'A password field on a secure page, as the browser reported it.' },
+    }),
+  ],
+  risk: { level: 'green', reason: 'A password field on a secure page, as the browser reported it.' },
+  observed: page(
+    [browserField('password', { frameOrigin: 'https://app.vercel.com', field: { tag: 'input', type: 'password' } })],
+    'https://app.vercel.com',
+  ),
+  saved: savedSignIn({
+    match: 'app.vercel.com',
+    offers: [offer({ id: 'GOOGLE_KIRIN', label: 'Google (kirin@…)', matched: false, username: 'kirin@example.test' })],
+  }),
+});
+const request = { first, next, google, chain, signin }[view] ?? first;
+const subject =
+  view === 'google' || view === 'chain' ? 'Sign in to Google' : view === 'signin' ? 'Sign in to Vercel' : 'Type it into sudo';
 
 // The agenda item the daemon raises for the request (lib/input-requests/agenda-adapter.ts), drawn by the REAL v5
 // item view with the card as its form: the type badge, the header and the paging are the item view's own.
@@ -135,7 +159,7 @@ createRoot(root).render(
   <div className="kt-shell flex min-h-full flex-col items-center bg-bg p-3">
     <div className="w-full max-w-[640px]">
       {view === 'logins' ? (
-        <LoginsCard list={logins({ entries: [login(), ...logins().entries.slice(1)] })} onPut={quiet} onRename={quiet} onRemove={quiet} />
+        <LoginsCard list={signInLogins()} onPut={quiet} onRename={quiet} onRemove={quiet} />
       ) : (
         <div style={{ height: '100vh', display: 'grid' }}>
           <AgendaItemView
@@ -194,7 +218,7 @@ run('./node_modules/.bin/tailwindcss', [
 ]);
 
 const wanted = process.argv[3]?.split(',');
-const STATES = (['first', 'next', 'google', 'chain', 'logins'] as const).filter(
+const STATES = (['first', 'next', 'google', 'chain', 'signin', 'logins'] as const).filter(
   state => wanted === undefined || wanted.includes(state),
 );
 
@@ -252,10 +276,17 @@ try {
           if (state === 'google')
             await page.locator('[data-input-field="email"] [data-input-value]').fill('kirin@example.test');
           if (state === 'logins') {
-            await page.locator('[aria-label="Add 2FA seed to GitHub (kirinnee)"]').click();
-            await page.locator('[data-login-totp-ack]').check();
-            await page.locator('[data-login-add-open]').click();
+            await page.locator('[aria-label="Edit Vercel"]').evaluate(el => (el as HTMLElement).click());
+            await page
+              .locator('[aria-label="Add 2FA seed to GitHub (kirinnee)"]')
+              .evaluate(el => (el as HTMLElement).click());
+            await page.locator('[data-login-totp-ack]').evaluate(el => (el as HTMLElement).click());
+            await page.locator('[data-login-add-open]').evaluate(el => (el as HTMLElement).click());
+            await page.locator('[data-login-new-method]').selectOption('sso');
+            await page.locator('[data-login-new-label]').fill('Acme');
+            await page.locator('[data-login-new-sso-name]').fill('Okta');
           }
+          if (state === 'logins') await page.setViewportSize({ width: viewport.width, height: 2_400 });
           const where = `${state} at ${viewport.name}/${scheme}`;
           const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
           if (overflow > 0) fail(`${where} scrolls sideways by ${overflow}px`);

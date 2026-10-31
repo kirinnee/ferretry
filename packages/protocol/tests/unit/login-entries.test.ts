@@ -1,6 +1,18 @@
 import { describe, expect, it } from 'bun:test';
 import {
   fillRoleFor,
+  LOGIN_HINT_PASSKEYS_OFF,
+  LOGIN_METHODS,
+  LoginDomainSchema,
+  loginDomainsOf,
+  LoginHintListSchema,
+  loginHintSite,
+  loginHintsFor,
+  loginHintSummary,
+  loginMethodOf,
+  LoginMethodSchema,
+  loginMethodSentence,
+  normalizedLoginDomain,
   InputSavedSchema,
   LOGIN_TOTP_WARNING,
   LoginEntryListSchema,
@@ -114,5 +126,123 @@ describe('what an input card offers', () => {
     expect(suggestedLoginId('1password.com')).toBe('LOGIN_1PASSWORD_COM');
     expect(suggestedLoginLabel('sudo@kirin-box')).toBe('sudo on kirin-box');
     expect(suggestedLoginLabel('github.com')).toBe('github.com');
+  });
+});
+
+describe('how an entry signs in', () => {
+  it('should offer a password and the identity providers, and no passkey', () => {
+    expect([...LOGIN_METHODS]).toEqual(['password', 'google', 'github', 'microsoft', 'apple', 'sso']);
+    for (const kind of ['passkey', 'webauthn', 'security-key', 'fido2'])
+      expect(LoginMethodSchema.safeParse({ kind }).success).toBe(false);
+  });
+
+  it('should refuse an SSO named for a passkey or a hardware key, however it is spelt', () => {
+    for (const name of ['Passkey', 'pass-key', 'Pass Key login', 'WebAuthn', 'FIDO2', 'YubiKey', 'Security key', 'U2F'])
+      expect(LoginMethodSchema.safeParse({ kind: 'sso', name }).success).toBe(false);
+    expect(LoginMethodSchema.safeParse({ kind: 'sso', name: 'Okta' }).success).toBe(true);
+  });
+
+  it('should need a name for other SSO only, and take a provider login only for a provider method', () => {
+    expect(LoginMethodSchema.safeParse({ kind: 'sso' }).success).toBe(false);
+    expect(LoginMethodSchema.safeParse({ kind: 'google', name: 'Okta' }).success).toBe(false);
+    expect(LoginMethodSchema.safeParse({ kind: 'password', via: 'GOOGLE_KIRIN' }).success).toBe(false);
+    expect(LoginMethodSchema.safeParse({ kind: 'google', via: 'GOOGLE_KIRIN' }).success).toBe(true);
+  });
+
+  it('should say a method as the owner reads it', () => {
+    expect(loginMethodSentence({ kind: 'google', via: 'G' }, 'Google (kirin@…)')).toBe(
+      "Sign in with Google via 'Google (kirin@…)'",
+    );
+    expect(loginMethodSentence({ kind: 'sso', name: 'Okta' }, undefined)).toBe('Sign in with Okta (SSO)');
+    expect(loginMethodSentence({ kind: 'password' }, 'ignored')).toBe('Password');
+  });
+
+  it('should read an entry from before methods as a password one, signing in on its web hosts', () => {
+    expect(loginMethodOf(SUMMARY)).toEqual({ kind: 'password' });
+    expect(loginDomainsOf({ match: ['sudo@kirin-box', 'github.com', 'localhost:8443'] })).toEqual([
+      'github.com',
+      'localhost:8443',
+    ]);
+    expect(loginDomainsOf({ match: ['github.com'], domains: [] })).toEqual([]);
+    expect(LoginEntrySummarySchema.safeParse({ ...SUMMARY, method: { kind: 'passkey' } }).success).toBe(false);
+  });
+
+  it('should take a login domain as a lowercase host, and read one from a pasted URL', () => {
+    expect(LoginDomainSchema.safeParse('accounts.google.com').success).toBe(true);
+    for (const bad of ['sudo@kirin-box', 'https://x.com', 'X.com', '*.google.com'])
+      expect(LoginDomainSchema.safeParse(bad).success).toBe(false);
+    expect(normalizedLoginDomain(' https://App.Vercel.com/login?next=/ ')).toBe('app.vercel.com');
+    expect(normalizedLoginDomain('accounts.google.com')).toBe('accounts.google.com');
+    expect(normalizedLoginDomain('*.google.com')).toBeUndefined();
+    expect(normalizedLoginDomain('')).toBeUndefined();
+  });
+
+  it('should take a method and login domains in a change', () => {
+    expect(PutLoginEntryRequestSchema.safeParse({ method: { kind: 'github' }, domains: ['github.com'] }).success).toBe(
+      true,
+    );
+    expect(PutLoginEntryRequestSchema.safeParse({ method: { kind: 'passkey' } }).success).toBe(false);
+    expect(PutLoginEntryRequestSchema.safeParse({ domains: ['*.github.com'] }).success).toBe(false);
+  });
+});
+
+describe('the login hint a ferret reads', () => {
+  const GOOGLE = {
+    ...SUMMARY,
+    id: 'GOOGLE_KIRIN',
+    label: 'Google (kirin@)',
+    match: ['accounts.google.com'],
+    username: 'kirin@example.com',
+  };
+  const VERCEL = {
+    ...SUMMARY,
+    id: 'VERCEL',
+    label: 'Vercel',
+    match: ['vercel.com'],
+    username: undefined,
+    method: { kind: 'google' as const, via: 'GOOGLE_KIRIN' },
+    domains: ['vercel.com'],
+    fields: { password: false, totp: false },
+  };
+
+  it('should list the site login, then the provider login it goes via, once each', () => {
+    const hints = loginHintsFor('vercel.com', [GOOGLE, VERCEL, SUMMARY]);
+    expect(hints.map(hint => [hint.id, hint.role])).toEqual([
+      ['VERCEL', 'site'],
+      ['GOOGLE_KIRIN', 'provider'],
+    ]);
+    expect(hints[0]?.via).toEqual({ id: 'GOOGLE_KIRIN', label: 'Google (kirin@)' });
+  });
+
+  it('should carry no secret field, and say passkeys are off', () => {
+    const hints = loginHintsFor('github.com', [SUMMARY]);
+    expect(LoginHintListSchema.safeParse({ v: 1, site: 'github.com', hints, passkeys: 'off' }).success).toBe(true);
+    expect(JSON.stringify(hints)).not.toContain('fields');
+    expect(
+      LoginHintListSchema.safeParse({
+        v: 1,
+        site: 'github.com',
+        hints: [{ ...hints[0], password: 'x' }],
+        passkeys: 'off',
+      }).success,
+    ).toBe(false);
+    expect(loginHintSummary('github.com', hints)).toContain(LOGIN_HINT_PASSKEYS_OFF);
+    expect(loginHintSummary('github.com', hints)).toContain(
+      "'GitHub (kirinnee)' (GITHUB_KIRINNEE): password on github.com",
+    );
+  });
+
+  it('should tell the ferret to click the provider button for a provider login', () => {
+    const summary = loginHintSummary('vercel.com', loginHintsFor('vercel.com', [GOOGLE, VERCEL]));
+    expect(summary).toContain("Sign in with Google via 'Google (kirin@)': click that button");
+    expect(summary).toContain('username kirin@example.com');
+  });
+
+  it('should match exactly and read a URL as its host', () => {
+    expect(loginHintsFor('evilgithub.com', [SUMMARY])).toEqual([]);
+    expect(loginHintsFor('api.github.com', [SUMMARY])).toEqual([]);
+    expect(loginHintSite('https://GitHub.com/login')).toBe('github.com');
+    expect(loginHintSite('sudo@kirin-box')).toBe('sudo@kirin-box');
+    expect(loginHintSite('not a site')).toBeUndefined();
   });
 });

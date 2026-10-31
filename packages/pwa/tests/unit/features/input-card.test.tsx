@@ -15,6 +15,7 @@ import {
   request,
   requestOf,
   saved,
+  savedSignIn,
   withSaved,
 } from '../../support/input-fixtures.ts';
 
@@ -951,5 +952,17 @@ describe('the card, a page’s picture', () => {
     expect(plain.calls.some(call => call.path.endsWith('/shot'))).toBe(false);
     expect(plain.q('[data-input-shot]')).toBeNull();
     expect(failing.q('[data-input-shot]')).toBeNull();
+  });
+});
+
+describe('a saved login that signs in through a provider', () => {
+  it('says so in one line, naming the provider login', async () => {
+    const { q } = await show(withSaved(savedSignIn({ offers: [] })));
+    expect(q('[data-input-sign-in]')?.textContent).toBe("Sign in with Google via 'Google (kirin@…)'");
+  });
+
+  it('says nothing extra for a plain password login', async () => {
+    const { q } = await show(withSaved(saved({ offers: [] })));
+    expect(q('[data-input-sign-in]')).toBeNull();
   });
 });

@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { LOGIN_TOTP_WARNING, type LoginEntryList, type PutLoginEntryRequest } from '@ferretry/protocol';
 import { LoginsCard } from '../../../src/features/secrets/logins-card.tsx';
-import { type Mounted, mount, must } from '../../support/dom.ts';
+import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import { byText, click, settle, typeInto } from '../../support/dom-form.ts';
-import { login, logins } from '../../support/input-fixtures.ts';
+import { login, logins, signInLogins } from '../../support/input-fixtures.ts';
 
 const mounted: Mounted[] = [];
 afterEach(async () => {
@@ -260,5 +260,149 @@ describe('the add form and the rename', () => {
     mounted.push(view);
 
     expect(view.container.querySelector('[data-testid="logins-error"]')?.textContent).toBe('the vault is locked');
+  });
+});
+
+const choose = async (element: HTMLElement | null, value: string): Promise<void> => {
+  const select = must(element, 'a select') as HTMLSelectElement;
+  await interact(() => {
+    must(Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set, 'a value setter').call(
+      select,
+      value,
+    );
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+};
+
+const optionValues = (select: HTMLElement | null): string[] =>
+  [...must(select, 'a select').querySelectorAll('option')].map(option => (option as HTMLOptionElement).value);
+
+describe('how a login signs in', () => {
+  it('shows each row its method in words and its login domains; a password one says Password', async () => {
+    const view = await show(signInLogins());
+
+    expect(inRow(row(view, 'VERCEL'), '[data-login-method]').textContent).toBe(
+      "Sign in with Google via 'Google (kirin@…)'",
+    );
+    expect(inRow(row(view, 'VERCEL'), '[data-login-domains]').textContent).toContain('app.vercel.com');
+    expect(inRow(row(view, 'GOOGLE_KIRIN'), '[data-login-domains]').textContent).toContain('accounts.google.com');
+    expect(inRow(row(view, 'GITHUB_KIRINNEE'), '[data-login-method]').textContent).toBe('Password');
+  });
+
+  it('reads an entry from an older daemon as Password, with its web match hosts as login domains', async () => {
+    const view = await show(logins());
+
+    expect(inRow(row(view, 'GITHUB_KIRINNEE'), '[data-login-method]').textContent).toBe('Password');
+    expect(inRow(row(view, 'GITHUB_KIRINNEE'), '[data-login-domains]').textContent).toContain('github.com');
+    expect(row(view, 'SUDO_KIRIN_BOX').querySelector('[data-login-domains]')).toBeNull();
+  });
+
+  it('adds a login with a provider method, the provider login it goes via, and normalised login domains', async () => {
+    const view = await show(signInLogins());
+
+    await click(view.q('[data-login-add-open]'));
+    expect(optionValues(view.q('[data-login-new-method]'))).toEqual([
+      'password',
+      'google',
+      'github',
+      'microsoft',
+      'apple',
+      'sso',
+    ]);
+    expect(view.q('[data-login-new-via]')).toBeNull();
+    await typeInto(view.q('[data-login-new-label]'), 'Linear');
+    await choose(view.q('[data-login-new-method]'), 'google');
+    expect(optionValues(view.q('[data-login-new-via]'))).toEqual(['', 'VERCEL', 'GOOGLE_KIRIN', 'GITHUB_KIRINNEE']);
+    await choose(view.q('[data-login-new-via]'), 'GOOGLE_KIRIN');
+    await typeInto(view.q('[data-login-new-domains]'), 'https://App.Linear.app/login, accounts.google.com');
+    await typeInto(view.q('[data-login-new-password]'), PASSWORD);
+    await click(byText(view.view.container, 'button', 'Add login'));
+    await settle();
+
+    expect(view.puts).toEqual([
+      {
+        id: 'LINEAR',
+        body: {
+          label: 'Linear',
+          match: [],
+          method: { kind: 'google', via: 'GOOGLE_KIRIN' },
+          domains: ['app.linear.app', 'accounts.google.com'],
+          password: PASSWORD,
+        },
+      },
+    ]);
+  });
+
+  it('asks for the SSO provider name, refuses a passkey one, and has no passkey option', async () => {
+    const view = await show(logins({ entries: [] }));
+
+    await click(view.q('[data-login-add-open]'));
+    await typeInto(view.q('[data-login-new-label]'), 'Acme');
+    await typeInto(view.q('[data-login-new-password]'), PASSWORD);
+    await choose(view.q('[data-login-new-method]'), 'sso');
+    expect(view.q('[data-login-new-sso-name]')).not.toBeNull();
+    expect(byText(view.view.container, 'button', 'Add login').hasAttribute('disabled')).toBe(true);
+    expect(view.q('[data-login-problem]')?.textContent).toContain('Name the SSO provider');
+
+    await typeInto(view.q('[data-login-new-sso-name]'), 'Passkey');
+    expect(byText(view.view.container, 'button', 'Add login').hasAttribute('disabled')).toBe(true);
+    expect(view.q('[data-login-problem]')?.textContent).toContain('passkeys are off');
+
+    await typeInto(view.q('[data-login-new-sso-name]'), 'Okta');
+    expect(byText(view.view.container, 'button', 'Add login').hasAttribute('disabled')).toBe(false);
+    await click(byText(view.view.container, 'button', 'Add login'));
+    await settle();
+    expect(view.puts[0]?.body.method).toEqual({ kind: 'sso', name: 'Okta' });
+    expect(view.view.container.textContent?.toLowerCase()).not.toContain('passkey option');
+  });
+
+  it('says a login domain that is not a web host', async () => {
+    const view = await show(logins({ entries: [] }));
+
+    await click(view.q('[data-login-add-open]'));
+    await typeInto(view.q('[data-login-new-label]'), 'Acme');
+    await typeInto(view.q('[data-login-new-password]'), PASSWORD);
+    await typeInto(view.q('[data-login-new-domains]'), 'not a host!');
+
+    expect(byText(view.view.container, 'button', 'Add login').hasAttribute('disabled')).toBe(true);
+    expect(view.q('[data-login-problem]')?.textContent).toContain('is not a web host');
+  });
+
+  it('prefills the edit form, lists every OTHER login as a via, and sends the whole method', async () => {
+    const view = await show(signInLogins());
+    const vercel = row(view, 'VERCEL');
+
+    await click(inRow(vercel, '[aria-label="Edit Vercel"]'));
+    expect(must(view.q<HTMLSelectElement>('[data-login-edit-method]'), 'method').value).toBe('google');
+    expect(optionValues(view.q('[data-login-edit-via]'))).toEqual(['', 'GOOGLE_KIRIN', 'GITHUB_KIRINNEE']);
+    expect(must(view.q<HTMLSelectElement>('[data-login-edit-via]'), 'via').value).toBe('GOOGLE_KIRIN');
+    expect(must(view.q<HTMLInputElement>('[data-login-edit-domains]'), 'domains').value).toBe('app.vercel.com');
+
+    await choose(view.q('[data-login-edit-method]'), 'github');
+    await typeInto(view.q('[data-login-edit-domains]'), 'app.vercel.com, vercel.com');
+    await click(byText(vercel, 'button', 'Save changes'));
+    await settle();
+
+    expect(view.puts).toEqual([
+      {
+        id: 'VERCEL',
+        body: { method: { kind: 'github', via: 'GOOGLE_KIRIN' }, domains: ['app.vercel.com', 'vercel.com'] },
+      },
+    ]);
+  });
+
+  it('prefills an older entry with its web match hosts and sends nothing until something changes', async () => {
+    const view = await show();
+    const github = row(view, 'GITHUB_KIRINNEE');
+
+    await click(inRow(github, '[aria-label="Edit GitHub (kirinnee)"]'));
+    expect(must(view.q<HTMLSelectElement>('[data-login-edit-method]'), 'method').value).toBe('password');
+    expect(view.q('[data-login-edit-via]')).toBeNull();
+    expect(must(view.q<HTMLInputElement>('[data-login-edit-domains]'), 'domains').value).toBe('github.com');
+    expect(byText(github, 'button', 'Save changes').hasAttribute('disabled')).toBe(true);
+
+    await choose(view.q('[data-login-edit-method]'), 'password');
+    expect(byText(github, 'button', 'Save changes').hasAttribute('disabled')).toBe(true);
+    expect(view.puts).toEqual([]);
   });
 });

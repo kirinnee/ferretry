@@ -4,6 +4,8 @@ import {
   LOGIN_TOTP_WARNING,
   type LoginEntryList,
   type LoginEntrySummary,
+  type LoginHintList,
+  loginHintsFor,
   type PutLoginEntryRequest,
   type RemovedLoginEntry,
 } from '@ferretry/protocol';
@@ -63,6 +65,11 @@ class FakeGateway implements ILoginEntryGateway {
     this.calls.push('rename');
     this.renames.push([id, to]);
     return Promise.resolve(summary({ id: to }));
+  }
+
+  hint(site: string): Promise<LoginHintList> {
+    this.calls.push(`hint ${site}`);
+    return Promise.resolve({ v: 1, site, hints: loginHintsFor(site, this.listing.entries), passkeys: 'off' });
   }
 
   remove(id: string): Promise<RemovedLoginEntry> {
@@ -586,7 +593,9 @@ describe('fy secret entry commands', () => {
       .flatMap(command => command.options)
       .filter(option => option.required || option.optional)
       .map(option => option.long);
-    for (const long of takesValue) should(['--label', '--match', '--username']).containEql(long);
+    // Every flag that takes a value takes a NON-secret one: names, hosts and how a login signs in.
+    for (const long of takesValue)
+      should(['--label', '--match', '--username', '--method', '--sso-name', '--via', '--domain']).containEql(long);
   });
 });
 
@@ -682,5 +691,129 @@ describe('ProtocolLoginEntryGateway', () => {
     should(JSON.parse(seen[0]?.init?.body ?? '').totp.seed).equal(SEED);
     should(refused).be.an.Error();
     should(seen).have.length(1);
+  });
+});
+
+describe('how a saved login signs in, from the command line', () => {
+  const google = summary({
+    id: 'GOOGLE_KIRIN',
+    label: 'Google (kirin@)',
+    match: ['accounts.google.com'],
+    username: 'kirin@example.com',
+  });
+  const vercel = summary({
+    id: 'VERCEL',
+    label: 'Vercel',
+    match: ['vercel.com'],
+    username: undefined,
+    method: { kind: 'google', via: 'GOOGLE_KIRIN' },
+    domains: ['vercel.com'],
+    fields: { password: false, totp: false },
+  });
+  const world = () => new FakeGateway({ v: 1, health: 'ready', entries: [google, vercel, summary()] });
+
+  it('should add a login that signs in via a provider, at its login domain, with no password', async () => {
+    // Arrange
+    const { controller, gateway, prompt } = rig(world());
+
+    // Act
+    await controller.add('NETLIFY', {
+      label: 'Netlify',
+      match: ['netlify.com'],
+      method: 'Google',
+      via: 'GOOGLE_KIRIN',
+      domain: ['https://app.netlify.com/login'],
+      password: false,
+    });
+
+    // Assert
+    should(gateway.puts[0]?.body).deepEqual({
+      label: 'Netlify',
+      match: ['netlify.com'],
+      method: { kind: 'google', via: 'GOOGLE_KIRIN' },
+      domains: ['app.netlify.com'],
+    });
+    should(prompt.hidden).be.empty();
+  });
+
+  it('should refuse a passkey method, a via for a password sign-in and a domain that is not a host', async () => {
+    const { controller, gateway } = rig(world());
+    should(await fails(async () => await controller.add('X', { label: 'x', method: 'passkey' }))).containEql(
+      'passkeys are off',
+    );
+    should(
+      await fails(async () => await controller.add('X', { label: 'x', method: 'sso', ssoName: 'WebAuthn' })),
+    ).containEql('passkeys are off');
+    should(await fails(async () => await controller.add('X', { label: 'x', method: 'okta' }))).containEql(
+      '--method is one of',
+    );
+    should(await fails(async () => await controller.edit('SUDO_KIRIN_BOX', { via: 'GOOGLE_KIRIN' }))).containEql(
+      '--via is for a provider method',
+    );
+    should(await fails(async () => await controller.add('X', { label: 'x', domain: ['*.google.com'] }))).containEql(
+      'not a web host',
+    );
+    should(gateway.puts).be.empty();
+  });
+
+  it('should keep the provider when only the method changes, and drop it with --no-via', async () => {
+    // Arrange
+    const { controller, gateway } = rig(world());
+
+    // Act
+    await controller.edit('VERCEL', { method: 'github' });
+    await controller.edit('VERCEL', { via: false });
+    await controller.edit('VERCEL', { method: 'password' });
+
+    // Assert
+    should(gateway.puts.map(put => put.body.method)).deepEqual([
+      { kind: 'github', via: 'GOOGLE_KIRIN' },
+      { kind: 'google' },
+      { kind: 'password' },
+    ]);
+  });
+
+  it('should list each login with how and where it signs in', async () => {
+    // Arrange
+    const { controller, messages } = rig(world());
+
+    // Act
+    await controller.list({});
+
+    // Assert
+    const text = messages.join('\n');
+    should(text).containEql("sign-in: Sign in with Google via 'Google (kirin@)'");
+    should(text).containEql('login domains: vercel.com');
+    should(text).containEql('sign-in: Password');
+    should(text).containEql('login domains: (none)');
+  });
+
+  it('should print the hint a ferret reads, with no value and no field flags', async () => {
+    // Arrange
+    const { controller, messages, gateway } = rig(world());
+
+    // Act
+    await controller.hint('https://vercel.com/login', {});
+    await controller.hint('vercel.com', { json: true });
+
+    // Assert
+    should(gateway.calls).containEql('hint vercel.com');
+    should(messages[0]).containEql("'Vercel' (VERCEL): Sign in with Google via 'Google (kirin@)': click that button");
+    should(messages[0]).containEql("'Google (kirin@)' (GOOGLE_KIRIN, provider): password on accounts.google.com");
+    should(messages[0]).containEql('passkeys are off');
+    should(messages[1]).not.containEql('"fields"');
+    should(await fails(async () => await controller.hint('not a site', {}))).containEql('is not a site');
+  });
+
+  it('should ask the hint route with the site in the query', async () => {
+    const seen: string[] = [];
+    const gateway = new ProtocolLoginEntryGateway({
+      request: (path: string, schema: { parse(value: unknown): unknown }) => {
+        seen.push(path);
+        return Promise.resolve(schema.parse({ v: 1, site: 'vercel.com', hints: [], passkeys: 'off' }));
+      },
+    } as never);
+    await gateway.hint('vercel.com');
+    should(seen).deepEqual([`${LOGIN_ENTRIES_PATH}/hint?site=vercel.com`]);
   });
 });
