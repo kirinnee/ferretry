@@ -141,6 +141,7 @@ class FakeBrowser {
   readonly automation: BrowserAutomation = {
     unexpectedExit: new Promise<number>(() => undefined),
     // No journey here asks the owner for a value in a page.
+    inputDocument: async () => ({ navigationId: 'loader-1' }),
     inputObserve: async () => ({ ok: false, missing: 'value' }),
     inputShot: async () => {
       throw new Error('no field shots in this journey');

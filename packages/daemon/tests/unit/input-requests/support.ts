@@ -1,4 +1,4 @@
-import type { AgendaId, InputEvent, InputRaise, InputTargetFacts } from '@ferretry/protocol';
+import type { AgendaId, InputEvent, InputRaise, InputShot, InputTargetFacts } from '@ferretry/protocol';
 import { EphemeralValues } from '../../../src/lib/input-requests/ephemeral-values.ts';
 import { QuarantineRegistry } from '../../../src/lib/input-requests/quarantine.ts';
 import { InputRequestService } from '../../../src/lib/input-requests/service.ts';
@@ -33,6 +33,8 @@ export function inputRequestService(
     readonly names?: readonly string[];
     /** The one live session; the default is {@link SESSION}. */
     readonly session?: string;
+    /** The picture a page target answers with; none by default. */
+    readonly shot?: InputShot;
   } = {},
 ) {
   const live = options.session ?? SESSION;
@@ -53,6 +55,7 @@ export function inputRequestService(
           ...(options.names === undefined ? {} : { names: options.names }),
         };
       },
+      ...(options.shot === undefined ? {} : { shoot: async () => options.shot }),
       type: async (_session, _target, values) => {
         writes.push(...values.map(value => value.text));
         return 'typed';

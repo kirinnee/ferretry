@@ -59,7 +59,14 @@ export interface BrowserInputShot {
   readonly clip: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
 }
 
+/** Which document a page is showing now: a navigation since the owner's value was typed changes `navigationId`. */
+export interface BrowserInputDocument {
+  readonly navigationId: string;
+}
+
 export interface BrowserInputFieldsPort {
+  /** The page's current document, cheaply: no field is looked at. */
+  inputDocument(pageId: string): Promise<BrowserInputDocument>;
   inputObserve(pageId: string, fields: readonly BrowserInputFieldPointer[]): Promise<BrowserInputObservation>;
   inputShot(pageId: string, facts: BrowserInputFacts): Promise<BrowserInputShot>;
   inputType(
@@ -76,11 +83,13 @@ export const BROWSER_INPUT_SHOT_MAX_SIDE = 900;
 export const BROWSER_INPUT_SHOT_MARGIN = 48;
 
 /**
- * The worker's JSON-line methods behind the port, one per call: `inputObserve` `{ pageId, fields }` answers
+ * The worker's JSON-line methods behind the port, one per call: `inputDocument` `{ pageId }` answers
+ * `{ document: { navigationId } }` (the main frame's loaderId); `inputObserve` `{ pageId, fields }` answers
  * `{ observation }`; `inputShot` `{ pageId, facts }` answers `{ shot }`; `inputType` `{ pageId, expected, values,
  * submit }` answers `{ outcome }`. Each answer is parsed by the daemon before it is believed.
  */
 export const BROWSER_INPUT_WORKER_METHODS = {
+  document: 'inputDocument',
   observe: 'inputObserve',
   shot: 'inputShot',
   type: 'inputType',

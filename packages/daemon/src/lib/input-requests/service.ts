@@ -27,6 +27,7 @@ import {
   type InputRequestField,
   type InputRisk,
   type InputSensitivity,
+  type InputShot,
   type InputTarget,
   type InputTargetFacts,
   inputRaiseFields,
@@ -128,7 +129,20 @@ interface Held {
   /** Every `deliveryId` seen and what came of it, so a retry gets the first outcome and never types twice. */
   readonly deliveries: Map<string, Promise<InputDeliverResult>>;
   readonly waiters: Set<() => void>;
+  /** A page's fields as a picture, taken at raise before anything was typed: the owner's card only, RAM only. */
+  shot?: InputShot;
+  /** The document a page's values were typed into: once the page has left it, its quarantine lets text reads by. */
+  navigation?: string;
 }
+
+/**
+ * A page's names in the quarantine registry. Terminals and pages share the registry, so a page's names carry a
+ * mark no surface key can start with: a hold on page "app" never seals terminal "app". Page holds are not
+ * journalled: a page does not outlive the daemon that drove it.
+ */
+const PAGE_MARK = '~page:';
+const pageName = (name: string): string => `${PAGE_MARK}${name}`;
+const isPageHold = (hold: QuarantineHold): boolean => hold.names.every(name => name.startsWith(PAGE_MARK));
 
 export interface InputRequestServiceDependencies {
   readonly target: InputTargetPort;
@@ -192,6 +206,11 @@ export class InputRequestService {
     const expiresAt = instant(now + (raise.expiresInSeconds ?? INPUT_DEFAULT_EXPIRY_SECONDS) * 1000);
     const requestId = this.deps.ids.requestId();
     const fields = withRisk(raised.map(cardField), seen.facts);
+    // A page is pictured now, before the owner is asked and long before anything is typed into it.
+    const shot =
+      seen.facts.kind === 'browser'
+        ? await this.deps.target.shoot?.(sessionId, target, seen.facts).catch(() => undefined)
+        : undefined;
     const step = raise.chain === undefined ? undefined : this.stepAfter(sessionId, raise.chain);
     const card = await this.deps.agenda.raise(sessionId, {
       requestId,
@@ -219,6 +238,7 @@ export class InputRequestService {
       observed: shown,
       risk: worstRisk(fields.map(field => field.risk)),
       observedDigest: digestFacts(seen.facts),
+      ...(shot === undefined ? {} : { pictured: true as const }),
       state: 'pending',
     };
     try {
@@ -236,6 +256,7 @@ export class InputRequestService {
       ...(raise.secretHint === undefined ? {} : { hint: raise.secretHint }),
       deliveries: new Map(),
       waiters: new Set(),
+      ...(shot === undefined ? {} : { shot }),
     };
     this.held.set(requestId, held);
     this.noteRaise(sessionId, now);
@@ -519,7 +540,49 @@ export class InputRequestService {
   /** The terminals of a session kept from an agent's eyes now, for the owner's viewer. Owner only. */
   quarantines(caller: InputCaller, sessionId: string): readonly InputQuarantine[] {
     requireOwner(caller);
-    return this.deps.quarantine.list(sessionId).map(({ key, until }) => ({ key, until: instant(until) }));
+    return this.deps.quarantine
+      .list(sessionId)
+      .filter(({ key }) => !key.startsWith(PAGE_MARK))
+      .map(({ key, until }) => ({ key, until: instant(until) }));
+  }
+
+  /**
+   * A page the daemon just typed a secret into, as an agent's read of it must see it: when the hold ends, and the
+   * documents the values went into. A page that has since moved to another document may be READ again (the text
+   * is masked for the redaction window), but not pictured until the hold ends.
+   */
+  pageHeld(
+    sessionId: string,
+    names: readonly (string | undefined)[],
+  ): { readonly until: number; readonly documents: readonly string[] } | undefined {
+    const marked = names.filter((name): name is string => name !== undefined).map(pageName);
+    const until = this.deps.quarantine.until(sessionId, marked);
+    if (until === undefined) return undefined;
+    const documents = [...this.held.values()]
+      .filter(
+        held =>
+          held.request.sessionId === sessionId &&
+          held.request.target.kind === 'browser' &&
+          held.navigation !== undefined &&
+          held.names.some(name => marked.includes(pageName(name))),
+      )
+      .map(held => held.navigation as string);
+    return { until, documents };
+  }
+
+  /** The document a session's page shows now, so a held page can be read again once it has moved on. */
+  async pageDocument(sessionId: string, key: string): Promise<string | undefined> {
+    return await this.deps.target.document?.(sessionId, key).catch(() => undefined);
+  }
+
+  /** The picture of a page request's fields for the owner's card, while it waits. Owner only; never the agent's. */
+  shot(caller: InputCaller, sessionId: string, requestId: string): InputShot {
+    requireOwner(caller);
+    const held = this.held.get(requestId);
+    if (held === undefined || held.request.sessionId !== sessionId || held.request.state !== 'pending')
+      throw new InputRequestError('not_found', 'no picture for that input request');
+    if (held.shot === undefined) throw new InputRequestError('not_found', 'Ferretry has no picture of this target');
+    return held.shot;
   }
 
   /** When a terminal's quarantine ends, for a reader that must refuse until then. */
@@ -699,6 +762,7 @@ export class InputRequestService {
         values.push({ field: field.id, text });
       }
       held.names = [...new Set([...held.names, request.target.key, ...(seen.names ?? [])])];
+      if (seen.facts.kind === 'browser') held.navigation = seen.facts.navigationId;
       if (request.sensitivity !== 'plain') hold = await this.holdFor(request, held.names);
       try {
         await this.journal(request, 'delivering', undefined, undefined, body.deliveryId);
@@ -854,7 +918,8 @@ export class InputRequestService {
    * of two windows covers the write landing late, and {@link settle} replaces it with the exact one.
    */
   private async holdFor(request: InputRequest, seenNames: readonly string[] | undefined): Promise<QuarantineHold> {
-    const names = [...new Set([request.target.key, ...(seenNames ?? [])])].slice(0, 4);
+    const surfaceNames = [...new Set([request.target.key, ...(seenNames ?? [])])].slice(0, 4);
+    const names = request.target.kind === 'browser' ? surfaceNames.map(pageName) : surfaceNames;
     const hold = this.deps.quarantine.begin(request.sessionId, names, request.id);
     try {
       await this.journalHold(hold, INPUT_QUARANTINE_EVENT_TYPES.started, this.deps.clock.now() + QUARANTINE_MS, true);
@@ -887,6 +952,7 @@ export class InputRequestService {
     until: number,
     unresolved?: true,
   ): Promise<void> {
+    if (isPageHold(hold)) return;
     await this.deps.journal.quarantine(hold.sessionId, {
       type,
       sessionId: hold.sessionId,
@@ -942,12 +1008,14 @@ export class InputRequestService {
           }
         : undefined;
     const seen = held.request;
-    const { observed: _seen, observedDigest: _digest, ...rest } = held.request;
+    const { observed: _seen, observedDigest: _digest, pictured: _pictured, ...rest } = held.request;
     held.request = {
       ...rest,
       state,
       ...(outcome === undefined ? {} : { outcome }),
     };
+    // The picture was for the owner deciding; once the request ends nobody may need it, so it is let go.
+    delete held.shot;
     const { request } = held;
     const kind =
       state === 'delivered'

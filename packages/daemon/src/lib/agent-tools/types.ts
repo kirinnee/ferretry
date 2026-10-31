@@ -80,4 +80,14 @@ export interface AgentInputPort {
   pendingOn(sessionId: string, target: { readonly kind: SurfaceKind; readonly key: string }): AgendaId | undefined;
   /** Runs `work` as one turn in the session, so a send or close and a raise or secure write never interleave. */
   exclusive<T>(sessionId: string, work: () => Promise<T>): Promise<T>;
+  /**
+   * A page the daemon just typed a secret into: when its hold ends and the documents the values went into, or
+   * nothing when it is not held. `names` are every way the page is known.
+   */
+  pageHeld(
+    sessionId: string,
+    names: readonly (string | undefined)[],
+  ): { readonly until: number; readonly documents: readonly string[] } | undefined;
+  /** The document a session's page shows now, or nothing when it cannot be told. */
+  pageDocument(sessionId: string, key: string): Promise<string | undefined>;
 }

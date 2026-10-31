@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { padInputValue } from '@ferretry/protocol';
+import { type InputTargetFacts, padInputValue } from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { finalised } from '../../../../src/lib/api/http.ts';
@@ -271,5 +271,64 @@ describe('the owner request list — publication at the transport', () => {
     const answered = await dispatch.dispatch(request({ method: 'GET', path: '/v1/input-requests', headers: human }));
 
     should(String(answered.body)).containEql(CANARY);
+  });
+});
+
+describe('the picture of a page request', () => {
+  const PAGE: InputTargetFacts = {
+    kind: 'browser',
+    pageId: 'page-1',
+    origin: 'https://example.test',
+    secure: true,
+    navigationId: 'loader-1',
+    fields: [
+      {
+        fieldId: 'password',
+        frameOrigin: 'https://example.test',
+        frameId: 'main',
+        backendNodeId: 7,
+        field: { tag: 'input', type: 'password' },
+        box: { x: 0, y: 0, w: 10, h: 10 },
+        visible: true,
+      },
+    ],
+  };
+  const SHOT = { pngBase64: 'iVBORw0KGgo=', clip: { x: 0, y: 0, w: 10, h: 10 } };
+  const shotPath = (requestId: string) => `/v1/sessions/${SESSION}/input-requests/${requestId}/shot`;
+
+  it('should serve the owner the picture taken before anything was typed, and refuse an agent', async () => {
+    // Arrange
+    const { service } = inputRequestService({ facts: PAGE, shot: SHOT });
+    await service.raise(SESSION, {
+      ...RAISE,
+      target: { kind: 'browser', key: 'app' },
+      sensitivity: undefined,
+      fields: [{ id: 'password', sensitivity: 'secret', element: { kind: 'ref', ref: 'e7' } }],
+    });
+    const [open] = await service.list({ kind: 'owner', actor: { kind: 'host' }, carrier: 'loopback' });
+    const dispatch = new ApiDispatcher(new ApiRouter(inputRequestRoutes(service)), CREDENTIALS, GRANTED);
+
+    // Act
+    const owner = await dispatch.dispatch(request({ method: 'GET', path: shotPath(open?.id ?? ''), headers: human }));
+    const agent = await dispatch.dispatch(
+      request({ method: 'GET', path: shotPath(open?.id ?? ''), headers: agentIn(SESSION) }),
+    );
+
+    // Assert
+    should(open?.pictured).be.true();
+    should(owner.status).equal(200);
+    should(jsonBody(owner)).eql(SHOT);
+    should(agent.status).equal(403);
+  });
+
+  it('should answer 404 for a request with no picture', async () => {
+    // Arrange
+    const { dispatch, requestId } = await served();
+
+    // Act
+    const response = await dispatch.dispatch(request({ method: 'GET', path: shotPath(requestId), headers: human }));
+
+    // Assert
+    should(response.status).equal(404);
   });
 });

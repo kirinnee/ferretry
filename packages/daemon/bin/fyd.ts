@@ -640,8 +640,8 @@ import {
   AgendaService,
   AgendaTurnNudge,
   AgendaWaker,
-  type AgentInputPort,
   AgentFiles,
+  type AgentInputPort,
   AgentSendFailureNotifier,
   AgentToolService,
   ANALYTICS_BACKSTOP_MS,
@@ -910,6 +910,8 @@ import {
   outdatedSections,
   overriddenBy,
   PacedTranscriptParser,
+  type PageInputHost,
+  PageInputTarget,
   PairedPushDevices,
   PairingDeviceRegistry,
   type PairingService,
@@ -6062,10 +6064,11 @@ function createInputRequestService(input: {
   readonly redact: (text: string) => Promise<string>;
   /** Saved logins: what the card offers, what "Use" types and where "Save as" keeps a value. */
   readonly logins: InputLoginAdapter;
+  /** The agent browser's pages, for a request on a page: looked at, pictured and typed into in each page's own queue. */
+  readonly pages: PageInputHost;
 }): InputRequestService {
   const clock = { now: () => Date.now() };
   return new InputRequestService({
-    // A page cannot take a request yet: the router answers `unsupported` until a browser adapter is wired.
     target: new InputTargetRouter(
       new TmuxInputTarget(
         input.tmux,
@@ -6078,6 +6081,7 @@ function createInputRequestService(input: {
         new SttyTerminalModes(process.platform, runProgram),
         runProgram,
       ),
+      new PageInputTarget(input.pages),
     ),
     agenda: new InputAgendaAdapter(input.agenda),
     notifier: new InputAgentNotifierAdapter(
@@ -9839,6 +9843,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       setTimeout(sweepDeadlines, 30_000).unref();
       // An agent stuck at a password prompt asks the owner through an agenda card (docs/input-requests.md). The value
       // lives only in this process's memory and in the one tmux write; the journal and the audit log carry names and flags.
+      let pageHost: PageInputHost | undefined;
       const inputRequestService = createInputRequestService({
         storage,
         terminals,
@@ -9852,6 +9857,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // One of the two holders of the LoginVault (docs/secrets.md; the other is the redactor): the input bridge
         // types a saved login into the target the owner tapped "Use" for, and answers only what happened.
         logins: new InputLoginAdapter(loginDirectory, loginVault),
+        // The browser is built further down; a request on a page reaches it through this hand-off once it is.
+        pages: {
+          inputOnPage: async (sessionId, key, work) => {
+            if (pageHost === undefined) throw new Error('the agent browser is not running yet');
+            return await pageHost.inputOnPage(sessionId, key, work);
+          },
+        },
       });
       inputRequests = inputRequestService;
       const sweepInputRequests = asActivity(
@@ -10518,6 +10530,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           return { cancel: () => clearTimeout(timer) };
         },
       });
+      pageHost = browserService;
       const agentControl = new AccountModelAgentControlPolicy(declaredAccountModel);
       closeAgentBrowsers = async () => await browserService.closeAll();
       releaseBrowserSession = async sessionId => await browserService.releaseSession(sessionId);
@@ -10533,6 +10546,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         filesOnPage: browserService.filesOnPage.bind(browserService),
         closePage: browserService.closePage.bind(browserService),
         lifecycleOnPage: browserService.lifecycleOnPage.bind(browserService),
+        inputOnPage: browserService.inputOnPage.bind(browserService),
         adoptPage: browserService.adoptPage.bind(browserService),
         closeAll: browserService.closeAll.bind(browserService),
         stream: async (sessionId, downstream) => {

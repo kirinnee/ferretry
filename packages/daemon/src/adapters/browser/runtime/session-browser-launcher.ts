@@ -3,10 +3,10 @@ import { createServer } from 'node:net';
 import type { BrowserMode, BrowserProxyStatus } from '@ferretry/protocol';
 import {
   agentBrowserArguments,
-  honestChromeUserAgent,
   BrowserControlError,
   type BrowserProfilePort,
   browserEnvironment,
+  honestChromeUserAgent,
   selectChromeExecutable,
 } from '../../../lib/browser/control/index.ts';
 import { browserProxyStatus, proxyEndpoint, type ResolvedBrowserProxy } from '../../../lib/browser/proxy/index.ts';
@@ -198,6 +198,7 @@ class LeasedBrowser implements BrowserAutomation {
   back: BrowserAutomation['back'] = pageId => this.worker.back(pageId);
   forward: BrowserAutomation['forward'] = pageId => this.worker.forward(pageId);
   reload: BrowserAutomation['reload'] = pageId => this.worker.reload(pageId);
+  inputDocument: BrowserAutomation['inputDocument'] = pageId => this.worker.inputDocument(pageId);
   inputObserve: BrowserAutomation['inputObserve'] = (pageId, fields) => this.worker.inputObserve(pageId, fields);
   inputShot: BrowserAutomation['inputShot'] = (pageId, facts) => this.worker.inputShot(pageId, facts);
   inputType: BrowserAutomation['inputType'] = (pageId, expected, values, submit) =>

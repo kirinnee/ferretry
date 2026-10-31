@@ -39,6 +39,16 @@ class FakeInput implements AgentInputPort {
     this.turns.push(sessionId);
     return await work();
   }
+  /** A page hold the case set: its end and the documents the value went into. */
+  held: { until: number; documents: string[] } | undefined;
+  /** The document the page shows now. */
+  document: string | undefined = 'loader-1';
+  pageHeld(): { until: number; documents: string[] } | undefined {
+    return this.held;
+  }
+  async pageDocument(): Promise<string | undefined> {
+    return this.document;
+  }
 }
 
 const refusal = async (work: Promise<unknown>): Promise<AgentToolError> => {

@@ -11,8 +11,8 @@ import type {
 } from '@ferretry/protocol';
 import type { AgentControlKind, AgentControlPolicy } from '../../../src/lib/fleet/agent-control.ts';
 import {
+  type AgentFileError,
   type AgentFiles,
-  AgentFileError,
   type AgentIdentity,
   type AgentIdentityResolver,
   type AgentToolPorts,
@@ -20,9 +20,9 @@ import {
   type AuditEntry,
   type AuditSink,
   type BrowserActGuard,
-  type BrowserLifecycleOutcome,
   type BrowserFileAction,
   type BrowserFileResult,
+  type BrowserLifecycleOutcome,
   type BrowserOpenOptions,
   type BrowserPageAction,
   BrowserSessionError,
@@ -404,7 +404,9 @@ class FakeAgentFiles implements Pick<AgentFiles, 'prepareUpload' | 'save'> {
 }
 
 /** A whole agent-tools domain over fakes, with every collaborator exposed for assertions. */
-export function agentToolWorld(extra: Pick<AgentToolPorts, 'input' | 'scrub' | 'quarantinedUntil'> = {}) {
+export function agentToolWorld(
+  extra: Pick<AgentToolPorts, 'input' | 'scrub' | 'quarantinedUntil'> & Partial<Pick<AgentToolPorts, 'redactor'>> = {},
+) {
   const terminals = new FakeTerminals(['s1', 's2']);
   const browser = new FakeBrowserPages();
   const audit = new RecordingAudit();

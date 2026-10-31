@@ -598,3 +598,53 @@ describe('browser worker client — process handles', () => {
     should(await settledDead(pid)).be.true();
   });
 });
+
+describe('browser worker client — the input bridge', () => {
+  it('should carry the four input calls and believe only answers in the protocol’s shape', async () => {
+    // Arrange
+    const client = await connect();
+    const pointer = [{ id: 'password', target: { kind: 'ref' as const, ref: 'e7' } }];
+
+    // Act
+    const seen = await client.inputObserve('p1', pointer);
+    const missing = await client.inputObserve('missing', pointer);
+    const document = await client.inputDocument('p1');
+    if (!seen.ok) throw new Error('the page should have been seen');
+    const shot = await client.inputShot('p1', seen.facts);
+    const typed = await client.inputType('p1', seen.facts, [{ field: 'password', text: 'x' }], true);
+    const changed = await client.inputType('p1', seen.facts, [{ field: 'password', text: 'x' }], false);
+
+    // Assert
+    should(seen.facts.fields[0]?.backendNodeId).equal(7);
+    should(missing).deepEqual({ ok: false, missing: 'password' });
+    should(document).deepEqual({ navigationId: 'loader-1' });
+    should(shot).deepEqual({ pngBase64: 'iVBORw0KGgo=', clip: { x: 0, y: 0, w: 10, h: 10 } });
+    should(typed).equal('typed');
+    should(changed).equal('target_changed');
+  });
+
+  it('should refuse a garbled look, picture or document, and call a garbled or failed write uncertain', async () => {
+    // Arrange
+    const client = await connect();
+    const facts = {
+      kind: 'browser' as const,
+      pageId: 'p1',
+      origin: 'https://example.test',
+      secure: true,
+      navigationId: 'loader-1',
+      fields: [],
+    } as never;
+
+    // Act
+    const observed = await rejection(client.inputObserve('garbled', []));
+    const pictured = await rejection(client.inputShot('garbled', facts));
+    const documented = await rejection(client.inputDocument('garbled'));
+    const garbled = await client.inputType('garbled', facts, [{ field: 'password', text: 'x' }], true);
+    const refused = await client.inputType('refuses', facts, [{ field: 'password', text: 'x' }], true);
+
+    // Assert
+    for (const failure of [observed, pictured, documented]) should(failure.code).equal('upstream_failed');
+    should(garbled).equal('uncertain');
+    should(refused).equal('uncertain');
+  });
+});

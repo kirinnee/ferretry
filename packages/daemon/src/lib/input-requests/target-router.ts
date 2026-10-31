@@ -1,4 +1,4 @@
-import type { InputTarget, InputTargetFacts } from '@ferretry/protocol';
+import type { InputShot, InputTarget, InputTargetFacts } from '@ferretry/protocol';
 import type {
   InputFieldValue,
   InputTargetField,
@@ -42,5 +42,14 @@ export class InputTargetRouter implements InputTargetPort {
     // A terminal shows one prompt at a time: anything but exactly one value is refused with nothing typed.
     if (only === undefined || rest.length > 0) return 'target_changed';
     return await this.terminal.type(sessionId, target, only.text, submit, expected);
+  }
+
+  async document(sessionId: string, key: string): Promise<string | undefined> {
+    return await this.browser?.document?.(sessionId, key);
+  }
+
+  async shoot(sessionId: string, target: InputTarget, facts: InputTargetFacts): Promise<InputShot | undefined> {
+    // A terminal's card draws its own text; only a page is pictured.
+    return target.kind === 'browser' ? await this.browser?.shoot?.(sessionId, target, facts) : undefined;
   }
 }

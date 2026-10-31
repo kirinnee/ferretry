@@ -1,9 +1,9 @@
 import { dirname } from 'node:path';
 import type {
   BrowserElementTarget,
+  BrowserInputEvent,
   BrowserPageLifecycleReply,
   BrowserPageLifecycleRequest,
-  BrowserInputEvent,
   BrowserPageSnapshot,
   BrowserScreencastFrame,
   BrowserScreenshotFormat,
@@ -12,8 +12,11 @@ import type {
 } from '@ferretry/protocol';
 import { InputTargetFactsSchema } from '@ferretry/protocol';
 import {
-  type BrowserAutomation,
   BROWSER_INPUT_WORKER_METHODS,
+  type BrowserAutomation,
+  type BrowserClickOptions,
+  BrowserFrameGovernor,
+  type BrowserInputDocument,
   type BrowserInputFacts,
   type BrowserInputFieldPointer,
   type BrowserInputObservation,
@@ -21,27 +24,25 @@ import {
   type BrowserInputShot,
   type BrowserInputValue,
   type BrowserPageActed,
-  BrowserFrameGovernor,
-  BrowserTransportError,
-  type BrowserClickOptions,
-  type FrameClock,
   type BrowserReadOptions,
   type BrowserScreenshotOptions,
+  BrowserTransportError,
   type BrowserTypeOptions,
   type BrowserUploadMode,
-  type PointerAct,
-  WorkerLineAssembler,
-  type WorkerStagedFile,
-  type WorkerSnapshotResult,
   boundedReadText,
   boundedScreenshot,
   encodeWorkerRequest,
+  type FrameClock,
   normalizeLifecycleReply,
   normalizeWorkerActionSnapshot,
   normalizeWorkerDialog,
   normalizeWorkerSnapshot,
   normalizeWorkerStaged,
+  type PointerAct,
   parseWorkerLine,
+  WorkerLineAssembler,
+  type WorkerSnapshotResult,
+  type WorkerStagedFile,
 } from '../../../lib/index.ts';
 import { SystemFrameClock } from './system-frame-clock.ts';
 
@@ -51,8 +52,13 @@ function parseObservation(raw: unknown): BrowserInputObservation {
   if (observation?.ok === false && typeof observation.missing === 'string')
     return { ok: false, missing: observation.missing.slice(0, 64) };
   const facts = InputTargetFactsSchema.safeParse(observation?.facts);
-  if (observation?.ok === true && facts.success && facts.data.kind === 'browser') return { ok: true, facts: facts.data };
-  throw new BrowserTransportError('upstream_failed', 'the browser described the fields in a form Ferretry does not accept', 502);
+  if (observation?.ok === true && facts.success && facts.data.kind === 'browser')
+    return { ok: true, facts: facts.data };
+  throw new BrowserTransportError(
+    'upstream_failed',
+    'the browser described the fields in a form Ferretry does not accept',
+    502,
+  );
 }
 
 /** A field shot: a bounded PNG and a finite clip, or a refusal. */
@@ -352,6 +358,14 @@ export class BrowserWorkerClient implements BrowserAutomation {
 
   resize(pageId: string, viewport: BrowserViewport): Promise<BrowserPageActed> {
     return this.action('resize', { pageId, width: viewport.width, height: viewport.height });
+  }
+
+  async inputDocument(pageId: string): Promise<BrowserInputDocument> {
+    const raw = await this.request(BROWSER_INPUT_WORKER_METHODS.document, { pageId });
+    const navigationId = ((raw as { document?: { navigationId?: unknown } } | null)?.document ?? {}).navigationId;
+    if (typeof navigationId !== 'string' || navigationId === '' || navigationId.length > 128)
+      throw new BrowserTransportError('upstream_failed', 'the browser did not say which document the page shows', 502);
+    return { navigationId };
   }
 
   async inputObserve(pageId: string, fields: readonly BrowserInputFieldPointer[]): Promise<BrowserInputObservation> {

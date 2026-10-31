@@ -21,6 +21,7 @@ import {
   savedBody,
   savedOutcomeWords,
   sendBlock,
+  shotBoxes,
   showsHeaderRisk,
   splitOffers,
   targetRef,
@@ -458,5 +459,48 @@ describe('a send the grants refuse', () => {
     expect(bare.kind).toBe('refused');
     expect(bare.definitive).toBe(true);
     expect(worded.text).toBe(`${bare.text} terminal use is off`);
+  });
+});
+
+describe('the boxes drawn on a page shot', () => {
+  const page = (fields: ReturnType<typeof browserField>[]) =>
+    request({
+      target: { kind: 'browser', key: 'app' },
+      fields: [
+        cardField('plain', { id: 'email', label: 'Email' }),
+        cardField('secret', { id: 'password', label: 'Password' }),
+      ],
+      observed: {
+        kind: 'browser',
+        pageId: 'page-1',
+        origin: 'https://accounts.google.com',
+        secure: true,
+        navigationId: 'nav-1',
+        fields,
+      },
+    });
+  const shot = { pngBase64: 'iVBORw0KGgo=', clip: { x: 100, y: 200, w: 400, h: 200 } };
+
+  it('places each field where the browser saw it, in percent of the picture, cut to the picture', () => {
+    const card = page([
+      browserField('email', { box: { x: 150, y: 220, w: 200, h: 40 } }),
+      browserField('password', { box: { x: 450, y: 380, w: 200, h: 40 } }),
+    ]);
+
+    expect(shotBoxes(card, fieldsOf(card), shot)).toEqual([
+      { key: 'email', label: 'Email', left: 12.5, top: 10, width: 50, height: 20 },
+      { key: 'password', label: 'Password', left: 87.5, top: 90, width: 12.5, height: 10 },
+    ]);
+  });
+
+  it('draws nothing for a field with no size, one outside the picture, a terminal, or an empty picture', () => {
+    const card = page([
+      browserField('email', { box: { x: 150, y: 220, w: 0, h: 40 } }),
+      browserField('password', { box: { x: 900, y: 900, w: 10, h: 10 } }),
+    ]);
+
+    expect(shotBoxes(card, fieldsOf(card), shot)).toEqual([]);
+    expect(shotBoxes(request(), fieldsOf(request()), shot)).toEqual([]);
+    expect(shotBoxes(card, fieldsOf(card), { ...shot, clip: { x: 0, y: 0, w: 0, h: 10 } })).toEqual([]);
   });
 });

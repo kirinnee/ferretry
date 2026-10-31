@@ -90,6 +90,8 @@ function composed(options: { type?: () => TypeResult } = {}) {
       agentView: async (sessionId, id, waitMs) => await live().agentView(sessionId, id, waitMs),
       pendingOn: (sessionId, target) => live().pendingOn(sessionId, target),
       exclusive: async (sessionId, work) => await live().exclusive(sessionId, work),
+      pageHeld: (sessionId, names) => live().pageHeld(sessionId, names),
+      pageDocument: async (sessionId, key) => await live().pageDocument(sessionId, key),
     },
     scrub: (sessionId, text) => live().scrub(sessionId, text),
   });

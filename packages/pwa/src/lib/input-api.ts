@@ -16,6 +16,8 @@ import {
   type InputRequest,
   type InputRequestList,
   InputRequestListSchema,
+  type InputShot,
+  InputShotSchema,
 } from '@ferretry/protocol';
 import { z } from 'zod';
 
@@ -50,6 +52,18 @@ export async function deliverInput(
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(InputDeliverBodySchema.parse(body)),
     },
+  );
+}
+
+/** The picture of a page request's fields, taken before anything was typed. Only a request marked `pictured` has one. */
+export async function readInputShot(
+  client: InputClient,
+  request: Pick<InputRequest, 'id' | 'sessionId'>,
+): Promise<InputShot> {
+  return await client.request(
+    `${sessionPath(request.sessionId)}/${encodeURIComponent(request.id)}/shot`,
+    InputShotSchema,
+    { method: 'GET' },
   );
 }
 

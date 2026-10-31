@@ -5,6 +5,7 @@ import {
   type InputQuarantineList,
   type InputRequest,
   type InputRequestList,
+  type InputShot,
 } from '@ferretry/protocol';
 import { isHumanAdminActor } from '../../api/actor.ts';
 import { parseBody } from '../../api/body.ts';
@@ -118,6 +119,26 @@ export function inputRequestRoutes(service: InputRequestService): readonly ApiRo
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => await list(service, context, false),
+    },
+    {
+      // The picture of a page request's fields, taken before anything was typed: the owner's card draws the
+      // boxes on it. Owner only, like everything about a request but the raise.
+      method: 'GET',
+      path: '/v1/sessions/:sessionId/input-requests/:requestId/shot',
+      minimum: 'operator',
+      capability: { capability: 'browser', axis: 'use' },
+      noStore: true,
+      handle: async context => {
+        const caller = ownerOf(context);
+        const shot: InputShot = (() => {
+          try {
+            return service.shot(caller, sessionOf(context), requestOf(context));
+          } catch (error) {
+            return answered(error);
+          }
+        })();
+        return jsonResponse(shot);
+      },
     },
     {
       method: 'POST',

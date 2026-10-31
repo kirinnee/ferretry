@@ -19,6 +19,7 @@ import {
   type InputSaved,
   type InputSavedOffer,
   type InputSensitivity,
+  type InputShot,
   inputValueProblem,
   LOGIN_LABEL_MAX_LENGTH,
   LOGIN_PASSWORD_MIN_LENGTH,
@@ -101,6 +102,39 @@ export const offerUsername = (offer: InputSavedOffer): string | undefined =>
   offer.username === undefined || offer.label.includes(offer.username) ? undefined : offer.username;
 
 export const REOBSERVING = 'Ferretry is looking at the target again';
+
+/** One field's box on a page shot, in percent of the shot, so it scales with the picture. */
+export interface ShotBox {
+  readonly key: string;
+  readonly label: string;
+  readonly left: number;
+  readonly top: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+const clamp = (value: number): number => Math.min(100, Math.max(0, value));
+
+/**
+ * Where each field the daemon found sits on the picture of the page: its box, as the BROWSER reported it,
+ * relative to the part of the page the picture shows. A field outside the picture, or with no size, gets no box.
+ */
+export const shotBoxes = (request: InputRequest, fields: readonly InputCardField[], shot: InputShot): ShotBox[] => {
+  const facts = request.observed;
+  if (facts?.kind !== 'browser' || !(shot.clip.w > 0) || !(shot.clip.h > 0)) return [];
+  const boxes: ShotBox[] = [];
+  for (const field of fields) {
+    const seen = facts.fields.find(each => each.fieldId === field.key);
+    if (seen === undefined || seen.box.w <= 0 || seen.box.h <= 0) continue;
+    const left = clamp(((seen.box.x - shot.clip.x) / shot.clip.w) * 100);
+    const top = clamp(((seen.box.y - shot.clip.y) / shot.clip.h) * 100);
+    const right = clamp(((seen.box.x + seen.box.w - shot.clip.x) / shot.clip.w) * 100);
+    const bottom = clamp(((seen.box.y + seen.box.h - shot.clip.y) / shot.clip.h) * 100);
+    if (right <= left || bottom <= top) continue;
+    boxes.push({ key: field.key, label: field.label, left, top, width: right - left, height: bottom - top });
+  }
+  return boxes;
+};
 
 /** Why Send and Use are off right now, or `undefined`. The RISK never appears here: it flags, it does not refuse. */
 export const sendBlock = (request: InputRequest, now: number): string | undefined => {

@@ -124,6 +124,19 @@ export interface AgentToolPorts {
   readonly quarantinedUntil?: (sessionId: string, names: readonly (string | undefined)[]) => number | undefined;
 }
 
+/** Page tools that hand back a PICTURE of a page: no mask can be drawn on pixels, so a hold refuses them to its end. */
+const PAGE_PICTURES: ReadonlySet<string> = new Set(['browser.screenshot', 'browser.pdf', 'browser.highlight']);
+/** Page tools that hand back what a page SAYS: masked always, and refused during a hold until the page moves on. */
+const PAGE_TEXT: ReadonlySet<string> = new Set([
+  'browser.read',
+  'browser.evaluate',
+  'browser.console',
+  'browser.network',
+  'browser.wait_for',
+]);
+/** Page tools that put text into a page: refused while the owner is being asked for a value on it. */
+const PAGE_TYPING: ReadonlySet<string> = new Set(['browser.type', 'browser.fill_form', 'browser.press']);
+
 /** The tools that change what a person would see, and so put up the driving marker. */
 const DRIVING_TOOLS: ReadonlySet<AgentToolCall['tool']> = new Set([
   'terminal.open',
@@ -383,7 +396,10 @@ export class AgentToolService {
         );
         facts.surface = surface;
         if (caller.kind === 'agent') await this.assertAgentMay(sessionId, surface);
+        if (surface.surface === 'browser') await this.guardPage(caller, call.tool, surface);
         const result = await this.act(caller, call, surface, facts);
+        // A hold that began while the page was being read wins: what the read saw may hold the value.
+        if (surface.surface === 'browser') await this.assertPageReadable(caller, call.tool, surface);
         await this.drove(caller, call, surface);
         return result;
       }
@@ -876,6 +892,54 @@ export class AgentToolService {
         };
     }
     return undefined;
+  }
+
+  /**
+   * What a page may not be asked while the owner's value is on its way into it or has just landed there: an act
+   * that types into it while a request is pending on it (the value is the owner's to type), and a read of it
+   * during its hold ({@link assertPageReadable}).
+   */
+  private async guardPage(caller: AgentToolCaller, tool: string, surface: ResolvedSurface): Promise<void> {
+    const input = this.ports.input;
+    if (input === undefined) return;
+    const reference = surfaceReference('browser', surface.name ?? surface.id);
+    if (PAGE_TYPING.has(tool)) {
+      const pending = [surface.name, surface.id]
+        .filter((key): key is string => key !== undefined)
+        .map(key => input.pendingOn(caller.sessionId, { kind: 'browser', key }))
+        .find(id => id !== undefined);
+      if (pending !== undefined)
+        throw new AgentToolError(
+          'conflict',
+          `an input request is pending on ${reference}; wait for !${pending} (input.wait) and do not type there yourself`,
+        );
+    }
+    await this.assertPageReadable(caller, tool, surface);
+  }
+
+  /**
+   * A page the daemon just typed a secret into is not READ while it is held: masking can only hide a value it
+   * recognises, so the page's text, its log and any picture of it wait for the window to end. A picture always
+   * waits (no mask can be drawn on pixels). Text may be read again as soon as the page has left the document the
+   * value went into, because every read is masked for the redaction window anyway.
+   */
+  private async assertPageReadable(caller: AgentToolCaller, tool: string, surface: ResolvedSurface): Promise<void> {
+    if (!PAGE_PICTURES.has(tool) && !PAGE_TEXT.has(tool)) return;
+    const input = this.ports.input;
+    const held = input?.pageHeld(caller.sessionId, [surface.name, surface.id]);
+    if (input === undefined || held === undefined) return;
+    if (PAGE_TEXT.has(tool) && held.documents.length > 0) {
+      const now = await input.pageDocument(caller.sessionId, surface.name ?? surface.id);
+      if (now !== undefined && !held.documents.includes(now)) return;
+    }
+    const reference = surfaceReference('browser', surface.name ?? surface.id);
+    const when = new Date(held.until).toISOString();
+    throw new AgentToolError(
+      'conflict',
+      caller.kind === 'agent'
+        ? `${reference} is quarantined until ${when}: the owner's secret was just typed there, so you cannot read or picture it for a short while. You can still click and navigate; text reads come back once the page has moved on, pictures after that time.`
+        : `${reference} is quarantined until ${when}: a secret was just typed there. Look at it in the browser view, or try again after that time.`,
+    );
   }
 
   /** Runs `work` as one turn in the session when input requests are wired; just runs it where they are not. */
