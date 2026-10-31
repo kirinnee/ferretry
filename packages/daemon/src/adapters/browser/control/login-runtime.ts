@@ -299,23 +299,16 @@ export class XvfbDisplay implements BrowserDisplayPort {
         timing: this.timing,
         stalled: () => (announced === undefined ? undefined : 'Xvfb did not report the display number it took'),
       });
+      await reading;
+      // Only now is the number known, and it is what the clients match the cookie on.
+      await this.replaceAuthority(authorityFile, xauthorityEntry(announced ?? '', cookie));
     } catch (error) {
       this.child = undefined;
       child.kill('SIGKILL');
       await this.discardAuthority();
       throw error;
     }
-    await reading;
-    const number = announced ?? '';
-    try {
-      await this.replaceAuthority(authorityFile, xauthorityEntry(number, cookie));
-    } catch (error) {
-      this.child = undefined;
-      child.kill('SIGKILL');
-      await this.discardAuthority();
-      throw error;
-    }
-    return `:${number}`;
+    return `:${announced ?? ''}`;
   }
 
   /**
