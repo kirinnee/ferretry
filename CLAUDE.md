@@ -238,6 +238,13 @@ reader, never persisted — except a ≤10 s owner-only (`0600`, in a `0700` dir
 Minting is governed by the `pairing` capability rather than by an admin-token minimum, because a browser is
 always a paired device and could otherwise never add a second one.
 
+**Catalogs** share skills and MCP setups with people who are NOT your devices, and every one is
+**signed by the publisher's daemon identity** over RFC 8785 canonical JSON, so the installer's own daemon
+checks it whatever carried it. Installing is a trust step: every file and command shown in full, every
+`${secret:NAME}` placeholder mapped by the installer to their own secret, and a pin that never
+auto-updates. The contract and what is built are [docs/catalogs.md](docs/catalogs.md); the approved
+design is [docs/design/catalogs.md](docs/design/catalogs.md).
+
 The hosted PWA is a **signed release**: CI signs a list of every file's SHA-256 with an Ed25519 key that
 lives only in the protected `pwa-release` environment and in a CI job that installs nothing. The
 service worker answers every page load from the installed release, serves only bytes that list names

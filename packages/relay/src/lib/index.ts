@@ -1,4 +1,5 @@
 export * from './binary.ts';
+export * from './catalog-signature.ts';
 export * from './channel.ts';
 export * from './claim.ts';
 export * from './connection.ts';
