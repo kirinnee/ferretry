@@ -232,3 +232,23 @@ describe('fy copy --json and empty listings', () => {
     should(said).eql(['s1 holds no secure copies', 'no pastes are approved in advance', 'no paste plans are waiting']);
   });
 });
+
+describe('fy copy: the last words', () => {
+  it('should write a page destination as browser:<origin>, and ask for an id when none is given', async () => {
+    const gateway = new FakeGateway();
+    gateway.rules = async () => ({ rules: [{ ...RULE, to: { kind: 'browser', origin: 'https://vercel.com' } }] });
+    const said: string[] = [];
+    const controller = new CopyController({
+      gateway,
+      out: { success: message => void said.push(message), diagnostic: () => undefined },
+      ownSessionId: undefined,
+      agentCredential: undefined,
+    });
+
+    await controller.rules({});
+
+    should(said[0]).containEql('command:gh → browser:https://vercel.com');
+    should(await failure(controller.removeRule(' ', {}))).equal('name the rule by its id (see `copy rules ls`)');
+    should(await failure(controller.approve('', [], {}))).equal('name the plan by its id (see `copy plan ls`)');
+  });
+});
