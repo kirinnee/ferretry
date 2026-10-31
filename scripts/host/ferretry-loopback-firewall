@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Loopback firewall for a shared Linux host. Installed and run by the HOST ADMIN as root, never by a
+# Ferretry user: it reads the admin-curated conf, rejects every uid but the owner on each user's fixed
+# browser ports (the agent Chrome's DevTools port, the proxy sign-in relay, the login window's VNC
+# port), and records what it applied in a marker the daemons read.
+#
+#   ferretry-loopback-firewall [apply]   validate the conf, replace `table inet ferretry`, write the marker
+#   ferretry-loopback-firewall stop      delete `table inet ferretry` and the marker
+#
+# FERRETRY_FIREWALL_CONF, FERRETRY_FIREWALL_RUN_DIR and FERRETRY_NFT exist for the tests ONLY. A root
+# invocation MUST NOT set them: they would point the root-owned conf, marker or nft binary elsewhere.
+# Without FERRETRY_FIREWALL_RUN_DIR the script refuses to run as anyone but root.
+#
+# The port arithmetic below is packages/protocol's `perUserBrowserPorts`; both are pinned to
+# scripts/host/per-user-ports.fixtures.json by a test on each side.
+
+conf="${FERRETRY_FIREWALL_CONF:-/etc/ferretry/loopback-firewall.conf}"
+run_dir="${FERRETRY_FIREWALL_RUN_DIR:-/run/ferretry}"
+nft="${FERRETRY_NFT:-nft}"
+marker="${run_dir}/loopback-firewall.json"
+mode="${1:-apply}"
+me="$(id -u)"
+
+[ "${me}" -eq 0 ] || [ -n "${FERRETRY_FIREWALL_RUN_DIR:-}" ] || { echo "❌ ferretry-loopback-firewall changes the host firewall and must run as root" >&2; exit 1; }
+[[ "${mode}" == "apply" || "${mode}" == "stop" ]] || { echo "❌ usage: ferretry-loopback-firewall [apply|stop]" >&2; exit 2; }
+
+# --- stop: drop the table and the marker, whether or not either exists ---------------------------
+if [ "${mode}" = "stop" ]; then
+  echo "🔁 Removing table inet ferretry and ${marker}"
+  printf 'add table inet ferretry\ndelete table inet ferretry\n' | "${nft}" -f -
+  rm -f "${marker}"
+  echo "✅ Loopback firewall removed"
+  exit 0
+fi
+
+# --- the conf must be a root-owned regular file nobody else can write ----------------------------
+# "Root-owned" is compared with the invoking uid: root in production, the test user in the tests.
+conf_dir="$(dirname "${conf}")"
+[[ -f "${conf}" && ! -L "${conf}" ]] || { echo "❌ ${conf} is not a regular file, so nothing was applied" >&2; exit 1; }
+read -r conf_owner conf_mode < <(stat -c '%u %a' "${conf}")
+read -r dir_owner dir_mode < <(stat -c '%u %a' "${conf_dir}")
+[ "${conf_owner}" = "${me}" ] || { echo "❌ ${conf} is not owned by root, so nothing was applied" >&2; exit 1; }
+[ $((8#${conf_mode} & 8#022)) -eq 0 ] || { echo "❌ ${conf} is writable by its group or by others, so nothing was applied" >&2; exit 1; }
+[[ "${dir_owner}" == "${me}" && $((8#${dir_mode} & 8#022)) -eq 0 ]] || { echo "❌ ${conf_dir} is not a root-owned directory closed to group and others, so nothing was applied" >&2; exit 1; }
+
+# --- parse every line before anything is applied -------------------------------------------------
+number='^(0|[1-9][0-9]{0,8})$'
+base=""
+declare -A uid_seen=()
+users=()
+ports=()
+error=""
+lineno=0
+
+while IFS= read -r line || [ -n "${line}" ]; do
+  lineno=$((lineno + 1))
+  read -r -a word <<<"${line%%#*}"
+  [ "${#word[@]}" -eq 0 ] && continue
+
+  case "${word[0]}:${#word[@]}" in
+    base:2)
+      [ -z "${base}" ] || { error="line ${lineno}: base is given twice"; break; }
+      [[ "${word[1]}" =~ ${number} ]] || { error="line ${lineno}: base must be a whole number"; break; }
+      [ "${word[1]}" -ge 1024 ] || { error="line ${lineno}: base must be at least 1024"; break; }
+      base="${word[1]}"
+      continue
+      ;;
+    user:2 | user:5) ;;
+    *)
+      error="line ${lineno}: expected 'base <int>', 'user <uid>' or 'user <uid> <cdp> <relay> <vnc>'"
+      break
+      ;;
+  esac
+
+  for field in "${word[@]:1}"; do
+    [[ "${field}" =~ ${number} ]] || { error="line ${lineno}: '${field}' is not a whole number"; break 2; }
+  done
+  uid="${word[1]}"
+  [ "${uid}" -ge 1000 ] || { error="line ${lineno}: uid ${uid} is below 1000, which is not a login user"; break; }
+  [ -z "${uid_seen[${uid}]:-}" ] || { error="line ${lineno}: uid ${uid} is listed twice"; break; }
+  uid_seen["${uid}"]=1
+
+  for port in "${word[@]:2}"; do
+    [[ "${port}" -ge 1024 && "${port}" -le 65535 ]] || { error="line ${lineno}: port ${port} is outside 1024-65535"; break 2; }
+  done
+  users+=("${uid}")
+  ports+=("${word[*]:2}")
+done <"${conf}"
+
+[ -z "${error}" ] || { echo "❌ ${conf}: ${error}; nothing was applied" >&2; exit 1; }
+
+# --- derive ports and claim each one once (after the whole file, so `base` may sit anywhere) -----
+base="${base:-20000}"
+declare -A port_owner=()
+rules=""
+entries=""
+for i in "${!users[@]}"; do
+  uid="${users[${i}]}"
+  if [ -z "${ports[${i}]}" ]; then
+    # packages/protocol perUserBrowserPorts: b = base + (uid - 1000) * 4; cdp b, relay b + 1, vnc b + 2.
+    b=$((base + (uid - 1000) * 4))
+    [ $((b + 2)) -le 32767 ] || { error="uid ${uid} gets ports outside 1024-32767 from base ${base}; set explicit ports or another base"; break; }
+    ports[i]="${b} $((b + 1)) $((b + 2))"
+  fi
+  read -r -a mine <<<"${ports[${i}]}"
+  for port in "${mine[@]}"; do
+    [ -z "${port_owner[${port}]:-}" ] || { error="port ${port} is claimed by both uid ${port_owner[${port}]} and uid ${uid}"; break 2; }
+    port_owner["${port}"]="${uid}"
+  done
+  tuple="${mine[0]}, ${mine[1]}, ${mine[2]}"
+  rules="${rules}    oif \"lo\" tcp dport { ${tuple} } meta skuid != ${uid} reject with tcp reset"$'\n'
+  entries="${entries}${entries:+, }{ \"uid\": ${uid}, \"ports\": [${tuple}] }"
+done
+
+[ -z "${error}" ] || { echo "❌ ${conf}: ${error}; nothing was applied" >&2; exit 1; }
+
+# --- one atomic transaction that replaces ONLY our table -----------------------------------------
+echo "🔨 Applying table inet ferretry for ${#users[@]} user(s)"
+"${nft}" -f - <<RULESET
+add table inet ferretry
+delete table inet ferretry
+table inet ferretry {
+  chain output {
+    type filter hook output priority 0; policy accept;
+${rules}  }
+}
+RULESET
+
+# --- the marker, written only after a successful apply, atomically -------------------------------
+install -d -m 0755 "${run_dir}"
+tmp="$(mktemp "${run_dir}/.loopback-firewall.json.XXXXXX")"
+trap 'rm -f "${tmp}"' EXIT
+printf '{ "version": 1, "appliedAt": "%s", "base": %s,\n  "entries": [ %s ] }\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${base}" "${entries}" >"${tmp}"
+chmod 0644 "${tmp}"
+mv -f "${tmp}" "${marker}"
+
+echo "✅ Loopback firewall applied; marker at ${marker}"
