@@ -43,7 +43,7 @@ export const INPUT_SHORT_LOCK_SECONDS = 10;
 /**
  * Why a card's lock is as long as it is. Only the first three are short, and each is something the DAEMON saw:
  *
- * - `hidden-terminal`: the terminal has echo off and a recognised program (sudo, ssh, gpg…) is reading it.
+ * - `hidden-terminal`: a local password prompt: echo off in line mode, sudo/su/doas/passwd from a root-owned executable.
  * - `proven-field`: a password field on a secure page whose identity Ferretry has seen, on an earlier sign-in, hide
  *   the value after submit and move on (a saved login's observed facts).
  * - `probed-field`: a password field on a secure page into which Ferretry typed a throwaway value, found it in no
@@ -63,9 +63,9 @@ export type InputLock = z.infer<typeof InputLockSchema>;
 
 /** What the card says about each reason: one fixed sentence, never page or terminal text. */
 export const INPUT_LOCK_WORDS: Readonly<Record<InputLockReason, string>> = {
-  'hidden-terminal': 'The terminal hides typing and a known program is reading it.',
+  'hidden-terminal': 'A local password prompt (sudo, su, doas or passwd) with typing hidden.',
   'proven-field': 'A password field Ferretry has seen hide the value and move on after signing in.',
-  'probed-field': 'A password field: a test value Ferretry typed showed nowhere on the page.',
+  'probed-field': "A password field: a test value Ferretry typed did not show in the page's text.",
   code: 'A one-time code shows on screen as it is typed.',
   'not-proven': 'Ferretry has not proven that this target hides what is typed.',
 };
@@ -306,6 +306,13 @@ const TerminalFactsSchema = z.strictObject({
   promptLineDigest: Digest,
   /** The program is one that asks for a secret (sudo, ssh, gpg, …); the shell itself or an interpreter is not. */
   recognisedConsumer: z.boolean(),
+  /**
+   * The TTY is in canonical (line) mode, as a password prompt reads it. A program in raw or readline mode turns echo
+   * off and draws every character itself (ssh to a remote shell, psql), so echo off alone proves nothing.
+   */
+  canonical: z.boolean().optional(),
+  /** The foreground program runs from an executable root owns and nobody else can write: not a script a ferret placed. */
+  trustedProgram: z.literal(true).optional(),
 });
 
 const BrowserFieldSchema = z.strictObject({

@@ -84,7 +84,7 @@ const deliver = async (w: ReturnType<typeof inputRequestService>, request: { id:
 
 describe('the lock a card shows, and the hold that runs it', () => {
   it('should hold a sudo terminal with echo off for 10 seconds, and tell the agent so', async () => {
-    const w = inputRequestService();
+    const w = inputRequestService({ facts: { ...FACTS, canonical: true, trustedProgram: true } });
     const { view, request } = await raised(w);
     should(request.lock).deepEqual({ seconds: 10, reason: 'hidden-terminal' });
     should(view.lockSeconds).equal(10);
@@ -103,7 +103,7 @@ describe('the lock a card shows, and the hold that runs it', () => {
   });
 
   it('should hold a terminal that echoes for the full two minutes', async () => {
-    const w = inputRequestService({ facts: { ...FACTS, echo: 'on' } });
+    const w = inputRequestService({ facts: { ...FACTS, echo: 'on', canonical: true, trustedProgram: true } });
     const { request } = await raised(w);
     should(request.lock).deepEqual({ seconds: 120, reason: 'not-proven' });
     await w.service.deliver(
@@ -128,6 +128,7 @@ describe('the lock a card shows, and the hold that runs it', () => {
   it('should probe a qualifying page and hold it 10 seconds after a clean probe', async () => {
     const asked: (readonly string[])[] = [];
     const w = inputRequestService({
+      steered: () => false,
       facts: PAGE,
       probe: async fieldIds => {
         asked.push(fieldIds);
@@ -147,16 +148,17 @@ describe('the lock a card shows, and the hold that runs it', () => {
       async () => 'shown' as const,
       async () => await Promise.reject(new Error('the page went away')),
     ]) {
-      const { request } = await raised(inputRequestService({ facts: PAGE, probe }), PAGE_RAISE);
+      const { request } = await raised(inputRequestService({ steered: () => false, facts: PAGE, probe }), PAGE_RAISE);
       should(request.lock).deepEqual({ seconds: 120, reason: 'not-proven' });
     }
-    const { request } = await raised(inputRequestService({ facts: PAGE }), PAGE_RAISE);
+    const { request } = await raised(inputRequestService({ steered: () => false, facts: PAGE }), PAGE_RAISE);
     should(request.lock?.seconds).equal(120);
   });
 
   it('should not probe a page a saved login already proves, and hold it 10 seconds', async () => {
     let probed = false;
     const w = inputRequestService({
+      steered: () => false,
       facts: PAGE,
       logins: logins(() => [provenEntry()]),
       probe: async () => {
@@ -171,7 +173,7 @@ describe('the lock a card shows, and the hold that runs it', () => {
 
   it('should never shorten at the write a lock the card showed long', async () => {
     let entries: readonly LoginEntrySummary[] = [];
-    const w = inputRequestService({ facts: PAGE, logins: logins(() => entries) });
+    const w = inputRequestService({ steered: () => false, facts: PAGE, logins: logins(() => entries) });
     const { request } = await raised(w, PAGE_RAISE);
     should(request.lock?.seconds).equal(120);
     entries = [provenEntry()];
@@ -181,7 +183,7 @@ describe('the lock a card shows, and the hold that runs it', () => {
 
   it('should earn the lock again without the probe when the card is redrawn onto a re-rendered field', async () => {
     let facts: InputTargetFacts = PAGE;
-    const w = inputRequestService({ facts: () => facts, probe: async () => 'hidden' });
+    const w = inputRequestService({ steered: () => false, facts: () => facts, probe: async () => 'hidden' });
     const { request } = await raised(w, PAGE_RAISE);
     should(request.lock?.reason).equal('probed-field');
     facts = {
@@ -194,8 +196,54 @@ describe('the lock a card shows, and the hold that runs it', () => {
     should(w.writes).deepEqual([]);
   });
 
+  it('should give a redrawn plain card no lock', async () => {
+    let facts: InputTargetFacts = PAGE;
+    const w = inputRequestService({ steered: () => false, facts: () => facts });
+    const plain = {
+      ...PAGE_RAISE,
+      fields: [{ id: 'password', sensitivity: 'plain', element: { kind: 'ref', ref: 'e3' } }],
+    } as InputRaise;
+    const { request } = await raised(w, plain);
+    facts = {
+      ...PAGE,
+      fields: PAGE.kind === 'browser' ? [{ ...PAGE.fields[0], backendNodeId: 77 } as never] : [],
+    } as InputTargetFacts;
+    await deliver(w, request).catch(() => undefined);
+    const [redrawn] = await w.service.list(HOST);
+    should(redrawn?.observedDigest).not.equal(request.observedDigest);
+    should(redrawn).not.have.property('lock');
+  });
+
+  it('should not probe, and keep the full lock, where the ferret ran a page script or no observer can tell', async () => {
+    let probed = false;
+    const probe = async () => {
+      probed = true;
+      return 'hidden' as const;
+    };
+    const scripted = await raised(inputRequestService({ steered: () => true, facts: PAGE, probe }), PAGE_RAISE);
+    const blind = await raised(inputRequestService({ facts: PAGE, probe }), PAGE_RAISE);
+    should(probed).be.false();
+    should(scripted.request.lock?.seconds).equal(120);
+    should(blind.request.lock?.seconds).equal(120);
+  });
+
+  it('should hold the full lock at the write when the ferret acted on a page after the card was raised', async () => {
+    let acted = false;
+    const w = inputRequestService({
+      steered: since => acted && since !== Number.POSITIVE_INFINITY,
+      facts: PAGE,
+      probe: async () => 'hidden',
+    });
+    const { request } = await raised(w, PAGE_RAISE);
+    should(request.lock?.seconds).equal(10);
+    acted = true;
+    await deliver(w, request);
+    should(w.quarantine.until(SESSION, ['~page:app'])).equal(NOW + 120_000);
+  });
+
   it('should hold the full lock when the saved logins cannot be read', async () => {
     const w = inputRequestService({
+      steered: () => false,
       facts: PAGE,
       logins: {
         entries: async () => await Promise.reject(new Error('damaged')),

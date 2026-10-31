@@ -2,11 +2,13 @@ import { describe, it } from 'bun:test';
 import type { InputRequestField, InputTargetFacts, LoginObserved } from '@ferretry/protocol';
 import should from 'should';
 import {
+  type LockContext,
   lockFor,
   longerLock,
   pageFieldsQualify,
   probeable,
   provenByFacts,
+  terminalHides,
 } from '../../../src/lib/input-requests/lock.ts';
 import { identityOf } from '../../../src/lib/input-requests/login-observer.ts';
 
@@ -37,60 +39,104 @@ const page = (fields: PageField[] = [pageField()], extra: Partial<InputTargetFac
     ...extra,
   }) as InputTargetFacts;
 
-const terminal = (echo: 'off' | 'on', recognised: boolean): InputTargetFacts => ({
+/** A local sudo prompt, as the daemon sees it when it hides typing. */
+const sudo = (
+  extra: Partial<Extract<InputTargetFacts, { kind: 'terminal' }>> = {},
+  comm = 'sudo',
+): InputTargetFacts => ({
   kind: 'terminal',
   paneProof: { paneId: '%3', pid: 1 },
-  foreground: { pid: 2, pgid: 2, comm: 'sudo', argv: 'sudo -v' },
-  echo,
+  foreground: { pid: 2, pgid: 2, comm, argv: `${comm} -v` },
+  echo: 'off',
   cursorRow: 0,
   promptLine: '',
   promptLineDigest: 'a'.repeat(64),
-  recognisedConsumer: recognised,
+  recognisedConsumer: true,
+  canonical: true,
+  trustedProgram: true,
+  ...extra,
 });
 
 const field = (id: string, sensitivity: InputRequestField['sensitivity']): InputRequestField =>
   ({ id, sensitivity }) as unknown as InputRequestField;
 const SECRET = [field('password', 'secret')];
-const flag = { value: true, observedAt: '2026-10-31T09:00:00.000Z', count: 2 };
+const flag = (value = true) => ({ value, observedAt: '2026-10-31T09:00:00.000Z', count: 2 });
+const QUIET: LockContext = { observed: [], probed: false, submitted: true, steered: false };
 
 const proven = (facts: InputTargetFacts, extra: Partial<LoginObserved> = {}): LoginObserved => ({
   at: 'accounts.example.test',
   surface: 'page',
   identity: identityOf(facts, 'accounts.example.test') as string,
   since: '2026-10-31T09:00:00.000Z',
-  masked: flag,
-  noEchoAfterSubmit: flag,
-  navigatedAway: flag,
+  masked: flag(),
+  noEchoAfterSubmit: flag(),
+  navigatedAway: flag(),
   ...extra,
 });
 
-describe('the lock a delivery earns', () => {
-  it('should be short for a terminal that hides typing for a recognised program, and long otherwise', () => {
-    should(lockFor(terminal('off', true), SECRET, [], false)).deepEqual({ seconds: 10, reason: 'hidden-terminal' });
-    should(lockFor(terminal('on', true), SECRET, [], false)).deepEqual({ seconds: 120, reason: 'not-proven' });
-    should(lockFor(terminal('off', false), SECRET, [], false)).deepEqual({ seconds: 120, reason: 'not-proven' });
+describe('a terminal', () => {
+  it('should be short only for a local password prompt from a root-owned password program', () => {
+    should(lockFor(sudo(), SECRET, QUIET)).deepEqual({ seconds: 10, reason: 'hidden-terminal' });
+    for (const comm of ['su', 'doas', 'passwd', 'sudoedit']) should(terminalHides(sudo({}, comm))).be.true();
   });
 
-  it('should be long for a one-time code, wherever it goes', () => {
-    should(lockFor(terminal('off', true), [field('code', 'private')], [], true).reason).equal('code');
-    should(lockFor(page(), [...SECRET, field('code', 'private')], [proven(page())], true).seconds).equal(120);
+  it('should be long for raw or readline mode, an echoing or unread tty, a relay, or a program anyone could place', () => {
+    for (const facts of [
+      sudo({ canonical: false }),
+      sudo({ canonical: undefined }),
+      sudo({ echo: 'on' }),
+      sudo({ echo: 'unknown' }),
+      sudo({ trustedProgram: undefined }),
+      sudo({}, 'ssh'),
+      sudo({}, 'docker'),
+      sudo({}, 'psql'),
+      sudo({}, 'gpg'),
+    ])
+      should(lockFor(facts, SECRET, QUIET)).deepEqual({ seconds: 120, reason: 'not-proven' });
+    should(terminalHides(page())).be.false();
   });
+});
 
-  it("should be short for a page field proven by a saved login's facts about that very field", () => {
+describe('a one-time code', () => {
+  it('should be long wherever it goes', () => {
+    should(lockFor(sudo(), [field('code', 'private')], QUIET).reason).equal('code');
+    should(
+      lockFor(page(), [...SECRET, field('code', 'private')], { ...QUIET, observed: [proven(page())], probed: true })
+        .seconds,
+    ).equal(120);
+  });
+});
+
+describe('a page field', () => {
+  it('should be short when a saved login proves that very field, for a submitted value', () => {
     const facts = page();
-    should(lockFor(facts, SECRET, [proven(facts)], false)).deepEqual({ seconds: 10, reason: 'proven-field' });
-    should(provenByFacts(facts, [proven(facts, { noEchoAfterSubmit: { ...flag, value: false } })])).be.false();
-    should(provenByFacts(facts, [proven(facts, { navigatedAway: undefined })])).be.false();
-    should(provenByFacts(facts, [proven(facts, { surface: 'terminal' })])).be.false();
-    should(provenByFacts(facts, [proven(facts, { at: 'other.example.test' })])).be.false();
-    const renamed = page([pageField({}, { name: 'pass2' })]);
-    should(provenByFacts(renamed, [proven(facts)])).be.false();
-    should(provenByFacts({ ...facts, origin: 'null' } as InputTargetFacts, [proven(facts)])).be.false();
+    should(lockFor(facts, SECRET, { ...QUIET, observed: [proven(facts)] })).deepEqual({
+      seconds: 10,
+      reason: 'proven-field',
+    });
+    should(provenByFacts(facts, [proven(facts)], false)).be.false();
+  });
+
+  it('should not be proven by a record that says otherwise, a partial record, or another place or field', () => {
+    const facts = page();
+    should(provenByFacts(facts, [proven(facts), proven(facts, { noEchoAfterSubmit: flag(false) })], true)).be.false();
+    should(provenByFacts(facts, [proven(facts, { navigatedAway: undefined })], true)).be.false();
+    should(provenByFacts(facts, [proven(facts, { surface: 'terminal' })], true)).be.false();
+    should(provenByFacts(facts, [proven(facts, { at: 'other.example.test' })], true)).be.false();
+    should(provenByFacts(page([pageField({}, { name: 'pass2' })]), [proven(facts)], true)).be.false();
+    should(provenByFacts({ ...facts, origin: 'null' } as InputTargetFacts, [proven(facts)], true)).be.false();
   });
 
   it('should be short for a clean probe, and long when it did not run cleanly', () => {
-    should(lockFor(page(), SECRET, [], true)).deepEqual({ seconds: 10, reason: 'probed-field' });
-    should(lockFor(page(), SECRET, [], false)).deepEqual({ seconds: 120, reason: 'not-proven' });
+    should(lockFor(page(), SECRET, { ...QUIET, probed: true })).deepEqual({ seconds: 10, reason: 'probed-field' });
+    should(lockFor(page(), SECRET, QUIET)).deepEqual({ seconds: 120, reason: 'not-proven' });
+  });
+
+  it('should be long, whatever proves it, when the ferret could have steered the page', () => {
+    const facts = page();
+    should(lockFor(facts, SECRET, { ...QUIET, observed: [proven(facts)], probed: true, steered: true }).seconds).equal(
+      120,
+    );
   });
 
   it('should be long for any page field the card would not draw green', () => {
@@ -106,9 +152,9 @@ describe('the lock a delivery earns', () => {
     ];
     for (const facts of cases) {
       should(pageFieldsQualify(facts, SECRET)).be.false();
-      should(lockFor(facts, SECRET, [proven(facts)], true).seconds).equal(120);
+      should(lockFor(facts, SECRET, { ...QUIET, observed: [proven(facts)], probed: true }).seconds).equal(120);
     }
-    should(pageFieldsQualify(terminal('off', true), SECRET)).be.false();
+    should(pageFieldsQualify(sudo(), SECRET)).be.false();
   });
 
   it('should keep the longer of two locks', () => {
@@ -120,24 +166,33 @@ describe('the lock a delivery earns', () => {
 });
 
 describe('when the dummy probe may run', () => {
-  it('should run only on a qualifying page not already proven', () => {
-    should(probeable(page(), SECRET, [])).be.true();
-    should(probeable(page(), SECRET, [proven(page())])).be.false();
-    should(probeable(terminal('off', true), SECRET, [])).be.false();
-    should(probeable(page([pageField({}, { type: 'text' })]), SECRET, [])).be.false();
+  it('should run only on one qualifying password field not already proven, in a session that ran no page script', () => {
+    should(probeable(page(), SECRET, QUIET)).be.true();
+    should(probeable(page(), SECRET, { ...QUIET, observed: [proven(page())] })).be.false();
+    should(probeable(page(), SECRET, { ...QUIET, steered: true })).be.false();
+    should(probeable(sudo(), SECRET, QUIET)).be.false();
+    should(probeable(page([pageField({}, { type: 'text' })]), SECRET, QUIET)).be.false();
+    const two = page([pageField(), pageField({ fieldId: 'confirm', backendNodeId: 2 }, { name: 'confirm' })]);
+    should(probeable(two, [...SECRET, field('confirm', 'secret')], QUIET)).be.false();
   });
 
-  it('should never run on a card with a one-time code, or on a field that looks like one', () => {
-    should(probeable(page(), [...SECRET, field('code', 'private')], [])).be.false();
+  it('should never run on a card with a one-time code, or on a field that says it takes a code or a PIN', () => {
+    should(probeable(page(), [...SECRET, field('code', 'private')], QUIET)).be.false();
     for (const attributes of [
       { autocomplete: 'one-time-code' },
       { inputmode: 'numeric' },
       { inputmode: 'tel' },
       { inputmode: 'decimal' },
+      { name: 'pin' },
+      { name: 'otp_code' },
+      { id: 'mfa-input' },
+      { name: 'verificationCode' },
+      { id: 'cvv' },
+      { autocomplete: 'cc-csc', name: 'security' },
     ])
-      should(probeable(page([pageField({}, attributes)]), SECRET, [])).be.false();
+      should(probeable(page([pageField({}, attributes)]), SECRET, QUIET)).be.false();
     should(
-      probeable(page([pageField({}, { autocomplete: 'current-password', inputmode: 'text' })]), SECRET, []),
+      probeable(page([pageField({}, { autocomplete: 'current-password', inputmode: 'text' })]), SECRET, QUIET),
     ).be.true();
   });
 });

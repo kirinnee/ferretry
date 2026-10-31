@@ -235,7 +235,7 @@ describe('the dummy probe through a page target', () => {
     const { target, calls } = host();
     should(await target.probe('s1', APP, FACTS_PAGE, ['password'])).equal('hidden');
     should(calls[0]).equal('page:s1:app');
-    should(calls[1]).match(/^probe:page-1:password:~[a-z0-9]{5}$/u);
+    should(calls[1]).match(/^probe:page-1:password:~[a-z0-9]{2}$/u);
   });
 
   it('should abort for another page, a terminal, a refused page, or a browser that cannot probe', async () => {
@@ -246,9 +246,9 @@ describe('the dummy probe through a page target', () => {
     should(await host({ refuse: true }).target.probe('s1', APP, FACTS_PAGE, ['password'])).equal('aborted');
   });
 
-  it('should make a throwaway value of a tilde and five letters or digits, different each time', () => {
+  it('should make a throwaway value of a tilde and two letters or digits, different each time', () => {
     const made = new Set(Array.from({ length: 20 }, () => throwawayValue()));
-    for (const value of made) should(value).match(/^~[a-z0-9]{5}$/u);
+    for (const value of made) should(value).match(/^~[a-z0-9]{2}$/u);
     should(made.size).be.above(1);
   });
 });

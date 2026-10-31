@@ -14,10 +14,10 @@ export interface PageInputHost {
   ): Promise<T>;
 }
 
-/** A throwaway value for the dummy probe: a tilde and five random letters and digits. */
+/** A throwaway value for the dummy probe: a tilde and two random letters or digits, shorter than any code or PIN field. */
 export function throwawayValue(): string {
   const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
-  return `~${[...crypto.getRandomValues(new Uint8Array(5))].map(byte => alphabet[byte % alphabet.length]).join('')}`;
+  return `~${[...crypto.getRandomValues(new Uint8Array(2))].map(byte => alphabet[byte % alphabet.length]).join('')}`;
 }
 
 /**
@@ -145,7 +145,7 @@ export class PageInputTarget implements InputTargetPort {
 
   /**
    * The dummy probe, inside the page's own queue so no act of the agent lands in it. The throwaway value is made here:
-   * six characters (short of any usual minimum length, so it would not pass as a password), random, never kept.
+   * three characters (shorter than any code or PIN, and than any password a site accepts), random, never kept.
    */
   async probe(
     sessionId: string,

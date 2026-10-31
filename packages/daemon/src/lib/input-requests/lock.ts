@@ -16,7 +16,8 @@ import { identityOf, placeOf } from './login-observer.ts';
  * {@link INPUT_QUARANTINE_SECONDS} otherwise. Masking keeps its whole redaction window either way, and the owner can
  * still end a lock early or reveal. Nothing the agent says is an input to this: only facts the daemon observed.
  *
- * - A TERMINAL is proven when it has echo off and a recognised program is reading it (the facts on the card).
+ * - A TERMINAL is proven only for a local password prompt: echo off in line (canonical) mode, a getpass program
+ *   (sudo, su, doas, passwd) running from an executable root owns and only root can write.
  * - A PAGE is proven only when every secret field is a password input on a secure page with no human check showing,
  *   in its own frame's origin, visible and uncovered, AND either a saved login's observed facts for that very field
  *   identity say it hid the value after submit and the page moved on, or the daemon's own dummy probe at raise found
@@ -46,58 +47,101 @@ export function pageFieldsQualify(facts: InputTargetFacts, fields: readonly Inpu
   );
 }
 
-/** A saved login's facts prove this very field hid the value after submit and the page moved on. */
-export function provenByFacts(facts: InputTargetFacts, observed: readonly LoginObserved[]): boolean {
+/**
+ * A saved login's facts prove this very field hid the value after a submit and the page moved on: at least one record
+ * for this place and field identity says all three, and NONE says the other way. Only for a delivery that is
+ * submitted: the facts are about what happens after a submit.
+ */
+export function provenByFacts(
+  facts: InputTargetFacts,
+  observed: readonly LoginObserved[],
+  submitted: boolean,
+): boolean {
+  if (!submitted) return false;
   const place = placeOf(facts, undefined);
   if (place === undefined) return false;
   const identity = identityOf(facts, place);
-  return observed.some(
-    seen =>
-      seen.at === place &&
-      seen.surface === 'page' &&
-      seen.identity === identity &&
-      seen.masked?.value === true &&
-      seen.noEchoAfterSubmit?.value === true &&
-      seen.navigatedAway?.value === true,
+  const here = observed.filter(seen => seen.at === place && seen.surface === 'page' && seen.identity === identity);
+  const says = (seen: LoginObserved): readonly (boolean | undefined)[] => [
+    seen.masked?.value,
+    seen.noEchoAfterSubmit?.value,
+    seen.navigatedAway?.value,
+  ];
+  return here.some(seen => says(seen).every(value => value === true)) && !here.some(seen => says(seen).includes(false));
+}
+
+/**
+ * The programs whose prompt is a local password read (getpass): echo off in line mode, nothing drawn. A relay (ssh,
+ * docker, kubectl) or a readline program (psql, mysql) turns echo off and draws what is typed, so it is never one.
+ */
+const GETPASS_PROGRAMS: ReadonlySet<string> = new Set(['sudo', 'sudoedit', 'su', 'doas', 'passwd']);
+
+/** A terminal proven to hide typing: a local password prompt, from an executable the ferret could not have placed. */
+export function terminalHides(facts: InputTargetFacts): boolean {
+  return (
+    facts.kind === 'terminal' &&
+    facts.echo === 'off' &&
+    facts.canonical === true &&
+    facts.trustedProgram === true &&
+    GETPASS_PROGRAMS.has(facts.foreground.comm)
   );
 }
 
-/**
- * The lock a delivery earns from what the daemon saw. `observed` is every saved login's facts; `probed` says the
- * daemon's own dummy probe of this page found the throwaway value nowhere.
- */
+/** What else the decision needs: whether the value is submitted, and whether the ferret could have steered the page. */
+export interface LockContext {
+  /** Every saved login's observed facts. */
+  readonly observed: readonly LoginObserved[];
+  /** The daemon's dummy probe of this page found the throwaway value nowhere. */
+  readonly probed: boolean;
+  /** Enter is pressed after the value (or may be, on the card). */
+  readonly submitted: boolean;
+  /** The ferret ran a page script in this session, or acted on a page since the card was raised. */
+  readonly steered: boolean;
+}
+
+/** The lock a delivery earns from what the daemon saw. */
 export function lockFor(
   facts: InputTargetFacts,
   fields: readonly InputRequestField[],
-  observed: readonly LoginObserved[],
-  probed: boolean,
+  context: LockContext,
 ): InputLock {
   if (fields.some(field => field.sensitivity === 'private')) return FULL('code');
-  if (facts.kind === 'terminal')
-    return facts.echo === 'off' && facts.recognisedConsumer ? SHORT('hidden-terminal') : FULL('not-proven');
-  if (!pageFieldsQualify(facts, fields)) return FULL('not-proven');
-  if (provenByFacts(facts, observed)) return SHORT('proven-field');
-  return probed ? SHORT('probed-field') : FULL('not-proven');
+  if (facts.kind === 'terminal') return terminalHides(facts) ? SHORT('hidden-terminal') : FULL('not-proven');
+  if (context.steered || !pageFieldsQualify(facts, fields)) return FULL('not-proven');
+  if (provenByFacts(facts, context.observed, context.submitted)) return SHORT('proven-field');
+  return context.probed ? SHORT('probed-field') : FULL('not-proven');
 }
 
-/** autocomplete or inputmode that says a field takes a one-time code: never probed (a wrong code can count). */
-const CODE_LIKE = (field: { readonly autocomplete?: string; readonly inputmode?: string }): boolean =>
-  /one-time-code/iu.test(field.autocomplete ?? '') || /^(?:numeric|tel|decimal)$/iu.test(field.inputmode ?? '');
+/**
+ * Attributes that say a field takes a code or a PIN, where a wrong attempt can count: never probed. The agent picks a
+ * field's sensitivity, so a `type=password` PIN it called `secret` is caught here, by what the page says it is.
+ */
+const CODE_WORDS = /otp|totp|mfa|2fa|pin|passcode|one.?time|verif|code|cvv|cvc|token|security/iu;
+const CODE_LIKE = (field: {
+  readonly autocomplete?: string;
+  readonly inputmode?: string;
+  readonly name?: string;
+  readonly id?: string;
+}): boolean =>
+  /^(?:numeric|tel|decimal)$/iu.test(field.inputmode ?? '') ||
+  [field.autocomplete, field.name, field.id].some(word => word !== undefined && CODE_WORDS.test(word));
 
 /**
- * Whether the daemon may run its dummy probe on a page card: only a page whose secret fields all qualify, not already
- * proven by a saved login's facts, with no one-time code on the card and no field that looks like one. A terminal is
- * never probed: a wrong password there can lock an account.
+ * Whether the daemon may run its dummy probe on a page card: exactly ONE secret field (typing into a second would blur
+ * the first while it holds the test value), qualifying, not already proven, no one-time code on the card, nothing that
+ * looks like a code or a PIN, and a session whose ferret never ran a page script. A terminal is never probed.
  */
 export function probeable(
   facts: InputTargetFacts,
   fields: readonly InputRequestField[],
-  observed: readonly LoginObserved[],
+  context: Omit<LockContext, 'probed'>,
 ): boolean {
-  if (facts.kind !== 'browser' || fields.some(field => field.sensitivity === 'private')) return false;
-  if (!pageFieldsQualify(facts, fields) || provenByFacts(facts, observed)) return false;
-  const secret = new Set(fields.filter(field => field.sensitivity === 'secret').map(field => field.id));
-  return facts.fields.filter(field => secret.has(field.fieldId)).every(field => !CODE_LIKE(field.field));
+  if (facts.kind !== 'browser' || context.steered || fields.some(field => field.sensitivity === 'private'))
+    return false;
+  const secret = fields.filter(field => field.sensitivity === 'secret').map(field => field.id);
+  if (secret.length !== 1 || !pageFieldsQualify(facts, fields)) return false;
+  if (provenByFacts(facts, context.observed, context.submitted)) return false;
+  return facts.fields.filter(field => secret.includes(field.fieldId)).every(field => !CODE_LIKE(field.field));
 }
 
 /** The longer of two locks: a card that said two minutes is never shortened at the write. */

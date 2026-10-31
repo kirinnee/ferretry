@@ -40,6 +40,8 @@ export function inputRequestService(
     readonly probe?: (fieldIds: readonly string[]) => Promise<'hidden' | 'shown' | 'aborted'>;
     /** Saved logins, for the facts the lock may read; none by default. */
     readonly logins?: InputLoginPort;
+    /** Whether the ferret steered a page (the login observer); absent: no observer, so every page counts as steered. */
+    readonly steered?: (since: number) => boolean;
   } = {},
 ) {
   const live = options.session ?? SESSION;
@@ -93,6 +95,15 @@ export function inputRequestService(
     quarantine,
     redact: async text => values.scrubAll(text),
     ...(options.logins === undefined ? {} : { logins: options.logins }),
+    ...(options.steered === undefined
+      ? {}
+      : {
+          observer: {
+            delivered: async () => undefined,
+            tainted: (_session: string, _kind: string, since: number) =>
+              (options.steered as NonNullable<typeof options.steered>)(since),
+          },
+        }),
   });
   return { service, writes, events, quarantine };
 }

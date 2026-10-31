@@ -40,6 +40,7 @@ import {
   type ElementHandle,
   type Locator,
   type Page,
+  type WebSocket,
 } from 'playwright-core';
 import {
   CDP_PIPE_ENDPOINT,
@@ -317,6 +318,13 @@ function watch(page: Page, key: string): void {
 function registerPage(page: Page): void {
   if (pageIds.has(page)) return;
   const key = pageId(page);
+  // The WebSockets the page holds open: the dummy probe will not type where a socket may carry each keystroke.
+  const sockets = new Set<WebSocket>();
+  openSockets.set(page, sockets);
+  page.on('websocket', socket => {
+    sockets.add(socket);
+    socket.on('close', () => sockets.delete(socket));
+  });
   watch(page, key);
   setPageState(page, 'ready');
   void page
@@ -497,6 +505,9 @@ function inputLocatorOf(locator: Locator): InputLocator {
 }
 
 /** The page as the input bridge sees it: Playwright for the element, DevTools for the node. */
+/** Each page's open WebSockets (`registerPage`). */
+const openSockets = new WeakMap<Page, Set<WebSocket>>();
+
 function inputSubject(page: Page): InputSubject {
   const key = pageId(page);
   let sessions = inputSessions.get(key);
@@ -513,6 +524,9 @@ function inputSubject(page: Page): InputSubject {
       title: async () => await safeTitle(page),
       mainFrame: () => page.mainFrame(),
       frames: () => page.frames(),
+      on: (event: 'request', listener: () => void) => page.on(event, listener),
+      off: (event: 'request', listener: () => void) => page.off(event, listener),
+      openSockets: () => openSockets.get(page)?.size ?? 0,
     } as unknown as InputablePage,
     cdp: {
       page: async () => (await pageSession(page)) as unknown as InputCdpSession,

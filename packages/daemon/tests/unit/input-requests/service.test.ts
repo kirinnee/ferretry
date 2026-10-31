@@ -288,7 +288,7 @@ describe('InputRequestService.raise', () => {
       id: 'A1',
       state: 'pending',
       observed: { consumer: 'sudo', echo: 'off', recognised: true },
-      lockSeconds: 10,
+      lockSeconds: 120,
       note: 'Waiting for the owner on A1.',
     });
     should(w.cards[0]?.title).equal('Needs a secret');

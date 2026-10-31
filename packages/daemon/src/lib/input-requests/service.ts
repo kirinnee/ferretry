@@ -190,7 +190,7 @@ export interface InputRequestServiceDependencies {
    * Told about every value typed into a terminal or a page, once it landed: the facts a saved login keeps
    * (docs/input-requests.md, "Login recipes") come only from here. Absent: no facts are kept.
    */
-  readonly observer?: Pick<LoginObserver, 'delivered'>;
+  readonly observer?: Pick<LoginObserver, 'delivered' | 'tainted'>;
 }
 
 const instant = (ms: number): string => new Date(ms).toISOString();
@@ -274,8 +274,14 @@ export class InputRequestService {
     // How long the target is kept from the ferret after the write (lock.ts): only what the daemon saw decides it.
     // The dummy probe runs after the picture, so the picture shows the page as it was.
     const observedFacts = sensitivity === 'plain' || target.kind === 'secret' ? [] : await this.observedFacts();
+    // At the raise only a page script the ferret ever ran counts: acts before the card are the ferret's own business.
+    const context = {
+      observed: observedFacts,
+      submitted: raise.submit !== 'agent',
+      steered: this.tainted(sessionId, Number.POSITIVE_INFINITY),
+    };
     const probed =
-      sensitivity !== 'plain' && probeable(seen.facts, fields, observedFacts)
+      sensitivity !== 'plain' && probeable(seen.facts, fields, context)
         ? (await this.deps.target
             .probe?.(
               sessionId,
@@ -288,7 +294,7 @@ export class InputRequestService {
     const lock =
       sensitivity === 'plain' || target.kind === 'secret'
         ? undefined
-        : lockFor(seen.facts, fields, observedFacts, probed);
+        : lockFor(seen.facts, fields, { ...context, probed });
     const step = raise.chain === undefined ? undefined : this.stepAfter(sessionId, raise.chain);
     const card = await this.deps.agenda.raise(sessionId, {
       requestId,
@@ -918,7 +924,13 @@ export class InputRequestService {
       // The secret store is no surface anybody reads, so there is nothing to hold from view. The lock is looked at
       // again from the facts just seen, and the longer of that and the card's is kept: a card never shortens.
       if (request.sensitivity !== 'plain' && request.target.kind !== 'secret') {
-        const now = lockFor(seen.facts, request.fields, await this.observedFacts(), held.probed === true);
+        // At the write, any act of the ferret on a page since the card was raised voids a page's proof as well.
+        const now = lockFor(seen.facts, request.fields, {
+          observed: await this.observedFacts(),
+          probed: held.probed === true,
+          submitted,
+          steered: this.tainted(request.sessionId, Date.parse(request.raisedAt)),
+        });
         const lock = request.lock === undefined ? now : longerLock(request.lock, now);
         held.request = { ...held.request, lock };
         hold = await this.holdFor(request, held.names, lock.seconds * 1000);
@@ -1091,6 +1103,14 @@ export class InputRequestService {
     } catch {
       // A fact not kept is a fact not kept: the delivery already happened.
     }
+  }
+
+  /**
+   * Whether the ferret could have steered a page: it ran a page script in this session, or drove a page since `since`.
+   * With no observer wired nothing is known, so every page counts as steered (the lock stays long).
+   */
+  private tainted(sessionId: string, since: number): boolean {
+    return this.deps.observer?.tainted(sessionId, 'browser', since) ?? true;
   }
 
   /** Every saved login's observed facts, for the lock; none when the store cannot be read (the lock stays long). */
@@ -1313,7 +1333,14 @@ export class InputRequestService {
     // A dummy probe was about the node the card first showed: a redrawn card earns its lock again without it.
     held.probed = false;
     const lock =
-      request.lock === undefined ? undefined : lockFor(seen.facts, request.fields, await this.observedFacts(), false);
+      request.lock === undefined
+        ? undefined
+        : lockFor(seen.facts, request.fields, {
+            observed: await this.observedFacts(),
+            probed: false,
+            submitted: request.submit !== 'agent',
+            steered: this.tainted(request.sessionId, Date.parse(request.raisedAt)),
+          });
     const { pictured: _pictured, ...rest } = request;
     held.request = {
       ...rest,

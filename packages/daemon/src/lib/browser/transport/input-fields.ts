@@ -100,6 +100,8 @@ export interface InputablePage {
   /** Playwright's page events: the dummy probe listens for any request while it runs. */
   on?(event: 'request', listener: () => void): unknown;
   off?(event: 'request', listener: () => void): unknown;
+  /** How many WebSockets the page holds open (the worker tracks them): the probe never types where one is. */
+  openSockets?(): number;
 }
 
 /** How the page's DevTools sessions are reached. */
@@ -303,7 +305,8 @@ export async function readInputText(subject: InputSubject): Promise<string> {
   ];
   if (typeof markup !== 'string' || parts.some(part => part.length > BROWSER_INPUT_TEXT_MAX_CHARS))
     throw new Error(REFUSALS.noDocument);
-  return parts.join('\n');
+  // The title and the address too: a page can echo a value into either (`document.title`, `history.replaceState`).
+  return [...parts, await titleOf(subject.page), subject.page.url()].join('\n');
 }
 
 async function titleOf(page: InputablePage): Promise<string> {
@@ -881,6 +884,20 @@ export type BrowserInputProbeOutcome = 'hidden' | 'shown' | 'aborted';
 const VALUE_OF = 'function () { return typeof this.value === "string" ? this.value : null; }';
 
 /**
+ * Empties a field the native way when Backspace did not: the element prototype's own value setter (not one the page
+ * defined), then an `input` event so a framework's state follows. Run in the trusted world.
+ */
+const CLEAR_VALUE =
+  'function () { const p = this instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; const set = Object.getOwnPropertyDescriptor(p, "value")?.set; if (set) set.call(this, ""); this.dispatchEvent(new Event("input", { bubbles: true })); }';
+
+/** Whether a field's document is the top window's: asked in the trusted world. */
+const IN_MAIN_FRAME =
+  'function () { const view = this.ownerDocument && this.ownerDocument.defaultView; return view !== null && view === view.top; }';
+
+/** How long the probe waits before its second look: an echo a page draws after a short debounce is still seen. */
+export const PROBE_SECOND_LOOK_MS = 750;
+
+/**
  * Selects what a field holds and deletes it with a Backspace key: an edit the page sees as one (a framework's own
  * state follows), never Enter, never a blur.
  */
@@ -891,78 +908,91 @@ async function emptyField(session: InputCdpSession, objectId: string): Promise<v
   await session.send('Input.dispatchKeyEvent', { type: 'keyUp', ...key });
 }
 
+/** What a field holds now, from the trusted world; `undefined` when it is not a text field. */
+async function fieldValue(session: InputCdpSession, objectId: string): Promise<string | undefined> {
+  const value = objectOf(
+    objectOf(
+      await ask(session, 'Runtime.callFunctionOn', { objectId, functionDeclaration: VALUE_OF, returnByValue: true }),
+    ).result,
+  ).value;
+  return typeof value === 'string' ? value : undefined;
+}
+
+/** Empties a field and proves it: Backspace first, the native setter if that did not do it. Whether it is empty now. */
+async function cleared(session: InputCdpSession, objectId: string): Promise<boolean> {
+  await emptyField(session, objectId);
+  if ((await fieldValue(session, objectId)) === '') return true;
+  await session.send('Runtime.callFunctionOn', { objectId, functionDeclaration: CLEAR_VALUE, returnByValue: true });
+  return (await fieldValue(session, objectId)) === '';
+}
+
 /**
- * THE DUMMY PROBE (docs/input-requests.md, "How long the lock lasts"): whether a password field shows what is typed
- * into it ANYWHERE a ferret's read of the page could see. The page is checked against `expected` exactly as a write
- * is, then into each named field goes a throwaway value that cannot pass any validation (`dummy`), typed the way the
- * owner's value will be; everything a read could return (`readInputText`) is searched for it; and each field is
- * emptied again with Backspace. Never Enter, never a blur, never a code field (the caller does not name one).
+ * THE DUMMY PROBE (docs/input-requests.md, "How long the lock lasts"): whether ONE password field shows what is typed
+ * into it in the page's text. The page is checked against `expected` exactly as a write is; the field must be in the
+ * page's main frame and EMPTY (a value someone put there is never wiped); the page must hold no WebSocket open (a
+ * socket can carry every keystroke unseen) and the browser must be able to report requests. Then a throwaway value
+ * (`dummy`) is typed the way the owner's value will be, the page's text is searched for it at once and again after
+ * {@link PROBE_SECOND_LOOK_MS}, and the field is emptied and proven empty. Never Enter, never another field.
  *
- * `aborted` — and so the full lock — whenever anything is off: the page fired ANY request or showed another document
- * while the probe ran (a field that talks to its server as you type), a field would not empty, the page could not be
- * read whole, or no request listener exists to tell. Only a clean run answers `hidden` or `shown`.
+ * `aborted` (and so the full lock) whenever anything is off: any request or another document while it ran, a socket
+ * opened, a field that would not empty, a page that could not be read whole. The test value is never left behind
+ * when the field can be emptied at all; the owner's own write selects and replaces whatever is there.
  */
 export async function probeInputFields(
   subject: InputSubject,
   expected: BrowserInputFacts,
   fieldIds: readonly string[],
   dummy: string,
+  wait: (ms: number) => Promise<void> = async ms => await new Promise(resolve => setTimeout(resolve, ms)),
 ): Promise<BrowserInputProbeOutcome> {
   const { page } = subject;
-  if (page.isClosed() || page.on === undefined || page.off === undefined || fieldIds.length === 0) return 'aborted';
+  const [field] = fieldIds;
+  if (page.isClosed() || page.on === undefined || page.off === undefined || page.openSockets === undefined)
+    return 'aborted';
+  if (field === undefined || fieldIds.length !== 1 || page.openSockets() > 0) return 'aborted';
   let requests = 0;
   const heard = (): void => {
     requests += 1;
   };
   page.on('request', heard);
-  const typed: { readonly session: InputCdpSession; readonly objectId: string }[] = [];
+  let typed: { readonly session: InputCdpSession; readonly objectId: string } | undefined;
   try {
-    const known = await checkUnchanged(
-      subject,
-      expected,
-      fieldIds.map(field => ({ field, text: dummy })),
-    );
-    const worlds = new IsolatedWorlds();
-    for (const field of fieldIds) {
-      const target = known.get(field);
-      if (target === undefined) return 'aborted';
-      const { backendNodeId } = target.field;
-      const trusted = await worlds.resolve(target.session, backendNodeId);
-      await target.session.send('DOM.focus', { backendNodeId });
-      await target.session.send('Runtime.callFunctionOn', {
-        objectId: trusted.objectId,
-        functionDeclaration: SELECT_CONTENTS,
-        returnByValue: true,
-      });
-      await proveFocus(subject, expected, target.session, trusted.rootContextId, backendNodeId);
-      typed.push({ session: target.session, objectId: trusted.objectId });
-      await target.session.send('Input.insertText', { text: dummy });
+    const known = await checkUnchanged(subject, expected, [{ field, text: dummy }]);
+    const target = known.get(field);
+    if (target === undefined) return 'aborted';
+    const { backendNodeId } = target.field;
+    const trusted = await new IsolatedWorlds().resolve(target.session, backendNodeId);
+    // Only a field of the main frame: the text the probe reads is the main frame's.
+    const main = objectOf(
+      objectOf(
+        await ask(target.session, 'Runtime.callFunctionOn', {
+          objectId: trusted.objectId,
+          functionDeclaration: IN_MAIN_FRAME,
+          returnByValue: true,
+        }),
+      ).result,
+    ).value;
+    if (main !== true) return 'aborted';
+    if ((await fieldValue(target.session, trusted.objectId)) !== '') return 'aborted';
+    await target.session.send('DOM.focus', { backendNodeId });
+    await proveFocus(subject, expected, target.session, trusted.rootContextId, backendNodeId);
+    typed = { session: target.session, objectId: trusted.objectId };
+    await target.session.send('Input.insertText', { text: dummy });
+    let shown = (await readInputText(subject)).includes(dummy);
+    if (!shown) {
+      await wait(PROBE_SECOND_LOOK_MS);
+      shown = (await readInputText(subject)).includes(dummy);
     }
-    const shown = (await readInputText(subject)).includes(dummy);
-    for (const field of typed) await emptyField(field.session, field.objectId);
-    typed.length = 0;
-    for (const field of fieldIds) {
-      const target = known.get(field);
-      if (target === undefined) return 'aborted';
-      const trusted = await worlds.resolve(target.session, target.field.backendNodeId);
-      const value = objectOf(
-        objectOf(
-          await ask(target.session, 'Runtime.callFunctionOn', {
-            objectId: trusted.objectId,
-            functionDeclaration: VALUE_OF,
-            returnByValue: true,
-          }),
-        ).result,
-      ).value;
-      if (value !== '') return 'aborted';
-    }
-    if ((await navigationIdOf(await subject.cdp.page())) !== expected.navigationId || requests > 0) return 'aborted';
+    const empty = await cleared(typed.session, typed.objectId);
+    if (empty) typed = undefined;
+    if (!empty || requests > 0 || page.openSockets() > 0) return 'aborted';
+    if ((await navigationIdOf(await subject.cdp.page())) !== expected.navigationId) return 'aborted';
     return shown ? 'shown' : 'hidden';
   } catch {
     return 'aborted';
   } finally {
     // A probe that stopped part way still empties what it typed, best effort; the owner's write selects and replaces.
-    for (const field of typed) await emptyField(field.session, field.objectId).catch(() => undefined);
+    if (typed !== undefined) await cleared(typed.session, typed.objectId).catch(() => false);
     page.off('request', heard);
   }
 }

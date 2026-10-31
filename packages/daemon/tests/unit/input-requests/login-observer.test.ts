@@ -359,3 +359,17 @@ describe('each fact is decided at its own moment', () => {
     should(facts(w.seen)).not.have.property('noEchoAfterSubmit');
   });
 });
+
+describe('whether the ferret could have steered a surface, for the lock', () => {
+  it('should count a page script ever run, an act since a time, and an unreadable time', () => {
+    const w = world({});
+    should(w.observer.tainted('s1', 'browser', 0)).be.false();
+    w.observer.acted('s1', 'terminal');
+    should(w.observer.tainted('s1', 'terminal', DELIVERED)).be.true();
+    should(w.observer.tainted('s1', 'terminal', DELIVERED + 1)).be.false();
+    should(w.observer.tainted('s1', 'browser', Number.NaN)).be.true();
+    w.observer.acted('s1', 'browser', true);
+    should(w.observer.tainted('s1', 'browser', Number.POSITIVE_INFINITY)).be.true();
+    should(w.observer.tainted('s1', 'terminal', Number.POSITIVE_INFINITY)).be.false();
+  });
+});
