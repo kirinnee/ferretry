@@ -1,14 +1,14 @@
 /**
  * Screenshots and checks for the cards waiting for the owner's try, as the Inbox shows them: the list with a to-test
- * item among the agenda items, that item held mid-swipe RIGHT (Done) and LEFT (Not good) with nothing drawn over it
- * naming either, and the Not good reason box. Phone 390 and desktop 1440, Studio light and dark.
+ * item in its own To test section, that item held mid-swipe RIGHT (Done) and LEFT (Not good) with the answer named
+ * (icon + word) in the area it uncovers, and the Not good reason box. Phone 390 and desktop 1440, Studio light and dark.
  *
  *   bun harness/to-test-inbox-screenshot.ts [outDir] [series]   # writes <outDir>/<series>-<name>-<phone|desktop>-<theme>.png
  *
  * It bundles `inbox-page.tsx` (the real `AgendaInboxPage`, invented data, `?view=to-test`), serves it on an ephemeral
  * loopback port, drives it with REAL touch input (the swipe is touch only), and FAILS (after writing every picture)
  * when: a page scrolls sideways; the item lacks its title, release or How to test steps; the held drag does not read as
- * the answer it would send; any teaching text is drawn; a swipe past the threshold does not send Done; or the Not good
+ * the answer it would send; the uncovered area does not name the answer; a swipe past the threshold does not send Done; or the Not good
  * reason box does not open. A held drag is cancelled, so nothing is sent by it.
  */
 
@@ -149,6 +149,7 @@ const rowOf = (page: Page) => page.locator('[data-to-test]').first();
 
 /** A finger on the row's meta line, dragged by `dx`; the caller lets go or cancels. */
 const hold = async (page: Page, client: CDPSession, dx: number): Promise<{ x: number; y: number }> => {
+  await rowOf(page).scrollIntoViewIfNeeded();
   const grip = await rowOf(page).locator('.fy-totest__meta').boundingBox();
   if (grip === null) return fail('to-test: the row has no place to grab');
   const x = grip.x + 20;
@@ -184,6 +185,17 @@ for (const form of ['phone', 'desktop'] as const) {
       `${form} ${theme}: the row lacks its How to test steps`,
     );
     check((await list.locator('[data-to-test]').count()) === 2, `${form} ${theme}: not both to-test rows are listed`);
+    check(
+      (await list.locator('[data-agenda-section="to-test"] [data-to-test]').count()) === 2,
+      `${form} ${theme}: the to-test rows are not in their own To test section`,
+    );
+    const gap = await row.evaluate(element => {
+      const title = element.querySelector('[data-to-test-title]')?.getBoundingClientRect();
+      const meta = element.querySelector('.fy-totest__meta')?.getBoundingClientRect();
+      return title === undefined || meta === undefined ? 999 : meta.top - title.bottom;
+    });
+    check(gap <= 12, `${form} ${theme}: ${gap}px between the title and the meta line`);
+    await list.locator('[data-agenda-section="to-test"]').evaluate(el => el.scrollIntoView({ block: 'start' }));
     await shot(list, 'list', form, theme);
 
     // Mid-swipe both ways: what letting go would do is on the row as data, never drawn over it.
@@ -198,9 +210,10 @@ for (const form of ['phone', 'desktop'] as const) {
           (await row.getAttribute('data-swipe-answer')) === aim,
         `${form} ${theme} ${name}: the drag does not read as ${aim}`,
       );
+      const reveal = row.locator(`[data-to-test-reveal="${direction}"]`);
       check(
-        (await row.locator('.fy-totest__stamp, [data-swipe-stamp]').count()) === 0,
-        `${form} ${theme} ${name}: a banner names the answer mid-drag`,
+        (await reveal.isVisible()) && (await reveal.textContent())?.trim() === aim,
+        `${form} ${theme} ${name}: the uncovered area does not name ${aim}`,
       );
       await shot(list, name, form, theme);
       await touch(client, 'touchCancel');

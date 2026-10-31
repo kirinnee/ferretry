@@ -84,7 +84,20 @@ const rowOf = (root: HTMLElement, id: string): HTMLElement =>
   );
 
 describe('Inbox — cards waiting for a try', () => {
-  it('lists each to-test card under Needs you with its title, release and How to test steps', async () => {
+  it('draws them in a To test section of their own, after Needs you, so they can be batched', async () => {
+    const { root } = await open();
+    const sections = [...root.querySelectorAll<HTMLElement>('[data-agenda-section]')].map(section =>
+      section.getAttribute('data-agenda-section'),
+    );
+    expect(sections).toEqual(['needs-you', 'to-test']);
+    const section = must(root.querySelector<HTMLElement>('[data-agenda-section="to-test"]'), 'the To test section');
+    expect(section.querySelector('h2')?.textContent).toContain('To test');
+    expect(section.querySelector('.fy-inbox-section__count')?.textContent).toBe('2');
+    expect(section.querySelectorAll('[data-to-test]')).toHaveLength(2);
+    expect(root.querySelector('[data-agenda-section="needs-you"]')?.querySelector('[data-to-test]') ?? null).toBeNull();
+  });
+
+  it('lists each to-test card with its title, release and How to test steps', async () => {
     const { root } = await open();
     const row = rowOf(root, 'F22');
     expect(row.querySelector('[data-to-test-title]')?.textContent).toBe('Try the board');
@@ -175,18 +188,20 @@ const drag = async (row: HTMLElement, dx: number, release: boolean): Promise<voi
 };
 
 describe('Inbox — swiping a card waiting for a try', () => {
-  it('reads a right drag as Done and a left drag as Not good, mid-swipe, without drawing the word', async () => {
+  it('reads a right drag as Done and a left drag as Not good, mid-swipe, and names the answer in the area it uncovers', async () => {
     const { root } = await open({ phone: true });
     const row = rowOf(root, 'F22');
     await drag(row, 200, false);
     expect(row.getAttribute('data-swipe-direction')).toBe('right');
     expect(row.getAttribute('data-swipe-answer')).toBe('Done');
+    expect(row.querySelector('[data-to-test-reveal="right"]')?.textContent).toBe('Done');
     await interact(() =>
       must(row.querySelector('.fy-totest__meta'), 'grip').dispatchEvent(pointer('pointercancel', 300)),
     );
     await drag(row, -200, false);
     expect(row.getAttribute('data-swipe-direction')).toBe('left');
     expect(row.getAttribute('data-swipe-answer')).toBe('Not good');
+    expect(row.querySelector('[data-to-test-reveal="left"]')?.textContent).toBe('Not good');
   });
 
   it('a right swipe past the threshold is Done', async () => {

@@ -3,14 +3,14 @@
  *
  * - SWIPE RIGHT IS DONE, LEFT IS NOT GOOD, the same sideways swipe the agenda deck has (touch only, decided after the
  *   same slop, committed past the same threshold, never started on something the reader presses or inside a sideways
- *   scroller). Nothing is drawn naming the answer; what letting go would do is kept as `data-swipe-*`.
+ *   scroller). What letting go would do is kept as `data-swipe-*` and named (icon + word) in the area the row uncovers.
  * - THE BUTTONS ARE THE SAME TWO ANSWERS for a mouse, a keyboard and a screen reader.
  * - NOTHING CLOSES A CARD HERE THAT THE BOARD DOES NOT: both answers go through `useBoardAnswers`, the Board's own flow.
  *   Done moves the card forward at once; Not good opens the Board's reason box and reopens the card with the owner's
  *   words as the ask.
  */
 
-import { Check, ThumbsDown } from 'lucide-react';
+import { Check, ThumbsDown, X } from 'lucide-react';
 import { type PointerEvent, useMemo, useRef, useState } from 'react';
 import { Spinner } from '../../components/spinner.tsx';
 import { swipeIntent, swipeThreshold } from '../../lib/agenda-inbox.ts';
@@ -188,6 +188,14 @@ function ToTestRow({
       data-swipe-answer={direction === null ? undefined : ANSWER_WORD[direction]}
       data-to-test={row.key}
     >
+      <span aria-hidden="true" className="fy-totest__reveal" data-side="right" data-to-test-reveal="right">
+        <Check size={16} />
+        Done
+      </span>
+      <span aria-hidden="true" className="fy-totest__reveal" data-side="left" data-to-test-reveal="left">
+        Not good
+        <X size={16} />
+      </span>
       <div
         className="fy-totest__surface"
         data-dragging={swipe.intent === null ? undefined : ''}

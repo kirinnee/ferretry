@@ -1218,6 +1218,28 @@
 .fy-totest[data-swipe-committed] {
   filter: saturate(1.4);
 }
+/* The area a swipe uncovers: the answer letting go would give, in the Done / Not good tones. */
+.fy-totest__reveal {
+  position: absolute;
+  inset: 0 auto 0 0;
+  display: none;
+  align-items: center;
+  gap: var(--gap-xs);
+  padding: 0 var(--gap-md);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-strong);
+}
+.fy-totest__reveal[data-side='left'] {
+  inset: 0 0 0 auto;
+}
+.fy-totest[data-swipe-direction='right'] .fy-totest__reveal[data-side='right'] {
+  display: flex;
+  color: var(--ok);
+}
+.fy-totest[data-swipe-direction='left'] .fy-totest__reveal[data-side='left'] {
+  display: flex;
+  color: var(--err);
+}
 .fy-totest__surface {
   display: flex;
   min-width: 0;
@@ -1293,4 +1315,9 @@
 }
 .fy-totest__actions .kt-btn {
   min-height: 44px;
+}
+/* The title is a link, so a touch screen floors it at 44px and leaves a gap under it; the card's own Done / Not good buttons are its targets. */
+:root .fy-totest a.fy-totest__title {
+  min-height: 0;
+  min-width: 0;
 }

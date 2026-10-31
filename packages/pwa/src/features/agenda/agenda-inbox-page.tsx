@@ -1195,18 +1195,17 @@ export function AgendaInboxPage({
         {sections.stopped.length === 0 ? null : (
           <Section env={env} groups={sections.stopped} id="stopped" title="Stopped on you" />
         )}
-        {sections.needsYou.length === 0 && toTestRows.length === 0 ? null : (
+        {sections.needsYou.length === 0 ? null : (
+          <Section env={env} groups={sections.needsYou} id="needs-you" title="Needs you" />
+        )}
+        {toTestRows.length === 0 ? null : (
           <Section
             env={env}
-            extra={
-              toTestRows.length === 0 ? null : (
-                <ToTestList answers={toTestAnswers} now={now} onNavigate={onNavigate} rows={toTestRows} />
-              )
-            }
+            extra={<ToTestList answers={toTestAnswers} now={now} onNavigate={onNavigate} rows={toTestRows} />}
             extraCount={toTestRows.length}
-            groups={sections.needsYou}
-            id="needs-you"
-            title="Needs you"
+            groups={[]}
+            id="to-test"
+            title="To test"
           />
         )}
         {sections.withFerrets.length === 0 ? null : (
