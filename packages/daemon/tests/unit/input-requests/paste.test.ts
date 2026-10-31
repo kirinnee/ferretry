@@ -401,3 +401,31 @@ describe('a paste after a daemon restart', () => {
     should(restarted.writes).eql([]);
   });
 });
+
+describe('what the security review found about pastes approved in advance', () => {
+  const RULE = { from: { kind: 'command', program: 'vercel' }, to: { kind: 'terminal', program: 'vercel' } } as const;
+  const OWNS = { kind: 'owner', actor: { kind: 'host' } } as const;
+
+  it("should spend the rule's use when the write may have typed, never give it back", async () => {
+    const w = await world();
+    await w.rules.create(OWNS, { ...RULE, count: 1 });
+    await w.capture();
+    w.typed.result = 'uncertain';
+
+    await w.service.raise(SESSION, PASTE);
+    for (let tick = 0; tick < 10; tick += 1) await Promise.resolve();
+
+    should(w.rules.reserve(SESSION, { kind: 'command', program: 'vercel' }, VERCEL)).be.undefined();
+  });
+
+  it('should leave the card for the owner when the terminal shows what is typed, whatever the rule says', async () => {
+    const w = await world({ facts: { ...VERCEL, echo: 'on' } });
+    await w.rules.create(OWNS, RULE);
+    await w.capture();
+
+    const view = await w.service.raise(SESSION, PASTE);
+
+    should(view.state).equal('pending');
+    should(w.writes).eql([]);
+  });
+});

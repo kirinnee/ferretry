@@ -120,13 +120,18 @@ value comes from the copy (`InputRaise.source`), so the card, the daemon-observe
   reading the terminal as tmux names it (`pane_current_command`, at most 15 characters on Linux). A match
   pastes at once, still as one guarded write, with the card raised and closed so it shows in the log, and the
   audit actor is the rule. A rule's use is taken synchronously, so two pastes can never both spend its last
-  use; a write that refuses gives the use back and leaves the card for the owner.
+  use. A write that typed nothing gives the use back and leaves the card for the owner; a write that may have
+  typed (uncertain) spends it. A use is recorded in memory even when the rules file cannot be written.
+- **Only where typing is hidden.** Nobody sees the card of a pre-approved paste, so a rule pastes unasked only
+  into a terminal with echo off (or a page's password field). Anywhere the value would show on screen, the card
+  waits for the owner even under a matching rule.
 - **The secret store is never written by a rule** unless that rule names the exact secret NAME. Pasting into
   the store is the next phase (SC2b); until then a `secret:` rule matches nothing.
 - **A plan**: `secure.preapprove` raises ONE card listing the pastes the agent plans, each with its route and
   the agent's reason (shown as its words). The owner allows some or all with `fy copy plan approve <id> 1 3`
   (none declines); each allowed item becomes a rule for that session allowing one paste until the plan's
-  expiry (two hours by default). Closing the card approves nothing. Plans live in RAM: a restart forgets them.
+  expiry, which the card states (two hours by default, a day at most: a longer route is the owner's to add as a
+  rule). Two answers arriving together make the rules once. Closing the card approves nothing. Plans live in RAM: a restart forgets them.
 - **The rules file** (`<state>/secure-copy/rules.json`) holds routes and counts, never a value. One that cannot
   be read is NO rules: every paste then asks the owner.
 
@@ -138,6 +143,11 @@ value comes from the copy (`InputRaise.source`), so the card, the daemon-observe
 - **Masking is best effort.** A value printed differently (cut, wrapped, encoded) is not recognised. A
   fragment of the value in a failed command's stderr is not masked.
 - **`clean` is not a proof.** The transcript check reads the file's end and matches the value whole.
+- **Owner-only is an honest-client rule.** Allowing a paste, adding a rule and answering a plan refuse a caller
+  that says it is a ferret, as every route under the admin token does ([input requests](input-requests.md)). A
+  ferret that clears its own session variables and reads the admin token is taken for the owner, and since
+  allowing a paste needs no value and no terminal, that is one command. It gains no more than the
+  [secrets](secrets.md) boundary already gives it; it is said here so nobody reads "owner only" as stronger.
 - **A rule trusts a program's name.** tmux reports the foreground command's name, so a program named `vercel`
   that the agent wrote itself matches a `terminal:vercel` rule. Approve routes into programs you know the
   ferret is running, and prefer a count or an expiry.

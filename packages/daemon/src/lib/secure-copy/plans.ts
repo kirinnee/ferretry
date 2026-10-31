@@ -43,6 +43,8 @@ export interface CopyPlanPorts {
 
 export class CopyPlanService {
   private readonly plans = new Map<string, CopyPlan>();
+  /** Plans an answer is being recorded for, so a double tap or a retry cannot make their rules twice. */
+  private readonly answering = new Set<string>();
 
   constructor(private readonly ports: CopyPlanPorts) {}
 
@@ -62,7 +64,7 @@ export class CopyPlanService {
     const expiresAt = new Date(now + (expiresInSeconds ?? COPY_PLAN_DEFAULT_LIFETIME_SECONDS) * 1000).toISOString();
     const card = await this.ports.agenda.raise(sessionId, {
       planId: id,
-      ask: `Allow ${items.length === 1 ? 'this paste' : `these ${String(items.length)} pastes`} without asking each time?`,
+      ask: `Allow ${items.length === 1 ? 'this paste' : `these ${String(items.length)} pastes`} once each, without asking, until ${expiresAt}?`,
       context: items
         .map((item, index) => `${String(index + 1)}. ${routeOf(item.from, item.to)}. The agent says: ${item.why}`)
         .join('\n'),
@@ -105,17 +107,23 @@ export class CopyPlanService {
     if (plan === undefined || plan.sessionId !== sessionId)
       throw new SecureCopyError('not_found', 'there is no such plan waiting (a daemon restart forgets plans)');
     if (plan.state !== 'pending') throw new SecureCopyError('conflict', `the plan is already ${plan.state}`);
+    if (this.answering.has(planId)) throw new SecureCopyError('conflict', 'the plan is already being answered');
     const chosen = [...new Set(indices)].sort((a, b) => a - b);
     if (chosen.some(index => index >= plan.items.length))
       throw new SecureCopyError('bad_request', `the plan has ${String(plan.items.length)} items`);
-    if (chosen.length > 0)
-      await this.ports.rules.fromPlan(
-        caller,
-        sessionId,
-        planId,
-        chosen.map(index => plan.items[index] as CopyPlanItem),
-        Date.parse(plan.expiresAt),
-      );
+    this.answering.add(planId);
+    try {
+      if (chosen.length > 0)
+        await this.ports.rules.fromPlan(
+          caller,
+          sessionId,
+          planId,
+          chosen.map(index => plan.items[index] as CopyPlanItem),
+          Date.parse(plan.expiresAt),
+        );
+    } finally {
+      this.answering.delete(planId);
+    }
     const settled: CopyPlan =
       chosen.length === 0 ? { ...plan, state: 'declined' } : { ...plan, state: 'approved', approved: chosen };
     this.plans.set(planId, settled);

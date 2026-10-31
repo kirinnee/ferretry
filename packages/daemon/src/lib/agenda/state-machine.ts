@@ -39,13 +39,18 @@ import {
 /** Agent-raised requests are capped separately so automatic sources retain board capacity. */
 export const MAX_AGENT_AGENDA_PER_SESSION = 10;
 
-export type DaemonAgendaCause =
-  | 'source-reconciliation'
-  | 'warden-escalation'
-  | 'system'
-  | 'harness-prompt'
-  | 'input-request'
-  | 'secure-copy';
+/** Every cause the daemon raises an item for: ONE list, so the type and the ledger's parser cannot disagree. */
+export const DAEMON_AGENDA_CAUSES = [
+  'source-reconciliation',
+  'warden-escalation',
+  'system',
+  'harness-prompt',
+  'input-request',
+  'secure-copy',
+] as const;
+export type DaemonAgendaCause = (typeof DAEMON_AGENDA_CAUSES)[number];
+const isDaemonAgendaCause = (value: unknown): value is DaemonAgendaCause =>
+  (DAEMON_AGENDA_CAUSES as readonly unknown[]).includes(value);
 
 /**
  * Provenance is a tagged value, not a user-supplied collection of nullable fields. The daemon
@@ -796,16 +801,7 @@ function parseAgendaActor(value: unknown): AgendaActor | null {
   ) {
     return { kind: 'agent', sessionId: raw.sessionId, name: raw.name };
   }
-  if (
-    raw.kind === 'daemon' &&
-    (raw.cause === 'source-reconciliation' ||
-      raw.cause === 'warden-escalation' ||
-      raw.cause === 'system' ||
-      raw.cause === 'harness-prompt' ||
-      raw.cause === 'input-request')
-  ) {
-    return { kind: 'daemon', cause: raw.cause };
-  }
+  if (raw.kind === 'daemon' && isDaemonAgendaCause(raw.cause)) return { kind: 'daemon', cause: raw.cause };
   return null;
 }
 

@@ -45,12 +45,19 @@ export type PasteRuleCaller =
 export class PasteRuleService implements InputPasteRules {
   private rules: PasteRule[] = [];
   private loaded = false;
+  /** Settles when the store has been read: a change made before then would be computed from nothing. */
+  private readonly ready: Promise<void>;
+  private markReady: () => void = () => undefined;
   /** Rules whose count a paste has taken and not yet spent or given back. */
   private readonly reserved = new Map<string, number>();
   /** Every write, one after another, each computed from the rules as the previous one left them. */
   private writes: Promise<unknown> = Promise.resolve();
 
-  constructor(private readonly ports: PasteRulePorts) {}
+  constructor(private readonly ports: PasteRulePorts) {
+    this.ready = new Promise(resolve => {
+      this.markReady = resolve;
+    });
+  }
 
   /** Reads the store once, at start. Damage is no rules, said once. */
   async load(): Promise<void> {
@@ -63,11 +70,13 @@ export class PasteRuleService implements InputPasteRules {
       );
     }
     this.loaded = true;
+    this.markReady();
   }
 
   /** Every rule still in force. Owner only. */
   list(caller: PasteRuleCaller): readonly PasteRule[] {
     requireOwner(caller);
+    if (!this.loaded) throw new SecureCopyError('unavailable', 'the rules are still being read; try again in a moment');
     this.purge();
     return [...this.rules];
   }
@@ -75,6 +84,7 @@ export class PasteRuleService implements InputPasteRules {
   /** The owner approves a route in advance. */
   async create(caller: PasteRuleCaller, request: PasteRuleCreate): Promise<PasteRule> {
     const owner = requireOwner(caller);
+    await this.ready;
     this.purge();
     if (this.rules.length >= COPY_MAX_RULES)
       throw new SecureCopyError('capacity', `there are already ${String(COPY_MAX_RULES)} rules; remove one first`);
@@ -108,6 +118,7 @@ export class PasteRuleService implements InputPasteRules {
     expiresAt: number,
   ): Promise<readonly PasteRule[]> {
     const owner = requireOwner(caller);
+    await this.ready;
     this.purge();
     if (this.rules.length + items.length > COPY_MAX_RULES)
       throw new SecureCopyError(
@@ -136,6 +147,7 @@ export class PasteRuleService implements InputPasteRules {
   /** The owner takes a rule back. Unknown is not found; a rule a paste is spending right now goes all the same. */
   async revoke(caller: PasteRuleCaller, id: string): Promise<void> {
     requireOwner(caller);
+    await this.ready;
     if (!this.rules.some(rule => rule.id === id)) throw new SecureCopyError('not_found', 'there is no such rule');
     await this.persist(rules => rules.filter(rule => rule.id !== id));
   }
@@ -164,16 +176,20 @@ export class PasteRuleService implements InputPasteRules {
   }
 
   /** The use stays taken until the store has recorded it, so a paste racing the write cannot spend it twice. */
+  /**
+   * The use stays taken until it is recorded, and it is recorded in memory EVEN IF the store cannot be written: a
+   * failing disk loses the record of a use, never the use itself, so it cannot let a counted rule allow more pastes.
+   */
   spent(ruleId: string): void {
     if (this.taken(ruleId) === 0) return;
-    void this.persist(rules =>
+    const spend = (rules: readonly PasteRule[]): PasteRule[] =>
       rules.flatMap(rule => {
         if (rule.id !== ruleId) return [rule];
         const remaining = rule.remaining === undefined ? undefined : rule.remaining - 1;
         if (remaining === 0) return [];
         return [{ ...rule, used: rule.used + 1, ...(remaining === undefined ? {} : { remaining }) }];
-      }),
-    )
+      });
+    void this.persist(spend, { keepOnFailure: true })
       .catch(() => undefined)
       .finally(() => this.give(ruleId));
   }
@@ -195,12 +211,20 @@ export class PasteRuleService implements InputPasteRules {
     this.rules = this.rules.filter(rule => rule.expiresAt === undefined || Date.parse(rule.expiresAt) > now);
   }
 
-  private async persist(change: (rules: readonly PasteRule[]) => PasteRule[]): Promise<void> {
+  /**
+   * One change, computed from the rules as the previous write left them. `keepOnFailure` is for a change that only
+   * TIGHTENS (a use spent): it holds in memory even when the store cannot take it.
+   */
+  private async persist(
+    change: (rules: readonly PasteRule[]) => PasteRule[],
+    options: { readonly keepOnFailure?: boolean } = {},
+  ): Promise<void> {
     const write = this.writes.then(async () => {
       const next = change(this.rules);
       try {
         await this.ports.store.write(next);
       } catch {
+        if (options.keepOnFailure === true) this.rules = next;
         this.ports.warn('the secure copy rules could not be saved');
         throw new SecureCopyError('unavailable', 'Ferretry could not save the rules, so nothing changed');
       }

@@ -25,6 +25,7 @@ function rules(options: { readonly unreadable?: boolean; readonly failWrites?: b
   const ms = { now: Date.parse('2026-10-31T12:00:00.000Z') };
   const stored: { rules: readonly PasteRule[] | undefined } = { rules: undefined };
   const warned: string[] = [];
+  const disk = { failing: options.failWrites === true };
   let id = 0;
   const service = new PasteRuleService({
     store: {
@@ -33,7 +34,7 @@ function rules(options: { readonly unreadable?: boolean; readonly failWrites?: b
         return stored.rules;
       },
       write: async next => {
-        if (options.failWrites === true) throw new Error('disk full');
+        if (disk.failing) throw new Error('disk full');
         stored.rules = next;
       },
     },
@@ -41,7 +42,7 @@ function rules(options: { readonly unreadable?: boolean; readonly failWrites?: b
     ids: { ruleId: () => (++id).toString(16).padStart(32, '0') },
     warn: message => void warned.push(message),
   });
-  return { service, stored, warned, ms };
+  return { service, stored, warned, ms, disk };
 }
 
 const refused = async (work: Promise<unknown> | (() => unknown)): Promise<SecureCopyError> => {
@@ -233,7 +234,7 @@ describe('CopyPlanService', () => {
     should(p.cards).eql([
       {
         sessionId: 's1',
-        ask: 'Allow these 2 pastes without asking each time?',
+        ask: 'Allow these 2 pastes once each, without asking, until 2026-10-31T14:00:00.000Z?',
         context:
           '1. what gh prints → vercel in a terminal. The agent says: the deploy token\n2. what gh prints → fly in a terminal. The agent says: the fly token',
       },
@@ -377,5 +378,74 @@ describe('PasteRuleService and plans: the rest of the routes', () => {
     should(routeOf({ kind: 'clipboard', origin: 'https://github.com' }, { kind: 'secret', name: 'GH_TOKEN' })).equal(
       'the clipboard of https://github.com → the secret GH_TOKEN',
     );
+  });
+});
+
+describe('PasteRuleService and plans: what the security review found', () => {
+  it('should keep a spent use spent when the store cannot be written, so a counted rule allows no more', async () => {
+    const { service, disk } = rules();
+    await service.load();
+    const rule = await service.create(OWNER, { from: GH, to: VERCEL_TERMINAL, count: 1 });
+    disk.failing = true;
+
+    should(service.reserve('s1', GH, AT_VERCEL)).equal(rule.id);
+    service.spent(rule.id);
+    await settle();
+
+    should(service.reserve('s1', GH, AT_VERCEL)).be.undefined();
+    should(service.list(OWNER)).eql([]);
+  });
+
+  it("should not lose a spent use to an owner's change written at the same time", async () => {
+    const { service, stored } = rules();
+    await service.load();
+    const rule = await service.create(OWNER, { from: GH, to: VERCEL_TERMINAL, count: 2 });
+
+    service.reserve('s1', GH, AT_VERCEL);
+    const adding = service.create(OWNER, { from: GH, to: { kind: 'terminal', program: 'fly' } });
+    service.spent(rule.id);
+    await adding;
+    await settle();
+
+    should(stored.rules?.find(candidate => candidate.id === rule.id)).match({ remaining: 1, used: 1 });
+    should(stored.rules).have.length(2);
+  });
+
+  it('should hold every change until the store has been read, and refuse a listing before then', async () => {
+    const { service, stored } = rules();
+    stored.rules = [
+      {
+        id: 'a'.repeat(32),
+        from: GH,
+        to: VERCEL_TERMINAL,
+        used: 0,
+        createdAt: '2026-10-31T00:00:00.000Z',
+        createdBy: { kind: 'host' },
+      },
+    ];
+
+    should((await refused(() => service.list(OWNER))).code).equal('unavailable');
+    const adding = service.create(OWNER, { from: GH, to: { kind: 'terminal', program: 'fly' } });
+    await settle();
+    should(stored.rules).have.length(1);
+    await service.load();
+    await adding;
+
+    should(stored.rules).have.length(2);
+  });
+
+  it('should answer a plan once when two answers arrive together', async () => {
+    const p = plans();
+    await p.rules.load();
+    const plan = await p.service.propose('s1', PLAN_ITEMS);
+
+    const [first, second] = await Promise.allSettled([
+      p.service.approve(OWNER, 's1', plan.id, [0]),
+      p.service.approve(OWNER, 's1', plan.id, [0, 1]),
+    ]);
+
+    should(first.status).equal('fulfilled');
+    should(second).match({ status: 'rejected', reason: { code: 'conflict' } });
+    should(p.rules.list(OWNER)).have.length(1);
   });
 });

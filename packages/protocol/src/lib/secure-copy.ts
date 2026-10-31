@@ -192,6 +192,8 @@ export const COPY_MAX_RULES = 50;
 export const COPY_PLAN_MAX_ITEMS = 10;
 export const COPY_PLAN_WHY_MAX_CHARS = 140;
 export const COPY_PLAN_DEFAULT_LIFETIME_SECONDS = 7_200;
+/** The longest an agent may ask a plan's rules to last; a longer route is the owner's to add as a rule. */
+export const COPY_PLAN_MAX_LIFETIME_SECONDS = 86_400;
 
 /** A program as the daemon names it: a base name, no path. tmux reports at most 15 characters of it on Linux. */
 const ProgramSchema = z

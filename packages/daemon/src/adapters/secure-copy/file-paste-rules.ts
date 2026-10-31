@@ -8,7 +8,8 @@ const RulesDocumentSchema = z.strictObject({ v: z.literal(1), rules: z.array(Pas
 /**
  * The owner's pre-approval rules, `<state>/secure-copy/rules.json`: routes and counts, never a value. Written
  * atomically. A document that does not parse is an ERROR, not an empty store: the service then holds no rules,
- * so every paste asks the owner, rather than reading damage as "nothing approved" and overwriting what is there.
+ * so every paste asks the owner. The owner's next change writes a fresh document over the damaged one: that can
+ * only drop approvals, never add one.
  */
 export class FilePasteRuleStore implements PasteRuleStore {
   private readonly file: string;

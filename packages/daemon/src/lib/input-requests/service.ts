@@ -261,6 +261,8 @@ export class InputRequestService {
     facts: InputTargetFacts,
     submit: InputRaise['submit'],
   ): Promise<void> {
+    // With nobody looking at the card, only a target that hides what is typed is pasted unasked.
+    if (!hidesTyping(facts)) return;
     const ruleId = this.deps.rules?.reserve(held.request.sessionId, copy.from, facts);
     if (ruleId === undefined) return;
     const body: InputDeliverBody = {
@@ -269,11 +271,16 @@ export class InputRequestService {
       sealed: true,
       submit: submit === 'owner-default',
     };
+    // A use is given back only when NOTHING may have been typed; an uncertain write spends it.
+    let written = false;
     try {
-      await this.attempt(held, body, { kind: 'rule', ruleId });
+      await this.attempt(held, body, { kind: 'rule', ruleId }, typed => {
+        written = typed === 'typed' || typed === 'uncertain';
+      });
       this.deps.rules?.spent(ruleId);
     } catch {
-      this.deps.rules?.release(ruleId);
+      if (written) this.deps.rules?.spent(ruleId);
+      else this.deps.rules?.release(ruleId);
     }
   }
 
@@ -694,7 +701,13 @@ export class InputRequestService {
       throw new InputRequestError('unavailable', 'Ferretry is looking at the target again; try Send in a moment');
   }
 
-  private async attempt(held: Held, body: InputDeliverBody, by: InputActor): Promise<InputDeliverResult> {
+  private async attempt(
+    held: Held,
+    body: InputDeliverBody,
+    by: InputActor,
+    /** Told what the one write came to, the moment it returns: a caller that must know whether a value may be in the target. */
+    wrote?: (typed: TypeResult) => void,
+  ): Promise<InputDeliverResult> {
     const { request } = held;
     const fail = async (code: InputReason, error: InputRequestError): Promise<never> => {
       await this.checkFailed(held, code);
@@ -749,6 +762,7 @@ export class InputRequestService {
       const typed: TypeResult = await this.deps.target
         .type(request.sessionId, request.target, value, submitted, seen.facts)
         .catch((): TypeResult => 'uncertain');
+      wrote?.(typed);
       if (typed === 'uncertain') {
         await this.settle(hold);
         hold = undefined;
@@ -1173,6 +1187,11 @@ function auditDetail(request: InputRequest): InputAuditDetail {
 }
 
 const PASTE_TITLE = 'Wants to paste a secure copy';
+
+/** A target that does not show what is typed: a terminal with echo off, or a page's password field. */
+function hidesTyping(facts: InputTargetFacts): boolean {
+  return facts.kind === 'terminal' ? facts.echo === 'off' : facts.field.type === 'password';
+}
 
 /** A paste's ask: what is pasted and where it came from, in the daemon's words. There is nothing to type. */
 function pasteAskOf(copy: CopyMeta): string {

@@ -56,7 +56,7 @@ import {
   COPY_MAX_LIFETIME_SECONDS,
   COPY_MAX_LIVE_PER_SESSION,
   COPY_PLAN_MAX_ITEMS,
-  COPY_RULE_MAX_LIFETIME_SECONDS,
+  COPY_PLAN_MAX_LIFETIME_SECONDS,
   CopyCommandReportSchema,
   CopyHandleSchema,
   CopyMetaSchema,
@@ -595,7 +595,7 @@ export const AgentToolCallSchema = z.discriminatedUnion('tool', [
     tool: z.literal('secure.preapprove'),
     /** The pastes the agent plans, before it starts: one card, the owner ticks what it allows. */
     items: z.array(CopyPlanItemSchema).min(1).max(COPY_PLAN_MAX_ITEMS),
-    expiresInSeconds: z.number().int().min(300).max(COPY_RULE_MAX_LIFETIME_SECONDS).optional(),
+    expiresInSeconds: z.number().int().min(300).max(COPY_PLAN_MAX_LIFETIME_SECONDS).optional(),
   }),
 ]);
 export type AgentToolCall = z.infer<typeof AgentToolCallSchema>;

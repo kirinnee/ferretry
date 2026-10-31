@@ -265,3 +265,18 @@ describe('pasting, rules and plans', () => {
     should(InputActorSchema.safeParse({ kind: 'rule', ruleId: 'x' }).success).be.false();
   });
 });
+
+describe('a plan the agent asks for', () => {
+  it('should last at most a day, however long the agent asks', () => {
+    const items = [
+      { from: { kind: 'command', program: 'gh' }, to: { kind: 'terminal', program: 'vercel' }, why: 'token' },
+    ];
+
+    should(
+      AgentToolCallSchema.safeParse({ tool: 'secure.preapprove', items, expiresInSeconds: 86_400 }).success,
+    ).be.true();
+    should(
+      AgentToolCallSchema.safeParse({ tool: 'secure.preapprove', items, expiresInSeconds: 86_401 }).success,
+    ).be.false();
+  });
+});
