@@ -6,10 +6,12 @@ import {
   fieldsOf,
   initialSaveDraft,
   inputFailure,
+  observedWords,
   offersPressEnter,
   REOBSERVING,
   SAVE_TOO_SHORT,
   saveBlock,
+  saveDraftProblem,
   savedBody,
   savedOutcomeWords,
   sendBlock,
@@ -17,9 +19,9 @@ import {
   targetRef,
   titleWords,
   typedBody,
-} from '../../src/lib/input-card.ts';
-import { must } from '../support/dom.ts';
-import { NOW, offer, request, saved, withSaved } from '../support/input-fixtures.ts';
+} from '../../../src/lib/input-card.ts';
+import { must } from '../../support/dom.ts';
+import { NOW, offer, request, saved, withSaved } from '../../support/input-fixtures.ts';
 
 const DELIVERY = '11111111-1111-4111-8111-111111111111';
 const draft = (overrides: Partial<ReturnType<typeof initialSaveDraft>> = {}) => ({
@@ -212,5 +214,55 @@ describe('savedOutcomeWords', () => {
     expect(
       savedOutcomeWords({ ...result, saved: { entry: 'X', ok: false, problem: 'the vault is full' } }, 'GitHub'),
     ).toContain('the vault is full');
+  });
+});
+
+describe('what the daemon saw in a browser', () => {
+  const facts = (type: string | undefined) =>
+    request({
+      target: { kind: 'browser', key: 'app', selector: '#password' },
+      observed: {
+        kind: 'browser',
+        pageId: 'page-1',
+        origin: 'https://github.com',
+        secure: true,
+        frameOrigin: 'https://github.com',
+        navigationId: 'nav-1',
+        backendNodeId: 7,
+        field: { tag: 'input', ...(type === undefined ? {} : { type }) },
+        box: { x: 0, y: 0, w: 100, h: 20 },
+        visible: true,
+      },
+    });
+
+  it('names the origin, and says whether the field is a password field', () => {
+    expect(observedWords(facts('password'))).toEqual({
+      program: 'https://github.com',
+      echo: 'password field',
+      recognised: true,
+    });
+    expect(observedWords(facts('text'))?.echo).toBe('field');
+    expect(observedWords(facts(undefined))?.echo).toBe('field');
+  });
+});
+
+describe('the save fields', () => {
+  it('say what is wrong with a label or a handle, and nothing when saving is off', () => {
+    expect(saveDraftProblem(draft({ enabled: false, label: '' }))).toBeUndefined();
+    expect(saveDraftProblem(draft({ label: ' ' }))).toBe('Give it a label.');
+    expect(saveDraftProblem(draft({ label: 'x'.repeat(81) }))).toBe('A label is at most 80 characters.');
+    expect(saveDraftProblem(draft({ id: 'sudo kirin box' }))).toContain('uppercase letters, digits');
+    expect(saveDraftProblem(draft())).toBeUndefined();
+  });
+});
+
+describe('a send the grants refuse', () => {
+  it('says what the grant guidance says, with the daemon words after it when it gave some', () => {
+    const bare = inputFailure({ status: 403, code: 'grant_not_granted' });
+    const worded = inputFailure({ status: 403, code: 'grant_not_granted', message: 'terminal use is off' });
+
+    expect(bare.kind).toBe('refused');
+    expect(bare.definitive).toBe(true);
+    expect(worded.text).toBe(`${bare.text} terminal use is off`);
   });
 });

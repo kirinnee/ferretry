@@ -8,10 +8,11 @@ import {
   newLoginBody,
   newLoginProblem,
   parseMatch,
+  passwordProblem,
   removeTotpBody,
   replacePasswordBody,
-} from '../../src/lib/login-form.ts';
-import { login } from '../support/input-fixtures.ts';
+} from '../../../src/lib/login-form.ts';
+import { login } from '../../support/input-fixtures.ts';
 
 const draft = {
   label: 'GitHub (kirinnee)',
@@ -81,5 +82,18 @@ describe('what a row says about an entry', () => {
   it('names which secret fields exist and nothing about their values', () => {
     expect(fieldWords(login())).toEqual(['password ✓', 'no 2FA']);
     expect(fieldWords(login({ fields: { password: true, totp: true } }))).toEqual(['password ✓', '2FA ✓']);
+  });
+});
+
+describe('the sentences under the add form', () => {
+  it('says a label or a handle that will not do, before the button is pressed', () => {
+    expect(newLoginProblem({ ...draft, label: 'x'.repeat(81) }, [])).toBe('A label is at most 80 characters.');
+    expect(newLoginProblem({ ...draft, id: 'github-kirinnee' }, [])).toContain('uppercase letters, digits');
+  });
+
+  it('says a password is too short only once something is typed', () => {
+    expect(passwordProblem('')).toBeUndefined();
+    expect(passwordProblem('abc')).toBe('At least 8 characters.');
+    expect(passwordProblem('long enough')).toBeUndefined();
   });
 });

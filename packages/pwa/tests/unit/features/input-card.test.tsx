@@ -409,3 +409,37 @@ describe('cancelling', () => {
     expect(finished).toBe(1);
   });
 });
+
+describe('when the daemon refuses', () => {
+  it('says why a cancel failed and leaves the card open', async () => {
+    const view = await show(request(), () => {
+      throw Object.assign(new Error('refused'), { status: 403, code: 'grant_not_granted' });
+    });
+
+    await click(byText(view.view.container, 'button', 'Cancel request'));
+    await settle();
+
+    expect(view.q('[role="alert"]')?.textContent).toContain('switched this off');
+    expect(view.q('[data-input-settled]')).toBeNull();
+  });
+
+  it('sends nothing, and says so, when the value would press keys', async () => {
+    const view = await show(request());
+    await typeInto(view.q('[data-input-value]'), 'pass\tword');
+
+    await click(view.q('[data-input-send]'));
+
+    expect(view.calls).toEqual([]);
+    expect(view.q('[data-input-failure]')?.textContent).toContain('would press keys');
+  });
+
+  it('says what is wrong with the label or handle of a login being saved', async () => {
+    const view = await show(withSaved(saved()));
+    await typeInto(view.q('[data-input-value]'), SECRET);
+
+    await click(view.q('[data-input-save-tick]'));
+    await typeInto(view.q('[data-input-save-label]'), '');
+
+    expect(view.q('[data-input-save] [role="alert"]')?.textContent).toBe('Give it a label.');
+  });
+});

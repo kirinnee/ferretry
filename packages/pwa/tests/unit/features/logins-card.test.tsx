@@ -224,3 +224,41 @@ describe('write-only', () => {
     expect(login().fields).toEqual({ password: true, totp: false });
   });
 });
+
+describe('the add form and the rename', () => {
+  it('keeps a handle the person typed, instead of following the label', async () => {
+    const view = await show(logins({ entries: [] }));
+    await click(view.q('[data-login-add-open]'));
+
+    await typeInto(view.q('[data-login-new-id]'), 'my handle');
+    await typeInto(view.q('[data-login-new-label]'), 'GitHub (kirinnee)');
+
+    expect(must(view.q<HTMLInputElement>('[data-login-new-id]'), 'handle').value).toBe('MY_HANDLE');
+  });
+
+  it('says a handle is taken, and does not rename onto it', async () => {
+    const view = await show();
+    const github = row(view, 'GITHUB_KIRINNEE');
+
+    await click(inRow(github, '[aria-label="Rename handle of GitHub (kirinnee)"]'));
+    await typeInto(view.q('[data-login-rename-handle]'), 'sudo_kirin_box');
+
+    expect(github.textContent).toContain('SUDO_KIRIN_BOX already exists.');
+    expect(byText(github, 'button', 'Rename').hasAttribute('disabled')).toBe(true);
+  });
+
+  it('shows the refusal of a write above the list', async () => {
+    const view = await mount(
+      <LoginsCard
+        error="the vault is locked"
+        list={logins()}
+        onPut={async () => false}
+        onRename={async () => false}
+        onRemove={async () => false}
+      />,
+    );
+    mounted.push(view);
+
+    expect(view.container.querySelector('[data-testid="logins-error"]')?.textContent).toBe('the vault is locked');
+  });
+});
