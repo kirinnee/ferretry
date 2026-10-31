@@ -10263,6 +10263,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         openPage: browserService.openPage.bind(browserService),
         actOnPage: browserService.actOnPage.bind(browserService),
         closePage: browserService.closePage.bind(browserService),
+        lifecycleOnPage: browserService.lifecycleOnPage.bind(browserService),
+        adoptPage: browserService.adoptPage.bind(browserService),
         closeAll: browserService.closeAll.bind(browserService),
         stream: async (sessionId, downstream) => {
           let viewer: BrowserViewerStream | undefined;

@@ -14,6 +14,12 @@ import { z } from 'zod';
  *   cannot name — where the act allows one.
  */
 
+/** The smallest and largest viewport a page may be sized to, in CSS pixels. */
+export const BROWSER_MIN_WIDTH = 320;
+export const BROWSER_MIN_HEIGHT = 240;
+export const BROWSER_MAX_WIDTH = 1_920;
+export const BROWSER_MAX_HEIGHT = 1_200;
+
 /** A ref as a snapshot writes it: `e12`, or `f1e3` inside a frame. */
 export const BROWSER_REF_PATTERN = /^(?:f\d{1,6})?e\d{1,7}$/u;
 /** The furthest a point may be from the viewport's top-left corner, either way. */

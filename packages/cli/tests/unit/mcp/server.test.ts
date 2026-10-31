@@ -9,12 +9,14 @@ import {
   type AgentToolResult,
 } from '@ferretry/protocol';
 import should from 'should';
-import type { TerminalWait } from '../../../src/lib/agent-tools/client';
+import type { BrowserWait, TerminalWait } from '../../../src/lib/agent-tools/client';
 import { McpServer } from '../../../src/lib/mcp/server';
 import { MCP_CONFIG_TOOLS, MCP_LESSON_TOOLS, MCP_TOOLS } from '../../../src/lib/mcp/tools';
 
 function harness(
-  answer: (call: AgentToolCall | TerminalWait) => Promise<AgentToolResult> = async () => ({ summary: 'ok' }),
+  answer: (call: AgentToolCall | TerminalWait | BrowserWait) => Promise<AgentToolResult> = async () => ({
+    summary: 'ok',
+  }),
   options: {
     config?: (call: AgentConfigToolCall) => Promise<AgentConfigToolResult>;
     lessons?: (call: AgentLessonToolCall) => Promise<AgentLessonToolResult>;
@@ -22,7 +24,7 @@ function harness(
     environment?: Readonly<Record<string, string>>;
   } = {},
 ) {
-  const calls: (AgentToolCall | TerminalWait)[] = [];
+  const calls: (AgentToolCall | TerminalWait | BrowserWait)[] = [];
   const configCalls: AgentConfigToolCall[] = [];
   const lessonCalls: AgentLessonToolCall[] = [];
   const server = new McpServer(
@@ -32,6 +34,10 @@ function harness(
         return await answer(call);
       },
       wait: async wait => {
+        calls.push(wait);
+        return await answer(wait);
+      },
+      browserWait: async wait => {
         calls.push(wait);
         return await answer(wait);
       },
@@ -259,6 +265,73 @@ describe('McpServer — the tools', () => {
         content: [{ type: 'text', text: 'give "text" to wait for, or "exit": true — one of them' }],
       },
     });
+    should(tooLong).match({ result: { isError: true, content: [{ text: /^timeoutMs: /u }] } });
+  });
+
+  it('should map each page-lifecycle tool to its wire call', async () => {
+    // Arrange
+    const { calls, request } = harness();
+
+    // Act
+    await request('tools/call', toolCall('browser_dialog', { name: 'app', action: 'accept', promptText: 'yes' }));
+    await request('tools/call', toolCall('browser_tabs', { action: 'adopt', id: 'page-7', as: 'popup' }));
+    await request('tools/call', toolCall('browser_console', { name: 'app', level: 'warning', since: 4, limit: 20 }));
+    await request('tools/call', toolCall('browser_network', { name: 'app', action: 'get', id: 'r12' }));
+    await request(
+      'tools/call',
+      toolCall('browser_network', { name: 'app', action: 'list', filter: '/api', types: ['xhr', 'fetch'] }),
+    );
+    await request(
+      'tools/call',
+      toolCall('browser_emulate', {
+        name: 'app',
+        viewport: { width: 390, height: 844 },
+        media: { colorScheme: 'dark', print: false },
+        network: { offline: false, latency: 200 },
+        reset: false,
+      }),
+    );
+    await request('tools/call', toolCall('browser_emulate', { name: 'app', reset: true }));
+
+    // Assert — a false on an on-only flag, nested ones included, is read as left out
+    should(calls).deepEqual([
+      { tool: 'browser.dialog', name: 'app', action: 'accept', promptText: 'yes' },
+      { tool: 'browser.tabs', action: 'adopt', id: 'page-7', as: 'popup' },
+      { tool: 'browser.console', name: 'app', level: 'warning', since: 4, limit: 20 },
+      { tool: 'browser.network', name: 'app', action: 'get', id: 'r12' },
+      { tool: 'browser.network', name: 'app', action: 'list', filter: '/api', types: ['xhr', 'fetch'] },
+      {
+        tool: 'browser.emulate',
+        name: 'app',
+        viewport: { width: 390, height: 844 },
+        media: { colorScheme: 'dark' },
+        network: { latency: 200 },
+      },
+      { tool: 'browser.emulate', name: 'app', reset: true },
+    ]);
+  });
+
+  it('should hand browser_wait_for to the looping wait with its total budget, and refuse a bad one', async () => {
+    // Arrange
+    const { calls, request } = harness(async () => ({ summary: 'There.', matched: true }));
+
+    // Act
+    await request('tools/call', toolCall('browser_wait_for', { name: 'app', text: 'Welcome', timeoutMs: 90_000 }));
+    await request('tools/call', toolCall('browser_wait_for', { name: 'app', selector: '#done', state: 'hidden' }));
+    await request('tools/call', toolCall('browser_wait_for', { name: 'app', time: 2_000 }));
+    const none = await request('tools/call', toolCall('browser_wait_for', { name: 'app' }));
+    const tooLong = await request(
+      'tools/call',
+      toolCall('browser_wait_for', { name: 'app', text: 'x', timeoutMs: 600_000 }),
+    );
+
+    // Assert
+    should(calls).deepEqual([
+      { call: { tool: 'browser.wait_for', name: 'app', text: 'Welcome' }, totalMs: 90_000 },
+      { call: { tool: 'browser.wait_for', name: 'app', selector: '#done', state: 'hidden' }, totalMs: 10_000 },
+      { call: { tool: 'browser.wait_for', name: 'app', time: 2_000 }, totalMs: 10_000 },
+    ]);
+    should(none).match({ result: { isError: true } });
     should(tooLong).match({ result: { isError: true, content: [{ text: /^timeoutMs: /u }] } });
   });
 

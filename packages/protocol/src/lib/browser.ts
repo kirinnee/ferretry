@@ -2,6 +2,10 @@ import { z } from 'zod';
 import { SurfaceNameSchema } from './agent-tools.ts';
 import {
   BROWSER_MAX_FIND_CHARS,
+  BROWSER_MAX_HEIGHT,
+  BROWSER_MAX_WIDTH,
+  BROWSER_MIN_HEIGHT,
+  BROWSER_MIN_WIDTH,
   BROWSER_MAX_SNAPSHOT_DEPTH,
   BrowserCoordinateSchema,
   BrowserModifierSchema,
@@ -17,15 +21,13 @@ import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
 import { SECRET_REFERENCE_SOURCE } from './secrets.ts';
 import { SurfaceOpenerSchema } from './surface.ts';
 
+export { BROWSER_MAX_HEIGHT, BROWSER_MAX_WIDTH, BROWSER_MIN_HEIGHT, BROWSER_MIN_WIDTH };
+
 export const BROWSER_MAX_INSTANCES = 3;
 /** The most pages one SESSION keeps open; opening another past it is refused, never hidden. */
 export const BROWSER_MAX_PAGES = 20;
 /** The most pages the machine's one agent browser holds across every session. */
 export const BROWSER_MAX_MACHINE_PAGES = 60;
-export const BROWSER_MIN_WIDTH = 320;
-export const BROWSER_MIN_HEIGHT = 240;
-export const BROWSER_MAX_WIDTH = 1_920;
-export const BROWSER_MAX_HEIGHT = 1_200;
 export const BROWSER_MAX_PAGE_ID_LENGTH = 128;
 export const BROWSER_MAX_SELECTOR_LENGTH = 4_096;
 export const BROWSER_MAX_TEXT_LENGTH = 200_000;

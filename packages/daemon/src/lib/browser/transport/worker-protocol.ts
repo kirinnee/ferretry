@@ -1,6 +1,11 @@
 import {
   BROWSER_MAX_PAGE_ID_LENGTH,
   type BrowserChallenge,
+  BROWSER_DIALOG_MESSAGE_MAX_CHARS,
+  type BrowserDialogInfo,
+  BrowserDialogInfoSchema,
+  BrowserDialogTypeSchema,
+  type BrowserPageLifecycleReply,
   BrowserChallengeProviderSchema,
   type BrowserErrorCode,
   type BrowserPageActionSnapshot,
@@ -21,6 +26,8 @@ export const MAX_WORKER_ERROR_CHARS = 200;
 export const MAX_SCREENSHOT_BASE64_CHARS = 24 * 1024 * 1024;
 export const MAX_FRAME_BASE64_CHARS = 16 * 1024 * 1024;
 export const MAX_READ_TEXT_CHARS = 200_000;
+/** A body of 64 KiB plus its headers and log lines, with room for multi-byte text. */
+export const MAX_LIFECYCLE_TEXT_CHARS = 300_000;
 /**
  * A screenshot reply is the largest legitimate record. Anything past it plus JSON overhead is a
  * worker that has lost the protocol, and there is no resynchronization point before the newline.
@@ -168,6 +175,27 @@ export function normalizeWorkerActionSnapshot(value: unknown): WorkerSnapshotRes
 /** Text results are bounded here so no page content can grow without limit inside the daemon. */
 export function boundedReadText(value: unknown): string {
   return bounded(asRecord(value)['text'], MAX_READ_TEXT_CHARS);
+}
+
+/** The dialog a page is waiting on, if the worker reported one the wire knows. */
+export function normalizeWorkerDialog(value: unknown): BrowserDialogInfo | undefined {
+  const raw = asRecord(asRecord(value)['dialog']);
+  const dialog = BrowserDialogInfoSchema.safeParse({
+    type: raw['type'],
+    message: bounded(raw['message'], BROWSER_DIALOG_MESSAGE_MAX_CHARS),
+  });
+  return dialog.success ? dialog.data : undefined;
+}
+
+/** What a lifecycle request answers with, bounded: its text is page-derived and is scrubbed by the caller. */
+export function normalizeLifecycleReply(value: unknown): BrowserPageLifecycleReply {
+  const raw = asRecord(asRecord(value)['lifecycle']);
+  const dialogType = BrowserDialogTypeSchema.safeParse(raw['dialogType']);
+  return {
+    text: bounded(raw['text'], MAX_LIFECYCLE_TEXT_CHARS),
+    ...(typeof raw['matched'] === 'boolean' ? { matched: raw['matched'] } : {}),
+    ...(dialogType.success ? { dialogType: dialogType.data } : {}),
+  };
 }
 
 export function boundedScreenshot(value: unknown): string {

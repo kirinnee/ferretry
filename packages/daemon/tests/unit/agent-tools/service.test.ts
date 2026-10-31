@@ -1308,3 +1308,637 @@ describe('AgentToolService — takeovers and hand-overs outlive a restart', () =
     should(fresh.events.reads).equal(2);
   });
 });
+
+describe('AgentToolService — a page’s dialogs', () => {
+  it('should answer the dialog, say which kind it was, and audit it by kind and answer — never what was typed', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+    world.browser.lifecycleReplies.push({
+      reply: { text: 'accepted the prompt dialog: Your name?', dialogType: 'prompt' },
+    });
+
+    // Act
+    const answered = await world.service.call(agent, {
+      tool: 'browser.dialog',
+      name: 'app',
+      action: 'accept',
+      promptText: 'correct-horse-battery',
+    });
+
+    // Assert
+    should(answered.summary).equal('On %browser:app: accepted the prompt dialog: Your name?.');
+    should(world.browser.lifecycles).deepEqual([
+      { op: 'dialog', action: 'accept', promptText: 'correct-horse-battery' },
+    ]);
+    should(world.audit.entries.at(-1)?.detail).deepEqual({
+      tool: 'browser.dialog',
+      by: 'agent',
+      surface: '%browser:app',
+      action: 'accept',
+      promptTextLength: 21,
+      dialogType: 'prompt',
+      accepted: true,
+    });
+    should(JSON.stringify(world.audit.entries)).not.containEql('correct-horse-battery');
+  });
+
+  it('should audit a dismiss, and leave the answer out when the browser did not say what kind it was', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+
+    // Act
+    await world.service.call(agent, { tool: 'browser.dialog', name: 'app', action: 'dismiss' });
+
+    // Assert
+    should(world.browser.lifecycles).deepEqual([{ op: 'dialog', action: 'dismiss' }]);
+    should(world.audit.entries.at(-1)?.detail).deepEqual({
+      tool: 'browser.dialog',
+      by: 'agent',
+      surface: '%browser:app',
+      action: 'dismiss',
+    });
+  });
+
+  it('should mask a vault secret in a dialog message, in the answer and in a dialog that is still waiting', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+    world.redactor.values.set('sk_live_51Hx', 'STRIPE_KEY');
+    world.browser.lifecycleReplies.push({
+      reply: { text: 'dismissed the alert dialog: key sk_live_51Hx', dialogType: 'alert' },
+      dialog: { type: 'confirm', message: 'Use sk_live_51Hx?' },
+    });
+
+    // Act
+    const answered = await world.service.call(agent, { tool: 'browser.dialog', name: 'app', action: 'dismiss' });
+
+    // Assert
+    should(answered.summary).containEql('key [redacted:STRIPE_KEY]');
+    should(answered.summary).containEql('A confirm dialog is waiting on this page: "Use [redacted:STRIPE_KEY]?".');
+    should(JSON.stringify(answered)).not.containEql('sk_live_51Hx');
+  });
+
+  it('should report a waiting dialog in the result of every act on that page, scrubbed, with the way out', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+    world.redactor.values.set('hunter2', 'PW');
+    world.browser.pendingDialog = { type: 'confirm', message: 'Delete hunter2?' };
+
+    // Act
+    const clicked = await world.service.call(agent, { tool: 'browser.click', name: 'app', selector: 'button' });
+    const read = await world.service.call(agent, { tool: 'browser.read', name: 'app' });
+
+    // Assert
+    for (const result of [clicked, read]) {
+      should(result.summary).containEql('A confirm dialog is waiting on this page: "Delete [redacted:PW]?".');
+      should(result.summary).containEql('use browser.dialog with accept or dismiss');
+    }
+    should(JSON.stringify([clicked, read])).not.containEql('hunter2');
+  });
+
+  it('should say nothing of dialogs when the page has none', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+
+    // Act
+    const clicked = await world.service.call(agent, { tool: 'browser.click', name: 'app', selector: 'button' });
+
+    // Assert
+    should(clicked.summary).not.containEql('dialog');
+  });
+});
+
+describe('AgentToolService — waiting on a page', () => {
+  const open = async () => {
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+    return world;
+  };
+
+  it('should stop at once when the condition holds, and ask the browser for one slice of it', async () => {
+    // Arrange
+    const world = await open();
+    world.browser.lifecycleReplies.push({ reply: { text: 'condition met', matched: true } });
+
+    // Act
+    const result = await world.service.call(agent, { tool: 'browser.wait_for', name: 'app', text: 'Welcome' });
+
+    // Assert
+    should(result).deepEqual({ summary: 'The wait on %browser:app is over: it happened.', matched: true });
+    should(world.browser.lifecycles).deepEqual([
+      { op: 'wait', condition: { kind: 'text', text: 'Welcome' }, timeoutMs: 1_000 },
+    ]);
+  });
+
+  it('should ask for each kind of condition in the shape the browser knows', async () => {
+    // Arrange
+    const world = await open();
+    for (let call = 0; call < 6; call += 1)
+      world.browser.lifecycleReplies.push({ reply: { text: 'condition met', matched: true } });
+
+    // Act
+    await world.service.call(agent, { tool: 'browser.wait_for', name: 'app', ref: 'e3', state: 'hidden' });
+    await world.service.call(agent, { tool: 'browser.wait_for', name: 'app', selector: '#go' });
+    await world.service.call(agent, { tool: 'browser.wait_for', name: 'app', textGone: 'Loading' });
+    await world.service.call(agent, { tool: 'browser.wait_for', name: 'app', url: '/home' });
+    await world.service.call(agent, { tool: 'browser.wait_for', name: 'app', load: 'networkidle' });
+
+    // Assert
+    should(world.browser.lifecycles.map(request => (request.op === 'wait' ? request.condition : undefined))).deepEqual([
+      { kind: 'element', target: { kind: 'ref', ref: 'e3' }, state: 'hidden' },
+      { kind: 'element', target: { kind: 'selector', selector: '#go' }, state: 'visible' },
+      { kind: 'textGone', text: 'Loading' },
+      { kind: 'url', url: '/home' },
+      { kind: 'load', state: 'networkidle' },
+    ]);
+  });
+
+  it('should wait a second at a time, and give up with the whole timeout told', async () => {
+    // Arrange
+    const world = await open();
+    for (let call = 0; call < 3; call += 1)
+      world.browser.lifecycleReplies.push({ reply: { text: 'condition not met yet', matched: false } });
+
+    // Act
+    const result = await world.service.call(agent, {
+      tool: 'browser.wait_for',
+      name: 'app',
+      text: 'Never',
+      timeoutMs: 2_500,
+    });
+
+    // Assert
+    should(result.matched).be.false();
+    should(result.summary).equal('Still waiting on %browser:app: the wait timed out after 2500 ms.');
+    should(world.browser.lifecycles.map(request => (request.op === 'wait' ? request.timeoutMs : 0))).deepEqual([
+      1_000, 1_000, 500,
+    ]);
+  });
+
+  it('should stop a wait when the clock says the time is up, even if slices are still coming back', async () => {
+    // Arrange
+    const world = await open();
+    world.browser.beforeLifecycle.push(() => {
+      world.clock.ms += 60_000;
+    });
+
+    // Act
+    const result = await world.service.call(agent, {
+      tool: 'browser.wait_for',
+      name: 'app',
+      text: 'Never',
+      timeoutMs: 5_000,
+    });
+
+    // Assert
+    should(result.matched).be.false();
+    should(world.browser.lifecycles).have.length(1);
+  });
+
+  it('should end a wait when a dialog blocks the page, and say what it asks', async () => {
+    // Arrange
+    const world = await open();
+    world.browser.lifecycleReplies.push({
+      reply: { text: 'condition not met yet', matched: false },
+      dialog: { type: 'alert', message: 'Session expired' },
+    });
+
+    // Act
+    const result = await world.service.call(agent, { tool: 'browser.wait_for', name: 'app', text: 'Never' });
+
+    // Assert
+    should(result.matched).be.false();
+    should(result.summary).containEql('the page is blocked by a dialog');
+    should(result.summary).containEql('"Session expired"');
+    should(world.browser.lifecycles).have.length(1);
+  });
+
+  it('should sleep a plain wait here, a second at a time', async () => {
+    // Arrange
+    const world = await open();
+
+    // Act
+    const result = await world.service.call(agent, { tool: 'browser.wait_for', name: 'app', time: 2_500 });
+
+    // Assert
+    should(result).deepEqual({ summary: 'Waited 2500 ms on %browser:app.', matched: true });
+    should(world.slept).deepEqual([1_000, 1_000, 500]);
+    should(world.browser.lifecycles).deepEqual([]);
+  });
+
+  it('should stop a plain wait the moment a person takes the page over', async () => {
+    // Arrange
+    const world = await open();
+    world.onSleep.push(async () => {
+      await world.service.control('s1', 'browser', { action: 'takeover', key: 'app' }, { by: 'local' }, person);
+    });
+
+    // Act
+    const stopped = await refusal(world.service.call(agent, { tool: 'browser.wait_for', name: 'app', time: 5_000 }));
+
+    // Assert
+    should(stopped.code).equal('taken_over');
+    should(world.slept).have.length(1);
+  });
+
+  it('should stop a wait between slices the moment a person takes the page over', async () => {
+    // Arrange
+    const world = await open();
+    world.browser.lifecycleReplies.push({ reply: { text: 'condition not met yet', matched: false } });
+    world.browser.beforeLifecycle.push(
+      async () => undefined,
+      async () => {
+        await world.service.control('s1', 'browser', { action: 'takeover', key: 'app' }, { by: 'local' }, person);
+      },
+    );
+
+    // Act
+    const stopped = await refusal(
+      world.service.call(agent, { tool: 'browser.wait_for', name: 'app', text: 'Never', timeoutMs: 5_000 }),
+    );
+
+    // Assert
+    should(stopped.code).equal('taken_over');
+    should(world.browser.lifecycles).have.length(1);
+  });
+
+  it('should audit a wait by what it waited for and how long, never by the text or address', async () => {
+    // Arrange
+    const world = await open();
+    const secret = 'correct-horse-battery';
+    for (let call = 0; call < 3; call += 1)
+      world.browser.lifecycleReplies.push({ reply: { text: 'condition met', matched: true } });
+
+    // Act
+    await world.service.call(agent, { tool: 'browser.wait_for', name: 'app', text: secret, timeoutMs: 3_000 });
+    await world.service.call(agent, { tool: 'browser.wait_for', name: 'app', url: `/${secret}` });
+    await world.service.call(agent, { tool: 'browser.wait_for', name: 'app', selector: `#${secret}` });
+
+    // Assert
+    should(world.audit.entries.slice(-3).map(entry => entry.detail)).deepEqual([
+      { tool: 'browser.wait_for', by: 'agent', surface: '%browser:app', waitKind: 'text', timeoutMs: 3_000 },
+      { tool: 'browser.wait_for', by: 'agent', surface: '%browser:app', waitKind: 'url', timeoutMs: 10_000 },
+      { tool: 'browser.wait_for', by: 'agent', surface: '%browser:app', waitKind: 'element', timeoutMs: 10_000 },
+    ]);
+    should(JSON.stringify(world.audit.entries)).not.containEql(secret);
+  });
+});
+
+describe('AgentToolService — a page’s console, requests and device', () => {
+  const open = async () => {
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+    return world;
+  };
+
+  it('should hand back the console, scrubbed, with the level and position asked for', async () => {
+    // Arrange
+    const world = await open();
+    world.redactor.values.set('sk_live_51Hx', 'STRIPE_KEY');
+    world.browser.lifecycleReplies.push({
+      reply: { text: '#4 [error] failed with sk_live_51Hx\nlast entry #4: ask with since: 4 for what comes after' },
+    });
+
+    // Act
+    const result = await world.service.call(agent, {
+      tool: 'browser.console',
+      name: 'app',
+      level: 'error',
+      since: 3,
+      limit: 20,
+    });
+
+    // Assert
+    should(result.summary).equal('The console of %browser:app.');
+    should(result.output).containEql('#4 [error] failed with [redacted:STRIPE_KEY]');
+    should(JSON.stringify(result)).not.containEql('sk_live_51Hx');
+    should(world.browser.lifecycles).deepEqual([{ op: 'console', level: 'error', since: 3, limit: 20 }]);
+    should(world.audit.entries.at(-1)?.detail).deepEqual({
+      tool: 'browser.console',
+      by: 'agent',
+      surface: '%browser:app',
+      level: 'error',
+      since: 3,
+      limit: 20,
+    });
+  });
+
+  it('should ask for the whole console when nothing narrows it', async () => {
+    // Arrange
+    const world = await open();
+
+    // Act
+    await world.service.call(agent, { tool: 'browser.console', name: 'app' });
+
+    // Assert
+    should(world.browser.lifecycles).deepEqual([{ op: 'console' }]);
+  });
+
+  it('should list requests and show one, scrubbed, auditing the filter by its length only', async () => {
+    // Arrange
+    const world = await open();
+    world.redactor.values.set('sk_live_51Hx', 'STRIPE_KEY');
+    world.browser.lifecycleReplies.push(
+      { reply: { text: 'r1 GET 200 fetch 1.0KB 12ms https://api.test/keys?k=sk_live_51Hx' } },
+      { reply: { text: 'r1 GET 200 fetch 1.0KB 12ms https://api.test/keys\n\n{"key":"sk_live_51Hx"}' } },
+    );
+
+    // Act
+    const listed = await world.service.call(agent, {
+      tool: 'browser.network',
+      name: 'app',
+      action: 'list',
+      filter: 'api.test',
+      types: ['fetch', 'xhr'],
+    });
+    const shown = await world.service.call(agent, { tool: 'browser.network', name: 'app', action: 'get', id: 'r1' });
+
+    // Assert
+    should(listed.summary).equal('The requests of %browser:app.');
+    should(listed.output).containEql('k=[redacted:STRIPE_KEY]');
+    should(shown.summary).equal('Request r1 of %browser:app.');
+    should(shown.output).containEql('{"key":"[redacted:STRIPE_KEY]"}');
+    should(JSON.stringify([listed, shown])).not.containEql('sk_live_51Hx');
+    should(world.browser.lifecycles).deepEqual([
+      { op: 'network', action: 'list', filter: 'api.test', types: ['fetch', 'xhr'] },
+      { op: 'network', action: 'get', id: 'r1' },
+    ]);
+    should(world.audit.entries.slice(-2).map(entry => entry.detail)).deepEqual([
+      { tool: 'browser.network', by: 'agent', surface: '%browser:app', action: 'list', filterLength: 8, types: 2 },
+      { tool: 'browser.network', by: 'agent', surface: '%browser:app', action: 'get' },
+    ]);
+  });
+
+  it('should emulate only what was asked, and audit the names of the fields and none of their values', async () => {
+    // Arrange
+    const world = await open();
+    world.browser.lifecycleReplies.push({ reply: { text: 'Emulating: viewport 390x844; locale de-DE' } });
+
+    // Act
+    const result = await world.service.call(agent, {
+      tool: 'browser.emulate',
+      name: 'app',
+      viewport: { width: 390, height: 844 },
+      locale: 'de-DE',
+    });
+    await world.service.call(agent, { tool: 'browser.emulate', name: 'app', reset: true });
+
+    // Assert
+    should(result.summary).equal('Emulating: viewport 390x844; locale de-DE on %browser:app.');
+    should(world.browser.lifecycles).deepEqual([
+      { op: 'emulate', emulation: { viewport: { width: 390, height: 844 }, locale: 'de-DE' } },
+      { op: 'emulate', emulation: { reset: true } },
+    ]);
+    should(world.audit.entries.slice(-2).map(entry => entry.detail)).deepEqual([
+      { tool: 'browser.emulate', by: 'agent', surface: '%browser:app', fields: 'viewport,locale' },
+      { tool: 'browser.emulate', by: 'agent', surface: '%browser:app', fields: 'reset' },
+    ]);
+  });
+
+  it('should refuse each lifecycle tool on a page a person holds, and never reach the browser', async () => {
+    // Arrange
+    const world = await open();
+    await world.service.control('s1', 'browser', { action: 'takeover', key: 'app' }, { by: 'local' }, person);
+
+    // Act
+    const codes = await Promise.all(
+      [
+        { tool: 'browser.dialog', name: 'app', action: 'dismiss' },
+        { tool: 'browser.wait_for', name: 'app', text: 'x' },
+        { tool: 'browser.wait_for', name: 'app', time: 100 },
+        { tool: 'browser.console', name: 'app' },
+        { tool: 'browser.network', name: 'app', action: 'list' },
+        { tool: 'browser.emulate', name: 'app', reset: true },
+      ].map(async call => (await refusal(world.service.call(agent, call as never))).code),
+    );
+
+    // Assert
+    should(codes).deepEqual(Array(6).fill('taken_over'));
+    should(world.browser.lifecycles).deepEqual([]);
+  });
+
+  it('should refuse each lifecycle tool on a page a person opened, and let the person use them on their own', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    await world.service.call(person, { tool: 'browser.open', name: 'bank' });
+
+    // Act
+    const refused = await refusal(world.service.call(agent, { tool: 'browser.console', name: 'bank' }));
+    const mine = await world.service.call(person, { tool: 'browser.console', name: 'bank' });
+
+    // Assert
+    should(refused.code).equal('forbidden');
+    should(mine.summary).equal('The console of %browser:bank.');
+    should(world.browser.lifecycles).have.length(1);
+  });
+
+  it('should refuse the tools when the machine’s browser control is switched off', async () => {
+    // Arrange
+    const world = await open();
+    world.policy.off.add('browser');
+
+    // Act
+    const refused = await refusal(world.service.call(agent, { tool: 'browser.emulate', name: 'app', reset: true }));
+
+    // Assert
+    should(refused.code).equal('forbidden');
+    should(world.browser.lifecycles).deepEqual([]);
+  });
+
+  it('should withhold a log, rather than serve it unmasked, when the vault cannot be opened', async () => {
+    // Arrange
+    const world = await open();
+    world.redactor.locked = true;
+
+    // Act
+    const refused = await refusal(world.service.call(agent, { tool: 'browser.console', name: 'app' }));
+
+    // Assert
+    should(refused.code).equal('unavailable');
+  });
+});
+
+describe('AgentToolService — popups and tabs', () => {
+  const opened = async () => {
+    const world = agentToolWorld();
+    const app = await world.browser.openPage('s1', 'app', { openedBy: { by: 'agent', sessionId: 's1' } });
+    return { world, app };
+  };
+
+  it('should let the agent use a popup its own page opened, with the opener recorded by the browser', async () => {
+    // Arrange
+    const { world, app } = await opened();
+    world.browser.popup('s1', app.id);
+
+    // Act
+    const read = await world.service.call(agent, { tool: 'browser.read', name: 'popup-1' });
+    const listed = await world.service.call(agent, { tool: 'browser.list' });
+
+    // Assert
+    should(read.output).not.be.undefined();
+    should(listed.surfaces?.find(row => row.id === 'popup-1')).match({ openerId: app.id, available: true });
+  });
+
+  it('should follow a chain of popups back to a page the agent opened, and stop at one it did not', async () => {
+    // Arrange
+    const { world, app } = await opened();
+    world.browser.popup('s1', app.id, 'popup-1');
+    world.browser.popup('s1', 'popup-1', 'popup-2');
+    world.browser.popup('s1', 'popup-9', 'popup-3');
+    world.browser.popup('s1', 'popup-3', 'popup-4');
+
+    // Act
+    const deep = await world.service.call(agent, { tool: 'browser.read', name: 'popup-2' });
+    const orphan = await refusal(world.service.call(agent, { tool: 'browser.read', name: 'popup-4' }));
+
+    // Assert
+    should(deep.output).not.be.undefined();
+    should(orphan.code).equal('forbidden');
+  });
+
+  it('should refuse a popup of a page a person opened, until the person hands that page over', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    const bank = await world.browser.openPage('s1', 'bank', { openedBy: { by: 'human', deviceId: 'phone-1' } });
+    world.browser.popup('s1', bank.id);
+
+    // Act
+    const refused = await refusal(world.service.call(agent, { tool: 'browser.read', name: 'popup-1' }));
+    await world.service.control('s1', 'browser', { action: 'handover', key: 'bank' }, { by: 'local' }, person);
+    const allowed = await world.service.call(agent, { tool: 'browser.read', name: 'popup-1' });
+
+    // Assert
+    should(refused.code).equal('forbidden');
+    should(allowed.output).not.be.undefined();
+  });
+
+  it('should not follow an opener chain deeper than eight pages', async () => {
+    // Arrange
+    const { world, app } = await opened();
+    let opener = app.id;
+    for (let depth = 1; depth <= 10; depth += 1) {
+      world.browser.popup('s1', opener, `popup-${String(depth)}`);
+      opener = `popup-${String(depth)}`;
+    }
+
+    // Act
+    const near = await world.service.call(agent, { tool: 'browser.read', name: 'popup-8' });
+    const far = await refusal(world.service.call(agent, { tool: 'browser.read', name: 'popup-10' }));
+
+    // Assert
+    should(near.output).not.be.undefined();
+    should(far.code).equal('forbidden');
+  });
+
+  it('should list tabs and tell the agent which popups have no name yet, and how to take one', async () => {
+    // Arrange
+    const { world, app } = await opened();
+    world.browser.popup('s1', app.id);
+
+    // Act
+    const listed = await world.service.call(agent, { tool: 'browser.tabs', action: 'list' });
+    const quiet = await world.service.call(agent, { tool: 'browser.list' });
+
+    // Assert
+    should(listed.surfaces).have.length(2);
+    should(listed.summary).containEql('Popups with no name yet: popup-1');
+    should(listed.summary).containEql('browser.tabs');
+    should(quiet.summary).not.containEql('Popups with no name yet');
+    should(world.audit.entries.at(-2)?.detail).deepEqual({ tool: 'browser.tabs', by: 'agent', action: 'list' });
+  });
+
+  it('should list tabs plainly when there is no popup', async () => {
+    // Arrange
+    const { world } = await opened();
+
+    // Act
+    const listed = await world.service.call(agent, { tool: 'browser.tabs', action: 'list' });
+
+    // Assert
+    should(listed.summary).not.containEql('Popups');
+  });
+
+  it('should adopt a popup under a name, credit the agent with it, announce it and then use it by that name', async () => {
+    // Arrange
+    const { world, app } = await opened();
+    world.browser.popup('s1', app.id);
+
+    // Act
+    const adopted = await world.service.call(agent, {
+      tool: 'browser.tabs',
+      action: 'adopt',
+      id: 'popup-1',
+      as: 'checkout',
+    });
+    const read = await world.service.call(agent, { tool: 'browser.read', name: 'checkout' });
+
+    // Assert
+    should(adopted.summary).equal(
+      'Adopted the popup popup-1 (opened by page-1) as %browser:checkout. Use it by that name.',
+    );
+    should(world.browser.adopted).deepEqual([
+      { id: 'popup-1', name: 'checkout', openedBy: { by: 'agent', sessionId: 's1' } },
+    ]);
+    should(read.output).not.be.undefined();
+    should(world.events.published.some(event => event.type === 'surface.opened')).be.true();
+    should(world.audit.entries.find(entry => entry.detail?.tool === 'browser.tabs')?.detail).deepEqual({
+      tool: 'browser.tabs',
+      by: 'agent',
+      surface: '%browser:checkout',
+      action: 'adopt',
+    });
+  });
+
+  it('should refuse to adopt a page that is not a popup, one that is named, or a popup that is not the agent’s', async () => {
+    // Arrange
+    const { world, app } = await opened();
+    world.browser.popup('s1', app.id);
+    await world.browser.adoptPage('s1', 'popup-1', 'taken');
+    world.browser.popup('s1', 'person-page', 'popup-2');
+
+    // Act
+    const notPopup = await refusal(
+      world.service.call(agent, { tool: 'browser.tabs', action: 'adopt', id: app.id, as: 'again' }),
+    );
+    const named = await refusal(
+      world.service.call(agent, { tool: 'browser.tabs', action: 'adopt', id: 'popup-1', as: 'other' }),
+    );
+    const foreign = await refusal(
+      world.service.call(agent, { tool: 'browser.tabs', action: 'adopt', id: 'popup-2', as: 'mine' }),
+    );
+    const unknown = await refusal(
+      world.service.call(agent, { tool: 'browser.tabs', action: 'adopt', id: 'nowhere', as: 'mine' }),
+    );
+
+    // Assert
+    should(notPopup).match({ code: 'bad_request', message: /is not a popup/u });
+    should(named.code).equal('conflict');
+    should(foreign.code).equal('forbidden');
+    should(unknown.code).equal('not_found');
+  });
+
+  it('should let a person adopt a popup as their own', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    const bank = await world.browser.openPage('s1', 'bank');
+    world.browser.popup('s1', bank.id);
+
+    // Act
+    const adopted = await world.service.call(person, {
+      tool: 'browser.tabs',
+      action: 'adopt',
+      id: 'popup-1',
+      as: 'pay',
+    });
+
+    // Assert
+    should(adopted.summary).containEql('%browser:pay');
+    should(world.browser.adopted).deepEqual([
+      { id: 'popup-1', name: 'pay', openedBy: { by: 'human', deviceId: 'phone-1' } },
+    ]);
+  });
+});

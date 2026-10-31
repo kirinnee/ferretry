@@ -194,6 +194,7 @@ class LeasedBrowser implements BrowserAutomation {
   newPage: BrowserAutomation['newPage'] = options => this.worker.newPage(options);
   closePage: BrowserAutomation['closePage'] = pageId => this.worker.closePage(pageId);
   resize: BrowserAutomation['resize'] = (pageId, viewport) => this.worker.resize(pageId, viewport);
+  lifecycle: BrowserAutomation['lifecycle'] = (pageId, request) => this.worker.lifecycle(pageId, request);
   startScreencast: BrowserAutomation['startScreencast'] = (pageId, viewport, listener) =>
     this.worker.startScreencast(pageId, viewport, listener);
   stopScreencast: BrowserAutomation['stopScreencast'] = (pageId, listener) =>
