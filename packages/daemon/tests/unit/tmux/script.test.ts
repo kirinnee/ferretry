@@ -12,11 +12,52 @@ describe('which tmux commands travel on stdin', () => {
     should(carriesPayload(['send-keys', '-t', 'fy-a', '-l', 'hunter2'])).be.true();
   });
 
-  it('should send the guarded write — an if-shell -F whose branch types the value — on stdin', () => {
+  it('should send the guarded write — an if-shell -F whose branch types the value — and every if-shell, on stdin', () => {
     should(
       carriesPayload(['if-shell', '-F', '-t', '%1', '#{==:#{pane_dead},0}', 'send-keys -H -t %1 70', 'x']),
     ).be.true();
-    should(carriesPayload(['if-shell', '-t', '%1', 'true', 'display-message hi'])).be.false();
+    should(carriesPayload(['if-shell', '-t', '%1', 'true', 'display-message hi'])).be.true();
+  });
+
+  it('should send every payload-bearing tmux command on stdin, under its name or its alias', () => {
+    // tmux's own family, not today's callers: the next caller of any of these is covered already.
+    for (const command of [
+      'send-keys',
+      'send',
+      'set-buffer',
+      'setb',
+      'set-environment',
+      'setenv',
+      'if-shell',
+      'if',
+      'run-shell',
+      'run',
+    ])
+      should(carriesPayload([command, 'x'])).be.true(command);
+    for (const command of [
+      'new-session',
+      'new',
+      'new-window',
+      'neww',
+      'split-window',
+      'splitw',
+      'respawn-pane',
+      'respawnp',
+      'respawn-window',
+      'respawnw',
+    ])
+      should(carriesPayload([command, '-e', 'K=V', 'cmd'])).be.true(command);
+  });
+
+  it('should judge a compound command by every command in it, not only the first', () => {
+    should(carriesPayload(['display-message', '-p', 'x', ';', 'send-keys', '-l', 'hunter2'])).be.true();
+    should(carriesPayload(['list-sessions', ';', 'set-option', 'a', 'b'])).be.false();
+    should(scriptArguments(['set-option', 'a', 'b', ';', 'new', '-e', 'K=V'])).deepEqual([
+      'start-server',
+      ';',
+      'source-file',
+      '-',
+    ]);
   });
 
   it('should leave addresses and reads in argv, including a new-session with no environment', () => {

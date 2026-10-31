@@ -149,6 +149,50 @@ describe('BunTmuxProcess', () => {
     }
   });
 
+  it('should keep every payload-bearing command shape out of argv, aliases and compounds included', async () => {
+    // The transport guarantee for FUTURE callers: whichever payload command, alias or compound a caller
+    // reaches for, the argv a process listing shows carries none of it.
+    const root = await mkdtemp(join(tmpdir(), 'ferretry-tmux-adapter-'));
+    const executable = join(root, 'fake-tmux.sh');
+    const argv = join(root, 'arguments.txt');
+    await writeFile(executable, `#!/bin/sh\nprintf '%s\\n' "$@" >> '${argv}'\ncat > /dev/null\n`);
+    await chmod(executable, 0o700);
+    const subject = new BunTmuxProcess(executable, join(root, 'isolated.sock'));
+    const marker = 'fy-payload-marker';
+    const shapes: readonly (readonly string[])[] = [
+      ['send', '-l', marker],
+      ['set-buffer', marker],
+      ['setenv', 'K', marker],
+      ['run-shell', `echo ${marker}`],
+      ['if', '-t', '%1', 'true', `send-keys -l ${marker}`],
+      ['new-window', '-e', `K=${marker}`, 'cmd'],
+      ['respawnp', '-e', `K=${marker}`, '-t', '%1'],
+      ['display-message', '-p', 'x', ';', 'send-keys', '-l', marker],
+    ];
+
+    try {
+      // Act
+      for (const shape of shapes) await subject.execute(shape);
+
+      // Assert
+      should(await readFile(argv, 'utf8')).not.containEql(marker);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('should refuse a payload that also brings its own stdin rather than send it in argv', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ferretry-tmux-adapter-'));
+    const subject = new BunTmuxProcess('/bin/true', join(root, 'isolated.sock'));
+    try {
+      await should(subject.execute(['send-keys', '-l', 'secret'], 'load me')).be.rejectedWith(
+        /cannot also take stdin/u,
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('should hand a real pane exactly the environment it was given, with no argv on the host showing it', async () => {
     // Arrange — values chosen to break any quoting that is not exact: expansion, quotes, a newline.
     const tmux = Bun.which('tmux');
@@ -178,7 +222,11 @@ describe('BunTmuxProcess', () => {
 
       // Assert
       should(JSON.parse(await readFile(out, 'utf8'))).equal(secret);
-      should(await readFile(`/proc/${String(server)}/cmdline`, 'utf8')).not.containEql(`fy-cap-${String(process.pid)}`);
+      // Only Linux has procfs to read a process's argv from; the environment round-trip above holds everywhere.
+      if (process.platform === 'linux')
+        should(await readFile(`/proc/${String(server)}/cmdline`, 'utf8')).not.containEql(
+          `fy-cap-${String(process.pid)}`,
+        );
     } finally {
       await subject.execute(['kill-server']);
       await rm(root, { recursive: true, force: true });

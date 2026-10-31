@@ -17,8 +17,12 @@ export class BunTmuxProcess implements TmuxCommandPort {
       throw new Error('tmux command must begin with a command name, not a server option');
     // A pane's environment and the keys typed into it are payloads, not addresses: they go to tmux as a
     // script on stdin so no process listing on the host ever shows them (`lib/tmux/script.ts`).
-    if (stdin === undefined && carriesPayload(arguments_))
+    if (carriesPayload(arguments_)) {
+      // Stdin is already the script's, so a payload that ALSO brings its own stdin has nowhere safe to go.
+      if (stdin !== undefined)
+        throw new Error(`tmux ${arguments_[0] ?? ''} carries a payload and cannot also take stdin`);
       return await this.execute(scriptArguments(arguments_), scriptLine(arguments_));
+    }
     // `-u` makes tmux print UTF-8 whatever this process's locale says. Without it a daemon started
     // with no UTF-8 locale — which is every daemon a service manager or `fy daemon start` launches
     // unless told otherwise — gets every tab and non-ASCII byte in a format's output back as `_`, so

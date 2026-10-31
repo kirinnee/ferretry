@@ -23,21 +23,74 @@
  * the command there and silently dropped the `;` — `send-keys -l 'ls;'` now types the `;` it was asked to.
  */
 
-/** Whether this command's arguments carry a payload that must not appear in a process listing. */
+/**
+ * Every tmux command that can carry a payload in its arguments, under its name and its alias, whatever
+ * its flags: typed keys and buffers, environment values, and the commands `if-shell` and `run-shell` run
+ * (the guarded write's branch is a `send-keys` carrying the value, docs/input-requests.md).
+ *
+ * THE WHOLE FAMILY, NOT THE CALLS MADE TODAY. A classifier that listed only the commands this daemon sends
+ * now would let the next caller of `set-buffer` or `setenv` put a secret back in argv without anything
+ * noticing; this set is tmux's, and a test holds it to the manual.
+ */
+const PAYLOAD_COMMANDS: ReadonlySet<string> = new Set([
+  'send-keys',
+  'send',
+  'set-buffer',
+  'setb',
+  'set-environment',
+  'setenv',
+  'if-shell',
+  'if',
+  'run-shell',
+  'run',
+]);
+
+/** Commands whose `-e NAME=VALUE` sets a new pane's environment. */
+const ENVIRONMENT_COMMANDS: ReadonlySet<string> = new Set([
+  'new-session',
+  'new',
+  'new-window',
+  'neww',
+  'split-window',
+  'splitw',
+  'respawn-pane',
+  'respawnp',
+  'respawn-window',
+  'respawnw',
+]);
+
+/**
+ * Whether this command's arguments carry a payload that must not appear in a process listing.
+ *
+ * A compound command (`a ; b`) is judged by EVERY command in it: a payload hidden behind an innocent first
+ * command would otherwise go out in argv.
+ */
 export function carriesPayload(arguments_: readonly string[]): boolean {
-  const [command, ...rest] = arguments_;
-  if (command === 'send-keys') return true;
-  // `-F` is the guarded write: its branch is a `send-keys` carrying the value (docs/input-requests.md).
-  if (command === 'if-shell') return rest.includes('-F');
-  return command === 'new-session' && rest.includes('-e');
+  return commandsOf(arguments_).some(([command, ...rest]) => {
+    if (command === undefined) return false;
+    if (PAYLOAD_COMMANDS.has(command)) return true;
+    return ENVIRONMENT_COMMANDS.has(command) && rest.includes('-e');
+  });
+}
+
+/** The commands an argv holds, split on tmux's lone `;` separator. */
+function commandsOf(arguments_: readonly string[]): readonly (readonly string[])[] {
+  const commands: string[][] = [[]];
+  for (const argument of arguments_) {
+    if (argument === ';') commands.push([]);
+    else commands.at(-1)?.push(argument);
+  }
+  return commands;
 }
 
 /**
- * The argv that runs a script from stdin. `new-session` may be the command that starts the server, so
- * it asks for one first; everything else needs a server already, and fails as it always did without one.
+ * The argv that runs a script from stdin. `new-session` may be the command that starts the server, so a
+ * script holding one asks for a server first; everything else needs a server already, and fails as it always did without one.
  */
 export function scriptArguments(arguments_: readonly string[]): readonly string[] {
-  return arguments_[0] === 'new-session' ? ['start-server', ';', 'source-file', '-'] : ['source-file', '-'];
+  return commandsOf(arguments_).some(([command]) => command === 'new-session' || command === 'new')
+    ? ['start-server', ';', 'source-file', '-']
+    : ['source-file', '-'];
 }
 
 /** The command as one line of tmux's command language, parsing back to exactly these arguments. */
