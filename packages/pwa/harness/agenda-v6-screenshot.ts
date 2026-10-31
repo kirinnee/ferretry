@@ -143,7 +143,25 @@ const checkLayout = async (page: Page, label: string): Promise<void> => {
       Math.round(node.getBoundingClientRect().top),
     );
     const view = document.querySelector('[data-agenda-view]');
+    const block = (name: string) => {
+      const node = document.querySelector(`.fy-card [data-agenda-situation] [data-agenda-section="${name}"]`);
+      const label = node?.querySelector('h4');
+      const text = node?.querySelector('ul, ol, p');
+      if (!node || !label || !text) return null;
+      const outer = node.getBoundingClientRect();
+      const above = label.getBoundingClientRect();
+      const below = text.getBoundingClientRect();
+      return {
+        stacked: above.bottom <= below.top + 1,
+        textWidth: Math.round(below.width),
+        blockWidth: Math.round(outer.width),
+        background: getComputedStyle(node).backgroundColor,
+        labelColour: getComputedStyle(label).color,
+      };
+    };
     return {
+      premise: block('premise'),
+      context: block('context'),
       composer: box('[data-agenda-harness-composer]'),
       card: box('.fy-card'),
       head: box('.fy-item-view__head'),
@@ -163,6 +181,21 @@ const checkLayout = async (page: Page, label: string): Promise<void> => {
   check(found.wide <= 0, `${label}: scrolls sideways by ${found.wide}px`);
   check(!found.whyNow, `${label}: "Why now" is drawn`);
   check(found.bars === 0, `${label}: ${found.bars} element(s) in the card draw a left accent bar`);
+  for (const [name, part] of [
+    ['premise', found.premise],
+    ['context', found.context],
+  ] as const) {
+    if (part === null) continue;
+    check(part.stacked, `${label}: the ${name} label is not above its text`);
+    check(
+      part.blockWidth - part.textWidth <= 56,
+      `${label}: the ${name} text is not full width (${part.textWidth} of ${part.blockWidth})`,
+    );
+    check(part.background !== 'rgba(0, 0, 0, 0)', `${label}: the ${name} block has no tint`);
+    check(part.labelColour !== part.background, `${label}: the ${name} label matches its tint`);
+  }
+  if (found.premise !== null && found.context !== null)
+    check(found.premise.background !== found.context.background, `${label}: premise and context share one tint`);
   check(found.chips.length <= 3, `${label}: the answer row holds ${found.chips.length} buttons`);
   check(new Set(found.chips).size <= 1, `${label}: the answer row wraps (${found.chips.join(',')})`);
   const composer = found.composer;
@@ -266,7 +299,8 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   check((await tip.count()) === 1, `terms ${form} ${theme}: a tapped term shows no meaning`);
   // A tap anywhere else closes it; then it is opened again for the picture.
   const press = (target: ReturnType<Page['locator']>) => (form === 'phone' ? target.tap() : target.click());
-  await press(choice.locator('[data-agenda-question-line]'));
+  // The opened meaning floats over the lines under its term, so the tap lands beside the column, where it covers nothing.
+  await (form === 'phone' ? choice.touchscreen.tap(2, 60) : choice.mouse.click(2, 60));
   await choice.waitForTimeout(100);
   check((await tip.count()) === 0, `terms ${form} ${theme}: a tap elsewhere leaves the meaning open`);
   await press(choice.locator('.fy-card a[href^="#fy-term-"]').nth(1));

@@ -2,7 +2,7 @@
  * THE CARD OF AN OPEN AGENDA ITEM — everything the owner reads and answers, in ONE card, top to bottom:
  *
  *   top bar    the item's type, "↓ Not needed" (the ↓ swipe) and the version picker ("v2 of 2 · 3m ago")
- *   situation  PREMISE and CONTEXT — the two fields every item carries — as one soft panel: labels left, points right
+ *   situation  PREMISE and CONTEXT — the two fields every item carries — as two tinted blocks, each label above its points
  *   question   the one thing asked, said plainly
  *   options    each option's one-word name (or its letter) and what it means, the recommended one said in words
  *   sections   only what the item carries, each folding: why the recommendation, steps, reasoning or more detail
@@ -87,7 +87,7 @@ function Fold({
   );
 }
 
-/** PREMISE and CONTEXT as one soft panel: the label on the left, the points on the right. */
+/** PREMISE and CONTEXT as two tinted blocks: each label above its points. */
 function Situation({
   premise,
   context,
