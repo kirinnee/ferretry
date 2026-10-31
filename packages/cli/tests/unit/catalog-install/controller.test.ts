@@ -295,3 +295,52 @@ describe('fy catalog installs / uninstall', () => {
     should(out.errors[0]).equal('Nothing was changed. edited locally');
   });
 });
+
+describe('fy catalog install, installs and uninstall with --json', () => {
+  it('should send the preview to stderr and print only the applied install on stdout', async () => {
+    const { controller, gateway, out } = build();
+    gateway.preview = previewOf({ warnings: [{ code: 'first-publisher', text: 'first one' }] });
+
+    await controller.install('cat.json', { ...PROJECT, json: true });
+
+    should(out.reports).have.length(0);
+    should(JSON.parse(out.diagnostics[0] ?? '{}')).match({ phase: 'preview', preview: { previewId: PREVIEW_ID } });
+    should(out.successes).have.length(1);
+    const installed = JSON.parse(out.successes[0] ?? '{}');
+    should(installed.install.installId).equal(INSTALL_ID);
+    should(installed.notes).be.an.Array();
+  });
+
+  it('should print the install list as its protocol payload', async () => {
+    const { controller, gateway, out } = build();
+    gateway.installs = [installOf('project', { A: null })];
+
+    await controller.installs({ json: true });
+
+    should(out.reports).have.length(0);
+    should(JSON.parse(out.successes[0] ?? '{}').installs[0].installId).equal(INSTALL_ID);
+  });
+
+  it('should refuse --json without --yes, before reading or changing anything', async () => {
+    const install = build({ interactive: true, answers: ['y'] });
+    await install.controller.install('cat.json', { ...PROJECT, yes: false, json: true });
+    should(install.gateway.previews).have.length(0);
+    should(install.out.errors[0]).containEql('--json is for scripts');
+    should(install.out.exitCode).equal(1);
+
+    const remove = build({ interactive: true, answers: ['y'] });
+    remove.gateway.installs = [installOf('runtime')];
+    await remove.controller.uninstall(INSTALL_ID, { json: true });
+    should(remove.gateway.removes).have.length(0);
+    should(remove.out.errors[0]).containEql('--json is for scripts');
+  });
+
+  it('should print what was removed as its protocol payload', async () => {
+    const { controller, gateway, out } = build();
+    gateway.installs = [installOf('runtime')];
+
+    await controller.uninstall(INSTALL_ID, { yes: true, json: true });
+
+    should(JSON.parse(out.successes[0] ?? '{}').installId).equal(INSTALL_ID);
+  });
+});

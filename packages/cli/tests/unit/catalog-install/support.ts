@@ -180,6 +180,7 @@ export class FakeOutput implements ICatalogInstallOutput {
   readonly successes: string[] = [];
   readonly warnings: string[] = [];
   readonly errors: string[] = [];
+  readonly diagnostics: string[] = [];
   exitCode = 0;
   report(message: string): void {
     this.reports.push(message);
@@ -192,6 +193,9 @@ export class FakeOutput implements ICatalogInstallOutput {
   }
   error(message: string): void {
     this.errors.push(message);
+  }
+  diagnostic(message: string): void {
+    this.diagnostics.push(message);
   }
   setExitCode(code: number): void {
     this.exitCode = code;

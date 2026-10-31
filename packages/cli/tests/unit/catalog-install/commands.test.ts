@@ -86,3 +86,43 @@ describe('fy catalog commands', () => {
     should(gateway.removes).have.length(1);
   });
 });
+
+describe('fy catalog install verbs and --json', () => {
+  it('should take --json on the verb or on the shared catalog command', async () => {
+    for (const argv of [
+      ['catalog', 'installs', '--json'],
+      ['catalog', '--json', 'installs'],
+    ]) {
+      const { program, gateway, out } = build();
+      gateway.installs = [installOf('project')];
+      await program.parseAsync(argv, { from: 'user' });
+      should([argv.join(' '), JSON.parse(out.successes[0] ?? '{}').installs[0].installId]).eql([
+        argv.join(' '),
+        INSTALL_ID,
+      ]);
+    }
+  });
+
+  it('should print the human list without --json', async () => {
+    const { program, gateway, out } = build();
+    gateway.installs = [installOf('project')];
+    await program.parseAsync(['catalog', 'installs'], { from: 'user' });
+    should(out.successes).have.length(0);
+    should(out.reports[0]).containEql(INSTALL_ID);
+  });
+
+  it('should pass --json through install and uninstall', async () => {
+    const install = build();
+    await install.program.parseAsync(
+      ['catalog', 'install', 'cat.json', '--project', 'repo', '--harness', 'claude', '--yes', '--json'],
+      { from: 'user' },
+    );
+    should(install.out.diagnostics).have.length(1);
+    should(JSON.parse(install.out.successes[0] ?? '{}').install.installId).equal(INSTALL_ID);
+
+    const remove = build();
+    remove.gateway.installs = [installOf('runtime')];
+    await remove.program.parseAsync(['catalog', 'uninstall', INSTALL_ID, '--yes', '--json'], { from: 'user' });
+    should(JSON.parse(remove.out.successes[0] ?? '{}').installId).equal(INSTALL_ID);
+  });
+});

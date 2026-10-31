@@ -21,6 +21,8 @@ export interface ICatalogInstallOutput {
   success(message: string): void;
   warn(message: string): void;
   error(message: string): void;
+  /** Uncoloured stderr for JSON evidence (the preview) that must not corrupt the final stdout payload. */
+  diagnostic(message: string): void;
   setExitCode(code: number): void;
 }
 
