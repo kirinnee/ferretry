@@ -1706,6 +1706,47 @@ describe('a stream session', () => {
     should(stream.fromClientFrames[1]).equal('{"cols":80,"rows":24}');
   });
 
+  // R9-1
+  it('should not send a stream frame whose permit turned false while it queued and sealed', async () => {
+    const stream = fakeStream();
+    const harnessed = harness(undefined, DEVICE_TOKEN, accepts(stream));
+    const opened = await keyedSession(harnessed);
+    await clientSend(harnessed.link, opened.channel, {
+      t: 'stream',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+      path: '/v1/events',
+      query: [['sessionId', 'fy_s']],
+    });
+    const before = harnessed.wire.frames.filter(frame => frame.kind === FRAME_KINDS.data).length;
+    let held = false;
+
+    stream.downstream?.send(new Uint8Array([104, 105]), () => !held);
+    held = true;
+    await settle(harnessed.link);
+
+    should(harnessed.wire.frames.filter(frame => frame.kind === FRAME_KINDS.data)).have.length(before);
+    should(controlOf(harnessed.wire.frames.at(-1))).containDeep({ t: 'closed', code: RELAY_CLOSE_CODES.protocolError });
+  });
+
+  it('should send a stream frame whose permit still holds', async () => {
+    const stream = fakeStream();
+    const harnessed = harness(undefined, DEVICE_TOKEN, accepts(stream));
+    const opened = await keyedSession(harnessed);
+    const after = await clientSend(harnessed.link, opened.channel, {
+      t: 'stream',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+      path: '/v1/events',
+      query: [['sessionId', 'fy_s']],
+    });
+
+    stream.downstream?.send(new Uint8Array([104, 105]), () => true);
+    await settle(harnessed.link);
+
+    should((await clientReadAll(harnessed.wire, after)).messages.at(-1)).deepEqual({ t: 'data', bytes: 'aGk' });
+  });
+
   it('should refuse a ticket or a token in a stream query, and an unknown credential', async () => {
     // Arrange
     const ticketed = harness();

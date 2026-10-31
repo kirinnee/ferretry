@@ -105,6 +105,11 @@ export function freshSealedName(key: string, role: 'password' | 'totp'): string 
   return `${key}_${role === 'password' ? 'PASSWORD' : 'TOTP'}_${randomBytes(4).toString('hex').toUpperCase()}`;
 }
 
+/** How many sealed names the index points at that the sealed document does not hold. */
+function missingReferences(index: LoginIndexDocument, sealed: SecretVaultDocument): number {
+  return [...referenced(index)].filter(name => sealed.entries[name] === undefined).length;
+}
+
 /** Every sealed name an index points at. */
 function referenced(index: LoginIndexDocument): ReadonlySet<string> {
   const names = new Set<string>();
@@ -168,6 +173,16 @@ export class LoginStoreLock {
     this.tail = turn.catch(() => undefined);
     return await turn;
   }
+}
+
+/**
+ * What a boot sweep did: how many unreferenced sealed values it removed, or why it removed none. `damaged` is a
+ * committed index that names ciphertext the sealed document does not hold: with a reference that cannot be
+ * trusted, NOTHING is swept, so no value can lose its masking on the strength of a broken index.
+ */
+export interface LoginSweep {
+  readonly swept: number;
+  readonly damaged?: string;
 }
 
 /** The fields a card keeps in one saved login at once: the plain username, the secret password, or both. */
@@ -295,19 +310,23 @@ export class LoginDirectory {
    * sealed value. Never sweeps against an index that was never written or cannot be read: with no commit to trust,
    * everything is kept (and masked). Runs under the store lock, so no change can be mid-flight.
    */
-  async sweepUnreferenced(): Promise<number> {
+  async sweepUnreferenced(): Promise<LoginSweep> {
     return await this.lock.run(async () => {
       const index = await this.documents.index.read();
-      if (index === undefined) return 0;
+      if (index === undefined) return { swept: 0 };
       const sealed = await this.documents.readSealed();
+      const missing = missingReferences(index, sealed);
+      if (missing > 0) return { swept: 0, damaged: `the index names ${missing} sealed value(s) that are not there` };
       const before = Object.keys(sealed.entries).length;
       await this.sweep(index, sealed);
-      return before - Object.keys((await this.documents.readSealed()).entries).length;
+      return { swept: before - Object.keys((await this.documents.readSealed()).entries).length };
     });
   }
 
   /** Drops sealed values the committed index no longer points at. Best effort: an orphan is still masked. */
   private async sweep(committed: LoginIndexDocument, sealed: SecretVaultDocument): Promise<void> {
+    // A reference to ciphertext that is not there means the index cannot be trusted: keep everything.
+    if (missingReferences(committed, sealed) > 0) return;
     const keep = referenced(committed);
     const kept = Object.fromEntries(Object.entries(sealed.entries).filter(([name]) => keep.has(name)));
     if (Object.keys(kept).length === Object.keys(sealed.entries).length) return;

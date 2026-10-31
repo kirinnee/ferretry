@@ -123,6 +123,29 @@ describe('createSessionDirectory', () => {
     await should(subject.get('live-1')).be.rejectedWith({ name: 'SessionReadError', failure: 'unusable' });
   });
 
+  /**
+   * The agenda asks whether a session is there for every ferret on a board, on every board read: projected,
+   * that was a transcript tail per session and one card's read took ten seconds on a 760-session host.
+   */
+  it('should say a live or ended session is there without projecting either', async () => {
+    const f = fleet(1, 1);
+    const subject = directory(f);
+    should(await subject.has('live-0')).be.true();
+    should(await subject.has('ended-0')).be.true();
+    should(f.projected).eql([]);
+    should(f.clock).equal(2 * 2 * READ_MS);
+  });
+
+  it('should say an unindexed session is not there, and refuse what the single read refuses', async () => {
+    const f = fleet(2, 0);
+    f.broken.add('live-1');
+    const subject = directory(f);
+    should(await subject.has('nobody')).be.false();
+    await should(subject.has('live-1')).be.rejectedWith({ name: 'SessionReadError', failure: 'unusable' });
+    await should(subject.has('../etc')).be.rejectedWith({ name: 'SessionReadError', failure: 'invalid' });
+    should(f.projected).eql([]);
+  });
+
   it('should answer nothing for an unindexed session and refuse an unusable reference', async () => {
     const subject = directory(fleet(1, 0));
     should(await subject.get('nobody')).be.undefined();

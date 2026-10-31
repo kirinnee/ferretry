@@ -113,10 +113,16 @@ const DEFAULT_RESTART: WorkerRestartPolicy = {
   windowMs: 10 * 60_000,
 };
 
-/** How long an idle thread is kept when it holds no window. */
-const PARSE_IDLE_MS = 30_000;
+/**
+ * How long an idle thread is kept when it holds no window. The thread holds every session's folded
+ * conversation, so a thread ended at 30 s made the next messages read of a big session fold the whole
+ * transcript again (3.4 s). Ten minutes covers a person stepping away and coming back; the memory it
+ * keeps meanwhile is bounded by the index's own byte budget (`DEFAULT_CONVERSATION_INDEX_BYTES`), not
+ * by this time.
+ */
+export const PARSE_IDLE_MS = 10 * 60_000;
 /** How long an idle thread is kept while a window is open: the thread IS the window's memory. */
-const PARSE_WINDOW_HOLD_MS = 6 * 60 * 60_000;
+export const PARSE_WINDOW_HOLD_MS = 6 * 60 * 60_000;
 
 /**
  * The value a refusal is raised as: an image or digest refusal keeps its failure and its class, so the

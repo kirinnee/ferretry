@@ -65,7 +65,20 @@ export interface SessionDirectoryPorts {
   readonly yieldToLoop: () => Promise<void>;
 }
 
-export function createSessionDirectory(ports: SessionDirectoryPorts): SessionDirectorySubsystem {
+/**
+ * Whether a session is there, and nothing more: the question the agenda asks before it reads a board.
+ *
+ * IT NEVER PROJECTS. A board read asks it for every ferret on the board — some two hundred sessions — and
+ * the single read's projection is a transcript tail parsed (or a worker barrier waited on) for each one,
+ * which made one card's read take up to ten seconds. Whether a session exists is not something its
+ * transcript can change, so the answer is the index and the two documents, with the single read's own
+ * refusals: an unusable reference, or documents that do not satisfy the protocol.
+ */
+export interface SessionPresence {
+  has(sessionId: string): Promise<boolean>;
+}
+
+export function createSessionDirectory(ports: SessionDirectoryPorts): SessionDirectorySubsystem & SessionPresence {
   /** The pair of documents for one indexed session, parsed, or `undefined` when either is unusable. */
   const view = async (id: SessionId, project: boolean): Promise<SessionView | undefined> => {
     // Read BEFORE the documents: a reader starting its live feed after this sequence is replayed every
@@ -82,6 +95,17 @@ export function createSessionDirectory(ports: SessionDirectoryPorts): SessionDir
       ...(journalSequence === undefined ? {} : { journalSequence }),
     };
   };
+  /** The single read, projected or not: `undefined` for a session the index does not hold. */
+  const read = async (reference: string, project: boolean): Promise<SessionView | undefined> => {
+    const id = tryParseSessionId(reference);
+    if (id === undefined)
+      throw new SessionReadError('invalid', `${JSON.stringify(reference)} is not a usable session id`);
+    if (ports.find(id) === undefined) return undefined;
+    const found = await view(id, project);
+    if (found === undefined)
+      throw new SessionReadError('unusable', `the documents for session ${reference} do not satisfy the protocol`);
+    return found;
+  };
   return {
     list: async () => {
       const views: SessionView[] = [];
@@ -94,15 +118,7 @@ export function createSessionDirectory(ports: SessionDirectoryPorts): SessionDir
       }
       return views;
     },
-    get: async reference => {
-      const id = tryParseSessionId(reference);
-      if (id === undefined)
-        throw new SessionReadError('invalid', `${JSON.stringify(reference)} is not a usable session id`);
-      if (ports.find(id) === undefined) return undefined;
-      const found = await view(id, true);
-      if (found === undefined)
-        throw new SessionReadError('unusable', `the documents for session ${reference} do not satisfy the protocol`);
-      return found;
-    },
+    get: async reference => await read(reference, true),
+    has: async reference => (await read(reference, false)) !== undefined,
   };
 }
