@@ -496,6 +496,8 @@ SHA-256 of a code is stored.
   that the share still gives and that still exist, and a join for an existing member needs that member to be
   there, so nothing the owner removed comes back through a join already in flight. Whoever admits MUST commit
   or `release` in a try/finally.
+  Taking a catalog away from a person, or deleting it, while they are mid-join refuses that WHOLE join, by design:
+  the joiner is refused and the code stays spent, so the owner mints another.
 - **A burn is on disk before the answer.** Every admission that changed a share (a burn, a counted use, a Q5
   refusal) returns `persisted`, a promise for the write; the caller awaits it before replying, and
   `flushed()` waits for every queued write. A failed write still leaves the code burned in memory.

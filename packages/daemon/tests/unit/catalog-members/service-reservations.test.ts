@@ -251,6 +251,48 @@ describe('a reservation that nobody commits', () => {
     should(error.refusal).equal('share_refused');
   });
 
+  it('should judge the lapse when the commit was asked, not when a slow disk ahead of it lets it run', async () => {
+    // Arrange
+    const r = await rig({ shares: sharesDoc(storedShare(1)), members: holders() });
+    const reservation = joinOf(r.service.admitJoin(codeOf(1), T0));
+    await r.service.flushed();
+    r.clock.now = T0 + 29_000;
+    const release = r.members.hold();
+    const ahead = r.service.renameMember(memberId(7), 'Slow');
+
+    // Act
+    const asked = r.service.commit(reservation, newKey(70));
+    r.clock.now = T0 + 45_000;
+    release();
+    await ahead;
+    const joined = await asked;
+
+    // Assert
+    should(joined.memberId).equal(memberId(1));
+    should(memberOf(r.members.document, 1).keys).have.length(1);
+  });
+
+  it('should judge a redeem the same way', async () => {
+    // Arrange
+    const r = await rig({ members: holders() });
+    const { code } = await r.service.mint(singleForMember(7, [catalogId(2)]));
+    const reservation = redeemOf(r.service.admitRedeem(code, memberId(7), T0));
+    await r.service.flushed();
+    r.clock.now = T0 + 29_000;
+    const release = r.members.hold();
+    const ahead = r.service.renameMember(memberId(8), 'Slow');
+
+    // Act
+    const asked = r.service.commitRedeem(reservation, by);
+    r.clock.now = T0 + 45_000;
+    release();
+    await ahead;
+    await asked;
+
+    // Assert
+    should(memberOf(r.members.document, 7).catalogIds).eql([catalogId(1), catalogId(2)]);
+  });
+
   it('should refuse a reservation committed twice', async () => {
     // Arrange
     const r = await rig({ shares: sharesDoc(storedShare(1)) });

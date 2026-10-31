@@ -16,7 +16,7 @@
  * A join that passed the admission step holds a slot until it is committed or released. Whoever admits MUST
  * commit or {@link release} in a try/finally, and MUST await `persisted` on the answer before replying: the
  * burn of a code is on disk before the joiner hears anything. A reservation also lapses on its own after
- * 30 seconds. Every change that takes access away (a revoke, a catalog taken or deleted, a share ended)
+ * 30 seconds, judged at the moment commit was ASKED, not when its turn in the queue comes. Every change that takes access away (a revoke, a catalog taken or deleted, a share ended)
  * VOIDS the reservations it touches in the same queue, and a commit refuses a reservation that is no longer
  * held, so nothing the owner removed comes back through a join that was already in flight.
  *
@@ -275,11 +275,13 @@ export class CatalogMemberService {
    * (the admission already burned it) and the caller {@link release}s the slot.
    */
   async commit(reservation: JoinReservation, key: NewMemberKey): Promise<JoinedMember> {
+    // The lapse is judged at the moment of the ask: a slow disk ahead in the queue must not refuse a real join.
+    const requestedAt = this.deps.now();
     return await this.#serially(async () => {
       const known = await this.deps.catalogs.knownIds();
       const state = this.#loaded();
       const now = this.deps.now();
-      this.#claim(reservation, now);
+      this.#claim(reservation, requestedAt);
       const share = state.shares.shares.find(entry => entry.shareId === reservation.shareId);
       const existing = state.members.members.find(member => member.memberId === reservation.memberId);
       // What the owner took away while the join was in flight does not come back: the member must still be
@@ -348,10 +350,11 @@ export class CatalogMemberService {
 
   /** Step 3 of a redeem: the catalogs it adds are filed. A redeem that adds nothing writes nothing. */
   async commitRedeem(reservation: RedeemReservation, by: RedeemedBy): Promise<void> {
+    const requestedAt = this.deps.now();
     await this.#serially(async () => {
       const known = await this.deps.catalogs.knownIds();
       const state = this.#loaded();
-      this.#claim(reservation, this.deps.now());
+      this.#claim(reservation, requestedAt);
       const member = state.members.members.find(entry => entry.memberId === reservation.memberId);
       if (member === undefined) throw new CatalogMemberRefusal('member_unknown', 'that member no longer exists');
       if (reservation.added.length === 0) return;
