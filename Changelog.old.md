@@ -1,3 +1,9 @@
+## [4.170.0](https://github.com/kirinnee/ferretry/compare/v4.169.0...v4.170.0) (2026-10-31)
+
+### Features
+
+* **daemon:** per-login daily and weekly spend budgets with a trigger and a hard limit ([#1057](https://github.com/kirinnee/ferretry/issues/1057)) ([e963c93](https://github.com/kirinnee/ferretry/commit/e963c933b1960f822f75a3cde5c93d7303bb5a37))
+
 ## [4.169.0](https://github.com/kirinnee/ferretry/compare/v4.168.2...v4.169.0) (2026-10-31)
 
 ### Features
