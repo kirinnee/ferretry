@@ -24,9 +24,12 @@ import { type AccountChanges, ChangeApplyPanel, useAccountChanges } from '../she
 import { DisableSwitch } from '../shell/disable-switch.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import { AddLogin } from './add-login.tsx';
+import { BudgetEditor } from './budget-editor.tsx';
+import { BudgetMeter } from './budget-meter.tsx';
 import { CredentialEnvironment, environmentChip } from './credential-environment.tsx';
 import { CredentialSignIn } from './credential-sign-in.tsx';
 import {
+  budgetChip,
   credentialEmail,
   credentialExplanation,
   credentialGroups,
@@ -44,6 +47,7 @@ import {
   usageBarText,
 } from './credentials-model.ts';
 import { LocalModelsPanel } from './local-models-panel.tsx';
+import { METER_LABEL, METER_WORDS } from './meter-layout.ts';
 import { SIGN_OUT_VERSUS_REMOVE } from './login-remove-model.ts';
 import { LoginScopeChip } from './login-scope-chip.tsx';
 import { RemoveLoginDialog } from './remove-login-dialog.tsx';
@@ -61,7 +65,7 @@ export function UsageBars({ credential, now }: { readonly credential: FleetCrede
     <div className="flex flex-col gap-1" data-credential-usage="">
       {bars.map((usage: UsageBar) => (
         <div key={usage.label} className="flex min-w-0 items-center gap-2 text-meta">
-          <span className="w-10 shrink-0 text-muted">{usage.label}</span>
+          <span className={METER_LABEL}>{usage.label}</span>
           <span
             role="img"
             aria-label={usageBarText(usage)}
@@ -72,7 +76,7 @@ export function UsageBars({ credential, now }: { readonly credential: FleetCrede
               style={{ width: `${String(usage.percent ?? 0)}%` }}
             />
           </span>
-          <span className="shrink-0 text-muted">
+          <span className={METER_WORDS}>
             {usage.percent === null ? 'not measured' : `${String(usage.percent)}% used`}
             {usage.resets === null ? '' : ` · ${usage.resets}`}
           </span>
@@ -89,6 +93,7 @@ export function UsageBars({ credential, now }: { readonly credential: FleetCrede
 export function CredentialBadges({ credential }: { readonly credential: FleetCredentialView }) {
   const terminal = terminalBadge(credential);
   const slot = slotBadge(credential);
+  const budget = budgetChip(credential.budget);
   return (
     <span className="flex min-w-0 flex-wrap gap-1" data-credential-badges="">
       <LoginScopeChip harnesses={credentialHarnesses(credential)} />
@@ -100,6 +105,11 @@ export function CredentialBadges({ credential }: { readonly credential: FleetCre
       {credential.disabled === undefined ? null : (
         <Badge tone="warn" data-credential-disabled-badge="">
           Disabled
+        </Badge>
+      )}
+      {budget === null ? null : (
+        <Badge tone={budget.tone} data-credential-budget-badge="">
+          {budget.label}
         </Badge>
       )}
       {credential.label === undefined ? null : <Badge tone="accent">{credential.label}</Badge>}
@@ -272,6 +282,16 @@ function CredentialPage({
           onChanged={reload}
         />
       </div>
+
+      <BudgetEditor
+        credential={credential}
+        machineName={machineName}
+        online={online}
+        connection={connection}
+        createClient={createClient}
+        changes={changes}
+        onChanged={reload}
+      />
 
       {credential.environment === undefined ? null : (
         <CredentialEnvironment
@@ -519,6 +539,9 @@ function CredentialRow({
                     ) : null
                   ) : (
                     <ProviderQuota reading={credential.usage.provider} now={now} />
+                  )}
+                  {credential.budget === undefined ? null : (
+                    <BudgetMeter budget={credential.budget} machineName={machineName} />
                   )}
                 </span>
               </a>
