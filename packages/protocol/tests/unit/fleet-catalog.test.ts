@@ -262,6 +262,29 @@ const cases: readonly SchemaCase[] = [
     value: { kind: 'settings', harness: 'claude', flags: ['--verbose'], env: { LOG: 'debug' } },
   },
   { name: 'FleetAccountChangeSchema', schema: catalog.FleetAccountChangeSchema, value: change },
+  {
+    name: 'FleetCatalogInstallChangeSchema',
+    schema: catalog.FleetCatalogInstallChangeSchema,
+    value: {
+      kind: 'catalog.install',
+      name: 'pdf-tools',
+      component: { kind: 'skills', items: ['pdf-tools'] },
+      files: [{ path: 'SKILL.md', content: '# pdf\n' }],
+      profile: 'work',
+      installedFrom: {
+        publisher: `fy_daemon_${'p'.repeat(43)}`,
+        publisherName: 'kirin-box',
+        catalogId: `cat_${'c'.repeat(22)}`,
+        catalogName: 'Catalog',
+        itemId: `itm_${'i'.repeat(22)}`,
+        kind: 'skill',
+        name: 'pdf-tools',
+        version: 1,
+        digest: `sha256:${'a'.repeat(64)}`,
+      },
+      replace: false,
+    },
+  },
   { name: 'FleetAccountChangeRequestSchema', schema: catalog.FleetAccountChangeRequestSchema, value: { change } },
   {
     name: 'FleetChangedRuntimeSchema',
@@ -449,6 +472,66 @@ describe('the account-model catalogue wire contract', () => {
 
     // Assert
     should(parsed).deepEqual(changes.map(() => true));
+  });
+
+  it('should accept a catalog.install of an MCP server or a skill, and refuse any other kind of component', () => {
+    // Arrange
+    const installedFrom = {
+      publisher: `fy_daemon_${'p'.repeat(43)}`,
+      publisherName: 'kirin-box',
+      catalogId: `cat_${'c'.repeat(22)}`,
+      catalogName: 'Catalog',
+      itemId: `itm_${'i'.repeat(22)}`,
+      kind: 'skill',
+      name: 'pdf-tools',
+      version: 1,
+      digest: `sha256:${'a'.repeat(64)}`,
+    };
+    const sent = (component: unknown) => ({
+      kind: 'catalog.install',
+      name: 'pdf-tools',
+      component,
+      files: [{ path: 'SKILL.md', content: '# pdf\n' }],
+      profile: 'work',
+      installedFrom,
+      replace: false,
+    });
+    const install = (component: unknown) => catalog.FleetCatalogInstallChangeSchema.safeParse(sent(component)).success;
+
+    // Act
+    const actual = [
+      install({ kind: 'skills', items: ['pdf-tools'] }),
+      install({ kind: 'mcp', url: 'https://mcp.example.com/x' }),
+      install({ kind: 'hooks', harness: 'claude' }),
+    ];
+
+    // Assert
+    should(actual).deepEqual([true, true, false]);
+    should(
+      catalog.FleetCatalogInstallChangeSchema.safeParse({
+        ...sent({ kind: 'skills', items: ['x'] }),
+        files: [{ path: '../x', content: 'x' }],
+      }).success,
+    ).be.false();
+  });
+
+  it('should not let the public change schema express a catalog.install at all', () => {
+    // Arrange
+    const forged = {
+      kind: 'catalog.install',
+      name: 'pdf-tools',
+      component: { kind: 'skills', items: ['pdf-tools'] },
+      files: [{ path: 'SKILL.md', content: '# pdf\n' }],
+      profile: 'work',
+      replace: false,
+    };
+
+    // Act
+    const asChange = catalog.FleetAccountChangeSchema.safeParse(forged);
+    const asRequest = catalog.FleetAccountChangeRequestSchema.safeParse({ change: forged });
+
+    // Assert
+    should([asChange.success, asRequest.success]).deepEqual([false, false]);
   });
 
   it('should accept a runtime.put naming which half of a dual login it runs, and leave it optional', () => {

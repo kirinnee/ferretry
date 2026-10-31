@@ -13,6 +13,11 @@ import path from 'node:path';
 import { FleetCloneBundleSchema } from '@ferretry/protocol';
 import { resolveDefaultRuntime } from '@ferretry/fleet';
 import should from 'should';
+import { ApiDispatcher } from '../../../src/lib/api/dispatcher.ts';
+import { ApiRouter } from '../../../src/lib/api/router.ts';
+import { fleetCatalogRoutes } from '../../../src/lib/runtime/mounts/fleet-catalog.ts';
+import { CREDENTIALS, GRANTED, human } from '../../unit/runtime/mounts/support.ts';
+import { request } from '../../unit/api/support.ts';
 import { fileFleetCatalogDeps, readDeclaredAccountModel } from '../../../src/adapters/fleet/account-model-files.ts';
 import { fileFleetSetupDeps } from '../../../src/adapters/fleet/setup-files.ts';
 import { resolveWardenLogin } from '../../../src/lib/warden/config.ts';
@@ -332,5 +337,106 @@ describe('Clone and the default runtime for new agents over real files', () => {
     const model = await declared(chosen);
     should(Object.keys(model.runtimes).toSorted()).deepEqual(['claude-default', 'claude-kirin']);
     should(model.machine.defaultRuntime).equal('claude-default');
+  });
+});
+
+describe('a catalog install over real files cannot leave the skill folder', () => {
+  const ORIGIN = {
+    publisher: `fy_daemon_${'A'.repeat(43)}`,
+    publisherName: 'kirin-box',
+    catalogId: `cat_${'c'.repeat(22)}`,
+    catalogName: 'Catalog',
+    itemId: `itm_${'s'.repeat(22)}`,
+    kind: 'skill',
+    name: 'pdf-tools',
+    version: 1,
+    digest: `sha256:${'a'.repeat(64)}`,
+  } as const;
+  const install = (files: { path: string; content: string }[]) =>
+    ({
+      kind: 'catalog.install',
+      name: 'pdf-tools',
+      component: { kind: 'skills', items: ['pdf-tools'] },
+      files,
+      profile: 'plain',
+      installedFrom: ORIGIN,
+      replace: false,
+    }) as never;
+
+  /** A machine with one profile, which is what a catalog item is installed into. */
+  async function withProfile(): Promise<Machine> {
+    const on = await machine('studio', { claude: false });
+    const component = await on.catalog.propose({
+      kind: 'component.put',
+      name: 'house',
+      component: { kind: 'instructions' },
+      content: 'Be kind.\n',
+      create: true,
+    } as never);
+    await on.catalog.apply(component.id, { governed: false } as never);
+    const profile = await on.catalog.propose({
+      kind: 'profile.put',
+      name: 'plain',
+      layers: ['instructions/house'],
+      create: true,
+    });
+    await on.catalog.apply(profile.id, { governed: false } as never);
+    return on;
+  }
+
+  it('should refuse the kind on the public proposals route, writing nothing anywhere', async () => {
+    const on = await withProfile();
+    const before = [...(await filesUnder(on.home.paths.config)), ...(await filesUnder(on.fleet))];
+    const dispatcher = new ApiDispatcher(new ApiRouter(fleetCatalogRoutes(on.catalog)), CREDENTIALS, GRANTED);
+
+    const staged = await dispatcher.dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/fleet/proposals',
+        headers: { ...human, 'content-type': 'application/json' },
+        body: JSON.stringify({ change: install([{ path: '../../../../config/x.yaml', content: 'owned: 1\n' }]) }),
+      }),
+    );
+
+    should(staged.status).equal(400);
+    should([...(await filesUnder(on.home.paths.config)), ...(await filesUnder(on.fleet))]).deepEqual(before);
+  });
+
+  it('should refuse a path out of the skill folder even when called internally, and write nothing', async () => {
+    const on = await withProfile();
+    const before = [...(await filesUnder(on.home.paths.config)), ...(await filesUnder(on.fleet))];
+
+    const attempt = on.catalog.installCatalogItem(
+      install([{ path: '../../../../config/x.yaml', content: 'owned: 1\n' }]),
+      { governed: false } as never,
+    );
+
+    await attempt.then(
+      () => should.fail(undefined, undefined, 'expected a refusal'),
+      (error: Error) => should(error.name).equal('FleetCatalogRefusal'),
+    );
+    should([...(await filesUnder(on.home.paths.config)), ...(await filesUnder(on.fleet))]).deepEqual(before);
+  });
+
+  it('should write a well-formed skill under its own folder in the assets directory, and only there', async () => {
+    const on = await withProfile();
+    const before = new Set(await filesUnder(on.fleet));
+
+    await on.catalog.installCatalogItem(
+      install([
+        { path: 'SKILL.md', content: '---\nname: pdf-tools\n---\n' },
+        { path: 'scripts/split.sh', content: 'echo split\n' },
+      ]),
+      { governed: false } as never,
+    );
+
+    const added = (await filesUnder(on.fleet)).filter(file => !before.has(file));
+    should(added.filter(file => file.startsWith('assets/')).toSorted()).deepEqual([
+      'assets/skills/pdf-tools/SKILL.md',
+      'assets/skills/pdf-tools/scripts/split.sh',
+    ]);
+    should(await readFile(path.join(on.fleet, 'assets/skills/pdf-tools/scripts/split.sh'), 'utf8')).equal(
+      'echo split\n',
+    );
   });
 });

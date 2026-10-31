@@ -32,6 +32,7 @@
  * Every object is strict, so a field the daemon grew without adding it here fails the response.
  */
 import { z } from 'zod';
+import { CatalogProvenanceSchema } from './catalog-install.ts';
 import { AutoResumeSummarySchema } from './auto-resume.ts';
 import { BrowserModeSchema, BrowserProxySettingSchema } from './browser.ts';
 import { BrowserPortsSettingSchema } from './browser-ports.ts';
@@ -51,6 +52,7 @@ import {
 } from './fleet-credentials.ts';
 import { GrantRefusalSchema } from './grants.ts';
 import { LocalModelsSchema } from './models.ts';
+import { CATALOG_SKILL_MAX_FILES, CatalogSkillFileSchema } from './shared-catalog.ts';
 
 const HarnessKindSchema = z.enum(['claude', 'codex']);
 
@@ -310,6 +312,8 @@ export const FleetComponentViewSchema = z.strictObject({
   clonedFrom: NonEmptyStringSchema.optional(),
   /** That machine's daemon id as the copying browser reported it, so a surface can name it by its own label. */
   clonedFromDaemon: NonEmptyStringSchema.optional(),
+  /** Set by a catalog install: what this machine verified about where it came from (docs/catalogs.md). */
+  installedFrom: CatalogProvenanceSchema.optional(),
 });
 export type FleetComponentView = z.infer<typeof FleetComponentViewSchema>;
 
@@ -630,6 +634,33 @@ export type FleetComponentInput = z.infer<typeof FleetComponentInputSchema>;
 
 /** The longest component text one change may carry. */
 export const MAX_COMPONENT_CONTENT_BYTES = 256 * 1024;
+
+/**
+ * Put an MCP server or a skill that a catalog published into this machine's setup, and add it to one
+ * profile — in ONE change, so the provisioner's rollback boundary covers the component, the skill's
+ * files and the profile together.
+ *
+ * THIS IS AN INTERNAL CHANGE, NOT A WIRE ONE. It is deliberately outside `FleetAccountChangeSchema`:
+ * `POST /v1/fleet/proposals` cannot express it, because what makes it safe — the publisher's
+ * signature, the item's digest, the passkey, the refusal of a ferret — is checked by the catalog
+ * installer before it exists, and `installedFrom` is only ever what the installer VERIFIED. The
+ * installer hands it to the fleet service's own `installCatalogItem`; no route parses it. A skill's
+ * `files` are relative to its own folder and land under the skills store (docs/catalogs.md).
+ * `replace` means "the component of this name is the one this publisher's item installed before".
+ */
+export const FleetCatalogInstallChangeSchema = z.strictObject({
+  kind: z.literal('catalog.install'),
+  name: FleetComponentNameSchema,
+  component: FleetComponentInputSchema.refine(
+    component => component.kind === 'mcp' || component.kind === 'skills',
+    'only an MCP server or a skill is installed from a catalog',
+  ),
+  files: z.array(CatalogSkillFileSchema).max(CATALOG_SKILL_MAX_FILES),
+  profile: FleetComponentNameSchema,
+  installedFrom: CatalogProvenanceSchema,
+  replace: z.boolean(),
+});
+export type FleetCatalogInstallChange = z.infer<typeof FleetCatalogInstallChangeSchema>;
 
 /**
  * One change to this machine's setup. `create: true` means "this name must be new": a clash is

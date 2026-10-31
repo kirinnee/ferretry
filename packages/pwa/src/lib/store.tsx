@@ -682,7 +682,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     health: connectionHealth,
     drops: carrierDrops,
     presence: () => presence.present(),
-    stepUp: async (daemon, act, origin) => await stepUp.require(daemon, act, origin),
+    stepUp: async (daemon, act, origin, actId) => await stepUp.require(daemon, act, origin, actId),
     unlockRequired: async (daemon, origin) => await unlockGate.require(daemon, undefined, origin),
     crypto: relayCrypto,
     rotation: new KeyRotation({ store: deviceKeys, crypto: relayCrypto }),

@@ -63,6 +63,26 @@ export const AppOriginSchema = z
 export const PasskeyOptionsRequestSchema = z.strictObject({ origin: AppOriginSchema });
 export type PasskeyOptionsRequest = z.infer<typeof PasskeyOptionsRequestSchema>;
 
+/** The acts that add access or run someone else's code, each wanting a passkey proved for it ({@link STEP_UP_ACTS}). */
+export const StepUpActSchema = z.enum([
+  'add-device',
+  'widen-device',
+  'enable-agent-control',
+  'loosen-config',
+  'clone-secrets',
+  'loosen-security',
+  'catalog-install',
+]);
+export type StepUpAct = z.infer<typeof StepUpActSchema>;
+
+/**
+ * Options for a step-up. `act` is the one act the person is about to confirm: the daemon stamps the
+ * proof with it, and an act that asks for its own proof (a catalog install) takes only a proof stamped
+ * for it. Absent, the proof is unstamped and no such act takes it.
+ */
+export const StepUpOptionsRequestSchema = PasskeyOptionsRequestSchema.extend({ act: StepUpActSchema.optional() });
+export type StepUpOptionsRequest = z.infer<typeof StepUpOptionsRequestSchema>;
+
 export const StepUpOptionsSchema = z.strictObject({
   challenge: Base64UrlSchema(128),
   rpId: z.string().min(1).max(253),
@@ -222,9 +242,7 @@ export const StepUpDemandSchema = z.strictObject({
    * The ONE act this confirmation is for, when the act is one that adds access to this machine and so
    * wants a passkey proved for it alone ({@link STEP_UP_ACTS}). Absent for every other step-up.
    */
-  act: z
-    .enum(['add-device', 'widen-device', 'enable-agent-control', 'loosen-config', 'clone-secrets', 'loosen-security'])
-    .optional(),
+  act: StepUpActSchema.optional(),
 });
 export type StepUpDemand = z.infer<typeof StepUpDemandSchema>;
 
@@ -264,6 +282,12 @@ export const STEP_UP_ACTS = {
    * (owner decision 2026-10-21).
    */
   loosenSecurity: 'loosen-security',
+  /**
+   * Installing, or updating, an item from a catalog someone else published (docs/catalogs.md). A skill is
+   * instructions a ferret follows and an MCP setup is a program this machine runs, so every install
+   * wants a passkey proved for it alone — even inside an unlock (owner decision Q7). Removing one never asks.
+   */
+  catalogInstall: 'catalog-install',
 } as const satisfies Record<string, NonNullable<StepUpDemand['act']>>;
 
 /**

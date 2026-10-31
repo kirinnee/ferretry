@@ -507,6 +507,20 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       },
     },
   },
+  catalogInstalls: {
+    list: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    preview: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    apply: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    remove: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+  },
   sessionMcp: {
     list: async () => {
       throw new Error('not exercised by the surface inventory');
@@ -894,7 +908,8 @@ describe('the mounted daemon surface', () => {
       7 + // the owner's input requests: the two lists, a page request's picture, deliver or cancel one, and the quarantine list and its end (docs/input-requests.md)
       4 + // saved logins: the list, put, rename and delete (docs/input-requests.md#saved-logins)
       6 + // secure copy: a session's copies, the rules (list, add, remove), the paste plans and an answer to one (docs/secure-copy.md)
-      2; // the board's legacy import: the old-reference lookup, and the one-time import (owner only)
+      2 + // the board's legacy import: the old-reference lookup, and the one-time import (owner only)
+      7; // installing a catalog item from a signed file: a preview and an apply per scope, the list, and a remove per scope (docs/catalogs.md)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status,
     // and the WebRTC offer: any paired device may ask for a shorter path to its own daemon (§16).
@@ -1110,6 +1125,13 @@ describe('the mounted daemon surface', () => {
       'POST /v1/sessions/:sessionId/mcp/project',
       'POST /v1/sessions/:sessionId/mcp/login',
       'GET /v1/sessions/:sessionId/mcp',
+      'POST /v1/catalog-installs/project/preview',
+      'POST /v1/catalog-installs/runtime/preview',
+      'POST /v1/catalog-installs/project',
+      'POST /v1/catalog-installs/runtime',
+      'GET /v1/catalog-installs',
+      'DELETE /v1/catalog-installs/project/:installId',
+      'DELETE /v1/catalog-installs/runtime/:installId',
       'POST /v1/sessions/:sessionId/send',
       'POST /v1/sessions/:sessionId/interrupt',
       'GET /v1/sessions/:sessionId/sends',

@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import {
   accessSync,
   chmodSync,
@@ -1275,6 +1275,10 @@ import { NO_PERFORMANCE_PROBE, PerformanceRecorder } from '../src/lib/performanc
 import { teeStackSampler } from '../src/lib/performance/sampler-tee.ts';
 import type { PackSubsystem } from '../src/lib/runtime/mounts/pack.ts';
 import type { SessionForkSubsystem } from '../src/lib/runtime/mounts/session-fork.ts';
+import { FileCatalogInstallStore } from '../src/adapters/catalog-installs/file-store.ts';
+import { FileProjectSkillFiles } from '../src/adapters/catalog-installs/project-skill-files.ts';
+import { FileRuntimeSkillAssets } from '../src/adapters/catalog-installs/runtime-skill-assets.ts';
+import { CatalogInstallService } from '../src/lib/catalog-installs/service.ts';
 import { createSessionMcpSubsystem } from '../src/lib/runtime/mounts/session-mcp.ts';
 import {
   ConversationLeases,
@@ -11329,7 +11333,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // A message held while this session could not take input is delivered now that it is back.
         sends,
       );
-      const mounted: Omit<MountedSubsystems, 'sessionMcp' | 'mcpInventory'> = {
+      const mounted: Omit<MountedSubsystems, 'sessionMcp' | 'catalogInstalls' | 'mcpInventory'> = {
         pack: {
           service: packService,
           routing: { cleanUp, file: guideFile },
@@ -12151,6 +12155,18 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           projectRoots: knownProjectRoots(mounted.catalogs, mounted.worktrees),
           files: new FileMcpProjectFiles(),
           fleet: mounted.fleetCatalog,
+        }),
+        catalogInstalls: new CatalogInstallService({
+          crypto: new WebCryptoRelayCrypto(),
+          store: new FileCatalogInstallStore(paths, stateFiles),
+          projectRoots: knownProjectRoots(mounted.catalogs, mounted.worktrees),
+          mcpFiles: new FileMcpProjectFiles(),
+          skillFiles: new FileProjectSkillFiles(),
+          runtimeSkills: new FileRuntimeSkillAssets(join(paths.fleet, 'assets', 'skills')),
+          fleet: fleetCatalog,
+          secretNames: async () => new Set((await secretDirectory.list()).map(secret => secret.name)),
+          now: () => millisecondClock.now(),
+          mint: prefix => `${prefix}_${randomBytes(16).toString('base64url')}`,
         }),
         mcpInventory: (() => {
           mcpFolderSources.known = mcpInventoryFolders(mounted.catalogs, mounted.worktrees);

@@ -134,6 +134,9 @@ import { RecommendController } from '../src/lib/fleet/recommend';
 import { registerGrantCommands } from '../src/lib/grants/commands';
 import { GrantController } from '../src/lib/grants/controller';
 import { ProtocolGrantGateway } from '../src/lib/grants/gateway';
+import { FsCatalogFileReader } from '../src/adapters/catalog-install/fs-catalog-file-reader';
+import { registerCatalogInstallCommands } from '../src/lib/catalog-install/commands';
+import { CatalogInstallController } from '../src/lib/catalog-install/controller';
 import { registerHarnessCommands } from '../src/lib/harness/commands';
 import { HarnessController } from '../src/lib/harness/controller';
 import { registerHistoryCommands } from '../src/lib/history/commands';
@@ -456,6 +459,10 @@ type SharedDaemonClient = Pick<
   | 'scratchSweep'
   | 'harnessUpdate'
   | 'startHarnessUpdate'
+  | 'previewCatalogInstall'
+  | 'applyCatalogInstall'
+  | 'catalogInstalls'
+  | 'removeCatalogInstall'
   | 'snapshot'
   | 'logs'
   | 'events'
@@ -474,6 +481,10 @@ function lazyDaemonClient(client: () => Promise<IFyApiClient>): SharedDaemonClie
     analytics: async (query?: string): Promise<AnalyticsResponse> => (await client()).analytics(query),
     harnessUpdate: async () => (await client()).harnessUpdate(),
     startHarnessUpdate: async request => (await client()).startHarnessUpdate(request),
+    previewCatalogInstall: async (scope, request) => (await client()).previewCatalogInstall(scope, request),
+    applyCatalogInstall: async (scope, request) => (await client()).applyCatalogInstall(scope, request),
+    catalogInstalls: async () => (await client()).catalogInstalls(),
+    removeCatalogInstall: async (scope, installId) => (await client()).removeCatalogInstall(scope, installId),
     list: async (): Promise<readonly SessionView[]> => (await client()).list(),
     get: async (id: string, signal?: AbortSignal): Promise<SessionView> => (await client()).get(id, signal),
     stop: async (id: string, reason?: string): Promise<SessionView> => (await client()).stop(id, reason),
@@ -964,6 +975,19 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         prompt: world.prompt,
         interactive: world.interactive,
         wait: async milliseconds => await Bun.sleep(milliseconds),
+        binaryName: BINARY_NAME,
+      }),
+    ),
+  ({ program, world, client }) =>
+    registerCatalogInstallCommands(
+      program,
+      new CatalogInstallController({
+        gateway: client,
+        files: new FsCatalogFileReader(),
+        out: world.io,
+        prompt: world.prompt,
+        interactive: world.interactive,
+        cwd: world.cwd,
         binaryName: BINARY_NAME,
       }),
     ),

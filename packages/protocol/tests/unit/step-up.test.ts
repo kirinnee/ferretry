@@ -14,6 +14,13 @@ const DEVICE_ID = `fy_device_id_${'d'.repeat(22)}`;
 const stepUpCases: SchemaCase[] = [
   { name: 'app origin', schema: stepUp.AppOriginSchema, value: ORIGIN },
   { name: 'options request', schema: stepUp.PasskeyOptionsRequestSchema, value: { origin: ORIGIN } },
+  { name: 'step-up options request', schema: stepUp.StepUpOptionsRequestSchema, value: { origin: ORIGIN } },
+  {
+    name: 'step-up options request naming its act',
+    schema: stepUp.StepUpOptionsRequestSchema,
+    value: { origin: ORIGIN, act: 'catalog-install' },
+  },
+  { name: 'step-up act', schema: stepUp.StepUpActSchema, value: 'catalog-install' },
   {
     name: 'registration options',
     schema: stepUp.PasskeyRegistrationOptionsSchema,
@@ -225,6 +232,16 @@ describe('the passkey step-up wire', () => {
     should(
       stepUp.StepUpDemandSchema.safeParse({ capability: 'fleet', axis: 'configure', act: 'loosen-everything' }).success,
     ).be.false();
+  });
+
+  it('should refuse a step-up options request naming an act that does not exist', () => {
+    assertRejects([
+      {
+        name: 'an unknown act',
+        schema: stepUp.StepUpOptionsRequestSchema,
+        value: { origin: ORIGIN, act: 'loosen-everything' },
+      },
+    ]);
   });
 
   it('should spell a refusal code per reason, and the grant refusal the way the grant layer does', () => {

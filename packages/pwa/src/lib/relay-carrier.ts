@@ -46,6 +46,7 @@ import {
   OLDER_DAEMON_SENTENCE,
   RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE,
   STEP_UP_REQUIRED_CODE,
+  type StepUpAct,
   type StepUpDemand,
   StepUpRequiredBodySchema,
   UNLOCK_REQUIRED_CODE,
@@ -1035,7 +1036,12 @@ export interface DaemonCarrierRouterOptions {
    * nothing can ask, and the refusal is returned as it came. `origin` says whether a person started the
    * request: a read (`GET`, `HEAD`) is the page's own background work, anything else is a press.
    */
-  readonly stepUp?: (daemon: DaemonConnection, act?: string, origin?: PromptOrigin) => Promise<boolean>;
+  readonly stepUp?: (
+    daemon: DaemonConnection,
+    act?: string,
+    origin?: PromptOrigin,
+    actId?: StepUpAct,
+  ) => Promise<boolean>;
   /**
    * Asked when the daemon answers `401 unlock_required`: this machine wants a passkey on opening and
    * this device has not given one. `true` once the person has confirmed, and the request is then sent
@@ -1755,7 +1761,7 @@ export class DaemonCarrierRouter {
     if (demand === undefined) return response;
     // The act the daemon NAMED, or nothing: an unparseable demand still asks, and the prompt says "this change".
     const act = demand === null ? undefined : stepUpAct(demand);
-    if (!(await ask(daemon, act, origin))) return response;
+    if (!(await ask(daemon, act, origin, demand?.act))) return response;
     return await once();
   }
 

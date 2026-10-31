@@ -1650,6 +1650,86 @@ describe('spending a single-use step-up', () => {
     should(spent).be.empty();
   });
 
+  describe('claiming the fresh proof at admission', () => {
+    const claimingRoute = (claimed: boolean[], act?: 'catalog-install'): ApiRoute => ({
+      method: 'POST',
+      path: '/v1/claims',
+      minimum: 'operator',
+      capability: { capability: 'fleet', axis: 'use' },
+      handle: async context => {
+        claimed.push(context.claimFreshStepUp?.(act) === true);
+        return jsonResponse({});
+      },
+    });
+    const claimWitness = (proofs: { left: number }): StepUpWitness => ({
+      held: () => true,
+      claimFresh: () => {
+        if (proofs.left <= 0) return false;
+        proofs.left -= 1;
+        return true;
+      },
+    });
+    const dispatcherFor = (claimed: boolean[], witnessed: StepUpWitness, act?: 'catalog-install') =>
+      new ApiDispatcher(
+        new ApiRouter([claimingRoute(claimed, act)]),
+        credentials,
+        guardDeciding({ allowed: true, refusal: 'granted' }),
+        undefined,
+        witnessed,
+      );
+
+    it('should hand a route the device’s proof once, and nothing the second time', async () => {
+      const claimed: boolean[] = [];
+      const dispatcher = dispatcherFor(claimed, claimWitness({ left: 1 }));
+
+      await dispatcher.dispatch(request({ method: 'POST', path: '/v1/claims', device: DEVICE }));
+      await dispatcher.dispatch(request({ method: 'POST', path: '/v1/claims', device: DEVICE }));
+
+      should(claimed).deepEqual([true, false]);
+    });
+
+    it('should ask the witness for a proof of the act the route names, and pass none when it names none', async () => {
+      const asked: unknown[] = [];
+      const witness: StepUpWitness = {
+        held: () => true,
+        claimFresh: (_subject, act) => {
+          asked.push(act);
+          return act === 'catalog-install';
+        },
+      };
+
+      const named: boolean[] = [];
+      await dispatcherFor(named, witness, 'catalog-install').dispatch(
+        request({ method: 'POST', path: '/v1/claims', device: DEVICE }),
+      );
+      const unnamed: boolean[] = [];
+      await dispatcherFor(unnamed, witness).dispatch(request({ method: 'POST', path: '/v1/claims', device: DEVICE }));
+
+      should(asked).deepEqual(['catalog-install', undefined]);
+      should([named, unnamed]).deepEqual([[true], [false]]);
+    });
+
+    it('should hold no proof for a caller with no device, even when the witness has one', async () => {
+      const claimed: boolean[] = [];
+      const dispatcher = dispatcherFor(claimed, claimWitness({ left: 1 }));
+
+      await dispatcher.dispatch(
+        request({ method: 'POST', path: '/v1/claims', headers: { authorization: 'Bearer admin-secret' } }),
+      );
+
+      should(claimed).deepEqual([false]);
+    });
+
+    it('should hold no proof when the witness cannot claim one', async () => {
+      const claimed: boolean[] = [];
+      const dispatcher = dispatcherFor(claimed, { held: () => true });
+
+      await dispatcher.dispatch(request({ method: 'POST', path: '/v1/claims', device: DEVICE }));
+
+      should(claimed).deepEqual([false]);
+    });
+  });
+
   it('should serve an allowed stepped-up act when the witness has nothing to spend', async () => {
     const served = await dispatcherWithGuard(guardDeciding({ allowed: true, refusal: 'granted', steppedUp: true }), {
       held: () => true,

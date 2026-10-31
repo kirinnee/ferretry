@@ -21,6 +21,7 @@ import {
   PasskeyViewSchema,
   type UnlockGranted,
   UnlockGrantedSchema,
+  type StepUpAct,
   type StepUpAssertion,
   type StepUpGranted,
   StepUpGrantedSchema,
@@ -53,8 +54,12 @@ export async function registerPasskey(client: StepUpClient, registration: Passke
   return await client.request('/v1/passkeys', PasskeyViewSchema, json(registration));
 }
 
-export async function stepUpOptions(client: StepUpClient, origin: string): Promise<StepUpOptions> {
-  return await client.request('/v1/step-up/options', StepUpOptionsSchema, json({ origin }));
+export async function stepUpOptions(client: StepUpClient, origin: string, act?: StepUpAct): Promise<StepUpOptions> {
+  return await client.request(
+    '/v1/step-up/options',
+    StepUpOptionsSchema,
+    json(act === undefined ? { origin } : { origin, act }),
+  );
 }
 
 export async function submitStepUp(client: StepUpClient, assertion: StepUpAssertion): Promise<StepUpGranted> {

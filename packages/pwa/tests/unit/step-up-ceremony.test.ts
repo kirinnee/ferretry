@@ -78,11 +78,13 @@ describe('running the ceremony', () => {
 
     // Act
     await run(daemon);
+    await run(daemon, 'catalog-install');
 
     // Assert
-    should(asked).eql([daemon]);
-    should(order).eql(['/v1/step-up/options', 'passkey sheet', '/v1/step-up']);
+    should(asked).eql([daemon, daemon]);
+    should(order.slice(0, 3)).eql(['/v1/step-up/options', 'passkey sheet', '/v1/step-up']);
     should(bodies[0]).eql({ origin: ORIGIN });
+    should(bodies[2]).eql({ origin: ORIGIN, act: 'catalog-install' });
     should(bodies[1]).eql({
       credentialId: toBase64Url(Uint8Array.of(0xaa, 0xbb)),
       clientDataJSON: toBase64Url(Uint8Array.of(0x7b, 0x7d)),
