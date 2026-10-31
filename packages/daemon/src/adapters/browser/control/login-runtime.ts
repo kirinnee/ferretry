@@ -3,7 +3,12 @@ import { chmod, mkdir, open, rename, rm, writeFile } from 'node:fs/promises';
 import { createServer, createConnection } from 'node:net';
 import { hostname as osHostname, userInfo } from 'node:os';
 import { join } from 'node:path';
-import { BROWSER_MAX_HEIGHT, BROWSER_MAX_WIDTH, type BrowserViewport } from '@ferretry/protocol';
+import {
+  BROWSER_MAX_HEIGHT,
+  BROWSER_MAX_WIDTH,
+  type BrowserViewport,
+  type ResolvedBrowserPorts,
+} from '@ferretry/protocol';
 import {
   BrowserControlError,
   generateXCookie,
@@ -395,6 +400,8 @@ export interface BrowserLoginRuntimeOptions extends BrowserLoginTiming {
   readonly freePort?: () => Promise<number>;
   /** Proves the VNC port is held by the x11vnc this window started. Defaults to this host's `/proc`. */
   readonly listenerProver?: ListenerProverPort;
+  /** Which loopback ports `browserPorts` asks for, read at every window start; absent means random. */
+  readonly ports?: () => Promise<ResolvedBrowserPorts>;
 }
 
 /**
@@ -509,6 +516,9 @@ export class NodeBrowserLoginRuntime implements BrowserLoginRuntime {
   }
 
   async freePort(): Promise<number> {
+    const ports = await this.options.ports?.();
+    if (ports?.kind === 'refused') throw new BrowserControlError('launch_failed', ports.reason);
+    if (ports?.kind === 'fixed') return ports.ports.vnc;
     return await this.freePortOf();
   }
 

@@ -1,0 +1,13 @@
+{
+  "cases": [
+    { "uid": 1000, "base": 20000, "ports": { "cdp": 20000, "relay": 20001, "vnc": 20002 } },
+    { "uid": 1001, "base": 20000, "ports": { "cdp": 20004, "relay": 20005, "vnc": 20006 } },
+    { "uid": 1500, "base": 20000, "ports": { "cdp": 22000, "relay": 22001, "vnc": 22002 } },
+    { "uid": 1001, "base": 30000, "ports": { "cdp": 30004, "relay": 30005, "vnc": 30006 } },
+    { "uid": 4000, "base": 20000, "ports": { "cdp": 32000, "relay": 32001, "vnc": 32002 } },
+    { "uid": 4191, "base": 20000, "ports": { "cdp": 32764, "relay": 32765, "vnc": 32766 } },
+    { "uid": 4192, "base": 20000, "ports": { "cdp": 32768, "relay": 32769, "vnc": 32770 }, "refused": true },
+    { "uid": 4191, "base": 20001, "ports": { "cdp": 32765, "relay": 32766, "vnc": 32767 } },
+    { "uid": 4191, "base": 20002, "ports": { "cdp": 32766, "relay": 32767, "vnc": 32768 }, "refused": true }
+  ]
+}

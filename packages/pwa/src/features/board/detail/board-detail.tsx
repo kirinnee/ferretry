@@ -1,8 +1,11 @@
 /**
  * THE CARD DETAIL (`/d/<id>/board/<taskId>`): one card in full, over the Board.
  *
- * One flowing page, in the manner of a task page: a header (id, title, a lane dropdown, who and where), plain
- * headed sections, a timeline, and a comment box pinned at the bottom. A side drawer on a wide screen and a
+ * One flowing page, in the manner of a task page: a header (id, title, the summary line, a lane dropdown, who and
+ * where), then the card read top to bottom as an agenda card reads — premise and context as two tinted blocks, the
+ * ask, How to test as a numbered checklist with Done / Not good right under it on a card waiting to be tested, the
+ * brief, the terms (each also a tap tip where the text uses it) — then the plain headed sections, a timeline, and a
+ * comment box pinned at the bottom. Nothing folds. A side drawer on a wide screen and a
  * full-screen page on a phone; either way the address names the card, so Back leaves it and a link opens it. The card is read through the board store (one source of truth with
  * the Board behind it), every write goes through `BoardActions`, and an ask opens in its ferret's chat as
  * the same item view every `!A5` opens — it is answered there, never here. This file composes; the facts are `board-detail.ts` and the
@@ -45,6 +48,8 @@ import type { FerretNames } from '../../../lib/board-present.ts';
 import type { DaemonBoardStore } from '../../../lib/board-store.ts';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { daemonBoardPath, daemonSessionPath } from '../../../lib/pages/routes.ts';
+import { Situation } from '../../agenda/agenda-item-card.tsx';
+import { markTerms, TermLayer } from '../../agenda/agenda-terms.tsx';
 import { AnswerIcon, BoardDoneAction } from '../board-done-action.tsx';
 import { BoardIcon } from '../board-icons.tsx';
 import { BoardReasonBox } from '../board-reason-box.tsx';
@@ -55,9 +60,11 @@ import {
   Avatar,
   type ChildLine,
   ChildrenList,
+  cardProse,
   DependsLine,
   DetailSection,
   HistorySection,
+  HowToTest,
   LinksSection,
   Prose,
   prIconName,
@@ -65,6 +72,18 @@ import {
 } from './board-detail-sections.tsx';
 
 export type BoardAgenda = Pick<DaemonAgendaClient, 'hydrate' | 'respond' | 'store'>;
+
+/** The card's own texts, each `null` when empty, with the first use of each term marked as a tap tip, in reading order. */
+const markedTexts = (task: BoardTaskView) => {
+  const seen = new Set<number>();
+  const mark = (text: string): string | null => (written(text) ? markTerms(text, task.terms, seen) : null);
+  return {
+    premise: mark(task.premise),
+    context: mark(task.context),
+    howToTest: mark(task.howToTest),
+    brief: mark(task.brief),
+  };
+};
 
 /** What the detail needs from outside the Board: a way to speak to a ferret. */
 export interface BoardDetailPorts extends SendBackPorts {
@@ -248,6 +267,7 @@ function DetailBody({
   const open = (id: string): void =>
     onNavigate(`${daemonBoardPath(machine.connection.daemonId)}/${encodeURIComponent(id)}`);
   const movable = laneSet !== null && category !== 'closed' && task.dropped === null;
+  const marked = useMemo(() => markedTexts(task), [task]);
   const firstPr = task.links.prs[0] ?? null;
 
   const run = async (work: () => Promise<{ readonly ok: boolean; readonly error?: { readonly message: string } }>) => {
@@ -473,6 +493,11 @@ function DetailBody({
               </div>
             </div>
           </div>
+          {written(task.summary) ? (
+            <div className="fy-board-detail__summary" data-section="summary">
+              {cardProse(task.summary)}
+            </div>
+          ) : null}
           <div className="fy-board-detail__meta">
             <span className="fy-board-detail__lane">
               {movable ? (
@@ -541,52 +566,6 @@ function DetailBody({
           )}
         </header>
 
-        {verdict === null || task.dropped !== null ? null : (
-          <fieldset aria-label="Your verdict" className="fy-board-detail__verdict">
-            {verdict.closeLaneId === null ? null : (
-              <button
-                aria-busy={pressed === 'works'}
-                className="kt-btn"
-                data-pending={pressed === 'works' ? '' : undefined}
-                data-variant="primary"
-                data-verdict="works"
-                disabled={busy}
-                title={doneTitle({ kind: 'done', laneId: verdict.closeLaneId }, task.title)}
-                onClick={() => requestMove(verdict.closeLaneId as string, 'works')}
-                type="button"
-              >
-                <AnswerIcon icon={Check} pending={pressed === 'works'} size={14} />
-                Done
-              </button>
-            )}
-            {verdict.reworkLaneId === null ? null : (
-              <button
-                aria-busy={pressed === 'not-good'}
-                className="kt-btn"
-                data-pending={pressed === 'not-good' ? '' : undefined}
-                data-variant="ghost"
-                data-verdict="not-good"
-                disabled={busy}
-                title={`Not good → back to ${laneNameOf(laneSet, verdict.reworkLaneId)}, with a reason`}
-                onClick={() => {
-                  setProblem(null);
-                  const to = verdict.reworkLaneId as string;
-                  setDialog({ kind: 'rework', to, toName: laneNameOf(laneSet, to) });
-                }}
-                type="button"
-              >
-                <AnswerIcon icon={X} pending={pressed === 'not-good'} size={14} />
-                Not good
-              </button>
-            )}
-          </fieldset>
-        )}
-        {answerProblem === null ? null : (
-          <p className="fy-board-reason__error fy-board-detail__answer-error" data-answer-error="" role="alert">
-            {answerProblem}
-          </p>
-        )}
-
         {reparenting ? (
           <ReparentForm
             busy={busy}
@@ -603,39 +582,80 @@ function DetailBody({
           />
         ) : null}
 
-        <DetailSection id="summary" title="Summary">
-          <Prose empty="No summary yet." text={task.summary} />
-        </DetailSection>
+        <TermLayer renderProse={cardProse} terms={task.terms}>
+          <Situation context={marked.context} premise={marked.premise} renderProse={cardProse} />
 
-        <DetailSection id="ask" title="Ask">
-          <AskSection
-            names={names}
-            now={now}
-            onOpenSession={sessionId => onNavigate(daemonSessionPath(machine.connection.daemonId, sessionId))}
-            task={task}
-          />
-        </DetailSection>
+          <DetailSection id="ask" title="Ask">
+            <AskSection
+              names={names}
+              now={now}
+              onOpenSession={sessionId => onNavigate(daemonSessionPath(machine.connection.daemonId, sessionId))}
+              task={task}
+            />
+          </DetailSection>
 
-        {written(task.premise) ? (
-          <DetailSection id="premise" title="Premise">
-            <Prose empty="" text={task.premise} />
-          </DetailSection>
-        ) : null}
-        {written(task.context) ? (
-          <DetailSection id="context" title="Context">
-            <Prose empty="" text={task.context} />
-          </DetailSection>
-        ) : null}
-        {task.terms.length === 0 ? null : (
-          <DetailSection count={task.terms.length} id="terms" title="Terms">
-            <TermsTable terms={task.terms} />
-          </DetailSection>
-        )}
-        {written(task.brief) ? (
-          <DetailSection id="brief" title="Brief">
-            <Prose empty="" text={task.brief} />
-          </DetailSection>
-        ) : null}
+          {marked.howToTest === null ? null : (
+            <DetailSection id="how-to-test" title="How to test">
+              <HowToTest key={marked.howToTest} renderProse={cardProse} text={marked.howToTest} />
+            </DetailSection>
+          )}
+          {verdict === null || task.dropped !== null ? null : (
+            <fieldset aria-label="Your verdict" className="fy-board-detail__verdict">
+              {verdict.closeLaneId === null ? null : (
+                <button
+                  aria-busy={pressed === 'works'}
+                  className="kt-btn"
+                  data-pending={pressed === 'works' ? '' : undefined}
+                  data-variant="primary"
+                  data-verdict="works"
+                  disabled={busy}
+                  title={doneTitle({ kind: 'done', laneId: verdict.closeLaneId }, task.title)}
+                  onClick={() => requestMove(verdict.closeLaneId as string, 'works')}
+                  type="button"
+                >
+                  <AnswerIcon icon={Check} pending={pressed === 'works'} size={14} />
+                  Done
+                </button>
+              )}
+              {verdict.reworkLaneId === null ? null : (
+                <button
+                  aria-busy={pressed === 'not-good'}
+                  className="kt-btn"
+                  data-pending={pressed === 'not-good' ? '' : undefined}
+                  data-variant="ghost"
+                  data-verdict="not-good"
+                  disabled={busy}
+                  title={`Not good → back to ${laneNameOf(laneSet, verdict.reworkLaneId)}, with a reason`}
+                  onClick={() => {
+                    setProblem(null);
+                    const to = verdict.reworkLaneId as string;
+                    setDialog({ kind: 'rework', to, toName: laneNameOf(laneSet, to) });
+                  }}
+                  type="button"
+                >
+                  <AnswerIcon icon={X} pending={pressed === 'not-good'} size={14} />
+                  Not good
+                </button>
+              )}
+            </fieldset>
+          )}
+          {answerProblem === null ? null : (
+            <p className="fy-board-reason__error fy-board-detail__answer-error" data-answer-error="" role="alert">
+              {answerProblem}
+            </p>
+          )}
+
+          {marked.brief === null ? null : (
+            <DetailSection id="brief" title="Brief">
+              <Prose text={marked.brief} />
+            </DetailSection>
+          )}
+          {task.terms.length === 0 ? null : (
+            <DetailSection count={task.terms.length} id="terms" title="Terms">
+              <TermsTable terms={task.terms} />
+            </DetailSection>
+          )}
+        </TermLayer>
 
         {children.length === 0 ? null : (
           <DetailSection count={children.length} id="children" title="Sub-cards">

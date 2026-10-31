@@ -66,6 +66,13 @@ const FORM_SCENES = ['form-empty', 'form-stored', 'form-short', 'invalid-form'] 
 
 const invalidForm = (): string => wrap(FORM_SCENES.map(scene => resolved[scene]?.status ?? '').join(''));
 
+const firewallGallery = (): string =>
+  wrap(
+    ['firewall-missing', 'firewall-stale', 'firewall-failed', 'firewall-unverified']
+      .map(scene => resolved[scene]?.status ?? '')
+      .join(''),
+  );
+
 const statusGallery = (): string => wrap(STATUS_SCENES.map(scene => resolved[scene.key]?.status ?? '').join(''));
 
 const SAVED_HINT = 'Tries one request through the proxy from studio.';
@@ -147,6 +154,11 @@ const themes = ['light', 'dark'] as const;
 const scenes = [
   { name: 'browser-tab', html: tab, mustSee: '[data-browser-state="running"]' },
   { name: 'browser-status', html: statusGallery, mustSee: '[data-browser-state="stopped"]' },
+  {
+    name: 'browser-firewall',
+    html: firewallGallery,
+    mustSee: '[data-setup-note="browser-firewall"][data-tone="warn"]',
+  },
   { name: 'browser-proxy-invalid', html: invalidForm, mustSee: '[data-browser-proxy-test-refusal]' },
   { name: 'browser-proxy-test', html: gallery, mustSee: '[data-setup-note="browser-proxy-test"]' },
 ] as const;
@@ -217,6 +229,9 @@ describe('Browser tab visual contract', () => {
               if (scene.name === 'browser-status') {
                 const said = await page.locator('[data-browser-state]').allTextContents();
                 should(said).eql(STATUS_SCENES.map(status => status.words));
+              }
+              if (scene.name === 'browser-firewall') {
+                should(await page.locator('[data-setup-note="browser-firewall"]').count()).equal(4);
               }
               if (scene.name === 'browser-tab') {
                 should(await page.locator('[data-browser-state]').first().textContent()).equal(STATUS_SCENES[0].words);

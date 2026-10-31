@@ -43,7 +43,7 @@ class StubFeed implements UsageFeedPort {
 
 const dispatch = (feed: UsageFeedPort, path: string) =>
   new ApiDispatcher(
-    new ApiRouter([...healthRoutes(fixedClock(NOW), NOW - 90_000), ...usageRoutes(feed, fixedClock(NOW))]),
+    new ApiRouter([...healthRoutes(fixedClock(NOW), NOW - 90_000), ...usageRoutes(feed, fixedClock(NOW), () => true)]),
     { admin: 'admin-secret', warden: 'warden-secret' },
     NO_GOVERNED_ROUTES_GUARD,
   ).dispatch(request({ path }));
@@ -229,7 +229,7 @@ describe('the usage feed', () => {
     // Arrange
     const feed = new StubFeed([account], NOW);
     const dispatcher = new ApiDispatcher(
-      new ApiRouter([...usageRoutes(feed, fixedClock(NOW))]),
+      new ApiRouter([...usageRoutes(feed, fixedClock(NOW), () => true)]),
       {
         admin: 'admin-secret',
       },
@@ -249,7 +249,7 @@ describe('the usage feed', () => {
   it('should tell a protocol client when no usage snapshot has ever been collected', async () => {
     // Arrange
     const dispatcher = new ApiDispatcher(
-      new ApiRouter([...usageRoutes(new StubFeed([], undefined), fixedClock(NOW))]),
+      new ApiRouter([...usageRoutes(new StubFeed([], undefined), fixedClock(NOW), () => true)]),
       {
         admin: 'admin-secret',
       },
@@ -322,6 +322,7 @@ describe('the assembled daemon surface', () => {
     usage: new StubFeed([], NOW),
     clock: fixedClock(NOW),
     startedAtMs: NOW,
+    publicUsageFeed: () => true,
   };
 
   it('should mount every contract the daemon promises', () => {
@@ -356,7 +357,7 @@ describe('usage routes — who is a watcher (docs/provider-quotas.md)', () => {
       peekAgent: () => undefined,
     }));
     const dispatcher = new ApiDispatcher(
-      new ApiRouter([...usageRoutes(feed, fixedClock(NOW))]),
+      new ApiRouter([...usageRoutes(feed, fixedClock(NOW), () => true)]),
       { admin: 'admin-secret' },
       NO_GOVERNED_ROUTES_GUARD,
     );
@@ -370,5 +371,80 @@ describe('usage routes — who is a watcher (docs/provider-quotas.md)', () => {
     // Assert
     should(scraped).equal(0);
     should(watches).equal(1);
+  });
+});
+
+describe('usage routes — the public pair is opt-in (docs/multi-user-host.md)', () => {
+  const dispatcherWith = (publicFeed: () => boolean) =>
+    new ApiDispatcher(
+      new ApiRouter([...usageRoutes(new StubFeed([{ agent: 'glm', ok: true }], NOW), fixedClock(NOW), publicFeed)]),
+      { admin: 'admin-secret' },
+      NO_GOVERNED_ROUTES_GUARD,
+    );
+  const AUTHENTICATED = { authorization: 'Bearer admin-secret' };
+
+  it.each(['/usage', '/metrics'])('should serve %s to anyone while the owner has the feed on', async path => {
+    // Act
+    const response = await dispatcherWith(() => true).dispatch(request({ path }));
+
+    // Assert
+    should(response.status).equal(200);
+  });
+
+  it.each(['/usage', '/metrics'])(
+    'should answer %s exactly as it answers a path that does not exist, for anyone, while the feed is off',
+    async path => {
+      // Arrange
+      const dispatcher = dispatcherWith(() => false);
+      const unrouted = '/not-a-route';
+
+      // Act
+      const anonymous = await dispatcher.dispatch(request({ path }));
+      const anonymousUnrouted = await dispatcher.dispatch(request({ path: unrouted }));
+      const authenticated = await dispatcher.dispatch(request({ path, headers: AUTHENTICATED }));
+      const authenticatedUnrouted = await dispatcher.dispatch(request({ path: unrouted, headers: AUTHENTICATED }));
+
+      // Assert — a handler-level 404 would give an anonymous caller 404 where an unrouted path gives 401.
+      should(anonymous.status).equal(401);
+      should(anonymous).deepEqual({ ...anonymousUnrouted, body: anonymous.body });
+      should(authenticated.status).equal(404);
+      should(authenticated).deepEqual({ ...authenticatedUnrouted, body: authenticated.body });
+    },
+  );
+
+  it('should not name the pair in a 405 either: a verb the route never had is a 404 while the feed is off', async () => {
+    // Act
+    const response = await dispatcherWith(() => false).dispatch(
+      request({ method: 'POST', path: '/usage', headers: AUTHENTICATED }),
+    );
+
+    // Assert
+    should(response.status).equal(404);
+  });
+
+  it('should leave /v1/usage token-scoped and served whether the feed is on or off', async () => {
+    // Act
+    const off = await dispatcherWith(() => false).dispatch(request({ path: '/v1/usage', headers: AUTHENTICATED }));
+    const anonymous = await dispatcherWith(() => false).dispatch(request({ path: '/v1/usage' }));
+
+    // Assert
+    should(off.status).equal(200);
+    should(anonymous.status).equal(401);
+  });
+
+  it('should follow the switch at every request, not at the moment the routes were built', async () => {
+    // Arrange
+    let on = false;
+    const dispatcher = dispatcherWith(() => on);
+
+    // Act
+    const before = await dispatcher.dispatch(request({ path: '/usage' }));
+    on = true;
+    const during = await dispatcher.dispatch(request({ path: '/usage' }));
+    on = false;
+    const after = await dispatcher.dispatch(request({ path: '/usage' }));
+
+    // Assert
+    should([before.status, during.status, after.status]).deepEqual([401, 200, 401]);
   });
 });

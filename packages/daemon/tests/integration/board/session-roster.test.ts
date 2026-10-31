@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -14,7 +14,7 @@ import {
   StateHomeLayout,
   SystemClock,
 } from '../../../src/adapters/index.ts';
-import { parseSessionId } from '../../../src/lib/index.ts';
+import { createFoundationPaths, createSessionPaths, parseSessionId } from '../../../src/lib/index.ts';
 import type { WardenLivenessLedger } from '../../../src/lib/warden/types.ts';
 
 /**
@@ -145,6 +145,24 @@ describe('the board session roster', () => {
       lastSubprocessAt: LATER,
       subprocessSince: LATER,
     });
+  });
+
+  it('should see a state written outside the daemon on the next read, though the last read was memoized', async () => {
+    // Arrange
+    const storage = await openStorage();
+    await session(storage, 'lead', { status: 'running', lastActivityAt: EARLIER });
+    const roster = new StorageSessionRoster(storage, () => undefined);
+    await roster.roster();
+    await roster.roster();
+
+    // Act — an editor (or a second process) rewrites state.json behind the daemon's back.
+    const home = [...homes].at(-1) as string;
+    const file = createSessionPaths(createFoundationPaths(home as never), parseSessionId('lead')).state;
+    await writeFile(file, `${JSON.stringify({ id: 'lead', turn: 1, status: 'completed', lastActivityAt: LATER })}\n`);
+    const read = await roster.roster();
+
+    // Assert
+    should(read.sessions.get('lead')).match({ status: 'completed', lastActivityAt: LATER });
   });
 
   it('should hold a session it cannot read without calling it alive or dead', async () => {

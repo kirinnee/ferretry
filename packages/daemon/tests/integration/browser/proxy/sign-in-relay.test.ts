@@ -102,6 +102,23 @@ describe('ProxySignInRelay', () => {
     should(reply).endWith('echo:hello');
   });
 
+  it('should listen on the port it is told to, and on a free one when it is not', async () => {
+    const proxy = await httpProxy(await origin(), []);
+    const held = createServer();
+    const wanted = await listen(held);
+    await new Promise<void>(resolve => held.close(() => resolve()));
+    const fixed = await ProxySignInRelay.start(
+      { scheme: 'http', host: '127.0.0.1', port: proxy },
+      { username: 'user', password: 'pass' },
+      undefined,
+      { port: wanted },
+    );
+    relays.push(fixed);
+    const free = await relay('http', proxy);
+    should(fixed.port).equal(wanted);
+    should(free.port).not.equal(wanted);
+  });
+
   it('should forward a plain request with its own sign-in and without the one Chrome sent', async () => {
     const requests: string[] = [];
     const proxy = await httpProxy(await origin(), requests);

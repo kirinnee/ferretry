@@ -1,16 +1,17 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { NUDGE_MESSAGES, TRIAGE_CRITERIA, type TriageDecision } from '../../../src/lib/speedups/jev.ts';
 import {
   at,
   enabled,
   harness,
   JEV_INVESTIGATE,
-  JEV_SKIP,
+  type JevScript,
   journalTypes,
   NOW,
+  no,
   session,
   unattended,
+  yes,
 } from './sweep-harness.ts';
 
 /**
@@ -36,13 +37,19 @@ const stuck = () =>
     },
   });
 
-const nudge = (confidence: number): TriageDecision => ({
-  ...JEV_SKIP,
-  verdict: 'nudge',
-  confidence,
-  reason: TRIAGE_CRITERIA.nudge,
-  nudge: { id: 'stuck_command', message: NUDGE_MESSAGES.stuck_command, confidence },
+/** Jev: it waits on something real (the command), and the wait is no longer reasonable — nudge it. */
+const nudge = (confidence: number): JevScript => ({
+  answers: { waiting_on_real: yes(confidence), wait_reasonable: no(confidence) },
+  nudge: { id: 'stuck_command', confidence },
 });
+
+/** The unattended question, as the tree walked it when Jev was not sure: the first question names the gap. */
+const UNSURE_PATH = [
+  { node: 'running', kind: 'fact', answer: 'yes' },
+  { node: 'output_changed', kind: 'fact', answer: 'no' },
+  { node: 'waiting_on_real', kind: 'judgement', answer: 'yes', confidence: 0.5 },
+  { node: 'wait_reasonable', kind: 'judgement', answer: 'yes', confidence: 0.5 },
+];
 
 const layers = (llm: boolean, caps: Partial<ReturnType<typeof enabled>['caps']> = {}) =>
   enabled({ layers: { jev: true, llm }, caps: { ...enabled().caps, ...caps } });
@@ -67,10 +74,12 @@ describe('Jev’s checks', () => {
         sessionId: 's1',
         anomalyKind: 'unattended_question',
         verdict: 'handed_on',
-        why: 'unsure',
+        why: 'not_sure_enough',
         route: 'investigation',
-        confidence: 0.9,
+        confidence: 0.5,
         costUsd: 0.001,
+        path: UNSURE_PATH,
+        node: 'waiting_on_real',
       },
     ]);
     should(today(subject)?.jev).deepEqual({ checks: 1, healthy: 0, acted: 0, handedOn: 1, skippedForCap: 0 });
@@ -86,7 +95,7 @@ describe('Jev’s checks', () => {
     await subject.service.run({ force: false });
 
     // Assert
-    should(subject.jevChecks[0]).match({ verdict: 'handed_on', why: 'unsure', route: 'owner' });
+    should(subject.jevChecks[0]).match({ verdict: 'handed_on', why: 'not_sure_enough', route: 'owner' });
   });
 
   it('should record a flag Jev was sure is healthy', async () => {
@@ -122,10 +131,25 @@ describe('Jev’s checks', () => {
 
   it('should keep the act Jev recommended when the owner keeps that act for themselves', async () => {
     // Arrange
+    // A ferret whose transcript moved 12 minutes ago, already nudged about this: Jev says it repeats itself.
+    const looping = { ...stuck(), state: { ...stuck().state, lastTranscriptAt: iso(NOW - 12 * MINUTE) } };
     const subject = harness({
       config: layers(false),
-      fleet: [stuck()],
-      guard: [{ ...JEV_SKIP, verdict: 'stop', confidence: 0.99, reason: TRIAGE_CRITERIA.stop }],
+      fleet: [looping],
+      state: {
+        actions: [
+          {
+            at: iso(NOW - 60 * MINUTE),
+            sessionId: 's1',
+            action: 'nudge',
+            outcome: 'done',
+            by: 'warden',
+            anomalyKind: 'sus_subprocess',
+            detail: 'Nudged.',
+          },
+        ],
+      },
+      guard: [{ answers: { doing_new_things: no(0.99) } }],
     });
 
     // Act
@@ -167,7 +191,7 @@ describe('Jev’s checks', () => {
 
     // Assert
     should(subject.jevChecks.map(check => [check.sessionId, check.verdict, check.why])).deepEqual([
-      ['s1', 'handed_on', 'unsure'],
+      ['s1', 'handed_on', 'not_sure_enough'],
       ['s2', 'skipped', 'jev_cap'],
     ]);
     should(subject.jevChecks[1]).match({ route: 'investigation', confidence: 0, costUsd: 0 });

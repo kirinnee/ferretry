@@ -1,0 +1,9 @@
+[Unit]
+Description=Ferretry loopback firewall: re-apply if missing, then prove each user's ports are protected
+Documentation=https://github.com/kirinnee/ferretry
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ferretry-loopback-firewall --verify

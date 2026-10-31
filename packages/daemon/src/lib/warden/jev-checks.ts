@@ -23,9 +23,10 @@ import {
   type WardenDayStats,
   type WardenJevBefore,
   type WardenJevCheck,
-  WardenJevCheckSchema,
   type WardenJevCheckRoute,
+  WardenJevCheckSchema,
   type WardenJevDayStats,
+  type WardenJevPathStep,
 } from '@ferretry/protocol';
 import type { TriageDecision } from '../speedups/jev.ts';
 import type { WardenAnomaly } from './detect.ts';
@@ -99,6 +100,10 @@ export interface JevCheckInput {
   readonly route: WardenJevCheckRoute;
   /** For an act: whether it took. An act that did not take hands the flag on. */
   readonly took?: boolean;
+  /** The decision tree's path to the answer (`jev-tree.ts`), when one was walked. */
+  readonly path?: readonly WardenJevPathStep[];
+  /** The node Jev was not sure enough of. */
+  readonly node?: string;
   readonly nowMs: number;
 }
 
@@ -111,6 +116,8 @@ export function jevCheckOf(input: JevCheckInput): WardenJevCheck {
     anomalyKind: anomaly.kind,
     confidence: outcome.confidence,
     costUsd: decision.costUsd ?? 0,
+    ...(input.path === undefined || input.path.length === 0 ? {} : { path: [...input.path] }),
+    ...(input.node === undefined ? {} : { node: input.node }),
   };
   switch (outcome.kind) {
     case 'leave':
@@ -215,6 +222,8 @@ export function jevBeforeOf(check: JevCheckBefore): WardenJevBefore {
     at: check.at,
     confidence: check.confidence,
     costUsd: check.costUsd,
+    ...(check.path === undefined ? {} : { path: check.path }),
+    ...(check.node === undefined ? {} : { node: check.node }),
   };
 }
 

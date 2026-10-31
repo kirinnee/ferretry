@@ -104,6 +104,7 @@ describe('buildBoardCreateRequest', () => {
       context: '',
       terms: [],
       brief: '',
+      howToTest: '',
       workflow: 'quick',
       parent: null,
       assignee: null,
@@ -159,6 +160,22 @@ describe('buildBoardCreateRequest', () => {
       files: ['src/a.ts'],
       branch: 'feat/x',
       docs: ['docs/a.md'],
+    });
+  });
+
+  it('should carry How to test, and write a repeated --premise or --context as one bullet each', () => {
+    // Act
+    const request = buildBoardCreateRequest(
+      { ...minimal, premise: [' cards are hard to read ', '', 'Done has no test steps'], context: [' agenda v6 '] },
+      [],
+      { ...resolved, howToTest: '1. Open the Board\n2. See the steps' },
+    );
+
+    // Assert
+    should(request).containEql({
+      premise: '- cards are hard to read\n- Done has no test steps',
+      context: 'agenda v6',
+      howToTest: '1. Open the Board\n2. See the steps',
     });
   });
 
@@ -372,8 +389,10 @@ describe('the action builders', () => {
 
   it('should build an edit from only the fields given, and replace the glossary whole', () => {
     // Act + Assert
-    should(buildEditAction({ title: ' New name ' }, undefined)).eql({ action: 'edit', title: 'New name' });
-    should(buildEditAction({ summary: ' s ', premise: ' p ', context: ' c ', term: ['a=b'] }, 'the new brief')).eql({
+    should(buildEditAction({ title: ' New name ' })).eql({ action: 'edit', title: 'New name' });
+    should(
+      buildEditAction({ summary: ' s ', premise: ' p ', context: ' c ', term: ['a=b'] }, { brief: 'the new brief' }),
+    ).eql({
       action: 'edit',
       summary: 's',
       premise: 'p',
@@ -381,15 +400,29 @@ describe('the action builders', () => {
       terms: [{ term: 'a', meaning: 'b' }],
       brief: 'the new brief',
     });
-    should(buildEditAction({ term: [] }, 'brief only')).eql({ action: 'edit', brief: 'brief only' });
+    should(buildEditAction({ term: [] }, { brief: 'brief only' })).eql({ action: 'edit', brief: 'brief only' });
+  });
+
+  it('should edit How to test alone, and premise and context as bullets or cleared', () => {
+    // Act + Assert
+    should(buildEditAction({}, { howToTest: ' 1. Open it\n2. See it ' })).eql({
+      action: 'edit',
+      howToTest: '1. Open it\n2. See it',
+    });
+    should(buildEditAction({ premise: ['one', 'two'], context: [' only '] })).eql({
+      action: 'edit',
+      premise: '- one\n- two',
+      context: 'only',
+    });
+    should(buildEditAction({ premise: [' '], context: [] })).eql({ action: 'edit', premise: '' });
   });
 
   it('should refuse an edit that changes nothing or retitles past five words', () => {
     // Act + Assert
-    should(() => buildEditAction({}, undefined)).throw(/nothing to edit: pass --title/u);
-    should(() => buildEditAction({ term: [] }, undefined)).throw(/nothing to edit/u);
-    should(() => buildEditAction({ title: 'one two three four five six' }, undefined)).throw(/task title has 6 words/u);
-    should(() => buildEditAction({ title: '   ' }, undefined)).throw(/cannot edit/u);
+    should(() => buildEditAction({})).throw(/nothing to edit: pass --title/u);
+    should(() => buildEditAction({ term: [] })).throw(/nothing to edit/u);
+    should(() => buildEditAction({ title: 'one two three four five six' })).throw(/task title has 6 words/u);
+    should(() => buildEditAction({ title: '   ' })).throw(/cannot edit/u);
   });
 
   it('should build a refile with an optional lane and reason', () => {

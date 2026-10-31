@@ -28,7 +28,7 @@
  */
 
 import { queuedMessageInstruction, turnFileInstruction } from '@ferretry/protocol';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { HandoffSourceProvider } from '../../../src/components/handoff-message.tsx';
 import { transcriptEntriesFromLog } from '../../../src/components/session-workspace-model.ts';
@@ -258,6 +258,12 @@ function Scene() {
   const stage = STAGES[index] as Stage;
   probe.stage = stage.name;
   probe.goto = setIndex;
+  // Check the moment a stage is on screen, not only on the next mutation or frame: a stage that is only a
+  // few tens of milliseconds long can pass between two frames of a loaded runner without a single mutation.
+  useLayoutEffect(() => {
+    probe.stage = stage.name;
+    check();
+  }, [stage.name]);
   useEffect(() => {
     probe.stages.push(stage.name);
   }, [stage.name]);

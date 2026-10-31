@@ -43,6 +43,7 @@ import {
   isInBoardState,
   LaneSetActionRequestSchema,
   LegacyTaskRefSchema,
+  MAX_BOARD_HOW_TO_TEST_LENGTH,
   laneEditProblems,
   moveReasonProblem,
   PrChecksSchema,
@@ -180,6 +181,7 @@ const CARD: BoardTask = BoardTaskSchema.parse({
   context: '#319, #320',
   terms: [{ term: 'Lane', meaning: 'a project-defined column with a fixed category' }],
   brief: '# U1\n\nBuild the protocol.',
+  howToTest: '1. Open the Board\n2. See the card',
   owner: LEAD,
   assignee: CHILD,
   parent: { id: 'F18' },
@@ -485,6 +487,27 @@ describe('board schemas', () => {
   });
 });
 
+describe('How to test', () => {
+  it('should read a card stored before How to test existed as having none', () => {
+    const { howToTest: _howToTest, ...stored } = CARD;
+    should(BoardTaskSchema.parse(stored).howToTest).equal('');
+    const { howToTest: _viewHowToTest, ...sent } = VIEW;
+    should(BoardTaskViewSchema.parse(sent).howToTest).equal('');
+  });
+
+  it('should keep a card’s test steps, and let an edit name them as their own field', () => {
+    should(BoardTaskSchema.parse(CARD).howToTest).equal('1. Open the Board\n2. See the card');
+    should(BoardEditableFieldSchema.options).containEql('howToTest');
+    should(
+      BoardTaskCreateRequestSchema.parse({ kind: 'feature', title: 'X', ask: CARD.ask, howToTest: '1. Look' })
+        .howToTest,
+    ).equal('1. Look');
+    should(
+      BoardTaskSchema.safeParse({ ...CARD, howToTest: 'x'.repeat(MAX_BOARD_HOW_TO_TEST_LENGTH + 1) }).success,
+    ).be.false();
+  });
+});
+
 describe('card invariants', () => {
   it('should match the id prefix to the kind', () => {
     should(issuesOf({ ...CARD, kind: 'bug' })).deepEqual(['task id prefix must match its kind']);
@@ -645,6 +668,7 @@ describe('board mutations', () => {
       context: '',
       terms: [],
       brief: '',
+      howToTest: '',
       workflow: 'quick',
       parent: null,
       assignee: null,
@@ -681,6 +705,7 @@ describe('board mutations', () => {
       { action: 'note', text: 'checked' },
       { action: 'edit', title: 'Board page' },
       { action: 'edit', terms: [{ term: 'Lane', meaning: 'a column' }] },
+      { action: 'edit', howToTest: '1. Open the Board' },
       { action: 'file', path: 'a.ts', release: true, reason: 'done' },
       { action: 'order', order: 2 },
       { action: 'refile', projectId: PROJECT },

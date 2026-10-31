@@ -15,6 +15,8 @@ import { type BoardTaskView, describeBoardEvent, formatTaskRef, type LaneSet, ty
 export interface WardenFocusCard {
   readonly task: BoardTaskView;
   readonly laneSet: LaneSet | null;
+  /** The ferret was started by another ferret: it may not move cards, so the brief does not tell it to. */
+  readonly subFerret?: boolean;
 }
 
 /** How many of the newest history lines a resumed ferret is shown. */
@@ -58,7 +60,9 @@ export function focusCardBrief(card: WardenFocusCard): string {
         )}`,
     ),
     '',
-    `Carry on with ${ref}: move it as you work (\`fy task move ${task.id} <lane>\`), and note why if you stop.`,
+    card.subFerret === true
+      ? `Carry on with ${ref}: your card moves itself (start, PR, merge, \`fy signal done\`); note why if you stop.`
+      : `Carry on with ${ref}: move it as you work (\`fy task move ${task.id} <lane>\`), and note why if you stop.`,
   );
   return lines.join('\n');
 }

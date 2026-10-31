@@ -424,13 +424,13 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     // Assert — the whole prompt, every section on and the longest routing prompt as its one `Routing: ` line,
     // stays under 7.9 KB (docs/pack-mode.md records the sizes: raised from 7.4 KB for the input bridge's login rule in the tools section, from 6.7 KB for Attention's steps and
     // hypermedia's `chart`; the notify rule replaced Attention's 1 KB, Agenda mode adds its own section). The
-    // Board section (640) was paid for by naming the tools by prefix, moving map, media and chart's full spec
-    // behind `fy render guide`, and compressing the lessons rule: 7,245 measured (the reply-parks-the-item wording, which now says to refresh the whole card), so keep 150 of headroom.
+    // Board section (749, card-writing, How to test and the lane-by-category rule included, in tightened words) was paid for by naming the tools by prefix, moving map, media and chart's full spec
+    // behind `fy render guide`, and compressing the lessons rule: 7,246 measured (the lane-by-category rule was paid for by tightening the Hypermedia wording), so keep 150 of headroom.
     const longestRouting = 1 + 'Routing: '.length + MAX_ROUTING_PROMPT_CHARS;
     should(Object.values(sizes).reduce((sum, size) => sum + size, 0) + longestRouting).be.below(7_900 - 150);
     should(sizes.pack).be.below(1_050);
     should(sizes.tools).be.below(1_300);
-    should(sizes.board).be.below(660);
+    should(sizes.board).be.below(760);
     should(sizes.hypermedia).be.below(1_550);
     should(sizes.lessons).be.below(270);
     should(sizes.settings).be.below(600);

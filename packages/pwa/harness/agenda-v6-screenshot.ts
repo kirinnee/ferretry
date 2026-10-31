@@ -229,7 +229,19 @@ const checkLayout = async (page: Page, label: string): Promise<void> => {
   }
 };
 
-const HISTORY_OUT = ['Bash(', 'Read(', 'Let me check the runner', 'lockfile', 'Building the spend-limit'] as const;
+const HISTORY_OUT = [
+  'Bash(',
+  'Read(',
+  'Let me check the runner',
+  'lockfile',
+  'Building the spend-limit',
+  'relay probe',
+  'Kylene',
+  'Ledger export',
+  'bucket',
+  'dashboard fix',
+  'Nothing else is waiting',
+] as const;
 
 const checkHistory = async (page: Page, label: string): Promise<void> => {
   const history = page.locator('[data-agenda-history]');
@@ -237,8 +249,10 @@ const checkHistory = async (page: Page, label: string): Promise<void> => {
   const text = (await history.textContent()) ?? '';
   for (const word of HISTORY_OUT) check(!text.includes(word), `${label}: the History shows "${word}"`);
   check(text.includes('does pause kill a running turn?'), `${label}: the owner's question is missing`);
-  check(text.includes('A running turn finishes'), `${label}: the ferret's answer (no !A90 in it) is missing`);
+  check(text.includes('A running turn finishes'), `${label}: the ferret's paragraph under the !A90 heading is missing`);
+  check(text.includes('It only stops new turns from starting'), `${label}: the recap pair about the item is missing`);
   check(text.includes('Card updated to v2'), `${label}: no "Card updated to v2"`);
+  check(text.includes('Context: added'), `${label}: the edit's change summary is missing`);
   const backgrounds = await history
     .locator('[data-history="ferret"]')
     .evaluateAll(nodes => nodes.map(node => getComputedStyle(node).backgroundColor));
@@ -327,6 +341,9 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   await choice.mouse.click(2, 60);
   await scrollTo(choice, 'bottom');
   await checkHistory(choice, `history ${form} ${theme}`);
+  // The reply's Markdown is laid out after the first scroll: scroll again so the last row is not under the composer.
+  await choice.waitForTimeout(400);
+  await scrollTo(choice, 'bottom');
   await shot(choice, 'history', form, theme);
   await choice.close();
 

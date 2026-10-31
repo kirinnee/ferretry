@@ -12,6 +12,7 @@ import {
   FileResumeTurnStore,
   FileSendChannel,
   FileSendLedger,
+  SEND_LEDGERS_KEPT,
   FileSendTurnStore,
   KeyedSerialExecutor,
   ResumeSendReviver,
@@ -348,6 +349,100 @@ describe('the file send ledger', () => {
 
     // Assert
     should([...all.keys()]).deepEqual(['send-1']);
+  });
+
+  it('should read only what was appended since its last read, the last line for a send still winning', async () => {
+    // Arrange
+    const home = await directory('ferretry-send-ledger-');
+    const subject = new FileSendLedger(() => home, clock);
+    await subject.accept(ID, record());
+    should((await subject.all(ID)).get('send-1')?.fate).equal('accepted');
+
+    // Act — another writer appends a settlement and a new send behind the reader's back.
+    const file = join(home, 'channel', 'sends.jsonl');
+    await appendFile(
+      file,
+      `${JSON.stringify(record({ fate: 'delivered' }))}\n${JSON.stringify(record({ sendId: 'send-2' }))}\n`,
+    );
+    const all = await subject.all(ID);
+
+    // Assert
+    should(all.get('send-1')?.fate).equal('delivered');
+    should([...all.keys()]).deepEqual(['send-1', 'send-2']);
+  });
+
+  it('should read the whole file again once it was replaced, shortened or rewritten in place', async () => {
+    // Arrange
+    const home = await directory('ferretry-send-ledger-');
+    const subject = new FileSendLedger(() => home, clock);
+    await subject.accept(ID, record());
+    await subject.accept(ID, record({ sendId: 'send-2' }));
+    await subject.all(ID);
+    const file = join(home, 'channel', 'sends.jsonl');
+
+    // Act — a person rewrites it shorter, then in place at the same size.
+    await writeFile(file, `${JSON.stringify(record({ sendId: 'send-3' }))}\n`);
+    const shortened = await subject.all(ID);
+    const sameSize = `${JSON.stringify(record({ sendId: 'send-4' }))}\n`;
+    await new Promise(resolve => setTimeout(resolve, 5));
+    await writeFile(file, sameSize);
+    const rewritten = await subject.all(ID);
+
+    // Assert
+    should([...shortened.keys()]).deepEqual(['send-3']);
+    should([...rewritten.keys()]).deepEqual(['send-4']);
+  });
+
+  it('should answer a complete last line that has no newline yet, and still read the line its newline completes', async () => {
+    // Arrange
+    const home = await directory('ferretry-send-ledger-');
+    const subject = new FileSendLedger(() => home, clock);
+    await subject.accept(ID, record());
+    const file = join(home, 'channel', 'sends.jsonl');
+    await appendFile(file, JSON.stringify(record({ sendId: 'send-2' })));
+
+    // Act
+    const before = await subject.all(ID);
+    await appendFile(file, `\n${JSON.stringify(record({ sendId: 'send-3' }))}\n`);
+    const after = await subject.all(ID);
+
+    // Assert
+    should([...before.keys()]).deepEqual(['send-1', 'send-2']);
+    should([...after.keys()]).deepEqual(['send-1', 'send-2', 'send-3']);
+  });
+
+  it('should let go of the ledger read longest ago past its bound, and read that one whole when asked again', async () => {
+    // Arrange — one more session than it keeps, each with one send, read in order.
+    const home = await directory('ferretry-send-ledger-');
+    const subject = new FileSendLedger(id => join(home, id), clock);
+    const ids = Array.from({ length: SEND_LEDGERS_KEPT + 1 }, (_, n) => parseSessionId(`kept-${String(n)}`));
+    for (const id of ids) await subject.accept(id, record());
+    for (const id of ids) await subject.all(id);
+    const first = ids[0] as SessionId;
+
+    // Act — the first session's ledger, let go, gains a settlement behind the reader's back.
+    await appendFile(join(home, first, 'channel', 'sends.jsonl'), `${JSON.stringify(record({ fate: 'delivered' }))}\n`);
+    const reread = await subject.all(first);
+
+    // Assert
+    should(reread.get('send-1')?.fate).equal('delivered');
+    should((await subject.all(ids.at(-1) as SessionId)).get('send-1')?.fate).equal('accepted');
+  });
+
+  it('should hand out frozen records and a map of its own, so no reader changes what another reads', async () => {
+    // Arrange
+    const home = await directory('ferretry-send-ledger-');
+    const subject = new FileSendLedger(() => home, clock);
+    await subject.accept(ID, record());
+
+    // Act
+    const first = await subject.all(ID);
+    first.delete('send-1');
+    const second = await subject.all(ID);
+
+    // Assert
+    should(second.has('send-1')).be.true();
+    should(Object.isFrozen(second.get('send-1'))).be.true();
   });
 });
 

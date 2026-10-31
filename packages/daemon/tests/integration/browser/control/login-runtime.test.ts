@@ -588,6 +588,56 @@ describe('NodeBrowserLoginRuntime', () => {
     server.stop(true);
   });
 
+  it('should give the VNC server the port the setting names, without looking for a free one', async () => {
+    // Arrange
+    const root = await workspace();
+    const ports = { cdp: 20_004, relay: 20_005, vnc: 20_006 };
+    const subject = new NodeBrowserLoginRuntime({
+      display: fakeDisplay(),
+      secretsDirectory: root,
+      ports: async () => ({ kind: 'fixed', ports }),
+    });
+
+    // Act
+    const actual = await subject.freePort();
+
+    // Assert
+    should(actual).equal(20_006);
+  });
+
+  it('should take a free port when the setting is random', async () => {
+    // Arrange
+    const root = await workspace();
+    const subject = new NodeBrowserLoginRuntime({
+      display: fakeDisplay(),
+      secretsDirectory: root,
+      ports: async () => ({ kind: 'random' }),
+    });
+
+    // Act
+    const port = await subject.freePort();
+
+    // Assert
+    should(port).be.above(0).and.below(65_536);
+  });
+
+  it('should refuse to open the window, in the sentence the setting gave, when its ports cannot be had', async () => {
+    // Arrange
+    const root = await workspace();
+    const subject = new NodeBrowserLoginRuntime({
+      display: fakeDisplay(),
+      secretsDirectory: root,
+      ports: async () => ({ kind: 'refused', reason: 'uid 999 gets ports outside 1024–32767' }),
+    });
+
+    // Act
+    const refused = await subject.freePort().catch((error: unknown) => error);
+
+    // Assert
+    should(refused).instanceOf(BrowserControlError);
+    should((refused as Error).message).equal('uid 999 gets ports outside 1024–32767');
+  });
+
   it('should write the VNC password where only this daemon can read it', async () => {
     // Arrange
     const root = await workspace();

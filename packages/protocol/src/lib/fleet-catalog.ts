@@ -34,6 +34,8 @@
 import { z } from 'zod';
 import { AutoResumeSummarySchema } from './auto-resume.ts';
 import { BrowserModeSchema, BrowserProxySettingSchema } from './browser.ts';
+import { BrowserPortsSettingSchema } from './browser-ports.ts';
+import { BrowserFirewallFailureSchema } from './loopback-firewall.ts';
 import { InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSchema } from './common.ts';
 import {
   FleetApplyOutcomeSchema,
@@ -175,6 +177,16 @@ export const FleetMachineViewSchema = z.strictObject({
    */
   browserProxy: BrowserProxySettingSchema.nullable().optional(),
   /**
+   * "Browser ports": `random`, `per-user` or explicit loopback ports for the agent browser, its sign-in relay and
+   * the login window. Optional so a newer app can read an older daemon, which always uses random ports.
+   */
+  browserPorts: BrowserPortsSettingSchema.optional(),
+  /**
+   * "When the loopback firewall check fails": `warn` or `refuse` (decline to start the browser on a fixed port).
+   * Optional so a newer app can read an older daemon, which only ever warns.
+   */
+  browserFirewallFailure: BrowserFirewallFailureSchema.optional(),
+  /**
    * "Auto-resume after restart": when the daemon boots and finds ferrets that were running when the host
    * went down, it resumes them with their conversation intact. Optional only so a newer app can read an
    * older daemon, which has no such setting (and does not do it).
@@ -185,6 +197,12 @@ export const FleetMachineViewSchema = z.strictObject({
    * Optional only so a newer app can read an older daemon, which has no such default (and starts every ferret off).
    */
   agendaMode: z.boolean().optional(),
+  /**
+   * "Public usage feed" (docs/multi-user-host.md): whether `GET /usage` and `GET /metrics` answer a caller with no
+   * credential. Optional only so a newer app can read an older daemon, which has no such setting (and always
+   * served both).
+   */
+  publicUsageFeed: z.boolean().optional(),
   /** What the last auto-resume pass did, or `null` when none has run. Left out by an older daemon. */
   lastAutoResume: AutoResumeSummarySchema.nullable().optional(),
   tools: z.array(FleetMachineToolSchema).readonly(),
@@ -764,9 +782,15 @@ export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
     /** Left out by a client that predates it, and then left as it is; `null` turns the proxy off. */
     browserProxy: BrowserProxySettingSchema.nullable().optional(),
     /** Left out by a client that predates it, and then left as it is. */
+    browserPorts: BrowserPortsSettingSchema.optional(),
+    /** Left out by a client that predates it, and then left as it is. */
+    browserFirewallFailure: BrowserFirewallFailureSchema.optional(),
+    /** Left out by a client that predates it, and then left as it is. */
     autoResume: z.boolean().optional(),
     /** Left out by a client that predates it, and then left as it is. */
     agendaMode: z.boolean().optional(),
+    /** Left out by a client that predates it, and then left as it is. */
+    publicUsageFeed: z.boolean().optional(),
   }),
   z.strictObject({
     kind: z.literal('setup.import'),

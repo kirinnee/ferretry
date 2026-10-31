@@ -1,3 +1,75 @@
+## [4.162.0](https://github.com/kirinnee/ferretry/compare/v4.161.0...v4.162.0) (2026-10-31)
+
+### Features
+
+* **daemon:** make the public /usage and /metrics feeds opt-in ([#1156](https://github.com/kirinnee/ferretry/issues/1156)) ([fac289b](https://github.com/kirinnee/ferretry/commit/fac289b04d58cc779518466d3fb39af5287f785b))
+* **daemon:** warn in doctor when a shared host's user slice is uncapped or linger is off ([#1160](https://github.com/kirinnee/ferretry/issues/1160)) ([4604263](https://github.com/kirinnee/ferretry/commit/460426394bd05b1ac64302292361315ecb8aa8e6))
+
+### Fixes
+
+* **cli:** keep the daemon lifecycle claim in the user's private runtime directory ([#1158](https://github.com/kirinnee/ferretry/issues/1158)) ([3a0bb58](https://github.com/kirinnee/ferretry/commit/3a0bb5826b02449c1b3699fc059b89b42af3a01c))
+* **daemon:** send tmux pane environment and typed keys on stdin, never in argv ([#1115](https://github.com/kirinnee/ferretry/issues/1115)) ([942e002](https://github.com/kirinnee/ferretry/commit/942e0027f40037eadf5be25da5e0cd8e5970705f))
+
+## [4.161.0](https://github.com/kirinnee/ferretry/compare/v4.160.1...v4.161.0) (2026-10-31)
+
+### Features
+
+* **board:** teach ferrets which lane by the work, and enter it for them ([#1150](https://github.com/kirinnee/ferretry/issues/1150)) ([fd63e3f](https://github.com/kirinnee/ferretry/commit/fd63e3fb563e54810062ea57c46ba7e1ed270438))
+* **browser:** browserPorts setting and fy browser firewall entry ([#1128](https://github.com/kirinnee/ferretry/issues/1128)) ([8e4e10f](https://github.com/kirinnee/ferretry/commit/8e4e10f944f313dbdd48c16f79b1e56a6abab185))
+* **daemon:** gzip large JSON answers on every carrier ([#1140](https://github.com/kirinnee/ferretry/issues/1140)) ([4363fbb](https://github.com/kirinnee/ferretry/commit/4363fbb5602af35705853462bba98c669225a54a))
+* **daemon:** warn when the loopback firewall is failed, missing, stale or unverified ([#1130](https://github.com/kirinnee/ferretry/issues/1130)) ([ac8dfe7](https://github.com/kirinnee/ferretry/commit/ac8dfe7260bb911d0ebf8e0b362d6f60fa5d3229))
+* **pwa:** fit, zoom and pan diagrams ([#1142](https://github.com/kirinnee/ferretry/issues/1142)) ([63fd214](https://github.com/kirinnee/ferretry/commit/63fd2144d016491c190f89a0f5c4b87810ddc037))
+* **warden:** ask Jev a yes/no decision tree instead of one 7-way choice ([#1141](https://github.com/kirinnee/ferretry/issues/1141)) ([17372a5](https://github.com/kirinnee/ferretry/commit/17372a50072e50d67a4f8ef9bcd4df62b2cf8f5d))
+
+### Fixes
+
+* **daemon:** do not start the Codex link sign-in on its own on a shared host ([#1155](https://github.com/kirinnee/ferretry/issues/1155)) ([9b2de76](https://github.com/kirinnee/ferretry/commit/9b2de767d6a6c7b27cfdc6b6b409e33f25b1629c))
+* **daemon:** re-assert owner-only mode on an existing API token at boot ([#1157](https://github.com/kirinnee/ferretry/issues/1157)) ([53fb082](https://github.com/kirinnee/ferretry/commit/53fb082efcbc10e70bfbf4f121a9aaaccf5cee01))
+* **daemon:** read a token from the Authorization header only, never from a URL ([#1154](https://github.com/kirinnee/ferretry/issues/1154)) ([887562e](https://github.com/kirinnee/ferretry/commit/887562ef994bd6cd96871a82a52a89aa9a125247))
+* **daemon:** stop board github watch activities nesting inside each other ([#1152](https://github.com/kirinnee/ferretry/issues/1152)) ([85986dc](https://github.com/kirinnee/ferretry/commit/85986dcad7ac169c2fafac169e73e529f6c8ef45))
+* **pwa:** show only the parts of a reply that are about the agenda item ([#1146](https://github.com/kirinnee/ferretry/issues/1146)) ([f6c2e09](https://github.com/kirinnee/ferretry/commit/f6c2e09771ca2086c9b53ac332f86d0774794c56))
+
+### Performance
+
+* **agenda:** keep each session's parsed agenda against its file's identity ([#1145](https://github.com/kirinnee/ferretry/issues/1145)) ([bbb2b40](https://github.com/kirinnee/ferretry/commit/bbb2b40e7cb266f09dcc81315b2f0bedaa8fa75f))
+* **send:** answer a page of sends, and read the ledger incrementally ([#1149](https://github.com/kirinnee/ferretry/issues/1149)) ([034cfa9](https://github.com/kirinnee/ferretry/commit/034cfa9f63e087076d328966d1aed9f9389f1815))
+
+## [4.160.1](https://github.com/kirinnee/ferretry/compare/v4.160.0...v4.160.1) (2026-10-31)
+
+### Performance
+
+* **session:** parse a session's unchanged documents once for the presence check ([#1144](https://github.com/kirinnee/ferretry/issues/1144)) ([4c91932](https://github.com/kirinnee/ferretry/commit/4c9193232e49ecb64dad69e424769cf55493b9ef))
+
+## [4.160.0](https://github.com/kirinnee/ferretry/compare/v4.159.0...v4.160.0) (2026-10-31)
+
+### Features
+
+* **board:** readable cards with How to test above Done ([#1135](https://github.com/kirinnee/ferretry/issues/1135)) ([7017a82](https://github.com/kirinnee/ferretry/commit/7017a82a916b6426760fb297a90a214aaee85822))
+* **cli:** ship the loopback firewall script and unit for shared hosts ([#1126](https://github.com/kirinnee/ferretry/issues/1126)) ([724ea35](https://github.com/kirinnee/ferretry/commit/724ea355e795d1cf93cf3a2b1b54578bebb03f60))
+* **warden:** revive and action stats by decider on the Warden page ([#1137](https://github.com/kirinnee/ferretry/issues/1137)) ([e4618bd](https://github.com/kirinnee/ferretry/commit/e4618bd221c4da4b1ede585289c132e55b9566a1))
+
+### Performance
+
+* **board:** derive one card from its neighbourhood, and memoize the roster ([#1143](https://github.com/kirinnee/ferretry/issues/1143)) ([d1990da](https://github.com/kirinnee/ferretry/commit/d1990da00af60e771ec7b948b0abe7b16607cbee))
+
+## [4.159.0](https://github.com/kirinnee/ferretry/compare/v4.158.1...v4.159.0) (2026-10-31)
+
+### Features
+
+* **fleet:** answer owner questions on the agenda too ([#1138](https://github.com/kirinnee/ferretry/issues/1138)) ([fa165f0](https://github.com/kirinnee/ferretry/commit/fa165f0ed8647cab9052bd5a23e3689428363900))
+
+### Performance
+
+* **agenda:** check a session exists without projecting its transcript ([#1136](https://github.com/kirinnee/ferretry/issues/1136)) ([92d721e](https://github.com/kirinnee/ferretry/commit/92d721e592ea7d0d6153d07f48f1b6754a8f149c))
+* **daemon:** keep the transcript parse worker warm for ten minutes idle ([#1131](https://github.com/kirinnee/ferretry/issues/1131)) ([b82555e](https://github.com/kirinnee/ferretry/commit/b82555e083048f2ad5a0810b8119bcb7c9fcb291))
+* **pwa:** read an Inbox item's thread from the transcript tail ([#1132](https://github.com/kirinnee/ferretry/issues/1132)) ([a7503e6](https://github.com/kirinnee/ferretry/commit/a7503e6e44659a532370ac521cbaca29b0928823))
+
+## [4.158.1](https://github.com/kirinnee/ferretry/compare/v4.158.0...v4.158.1) (2026-10-31)
+
+### Performance
+
+* **protocol:** share one frozen session list instead of deep-copying it per read ([#1129](https://github.com/kirinnee/ferretry/issues/1129)) ([5915434](https://github.com/kirinnee/ferretry/commit/5915434ae48de510f3bbcd2f59314c065c2859e9))
+
 ## [4.158.0](https://github.com/kirinnee/ferretry/compare/v4.157.0...v4.158.0) (2026-10-31)
 
 ### Features

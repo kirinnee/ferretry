@@ -6,6 +6,6 @@ while IFS= read -r file; do
     echo "❌ '${file}' is tracked but not executable" >&2
     exit 1
   }
-done < <(git ls-files '*.sh')
+done < <(git ls-files '*.sh' 'scripts/host/ferretry-loopback-firewall')
 
 echo "✅ Tracked shell scripts are executable"

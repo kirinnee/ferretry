@@ -2,8 +2,8 @@
  * THE HISTORY UNDER AN OPEN AGENDA CARD — the conversation about the item, read like the chat: oldest first, the
  * latest at the bottom, just above the composer. ONLY THE OWNER'S messages are bubbles (right-aligned, like the
  * chat's own); the ferret's text is plain, under its name and the time, with no tool calls and no thinking — the
- * relevance rule that decides what is here is `itemHistory`'s. An edit is one quiet centred line: "Card updated to
- * v2". Never folded.
+ * relevance rule that decides what is here is `itemHistory`'s. An edit is one quiet centred line, "Card updated to
+ * v2", with what it changed in plain words under it. Never folded.
  */
 
 import { Check } from 'lucide-react';
@@ -26,7 +26,14 @@ function HistoryRow({ event, now, ferret, renderProse }: HistoryRowProps) {
   if (event.kind === 'revision') {
     return (
       <li className="fy-hist__sys" data-history="revision">
-        Card updated to v{event.version}
+        <span>Card updated to v{event.version}</span>
+        {event.summary.length === 0 ? null : (
+          <ul className="fy-hist__changes">
+            {event.summary.map(line => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        )}
       </li>
     );
   }

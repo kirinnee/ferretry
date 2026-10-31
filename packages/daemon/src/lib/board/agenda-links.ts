@@ -31,9 +31,12 @@ export class AgendaCardLinks implements AgendaLinkSource {
     private readonly diagnostics: { warn(message: string): void },
   ) {}
 
-  async asksFor(cards: readonly BoardTask[]): Promise<ReadonlyMap<BoardTaskId, CardAsks>> {
+  async asksFor(
+    cards: readonly BoardTask[],
+    board: readonly BoardTask[] = cards,
+  ): Promise<ReadonlyMap<BoardTaskId, CardAsks>> {
     const wanted = new Set(cards.map(card => card.id));
-    const sessions = [...new Set(cards.flatMap(card => [card.owner, effectiveAssignee(card)]))];
+    const sessions = [...new Set(board.flatMap(card => [card.owner, effectiveAssignee(card)]))];
     const machine = this.machineId();
     const asks = new Map<BoardTaskId, { open: AgendaRef[]; blocking: AgendaRef[] }>();
     for (let start = 0; start < sessions.length; start += AGENDA_READ_CONCURRENCY) {

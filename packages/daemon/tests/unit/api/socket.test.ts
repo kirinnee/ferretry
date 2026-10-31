@@ -323,9 +323,9 @@ describe('ApiSocketDispatcher', () => {
     should(decision.outcome === 'refused' ? decision.response.status : 0).equal(403);
   });
 
-  it('should honour a loopback query-parameter token, which is all a browser socket can carry', async () => {
-    // A `WebSocket` constructor cannot set an `Authorization` header. The token is accepted from the
-    // query string only for a loopback peer, which could already read the file it came from.
+  it('should honour no query-parameter token, even for a loopback peer', async () => {
+    // A token in a URL reaches argv, shell history and every proxy's access log, so an upgrade is
+    // authenticated by its `Authorization` header alone.
     // Arrange
     const dispatcher = dispatcherFor(streamRoute());
 
@@ -338,7 +338,7 @@ describe('ApiSocketDispatcher', () => {
     );
 
     // Assert
-    should(loopback.outcome).equal('accepted');
+    should(loopback.outcome).equal('refused');
     should(remote.outcome).equal('refused');
   });
 
