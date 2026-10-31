@@ -800,9 +800,10 @@ capability (`use` to list, `configure` to change) and each change a kept `secret
 
 A saved login is being split in two:
 
-- An **account** is one identity: label, **plain** username, and its **secret** password and opt-in 2FA seed,
-  sealed exactly as today. Its handle is the saved login's handle (`GITHUB_KIRINNEE`, still `[[GITHUB_KIRINNEE]]`
-  in a recipe) and its immutable key is the saved login's `L…` key, so **no sealed name changes**.
+- An **account** is one identity: label, **plain** username, its **secret** password, and its 2FA keys (an
+  opt-in 2FA seed among them), sealed exactly as today. Its handle is the saved login's handle
+  (`GITHUB_KIRINNEE`, still `[[GITHUB_KIRINNEE]]` in a recipe) and its immutable key is the saved login's `L…`
+  key, so **no sealed name changes**.
 - A **sign-in** is how that account signs in at **one place**: a website (its login domains, plus the hosts it
   is for) or a terminal tool (`sudo@kirin-box`, `ssh@build.example.com`). It holds the method, the provider it
   goes `via`, the recipe (with a `recipeVersion`), what the daemon observed there and the ferrets' proposals. Its
@@ -819,15 +820,16 @@ program or other ssh destination.
 deterministic (a migrated sign-in's id is derived from the account key and its place, so a re-run gives the
 same ids):
 
-| Saved login (`v: 1`)                      | Becomes (`v: 2`)                                                                |
-| ----------------------------------------- | ------------------------------------------------------------------------------- |
-| handle, key, label, username, seals, TOTP | the account, verbatim                                                           |
-| login domains and web `match` hosts       | one **site** sign-in                                                            |
-| each `tool@host` in `match`               | one **terminal** sign-in (ssh, scp, sftp keep the destination)                  |
-| method, via, recipe                       | every sign-in from that entry (via by the provider's key)                       |
-| auto-apply, proposals                     | the **primary** sign-in only (the site, else the first terminal)                |
-| each observed fact                        | the sign-in at its place; a fact from no place of the entry is dropped, counted |
-| nothing matched                           | an account with no sign-ins                                                     |
+| Saved login (`v: 1`)                   | Becomes (`v: 2`)                                                                |
+| -------------------------------------- | ------------------------------------------------------------------------------- |
+| handle, key, label, username, password | the account, verbatim                                                           |
+| 2FA seed and its parameters            | the account's first 2FA key, under the same sealed name ([2FA keys](#2fa-keys)) |
+| login domains and web `match` hosts    | one **site** sign-in                                                            |
+| each `tool@host` in `match`            | one **terminal** sign-in (ssh, scp, sftp keep the destination)                  |
+| method, via, recipe                    | every sign-in from that entry (via by the provider's key)                       |
+| auto-apply, proposals                  | the **primary** sign-in only (the site, else the first terminal)                |
+| each observed fact                     | the sign-in at its place; a fact from no place of the entry is dropped, counted |
+| nothing matched                        | an account with no sign-ins                                                     |
 
 Dropping a fact is safe: facts only ever shorten the [lock](#how-long-the-lock-lasts). A via link the new rules
 refuse (gone, itself, a provider with no site, a circle) is dropped and counted rather than written. An older
@@ -845,7 +847,126 @@ anything: **the tap is still the permission.** A line that would choose two matc
 neither, so the answer never depends on list order.
 
 `account_hint` will answer one line per sign-in, with the sign-in id to propose against. It never says which
-secret fields an account holds, nor its 2FA parameters, seal names, auto-apply or proposals.
+secret fields an account holds, nor its 2FA parameters, seal names, auto-apply or proposals. It lists an account's
+2FA keys by kind and label only.
+
+#### 2FA keys
+
+> **Protocol only**, like the rest of this section: the shapes are in `accounts.ts` and `two-factor.ts`; the
+> store, the routes and the cards land later. No daemon reports `accounts.2fa-keys.1` yet. Until it does, a
+> deliver that names a key (`factor`) is refused, and so is a step-up for `add-2fa-key`.
+
+**An account is a username, a password and a list of 2FA keys** (`factors`, at most 8). Each key has an id
+(`tf_` and 12 hex digits, never shown to people), a kind, a label **the owner wrote** ("Okta Verify on Pixel",
+"Phone ••42") and a few plain facts:
+
+| Kind           | Holds a value?                                                    | Plain facts                                              |
+| -------------- | ----------------------------------------------------------------- | -------------------------------------------------------- |
+| `totp`         | **only when the owner saved its seed** (sealed, as a password is) | code parameters, issuer and account name, checked by use |
+| `sms`          | never                                                             | the last 2 to 4 digits (`••42`), never a whole number    |
+| `email`        | never                                                             | where the code arrives                                   |
+| `push`         | never                                                             | the app (Okta Verify, Microsoft Authenticator, Duo…)     |
+| `security-key` | never                                                             | none                                                     |
+
+A `totp` key with a seed is **automatic**: Ferretry makes its codes. Without one, it is an authenticator only
+the owner holds, and they type its codes. At most 4 keys per account hold a seed.
+
+The index keeps these rules on every read, so a hand-edited file is damaged, never half-trusted:
+
+- a key's id is unique in the **whole** index, and its label within its account (case-folded);
+- a seed's seal is a `…_TOTP_…` name under **this account's own key**, so it can never point at another
+  account's secret or at a password;
+- no sealed name appears twice in the index, whether a password's or a key's;
+- a `totp` key keeps its code parameters exactly when it keeps a seed, and only a key with a seed is checked
+  by use.
+
+`sealedNamesOf(account)` lists every sealed name an account points at: its password's and each key's seed. A
+sweep of the sealed document must keep everything it lists. **A sweep that skipped the keys would delete every
+saved seed.**
+
+**The migration moves today's seed; it does not rewrite it.** A saved login's `seals.totp` and its parameters
+become the account's first key, `{ kind: 'totp', label: 'Authenticator app', seal: <the same name>, params,
+addedBy: 'migration' }`. The key is not yet checked. Its id is derived from the account key and the sealed
+name (`migratedTwoFactorId`), so a re-run gives the same id. The sealed document is byte-identical before and
+after. A seed without its parameters, or parameters without a seed, is refused as damaged rather than turned
+into a guessed key. This is folded into the `v: 2` index directly; there is no `v: 3`.
+
+**What each reader sees:**
+
+- **The owner** (`AccountSummary.factors`): each key without its seal, plus `automatic`. `fields.totp` and
+  `totp` stay for one release, for an app from before 2FA keys.
+- **A ferret** (`account_hint`): each key's id, kind and label, **nothing else**. A `totp` key reads the same
+  whether Ferretry holds its seed or the owner does, so two accounts that differ only by a seed give
+  byte-identical hints. The hint line reads `2FA: 'Okta Verify on Pixel' (push) [tf_…], 'Phone ••42' (sms) [tf_…]`.
+
+**A code card's title** comes from the keys (`factorAskWords`), in the owner's words: "Code sent to ••42 (SMS)",
+"Code from Authenticator app", "One-time code: SMS ••42 or Authenticator app", or, with no key known, "One-time
+code for GitHub · kirinnee". A raise may name the key with `factor`. Like `secretHint`, it is a hint: it is used
+only if it is a key of the matched account, and otherwise ignored.
+
+**Saving a seed** takes one field: a base32 key (spaces fine) or an `otpauth://totp/…` link. `parseTotpInput` is
+the one parser, run by the app for instant feedback and again by the daemon, which has the final say. It refuses
+each of these with its own fixed sentence, and **never repeats any part of the input**:
+
+- an `otpauth://hotp` link (counter-based codes);
+- any other `otpauth` type, or an `otpauth-migration://` export;
+- an algorithm other than SHA1, SHA256 or SHA512;
+- digits other than 6 to 8, or a period outside 15 to 120 seconds;
+- a missing or malformed secret, or a setting named twice;
+- a label whose issuer contradicts the `issuer` setting;
+- hidden characters or a broken %-escape;
+- anything over 2,048 bytes.
+
+`factorMismatch` warns when the key says it is for another account. The issuer must match the account label,
+or a label of a host its sign-ins name. The account name must match the username, or be an email whose local
+part is the username. If either differs, the owner sees: "This key says it is for Okta · bob@x.com, but you're
+saving it to GitHub · kirinnee." The daemon refuses the save unless the owner ticked "save it here anyway".
+
+**The passkey is asked every time, even at the machine.** `add-2fa-key` is the one step-up act that
+**every** caller must prove, the admin token on loopback included. Its proof is bound to the one staged save:
+`StepUpOptionsRequest.subject` is the stage (`st_…`), and the challenge carries
+`addTwoFactorKeySubject(accountKey, stage)`. A proof for one save can never commit another.
+
+#### Approve on your phone
+
+> **Protocol only.** The shapes are in `phone-approval.ts`. No daemon reports `input.phone-approval.1` yet, so
+> no daemon raises one.
+
+A sign-in that waits for a push the owner approves on their phone has its own card, a `PhoneApproval`. It is
+not an input request, because nothing is typed.
+
+**Nothing of the ferret's is shown.** The raise (`PhoneApprovalRaise`) names only:
+
+- where: a page or a terminal;
+- optionally, the element it thinks shows the number. This is only **where to look**: the browser reads the
+  element, never the ferret;
+- optionally, the account and the push key, as hints;
+- how long to wait: 30 to 300 seconds, 2 minutes by default.
+
+It has no prompt, message, label or number field, and it is strict, so an extra field is refused.
+
+The account, site, time and number on the card all come from the daemon. `phoneApprovalWords` builds the card,
+the agenda subject and the push from the approval's own fields, and from nothing else:
+
+- **Card:** "Approve on your phone" · "ClickUp · a@gmail.com" · "ClickUp via Okta on company.okta.com" · "Tap 42
+  on your phone" (Duo: "Enter 123456 in Duo Mobile").
+- **Push** (owner decision !A171): the daemon-read number comes first, as in "Tap 42 on your phone: ClickUp ·
+  a@gmail.com". With no number, it ends "— open for the number".
+- **Agenda subject:** never the number. It is a plain `info` item with a `phoneApproval` ref, so an older app
+  shows it as an info card.
+- **No number:** the card says why ("A ferret scripted this page, so Ferretry won't read a number from it.").
+- **A sign-in Ferretry does not know:** the card says so, and where ("a sign-in Ferretry doesn't know, on
+  login.microsoftonline.com"), so an unexpected push is easy to refuse.
+- **Every card** ends with: "Never use a number a ferret tells you."
+
+**A terminal never shows a number.** A ferret can print any text into its own pane, so a terminal card always
+reads `numberMissing: 'terminal'` and sends the owner to the terminal.
+
+**Success is observed, never claimed.** `moved-on` is set only by the daemon, when it sees the sign-in move on.
+There is no "I approved" button and no route that sets it.
+
+While it waits, the ferret is told only the state and, once the sign-in moved on, `secondFactor: 'push'`
+(`PhoneApprovalAgentView`). It is **never told the number**.
 
 ### Later, and off by default: standing permission
 

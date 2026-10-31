@@ -114,6 +114,7 @@ const ACCESS_ACTS: Readonly<Record<NonNullable<StepUpDemand['act']>, string>> = 
   'loosen-security': 'make this machine ask for your passkey less often',
   'catalog-install': 'install something from a shared catalog',
   'share-catalog': 'share a catalog with someone',
+  'add-2fa-key': 'save automatic 2FA codes for an account',
 };
 
 /**

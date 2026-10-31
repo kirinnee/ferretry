@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TwoFactorStageIdSchema } from './account-ids.ts';
 import { ApiErrorResponseSchema, InstantSchema } from './common.ts';
 import { CapabilityAxisSchema, DaemonCapabilitySchema } from './grants.ts';
 import { PairedDeviceIdSchema } from './pairing.ts';
@@ -73,15 +74,31 @@ export const StepUpActSchema = z.enum([
   'loosen-security',
   'catalog-install',
   'share-catalog',
+  'add-2fa-key',
 ]);
 export type StepUpAct = z.infer<typeof StepUpActSchema>;
+
+/** The acts whose proof is also bound to ONE thing (`subject`), so it cannot be spent on another: a staged 2FA seed. */
+export const STEP_UP_SUBJECT_ACTS = ['add-2fa-key'] as const satisfies readonly StepUpAct[];
 
 /**
  * Options for a step-up. `act` is the one act the person is about to confirm: the daemon stamps the
  * proof with it, and an act that asks for its own proof (a catalog install) takes only a proof stamped
  * for it. Absent, the proof is unstamped and no such act takes it.
+ *
+ * `subject` is the one thing a {@link STEP_UP_SUBJECT_ACTS} act is for (the staged seed, `st_…`): the daemon binds the
+ * challenge, and so the proof, to it, and the save takes only a proof for that act AND that subject. Sent exactly with
+ * such an act, and never with another.
  */
-export const StepUpOptionsRequestSchema = PasskeyOptionsRequestSchema.extend({ act: StepUpActSchema.optional() });
+export const StepUpOptionsRequestSchema = PasskeyOptionsRequestSchema.extend({
+  act: StepUpActSchema.optional(),
+  subject: TwoFactorStageIdSchema.optional(),
+}).refine(
+  request =>
+    (request.subject !== undefined) ===
+    (request.act !== undefined && (STEP_UP_SUBJECT_ACTS as readonly string[]).includes(request.act)),
+  { path: ['subject'], message: 'name the staged 2FA key exactly when adding one' },
+);
 export type StepUpOptionsRequest = z.infer<typeof StepUpOptionsRequestSchema>;
 
 export const StepUpOptionsSchema = z.strictObject({
@@ -250,7 +267,7 @@ export type StepUpDemand = z.infer<typeof StepUpDemandSchema>;
 /**
  * The acts that ADD ACCESS to a machine, and so always need a fresh passkey confirmation of their own
  * from a device — even an unlocked one, even with `stepUpOnActions` off (owner decision 2026-10-14).
- * The machine itself (its admin token, on the host) is never asked.
+ * The machine itself (its admin token, on the host) is never asked, except for `add-2fa-key`.
  */
 export const STEP_UP_ACTS = {
   /** Minting a pairing code: the next device to redeem it gets access. */
@@ -294,6 +311,13 @@ export const STEP_UP_ACTS = {
    * what the catalog holds, so every code wants a passkey proved for it alone, like a pairing code.
    */
   shareCatalog: 'share-catalog',
+  /**
+   * Saving a 2FA seed, so Ferretry makes that account's codes (docs/input-requests.md, "Accounts and sign-ins"). Then the
+   * password and the code come from one machine, and the admin token every ferret holds could otherwise add a seed to
+   * any account. So this is the one act asked of EVERY caller, the machine itself included, and its proof is bound to
+   * the one staged seed it saves ({@link STEP_UP_SUBJECT_ACTS}). Removing a key never asks.
+   */
+  addTwoFactorKey: 'add-2fa-key',
 } as const satisfies Record<string, NonNullable<StepUpDemand['act']>>;
 
 /**
