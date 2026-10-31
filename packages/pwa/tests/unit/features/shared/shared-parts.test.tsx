@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { beforeEach, describe, expect, it } from 'bun:test';
 import { AccessRefused, JoinAgain } from '../../../../src/features/shared/access-refused.tsx';
 import { Fingerprint, SharedPage } from '../../../../src/features/shared/shared-parts.tsx';
 import {
@@ -12,6 +12,11 @@ import {
 import { click, settle } from '../../../support/dom-form.ts';
 import { mount } from '../../../support/dom.ts';
 import { failedAttempt } from '../../../support/shared-screens.ts';
+
+/** Earlier files in the same run can leave screens behind, and the queries here read the whole document. */
+beforeEach(() => {
+  document.body.replaceChildren();
+});
 
 const q = (selector: string): HTMLElement | null => document.querySelector<HTMLElement>(selector);
 

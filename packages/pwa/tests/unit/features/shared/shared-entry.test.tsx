@@ -1,10 +1,15 @@
-import { describe, expect, it } from 'bun:test';
+import { beforeEach, describe, expect, it } from 'bun:test';
 import { SharedEntry } from '../../../../src/features/shared/shared-entry.tsx';
 import { SEE_SHARED } from '../../../../src/features/shared/shared-screens-model.ts';
 import { testSubscription } from '../../../support/member-keys.ts';
 import { click, settle } from '../../../support/dom-form.ts';
 import { mount } from '../../../support/dom.ts';
 import { fakeMembers } from '../../../support/shared-screens.ts';
+
+/** Earlier files in the same run can leave screens behind, and the queries here read the whole document. */
+beforeEach(() => {
+  document.body.replaceChildren();
+});
 
 const q = (selector: string): HTMLElement | null => document.querySelector<HTMLElement>(selector);
 

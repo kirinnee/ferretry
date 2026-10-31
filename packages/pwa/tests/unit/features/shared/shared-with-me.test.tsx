@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from 'bun:test';
+import { beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { SharedWithMe } from '../../../../src/features/shared/shared-with-me.tsx';
 import {
   LEAVE_NOTE,
@@ -27,6 +27,11 @@ import {
   type SharedItemFixture,
   sharedItemFixture,
 } from '../../../support/shared-screens.ts';
+
+/** Earlier files in the same run can leave screens behind, and the queries here read the whole document. */
+beforeEach(() => {
+  document.body.replaceChildren();
+});
 
 const q = (selector: string): HTMLElement | null => document.querySelector<HTMLElement>(selector);
 const all = (selector: string): HTMLElement[] => [...document.querySelectorAll<HTMLElement>(selector)];

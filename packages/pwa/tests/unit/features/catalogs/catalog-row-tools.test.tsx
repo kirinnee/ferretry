@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { beforeEach, describe, expect, it } from 'bun:test';
 import { FyHttpError } from '@ferretry/protocol/client';
 import {
   CatalogRowTools,
@@ -13,6 +13,11 @@ import { INSTALL_ID, installRecord, ownedCatalog } from '../../../support/catalo
 import { chooseInstallFromFile } from '../../../support/catalog-add.ts';
 import { click, settle } from '../../../support/dom-form.ts';
 import { mount } from '../../../support/dom.ts';
+
+/** Earlier files in the same run can leave screens behind, and the queries here read the whole document. */
+beforeEach(() => {
+  document.body.replaceChildren();
+});
 
 const connection = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.example.test', deviceId: 'token-a' });
 const q = (selector: string): HTMLElement | null => document.querySelector<HTMLElement>(selector);

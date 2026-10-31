@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from 'bun:test';
+import { beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import type { SharedRedeemResponse } from '@ferretry/protocol';
 import { JoinScreen } from '../../../../src/features/shared/join-screen.tsx';
 import {
@@ -31,6 +31,11 @@ import {
 } from '../../../support/shared-screens.ts';
 import { click, settle } from '../../../support/dom-form.ts';
 import { interact, mount } from '../../../support/dom.ts';
+
+/** Earlier files in the same run can leave screens behind, and the queries here read the whole document. */
+beforeEach(() => {
+  document.body.replaceChildren();
+});
 
 const q = (selector: string): HTMLElement | null => document.querySelector<HTMLElement>(selector);
 const text = (): string => document.body.textContent ?? '';

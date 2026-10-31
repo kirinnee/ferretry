@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import { formatShareFragment } from '@ferretry/protocol';
 import { AddCatalogFromLink } from '../../../../src/features/catalogs/add-from-link.tsx';
 import { CatalogMoreMenu } from '../../../../src/features/catalogs/catalog-more-menu.tsx';
@@ -7,6 +7,11 @@ import { RouterProvider } from '../../../../src/lib/router.tsx';
 import { FAKE_CODE } from '../../../support/catalog-sharing.ts';
 import { byText, click, settle, typeInto } from '../../../support/dom-form.ts';
 import { mount } from '../../../support/dom.ts';
+
+/** Earlier files in the same run can leave screens behind, and the queries here read the whole document. */
+beforeEach(() => {
+  document.body.replaceChildren();
+});
 
 const FP = `fy_daemon_${'q'.repeat(43)}`;
 const hash = `#${formatShareFragment({ daemonUrl: 'https://box.example.test', daemonId: FP, code: FAKE_CODE } as never)}`;

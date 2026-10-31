@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from 'bun:test';
+import { beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { type InstallMachine, SharedItemSheet } from '../../../../src/features/shared/shared-item-sheet.tsx';
 import { NOT_PAIRED_NOTE } from '../../../../src/features/shared/shared-screens-model.ts';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
@@ -8,6 +8,11 @@ import { installPreview, installRecord } from '../../../support/catalog-views.ts
 import { click, settle } from '../../../support/dom-form.ts';
 import { interact, mount } from '../../../support/dom.ts';
 import { type SharedItemFixture, sharedItemFixture } from '../../../support/shared-screens.ts';
+
+/** Earlier files in the same run can leave screens behind, and the queries here read the whole document. */
+beforeEach(() => {
+  document.body.replaceChildren();
+});
 
 const q = (selector: string): HTMLElement | null => document.querySelector<HTMLElement>(selector);
 const text = (): string => document.body.textContent ?? '';

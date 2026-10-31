@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from 'bun:test';
+import { beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { FyHttpError } from '@ferretry/protocol/client';
 import type { DaemonIdentity } from '@ferretry/relay';
 import { openCatalogFile } from '../../../../src/features/catalogs/catalog-install-model.ts';
@@ -12,6 +12,11 @@ import { click, settle } from '../../../support/dom-form.ts';
 import { interact, mount } from '../../../support/dom.ts';
 import { runAsync } from '../../../support/react.ts';
 import { settleUntil } from '../../../support/settle.ts';
+
+/** Earlier files in the same run can leave screens behind, and the queries here read the whole document. */
+beforeEach(() => {
+  document.body.replaceChildren();
+});
 
 const connection = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.example.test', deviceId: 'token-a' });
 const q = (selector: string): HTMLElement | null => document.querySelector<HTMLElement>(selector);
