@@ -43,8 +43,8 @@ import type { TranscriptHistoryControl } from './components/transcript-history-r
 import { AgendaInboxComposer } from './features/agenda/agenda-inbox-composer.tsx';
 import { AgendaInboxPage } from './features/agenda/agenda-inbox-page.tsx';
 import { useAgendaSessionActions } from './features/agenda/agenda-session-actions.tsx';
-import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import type { ToTestHost } from './features/agenda/to-test-rows.tsx';
+import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { BoardOriginProvider, useBoardOrigin } from './features/board/board-origin.tsx';
 import { BoardPage } from './features/board/board-page.tsx';
 import { LinkBehaviourProvider } from './features/browser/external-link.tsx';
@@ -133,11 +133,11 @@ import { useWhatsNewEntry, useWhatsNewHost, WhatsNewProvider } from './features/
 import { WhatsNewSheet } from './features/whats-new/whats-new-sheet.tsx';
 import { useAccountPickerSlice } from './hooks/use-account-picker.ts';
 import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.ts';
-import { type BoardMachine, useBoard, useBoardActions } from './hooks/use-board.ts';
 import { useAgendaSession, useAgendaSnapshot } from './hooks/use-agenda.ts';
 import { AgendaInboxContext, useAgendaInbox, useAgendaInboxModel, useInboxMachines } from './hooks/use-agenda-inbox.ts';
 import { useAgendaReplies } from './hooks/use-agenda-replies.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
+import { type BoardMachine, useBoard, useBoardActions } from './hooks/use-board.ts';
 import { useCarrierPreferences, useTunnelService, useTunnelSwitches } from './hooks/use-carrier-preferences.ts';
 import { useChatTasksUrl } from './hooks/use-chat-tasks-url.ts';
 import { useConfigChangeFeed } from './hooks/use-config-change-feed.ts';
