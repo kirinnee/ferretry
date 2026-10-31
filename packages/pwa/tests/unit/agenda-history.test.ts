@@ -207,6 +207,37 @@ describe('the history of one agenda item', () => {
     expect(summaries[1]).toEqual(['Decided so far: added “Ship it”']);
   });
 
+  test('says a reworded field by name, and folds a long list of changes into "and N more"', () => {
+    const revisions = [
+      { at: '2026-08-01T10:00:00.000Z', by: 'agent', changed: ['why'], previous: { why: 'Old reason' } },
+      {
+        at: '2026-08-01T11:00:00.000Z',
+        by: 'agent',
+        changed: ['premise'],
+        previous: { premise: '- one' },
+      },
+    ] as unknown as AgendaItem['revisions'];
+    const events = itemHistory(
+      item({
+        revisions,
+        why: 'New reason',
+        premise: '- one\n- two\n- three\n- four\n- five\n- six\n- seven\n- eight',
+      } as Partial<AgendaItem>),
+      [],
+    );
+    const [first, second] = events.map(event => (event.kind === 'revision' ? event.summary : []));
+    expect(first).toEqual(['Why it matters: reworded']);
+    expect(second).toEqual([
+      'Premise: added “two”',
+      'Premise: added “three”',
+      'Premise: added “four”',
+      'Premise: added “five”',
+      'Premise: added “six”',
+      'Premise: added “seven”',
+      'and 1 more changes',
+    ]);
+  });
+
   test('interleaves versions and chat by time, stably, and lets a row with no clock inherit the last', () => {
     const revisions = [
       { at: '2026-08-01T10:00:00.000Z', by: 'agent', changed: ['subject'], previous: { subject: 'Old' } },

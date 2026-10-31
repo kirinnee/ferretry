@@ -45,6 +45,24 @@ describe('the History under an open agenda card', () => {
     expect(rows[2]?.textContent).toBe('Card updated to v2');
   });
 
+  test('says what an edit changed in a list under the "Card updated" line', async () => {
+    const root = await draw([
+      {
+        kind: 'revision',
+        key: 'v',
+        at: AT,
+        version: 2,
+        summary: ['Premise: added “A cache is the cause”', 'Title: now “New”'],
+      },
+    ]);
+    const row = must(root.querySelector('[data-history="revision"]'), 'the revision row');
+    expect(row.querySelector('span')?.textContent).toBe('Card updated to v2');
+    expect([...row.querySelectorAll('.fy-hist__changes li')].map(li => li.textContent)).toEqual([
+      'Premise: added “A cache is the cause”',
+      'Title: now “New”',
+    ]);
+  });
+
   test('ticks an answer, says a note under it, and leaves a reply unticked', async () => {
     const root = await draw([
       { kind: 'owner', key: 'a', at: AT, text: 'Pause', form: 'answer', note: 'until Monday' },
