@@ -294,3 +294,4 @@ packages/pwa/src/features/queue-view/queue-action.ts # the Find/Cmd-K Message qu
 packages/pwa/src/lib/queue-view.ts # the queue page's row and group model, used by queue-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/components/machine-home-model.ts # the machine home's counts, ferret order and health word, used by App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/hooks/use-spend-today.ts # the machine home's spend-today figure, used by App.tsx ← main.tsx; the gate ignores .tsx roots
+packages/pwa/src/lib/board-card-stack.ts # the Tasks tab's Cards order (to test, waiting on you, the rest), used by board-cards-view.tsx ← board-side-tab.tsx ← chat-tasks.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots

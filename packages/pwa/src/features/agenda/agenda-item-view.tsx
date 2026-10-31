@@ -22,7 +22,7 @@
  */
 
 import type { AgendaCardAnswer, AgendaItem } from '@ferretry/protocol';
-import { ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 import { useQuoteMenu } from '../../components/quote-menu.tsx';
 import { useDoneClose } from '../../hooks/use-done-close.ts';
@@ -40,6 +40,7 @@ import { AgendaItemCard } from './agenda-item-card.tsx';
 import { AgendaItemHistory } from './agenda-item-history.tsx';
 import { AgendaSnoozeMenu } from './agenda-snooze-menu.tsx';
 import { AgendaStatusPill } from './agenda-status-pill.tsx';
+import { StackPager } from './stack-pager.tsx';
 import { useDoneCloseFlow } from './use-done-close-flow.ts';
 
 export interface AgendaItemViewProps {
@@ -216,27 +217,7 @@ export function AgendaItemView({
                   <AgendaStatusPill status={status} />
                 </span>
               )}
-              <button
-                aria-label="Previous item"
-                className="fy-item-view__step"
-                disabled={onPrevious === undefined}
-                onClick={onPrevious}
-                type="button"
-              >
-                <ChevronLeft aria-hidden="true" size={18} />
-              </button>
-              <span className="fy-item-view__where" data-agenda-where="">
-                {position.index + 1} of {position.total}
-              </span>
-              <button
-                aria-label="Next item"
-                className="fy-item-view__step"
-                disabled={onNext === undefined}
-                onClick={onNext}
-                type="button"
-              >
-                <ChevronRight aria-hidden="true" size={18} />
-              </button>
+              <StackPager index={position.index} onNext={onNext} onPrevious={onPrevious} total={position.total} />
               {onSnooze === undefined ? null : (
                 <AgendaSnoozeMenu disabled={busy} now={now} onSnooze={onSnooze} triggerClass="fy-item-view__step" />
               )}
