@@ -34,6 +34,9 @@ const dayStats = {
   asked: { auto: 1, jev: 0, llm: 0 },
 };
 
+const actionTally = { action: 'revive', outcome: 'done', auto: 2, jev: 1, llm: 0 };
+const reviveResults = { progressed: { auto: 2, jev: 1, llm: 0 }, stalled: { auto: 0, jev: 0, llm: 1 } };
+
 const jevCheck = {
   at: INSTANT,
   sessionId: 'session-1',
@@ -190,6 +193,14 @@ const wardenCases: SchemaCase[] = [
   { name: 'actor counts', schema: warden.WardenActorCountsSchema, value: dayStats.moved },
   { name: 'day stats', schema: warden.WardenDayStatsSchema, value: dayStats },
   { name: 'day stats with Jev checks', schema: warden.WardenDayStatsSchema, value: { ...dayStats, jev: jevDay } },
+  { name: 'stat action', schema: warden.WardenStatActionSchema, value: 'escalate' },
+  { name: 'action tally', schema: warden.WardenActionTallySchema, value: actionTally },
+  { name: 'revive results', schema: warden.WardenReviveResultsSchema, value: reviveResults },
+  {
+    name: 'day stats with action tallies',
+    schema: warden.WardenDayStatsSchema,
+    value: { ...dayStats, acts: [actionTally], reviveResults },
+  },
   { name: 'jev day stats', schema: warden.WardenJevDayStatsSchema, value: jevDay },
   { name: 'jev check verdict', schema: warden.WardenJevCheckVerdictSchema, value: 'skipped' },
   { name: 'jev check why', schema: warden.WardenJevCheckWhySchema, value: 'jev_cap' },

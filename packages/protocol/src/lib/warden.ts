@@ -812,6 +812,43 @@ export const WardenActorCountsSchema = z.object({
 });
 export type WardenActorCounts = z.infer<typeof WardenActorCountsSchema>;
 
+// ── Every action, by who decided ──────────────────────────────────────────────────────────────────
+
+/**
+ * What the action stats count: every {@link WardenActionKindSchema} plus `escalate`, a flag handed to
+ * the owner that no held action records (a `NEEDS_HUMAN` verdict, Jev's hand-on, a failed investigation).
+ * A revive is the Warden bringing a dead ferret back: `revive` (a rule) and `resume` (a verdict) both are.
+ */
+export const WardenStatActionSchema = z.enum([...WardenActionKindSchema.options, 'escalate']);
+export type WardenStatActionKind = z.infer<typeof WardenStatActionSchema>;
+
+/** The actions that bring a dead or stopped ferret back — what the stats call a revive. */
+export const WARDEN_REVIVE_ACTIONS: readonly WardenStatActionKind[] = ['revive', 'resume'];
+
+/**
+ * How many times one action had one outcome, split by who decided it (`auto` is a rule, `jev` Jev, `llm`
+ * an investigation's verdict, `owner` the owner). One entry per (action, outcome) pair that happened.
+ */
+export const WardenActionTallySchema = WardenActorCountsSchema.extend({
+  action: WardenStatActionSchema,
+  outcome: WardenActionOutcomeSchema,
+});
+export type WardenActionTally = z.infer<typeof WardenActionTallySchema>;
+
+/**
+ * What became of the ferrets the Warden brought back, by who decided it: `progressed` the ferret did
+ * real work again within {@link WARDEN_REVIVE_PROGRESS_MINUTES}; `stalled` it did not, or it ended again.
+ * A revive still inside its window is in neither.
+ */
+export const WardenReviveResultsSchema = z.object({
+  progressed: WardenActorCountsSchema,
+  stalled: WardenActorCountsSchema,
+});
+export type WardenReviveResults = z.infer<typeof WardenReviveResultsSchema>;
+
+/** How long a revived ferret has to show progress before the revive counts as not having taken. */
+export const WARDEN_REVIVE_PROGRESS_MINUTES = 10;
+
 // ── Jev's checks ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -952,11 +989,15 @@ export const WardenDayStatsSchema = z.object({
   asked: WardenActorCountsSchema,
   /** Jev's checks this day. Absent from an older daemon, which kept only `jevDecisions`. */
   jev: WardenJevDayStatsSchema.optional(),
+  /** Every action this day by outcome and decider (revives, nudges, restarts …). Absent from an older daemon. */
+  acts: z.array(WardenActionTallySchema).optional(),
+  /** What became of the revives this day. Absent from an older daemon. */
+  reviveResults: WardenReviveResultsSchema.optional(),
 });
 export type WardenDayStats = z.infer<typeof WardenDayStatsSchema>;
 
 /** How many days of {@link WardenDayStats} the status carries, today included. */
-export const WARDEN_HISTORY_DAYS = 7;
+export const WARDEN_HISTORY_DAYS = 30;
 
 // ── Investigator names ──────────────────────────────────────────────────────────────────────────
 
@@ -1020,6 +1061,10 @@ export const WardenStatusViewSchema = z.object({
    * kept a record for: a day it did not is missing, never a zero. Absent from an older daemon.
    */
   history: z.array(WardenDayStatsSchema).optional(),
+  /** The actions of every day in `history` added up. Absent from an older daemon. */
+  actionTotals: z.array(WardenActionTallySchema).optional(),
+  /** The revive results of every day in `history` added up. Absent from an older daemon. */
+  reviveTotals: WardenReviveResultsSchema.optional(),
   /** Jev's most recent checks, newest first, from the record kept beside the reports. Absent from an older daemon. */
   jevChecks: z.array(WardenJevCheckSchema).optional(),
 });

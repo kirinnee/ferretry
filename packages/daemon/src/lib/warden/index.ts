@@ -1,3 +1,4 @@
+export * from './action-tally.ts';
 export * from './agenda.ts';
 export * from './backoff.ts';
 export * from './bless.ts';
@@ -26,6 +27,7 @@ export * from './remedy.ts';
 export * from './reports.ts';
 export * from './revive.ts';
 export * from './revive-service.ts';
+export * from './revive-watch.ts';
 export * from './runtime.ts';
 export * from './state.ts';
 export * from './sus.ts';

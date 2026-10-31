@@ -87,6 +87,7 @@ import {
 } from '@ferretry/protocol';
 import { displayAgentName } from '../names/session-names.ts';
 import type { TriageDecision, TriageGuardPort } from '../speedups/jev.ts';
+import { sumActionTallies, sumReviveResults } from './action-tally.ts';
 import { type AgendaBoardInput, buildWardenAgendaView } from './agenda.ts';
 import {
   BACKOFF_CEILING_MS,
@@ -197,6 +198,7 @@ import {
   wardenNudgeMessage,
 } from './remedy.ts';
 import type { WardenReviveService } from './revive-service.ts';
+import { resolveReviveWatch, watchRevive } from './revive-watch.ts';
 import {
   parseWardenRuntimeState,
   jevHandoffKey,
@@ -723,6 +725,7 @@ export class WardenSweepService {
     ]);
     const resolved = await this.resolveLogin(stored.config);
     const budget = this.budget(stored.config, state, nowMs, resolved.usable);
+    const history = wardenHistory(state, nowMs);
     const jevChecks = await this.ports.jevChecks.recent(JEV_CHECKS_SHOWN).catch(() => undefined);
     const investigators = new Map(
       (state.investigations ?? []).flatMap(record =>
@@ -764,7 +767,9 @@ export class WardenSweepService {
       ],
       actions: (state.actions ?? []).slice(0, WARDEN_STATUS_LIST_LIMIT).map(action => ({ ...action })),
       blessings: [...blessingViews(state.blessings ?? {}, nowMs)],
-      history: [...wardenHistory(state, nowMs)],
+      history: [...history],
+      actionTotals: [...sumActionTallies(history)],
+      reviveTotals: sumReviveResults(history),
       // A record that cannot be read is left out — unknown, as from an older daemon — never shown as none.
       ...(jevChecks === undefined ? {} : { jevChecks: [...jevChecks] }),
     };
@@ -1045,6 +1050,7 @@ export class WardenSweepService {
     };
     await this.ports.state.write(state);
     state = await this.closeLeftovers(state, fleet, config, nowMs);
+    state = resolveReviveWatch(state, fleet, nowMs);
     const reviveRun = await this.reviveDead(state, fleet, config, nowMs);
     state = reviveRun.state;
     const anomalies = detected.anomalies.filter(anomaly => !reviveRun.revived.has(anomaly.sessionId));
@@ -1969,8 +1975,11 @@ export class WardenSweepService {
       ...(investigator === undefined ? {} : { investigator }),
       ...(jev === undefined ? {} : { jev }),
     };
-    return recordWardenOutcome(
-      { ...state, actions: [stamped, ...(state.actions ?? [])].slice(0, WARDEN_HISTORY_LIMIT) },
+    return watchRevive(
+      recordWardenOutcome(
+        { ...state, actions: [stamped, ...(state.actions ?? [])].slice(0, WARDEN_HISTORY_LIMIT) },
+        stamped,
+      ),
       stamped,
     );
   }
