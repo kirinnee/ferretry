@@ -75,7 +75,10 @@ import {
   type PackConfig,
   type PackRefusal,
   ProtocolVersionSchema,
+  readLoopbackFirewallMarker,
   type RegisterProjectRequest,
+  type ResolvedBrowserPorts,
+  resolveBrowserPorts,
   type RuntimeControlRequest,
   type RuntimeModelChoice,
   refusalNotice,
@@ -6283,7 +6286,11 @@ const TERMINAL_IDLE_TIMEOUT_MS = 60 * 60_000;
  * that has none refuses with a sentence naming what is missing rather than spawning whatever answers
  * to the name.
  */
-function createBrowserLoginWorld(paths: FoundationPaths, closeAgentBrowsers: () => Promise<void>): BrowserLoginWorld {
+function createBrowserLoginWorld(
+  paths: FoundationPaths,
+  closeAgentBrowsers: () => Promise<void>,
+  ports: () => Promise<ResolvedBrowserPorts>,
+): BrowserLoginWorld {
   const profile = new BrowserProfileStore(paths.home);
   const which = (name: string) => () => Bun.which(name, { PATH: process.env.PATH }) ?? undefined;
   const runtime = new NodeBrowserLoginRuntime({
@@ -6291,6 +6298,7 @@ function createBrowserLoginWorld(paths: FoundationPaths, closeAgentBrowsers: () 
     secretsDirectory: profile.browserDirectory,
     x11vncExecutable: which('x11vnc'),
     timeoutExecutable: which('timeout'),
+    ports,
     // The operator's explicit Chrome, honoured ahead of this platform's candidate list. The domain
     // names the variable in its own refusal, so the name is read here rather than invented.
     chromeOverride: () => process.env.FY_CHROME_BIN,
@@ -7268,6 +7276,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * configuration that is absent is a host with no fleet; one in the old account format refuses.
    */
   const declaredAccountModel = async () => await readDeclaredAccountModel(configFiles, configLocations);
+  /**
+   * Which loopback ports the browser, its sign-in relay and the login window bind: read at every start, like the
+   * mode. An unreadable configuration is `random`, which is what every start did before the setting.
+   */
+  const browserPorts = async (): Promise<ResolvedBrowserPorts> => {
+    const setting = (await declaredAccountModel())?.machine.browserPorts ?? 'random';
+    if (setting === 'random') return { kind: 'random' };
+    const marker = await readLoopbackFirewallMarker(async path => await Bun.file(path).text());
+    return resolveBrowserPorts(setting, process.getuid?.() ?? 0, marker);
+  };
   /**
    * The same model as the last configuration load has it, without touching the directory: for the
    * readers that run on a timer — the credential catalogue, the usage feed and its cadence, auto-resume —
@@ -8626,6 +8644,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // Read at every launch, so a switch applies the next time the browser starts. An unreadable
         // configuration launches headless rather than not at all.
         mode: async () => (await declaredAccountModel())?.machine.browserMode ?? 'headless',
+        ports: browserPorts,
         // Read at every launch too, but a proxy the owner asked for is never dropped quietly: a secret the vault
         // does not hold refuses the launch (resolveBrowserProxy) rather than sending traffic around the proxy.
         proxy: async () => {
@@ -8741,7 +8760,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         })),
       };
     },
-    browserLogin: createBrowserLoginWorld(paths, async () => await closeAgentBrowsers()),
+    browserLogin: createBrowserLoginWorld(paths, async () => await closeAgentBrowsers(), browserPorts),
     fileEvents,
     tmuxControl: tmux,
     createSubsystems: (

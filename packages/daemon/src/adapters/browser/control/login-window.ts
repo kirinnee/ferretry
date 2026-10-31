@@ -33,6 +33,7 @@ export interface BrowserLoginRuntime {
   timeoutExecutable(): string;
   chromeVersion(executable: string): Promise<string>;
   spawn(argv: readonly string[], environment: Readonly<Record<string, string | undefined>>): BrowserLoginChild;
+  /** The loopback port x11vnc listens on: the machine's fixed `vnc` port when `browserPorts` names one, else a free one. */
   freePort(): Promise<number>;
   writePassword(password: string): Promise<string>;
   waitForChrome(profile: string, child: BrowserLoginChild): Promise<void>;

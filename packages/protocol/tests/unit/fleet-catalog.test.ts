@@ -476,6 +476,28 @@ describe('the account-model catalogue wire contract', () => {
     should(unnamed.success && unnamed.data.kind === 'runtime.put' && 'harness' in unnamed.data).be.false();
   });
 
+  it('should take browserPorts on a settings change, leave it optional, and refuse ports that cannot work', () => {
+    // Arrange
+    const sent = {
+      kind: 'machine.settings',
+      agentPermissions: 'auto',
+      defaultRuntime: null,
+      agentControl: { terminals: true, browsers: true, files: true },
+    };
+    const explicit = { cdp: 9222, relay: 9223, vnc: 5901 };
+
+    // Act
+    const parse = (browserPorts?: unknown) =>
+      catalog.FleetAccountChangeSchema.safeParse(browserPorts === undefined ? sent : { ...sent, browserPorts });
+
+    // Assert
+    should(parse().success).be.true();
+    should(parse('per-user').success).be.true();
+    should(parse(explicit).success).be.true();
+    should(parse({ ...explicit, relay: 9222 }).success).be.false();
+    should(parse('fixed').success).be.false();
+  });
+
   it('should require ferretrySettings in what a machine reports, and leave it optional in what a client sends', () => {
     // Arrange
     const sent = { kind: 'machine.settings', agentPermissions: 'auto', defaultRuntime: null };

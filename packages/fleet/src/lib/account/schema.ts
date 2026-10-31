@@ -24,6 +24,7 @@
  */
 import {
   BrowserModeSchema,
+  BrowserPortsSettingSchema,
   BrowserProxySettingSchema,
   CONFIG_COMPONENT_KINDS,
   isLoopbackHost,
@@ -190,6 +191,13 @@ export const MACHINE_SHAPE = {
    * sees where the browser goes, and its credential references would be sent to whatever address is written.
    */
   browserProxy: BrowserProxySettingSchema.optional(),
+  /**
+   * "Browser ports" (docs/config-files.md): `random` (the default), `per-user` (ports derived from this user's uid,
+   * fenced by the host admin's loopback firewall) or three explicit `{ cdp, relay, vnc }` ports. Read when the
+   * browser or the login window STARTS. Not a loosening: it changes which loopback ports are used, not what an
+   * agent may do.
+   */
+  browserPorts: BrowserPortsSettingSchema.default('random'),
   /**
    * "Auto-resume after restart": when the daemon boots and finds ferrets that were running when the host
    * went down, it resumes them with their conversation intact. On by default; sessions the owner stopped

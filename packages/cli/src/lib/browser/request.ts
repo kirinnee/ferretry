@@ -5,6 +5,9 @@ export { BROWSER_PROXY_TEST_PATH };
 
 export const BROWSER_LOGIN_PATH = '/v1/browser/login';
 
+/** The machine view, where the saved `browserPorts` setting is read for the firewall entry. */
+export const BROWSER_FIREWALL_MACHINE_PATH = '/v1/fleet/machine';
+
 export const sessionBrowserPath = (sessionId: string): string =>
   `/v1/sessions/${encodeURIComponent(sessionId)}/browser`;
 
@@ -17,6 +20,7 @@ export const sessionBrowserPath = (sessionId: string): string =>
  */
 export function browserRequest(command: BrowserCommand, selfSessionId?: string): BrowserRequest {
   if (command.command === 'login') return loginRequest(command);
+  if (command.command === 'firewall') return { method: 'GET', path: BROWSER_FIREWALL_MACHINE_PATH };
   if (command.command === 'proxy') {
     return {
       method: 'POST',

@@ -43,6 +43,7 @@ import {
 } from '@ferretry/fleet';
 import type {
   BrowserMode,
+  BrowserPortsSetting,
   FleetAccountChange,
   FleetAgentControl,
   FleetComponentInput,
@@ -705,6 +706,18 @@ function putMachineSettings(
     }
   }
 
+  // A client that predates Browser ports leaves it out, and leaves it as it is.
+  if (change.browserPorts !== undefined) {
+    const previous = model.machine.browserPorts;
+    if (JSON.stringify(change.browserPorts) !== JSON.stringify(previous)) {
+      draft.machine.browserPorts = change.browserPorts;
+      parts.push(`the browser ports to ${browserPortsWords(change.browserPorts)}`);
+      consequences.push(
+        'Applies the next time the browser or the login window starts; a browser already running keeps its ports until it stops.',
+      );
+    }
+  }
+
   // A client that predates Auto-resume leaves it out, and leaves it as it is.
   const autoResume = change.autoResume ?? model.machine.autoResume;
   if (autoResume !== model.machine.autoResume) {
@@ -1189,4 +1202,11 @@ function disabledBlock(change: { readonly reason?: string | undefined; readonly 
     ...(change.reason === undefined ? {} : { reason: change.reason }),
     ...(change.until === undefined ? {} : { until: change.until }),
   };
+}
+
+/** The product's words for a Browser ports setting (docs/config-files.md). */
+function browserPortsWords(setting: BrowserPortsSetting): string {
+  if (setting === 'random') return 'random';
+  if (setting === 'per-user') return 'per-user (derived from the user id)';
+  return `cdp ${setting.cdp}, relay ${setting.relay}, vnc ${setting.vnc}`;
 }
