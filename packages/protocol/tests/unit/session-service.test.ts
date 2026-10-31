@@ -73,6 +73,7 @@ const sendRecord = {
   attachmentIds: [],
   fate: 'delivered',
   evidence: sendEvidence,
+  by: { kind: 'ferretry', feature: 'Board' },
 };
 
 const transcriptProvenance = {
@@ -139,6 +140,11 @@ const sessionCases: SchemaCase[] = [
   },
   { name: 'send cancel effect', schema: session.SendCancelEffectSchema, value: 'left_in_queue' },
   { name: 'send evidence', schema: session.SendEvidenceSchema, value: sendEvidence },
+  {
+    name: 'queue author',
+    schema: session.QueueAuthorSchema,
+    value: { kind: 'ferretry', feature: 'Board' },
+  },
   { name: 'send record', schema: session.SendRecordSchema, value: sendRecord },
   { name: 'send list', schema: session.SendListResponseSchema, value: { sends: [sendRecord] } },
   { name: 'runtime option', schema: session.RuntimeModelOptionSchema, value: { value: 'model', label: 'Model' } },
