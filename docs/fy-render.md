@@ -348,8 +348,9 @@ window, 800px)`, never up inline, so it is wholly visible at rest and the page n
   and **pans inside the viewport** instead (`data-fy-render-fit="legible"`). Fullscreen has no floor: it rests on the
   whole picture (up to twice natural size) and the reader zooms in. An authored `svg` has no known text size, so it
   always fits whole.
-- **Controls, like GitHub.** Labelled **Zoom in**, **Zoom out** and **Reset zoom** buttons beside the corner tools
-  (always shown on touch, on hover or focus otherwise), plus the existing **Fullscreen**. Focused, `+`/`=` zoom in,
+- **Controls, like GitHub — and never on the drawing.** Labelled **Zoom in**, **Zoom out** and **Reset zoom** buttons
+  sit top left in a strip the viewport reserves above the picture, level with the corner tools at top right (always
+  shown on touch, on hover or focus otherwise), plus the existing **Fullscreen**. Focused, `+`/`=` zoom in,
   `-` zooms out, `0` resets, arrows pan. Drag pans, two fingers pinch, a double tap zooms and the next one returns,
   `Ctrl`/`Cmd` + wheel (and a trackpad pinch) zooms about the cursor. Transitions respect `prefers-reduced-motion`.
 - **Plain scroll is never trapped.** A plain wheel inline is the page's, and `touch-action` is derived from the
