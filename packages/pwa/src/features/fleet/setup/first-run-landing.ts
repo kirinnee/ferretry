@@ -14,7 +14,7 @@
  */
 
 import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
-import { daemonMachineSetupPath, daemonSessionsPath } from '../../../lib/pages/routes.ts';
+import { daemonMachineSetupPath, daemonHomePath } from '../../../lib/pages/routes.ts';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { readMachineReach } from '../shell/machine-reach.ts';
 
@@ -26,5 +26,5 @@ export const landingAfterPairing = async (
   const reach = await readMachineReach(() => createClient(connection));
   return reach.kind === 'online' && reach.machine.setUp === false
     ? daemonMachineSetupPath(connection.daemonId)
-    : daemonSessionsPath(connection.daemonId);
+    : daemonHomePath(connection.daemonId);
 };

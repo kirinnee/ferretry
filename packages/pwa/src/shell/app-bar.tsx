@@ -179,6 +179,7 @@ const entry = (id: AppBarDestinationId): AppNavigationEntry =>
 /** Which destination, if any, the reader is currently on. A session belongs to Sessions. */
 export const appBarDestinationForRoute = (route: Route): AppBarDestinationId | null => {
   switch (route.kind) {
+    case 'home':
     case 'sessions':
     case 'session':
     case 'new-session':

@@ -150,7 +150,7 @@ describe('APP_NAVIGATION', () => {
       'learning',
       'settings',
     ]);
-    expect(SESSIONS_ENTRY.path(DAEMON)).toBe('/d/workshop');
+    expect(SESSIONS_ENTRY.path(DAEMON)).toBe('/d/workshop/sessions');
   });
 
   it('puts every place either on the phone bar or under More, never both', () => {
@@ -167,7 +167,7 @@ describe('AppBar destinations', () => {
     const hrefs = linksOf(mounted.container, 'Destinations').map(link => link.getAttribute('href'));
 
     expect(hrefs).toEqual([
-      '/d/workshop',
+      '/d/workshop/sessions',
       '/d/workshop/inbox',
       '/d/workshop/board',
       '/d/workshop/projects',
@@ -188,7 +188,7 @@ describe('AppBar destinations', () => {
     await mounted.render(bar({ daemon: OTHER }));
 
     expect(linksOf(mounted.container, 'Destinations').map(link => link.getAttribute('href'))).toEqual([
-      '/d/laptop',
+      '/d/laptop/sessions',
       '/d/laptop/inbox',
       '/d/laptop/board',
       '/d/laptop/projects',
@@ -571,14 +571,14 @@ describe('AppTabBar', () => {
       'More',
     ]);
     expect([...nav.querySelectorAll('a')].map(link => link.getAttribute('href'))).toEqual([
-      '/d/workshop',
+      '/d/workshop/sessions',
       '/d/workshop/inbox',
       '/d/workshop/board',
     ]);
 
     await mounted.render(tabBar({ daemon: OTHER }));
     expect([...nav.querySelectorAll('a')].map(link => link.getAttribute('href'))).toEqual([
-      '/d/laptop',
+      '/d/laptop/sessions',
       '/d/laptop/inbox',
       '/d/laptop/board',
     ]);

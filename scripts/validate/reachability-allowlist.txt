@@ -294,3 +294,5 @@ packages/pwa/src/lib/item-conversation.ts # the Inbox item's History read, used 
 packages/pwa/src/lib/board-side-view.ts # the in-ferret Tasks tab's Kanban/List choice, reached from chat-tasks.tsx ← session-chat-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/features/queue-view/queue-action.ts # the Find/Cmd-K Message queue destination, used by App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/lib/queue-view.ts # the queue page's row and group model, used by queue-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
+packages/pwa/src/components/machine-home-model.ts # the machine home's counts, ferret order and health word, used by App.tsx ← main.tsx; the gate ignores .tsx roots
+packages/pwa/src/hooks/use-spend-today.ts # the machine home's spend-today figure, used by App.tsx ← main.tsx; the gate ignores .tsx roots

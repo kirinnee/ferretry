@@ -13,7 +13,7 @@
 
 import { type ReactNode, useCallback, useMemo, useRef } from 'react';
 import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
-import { daemonSessionsPath, daemonSettingsPath } from '../../../lib/pages/routes.ts';
+import { daemonHomePath, daemonSettingsPath } from '../../../lib/pages/routes.ts';
 import { Button } from '../../../shell/primitives.tsx';
 import type { ParakeetVoice } from '../../../lib/stt/parakeet-voice.ts';
 import type { PairingClientFactory } from '../../settings/add-device-settings.tsx';
@@ -132,7 +132,7 @@ export function MachineSetupScreen({
         sources={sources}
         {...(progress === undefined ? {} : { progress })}
         {...(startAt === undefined ? {} : { startAt })}
-        onFinish={() => onNavigate(daemonSessionsPath(daemonId))}
+        onFinish={() => onNavigate(daemonHomePath(daemonId))}
         onLeave={toMachine}
         onNavigate={onNavigate}
         {...(voiceCleanup === undefined ? {} : { voiceCleanup })}
