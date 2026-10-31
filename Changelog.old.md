@@ -1,3 +1,9 @@
+## [4.183.0](https://github.com/kirinnee/ferretry/compare/v4.182.0...v4.183.0) (2026-10-31)
+
+### Features
+
+* **agenda:** one clear answer shape per card kind ([#1190](https://github.com/kirinnee/ferretry/issues/1190)) ([33a5312](https://github.com/kirinnee/ferretry/commit/33a53122d9bca8b9007505433df79974b91fca72))
+
 ## [4.182.0](https://github.com/kirinnee/ferretry/compare/v4.181.0...v4.182.0) (2026-10-31)
 
 ### Features
