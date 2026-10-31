@@ -74,6 +74,18 @@ describe('planSend', () => {
     should(plan.park).deepEqual({ callerSessionId: 'ses-caller', until: '2h' });
   });
 
+  it('should expect a reply without parking anybody, even from outside a session', () => {
+    // Arrange / Act
+    const human = planSend({ message: 'send your verdict', expectReply: true }, HUMAN);
+    const inPane = planSend({ message: 'send your verdict', expectReply: true }, IN_PANE);
+
+    // Assert
+    should(human.replyExpected).be.true();
+    should(human.park).be.undefined();
+    should(inPane.replyExpected).be.true();
+    should(inPane.park).be.undefined();
+  });
+
   it('should plan an open-ended park when no deadline was given', () => {
     // Arrange / Act
     const plan = planSend({ message: 'and you?', ask: true }, IN_PANE);

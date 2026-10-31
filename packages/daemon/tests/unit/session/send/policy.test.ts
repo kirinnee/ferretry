@@ -133,8 +133,9 @@ describe('peerPreamble', () => {
 
   it('never nags a receiver about a note that wants nothing back', () => {
     const banner = peerPreamble({ id: ID }, 'message', 'fy');
-    should(banner).containEql('No reply needed');
+    should(banner).containEql('To reply:');
     should(banner).not.containEql('waiting');
+    should(banner).not.containEql('No reply needed');
     // With no callsign the session id stands in for it, so the reply command still addresses somebody.
     should(banner).containEql('fy send session-1');
   });

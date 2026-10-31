@@ -15,8 +15,15 @@ describe('the peer envelope', () => {
       peerEnvelopePreamble({ name: 'torrey', sessionId: 'mvb0sw7d-27f71326', kind: 'message', clientName: 'fy' }),
     ).equal(
       '[message from ferret torrey (session mvb0sw7d-27f71326) — not from the owner]\n' +
-        'No reply needed. To reply: fy send torrey "<reply>"\n\n',
+        'To reply: fy send torrey "<reply>"\n\n',
     );
+  });
+
+  it('should never tell the receiver of a note or a reply that no answer is owed', () => {
+    for (const kind of PEER_MESSAGE_KINDS) {
+      const preamble = peerEnvelopePreamble({ name: 'torrey', sessionId: 's1', kind, clientName: 'fy' });
+      should(preamble).not.match(/no reply needed/iu);
+    }
   });
 
   it('should say a question is waiting on its answer', () => {
@@ -28,7 +35,7 @@ describe('the peer envelope', () => {
 
   it('should call a reply a reply', () => {
     should(peerEnvelopePreamble({ name: 'torrey', sessionId: 's1', kind: 'reply', clientName: 'fy' })).startWith(
-      '[reply from ferret torrey (session s1) — not from the owner]\nNo reply needed.',
+      '[reply from ferret torrey (session s1) — not from the owner]\nTo reply: fy send torrey',
     );
   });
 
