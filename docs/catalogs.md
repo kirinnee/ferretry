@@ -234,7 +234,7 @@ Installing is two steps and every route has exactly one capability. A project wr
   `catalog-install` (`403 grant_step_up_required` otherwise). **The unlock is not that proof**: it
   opens the machine, and only a passkey proved for this act counts. The proof is claimed atomically at
   admission, so one confirmation buys one install even when two applies race, and it is **not** given
-  back when the install is then refused: ask again. An update asks too. **Removing never asks.** A loopback caller is ungoverned: the CLI asks y/N instead.
+  back when the install is then refused: if the install is refused after you confirm, you confirm again. An update asks too. **Removing never asks.** A loopback caller is ungoverned: the CLI asks y/N instead.
 - **A ferret may preview and list, but never install or remove**: it is refused with `403 forbidden`
   , because an install is code that will run.
 - **What "pinned" means.** The first install from a catalog records the publisher's fingerprint, and
