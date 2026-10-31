@@ -10,7 +10,7 @@ const NOTE = [
 describe('parseInstructionsUpdate', () => {
   test('names each changed section and drops the lead-in addressed to the agent', () => {
     const update = parseInstructionsUpdate(NOTE);
-    expect(update?.headline).toBe("Ferretry updated this ferret's instructions · Ferretry tools, Board");
+    expect(update?.headline).toBe('Ferretry · Instructions updated · Ferretry tools, Board');
     expect(update?.sections.map(section => section.label)).toEqual(['Ferretry tools', 'Board']);
     expect(update?.sections[1]?.text).toBe('Board: all work is a card.\n\nSecond paragraph of the board rule.');
   });
@@ -22,7 +22,7 @@ describe('parseInstructionsUpdate', () => {
 
   test('a note with no sections still reads as an update, without a section list', () => {
     const update = parseInstructionsUpdate('[instructions updated] Ferretry changed part of them:');
-    expect(update).toEqual({ sections: [], headline: "Ferretry updated this ferret's instructions" });
+    expect(update).toEqual({ sections: [], headline: 'Ferretry · Instructions updated' });
   });
 
   test('text before any labelled paragraph becomes a generic section', () => {
@@ -34,15 +34,15 @@ describe('parseInstructionsUpdate', () => {
 describe('parseInstructionsUpdate from the sender metadata', () => {
   const BODY = NOTE.replace('[instructions updated] ', '');
 
-  test('a note from the Instructions sender needs no tag and is headed by the sections the daemon names', () => {
+  test('a note from the Instructions sender needs no tag and is headed by the sections its text names', () => {
     const update = parseInstructionsUpdate(BODY, { feature: 'Instructions', sections: ['Tools', 'Board'] });
-    expect(update?.headline).toBe("Ferretry updated this ferret's instructions · Tools, Board");
+    expect(update?.headline).toBe('Ferretry · Instructions updated · Ferretry tools, Board');
     expect(update?.sections.map(section => section.label)).toEqual(['Ferretry tools', 'Board']);
   });
 
   test('without section names it falls back to the labels it can read', () => {
     const update = parseInstructionsUpdate(BODY, { feature: 'Instructions' });
-    expect(update?.headline).toBe("Ferretry updated this ferret's instructions · Ferretry tools, Board");
+    expect(update?.headline).toBe('Ferretry · Instructions updated · Ferretry tools, Board');
   });
 
   test('another sender is not an instructions note, tag or no tag', () => {
@@ -52,7 +52,7 @@ describe('parseInstructionsUpdate from the sender metadata', () => {
 
   test('the old tag still wins for history even when the sender is silent', () => {
     expect(parseInstructionsUpdate(NOTE, { sections: ['Board'] })?.headline).toBe(
-      "Ferretry updated this ferret's instructions · Board",
+      'Ferretry · Instructions updated · Ferretry tools, Board',
     );
   });
 });

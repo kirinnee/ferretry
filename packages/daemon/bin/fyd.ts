@@ -4382,6 +4382,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
             sendId: crypto.randomUUID(),
             message,
             origin: 'daemon',
+            by: { kind: 'ferretry', feature: 'Warden' },
           });
         },
         // A message is the turn the ferret is handed (its focus card, `focus-card.ts`); without one the resume

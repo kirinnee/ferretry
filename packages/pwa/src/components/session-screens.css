@@ -2633,6 +2633,7 @@ button.fy-receipt {
    same invisible, centred 44px hit area the transcript's other disclosures get. */
 @media (pointer: coarse) {
   :root a.fy-peer-open[href],
+  :root button.fy-system-details,
   :root button.fy-sent-command-toggle {
     min-height: 0;
     min-width: 0;
@@ -3313,4 +3314,9 @@ button.fy-context-ring::after {
 .fy-message-system[data-board-nudge] > .fy-receipt-line {
   flex: 0 0 auto;
   margin-left: auto;
+}
+/* A Ferretry message's remaining lines sit in the text column, under the line they continue, clear of the next row. */
+.fy-system-detail[data-ferretry-detail] {
+  margin-bottom: 6px;
+  padding-left: 20px;
 }

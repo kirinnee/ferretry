@@ -371,4 +371,32 @@ describe('a Ferretry notice handed over through a file', () => {
     expect(read.textContent).toContain('has had no activity for 3h.');
     await view.unmount();
   });
+
+  it('shows a Warden nudge that travelled as a file as the Ferretry row once it is read', async () => {
+    const handoffs = source();
+    const nudge = entry({
+      text: 'x',
+      send: {
+        sendId: 'send-10',
+        senderKind: 'daemon',
+        acceptedAt: '2026-10-18T02:45:00.000Z',
+        message: 'x',
+        attachmentIds: [],
+        fate: 'delivered',
+        by: { kind: 'ferretry', feature: 'Warden' },
+      },
+    });
+    const view = await mount(inSession(handoffs.value, nudge));
+    await interact(() =>
+      handoffs.pending[0]?.resolve({
+        name: 'turn-008',
+        message: 'You went quiet.\n\nSay what you are on.',
+        attachments: [],
+      }),
+    );
+    const row = must(view.container.querySelector<HTMLElement>('[data-ferretry-message="Warden"]'), 'the Warden row');
+    expect(row.textContent).toContain('You went quiet.');
+    expect(view.container.querySelector('.fy-message-user')).toBeNull();
+    await view.unmount();
+  });
 });

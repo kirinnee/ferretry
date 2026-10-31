@@ -42,9 +42,10 @@ export function parseInstructionsUpdate(text: string, by?: InstructionsSender): 
     if (label === undefined && last !== undefined) last.text = `${last.text}\n\n${paragraph}`;
     else sections.push({ label: label ?? 'Instructions', text: paragraph });
   }
-  const labels = by?.sections ?? sections.map(section => section.label);
+  const read = sections.map(section => section.label).filter(label => label !== 'Instructions');
+  const labels = read.length > 0 ? read : (by?.sections ?? []);
   return {
     sections,
-    headline: `Ferretry updated this ferret's instructions${labels.length === 0 ? '' : ` · ${labels.join(', ')}`}`,
+    headline: `Ferretry · Instructions updated${labels.length === 0 ? '' : ` · ${labels.join(', ')}`}`,
   };
 }

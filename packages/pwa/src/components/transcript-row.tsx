@@ -2,6 +2,7 @@ import { type HandoffPointer, parseFerretryNotice, parsePeerEnvelope } from '@fe
 import { type ReactNode, useState } from 'react';
 import { handedOverDraft, isFerretryNoticeSend, isOwnSend, ledgerPlacementCopy } from '../lib/ledger-placement.ts';
 import { isBoardNudge } from '../lib/board-nudge.ts';
+import { ferretryFeatureOf } from '../lib/ferretry-sender.ts';
 import { parseInstructionsUpdate } from '../lib/instructions-update.ts';
 import { clockOfInstant } from '../lib/message-clock.ts';
 import { stripFraming } from '../lib/message-framing.ts';
@@ -11,6 +12,7 @@ import { AgendaMessageOr, useAgendaChatReply } from './agenda-message.tsx';
 import {
   BoardNudgeRow,
   HandoffNoticeRow,
+  FerretryMessageRow,
   InstructionsUpdateRow,
   PeerMessageRow,
   SystemNoticeRow,
@@ -117,6 +119,9 @@ export function TranscriptRow({
     if (isBoardNudge(entry.ledger)) return <BoardNudgeRow entry={entry} rhythm={rhythm} text={entry.ledger.message} />;
     const noted = parseInstructionsUpdate(entry.ledger.message, entry.ledger.queue?.by);
     if (noted !== null) return <InstructionsUpdateRow entry={entry} rhythm={rhythm} update={noted} />;
+    const sentBy = ferretryRowFeature(entry.ledger);
+    if (sentBy !== undefined)
+      return <FerretryMessageRow entry={entry} feature={sentBy} rhythm={rhythm} text={entry.ledger.message} />;
     return (
       <div className="fy-message fy-message-ledger" data-transcript-kind="ledger" {...rhythm}>
         {isFerretryNoticeSend(entry.ledger) ? <span className="fy-system-label">Ferretry</span> : null}
@@ -157,6 +162,9 @@ export function TranscriptRow({
     return <BoardNudgeRow entry={entry} rhythm={rhythm} text={entry.text} />;
   const instructions = entry.kind === 'user' ? parseInstructionsUpdate(entry.text, entry.send?.queue?.by) : null;
   if (instructions !== null) return <InstructionsUpdateRow entry={entry} rhythm={rhythm} update={instructions} />;
+  const ferretryFeature = entry.kind === 'user' ? ferretryRowFeature(entry.send) : undefined;
+  if (ferretryFeature !== undefined)
+    return <FerretryMessageRow entry={entry} feature={ferretryFeature} rhythm={rhythm} text={entry.text} />;
   if (entry.kind === 'user' && entry.send !== undefined && isFerretryNoticeSend(entry.send))
     return (
       <SystemNoticeRow entry={{ ...entry, text: parseFerretryNotice(entry.text) ?? entry.text }} rhythm={rhythm} />
@@ -289,6 +297,11 @@ function HandoffRow({
   const instructions =
     reading.state === 'read' ? parseInstructionsUpdate(reading.handoff.message, entry.send?.queue?.by) : null;
   if (instructions !== null) return <InstructionsUpdateRow entry={entry} rhythm={rhythm} update={instructions} />;
+  const ferretryFeature = ferretryRowFeature(entry.send);
+  if (ferretryFeature !== undefined && reading.state === 'read')
+    return (
+      <FerretryMessageRow entry={entry} feature={ferretryFeature} rhythm={rhythm} text={reading.handoff.message} />
+    );
   const parsed = reading.state === 'read' ? parsePeerEnvelope(reading.handoff.message) : null;
   if (parsed !== null && source !== null && reading.state === 'read')
     return (
@@ -474,7 +487,7 @@ function transcriptRhythm(
 /** The board's own automatic message: a system line between speakers, not a turn of the owner's. */
 function isBoardNudgeEntry(entry: TranscriptEntry): boolean {
   const send = entry.kind === 'ledger' ? entry.ledger : entry.kind === 'user' ? entry.send : undefined;
-  return send !== undefined && isBoardNudge(send);
+  return send !== undefined && (isBoardNudge(send) || ferretryRowFeature(send) !== undefined);
 }
 
 function densityOf(entry: TranscriptEntry): 'message' | 'chrome' {
@@ -519,3 +532,9 @@ const DEFAULT_LABELS: Readonly<Record<TranscriptEntry['kind'], string>> = {
 };
 
 const defaultLabel = (kind: TranscriptEntry['kind']): string => DEFAULT_LABELS[kind];
+
+/** The part of Ferretry that sent a message the generic Ferretry row draws; Board and Instructions have their own rows. */
+function ferretryRowFeature(send: LedgerSendRecord | undefined): string | undefined {
+  const feature = ferretryFeatureOf(send);
+  return feature === 'Board' || feature === 'Instructions' ? undefined : feature;
+}
