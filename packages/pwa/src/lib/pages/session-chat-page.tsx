@@ -1357,6 +1357,7 @@ export function SessionChatPage({
         },
         onOpenFile: path => openFile(path),
         mcpSignIn: { connection, createClient, machineName: contextDependencies.machineName },
+        catalogs: { connection },
         onAddMcp: () => setActionForm(SESSION_ACTION_IDS.addMcp),
       },
     };

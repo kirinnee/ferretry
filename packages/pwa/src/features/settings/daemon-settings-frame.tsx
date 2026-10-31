@@ -19,6 +19,7 @@ import {
   Gauge,
   GraduationCap,
   KeyRound,
+  Library,
   Lock,
   PawPrint,
   Radar,
@@ -39,6 +40,8 @@ import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { Button } from '../../shell/primitives.tsx';
 import { ActiveCarrierCard, type CarrierPreferenceControl } from '../carrier/active-carrier-card.tsx';
+import { CatalogsSurface } from '../catalogs/catalogs-surface.tsx';
+import type { CatalogClientFactory } from '../catalogs/catalogs-api.ts';
 import { type SecretClientFactory, SecretsSurface } from '../secrets/secrets-surface.tsx';
 import { type WardenClientFactory, WardenConfigSurface } from '../warden/warden-config-card.tsx';
 import { AddDeviceSurface, type PairingClientFactory } from './add-device-settings.tsx';
@@ -79,6 +82,7 @@ export interface DaemonSettingsTabDefinition {
 const PANEL_ICONS: Readonly<Record<string, ReactNode>> = {
   warden: <ShieldCheck size={16} aria-hidden="true" />,
   secrets: <KeyRound size={16} aria-hidden="true" />,
+  catalogs: <Library size={16} aria-hidden="true" />,
   // A phone, because the panel's subject is the other device — the thing being added, not this one.
   devices: <Smartphone size={16} aria-hidden="true" />,
   // A lock, because this panel is where a refused control is explained — the one glyph that reads as
@@ -140,6 +144,7 @@ interface FrameLive {
   readonly connectionRecord: DaemonConnectionRecord | undefined;
   readonly createWardenClient: WardenClientFactory | undefined;
   readonly createSecretClient: SecretClientFactory | undefined;
+  readonly createCatalogClient: CatalogClientFactory | undefined;
   readonly otherMachines: readonly DaemonConnectionRecord[];
   readonly createGrantClient: GrantClientFactory | undefined;
   readonly createPairingClient: PairingClientFactory | undefined;
@@ -176,6 +181,18 @@ function SecretsPanel({ connection }: DaemonSettingsTabProps) {
       {...(createSecretClient ? { createClient: createSecretClient } : {})}
       others={otherMachines}
       machineName={daemonDisplayName}
+    />
+  );
+}
+
+function CatalogsPanel({ connection }: DaemonSettingsTabProps) {
+  const { createCatalogClient } = useFrameLive();
+  return (
+    <CatalogsSurface
+      connection={connection}
+      {...(createCatalogClient
+        ? { createClient: createCatalogClient, installHost: { createClient: createCatalogClient } }
+        : {})}
     />
   );
 }
@@ -255,6 +272,12 @@ const LEADING_TABS: readonly DaemonSettingsTabDefinition[] = [
     Surface: SecretsPanel,
   },
   {
+    id: 'catalogs',
+    label: 'Catalogs',
+    description: 'Share skills and MCP servers as a signed file, or install from one.',
+    Surface: CatalogsPanel,
+  },
+  {
     /**
      * Adding a device, immediately after the two panels that own this machine's own configuration.
      *
@@ -320,6 +343,8 @@ export interface DaemonSettingsFrameProps {
   readonly createWardenClient?: WardenClientFactory;
   /** The same seam for the secret store. */
   readonly createSecretClient?: SecretClientFactory;
+  /** And for the catalogs, so no harness signs or reads a real one. */
+  readonly createCatalogClient?: CatalogClientFactory;
   /** The other machines this browser is paired with, so secrets can be copied to one. */
   readonly otherMachines?: readonly DaemonConnectionRecord[];
   /** And for the grant surface, so no test or harness opens a socket to read a limit. */
@@ -361,6 +386,7 @@ export function DaemonSettingsFrame({
   name,
   createWardenClient,
   createSecretClient,
+  createCatalogClient,
   otherMachines = NO_OTHER_MACHINES,
   createGrantClient,
   createPairingClient,
@@ -388,6 +414,7 @@ export function DaemonSettingsFrame({
       connectionRecord,
       createWardenClient,
       createSecretClient,
+      createCatalogClient,
       otherMachines,
       createGrantClient,
       createPairingClient,
@@ -406,6 +433,7 @@ export function DaemonSettingsFrame({
       connectionRecord,
       createWardenClient,
       createSecretClient,
+      createCatalogClient,
       otherMachines,
       createGrantClient,
       createPairingClient,

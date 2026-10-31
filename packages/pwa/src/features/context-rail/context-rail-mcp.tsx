@@ -10,6 +10,12 @@
 
 import type { McpInventory } from '@ferretry/protocol';
 import { Plus } from 'lucide-react';
+import {
+  CatalogRowTools,
+  type CatalogRowsHost,
+  InstallFromFileButton,
+  useCatalogInstalls,
+} from '../catalogs/catalog-row-tools.tsx';
 import { sortedMcpServers } from '../mcp/mcp-model.ts';
 import { type McpActionsHost, McpServerRow, useMcpServerActions } from '../mcp/mcp-server-row.tsx';
 import {
@@ -39,6 +45,8 @@ export interface ContextMcpPanelProps {
   readonly machineName: string;
   /** Opens Actions › Add MCP server… — the same form, from the list it adds to. */
   readonly onAdd?: () => void;
+  /** Lets rows offer "Add to catalog…", say where an installed server came from, and install from a file. */
+  readonly catalogs?: CatalogRowsHost;
   readonly query: string;
   readonly onQueryChange: (query: string) => void;
   readonly chip: McpChip;
@@ -53,6 +61,7 @@ export function ContextMcpPanel({
   signIn,
   machineName,
   onAdd,
+  catalogs,
   query,
   onQueryChange,
   chip,
@@ -65,6 +74,8 @@ export function ContextMcpPanel({
     signIn === undefined ? undefined : { ...signIn, machineName, sessionId, now },
     reload,
   );
+
+  const installed = useCatalogInstalls(catalogs);
 
   if (load.kind === 'failed')
     return (
@@ -101,11 +112,14 @@ export function ContextMcpPanel({
         <span>
           {servers.length} server{servers.length === 1 ? '' : 's'} this ferret sees
         </span>
-        {onAdd === undefined ? null : (
-          <button className="fy-info-link" data-context-mcp-add="" onClick={onAdd} type="button">
-            <Plus aria-hidden="true" size={12} /> Add…
-          </button>
-        )}
+        <span className="flex flex-wrap items-center gap-sm">
+          {onAdd === undefined ? null : (
+            <button className="fy-info-link" data-context-mcp-add="" onClick={onAdd} type="button">
+              <Plus aria-hidden="true" size={12} /> Add…
+            </button>
+          )}
+          {catalogs === undefined ? null : <InstallFromFileButton host={catalogs} />}
+        </span>
       </div>
       {inventory.problems.map(problem => (
         <p key={problem.source} className="m-0 break-words text-meta text-warn" data-context-mcp-problem="">
@@ -119,6 +133,15 @@ export function ContextMcpPanel({
           {visible.map(server => (
             <li key={server.id} className="border-b border-border-soft" data-context-mcp={server.name}>
               <McpServerRow server={server} actions={actions} nowMs={nowMs} online={signIn !== undefined} />
+              {catalogs === undefined ? null : (
+                <CatalogRowTools
+                  host={catalogs}
+                  kind="mcp"
+                  name={server.name}
+                  source={{ kind: 'mcp', mcp: server.id }}
+                  read={installed}
+                />
+              )}
             </li>
           ))}
         </ul>

@@ -13,6 +13,7 @@
 import type { McpInventory, SessionSkillsInventory } from '@ferretry/protocol';
 import { type ReactNode, useId, useState } from 'react';
 import { SheetTabs, sheetPanelId, sheetTabId } from '../../shell/sheet-tabs.tsx';
+import type { CatalogRowsHost } from '../catalogs/catalog-row-tools.tsx';
 import { ContextDocsPanel, ContextSkillsPanel, type SkillFileLoader } from './context-rail-lists.tsx';
 import { ContextMcpPanel, type ContextMcpSignInHost } from './context-rail-mcp.tsx';
 import {
@@ -43,6 +44,8 @@ export interface ContextRailBodyProps {
   readonly onOpenFile: (path: string) => void;
   /** Lets MCP rows check and sign in. Without it they say where each server stands and offer nothing. */
   readonly mcpSignIn?: ContextMcpSignInHost;
+  /** Lets skill and MCP rows add to a catalog, show where an install came from, and install from a file. */
+  readonly catalogs?: CatalogRowsHost;
   /** The shown sub-tab, when the host keeps it (the phone sheet remembers it between openings). */
   readonly tab?: ContextRailTab;
   readonly onTabChange?: (tab: ContextRailTab) => void;
@@ -80,6 +83,7 @@ export function ContextRailBody({
   onInsertSkill,
   onOpenFile,
   mcpSignIn,
+  catalogs,
   tab: shownTab,
   onTabChange,
   tabs = CONTEXT_RAIL_TABS,
@@ -143,6 +147,7 @@ export function ContextRailBody({
             now={now}
             {...(mcpSignIn === undefined ? {} : { signIn: mcpSignIn })}
             {...(onAddMcp === undefined ? {} : { onAdd: onAddMcp })}
+            {...(catalogs === undefined ? {} : { catalogs })}
             {...shared}
           />
         ) : tab === 'skills' ? (
@@ -155,6 +160,7 @@ export function ContextRailBody({
             onInsertSkill={onInsertSkill}
             machineName={machineName}
             {...(loadSkillFile === undefined ? {} : { loadSkillFile })}
+            {...(catalogs === undefined ? {} : { catalogs })}
             {...shared}
           />
         ) : (
