@@ -89,6 +89,13 @@ the quarantine below only keeps a known flake from holding a release hostage whi
 `tests/realworld/` with the same file name. A rig both need lives in `tests/integration/support/`, where
 the realworld test imports it.
 
+**Moving a matrix.** A deterministic browser file whose full matrix costs more than a merge gate may spend
+(a desktop and a phone, eight cold boots of the real app) may keep its whole matrix in `tests/realworld/` with
+no assertion dropped, if a FAST blocking file in `tests/integration/` still proves every distinct behaviour
+once, on one form factor, over the same scene. The shared rig lives in `tests/integration/support/`; the
+blocking file names what it dropped. The first one is `nav-cache` (Back, reload and the session cache):
+`tests/integration/shell/nav-cache.test.ts` blocks, `tests/realworld/shell/nav-cache.visual.test.ts` is the matrix.
+
 **A fixture never hands a daemon a port it guessed.** Probing a free port, closing it and passing the number
 on is a check-then-use race: a parallel test file or the kernel's outgoing-connection ports can take the
 number before the daemon binds it. A fixture writes `"port": 0` into `config/daemon.json` and the daemon
