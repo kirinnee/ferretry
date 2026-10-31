@@ -484,6 +484,71 @@ describe('ConfigFilesService.write', () => {
     should(service.current().evaluation.effective.model.machine.agentPermissions).equal('auto');
   });
 
+  it("should hold a runtime written off a budgeted login, and take the owner's reviewed removal of the login", async () => {
+    // Arrange
+    const login = 'harness: claude\nstore: ferretry\nbudget:\n  daily:\n    hard: 60\n';
+    const home = 'harness: claude\nstore: host\n';
+    const runtime = 'credential: liftoff\nprofile: default\nagent: true\n';
+    const files = {
+      'logins/liftoff.yaml': login,
+      'logins/home.yaml': home,
+      'profiles/default.yaml': 'contents: []\n',
+      'runtimes/claude-liftoff.yaml': runtime,
+    };
+    const accepted = Object.fromEntries(
+      Object.entries(files).map(([path, text]) => [path, { etag: digest(text), text }]),
+    );
+    const { service, directory } = setup(files, accepted);
+    await service.load();
+
+    // Act
+    const moved = await service.write(
+      'runtimes/claude-liftoff.yaml',
+      'credential: home\nprofile: default\nagent: true\n',
+      digest(runtime),
+      false,
+    );
+
+    // Assert: re-pointed by an editor that may not confirm, it waits and the runtime stays on the budget.
+    should(moved.outcome).equal('pending');
+    should(moved.pending?.changes).eql([
+      'runtime "claude-liftoff" moves off login "liftoff", whose budget counts and stops it, to "home"',
+    ]);
+    should(service.current().evaluation.effective.model.runtimes['claude-liftoff']?.credential).equal('liftoff');
+
+    // A deletion nobody reviewed is held; the owner's reviewed removal of both files goes through.
+    await directory.remove('runtimes/claude-liftoff.yaml');
+    await directory.remove('logins/liftoff.yaml');
+    const held = await service.load();
+    should(held.evaluation.pending.map(item => item.path).toSorted()).eql([
+      'logins/liftoff.yaml',
+      'runtimes/claude-liftoff.yaml',
+    ]);
+    service.acknowledgeRemoval('runtimes/claude-liftoff.yaml');
+    service.acknowledgeRemoval('logins/liftoff.yaml');
+    const removed = await service.load();
+    should(removed.evaluation.pending).eql([]);
+    should(removed.evaluation.effective.model.credentials.liftoff).be.undefined();
+  });
+
+  it('should hold a raised login budget and apply a lowered one, judged against the login in effect', async () => {
+    // Arrange
+    const tight = 'harness: claude\nstore: ferretry\nbudget:\n  daily:\n    trigger: 40\n';
+    const raised = 'harness: claude\nstore: ferretry\nbudget:\n  daily:\n    trigger: 400\n';
+    const lowered = 'harness: claude\nstore: ferretry\nbudget:\n  daily:\n    trigger: 20\n';
+    const { service } = setup({ 'logins/liftoff.yaml': tight }, acceptedAs('logins/liftoff.yaml', tight));
+
+    // Act
+    const held = await service.write('logins/liftoff.yaml', raised, digest(tight), false);
+    const applied = await service.write('logins/liftoff.yaml', lowered, digest(raised), false);
+
+    // Assert
+    should(held.outcome).equal('pending');
+    should(held.pending?.changes).eql(['login "liftoff"\'s daily trigger in dollars goes up from 40 to 400']);
+    should(applied).eql({ etag: digest(lowered), outcome: 'applied', loosened: false });
+    should(service.current().evaluation.effective.model.credentials.liftoff?.budget).eql({ daily: { trigger: 20 } });
+  });
+
   it('should never treat a non-singleton file as a loosening', async () => {
     // Arrange
     const { service } = setup();
@@ -594,6 +659,26 @@ describe('ConfigFilesService.acknowledge and writeOwn', () => {
     should(differing.evaluation.effective.warden.layers.llm).be.false();
     should(matching.evaluation.pending).eql([]);
     should(matching.evaluation.effective.warden.layers.llm).be.true();
+  });
+
+  it('should let an acknowledged removal that never landed lapse, a later deletion then held', async () => {
+    // Arrange: a budgeted login, in effect; its removal acknowledged by an apply that was then refused.
+    const login = 'harness: claude\nstore: ferretry\nbudget:\n  daily:\n    hard: 60\n';
+    const { service, directory, advance } = setup(
+      { 'logins/liftoff.yaml': login },
+      { 'logins/liftoff.yaml': { etag: digest(login), text: login } },
+    );
+    service.acknowledgeRemoval('logins/liftoff.yaml');
+
+    // Act
+    advance(ACKNOWLEDGEMENT_TTL_MS + 1);
+    await service.load();
+    await directory.remove('logins/liftoff.yaml');
+    const snapshot = await service.load();
+
+    // Assert
+    should(snapshot.evaluation.pending.map(item => item.path)).eql(['logins/liftoff.yaml']);
+    should(snapshot.evaluation.effective.model.credentials.liftoff?.budget).eql({ daily: { hard: 60 } });
   });
 
   it('should let an acknowledgement lapse after its time to live, the loosening then held', async () => {

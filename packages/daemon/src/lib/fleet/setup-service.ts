@@ -82,6 +82,7 @@ import type { CallerGovernance } from '../api/capability.ts';
 import {
   type AccountChangeExecutor,
   type AccountDocumentReading,
+  budgetHoldsOf,
   FleetCatalogRefusal,
   type FleetCatalogServiceDeps,
   harnessCommandsOf,
@@ -134,6 +135,7 @@ export type SetupCatalogDeps = Pick<
   | 'hostCodexHome'
   | 'acceptsAutoPermissionMode'
   | 'modelCatalogs'
+  | 'budgetHolds'
 >;
 
 export interface FleetSetupServiceDeps {
@@ -703,6 +705,8 @@ export class FleetSetupService {
         harnessCommands: harnessCommandsOf(harness => catalog.locate(harness)),
         ...(catalog.hostCodexHome === undefined ? {} : { hostCodexHome: catalog.hostCodexHome }),
         acceptsAutoPermissionMode: catalog.acceptsAutoPermissionMode,
+        // An import or a clone publishes the logins a budget holds unavailable too, like every other publish.
+        ...budgetHoldsOf(catalog),
         ...(await this.#modelCatalogs()),
       });
     } catch (error) {

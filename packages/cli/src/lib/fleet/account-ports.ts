@@ -1,3 +1,4 @@
+import type { IConfigGateway } from '../config/ports.ts';
 import type {
   FleetAccountChange,
   FleetAccountChangeOutcome,
@@ -110,6 +111,8 @@ export interface AccountCommandDeps {
    * still missing (the same path `fy secret set` uses). Never argv, never echoed.
    */
   readonly readSecretValue: () => Promise<string>;
+  /** The checked configuration-file write `fy login budget` edits a login's file through. Absent: not offered. */
+  readonly config?: Pick<IConfigGateway, 'file' | 'write'>;
 }
 
 /** The flags every write shares. */

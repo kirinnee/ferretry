@@ -23,6 +23,7 @@ import {
   presetOfferedRefusal,
   resolveAddHarness,
 } from './provider-match.ts';
+import { registerBudgetCommand } from './budget.ts';
 import { renderCredentialList, renderCredentialRow, renderPresetList } from './render.ts';
 
 const CREDENTIAL_ID_LIMIT = 64;
@@ -69,7 +70,7 @@ export function registerCredentialCommands(program: Command, deps: AccountComman
   const credential = program
     .command('credential')
     .alias('login')
-    .description('add, check, sign in, sign out, label, disable or remove a login');
+    .description('add, check, sign in, sign out, label, disable, budget or remove a login');
 
   writeOptions(
     credential
@@ -122,12 +123,14 @@ export function registerCredentialCommands(program: Command, deps: AccountComman
   ).action(async (id: string, options: { json?: boolean }) => {
     await requireMayApply(deps);
     const view = await deps.gateway.check(id);
-    deps.out.report(options.json ? JSON.stringify(view, null, 2) : renderCredentialRow(view).join('\n'));
+    deps.out.report(options.json ? JSON.stringify(view, null, 2) : renderCredentialRow(view, bin).join('\n'));
     if (view.status.word === 'needs_sign_in') {
       if (!options.json) deps.out.error(`${id} needs sign-in: ${bin} credential signin ${id}`);
       deps.out.setExitCode(1);
     }
   });
+
+  registerBudgetCommand(credential, deps);
 
   readOptions(
     credential

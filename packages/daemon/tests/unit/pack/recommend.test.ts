@@ -253,6 +253,63 @@ describe('runtimeRefusal', () => {
     });
   });
 
+  it('should refuse a login past its budget with its own code, the amount and when it is back', () => {
+    // Arrange: a budget alone switches nothing off; the start resolution refuses it too, and the
+    // budget's own code must still win, because "not installed" would send the ferret the wrong way.
+    const held = runtime('claude-main', {
+      catalogId: 'anthropic',
+      choices: [choice('opus', 'Opus')],
+      launch: { available: false, reason: 'its login is over its daily budget on this machine' },
+    });
+    const period = {
+      trigger: 40,
+      hard: 60,
+      spentUsd: 41.2,
+      startsAt: '2026-10-30T00:00:00.000Z',
+      resetsAt: '2026-10-31T00:00:00.000Z',
+    };
+    const budget = {
+      timeZone: 'UTC',
+      timeZoneSet: true,
+      daily: { ...period, level: 'over_trigger' as const },
+      weekly: {
+        trigger: 500,
+        spentUsd: 41.2,
+        level: 'ok' as const,
+        startsAt: period.startsAt,
+        resetsAt: '2026-11-02T00:00:00.000Z',
+      },
+      level: 'over_trigger' as const,
+      unpriced: 0,
+      measured: true,
+    };
+    const known = facts({
+      runtimes: [held],
+      credentials: [credential('claude-main-login', { budget })],
+      tools: [claudeTool],
+      unlaunchable: { 'claude-main-wrapper': 'unavailable' },
+    });
+    const within = facts({
+      runtimes: [readyClaude],
+      credentials: [
+        credential('claude-main-login', { budget: { ...budget, level: 'ok', daily: { ...period, level: 'ok' } } }),
+      ],
+      tools: [claudeTool],
+    });
+
+    // Act
+    const refusal = runtimeRefusal(held, 'opus', known);
+
+    // Assert
+    should(refusal).deepEqual({
+      code: 'over_budget',
+      message:
+        "claude-main's login (claude-main-login) spent $41.20 of its $40.00 daily trigger on this machine; back at 2026-10-31T00:00:00.000Z",
+      remedy: 'Pick another model; this one is back when the budget resets.',
+    });
+    should(runtimeRefusal(readyClaude, 'opus', within)).be.undefined();
+  });
+
   it('should say a switched-off runtime is disabled when it somehow still reads as launchable', () => {
     // Arrange
     const off = runtime('claude-main', { disabled: { source: 'login' } });

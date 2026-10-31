@@ -39,7 +39,9 @@ import {
   AdvancedSchema,
   type AgentControl,
   type ComponentOf,
+  type Credential,
   CredentialSchema,
+  type Runtime,
   HooksComponentSchema,
   InstructionsComponentSchema,
   type LayerReferenceText,
@@ -52,6 +54,7 @@ import {
   SettingsComponentSchema,
   SkillsComponentSchema,
 } from '../account/schema.ts';
+import { BUDGET_PERIODS } from '../account/budget.ts';
 import { type ModelCatalogFile, ModelCatalogFileSchema } from '../models/schema.ts';
 import { type ProviderPresetFile, ProviderPresetFileSchema } from '../presets/schema.ts';
 
@@ -218,6 +221,14 @@ function machineLoosening(before: MachineFileValue, after: MachineFileValue): re
       ? ['agents now skip every permission prompt']
       : []),
     ...browserProxyLoosening(before.machine.browserProxy, after.machine.browserProxy),
+    // A zone moves when every budget's day and week begin, so ANY change is held — the first one set
+    // included. From the host's own zone (absent) to a zone where the next day has already begun would
+    // reset a day that is over budget, and lift its hold, without the owner ever seeing it.
+    ...(after.machine.timeZone !== before.machine.timeZone
+      ? [
+          `budgets now reset in ${after.machine.timeZone ?? "the host's time zone"} instead of ${before.machine.timeZone ?? "the host's time zone"}`,
+        ]
+      : []),
     ...switchedOn(
       before.machine.publicUsageFeed,
       after.machine.publicUsageFeed,
@@ -341,9 +352,54 @@ function voiceLoosening(before: VoiceConfig, after: VoiceConfig): readonly strin
 }
 
 /**
+ * A login's budget loosens when a limit goes up or goes away — a period dropped, the whole `budget`, or the
+ * login file itself (`after` absent): a login deleted and made again without a budget is a budget removed in
+ * two steps, and while it is gone its running ferrets are neither metered nor stopped. Adding or lowering a
+ * limit tightens, and a new login file loosens nothing — a login nobody had could spend nothing before.
+ */
+export function loginLoosening(
+  id: string,
+  before: Pick<Credential, 'budget'> | undefined,
+  after: Pick<Credential, 'budget'> | undefined,
+): readonly string[] {
+  if (before === undefined) return [];
+  if (after === undefined) return before.budget === undefined ? [] : loginLoosening(id, before, {});
+  return BUDGET_PERIODS.flatMap(period =>
+    (['trigger', 'hard'] as const).flatMap(level => {
+      const was = before.budget?.[period]?.[level];
+      const now = after.budget?.[period]?.[level];
+      if (was === undefined) return [];
+      const what = `login "${id}"'s ${period} ${level === 'hard' ? 'hard limit' : 'trigger'} in dollars`;
+      return now === undefined ? [`${what} is removed (was ${String(was)})`] : raised(was, now, what);
+    }),
+  );
+}
+
+/**
+ * A runtime loosens a budget when it leaves a budgeted login — re-pointed at another login, or deleted. A
+ * budget counts the spend of the runtimes on its login and stops their ferrets, so moving one off it takes its
+ * week of spend and its running ferrets out of the budget's reach. `budgeted` says whether a login had a
+ * budget in effect before the edit.
+ */
+export function runtimeLoosening(
+  name: string,
+  before: Pick<Runtime, 'credential'> | undefined,
+  after: Pick<Runtime, 'credential'> | undefined,
+  budgeted: (login: string) => boolean,
+): readonly string[] {
+  if (before === undefined || !budgeted(before.credential) || after?.credential === before.credential) return [];
+  return [
+    after === undefined
+      ? `runtime "${name}" is removed from login "${before.credential}", whose budget counts and stops it`
+      : `runtime "${name}" moves off login "${before.credential}", whose budget counts and stops it, to "${after.credential}"`,
+  ];
+}
+
+/**
  * Each loosening an edit from `before` to `after` makes, in words; empty when it loosens nothing.
- * Only the singleton files have rules: a login, component, profile or runtime changes what an agent
- * RUNS WITH, which every editor may already change, not what it may spend or control.
+ * The singleton files have rules here, and a login's budget has its own (`loginLoosening`): any other
+ * edit to a login, component, profile or runtime changes what an agent RUNS WITH, which every editor may
+ * already change, not what it may spend or control.
  */
 export function configLoosening<K extends SingletonKind>(
   kind: K,

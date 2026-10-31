@@ -34,6 +34,7 @@ import {
 import { z } from 'zod';
 import { AliasSchema, EnvSchema, SafeNameSchema, UsageSchema } from '../config.ts';
 import { HarnessKindSchema } from '../manifest.ts';
+import { BudgetSchema, TimeZoneSchema } from './budget.ts';
 import { DisabledSchema } from './disabled.ts';
 import {
   CloudCredentialSchema,
@@ -232,6 +233,13 @@ export const MACHINE_SHAPE = {
    */
   agendaMode: z.boolean().default(true),
   /**
+   * The owner's time zone (IANA), which a login's spend budget counts its days and weeks in
+   * (docs/budgets.md): a day starts at local midnight, a week at Monday 00:00. Absent: the host's own
+   * zone. The app writes the zone the owner's device reports when a budget is first saved. Any change —
+   * the first zone set included — moves when every budget resets, so it is held for the owner.
+   */
+  timeZone: TimeZoneSchema.optional(),
+  /**
    * "Public usage feed" (docs/multi-user-host.md): whether the daemon also answers `GET /usage` and `GET /metrics`
    * to a caller with no credential. Off by default, and while it is off both paths answer exactly as a path the
    * daemon does not have, so another user on the host cannot read quota percentages and account labels or even
@@ -310,6 +318,8 @@ export const CredentialSchema = z
     ...CLONE_ORIGIN_SHAPE,
     /** Switched off without deleting it (`./disabled.ts`): every runtime on it refuses to start, ferrets already on it keep going. */
     disabled: DisabledSchema.optional(),
+    /** A daily and/or weekly spend budget (`./budget.ts`): past its trigger nothing new starts on it; past its hard limit its ferrets are stopped. */
+    budget: BudgetSchema.optional(),
     /** `store: environment` only. A secret travels as a `${secret:NAME}` reference, never a value. */
     env: EnvSchema.optional(),
     /** `store: environment` only: the provider preset it was made from. Display, Test and quota. */

@@ -41,6 +41,7 @@ import {
   resolveDefaultRuntime,
   resolveProfile,
   runtimeDisable,
+  type BudgetHolds,
   runtimeHarness,
   runtimeModels,
   type SettingsObject,
@@ -185,6 +186,8 @@ export interface CatalogFacts {
   readonly lastAutoResume?: AutoResumeSummary | null;
   /** The instant (ms) a `disabled.until` is read against; absent, no switch has expired. */
   readonly now?: number;
+  /** The logins their spend budget holds now (docs/budgets.md); absent, none. */
+  readonly budgetHolds?: BudgetHolds;
 }
 
 const HARNESSES: readonly HarnessKind[] = ['claude', 'codex'];
@@ -685,7 +688,7 @@ export function runtimeCatalog(model: AccountModel, facts: CatalogFacts): FleetR
         const stack = stackView(resolved, harness);
         const fixed = runtime.agent ? fixedLayerView(model, harness, resolved, facts) : {};
         const status = facts.credentialStatus?.[runtime.credential];
-        const off = runtimeDisable(model, name, facts.now ?? 0, VIEW_FY_COMMAND);
+        const off = runtimeDisable(model, name, facts.now ?? 0, VIEW_FY_COMMAND, facts.budgetHolds);
         const blocked =
           off !== undefined
             ? off.clauses.join('. ')
@@ -718,7 +721,10 @@ export function runtimeCatalog(model: AccountModel, facts: CatalogFacts): FleetR
             ...modelsView(resolved, harness, credential, facts.modelCatalogs),
             ...(fixed.view === undefined ? {} : { fixedLayer: fixed.view }),
             launch: act(blocked),
-            ...(off === undefined ? {} : { disabled: runtimeDisabledView(off) }),
+            // A budget alone is no switch: the runtime cannot launch (its `launch` says why), but nothing is off.
+            ...(off === undefined || (off.own === undefined && off.login === undefined)
+              ? {}
+              : { disabled: runtimeDisabledView(off) }),
             sameAs: Object.entries(model.runtimes)
               .filter(
                 ([other, peer]) =>

@@ -46,8 +46,12 @@ import {
   type ConfigEvaluation,
   type ConfigFileText,
   checkConfigFile,
+  type Credential,
   configLoosening,
   evaluateConfigFiles,
+  loginLoosening,
+  type Runtime,
+  runtimeLoosening,
   SINGLETON_DEFAULTS,
   type SingletonKind,
 } from '@ferretry/fleet';
@@ -177,6 +181,8 @@ export class ConfigFilesService {
    * yet as a deletion. One is consumed by the first load that finds exactly those bytes on disk.
    */
   #acknowledged = new Map<string, { readonly etag: string; readonly text: string; readonly at: number }>();
+  /** Removals the daemon makes on the owner's behalf, by path, with when: in effect once the file is gone. */
+  #acknowledgedRemovals = new Map<string, number>();
 
   constructor(private readonly deps: ConfigFilesServiceDeps) {}
 
@@ -245,6 +251,12 @@ export class ConfigFilesService {
         // A write that never landed: its apply was refused or rolled back.
         this.#acknowledged.delete(path);
       }
+    }
+    for (const [path, at] of this.#acknowledgedRemovals) {
+      if (!files.some(file => file.path === path)) {
+        delete accepted[path];
+        this.#acknowledgedRemovals.delete(path);
+      } else if (now - at > ACKNOWLEDGEMENT_TTL_MS) this.#acknowledgedRemovals.delete(path);
     }
     const evaluation = evaluateConfigFiles({ files, unreadable, accepted, digest: text => this.deps.digest(text) });
     if (JSON.stringify(evaluation.accepted) !== JSON.stringify(stored)) {
@@ -382,6 +394,15 @@ export class ConfigFilesService {
   }
 
   /**
+   * The removal of `path` is the owner's own reviewed act (a `fy login rm`, a runtime removed): once the file
+   * is gone it is out of effect at once, rather than held as an unconfirmed loosening. A removal that never
+   * lands lapses like an acknowledged write.
+   */
+  acknowledgeRemoval(path: string): void {
+    this.#acknowledgedRemovals.set(path, this.deps.now().getTime());
+  }
+
+  /**
    * Write a file the daemon owns the decision for (the Warden form): acknowledged, then written.
    *
    * `inEffect` is for a file with an edit held for the owner: the owner's change is made to BOTH
@@ -421,7 +442,13 @@ export class ConfigFilesService {
       const found = disk === undefined ? ABSENT_CONFIG_ETAG : this.deps.digest(disk);
       if (ifMatch !== undefined && ifMatch !== found) throw new ConfigFileConflictError(path);
       const etag = this.deps.digest(text);
-      const loosening = isSingletonAddress(address) ? this.#loosening(address.kind, path, text) : [];
+      const loosening = isSingletonAddress(address)
+        ? this.#loosening(address.kind, path, text)
+        : address.kind === 'login'
+          ? this.#loginLoosening(address.name, path, text)
+          : address.kind === 'runtime'
+            ? this.#runtimeLoosening(address.name, path, text)
+            : [];
       if (loosening.length === 0 || mayLoosen) this.acknowledge(path, text);
       await this.deps.directory.write(path, text);
       const snapshot = await this.#load();
@@ -441,6 +468,27 @@ export class ConfigFilesService {
     const before =
       kind === 'machine' ? { machine: effective.model.machine, advanced: effective.model.advanced } : effective[kind];
     return configLoosening(kind, before as never, checked.value as never);
+  }
+
+  /** What putting `text` into effect for login `id` would loosen in its budget, against what is in effect now. */
+  #loginLoosening(id: string, path: string, text: string): readonly string[] {
+    const checked = checkConfigFile(path, text);
+    if (!checked.ok) return [];
+    const before = this.current().evaluation.effective.model.credentials[id];
+    return loginLoosening(id, before, checked.value as Credential);
+  }
+
+  /** What putting `text` into effect for runtime `name` would loosen: leaving a login with a budget in effect. */
+  #runtimeLoosening(name: string, path: string, text: string): readonly string[] {
+    const checked = checkConfigFile(path, text);
+    if (!checked.ok) return [];
+    const model = this.current().evaluation.effective.model;
+    return runtimeLoosening(
+      name,
+      model.runtimes[name],
+      checked.value as Runtime,
+      login => model.credentials[login]?.budget !== undefined,
+    );
   }
 
   /**

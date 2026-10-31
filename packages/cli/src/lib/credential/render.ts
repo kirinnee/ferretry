@@ -1,14 +1,64 @@
 import type {
+  FleetBudgetPeriodView,
+  FleetCredentialBudget,
   FleetCredentialList,
   FleetCredentialUsageWindow,
   FleetCredentialView,
   FleetProviderPresetCatalog,
 } from '@ferretry/protocol';
+import { usdWords } from '@ferretry/fleet';
 import { disabledWords, HARNESS_LABEL, indent, listOrNone } from '../fleet/account-render.ts';
 import { presetScopeChip } from './provider-match.ts';
 
 const window = (name: string, usage: FleetCredentialUsageWindow): string =>
   usage.usedPercent === undefined ? `${name} not measured yet` : `${name} ${Math.round(usage.usedPercent)}% used`;
+
+/** "today $12.40 of $40.00 trigger, $60.00 hard" — one period of a budget. */
+function periodWords(name: string, period: FleetBudgetPeriodView): string {
+  const limits = [
+    ...(period.trigger === undefined ? [] : [`${usdWords(period.trigger)} trigger`]),
+    ...(period.hard === undefined ? [] : [`${usdWords(period.hard)} hard`]),
+  ].join(', ');
+  return `${name} ${usdWords(period.spentUsd)} of ${limits}`;
+}
+
+/** A reset instant in the budget's own zone: `Sat 00:00`. */
+const resetWords = (instant: string, timeZone: string): string =>
+  new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(Date.parse(instant));
+
+/** The budget lines under a login (docs/budgets.md): spent on THIS machine against its limits, and what holds it. */
+function budgetLines(budget: FleetCredentialBudget | undefined, binaryName: string): string[] {
+  if (budget === undefined) return [];
+  const periods = [
+    ...(budget.daily === undefined ? [] : [periodWords('today', budget.daily)]),
+    ...(budget.weekly === undefined ? [] : [periodWords('this week', budget.weekly)]),
+  ];
+  const zone = `${budget.timeZone}${budget.timeZoneSet ? '' : ', the host’s zone'}`;
+  const lines = [`Budget, spent on this machine only (${zone}): ${periods.join(' · ')}`];
+  if (!budget.measured) lines.push('Not measured yet: the first count since the daemon started is still running.');
+  if (budget.partial === true)
+    lines.push('Partial: a transcript is too large to read back to the start of the period, so the amount may be low.');
+  if (budget.unpriced > 0)
+    lines.push(`${String(budget.unpriced)} request(s) used a model with no price and are not in these amounts.`);
+  const held = (['weekly', 'daily'] as const)
+    .map(name => budget[name])
+    .find(period => period !== undefined && period.level === budget.level);
+  if (budget.level !== 'ok' && held !== undefined) {
+    const back = resetWords(held.resetsAt, budget.timeZone);
+    lines.push(
+      budget.level === 'over_hard'
+        ? `Over its hard limit: its ferrets were stopped and nothing new starts on it until ${back}. Move one with \`${binaryName} migrate <id> -a <runtime>\`.`
+        : `Over its trigger: nothing new starts on it until ${back}; ferrets already on it keep running.`,
+    );
+  }
+  return lines;
+}
 
 /** Where the login lives, in the words the Credentials tab uses. */
 function whereKept(credential: FleetCredentialView): string {
@@ -19,7 +69,7 @@ function whereKept(credential: FleetCredentialView): string {
 }
 
 /** One login as a row and the facts under it. */
-export function renderCredentialRow(credential: FleetCredentialView): string[] {
+export function renderCredentialRow(credential: FleetCredentialView, binaryName: string): string[] {
   const who = [credential.email, credential.label].filter(Boolean).join(' · ');
   const off = disabledWords(credential.disabled);
   const head = `${credential.id}  ${HARNESS_LABEL[credential.harness]}${who ? `  ${who}` : ''}  — ${off ?? credential.status.label}`;
@@ -31,6 +81,7 @@ export function renderCredentialRow(credential: FleetCredentialView): string[] {
         : [`Nothing new starts on it. Turn it back on with \`login enable ${credential.id}\`.`]),
       credential.status.explanation,
       `Usage: ${window('5-hour', credential.usage.fiveHour)} · ${window('weekly', credential.usage.weekly)}`,
+      ...budgetLines(credential.budget, binaryName),
       `Used by: ${listOrNone(credential.usedBy, 'no runtime yet')}`,
       `Login: ${whereKept(credential)}`,
       ...environmentLines(credential),
@@ -45,7 +96,7 @@ export function renderCredentialList(list: FleetCredentialList, binaryName: stri
     return `No logins on ${list.machine} yet. Add one with \`${binaryName} credential add claude\` (or codex).`;
   }
   const lines = [`Logins on ${list.machine}:`, ''];
-  for (const credential of list.credentials) lines.push(...renderCredentialRow(credential), '');
+  for (const credential of list.credentials) lines.push(...renderCredentialRow(credential, binaryName), '');
   const needsSignIn = list.credentials.filter(
     credential => credential.status.word === 'needs_sign_in' && credential.signIn.available,
   );

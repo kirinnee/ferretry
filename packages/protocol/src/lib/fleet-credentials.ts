@@ -333,6 +333,50 @@ export const FleetDisabledSchema = z.strictObject({
 });
 export type FleetDisabled = z.infer<typeof FleetDisabledSchema>;
 
+/**
+ * Where a login stands against one budget period, best to worst (docs/budgets.md): `over_trigger` means
+ * nothing new starts on it; `over_hard` means its running ferrets were stopped too.
+ */
+export const FleetBudgetLevelSchema = z.enum(['ok', 'over_trigger', 'over_hard']);
+export type FleetBudgetLevel = z.infer<typeof FleetBudgetLevelSchema>;
+
+/** One budget period of one login: its limits as written, what this machine spent in it, and when it resets. */
+export const FleetBudgetPeriodViewSchema = z.strictObject({
+  trigger: z.number().finite().positive().optional(),
+  hard: z.number().finite().positive().optional(),
+  /** Dollars this machine's sessions on the login cost in the period, priced from their transcripts. */
+  spentUsd: z.number().finite().nonnegative(),
+  level: FleetBudgetLevelSchema,
+  startsAt: InstantSchema,
+  resetsAt: InstantSchema,
+});
+export type FleetBudgetPeriodView = z.infer<typeof FleetBudgetPeriodViewSchema>;
+
+/**
+ * A login's spend budget and where it stands. The spend is THIS MACHINE's only: each daemon meters the
+ * sessions it runs, so the same login used on another machine spends against that machine's budget.
+ */
+export const FleetCredentialBudgetSchema = z.strictObject({
+  /** The zone its days and weeks are counted in. */
+  timeZone: NonEmptyStringSchema,
+  /** Whether `timeZone` is written in machine.yaml; `false` means it is the host's own zone. */
+  timeZoneSet: z.boolean(),
+  daily: FleetBudgetPeriodViewSchema.optional(),
+  weekly: FleetBudgetPeriodViewSchema.optional(),
+  /** The worse of the periods. */
+  level: FleetBudgetLevelSchema,
+  /** Usage records in the periods whose model has no price: counted here, never as $0. */
+  unpriced: NonNegativeIntegerSchema,
+  /** `false` until the meter has read this login's sessions once since the daemon started. */
+  measured: z.boolean(),
+  /**
+   * A transcript on this login holds more written this period than one read reaches back over, so the
+   * spend is counted from where the read could start and may be LOW. Absent: every transcript was read whole.
+   */
+  partial: z.literal(true).optional(),
+});
+export type FleetCredentialBudget = z.infer<typeof FleetCredentialBudgetSchema>;
+
 /** One credential, as the Credentials tab shows it. */
 export const FleetCredentialViewSchema = z.strictObject({
   id: FleetCredentialIdSchema,
@@ -355,6 +399,8 @@ export const FleetCredentialViewSchema = z.strictObject({
   needsLabel: z.boolean(),
   /** Switched off without deleting it: a start on any runtime of this login refuses, ferrets already on it keep going. */
   disabled: FleetDisabledSchema.optional(),
+  /** Its spend budget, when it has one (`budget:` in its file). Absent from a daemon that predates budgets. */
+  budget: FleetCredentialBudgetSchema.optional(),
   /** Set by Clone on an empty slot: the machine it was copied from, by the name it gave itself. */
   clonedFrom: NonEmptyStringSchema.optional(),
   /** That machine's daemon id as the copying browser reported it, so a surface can name it by its own label. */

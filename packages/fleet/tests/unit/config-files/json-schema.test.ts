@@ -35,6 +35,7 @@ describe('configJsonSchema', () => {
       'conversations',
       'defaultRuntime',
       'publicUsageFeed',
+      'timeZone',
     ]);
     should(Object.keys(actual.properties.agentControl?.properties ?? {})).containEql('ferretrySettings');
     should(Object.keys(actual.properties.conversations?.properties ?? {})).deepEqual(['listComputer']);

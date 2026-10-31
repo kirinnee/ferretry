@@ -862,6 +862,8 @@ function accountCommandDeps(world: CliWorld, client: SharedDaemonClient): Accoun
     // Off a terminal, a one-click add with exactly one secret still missing reads it from stdin —
     // the same path `fy secret set` uses.
     readSecretValue: () => new StdinSecretValue(BINARY_NAME).read(),
+    // `fy login budget` edits a login's file through the same checked write `fy config write` uses.
+    config: new ProtocolConfigGateway(client),
   };
 }
 

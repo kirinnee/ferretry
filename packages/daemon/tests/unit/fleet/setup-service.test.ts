@@ -554,6 +554,33 @@ describe('the setup.import executor', () => {
     should(configTextOf(applied[0]?.documents ?? [])).containEql('agent: true');
   });
 
+  it('should publish a runtime on a login its budget holds unavailable, like every other publish', async () => {
+    // Arrange: the imported login is over its daily trigger on this machine.
+    const { service, applied } = world({
+      catalog: {
+        budgetHolds: () => ({
+          'claude-you': {
+            period: 'daily',
+            level: 'over_trigger',
+            limitUsd: 40,
+            resetsAtMs: Date.parse('2026-10-14T00:00:00.000Z'),
+            timeZone: 'UTC',
+          },
+        }),
+      },
+    });
+
+    // Act
+    await importOnce(service);
+
+    // Assert
+    const plan = applied[0]?.plan as
+      | { manifest: { accounts: { available: boolean; unavailableReason: string | null }[] } }
+      | undefined;
+    should(plan?.manifest.accounts[0]?.available).be.false();
+    should(plan?.manifest.accounts[0]?.unavailableReason).match(/over its daily budget on this machine/u);
+  });
+
   it("should publish each imported runtime with its login's model catalog (docs/model-catalog.md)", async () => {
     // Arrange
     const { service, applied } = world({

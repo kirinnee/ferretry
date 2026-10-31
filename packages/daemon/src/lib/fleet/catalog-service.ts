@@ -47,6 +47,7 @@ import {
   type ModelCatalogSources,
   materialiseFleet,
   nextDisableExpiry,
+  type BudgetHolds,
   type ProviderPreset,
   parseSettings,
   type RuntimeIds,
@@ -247,11 +248,24 @@ export interface FleetCatalogServiceDeps {
   publishedManifest?(): Promise<unknown>;
   /** The last auto-resume pass after a restart, for the Machine view; `null` when none has run. */
   lastAutoResume?(): Promise<AutoResumeSummary | null>;
+  /**
+   * The logins their spend budget holds now (docs/budgets.md), published unavailable exactly as a disabled
+   * login is. Absent: no budget holds anything.
+   */
+  budgetHolds?(): BudgetHolds;
   /** The first-run import and clone executors. Absent means "not available on this machine yet". */
   readonly executors?: {
     readonly setup?: AccountChangeExecutor<SetupChange>;
     readonly clone?: AccountChangeExecutor<CloneChange>;
   };
+}
+
+/** The budget holds every publish carries (docs/budgets.md), or nothing when none are known. */
+export function budgetHoldsOf(deps: Pick<FleetCatalogServiceDeps, 'budgetHolds'>): {
+  readonly budgetHolds?: BudgetHolds;
+} {
+  const holds = deps.budgetHolds?.();
+  return holds === undefined || Object.keys(holds).length === 0 ? {} : { budgetHolds: holds };
 }
 
 // ── Running sessions ─────────────────────────────────────────────────────────────────────────────
@@ -412,6 +426,11 @@ export class FleetCatalogService {
   }
 
   /** The earliest `disabled.until` still ahead on any login or runtime (ms), or `undefined` when none is. */
+  /** The budget holds a publish carries, or nothing when none are known. */
+  #budgetHolds(): { readonly budgetHolds?: BudgetHolds } {
+    return budgetHoldsOf(this.deps);
+  }
+
   async nextDisableExpiry(): Promise<number | undefined> {
     const { model } = await this.#read();
     return nextDisableExpiry(
@@ -453,6 +472,7 @@ export class FleetCatalogService {
         harnessCommands: harnessCommandsOf(this.deps.locate),
         ...(this.deps.hostCodexHome === undefined ? {} : { hostCodexHome: this.deps.hostCodexHome }),
         acceptsAutoPermissionMode: this.deps.acceptsAutoPermissionMode,
+        ...this.#budgetHolds(),
         ...sources,
       });
     } catch (error) {
@@ -619,6 +639,7 @@ export class FleetCatalogService {
       acceptsAutoPermissionMode: this.deps.acceptsAutoPermissionMode,
       lastAutoResume: (await this.deps.lastAutoResume?.()) ?? null,
       now: this.deps.now(),
+      ...this.#budgetHolds(),
       ...(await this.#modelCatalogs()),
     };
   }
@@ -714,6 +735,7 @@ export class FleetCatalogService {
         ...(this.deps.hostCodexHome === undefined ? {} : { hostCodexHome: this.deps.hostCodexHome }),
         ...(await this.#modelCatalogs()),
         acceptsAutoPermissionMode: this.deps.acceptsAutoPermissionMode,
+        ...this.#budgetHolds(),
       });
       preview = await this.deps.provisioner.preview(plan);
     } catch (error) {

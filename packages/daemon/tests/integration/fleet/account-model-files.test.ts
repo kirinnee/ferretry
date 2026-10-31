@@ -116,6 +116,7 @@ async function machine(
         acknowledged.push({ path: file, text });
         home.service.acknowledge(file, text);
       },
+      acknowledgeRemoval: file => home.service.acknowledgeRemoval(file),
     },
     configDirectory: home.paths.config,
     ...(sessionRecords === undefined ? {} : { sessionRecords }),
