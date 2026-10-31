@@ -7,7 +7,7 @@ import {
   FileAgendaLedgerRepository,
   InvalidAgendaLedgerError,
 } from '../../../src/adapters/agenda/file-agenda-ledger-repository.ts';
-import type { AgendaMutation } from '../../../src/lib/agenda/index.ts';
+import { type AgendaMutation, emptyAgendaLedger } from '../../../src/lib/agenda/index.ts';
 import { AgendaService } from '../../../src/lib/agenda/service.ts';
 
 const homes: string[] = [];
@@ -43,6 +43,30 @@ const request = {
 };
 
 describe('FileAgendaLedgerRepository', () => {
+  it('should see a ledger rewritten on disk outside the daemon on the next read, though it read it a moment before', async () => {
+    // Arrange
+    const { repository } = await createRepository();
+    const service = new AgendaService(
+      repository,
+      { now: () => '2026-07-31T10:00:00Z' },
+      { has: async sessionId => sessionId === 'session-1' },
+      { raised: async () => undefined },
+    );
+    await service.raise('session-1', request, { kind: 'agent', sessionId: 'session-1', name: 'Ada' });
+    should((await repository.read('session-1'))?.entries).have.length(1);
+    should((await repository.read('session-1'))?.entries).have.length(1);
+
+    // Act — an editor empties the file in place.
+    await writeFile(
+      repository.file('session-1'),
+      `${JSON.stringify(emptyAgendaLedger('session-1', '2026-07-31T10:01:00Z'), null, 2)}\n`,
+    );
+    const read = await repository.read('session-1');
+
+    // Assert
+    should(read?.entries).have.length(0);
+  });
+
   it('should atomically persist and reload lifecycle state below the injected session directory', async () => {
     // Arrange
     const { repository } = await createRepository();
