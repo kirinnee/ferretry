@@ -12,6 +12,7 @@ import {
   FileResumeTurnStore,
   FileSendChannel,
   FileSendLedger,
+  SEND_LEDGERS_KEPT,
   FileSendTurnStore,
   KeyedSerialExecutor,
   ResumeSendReviver,
@@ -408,6 +409,24 @@ describe('the file send ledger', () => {
     // Assert
     should([...before.keys()]).deepEqual(['send-1', 'send-2']);
     should([...after.keys()]).deepEqual(['send-1', 'send-2', 'send-3']);
+  });
+
+  it('should let go of the ledger read longest ago past its bound, and read that one whole when asked again', async () => {
+    // Arrange — one more session than it keeps, each with one send, read in order.
+    const home = await directory('ferretry-send-ledger-');
+    const subject = new FileSendLedger(id => join(home, id), clock);
+    const ids = Array.from({ length: SEND_LEDGERS_KEPT + 1 }, (_, n) => parseSessionId(`kept-${String(n)}`));
+    for (const id of ids) await subject.accept(id, record());
+    for (const id of ids) await subject.all(id);
+    const first = ids[0] as SessionId;
+
+    // Act — the first session's ledger, let go, gains a settlement behind the reader's back.
+    await appendFile(join(home, first, 'channel', 'sends.jsonl'), `${JSON.stringify(record({ fate: 'delivered' }))}\n`);
+    const reread = await subject.all(first);
+
+    // Assert
+    should(reread.get('send-1')?.fate).equal('delivered');
+    should((await subject.all(ids.at(-1) as SessionId)).get('send-1')?.fate).equal('accepted');
   });
 
   it('should hand out frozen records and a map of its own, so no reader changes what another reads', async () => {
