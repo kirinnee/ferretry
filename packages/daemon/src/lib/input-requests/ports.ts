@@ -126,15 +126,15 @@ export interface InputLoginPort {
   /** The value an entry's field types: the username, the password, or the 2FA code for `nowMs`. Rejects for a missing one. */
   fill(id: LoginEntryId, role: LoginFieldRole, nowMs: number): Promise<string>;
   /**
-   * Keeps a typed value in an entry: a new entry labelled `label` matching `match`, or the existing one
-   * (its label kept, `match` added to what it already matches).
+   * Keeps typed values in an entry in ONE change: a new entry labelled `label` matching `match`, or the
+   * existing one (its label kept, `match` added). The username and password of one card go together. The
+   * whole read-merge-write runs under the store-wide lock, so concurrent saves and edits never lose one.
    */
   save(
     id: LoginEntryId,
     label: string,
     match: string | undefined,
-    field: Exclude<LoginFieldRole, 'totp'>,
-    value: string,
+    fields: { readonly username?: string; readonly password?: string },
   ): Promise<void>;
 }
 

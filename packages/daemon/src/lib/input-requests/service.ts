@@ -759,7 +759,7 @@ export class InputRequestService {
     const logins = this.deps.logins;
     if (field === undefined || logins === undefined) return { entry: save.entry, ok: false, problem: 'not saved' };
     try {
-      await logins.save(save.entry, save.label, held.matchKey, field, value);
+      await logins.save(save.entry, save.label, held.matchKey, { [field]: value });
     } catch {
       return {
         entry: save.entry,

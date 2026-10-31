@@ -1,5 +1,5 @@
-import { LOGIN_MATCH_MAX, type LoginEntryId, type LoginEntrySummary, type LoginFieldRole } from '@ferretry/protocol';
-import type { LoginDirectory, LoginVault } from '../secrets/logins.ts';
+import type { LoginEntryId, LoginEntrySummary, LoginFieldRole } from '@ferretry/protocol';
+import type { LoginDirectory, LoginFieldValues, LoginVault } from '../secrets/logins.ts';
 import type { InputLoginPort } from './ports.ts';
 
 /**
@@ -20,21 +20,7 @@ export class InputLoginAdapter implements InputLoginPort {
     return await this.vault.fill(id, role, nowMs);
   }
 
-  async save(
-    id: LoginEntryId,
-    label: string,
-    match: string | undefined,
-    field: Exclude<LoginFieldRole, 'totp'>,
-    value: string,
-  ): Promise<void> {
-    const existing = (await this.directory.list()).find(entry => entry.id === id);
-    const matches = [...new Set([...(existing?.match ?? []), ...(match === undefined ? [] : [match])])].slice(
-      -LOGIN_MATCH_MAX,
-    );
-    await this.directory.put(id, {
-      ...(existing === undefined ? { label } : {}),
-      match: matches,
-      ...(field === 'password' ? { password: value } : { username: value }),
-    });
+  async save(id: LoginEntryId, label: string, match: string | undefined, fields: LoginFieldValues): Promise<void> {
+    await this.directory.saveFields(id, label, match, fields);
   }
 }
