@@ -44,9 +44,13 @@ class FakePage implements Pick<ActablePage, 'locator'> {
         const ref = /^aria-ref=(.+)$/u.exec(selector)?.[1];
         return ref === undefined || this.refs.has(ref) ? 1 : 0;
       },
-      evaluate: async (expression: string) => {
-        this.evaluated.push(`${selector} ${expression}`);
-        return undefined;
+      // The real page function runs, on an element that records what was done to it.
+      evaluate: async (pageFunction: (element: never, arg: string) => unknown, arg: string) => {
+        const element = {
+          setAttribute: (name: string, value: string) => this.evaluated.push(`${selector} set ${name}=${value}`),
+          removeAttribute: (name: string) => this.evaluated.push(`${selector} remove ${name}`),
+        };
+        return (pageFunction as (element: unknown, arg: string) => unknown)(element, arg);
       },
       click: unused,
       fill: unused,
@@ -106,8 +110,8 @@ describe('runPageScript', () => {
 
     // Assert
     should(fake.evaluated).deepEqual([
-      'aria-ref=e1 (element) => element.setAttribute("data-ferretry-script", "mark-7")',
-      'aria-ref=e1 (element) => element.removeAttribute("data-ferretry-script")',
+      'aria-ref=e1 set data-ferretry-script=mark-7',
+      'aria-ref=e1 remove data-ferretry-script',
     ]);
     should(String(cdp.sent[2]?.params.expression)).containEql(
       'document.querySelector("[data-ferretry-script=\\"mark-7\\"]")',
@@ -134,7 +138,7 @@ describe('runPageScript', () => {
 
     // Assert
     should(failure?.message).equal('the script threw: TypeError: x is not a function');
-    should(fake.evaluated.at(-1)).equal('#a (element) => element.removeAttribute("data-ferretry-script")');
+    should(fake.evaluated.at(-1)).equal('#a remove data-ferretry-script');
   });
 
   it('should say DevTools refused the script when it names no exception', async () => {

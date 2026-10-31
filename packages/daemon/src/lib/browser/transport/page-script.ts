@@ -39,6 +39,21 @@ export interface PageScriptResult {
   readonly text: string;
 }
 
+/** Just enough of a DOM element for the mark: the functions below run in the page, not here. */
+interface MarkableElement {
+  setAttribute(name: string, value: string): void;
+  removeAttribute(name: string): void;
+}
+
+/** `name=value`, as one string: the page function takes one. */
+const putMark = (element: MarkableElement, mark: string): void => {
+  const at = mark.indexOf('=');
+  element.setAttribute(mark.slice(0, at), mark.slice(at + 1));
+};
+const takeMark = (element: MarkableElement, name: string): void => {
+  element.removeAttribute(name);
+};
+
 /** A one-time mark for a script's element. */
 export type MarkMint = () => string;
 
@@ -99,8 +114,7 @@ export async function runPageScript(
   const timeout = Math.min(Math.max(script.timeoutMs ?? AGENT_TOOL_DEFAULT_SCRIPT_MS, 1), AGENT_TOOL_MAX_SCRIPT_MS);
   const element = script.target === undefined ? undefined : await browserElementOf(page, script.target);
   const mark = element === undefined ? undefined : mint();
-  if (element !== undefined && mark !== undefined)
-    await element.evaluate(`(element) => element.setAttribute(${JSON.stringify(MARK)}, ${JSON.stringify(mark)})`);
+  if (element !== undefined && mark !== undefined) await element.evaluate(putMark, `${MARK}=${mark}`);
   try {
     const tree = (await cdp.send('Page.getFrameTree', {})) as { frameTree?: { frame?: { id?: unknown } } };
     const frameId = tree.frameTree?.frame?.id;
@@ -126,7 +140,6 @@ export async function runPageScript(
     const value = answer.result?.value;
     return { text: (typeof value === 'string' ? value : String(value)).slice(0, PAGE_SCRIPT_MAX_RESULT_CHARS) };
   } finally {
-    if (element !== undefined)
-      await element.evaluate(`(element) => element.removeAttribute(${JSON.stringify(MARK)})`).catch(() => undefined);
+    if (element !== undefined) await element.evaluate(takeMark, MARK).catch(() => undefined);
   }
 }
