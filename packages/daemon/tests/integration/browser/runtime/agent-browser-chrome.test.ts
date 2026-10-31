@@ -131,8 +131,11 @@ describe('the machine agent browser, in a real Chrome', () => {
       () => undefined,
       (error: unknown) => error,
     );
-    await tools.call(agent('s1'), { tool: 'browser.navigate', name: 'refs', history: 'back' });
-    const back = await tools.call(agent('s1'), { tool: 'browser.read', name: 'refs', selector: '#o' });
+    // Back may restore the page from Chrome's back/forward cache, clicked state and all, so it is read by
+    // where the page is; a reload is what brings the form back fresh.
+    const back = await tools.call(agent('s1'), { tool: 'browser.navigate', name: 'refs', history: 'back' });
+    await tools.call(agent('s1'), { tool: 'browser.navigate', name: 'refs', history: 'reload' });
+    const reloaded = await tools.call(agent('s1'), { tool: 'browser.read', name: 'refs', selector: '#o' });
     const shot = await tools.call(agent('s1'), { tool: 'browser.screenshot', name: 'refs', format: 'jpeg' });
 
     // Assert
@@ -140,7 +143,8 @@ describe('the machine agent browser, in a real Chrome', () => {
     should(after.output).equal('clicked:hadi');
     should(stale).be.instanceOf(AgentToolError);
     should((stale as AgentToolError).message).containEql('latest snapshot');
-    should(back.output).equal('idle');
+    should(back.summary).containEql(`(now at ${base}/form)`);
+    should(reloaded.output).equal('idle');
     should(shot.screenshotFormat).equal('jpeg');
     await tools.call(agent('s1'), { tool: 'browser.close', name: 'refs' });
   }, 60_000);
