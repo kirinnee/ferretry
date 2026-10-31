@@ -272,6 +272,8 @@ describe('Agenda board observers', () => {
       sourceRef: null,
       subject: 'Deploy finished',
       why: 'The release went out.',
+      context: 'Finishing the relay PR.',
+      premise: 'A ferret has news for the owner.',
       howToResolve: 'Read it.',
       kind: 'info' as const,
     };
