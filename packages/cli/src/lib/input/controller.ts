@@ -124,7 +124,9 @@ export class InputController {
       throw new Error(`!${request.agendaItemId} is still being re-checked after a restart: try again in a moment`);
     }
     if (saveAs !== undefined && request.fields.length > 1) {
-      throw new Error(`!${request.agendaItemId} asks for several values: --save-as keeps one, so it cannot be used here`);
+      throw new Error(
+        `!${request.agendaItemId} asks for several values: --save-as keeps one, so it cannot be used here`,
+      );
     }
     if (saveAs !== undefined && request.saved?.saves === undefined) {
       throw new Error(`!${request.agendaItemId} cannot be saved: this kind of value is never kept in a saved login`);

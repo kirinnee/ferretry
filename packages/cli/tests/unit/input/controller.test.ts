@@ -264,3 +264,97 @@ describe('fy input ls and cancel', () => {
     should(out.messages).deepEqual(['Declined !A7.']);
   });
 });
+
+describe('fy input answer, a card of several fields', () => {
+  const login = request({
+    target: { kind: 'browser', key: 'app' },
+    prompt: 'Google login',
+    fields: [
+      {
+        id: 'email',
+        label: 'Email',
+        sensitivity: 'plain',
+        risk: { level: 'red', reason: 'Not secret: the ferret can see this value.' },
+      },
+      { id: 'password', label: 'Password', sensitivity: 'secret' },
+    ],
+    chain: 'A6',
+    step: 2,
+    observed: {
+      kind: 'browser',
+      pageId: 'page-1',
+      origin: 'http://accounts.example.test',
+      secure: false,
+      navigationId: 'nav-1',
+      fields: [
+        {
+          fieldId: 'email',
+          frameOrigin: 'http://accounts.example.test',
+          frameId: 'main',
+          backendNodeId: 1,
+          field: { tag: 'input', type: 'email' },
+          box: { x: 0, y: 0, w: 10, h: 10 },
+          visible: true,
+        },
+      ],
+      challenge: { provider: 'recaptcha' },
+    },
+  });
+
+  it('should ask for each field in turn, say which one the ferret can see, and send each padded by its field', async () => {
+    // Arrange
+    const { ports, gateway, prompt, out } = rig({}, new FakeInputGateway([login]));
+
+    // Act
+    await new InputController(ports).answer('!A7', options);
+
+    // Assert
+    should(prompt.asked).deepEqual([
+      'Email for !A7 (hidden, not secret: the ferret can see it): ',
+      'Password for !A7 (hidden): ',
+    ]);
+    const body = gateway.delivered[0]?.body;
+    should(body?.padded).be.undefined();
+    should(body?.fields?.map(typed => [typed.field, unpadInputValue(typed.padded)])).deepEqual([
+      ['email', VALUE],
+      ['password', VALUE],
+    ]);
+    const shown = out.diagnostics.join('\n');
+    should(shown).containEql('the page: http://accounts.example.test (not secure: http)');
+    should(shown).containEql('the page is showing a captcha: take over the browser and complete it yourself');
+    should(shown).containEql('step 2, after !A6');
+    should(shown).containEql('field email (Email): plain, risk red: Not secret: the ferret can see this value.');
+    should(shown).containEql('field password (Password): secret');
+  });
+
+  it('should send nothing when one field cannot be typed', async () => {
+    // Arrange
+    const { ports, gateway } = rig({}, new FakeInputGateway([login]), new FakeHiddenPrompt('two\nlines'));
+
+    // Act
+    const failed = await new InputController(ports).answer('!A7', options).then(
+      () => undefined,
+      (error: unknown) => error as Error,
+    );
+
+    // Assert
+    should(failed?.message).startWith('email: this would press keys');
+    should(gateway.delivered).deepEqual([]);
+  });
+
+  it('should refuse --save-as: it keeps one value, and this card asks for several', async () => {
+    // Arrange
+    const { ports, gateway, prompt } = rig({}, new FakeInputGateway([login]));
+
+    // Act
+    const failed = await new InputController(ports).answer('!A7', { ...options, saveAs: 'GOOGLE' }).then(
+      () => undefined,
+      (error: unknown) => error as Error,
+    );
+
+    // Assert
+    should(failed?.message).equal('!A7 asks for several values: --save-as keeps one, so it cannot be used here');
+    should(prompt.asked).deepEqual([]);
+    should(gateway.delivered).deepEqual([]);
+  });
+});

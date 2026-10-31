@@ -143,11 +143,10 @@ export function savedForFields(
   if (fields.length === 1 && only !== undefined) return savedFor(only.sensitivity, matchKey, entries, hint);
   const roles = fields.map(field => fillRoleFor(field.sensitivity));
   const complete = entries.filter(entry => roles.every(role => holds(entry, role)));
-  const { suggest: _suggest, saves: _saves, ...offered } = savedFor(
-    strongestSensitivity(fields),
-    matchKey,
-    complete,
-    hint,
-  );
+  const {
+    suggest: _suggest,
+    saves: _saves,
+    ...offered
+  } = savedFor(strongestSensitivity(fields), matchKey, complete, hint);
   return offered;
 }

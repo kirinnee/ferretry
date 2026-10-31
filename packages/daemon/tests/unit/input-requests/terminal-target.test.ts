@@ -355,9 +355,7 @@ describe('typing into a terminal an input request aims at', () => {
     const expected = await observed(w);
     const browserFacts = { ...expected, kind: 'browser' } as unknown as InputTargetFacts;
 
-    should(await target(w).type('s1', { kind: 'browser', key: 'a' }, SECRET, true, expected)).equal(
-      'target_gone',
-    );
+    should(await target(w).type('s1', { kind: 'browser', key: 'a' }, SECRET, true, expected)).equal('target_gone');
     should(await target(w).type('s1', dev, SECRET, true, browserFacts)).equal('target_gone');
   });
 

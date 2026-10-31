@@ -320,8 +320,6 @@ function FieldInput({
 }: FieldInputProps) {
   const inputId = useId();
   const attributes = fieldAttributes(field.sensitivity, revealed);
-  const riskLine = fieldRiskLine(request, field);
-  const RiskIcon = riskLine === undefined ? null : RISK_ICON[riskLine.level];
 
   // React detaches a ref BEFORE passive cleanups run, so the field is emptied when it is detached.
   const attach = useCallback(
@@ -380,6 +378,21 @@ function FieldInput({
           {problem}
         </p>
       )}
+      <FieldFlags field={field} request={request} />
+    </div>
+  );
+}
+
+/**
+ * A field's own flags: the red "the ferret can see this" of a plain field and the daemon's risk for the rest. Drawn
+ * with the field when it is typed AND in the field summary above a saved login's button, so a one-tap send never
+ * goes out with a warning the owner was not shown.
+ */
+function FieldFlags({ field, request }: { readonly field: InputCardField; readonly request: InputRequest }) {
+  const riskLine = fieldRiskLine(request, field);
+  const RiskIcon = riskLine === undefined ? null : RISK_ICON[riskLine.level];
+  return (
+    <>
       {field.sensitivity === 'plain' ? (
         <p className="m-0 flex items-start gap-2 text-meta text-err" data-input-plain="">
           <ShieldAlert aria-hidden="true" className="mt-0.5 shrink-0" size={14} />
@@ -395,9 +408,33 @@ function FieldInput({
           <span>{riskLine.reason}</span>
         </p>
       )}
-    </div>
+    </>
   );
 }
+
+/** Each field a saved login would fill, by name, with its flags: what the owner sees instead of the inputs. */
+function FieldSummary({
+  fields,
+  request,
+}: {
+  readonly fields: readonly InputCardField[];
+  readonly request: InputRequest;
+}) {
+  return (
+    <ul className="m-0 flex min-w-0 list-none flex-col gap-2 p-0" data-input-field-summary="">
+      {fields.map(field => (
+        <li className="flex min-w-0 flex-col gap-1" data-input-summary-field={field.key} key={field.key}>
+          <span className="text-cell font-medium text-fg">
+            {field.label} <span className="font-normal text-muted">· {SENSITIVITY_WORDS[field.sensitivity]}</span>
+          </span>
+          <FieldFlags field={field} request={request} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+const SENSITIVITY_WORDS = { secret: 'secret', private: 'one-time code', plain: 'not secret' } as const;
 
 function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, onRefresh }: FormProps) {
   const nodes = useRef<Nodes>(new Map());
@@ -528,6 +565,8 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
           ))}
         </div>
       ) : null}
+
+      {primary === undefined || typing ? null : <FieldSummary fields={fields} request={request} />}
 
       {primary === undefined || typing ? null : (
         <div className="flex flex-wrap items-stretch gap-2">

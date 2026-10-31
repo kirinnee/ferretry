@@ -107,7 +107,11 @@ const FINAL = new Set<InputRequest['state']>(['delivered', 'refused', 'expired',
 const TITLES = { secret: 'Needs a secret', private: 'Needs a code', plain: 'Needs an answer' } as const;
 const LOGIN_TITLE = 'Needs a login';
 /** What a field is called on the card when the agent gave it no label. */
-const FIELD_LABELS: Readonly<Record<InputSensitivity, string>> = { secret: 'Password', private: 'Code', plain: 'Value' };
+const FIELD_LABELS: Readonly<Record<InputSensitivity, string>> = {
+  secret: 'Password',
+  private: 'Code',
+  plain: 'Value',
+};
 /** The longest a chain is counted: a login is a few steps, not a loop. */
 const MAX_STEP = 16;
 
@@ -239,12 +243,18 @@ export class InputRequestService {
   }
 
   /**
-   * Which step of a login a chained card is: one more than the card it follows, when that card is one of this
-   * session's. A chain to a card this daemon no longer holds (it restarted) still reads as a second step.
+   * Which step of a login a chained card is: one more than the card it follows. The card it follows must be one
+   * of THIS session's input requests that this daemon holds: another session's card, an unknown one, or one from
+   * before a restart is refused, so a card never claims to continue a login it is not part of.
    */
   private stepAfter(sessionId: string, chain: AgendaId): number {
     const before = this.byCard(sessionId, chain);
-    return Math.min(MAX_STEP, (before?.request.step ?? 1) + 1);
+    if (before === undefined)
+      throw new InputRequestError(
+        'bad_request',
+        `chain names ${chain}, which is not an input request of this session; raise this card without chain`,
+      );
+    return Math.min(MAX_STEP, (before.request.step ?? 1) + 1);
   }
 
   /** What the agent reads about its request: where it stands, never the value. Waits up to `waitMs` for a final state. */
@@ -284,7 +294,10 @@ export class InputRequestService {
     const prompt = (await this.deps.redact(request.prompt)).slice(0, INPUT_PROMPT_MAX_LENGTH);
     // A label is the agent's words as much as the prompt is, and could carry a value just the same.
     const fields = await Promise.all(
-      request.fields.map(async field => ({ ...field, label: (await this.deps.redact(field.label)).slice(0, 60).trim() || FIELD_LABELS[field.sensitivity] })),
+      request.fields.map(async field => ({
+        ...field,
+        label: (await this.deps.redact(field.label)).slice(0, 60).trim() || FIELD_LABELS[field.sensitivity],
+      })),
     );
     const saved = await this.savedView(held);
     const withSaved = saved === undefined ? { ...request, prompt, fields } : { ...request, prompt, fields, saved };
@@ -1135,7 +1148,11 @@ function typedValues(request: InputRequest, body: InputDeliverBody): Map<string,
       throw new InputRequestError('bad_request', 'this card asks for several values: send each by its field');
     take(request.fields[0], body.padded);
   }
-  for (const each of body.fields ?? []) take(request.fields.find(field => field.id === each.field), each.padded);
+  for (const each of body.fields ?? [])
+    take(
+      request.fields.find(field => field.id === each.field),
+      each.padded,
+    );
   const missing = request.fields.filter(field => !typed.has(field.id));
   if (missing.length > 0 && body.entry === undefined)
     throw new InputRequestError(
@@ -1143,7 +1160,10 @@ function typedValues(request: InputRequest, body: InputDeliverBody): Map<string,
       `fill every field before Send: ${missing.map(field => field.id).join(', ')} ${missing.length === 1 ? 'is' : 'are'} empty`,
     );
   if (missing.length === 0 && body.entry !== undefined && body.padded === undefined && body.fields !== undefined)
-    throw new InputRequestError('bad_request', 'every field was typed, so there is nothing for the saved login to fill');
+    throw new InputRequestError(
+      'bad_request',
+      'every field was typed, so there is nothing for the saved login to fill',
+    );
   return typed;
 }
 
@@ -1180,8 +1200,6 @@ function riskOf(field: Pick<InputRequestField, 'id' | 'sensitivity'>, facts: Inp
 }
 
 const PAGE_PRIVATE_FLAG = 'This code will show on the page; Ferretry hides the page from the ferret for 2 minutes.';
-const PASSWORD_AUTOCOMPLETE = new Set(['current-password', 'new-password']);
-
 /**
  * A page field's flag, worst first: the field the agent named is missing or hidden, the page is not secure (http
  * crosses the network in the clear), the field sits in a frame from another site, or a secret is going into a
@@ -1193,16 +1211,18 @@ function pageRiskOf(
 ): InputRisk {
   const found = facts.fields.find(each => each.fieldId === field.id);
   if (found === undefined || !found.visible)
-    return { level: 'amber', reason: 'Ferretry could not see this field on the page, so the value may land somewhere unexpected.' };
+    return {
+      level: 'amber',
+      reason: 'Ferretry could not see this field on the page, so the value may land somewhere unexpected.',
+    };
   if (!facts.secure)
     return { level: 'amber', reason: 'The page is not https, so the value crosses the network unencrypted.' };
   if (found.frameOrigin !== facts.origin)
     return { level: 'amber', reason: 'This field is inside a frame from another site, not the page itself.' };
   if (field.sensitivity === 'private') return { level: 'amber', reason: PAGE_PRIVATE_FLAG };
-  const password =
-    found.field.type === 'password' ||
-    (found.field.autocomplete !== undefined && PASSWORD_AUTOCOMPLETE.has(found.field.autocomplete));
-  if (!password)
+  // Only a password input masks what is typed. `autocomplete="current-password"` is a hint about the field's role
+  // and leaves a text input showing the value, so it never earns green.
+  if (found.field.type?.toLowerCase() !== 'password')
     return { level: 'amber', reason: 'This is not a password field, so the value will show on the page.' };
   return { level: 'green', reason: 'A password field on a secure page, as the browser reported it.' };
 }

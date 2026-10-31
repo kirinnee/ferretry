@@ -245,7 +245,12 @@ describe('a card of several fields', () => {
     const digest = request.observedDigest ?? '';
 
     const missing = await refused(
-      service.deliver(SESSION, request.id, send(digest, { fields: [{ field: 'email', padded: padInputValue(EMAIL) }] }), HOST),
+      service.deliver(
+        SESSION,
+        request.id,
+        send(digest, { fields: [{ field: 'email', padded: padInputValue(EMAIL) }] }),
+        HOST,
+      ),
     );
     const unknown = await refused(
       service.deliver(
@@ -260,7 +265,9 @@ describe('a card of several fields', () => {
         HOST,
       ),
     );
-    const bare = await refused(service.deliver(SESSION, request.id, send(digest, { padded: padInputValue(EMAIL) }), HOST));
+    const bare = await refused(
+      service.deliver(SESSION, request.id, send(digest, { padded: padInputValue(EMAIL) }), HOST),
+    );
 
     should(missing.message).equal('fill every field before Send: password is empty');
     should(unknown.message).equal('that field is not on this card');
@@ -342,7 +349,9 @@ describe('a card of several fields', () => {
       createdAt: 'a',
       updatedAt: 'a',
     });
-    const { request } = await raisedLogin({ entries: [entry('GOOGLE_COM', 'kirin'), entry('PASSWORD_ONLY', undefined)] });
+    const { request } = await raisedLogin({
+      entries: [entry('GOOGLE_COM', 'kirin'), entry('PASSWORD_ONLY', undefined)],
+    });
 
     should(request.saved?.offers.map(offer => [offer.id, offer.matched])).eql([['GOOGLE_COM', true]]);
     should(request.saved?.suggest).be.undefined();
@@ -371,7 +380,9 @@ describe('a card of several fields', () => {
       }),
     );
 
-    should(two.message).equal('a terminal shows one prompt at a time: ask for one value, then raise the next with chain');
+    should(two.message).equal(
+      'a terminal shows one prompt at a time: ask for one value, then raise the next with chain',
+    );
     should(pointed.message).equal('a terminal field names no element: the value goes to its prompt');
   });
 
@@ -386,7 +397,12 @@ describe('a card of several fields', () => {
     const [request] = await service.list(HOST);
     if (request === undefined) throw new Error('no request');
 
-    await service.deliver(SESSION, request.id, send(request.observedDigest ?? '', { padded: padInputValue(PASSWORD) }), HOST);
+    await service.deliver(
+      SESSION,
+      request.id,
+      send(request.observedDigest ?? '', { padded: padInputValue(PASSWORD) }),
+      HOST,
+    );
 
     should(request.fields[0]?.label).equal('Passphrase');
     should(writes[0]?.values).eql([{ field: 'value', text: PASSWORD }]);
@@ -533,5 +549,65 @@ describe('InputTargetRouter', () => {
     ).equal('target_changed');
     should(await router.type(SESSION, dev, [{ field: 'value', text: 'only' }], true, FACTS)).equal('typed');
     should(terminalWrites).eql(['only']);
+  });
+});
+
+describe('review regressions: a card of several fields', () => {
+  it('should keep a visible text field amber for a secret even when autocomplete says it is for a password', async () => {
+    for (const autocomplete of ['current-password', 'new-password']) {
+      const facts: PageFacts = {
+        ...PAGE,
+        fields: [pageField('email'), pageField('password', { field: { tag: 'input', type: 'text', autocomplete } })],
+      };
+      const { request } = await raisedLogin({ facts });
+
+      should(request.fields[1]?.risk).eql({
+        level: 'amber',
+        reason: 'This is not a password field, so the value will show on the page.',
+      });
+    }
+  });
+
+  it('should refuse a chain to a card that is not one of this session’s input requests', async () => {
+    const { service } = build();
+    const unknown = await refused(service.raise(SESSION, { ...LOGIN, chain: 'A9' as AgendaId }));
+    await service.raise(SESSION, LOGIN);
+    // A1 is this session's card; another session may not claim to continue it.
+    const foreign = await refused(service.raise('mvv6b4qw-0000other', { ...LOGIN, chain: 'A1' as AgendaId }));
+
+    should(unknown.message).equal(
+      'chain names A9, which is not an input request of this session; raise this card without chain',
+    );
+    should(foreign.code).equal('bad_request');
+    should(await service.list(HOST)).have.length(1);
+  });
+
+  it('should name a page whose origin is opaque by what the browser said', async () => {
+    const { view } = await raisedLogin({ facts: { ...PAGE, origin: 'null' } });
+
+    should(view.observed).eql({ consumer: 'null' });
+  });
+
+  it('should refuse a saved login beside a Send that already typed every field', async () => {
+    const { service, request, writes, fills } = await raisedLogin();
+
+    const error = await refused(
+      service.deliver(
+        SESSION,
+        request.id,
+        send(request.observedDigest ?? '', {
+          fields: [
+            { field: 'email', padded: padInputValue(EMAIL) },
+            { field: 'password', padded: padInputValue(PASSWORD) },
+          ],
+          entry: 'GOOGLE_COM',
+        }),
+        HOST,
+      ),
+    );
+
+    should(error.message).equal('every field was typed, so there is nothing for the saved login to fill');
+    should(writes).eql([]);
+    should(fills).eql([]);
   });
 });

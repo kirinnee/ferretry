@@ -161,14 +161,14 @@ card draws what the **daemon** observed (`sudo` is reading it, typing is hidden)
 **agent** wrote small, and carries a **risk flag** with one fixed sentence that says what the risk is
 (`request.risk`: a level and a reason; the sentence never contains terminal text):
 
-| Level | When                                                                                                                      |
-| ----- | ------------------------------------------------------------------------------------------------------------------------- |
-| green | A `secret`, echo off, and a recognised program (`sudo`, `ssh`, `gpg` and so on).                                          |
-| amber | A `secret` with echo on (the value will show on screen), echo unknown, an unrecognised program or the bare shell.         |
-| amber | A `private` code (it echoes): "This code will show on screen while the terminal is hidden from the ferret for 2 minutes." |
+| Level | When                                                                                                                                                                        |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| green | A `secret`, echo off, and a recognised program (`sudo`, `ssh`, `gpg` and so on).                                                                                            |
+| amber | A `secret` with echo on (the value will show on screen), echo unknown, an unrecognised program or the bare shell.                                                           |
+| amber | A `private` code (it echoes): "This code will show on screen while the terminal is hidden from the ferret for 2 minutes."                                                   |
 | amber | A page field: the page is not https, the field is in a frame from another site, a `secret` is going into a field that is not a password field, or the field cannot be seen. |
-| green | A page's `secret` going into a password field on a secure page.                                                          |
-| red   | A `plain` value: "Not secret: the ferret can see this value."                                                             |
+| green | A page's `secret` going into a password field on a secure page.                                                                                                             |
+| red   | A `plain` value: "Not secret: the ferret can see this value."                                                                                                               |
 
 The flag is computed from what the daemon observed, when the request is raised and again when it is
 restored. Send is available at every level. The only refusals are a control character or line break in
@@ -441,7 +441,7 @@ default**, revocable, and audited on every use. Until then every placement is a 
 | ----- | ------------------------------------------------------------------------------------------- | ----------- |
 | P0    | This contract and the schemas                                                               | done        |
 | P1    | Terminal secret and plain: service, agent tools, deliver and cancel, quarantine, `fy input` | done        |
-| P2    | The app card, cards of several fields, `chain` steps                                       | this change |
+| P2    | The app card, cards of several fields, `chain` steps                                        | this change |
 | P3    | Saved logins (one tap), "Save as", 2FA codes, `fy secret entry`, Settings › Saved logins    | done        |
 | P4    | Browser fields, and the agent-instruction extension for the browser                         | later       |
 | P5    | Multi-step chains, consumer configuration, a per-daemon remote cap                          | later       |
