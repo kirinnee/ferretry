@@ -25,7 +25,7 @@ export class InputAgendaAdapter implements InputAgendaPort {
         sourceRef: card.requestId,
         kind: 'input',
         title: card.title,
-        subject: card.title,
+        subject: oneLine(card.ask),
         why: card.ask,
         context: [
           ...(card.chain === undefined ? [] : [`This follows ${card.chain} in the same login.`]),
@@ -80,3 +80,6 @@ export class InputCardClosedObserver implements AgendaChangeObserver {
     await this.closed(sessionId, addressed.id);
   }
 }
+
+/** The item view shows the title and the subject apart, so the subject is the ask, on one line. */
+const oneLine = (text: string): string => text.replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, ' ').trim();

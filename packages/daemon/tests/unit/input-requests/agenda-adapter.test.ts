@@ -79,12 +79,23 @@ describe('InputAgendaAdapter', () => {
     should(item).match({
       kind: 'input',
       title: 'Needs a secret for %terminal:dev',
+      subject: 'A ferret asked for a value to type into %terminal:dev.',
       why: 'A ferret asked for a value to type into %terminal:dev.',
       context: 'The agent says: sudo password for deploy',
       input: { requestId: REQUEST },
     });
     should(item).not.have.property('ask');
     should(item?.blockingNow).not.equal(true);
+  });
+
+  it('should keep the subject on one line when the ask carries a line break', async () => {
+    const { adapter, service } = world();
+
+    const id = await raisedId(adapter, card({ ask: 'Type it into\nsudo\u2028now' }));
+    const listed = await service.list(SESSION);
+
+    const item = listed.ok ? listed.value.items.find(candidate => candidate.id === id) : undefined;
+    should(item?.subject).equal('Type it into sudo now');
   });
 
   it('should mark a blocking request blocking, and say which login it follows', async () => {
