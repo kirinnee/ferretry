@@ -9,10 +9,8 @@ import { AgendaDetail } from '../../../src/features/agenda/agenda-detail.tsx';
 import { AgendaBody } from '../../../src/features/agenda/agenda-steps.tsx';
 import type { ClipboardWriter } from '../../../src/features/onboarding/copy-button.tsx';
 import {
-  DONE_ACTION,
   historyLine,
   type InboxAction,
-  NEEDS_INFO_ACTION,
   swipeMap,
   tickedSteps,
   updatedSinceAsked,
@@ -25,6 +23,9 @@ afterEach(async () => {
   await view?.unmount();
   view = null;
 });
+
+/** A to-do's one answer: the owner did the steps. */
+const MARK_DONE: InboxAction = { kind: 'resolve', label: 'Mark as done' };
 
 const SQUARE_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>';
 
@@ -198,26 +199,31 @@ describe('attention checklist', () => {
 });
 
 describe('a to-do item', () => {
-  test('offers Need more info left and Done right, and keeps the reply box shut', async () => {
+  test('offers one Mark as done on the right, and keeps the reply box shut', async () => {
     const acts: InboxAction[] = [];
     view = await mount(<AgendaCard item={todo()} onAct={action => acts.push(action)} />);
     expect(view.container.querySelector('textarea')).toBeNull();
-    expect(view.container.querySelector('[data-agenda-option]')?.getAttribute('data-agenda-answer')).toBe('left');
+    expect(view.container.querySelector('[data-agenda-option]')?.getAttribute('data-agenda-answer')).toBe('right');
     expect([...view.container.querySelectorAll('[data-agenda-answer]')].map(node => node.textContent?.trim())).toEqual([
-      'Need more info',
-      'Done',
+      'Mark as done',
     ]);
     await interact(() => done(must(view?.container, 'view')).click());
-    expect(acts).toEqual([DONE_ACTION]);
+    expect(acts).toEqual([MARK_DONE]);
   });
 
-  test('Need more info sends the bare action; the host adds the composer text', async () => {
-    const acts: InboxAction[] = [];
-    view = await mount(<AgendaCard item={todo()} onAct={action => acts.push(action)} />);
-    await interact(() =>
-      must(view?.container.querySelector<HTMLButtonElement>('[data-agenda-answer="left"]'), 'ask').click(),
+  test('offers no Need more info, even on an item stored with one: the owner asks in the composer', async () => {
+    view = await mount(
+      <AgendaCard
+        item={todo({
+          answers: [
+            { direction: 'left', does: 'needs-info', label: 'Need more info' },
+            { direction: 'right', does: 'done', label: 'Done' },
+          ],
+        })}
+        onAct={() => {}}
+      />,
     );
-    expect(acts).toEqual([NEEDS_INFO_ACTION]);
+    expect(view.container.querySelector('[data-agenda-answer="left"]')).toBeNull();
     expect(view.container.querySelector('textarea')).toBeNull();
   });
 
@@ -269,13 +275,13 @@ describe('a to-do item', () => {
 });
 
 describe('to-do helpers', () => {
-  test('swipe: Done right and Need more info left; a waiting item and a text-only ask swipe nowhere', () => {
-    expect(swipeMap(todo())).toEqual({ right: DONE_ACTION, left: NEEDS_INFO_ACTION });
+  test('swipe: Mark as done right and nothing else; a waiting item and a text-only ask swipe nowhere', () => {
+    expect(swipeMap(todo())).toEqual({ right: MARK_DONE });
     expect(swipeMap(todo({ waitingOn: 'ferret', askedAt: '2026-07-31T10:42:00.000Z' }))).toEqual({});
     expect(swipeMap(agendaItem('A1', { ask: { kind: 'open-question' } }))).toEqual({});
     expect(
       swipeMap(todo({ waitingOn: 'ferret', askedAt: '2026-07-31T10:42:00.000Z', waitingFor: 'discussion' })),
-    ).toEqual({ right: DONE_ACTION, left: NEEDS_INFO_ACTION });
+    ).toEqual({ right: MARK_DONE });
   });
 
   test('history reads in the given time zone', () => {

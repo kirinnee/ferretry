@@ -277,7 +277,7 @@ describe('Agenda service progress', () => {
     // Arrange
     const observer = new Observer();
     const { service } = createService(new MemoryRepository(), observer);
-    await service.raise(SESSION, { ...request, steps: ['One', 'Two'] }, AGENT);
+    await service.raise(SESSION, { ...request, ask: { kind: 'task' }, steps: ['One', 'Two'] }, AGENT);
 
     // Act
     const ticked = await service.progress(SESSION, 'A1', 1, true, { kind: 'human' });

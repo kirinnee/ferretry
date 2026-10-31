@@ -1,56 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { MAX_AGENDA_DETAIL_LENGTH } from '@ferretry/protocol';
-import {
-  answersPerQuestion,
-  composeQuestionAnswers,
-  hasAgendaBrief,
-  hasSeveralQuestions,
-  questionAnswersAction,
-  swipeMap,
-  visibleWhy,
-} from '../../src/lib/agenda-inbox.ts';
-
-const two = [{ question: 'Which database?' }, { question: 'Ship when?' }];
-
-describe('composeQuestionAnswers', () => {
-  test('numbers each question, with its answer under an arrow', () => {
-    expect(composeQuestionAnswers(two, ['SQLite', 'Friday'])).toBe(
-      '1. Which database?\n→ SQLite\n\n2. Ship when?\n→ Friday',
-    );
-  });
-
-  test('writes an unanswered question as (no answer)', () => {
-    expect(composeQuestionAnswers(two, ['SQLite', '   '])).toBe(
-      '1. Which database?\n→ SQLite\n\n2. Ship when?\n→ (no answer)',
-    );
-  });
-
-  test('has nothing to send when nothing is answered', () => {
-    expect(composeQuestionAnswers(two, [])).toBeNull();
-  });
-
-  test('cuts the questions, never the answers, to fit', () => {
-    const long = [{ question: 'q'.repeat(3000) }, { question: 'r'.repeat(3000) }];
-    const text = composeQuestionAnswers(long, ['keep this whole', 'and this']);
-    expect(text).not.toBeNull();
-    expect(text?.length).toBeLessThanOrEqual(MAX_AGENDA_DETAIL_LENGTH);
-    expect(text).toContain('→ keep this whole');
-    expect(text).toContain('→ and this');
-  });
-
-  test('refuses when the answers alone do not fit', () => {
-    expect(composeQuestionAnswers(two, ['a'.repeat(MAX_AGENDA_DETAIL_LENGTH), 'b'])).toBeNull();
-  });
-
-  test('becomes one open-question response', () => {
-    expect(questionAnswersAction(two, ['SQLite', 'Friday'])).toEqual({
-      kind: 'respond',
-      label: 'Reply',
-      response: { kind: 'open-question', answer: '1. Which database?\n→ SQLite\n\n2. Ship when?\n→ Friday' },
-    });
-    expect(questionAnswersAction(two, [])).toBeNull();
-  });
-});
+import { hasAgendaBrief, swipeMap, visibleWhy } from '../../src/lib/agenda-inbox.ts';
 
 describe('structured-item rules', () => {
   test('hides why when it only repeats the summary', () => {
@@ -67,20 +16,19 @@ describe('structured-item rules', () => {
     expect(hasAgendaBrief({ decided: '- a decision' })).toBe(true);
   });
 
-  test('answers per question only for several questions with an open-question ask', () => {
-    const questions = [{ question: 'a' }, { question: 'b' }];
-    expect(hasSeveralQuestions({ questions })).toBe(true);
-    expect(answersPerQuestion({ questions, ask: { kind: 'open-question' } })).toBe(true);
-    expect(answersPerQuestion({ questions, ask: { kind: 'permission' } })).toBe(false);
-    expect(answersPerQuestion({ questions: [{ question: 'a' }], ask: { kind: 'open-question' } })).toBe(false);
-  });
-
-  test('swipes the own answers of a card however many questions or options it has', () => {
+  test('swipes the options of one question, and nothing on several questions: the reply answers those', () => {
     const ask = { kind: 'multiple-choice' as const, options: [{ label: 'One' }, { label: 'Two' }] };
-    const several = swipeMap({ subject: 'Pick', ask, questions: [{ question: 'a' }, { question: 'b' }] });
-    expect(Object.keys(several).sort()).toEqual(['left', 'right']);
-    expect(several.left).toMatchObject({ kind: 'respond', label: 'One' });
-    expect(several.right).toMatchObject({ kind: 'respond', label: 'Two' });
-    expect(swipeMap({ subject: 'Pick', ask, questions: [{ question: 'a' }] })).toEqual(several);
+    const one = swipeMap({ subject: 'Pick', ask, questions: [{ question: 'a' }] });
+    expect(Object.keys(one).sort()).toEqual(['left', 'right']);
+    expect(one.left).toMatchObject({ kind: 'respond', label: 'One' });
+    expect(one.right).toMatchObject({ kind: 'respond', label: 'Two' });
+    expect(swipeMap({ subject: 'Pick', ask, questions: [{ question: 'a' }, { question: 'b' }] })).toEqual({});
+    expect(
+      swipeMap({
+        subject: 'Tell me',
+        ask: { kind: 'open-question' },
+        questions: [{ question: 'a' }, { question: 'b' }],
+      }),
+    ).toEqual({});
   });
 });

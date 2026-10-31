@@ -135,7 +135,7 @@ describe('choice asks', () => {
   it('should refuse options on a kind that has none', () => {
     // Act + Assert
     should(() => parseAsk({ kind: 'permission', option: ['a', 'b'] })).throw(
-      /--option only makes sense with --kind choice, not permission/u,
+      /^--option is only for a choice: ONE question, 2–3 options, each explained/u,
     );
   });
 

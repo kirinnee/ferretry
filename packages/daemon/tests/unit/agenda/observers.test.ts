@@ -517,7 +517,7 @@ describe('Agenda board progress observers', () => {
     // Arrange
     const changes = new RecordingChanges();
     const agenda = service(new MemoryRepository(), changes);
-    await agenda.raise(SESSION, { ...ASK, steps: ['Do it'] }, AGENT);
+    await agenda.raise(SESSION, { ...ASK, ask: { kind: 'task' }, steps: ['Do it'] }, AGENT);
     await agenda.progress(SESSION, 'A1', 0, true, HUMAN);
     const messenger = new RecordingMessenger();
     const delivery = new AgendaReplyDelivery(messenger, 'fy');

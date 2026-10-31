@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { AGENDA_SHAPE_LINE } from '@ferretry/protocol';
 import should from 'should';
 import {
   AGENDA_ENV,
@@ -27,8 +28,8 @@ import {
   HYPERMEDIA_ENV,
   HYPERMEDIA_INSTRUCTION,
   instructionDigest,
-  LESSONS_INSTRUCTION,
   LEAD_RULES_INSTRUCTION,
+  LESSONS_INSTRUCTION,
   launchInstructions,
   NOTIFY_INSTRUCTION,
   PACK_ENV,
@@ -762,7 +763,7 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql('the board covers it (Done/Not good)');
     should(text).containEql('after a Not good, open one only if you need input.');
     // An owner's question is answered in chat AND on the agenda as one info item, so a missed reply is not a missed answer.
-    should(text).containEql("Owner's question: ALSO answer as a `--kind info` item.");
+    should(text).containEql("Owner's question: ALSO answer as a `-k info` item.");
     should(text).containEql('One item per ask:');
     // Premise and context are part of the one command, and required: every item is read cold.
     should(text).containEql(
@@ -771,13 +772,17 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql('Title ≤40, ask ≤120.');
     should(text).containEql('no "as above", ticket/PR numbers, paths, acronyms');
     should(text).containEql('`--term "X=meaning"`');
-    should(text).containEql('`--decided` = settled, `--still-open` = left');
-    should(text).containEql('`--body`: hypermedia.');
-    should(text).containEql('`--kind todo|yesno|permission|choice|review|info`');
-    // Each item stands alone, in full Markdown, and each option is a short letter-able label plus a one-line reason.
-    should(text).containEql('Items stand ALONE: Markdown,');
-    should(text).containEql('Choice: 2–3 `--option "Label: why"`; `--recommend <label> --recommend-why <line>`');
-    should(text).containEql('To-do: `--step "<md>"`');
+    should(text).containEql('`--decided`=settled, `--still-open`=left');
+    should(text).containEql('`--body`=hypermedia.');
+    // Each item stands alone, in full Markdown.
+    should(text).containEql('ALONE: Markdown;');
+    // ONE ANSWER SHAPE PER KIND, in the protocol's own words (the CLI's help and refusals say the same).
+    should(text).containEql(AGENDA_SHAPE_LINE);
+    should(text).containEql('choice=ONE question+2–3 `-o "Label: why"`, `--recommend`');
+    should(text).containEql('reply=open question or several/mixed asks (one `-q` each, no options)');
+    should(text).containEql('todo=`--step`s');
+    should(text).containEql('info=Got it');
+    should(text).containEql('permission=Approve/Deny');
     // When it is needed: it blocks now, will block later, or by a time.
     should(text).containEql('`--blocking`');
     should(text).containEql('`--will-block`');

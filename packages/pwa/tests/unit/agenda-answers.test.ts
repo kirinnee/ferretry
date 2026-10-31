@@ -120,18 +120,15 @@ describe('the swipe map is built from the card’s answers', () => {
   it('reads each kind’s default answers left · up · right', () => {
     const labels = (item: AgendaItem) =>
       Object.fromEntries(Object.entries(swipeTargets(item)).map(([direction, target]) => [direction, target?.label]));
-    expect(labels(agendaItem('A1', { ask: { kind: 'task' } }))).toEqual({
-      left: 'Need more info',
-      right: 'Done',
-    });
+    expect(labels(agendaItem('A1', { ask: { kind: 'task' } }))).toEqual({ right: 'Mark as done' });
     expect(labels(agendaItem('A2', { kind: 'yesno' }))).toEqual({ left: 'No', right: 'Yes' });
     expect(labels(agendaItem('A3', { ask: { kind: 'permission' } }))).toEqual({
       left: 'Deny',
-      right: 'Allow',
+      right: 'Approve',
     });
     expect(labels(agendaItem('A4', { kind: 'review' }))).toEqual({
-      left: 'Needs changes',
-      right: 'Looks good',
+      left: 'Request changes',
+      right: 'Approve',
     });
     expect(labels(agendaItem('A5'))).toEqual({ right: 'Got it' });
   });
@@ -207,7 +204,7 @@ describe('the swipe map is built from the card’s answers', () => {
       },
       right: {
         kind: 'respond',
-        label: 'Allow',
+        label: 'Approve',
         response: { kind: 'permission', decision: 'approve' },
         note: 'only /tmp',
       },
@@ -269,13 +266,19 @@ describe('the card’s kind', () => {
     expect(kindWord({ ask: { kind: 'open-question' } })).toBe('Reply');
   });
 
-  it('calls a text-only ask one only while it has no answers to give', () => {
+  it('calls an open question, several questions and a mix text-only, whatever answers they were stored with', () => {
     expect(isTextOnlyAsk(agendaItem('A1', { ask: { kind: 'open-question' } }))).toBe(true);
     expect(
       isTextOnlyAsk(
         withAnswers([{ direction: 'right', does: 'done', label: 'Done' }], { ask: { kind: 'open-question' } }),
       ),
-    ).toBe(false);
+    ).toBe(true);
+    expect(
+      isTextOnlyAsk(
+        agendaItem('A3', { ask: { kind: 'permission' }, questions: [{ question: 'a' }, { question: 'b' }] }),
+      ),
+    ).toBe(true);
+    expect(isTextOnlyAsk(agendaItem('A4', { ask: { kind: 'permission' } }))).toBe(false);
     expect(isTextOnlyAsk(agendaItem('A2', { ask: { kind: 'task' } }))).toBe(false);
   });
 });

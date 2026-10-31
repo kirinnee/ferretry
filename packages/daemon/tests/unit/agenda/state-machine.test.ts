@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import type { AgendaAsk, AgendaCardAnswer, AgendaId, AgendaItem, AgendaResponse } from '@ferretry/protocol';
 import {
+  AGENDA_SHAPE_ERRORS,
   AGENDA_URGENT_WAKE_MS,
   AgendaItemSchema,
   AgendaSnapshotSchema,
@@ -844,6 +845,8 @@ describe('Agenda state machine', () => {
 describe('Agenda state machine edit', () => {
   const questioned = (): Extract<AgendaMutation, { ok: true }> =>
     raised(AGENT, {
+      kind: 'choice',
+      ask: { kind: 'multiple-choice', options: [{ label: 'A' }, { label: 'B' }] },
       questions: [
         { question: 'Which plan?', options: [{ label: 'A' }, { label: 'B' }], recommended: 'A', why: 'Cheaper.' },
       ],
@@ -982,15 +985,21 @@ describe('Agenda state machine steps and progress', () => {
 
   it('should store steps and body, dedupe on them, and replace them on a refresh', () => {
     // Arrange
-    const first = raised(AGENT, { steps: STEPS, body: '## Why\nBecause.' });
+    const first = raised(AGENT, { ask: { kind: 'task' as const }, steps: STEPS, body: '## Why\nBecause.' });
     const stable = raised(DAEMON, { source: 'task', sourceRef: 'F1', steps: STEPS });
 
     // Act
     const same = succeeded(
-      applyAgendaCommand(first.ledger, raiseCommand(AGENT, { steps: STEPS, body: '## Why\nBecause.' }, SECOND)),
+      applyAgendaCommand(
+        first.ledger,
+        raiseCommand(AGENT, { ask: { kind: 'task' as const }, steps: STEPS, body: '## Why\nBecause.' }, SECOND),
+      ),
     );
     const other = succeeded(
-      applyAgendaCommand(same.ledger, raiseCommand(AGENT, { steps: [...STEPS, 'Done'], body: undefined }, THIRD)),
+      applyAgendaCommand(
+        same.ledger,
+        raiseCommand(AGENT, { ask: { kind: 'task' as const }, steps: [...STEPS, 'Done'], body: undefined }, THIRD),
+      ),
     );
     const refreshed = succeeded(
       applyAgendaCommand(
@@ -1011,7 +1020,7 @@ describe('Agenda state machine steps and progress', () => {
 
   it('should tick and untick steps in order, report no change when already so, and keep the item open', () => {
     // Arrange
-    const created = raised(AGENT, { steps: STEPS });
+    const created = raised(AGENT, { ask: { kind: 'task' as const }, steps: STEPS });
 
     // Act
     const ticked2 = succeeded(applyAgendaCommand(created.ledger, progressOf(HUMAN, 'A1', 2, true)));
@@ -1035,7 +1044,7 @@ describe('Agenda state machine steps and progress', () => {
 
   it('should refuse a step out of range, an item without steps, a stranger, and a closed or unknown item', () => {
     // Arrange
-    const created = raised(AGENT, { steps: STEPS });
+    const created = raised(AGENT, { ask: { kind: 'task' as const }, steps: STEPS });
     const plain = raised(AGENT);
     const closed = succeeded(
       applyAgendaCommand(created.ledger, { action: 'dismiss', actor: HUMAN, id: 'A1', at: SECOND }),
@@ -1059,7 +1068,7 @@ describe('Agenda state machine steps and progress', () => {
 
   it('should clear progress when an edit changes the steps and keep it when they are the same', () => {
     // Arrange
-    const created = raised(AGENT, { steps: STEPS });
+    const created = raised(AGENT, { ask: { kind: 'task' as const }, steps: STEPS });
     const ticked = succeeded(applyAgendaCommand(created.ledger, progressOf(HUMAN, 'A1', 1, true)));
     const editWith = (patch: EditAgendaPatch): AgendaCommand => ({
       action: 'edit',
@@ -1102,7 +1111,7 @@ describe('Agenda state machine steps and progress', () => {
 describe('Agenda state machine progress on another agent’s item', () => {
   it('should refuse a tick from an agent on an item a different agent raised', () => {
     // Arrange
-    const created = raised(AGENT, { steps: ['One'] });
+    const created = raised(AGENT, { ask: { kind: 'task' as const }, steps: ['One'] });
     const foreign: AgendaLedger = {
       ...created.ledger,
       entries: [
@@ -3718,5 +3727,65 @@ describe('Agenda state machine offer to close', () => {
     // Assert
     should(result.error).containDeep({ code: 'invalid' });
     should(result.error.message).containEql('notice');
+  });
+});
+
+describe('Agenda state machine answer shapes', () => {
+  const raiseAs = (actor: AgendaActor, overrides: Partial<RaiseAgendaRequest>) =>
+    applyAgendaCommandToSession(null, SESSION_ID, raiseCommand(actor, overrides));
+  const several = [{ question: 'Which region?' }, { question: 'OK to restart?' }, { question: 'Your work email?' }];
+
+  it('should refuse a ferret raise that mixes shapes, naming the shape to write instead', () => {
+    // Act
+    const optioned = failed(
+      raiseAs(AGENT, {
+        kind: 'reply',
+        ask: { kind: 'open-question' },
+        questions: [{ question: 'Which region?', options: [{ label: 'EU' }, { label: 'US' }] }, ...several],
+      }),
+    );
+    const severalChoice = failed(
+      raiseAs(AGENT, {
+        kind: 'choice',
+        ask: { kind: 'multiple-choice', options: [{ label: 'EU' }, { label: 'US' }] },
+        questions: several,
+      }),
+    );
+    const steppedPermission = failed(raiseAs(AGENT, { steps: ['Open it'] }));
+    const optionedReply = failed(
+      raiseAs(AGENT, { kind: 'reply', ask: { kind: 'multiple-choice', options: [{ label: 'A' }, { label: 'B' }] } }),
+    );
+
+    // Assert
+    should(optioned.error).deepEqual({ code: 'invalid', message: AGENDA_SHAPE_ERRORS.severalQuestions });
+    should(severalChoice.error.message).equal(AGENDA_SHAPE_ERRORS.severalQuestions);
+    should(steppedPermission.error.message).equal(AGENDA_SHAPE_ERRORS.stepsOnlyTodo);
+    should(optionedReply.error.message).equal(AGENDA_SHAPE_ERRORS.optionsOnlyChoice);
+  });
+
+  it('should take several plain questions as one reply, and leave the daemon its own raises', () => {
+    // Act
+    const reply = succeeded(raiseAs(AGENT, { kind: 'reply', ask: { kind: 'open-question' }, questions: several }));
+    const daemon = succeeded(raiseAs(DAEMON, { source: 'task', sourceRef: 'F9', steps: ['Open it'] }));
+
+    // Assert
+    should(reply.item?.questions).have.length(3);
+    should(daemon.item?.steps).deepEqual(['Open it']);
+  });
+
+  it('should refuse a ferret edit that gives steps to a card that is not a to-do', () => {
+    // Arrange
+    const permission = raised(AGENT);
+    const todo = raised(AGENT, { ask: { kind: 'task' }, kind: 'task', steps: ['One'] });
+    const editSteps = (ledger: AgendaLedger) =>
+      applyAgendaCommand(ledger, { action: 'edit', actor: AGENT, id: 'A1', patch: { steps: ['Two'] }, at: SECOND });
+
+    // Act
+    const refused = failed(editSteps(permission.ledger));
+    const edited = succeeded(editSteps(todo.ledger));
+
+    // Assert
+    should(refused.error).deepEqual({ code: 'invalid', message: AGENDA_SHAPE_ERRORS.stepsOnlyTodo });
+    should(edited.item?.steps).deepEqual(['Two']);
   });
 });

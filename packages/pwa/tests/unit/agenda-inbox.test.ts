@@ -190,8 +190,8 @@ describe('swipes', () => {
     expect(yesNo.right).toMatchObject({ kind: 'respond', label: 'No' });
     expect(yesNo.up).toBeUndefined();
     const task = swipeMap(card({ ask: { kind: 'task' } }));
-    expect(task.right).toMatchObject({ kind: 'resolve', label: 'Done' });
-    expect(task.left).toMatchObject({ kind: 'needs-info' });
+    expect(task.right).toMatchObject({ kind: 'resolve', label: 'Mark as done' });
+    expect(task.left).toBeUndefined();
     expect(task.up).toBeUndefined();
     const three = swipeMap(card({ ask: choice('A', 'B', 'C') }));
     expect(Object.keys(three).sort()).toEqual(['left', 'right', 'up']);
@@ -234,13 +234,16 @@ describe('swipes', () => {
 
   test('finds the swipe an answer sits on by meaning, not by identity', () => {
     const map = swipeMap(card({ ask: { kind: 'task' } }));
-    expect(directionOfAction(map, { ...DONE_ACTION })).toBe('right');
-    expect(directionOfAction(map, { ...NEEDS_INFO_ACTION, label: 'Need more info' })).toBe('left');
+    expect(directionOfAction(map, { kind: 'resolve', label: 'Mark as done' })).toBe('right');
+    expect(directionOfAction(map, { ...NEEDS_INFO_ACTION, label: 'Need more info' })).toBeNull();
     expect(directionOfAction(map, { ...DISMISS_ACTION })).toBeNull();
   });
 
   test('options follow the swipe order, recommended first', () => {
-    expect(inboxOptions(card({ ask: { kind: 'permission' } })).map(option => option.label)).toEqual(['Allow', 'Deny']);
+    expect(inboxOptions(card({ ask: { kind: 'permission' } })).map(option => option.label)).toEqual([
+      'Approve',
+      'Deny',
+    ]);
     expect(inboxOptions(card()).map(option => option.label)).toEqual(['Got it']);
   });
 });

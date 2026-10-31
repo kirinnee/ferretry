@@ -7,7 +7,7 @@ import {
 } from '../../../src/features/agenda/agenda-brief.tsx';
 import { revisionHighlight } from '../../../src/lib/agenda-revisions.ts';
 import { agendaItem, choices } from '../../support/agenda-inbox.tsx';
-import { interact, type Mounted, mount, must } from '../../support/dom.ts';
+import { type Mounted, mount, must } from '../../support/dom.ts';
 
 let view: Mounted | null = null;
 afterEach(async () => {
@@ -154,50 +154,6 @@ describe('the brief sections, by card', () => {
   });
 });
 
-describe('the question picker', () => {
-  test('writes an option’s description under its label and toggles the pick', async () => {
-    const picks: Array<[number, string]> = [];
-    const asked = {
-      ...item,
-      questions: [
-        {
-          question: 'Which database should hold the board?',
-          options: [{ label: 'SQLite', description: 'No server to run.' }, { label: 'Postgres' }],
-          recommended: 'SQLite',
-        },
-      ],
-    };
-    const picker = {
-      answers: ['Postgres'],
-      disabled: false,
-      onAnswer: (index: number, answer: string) => picks.push([index, answer]),
-    };
-    view = await mount(<AgendaBriefSections item={asked} picker={picker} renderProse={text => text} />);
-    const container = must(view.container, 'view');
-    const options = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-agenda-pick]'));
-    expect(options.map(option => option.getAttribute('data-agenda-pick'))).toEqual(['SQLite', 'Postgres']);
-    // One short button each, named in full; the explanation lives in the lettered list under the row.
-    expect(options.map(option => option.textContent)).toEqual(['SQLite', 'Postgres']);
-    expect(options[0]?.getAttribute('aria-label')).toBe('SQLite, recommended');
-    expect(options[1]?.getAttribute('aria-label')).toBe('Postgres');
-    expect(options[0]?.getAttribute('title')).toBe('SQLite');
-    const listed = container.querySelector('[data-agenda-option-detail="SQLite"]');
-    expect(listed?.textContent).toContain('A — SQLite');
-    expect(listed?.textContent).toContain('No server to run.');
-    expect(listed?.querySelector('[data-agenda-recommended]')).not.toBeNull();
-    expect(container.querySelector('[data-agenda-option-detail="Postgres"]')?.textContent).toContain('B — Postgres');
-    expect(options[1]?.getAttribute('aria-pressed')).toBe('true');
-    await interact(() => {
-      options[0]?.click();
-      options[1]?.click();
-    });
-    expect(picks).toEqual([
-      [0, 'SQLite'],
-      [0, ''],
-    ]);
-  });
-});
-
 describe('the open layout asks first', () => {
   const asked = agendaItem('A3', {
     title: 'Plan',
@@ -219,10 +175,7 @@ describe('the open layout asks first', () => {
     [...root.querySelectorAll('[data-agenda-section]')].map(node => node.getAttribute('data-agenda-section') ?? '');
 
   test('puts what is going on on top, then the questions, with each reason under its question', async () => {
-    const picker = { answers: ['', '', ''], disabled: false, onAnswer: () => undefined };
-    view = await mount(
-      <AgendaBriefSections askShown collapsible={false} item={asked} picker={picker} renderProse={text => text} />,
-    );
+    view = await mount(<AgendaBriefSections askShown collapsible={false} item={asked} renderProse={text => text} />);
     const root = must(view.container, 'view');
     expect(order(root)[0]).toBe('premise');
     expect(order(root).indexOf('premise')).toBeLessThan(order(root).indexOf('questions'));
@@ -231,12 +184,11 @@ describe('the open layout asks first', () => {
     expect(root.textContent).not.toContain('message box');
   });
 
-  test('the board folds the questions after the premise, and marks a picked question answered', async () => {
-    const picker = { answers: ['', 'Zoe', ''], disabled: false, onAnswer: () => undefined };
-    view = await mount(<AgendaBriefSections item={asked} picker={picker} renderProse={text => text} />);
+  test('the board folds the questions after the premise, and offers no picker for them', async () => {
+    view = await mount(<AgendaBriefSections item={asked} renderProse={text => text} />);
     const root = must(view.container, 'view');
     expect(order(root).indexOf('premise')).toBeLessThan(order(root).indexOf('questions'));
-    expect(root.querySelectorAll('[aria-label="answered"]')).toHaveLength(1);
+    expect(root.querySelector('[data-agenda-pick]')).toBeNull();
   });
 });
 

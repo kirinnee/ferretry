@@ -85,7 +85,7 @@ describe('the card says what it is, at a glance', () => {
     expect(root.textContent).not.toContain('Which database should hold the board?');
   });
 
-  test('still draws several questions, each answered on the card', async () => {
+  test('still lists several questions, numbered, each answered in the one reply', async () => {
     const { root } = await card(
       agendaItem('A1', {
         subject: 'Two things before the release',
@@ -93,7 +93,7 @@ describe('the card says what it is, at a glance', () => {
         questions: [{ question: 'Which day should it ship?' }, { question: 'Who should announce it?' }],
       }),
     );
-    expect(root.querySelector('[data-agenda-section="questions"]')).not.toBeNull();
+    expect(root.querySelectorAll('[data-agenda-wanted-answer]')).toHaveLength(2);
     expect(root.querySelector('input[type="text"], textarea')).toBeNull();
   });
 
@@ -218,22 +218,17 @@ describe('answering is replying', () => {
     expect(acts).toEqual([{ kind: 'respond', label, response }]);
   });
 
-  test('a task: Done resolves and Need more info asks, both bare', async () => {
+  test('a task: one Mark as done resolves, bare; nothing else is offered', async () => {
     const task = await card(agendaItem('T1', { ask: { kind: 'task' } }));
     await interact(() => answer(task.root, 'right').click());
-    await interact(() => answer(task.root, 'left').click());
-    expect(task.acts).toEqual([
-      { kind: 'resolve', label: 'Done' },
-      { kind: 'needs-info', label: 'Need more info' },
-    ]);
+    expect(task.root.querySelector('[data-agenda-answer="left"]')).toBeNull();
+    expect(task.acts).toEqual([{ kind: 'resolve', label: 'Mark as done' }]);
   });
 
-  test('a review: Looks good answers; Needs changes is no button, the card says to write it in the message box', async () => {
+  test('a review: Approve answers; Request changes is no button here, the card says to write it in the message box', async () => {
     const { acts, root } = await card(review);
     await interact(() => answer(root, 'right').click());
-    expect(acts).toEqual([
-      { kind: 'respond', label: 'Looks good', response: { kind: 'answer-review', verdict: 'good' } },
-    ]);
+    expect(acts).toEqual([{ kind: 'respond', label: 'Approve', response: { kind: 'answer-review', verdict: 'good' } }]);
     expect(root.querySelector('[data-agenda-answer="left"]')).toBeNull();
     expect(root.querySelector('[data-agenda-composer-hint]')?.textContent).toContain('message box');
   });
@@ -253,53 +248,29 @@ describe('answering is replying', () => {
     );
     expect(root.querySelector('[data-agenda-answer]')).toBeNull();
     expect(root.querySelector('[data-agenda-send]')).toBeNull();
-    expect(root.querySelector('[data-agenda-composer-hint]')?.textContent).toBe('Reply in the message box below.');
+    expect(root.querySelector('[data-agenda-composer-hint]')?.textContent).toBe('Type your answer below.');
   });
 });
 
-describe('a card answered one answer per question', () => {
-  test('swaps the answer bar and the reply for one Send answers button', async () => {
-    const item = agendaItem('M1', {
-      ask: { kind: 'open-question' },
-      questions: [
-        { question: 'Which engine?', options: [{ label: 'SQLite' }, { label: 'Postgres' }] },
-        { question: 'Migrate when?', options: [{ label: 'Now' }, { label: 'Later' }] },
-      ],
-    });
-    const { root } = await card(item);
-    expect(root.querySelector('[data-agenda-send-answers]')).not.toBeNull();
-    expect(root.querySelector('[data-agenda-answer]')).toBeNull();
-    expect(root.querySelector('[data-agenda-reply-toggle]')).toBeNull();
+describe('a card asked several things', () => {
+  const several = agendaItem('M1', {
+    ask: { kind: 'open-question' },
+    questions: [
+      { question: 'Which engine?', options: [{ label: 'SQLite' }, { label: 'Postgres' }] },
+      { question: 'Migrate when?', options: [{ label: 'Now' }, { label: 'Later' }] },
+    ],
+  });
+
+  test('offers no option buttons and no Send answers: one reply answers every question, numbered', async () => {
+    const { root } = await card(several);
+    expect(root.querySelector('[data-agenda-send-answers], [data-agenda-pick], [data-agenda-answer]')).toBeNull();
     expect(root.querySelector('textarea, input[type="text"]')).toBeNull();
-  });
-
-  test('an open question among them is asked once, with no picker and no boilerplate about the message box', async () => {
-    const item = agendaItem('M2', {
-      ask: { kind: 'open-question' },
-      questions: [{ question: 'Which engine?', options: [{ label: 'SQLite' }] }, { question: 'Who announces it?' }],
-    });
-    const { root } = await card(item);
-    expect(root.querySelector('[data-agenda-composer-hint]')).toBeNull();
-    expect(root.textContent).not.toContain('message box');
-    expect(root.textContent?.split('Who announces it?').length).toBe(2);
-    expect(root.querySelectorAll('[data-agenda-pick]')).toHaveLength(1);
-  });
-
-  test('Send answers is ready only once at least one answer is picked, then sends them together', async () => {
-    const item = agendaItem('M3', {
-      ask: { kind: 'open-question' },
-      questions: [
-        { question: 'Which engine?', options: [{ label: 'SQLite' }, { label: 'Postgres' }] },
-        { question: 'Migrate when?', options: [{ label: 'Now' }, { label: 'Later' }] },
-      ],
-    });
-    const { acts, root } = await card(item);
-    const send = must(root.querySelector<HTMLButtonElement>('[data-agenda-send-answers]'), 'Send answers');
-    expect(send.disabled).toBe(true);
-    await interact(() => must(root.querySelector<HTMLButtonElement>('[data-agenda-pick="SQLite"]'), 'SQLite').click());
-    expect(send.disabled).toBe(false);
-    await interact(() => send.click());
-    expect(acts).toHaveLength(1);
-    expect(acts[0]?.kind).toBe('respond');
+    expect(root.querySelector('[data-agenda-composer-hint]')?.textContent).toBe(
+      'Reply with your answers below, numbered.',
+    );
+    const wanted = [...root.querySelectorAll('[data-agenda-wanted-answer]')].map(each => each.textContent);
+    expect(wanted[0]).toContain('Which engine?');
+    expect(wanted[0]).toContain('SQLite / Postgres');
+    expect(wanted[1]).toContain('Migrate when?');
   });
 });

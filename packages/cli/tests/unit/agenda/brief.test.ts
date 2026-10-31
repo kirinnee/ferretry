@@ -91,7 +91,9 @@ describe('agenda brief composition', () => {
 
   it('should refuse item-level options over several questions, and a malformed term', () => {
     // Arrange / Act / Assert
-    should(() => add(['x'], { question: ['a?', 'b?'], option: ['yes', 'no'] })).throw(/belongs to a single question/u);
+    should(() => add(['x'], { question: ['a?', 'b?'], option: ['yes', 'no'] })).throw(
+      /several questions → write them as a numbered list for the owner to answer in the reply/u,
+    );
     should(() => add(['x'], { term: ['no meaning here'] })).throw(/--term needs TERM=meaning/u);
   });
 
@@ -350,20 +352,20 @@ describe('agenda brief to-do asks', () => {
     const implied = add(['Log in'], { step: ['Run `fy login`'] });
     const forced = add(['Log in'], { task: true });
     const named = add(['Log in'], { kind: 'task' });
-    const question = add(['Which?'], { step: ['One'], option: ['a', 'b'] });
     const open = add(['Why?'], {});
 
     // Assert
     should(implied).containDeep({ ask: { kind: 'task' } });
     should(forced).containDeep({ ask: { kind: 'task' } });
     should(named).containDeep({ ask: { kind: 'task' } });
-    should(question).containDeep({ ask: { kind: 'multiple-choice' } });
     should(open).containDeep({ ask: { kind: 'open-question' } });
   });
 
   it('should refuse a task that also asks a question', () => {
     // Act + Assert
-    should(() => add(['Log in'], { task: true, question: ['Which?'] })).throw(/a todo asks nothing/u);
+    should(() => add(['Log in'], { task: true, question: ['Which?'] })).throw(
+      /^a to-do asks nothing: steps, then Mark as done/u,
+    );
   });
 });
 
@@ -420,14 +422,14 @@ describe('agenda brief card title and ask', () => {
 describe('agenda brief card kinds and answers', () => {
   const answersOf = (flags: BriefFlags) => add(['Ask'], flags).answers?.map(a => `${a.direction}:${a.does}:${a.label}`);
 
-  it('should compose a task: Need more info on the left, Done on the right', () => {
+  it('should compose a task: Mark as done on the right, and nothing else', () => {
     // Act
     const request = add(['Log in'], { kind: 'task' });
 
     // Assert
     should(request.kind).equal('task');
     should(request.ask).deepEqual({ kind: 'task' });
-    should(answersOf({ kind: 'task' })).deepEqual(['left:needs-info:Need more info', 'right:done:Done']);
+    should(answersOf({ kind: 'task' })).deepEqual(['right:done:Mark as done']);
   });
 
   it('should compose a yesno with its own Yes and No', () => {
@@ -448,17 +450,17 @@ describe('agenda brief card kinds and answers', () => {
     should(() => add(['Ship it?'], { kind: 'yesno' }, file)).throw(/--kind yesno brings its own Yes and No/u);
   });
 
-  it('should compose a permission: Deny on the left, Allow on the right', () => {
+  it('should compose a permission: Deny on the left, Approve on the right', () => {
     // Act + Assert
     should(add(['Run it?'], { kind: 'permission' }).kind).equal('permission');
-    should(answersOf({ kind: 'permission' })).deepEqual(['left:reject:Deny', 'right:approve:Allow']);
+    should(answersOf({ kind: 'permission' })).deepEqual(['left:reject:Deny', 'right:approve:Approve']);
   });
 
-  it('should compose a review: Needs changes on the left, Looks good on the right', () => {
+  it('should compose a review: Request changes on the left, Approve on the right', () => {
     // Act + Assert
     const request = add(['Is this right?'], { kind: 'review' });
     should(request.ask).deepEqual({ kind: 'answer-review' });
-    should(answersOf({ kind: 'review' })).deepEqual(['left:clarify:Needs changes', 'right:good:Looks good']);
+    should(answersOf({ kind: 'review' })).deepEqual(['left:clarify:Request changes', 'right:good:Approve']);
   });
 
   it('should compose an info card with no ask and one Got it answer', () => {
@@ -542,7 +544,9 @@ describe('agenda brief card kinds and answers', () => {
 
   it('should refuse a question on an info card', () => {
     // Act + Assert
-    should(() => add(['x'], { kind: 'info', question: ['Which?'] })).throw(/an info card asks nothing/u);
+    should(() => add(['x'], { kind: 'info', question: ['Which?'] })).throw(
+      /^an info card only tells: no --question, --option or --step/u,
+    );
   });
 });
 
@@ -553,9 +557,8 @@ describe('agenda brief up answer', () => {
 
     // Assert
     should(request.answers).deepEqual([
-      { direction: 'left', does: 'needs-info', label: 'Need more info' },
       { direction: 'up', does: 'dismiss', label: 'Skip it', description: 'Not needed now' },
-      { direction: 'right', does: 'done', label: 'Done' },
+      { direction: 'right', does: 'done', label: 'Mark as done' },
     ]);
   });
 
@@ -567,7 +570,7 @@ describe('agenda brief up answer', () => {
     should(request.answers).deepEqual([
       { direction: 'left', does: 'reject', label: 'Deny' },
       { direction: 'up', does: 'approve', label: 'Always allow' },
-      { direction: 'right', does: 'approve', label: 'Allow' },
+      { direction: 'right', does: 'approve', label: 'Approve' },
     ]);
   });
 
@@ -759,5 +762,85 @@ describe('agenda option details', () => {
       ],
     });
     should(() => composeEditRequest('A1', { option: ['Go'] }, undefined)).throw(/cannot change the options/u);
+  });
+});
+
+describe('agenda brief answer shapes', () => {
+  const STEPS_ONLY_TODO =
+    /^--step is only for a to-do \(--kind todo\): steps, then Mark as done\. Steps AND a question/u;
+  const OPTIONS_ONLY_CHOICE = /^--option is only for a choice: ONE question, 2–3 options, each explained/u;
+  const SEVERAL =
+    /^several questions → write them as a numbered list for the owner to answer in the reply: .*no --option/u;
+
+  it('should make several plain questions one reply with no buttons, the owner answering each in words', () => {
+    // Act
+    const request = add(['Three answers'], { question: ['Which region?', 'OK to restart?', 'Your work email?'] });
+
+    // Assert
+    should(request.kind).equal('reply');
+    should(request.ask).deepEqual({ kind: 'open-question' });
+    should(request).not.have.property('answers');
+    should(request.questions?.map(each => each.question)).deepEqual([
+      'Which region?',
+      'OK to restart?',
+      'Your work email?',
+    ]);
+  });
+
+  it('should refuse several questions given options or another kind, naming the numbered-reply shape', () => {
+    // Arrange
+    const optioned = parseBriefFile(
+      JSON.stringify({ questions: [{ question: 'Which region?', options: ['EU', 'US'] }, 'OK to restart?'] }),
+    );
+
+    // Act + Assert
+    should(() => add(['x'], { question: ['a?', 'b?'], option: ['A', 'B'] })).throw(SEVERAL);
+    should(() => add(['x'], {}, optioned)).throw(SEVERAL);
+    for (const kind of ['choice', 'yesno', 'permission', 'review']) {
+      should(() => add(['x'], { kind, question: ['a?', 'b?'] })).throw(SEVERAL);
+    }
+    should(add(['x'], { kind: 'reply', question: ['a?', 'b?'] }).kind).equal('reply');
+  });
+
+  it('should keep options to a choice: never on a reply, a permission, a review, a to-do or an info card', () => {
+    // Act + Assert
+    for (const kind of ['reply', 'permission', 'review', 'todo', 'info']) {
+      should(() => add(['x'], { kind, option: ['A', 'B'] })).throw(OPTIONS_ONLY_CHOICE);
+    }
+    should(add(['x'], { kind: 'choice', option: ['A: first', 'B: second'] }).kind).equal('choice');
+  });
+
+  it('should keep steps to a to-do: a question with steps is a mix, refused with the shape to write instead', () => {
+    // Act + Assert
+    should(() => add(['Which?'], { step: ['One'], option: ['A', 'B'] })).throw(STEPS_ONLY_TODO);
+    should(() => add(['Which?'], { step: ['One'], question: ['Which?'] })).throw(STEPS_ONLY_TODO);
+    for (const kind of ['reply', 'permission', 'review', 'yesno']) {
+      should(() => add(['x'], { kind, step: ['One'] })).throw(STEPS_ONLY_TODO);
+    }
+    should(() => add(['x'], { kind: 'info', step: ['One'] })).throw(/^an info card only tells/u);
+    should(add(['x'], { step: ['One'] }).kind).equal('task');
+  });
+
+  it('should refuse an edit that gives steps to an item that is not a to-do', () => {
+    // Arrange
+    const reply = AgendaItemSchema.parse({
+      id: 'A3',
+      source: 'agent-raised',
+      sourceRef: null,
+      subject: 'x',
+      why: 'x',
+      waitingSince: '2026-10-26T09:00:00.000Z',
+      howToResolve: 'x',
+      ask: { kind: 'open-question' },
+      kind: 'reply',
+      raisedBy: 'agent',
+      raisedBySession: 's',
+      raisedByName: 'Ada',
+    });
+    const todo = AgendaItemSchema.parse({ ...reply, ask: { kind: 'task' }, kind: 'task' });
+
+    // Act + Assert
+    should(() => composeEditRequest('A3', { step: ['One'] }, reply)).throw(STEPS_ONLY_TODO);
+    should(composeEditRequest('A3', { step: ['One'] }, todo)).containDeep({ steps: ['One'] });
   });
 });

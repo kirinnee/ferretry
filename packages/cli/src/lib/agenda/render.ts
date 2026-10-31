@@ -5,6 +5,7 @@ import {
   type AgendaSnapshot,
   agendaCardAnswers,
   agendaInDiscussion,
+  agendaShape,
   agendaTurn,
   agendaWakeAt,
   hasOwnTitle,
@@ -44,8 +45,10 @@ const ARROWS: Readonly<Record<AgendaDirection, string>> = { left: '←', up: '�
  */
 function answersLine(item: AgendaItem): string {
   const answers = agendaCardAnswers(item);
-  // Only a card asked in words has no answers to swipe.
-  if (answers.length === 0) return 'answer: write a full answer';
+  // Only a card asked in words has no answers to swipe: one question, or several answered as a numbered list.
+  if (answers.length === 0) {
+    return agendaShape(item) === 'answers' ? 'answer: one reply, each answer numbered' : 'answer: write a full answer';
+  }
   const swipes = answers.map(answer => `${ARROWS[answer.direction]} ${compact(answer.label, OPTION_WIDTH)}`);
   const rest = unswipedChoices(item).map(option => `"${compact(option.label, OPTION_WIDTH)}"`);
   return `answers: ${swipes.join(' · ')}${rest.length === 0 ? '' : ` · also ${rest.join(' | ')}`}`;

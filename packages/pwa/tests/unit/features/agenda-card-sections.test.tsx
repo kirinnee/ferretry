@@ -51,7 +51,8 @@ describe('AgendaCard content', () => {
   });
 
   test('the recommendation is a tag and a reason line in the answer bar, never a section', async () => {
-    view = await mount(<AgendaCard item={full} onAct={() => {}} />);
+    // A choice alone: with steps as well it would be a mix, answered in words.
+    view = await mount(<AgendaCard item={agendaItem('A1', { ...full, steps: undefined })} onAct={() => {}} />);
     expect(names(view.container)).not.toContain('recommendation');
     const tagged = must(view.container.querySelector('[data-agenda-answer] [data-agenda-recommended]'), 'tag');
     expect(tagged.closest('[data-agenda-option]')?.getAttribute('data-agenda-option')).toBe('Keep ci');

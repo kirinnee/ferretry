@@ -461,8 +461,21 @@ describe('agenda command surface', () => {
     // Act
     await should(program.parseAsync(['node', 'fy', 'agenda', 'add', '--help'])).be.rejected();
 
-    // Assert
-    should(help).containEql('--kind says what the human DOES');
+    // Assert — ONE ANSWER SHAPE PER KIND, in the protocol's words, with an example raise for every kind.
+    const text = help.replaceAll(/\s+/gu, ' ');
+    should(text).containEql('ONE ANSWER SHAPE PER KIND');
+    should(text).containEql('ONE question, then each option with what it means; the owner taps one');
+    should(text).containEql('an open question, no buttons; the owner types the answer in the reply box');
+    should(text).containEql('SEVERAL questions or a mix: a numbered list of each answer wanted, no buttons');
+    should(text).containEql('numbered steps the owner ticks, then one Mark as done button');
+    should(text).containEql('something to know, nothing to decide; one Got it button');
+    should(text).containEql('the owner taps Approve or Deny');
+    should(text).containEql('the owner taps Approve or Request changes');
+    should(text).containEql('Options are ONLY for a choice; steps ONLY for a to-do.');
+    for (const kind of ['choice', 'yesno', 'permission', 'review', 'reply', 'todo', 'info']) {
+      should(text).containEql(`e.g. fy agenda add -t "<topic>" --premise … --context … -k ${kind} `);
+    }
+    should(text).containEql('-q "Which region?" -q "OK to restart?" -q "Your work email?"');
   });
 
   it('should explain the asymmetric dismissal policy in dismiss help', async () => {
@@ -867,7 +880,7 @@ describe('agenda card flags', () => {
       answers: [
         { direction: 'left', label: 'Deny' },
         { direction: 'up', does: 'approve', label: 'Always allow', description: 'for this repo' },
-        { direction: 'right', label: 'Allow' },
+        { direction: 'right', label: 'Approve' },
       ],
     });
   });

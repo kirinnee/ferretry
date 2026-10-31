@@ -324,6 +324,43 @@ the facts around it — so every NEW item a ferret raises must carry both:
 - **Only new items.** It is checked when an item is raised, never when one is read or edited: an item already
   on a board keeps working without them, and `agenda edit` may still reword either.
 
+## What I need from you
+
+**Every card has one answer shape, and it says it in one place.** Under the premise and the context, before any
+optional section, every open card draws a segment headed **What I need from you**. It holds exactly the ask and
+ends with one plain instruction, so the owner always knows what to do:
+
+| Kind (`--kind`)                     | The segment shows                                   | The buttons                                            |
+| ----------------------------------- | --------------------------------------------------- | ------------------------------------------------------ |
+| `choice`                            | ONE question, then each option with what it means   | the options (three on the row), recommended tagged     |
+| `yesno`                             | one yes-or-no question                              | Yes · No                                               |
+| `permission`                        | what is being approved, and its effect (`--impact`) | Approve · Deny                                         |
+| `review`                            | what to review (`--link`)                           | Approve · Request changes                              |
+| `reply`, one question               | the question                                        | none: "Type your answer below."                        |
+| `reply`, several questions or a mix | a numbered list of each answer wanted               | none: "Reply with your answers below, numbered."       |
+| `todo`                              | the steps, numbered, each ticked                    | Mark as done                                           |
+| `info`, and a notice                | the message                                         | Got it (quiet: a bare Got it does not wake the ferret) |
+
+- **Options are only for a choice; steps only for a to-do.** Several questions, or a question mixed with anything
+  else, are `--kind reply` with one `--question` each: never option buttons. The owner answers them all in one
+  reply, by number.
+- **Request changes** is a button, never a swipe: it sends what the composer holds as the change asked for, or puts
+  the owner in the composer when it is empty. Where no composer is at hand (the Sessions page's compact card), the
+  card says to type the changes in the message box instead.
+- **Swipes are the visible buttons only.** A card answered in words swipes nowhere except ↓ Not needed.
+- **It is enforced where an item is raised.** `fy agenda add` refuses a raise that mixes shapes before anything is
+  sent, and the daemon refuses the same raise from a ferret (`invalid`), each naming the shape to write instead —
+  "several questions → write them as a numbered list for the owner to answer in the reply: one --question each,
+  --kind reply; no --option". `fy agenda edit` may not give steps to anything but a to-do. The daemon's and the
+  Warden's own raises keep their fixed shapes, and a notice and a confirmation have theirs.
+- **An item already on the board reads in its shape too**, from its stored fields (`agendaShape`): an old item with
+  several questions loses its per-question pickers (any options it had are said in words), an old to-do keeps only
+  Mark as done (and a Skip its ferret added), and an old choice that also had steps is a mix, answered in words.
+- **One source of truth.** The rules and their words live in `packages/protocol/src/lib/agenda-shape.ts`: the line
+  every ferret's prompt carries (`AGENDA_SHAPE_LINE`, inside `AGENDA_INSTRUCTION`), the `fy agenda add --help` table
+  with an example per kind (`agendaShapeHelp`), the refusals (`AGENDA_SHAPE_ERRORS`, `agendaShapeProblems`) and the
+  owner's instruction lines (`AGENDA_SHAPE_LEADS`). Change the wording there, never at a surface.
+
 ## Clearing the agent ferrets' backlog
 
 Agent ferrets (sessions with `mode: auto`, the same fact as the Inbox's **Agents** filter) can leave a long backlog

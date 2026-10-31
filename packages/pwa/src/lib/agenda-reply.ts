@@ -17,6 +17,9 @@ export const withComposerNote = (action: InboxAction, text: string): InboxAction
   const typed = text.trim();
   if (typed === '' || action.kind === 'discuss' || action.kind === 'snooze' || action.kind === 'unsnooze')
     return action;
+  // Request changes IS the typed words (the card took them as its clarification): the composer is spent.
+  if (action.kind === 'respond' && action.response.kind === 'answer-review' && action.response.verdict === 'clarify')
+    return { ...action };
   if (action.kind === 'respond' && action.response.kind !== 'multiple-choice' && action.response.kind !== 'permission')
     return action;
   const note = action.note === undefined || action.note.trim() === '' ? typed : `${action.note} — ${typed}`;

@@ -8,17 +8,22 @@
  *
  * The defaults (docs/agenda.md, "Answering a card"):
  *
- * | kind       | ←              | ↑ (optional)      | →             |
- * | ---------- | -------------- | ----------------- | ------------- |
- * | task       | Need more info | e.g. Skip         | Done          |
- * | yesno      | the first      |                   | the second    |
- * | permission | Deny           | e.g. Always allow | Allow         |
- * | choice (2) | the first      |                   | the second    |
- * | choice (3) | the first      | the second        | the third     |
- * | review     | Needs changes  |                   | Looks good    |
- * | info       |                |                   | Got it        |
- * | reply      |                |                   |               |
- * | input      |                |                   |               |
+ * | kind       | ←               | ↑ (optional)      | →             |
+ * | ---------- | --------------- | ----------------- | ------------- |
+ * | task       |                 | e.g. Skip         | Mark as done  |
+ * | yesno      | the first       |                   | the second    |
+ * | permission | Deny            | e.g. Always allow | Approve       |
+ * | choice (2) | the first       |                   | the second    |
+ * | choice (3) | the first       | the second        | the third     |
+ * | review     | Request changes |                   | Approve       |
+ * | info       |                 |                   | Got it        |
+ * | reply      |                 |                   |               |
+ * | input      |                 |                   |               |
+ *
+ * WHAT A CARD SHOWS IS ITS SHAPE (`agendaShape`), and the buttons follow it for every item, old or new: a card
+ * asked in words — one open question, several questions, or a question mixed with steps — has NO buttons (the
+ * reply box is the answer); a to-do has only Mark as done (and a Skip its ferret added); a notice or an info card
+ * only Got it. An item stored with more answers than its shape takes keeps them in its record, never on its card.
  *
  * ONE MEANING FOR EVERY SWIPE: a row of options reads in the options list's order — the first ←, the second ↑,
  * the third → (two: ← and →; one: ↑) — wherever the recommendation sits, so a swipe means the same in the Inbox
@@ -45,13 +50,36 @@ export const NO_LABEL = 'No';
 
 /** The default label of each answer a card can give, when the ferret did not word it. */
 export const DEFAULT_ANSWER_LABELS: Readonly<Record<Exclude<AgendaAnswerEffect, 'choose'>, string>> = {
-  approve: 'Allow',
+  approve: 'Approve',
   reject: 'Deny',
-  good: 'Looks good',
-  clarify: 'Needs changes',
+  good: 'Approve',
+  clarify: 'Request changes',
   done: 'Done',
   'needs-info': 'Need more info',
   dismiss: 'Skip',
+};
+
+/** The one answer a to-do offers: the owner did the steps. */
+export const MARK_DONE_LABEL = 'Mark as done';
+
+/**
+ * The words each effect was given by default before (and the to-do's and info's own words): an item stored with
+ * one of them still reads as worded by default, so its answer is never mistaken for one its ferret wrote.
+ */
+const OTHER_DEFAULT_LABELS: Readonly<Partial<Record<AgendaAnswerEffect, readonly string[]>>> = {
+  approve: ['Allow'],
+  good: ['Looks good'],
+  clarify: ['Needs changes'],
+  done: ['Got it', MARK_DONE_LABEL],
+};
+
+/** Whether an answer carries its effect's default words (now or before), rather than its ferret's own. */
+export const isDefaultAnswerLabel = (does: AgendaAnswerEffect, label: string): boolean => {
+  if (does === 'choose') return false;
+  const wanted = label.trim().toLowerCase();
+  return [DEFAULT_ANSWER_LABELS[does], ...(OTHER_DEFAULT_LABELS[does] ?? [])].some(
+    word => word.toLowerCase() === wanted,
+  );
 };
 
 /**
@@ -187,9 +215,8 @@ export const defaultAgendaAnswers = (
     switch (kind) {
       case 'task':
         return [
-          answer('left', 'needs-info', labels['needs-info']),
           ...(up === undefined ? [] : [answer('up', 'dismiss', up.label, up.description)]),
-          answer('right', 'done', labels.done),
+          answer('right', 'done', MARK_DONE_LABEL),
         ];
       case 'yesno': {
         const options = ask?.kind === 'multiple-choice' ? ask.options : [];
@@ -254,17 +281,76 @@ const inOptionOrder = (
 };
 
 /**
+ * WHAT A CARD NEEDS FROM THE OWNER, AND SO HOW IT LOOKS — one shape per kind (docs/agenda.md, "What I need from
+ * you"); `agenda-shape.ts` holds the words each is taught and drawn with:
+ *
+ * - `choice`: ONE question, each option explained, the options as buttons.
+ * - `yesno`: one question, Yes and No.
+ * - `approval`: what is being approved and its effect, Approve and Deny.
+ * - `review`: what to look at, Approve and Request changes.
+ * - `reply`: one open question, answered in the reply box: no buttons.
+ * - `answers`: several questions, or a question mixed with steps: a numbered list of each answer wanted, all of
+ *   them given in one reply — no buttons.
+ * - `todo`: numbered steps, then Mark as done.
+ * - `info`: something to know (a notice too), Got it.
+ * - `input`: a value typed into the item's own form (docs/input-requests.md).
+ */
+export type AgendaShape = 'choice' | 'yesno' | 'approval' | 'review' | 'reply' | 'answers' | 'todo' | 'info' | 'input';
+
+/** What a card's shape is read from: its kind, ask, questions and steps, and whether it is a notice. */
+export type AgendaShapeSource = Pick<AgendaCardSource, 'kind' | 'ask' | 'questions' | 'steps'> & {
+  readonly notice?: true | undefined;
+  readonly confirms?: unknown;
+};
+
+/** The card's shape, from its stored fields alone, so an item raised before shapes reads in one too. */
+export const agendaShape = (item: AgendaShapeSource): AgendaShape => {
+  if (item.notice === true) return 'info';
+  const kind = agendaCardKind(item);
+  if (kind === 'input') return 'input';
+  // A held configuration change is one choice the daemon wrote: Allow, Deny or Discard change.
+  if (item.confirms !== undefined) return 'choice';
+  if (kind === 'task') return 'todo';
+  if (kind === 'info') return 'info';
+  // More than one answer is wanted: several questions, or a question with steps to follow as well.
+  if ((item.questions?.length ?? 0) > 1 || (item.steps?.length ?? 0) > 0) return 'answers';
+  switch (kind) {
+    case 'choice':
+      return 'choice';
+    case 'yesno':
+      return 'yesno';
+    case 'permission':
+      return 'approval';
+    case 'review':
+      return 'review';
+    case 'reply':
+      return 'reply';
+  }
+};
+
+/** The answers a shape keeps on its card: none when the reply box is the answer, only Mark as done or Got it. */
+const SHAPE_KEEPS: Readonly<Partial<Record<AgendaShape, (answer: AgendaCardAnswer) => boolean>>> = {
+  reply: () => false,
+  answers: () => false,
+  input: () => false,
+  todo: answer => answer.does === 'done' || answer.does === 'dismiss',
+  info: answer => answer.does === 'done',
+};
+
+/**
  * The card's answers, left · up · right: the ones it was raised with, else its kind's defaults — which
  * is how an item from before cards reads (its choice keeps on its row what its brief recommends) — a row of
- * options always in the options list's order (`inOptionOrder`).
+ * options always in the options list's order (`inOptionOrder`), and only those its shape offers (`SHAPE_KEEPS`).
  */
-export const agendaCardAnswers = (item: AgendaCardSource): AgendaCardAnswer[] =>
-  byDirection(
+export const agendaCardAnswers = (item: AgendaCardSource & AgendaShapeSource): AgendaCardAnswer[] => {
+  const keeps = SHAPE_KEEPS[agendaShape(item)] ?? (() => true);
+  return byDirection(
     inOptionOrder(
       item,
       item.answers ?? defaultAgendaAnswers(agendaCardKind(item), item.ask, recommendedAgendaOption(item)),
     ),
-  );
+  ).filter(keeps);
+};
 
 /** The answer a direction gives on this card, if any. */
 export const answerInDirection = (

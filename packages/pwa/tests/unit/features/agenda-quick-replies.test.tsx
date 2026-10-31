@@ -180,51 +180,65 @@ describe('the quick replies', () => {
     expect(root().querySelector('[data-agenda-quick-replies]')).toBeNull();
   });
 
-  test('says an item with its ferret is being waited on, and offers Clear for a notice', async () => {
+  test('says an item with its ferret is being waited on, and offers Got it for a notice', async () => {
     await draw(agendaItem('A2', { ask: { kind: 'permission' }, waitingOn: 'ferret' } as Partial<AgendaItem>), {
       waitingOn: 'Zoe',
     });
     expect(root().textContent).toContain('With Zoe — it will update this.');
     const notice = agendaItem('A3', { notice: true } as Partial<AgendaItem>);
     const spy = await draw(notice);
+    expect(one('[data-agenda-clear]').textContent).toBe('Got it');
     await interact(() => one<HTMLButtonElement>('[data-agenda-clear]').click());
     expect(spy.acted[0]).toMatchObject({ kind: 'resolve', label: 'Clear' });
   });
 });
 
-describe('several questions', () => {
-  const sendingProps = (calls: string[], extra: { ready?: boolean; canUseRecommended?: boolean } = {}) => ({
-    sending: {
-      ready: extra.ready ?? true,
-      canUseRecommended: extra.canUseRecommended ?? true,
-      onSend: () => calls.push('send'),
-      onUseRecommended: () => calls.push('recommended'),
+describe('Request changes', () => {
+  const review = agendaItem('A5', { kind: 'review', ask: { kind: 'answer-review' } } as Partial<AgendaItem>);
+  const requestChanges = (calls: string[]) => ({
+    requestChanges: {
+      answer: { direction: 'left' as const, does: 'clarify' as const, label: 'Request changes' },
+      onTap: () => calls.push('request'),
     },
   });
-  const several = agendaItem('A5', {
-    questions: [{ question: 'Which day?' }, { question: 'Who?' }],
-  } as Partial<AgendaItem>);
 
-  test('"Send answers" and "All recommended" are the row’s chips', async () => {
+  test('is a button on the left beside Approve, tapped only: it hands over to the host, never sends by itself', async () => {
     const calls: string[] = [];
-    await draw(several, sendingProps(calls));
-    await interact(() => one<HTMLButtonElement>('[data-agenda-use-recommended]').click());
-    await interact(() => one<HTMLButtonElement>('[data-agenda-send-answers]').click());
-    expect(calls).toEqual(['recommended', 'send']);
+    const spy = await draw(review, requestChanges(calls));
+    const labels = [...root().querySelectorAll('.fy-qr__chip')].map(each => each.textContent);
+    expect(labels).toEqual(['Request changes', '→Approve']);
+    await interact(() => answer('Request changes').click());
+    expect(calls).toEqual(['request']);
+    expect(spy.acted).toEqual([]);
+    // The swipe left gives nothing: its words are the composer's.
+    await drag({ x: 0, y: 200 });
+    expect(spy.acted).toEqual([]);
   });
 
-  test('"Send answers" waits for a pick for each question, and "All recommended" only shows when each has one', async () => {
+  test('is not drawn where the host cannot take the owner to the composer, and does nothing while busy', async () => {
+    await draw(review);
+    expect(root().querySelector('[data-agenda-option="Request changes"]')).toBeNull();
     const calls: string[] = [];
-    await draw(several, sendingProps(calls, { ready: false, canUseRecommended: false }));
-    expect(one<HTMLButtonElement>('[data-agenda-send-answers]').disabled).toBe(true);
-    expect(root().querySelector('[data-agenda-use-recommended]')).toBeNull();
+    await draw(review, { ...requestChanges(calls), busy: true });
+    await interact(() => answer('Request changes').click());
+    expect(calls).toEqual([]);
   });
+});
 
-  test('a busy item sends nothing', async () => {
-    const calls: string[] = [];
-    await draw(several, { ...sendingProps(calls), busy: true });
-    expect(one<HTMLButtonElement>('[data-agenda-send-answers]').disabled).toBe(true);
-    expect(one<HTMLButtonElement>('[data-agenda-use-recommended]').disabled).toBe(true);
+describe('a card answered in words', () => {
+  test('draws no buttons for an open question or for several questions', async () => {
+    await draw(agendaItem('A6', { ask: { kind: 'open-question' } } as Partial<AgendaItem>));
+    expect(root().querySelector('[data-agenda-quick-replies]')).toBeNull();
+    await draw(
+      agendaItem('A7', {
+        ask: { kind: 'open-question' },
+        questions: [
+          { question: 'Which day?', options: [{ label: 'Monday' }, { label: 'Friday' }] },
+          { question: 'Who?', options: [{ label: 'Zoe' }, { label: 'Kit' }] },
+        ],
+      } as Partial<AgendaItem>),
+    );
+    expect(root().querySelector('[data-agenda-quick-replies]')).toBeNull();
   });
 });
 
