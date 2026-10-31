@@ -72,7 +72,7 @@ describe('counting an outcome by who acted', () => {
     should(today(actual)?.stopped).deepEqual({ auto: 0, jev: 0, llm: 0 });
   });
 
-  it('should count neither a failed attempt nor a closed leftover browser', () => {
+  it('should count neither a failed attempt nor a closed leftover browser as what became of a flag', () => {
     // Arrange
     const state = EMPTY_WARDEN_STATE;
 
@@ -81,8 +81,12 @@ describe('counting an outcome by who acted', () => {
     const closed = recordWardenOutcome(state, action({ action: 'close_leftover' }));
 
     // Assert
-    should(failed).equal(state);
-    should(closed).equal(state);
+    for (const actual of [failed, closed]) {
+      should(today(actual)?.moved).deepEqual({ auto: 0, jev: 0, llm: 0 });
+      should(today(actual)?.cleared).deepEqual({ auto: 0, jev: 0, llm: 0 });
+      should(today(actual)?.stopped).deepEqual({ auto: 0, jev: 0, llm: 0 });
+      should(today(actual)?.asked).deepEqual({ auto: 0, jev: 0, llm: 0 });
+    }
   });
 
   it('should read the actor from what the action says when it carries none', () => {
@@ -228,10 +232,10 @@ describe('folding the snapshot counters in', () => {
     should(today(actual)).containEql({ investigations: 1, investigationUsd: 0.2 });
   });
 
-  it('should keep the last fourteen days, oldest first', () => {
+  it('should keep the last thirty days, oldest first', () => {
     // Arrange
-    const days = Array.from({ length: 20 }, (_, index) =>
-      emptyWardenDay(new Date(NOON - (19 - index) * DAY_MS).toISOString().slice(0, 10)),
+    const days = Array.from({ length: 40 }, (_, index) =>
+      emptyWardenDay(new Date(NOON - (39 - index) * DAY_MS).toISOString().slice(0, 10)),
     );
 
     // Act
@@ -240,22 +244,22 @@ describe('folding the snapshot counters in', () => {
     // Assert
     should(actual.daily).have.length(WARDEN_DAILY_KEEP_DAYS);
     should(actual.daily?.at(-1)?.day).equal('2026-07-31');
-    should(actual.daily?.[0]?.day).equal('2026-07-18');
+    should(actual.daily?.[0]?.day).equal('2026-07-02');
   });
 });
 
 describe('the history the status shows', () => {
-  it('should be at most seven days, oldest first and today last, only those the daemon kept', () => {
+  it('should be at most thirty days, oldest first and today last, only those the daemon kept', () => {
     // Arrange
-    const days = Array.from({ length: 10 }, (_, index) =>
-      emptyWardenDay(new Date(NOON - (9 - index) * DAY_MS).toISOString().slice(0, 10)),
+    const days = Array.from({ length: 40 }, (_, index) =>
+      emptyWardenDay(new Date(NOON - (39 - index) * DAY_MS).toISOString().slice(0, 10)),
     );
 
     // Act
     const actual = wardenHistory({ daily: days }, NOON);
 
     // Assert
-    should(actual).have.length(7);
+    should(actual).have.length(30);
     should(actual.map(entry => entry.day)).deepEqual([...actual.map(entry => entry.day)].sort());
     should(actual.at(-1)?.day).equal('2026-07-31');
   });

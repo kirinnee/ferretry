@@ -24,6 +24,7 @@ import {
   TaskRefSchema,
   type WardenAction,
   WardenActionSchema,
+  WardenActorSchema,
   WardenClearedBySchema,
   type WardenDayStats,
   WardenDayStatsSchema,
@@ -44,6 +45,7 @@ import type { WardenFailoverState } from './failover.ts';
 import type { OrphanMemory } from './orphans.ts';
 import type { ReviveState } from './revive.ts';
 import { WardenFailoverPolicySchema, WardenSelectionReasonSchema } from './provenance.ts';
+import type { ReviveWatch } from './revive-watch.ts';
 import type { WardenCostAverage, WardenGuardHealth, WardenInvestigationRecord, WardenTriageDay } from './triage.ts';
 
 const Instant = z.string().min(1);
@@ -385,12 +387,14 @@ export interface WardenRuntimeState {
   /** Why each queued target is queued, keyed by target session id. */
   readonly queueMeta?: Readonly<Record<string, WardenQueueEntryMeta>>;
   readonly sweepCoverage?: WardenSweepCoverage;
-  /** The last 14 UTC days of the Warden's work, oldest first (`daily.ts`). Absent in a document that predates it. */
+  /** The last 30 UTC days of the Warden's work, oldest first (`daily.ts`). Absent in a document that predates it. */
   readonly daily?: readonly WardenDayStats[];
   /** The sequence of the last investigator named `warden-xxxxxx`; the next one is issued after it. */
   readonly investigatorSequence?: number;
   /** What auto-revive remembers: who was revived and when, the breaker, the deaths already explained. */
   readonly revive?: ReviveState;
+  /** Ferrets the Warden brought back that have not yet shown progress or run out of time (`revive-watch.ts`). */
+  readonly reviveWatch?: readonly ReviveWatch[];
   /**
    * The orphaned cards the Warden told somebody about (`orphans.ts`), keyed by card id, kept while each
    * card stays orphaned by the same ferret: what stops it telling them again every sweep.
@@ -416,6 +420,13 @@ const ReviveStateSchema = z.object({
   batches: z.array(z.object({ at: Instant, ids: z.array(z.string().min(1)) })).default([]),
   breaker: z.object({ openedAt: Instant, until: Instant, why: z.string() }).optional(),
   refused: z.record(z.string(), Instant).default({}),
+});
+
+const ReviveWatchSchema = z.object({
+  sessionId: z.string().min(1),
+  at: Instant,
+  actor: WardenActorSchema,
+  action: z.enum(['revive', 'resume']),
 });
 
 const RuntimeStateSchema = z.object({
@@ -447,6 +458,7 @@ const RuntimeStateSchema = z.object({
   daily: DailySchema.optional(),
   investigatorSequence: z.number().int().min(0).max(WARDEN_INVESTIGATOR_MAX_SEQUENCE).optional(),
   revive: ReviveStateSchema.optional(),
+  reviveWatch: z.array(ReviveWatchSchema).optional(),
   orphans: z
     .record(
       z.string(),
