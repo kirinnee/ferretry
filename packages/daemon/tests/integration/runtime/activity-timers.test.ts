@@ -10,7 +10,7 @@ import {
 import { BoardService } from '../../../src/lib/board/index.ts';
 import { GitHubWatcher, type GitHubWatcherPorts } from '../../../src/lib/board-github/index.ts';
 import { ActivityLedger } from '../../../src/lib/runtime/liveness.ts';
-import { world } from '../board/support.ts';
+import { world } from '../../unit/board/support.ts';
 
 const WATCH = 'board github watch';
 
@@ -144,5 +144,21 @@ describe('afterAsActivity', () => {
     // Assert
     should(ran).deepEqual(['ran']);
     should(host.pending).equal(0);
+  });
+});
+
+describe('afterAsActivity on the runtime timers', () => {
+  it('should arm and cancel a real timer, unreferenced or not, without waiting for it', () => {
+    // Arrange
+    const ran: string[] = [];
+
+    // Act — far enough ahead that neither can fire before it is cancelled.
+    const plain = afterAsActivity(undefined, WATCH, () => ran.push('plain'), 60_000);
+    const unreferenced = afterAsActivity(ledger(), WATCH, () => ran.push('unreferenced'), 60_000, { unref: true });
+    plain();
+    unreferenced();
+
+    // Assert
+    should(ran).deepEqual([]);
   });
 });
