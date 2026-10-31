@@ -1274,6 +1274,7 @@ import {
   withContext,
   withLivenessLedger,
   withOutdated,
+  withRevive,
   xvfbMissingMessage,
 } from '../src/lib/index.ts';
 import {
@@ -11636,24 +11637,26 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // next process would restart.
           { next: () => crypto.randomUUID() },
         ),
-        sessions: withContext(
-          withOutdated(sessions, { outdated: outdatedFor, now: () => Date.parse(clock.now()), ttlMs: 5_000 }),
-          {
-            // The window the account's catalog declares for each session's model, read once per roster.
-            declared: async () => {
-              const fleet = await accounts.accounts();
-              return view => {
-                const account = findAccountByAgent(fleet, view.config.agent);
-                const model = view.config.model ?? view.config.modelHint;
-                return account === undefined || model === undefined
-                  ? undefined
-                  : declaredModel(account, model)?.context;
-              };
+        sessions: withRevive(
+          withContext(
+            withOutdated(sessions, { outdated: outdatedFor, now: () => Date.parse(clock.now()), ttlMs: 5_000 }),
+            {
+              // The window the account's catalog declares for each session's model, read once per roster.
+              declared: async () => {
+                const fleet = await accounts.accounts();
+                return view => {
+                  const account = findAccountByAgent(fleet, view.config.agent);
+                  const model = view.config.model ?? view.config.modelHint;
+                  return account === undefined || model === undefined
+                    ? undefined
+                    : declaredModel(account, model)?.context;
+                };
+              },
+              overrides: contextWindowOverrides,
+              now: () => Date.parse(clock.now()),
+              ttlMs: 30_000,
             },
-            overrides: contextWindowOverrides,
-            now: () => Date.parse(clock.now()),
-            ttlMs: 30_000,
-          },
+          ),
         ),
         // A name in any `:sessionId` is resolved over the same candidates the send and signal domains read,
         // so a route, the attribution on a message and a declared wait agree on which agent a name means.

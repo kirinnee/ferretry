@@ -859,6 +859,16 @@ export const SessionOutdatedSchema = z.strictObject({
 export type SessionOutdated = z.infer<typeof SessionOutdatedSchema>;
 
 /**
+ * Whether a session can be brought back, with the reason in words: the one answer every Resume button
+ * reads, so no surface decides it from the status on its own. Derived when the view is read, never stored.
+ */
+export const SessionReviveSchema = z.strictObject({
+  revivable: z.boolean(),
+  reason: z.string().min(1),
+});
+export type SessionRevive = z.infer<typeof SessionReviveSchema>;
+
+/**
  * How full a session's context window is, from the newest usage the harness recorded.
  *
  * Derived when the view is read, never stored: the stored facts are the harness's own token count
@@ -881,6 +891,8 @@ export type SessionContext = z.infer<typeof SessionContextSchema>;
 export const SessionViewSchema = z.object({
   config: SessionConfigSchema,
   state: SessionStateSchema,
+  /** Whether this session can be brought back, and why (or why not); see {@link SessionReviveSchema}. Absent from a daemon that predates it. */
+  revive: SessionReviveSchema.optional(),
   /** Present only while the running ferret carries out-of-date instructions (`fy restart --outdated`). */
   outdated: SessionOutdatedSchema.optional(),
   /** How full the context window is; absent while unknown (see {@link SessionContextSchema}). */

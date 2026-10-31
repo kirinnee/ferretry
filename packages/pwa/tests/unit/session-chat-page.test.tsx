@@ -1428,6 +1428,27 @@ describe('SessionChatPage', () => {
     run(() => page.unmount());
   });
 
+  test('a stopped ferret keeps its Resume button in the bar on a phone, and a running one draws none', async () => {
+    const draw = (status: 'stopped' | 'running') =>
+      renderSessionChatPage(
+        <SessionChatPage
+          client={client([], sessionView('shared', { state: { status } }))}
+          connection={alpha}
+          entries={[]}
+          onSessionChange={() => undefined}
+          presentation="sheet"
+          session={sessionView('shared', { state: { status } })}
+        />,
+      );
+    const stopped = draw('stopped');
+    expect(barAction(stopped.root, 'Resume session')).toBeDefined();
+    run(() => stopped.unmount());
+    const running = draw('running');
+    expect(hasBarAction(running.root, 'Resume session')).toBe(false);
+    expect(hasBarAction(running.root, 'Interrupt turn')).toBe(false);
+    run(() => running.unmount());
+  });
+
   test('resumes finished sessions, reports lifecycle failures, and fences a wrong-session answer', async () => {
     const calls: string[] = [];
     const finished = sessionView('shared', { state: { status: 'completed' } });

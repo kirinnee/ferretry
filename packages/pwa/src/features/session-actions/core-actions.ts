@@ -28,6 +28,7 @@ import type { ReactNode } from 'react';
 import { TERMINAL_STATUSES } from '../../shell/status-mark.tsx';
 import { isOutdated, outdatedSectionWords } from '../restart-outdated/outdated-model.ts';
 import { HARNESS_SHORT, otherHarness } from '../fleet/credentials/credentials-model.ts';
+import { reviveOffer } from '../../shell/revive-offer.ts';
 import type { SessionActionContribution, SessionActionFormHost } from './registry.ts';
 
 export interface CoreActionContext {
@@ -221,7 +222,7 @@ export const CORE_SESSION_ACTIONS: readonly SessionActionContribution<CoreAction
     group: 'danger',
     order: 20,
     build: context =>
-      context.canControl && terminal(context.view) && !killFailed(context.view)
+      reviveOffer(context.view, context.canControl).offered
         ? { kind: 'run', id: SESSION_ACTION_IDS.resume, label: 'Resume ferret', icon: Play, run: context.resume }
         : null,
   },
