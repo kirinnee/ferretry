@@ -32,6 +32,7 @@ import {
   type SharedCatalogItem,
   SharedCatalogItemSchema,
   type SharedCatalogManifestEntry,
+  type SignedCatalogManifest,
   type UpdateCatalogRequest,
   type WithdrawnCatalogItem,
   CatalogItemNameSchema,
@@ -308,44 +309,14 @@ export class SharedCatalogService {
       if (item.withdrawnAt !== undefined)
         throw new CatalogRefusal('item_withdrawn', `${item.name} was withdrawn, so it cannot be exported.`);
     }
-    const entries: SharedCatalogManifestEntry[] = live.map(item => {
-      const version = latestVersion(item);
-      return {
-        itemId: item.itemId,
-        kind: item.kind,
-        name: item.name,
-        summary: version.summary,
-        version: version.version,
-        digest: version.digest,
-        size: version.size,
-        publishedAt: version.publishedAt,
-        ...(item.harness === undefined ? {} : { harness: item.harness }),
-      };
-    });
     const items: SharedCatalogItem[] = [];
     for (const item of live) if (chosen.has(item.itemId)) items.push(await this.#frozen(item, latestVersion(item)));
-    const signed = await signCatalogManifest(this.deps.crypto, identity, {
-      format: SHARED_CATALOG_MANIFEST_FORMAT,
-      version: 1,
-      publisher: identity.daemonId,
-      publisherName: catalog.publisherName,
-      catalogId: catalog.id,
-      name: catalog.name,
-      description: catalog.description,
-      visibility: catalog.visibility,
-      revision: catalog.revision,
-      issuedAt: catalog.issuedAt,
-      items: entries,
-      withdrawn: catalog.items.flatMap(item =>
-        item.withdrawnAt === undefined ? [] : [{ itemId: item.itemId, at: item.withdrawnAt }],
-      ),
-    });
-    if (!signed.ok) throw new CatalogRefusal('export_failed', signed.reason);
+    const signed = await this.#signedManifest(identity, catalog);
     const parsed = SharedCatalogFileSchema.safeParse({
       format: SHARED_CATALOG_FILE_FORMAT,
       version: 1,
       exportedAt: catalog.issuedAt,
-      signedManifest: signed.value,
+      signedManifest: signed,
       items,
     });
     if (!parsed.success)
@@ -368,7 +339,62 @@ export class SharedCatalogService {
     return parsed.data;
   }
 
+  // ── What a member reads ────────────────────────────────────────────────────────────────────────
+
+  /** The catalog's signed manifest as it stands, made exactly as an export makes it. */
+  async signedManifest(catalogId: string): Promise<SignedCatalogManifest> {
+    const identity = await this.#identity();
+    return await this.#signedManifest(identity, findCatalog(await this.deps.documents.read(), catalogId));
+  }
+
+  /** One frozen version of a live item, checked against the digest the document lists for it. */
+  async frozenItem(catalogId: string, itemId: string, version: number): Promise<SharedCatalogItem> {
+    const catalog = findCatalog(await this.deps.documents.read(), catalogId);
+    const item = findItem(catalog, itemId);
+    if (item.withdrawnAt !== undefined)
+      throw new CatalogRefusal('item_withdrawn', `${item.name} was withdrawn, so it cannot be read.`);
+    const stored = item.versions.find(candidate => candidate.version === version);
+    if (stored === undefined)
+      throw new CatalogRefusal('item_unknown', `${item.name} has no version ${String(version)}.`);
+    return await this.#frozen(item, stored);
+  }
+
   // ── Internals ──────────────────────────────────────────────────────────────────────────────────
+
+  async #signedManifest(identity: DaemonIdentity, catalog: StoredCatalog): Promise<SignedCatalogManifest> {
+    const entries: SharedCatalogManifestEntry[] = liveItems(catalog).map(item => {
+      const version = latestVersion(item);
+      return {
+        itemId: item.itemId,
+        kind: item.kind,
+        name: item.name,
+        summary: version.summary,
+        version: version.version,
+        digest: version.digest,
+        size: version.size,
+        publishedAt: version.publishedAt,
+        ...(item.harness === undefined ? {} : { harness: item.harness }),
+      };
+    });
+    const signed = await signCatalogManifest(this.deps.crypto, identity, {
+      format: SHARED_CATALOG_MANIFEST_FORMAT,
+      version: 1,
+      publisher: identity.daemonId,
+      publisherName: catalog.publisherName,
+      catalogId: catalog.id,
+      name: catalog.name,
+      description: catalog.description,
+      visibility: catalog.visibility,
+      revision: catalog.revision,
+      issuedAt: catalog.issuedAt,
+      items: entries,
+      withdrawn: catalog.items.flatMap(item =>
+        item.withdrawnAt === undefined ? [] : [{ itemId: item.itemId, at: item.withdrawnAt }],
+      ),
+    });
+    if (!signed.ok) throw new CatalogRefusal('export_failed', signed.reason);
+    return signed.value;
+  }
 
   #serially<T>(run: () => Promise<T>): Promise<T> {
     const result = this.#queue.then(run, run);

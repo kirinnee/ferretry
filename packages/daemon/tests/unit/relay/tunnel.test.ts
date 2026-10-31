@@ -10,7 +10,7 @@ import { describe, it } from 'bun:test';
 import { randomBytes } from 'node:crypto';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { MAX_TUNNEL_BODY_BYTES } from '@ferretry/protocol';
-import { fromBase64Url, MAX_PLAINTEXT_BYTES, toBase64Url, utf8Bytes } from '@ferretry/relay';
+import { fromBase64Url, MAX_PLAINTEXT_BYTES, SESSION_PROTOCOL_ID, toBase64Url, utf8Bytes } from '@ferretry/relay';
 import should from 'should';
 import { type ApiResponse, BodyTooLargeError } from '../../../src/lib/api/http.ts';
 import {
@@ -18,6 +18,7 @@ import {
   encodeTunnelMessage,
   type RelayTunnelDaemonMessage,
   tunnelApiRequest,
+  tunnelMemberRequest,
   tunnelResponseMessages,
   tunnelStreamRequest,
 } from '../../../src/lib/relay/tunnel.ts';
@@ -27,6 +28,7 @@ const DEVICE_ID = `fy_device_id_${'a'.repeat(22)}`;
 const APP_SESSION = toBase64Url(new Uint8Array(16).fill(1));
 const PROOF = toBase64Url(new Uint8Array(64).fill(2));
 const DEVICE = { deviceId: DEVICE_ID, appSession: APP_SESSION } as const;
+const MEMBER = { memberId: `mbr_${'a'.repeat(22)}`, keyId: `mk_${'b'.repeat(22)}`, appSession: APP_SESSION } as const;
 
 const request = (patch: Record<string, unknown> = {}): unknown => ({
   t: 'req',
@@ -115,6 +117,81 @@ describe('the session tunnel envelope', () => {
     should(await built.text()).equal('{"name":"x"}');
     // Assert — a request with no body reads as an empty one rather than throwing on demand.
     should(await tunnelApiRequest({ method: 'GET', path: '/v1/health' }, DEVICE, 's1').text()).equal('');
+  });
+
+  it('should read a join and a member claim as the two other credential records, and refuse their strays', () => {
+    const join = {
+      t: 'join',
+      protocol: 'ferretry-relay/2',
+      code: 'ABCD-2345',
+      clientName: 'Ferretry PWA',
+      memberKey: 'k'.repeat(44),
+      boxKey: 'b'.repeat(43),
+      proof: PROOF,
+    };
+    const member = {
+      t: 'member',
+      protocol: 'ferretry-relay/2',
+      keyId: MEMBER.keyId,
+      appSession: APP_SESSION,
+      proof: PROOF,
+    };
+
+    should(decodeTunnelClientMessage(record(join))).containDeep({ t: 'join', code: 'ABCD-2345' });
+    should(decodeTunnelClientMessage(record(member))).containDeep({ t: 'member', keyId: MEMBER.keyId });
+    should(decodeTunnelClientMessage(record({ ...join, extra: 1 }))).be.null();
+    should(decodeTunnelClientMessage(record({ ...join, protocol: 'ferretry-relay/1' }))).be.null();
+    should(decodeTunnelClientMessage(record({ ...member, deviceId: DEVICE_ID }))).be.null();
+    should(decodeTunnelClientMessage(record({ ...member, proof: 'short' }))).be.null();
+  });
+
+  it('should write a join outcome as the exact text it was given, and every other message as JSON', () => {
+    const padded = `{"t":"join-refused"}${' '.repeat(40)}`;
+
+    should(new TextDecoder().decode(encodeTunnelMessage({ t: 'join-outcome', text: padded }))).equal(padded);
+    should(
+      new TextDecoder().decode(
+        encodeTunnelMessage({ t: 'renew', protocol: SESSION_PROTOCOL_ID, nonce: 'n', expiresAt: 'x' }),
+      ),
+    ).equal('{"t":"renew","protocol":"ferretry-relay/2","nonce":"n","expiresAt":"x"}');
+  });
+
+  it('should build a member request that carries the proven member, never a device, and is never loopback', async () => {
+    const transcript = new Uint8Array(32).fill(3);
+
+    const built = tunnelMemberRequest(
+      {
+        method: 'POST',
+        path: '/v1/shared/redeem',
+        query: [['a', 'b']],
+        headers: { 'content-type': 'application/json' },
+        body: '{"code":"x"}',
+      },
+      MEMBER,
+      'rendezvous-session-1',
+      { loopback: true, privilegedLoopback: true, clientAddress: '127.0.0.1' },
+      transcript,
+    );
+
+    should(built.member).deepEqual(MEMBER);
+    should(built.device).be.undefined();
+    should(built.loopback).be.false();
+    should(built.privilegedLoopback).be.false();
+    should(built.clientAddress).equal('127.0.0.1');
+    should(built.transcriptHash).equal(transcript);
+    should(built.headers.has('authorization')).be.false();
+    should(built.query.get('a')).deepEqual(['b']);
+    should(await built.text()).equal('{"code":"x"}');
+    await built.text(1).then(
+      () => {
+        throw new Error('a body over the limit was read');
+      },
+      error => should(error).be.instanceOf(BodyTooLargeError),
+    );
+    const bare = tunnelMemberRequest({ method: 'GET', path: '/v1/shared/me' }, MEMBER, 's2');
+    should(bare.clientAddress).equal('relay-session:s2');
+    should(bare.transcriptHash).be.undefined();
+    should(await bare.text()).equal('');
   });
 
   it('should carry the session’s transcript hash on the request when it is given one, and none otherwise', () => {

@@ -13,6 +13,9 @@ import {
   isLoopbackHost,
   isWildcardHost,
   LOOPBACK,
+  MEMBER_UNLOCK_DAYS_DEFAULT,
+  MEMBER_UNLOCK_DAYS_MAX,
+  MEMBER_UNLOCK_DAYS_MIN,
 } from '@ferretry/protocol';
 import { SocketEndpointSchema } from '@ferretry/relay';
 import { z } from 'zod';
@@ -356,6 +359,21 @@ export const DaemonConfigDocumentSchema = z
      * one down the send path directly, as before the queue. Read at start; a change needs a restart.
      */
     delivery: z.object({ queue: z.boolean().default(true) }).prefault({}),
+    /**
+     * WHAT A SHARED-CATALOG MEMBER MAY DO WITH THIS MACHINE (docs/catalogs.md § Members). `memberUnlockDays` is how
+     * long one passkey assertion unlocks a member's browser (1 to 90 days, default 30): a member only reads, so the
+     * device unlock's hours would be needlessly strict. Read at start; a change needs a restart.
+     */
+    catalogs: z
+      .strictObject({
+        memberUnlockDays: z
+          .number()
+          .int()
+          .min(MEMBER_UNLOCK_DAYS_MIN)
+          .max(MEMBER_UNLOCK_DAYS_MAX)
+          .default(MEMBER_UNLOCK_DAYS_DEFAULT),
+      })
+      .prefault({}),
     /**
      * THE HOUSEKEEPING WORKER (docs/design/housekeeping-worker.md, stage 4): the fleet's credential reads,
      * free usage reads and passive usage reads run on their own thread, and only facts come back — a

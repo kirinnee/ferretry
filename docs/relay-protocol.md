@@ -1516,13 +1516,13 @@ sessions). Each
 one commits the session to a mode, the mode is decided by that record's own shape rather than by any
 later negotiation, and each mode's terminal state is unreachable from the others:
 
-| sequence-1 record | the session is        | what follows                                                                                            |
-| ----------------- | --------------------- | ------------------------------------------------------------------------------------------------------- |
-| `auth`            | a **request session** | any number of `req`, each answered by `res` (in parts when large)                                       |
-| `stream`          | a **stream session**  | exactly one protocol-switching stream, in `data` frames, until it ends                                  |
-| `pair`            | a **pairing session** | one redemption attempt, one sealed outcome, then the session closes                                     |
-| `join`            | a **join session**    | one share-code redemption, one sealed outcome, then the session closes (Member sessions, from phase 2b) |
-| `member`          | a **member session**  | requests on the member route table only (Member sessions, from phase 2b)                                |
+| sequence-1 record | the session is        | what follows                                                                             |
+| ----------------- | --------------------- | ---------------------------------------------------------------------------------------- |
+| `auth`            | a **request session** | any number of `req`, each answered by `res` (in parts when large)                        |
+| `stream`          | a **stream session**  | exactly one protocol-switching stream, in `data` frames, until it ends                   |
+| `pair`            | a **pairing session** | one redemption attempt, one sealed outcome, then the session closes                      |
+| `join`            | a **join session**    | one share-code redemption, one sealed outcome, then the session closes (Member sessions) |
+| `member`          | a **member session**  | requests on the member route table only (Member sessions)                                |
 
 Any other message at sequence `1` ends the session with `4400`. So does any message a mode does not
 list: a `req` on a stream session, a second credential record anywhere, a `data` record on a request
@@ -2442,9 +2442,11 @@ and says so.
 
 ### Member sessions
 
-**Status: specified, not yet served.** This is the contract catalogs phase 2b builds against. Until it
-lands a daemon's union is still `auth`, `stream` and `pair`, and a `join` or `member` record is an unknown
-`t` that ends the session with `4400`.
+**Status: served (catalogs phase 2b-2).** A daemon's sequence-1 union is `auth`, `stream`, `pair`,
+`join` and `member`, on the direct carrier and the relay alike. The publisher half is built: the join
+gate (`catalog-members/join.ts`), the member route table (`catalog-members/shared-routes.ts`, mounted
+as `MemberDispatcher`), member passkeys and unlocks (`catalog-members/passkeys.ts`), and closing a revoked
+member's live sessions. The browser half is phase 2c; the end-to-end test is 2d.
 
 A catalog **member** is a person a publisher shared catalogs with ([catalogs.md](catalogs.md) § Members),
 not a paired device. Their browser reaches the publisher through exactly the carriers a device uses —
@@ -2528,6 +2530,14 @@ The publisher answers with exactly one sealed outcome and then `4440`, as a pair
      So two concurrent joins cannot both spend one code, and nothing a stranger sends can spend one at all.
 - **`joined.response` is `MemberJoinedResponseSchema`, whole**, `carriers` included, for the reason
   `paired.response` is whole. It has no field for a key, a proof or a fingerprint.
+- **As built.** The link seals the outcome through `padJoinOutcome`; an outcome that cannot be padded is the
+  refusal, never an unpadded record. The session is `concluding` before the join is judged, so a second
+  record is refused rather than racing a spent attempt, and the `4440` follows the sealed answer whatever
+  it was. The per-peer budget counts FAILED joins only (10 a minute) and is keyed by the socket's client
+  address on the direct carrier; a relayed or tunnelled join has no per-peer key. The publisher awaits the
+  write of the burn before it seals ANY outcome, a refusal included, and commits or releases the
+  reservation in a `finally`, so a failed write never leaves a slot held for its thirty-second lapse.
+  A daemon whose member side is not bound yet refuses every join identically.
 - **The browser keeps the key only after it reads `joined`.** An attempt whose answer never arrived is
   reported plainly; the owner's Members list shows the unused key, and it disappears on its own (below).
 - **The passkey window.** A new key can do exactly one thing for ten minutes: register ONE passkey
@@ -2571,6 +2581,12 @@ The publisher answers with exactly one sealed outcome and then `4440`, as a pair
   marks the key refused, says so, and keeps it — exactly as a paired device keeps its key on `4403` —
   until the person chooses to join again or to forget it, or a SEALED `member-revoked` arrives (phase 5).
   Joining again with a new code makes a NEW key; the refused one is never discarded silently.
+- **As built.** An unknown id is verified against a dummy key, so a bad id costs what a known one does. The
+  session is registered with the publisher's live-member registry only after the proof holds, and
+  registering re-reads the key, so a revoke landing between the proof and the registration still refuses
+  it. A revoke, a removed browser, an ended member or a deleted catalog ends the member's live sessions
+  with the same `4403` ("unknown device credential") an unknown key gets, so the carrier cannot tell a
+  revoke from a wrong key. `lastSeenAt` is recorded when a session opens.
 - Accepted, it answers `authenticated { accessExpiresAt }` and the session becomes a request session
   with a device session's lease, `renew` and close rules — the renew answered with the `member-renew`
   signature — on a **separate route table**: `/v1/shared/*` and nothing else. The dispatcher hands a
@@ -2578,6 +2594,26 @@ The publisher answers with exactly one sealed outcome and then `4440`, as a pair
   forgotten capability is still unreachable to a member. Its requests carry a member principal that
   meets **no** credential minimum of the main table (`authenticated`, `operator`, `admin-token`), and
   a test sweeps the main table to prove it.
+- **The member route table, as built** (`/v1/shared/*`, nine routes, no other):
+
+  | Route                                                          | Needs                                                       |
+  | -------------------------------------------------------------- | ----------------------------------------------------------- |
+  | `POST /v1/shared/passkeys/options`, `POST /v1/shared/passkeys` | the key; inside its window with no passkey yet, or unlocked |
+  | `POST /v1/shared/unlock/options`, `POST /v1/shared/unlock`     | the key (and a registered passkey)                          |
+  | `GET /v1/shared/me`                                            | unlocked                                                    |
+  | `GET /v1/shared/catalogs/:catalogId/manifest`                  | unlocked; `ETag` is the revision, `304` on a match          |
+  | `GET /v1/shared/catalogs/:catalogId/items/:itemId/:version`    | unlocked                                                    |
+  | `POST /v1/shared/redeem`                                       | unlocked                                                    |
+  | `DELETE /v1/shared/me/keys/self`                               | unlocked (a browser leaving)                                |
+
+  Every request re-reads the member's current grants before its handler runs; a key that is gone, or whose
+  member changed, is one `401`. A locked session asking for an unlocked route gets `403 member_locked`.
+  A catalog the member is not granted is a `404 catalog_unknown`, identical to one that does not exist.
+  Answers are `Cache-Control: no-store`. The main dispatcher refuses any request that carries a member
+  principal with `403` before it looks at a route, and the sweep test (`surface.test.ts`) walks every
+  route of the main table to prove a member is refused by each, and that no device credential is ever
+  accepted by `/v1/shared/*`.
+
 - A member session that has not unlocked with its member passkey reaches only `/v1/shared/unlock*` and,
   inside the key's window only, `/v1/shared/passkeys*` (the one-passkey rule above). Everything else —
   `GET /v1/shared/me` included, so a key-only holder never reads the member's name or catalogs — needs

@@ -5,6 +5,7 @@ import { ANALYTICS_PRICING_RATE_APPLICABILITY } from '@ferretry/protocol';
 import should from 'should';
 import { AUDITED_ROUTES, AUDITED_SOCKET_ROUTES } from '../../../../src/lib/audit/index.ts';
 import { BrowserProxyTester } from '../../../../src/lib/browser/proxy/index.ts';
+import { MemberDispatcher, type SharedRouteDeps } from '../../../../src/lib/catalog-members/shared-routes.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import { HandoverReconcileLoop } from '../../../../src/lib/handover/index.ts';
 import { NO_PERFORMANCE_PROBE } from '../../../../src/lib/performance/recorder.ts';
@@ -1577,6 +1578,107 @@ describe('the mounted daemon surface', () => {
     // And a LOOPBACK caller is unaffected: somebody at the machine already has the machine.
     const local = await sockets.upgrade(request({ path, headers: human, loopback: true }));
     should(local.outcome === 'refused' ? local.response.status : 0).equal(404);
+  });
+});
+
+describe('the member sessions and the main table', () => {
+  const member = { memberId: 'mbr_AAAAAAAAAAAAAAAAAAAAAA', keyId: 'mk_AAAAAAAAAAAAAAAAAAAAAA', appSession: 'app-1' };
+  const refuse = (): never => {
+    throw new Error('a request without a member reached the member side');
+  };
+  const concrete = (path: string): string => path.replace(/[:*][A-Za-z]+/gu, 'x1');
+  const never = async (): Promise<never> => {
+    throw new Error('a request without a member reached the member side');
+  };
+  const memberTable = new MemberDispatcher({
+    members: {
+      ready: never,
+      access: never,
+      admitRedeem: refuse,
+      commitRedeem: never,
+      release: never,
+      removeKey: never,
+    },
+    passkeys: {} as SharedRouteDeps['passkeys'],
+    catalogs: { catalogs: never, signedManifest: never, frozenItem: never },
+    publisher: () => ({ daemonId: '', daemonName: '', carriers: [] }),
+    audit: { record: async () => undefined },
+    now: () => 0,
+  });
+
+  it('should refuse a member on EVERY route of the main table, public ones and sockets included', async () => {
+    // Arrange
+    const mounted = subsystems();
+    await mounted.grants.refresh();
+    const http = createMountedDispatcher(base, mounted);
+    const sockets = createMountedSocketDispatcher(base, mounted);
+    const routes = mountedDaemonRoutes(base, mounted);
+    const socketRoutes = mountedSocketRoutes(mounted);
+
+    // Act
+    const served = [];
+    for (const route of routes) {
+      const asked = {
+        ...request({ method: route.method, path: concrete(route.path), headers: human, loopback: true }),
+        member,
+      };
+      served.push({ route: `${route.method} ${route.path}`, response: await http.dispatch(asked) });
+    }
+    const upgrades = [];
+    for (const route of socketRoutes) {
+      const asked = { ...request({ path: concrete(route.path), headers: human, loopback: true }), member };
+      upgrades.push({ route: `UPGRADE ${route.path}`, response: await sockets.upgrade(asked) });
+    }
+
+    // Assert — a sweep over a table that grew, not over a list written here.
+    should(served.length).be.above(100);
+    should(served.filter(entry => entry.response.status !== 403).map(entry => entry.route)).deepEqual([]);
+    should(
+      served
+        .filter(entry => (JSON.parse(entry.response.body) as { code?: string }).code !== 'forbidden')
+        .map(entry => entry.route),
+    ).deepEqual([]);
+    should(upgrades.length).be.above(0);
+    should(
+      upgrades
+        .filter(entry => entry.response.outcome !== 'refused' || entry.response.response.status !== 403)
+        .map(entry => entry.route),
+    ).deepEqual([]);
+  });
+
+  it('should keep every member route out of the main table, and answer none of them to a device', async () => {
+    // Arrange
+    const mounted = subsystems();
+    await mounted.grants.refresh();
+    const http = createMountedDispatcher(base, mounted);
+    const sockets = [...mountedSocketRoutes(mounted)];
+    const mainPaths = [...mountedDaemonRoutes(base, mounted), ...sockets].map(route => route.path);
+    const memberRoutes = memberTable.routes;
+
+    // Act
+    const asDevice = [];
+    for (const route of memberRoutes) {
+      asDevice.push(
+        await http.dispatch(
+          request({ method: route.method, path: concrete(route.path), headers: human, loopback: true }),
+        ),
+      );
+    }
+    const asNobody = [];
+    for (const route of memberRoutes) {
+      asNobody.push(
+        await memberTable.dispatch(
+          request({ method: route.method, path: concrete(route.path), headers: human, loopback: true }),
+        ),
+      );
+    }
+
+    // Assert — no pattern of the main table lives under /v1/shared, so the device credential finds nothing there…
+    should(mainPaths.filter(path => path.startsWith('/v1/shared'))).deepEqual([]);
+    should(asDevice.map(response => response.status)).deepEqual(memberRoutes.map(() => 404));
+    // …and the member table, handed the device's request with its admin bearer, answers one 401 and reads nothing.
+    should(memberRoutes.length).be.above(0);
+    should(asNobody.map(response => response.status)).deepEqual(memberRoutes.map(() => 401));
   });
 });
 

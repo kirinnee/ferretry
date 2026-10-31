@@ -31,7 +31,11 @@ import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
-import { CatalogMemberRefusal, type CatalogMemberRefusalCode } from '../../catalog-members/refusal.ts';
+import {
+  CATALOG_MEMBER_STATUS,
+  CatalogMemberRefusal,
+  type CatalogMemberRefusalCode,
+} from '../../catalog-members/refusal.ts';
 import type { CatalogMemberService } from '../../catalog-members/service.ts';
 
 const SHARING_USE: CapabilityDemand = { capability: 'sharing', axis: 'use' };
@@ -43,30 +47,12 @@ export interface CatalogMemberSubsystem {
   >;
 }
 
-/**
- * How each refusal answers. A damaged store is this machine's fault (500) and no address to put in a link is a
- * 503; the owner's mistakes are 404 (no such id) or 409 (the state will not take it).
- */
-const STATUS: Readonly<Record<CatalogMemberRefusalCode, number>> = {
-  share_refused: 409,
-  share_other_member: 409,
-  share_new_member: 409,
-  members_full: 409,
-  member_unknown: 404,
-  member_key_unknown: 404,
-  catalog_unknown: 404,
-  share_unknown: 404,
-  shares_full: 409,
-  catalogs_full: 409,
-  share_link_unavailable: 503,
-  store_damaged: 500,
-};
-
 async function answer(work: () => Promise<unknown>, success = 200): Promise<ApiResponse> {
   try {
     return jsonResponse(await work(), success);
   } catch (error) {
-    if (error instanceof CatalogMemberRefusal) throw new ApiError(STATUS[error.refusal], error.message, error.refusal);
+    if (error instanceof CatalogMemberRefusal)
+      throw new ApiError(CATALOG_MEMBER_STATUS[error.refusal], error.message, error.refusal);
     throw error;
   }
 }

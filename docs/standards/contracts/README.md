@@ -171,7 +171,7 @@ daemon does not serve (`unserved`), when the daemon declares a route no producti
 the old declaration stale and the new target undeclared rather than silently continuing to agree.
 
 This is a lexical TypeScript pass, not a grep. Its primary route file set is every `*.ts`/`*.tsx` file
-below `packages/daemon/src/lib/runtime/mounts` and `packages/daemon/src/lib/api/routes`; a containment
+below `packages/daemon/src/lib/runtime/mounts`, `packages/daemon/src/lib/api/routes` and `packages/daemon/src/lib/catalog-members` (the member table); a containment
 pass also scans all other daemon `{src,bin}` production TypeScript and exits `2` if a route-shaped
 object moved outside those declared directories. Its observation set is every other workspace
 package's `{src,bin}` production TypeScript. Tests are excluded because fixtures are not wires, and

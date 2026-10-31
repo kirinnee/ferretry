@@ -33,8 +33,8 @@ export interface CatalogDirectory {
 /**
  * Closes the live sessions of a member or of one browser of a member, AFTER the revoke is written.
  *
- * Phase 2b-1 plugs a no-op: nothing opens a member session yet. Phase 2b-2 registers the member route
- * table's live connections here, and a revoke already awaits it in the right place.
+ * `LiveMemberSessions` is the one that closes them: every live member session registers there, and a revoke
+ * awaits it in the right place.
  */
 export interface MemberSessionCloser {
   closeMember(memberId: string): Promise<void>;

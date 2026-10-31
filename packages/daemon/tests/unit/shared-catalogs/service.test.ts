@@ -388,4 +388,30 @@ describe('SharedCatalogService', () => {
     should(await r.service.remove(catalog.id)).deepEqual({ catalogId: catalog.id });
     should((await refusal(async () => await r.service.remove(catalog.id))).refusal).equal('catalog_unknown');
   });
+
+  it('should hand a member the signed manifest as an export makes it', async () => {
+    const { r, catalog } = await withSkill();
+    const exported = await r.service.exportCatalog(catalog.id, {});
+    const signed = await r.service.signedManifest(catalog.id);
+    should(JSON.stringify(signed)).equal(JSON.stringify(exported.signedManifest));
+    should((await refusal(async () => await r.service.signedManifest('cat_unknown00000000000000'))).refusal).equal(
+      'catalog_unknown',
+    );
+  });
+
+  it('should hand a member one frozen version, and refuse a withdrawn, missing or unknown one', async () => {
+    const { r, catalog, added } = await withSkill();
+    const item = await r.service.frozenItem(catalog.id, added.itemId, 1);
+    should(item.itemId).equal(added.itemId);
+    should((await refusal(async () => await r.service.frozenItem(catalog.id, added.itemId, 2))).refusal).equal(
+      'item_unknown',
+    );
+    should((await refusal(async () => await r.service.frozenItem('cat_unknown00000000000000', 'x', 1))).refusal).equal(
+      'catalog_unknown',
+    );
+    await r.service.withdraw(catalog.id, added.itemId);
+    should((await refusal(async () => await r.service.frozenItem(catalog.id, added.itemId, 1))).refusal).equal(
+      'item_withdrawn',
+    );
+  });
 });

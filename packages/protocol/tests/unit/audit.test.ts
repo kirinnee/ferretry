@@ -43,7 +43,7 @@ describe('audit schemas', () => {
 
     // Act / Assert
     for (const event of future) should(audit.AuditEventSchema.parse(event)).equal(event);
-    should(audit.AUDIT_EVENTS).have.length(44);
+    should(audit.AUDIT_EVENTS).have.length(48);
     should(audit.AuditEventSchema.parse('security.changed')).equal('security.changed');
     should(audit.AuditEventSchema.parse('device.key-rotated')).equal('device.key-rotated');
   });
@@ -65,6 +65,17 @@ describe('audit schemas', () => {
       should(audit.AUDIT_EVENTS).containEql(event);
       should(audit.AUDIT_KEPT_EVENTS).containEql(event);
     }
+  });
+
+  it('should declare the four member-session events, and keep only the join and the passkey past rotation', () => {
+    // Arrange
+    const kept = ['catalog.member.joined', 'catalog.member.passkey-added'] as const;
+    const general = ['catalog.member.unlocked', 'catalog.member.join-refused'] as const;
+
+    // Act / Assert
+    for (const event of [...kept, ...general]) should(audit.AuditEventSchema.parse(event)).equal(event);
+    for (const event of kept) should(audit.AUDIT_KEPT_EVENTS).containEql(event);
+    for (const event of general) should(audit.AUDIT_KEPT_EVENTS).not.containEql(event);
   });
 
   it('should only keep events the log can hold, each once', () => {

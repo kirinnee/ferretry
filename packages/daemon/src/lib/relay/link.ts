@@ -83,11 +83,16 @@ import {
   HEARTBEAT_RESPONSE,
   MAX_PLAINTEXT_BYTES,
   maySend,
+  type MemberJoinOutcomeContent,
+  memberAuthMessage,
+  memberJoinMessage,
+  memberRenewMessage,
   NONCE_BYTES,
   newReceiveWindow,
   newSendWindow,
   openChannel,
   openRecord,
+  padJoinOutcome,
   RELAY_CLOSE_CODES,
   RELAY_PROTOCOL_ID,
   RENDEZVOUS_SESSION_ID,
@@ -108,7 +113,7 @@ import {
   utf8Bytes,
   verifyDeviceProof,
 } from '@ferretry/relay';
-import type { ApiRequest, ApiResponse, SessionDevice } from '../api/http.ts';
+import type { ApiRequest, ApiResponse, SessionDevice, SessionMember } from '../api/http.ts';
 import { SOCKET_CLOSES, type SocketDownstream, type SocketHandler, type SocketUpgradeDecision } from '../api/socket.ts';
 import type {
   DeviceConnectionTracker,
@@ -116,6 +121,7 @@ import type {
   PairingRedemption,
   SessionPairingAttempt,
 } from '../pairing/index.ts';
+import type { MemberJoinCarrier, RelayMemberSessions } from './member-port.ts';
 import {
   decodeTunnelClientMessage,
   encodeTunnelMessage,
@@ -124,6 +130,8 @@ import {
   type RelayTunnelClientMessage,
   type RelayTunnelDaemonMessage,
   type RelayTunnelData,
+  type RelayTunnelJoin,
+  type RelayTunnelMember,
   type RelayTunnelPair,
   type RelayTunnelRequest,
   type RelayTunnelRequestPart,
@@ -132,6 +140,7 @@ import {
   tunnelApiRequest,
   tunnelDataFrame,
   tunnelDataMessage,
+  tunnelMemberRequest,
   tunnelResponseMessages,
   tunnelStreamRequest,
 } from './tunnel.ts';
@@ -342,6 +351,8 @@ export interface RelayLinkDependencies {
   readonly sockets: RelayStreamDispatch;
   readonly devices: RelayDeviceDirectory;
   readonly pairing: RelayPairingRedeemer;
+  /** The member side. Absent, every join is refused and every member key is unknown. */
+  readonly members?: RelayMemberSessions;
   readonly scheduler: RelayLinkScheduler;
   readonly clock: RelayLinkClock;
   /** The lease and its cap. Absent means {@link DEFAULT_ACCESS_LEASE_POLICY}. */
@@ -522,6 +533,8 @@ interface LinkSession {
   transcript: Uint8Array | undefined;
   /** The device this session proved, once it proved one. */
   device: SessionDevice | undefined;
+  /** The member browser this session proved, once it proved one. A session has a device, a member, or neither. */
+  member: SessionMember | undefined;
   /** When this session's authority ends unless the device renews it, and the timers that enforce it. */
   leaseExpiresAtMs: number;
   /** When the device first proved itself here; the session cap is counted from it. */
@@ -803,6 +816,7 @@ export class RelayLink {
       channel: undefined,
       transcript: undefined,
       device: undefined,
+      member: undefined,
       leaseExpiresAtMs: 0,
       provedAtMs: undefined,
       lease: undefined,
@@ -994,6 +1008,12 @@ export class RelayLink {
       case 'pair':
         await this.#redeemPairing(session, message);
         return;
+      case 'join':
+        await this.#joinMember(session, message);
+        return;
+      case 'member':
+        await this.#authenticateMember(session, message);
+        return;
       default:
         this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'the first record must be a credential');
     }
@@ -1138,15 +1158,26 @@ export class RelayLink {
     const nonce = session.renewNonce;
     session.renewNonce = undefined;
     const device = session.device;
+    const member = session.member;
     const transcript = session.transcript;
-    if (nonce === undefined || device === undefined || transcript === undefined) {
+    if (nonce === undefined || (device === undefined && member === undefined) || transcript === undefined) {
       this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'a renewal arrived that nothing asked for');
       return;
     }
-    const key = await this.deps.devices.deviceKey(device.deviceId);
+    // The key is looked up again and judged by the act that session opened with: a member's renewal signs
+    // under the member label, so neither kind of proof can stand in for the other.
+    const key =
+      member === undefined
+        ? await this.deps.devices.deviceKey(device?.deviceId ?? '')
+        : (await this.deps.members?.key(member.keyId))?.memberKey;
     const verified =
       key !== undefined &&
-      (await verifyDeviceProof(this.deps.crypto, key, proof, deviceRenewMessage(transcript, nonce)));
+      (await verifyDeviceProof(
+        this.deps.crypto,
+        key,
+        proof,
+        member === undefined ? deviceRenewMessage(transcript, nonce) : memberRenewMessage(transcript, nonce),
+      ));
     if (!this.#live(session)) return;
     if (!verified) {
       this.#endSession(session.sessionId, RELAY_CLOSE_CODES.authRejected, 'unknown device credential');
@@ -1263,13 +1294,33 @@ export class RelayLink {
     session.running += 1;
     try {
       const device = session.device;
-      if (device === undefined) return;
+      const member = session.member;
+      if (device === undefined && member === undefined) return;
       // A try rather than `.catch()`: a port implemented without `async` throws instead of rejecting.
       let response: ApiResponse;
       try {
-        response = await this.deps.dispatch(
-          tunnelApiRequest({ ...request, body }, device, session.sessionId.text, this.deps.arrival, session.transcript),
-        );
+        // A member's request goes to the member route table and to nothing else: there is no path from here to
+        // the dispatcher a device uses.
+        response =
+          member !== undefined
+            ? await this.#dispatchMember(
+                tunnelMemberRequest(
+                  { ...request, body },
+                  member,
+                  session.sessionId.text,
+                  this.deps.arrival,
+                  session.transcript,
+                ),
+              )
+            : await this.deps.dispatch(
+                tunnelApiRequest(
+                  { ...request, body },
+                  device as SessionDevice,
+                  session.sessionId.text,
+                  this.deps.arrival,
+                  session.transcript,
+                ),
+              );
       } catch {
         response = {
           status: 500,
@@ -1382,6 +1433,124 @@ export class RelayLink {
         : { t: 'pair-refused', protocol: SESSION_PROTOCOL_ID, reason: 'pairing_refused' },
     );
     this.#conclude(session);
+  }
+
+  // ─── a catalog member: one join, or a request session on the member route table ───────────────
+
+  /**
+   * A share code redeemed, through a port and never through a route.
+   *
+   * THE SAME SHAPE AS A PAIRING: one attempt, one sealed outcome, then `4440`, whatever the outcome. Both
+   * outcomes are PADDED to the same byte count (`padJoinOutcome`), so the size of the sealed record says
+   * nothing; an outcome that cannot be padded is the refusal, never an unpadded record. The session is
+   * `concluding` before the port is asked, so a second record is refused rather than racing a spent attempt.
+   *
+   * No host credential is read and no request is built: a session at this point is an anonymous stranger.
+   */
+  async #joinMember(session: LinkSession, request: RelayTunnelJoin): Promise<void> {
+    session.phase = 'concluding';
+    const transcript = session.transcript;
+    const arrival = this.deps.arrival;
+    const carrier: MemberJoinCarrier =
+      arrival === undefined
+        ? { kind: 'relay' }
+        : arrival.carrier === 'tunnel'
+          ? { kind: 'tunnel' }
+          : { kind: 'direct', rateLimitKey: arrival.clientAddress ?? `direct-session:${session.sessionId.text}` };
+    let content: MemberJoinOutcomeContent = {
+      t: 'join-refused',
+      protocol: SESSION_PROTOCOL_ID,
+      reason: 'join_refused',
+    };
+    try {
+      const result = await this.deps.members?.join(
+        {
+          code: request.code,
+          clientName: request.clientName,
+          memberKey: request.memberKey,
+          boxKey: request.boxKey,
+          prove: async () =>
+            transcript !== undefined &&
+            (await verifyDeviceProof(
+              this.deps.crypto,
+              request.memberKey,
+              request.proof,
+              memberJoinMessage(transcript, request.memberKey, request.boxKey),
+            )),
+        },
+        carrier,
+      );
+      if (result?.ok === true) content = { t: 'joined', protocol: SESSION_PROTOCOL_ID, response: result.response };
+    } catch {
+      // The port promises not to throw; a port that does is a refusal, not a session left hanging.
+    }
+    if (!this.#live(session)) return;
+    const text =
+      padJoinOutcome(content) ??
+      padJoinOutcome({ t: 'join-refused', protocol: SESSION_PROTOCOL_ID, reason: 'join_refused' });
+    this.#queue(session, { t: 'join-outcome', text: text ?? '' });
+    this.#conclude(session);
+  }
+
+  /**
+   * A member browser's proof, or the session ends with the one `4403` a device gets.
+   *
+   * Unknown, revoked, idle-expired and a bad proof are the same close, and an unknown id is verified against
+   * the dummy key so it costs what a known one does. The session is registered only after the proof holds, and
+   * registering re-reads the key, so a revoke that lands between the two still ends it.
+   */
+  async #authenticateMember(session: LinkSession, claim: RelayTunnelMember): Promise<void> {
+    session.phase = 'proving';
+    const transcript = session.transcript;
+    const members = this.deps.members;
+    const filed = await members?.key(claim.keyId);
+    const checked =
+      transcript !== undefined &&
+      (await verifyDeviceProof(
+        this.deps.crypto,
+        filed?.memberKey ?? UNKNOWN_DEVICE_KEY,
+        claim.proof,
+        memberAuthMessage(transcript, claim.keyId, claim.appSession),
+      ));
+    if (!this.#live(session)) return;
+    if (members === undefined || filed === undefined || !checked) {
+      this.#refuseMember(session);
+      return;
+    }
+    const member: SessionMember = { memberId: filed.memberId, keyId: claim.keyId, appSession: claim.appSession };
+    const release = await members.open(member, () => {
+      // Said exactly as an unknown browser is, so the carrier cannot tell a revoke apart.
+      if (this.#live(session))
+        this.#endSession(session.sessionId, RELAY_CLOSE_CODES.authRejected, 'unknown device credential');
+    });
+    if (!this.#live(session)) {
+      release?.();
+      return;
+    }
+    if (release === undefined) {
+      this.#refuseMember(session);
+      return;
+    }
+    session.release = release;
+    session.member = member;
+    this.#armLease(session);
+    session.phase = 'serving';
+    this.#sendRecord(session, {
+      t: 'authenticated',
+      protocol: SESSION_PROTOCOL_ID,
+      accessExpiresAt: instant(session.leaseExpiresAtMs),
+    });
+  }
+
+  #refuseMember(session: LinkSession): void {
+    this.#lastRefusal = 'a client presented a member this daemon does not accept';
+    this.#endSession(session.sessionId, RELAY_CLOSE_CODES.authRejected, 'unknown device credential');
+  }
+
+  async #dispatchMember(request: ApiRequest): Promise<ApiResponse> {
+    const members = this.deps.members;
+    if (members === undefined) throw new Error('a member session without a member side');
+    return await members.dispatch(request);
   }
 
   // ─── one stream ─────────────────────────────────────────────────────────────────────────────

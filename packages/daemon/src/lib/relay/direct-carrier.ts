@@ -38,6 +38,7 @@ import {
 } from '@ferretry/relay';
 import type { SocketDownstream, SocketEnded, SocketFrame, SocketHandler } from '../api/socket.ts';
 import type { DeviceConnectionTracker } from '../pairing/index.ts';
+import type { RelayMemberSessions } from './member-port.ts';
 import {
   type AccessLeasePolicy,
   type RelayApiDispatch,
@@ -91,6 +92,8 @@ export interface DirectCarrierDependencies {
   readonly sockets: RelayStreamDispatch;
   readonly devices: RelayDeviceDirectory;
   readonly pairing: RelayPairingRedeemer;
+  /** The member side; absent means a daemon with none, which refuses every join and knows no key. */
+  readonly members?: RelayMemberSessions;
   readonly scheduler: RelayLinkScheduler;
   readonly clock: RelayLinkClock;
   /** The lease and its cap; absent means the protocol's own (`DEFAULT_ACCESS_LEASE_POLICY`). */
@@ -165,6 +168,7 @@ export class DirectSession implements SocketHandler {
     this.#clock = deps.clock;
     this.#openedAt = deps.clock.now();
     this.#lastFrameAt = this.#openedAt;
+    const { members } = deps;
     this.#link = new RelayLink({
       crypto: deps.crypto,
       identity: deps.identity,
@@ -184,6 +188,24 @@ export class DirectSession implements SocketHandler {
       sockets: deps.sockets,
       devices: deps.devices,
       pairing: deps.pairing,
+      ...(members === undefined
+        ? {}
+        : {
+            members: {
+              join: (attempt, carrier) => members.join(attempt, carrier),
+              key: keyId => members.key(keyId),
+              dispatch: request => members.dispatch(request),
+              // A member's key proven is the moment this socket stops being an unproven one, as a device's is.
+              open: async (member, end) => {
+                const release = await members.open(member, end);
+                if (release !== undefined) {
+                  this.#proved = true;
+                  onProved();
+                }
+                return release;
+              },
+            },
+          }),
       scheduler: deps.scheduler,
       clock: deps.clock,
       ...(deps.lease === undefined ? {} : { lease: deps.lease }),

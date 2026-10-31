@@ -27,6 +27,8 @@ import {
   HANDSHAKE_FRAME_SEQUENCE,
   HEARTBEAT_REQUEST,
   HEARTBEAT_RESPONSE,
+  memberAuthMessage,
+  memberJoinMessage,
   openChannel,
   openRecord,
   type PrivateKeyHandle,
@@ -62,6 +64,7 @@ import {
   MAX_DIRECT_UNPROVEN_SESSIONS,
 } from '../../../src/lib/relay/direct-carrier.ts';
 import { transcriptKey } from '../../../src/lib/relay/link.ts';
+import type { MemberJoinCarrier, RelayMemberSessions } from '../../../src/lib/relay/member-port.ts';
 import { directCarrierSocketRoute } from '../../../src/lib/runtime/mounts/direct-carrier.ts';
 import { request } from '../api/support.ts';
 
@@ -72,6 +75,11 @@ const APP_SESSION = toBase64Url(new Uint8Array(16).fill(4));
 let identity: DaemonIdentity;
 let deviceKey: PrivateKeyHandle;
 let deviceKeyText: string;
+let memberKey: PrivateKeyHandle;
+let memberKeyText: string;
+const MEMBER_ID = `mbr_${'a'.repeat(22)}`;
+const MEMBER_KEY_ID = `mk_${'b'.repeat(22)}`;
+const BOX_KEY = 'B'.repeat(43);
 
 beforeAll(async () => {
   const pair = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, [
@@ -86,6 +94,9 @@ beforeAll(async () => {
   const device = await crypto_.generateDeviceKey();
   deviceKey = crypto_.deviceKeyHandle(device.privateKey);
   deviceKeyText = toBase64Url(device.publicKeySpki);
+  const member = await crypto_.generateDeviceKey();
+  memberKey = crypto_.deviceKeyHandle(member.privateKey);
+  memberKeyText = toBase64Url(member.publicKeySpki);
 });
 
 interface Downstream {
@@ -156,6 +167,7 @@ function carrier(
     readonly timers?: FakeTimer[];
     readonly connections?: LiveDeviceConnections;
     readonly sessionLog?: DirectSessionLog;
+    readonly members?: RelayMemberSessions;
   } = {},
 ) {
   const connections = options.connections ?? new LiveDeviceConnections();
@@ -192,6 +204,7 @@ function carrier(
     },
     clock: { now: options.now ?? (() => 0) },
     connections,
+    ...(options.members === undefined ? {} : { members: options.members }),
     ...(options.sessionLog === undefined ? {} : { sessionLog: options.sessionLog }),
   });
   return { route, requests, pairings, connections };
@@ -806,5 +819,108 @@ describe('what a tunnel session reports about its own life', () => {
     // Assert
     should(seen.opened).eql([]);
     should(seen.ends).eql([]);
+  });
+});
+
+describe('a shared-catalog member on a direct socket', () => {
+  function members(options: { readonly keyKnown?: boolean; readonly opens?: boolean } = {}) {
+    const joins: Array<{ readonly code: string; readonly proven: boolean; readonly carrier: MemberJoinCarrier }> = [];
+    const opened: unknown[] = [];
+    const dispatched: ApiRequest[] = [];
+    const port: RelayMemberSessions = {
+      join: async (attempt, how) => {
+        joins.push({ code: attempt.code, proven: await attempt.prove(), carrier: how });
+        return { ok: false };
+      },
+      key: async keyId =>
+        options.keyKnown !== false && keyId === MEMBER_KEY_ID
+          ? { memberId: MEMBER_ID, memberKey: memberKeyText }
+          : undefined,
+      open: async member => {
+        opened.push(member);
+        return options.opens === false ? undefined : () => undefined;
+      },
+      dispatch: async built => {
+        dispatched.push(built);
+        return { status: 200, headers: new Map(), body: '{"shared":true}' };
+      },
+    };
+    return { port, joins, opened, dispatched };
+  }
+
+  const claim = async (transcript: Uint8Array) => ({
+    t: 'member',
+    protocol: SESSION_PROTOCOL_ID,
+    keyId: MEMBER_KEY_ID,
+    appSession: APP_SESSION,
+    proof: await signDeviceProof(crypto_, memberKey, memberAuthMessage(transcript, MEMBER_KEY_ID, APP_SESSION)),
+  });
+
+  it('should carry a proven member to the member port alone, and stop counting its socket as unproven', async () => {
+    // Arrange — two unproven sockets from one address fill that address's allowance.
+    const fake = members();
+    const { route, requests } = carrier({ members: fake.port });
+    const proving = await connect(route, { clientAddress: '192.0.2.50' });
+    await connect(route, { clientAddress: '192.0.2.50' });
+    await connect(route, { clientAddress: '192.0.2.50' }).should.be.rejectedWith({ status: 429 });
+
+    // Act — one of them proves a member key and asks for something.
+    const { channel, transcript } = await handshake(proving.handler, proving.wire, proving.sessionId);
+    let next = await send(proving.handler, proving.wire, channel, await claim(transcript));
+    next = await send(proving.handler, proving.wire, next, { t: 'req', id: 1, method: 'GET', path: '/v1/shared/me' });
+
+    // Assert — the member port answered, the device route table never heard, and the proven socket is
+    // no longer one of the address's unproven ones.
+    const messages = await records(proving.wire, channel);
+    should(messages[0]).containDeep({ t: 'authenticated' });
+    should(messages[1]).containDeep({ t: 'res', id: 1, status: 200, body: '{"shared":true}' });
+    should(fake.opened).deepEqual([{ memberId: MEMBER_ID, keyId: MEMBER_KEY_ID, appSession: APP_SESSION }]);
+    should(fake.dispatched).have.length(1);
+    should(requests).be.empty();
+    await connect(route, { clientAddress: '192.0.2.50' });
+    proving.handler.close();
+  });
+
+  it('should refuse a member the port will not register, and leave its socket unproven', async () => {
+    const fake = members({ opens: false });
+    const { route } = carrier({ members: fake.port });
+    const refused = await connect(route, { clientAddress: '192.0.2.60' });
+    await connect(route, { clientAddress: '192.0.2.60' });
+    const { channel, transcript } = await handshake(refused.handler, refused.wire, refused.sessionId);
+
+    await send(refused.handler, refused.wire, channel, await claim(transcript), 'closed');
+
+    should(refused.wire.closes[0]?.code).equal(RELAY_CLOSE_CODES.authRejected);
+    should(fake.opened).have.length(1);
+  });
+
+  it('should hand a join to the member port keyed by the socket’s own peer, and answer padded', async () => {
+    const fake = members();
+    const { route } = carrier({ members: fake.port });
+    const { handler, wire, sessionId } = await connect(route, { clientAddress: '203.0.113.77' });
+    const { channel, transcript } = await handshake(handler, wire, sessionId);
+    const proof = await signDeviceProof(crypto_, memberKey, memberJoinMessage(transcript, memberKeyText, BOX_KEY));
+
+    await send(
+      handler,
+      wire,
+      channel,
+      {
+        t: 'join',
+        protocol: SESSION_PROTOCOL_ID,
+        code: 'CODE-1234',
+        clientName: 'Ferretry PWA',
+        memberKey: memberKeyText,
+        boxKey: BOX_KEY,
+        proof,
+      },
+      'closed',
+    );
+
+    should(fake.joins).deepEqual([
+      { code: 'CODE-1234', proven: true, carrier: { kind: 'direct', rateLimitKey: '203.0.113.77' } },
+    ]);
+    should(await records(wire, channel)).containDeep([{ t: 'join-refused', reason: 'join_refused' }]);
+    should(wire.closes[0]?.code).equal(RELAY_SESSION_CONCLUDED_CLOSE_CODE);
   });
 });

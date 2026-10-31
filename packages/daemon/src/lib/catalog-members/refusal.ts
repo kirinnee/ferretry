@@ -29,3 +29,22 @@ export class CatalogMemberRefusal extends Error {
 /** Narrows a protocol refusal for callers that only ever raise the wire's own. */
 export const isShareRefusal = (code: CatalogMemberRefusalCode): code is CatalogShareRefusal =>
   (CATALOG_SHARE_REFUSALS as readonly string[]).includes(code);
+
+/**
+ * How each refusal answers over HTTP. A damaged store is this machine's fault (500) and no address to put in a
+ * link is a 503; the owner's and the member's mistakes are 404 (no such id) or 409 (the state will not take it).
+ */
+export const CATALOG_MEMBER_STATUS: Readonly<Record<CatalogMemberRefusalCode, number>> = {
+  share_refused: 409,
+  share_other_member: 409,
+  share_new_member: 409,
+  members_full: 409,
+  member_unknown: 404,
+  member_key_unknown: 404,
+  catalog_unknown: 404,
+  share_unknown: 404,
+  shares_full: 409,
+  catalogs_full: 409,
+  share_link_unavailable: 503,
+  store_damaged: 500,
+};

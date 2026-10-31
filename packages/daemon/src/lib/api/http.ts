@@ -56,6 +56,13 @@ export interface ApiRequest {
    */
   readonly device?: SessionDevice;
   /**
+   * The shared-catalog member a SESSION proved, set by the one tunnel constructor that builds a member
+   * request (`tunnelMemberRequest`) and by nothing else. It is never set beside `device`, and the main
+   * route table refuses a request that carries it before anything else is looked at: a member reaches
+   * the member route table or nothing.
+   */
+  readonly member?: SessionMember;
+  /**
    * The transcript hash of the session that carried this request, set beside `device` by the same one
    * constructor. What a device-key rotation's proof is signed over (`docs/design/zero-trust.md` B6);
    * a hash, public to both ends of the session, and never a secret.
@@ -87,6 +94,13 @@ export interface ApiRequest {
 export interface SessionDevice {
   readonly deviceId: string;
   /** Random per page load, signed into the session's proof; a step-up belongs to one of these. */
+  readonly appSession: string;
+}
+
+/** Who opened a member session: the key that signed it, and the running copy of the app it came from. */
+export interface SessionMember {
+  readonly memberId: string;
+  readonly keyId: string;
   readonly appSession: string;
 }
 

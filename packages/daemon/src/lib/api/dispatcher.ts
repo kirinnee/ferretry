@@ -123,6 +123,13 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
   /** Whose passkey step-up is live. Absent means nobody holds one, which can only refuse more. */
   stepUps: StepUpWitness = NO_STEP_UP_WITNESS,
 ): RouteAuthorization<TRoute> {
+  // A MEMBER IS REFUSED BY THE MAIN TABLE BEFORE ANYTHING ELSE, the public shortcut included: a member session
+  // is served by the member route table alone, and an anonymous route here is still a route a member may not use.
+  if (request.member !== undefined)
+    return {
+      kind: 'refused',
+      response: errorResponse(403, `the request may not use ${request.method} ${request.path}`, 'forbidden'),
+    };
   const lookup = router.lookup(request.method, request.path);
   // The public shortcut answers before authentication is even attempted, which is the whole point of
   // being public — but it is a shortcut past EVERY check below, so it may only be taken by a route

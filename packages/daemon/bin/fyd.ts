@@ -57,6 +57,7 @@ import {
   type AnalyticsPricingRate,
   type AskToStopJobsResult,
   type AutoResumeSummary,
+  CatalogMemberKeyIdSchema,
   CONFIG_ACCEPTED_FILE,
   type ConversionPreview,
   type ConversionSummary as ConversionSummaryView,
@@ -1068,6 +1069,12 @@ import {
   type McpSourceServer,
   SharedCatalogService,
   CatalogMemberService,
+  DeferredMemberSessions,
+  LiveMemberSessions,
+  MemberDispatcher,
+  MemberGateway,
+  MemberJoinGate,
+  MemberPasskeyService,
   shareLinkTarget,
   publisherLabel,
   type SecretCloneIdentitySource,
@@ -7291,6 +7298,19 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     () => securitySettings?.current().stepUpWindowMinutes ?? 0,
   );
   const deviceConnections = new LiveDeviceConnections(stepUpRegistry);
+  // The member side of every carrier: the carriers are built before the subsystems that answer for members, so
+  // they hold the deferred half and the subsystem build binds the real one. `memberConnections` is what a revoke closes.
+  const memberSessions = new DeferredMemberSessions();
+  const memberConnections = new LiveMemberSessions();
+  // What a member's join and `me` say about this machine, set when pairing opens, as the facts above are.
+  let memberFacts:
+    | {
+        readonly daemonName: string;
+        readonly carriers: PublishedCarrierView;
+        readonly origins: () => readonly string[];
+        readonly unlockDays: () => number;
+      }
+    | undefined;
   // ONE journal for the owner's acts — grant changes and re-opened passkey windows — so two writers never
   // interleave in the same file.
   const grantAudit = new JournalGrantAudit(paths.grantAudit, stateFiles);
@@ -8819,6 +8839,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const state = await repository.open(hostname());
       attachmentDaemonId = state.daemonId;
       shareAdvertisement = config.advertisement;
+      memberFacts = {
+        daemonName: state.daemonName,
+        carriers,
+        origins: () => browserOrigins(config),
+        unlockDays: () => config.catalogs.memberUnlockDays,
+      };
       analyticsMachineName = state.daemonName;
       const credentials = new PairingDeviceRegistry(state.daemonId, state.devices);
       // Read BEFORE pairing is built: the idle period and the step-up window are both asked of it.
@@ -9048,6 +9074,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sockets,
         devices,
         pairing,
+        members: memberSessions,
         scheduler: {
           after: (milliseconds: number, action: () => void) => {
             const handle = setTimeout(action, milliseconds);
@@ -9092,6 +9119,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             sockets,
             devices,
             pairing,
+            members: memberSessions,
             connections: deviceConnections,
             lease: timings.lease,
             log: line => bootNotices.state(line),
@@ -12283,11 +12311,85 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         links: {
           target: () => shareLinkTarget(shareAdvertisement, attachmentDaemonId, HOSTED_APP_ORIGIN),
         },
-        // Phase 2b-2 registers the member route table's live connections here; until then nothing is open.
-        sessions: { closeMember: async () => undefined, closeKey: async () => undefined },
+        // A revoke writes first, drops the grants, then ends this member's live sessions (and forgets a removed
+        // browser's passkeys, so a key id that is reused can never inherit them).
+        sessions: {
+          closeMember: async memberId => await memberConnections.closeMember(memberId),
+          closeKey: async (memberId, keyId) => {
+            await memberConnections.closeKey(memberId, keyId);
+            await memberPasskeys.forgetKey(keyId);
+          },
+        },
         audit: auditLog,
         now: () => millisecondClock.now(),
       });
+      const sharedCatalogNames = async (): Promise<ReadonlyMap<string, string>> =>
+        new Map((await sharedCatalogs.list()).catalogs.map(catalog => [catalog.id, catalog.name]));
+      const facts = (): NonNullable<typeof memberFacts> => {
+        if (memberFacts === undefined)
+          throw new Error('pairing has not opened, so this machine cannot describe itself');
+        return memberFacts;
+      };
+      const memberPasskeys = new MemberPasskeyService({
+        store: new StatePasskeyStore(paths, stateFiles, {
+          path: paths.catalogMemberPasskeys,
+          owner: CatalogMemberKeyIdSchema,
+        }),
+        verifier: passkeyVerifier(new WebCryptoPasskeyCrypto()),
+        challenges: new ChallengeLedger(),
+        random: { bytes: length => crypto.getRandomValues(new Uint8Array(length)) },
+        clock: { nowMs: () => Date.now() },
+        unlocks: new StateUnlockLedger(paths, stateFiles, attachmentDaemonId ?? '', {
+          path: paths.catalogMemberUnlocks,
+          owner: CatalogMemberKeyIdSchema,
+        }),
+        members: { passkeyAdded: async keyId => await catalogMembers.passkeyAdded(keyId) },
+        catalogNames: sharedCatalogNames,
+        allowedOrigins: () => facts().origins(),
+        relyingPartyName: 'Ferretry',
+        daemonName: () => facts().daemonName,
+        unlockDays: () => facts().unlockDays(),
+        audit: auditLog,
+      });
+      void memberPasskeys.restore().then(notice => {
+        if (notice !== undefined) bootNotices.state(notice);
+      });
+      const memberJoinGate = new MemberJoinGate({
+        members: catalogMembers,
+        publisher: () => ({
+          daemonId: attachmentDaemonId ?? '',
+          daemonName: facts().daemonName,
+          carriers: facts().carriers.current(),
+          memberUnlockDays: facts().unlockDays(),
+        }),
+        audit: auditLog,
+        now: () => millisecondClock.now(),
+      });
+      memberSessions.bind(
+        new MemberGateway({
+          gate: memberJoinGate,
+          dispatcher: new MemberDispatcher({
+            members: catalogMembers,
+            passkeys: memberPasskeys,
+            catalogs: {
+              catalogs: async () =>
+                (await sharedCatalogs.list()).catalogs.map(({ id, name, revision }) => ({ id, name, revision })),
+              signedManifest: async catalogId => await sharedCatalogs.signedManifest(catalogId),
+              frozenItem: async (catalogId, itemId, version) =>
+                await sharedCatalogs.frozenItem(catalogId, itemId, version),
+            },
+            publisher: () => ({
+              daemonId: attachmentDaemonId ?? '',
+              daemonName: facts().daemonName,
+              carriers: facts().carriers.current(),
+            }),
+            audit: auditLog,
+            now: () => millisecondClock.now(),
+          }),
+          members: catalogMembers,
+          live: memberConnections,
+        }),
+      );
       new MemberSweepTimer(
         systemSweepClock,
         async () => await catalogMembers.sweep(),
