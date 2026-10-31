@@ -1,3 +1,16 @@
+## [4.157.0](https://github.com/kirinnee/ferretry/compare/v4.156.2...v4.157.0) (2026-10-31)
+
+### Features
+
+* **pwa:** draw every agenda card section open, no folding ([#1121](https://github.com/kirinnee/ferretry/issues/1121)) ([6b3385b](https://github.com/kirinnee/ferretry/commit/6b3385b4c11818a09b49bc558adb384135a44984))
+
+### Fixes
+
+* **board:** upload Not good pictures over the machine's carrier ([#1124](https://github.com/kirinnee/ferretry/issues/1124)) ([3ab664c](https://github.com/kirinnee/ferretry/commit/3ab664c42eba23fb11e6b64308ad4b92359f2945))
+* **daemon:** drive the agent browser over a DevTools pipe, not a shared port ([#1123](https://github.com/kirinnee/ferretry/issues/1123)) ([41803e3](https://github.com/kirinnee/ferretry/commit/41803e3625b236fb4e456e683ce3d6cb30fb3552))
+* **migrate:** say to update an old daemon, and keep Claude's status line out of jobs ([#1125](https://github.com/kirinnee/ferretry/issues/1125)) ([19b4638](https://github.com/kirinnee/ferretry/commit/19b4638096791254168ca01cb4ad5afdc83a2b62))
+* **pwa:** finder tap no longer closes the What's new sheet it opens ([#1122](https://github.com/kirinnee/ferretry/issues/1122)) ([42aafc5](https://github.com/kirinnee/ferretry/commit/42aafc5af12d618f082eb1ad14f4837e108b7d5c))
+
 ## [4.156.2](https://github.com/kirinnee/ferretry/compare/v4.156.1...v4.156.2) (2026-10-31)
 
 ### Fixes

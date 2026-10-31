@@ -1,3 +1,9 @@
+## [4.158.0](https://github.com/kirinnee/ferretry/compare/v4.157.0...v4.158.0) (2026-10-31)
+
+### Features
+
+* **daemon:** prove the browser's loopback listeners are its own ([#1127](https://github.com/kirinnee/ferretry/issues/1127)) ([1ab7d1a](https://github.com/kirinnee/ferretry/commit/1ab7d1ae5ec0be214e73371c27ca2af2bb82eea5)), closes [#1112](https://github.com/kirinnee/ferretry/issues/1112)
+
 ## [4.157.0](https://github.com/kirinnee/ferretry/compare/v4.156.2...v4.157.0) (2026-10-31)
 
 ### Features
