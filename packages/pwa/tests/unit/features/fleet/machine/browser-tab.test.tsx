@@ -281,6 +281,7 @@ describe('BrowserTab › Browser proxy', () => {
         expect(q('[data-browser-proxy-hint]')?.textContent).toContain(
           'Applies the next time the browser on studio-mac',
         );
+        await click(q('[data-browser-proxy-expert]'), 'expert');
         const fill = async (): Promise<void> => {
           await typeInto(q('[data-browser-proxy-url]'), 'http://proxy.example:8080');
           await typeInto(q('[data-browser-proxy-bypass]'), '*.internal.example, 10.0.0.0/8');
@@ -338,6 +339,12 @@ describe('BrowserTab › Browser proxy', () => {
   });
 });
 
+const afterwards = async (): Promise<void> => {
+  await interact(async () => {
+    for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();
+  });
+};
+
 describe('BrowserTab › Test proxy', () => {
   const testCalls = (calls: readonly Recorded[]): Recorded[] =>
     calls.filter(call => call.path === BROWSER_PROXY_TEST_PATH);
@@ -351,13 +358,146 @@ describe('BrowserTab › Test proxy', () => {
     });
   });
 
-  it('is disabled while the typed address is not a valid proxy, enabled once it is', async () => {
-    await withTab({ machine: machineView({ browserProxy: null }) }, async ({ q }) => {
+  it('stays pressable while the typed proxy is not valid, and says what to fix instead of asking the machine', async () => {
+    await withTab({ machine: machineView({ browserProxy: null }) }, async ({ q, calls }) => {
       await typeInto(q('[data-browser-proxy-url]'), 'ftp://proxy.example');
-      expect(button(q).disabled).toBe(true);
-      await typeInto(q('[data-browser-proxy-url]'), 'http://proxy.example:8080');
       expect(button(q).disabled).toBe(false);
+      await click(button(q), 'test');
+      expect(q('[data-browser-proxy-test-refusal]')?.textContent).toContain('starts with http://');
+      expect(q('[data-setup-note="browser-proxy-problem"]')).toBeNull();
+      expect(testCalls(calls)).toHaveLength(0);
+      await typeInto(q('[data-browser-proxy-url]'), 'http://proxy.example:8080');
+      expect(q('[data-browser-proxy-test-refusal]')).toBeNull();
     });
+  });
+
+  it('says one short thing when an expert types a real value into a secret NAME box, and sends nothing', async () => {
+    await withTab({ machine: machineView({ browserProxy: null }) }, async ({ q, calls }) => {
+      await typeInto(q('[data-browser-proxy-url]'), 'socks5://proxy.example:1080');
+      await click(q('[data-browser-proxy-expert]'), 'expert');
+      await typeInto(q('[data-browser-proxy-username]'), 'amy');
+      await typeInto(q('[data-browser-proxy-password]'), 'hunter2!');
+      expect(button(q).disabled).toBe(false);
+      await click(button(q), 'test');
+      // One message, in one place: the test says it and the standing note steps aside.
+      expect(q('[data-browser-proxy-test-refusal]')?.textContent).toContain('secret name takes capital letters');
+      expect(q('[data-setup-note="browser-proxy-problem"]')).toBeNull();
+      expect(testCalls(calls)).toHaveLength(0);
+    });
+  });
+
+  it('shows two empty write-only boxes and no secret-name boxes until asked', async () => {
+    await withTab({ machine: machineView({ browserProxy: null }) }, async ({ q }) => {
+      for (const what of ['username', 'password']) {
+        expect((q(`[data-browser-proxy-credential-value="${what}"]`) as HTMLInputElement | null)?.type).toBe(
+          'password',
+        );
+      }
+      expect(q('[data-browser-proxy-username]')).toBeNull();
+      expect(q('[data-browser-proxy-password]')).toBeNull();
+      await click(q('[data-browser-proxy-expert]'), 'expert');
+      expect(q('[data-browser-proxy-username]')).not.toBeNull();
+      expect(q('[data-browser-proxy-password]')).not.toBeNull();
+    });
+  });
+
+  it('stores a typed password under PROXY_PASSWORD, empties the box, and shows Stored · Replace · Remove', async () => {
+    await withTab(
+      {
+        machine: machineView({ browserProxy: null }),
+        answers: {
+          '/v1/secrets': (call: Recorded) =>
+            call.method === 'POST'
+              ? { name: 'PROXY_PASSWORD', createdAt: '2026-10-31T01:00:00.000Z', updatedAt: '2026-10-31T01:00:00.000Z' }
+              : { v: 1, health: 'ready', secrets: [], references: [] },
+        },
+      },
+      async ({ q, calls, container }) => {
+        await typeInto(q('[data-browser-proxy-credential-value="password"]'), 'hunter2!');
+        await click(q('[data-browser-proxy-credential-save="password"]'), 'save');
+        await afterwards();
+        const put = calls.find(call => call.method === 'POST' && call.path === '/v1/secrets');
+        expect(put?.body).toEqual({ name: 'PROXY_PASSWORD', value: 'hunter2!' });
+        expect(q('[data-browser-proxy-credential-value="password"]')).toBeNull();
+        expect(q('[data-browser-proxy-credential-stored="password"]')?.textContent).toBe('Stored');
+        expect(q('[data-browser-proxy-credential-replace="password"]')).not.toBeNull();
+        expect(q('[data-browser-proxy-credential-remove="password"]')).not.toBeNull();
+        expect(q('[data-browser-proxy-credential-problem="password"]')).toBeNull();
+        expect(container.innerHTML).not.toContain('hunter2!');
+      },
+    );
+  });
+
+  it('Replace shows an empty box again, Cancel goes back, Remove forgets the name', async () => {
+    await withTab({ machine: withProxy() }, async ({ q }) => {
+      expect(q('[data-browser-proxy-credential-stored="username"]')).not.toBeNull();
+      expect(q('[data-browser-proxy-credential-value="username"]')).toBeNull();
+      await click(q('[data-browser-proxy-credential-replace="username"]'), 'replace');
+      expect((q('[data-browser-proxy-credential-value="username"]') as HTMLInputElement).value).toBe('');
+      await click(q('[data-browser-proxy-credential-cancel="username"]'), 'cancel');
+      expect(q('[data-browser-proxy-credential-stored="username"]')).not.toBeNull();
+      await click(q('[data-browser-proxy-credential-remove="username"]'), 'remove');
+      expect(q('[data-browser-proxy-credential-value="username"]')).not.toBeNull();
+    });
+  });
+
+  it('files a typed username under the expert name and says so plainly when the machine refuses', async () => {
+    await withTab(
+      {
+        machine: machineView({ browserProxy: null }),
+        answers: { '/v1/secrets': new FyHttpError('This machine’s secret store is locked.', 403, 'forbidden') },
+      },
+      async ({ q, calls }) => {
+        await click(q('[data-browser-proxy-expert]'), 'expert');
+        await typeInto(q('[data-browser-proxy-username]'), 'EDGE_USER');
+        await typeInto(q('[data-browser-proxy-credential-value="username"]'), 'amy-edge-login');
+        await click(q('[data-browser-proxy-credential-save="username"]'), 'save');
+        await afterwards();
+        expect(calls.find(call => call.method === 'POST')?.body).toEqual({
+          name: 'EDGE_USER',
+          value: 'amy-edge-login',
+        });
+        expect(q('[data-browser-proxy-credential-problem="username"]')?.textContent).toContain(
+          'secret store is locked',
+        );
+        expect((q('[data-browser-proxy-credential-value="username"]') as HTMLInputElement).value).toBe(
+          'amy-edge-login',
+        );
+      },
+    );
+  });
+
+  it('a value under 8 characters gets a one-line error on that field and is never sent', async () => {
+    await withTab({ machine: machineView({ browserProxy: null }) }, async ({ q, calls }) => {
+      await typeInto(q('[data-browser-proxy-credential-value="username"]'), 'amy');
+      expect(q('[data-browser-proxy-credential-problem="username"]')).toBeNull();
+      await click(q('[data-browser-proxy-credential-save="username"]'), 'save');
+      expect(q('[data-browser-proxy-credential-problem="username"]')?.textContent).toBe('Use at least 8 characters.');
+      expect(calls.some(call => call.method === 'POST')).toBe(false);
+    });
+  });
+
+  it('does not call a stored name stored when the machine does not have that secret', async () => {
+    await withTab(
+      {
+        machine: withProxy(),
+        answers: {
+          '/v1/secrets': {
+            v: 1,
+            health: 'ready',
+            secrets: [
+              { name: 'PROXY_USER', createdAt: '2026-10-31T01:00:00.000Z', updatedAt: '2026-10-31T01:00:00.000Z' },
+            ],
+            references: [],
+          },
+        },
+      },
+      async ({ q }) => {
+        expect(q('[data-browser-proxy-credential-stored="username"]')).not.toBeNull();
+        expect(q('[data-browser-proxy-credential-stored="password"]')).toBeNull();
+        expect(q('[data-browser-proxy-credential-value="password"]')).not.toBeNull();
+      },
+    );
   });
 
   it('is enabled for a saved proxy, also after the address is emptied, and disabled when offline', async () => {
@@ -401,9 +541,6 @@ describe('BrowserTab › Test proxy', () => {
       { machine: withProxy(), answers: { [BROWSER_PROXY_TEST_PATH]: reachable({ tested: 'unsaved' }) } },
       async ({ q, calls }) => {
         await typeInto(q('[data-browser-proxy-url]'), 'socks5://other.example.test:1080');
-        expect(q('[data-browser-proxy-test-hint]')?.textContent).toContain(
-          'It tests what is typed above, saved or not.',
-        );
         await click(button(q), 'test');
         const body = testCalls(calls)[0]?.body;
         expect(body).toEqual({
@@ -556,6 +693,7 @@ describe('BrowserTab › Test proxy', () => {
 
         await click(button(q), 'test again');
         expect(q('[data-setup-note="browser-proxy-test"]')).not.toBeNull();
+        await click(q('[data-browser-proxy-expert]'), 'expert');
         await typeInto(q('[data-browser-proxy-username]'), 'OTHER_USER');
         expect(q('[data-setup-note="browser-proxy-test"]')).toBeNull();
       },
@@ -621,7 +759,8 @@ describe('BrowserTab › Test proxy', () => {
         expect(shown).toContain('Missing secret');
         expect(shown).toContain('PROXY_PASSWORD is not stored');
         expect(shown).not.toContain('hunter2');
-        expect((q('[data-browser-proxy-password]') as HTMLInputElement).value).toBe('PROXY_PASSWORD');
+        expect(q('[data-browser-proxy-credential-stored="password"]')?.textContent).toBe('Stored');
+        expect(container.querySelector('input[type="password"]')).toBeNull();
       },
     );
   });

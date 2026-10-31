@@ -62,11 +62,14 @@ const STATUS_SCENES = [
   { key: 'running-direct', words: 'Running · direct, no proxy.' },
 ] as const;
 
+const FORM_SCENES = ['form-empty', 'form-stored', 'form-short', 'invalid-form'] as const;
+
+const invalidForm = (): string => wrap(FORM_SCENES.map(scene => resolved[scene]?.status ?? '').join(''));
+
 const statusGallery = (): string => wrap(STATUS_SCENES.map(scene => resolved[scene.key]?.status ?? '').join(''));
 
-const SAVED_HINT = 'Tries one request through the proxy from studio, using the stored secrets. Nothing is saved.';
-const EDITED_HINT =
-  'Tries one request through the proxy from studio, using the stored secrets. It tests what is typed above, saved or not. Nothing is saved.';
+const SAVED_HINT = 'Tries one request through the proxy from studio.';
+const EDITED_HINT = SAVED_HINT;
 
 const failure = (errorClass: BrowserProxyErrorClass, message: string): BrowserProxyTestResult => ({
   reachable: false,
@@ -144,6 +147,7 @@ const themes = ['light', 'dark'] as const;
 const scenes = [
   { name: 'browser-tab', html: tab, mustSee: '[data-browser-state="running"]' },
   { name: 'browser-status', html: statusGallery, mustSee: '[data-browser-state="stopped"]' },
+  { name: 'browser-proxy-invalid', html: invalidForm, mustSee: '[data-browser-proxy-test-refusal]' },
   { name: 'browser-proxy-test', html: gallery, mustSee: '[data-setup-note="browser-proxy-test"]' },
 ] as const;
 
