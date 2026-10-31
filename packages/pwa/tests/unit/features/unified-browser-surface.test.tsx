@@ -4,7 +4,10 @@ import { paneState } from '../../support/browser-pane-state.ts';
 import { type ComponentType, useCallback, useEffect, useState } from 'react';
 import type { InAppBrowserFrameProps } from '../../../src/features/browser/in-app-browser.tsx';
 import { type BrowserDestination, browserDestination } from '../../../src/features/browser/in-app-browser-model.ts';
-import type { RemoteBrowserPaneProps } from '../../../src/features/browser/remote-browser-pane.tsx';
+import type {
+  RemoteBrowserPaneProps,
+  RemoteBrowserPaneState,
+} from '../../../src/features/browser/remote-browser-pane.tsx';
 import {
   browserEngineForSession,
   browserSessionMemory,
@@ -99,7 +102,11 @@ interface FakeRemoteEngine {
   readonly actions: BrowserAction[];
   readonly props: () => RemoteBrowserPaneProps;
   readonly mounted: () => boolean;
-  readonly publish: (status: BrowserStatus | null, busy?: boolean) => Promise<void>;
+  readonly publish: (
+    status: BrowserStatus | null,
+    busy?: boolean,
+    view?: Partial<RemoteBrowserPaneState>,
+  ) => Promise<void>;
 }
 
 /**
@@ -111,16 +118,22 @@ const fakeRemoteEngine = (): FakeRemoteEngine => {
   const actions: BrowserAction[] = [];
   let seen: RemoteBrowserPaneProps | null = null;
   let live = false;
-  let apply: ((status: BrowserStatus | null, busy: boolean) => void) | null = null;
+  let apply: ((status: BrowserStatus | null, busy: boolean, view: Partial<RemoteBrowserPaneState>) => void) | null =
+    null;
 
   const Pane = (props: RemoteBrowserPaneProps) => {
     const { onStateChange } = props;
-    const [snapshot, setSnapshot] = useState<{ status: BrowserStatus | null; busy: boolean }>({
+    const [snapshot, setSnapshot] = useState<{
+      status: BrowserStatus | null;
+      busy: boolean;
+      view: Partial<RemoteBrowserPaneState>;
+    }>({
       status: null,
       busy: false,
+      view: {},
     });
     seen = props;
-    apply = (status, busy) => setSnapshot({ status, busy });
+    apply = (status, busy, view) => setSnapshot({ status, busy, view });
     const runAction = useCallback((action: BrowserAction) => {
       actions.push(action);
     }, []);
@@ -134,7 +147,10 @@ const fakeRemoteEngine = (): FakeRemoteEngine => {
     }, []);
 
     useEffect(() => {
-      const state = paneState({ status: snapshot.status, busy: snapshot.busy, error: null, runAction });
+      const state = {
+        ...paneState({ status: snapshot.status, busy: snapshot.busy, error: null, runAction }),
+        ...snapshot.view,
+      };
       onStateChange?.(state);
     }, [onStateChange, runAction, snapshot]);
 
@@ -146,9 +162,9 @@ const fakeRemoteEngine = (): FakeRemoteEngine => {
     actions,
     props: () => must(seen, 'remote pane props'),
     mounted: () => live,
-    publish: async (status, busy = false) => {
+    publish: async (status, busy = false, view = {}) => {
       const publisher = must(apply, 'a mounted remote engine');
-      await interact(() => publisher(status, busy));
+      await interact(() => publisher(status, busy, view));
     },
   };
 };
@@ -549,6 +565,134 @@ describe('the unified browser surface', () => {
     expect((await openMenu(view.container)).textContent).toContain('Ferretry docs');
     expect(labelled(view.container, 'Browser controls').title).toBe('Ferretry docs');
     await view.unmount();
+  });
+
+  describe('the one bar and its chip, hosted by a workspace tab', () => {
+    const nobody = { driver: null, ask: null, takenOver: false };
+    const control = (patch: Partial<NonNullable<UnifiedBrowserSurfaceProps['host']>['control']> = {}) => ({
+      ...nobody,
+      onTakeOver: () => undefined,
+      onHandBack: () => undefined,
+      ...patch,
+    });
+    const hosted = async (
+      hostControl: ReturnType<typeof control>,
+      status: BrowserStatus | null = runningStatus(),
+      view: Partial<RemoteBrowserPaneState> = {},
+      busy = false,
+    ) => {
+      rememberBrowserEngine(scopeA, 'remote');
+      const { remote, dependencies } = engines();
+      const view_ = await mount(surface({ dependencies, host: { name: 'app', control: hostControl } }));
+      await remote.publish(status, busy, view);
+      return { remote, view: view_ };
+    };
+    const chipOf = (container: HTMLElement): HTMLElement =>
+      must(container.querySelector<HTMLElement>('[data-browser-chip]'), 'the state chip');
+    const openDetail = async (container: HTMLElement): Promise<HTMLElement> => {
+      await interact(() => chipOf(container).click());
+      return must(container.querySelector<HTMLElement>('[data-browser-chip-detail]'), 'the chip detail');
+    };
+    const withPage = (patch: Record<string, unknown>): BrowserStatus =>
+      ({ ...runningStatus(), ...patch }) as unknown as BrowserStatus;
+
+    it('names a ferret typing by a short word and offers to take over', async () => {
+      const taken: string[] = [];
+      const { view } = await hosted(control({ driver: { name: 'Hadi' }, onTakeOver: () => taken.push('take') }));
+
+      expect(chipOf(view.container).textContent).toContain('Ferret');
+      const detail = await openDetail(view.container);
+      expect(detail.textContent).toContain('Hadi is typing here.');
+      await click(named(detail, 'Take over'));
+      expect(taken).toEqual(['take']);
+      await view.unmount();
+    });
+
+    it('holds a page the owner took over until it is handed back', async () => {
+      const handed: string[] = [];
+      const { view } = await hosted(control({ takenOver: true, onHandBack: () => handed.push('back') }));
+
+      expect(chipOf(view.container).textContent).toContain('You');
+      const detail = await openDetail(view.container);
+      expect(detail.textContent).toContain('The agent cannot type into this page until you hand it back.');
+      await click(named(detail, 'Hand back'));
+      expect(handed).toEqual(['back']);
+      await view.unmount();
+    });
+
+    it('carries a hand-over ask, who made it, and a way to dismiss it', async () => {
+      const dismissed: string[] = [];
+      const { view } = await hosted(
+        control({
+          ask: { agent: 'Hadi', message: 'Sign in, then hand it back.' },
+          onDismissAsk: () => dismissed.push('ask'),
+        }),
+      );
+
+      const detail = await openDetail(view.container);
+      expect(detail.textContent).toContain('Sign in, then hand it back.');
+      expect(detail.textContent).toContain('Hadi handed this page to you.');
+      expect(named(detail, 'Take over')).toBeDefined();
+      await click(named(detail, 'Dismiss'));
+      expect(dismissed).toEqual(['ask']);
+      await view.unmount();
+    });
+
+    it('shows a human check as its own banner', async () => {
+      const { view } = await hosted(
+        control(),
+        withPage({
+          pages: [
+            { id: 'page-a', url: 'https://example.test/', title: 'Example', challenge: { provider: 'cloudflare' } },
+          ],
+        }),
+      );
+
+      expect(chipOf(view.container).getAttribute('data-browser-chip')).toBe('challenge');
+      const detail = await openDetail(view.container);
+      expect(detail.querySelector('[data-browser-challenge]')).not.toBeNull();
+      await view.unmount();
+    });
+
+    it('lists every held error once, and dismisses them all', async () => {
+      const cleared: string[] = [];
+      const { view } = await hosted(
+        control(),
+        withPage({ pageState: 'error', pageError: 'The page could not be loaded.' }),
+        { error: 'The action failed.', clearError: () => cleared.push('cleared') },
+      );
+
+      expect(chipOf(view.container).getAttribute('data-browser-chip')).toBe('error');
+      const detail = await openDetail(view.container);
+      expect(detail.textContent).toContain('The action failed.');
+      expect(detail.textContent).toContain('The page could not be loaded.');
+      await click(named(detail, 'Dismiss'));
+      expect(cleared).toEqual(['cleared']);
+      await view.unmount();
+    });
+
+    it('says a lost display keeps trying, and a stopped browser starts from its chip', async () => {
+      const lost = await hosted(control(), runningStatus(), { connection: 'disconnected' });
+      expect(chipOf(lost.view.container).getAttribute('data-browser-chip')).toBe('disconnected');
+      expect((await openDetail(lost.view.container)).textContent).toContain('This view keeps trying to reconnect.');
+      await lost.view.unmount();
+
+      const stopped = await hosted(control(), withPage({ state: 'stopped', pages: [] }));
+      const detail = await openDetail(stopped.view.container);
+      await click(named(detail, 'Start browser'));
+      expect(stopped.remote.actions.at(-1)).toEqual({ action: 'start' });
+      await stopped.view.unmount();
+    });
+
+    it('opens a detail only from its chip, and closes it again', async () => {
+      const { view } = await hosted(control());
+
+      expect(view.container.querySelector('[data-browser-chip-detail]')).toBeNull();
+      await openDetail(view.container);
+      await interact(() => chipOf(view.container).click());
+      expect(view.container.querySelector('[data-browser-chip-detail]')).toBeNull();
+      await view.unmount();
+    });
   });
 
   it('hands an incoming link to the selected engine only', async () => {
