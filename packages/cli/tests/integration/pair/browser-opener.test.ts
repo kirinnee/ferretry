@@ -16,7 +16,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 
-import { DesktopBrowserOpener, desktopBrowserOpener } from '../../../src/adapters/pair/browser-opener';
+import {
+  DesktopBrowserOpener,
+  desktopBrowserOpener,
+  type ExitingProcess,
+  holdProcessOpen,
+  onProcessExit,
+} from '../../../src/adapters/pair/browser-opener';
 
 const CODE = '7F3K-Q2ND';
 const URL = `https://ferretry.example.invalid/pair#v1;u;f;code=${CODE}`;
@@ -220,5 +226,55 @@ describe('desktopBrowserOpener', () => {
     // the real one, because a build machine has no business opening a browser.
     should.exist(desktopBrowserOpener(stateHome));
     leftovers().should.be.empty();
+  });
+});
+
+describe('onProcessExit', () => {
+  /** A process that records what was registered and how it was asked to end, and ends nothing. */
+  const fakeProcess = () => {
+    const listeners = new Map<string, () => void>();
+    const exits: number[] = [];
+    const host: ExitingProcess = {
+      once: (event, listener) => {
+        listeners.set(event, listener);
+      },
+      exit: code => {
+        exits.push(code);
+        return undefined as never;
+      },
+    };
+    return { host, listeners, exits };
+  };
+
+  it('cleans up on exit without ending the process a second time', () => {
+    const { host, listeners, exits } = fakeProcess();
+    let cleaned = 0;
+    onProcessExit(host, () => {
+      cleaned += 1;
+    });
+    listeners.get('exit')?.();
+    cleaned.should.equal(1);
+    exits.should.be.empty();
+  });
+
+  it('cleans up and then exits with the conventional status when it is signalled', () => {
+    // Catching a signal replaces its default action, so the status the default would have produced
+    // is restored by hand: 128 plus the signal number.
+    const { host, listeners, exits } = fakeProcess();
+    let cleaned = 0;
+    onProcessExit(host, () => {
+      cleaned += 1;
+    });
+    listeners.get('SIGINT')?.();
+    listeners.get('SIGTERM')?.();
+    cleaned.should.equal(2);
+    exits.should.eql([130, 143]);
+  });
+});
+
+describe('holdProcessOpen', () => {
+  it('runs what it was given once the delay is up', async () => {
+    const ran = new Promise<void>(resolve => holdProcessOpen(resolve, 1));
+    await ran;
   });
 });

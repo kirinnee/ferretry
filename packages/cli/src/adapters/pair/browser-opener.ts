@@ -119,18 +119,35 @@ export class DesktopBrowserOpener implements IBrowserOpener {
   }
 }
 
-/** Removes the page when the process is stopped, as well as when it ends by itself. */
-const onProcessExit = (run: () => void): void => {
-  process.once('exit', run);
+/** The part of `process` the exit hook touches, so a suite can answer it without ending the test runner. */
+export interface ExitingProcess {
+  once(event: 'exit' | 'SIGINT' | 'SIGTERM', listener: () => void): unknown;
+  exit(code: number): never;
+}
+
+/**
+ * Removes the page when the process is stopped, as well as when it ends by itself.
+ *
+ * A signal's default action ends the process without an `exit` event, so Ctrl-C mid-countdown would
+ * leave the page behind; handling it here means catching it, which is why it then exits with the
+ * conventional `128 + signal` status the default action would have produced.
+ */
+export const onProcessExit = (host: ExitingProcess, run: () => void): void => {
+  host.once('exit', run);
   for (const [signal, code] of [
     ['SIGINT', 130],
     ['SIGTERM', 143],
   ] as const) {
-    process.once(signal, () => {
+    host.once(signal, () => {
       run();
-      process.exit(code);
+      host.exit(code);
     });
   }
+};
+
+/** Runs `run` after `ms`, on a timer that holds the process open — see the note on `--no-wait` above. */
+export const holdProcessOpen = (run: () => void, ms: number): void => {
+  setTimeout(run, ms);
 };
 
 /** The shipped opener, bound to this host and to the state home the daemon owns. */
@@ -140,8 +157,8 @@ export const desktopBrowserOpener = (stateHome: string): IBrowserOpener =>
     spawn,
     stateHome,
     retentionMs: REDIRECT_PAGE_LIFETIME_MS,
-    schedule: (run, ms) => {
-      setTimeout(run, ms);
+    schedule: holdProcessOpen,
+    onExit: run => {
+      onProcessExit(process, run);
     },
-    onExit: onProcessExit,
   });
