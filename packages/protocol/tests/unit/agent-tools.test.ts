@@ -180,11 +180,18 @@ describe('agent tool schemas', () => {
     ]);
   });
 
-  it('should paste into a terminal by its name or into the secret store by a secret name, nowhere else', () => {
+  it('should paste into a terminal by its name, one page field by ref or selector, or the secret store by name', () => {
     const paste = (to: unknown) => ({ tool: 'secure.paste', handle: 'sealed:token', to, prompt: 'the token' });
 
     should(tools.AgentToolCallSchema.safeParse(paste({ kind: 'secret', name: 'VERCEL_TOKEN' })).success).be.true();
+    should(tools.AgentToolCallSchema.safeParse(paste({ kind: 'browser', name: 'app', ref: 'e3' })).success).be.true();
+    should(
+      tools.AgentToolCallSchema.safeParse(paste({ kind: 'browser', name: 'app', selector: '#t' })).success,
+    ).be.true();
     for (const to of [
+      { kind: 'browser', name: 'app' },
+      { kind: 'browser', name: 'app', ref: 'e3', selector: '#t' },
+      { kind: 'browser', name: 'app', x: 1, y: 2 },
       { kind: 'secret', name: 'vercel_token' },
       { kind: 'secret', name: 'VERCEL_TOKEN', exists: true },
       { kind: 'vault', name: 'VERCEL_TOKEN' },

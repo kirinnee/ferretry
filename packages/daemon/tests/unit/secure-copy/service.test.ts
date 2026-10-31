@@ -78,6 +78,15 @@ const refusal = async (work: Promise<unknown>): Promise<SecureCopyError> => {
 };
 
 describe('SecureCopyService capturing what a command prints', () => {
+  it('should record which file printed the value, as the runner found it, for the owner to see', async () => {
+    const { service, runner } = world();
+    runner.outcome = { ...runner.outcome, program: '/home/kirin/.bun/bin/vercel' };
+
+    const { copy } = await service.capture('s1', command(['vercel', 'tokens', 'create']));
+
+    should(copy.from).eql({ kind: 'command', program: 'vercel', path: '/home/kirin/.bun/bin/vercel' });
+  });
+
   it('should keep a program run by its path as written, so a rule naming the bare program never matches it', async () => {
     const { service } = world();
 

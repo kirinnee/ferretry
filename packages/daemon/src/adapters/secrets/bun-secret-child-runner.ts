@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import type { SecretChildOutcome, SecretChildRunner, SecretChildSpec } from '../../lib/index.ts';
 
 /**
@@ -91,11 +92,20 @@ export class BunSecretChildRunner implements SecretChildRunner {
       if (value !== undefined) environment[key] = value;
     }
 
+    const env = { ...environment, ...spec.env };
+    // Found once, on the child's own PATH, and that very file is what runs: what the outcome names as the
+    // program is what was spawned, never a second lookup that could find something else.
+    const file = program.includes('/')
+      ? resolve(spec.cwd, program)
+      : Bun.which(program, { PATH: env.PATH ?? '', cwd: spec.cwd });
+    if (file === null) return { outcome: 'spawn_failed', stdout: '', stderr: '', truncated: false };
     let child: Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
     try {
-      child = Bun.spawn([program, ...rest], {
+      child = Bun.spawn([file, ...rest], {
+        // The program still sees the name it was asked for as its own argv[0].
+        argv0: program,
         cwd: spec.cwd,
-        env: { ...environment, ...spec.env },
+        env,
         // Never inherited and never open: every use is non-interactive, and an open stdin with
         // nothing written can only hang the daemon on a prompt nobody will answer.
         stdin: 'ignore',
@@ -123,9 +133,10 @@ export class BunSecretChildRunner implements SecretChildRunner {
       // A killed child has no exit status worth reporting: naming one would claim the program chose
       // to end that way, when in fact this daemon ended it.
       if (timedOut || exited === ABANDONED)
-        return { outcome: 'timeout', stdout: stdout.text, stderr: stderr.text, truncated: true };
+        return { outcome: 'timeout', program: file, stdout: stdout.text, stderr: stderr.text, truncated: true };
       return {
         outcome: 'exited',
+        program: file,
         exitCode: exited,
         stdout: stdout.text,
         stderr: stderr.text,

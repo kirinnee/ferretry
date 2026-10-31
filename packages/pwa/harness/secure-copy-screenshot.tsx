@@ -2,14 +2,15 @@
  * Screenshots of secure copy's three owner screens (docs/secure-copy.md), at a 390px phone and a 1440px desktop,
  * in the light and dark studio themes. Review evidence; nothing compares the PNGs.
  *
- *   bun harness/secure-copy-screenshot.tsx [out-dir] [states]   # writes secure-copy-{paste,store,plan,rules}-*.png
+ *   bun harness/secure-copy-screenshot.tsx [out-dir] [states]   # writes secure-copy-{paste,page,store,plan,rules}-*.png
  *
- * `states` is a comma list (paste,store,plan,rules) when only some are wanted.
+ * `states` is a comma list (paste,page,store,plan,rules) when only some are wanted.
  *
  * Fake fixtures only: no real account, no real daemon, no value (a paste card never holds one). "paste" is the
  * input card a paste raises: a token sealed from `vercel tokens create`, going into the `vercel` program reading
  * %terminal:dev, with the daemon's risk flag. "store" is the same copy saved as the secret VERCEL_TOKEN, which
- * already holds a value, so the card warns it replaces it. "plan" is the card a ferret raises before it starts, two planned
+ * already holds a value, so the card warns it replaces it. "page" is a copy from the vercel found in
+ * ~/.bun/bin going into a password field on vercel.com. "plan" is the card a ferret raises before it starts, two planned
  * pastes with one ticked off. "rules" is Settings › Secrets › Pastes approved in advance, with the add form open.
  * Every width asserts no sideways scroll and the touch floor on every button of the phone.
  */
@@ -41,7 +42,7 @@ import { InputCard } from '../../src/features/input-request/input-card.tsx';
 import { CopyPlanCard } from '../../src/features/secure-copy/copy-plan-card.tsx';
 import { CopyRulesCard } from '../../src/features/secure-copy/copy-rules-card.tsx';
 import { fieldsOf } from '../../src/lib/input-card.ts';
-import { NOW, field, request as fakeRequest } from '../../tests/support/input-fixtures.ts';
+import { NOW, browserField, field, request as fakeRequest } from '../../tests/support/input-fixtures.ts';
 
 const view = new URLSearchParams(location.search).get('view');
 const client = { request: async () => { throw new Error('the harness has no daemon'); } } as never;
@@ -78,6 +79,29 @@ const store = fakeRequest({
   risk: REPLACES,
   source: { kind: 'sealed', name: 'vercel_token', from: { kind: 'command', program: 'vercel' } },
   observed: { kind: 'secret', name: 'VERCEL_TOKEN', exists: true },
+} as Parameters<typeof fakeRequest>[0]);
+
+// The daemon's own sentence for a password field on a secure page (service.ts pageRiskOf).
+const PASSWORD = { level: 'green', reason: 'A password field on a secure page, as the browser reported it.' } as const;
+const intoPage = fakeRequest({
+  prompt: 'The deploy token for the project settings page',
+  sensitivity: 'secret',
+  target: { kind: 'browser', key: 'app' },
+  fields: [field('secret', { id: 'value', risk: PASSWORD })],
+  risk: PASSWORD,
+  source: {
+    kind: 'sealed',
+    name: 'vercel_token',
+    from: { kind: 'command', program: 'vercel', path: '/home/kirin/.bun/bin/vercel' },
+  },
+  observed: {
+    kind: 'browser',
+    pageId: 'page-1',
+    origin: 'https://vercel.com',
+    secure: true,
+    navigationId: 'nav-1',
+    fields: [browserField('value', { frameOrigin: 'https://vercel.com', field: { tag: 'input', type: 'password' } })],
+  },
 } as Parameters<typeof fakeRequest>[0]);
 
 const plan = {
@@ -119,6 +143,15 @@ const storeItem = {
   input: { requestId: store.id },
 } as never;
 
+const pageItem = {
+  ...(pasteItem as object),
+  sourceRef: intoPage.id,
+  subject: 'Allow pasting sealed:vercel_token (64 characters from vercel) into a field on vercel.com. You type nothing.',
+  why: 'Allow pasting sealed:vercel_token (64 characters from vercel) into a field on vercel.com. You type nothing.',
+  context: 'The agent says: The deploy token for the project settings page',
+  input: { requestId: intoPage.id },
+} as never;
+
 const planItem = {
   id: 'A8', source: 'question', sourceRef: plan.id, sourceSeq: 2, kind: 'permission', copyPlan: { planId: plan.id },
   title: 'Asks to approve pastes in advance',
@@ -144,6 +177,10 @@ createRoot(root).render(
         <CopyRulesCard rules={rules} onAdd={quiet} onRemove={quiet} />
       ) : view === 'plan' ? (
         itemView(planItem, { planForm: <CopyPlanCard agentName="Hadi" onAnswer={async () => 'Allowed 1 of 2, each once.'} plan={plan} /> })
+      ) : view === 'page' ? (
+        itemView(pageItem, {
+          inputForm: <InputCard agentName="Hadi" client={client} embedded fields={fieldsOf(intoPage)} now={NOW} onDone={() => undefined} request={intoPage} />,
+        })
       ) : view === 'store' ? (
         itemView(storeItem, {
           inputForm: <InputCard agentName="Hadi" client={client} embedded fields={fieldsOf(store)} now={NOW} onDone={() => undefined} request={store} />,
@@ -183,7 +220,7 @@ run('./node_modules/.bin/tailwindcss', [
 ]);
 
 const wanted = process.argv[3]?.split(',');
-const STATES = (['paste', 'store', 'plan', 'rules'] as const).filter(
+const STATES = (['paste', 'page', 'store', 'plan', 'rules'] as const).filter(
   state => wanted === undefined || wanted.includes(state),
 );
 

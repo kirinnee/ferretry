@@ -189,6 +189,15 @@ describe('fy copy', () => {
     );
     should(await failure(controller.list({}))).containEql('--session');
   });
+
+  it('should list a copy by the file that printed it when the daemon found one', async () => {
+    const { controller, said, gateway } = rig();
+    gateway.copies = async () => [{ ...COPY, from: { ...COPY.from, path: '/home/k/.bun/bin/vercel' } }];
+
+    await controller.list({ session: 's1' });
+
+    should(said[0]).startWith('sealed:vercel  live  24 chars from /home/k/.bun/bin/vercel  until');
+  });
 });
 
 describe('fy copy --json and empty listings', () => {

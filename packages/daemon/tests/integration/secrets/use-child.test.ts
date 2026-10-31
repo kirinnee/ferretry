@@ -1,6 +1,8 @@
 import { afterAll, describe, it } from 'bun:test';
-import should from 'should';
+import { chmod, mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { SecretUseRequestSchema } from '@ferretry/protocol';
+import should from 'should';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
 import {
   BunSecretChildRunner,
@@ -221,5 +223,54 @@ describe('the operator recipe source', () => {
     // Act / Assert
     should(await source.read()).deepEqual({});
     should(await source.references()).deepEqual([]);
+  });
+});
+
+describe('the child runner, finding the program it runs', () => {
+  /** A folder holding one program, `hello`, that prints `hi`. */
+  async function folderWithProgram(label: string): Promise<{ folder: string; bin: string }> {
+    const folder = await tempDirectory(label);
+    const bin = join(folder, 'bin');
+    await mkdir(bin);
+    await writeFile(join(bin, 'hello'), '#!/bin/sh\necho hi\n');
+    await chmod(join(bin, 'hello'), 0o755);
+    return { folder, bin };
+  }
+  const spec = (command: string[], cwd: string) => ({ command, cwd, env: {}, timeoutMs: 5_000, maxOutputBytes: 1_024 });
+
+  it("should run the program it finds on the child's own PATH and name that very file", async () => {
+    // Arrange
+    const { folder, bin } = await folderWithProgram('runner-which');
+    const runner = new BunSecretChildRunner(() => ({ PATH: bin }));
+
+    // Act
+    const result = await runner.run(spec(['hello'], folder));
+
+    // Assert
+    should(result).match({ outcome: 'exited', exitCode: 0, program: join(bin, 'hello'), stdout: 'hi\n' });
+  });
+
+  it('should resolve a program named by a path against the working folder', async () => {
+    // Arrange
+    const { folder, bin } = await folderWithProgram('runner-path');
+    const runner = new BunSecretChildRunner(() => ({ PATH: '/nonexistent' }));
+
+    // Act
+    const result = await runner.run(spec(['./bin/hello'], folder));
+
+    // Assert
+    should(result).match({ outcome: 'exited', program: join(bin, 'hello') });
+  });
+
+  it('should report a bare name the PATH does not hold as a spawn failure, naming no program', async () => {
+    // Arrange
+    const { folder } = await folderWithProgram('runner-missing');
+    const runner = new BunSecretChildRunner(() => ({ PATH: join(folder, 'empty') }));
+
+    // Act
+    const result = await runner.run(spec(['hello'], folder));
+
+    // Assert
+    should(result).eql({ outcome: 'spawn_failed', stdout: '', stderr: '', truncated: false });
   });
 });

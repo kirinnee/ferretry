@@ -309,7 +309,8 @@ export class SecureCopyService implements InputSealedPort {
       );
     return {
       value,
-      from,
+      // Which file printed it, as the runner found it: the owner sees it on the card.
+      from: outcome.program === undefined ? from : { ...from, path: outcome.program.slice(0, 1024) },
       command: {
         outcome: outcome.outcome,
         ...(outcome.exitCode === undefined ? {} : { exitCode: outcome.exitCode }),

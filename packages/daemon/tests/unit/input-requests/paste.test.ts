@@ -10,6 +10,7 @@ import {
   type SecretName,
 } from '@ferretry/protocol';
 import should from 'should';
+import type { BrowserInputFacts, BrowserInputFieldsPort } from '../../../src/lib/browser/transport/input-contracts.ts';
 import {
   EphemeralValues,
   type InputAuditEntry,
@@ -17,11 +18,13 @@ import {
   InputRequestError,
   InputRequestService,
   type InputStoreAuditEntry,
+  type InputTargetPort,
   PasteRuleService,
   QuarantineRegistry,
   SecureCopyService,
   type TypeResult,
 } from '../../../src/lib/index.ts';
+import { PageInputTarget } from '../../../src/lib/input-requests/page-target.ts';
 import { FACTS, SESSION } from './support.ts';
 
 const TOKEN = 'vcp_PASTE-NEVER-LEAKS-41f2';
@@ -51,6 +54,8 @@ async function world(
     readonly transcript?: 'found' | 'clean';
     /** What an earlier run left in the journal, for a restart. */
     readonly history?: readonly InputEvent[];
+    /** A real target in place of the recording fake (a page target over a fake browser). */
+    readonly target?: InputTargetPort;
   } = {},
 ) {
   const ms = { now: Date.parse('2026-10-31T12:00:00.000Z') };
@@ -99,7 +104,7 @@ async function world(
   let card = 1;
   let id = 1;
   const service = new InputRequestService({
-    target: {
+    target: options.target ?? {
       observe: async () => ({ ok: true, facts: facts.current }),
       type: async (_session, _target, values) => {
         writes.push(...values.map(value => value.text));
@@ -664,5 +669,84 @@ describe('what a rule never pastes unasked (the security review of SC2b)', () =>
 
     should(view.state).equal('pending');
     should(w.writes).eql([]);
+  });
+});
+
+describe('a paste into a field on a page', () => {
+  const PAGE: BrowserInputFacts = {
+    kind: 'browser',
+    pageId: 'page-1',
+    origin: 'https://vercel.com',
+    secure: true,
+    navigationId: 'loader-1',
+    fields: [
+      {
+        fieldId: 'value',
+        frameOrigin: 'https://vercel.com',
+        frameId: 'main',
+        backendNodeId: 7,
+        field: { tag: 'input', type: 'password' },
+        box: { x: 0, y: 0, w: 200, h: 32 },
+        visible: true,
+      },
+    ],
+  };
+  const INTO_FIELD: InputRaise = {
+    target: { kind: 'browser', key: 'app' },
+    prompt: 'the Vercel token for the env page',
+    fields: [{ id: 'value', sensitivity: 'secret', element: { kind: 'ref', ref: 'e3' } }],
+    submit: 'offer-owner',
+    source: { kind: 'sealed', name: 'vercel' },
+  };
+
+  /** The real page target over a fake browser that records what it was asked to type. */
+  function browser() {
+    const typed: { field: string; text: string }[] = [];
+    const port: BrowserInputFieldsPort = {
+      inputDocument: async () => ({ navigationId: 'loader-1' }),
+      inputObserve: async () => ({ ok: true, facts: PAGE }),
+      inputShot: async () => ({ pngBase64: 'AAAA', clip: { x: 0, y: 0, w: 10, h: 10 } }),
+      inputType: async (_pageId, _expected, values) => {
+        typed.push(...values);
+        return 'typed';
+      },
+    };
+    return {
+      typed,
+      target: new PageInputTarget({ inputOnPage: async (_sessionId, _key, work) => await work(port, 'page-1') }),
+    };
+  }
+
+  it("should ask the owner naming the page's host, then type the copy into that one field and hold the page", async () => {
+    const page = browser();
+    const w = await world({ target: page.target });
+    await w.capture();
+
+    const view = await w.service.raise(SESSION, INTO_FIELD);
+    const request = await w.pending();
+    await w.service.deliver(SESSION, request?.id ?? '', w.allow(request?.observedDigest ?? ''), OWNER);
+
+    should(w.cards[0]?.ask).equal(
+      `Allow pasting sealed:vercel (${String(TOKEN.length)} characters from vercel) into a field on vercel.com. You type nothing.`,
+    );
+    should(page.typed).eql([{ field: 'value', text: TOKEN }]);
+    should(w.service.pageHeld(SESSION, ['app'])).match({ documents: ['loader-1'] });
+    should(w.told.at(-1)).containEql(`${view.id}: sealed:vercel was pasted into %browser:app`);
+    should(JSON.stringify([w.audits, w.events, w.told, w.cards])).not.containEql(TOKEN);
+  });
+
+  it('should paste at once under a rule for the page origin into a password field', async () => {
+    const page = browser();
+    const w = await world({ target: page.target });
+    await w.rules.create(
+      { kind: 'owner', actor: { kind: 'host' } },
+      { from: { kind: 'command', program: 'vercel' }, to: { kind: 'browser', origin: 'https://vercel.com' } },
+    );
+    await w.capture();
+
+    const view = await w.service.raise(SESSION, INTO_FIELD);
+
+    should(view.state).equal('delivered');
+    should(page.typed).eql([{ field: 'value', text: TOKEN }]);
   });
 });

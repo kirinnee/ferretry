@@ -1505,7 +1505,7 @@ function pasteAskOf(copy: CopyMeta, facts: InputTargetFacts): string {
       ? 'the terminal'
       : facts.kind === 'secret'
         ? `the secret ${facts.name}${facts.exists ? ', replacing its value' : ''}`
-        : 'the page';
+        : `a field on ${hostOf(facts.origin)}`;
   return `Allow pasting ${copy.handle} (${String(copy.length)} characters from ${from}) into ${into}. You type nothing.`;
 }
 

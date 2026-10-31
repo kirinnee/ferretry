@@ -249,7 +249,9 @@ const switchOf = (call: AgentToolCall): SurfaceKind | undefined =>
       ? 'terminal'
       : 'browser'
     : call.tool === 'secure.paste'
-      ? 'terminal'
+      ? call.to.kind === 'browser'
+        ? 'browser'
+        : 'terminal'
       : kindOf(call);
 
 const plural = (count: number, word: string): string => `${String(count)} ${word}${count === 1 ? '' : 's'}`;
@@ -467,6 +469,7 @@ export class AgentToolService {
           );
         const name = bareCopyName(call.handle);
         if (call.to.kind === 'secret') return await this.pasteToStore(sessionId, caller, call, call.to.name, name);
+        if (call.to.kind === 'browser') return await this.pasteToPage(sessionId, caller, call, call.to, name, facts);
         const surface = await this.resolve(sessionId, 'terminal', call.to.name);
         facts.surface = surface;
         await this.assertAgentMay(sessionId, surface);
@@ -1164,6 +1167,48 @@ export class AgentToolService {
   /** Screen text with the values the daemon just typed masked; text unchanged where no mask is wired. */
   private masked(sessionId: string, text: string): string {
     return this.ports.scrub === undefined ? text : this.ports.scrub(sessionId, text);
+  }
+
+  /**
+   * A paste into one field of a page the agent opened: the same input request a `browser.request_input` field
+   * raises, with the copy as its value, so the page's observed facts, digest, guarded write and hold all apply.
+   */
+  private async pasteToPage(
+    sessionId: string,
+    caller: AgentToolCaller,
+    call: Extract<AgentToolCall, { readonly tool: 'secure.paste' }>,
+    to: Extract<Extract<AgentToolCall, { readonly tool: 'secure.paste' }>['to'], { readonly kind: 'browser' }>,
+    name: string,
+    facts: CallFacts,
+  ): Promise<AgentToolResult> {
+    const surface = await this.resolve(sessionId, 'browser', to.name);
+    facts.surface = surface;
+    await this.assertAgentMay(sessionId, surface);
+    const reference = surfaceReference('browser', surface.name ?? surface.id);
+    const view = await this.inputPort(caller).raise(sessionId, {
+      target: { kind: 'browser', key: surface.name ?? surface.id },
+      prompt: call.prompt,
+      fields: [
+        {
+          id: 'value',
+          sensitivity: 'secret',
+          element:
+            to.ref === undefined
+              ? { kind: 'selector' as const, selector: to.selector ?? '' }
+              : { kind: 'ref' as const, ref: to.ref },
+        },
+      ],
+      submit: call.submit ?? 'offer-owner',
+      source: { kind: 'sealed', name },
+      ...(call.expiresInSeconds === undefined ? {} : { expiresInSeconds: call.expiresInSeconds }),
+    });
+    return {
+      summary:
+        view.state === 'delivered'
+          ? `Pasted ${copyHandle(name)} into a field on ${reference} under a rule the owner approved in advance (!${view.id}). Screenshots of the page are withheld for a while.`
+          : `Asked the owner to allow pasting ${copyHandle(name)} into a field on ${reference} (!${view.id}). Wait with input.wait; do not type there yourself.`,
+      input: view,
+    };
   }
 
   /** A paste "as the secret NAME": no surface is involved, so there is nothing of the agent's to resolve. */

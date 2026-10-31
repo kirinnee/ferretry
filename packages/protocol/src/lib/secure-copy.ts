@@ -131,6 +131,11 @@ export const CopyOriginSchema = z.strictObject({
   origin: boundedLine(256).optional(),
   /** The program's base name, for a command copy. */
   program: boundedLine(64).optional(),
+  /**
+   * The file that ran, for a command copy: found by the daemon on the command's PATH, so the owner sees WHICH
+   * `vercel` printed the value (`/usr/local/bin/vercel`, or one in a folder the ferret could have written to).
+   */
+  path: boundedLine(1024).optional(),
   /** The surface it was read from, for a page or clipboard copy. */
   surface: SurfaceKeySchema.optional(),
 });

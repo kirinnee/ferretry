@@ -631,11 +631,15 @@ export const AgentToolCallSchema = z.discriminatedUnion('tool', [
     tool: z.literal('secure.paste'),
     handle: CopyHandleSchema,
     /**
-     * Where it goes: a terminal prompt the agent opened (the daemon observes what reads it), or the secret store
-     * under a name (the daemon observes whether the name already holds a value).
+     * Where it goes: a terminal prompt the agent opened (the daemon observes what reads it), one field on a page
+     * the agent opened (a snapshot's ref or a selector; the daemon observes the field and the page's origin), or
+     * the secret store under a name (the daemon observes whether the name already holds a value).
      */
     to: z.discriminatedUnion('kind', [
       z.strictObject({ kind: z.literal('terminal'), name: SurfaceKeySchema }),
+      z
+        .strictObject({ kind: z.literal('browser'), name: SurfaceKeySchema, ...ElementTargetShape })
+        .superRefine(refineBrowserTarget({ point: false, required: true })),
       z.strictObject({ kind: z.literal('secret'), name: SecretNameSchema }),
     ]),
     /** What the paste is for, shown to the owner as the agent's words. */

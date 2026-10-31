@@ -284,6 +284,59 @@ describe('the secure.paste and secure.preapprove agent tools', () => {
     );
   });
 
+  it("should raise a paste into one field of the agent's own page as a secret whose value is the copy", async () => {
+    const asking = recordingInput();
+    const pasted = recordingInput('delivered');
+    const INTO_PAGE = { ...PASTE, to: { kind: 'browser', name: 'app', ref: 'e3' } } as AgentToolCall;
+    const first = agentToolWorld({ input: asking.input });
+    await first.service.call(agent, { tool: 'browser.open', name: 'app' });
+    const second = agentToolWorld({ input: pasted.input });
+    await second.service.call(agent, { tool: 'browser.open', name: 'app' });
+
+    const pending = await first.service.call(agent, INTO_PAGE);
+    const delivered = await second.service.call(agent, {
+      ...INTO_PAGE,
+      to: { kind: 'browser', name: 'app', selector: '#token' },
+    } as AgentToolCall);
+
+    should(asking.raised).eql([
+      {
+        sessionId: 's1',
+        raise: {
+          target: { kind: 'browser', key: 'app' },
+          prompt: 'the deploy token',
+          fields: [{ id: 'value', sensitivity: 'secret', element: { kind: 'ref', ref: 'e3' } }],
+          submit: 'offer-owner',
+          source: { kind: 'sealed', name: 'vercel' },
+        },
+      },
+    ]);
+    should(pasted.raised[0]?.raise.fields).eql([
+      { id: 'value', sensitivity: 'secret', element: { kind: 'selector', selector: '#token' } },
+    ]);
+    should(pending.summary).equal(
+      'Asked the owner to allow pasting sealed:vercel into a field on %browser:app (!A7). Wait with input.wait; do not type there yourself.',
+    );
+    should(delivered.summary).startWith('Pasted sealed:vercel into a field on %browser:app under a rule');
+  });
+
+  it("should refuse a paste into a person's page and with the browser switch off, but not for the terminal switch", async () => {
+    const { input, raised } = recordingInput();
+    const world = agentToolWorld({ input });
+    await world.service.call(person, { tool: 'browser.open', name: 'theirs' });
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+    const into = (name: string) => ({ ...PASTE, to: { kind: 'browser', name, ref: 'e3' } }) as AgentToolCall;
+
+    const theirs = await refused(world.service.call(agent, into('theirs')));
+    world.policy.off.add('terminal');
+    await world.service.call(agent, into('app'));
+    world.policy.off.add('browser');
+    const switchedOff = await refused(world.service.call(agent, into('app')));
+
+    should([theirs.code, switchedOff.code]).eql(['forbidden', 'forbidden']);
+    should(raised).have.length(1);
+  });
+
   it('should refuse a paste into a terminal a person opened, a person pasting, and the terminal switch off', async () => {
     const { input, raised } = recordingInput();
     const world = agentToolWorld({ input });

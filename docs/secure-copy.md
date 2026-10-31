@@ -96,7 +96,8 @@ The agent instruction teaches the rule that makes this work: **capture before yo
 
 ## Pasting
 
-`secure.paste` names a handle and a terminal the agent opened. The daemon raises an **input request** whose
+`secure.paste` names a handle and where it goes: a terminal the agent opened, one field on a page the agent
+opened (`{ kind: "browser", name, ref | selector }`), or the secret store. The daemon raises an **input request** whose
 value comes from the copy (`InputRaise.source`), so the card, the daemon-observed destination facts,
 `observedDigest`, the single guarded write, the quarantine and the audit are all the input bridge's own
 ([input requests](input-requests.md)):
@@ -113,6 +114,10 @@ value comes from the copy (`InputRaise.source`), so the card, the daemon-observe
   a line break or a control character is refused for a terminal ("this would press keys").
 - **Risk flag**: as for any terminal secret, and never green when the ferret had already seen the value
   ("The ferret saw this value before it was sealed, so it is not protected; consider rotating it.").
+- **Into a page field** it is one field of the input bridge's page request: the card says "into a field on
+  <host>", the daemon observes the field and the page's origin, the write is the bridge's own guarded one, and
+  the page is held afterwards like any typed secret (pictures refused while held). It needs the `browser`
+  switch, as any page tool does; a rule for `browser:<origin>` pastes unasked only into a password field.
 - **Audit**: `input.delivered` with `source: sealed` and the copy's name, never the value.
 
 ### Into the secret store
@@ -170,6 +175,12 @@ without ever reading it. It is the same input request, with the store as the des
 - **A program run by its path never matches.** A rule names a bare program (`gh`), the one the daemon's PATH
   finds. A copy captured from `./gh` or `/tmp/x/gh` keeps that path as its source, because it may be a file the
   ferret made to print a value of its choosing, so no rule matches it and the owner is asked.
+- **The card names the file that printed it.** The child runner finds the program once, on the command's own
+  PATH, runs that very file, and the copy records its path (`from.path`), so the card, `fy input answer` and
+  `fy copy ls` show WHICH `gh` printed the value: `/usr/bin/gh`, or one in `~/.local/bin` the ferret could
+  have written. A rule still matches on the bare name. **GAP:** a ferret runs as the same user as the daemon, so
+  it can write a `gh` into any user-writable folder on that PATH; the path on the card is how the owner tells,
+  not a lock.
 - **The secret store is never written by a rule** unless that rule names the exact secret NAME: `secret:<NAME>`
   has no pattern and no wildcard, so a rule for `VERCEL_TOKEN` never writes `VERCEL_TOKEN_2`.
 - **A plan**: `secure.preapprove` raises ONE card listing the pastes the agent plans, each with its route and
@@ -207,6 +218,7 @@ without ever reading it. It is the same input request, with the store as the des
 | ----- | ---------------------------------------------------------------------------------------------------- | ----------- |
 | SC1   | This contract, the in-memory store, command capture, masking, exposure check, `secure_*` agent tools | done        |
 | SC2a  | Paste to a terminal prompt, pre-approval rules and the plan card, `fy copy`, Allow on the input card | done        |
-| SC2b  | Paste to the secret store, with the exact-NAME rule                                                  | this change |
-| SC3   | Page and clipboard capture, paste to a browser field, page-read and screenshot hiding                | later       |
+| SC2b  | Paste to the secret store, with the exact-NAME rule                                                  | done        |
+| SC3a  | Paste to a field on a page; the card names the file a command copy came from                         | this change |
+| SC3b  | Page and clipboard capture, page-read and screenshot hiding                                          | later       |
 | SC4   | The app's paste and plan cards, Settings, and the agent instruction                                  | later       |
