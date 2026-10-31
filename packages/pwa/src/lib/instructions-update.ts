@@ -49,7 +49,3 @@ export function parseInstructionsUpdate(text: string, by?: InstructionsSender): 
     headline: `Ferretry · Instructions updated${labels.length === 0 ? '' : ` · ${labels.join(', ')}`}`,
   };
 }
-
-/** Is this send Ferretry's instructions note — never the owner's words, though it is typed as theirs? */
-export const isInstructionsNote = (by: InstructionsSender & { readonly kind?: string }): boolean =>
-  by.kind === 'ferretry' && by.feature === FEATURE;

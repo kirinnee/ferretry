@@ -29,6 +29,7 @@ export class AgentSendFailureNotifier implements SendFailureNotifier {
       sendId: `send-failed:${recipient}:${record.sendId}`,
       message: sendFailureNotice(to?.teammate ?? recipient, record, this.clientName),
       origin: 'daemon',
+      by: { kind: 'ferretry', feature: 'Delivery' },
     });
   }
 }

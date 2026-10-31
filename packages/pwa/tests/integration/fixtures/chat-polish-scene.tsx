@@ -5,6 +5,7 @@
  * Parameters (all optional):
  *
  *   ?update=1    the reader pressed "Show" on the instructions-updated row
+ *   ?ferretry=1  one Ferretry system row for each part of Ferretry that writes into a chat
  *   ?open=1      the reader pressed "Show more" on the long ferret message
  *   ?tools=1     the reader opened the image group
  *   ?picker=1    show the task menu instead of the conversation
@@ -180,6 +181,42 @@ function Picker() {
   );
 }
 
+const FERRETRY_SENDS: readonly (readonly [string, string])[] = [
+  [
+    'Warden',
+    'You have been quiet for 12 minutes. Are you still working?\n\nIf you are blocked, say what on; run `fy signal working` if you are busy.',
+  ],
+  ['Agenda', 'You have an open agenda item waiting on the owner.'],
+  [
+    'Monitor',
+    'The command you were watching finished with exit code 1.\n\nLast output: 3 tests failed in packages/daemon.',
+  ],
+  ['Lessons', 'The owner reviewed a lesson you suggested and accepted it.'],
+  [
+    'Migrate',
+    'Ferretry is moving this session to another runtime; stop long-running jobs and say when they are stopped.',
+  ],
+  ['Restart', 'Ferretry restarted this session after the daemon updated.\n\nPick up where you left off.'],
+  ['Delivery', 'Your message to Torrey did not arrive.\n\nIt was refused: the session had ended.'],
+];
+
+const ferretryEntries = (): TranscriptEntry[] =>
+  FERRETRY_SENDS.map(([feature, text], index) => ({
+    id: `fx-${feature}`,
+    kind: 'user' as const,
+    text,
+    at: NOW - (FERRETRY_SENDS.length - index) * MINUTE,
+    send: {
+      sendId: `fx-${feature}`,
+      acceptedAt: new Date(NOW - (FERRETRY_SENDS.length - index) * MINUTE).toISOString(),
+      message: text,
+      attachmentIds: [],
+      fate: 'accepted' as const,
+      path: 'direct' as const,
+      senderKind: 'daemon' as const,
+      by: { kind: 'ferretry' as const, feature },
+    },
+  }));
 function Scene() {
   if (params.get('picker') === '1') return <Picker />;
   return (
@@ -187,7 +224,7 @@ function Scene() {
       <Transcript
         agentName="Janella"
         daemonId={daemon.daemonId}
-        entries={entries()}
+        entries={params.get('ferretry') === '1' ? ferretryEntries() : entries()}
         onSubmit={async () => true}
         sessionId={SESSION}
       />

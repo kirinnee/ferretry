@@ -1,6 +1,6 @@
 import { type HandoffPointer, parseFerretryNotice, parseMessageAttachments } from '@ferretry/protocol';
 import { markReplies } from './peer-delivery.ts';
-import { isInstructionsNote } from './instructions-update.ts';
+import { ferretryFeatureOf } from './ferretry-sender.ts';
 import { peerFrom } from './peer-message.ts';
 import { EMPTY_SEND_VIEW, type SendViewState } from './send-dismissals.ts';
 import { foldLedgerSendRecords, type LedgerSendRecord, RECORD_CLOCK_SLACK_MS } from './send-ledger.ts';
@@ -437,7 +437,7 @@ export const isOwnSend = (record: LedgerSendRecord): boolean =>
   record.from === undefined &&
   record.fromName === undefined &&
   !isFerretryNoticeSend(record) &&
-  !isInstructionsSend(record) &&
+  ferretryFeatureOf(record) === undefined &&
   peerFrom(record.message).from === null;
 
 /** Ferretry's own notice, never the reader's words: a daemon sender, or text that reads as a notice. */
@@ -451,8 +451,3 @@ export const isFerretryNoticeSend = (record: LedgerSendRecord): boolean =>
  */
 export const handedOverDraft = (record: LedgerSendRecord): ReturnType<typeof parseMessageAttachments> | undefined =>
   record.path === 'turn-file' || record.path === 'native-file' ? parseMessageAttachments(record.message) : undefined;
-
-const isInstructionsSend = (record: LedgerSendRecord): boolean => {
-  const by = record.queue?.by ?? record.by;
-  return by !== undefined && isInstructionsNote(by);
-};
