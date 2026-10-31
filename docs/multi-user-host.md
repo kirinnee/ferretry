@@ -14,15 +14,15 @@ run on macOS.
 Each user's Ferretry lives entirely under their own `FY_HOME` (default `~/.ferretry`, kept `0700` on
 every boot), with its own daemon, port, identity, tokens and tmux server. In detail:
 
-| Thing                                                | Why another user cannot reach it                                                                                                                                                |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Admin token, secrets vault, devices, daemon identity | `0600` files inside the `0700` state home, written atomically                                                                                                                   |
-| Daemon HTTP API                                      | Every route needs a credential except health, `/usage` and `/metrics`. Arriving from loopback grants no owner rights by itself                                                  |
-| Port                                                 | The first boot takes the first free port from 7431 to 7446 and records it, so the second user gets 7432 automatically. `fy` will not send its token to a port another uid holds |
-| tmux                                                 | A private socket `<FY_HOME>/tmux.sock` (`srwx------`). Pane environment and typed keys go to tmux on stdin, never in a process's arguments                                      |
-| Agent browser                                        | Its own profile under `<FY_HOME>/browser`. It is driven over a pipe, with no debugging port, and its X display (window mode, login window) needs a cookie only its owner holds  |
-| Phone pairing and relay                              | Each daemon has its own identity. A code is minted only by its owner, lives 2 minutes, and never appears in a process's arguments                                               |
-| `fy secret use`                                      | The value goes only into the child's environment. `/proc/<pid>/environ` is readable by the same uid only                                                                        |
+| Thing                                                | Why another user cannot reach it                                                                                                                                                                     |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Admin token, secrets vault, devices, daemon identity | `0600` files inside the `0700` state home, written atomically                                                                                                                                        |
+| Daemon HTTP API                                      | Every route needs a credential except health, `/usage` and `/metrics`. Arriving from loopback grants no owner rights by itself                                                                       |
+| Port                                                 | The first boot takes the first free port from 7431 to 7446 and records it, so the second user gets 7432 automatically. `fy` will not send its token to a port another uid holds                      |
+| tmux                                                 | A private socket `<FY_HOME>/tmux.sock` (`srwx------`). Pane environment and typed keys go to tmux on stdin, never in a process's arguments                                                           |
+| Agent browser                                        | Its own profile under `<FY_HOME>/browser`. Its X display (window mode, login window) needs a cookie only its owner holds. **Its debugging port is NOT protected yet** — see the first declared limit |
+| Phone pairing and relay                              | Each daemon has its own identity. A code is minted only by its owner, lives 2 minutes, and never appears in a process's arguments                                                                    |
+| `fy secret use`                                      | The value goes only into the child's environment. `/proc/<pid>/environ` is readable by the same uid only                                                                                             |
 
 ## Setting up a new user
 
@@ -94,6 +94,12 @@ ps -eo args | grep -c 'FY_SESSION_BOARD_CAPABILITY=' # 1 (the grep itself) — n
 
 These are known and are not protected against today:
 
+- **Another user can drive your agent browser.** Chrome is driven over a loopback debugging port that
+  has no authentication, so any local user can take over the logged-in browser profile while it runs.
+  A pipe transport with no port exists, but it is not on by default: Chrome then tells every site
+  `navigator.webdriver === true`, which costs sign-ins and bot checks. Until the owner chooses how a
+  shared machine turns it on, **don't sign the agent browser in to anything that matters on a shared
+  host**, or keep the browser off for users who do not need it.
 - **Administrators see everything.** Root, and anyone with `sudo` or in the `docker` group, can read
   every user's files and processes. Isolation is between ordinary users only.
 - **A tmux server started before the stdin fix** keeps the first session's credential in its argv until
@@ -120,5 +126,5 @@ These are known and are not protected against today:
 ## Where this was decided
 
 The audit behind this page (card &I28) and its fixes: the CLI's port-owner check, X display
-authentication, the pairing link kept out of argv, private temporary paths, tmux payloads on stdin, the
-agent browser over a pipe, and a fresh session credential per launch.
+authentication, the pairing link kept out of argv, private temporary paths, tmux payloads on stdin, a
+fresh session credential per launch, and a selectable pipe transport for the agent browser (off by default).
