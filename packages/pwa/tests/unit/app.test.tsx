@@ -2414,7 +2414,7 @@ describe('AppShell', () => {
       messages: () => [
         { role: 'assistant', text: 'Bumped the lockfile.' },
         { role: 'user', text: '!A3 can you rotate the key?' },
-        { role: 'assistant', text: 'Rotated; waiting on your approval.' },
+        { role: 'assistant', text: 'Piper merged the probe.\n\nOn !A3: rotated; waiting on your approval.' },
       ],
     });
     try {
@@ -2427,7 +2427,8 @@ describe('AppShell', () => {
         view.container.querySelectorAll('[data-agenda-history] [data-history="ferret"]'),
         node => node.textContent ?? '',
       ).join('\n');
-      expect(shown).toContain('Rotated; waiting on your approval.');
+      expect(shown).toContain('rotated; waiting on your approval.');
+      expect(shown).not.toContain('Piper merged');
       expect(shown).not.toContain('lockfile');
       const owner = view.container.querySelector('[data-agenda-history] [data-history="owner"]')?.textContent ?? '';
       expect(owner).toContain('can you rotate the key?');
