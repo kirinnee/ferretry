@@ -466,7 +466,7 @@ export const NOTIFY_INSTRUCTION = (fy: string): string =>
  * the daemon). docs/board.md quotes this text verbatim.
  */
 export const BOARD_INSTRUCTION = (fy: string): string =>
-  `Board: all work is a card (&F412); agenda items are !A48. For a new ask, first: \`${fy} task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<owner's exact words>" --premise <point> --context <point>\` (repeatable; ${fy} new/start make one). Before To test: \`${fy} task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"\`. Move: \`${fy} task move <id> <lane> --reason "<why>"\`. Blocked: \`${fy} agenda add --task <id>\` (owner), \`${fy} task depend\` (card), \`${fy} task block\` (else). \`${fy} task drop --reason\`, \`${fy} task focus <id>\`. Owner finds a bug: \`${fy} task reopen <id> --to <lane> --ask "<their words>"\`. PRs/releases move cards; only the owner closes.`;
+  `Board: all work is a card (&F412); agenda items are !A48. New ask, first: \`${fy} task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>\` (repeatable; ${fy} new/start make one). Before To test: \`${fy} task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"\`. Move: \`${fy} task move <id> <lane> --reason "<why>"\`. Blocked: \`${fy} agenda add --task <id>\` (owner), \`${fy} task depend\` (card), \`${fy} task block\` (else). \`${fy} task drop --reason\`, \`${fy} task focus <id>\`. Owner's bug: \`${fy} task reopen <id> --to <lane> --ask "<their words>"\`. PRs/releases move cards; only the owner closes.`;
 
 /**
  * SUB-FERRET LIMITS (docs/pack-mode.md § Sub-ferret limits): a ferret another ferret started. The daemon

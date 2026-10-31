@@ -424,8 +424,8 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     // Assert — the whole prompt, every section on and the longest routing prompt as its one `Routing: ` line,
     // stays under 7.4 KB (docs/pack-mode.md records the sizes: raised from 6.7 KB for Attention's steps and
     // hypermedia's `chart`; the notify rule replaced Attention's 1 KB, Agenda mode adds its own section). The
-    // Board section (640) was paid for by naming the tools by prefix, moving map, media and chart's full spec
-    // behind `fy render guide`, and compressing the lessons rule: 7,246 measured (the question-also-answered-as-an-info-item rule, paid for by tightening the Agenda wording), so keep 150 of headroom.
+    // Board section (635, card-writing and How to test included, in tightened words) was paid for by naming the tools by prefix, moving map, media and chart's full spec
+    // behind `fy render guide`, and compressing the lessons rule: 7,241 measured (the question-also-answered-as-an-info-item rule, paid for by tightening the Agenda wording), so keep 150 of headroom.
     const longestRouting = 1 + 'Routing: '.length + MAX_ROUTING_PROMPT_CHARS;
     should(Object.values(sizes).reduce((sum, size) => sum + size, 0) + longestRouting).be.below(7_400 - 150);
     should(sizes.pack).be.below(1_050);

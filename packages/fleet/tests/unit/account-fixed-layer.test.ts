@@ -823,9 +823,9 @@ describe('BOARD_INSTRUCTION', () => {
     // Assert — tasks are `&`, agenda items are `!`, and nothing prints the retired `#F`.
     should(text).startWith('Board: all work is a card (&F412); agenda items are !A48.');
     should(text).not.containEql('#F');
-    should(text).containEql('For a new ask, first:');
+    should(text).containEql('New ask, first:');
     should(text).containEql(
-      '`zz task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<owner\'s exact words>" --premise <point> --context <point>`',
+      '`zz task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>`',
     );
     should(text).containEql('(repeatable; zz new/start make one)');
     should(text).containEql(
@@ -838,6 +838,7 @@ describe('BOARD_INSTRUCTION', () => {
     should(text).containEql('`zz task drop --reason`');
     should(text).containEql('`zz task focus <id>`');
     should(text).containEql('`zz task reopen <id> --to <lane> --ask "<their words>"`');
+    should(text).containEql("Owner's bug:");
     should(text).containEql('PRs/releases move cards; only the owner closes.');
     should(text).not.containEql('`fy ');
   });
