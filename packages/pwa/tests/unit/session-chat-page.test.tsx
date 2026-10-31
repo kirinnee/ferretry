@@ -58,7 +58,15 @@ import { BottomSheet } from '../../src/shell/bottom-sheet.tsx';
 import { resetSidePaneTabsStates } from '../../src/shell/side-pane-tab-model.ts';
 import { ThemeToggle } from '../../src/shell/theme-toggle.tsx';
 import { fakeDeck, terminalListing, terminalView } from '../support/terminal-deck.ts';
-import { boardAnswer, card as boardCard, fakeEnvironment, fakePort, laneSetFor, PROJECT } from './board-support.ts';
+import {
+  boardAnswer,
+  card as boardCard,
+  fakeEnvironment,
+  fakePort,
+  laneSetFor,
+  originCard,
+  PROJECT,
+} from './board-support.ts';
 import { factoryFor } from './features/fleet/mcp-sign-in-support.ts';
 import '../support/dom.ts';
 import { render, run, runAsync } from '../support/react.ts';
@@ -1613,6 +1621,94 @@ describe('SessionChatPage', () => {
     }
   });
 
+  test('the composer’s task catalog is the whole project’s human cards, and its warm-up waits for that read', async () => {
+    const current = sessionView('shared', { config: { projectId: PROJECT } });
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const board = new DaemonBoardStore(
+      fakePort({
+        board: async () => {
+          await gate;
+          return boardAnswer(
+            [
+              originCard('F18', 'human', null, { owner: 'shared' }),
+              originCard('F19', 'human', null, { owner: 'other', assignee: 'someone' }),
+              originCard('F20', 'agent', { id: 'F19' }, { owner: 'other' }),
+            ],
+            { projectId: PROJECT, laneSet: laneSetFor() },
+          );
+        },
+      }),
+      fakeEnvironment(),
+    );
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        board={board}
+        client={client([], current)}
+        connection={alpha}
+        context={contextDependencies()}
+        entries={[]}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={current}
+      />,
+      fakeDaemon().factory,
+    );
+    try {
+      await flush();
+      const composer = () => page.root.findByType(Composer);
+      expect(composer().props.autocompleteTasks).toBeUndefined();
+      expect(composer().props.autocompleteReady()).toBeInstanceOf(Promise);
+      release();
+      await flush();
+      const asked = new Map<string, boolean>(
+        (composer().props.autocompleteTasks ?? []).map((task: { id: string; agentAsked: boolean }) => [
+          task.id,
+          task.agentAsked,
+        ]),
+      );
+      expect([...asked].sort()).toEqual([
+        ['F18', false],
+        ['F19', false],
+        ['F20', true],
+      ]);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('a project read that fails leaves the composer on this ferret’s own tasks', async () => {
+    const current = sessionView('shared', { config: { projectId: PROJECT } });
+    const board = new DaemonBoardStore(
+      fakePort({
+        board: async () => {
+          throw new Error('board is down');
+        },
+      }),
+      fakeEnvironment(),
+    );
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        board={board}
+        client={client([], current)}
+        connection={alpha}
+        context={contextDependencies()}
+        entries={[]}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={current}
+      />,
+      fakeDaemon().factory,
+    );
+    try {
+      await flush();
+      expect(page.root.findByType(Composer).props.autocompleteTasks).toEqual([]);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
   test('a chat with no focus card and no Tasks tab open never reads the board', async () => {
     let reads = 0;
     const board = new DaemonBoardStore(

@@ -9,6 +9,7 @@
 
 import type { BoardTaskView } from '@ferretry/protocol';
 import type { BoardModel } from './board-model.ts';
+import { taskOrigin } from './board-human.ts';
 import { isMine } from './board-model.ts';
 import { cardPlaces } from './board-view.ts';
 import type { DaemonId } from './daemon-connection.ts';
@@ -44,13 +45,20 @@ const legacyIdOf = (task: BoardTaskView, sessionId: string): string | null => {
   return ref.slice(0, at) === sessionId ? ref.slice(at + 1) : null;
 };
 
-/** The cards of `model` this ferret owns or is assigned, on `daemonId`, newest activity first. */
-export const sessionCards = (model: BoardModel, daemonId: DaemonId, sessionId: string): readonly SessionCard[] => {
+/**
+ * Whether the ask came from an agent. The daemon says so (`origin`, the same fact the Tasks panel splits on);
+ * a daemon that says nothing is an older one, where "the owner raised it or waits on it" is the best proof left.
+ */
+const askedByAgent = (task: BoardTaskView): boolean => {
+  const origin = taskOrigin(task);
+  return origin === null ? !isMine(task) : origin === 'agent';
+};
+
+const cardsOf = (model: BoardModel, daemonId: DaemonId, sessionId: string, keep: (task: BoardTaskView) => boolean) => {
   const places = cardPlaces(model);
   return model.cards
-    .filter(card => card.daemonId === daemonId)
-    .filter(card => card.task.owner === sessionId || card.task.assignee === sessionId)
-    .map(card => {
+    .filter(card => card.daemonId === daemonId && keep(card.task))
+    .map((card): SessionCard => {
       const category = places.get(card.key)?.category ?? null;
       const task = card.task;
       return {
@@ -62,12 +70,20 @@ export const sessionCards = (model: BoardModel, daemonId: DaemonId, sessionId: s
         active: category === 'active' || category === 'review',
         assignee: task.assignee,
         touchedAt: task.lastTouchedAt ?? task.createdAt,
-        agentAsked: !isMine(task),
+        agentAsked: askedByAgent(task),
         legacyId: legacyIdOf(task, sessionId),
         prs: task.links.prs.map(pr => ({ number: pr.number, url: pr.url })),
       };
     });
 };
+
+/** The cards of `model` this ferret owns or is assigned, on `daemonId`. */
+export const sessionCards = (model: BoardModel, daemonId: DaemonId, sessionId: string): readonly SessionCard[] =>
+  cardsOf(model, daemonId, sessionId, task => task.owner === sessionId || task.assignee === sessionId);
+
+/** Every card of `model` on `daemonId`, owned or not: a project's board as the `&` menu and the proof read it. */
+export const projectCards = (model: BoardModel, daemonId: DaemonId, sessionId: string): readonly SessionCard[] =>
+  cardsOf(model, daemonId, sessionId, () => true);
 
 /** The card an old reference means, or `null`: a card id on this slice wins, then an imported task's old id. */
 export const resolveCardReference = (

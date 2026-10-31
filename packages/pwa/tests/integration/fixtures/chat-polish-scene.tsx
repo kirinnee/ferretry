@@ -9,13 +9,21 @@
  *   ?tools=1     the reader opened the image group
  *   ?picker=1    show the task menu instead of the conversation
  *   ?on=1        the picker's switch is on
+ *   ?many=1      a busy project (64 cards) through the real provider and ranking; ?q=<text> narrows it
  *   ?theme=<family>-<mode>
  */
 
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ComposerAutocompletePopover } from '../../../src/components/composer-autocomplete-popover.tsx';
-import type { ComposerAutocompleteCandidate } from '../../../src/components/composer-autocomplete.ts';
+import {
+  type ComposerAutocompleteCandidate,
+  type ComposerTriggerMatch,
+  rankComposerCandidates,
+} from '../../../src/components/composer-autocomplete.ts';
+import { createDirectReferenceProviders } from '../../../src/components/composer-autocomplete-providers.ts';
+import type { ComposerReferenceTask } from '../../../src/lib/composer-reference-catalogs.ts';
+import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import { transcriptEntriesFromLog } from '../../../src/components/session-workspace-model.ts';
 import type { TranscriptEntry } from '../../../src/lib/session-screens.ts';
 import { Transcript } from '../../../src/components/transcript.tsx';
@@ -88,18 +96,67 @@ const candidate = (id: string, title: string, detail: string): ComposerAutocompl
   replacement: `&${id}`,
 });
 
+const LANES = ['Todo', 'In progress', 'To test', 'In review'] as const;
+const TITLES = [
+  'Fix the retry loop',
+  'Tidy the relay docs',
+  'Pair a second phone',
+  'Warden remedy copy',
+  'Board filter chips',
+  'Terminal resize jitter',
+  'Cache the fleet read',
+  'Rename the daemon flag',
+];
+
+const busyProject = (): ComposerReferenceTask[] =>
+  Array.from({ length: 64 }, (_, index) => ({
+    id: `F${index + 1}`,
+    title: `${TITLES[index % TITLES.length]} ${index + 1}`,
+    summary: index % 5 === 0 ? 'relay fingerprint allowlist' : '',
+    lane: LANES[index % LANES.length] ?? 'Todo',
+    closed: false,
+    active: index % 7 === 0,
+    assignee: index % 2 === 0 ? null : 'zelda',
+    touchedAt: new Date(NOW - index * MINUTE).toISOString(),
+    agentAsked: index >= 50,
+    legacyId: null,
+  }));
+
+const manyRows = (included: boolean, query: string): ComposerAutocompleteCandidate[] => {
+  const scope = daemonSessionScope(daemon, SESSION);
+  const [, , sigil] = createDirectReferenceProviders({
+    daemon,
+    scope,
+    getTasks: busyProject,
+    getIncludeAgentTasks: () => included,
+  });
+  const match: ComposerTriggerMatch = {
+    trigger: '&',
+    triggerText: '&',
+    query,
+    start: 0,
+    end: query.length + 1,
+    caret: query.length + 1,
+  };
+  const result = sigil?.initialCandidates?.({ query, match, signal: new AbortController().signal });
+  return rankComposerCandidates(result?.candidates ?? [], result?.filterQuery ?? query, result?.limit);
+};
+
 function Picker() {
   const [included, setIncluded] = useState(params.get('on') === '1');
-  const rows = [
-    candidate('F12', 'Fix the retry loop', 'Doing · you'),
-    candidate('F9', 'Tidy the relay docs', 'Todo · you'),
-    ...(included
-      ? [
-          candidate('F31', 'Review torrey’s diff', 'Doing · ferret'),
-          candidate('F40', 'Warden: stuck turn', 'Todo · warden'),
-        ]
-      : []),
-  ];
+  const many = params.get('many') === '1';
+  const rows = many
+    ? manyRows(included, params.get('q') ?? '')
+    : [
+        candidate('F12', 'Fix the retry loop', 'Doing · you'),
+        candidate('F9', 'Tidy the relay docs', 'Todo · you'),
+        ...(included
+          ? [
+              candidate('F31', 'Review torrey’s diff', 'Doing · ferret'),
+              candidate('F40', 'Warden: stuck turn', 'Todo · warden'),
+            ]
+          : []),
+      ];
   return (
     <div
       className="fy-composer-row"

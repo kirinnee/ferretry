@@ -97,6 +97,7 @@ import { type SurfaceEventFeed, useSurfaceDriving } from '../../features/workspa
 import { useSessionTerminals, useWorkspaceFormFactor } from '../../features/workspace/use-workspace-environment.ts';
 import type { AgendaReplies } from '../../hooks/use-agenda-replies.ts';
 import { useChatCard } from '../../hooks/use-chat-card.ts';
+import { useProjectCards } from '../../hooks/use-ferret-cards.ts';
 import { useStateChatTasks } from '../../hooks/use-chat-tasks-url.ts';
 import type { ChatTasksView } from '../board-chat-url.ts';
 import { useChatScrollbarGutter } from '../../hooks/use-chat-scrollbar-gutter.ts';
@@ -537,12 +538,28 @@ export function SessionChatPage({
   const [utility, setUtility] = useState<SessionUtility | null>(null);
   const utilityId = useId();
   const search = useSessionSearch();
-  const referenceTasks =
+  const ferretTasks =
     search.scope?.daemonId === scope.daemonId &&
     search.scope.sessionId === scope.sessionId &&
     search.taskState === 'ready'
       ? search.tasks
       : undefined;
+  // The `&` menu and the proof read the whole project's board, so a card the owner asked for is offered
+  // whoever holds it; a session with no project, or a project read that failed, keeps this ferret's own slice.
+  const projectId = session.config.projectId ?? null;
+  const projectTasks = useProjectCards(board, connection, session.config.id, projectId);
+  const referenceTasks =
+    projectId === null || projectTasks.state === 'unavailable'
+      ? ferretTasks
+      : projectTasks.state === 'ready'
+        ? projectTasks.cards
+        : undefined;
+  const { wait: waitForProjectTasks } = projectTasks;
+  const { waitForTasks: waitForFerretTasks } = search;
+  const waitForReferenceTasks = useCallback((): Promise<void> | undefined => {
+    const waits = [waitForFerretTasks(), waitForProjectTasks()].filter(wait => wait !== undefined);
+    return waits.length === 0 ? undefined : Promise.allSettled(waits).then(() => undefined);
+  }, [waitForFerretTasks, waitForProjectTasks]);
   // #43. The session's ONE skills read, owned here for the same reason the task
   // snapshot is: both the pane and the reference surface need it, and two reads
   // would be two owners that disagree after a refresh. `names` is undefined
@@ -579,7 +596,7 @@ export function SessionChatPage({
     {
       tasks: referenceTasks,
       skills: skills.catalog,
-      waitForTasks: search.waitForTasks,
+      waitForTasks: waitForReferenceTasks,
       waitForSkills: skills.settled,
       ...(search.taskState === 'unavailable' && search.taskError !== null ? { taskFailure: search.taskError } : {}),
       // The `!` menu reads the SAME live board the panel draws, so an item raised a moment ago is offered
