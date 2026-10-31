@@ -1,8 +1,10 @@
 /**
  * Screenshots of Settings › Machine › What agents may control, with its Page scripts row — the owner's switch
- * for `browser.eval` — as the app draws it: the section as it opens, Page scripts off (`off`), and with Page
- * scripts ticked and the Save panel showing (`on`), at a 390px phone and a 1440px desktop, in the light and
- * dark studio themes. Review evidence for the row and its warning; nothing compares the PNGs.
+ * for `browser.eval` — as the app draws it: the section as it opens, Page scripts off (`off`); with Page
+ * scripts ticked and the Save panel showing (`on`); and the same from a device off the machine, whose save is
+ * held until the owner confirms it with a passkey (`held`); and, when an agent turns it on by editing
+ * machine.yaml, the held change as its agenda card shows it (`card`) — at a 390px phone and a 1440px
+ * desktop, in the light and dark studio themes. Review evidence for the row and its warning; nothing compares the PNGs.
  *
  *   bun harness/page-scripts-screenshot.tsx          # writes harness/out/page-scripts-*.png
  *   PAGE_SCRIPTS_SHOTS=/tmp/dir bun harness/page-scripts-screenshot.tsx
@@ -32,11 +34,16 @@ const run = (command: string, args: readonly string[]): void => {
 
 const PAGE_ENTRY = `
 import { createRoot } from 'react-dom/client';
+import { AgendaConfigChange } from '../../src/features/agenda/agenda-config-change.tsx';
 import { MachineSettingsTab } from '../../src/features/fleet/machine/settings-tab.tsx';
 import { machineAnswer, machineView, scriptedClient, STUDIO } from '../../tests/unit/features/fleet/setup/setup-support.ts';
 import { machineSetupAnswer } from '../machine-setup-fixture.ts';
 
-const scripted = scriptedClient({ '/v1/fleet/machine': machineAnswer() });
+// A device off the machine: turning a switch on there waits for its passkey.
+const remote = new URLSearchParams(location.search).get('remote') === '1';
+const scripted = scriptedClient({
+  '/v1/fleet/machine': machineAnswer(remote ? { mayApply: false, applyRefusal: 'step-up-required' } : {}),
+});
 const client = {
   request: async (path, schema, init) => {
     const setup = machineSetupAnswer('studio-mac', true, path, init);
@@ -47,7 +54,14 @@ const browser = Object.assign(new EventTarget(), { location: { hash: '#machines/
 
 const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
+// An agent's own edit of machine.yaml that turns Page scripts on: held, as its agenda card shows it.
+const held = { path: 'machine.yaml', etag: 'b'.repeat(64), changes: ['agents may now control page scripts'] };
 createRoot(root).render(
+  new URLSearchParams(location.search).get('card') === '1' ? (
+    <div className="bg-bg p-4 text-fg" data-shot="">
+      <AgendaConfigChange item={{ confirms: held }} />
+    </div>
+  ) : (
   <div className="bg-bg p-4 text-fg" data-shot="">
     <MachineSettingsTab
       connection={STUDIO}
@@ -60,7 +74,8 @@ createRoot(root).render(
       sources={[]}
       browser={browser}
     />
-  </div>,
+  </div>
+  ),
 );
 `;
 
@@ -125,14 +140,19 @@ try {
           return await route.continue();
         });
         const page = await context.newPage();
-        for (const scene of ['off', 'on'] as const) {
-          await page.goto(`${server.url}?theme=studio-${scheme}`);
-          const section = page.locator('[data-setup-section="agent-control"]');
+        for (const scene of ['off', 'on', 'held', 'card'] as const) {
+          await page.goto(
+            `${server.url}?theme=studio-${scheme}${scene === 'held' ? '&remote=1' : ''}${scene === 'card' ? '&card=1' : ''}`,
+          );
+          const section = page.locator(
+            scene === 'card' ? '[data-agenda-confirms]' : '[data-setup-section="agent-control"]',
+          );
           await section.waitFor({ state: 'visible' });
-          if (scene === 'on') {
+          if (scene === 'on' || scene === 'held') {
             await section.locator('[data-setup-choice="pageScripts"]').click();
             await section.getByRole('button', { name: 'Save what agents may control' }).waitFor({ state: 'visible' });
           }
+          if (scene === 'held') await section.locator('[data-change-step-up]').waitFor({ state: 'visible' });
           await section.scrollIntoViewIfNeeded();
           const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
           if (overflow > 0) fail(`${scene} at ${viewport.name}/${scheme} scrolls sideways by ${overflow}px`);
