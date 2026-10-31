@@ -624,6 +624,16 @@ const appStore = async (
             ? options.transcript(connection.daemonId, sessionId)
             : (options.transcript ?? '');
         },
+        // The chat reads its tail as a page (`log-page`): the same transcript, beginning at the file's start.
+        logPage: async (sessionId: string) => {
+          transcriptReads.push(`${connection.daemonId}:${sessionId}`);
+          await options.transcriptGate?.();
+          const log =
+            typeof options.transcript === 'function'
+              ? options.transcript(connection.daemonId, sessionId)
+              : (options.transcript ?? '');
+          return { v: 1 as const, sessionId, log, start: 0, file: 'transcript' };
+        },
         // A conversation's durable rows, in one page — what the Attention page's "Last messages" fold reads.
         messages: async (sessionId: string) => ({
           v: 1 as const,

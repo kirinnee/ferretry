@@ -32,6 +32,7 @@ import type { SendDismiss, SendExpand } from '../../components/settled-send-note
 import type { PaneSnapshotReader } from '../../components/terminal-snapshot.tsx';
 import { readPaneSnapshot } from '../../components/terminal-snapshot-model.ts';
 import { Transcript } from '../../components/transcript.tsx';
+import type { TranscriptHistoryControl } from '../../components/transcript-history-row.tsx';
 import { TranscriptUnboundNotice } from '../../components/transcript-unbound-notice.tsx';
 import {
   type AgendaActionClient,
@@ -199,6 +200,8 @@ export interface SessionChatPageProps {
   readonly catchingUp?: boolean;
   /** Where this session's reading position is kept, so Back and a reload return to it. */
   readonly readingPosition?: ChatScrollSlot;
+  /** What the top of the transcript offers, and how to load older messages (`lib/transcript-history.ts`). */
+  readonly history?: TranscriptHistoryControl;
   /**
    * The Tasks tab's place: expanded over the chat or in the panel, and whether agent tasks show. The app
    * keeps both in the address (`?tasks=full`, `?agents=1`) so Back collapses the board; absent, the page
@@ -435,6 +438,7 @@ export function SessionChatPage({
   updating = false,
   catchingUp = false,
   readingPosition,
+  history,
   tasksView,
   connectionState,
   chatWidth = 'readable',
@@ -1500,6 +1504,7 @@ export function SessionChatPage({
               {...(onExpand === undefined ? {} : { onExpand })}
               pinSignal={pinSignal}
               {...(readingPosition === undefined ? {} : { readingPosition })}
+              {...(history === undefined ? {} : { history })}
               sessionId={session.config.id}
             />
           </AgendaItemsProvider>

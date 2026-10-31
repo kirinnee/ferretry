@@ -422,15 +422,25 @@ export interface TranscriptFollowOptions extends TranscriptReadOptions {
  * `instant`, found by scanning back from the END of the file — so what it costs is the bytes written
  * since then, never the file's size. `tail` starts on the first record boundary inside the last
  * `bytes` of the file, for a question about what is happening NOW. `beginning` reads the whole file,
- * one bounded step at a time.
+ * one bounded step at a time. `offset` starts on the first record boundary at or after `byteOffset` —
+ * the byte itself when a record begins there — for a page of OLDER history, whose caller already
+ * knows where in the file it wants to be.
  */
 export type TranscriptWindowStart =
   | { readonly at: 'beginning' }
   | { readonly at: 'since'; readonly instant: string }
-  | { readonly at: 'tail'; readonly bytes: number };
+  | { readonly at: 'tail'; readonly bytes: number }
+  | { readonly at: 'offset'; readonly byteOffset: number };
 
 export interface TranscriptWindowOptions extends TranscriptReadOptions {
   readonly start: TranscriptWindowStart;
+  /**
+   * The byte the window stops BEFORE. No step reads at or past it, and the window says it has no more
+   * once it gets there, so a page of older history costs the bytes it covers — never a step's worth
+   * past them. A record that straddles it is left unread, exactly as a live writer's half-written last
+   * line is. Absent, the window reads to the end of the file, as it always has.
+   */
+  readonly end?: number;
 }
 
 /** One bounded step of a window: the records appended since the last step, if any. */

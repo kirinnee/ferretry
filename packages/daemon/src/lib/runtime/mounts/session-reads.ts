@@ -56,6 +56,8 @@ const REFUSALS: Readonly<Record<OperatorReadFailure, { readonly status: number; 
   // conversation under it. A client acts by re-reading from the start of the page it still holds,
   // which is a different remedy from correcting a malformed query — that one stays a 400.
   message_cursor_stale: { status: 409, code: 'message_cursor_stale' },
+  // 409 for the same reason: the offsets were fine, and the transcript file under them is another one.
+  log_cursor_stale: { status: 409, code: 'log_cursor_stale' },
 };
 
 /** The path parameter, decoded. A parameter that regains a separator never reaches the subsystem. */
@@ -170,6 +172,37 @@ async function logs(
 }
 
 /**
+ * One page of the session's transcript as the chat renders it: the tail, or the page `?before` a byte.
+ *
+ * Conditional like `logs`, so a chat polling its tail is answered `304` while nothing was written. A
+ * blank `?file` is absent rather than a token: the token is the daemon's, and a client holds one only
+ * after a page it was given.
+ */
+async function logPage(
+  reads: OperatorReadService,
+  sessions: SessionDirectorySubsystem,
+  context: RouteContext,
+): Promise<ApiResponse> {
+  const id = sessionId(context);
+  await requireSession(sessions, id);
+  const file = queryValue(context.request, 'file');
+  const before = numberQuery(context, 'before');
+  const from = numberQuery(context, 'from');
+  const limit = numberQuery(context, 'limit');
+  try {
+    const page = await reads.logPage(id, {
+      ...(before === undefined ? {} : { before }),
+      ...(from === undefined ? {} : { from }),
+      ...(limit === undefined ? {} : { limit }),
+      ...(file === undefined || file === '' ? {} : { file }),
+    });
+    return conditional(jsonResponse(page), context.request.headers.get('if-none-match'));
+  } catch (error) {
+    return refuse(error);
+  }
+}
+
+/**
  * One page of the session's addressable conversation.
  *
  * `?cursor` is passed through RAW and unnormalized, which is the one place this mount deliberately
@@ -243,10 +276,10 @@ async function transcriptImage(
 }
 
 /**
- * The `operator` minimum on all five: a pane capture is the agent's whole screen, a transcript is
- * everything it has said, an addressable page is that transcript row by row, and the journal carries
- * the session's configuration in its lifecycle events. None of it is warden-readable until a unit
- * decides deliberately that it should be.
+ * The `operator` minimum on all six: a pane capture is the agent's whole screen, a transcript is
+ * everything it has said (a log page is the same transcript, read further back), an addressable page
+ * is that transcript row by row, and the journal carries the session's configuration in its lifecycle
+ * events. None of it is warden-readable until a unit decides deliberately that it should be.
  *
  * `noStore` on the first four for the reason the session view is: these are live state, and a cached answer
  * shows a session that has already moved on. It matters most for the snapshot, whose entire value is
@@ -284,6 +317,13 @@ export function sessionReadRoutes(
       minimum: 'operator',
       noStore: true,
       handle: async context => await logs(reads, sessions, context),
+    },
+    {
+      method: 'GET',
+      path: '/v1/sessions/:sessionId/log-page',
+      minimum: 'operator',
+      noStore: true,
+      handle: async context => await logPage(reads, sessions, context),
     },
     {
       method: 'GET',

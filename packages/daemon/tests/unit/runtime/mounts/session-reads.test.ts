@@ -9,6 +9,7 @@ import {
   type OperatorReadRedactor,
   type PaneCapture,
   type PaneScope,
+  type SessionTranscriptPages,
   type StoredSessionEvent,
   type TranscriptTailResult,
 } from '../../../../src/lib/session/reads/index.ts';
@@ -81,6 +82,7 @@ function fixture(
     readonly noTranscript?: true;
     readonly redactor?: OperatorReadRedactor;
     readonly images?: TranscriptImageReader;
+    readonly pages?: SessionTranscriptPages;
   } = {},
 ) {
   const reads = new OperatorReadService(
@@ -103,6 +105,7 @@ function fixture(
     CODEC,
     { read: async () => options.storedSnapshot ?? { kind: 'absent' } },
     options.redactor,
+    options.pages,
   );
   const dispatcher = new ApiDispatcher(
     new ApiRouter([
@@ -909,5 +912,143 @@ describe('the transcript image route', () => {
     should(image?.privilegedOnly).equal(logs?.privilegedOnly);
     should(logs?.noStore).equal(true);
     should(image?.noStore).not.equal(true);
+  });
+});
+
+describe('the session log page route', () => {
+  const page = (calls: unknown[] = []): SessionTranscriptPages => ({
+    page: async (_sessionId, query) => {
+      calls.push(query);
+      return {
+        kind: 'read',
+        events: [
+          { kind: 'message', harness: 'claude', role: 'user', text: 'older', timestamp: INSTANT, byteOffset: 40 },
+        ],
+        start: 40,
+        file: 'file-token',
+      };
+    },
+  });
+
+  it('should serve a page with where it begins and which file it came from', async () => {
+    // Arrange
+    const calls: unknown[] = [];
+    const dispatch = fixture({ pages: page(calls) });
+
+    // Act
+    const response = await dispatch({
+      path: '/v1/sessions/s1/log-page',
+      query: [
+        ['before', '900'],
+        ['from', '10'],
+        ['limit', '50'],
+        ['file', 'file-token'],
+      ],
+      headers: human,
+    });
+
+    // Assert
+    should(response.status).equal(200);
+    should(jsonBody(response)).eql({
+      v: 1,
+      sessionId: 's1',
+      log: '[09:08:07] user/message: older',
+      start: 40,
+      file: 'file-token',
+    });
+    should(calls).eql([{ limit: 50, before: 900, from: 10 }]);
+    should(response.headers.get('cache-control')).equal('no-store');
+  });
+
+  it('should read the tail when no byte is named, and answer an unchanged page 304', async () => {
+    // Arrange
+    const calls: unknown[] = [];
+    const dispatch = fixture({ pages: page(calls) });
+    const first = await dispatch({ path: '/v1/sessions/s1/log-page', headers: human });
+    const etag = first.headers.get('etag') ?? '';
+
+    // Act
+    const again = await dispatch({ path: '/v1/sessions/s1/log-page', headers: { ...human, 'if-none-match': etag } });
+
+    // Assert
+    should(calls[0]).eql({ limit: 200 });
+    should(again.status).equal(304);
+  });
+
+  it('should refuse a page of a file other than the one the earlier pages came from', async () => {
+    // Arrange
+    const dispatch = fixture({ pages: page() });
+
+    // Act
+    const response = await dispatch({
+      path: '/v1/sessions/s1/log-page',
+      query: [
+        ['before', '900'],
+        ['file', 'another-file'],
+      ],
+      headers: human,
+    });
+
+    // Assert
+    should(response.status).equal(409);
+    should(jsonBody(response)).have.property('code', 'log_cursor_stale');
+  });
+
+  it('should refuse an offset that is not a byte of a file, or a floor without an end', async () => {
+    // Arrange
+    const dispatch = fixture({ pages: page() });
+
+    // Act
+    const negative = await dispatch({ path: '/v1/sessions/s1/log-page', query: [['before', '-1']], headers: human });
+    const floorOnly = await dispatch({ path: '/v1/sessions/s1/log-page', query: [['from', '3']], headers: human });
+    const inverted = await dispatch({
+      path: '/v1/sessions/s1/log-page',
+      query: [
+        ['before', '3'],
+        ['from', '9'],
+      ],
+      headers: human,
+    });
+
+    // Assert
+    for (const response of [negative, floorOnly, inverted]) {
+      should(response.status).equal(400);
+      should(jsonBody(response)).have.property('code', 'invalid_query');
+    }
+  });
+
+  it('should refuse a session whose transcript file cannot be proved', async () => {
+    // Arrange
+    const dispatch = fixture({ pages: { page: async () => ({ kind: 'unresolved' }) } });
+
+    // Act
+    const response = await dispatch({ path: '/v1/sessions/s1/log-page', headers: human });
+
+    // Assert
+    should(response.status).equal(409);
+    should(jsonBody(response)).have.property('code', 'no_transcript');
+  });
+
+  it('should refuse rather than serve an empty page when no page reader is wired', async () => {
+    // Arrange
+    const dispatch = fixture();
+
+    // Act
+    const response = await dispatch({ path: '/v1/sessions/s1/log-page', headers: human });
+
+    // Assert
+    should(response.status).equal(409);
+    should(jsonBody(response)).have.property('code', 'transcript_unreadable');
+  });
+
+  it('should keep the warden off it, as it keeps the warden off the transcript', async () => {
+    // Arrange
+    const dispatch = fixture({ pages: page() });
+
+    // Act
+    const response = await dispatch({ path: '/v1/sessions/s1/log-page', headers: wardenToken });
+
+    // Assert
+    should(response.status).equal(403);
   });
 });

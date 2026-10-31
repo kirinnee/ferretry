@@ -1740,6 +1740,14 @@ it sends a validator only for a path it holds, and treats any other `304` as an 
 empty transcript. An unchanged transcript costs its headers, a few hundred bytes. The same headers
 work on the direct path: `if-none-match` is an admitted CORS request header and `etag` an exposed one.
 
+**Older history is paged, conditionally too.** The chat reads its tail as `GET /v1/sessions/:id/log-page`
+(`{ v, sessionId, log, start, file }`: the `/logs` text plus the byte it begins at and an opaque file
+token), and scrolling up reads `?before=<start>&file=<token>` for the page just older, until a page
+starts at `0`. Each page is its own path, so the polled tail keeps its `304` while older pages are held.
+Pages are whole records and meet exactly at `start`; a page asked of a file that is no longer the
+session's transcript is `409 log_cursor_stale`. An older daemon answers `unknown_route` and the chat
+keeps reading `/logs`.
+
 **An image of a transcript is addressed, not embedded.** `/logs` prints `[fy-image <handle> <type>]`
 where an image was, and `GET /v1/sessions/:id/transcript-images/:handle` answers one image as JSON
 (`{ image: { handle, mediaType, byteLength }, base64 }`). The handle names a record by its offset and

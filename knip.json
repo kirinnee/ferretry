@@ -182,6 +182,7 @@
         "tests/integration/fixtures/cancelled-rows-scene.tsx",
         "tests/integration/fixtures/chat-polish-scene.tsx",
         "tests/integration/fixtures/chat-rerender-scene.tsx",
+        "tests/integration/fixtures/chat-history-scene.tsx",
         "tests/integration/fixtures/browser-pane-jumpy-scene.tsx",
         "tests/integration/fixtures/ledger-actions-scene.tsx",
         "tests/integration/fixtures/open-links-scene.tsx",
