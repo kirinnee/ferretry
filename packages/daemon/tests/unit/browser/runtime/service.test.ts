@@ -79,6 +79,15 @@ class Tabs {
     type: async pageId => this.acted('type', pageId),
     read: async (pageId, options) => ({ ...this.acted(`read-${options?.mode ?? 'text'}`, pageId), text: 'hello' }),
     screenshot: async pageId => ({ ...this.acted('screenshot', pageId), screenshotBase64: 'iVBOR' }),
+    upload: async pageId => this.acted('upload', pageId),
+    download: async pageId => ({
+      ...this.acted('download', pageId),
+      staged: { path: '/stage/dl-1', name: 'report.csv', size: 3 },
+    }),
+    pdf: async pageId => ({
+      ...this.acted('pdf', pageId),
+      staged: { path: '/stage/pdf-1', name: 'page.pdf', size: 5 },
+    }),
     back: async pageId => this.acted('back', pageId),
     forward: async pageId => this.acted('forward', pageId),
     reload: async pageId => this.acted('reload', pageId),
@@ -261,6 +270,61 @@ describe('the machine agent browser — one Chrome, pages by session', () => {
     );
     should(refused.message).equal('a person holds it');
     should(tabs.calls.filter(call => call.startsWith('click'))).deepEqual([]);
+  });
+
+  it('should run the file tools on the named page, return what the worker staged, and keep the page list current', async () => {
+    // Arrange
+    const { tabs, service } = harness();
+    const app = await service.openPage('s1', 'app');
+
+    // Act
+    const uploaded = await service.filesOnPage('s1', 'app', {
+      action: 'upload',
+      target: { kind: 'selector', selector: '#f' },
+      paths: ['/upload/0'],
+      mode: 'input',
+    });
+    const downloaded = await service.filesOnPage('s1', 'app', { action: 'download' });
+    const printed = await service.filesOnPage('s1', app.id, { action: 'pdf' });
+
+    // Assert
+    should(tabs.calls.filter(call => !call.startsWith('new'))).deepEqual([
+      `upload:${app.id}`,
+      `download:${app.id}`,
+      `pdf:${app.id}`,
+    ]);
+    should(uploaded.staged).be.undefined();
+    should(downloaded.staged).deepEqual({ path: '/stage/dl-1', name: 'report.csv', size: 3 });
+    should(printed.staged).deepEqual({ path: '/stage/pdf-1', name: 'page.pdf', size: 5 });
+    should(printed.result).not.have.property('staged');
+    should(printed.status.pages.map(page => page.id)).containEql(app.id);
+  });
+
+  it('should keep one session’s file tools off another session’s page, and refuse a page that is not there', async () => {
+    const { tabs, service } = harness();
+    const other = await service.openPage('s2', 'app');
+    await service.openPage('s1', 'mine');
+
+    const foreign = await failure(service.filesOnPage('s1', other.id, { action: 'pdf' }));
+    const missing = await failure(service.filesOnPage('s1', 'nope', { action: 'download' }));
+
+    should(foreign).match({ code: 'not_found' });
+    should(missing).match({ code: 'not_found' });
+    should(tabs.calls.filter(call => call.startsWith('pdf') || call.startsWith('download'))).deepEqual([]);
+  });
+
+  it('should let a guard refuse a file act from inside the page’s queue, before the browser is touched', async () => {
+    const { tabs, service } = harness();
+    await service.openPage('s1', 'app');
+
+    const refused = await failure(
+      service.filesOnPage('s1', 'app', { action: 'pdf' }, async () => {
+        throw new BrowserSessionError('conflict', 'a person holds it');
+      }),
+    );
+
+    should(refused.message).equal('a person holds it');
+    should(tabs.calls.filter(call => call.startsWith('pdf'))).deepEqual([]);
   });
 
   it('should refuse a name in use, and a page past the session’s or the machine’s cap — never hide it', async () => {

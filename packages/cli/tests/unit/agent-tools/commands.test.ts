@@ -182,6 +182,36 @@ describe('fy browser page', () => {
     ]);
   });
 
+  it('should turn the file verbs into upload, download and pdf calls, telling an attachment id from a path', async () => {
+    // Arrange
+    const { calls, run } = harness();
+    const attachment = `att_${'cd'.repeat(32)}`;
+
+    // Act
+    await run('browser', 'page', 'upload', 'app', '#file', 'reports/q3.pdf', attachment);
+    await run('browser', 'page', 'upload', 'app', 'e5', 'a.png', '--drop');
+    await run('browser', 'page', 'download', 'app');
+    await run('browser', 'page', 'download', 'app', 'data/out.csv', '--id', 'dl-3', '--overwrite');
+    await run('browser', 'page', 'pdf', 'app');
+    await run('browser', 'page', 'pdf', 'app', 'page.pdf', '--overwrite');
+
+    // Assert
+    should(calls).deepEqual([
+      {
+        kind: 'call',
+        call: { tool: 'browser.upload', name: 'app', selector: '#file', files: ['reports/q3.pdf', { attachment }] },
+      },
+      { kind: 'call', call: { tool: 'browser.upload', name: 'app', ref: 'e5', files: ['a.png'], mode: 'drop' } },
+      { kind: 'call', call: { tool: 'browser.download', name: 'app' } },
+      {
+        kind: 'call',
+        call: { tool: 'browser.download', name: 'app', id: 'dl-3', saveAs: 'data/out.csv', overwrite: true },
+      },
+      { kind: 'call', call: { tool: 'browser.pdf', name: 'app' } },
+      { kind: 'call', call: { tool: 'browser.pdf', name: 'app', saveAs: 'page.pdf', overwrite: true } },
+    ]);
+  });
+
   it('should refuse a point where only an element will do, before calling anything', async () => {
     // Arrange
     const { calls, run } = harness();

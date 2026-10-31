@@ -25,7 +25,8 @@ the page and end with it. The reference grammar is unchanged — see
 `browser.tabs(action: list | adopt, id?, as?)` · `browser.wait_for(name, condition, timeoutMs?)` ·
 `browser.console(name, level?, since?, limit?)` · `browser.network(name, action: list | get, id?, filter?, types?)` ·
 `browser.emulate(name, viewport?, media?, geolocation?, locale?, timezone?, cpuThrottle?, network?, permissions?, reset?)` ·
-`browser.close(name)` · `browser.ask_owner(name, message?)`.
+`browser.upload(name, target, files, mode?)` · `browser.download(name, id?, saveAs?, overwrite?)` ·
+`browser.pdf(name, saveAs?, overwrite?)` · `browser.close(name)` · `browser.ask_owner(name, message?)`.
 
 A **target** is exactly one of a `ref`, a `selector`, or — for a click only — a point `x`, `y`; see
 [Refs and targets](#refs-and-targets). `history` is `back`, `forward` or `reload`.
@@ -63,7 +64,7 @@ element takes `ref: "e4"` in place of a selector, so an agent reads once and act
 - The CLI reads the same shapes from one word: `fy browser page click app e12`, `… click app 120,340`,
   `… read app --snapshot --find "Sign in"`, `… navigate app back`.
 - An MCP client that sends `false` for an on-only flag (`double`, `submit`, `slowly`, `boxes`, `fullPage`,
-  `incognito`, and `reset`, `print` and `offline` in `browser.emulate`) is read as having left it out.
+  `incognito`, `overwrite`, and `reset`, `print` and `offline` in `browser.emulate`) is read as having left it out.
 
 ## Page lifecycle
 
@@ -109,15 +110,15 @@ On the command line: `fy browser page dialog app accept --text hi`, `… tabs`, 
 
 ## Routes
 
-| Route                                                     | Who                       | Session from                |
-| --------------------------------------------------------- | ------------------------- | --------------------------- |
-| `POST /v1/agent/tools`                                    | an agent, on this machine | its session credential ONLY |
-| `POST /v1/sessions/:sessionId/surfaces/terminals/tools`   | a person (CLI, app)       | the path; `terminal` grant  |
-| `POST /v1/sessions/:sessionId/surfaces/browser/tools`     | a person                  | the path; `browser` grant   |
-| `POST /v1/sessions/:sessionId/surfaces/terminals/control` | a person: control         | the path; `terminal` grant  |
-| `POST /v1/sessions/:sessionId/surfaces/browser/control`   | a person: control         | the path; `browser` grant   |
-| `GET /v1/sessions/:sessionId/surfaces/terminals/control`  | a person: who drives what | the path; `terminal` grant  |
-| `GET /v1/sessions/:sessionId/surfaces/browser/control`    | a person: who drives what | the path; `browser` grant   |
+| Route                                                     | Who                       | Session from                                                              |
+| --------------------------------------------------------- | ------------------------- | ------------------------------------------------------------------------- |
+| `POST /v1/agent/tools`                                    | an agent, on this machine | its session credential ONLY                                               |
+| `POST /v1/sessions/:sessionId/surfaces/terminals/tools`   | a person (CLI, app)       | the path; `terminal` grant                                                |
+| `POST /v1/sessions/:sessionId/surfaces/browser/tools`     | a person                  | the path; `browser` grant, plus `filesystem` for the [file tools](#files) |
+| `POST /v1/sessions/:sessionId/surfaces/terminals/control` | a person: control         | the path; `terminal` grant                                                |
+| `POST /v1/sessions/:sessionId/surfaces/browser/control`   | a person: control         | the path; `browser` grant                                                 |
+| `GET /v1/sessions/:sessionId/surfaces/terminals/control`  | a person: who drives what | the path; `terminal` grant                                                |
+| `GET /v1/sessions/:sessionId/surfaces/browser/control`    | a person: who drives what | the path; `browser` grant                                                 |
 
 A control request is `{ action: 'takeover' | 'handback' | 'handover', key }` and answers
 `SurfaceControlView { sessionId, driving[], takeovers[], handed[], opened[], asked[] }` for that kind.
@@ -128,6 +129,44 @@ Control changes are published on the session's journal, so `/v1/events` streams 
 `incognito` for an incognito page), `surface.takeover`, `surface.handback`, `surface.handed`,
 `surface.opened` (`SurfaceOpenedSchema`) and `surface.asked` (`SurfaceAskedSchema`). The daemon replays its
 journal on start, so a takeover, a hand-over, an open or an ask outlives a restart.
+
+## Files
+
+`browser.upload`, `browser.download` and `browser.pdf` move files between a page and the **session's own working
+folder** — the one `terminal.open` resolves `folder` against. They never reach anywhere else on the host.
+`fy browser page upload <name> <target> <files…> [--drop]`, `… download <name> [saveAs] [--id dl-3] [--overwrite]`
+and `… pdf <name> [saveAs] [--overwrite]` are the same calls; MCP has `browser_upload`, `browser_download`, `browser_pdf`.
+
+**Which paths are accepted** (`packages/daemon/src/lib/agent-files/`, the pure policy; the disk is a port,
+`NodeAgentFilesystem` in `src/adapters/agent-files/`). A path is resolved twice: lexically, then by `realpath`
+(a destination that does not exist yet is resolved through its nearest existing ancestor), and must land inside
+the folder's own real path both times. Refused, in a sentence that names the rule: `..`; an absolute path
+outside the folder; a symlink — file or directory — that leads out; anything inside `.git/` at any depth; and
+the daemon's own scratch entries at the top of the folder (`DAEMON_OWNED_SCRATCH_ENTRIES`: `chat.jsonl`,
+`events.jsonl`, `config.json`, `attachments/` …). An upload may instead name `{ "attachment": "att_<64 hex>" }` — a file
+the owner put in THIS session's chat; the daemon copies it into its own private directory for the call and
+removes it afterwards.
+
+**Caps.** An upload is at most 20 files, 50 MiB each and 200 MiB per call. A download or PDF saved is at most 500 MiB.
+
+**`browser.upload`.** `target` is a ref or a selector, as for a click. `mode: "input"` (the default) fills an
+`<input type=file>`, or clicks the target and answers the file chooser it opens; `mode: "drop"` drops the files on
+the target's centre, for a dropzone with no input. The summary tells the agent when the page now shows a human
+check, and lists any download the upload started.
+
+**`browser.download`.** The browser worker stages every file a page downloads in a daemon-owned directory for
+15 minutes. The act that started one reports it ("A download started: name, size — save it with browser_download (id dl-3)"),
+and `browser.download` copies the chosen one (the page's latest when `id` is absent) into the folder: at `saveAs`, else
+`downloads/<sanitized name>`. It never replaces a file that is already there unless `overwrite: true`, never writes
+through a symlink (it is opened `O_EXCL|O_NOFOLLOW`), and never sets an executable bit (mode 0644). The name a page
+suggests is sanitised to a leaf name and scrubbed like any page text.
+
+**`browser.pdf`.** Prints the page with CDP `Page.printToPDF`, then saves it by the same rule (`downloads/<title>.pdf`).
+Chrome prints only when headless; in **Real window** mode it is refused with one sentence.
+
+**Wire shape.** The file actions are NOT in `BrowserActionSchema`, so the toolbar route cannot carry a host path: the
+daemon hands the worker an already-confined absolute path (`BrowserFileAction`, daemon-only), and a download comes back as
+a staged path the daemon alone saves.
 
 ## Handing a surface to the owner
 
@@ -206,7 +245,10 @@ call.
 5. **What agents may control.** Every agent call first asks the machine's `AgentControlPolicy` (unit S's
    store, read per call). The same switches also wrap every ordinary terminal, browser and filesystem
    route — HTTP and sockets — for an agent caller, so `files` is enforced on the session filesystem
-   routes. A person is never asked.
+   routes. A person is never asked. **The three [file tools](#files) need the `files` switch AS WELL AS
+   `browser`**; on a person's route `POST /v1/sessions/:id/surfaces/browser/tools` they additionally need the
+   `filesystem` grant on `use` ([grants.md](grants.md)), so a paired phone granted the browser cannot reach the host's
+   disk through it. A caller whose grants cannot be read is refused; the owner at the machine is not governed.
 6. **Take over / hand back, per tab and per terminal.** While a person holds a surface, every agent tool
    call on THAT surface is refused ("A person has taken over %terminal:dev; wait or ask them."); the
    agent keeps working everywhere else. The check is repeated inside the page's own queue, so a takeover
@@ -217,7 +259,9 @@ call.
    `incognito` — never typed text, a URL's path or query (host only), or a selector over 120 characters.
    A target is recorded as its ref, its clipped selector or `point: true` (never the coordinates); a
    `find` as its length; options (`double`, `submit`, `fullPage`, `format`, a history step) by what they were.
-   A refused credential or a body that is not a call is recorded too (`reason`). Takeovers and
+   The one exception to "no text" is the file tools: `browser.upload` records the count, total bytes and, for up to four files,
+   the leaf name (≤120 characters, never a path) and size; `browser.download` and `browser.pdf` record the saved size and
+   extension only. A refused credential or a body that is not a call is recorded too (`reason`). Takeovers and
    hand-overs write `surface.control`. Identical successes fold per minute like all activity.
 8. **What a page shows is scrubbed.** Every text a browser tool hands back — a read, a snapshot, the address
    in the summary — goes through the vault redactor first, to an agent and a person alike, as the operator's
@@ -253,6 +297,11 @@ agenda items in a sub-ferret's session with `-s <session>`, proven by lineage.
   removal this change can make unconditionally. Until then a renderer exploit on a page an agent is
   steered to runs as the daemon's user.
 - **A terminal's folder** is where the shell starts, not a boundary.
+- **Files: check, then use.** A path is confined by `realpath` when the call is made, and the worker reads it a
+  moment later; a same-user process that swaps a checked path for a symlink in that window can still redirect an
+  upload. The file tools' destination is closed against this (`O_EXCL|O_NOFOLLOW`); the read side is not.
+- **PDF needs a headless browser.** In Real window mode `browser.pdf` is refused rather than faked.
+- **A staged download** sits in a daemon-owned directory (mode 0700) for up to 15 minutes before it is saved or pruned.
 
 ## The tools server in every agent runtime
 

@@ -84,15 +84,15 @@ The carrier's `privilegedLoopback` proof (a loopback-only bind that advertises n
 
 ## Seven capabilities, two axes
 
-| capability   | what it covers                                                                                      |
-| ------------ | --------------------------------------------------------------------------------------------------- |
-| `fleet`      | the machine, its credentials, components, profiles and runtimes, and the proposals that change them |
-| `terminal`   | opening, writing to and streaming session terminals, and typing into a session's own pane (Console) |
-| `browser`    | the human login window and per-session browser control                                              |
-| `filesystem` | reading session working trees and registering projects on the host                                  |
-| `warden`     | supervision status, sweeps and the warden configuration                                             |
-| `pairing`    | pairing codes, the paired devices and their grants, and other devices' push enrolments              |
-| `secrets`    | running a command with a stored secret in its environment, listing, setting and deleting secrets    |
+| capability   | what it covers                                                                                                        |
+| ------------ | --------------------------------------------------------------------------------------------------------------------- |
+| `fleet`      | the machine, its credentials, components, profiles and runtimes, and the proposals that change them                   |
+| `terminal`   | opening, writing to and streaming session terminals, and typing into a session's own pane (Console)                   |
+| `browser`    | the human login window and per-session browser control                                                                |
+| `filesystem` | reading session working trees, registering projects, and the browser file tools (upload / download / pdf) on the host |
+| `warden`     | supervision status, sweeps and the warden configuration                                                               |
+| `pairing`    | pairing codes, the paired devices and their grants, and other devices' push enrolments                                |
+| `secrets`    | running a command with a stored secret in its environment, listing, setting and deleting secrets                      |
 
 **Leaving a ferret alone is `warden.configure`.** `POST /v1/warden/leave` keeps the Warden off one flagged
 or cleared ferret for an hour, four, or until its status changes ([config-files.md](config-files.md#the-warden)).

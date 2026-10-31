@@ -15,6 +15,7 @@
  * An INCOGNITO page gets its own browser context (its own cookies and storage, shared with nothing),
  * closed with the page.
  */
+import { mkdir, rm, stat, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import {
   BROWSER_MODIFIERS,
@@ -26,13 +27,16 @@ import {
 } from '@ferretry/protocol';
 import { type Browser, type BrowserContext, type CDPSession, chromium, type Page } from 'playwright-core';
 import { recogniseBrowserChallenge } from '../src/lib/browser/transport/challenge.ts';
+import { DownloadStage } from '../src/lib/browser/transport/download-stage.ts';
 import {
   browserElementParam,
   browserTargetParam,
   clickOn,
+  printPdf,
   readPage,
   shootPage,
   typeInto,
+  uploadFiles,
 } from '../src/lib/browser/transport/page-acts.ts';
 import {
   ConsoleLog,
@@ -45,6 +49,19 @@ import {
 import { type PointerPosition, pointerAfter, pointerSequence } from '../src/lib/browser/transport/pointer.ts';
 
 const endpoint = process.argv[2];
+/** Where downloads and PDFs are staged for the daemon; without it the worker stages nothing. */
+const stageDirectory = process.argv[3];
+const downloads = new DownloadStage({
+  directory: stageDirectory,
+  disk: {
+    mkdirp: async directory => void (await mkdir(directory, { recursive: true, mode: 0o700 })),
+    size: async file => (await stat(file)).size,
+    remove: async file => await rm(file, { force: true }),
+    write: async (file, bytes) => await writeFile(file, bytes, { mode: 0o600 }),
+  },
+  now: () => Date.now(),
+  sleep: async milliseconds => await new Promise(resolve => setTimeout(resolve, milliseconds)),
+});
 const MAX_PAGES = 200;
 const DEFAULT_VIEWPORT = { width: 1280, height: 800 } as const;
 const MAX_ERROR_CHARS = 200;
@@ -201,6 +218,7 @@ function registerPage(page: Page): void {
       if (opener) openers.set(page, pageId(opener));
     })
     .catch(() => undefined);
+  page.on('download', download => downloads.accept(pageId(page), download));
   page.on('request', request => {
     try {
       if (request.isNavigationRequest() && request.frame() === page.mainFrame()) setPageState(page, 'loading');
@@ -305,6 +323,17 @@ async function pageSession(page: Page): Promise<CDPSession> {
   return await session;
 }
 
+/** The page's CDP session, as the acts that need DevTools directly see it. */
+async function cdpOf(
+  page: Page,
+): Promise<{ send(method: string, params: Readonly<Record<string, unknown>>): Promise<unknown> }> {
+  const session = await pageSession(page);
+  return {
+    send: async (method, params) =>
+      await (session as { send(m: string, p: unknown): Promise<unknown> }).send(method, params),
+  };
+}
+
 async function targetId(page: Page): Promise<string> {
   let id = targets.get(page);
   if (id === undefined) {
@@ -380,7 +409,13 @@ async function snapshot(focus: Page, extra: Readonly<Record<string, unknown>> = 
 
 async function acted(page: Page, extra: Readonly<Record<string, unknown>> = {}): Promise<Record<string, unknown>> {
   const dialog = dialogs.pending(pageId(page));
-  return { ...(await snapshot(page, extra)), actedPageId: pageId(page), ...(dialog === undefined ? {} : { dialog }) };
+  const started = await downloads.notices(pageId(page));
+  return {
+    ...(await snapshot(page, extra)),
+    actedPageId: pageId(page),
+    ...(dialog === undefined ? {} : { dialog }),
+    ...(started.length === 0 ? {} : { downloads: started }),
+  };
 }
 
 /**
@@ -619,6 +654,8 @@ async function act(request: Request): Promise<Record<string, unknown>> {
         ...(params.double === true ? { double: true } : {}),
         ...(Array.isArray(params.modifiers) ? { modifiers: params.modifiers.filter(isModifier) } : {}),
       });
+      // A click that starts a download hears of it a moment later; the act should be able to say so.
+      await downloads.awaitStart(pageId(page), 250);
       return await acted(page);
     }
     case 'type': {
@@ -659,6 +696,30 @@ async function act(request: Request): Promise<Record<string, unknown>> {
         screenshotBase64: shot.base64.slice(0, MAX_SCREENSHOT_CHARS),
         screenshotFormat: shot.format,
       });
+    }
+    case 'upload': {
+      const page = targetPage(params.pageId);
+      const target = browserElementParam(params.target);
+      if (target === undefined) throw new Error('target is required');
+      const paths = Array.isArray(params.paths)
+        ? params.paths.filter((item): item is string => typeof item === 'string')
+        : [];
+      await uploadFiles(page, await cdpOf(page), target, paths, params.mode === 'drop' ? 'drop' : 'input');
+      return await acted(page);
+    }
+    case 'download': {
+      const page = targetPage(params.pageId);
+      const staged = await downloads.claim(
+        pageId(page),
+        typeof params.downloadId === 'string' ? params.downloadId : undefined,
+      );
+      return await acted(page, { staged });
+    }
+    case 'pdf': {
+      const page = targetPage(params.pageId);
+      const base64 = await printPdf(await cdpOf(page));
+      const staged = await downloads.stagePdf(pageId(page), base64, await safeTitle(page));
+      return await acted(page, { staged });
     }
     case 'back': {
       const page = targetPage(params.pageId);

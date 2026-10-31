@@ -17,7 +17,9 @@ import type {
   BrowserReadOptions,
   BrowserScreenshotOptions,
   BrowserTypeOptions,
+  BrowserUploadMode,
 } from './page-acts.ts';
+import type { WorkerStagedFile } from './worker-protocol.ts';
 
 /** What an act answers: the page list, and the dialog the acted page is waiting on, if it has one. */
 export type BrowserPageActed = BrowserPageActionSnapshot & { readonly dialog?: BrowserDialogInfo };
@@ -59,6 +61,17 @@ export interface BrowserAutomation {
       readonly screenshotFormat?: BrowserScreenshotFormat;
     }
   >;
+  /** Hands already-confined, absolute file paths to the page: into a file field (a dialog counts) or dropped on an element. */
+  upload(
+    pageId: string,
+    target: BrowserElementTarget,
+    paths: readonly string[],
+    mode: BrowserUploadMode,
+  ): Promise<BrowserPageActed>;
+  /** The chosen (default: latest) download this page started, as a file the browser staged for the daemon to save. */
+  download(pageId: string, downloadId?: string): Promise<BrowserPageActed & { readonly staged: WorkerStagedFile }>;
+  /** The page printed to PDF and staged for the daemon to save; a visible-window browser refuses. */
+  pdf(pageId: string): Promise<BrowserPageActed & { readonly staged: WorkerStagedFile }>;
   back(pageId: string): Promise<BrowserPageActed>;
   forward(pageId: string): Promise<BrowserPageActed>;
   reload(pageId: string): Promise<BrowserPageActed>;

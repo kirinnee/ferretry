@@ -5,6 +5,8 @@ import type { AgentToolCall, SurfaceControlView } from '../../src/lib/index.ts';
 import { INSTANT, LATER_INSTANT } from '../fixtures.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 
+const ATTACHMENT = `att_${'ab'.repeat(32)}`;
+
 const driving = {
   surface: 'terminal',
   id: 'a1b2c3d4e5f6',
@@ -50,6 +52,9 @@ const cases: SchemaCase[] = [
   { name: 'key press', schema: tools.TerminalKeySchema, value: 'ctrl-c' },
   { name: 'url', schema: tools.AgentUrlSchema, value: 'https://example.test/login' },
   { name: 'history step', schema: tools.BrowserHistoryStepSchema, value: 'back' },
+  { name: 'upload file by path', schema: tools.AgentUploadFileSchema, value: 'reports/q3.pdf' },
+  { name: 'upload file by attachment', schema: tools.AgentUploadFileSchema, value: { attachment: ATTACHMENT } },
+  { name: 'upload mode', schema: tools.BrowserUploadModeSchema, value: 'drop' },
   { name: 'call', schema: tools.AgentToolCallSchema, value: { tool: 'terminal.send', name: 'dev', text: 'ls' } },
   { name: 'surface', schema: tools.AgentSurfaceSchema, value: { id: 'page-1', name: 'app', title: 'x', url: 'a' } },
   {
@@ -124,6 +129,9 @@ describe('agent tool schemas', () => {
       { tool: 'browser.console', name: 'app' },
       { tool: 'browser.network', name: 'app', action: 'list' },
       { tool: 'browser.emulate', name: 'app', reset: true },
+      { tool: 'browser.upload', name: 'app', selector: '#file', files: ['a.txt'] },
+      { tool: 'browser.download', name: 'app' },
+      { tool: 'browser.pdf', name: 'app' },
       { tool: 'browser.close', name: 'app' },
       { tool: 'browser.ask_owner', name: 'app' },
     ];
@@ -324,6 +332,72 @@ describe('agent tool schemas', () => {
       { name: 'too long', schema: tools.AgentUrlSchema, value: `https://e.test/${'a'.repeat(2_048)}` },
     ]);
     should(tools.AgentUrlSchema.parse('http://127.0.0.1:3000/')).equal('http://127.0.0.1:3000/');
+  });
+});
+
+describe('the file tools', () => {
+  const upload = { tool: 'browser.upload', name: 'app', selector: '#file', files: ['a.txt'] };
+  const accepts = (call: unknown): boolean => tools.AgentToolCallSchema.safeParse(call).success;
+
+  it('should accept each file tool in the forms an agent uses', () => {
+    should(
+      [
+        upload,
+        { ...upload, selector: undefined, ref: 'e5', mode: 'drop' },
+        { ...upload, files: ['a.txt', { attachment: ATTACHMENT }], mode: 'input' },
+        { tool: 'browser.download', name: 'app', id: 'dl-3', saveAs: 'data/out.csv', overwrite: true },
+        { tool: 'browser.pdf', name: 'app', saveAs: 'page.pdf', overwrite: true },
+      ].map(accepts),
+    ).deepEqual([true, true, true, true, true]);
+  });
+
+  it('should refuse an upload with no target, both targets, no files, too many files, or a bad mode', () => {
+    const refused = [
+      { ...upload, selector: undefined },
+      { ...upload, ref: 'e5' },
+      { ...upload, files: [] },
+      { ...upload, files: Array.from({ length: tools.AGENT_TOOL_MAX_UPLOAD_FILES + 1 }, () => 'a.txt') },
+      { ...upload, mode: 'paste' },
+      { ...upload, files: [''] },
+      { ...upload, files: ['x'.repeat(tools.AGENT_TOOL_MAX_PATH_CHARS + 1)] },
+    ];
+    should(refused.map(accepts)).deepEqual(refused.map(() => false));
+  });
+
+  it('should refuse an attachment id that is not att_ and 64 hex digits, or carries more keys', () => {
+    const refused = [
+      { ...upload, files: [{ attachment: 'att_123' }] },
+      { ...upload, files: [{ attachment: '../etc/passwd' }] },
+      { ...upload, files: [{ attachment: ATTACHMENT, path: '/etc/passwd' }] },
+    ];
+    should(refused.map(accepts)).deepEqual(refused.map(() => false));
+  });
+
+  it('should refuse a download id that is not dl-…, an overwrite that is not true, and unknown keys', () => {
+    const refused = [
+      { tool: 'browser.download', name: 'app', id: '../x' },
+      { tool: 'browser.download', name: 'app', overwrite: false },
+      { tool: 'browser.download', name: 'app', saveAs: '' },
+      { tool: 'browser.download', name: 'app', url: 'https://e.test/' },
+      { tool: 'browser.pdf', name: 'app', id: 'dl-1' },
+      { tool: 'browser.pdf', name: 'app', saveAs: 'x'.repeat(tools.AGENT_TOOL_MAX_PATH_CHARS + 1) },
+    ];
+    should(refused.map(accepts)).deepEqual(refused.map(() => false));
+  });
+
+  it('should keep the caps in the order an upload is checked: file, then call', () => {
+    should(tools.AGENT_TOOL_MAX_UPLOAD_FILE_BYTES).be.below(tools.AGENT_TOOL_MAX_UPLOAD_CALL_BYTES);
+    should(tools.AGENT_TOOL_MAX_UPLOAD_FILE_BYTES * tools.AGENT_TOOL_MAX_UPLOAD_FILES).be.above(
+      tools.AGENT_TOOL_MAX_UPLOAD_CALL_BYTES,
+    );
+  });
+
+  it('should list the file tools as acts to run once, never to repeat after a dropped request', () => {
+    should(['browser.upload', 'browser.download', 'browser.pdf'].map(tools.isRepeatableAgentTool)).deepEqual([
+      false,
+      false,
+      false,
+    ]);
   });
 });
 

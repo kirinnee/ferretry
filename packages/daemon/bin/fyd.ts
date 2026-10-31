@@ -269,6 +269,7 @@ import {
   LoadSafeWorker,
   ManifestAccountInventory,
   MCP_OAUTH_SECRETS_DOCUMENT,
+  NodeAgentFilesystem,
   NodeBrowserLoginRuntime,
   NodeCatalog,
   NodeConversationFiles,
@@ -631,6 +632,7 @@ import {
   AgendaService,
   AgendaTurnNudge,
   AgendaWaker,
+  AgentFiles,
   AgentSendFailureNotifier,
   AgentToolService,
   ANALYTICS_BACKSTOP_MS,
@@ -5962,6 +5964,7 @@ function createAgentToolsSubsystem(input: {
   readonly browser: MountedSubsystems['browser'];
   readonly audit: AuditLog;
   readonly policy: AgentControlPolicy;
+  readonly files: AgentFiles;
   /** The vault redactor every operator read is scrubbed by; a page's text goes through it too. */
   readonly redactor: Pick<SecretRedactor, 'batch'>;
 }): MountedSubsystems['agentTools'] {
@@ -5992,6 +5995,7 @@ function createAgentToolsSubsystem(input: {
       browser: input.browser,
       control,
       policy: input.policy,
+      files: input.files,
       audit: input.audit,
       redactor: input.redactor,
       clock,
@@ -8473,6 +8477,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           return setting === undefined ? undefined : resolveBrowserProxy(setting, await secretVault.values());
         },
         display: agentBrowserDisplay,
+        // Where the worker keeps a page's downloads until the agent saves them (or fifteen minutes pass).
+        stageDirectory: join(paths.temporary, 'browser-stage'),
       },
     ),
     relayDirectory: new HostedRelayDirectory(environment.relayDirectoryOrigin()),
@@ -10277,6 +10283,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         releaseSession: browserService.releaseSession.bind(browserService),
         openPage: browserService.openPage.bind(browserService),
         actOnPage: browserService.actOnPage.bind(browserService),
+        filesOnPage: browserService.filesOnPage.bind(browserService),
         closePage: browserService.closePage.bind(browserService),
         lifecycleOnPage: browserService.lifecycleOnPage.bind(browserService),
         adoptPage: browserService.adoptPage.bind(browserService),
@@ -11074,6 +11081,21 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           browser: browserHost,
           audit: auditLog,
           policy: agentControl,
+          files: new AgentFiles({
+            fs: new NodeAgentFilesystem(),
+            folderOf: async sessionId => {
+              const id = tryParseSessionId(sessionId);
+              if (id === undefined || storage.findSession(id) === undefined) return undefined;
+              const config = SessionConfigSchema.safeParse(await storage.readConfig(id).catch(() => undefined));
+              return config.success ? config.data.cwd : undefined;
+            },
+            readAttachment: async (sessionId, attachmentId) => {
+              const { attachment, bytes } = await attachmentStore.download(sessionId, attachmentId);
+              return { filename: attachment.filename, bytes };
+            },
+            uploadDirectory: join(paths.temporary, 'browser-upload'),
+            token: () => crypto.randomUUID().replaceAll('-', ''),
+          }),
           redactor: secretRedactor,
         }),
         configFiles: createConfigFilesSubsystem({

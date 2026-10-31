@@ -1,4 +1,4 @@
-import { AGENT_TOOL_DEFAULT_WAIT_MS, BROWSER_REF_PATTERN } from '@ferretry/protocol';
+import { AGENT_TOOL_DEFAULT_WAIT_MS, ATTACHMENT_ID_PATTERN, BROWSER_REF_PATTERN } from '@ferretry/protocol';
 import type { Command } from 'commander';
 import { AgentToolsCommandError } from './client.ts';
 import type { AgentToolsCommand, IAgentToolsRunner } from './controller.ts';
@@ -546,6 +546,64 @@ export function registerBrowserPageCommands(program: Command, runner: IAgentTool
         );
       },
     );
+
+  verb('upload', 'give a page files: into a file input, or its file picker; needs the files switch')
+    .argument('<name>', 'the page’s name or id')
+    .argument('<target>', 'a ref from read --snapshot (e12), or a selector')
+    .argument('<files...>', 'paths in the session’s folder, or att_… attachment ids')
+    .option('--drop', 'drop them on a dropzone that has no file input')
+    .action(async (name: string, target: string, files: string[], options: SessionOption & { drop?: boolean }) => {
+      await call(
+        {
+          tool: 'browser.upload',
+          name,
+          ...elementArgument(target),
+          files: files.map(file => (ATTACHMENT_ID_PATTERN.test(file) ? { attachment: file } : file)),
+          ...(options.drop === true ? { mode: 'drop' } : {}),
+        },
+        options,
+      );
+    });
+
+  verb('download', 'save a file the page downloaded into the session’s folder; needs the files switch')
+    .argument('<name>', 'the page’s name or id')
+    .argument('[saveAs]', 'where to save it, inside the session’s folder; downloads/<its name> when absent')
+    .option('--id <id>', 'which download (dl-1, from the act that started it); the latest when absent')
+    .option('--overwrite', 'replace a file that is already there')
+    .action(
+      async (
+        name: string,
+        saveAs: string | undefined,
+        options: SessionOption & { id?: string; overwrite?: boolean },
+      ) => {
+        await call(
+          {
+            tool: 'browser.download',
+            name,
+            ...(options.id === undefined ? {} : { id: options.id }),
+            ...(saveAs === undefined ? {} : { saveAs }),
+            ...(options.overwrite === true ? { overwrite: true } : {}),
+          },
+          options,
+        );
+      },
+    );
+
+  verb('pdf', 'print a page to a PDF in the session’s folder (headless browser only); needs the files switch')
+    .argument('<name>', 'the page’s name or id')
+    .argument('[saveAs]', 'where to save it, inside the session’s folder')
+    .option('--overwrite', 'replace a file that is already there')
+    .action(async (name: string, saveAs: string | undefined, options: SessionOption & { overwrite?: boolean }) => {
+      await call(
+        {
+          tool: 'browser.pdf',
+          name,
+          ...(saveAs === undefined ? {} : { saveAs }),
+          ...(options.overwrite === true ? { overwrite: true } : {}),
+        },
+        options,
+      );
+    });
 
   verb('close', 'close a page')
     .argument('<name>', 'the page’s name or id')

@@ -44,6 +44,8 @@ export interface SessionBrowserModeOptions {
    */
   readonly proxy?: () => Promise<ResolvedBrowserProxy | undefined>;
   readonly platform?: NodeJS.Platform;
+  /** The daemon-owned directory the worker stages downloads and PDFs in (the file tools read them from here). */
+  readonly stageDirectory?: string;
   /** How long a signalled Chrome gets to exit before the next, harder step. Defaults to the shipped bound. */
   readonly shutdownTimeoutMs?: number;
 }
@@ -114,6 +116,7 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
         workerEntry: this.worker.kind === 'executable' ? this.worker.path : this.worker.entry,
         endpoint,
         workerExecutable: this.worker.kind === 'executable',
+        ...(this.modes.stageDirectory === undefined ? {} : { stageDirectory: this.modes.stageDirectory }),
       });
       return new LeasedBrowser(
         worker,
@@ -187,6 +190,10 @@ class LeasedBrowser implements BrowserAutomation {
   type: BrowserAutomation['type'] = (pageId, target, text, options) => this.worker.type(pageId, target, text, options);
   read: BrowserAutomation['read'] = (pageId, options) => this.worker.read(pageId, options);
   screenshot: BrowserAutomation['screenshot'] = (pageId, options) => this.worker.screenshot(pageId, options);
+  upload: BrowserAutomation['upload'] = (pageId, target, paths, mode) =>
+    this.worker.upload(pageId, target, paths, mode);
+  download: BrowserAutomation['download'] = (pageId, downloadId) => this.worker.download(pageId, downloadId);
+  pdf: BrowserAutomation['pdf'] = pageId => this.worker.pdf(pageId);
   back: BrowserAutomation['back'] = pageId => this.worker.back(pageId);
   forward: BrowserAutomation['forward'] = pageId => this.worker.forward(pageId);
   reload: BrowserAutomation['reload'] = pageId => this.worker.reload(pageId);

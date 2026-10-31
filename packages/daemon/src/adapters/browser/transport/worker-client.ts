@@ -20,7 +20,9 @@ import {
   type BrowserReadOptions,
   type BrowserScreenshotOptions,
   type BrowserTypeOptions,
+  type BrowserUploadMode,
   WorkerLineAssembler,
+  type WorkerStagedFile,
   type WorkerSnapshotResult,
   boundedReadText,
   boundedScreenshot,
@@ -29,6 +31,7 @@ import {
   normalizeWorkerActionSnapshot,
   normalizeWorkerDialog,
   normalizeWorkerSnapshot,
+  normalizeWorkerStaged,
   parseWorkerLine,
 } from '../../../lib/index.ts';
 import { SystemFrameClock } from './system-frame-clock.ts';
@@ -56,6 +59,8 @@ export interface WorkerClientOptions {
   readonly workerExecutable?: boolean;
   /** Argument the worker connects to; opaque to the client. */
   readonly endpoint: string;
+  /** The daemon-owned directory the worker stages downloads and PDFs in; without one it stages nothing. */
+  readonly stageDirectory?: string;
   readonly cwd?: string;
   readonly environment?: Readonly<Record<string, string | undefined>>;
   readonly readyTimeoutMs?: number;
@@ -172,9 +177,11 @@ export class BrowserWorkerClient implements BrowserAutomation {
   /** Spawns the worker and waits for its ready record, killing it if that never arrives. */
   static async connect(options: WorkerClientOptions): Promise<BrowserWorkerClient> {
     const child = Bun.spawn(
-      options.workerExecutable
-        ? [options.workerEntry, options.endpoint]
-        : [options.runtime, options.workerEntry, options.endpoint],
+      [
+        ...(options.workerExecutable ? [options.workerEntry] : [options.runtime, options.workerEntry]),
+        options.endpoint,
+        ...(options.stageDirectory === undefined ? [] : [options.stageDirectory]),
+      ],
       {
         cwd: options.cwd ?? dirname(options.workerEntry),
         env: workerEnvironment(options.environment ?? {}),
@@ -238,6 +245,36 @@ export class BrowserWorkerClient implements BrowserAutomation {
       // An older worker sends no format; its screenshots were always PNG.
       screenshotFormat: (raw as { screenshotFormat?: unknown }).screenshotFormat === 'jpeg' ? 'jpeg' : 'png',
     };
+  }
+
+  upload(
+    pageId: string,
+    target: BrowserElementTarget,
+    paths: readonly string[],
+    mode: BrowserUploadMode,
+  ): Promise<BrowserPageActed> {
+    return this.action('upload', { pageId, target, paths, mode });
+  }
+
+  async download(
+    pageId: string,
+    downloadId?: string,
+  ): Promise<BrowserPageActed & { readonly staged: WorkerStagedFile }> {
+    return await this.staged('download', { pageId, ...(downloadId === undefined ? {} : { downloadId }) });
+  }
+
+  async pdf(pageId: string): Promise<BrowserPageActed & { readonly staged: WorkerStagedFile }> {
+    return await this.staged('pdf', { pageId });
+  }
+
+  private async staged(
+    method: string,
+    params: Readonly<Record<string, unknown>>,
+  ): Promise<BrowserPageActed & { readonly staged: WorkerStagedFile }> {
+    const raw = await this.request(method, params);
+    const staged = normalizeWorkerStaged(raw);
+    if (staged === undefined) throw new BrowserTransportError('upstream_failed', 'browser worker staged no file', 502);
+    return { ...unwrap(normalizeWorkerActionSnapshot(raw)), staged };
   }
 
   back(pageId: string): Promise<BrowserPageActed> {

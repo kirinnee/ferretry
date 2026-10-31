@@ -377,6 +377,61 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     ),
   },
   {
+    name: 'browser_upload',
+    tool: 'browser.upload',
+    description:
+      'Give a page files: a file input, or the button that opens the file picker (ref or selector). files are paths in your working folder, or {"attachment": "att_…"}. mode "drop" drops them on a dropzone with no input. Needs the files switch.',
+    inputSchema: object(
+      {
+        name: NAME,
+        ref: REF,
+        selector: SELECTOR,
+        files: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 20,
+          items: {
+            anyOf: [
+              { type: 'string', maxLength: 1024 },
+              { type: 'object', properties: { attachment: { type: 'string' } }, required: ['attachment'] },
+            ],
+          },
+        },
+        mode: { type: 'string', enum: ['input', 'drop'] },
+      },
+      ['name', 'files'],
+    ),
+  },
+  {
+    name: 'browser_download',
+    tool: 'browser.download',
+    description:
+      'Save a file the page downloaded (a result says "a download started … id dl-1") into your working folder: downloads/<its name> unless saveAs says where. Refuses to overwrite unless overwrite is true. Needs the files switch.',
+    inputSchema: object(
+      {
+        name: NAME,
+        id: { type: 'string', description: 'The download id from the result, e.g. "dl-1"; the latest when absent.' },
+        saveAs: { type: 'string', maxLength: 1024, description: 'A path inside your working folder.' },
+        overwrite: { type: 'boolean' },
+      },
+      ['name'],
+    ),
+  },
+  {
+    name: 'browser_pdf',
+    tool: 'browser.pdf',
+    description:
+      'Print the page to a PDF in your working folder (downloads/<title>.pdf unless saveAs says where). Needs a headless browser, not the Real window mode. Refuses to overwrite unless overwrite is true. Needs the files switch.',
+    inputSchema: object(
+      {
+        name: NAME,
+        saveAs: { type: 'string', maxLength: 1024, description: 'A path inside your working folder.' },
+        overwrite: { type: 'boolean' },
+      },
+      ['name'],
+    ),
+  },
+  {
     name: 'browser_close',
     tool: 'browser.close',
     description: 'Close a page.',
