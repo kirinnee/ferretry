@@ -17,6 +17,7 @@ import { Button } from '../../shell/primitives.tsx';
 import { downloadText, type SaveText } from '../settings/performance-settings.tsx';
 import { AddToCatalogSheet } from './add-to-catalog-sheet.tsx';
 import { formatBytes, plural, shortDigest } from './catalog-review-model.ts';
+import { MarkedText } from './catalog-review-view.tsx';
 import { FailureLine, SharingOffPanel } from './catalog-parts.tsx';
 import {
   type CatalogClientFactory,
@@ -253,7 +254,7 @@ function CatalogDetail({
       {note === null ? null : (
         <p className="m-0 flex items-start gap-2 break-words text-cell text-ok" role="status" data-catalog-note="">
           <CircleCheck size={16} aria-hidden="true" className="mt-0.5 shrink-0" />
-          {note}
+          <MarkedText text={note} />
         </p>
       )}
       {editing ? (

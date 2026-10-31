@@ -147,7 +147,11 @@ const createClient = async () => catalogClient;
 const agreeing = preview => ({
   ...preview,
   publisher: { ...preview.publisher, daemonId: window.__publisher },
-  provenance: { ...preview.provenance, publisher: window.__publisher },
+  provenance: {
+    ...preview.provenance,
+    publisher: window.__publisher,
+    ...(window.__entries?.[preview.provenance.itemId] ?? {}),
+  },
 });
 
 const root = document.getElementById('root');
@@ -178,6 +182,9 @@ if (view === 'add-skill' || view === 'add-mcp') {
   const file = await signedFile(identity, items);
   const tampered = SharedCatalogFileSchema.parse({ ...file, items: file.items.map(item => ({ ...item, summary: 'Changed after it was signed' })) });
   window.__publisher = identity.daemonId;
+  window.__entries = Object.fromEntries(
+    file.signedManifest.manifest.items.map(entry => [entry.itemId, { name: entry.name, version: entry.version, digest: entry.digest }]),
+  );
   window.__catalogFile = JSON.stringify(view === 'refused' ? tampered : file);
   mountPage(<InstallFromFileSheet connection={CONNECTION} onClose={() => undefined} host={{ createClient, crypto, projects: [{ name: 'app', path: '/work/app' }] }} />);
 }

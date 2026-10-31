@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { MarkedText, ReviewBody, WarningList } from '../../../../src/features/catalogs/catalog-review-view.tsx';
-import { mount } from '../../../support/dom.ts';
+import { interact, mount } from '../../../support/dom.ts';
 
 const MARK = '⟨U+202E⟩';
 
@@ -105,6 +105,65 @@ describe('WarningList', () => {
     expect(items[0]?.textContent).toContain('Older version');
     expect(items[0]?.textContent).toContain('Version 1 is older than 2.');
     expect(items[0]?.querySelector('svg')).not.toBeNull();
+    await view.unmount();
+  });
+});
+
+describe('large files and long runs', () => {
+  const ZWSP = String.fromCodePoint(0x200b);
+  const lastFile = (container: HTMLElement) =>
+    container.querySelector('details[data-review-file]') as HTMLDetailsElement;
+
+  it('shows a 2 MiB file of zero-width spaces closed, with a note, and almost nothing in the page', async () => {
+    const started = performance.now();
+    const view = await mount(
+      <ReviewBody entries={[{ label: 'Skill file SKILL.md', text: ZWSP.repeat(2 * 1024 * 1024), document: true }]} />,
+    );
+    expect(performance.now() - started).toBeLessThan(3000);
+    expect(lastFile(view.container).open).toBe(false);
+    expect(view.container.querySelector('[data-review-large]')?.textContent).toBe(
+      'Large file: open to read it in full',
+    );
+    expect(view.container.querySelectorAll('mark')).toHaveLength(0);
+    expect(view.container.querySelectorAll('*').length).toBeLessThan(40);
+    await view.unmount();
+  });
+
+  it('shows all of it, as one counted mark, once it is opened', async () => {
+    const view = await mount(
+      <ReviewBody entries={[{ label: 'Skill file SKILL.md', text: ZWSP.repeat(2 * 1024 * 1024), document: true }]} />,
+    );
+    const details = lastFile(view.container);
+    await interact(() => {
+      details.open = true;
+      details.dispatchEvent(new Event('toggle'));
+    });
+    const marks = view.container.querySelectorAll('mark[data-hidden-marker]');
+    expect(marks).toHaveLength(1);
+    expect(marks[0]?.textContent).toBe('⟨U+200B ×2,097,152⟩');
+    await interact(() => {
+      details.open = false;
+      details.dispatchEvent(new Event('toggle'));
+    });
+    expect(view.container.querySelectorAll('mark')).toHaveLength(0);
+    await view.unmount();
+  });
+
+  it('keeps a small file open and without the note', async () => {
+    const view = await mount(
+      <ReviewBody entries={[{ label: 'Skill file SKILL.md', text: 'small', document: true }]} />,
+    );
+    expect(lastFile(view.container).open).toBe(true);
+    expect(view.container.querySelector('[data-review-large]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('writes a hidden character in a warning as its marker', async () => {
+    const view = await mount(
+      <WarningList warnings={[{ code: 'carries-scripts', text: `It runs fdp${String.fromCodePoint(0x202e)}.sh` }]} />,
+    );
+    expect(view.container.textContent).not.toContain(String.fromCodePoint(0x202e));
+    expect(view.container.querySelectorAll('mark[data-hidden-marker]')).toHaveLength(1);
     await view.unmount();
   });
 });

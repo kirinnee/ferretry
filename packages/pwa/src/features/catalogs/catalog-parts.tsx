@@ -11,6 +11,7 @@ import { readPairedDevices } from '../settings/add-device-api.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { Button } from '../../shell/primitives.tsx';
 import type { CatalogClientFactory } from './catalogs-api.ts';
+import { MarkedText } from './catalog-review-view.tsx';
 import { SHARING_OFF_LINES, SHARING_OFF_TITLE, sharingGrantCommand } from './catalogs-model.ts';
 
 /** A titled bottom sheet whose body scrolls. */
@@ -123,7 +124,9 @@ export function FailureLine({
     >
       <p className="m-0 flex items-start gap-2 break-words text-cell">
         <CircleAlert size={16} aria-hidden="true" className="mt-0.5 shrink-0" />
-        {sentence}
+        <span>
+          <MarkedText text={sentence} />
+        </span>
       </p>
       {again === true && onAgain !== undefined ? (
         <Button type="button" size="sm" onClick={onAgain} data-catalog-preview-again="">

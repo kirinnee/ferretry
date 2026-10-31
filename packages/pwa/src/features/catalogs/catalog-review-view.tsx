@@ -9,6 +9,7 @@
 import type { CatalogInstallWarning, CatalogReviewEntry } from '@ferretry/protocol';
 import { revealHidden } from '@ferretry/protocol';
 import { CircleAlert, Info, TriangleAlert } from 'lucide-react';
+import { useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
 import {
   INSTALLER_FILLS_IN,
@@ -58,9 +59,18 @@ export function MarkedText({ text }: { readonly text: string }) {
   );
 }
 
+const LARGE_FILE_NOTE = 'Large file: open to read it in full';
+
 function FileBlock({ row }: { readonly row: Extract<ReviewRow, { kind: 'file' }> }) {
+  // A big file is not drawn until it is opened, so the page stays quick; opening it shows all of it.
+  const [open, setOpen] = useState(!row.large);
   return (
-    <details className="kt-panel min-w-0" open data-review-file={row.path}>
+    <details
+      className="kt-panel min-w-0"
+      open={open}
+      onToggle={event => setOpen(event.currentTarget.open)}
+      data-review-file={row.path}
+    >
       <summary className="flex min-h-[44px] cursor-pointer select-none flex-wrap items-center gap-x-sm gap-y-xs px-control-x py-2 text-cell">
         <span className="min-w-0 flex-1 break-all font-mono text-fg">{row.path}</span>
         <span className="text-meta text-faint">{row.lines === 1 ? '1 line' : `${row.lines} lines`}</span>
@@ -69,10 +79,17 @@ function FileBlock({ row }: { readonly row: Extract<ReviewRow, { kind: 'file' }>
             Has hidden characters
           </span>
         ) : null}
+        {row.large ? (
+          <span className="w-full text-meta text-muted" data-review-large="">
+            {LARGE_FILE_NOTE}
+          </span>
+        ) : null}
       </summary>
-      <pre className="m-0 max-w-full overflow-x-auto whitespace-pre-wrap break-words border-t border-border-soft p-control-x font-mono text-cell leading-base text-fg">
-        <MarkedText text={row.text} />
-      </pre>
+      {open ? (
+        <pre className="m-0 max-w-full overflow-x-auto whitespace-pre-wrap break-words border-t border-border-soft p-control-x font-mono text-cell leading-base text-fg">
+          <MarkedText text={row.text} />
+        </pre>
+      ) : null}
     </details>
   );
 }
@@ -146,7 +163,9 @@ function WarningItem({ row }: { readonly row: WarningRow }) {
       <Icon size={16} aria-hidden="true" className="mt-0.5 shrink-0" />
       <span className="flex min-w-0 flex-col gap-0.5">
         <span className="text-cell font-semibold">{row.label}</span>
-        <span className="break-words text-cell">{row.text}</span>
+        <span className="break-words text-cell">
+          <MarkedText text={row.text} />
+        </span>
       </span>
     </li>
   );

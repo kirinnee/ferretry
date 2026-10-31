@@ -5,6 +5,9 @@ import {
   fingerprintStart,
   formatBytes,
   holdsMarker,
+  isLargeFile,
+  LARGE_FILE_BYTES,
+  LARGE_FILE_MARKERS,
   placeholderName,
   plural,
   reviewHeading,
@@ -14,7 +17,8 @@ import {
   warningRows,
 } from '../../../../src/features/catalogs/catalog-review-model.ts';
 
-const RLO = `${String.fromCodePoint(0x27e8)}U+202E${String.fromCodePoint(0x27e9)}`;
+const marker = (code: string): string => `${String.fromCodePoint(0x27e8)}U+${code}${String.fromCodePoint(0x27e9)}`;
+const RLO = marker('202E');
 
 describe('markers', () => {
   it('splits text around each marker and rejoins to the input', () => {
@@ -23,12 +27,30 @@ describe('markers', () => {
     should(segments.map(segment => segment.marker)).eql([false, true, false, true]);
     should(segments.map(segment => segment.text).join('')).equal(text);
   });
+  it('merges markers with nothing between them into one, counting repeats', () => {
+    const zero = marker('200B');
+    should(splitMarkers(zero.repeat(1000))).eql([{ marker: true, text: '⟨U+200B ×1,000⟩' }]);
+    should(splitMarkers(`a${zero}${zero}${RLO}${zero}b`)).eql([
+      { marker: false, text: 'a' },
+      { marker: true, text: '⟨U+200B ×2⟩⟨U+202E⟩⟨U+200B⟩' },
+      { marker: false, text: 'b' },
+    ]);
+  });
   it('treats plain text as one segment and empty text as none', () => {
     should(splitMarkers('plain')).eql([{ marker: false, text: 'plain' }]);
     should(splitMarkers('')).eql([]);
   });
   it('starts with a marker', () => {
     should(splitMarkers(RLO)).eql([{ marker: true, text: RLO }]);
+  });
+  it('calls a file large over 64 KiB or over 200 markers, and nothing smaller', () => {
+    should(isLargeFile('a'.repeat(LARGE_FILE_BYTES))).be.false();
+    should(isLargeFile('a'.repeat(LARGE_FILE_BYTES + 1))).be.true();
+    should(isLargeFile(RLO.repeat(LARGE_FILE_MARKERS))).be.false();
+    should(isLargeFile(RLO.repeat(LARGE_FILE_MARKERS + 1))).be.true();
+    should(
+      reviewRows([{ label: 'Skill file big.md', text: 'z'.repeat(LARGE_FILE_BYTES + 1), document: true }])[0],
+    ).containEql({ large: true });
   });
   it('knows whether a marker is present', () => {
     should(holdsMarker(`a${RLO}`)).be.true();
@@ -47,7 +69,7 @@ describe('reviewRows', () => {
       { label: 'Starts', text: `x${RLO}`, document: false },
       { label: 'Other', text: '${secret:ACME_TOKEN}', document: false },
     ]);
-    should(rows[0]).eql({ kind: 'file', path: 'SKILL.md', text: 'one\ntwo', lines: 2, marked: false });
+    should(rows[0]).eql({ kind: 'file', path: 'SKILL.md', text: 'one\ntwo', lines: 2, marked: false, large: false });
     should(rows[1]).containEql({ kind: 'file', path: 'empty.md', lines: 0 });
     should(rows[2]).eql({ kind: 'line', label: 'Starts', text: 'acme --stdio', marked: false });
     should(rows[3]).containEql({ placeholder: 'ACME_TOKEN' });
@@ -131,7 +153,9 @@ describe('numbers and names', () => {
   it('shortens a digest and a fingerprint', () => {
     should(shortDigest(`sha256:${'ab'.repeat(32)}`)).equal('sha256:abababababab…');
     should(shortDigest('weird')).equal('weird');
-    should(fingerprintStart('fy_daemon_q3XkAAAA')).equal('fy_daemon_q3Xk…');
+    const full = `fy_daemon_${'q3XkAbCdEfGhIjKlMnOp'}${'z'.repeat(23)}`;
+    should(fingerprintStart(full)).equal('fy_daemon_q3XkAbCdEfGhIjKlMnOp…');
+    should(fingerprintStart('fy_daemon_short')).equal('fy_daemon_short');
     should(fingerprintStart('other-id-that-is-long')).equal('other-id-that-…');
   });
   it('formats bytes', () => {

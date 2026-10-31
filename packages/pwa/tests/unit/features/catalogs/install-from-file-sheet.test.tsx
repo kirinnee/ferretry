@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from 'bun:test';
 import { FyHttpError } from '@ferretry/protocol/client';
 import type { DaemonIdentity } from '@ferretry/relay';
+import { openCatalogFile } from '../../../../src/features/catalogs/catalog-install-model.ts';
 import { InstallFromFileSheet, type InstallHost } from '../../../../src/features/catalogs/install-from-file-sheet.tsx';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { type AppStore, StoreProvider } from '../../../../src/lib/store.tsx';
@@ -18,6 +19,7 @@ let identity: DaemonIdentity;
 let fileText: string;
 let partialText: string;
 let withdrawnText: string;
+let entries: ReadonlyMap<string, { itemId: string; kind: string; name: string; version: number; digest: string }>;
 beforeAll(async () => {
   identity = await newIdentity();
   const skill = skillItem(identity.daemonId);
@@ -25,20 +27,35 @@ beforeAll(async () => {
   fileText = JSON.stringify(await signedFile(identity, [skill, mcp]));
   partialText = JSON.stringify(await signedFile(identity, [skill, mcp], [skill]));
   withdrawnText = JSON.stringify(await signedFile(identity, [skill, mcp], [skill, mcp], [skill.itemId]));
+  const opened = await openCatalogFile(fileText, crypto);
+  if (!opened.ok) throw new Error(opened.sentence);
+  entries = new Map(opened.opened.manifest.items.map(entry => [entry.itemId, entry]));
 });
 
-/** A machine review that names the same publisher and catalog the signed test file does. */
-const agreeingPreview = (change: Record<string, unknown> = {}) => {
+const MCP_ID = `itm_${'m'.repeat(22)}`;
+const SKILL_ID = `itm_${'s'.repeat(22)}`;
+
+/** A machine review that names the same publisher, catalog and item (the MCP one unless told) the signed test file does. */
+const agreeingPreview = (change: Record<string, unknown> = {}, itemId: string = MCP_ID) => {
   const base = installPreview();
+  const entry = entries.get(itemId);
+  if (entry === undefined) throw new Error(`no such item ${itemId}`);
   return installPreview({
-    provenance: { ...base.provenance, publisher: identity.daemonId, catalogName: "Kirin's catalog" },
+    provenance: {
+      ...base.provenance,
+      publisher: identity.daemonId,
+      catalogName: "Kirin's catalog",
+      itemId,
+      kind: entry.kind,
+      name: entry.name,
+      version: entry.version,
+      digest: entry.digest,
+    },
     publisher: { ...base.publisher, daemonId: identity.daemonId },
     ...change,
   });
 };
 
-const MCP_ID = `itm_${'m'.repeat(22)}`;
-const SKILL_ID = `itm_${'s'.repeat(22)}`;
 const PROJECTS = [{ name: 'proj', path: '/work/proj' }];
 const RUNTIME_PREVIEW = 'POST /v1/catalog-installs/runtime/preview';
 const RUNTIME_APPLY = 'POST /v1/catalog-installs/runtime';
@@ -301,11 +318,14 @@ describe('the review and the install', () => {
   });
 
   it('previews into a project and keeps the older-version offer to a refusal', async () => {
-    const projectPreview = agreeingPreview({
-      target: { scope: 'project', projectRoot: '/work/proj', harness: 'claude' },
-      destination: 'project proj, Claude',
-      secrets: [],
-    });
+    const projectPreview = agreeingPreview(
+      {
+        target: { scope: 'project', projectRoot: '/work/proj', harness: 'claude' },
+        destination: 'project proj, Claude',
+        secrets: [],
+      },
+      SKILL_ID,
+    );
     const { fake, view } = await open({ 'POST /v1/catalog-installs/project/preview': () => projectPreview });
     await giveText(fileText);
     await pickItem(SKILL_ID);
@@ -431,6 +451,134 @@ describe('the projects this browser knows', () => {
     await giveText(fileText);
     await choose('[data-catalog-scope]', 'project');
     expect(q('[data-catalog-project]')?.textContent).toContain('known');
+    await view.unmount();
+  });
+});
+
+describe('a preview that is overtaken', () => {
+  const held = () => {
+    let release: (value: unknown) => void = () => undefined;
+    let fail: (reason: unknown) => void = () => undefined;
+    const promise = new Promise<unknown>((resolve, reject) => {
+      release = resolve;
+      fail = reject;
+    });
+    return { promise, release: (value: unknown) => release(value), fail: (reason: unknown) => fail(reason) };
+  };
+  const waiting = async (pending: Promise<unknown>) => {
+    const made = await open({ [RUNTIME_PREVIEW]: () => pending });
+    await giveText(fileText);
+    await pickItem(MCP_ID);
+    await pickRuntime();
+    await tap('[data-catalog-preview]');
+    return made;
+  };
+
+  it('cannot be steered while it is being read', async () => {
+    const hold = held();
+    const { view } = await waiting(hold.promise);
+    expect(q('[data-catalog-preview]')?.textContent).toBe('Reading…');
+    const locked = [
+      ...document.querySelectorAll<HTMLInputElement>('[data-catalog-file-item] input'),
+      q('[data-catalog-scope]'),
+      q('[data-catalog-runtime]'),
+      q('[data-catalog-pick-file]'),
+    ];
+    expect(locked.length).toBe(5);
+    for (const control of locked) expect((control as HTMLInputElement).disabled).toBe(true);
+    hold.release(agreeingPreview());
+    await settle();
+    expect(q('[data-catalog-confirm]')).not.toBeNull();
+    for (const control of locked) expect((control as HTMLInputElement).disabled).toBe(false);
+    await view.unmount();
+  });
+
+  it('shows no review for an answer that arrives after another file was opened', async () => {
+    const hold = held();
+    const { view } = await waiting(hold.promise);
+    await giveText(fileText);
+    hold.release(agreeingPreview());
+    await settle();
+    await settle();
+    expect(q('[data-catalog-confirm]')).toBeNull();
+    expect(q('[data-catalog-failure]')).toBeNull();
+    expect(q('[data-catalog-install]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('shows no refusal for an answer that fails after another file was opened', async () => {
+    const hold = held();
+    const { view } = await waiting(hold.promise);
+    await giveText(fileText);
+    hold.fail(new FyHttpError('gone', 410, 'catalog_preview_expired'));
+    await settle();
+    await settle();
+    expect(q('[data-catalog-failure]')).toBeNull();
+    expect(q('[data-catalog-confirm]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('drops secrets that arrive after another file was opened', async () => {
+    const hold = held();
+    const slowSecrets = held();
+    const { view } = await open({
+      [RUNTIME_PREVIEW]: () => hold.promise,
+      'GET /v1/secrets': () => slowSecrets.promise,
+    });
+    await giveText(fileText);
+    await pickItem(MCP_ID);
+    await pickRuntime();
+    await tap('[data-catalog-preview]');
+    hold.release(agreeingPreview());
+    await settle();
+    expect(q('[data-catalog-confirm]')).not.toBeNull();
+    await giveText(fileText);
+    slowSecrets.release({ v: 1, health: 'ready', secrets: [{ name: 'ACME_TOKEN' }], references: [] });
+    await settle();
+    expect(q('[data-catalog-confirm]')).toBeNull();
+    await view.unmount();
+  });
+});
+
+describe('the publisher fingerprint', () => {
+  it('shows 20 characters after fy_daemon_ in the From row, and all of it when tapped', async () => {
+    const { view } = await open({});
+    await giveText(fileText);
+    const button = q('[data-catalog-file] button[aria-expanded]') as HTMLElement;
+    const shown = button.textContent ?? '';
+    expect(shown).toBe(`${identity.daemonId.slice(0, 'fy_daemon_'.length + 20)}…`);
+    await click(button);
+    expect(button.textContent).toBe(identity.daemonId);
+    await view.unmount();
+  });
+});
+
+describe('what the file supplies', () => {
+  it('writes a hidden character in an install note as its marker', async () => {
+    const raw = String.fromCodePoint(0x202e);
+    const installed = { install: installRecord('mcp', 'acme-mcp'), notes: [`Added ${raw}it.`] };
+    const { view } = await open({
+      [RUNTIME_PREVIEW]: () => agreeingPreview({ secrets: [] }),
+      [RUNTIME_APPLY]: () => installed,
+    });
+    await giveText(fileText);
+    await pickItem(MCP_ID);
+    await pickRuntime();
+    await tap('[data-catalog-preview]');
+    await tap('[data-catalog-install]');
+    expect(q('[data-catalog-note]')?.textContent).not.toContain(raw);
+    expect(q('[data-catalog-note] mark')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('refuses a review that names another item than the one chosen', async () => {
+    const { view } = await open({ [RUNTIME_PREVIEW]: () => agreeingPreview({}, SKILL_ID) });
+    await giveText(fileText);
+    await pickItem(MCP_ID);
+    await pickRuntime();
+    await tap('[data-catalog-preview]');
+    expect(q('[data-catalog-failure]')?.textContent).toContain('somewhere other than the file says');
+    expect(q('[data-catalog-confirm]')).toBeNull();
     await view.unmount();
   });
 });

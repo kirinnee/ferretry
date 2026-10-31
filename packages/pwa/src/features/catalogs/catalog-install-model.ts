@@ -94,17 +94,32 @@ export function withdrawnNote(opened: OpenedCatalogFile): string | null {
 export const PREVIEW_DISAGREES =
   'This machine reads this file as coming from somewhere other than the file says, so it was not opened. Nothing was installed.';
 
-/** `null` when the machine's review names the same publisher and catalog the verified file does; else the sentence to show instead. */
-export function previewDisagreement(opened: OpenedCatalogFile, preview: CatalogInstallPreview): string | null {
+/**
+ * `null` when the machine's review names the same publisher, catalog AND item the verified file does
+ * (the item chosen from its signed list: id, kind, name, version and digest); else the sentence to
+ * show instead.
+ */
+export function previewDisagreement(
+  opened: OpenedCatalogFile,
+  itemId: string,
+  preview: CatalogInstallPreview,
+): string | null {
   const { manifest } = opened;
   const { provenance, publisher } = preview;
+  const entry = manifest.items.find(candidate => candidate.itemId === itemId);
   const agrees =
+    entry !== undefined &&
     provenance.publisher === manifest.publisher &&
     publisher.daemonId === manifest.publisher &&
     provenance.publisherName === manifest.publisherName &&
     publisher.name === manifest.publisherName &&
     provenance.catalogId === manifest.catalogId &&
-    provenance.catalogName === manifest.name;
+    provenance.catalogName === manifest.name &&
+    provenance.itemId === entry.itemId &&
+    provenance.kind === entry.kind &&
+    provenance.name === entry.name &&
+    provenance.version === entry.version &&
+    provenance.digest === entry.digest;
   return agrees ? null : PREVIEW_DISAGREES;
 }
 

@@ -29,27 +29,45 @@ import { crypto, mcpItem, newIdentity, signedFile, skillItem, SKILL_ITEM_ID } fr
 import { installPreview, installRecord, PREVIEW_ID } from '../../../support/catalog-views.ts';
 
 describe('the machine and the file agree', () => {
-  it('shows the review only when it names the publisher and catalog the verified file does', async () => {
+  it('shows the review only when it names the publisher, catalog and item the verified file does', async () => {
     const identity = await newIdentity();
     const skill = skillItem(identity.daemonId);
     const result = await openCatalogFile(JSON.stringify(await signedFile(identity, [skill])), crypto);
     if (!result.ok) throw new Error(result.sentence);
+    const entry = result.opened.manifest.items[0];
+    if (entry === undefined) throw new Error('no entry');
     const base = installPreview();
     const agreeing = installPreview({
-      provenance: { ...base.provenance, publisher: identity.daemonId, catalogName: "Kirin's catalog" },
+      provenance: {
+        ...base.provenance,
+        publisher: identity.daemonId,
+        catalogName: "Kirin's catalog",
+        itemId: entry.itemId,
+        kind: entry.kind,
+        name: entry.name,
+        version: entry.version,
+        digest: entry.digest,
+      },
       publisher: { ...base.publisher, daemonId: identity.daemonId },
     });
-    should(previewDisagreement(result.opened, agreeing)).be.null();
+    const check = (preview: typeof agreeing, itemId = entry.itemId) =>
+      previewDisagreement(result.opened, itemId, preview);
+    should(check(agreeing)).be.null();
     const other = installPreview({
       provenance: { ...agreeing.provenance },
       publisher: { ...agreeing.publisher, daemonId: base.publisher.daemonId },
     });
-    should(previewDisagreement(result.opened, other)).equal(PREVIEW_DISAGREES);
-    const renamed = installPreview({
-      provenance: { ...agreeing.provenance, catalogName: 'Another catalog' },
-      publisher: agreeing.publisher,
-    });
-    should(previewDisagreement(result.opened, renamed)).equal(PREVIEW_DISAGREES);
+    should(check(other)).equal(PREVIEW_DISAGREES);
+    const provenanceChange = (change: Record<string, unknown>) =>
+      installPreview({ provenance: { ...agreeing.provenance, ...change }, publisher: agreeing.publisher });
+    should(check(provenanceChange({ catalogName: 'Another catalog' }))).equal(PREVIEW_DISAGREES);
+    // The item, too: the machine may not review a different one than the one chosen from the signed list.
+    should(check(provenanceChange({ itemId: `itm_${'z'.repeat(22)}` }))).equal(PREVIEW_DISAGREES);
+    should(check(provenanceChange({ kind: 'mcp' }))).equal(PREVIEW_DISAGREES);
+    should(check(provenanceChange({ name: 'other-skill' }))).equal(PREVIEW_DISAGREES);
+    should(check(provenanceChange({ version: entry.version + 1 }))).equal(PREVIEW_DISAGREES);
+    should(check(provenanceChange({ digest: `sha256:${'1'.repeat(64)}` }))).equal(PREVIEW_DISAGREES);
+    should(check(agreeing, `itm_${'y'.repeat(22)}`)).equal(PREVIEW_DISAGREES);
   });
 });
 

@@ -208,4 +208,95 @@ describe('AddToCatalogSheet', () => {
     expect(q('[data-catalog-landed]')?.textContent).toContain('version 3');
     await view.unmount();
   });
+
+  it('says why a preview failed, and shows nothing to add', async () => {
+    const { view } = await open({
+      'GET /v1/catalogs': list(ownedCatalog()),
+      [`POST /v1/catalogs/${CATALOG}/items/preview`]: () => {
+        throw new FyHttpError('boom', 500, 'x');
+      },
+    });
+    await click(q('[data-catalog-preview]'));
+    expect(q('[data-catalog-failure]')).not.toBeNull();
+    expect(q('[data-catalog-preview-block]')).toBeNull();
+    expect(q('[data-catalog-add]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('says Sharing is off when the preview is the first thing refused', async () => {
+    const { view } = await open({
+      'GET /v1/catalogs': list(ownedCatalog()),
+      [`POST /v1/catalogs/${CATALOG}/items/preview`]: () => {
+        throw new FyHttpError('no', 403, 'grant_device_not_granted');
+      },
+    });
+    await click(q('[data-catalog-preview]'));
+    expect(q('[data-sharing-off]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('previews into the other catalog when one is picked', async () => {
+    const second = ownedCatalog({ id: `cat_${'e'.repeat(22)}`, name: 'Other' });
+    const { fake, view } = await open({
+      'GET /v1/catalogs': list(ownedCatalog(), second),
+      [`POST /v1/catalogs/${second.id}/items/preview`]: () => itemPreview({ catalogId: second.id }),
+    });
+    const picker = q('[data-catalog-picker]') as HTMLSelectElement;
+    picker.value = second.id;
+    picker.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    await click(q('[data-catalog-preview]'));
+    expect(fake.calls.at(-1)?.path).toBe(`/v1/catalogs/${second.id}/items/preview`);
+    await view.unmount();
+  });
+
+  it('says what was saved without a catalog name when the catalog is not in the list', async () => {
+    const { view } = await open(
+      {
+        'GET /v1/catalogs': list(),
+        [`POST /v1/catalogs/${CATALOG}/items/preview`]: () => itemPreview({ version: 3 }),
+        [`POST /v1/catalogs/${CATALOG}/items/${ITEM}/versions`]: () => published,
+      },
+      { publish: { catalogId: CATALOG, itemId: ITEM } },
+    );
+    await click(q('[data-catalog-preview]'));
+    await click(q('[data-catalog-add]'));
+    expect(q('[data-catalog-landed]')?.textContent).toContain('Saved as version 3.');
+    await view.unmount();
+  });
+
+  it('keeps Add off, and says why, when nothing is new', async () => {
+    const { view } = await open({
+      'GET /v1/catalogs': list(ownedCatalog()),
+      [`POST /v1/catalogs/${CATALOG}/items/preview`]: () => itemPreview({ sameAsVersion: 3 }),
+    });
+    await click(q('[data-catalog-preview]'));
+    expect(q('[data-catalog-add-reason]')?.textContent).toContain('same as version 3');
+    expect(q('[data-catalog-add]')?.hasAttribute('disabled')).toBe(true);
+    await view.unmount();
+  });
+
+  it('writes a hidden character in a left-out name and reason as its marker', async () => {
+    const hidden = String.fromCodePoint(0x202e);
+    const { view } = await open({
+      'GET /v1/catalogs': list(ownedCatalog()),
+      [`POST /v1/catalogs/${CATALOG}/items/preview`]: () =>
+        itemPreview({ problems: [{ subject: `a${hidden}b`, reason: `no${hidden}pe` }] }),
+    });
+    await click(q('[data-catalog-preview]'));
+    const left = q('[data-catalog-problems]');
+    expect(left?.textContent).not.toContain(hidden);
+    expect(left?.querySelectorAll('mark').length).toBe(2);
+    await view.unmount();
+  });
+});
+
+describe('FailureLine marks what it quotes', () => {
+  it('writes a hidden character in a refusal as its marker', async () => {
+    const raw = String.fromCodePoint(0x202e);
+    const view = await mount(<FailureLine sentence={`The name ${raw}x was refused.`} />);
+    expect(view.container.textContent).not.toContain(raw);
+    expect(view.container.querySelectorAll('mark[data-hidden-marker]')).toHaveLength(1);
+    await view.unmount();
+  });
 });

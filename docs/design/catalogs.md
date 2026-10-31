@@ -778,7 +778,7 @@ ${secret:GITHUB_TOKEN}` would hand B's real token to A's program. **B never bind
 - **Writing outside the target.** Clone's path rules refuse it before anything is planned (§2.5, step 5).
 - **Updating to something worse later.** No auto-update. Every update is B's own diff, and asks again.
 - **Impersonation** ("I am Anthropic's official skills"). The name is the publisher's own text. The
-  library shows the subscriber's **own** label for each publisher, plus the start of its fingerprint,
+  library shows the subscriber's **own** label for each publisher, plus the first 20 characters of its fingerprint after `fy_daemon_` (120 bits; tap for all of it),
   and B pins the fingerprint on first install. A second publisher using the same name is told apart
   by fingerprint and is a different pin.
 - **A hostile catalog attacking the app.** A manifest or item is data. Markdown renders without raw

@@ -18,7 +18,7 @@ import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { useDaemonClient } from '../../lib/store.tsx';
 import { Button } from '../../shell/primitives.tsx';
 import { formatBytes, plural } from './catalog-review-model.ts';
-import { ReviewBody, WarningList } from './catalog-review-view.tsx';
+import { MarkedText, ReviewBody, WarningList } from './catalog-review-view.tsx';
 import { CatalogSheet, FailureLine, SharingOffPanel } from './catalog-parts.tsx';
 import {
   addCatalogItem,
@@ -327,7 +327,10 @@ function PreviewBlock({ preview }: { readonly preview: CatalogItemPreview }) {
           <ul className="m-0 flex list-none flex-col gap-xs p-0">
             {preview.problems.map(problem => (
               <li key={`${problem.subject}:${problem.reason}`} className="break-words text-cell text-fg">
-                <span className="font-mono">{problem.subject}</span>: {problem.reason}
+                <span className="font-mono">
+                  <MarkedText text={problem.subject} />
+                </span>
+                : <MarkedText text={problem.reason} />
               </li>
             ))}
           </ul>

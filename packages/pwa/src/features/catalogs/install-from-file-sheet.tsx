@@ -19,7 +19,7 @@ import { Button } from '../../shell/primitives.tsx';
 import { readFleetRuntimes } from '../fleet/catalog-api.ts';
 import { listSecrets } from '../secrets/secrets-api.ts';
 import { fingerprintStart, shortDigest } from './catalog-review-model.ts';
-import { ReviewBody, WarningList } from './catalog-review-view.tsx';
+import { MarkedText, ReviewBody, WarningList } from './catalog-review-view.tsx';
 import { CatalogSheet, FailureLine } from './catalog-parts.tsx';
 import { applyCatalogInstall, previewCatalogInstall } from './catalog-installs-api.ts';
 import {
@@ -109,6 +109,8 @@ function InstallSheetBody({
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<InstallRefusal | null>(null);
   const [landed, setLanded] = useState<Landed | null>(null);
+  // Counts the previews asked for. An answer is kept only if nothing it was asked about has changed since.
+  const asked = useRef(0);
 
   const options = useMemo<TargetOptions>(
     () => ({
@@ -142,6 +144,7 @@ function InstallSheetBody({
 
   const openFile = async (file: File | undefined): Promise<void> => {
     if (file === undefined) return;
+    asked.current += 1;
     setOpened(null);
     startOver();
     const tooBig = fileSizeProblem(file.size);
@@ -171,13 +174,16 @@ function InstallSheetBody({
       if (opened === null || itemId === null || target === null) return;
       const request = previewRequest(opened, itemId, target, older);
       if (request === null) return;
+      asked.current += 1;
+      const mine = asked.current;
       setBusy(true);
       setFailure(null);
       setPicks({});
       try {
         const client: CatalogClient = await createClient(connection);
         const read = await previewCatalogInstall(client, target.scope, request);
-        const disagreement = previewDisagreement(opened, read);
+        if (mine !== asked.current) return;
+        const disagreement = previewDisagreement(opened, itemId, read);
         if (disagreement !== null) {
           setPreview(null);
           setFailure({ sentence: disagreement, previewAgain: false, olderOffered: false });
@@ -187,13 +193,18 @@ function InstallSheetBody({
         setSecrets(undefined);
         if (read.secrets.length > 0)
           void listSecrets(client)
-            .then(setSecrets)
-            .catch(() => setSecrets(null));
+            .then(list => {
+              if (mine === asked.current) setSecrets(list);
+            })
+            .catch(() => {
+              if (mine === asked.current) setSecrets(null);
+            });
       } catch (error) {
+        if (mine !== asked.current) return;
         setPreview(null);
         setFailure(installRefusal(error));
       } finally {
-        setBusy(false);
+        if (mine === asked.current) setBusy(false);
       }
     },
     [opened, itemId, draft, createClient, connection],
@@ -230,7 +241,7 @@ function InstallSheetBody({
           </p>
           {landed.notes.map(note => (
             <p key={note} className="m-0 break-words text-cell text-muted" data-catalog-note="">
-              {note}
+              <MarkedText text={note} />
             </p>
           ))}
           <p className="m-0 text-cell text-muted">{NO_AUTO_UPDATE}</p>
@@ -259,7 +270,7 @@ function InstallSheetBody({
         <Button
           type="button"
           variant="outline"
-          disabled={busy && preview === null && opened === null}
+          disabled={busy}
           onClick={() => input.current?.click()}
           data-catalog-pick-file=""
         >
@@ -274,12 +285,14 @@ function InstallSheetBody({
           opened={opened}
           itemId={itemId}
           onItem={next => {
+            asked.current += 1;
             setItemId(next);
             setPreview(null);
             setFailure(null);
           }}
           draft={draft}
           onDraft={next => {
+            asked.current += 1;
             setDraft(next);
             setPreview(null);
             setFailure(null);
@@ -362,7 +375,12 @@ function OpenedFile({
           {revealHidden(fileSummary(opened))}
         </p>
         <p className="m-0 break-words text-meta text-muted">
-          From {revealHidden(opened.manifest.publisherName)} · {fingerprintStart(opened.manifest.publisher)}
+          From {revealHidden(opened.manifest.publisherName)} ·{' '}
+          <TapToExpand
+            label="Publisher fingerprint"
+            short={fingerprintStart(opened.manifest.publisher)}
+            full={opened.manifest.publisher}
+          />
         </p>
       </div>
       <fieldset className="m-0 flex min-w-0 flex-col gap-xs border-0 p-0" aria-labelledby={legend}>
@@ -381,7 +399,7 @@ function OpenedFile({
               name="catalog-file-item"
               className="mt-1"
               checked={itemId === row.entry.itemId}
-              disabled={row.unavailable !== null}
+              disabled={row.unavailable !== null || busy}
               onChange={() => onItem(row.entry.itemId)}
             />
             <span className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -396,7 +414,7 @@ function OpenedFile({
         ))}
         {withdrawn === null ? null : <p className="m-0 text-meta text-muted">{withdrawn}</p>}
       </fieldset>
-      <TargetPicker draft={draft} onDraft={onDraft} options={options} />
+      <TargetPicker draft={draft} onDraft={onDraft} options={options} busy={busy} />
       {problem === null ? null : (
         <p className="m-0 text-meta text-muted" data-catalog-choice-problem="">
           {problem}
@@ -438,10 +456,12 @@ function TargetPicker({
   draft,
   onDraft,
   options,
+  busy,
 }: {
   readonly draft: TargetDraft;
   readonly onDraft: (draft: TargetDraft) => void;
   readonly options: TargetOptions;
+  readonly busy: boolean;
 }) {
   const where = useId();
   const project = useId();
@@ -458,6 +478,7 @@ function TargetPicker({
             const scope = event.target.value;
             onDraft(scope === 'project' || scope === 'runtime' ? { scope } : {});
           }}
+          disabled={busy}
           data-catalog-scope=""
         >
           <option value="">{CHOOSE_PLACEHOLDER}</option>
@@ -480,6 +501,7 @@ function TargetPicker({
                   ...(event.target.value === '' ? {} : { projectRoot: event.target.value }),
                 });
               }}
+              disabled={busy}
               data-catalog-project=""
             >
               <option value="">{CHOOSE_PLACEHOLDER}</option>
@@ -504,6 +526,7 @@ function TargetPicker({
                   ...(next === 'claude' || next === 'codex' ? { harness: next } : {}),
                 });
               }}
+              disabled={busy}
               data-catalog-harness=""
             >
               <option value="">{CHOOSE_PLACEHOLDER}</option>
@@ -531,6 +554,7 @@ function TargetPicker({
                     },
               );
             }}
+            disabled={busy}
             data-catalog-runtime=""
           >
             <option value="">{CHOOSE_PLACEHOLDER}</option>
