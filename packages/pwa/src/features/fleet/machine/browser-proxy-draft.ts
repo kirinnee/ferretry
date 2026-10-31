@@ -15,8 +15,10 @@ const WHOLE_REFERENCE = new RegExp(`^${SECRET_REFERENCE_SOURCE}$`, 'u');
 
 const SECRET_NAME = /^[A-Z][A-Z0-9_]{0,63}$/u;
 
+export const isSecretName = (text: string): boolean => SECRET_NAME.test(text);
+
 /** What was typed as a secret name; a pasted `${secret:NAME}` reference counts as its name. */
-const nameTyped = (text: string): string => secretName(text.trim()) || text.trim();
+export const nameTyped = (text: string): string => secretName(text.trim()) || text.trim();
 
 const secretName = (reference: string | undefined): string => WHOLE_REFERENCE.exec(reference ?? '')?.[1] ?? '';
 
@@ -46,10 +48,10 @@ export function settingOf(
     ['username', username],
     ['password', password],
   ] as const) {
-    if (name !== '' && !SECRET_NAME.test(name)) {
+    if (name !== '' && !isSecretName(name)) {
       return {
         ok: false,
-        problem: `The ${field} box takes the NAME of a stored secret (capital letters, digits and _, like PROXY_${field === 'username' ? 'USER' : 'PASSWORD'}), not the ${field} itself. Store the value with fy secret set NAME, then type only the name here.`,
+        problem: `The ${field} box takes the NAME of a stored secret (capital letters, digits and _, like PROXY_${field === 'username' ? 'USER' : 'PASSWORD'}), not the ${field} itself. Paste the real ${field} into the box below these two to store it; the name then fills in here.`,
       };
     }
   }

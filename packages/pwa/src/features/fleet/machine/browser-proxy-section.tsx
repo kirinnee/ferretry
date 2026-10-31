@@ -4,8 +4,10 @@ import { Button } from '../../../shell/primitives.tsx';
 import type { SetupAccess } from '../setup/setup-access.ts';
 import { SetupNote, SetupSection } from '../setup/setup-ui.tsx';
 import { ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
+import { putSecret } from '../../secrets/secrets-api.ts';
 import { testBrowserProxy } from './browser-proxy-api.ts';
-import { type BrowserProxyDraft, draftOf, settingOf } from './browser-proxy-draft.ts';
+import { type BrowserProxyDraft, draftOf, isSecretName, nameTyped, settingOf } from './browser-proxy-draft.ts';
+import { BrowserProxySecretField, type StoreOutcome } from './browser-proxy-secret-field.tsx';
 import { BrowserProxyTestBlock } from './browser-proxy-test-block.tsx';
 import type { ProxyTestShown } from './browser-proxy-test-result.tsx';
 import { machineSettings } from './machine-settings.ts';
@@ -73,7 +75,10 @@ export function BrowserProxySection({
     if (typed && !wanted.ok) {
       testRun.current += 1;
       setTesting(false);
-      setShown({ kind: 'refused', sentence: wanted.problem });
+      setShown({
+        kind: 'refused',
+        sentence: 'Nothing was tried yet. Fix the problem in the note just above, then test again.',
+      });
       return;
     }
     if (testBody === null) return;
@@ -92,6 +97,13 @@ export function BrowserProxySection({
             : { kind: 'refused', sentence: outcome.sentence },
         );
       });
+  };
+  // A value is stored under the name in the box when it is a name, else under a default; the box then shows it.
+  const storeUnder = (box: string, fallback: string): string =>
+    isSecretName(nameTyped(box)) ? nameTyped(box) : fallback;
+  const store = async (name: string, value: string): Promise<StoreOutcome> => {
+    const outcome = await access.act(client => putSecret(client, name, value));
+    return outcome.kind === 'done' ? { kind: 'stored', name } : { kind: 'refused', sentence: outcome.sentence };
   };
   const apply = (browserProxy: NonNullable<typeof saved> | null): void => {
     void changes.apply(machineSettings(machine, { browserProxy })).then(result => {
@@ -177,8 +189,25 @@ export function BrowserProxySection({
           onChange={event => edit({ passwordSecret: event.target.value })}
         />
         <p className="m-0 text-meta leading-base text-muted">
-          Name the secrets, never type the value. Store each on {machineName} with <code>fy secret set NAME</code>.
+          These two boxes take the NAME of a stored secret, never the username or password itself. Paste the real value
+          below and {machineName} stores it under that name (or run <code>fy secret set NAME</code> there).
         </p>
+        <BrowserProxySecretField
+          what="username"
+          name={storeUnder(draft.usernameSecret, 'PROXY_USER')}
+          machineName={machineName}
+          online={online}
+          store={value => store(storeUnder(draft.usernameSecret, 'PROXY_USER'), value)}
+          onStored={name => edit({ usernameSecret: name })}
+        />
+        <BrowserProxySecretField
+          what="password"
+          name={storeUnder(draft.passwordSecret, 'PROXY_PASSWORD')}
+          machineName={machineName}
+          online={online}
+          store={value => store(storeUnder(draft.passwordSecret, 'PROXY_PASSWORD'), value)}
+          onStored={name => edit({ passwordSecret: name })}
+        />
       </div>
       {wanted.ok ? null : (
         <SetupNote tone="warn" name="browser-proxy-problem" live>

@@ -62,6 +62,8 @@ const STATUS_SCENES = [
   { key: 'running-direct', words: 'Running · direct, no proxy.' },
 ] as const;
 
+const invalidForm = (): string => wrap(resolved['invalid-form']?.status ?? '');
+
 const statusGallery = (): string => wrap(STATUS_SCENES.map(scene => resolved[scene.key]?.status ?? '').join(''));
 
 const SAVED_HINT = 'Tries one request through the proxy from studio, using the stored secrets. Nothing is saved.';
@@ -144,6 +146,7 @@ const themes = ['light', 'dark'] as const;
 const scenes = [
   { name: 'browser-tab', html: tab, mustSee: '[data-browser-state="running"]' },
   { name: 'browser-status', html: statusGallery, mustSee: '[data-browser-state="stopped"]' },
+  { name: 'browser-proxy-invalid', html: invalidForm, mustSee: '[data-browser-proxy-test-refusal]' },
   { name: 'browser-proxy-test', html: gallery, mustSee: '[data-setup-note="browser-proxy-test"]' },
 ] as const;
 

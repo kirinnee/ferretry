@@ -44,6 +44,19 @@ const states: Readonly<Record<string, BrowserStateView>> = {
   'running-direct': { state: 'running', startedAt: '2026-10-30T08:00:00.000Z' },
 };
 
+const typeInto = async (field: HTMLInputElement, value: string): Promise<void> => {
+  await interact(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(field, value);
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+};
+
+const click = async (element: Element): Promise<void> => {
+  await interact(() => {
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  });
+};
+
 const settle = async (): Promise<void> => {
   await interact(async () => {
     for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();
@@ -77,5 +90,35 @@ for (const [name, view] of Object.entries(states)) {
   out[name] = { tab: shown.container.innerHTML, status: section.outerHTML };
   await shown.unmount();
 }
+// The form as it is when a real user name and password were typed where secret NAMES go, then Test proxy pressed.
+const invalidClient: FleetClient = {
+  request: async <T,>(path: string, schema: z.ZodType<T>): Promise<T> => {
+    if (path !== BROWSER_STATE_PATH) throw new Error(`the picture asks nothing of ${path}`);
+    return schema.parse({ state: 'stopped' });
+  },
+};
+const invalid = await mount(
+  <BrowserTab
+    connection={connection}
+    machineName="studio"
+    machine={{ ...machine, browserProxy: null }}
+    online
+    checking={false}
+    onRetry={() => undefined}
+    createClient={async () => invalidClient}
+  />,
+);
+await settle();
+const field = (selector: string): HTMLInputElement =>
+  must(invalid.container.querySelector<HTMLInputElement>(selector), selector);
+await typeInto(field('[data-browser-proxy-url]'), 'socks5://proxy.example.test:1080');
+await typeInto(field('[data-browser-proxy-username]'), 'amy.example');
+await typeInto(field('[data-browser-proxy-password]'), 'correct-horse');
+await click(must(invalid.container.querySelector('[data-browser-proxy-test]'), 'the Test proxy button'));
+await settle();
+must(invalid.container.querySelector('[data-browser-proxy-test-refusal]'), 'the invalid-form message');
+const proxy = must(invalid.container.querySelector('[data-setup-section="browser-proxy"]'), 'the proxy section');
+out['invalid-form'] = { tab: invalid.container.innerHTML, status: proxy.outerHTML };
+await invalid.unmount();
 console.log(JSON.stringify(out));
 process.exit(0);

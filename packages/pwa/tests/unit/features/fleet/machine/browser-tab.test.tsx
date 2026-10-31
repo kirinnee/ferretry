@@ -338,6 +338,12 @@ describe('BrowserTab › Browser proxy', () => {
   });
 });
 
+const afterwards = async (): Promise<void> => {
+  await interact(async () => {
+    for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();
+  });
+};
+
 describe('BrowserTab › Test proxy', () => {
   const testCalls = (calls: readonly Recorded[]): Recorded[] =>
     calls.filter(call => call.path === BROWSER_PROXY_TEST_PATH);
@@ -356,7 +362,8 @@ describe('BrowserTab › Test proxy', () => {
       await typeInto(q('[data-browser-proxy-url]'), 'ftp://proxy.example');
       expect(button(q).disabled).toBe(false);
       await click(button(q), 'test');
-      expect(q('[data-browser-proxy-test-refusal]')?.textContent).toContain('starts with http://');
+      expect(q('[data-setup-note="browser-proxy-problem"]')?.textContent).toContain('starts with http://');
+      expect(q('[data-browser-proxy-test-refusal]')?.textContent).toContain('Fix the problem in the note just above');
       expect(testCalls(calls)).toHaveLength(0);
       await typeInto(q('[data-browser-proxy-url]'), 'http://proxy.example:8080');
       expect(q('[data-browser-proxy-test-refusal]')).toBeNull();
@@ -370,10 +377,72 @@ describe('BrowserTab › Test proxy', () => {
       await typeInto(q('[data-browser-proxy-password]'), 'hunter2!');
       expect(button(q).disabled).toBe(false);
       await click(button(q), 'test');
-      const sentence = q('[data-browser-proxy-test-refusal]')?.textContent ?? '';
+      expect(q('[data-browser-proxy-test-refusal]')?.textContent).toContain('Fix the problem in the note just above');
+      const sentence = q('[data-setup-note="browser-proxy-problem"]')?.textContent ?? '';
       expect(sentence).toContain('takes the NAME of a stored secret');
-      expect(sentence).toContain('fy secret set');
+      expect(sentence).toContain('Paste the real');
       expect(testCalls(calls)).toHaveLength(0);
+    });
+  });
+
+  it('stores a pasted password under a default name, empties the box, and fills the name box', async () => {
+    await withTab(
+      {
+        machine: machineView({ browserProxy: null }),
+        answers: {
+          '/v1/secrets': {
+            name: 'PROXY_PASSWORD',
+            createdAt: '2026-10-31T01:00:00.000Z',
+            updatedAt: '2026-10-31T01:00:00.000Z',
+          },
+        },
+      },
+      async ({ q, calls }) => {
+        const secret = q('[data-browser-proxy-secret-value="password"]') as HTMLInputElement | null;
+        expect(secret?.type).toBe('password');
+        await typeInto(secret, 'hunter2!');
+        await click(q('[data-browser-proxy-secret-store="password"]') as HTMLButtonElement, 'store');
+        await afterwards();
+        const put = calls.find(call => call.path === '/v1/secrets');
+        expect(put?.method).toBe('POST');
+        expect(put?.body).toEqual({ name: 'PROXY_PASSWORD', value: 'hunter2!' });
+        expect((q('[data-browser-proxy-secret-value="password"]') as HTMLInputElement).value).toBe('');
+        expect((q('[data-browser-proxy-password]') as HTMLInputElement).value).toBe('PROXY_PASSWORD');
+        expect(q('[data-setup-note="browser-proxy-secret-password"]')?.textContent).toContain(
+          'Stored as PROXY_PASSWORD',
+        );
+        expect(JSON.stringify(document.body.innerHTML)).not.toContain('hunter2!');
+      },
+    );
+  });
+
+  it('files a pasted username under the name already in the box, and says when the machine refuses', async () => {
+    await withTab(
+      {
+        machine: machineView({ browserProxy: null }),
+        answers: { '/v1/secrets': new FyHttpError('This machine’s secret store is locked.', 403, 'forbidden') },
+      },
+      async ({ q, calls }) => {
+        await typeInto(q('[data-browser-proxy-username]'), 'EDGE_USER');
+        await typeInto(q('[data-browser-proxy-secret-value="username"]'), 'amy-edge-login');
+        await click(q('[data-browser-proxy-secret-store="username"]') as HTMLButtonElement, 'store');
+        await afterwards();
+        expect(calls.find(call => call.path === '/v1/secrets')?.body).toEqual({
+          name: 'EDGE_USER',
+          value: 'amy-edge-login',
+        });
+        expect(q('[data-browser-proxy-secret-refusal]')?.textContent).toContain('secret store is locked');
+        expect((q('[data-browser-proxy-secret-value="username"]') as HTMLInputElement).value).toBe('amy-edge-login');
+      },
+    );
+  });
+
+  it('will not store a value the secret store would refuse for being too short, and says why', async () => {
+    await withTab({ machine: machineView({ browserProxy: null }) }, async ({ q, calls }) => {
+      await typeInto(q('[data-browser-proxy-secret-value="username"]'), 'amy');
+      expect((q('[data-browser-proxy-secret-store="username"]') as HTMLButtonElement).disabled).toBe(true);
+      expect(q('[data-browser-proxy-secret-short]')?.textContent).toContain('at least 8 characters');
+      expect(calls.some(call => call.path === '/v1/secrets')).toBe(false);
     });
   });
 
