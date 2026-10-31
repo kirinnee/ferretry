@@ -837,16 +837,19 @@ pre,
   }
 }
 /* A table that scrolls sideways says so: the edge with more beyond it fades out. `data-md-table-more` is set by
-   `MarkdownTable` from the box's own scroll position. The fade is a mask, so it takes the pane's ground in every
-   theme instead of painting a colour of its own. */
+   `MarkdownTable` from the box's own scroll position. The fade is a mask: only the alpha of `--fg` matters, so it takes the pane's ground in every
+   theme and paints no colour of its own. */
 .md-table-scroll[data-md-table-more='end'] {
-  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  -webkit-mask-image: linear-gradient(to right, var(--fg) calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, var(--fg) calc(100% - 28px), transparent);
 }
 .md-table-scroll[data-md-table-more='start'] {
-  mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
+  -webkit-mask-image: linear-gradient(to left, var(--fg) calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to left, var(--fg) calc(100% - 28px), transparent);
 }
 .md-table-scroll[data-md-table-more='both'] {
-  mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+  -webkit-mask-image: linear-gradient(to right, transparent, var(--fg) 28px, var(--fg) calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, transparent, var(--fg) 28px, var(--fg) calc(100% - 28px), transparent);
 }
 /* The full-screen sheet pans in both directions inside itself. */
 .md-table-pan {
