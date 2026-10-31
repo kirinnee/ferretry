@@ -187,7 +187,7 @@ describe('attention listing', () => {
     should(permission).containEql('answers: ← Deny · → Allow');
     should(review).containEql('answers: ← Needs changes · → Looks good');
     should(open).containEql('answer: write a full answer');
-    should(choice).containEql('answers: ← hold · ↑ ship it');
+    should(choice).containEql('answers: ← ship it · → hold');
   });
 
   it('should omit the answer hint for an item with no ask', () => {
@@ -562,7 +562,7 @@ describe('attention cards', () => {
     // Assert
     should(row(actual, 1)).equal('  !A1  [question]  Release');
     should(row(actual, 2)).equal('      ask: Ship the release now?');
-    should(row(actual, 3)).equal('      answers: ← No · → Yes');
+    should(row(actual, 3)).equal('      answers: ← Yes · → No');
   });
 
   it('should lay a permission card with an up answer out left, up, right', () => {

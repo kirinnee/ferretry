@@ -18,7 +18,7 @@ describe('AccountModelAgentControlPolicy', () => {
   it('should answer each kind from its own field', async () => {
     // Arrange
     const policy = new AccountModelAgentControlPolicy(async () =>
-      modelWith({ terminals: true, browsers: false, files: true, ferretrySettings: true }),
+      modelWith({ terminals: true, browsers: false, files: true, ferretrySettings: true, pageScripts: false }),
     );
 
     // Act + Assert
@@ -26,6 +26,19 @@ describe('AccountModelAgentControlPolicy', () => {
     should(await policy.allows('browser')).be.false();
     should(await policy.allows('files')).be.true();
     should(await policy.allows('settings')).be.true();
+    should(await policy.allows('scripts')).be.false();
+  });
+
+  it('should answer Page scripts from its own field, off unless the owner turned it on', async () => {
+    // Arrange
+    const off = new AccountModelAgentControlPolicy(async () => parseAccountModel({ version: 2 }));
+    const on = new AccountModelAgentControlPolicy(async () => modelWith({ pageScripts: true }));
+    const none = new AccountModelAgentControlPolicy(async () => undefined);
+
+    // Act + Assert
+    should(await off.allows('scripts')).be.false();
+    should(await on.allows('scripts')).be.true();
+    should(await none.allows('scripts')).be.false();
   });
 
   it('should read fresh on every call, never caching an earlier answer', async () => {

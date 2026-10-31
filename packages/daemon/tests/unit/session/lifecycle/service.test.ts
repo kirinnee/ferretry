@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { type SessionLaunchInstructions, SessionStatusSchema } from '@ferretry/protocol';
 import should from 'should';
+import { CredentialAgentIdentities } from '../../../../src/lib/agent-tools/policy.ts';
 import { type ClockPort, parseSessionId, type SerialExecutor, type SessionId } from '../../../../src/lib/index.ts';
 import type {
   SessionEffectAdmission,
@@ -13,8 +14,10 @@ import {
   type CreateSessionLifecycleRequest,
   defaultSessionLifecycleSettings,
   lifecyclePhase,
+  type SessionCapabilityHashStore,
   type SessionCredential,
   type SessionCredentialIssuer,
+  SessionCredentialRotation,
   type SessionEnvironmentStore,
   type SessionIdFactory,
   type SessionLifecycleEvent,
@@ -1445,5 +1448,160 @@ describe('SessionLifecycleService board stamping', () => {
     // Assert
     should(actual.config).not.have.property('projectId');
     should(actual.state.status).equal('created');
+  });
+});
+
+/** The rotation's hash write, applied to the stored record the way the storage merge applies it. */
+class RepositoryHashStore implements SessionCapabilityHashStore {
+  failures: unknown[] = [];
+
+  constructor(
+    private readonly repository: MemoryRepository,
+    private readonly order: string[],
+  ) {}
+
+  async record(id: SessionId, hash: string): Promise<void> {
+    const failure = this.failures.shift();
+    if (failure !== undefined) throw failure;
+    this.order.push('hash');
+    const current = this.repository.current(id);
+    this.repository.documents.set(
+      id,
+      JSON.stringify({ ...current, config: { ...current.config, sessionCapabilityHash: hash } }),
+    );
+  }
+}
+
+describe('SessionLifecycleService credential per launch', () => {
+  const capabilities = ['created-capability', 'first-pane-capability', 'second-pane-capability'] as const;
+
+  function rotating(): Harness & {
+    readonly environment: RecordingEnvironmentStore;
+    readonly credentials: SequenceCredentialIssuer;
+    readonly hashes: RepositoryHashStore;
+    /** The session id a presented capability authenticates as, through the real identity resolver. */
+    readonly resolve: (capability: string) => Promise<string | undefined>;
+  } {
+    const environment = new RecordingEnvironmentStore();
+    const credentials = new SequenceCredentialIssuer(capabilities.map(credential));
+    // The hash store needs the harness's own repository, which exists only once the harness does.
+    let hashes: RepositoryHashStore | undefined;
+    const rotation = new SessionCredentialRotation({
+      credentials,
+      environment,
+      hashes: {
+        record: async (id, hash) => {
+          await hashes?.record(id, hash);
+        },
+      },
+    });
+    const built = harness({ credentials, environment, rotation });
+    hashes = new RepositoryHashStore(built.repository, built.order);
+    const identities = new CredentialAgentIdentities(
+      {
+        snapshot: async () => {
+          const record = built.repository.current();
+          const hash = record.config.sessionCapabilityHash;
+          return hash === undefined
+            ? []
+            : [{ id: record.config.id, name: null, active: true, sessionCapabilityHash: hash }];
+        },
+      },
+      capability => credential(capability).hash,
+      (left, right) => left === right,
+    );
+    return {
+      ...built,
+      environment,
+      credentials,
+      hashes,
+      resolve: async capability => (await identities.resolve(capability))?.sessionId,
+    };
+  }
+
+  it('should hand the first pane a fresh credential, so the one creation minted stops authenticating', async () => {
+    // Arrange
+    const built = rotating();
+    built.launcher.livenessFromLaunch = true;
+    await built.subject.create(input());
+    should(await built.resolve('created-capability')).equal(ID);
+
+    // Act
+    const actual = await built.subject.start(ID);
+
+    // Assert
+    should(actual.config.sessionCapabilityHash).equal(credential('first-pane-capability').hash);
+    should(built.repository.current().config.sessionCapabilityHash).equal(credential('first-pane-capability').hash);
+    should(built.environment.written.get(ID)).deepEqual({
+      FY_SESSION_BOARD_CAPABILITY: 'first-pane-capability',
+      FY_SESSION_MODE: 'auto',
+    });
+    should(await built.resolve('first-pane-capability')).equal(ID);
+    should(await built.resolve('created-capability')).be.undefined();
+    // Recorded before the pane exists, so the pane is never holding a credential nothing accepts.
+    should(built.order.indexOf('hash')).be.below(built.order.indexOf('launch'));
+  });
+
+  it('should re-issue on every relaunch, so the replaced pane credential dies with it', async () => {
+    // Arrange — a first pane that came up and then failed, as one a revive would replace.
+    const built = rotating();
+    await built.subject.create(input());
+    const failing = async () => {
+      throw new Error('startup setup failed after the pane opened');
+    };
+    await should(built.subject.start(ID, failing)).be.rejectedWith('startup setup failed after the pane opened');
+    should(await built.resolve('first-pane-capability')).equal(ID);
+
+    // Act
+    await built.subject.start(ID);
+
+    // Assert
+    should(await built.resolve('second-pane-capability')).equal(ID);
+    should(await built.resolve('first-pane-capability')).be.undefined();
+    should(built.launcher.launches()).equal(2);
+    should(built.credentials.issues).equal(3);
+  });
+
+  it('should keep the credential of a pane that is still live when a start is retried', async () => {
+    // Arrange — a launch a daemon restart interrupted after the pane was opened: the record still
+    // says `starting`, and the pane is running with the environment it was launched with.
+    const built = rotating();
+    await built.subject.create(input());
+    const created = built.repository.current();
+    built.repository.documents.set(ID, JSON.stringify({ ...created, state: { ...created.state, status: 'starting' } }));
+    built.launcher.live = true;
+
+    // Act
+    const resumed = await built.subject.start(ID);
+    const retried = await built.subject.start(ID);
+
+    // Assert — nothing was minted, because no pane was launched to hold it.
+    should(resumed.state.status).equal('running');
+    should(retried.state.status).equal('running');
+    should(built.credentials.issues).equal(1);
+    should(built.launcher.launches()).equal(0);
+    should(await built.resolve('created-capability')).equal(ID);
+  });
+
+  it('should launch again after a crash between the new plaintext and its hash', async () => {
+    // Arrange — the new plaintext is durable, its hash never landed: the torn pair a crash leaves.
+    const built = rotating();
+    built.hashes.failures = [new Error('the daemon died before the hash was written')];
+    await built.subject.create(input());
+
+    // Act + Assert — nothing was launched holding the unrecorded credential.
+    await should(built.subject.start(ID)).be.rejectedWith('the daemon died before the hash was written');
+    should(built.repository.current().state.status).equal('failed');
+    should(built.repository.current().config.sessionCapabilityHash).equal(credential('created-capability').hash);
+    should(built.environment.written.get(ID)?.FY_SESSION_BOARD_CAPABILITY).equal('first-pane-capability');
+    should(built.launcher.launches()).equal(0);
+
+    // The retry re-issues rather than adopting the torn pair, and the pane it launches is accepted.
+    const actual = await built.subject.start(ID);
+    should(actual.state.status).equal('running');
+    should(built.launcher.launches()).equal(1);
+    should(await built.resolve('second-pane-capability')).equal(ID);
+    should(await built.resolve('first-pane-capability')).be.undefined();
+    should(await built.resolve('created-capability')).be.undefined();
   });
 });

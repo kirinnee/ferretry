@@ -831,6 +831,129 @@ describe('OperatorReadService.messages', () => {
     should(reads).eql(['s1', 's1']);
   });
 
+  it('should serve the newest rows oldest-first from the tail, with a way back and no way forward', async () => {
+    // Arrange
+    const reads = service({ rows: five });
+
+    // Act
+    const page = await reads.messages('s1', undefined, 2, {});
+
+    // Assert
+    should(SessionTranscriptPageSchema.parse(page)).eql(page);
+    should(page.messages.map(message => message.point.byteOffset)).eql([40, 50]);
+    should(page.nextCursor).be.null();
+    should(page.previousCursor).be.a.String();
+  });
+
+  it('should walk back from the tail page by page to the start, without a row twice or a row missed', async () => {
+    // Arrange
+    const reads = service({ rows: five });
+
+    // Act — the real journey: each older page is asked `through` the previous page's own token.
+    const newest = await reads.messages('s1', undefined, 2, {});
+    const middle = await reads.messages('s1', undefined, 2, { through: newest.previousCursor ?? undefined });
+    const oldest = await reads.messages('s1', undefined, 2, { through: middle.previousCursor ?? undefined });
+
+    // Assert
+    should(middle.messages.map(message => message.point.byteOffset)).eql([20, 30]);
+    should(oldest.messages.map(message => message.point.byteOffset)).eql([10]);
+    should(oldest.previousCursor).be.null();
+    should(middle.nextCursor).be.a.String();
+  });
+
+  it('should make the token a page ends before the very cursor a forward read resumes after', async () => {
+    // Arrange
+    const reads = service({ rows: five });
+    const tail = await reads.messages('s1', undefined, 2, {});
+
+    // Act — forward from the tail's previousCursor lands exactly on the tail's first row.
+    const forward = await reads.messages('s1', tail.previousCursor ?? undefined, 2);
+
+    // Assert
+    should(forward.messages.map(message => message.point.byteOffset)).eql([40, 50]);
+  });
+
+  it('should answer a backward read of a conversation shorter than the page whole, starting at the start', async () => {
+    // Arrange
+    const reads = service({ rows: five });
+
+    // Act
+    const page = await reads.messages('s1', undefined, 1_000, {});
+
+    // Assert
+    should(page.messages).have.length(5);
+    should(page.previousCursor).be.null();
+  });
+
+  it('should answer a backward read of an empty conversation with an empty page', async () => {
+    // Act
+    const page = await service({ rows: [] }).messages('s1', undefined, undefined, {});
+
+    // Assert
+    should(page.messages).eql([]);
+    should(page.previousCursor).be.null();
+    should(page.nextCursor).be.null();
+  });
+
+  it('should leave previousCursor off a forward read, which an older client would refuse as an unknown key', async () => {
+    // Act
+    const page = await service({ rows: five }).messages('s1', undefined, 2);
+
+    // Assert
+    should(page).not.have.property('previousCursor');
+  });
+
+  it('should refuse a backward read that also carries a forward cursor, and a through that is no token', async () => {
+    // Arrange
+    const reads = service({ rows: five });
+    const first = await reads.messages('s1', undefined, 2);
+
+    // Act
+    const both = await reads
+      .messages('s1', first.nextCursor ?? undefined, 2, { through: first.nextCursor ?? undefined })
+      .catch((error: unknown) => error);
+    const mixed = await reads.messages('s1', first.nextCursor ?? undefined, 2, {}).catch((error: unknown) => error);
+    const nonsense = await reads.messages('s1', undefined, 2, { through: 'page-2' }).catch((error: unknown) => error);
+
+    // Assert
+    for (const refusal of [both, mixed, nonsense])
+      should(refusal).be.instanceof(OperatorReadError).and.have.property('failure', 'invalid_query');
+  });
+
+  it('should refuse a through cursor whose anchor is gone or was replaced', async () => {
+    // Arrange
+    const newest = await service({ rows: five }).messages('s1', undefined, 2, {});
+    const truncated = service({ rows: [row(10)] });
+    const rewritten = service({
+      rows: [row(10), row(20), row(30, { rawPrefix: new Uint8Array(32).fill(7) }), row(40)],
+    });
+
+    // Act
+    const gone = await truncated
+      .messages('s1', undefined, 2, { through: newest.previousCursor ?? undefined })
+      .catch((error: unknown) => error);
+    const replaced = await rewritten
+      .messages('s1', undefined, 2, { through: newest.previousCursor ?? undefined })
+      .catch((error: unknown) => error);
+
+    // Assert
+    for (const refusal of [gone, replaced])
+      should(refusal).be.instanceof(OperatorReadError).and.have.property('failure', 'message_cursor_stale');
+  });
+
+  it('should read the source once per backward page', async () => {
+    // Arrange
+    const reads: string[] = [];
+    const service_ = service({ rows: five, reads });
+
+    // Act
+    const newest = await service_.messages('s1', undefined, 2, {});
+    await service_.messages('s1', undefined, 2, { through: newest.previousCursor ?? undefined });
+
+    // Assert
+    should(reads).eql(['s1', 's1']);
+  });
+
   it('should issue a cursor whose anchor is the final row it served', async () => {
     // Arrange
     const codec = messageCodec();

@@ -1,10 +1,18 @@
 import { existsSync } from 'node:fs';
-import { chmod, mkdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, open, rename, rm, writeFile } from 'node:fs/promises';
 import { createServer, createConnection } from 'node:net';
 import { hostname as osHostname, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { BROWSER_MAX_HEIGHT, BROWSER_MAX_WIDTH, type BrowserViewport } from '@ferretry/protocol';
-import { BrowserControlError, selectChromeExecutable } from '../../../lib/browser/control/index.ts';
+import {
+  BrowserControlError,
+  generateXCookie,
+  listenerHeldRefusal,
+  selectChromeExecutable,
+  xauthorityEntry,
+  xvfbLaunchArguments,
+} from '../../../lib/browser/control/index.ts';
+import { type ListenerProverPort, ProcListenerProver } from './listener-prover.ts';
 import type { BrowserLoginChild, BrowserLoginRuntime } from './login-window.ts';
 
 /**
@@ -57,6 +65,12 @@ export interface XvfbChild extends BrowserLoginChild {
 export interface BrowserDisplayPort {
   /** The `:N` an X client connects to. Idempotent: the same display for every caller. */
   display(): Promise<string>;
+  /**
+   * The Xauthority file every client of that display must name in `XAUTHORITY`, or `undefined` for a
+   * display that demands no cookie. Meaningful once `display()` has resolved; a client that does not
+   * carry it is refused by the server.
+   */
+  authority(): string | undefined;
   /** Releases the display. Safe to call when none was ever taken. */
   close(): Promise<void>;
 }
@@ -164,6 +178,11 @@ export interface XvfbDisplayOptions extends BrowserLoginTiming {
   readonly executable: () => string | undefined;
   readonly screen?: BrowserViewport;
   readonly spawn?: (argv: readonly string[]) => XvfbChild;
+  /**
+   * A directory this process owns where the display's cookie file lives — the daemon's own state
+   * home, never a shared temp path. It is created `0700` if absent and forced to `0700` if not.
+   */
+  readonly authorityDirectory: string;
   /** The refusal on a host with no Xvfb, when this display serves something other than the login window. */
   readonly missing?: () => string;
 }
@@ -179,6 +198,17 @@ export interface XvfbDisplayOptions extends BrowserLoginTiming {
  * `-nolisten tcp` because nothing off this machine may reach the screen. The VNC server is the only
  * published door, and it binds loopback under a one-shot password.
  *
+ * `-auth` because the unix socket `/tmp/.X11-unix/X<n>` is reachable by EVERY local user, and an X
+ * server with no authorization admits all of them: they could screenshot the login window, where the
+ * owner types passwords, or inject keystrokes into the window-mode agent browser. So the daemon mints
+ * a random 16-byte MIT-MAGIC-COOKIE-1 into an Xauthority file (`0600`, created exclusively, in a
+ * `0700` directory) and the server admits only a client that presents it. Every X client the daemon
+ * starts on this display — Chrome, x11vnc — is handed that file through `XAUTHORITY` (`authority()`).
+ * The server reads the cookie at start and ignores the address and display number beside it, but its
+ * CLIENTS match on them, so once `-displayfd` reports the number the file is rewritten for that number
+ * (atomically, so a server that re-reads it on reset never sees a half-written file). The file is
+ * removed on `close()`.
+ *
  * The display is created ONCE and lives until the daemon stops, not until the window closes. The
  * runtime contract has no release hook, so a display torn down per window would either leak on every
  * failed open — `display()` succeeds before the spawns that can throw — or need a refcount nothing
@@ -190,6 +220,7 @@ export class XvfbDisplay implements BrowserDisplayPort {
   private readonly spawn: (argv: readonly string[]) => XvfbChild;
   private taken: Promise<string> | undefined;
   private child: XvfbChild | undefined;
+  private authorityFile: string | undefined;
 
   constructor(private readonly options: XvfbDisplayOptions) {
     this.timing = resolveTiming(options);
@@ -218,10 +249,15 @@ export class XvfbDisplay implements BrowserDisplayPort {
     }
   }
 
+  authority(): string | undefined {
+    return this.authorityFile;
+  }
+
   async close(): Promise<void> {
     const child = this.child;
     this.child = undefined;
     this.taken = undefined;
+    await this.discardAuthority();
     if (child === undefined) return;
     child.kill('SIGTERM');
   }
@@ -236,16 +272,11 @@ export class XvfbDisplay implements BrowserDisplayPort {
       );
     }
     const screen = this.options.screen ?? { width: BROWSER_MAX_WIDTH, height: BROWSER_MAX_HEIGHT };
-    const child = this.spawn([
-      executable,
-      '-displayfd',
-      '1',
-      '-screen',
-      '0',
-      `${screen.width}x${screen.height}x24`,
-      '-nolisten',
-      'tcp',
-    ]);
+    const cookie = generateXCookie(buffer => crypto.getRandomValues(buffer));
+    // Display 0 is a placeholder the server never reads (see the class comment); the real number
+    // is written below, once it has been reported.
+    const authorityFile = await this.createAuthority(cookie);
+    const child = this.spawn(xvfbLaunchArguments(executable, screen, authorityFile));
     this.child = child;
     let announced: string | undefined;
     // Read in the background so the wait below stays one uniform deadline-bounded poll: a stream read
@@ -270,13 +301,56 @@ export class XvfbDisplay implements BrowserDisplayPort {
         timing: this.timing,
         stalled: () => (announced === undefined ? undefined : 'Xvfb did not report the display number it took'),
       });
+      await reading;
+      // Only now is the number known, and it is what the clients match the cookie on.
+      await this.replaceAuthority(authorityFile, xauthorityEntry(announced ?? '', cookie));
     } catch (error) {
       this.child = undefined;
       child.kill('SIGKILL');
+      await this.discardAuthority();
       throw error;
     }
-    await reading;
     return `:${announced ?? ''}`;
+  }
+
+  /**
+   * Creates the cookie file: `0700` directory, then `0600` file opened EXCLUSIVELY under an
+   * unguessable name, so it can neither be pre-planted by another user nor be a symlink followed to
+   * somewhere else, and is never readable by anyone but this daemon's user at any instant.
+   */
+  private async createAuthority(cookie: Uint8Array): Promise<string> {
+    const directory = this.options.authorityDirectory;
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    await chmod(directory, 0o700);
+    const file = join(directory, `xauthority-${crypto.randomUUID()}`);
+    const handle = await open(file, 'wx', 0o600);
+    try {
+      await handle.writeFile(xauthorityEntry('0', cookie));
+    } finally {
+      await handle.close();
+    }
+    this.authorityFile = file;
+    return file;
+  }
+
+  /** Swaps the file's content for `entry` without ever exposing a partial or looser-mode file. */
+  private async replaceAuthority(file: string, entry: Uint8Array): Promise<void> {
+    const replacement = `${file}.next`;
+    const handle = await open(replacement, 'wx', 0o600);
+    try {
+      await handle.writeFile(entry);
+    } finally {
+      await handle.close();
+    }
+    await rename(replacement, file);
+  }
+
+  private async discardAuthority(): Promise<void> {
+    const file = this.authorityFile;
+    this.authorityFile = undefined;
+    if (file === undefined) return;
+    await rm(file, { force: true });
+    await rm(`${file}.next`, { force: true });
   }
 
   /** The first newline-terminated line Xvfb writes, or `''` if it closed the stream without one. */
@@ -316,9 +390,11 @@ export interface BrowserLoginRuntimeOptions extends BrowserLoginTiming {
   readonly spawn?: BrowserLoginSpawner;
   readonly run?: BrowserLoginProgramReader;
   readonly exists?: (candidate: string) => boolean;
-  /** Whether anything is accepting TCP on loopback at this port. */
+  /** Whether anything is accepting TCP on loopback at this port — asked only where the listener cannot be proven. */
   readonly probePort?: (port: number) => Promise<boolean>;
   readonly freePort?: () => Promise<number>;
+  /** Proves the VNC port is held by the x11vnc this window started. Defaults to this host's `/proc`. */
+  readonly listenerProver?: ListenerProverPort;
 }
 
 /**
@@ -344,6 +420,7 @@ export class NodeBrowserLoginRuntime implements BrowserLoginRuntime {
   private readonly exists: (candidate: string) => boolean;
   private readonly probePort: (port: number) => Promise<boolean>;
   private readonly freePortOf: () => Promise<number>;
+  private readonly prover: ListenerProverPort;
 
   constructor(private readonly options: BrowserLoginRuntimeOptions) {
     this.platform = options.platform ?? process.platform;
@@ -376,10 +453,15 @@ export class NodeBrowserLoginRuntime implements BrowserLoginRuntime {
       });
     this.probePort = options.probePort ?? (port => loopbackAccepts(port));
     this.freePortOf = options.freePort ?? (() => loopbackFreePort());
+    this.prover = options.listenerProver ?? new ProcListenerProver();
   }
 
   async display(): Promise<string> {
     return await this.options.display.display();
+  }
+
+  authority(): string | undefined {
+    return this.options.display.authority();
   }
 
   /** Releases the display this runtime took. Registered by the composition root, not by the window:
@@ -463,11 +545,25 @@ export class NodeBrowserLoginRuntime implements BrowserLoginRuntime {
     });
   }
 
+  /**
+   * Waits until the VNC port is held by THIS window's x11vnc, proven from the kernel's socket table and the
+   * supervisor's process tree (`lib/browser/control/listener-proof.ts`) — before the window announces the port,
+   * password and ssh line to anybody. Nothing in Ferretry ever connects to it: a person's VNC client does, over
+   * `ssh -L`, so a program that took the port between `freePort` and x11vnc's bind would otherwise be the screen
+   * that person is shown and types their password into. A listener that is not x11vnc's refuses at once, naming
+   * the port. Only a host that cannot prove (macOS) falls back to asking whether anything accepts there.
+   */
   async waitForVnc(port: number, child: BrowserLoginChild): Promise<void> {
     await awaitReady({
       what: 'the VNC server',
       child,
-      ready: async () => await this.probePort(port),
+      ready: async () => {
+        const proof = await this.prover.prove(port, child.pid);
+        if (proof.kind === 'foreign') {
+          throw new BrowserControlError('launch_failed', listenerHeldRefusal(port, proof.uid));
+        }
+        return proof.kind === 'unknown' ? await this.probePort(port) : proof.kind === 'proven';
+      },
       timing: this.timing,
     });
   }

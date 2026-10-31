@@ -124,7 +124,7 @@ describe('the saved-login directory', () => {
         key: `L${index.toString(16).toUpperCase().padStart(24, '0')}`,
         label: `e${index}`,
         match: [],
-        password: false,
+        seals: {},
         createdAt: CLOCK.now(),
         updatedAt: CLOCK.now(),
       };

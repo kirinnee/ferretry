@@ -49,7 +49,7 @@ export const AGENT_PERMISSION_WORDS: Readonly<Record<AgentPermissions, string>> 
 };
 
 /** "What agents may control" (T): each switch's label and what it covers — the fourth, Ferretry settings,
- *  is the `config.*` tools (docs/config-files.md). */
+ *  is the `config.*` tools (docs/config-files.md); the fifth, Page scripts, is `browser.eval`. */
 export const AGENT_CONTROL_WORDS: Readonly<
   Record<AgentControlKind, { readonly title: string; readonly detail: string }>
 > = {
@@ -60,6 +60,11 @@ export const AGENT_CONTROL_WORDS: Readonly<
     title: 'Ferretry settings',
     detail:
       "Read and edit this machine's configuration files (the config tools). Off by default; an agent's edit that loosens anything still waits for you.",
+  },
+  pageScripts: {
+    title: 'Page scripts',
+    detail:
+      'Let agents run their own JavaScript in pages they drive. A script can read what a page holds — on the shared agent profile, that includes your sign-ins to every site you signed it in to. Off by default; turn it on only if you need it.',
   },
 };
 
@@ -266,7 +271,13 @@ export function DefaultRuntimeSection({
   );
 }
 
-const AGENT_CONTROL_KINDS: readonly AgentControlKind[] = ['terminals', 'browsers', 'files', 'ferretrySettings'];
+const AGENT_CONTROL_KINDS: readonly AgentControlKind[] = [
+  'terminals',
+  'browsers',
+  'files',
+  'ferretrySettings',
+  'pageScripts',
+];
 
 export function AgentControlSection({
   machine,

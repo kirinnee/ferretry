@@ -1,4 +1,6 @@
 import {
+  AskToStopJobsRequestSchema,
+  type AskToStopJobsResult,
   type ContextDowngrade,
   type ConversionPreview,
   ConversionPreviewRequestSchema,
@@ -9,7 +11,7 @@ import {
   type SessionRelaunchSettings,
   type SessionView,
 } from '@ferretry/protocol';
-import { parseBody } from '../../api/body.ts';
+import { parseBody, parseOptionalBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiRequest, type ApiResponse, decodeParameter, headerValue } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
@@ -91,7 +93,12 @@ export type SessionMigrateFailure =
    */
   | 'unresumable'
   /** The relaunch under the new account was attempted and failed. The session records why. */
-  | 'failed';
+  | 'failed'
+  /**
+   * Asked to have the agent stop its background jobs, the daemon looked again and found none of the
+   * agent's own jobs in the way — they finished, or what blocks is something else. Nothing was queued.
+   */
+  | 'no_jobs';
 
 /** A refusal raised by the composition root's migrator, in a taxonomy `src/lib` may name. */
 export class SessionMigrateError extends Error {
@@ -139,6 +146,12 @@ export interface SessionMigrateSubsystem {
     sessionId: string,
     request: { readonly agent: string; readonly model?: string },
   ): Promise<ConversionPreview>;
+  /**
+   * The remedy for a refusal whose only blockers are the agent's own background jobs: look again, and
+   * queue ONE message asking the agent to stop the ones still in the way, or to say why not. It kills
+   * nothing and forces nothing — the person runs the safety check again once the agent has answered.
+   */
+  askToStopJobs(sessionId: string): Promise<AskToStopJobsResult>;
 }
 
 /** The HTTP status and code each refusal answers with. */
@@ -163,6 +176,9 @@ const REFUSALS: Readonly<Record<SessionMigrateFailure, { readonly status: number
   // `conversation: 'fresh'` — that only the person may make.
   unresumable: { status: 409, code: 'conversation_unresumable' },
   failed: { status: 500, code: 'session_migrate_failed' },
+  // 409: the session's own condition — there is nothing of the agent's to ask about — and the remedy is
+  // the safety check the caller was about to run again anyway.
+  no_jobs: { status: 409, code: 'no_background_jobs' },
 };
 
 /** Restates a migration refusal in the HTTP vocabulary. */
@@ -321,6 +337,18 @@ export function sessionMigrateRoutes(
       minimum: 'operator',
       noStore: true,
       handle: async context => await migrate(subsystem, guard, context),
+    },
+    {
+      // `operator`, as sending the agent a message is: that is all this does. No request id, because the
+      // queue id is derived from the jobs themselves, so a repeat answers with the message already queued.
+      method: 'POST',
+      path: '/v1/sessions/:sessionId/migrate/ask-to-stop-jobs',
+      minimum: 'operator',
+      noStore: true,
+      handle: async context => {
+        await parseOptionalBody(context.request, AskToStopJobsRequestSchema);
+        return jsonResponse(await subsystem.askToStopJobs(pathSessionId(context)).catch(refuse));
+      },
     },
   ];
 }

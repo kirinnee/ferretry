@@ -25,6 +25,7 @@ import {
   type CreateSessionLifecycleRequest,
   SESSION_BOARD_CAPABILITY_VARIABLE,
   type SessionCredentialIssuer,
+  type SessionCredentialRotator,
   type SessionEnvironmentStore,
   type SessionIdFactory,
   type SessionLifecycleEvent,
@@ -68,6 +69,15 @@ export interface SessionLifecyclePorts {
    */
   readonly credentials?: SessionCredentialIssuer;
   readonly environment?: SessionEnvironmentStore;
+  /**
+   * Re-issues the credential for every pane this lifecycle launches, so the one `create` minted — or
+   * the one a previous pane held — stops authenticating the moment a new pane is opened.
+   *
+   * Asked ONLY when a pane is about to be launched: a retried start that finds its pane already live
+   * keeps that pane's credential, because the pane holds it and cannot be handed another. Optional: a
+   * daemon wired without it keeps one credential for the session's whole life, as before.
+   */
+  readonly rotation?: SessionCredentialRotator;
   /**
    * One live writer per harness conversation (docs/design/account-model.md §9.3). A launch claims the
    * conversation its argv names before the pane exists, and a stop or a failure releases it. Optional:
@@ -187,6 +197,7 @@ export class SessionLifecycleService {
       if (!live) {
         try {
           await this.ports.leases?.claim(parsed, starting.config.command);
+          starting = await this.rotated(starting);
         } catch (error) {
           throw await this.recordFailure(starting, error);
         }
@@ -259,6 +270,20 @@ export class SessionLifecycleService {
     if (launches === undefined || !launches.launching(id)) return;
     if (await launches.awaitSettled(id, this.settings.stopLaunchWaitMs)) return;
     throw new SessionStopPending(id, this.settings.stopLaunchWaitMs);
+  }
+
+  /**
+   * The record carrying the credential the pane about to launch will hold.
+   *
+   * Carried in the record from here on, not merely written beside it: every later write of this
+   * record — `running`, or a failure — rewrites the whole configuration, and one made from the
+   * pre-rotation copy would put the old hash back and lock the new pane out. A rotation that fails
+   * leaves the record as it was, which is also what disk says: the hash is the rotation's LAST write.
+   */
+  private async rotated(record: SessionLifecycleRecord): Promise<SessionLifecycleRecord> {
+    if (this.ports.rotation === undefined) return record;
+    const sessionCapabilityHash = await this.ports.rotation.rotate(record.config.id);
+    return { ...record, config: { ...record.config, sessionCapabilityHash } };
   }
 
   /**

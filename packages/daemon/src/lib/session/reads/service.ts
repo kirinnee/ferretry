@@ -39,14 +39,19 @@ import type {
   ConversationMessagePoint,
   FyEvent,
   SessionLogPage,
+  SessionLogSearch,
+  SessionLogSearchMatch,
   SessionTranscriptMessage,
   SessionTranscriptPage,
 } from '@ferretry/protocol';
 import { ExactConversationMessagePointSchema, formatTranscriptImageMarker } from '@ferretry/protocol';
 import { markerMediaType, numberRecordImages, type RecordImage } from '../../transcript/images.ts';
+import { isOwnerMessage } from '../../transcript/owner.ts';
+import { snippetAround } from '../../transcript/search.ts';
 import type { TranscriptEvent } from '../../transcript/types.ts';
 import type { LastSnapshotReader } from '../snapshot/index.ts';
 import { type PortableConversationRow, sameConversationMessagePoint } from '../transcript/digest.ts';
+import { prefilterNeedle } from '../transcript/log-search.ts';
 import {
   issueSessionTranscriptMessageToken,
   readSessionTranscriptMessageCursor,
@@ -230,6 +235,34 @@ export interface SessionTranscriptPages {
   page(sessionId: string, query: TranscriptPageQuery): Promise<TranscriptPageResult>;
 }
 
+/** What a transcript search asks the file for: a needle the raw records must hold, and the test for an event. */
+export interface TranscriptSearchQuery {
+  readonly needle: string | undefined;
+  readonly accept: (event: TranscriptEvent) => boolean;
+  readonly limit: number;
+}
+
+/** A search read that reports resolution separately from content, as {@link TranscriptPageResult} does. */
+export type TranscriptSearchReadResult =
+  | { readonly kind: 'unresolved' }
+  | { readonly kind: 'unreadable' }
+  | {
+      readonly kind: 'read';
+      readonly events: readonly TranscriptEvent[];
+      readonly truncated: boolean;
+      readonly file: string;
+    };
+
+/** The whole of one session's transcript, searched (`searchTranscriptRecords`). */
+export interface SessionTranscriptSearch {
+  search(sessionId: string, query: TranscriptSearchQuery): Promise<TranscriptSearchReadResult>;
+}
+
+/** The stand-in for a daemon that wired no search: an honest refusal, never "no matches". */
+const NO_SEARCH: SessionTranscriptSearch = {
+  search: async () => ({ kind: 'unreadable' }),
+};
+
 /** The stand-in for a daemon that wired no pages: an honest refusal, never an empty page. */
 const NO_PAGES: SessionTranscriptPages = {
   page: async () => ({ kind: 'unreadable' }),
@@ -308,11 +341,26 @@ export const DEFAULT_MESSAGE_PAGE = 200;
 /** Largest addressable-row page one `messages` read will serve, matching the client's own ceiling. */
 export const MAX_MESSAGE_PAGE = 1_000;
 
+/**
+ * Which end a `messages` read counts from when it reads BACKWARD: the newest rows (`through` absent), or the
+ * newest rows ending at the row a cursor names, inclusive. A forward cursor and a backward one are the same token.
+ */
+export interface MessageBackwardRead {
+  readonly through?: string;
+}
+
 /** Transcript events a `logs` read returns when the caller names no limit. */
 export const DEFAULT_LOG_TAIL = 200;
 
 /** Largest transcript tail a single `logs` read will render. */
 export const MAX_LOG_TAIL = 2_000;
+
+/** Matches a `logSearch` answers when the caller names no limit, and the most it will. */
+export const DEFAULT_LOG_SEARCH = 500;
+export const MAX_LOG_SEARCH = 2_000;
+
+/** The longest query a search takes. */
+export const MAX_LOG_SEARCH_QUERY = 200;
 
 /**
  * The `source` every replayed event carries.
@@ -508,6 +556,7 @@ export class OperatorReadService {
     private readonly lastSnapshot: LastSnapshotReader = { read: async () => ({ kind: 'absent' }) },
     private readonly redactor: OperatorReadRedactor = UNREDACTED,
     private readonly pages: SessionTranscriptPages = NO_PAGES,
+    private readonly search: SessionTranscriptSearch = NO_SEARCH,
   ) {}
 
   /**
@@ -668,7 +717,82 @@ export class OperatorReadService {
         `session ${sessionId}'s transcript is no longer the file those pages came from`,
       );
     const log = await this.renderRedacted(result.events, { partialFirstRecord: false });
-    return { v: 1, sessionId, log, start: result.start, file: result.file };
+    // One per rendered event, in order: where in the file each line of `log` came from, so a search hit
+    // (`logSearch`) can be found among the rows the chat drew from these pages.
+    const offsets = result.events.map(event => event.byteOffset ?? result.start);
+    return { v: 1, sessionId, log, start: result.start, file: result.file, offsets };
+  }
+
+  /**
+   * Every place in the session's whole transcript that says `q`, newest first in the reading and
+   * answered oldest first — the chat's search, over what it has not loaded as much as what it has.
+   *
+   * WHAT IS SEARCHED is what the chat shows: a message's text, and with `tools` a reasoning block, a
+   * tool call (its name and input) and a tool's result. `who` narrows it to the owner's own messages
+   * (`me`, never text the harness wrote into the user channel) or to the agent's (`agent`).
+   *
+   * SECRETS STAY MASKED. An event is a match only if its SCRUBBED text holds the query, and its snippet
+   * is cut from that scrubbed text — so the search cannot be used to ask whether a secret value appears,
+   * and no snippet carries one. The raw text only chooses which records are worth scrubbing.
+   *
+   * `truncated` says older records were not read because `limit` matches were found first.
+   */
+  async logSearch(
+    sessionId: string,
+    query: { readonly q: string; readonly who?: string; readonly tools?: boolean; readonly limit?: number },
+  ): Promise<SessionLogSearch> {
+    const limit = boundedLimit(query.limit, DEFAULT_LOG_SEARCH, MAX_LOG_SEARCH, 'limit');
+    const text = query.q.trim();
+    if (text === '' || text.length > MAX_LOG_SEARCH_QUERY)
+      throw new OperatorReadError('invalid_query', `q must be 1 to ${MAX_LOG_SEARCH_QUERY} characters`);
+    const who = query.who ?? 'all';
+    if (who !== 'all' && who !== 'me' && who !== 'agent')
+      throw new OperatorReadError('invalid_query', 'who must be all, me or agent');
+    const needle = text.toLowerCase();
+    const shown = (event: TranscriptEvent): boolean =>
+      (who === 'me'
+        ? isOwnerMessage(event)
+        : who === 'agent'
+          ? event.role === 'assistant'
+          : event.role === 'user' || event.role === 'assistant' || event.role === 'tool') &&
+      (event.kind === 'message' ||
+        (query.tools === true &&
+          (event.kind === 'reasoning' || event.kind === 'tool-call' || event.kind === 'tool-result')));
+    const result = await this.search.search(sessionId, {
+      needle: prefilterNeedle(text),
+      accept: event => shown(event) && body(event).toLowerCase().includes(needle),
+      limit,
+    });
+    if (result.kind === 'unresolved')
+      throw new OperatorReadError(
+        'no_transcript',
+        `session ${sessionId} has no transcript this daemon can prove is its own`,
+      );
+    if (result.kind === 'unreadable')
+      throw new OperatorReadError(
+        'transcript_unreadable',
+        `session ${sessionId} has a proved transcript, but this daemon could not read it`,
+      );
+    const matches =
+      result.events.length === 0
+        ? []
+        : await this.redactor.batch(scrub =>
+            result.events.flatMap((event): SessionLogSearchMatch[] => {
+              const scrubbed = scrub.text(body(event));
+              const at = scrubbed.toLowerCase().indexOf(needle);
+              if (at < 0) return [];
+              return [
+                {
+                  offset: event.byteOffset ?? 0,
+                  role: event.role,
+                  kind: event.kind,
+                  snippet: snippetAround(scrubbed, at, needle.length),
+                  ...(event.timestamp === undefined ? {} : { at: event.timestamp }),
+                },
+              ];
+            }),
+          );
+    return { v: 1, sessionId, query: text, file: result.file, matches, truncated: result.truncated };
   }
 
   /**
@@ -700,6 +824,13 @@ export class OperatorReadService {
   /**
    * One page of the session's addressable conversation, strictly after an authenticated cursor.
    *
+   * BACKWARD. `backward` reads the page that ENDS at the newest row (`tail`), or at the row a cursor names
+   * (`through`, inclusive), and the answer carries `previousCursor`: the token over the row just before the
+   * page, which is also the cursor a forward read resumes after, so there is one token kind and one proof
+   * (`resumeAfter`). It is null at the start of the conversation. Rows stay oldest-first inside the page; a
+   * reader that wants an old item's thread asks for the tail and walks `previousCursor` back until it has
+   * what it came for, instead of paging the whole conversation forward to reach its end.
+   *
    * WHAT A PAGE PROMISES. Every row names a durable coordinate this daemon minted and carries opaque
    * evidence that the RAW message at that coordinate is still the one this read saw. That second half
    * is what a coordinate alone cannot give: a harness that rewrites a byte range leaves the point
@@ -725,11 +856,18 @@ export class OperatorReadService {
     sessionId: string,
     cursor: string | undefined,
     limit: number | undefined,
+    backward?: MessageBackwardRead,
   ): Promise<SessionTranscriptPage> {
     const size = boundedLimit(limit, DEFAULT_MESSAGE_PAGE, MAX_MESSAGE_PAGE, 'limit');
+    if (backward !== undefined && cursor !== undefined)
+      throw new OperatorReadError(
+        'invalid_query',
+        'cursor continues forward; it cannot be combined with tail or through',
+      );
     // The caller's own query is judged BEFORE a file is read: a cursor this daemon could not have
     // issued is a 400 about the request, never a statement about the session's transcript.
     const anchor = cursor === undefined ? undefined : cursorAnchor(cursor);
+    const through = backward?.through === undefined ? undefined : cursorAnchor(backward.through);
     const read = await this.messageSource.read(sessionId);
     if (read.kind === 'unresolved')
       throw new OperatorReadError(
@@ -764,22 +902,39 @@ export class OperatorReadService {
         'event_evidence_mismatch',
         `addressable conversation for ${sessionId} was read under context for ${read.context.sessionId}`,
       );
-    const start = anchor === undefined ? 0 : await this.resumeAfter(sessionId, read, anchor, cursor ?? '');
-    const served = read.rows.slice(start, start + size);
+    // The page is rows [start, end). Forward it begins after the cursor; backward it ENDS at the tail, or
+    // at the row the `through` cursor names (inclusive — the row a forward cursor would resume after).
+    const end =
+      backward === undefined
+        ? undefined
+        : through === undefined
+          ? read.rows.length
+          : await this.resumeAfter(sessionId, read, through, backward.through ?? '');
+    const start =
+      end !== undefined
+        ? Math.max(0, end - size)
+        : anchor === undefined
+          ? 0
+          : await this.resumeAfter(sessionId, read, anchor, cursor ?? '');
+    const served = read.rows.slice(start, end ?? start + size);
     // `nextCursor` is null EXACTLY at the current end, so a client that reaches it, waits and asks
     // again with the previous cursor is asking a question this daemon can answer.
     const last = start + served.length < read.rows.length ? served[served.length - 1] : undefined;
-    const [bound, nextCursor] = await Promise.all([
-      Promise.all(served.map(async row => await this.boundRow(read.context, row))),
-      last === undefined
+    const before = backward === undefined || start === 0 ? undefined : read.rows[start - 1];
+    const issue = async (row: PortableConversationRow | undefined): Promise<string | null> =>
+      row === undefined
         ? null
-        : issueSessionTranscriptMessageToken(
+        : await issueSessionTranscriptMessageToken(
             this.messageTokens,
             SESSION_TRANSCRIPT_MESSAGE_TOKEN_CURSOR_DOMAIN,
             read.context,
-            last.point,
-            last.rawPrefix,
-          ),
+            row.point,
+            row.rawPrefix,
+          );
+    const [bound, nextCursor, previousCursor] = await Promise.all([
+      Promise.all(served.map(async row => await this.boundRow(read.context, row))),
+      issue(last),
+      issue(before),
     ]);
     // The whole page under ONE vault open, and none for an empty page. Order and cardinality are the
     // caller's slice, and nothing here adds, drops or reorders a row.
@@ -791,7 +946,7 @@ export class OperatorReadService {
               servedRow(row, point, scrub.text(row.text), selectionBinding),
             ),
           );
-    return { v: 1, sessionId, messages, nextCursor };
+    return { v: 1, sessionId, messages, nextCursor, ...(backward === undefined ? {} : { previousCursor }) };
   }
 
   /**

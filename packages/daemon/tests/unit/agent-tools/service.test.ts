@@ -6,6 +6,8 @@ import {
   BrowserSessionError,
   BrowserTransportError,
   browserUnavailable,
+  controlRefusal,
+  pageScriptsRefusal,
   TerminalMountError,
 } from '../../../src/lib/index.ts';
 import { AGENT_TOOL_MAX_OUTPUT_CHARS, type AgentToolCall } from '@ferretry/protocol';
@@ -1121,6 +1123,159 @@ describe('AgentToolService — pointer and keys', () => {
     // Assert
     should(answer.summary).containEql('key=[redacted:STRIPE_KEY]');
     should(answer.summary).not.containEql('sk_live_51Hx');
+  });
+});
+
+describe('AgentToolService — page scripts (owner-gated browser.eval)', () => {
+  it('should run the agent’s script on its page, with its element and timeout, and hand back what it returned', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'browser.open', name: 'app', url: 'https://app.test/' });
+    world.browser.scriptAnswer = '{"items":3}';
+
+    // Act
+    const ran = await world.service.call(agent, {
+      tool: 'browser.eval',
+      name: 'app',
+      function: '(list) => ({ items: list.children.length })',
+      ref: 'e3',
+      timeoutMs: 2_000,
+    });
+
+    // Assert
+    should(world.browser.scripts).deepEqual([
+      { source: '(list) => ({ items: list.children.length })', target: { kind: 'ref', ref: 'e3' }, timeoutMs: 2_000 },
+    ]);
+    should(ran).deepEqual({
+      summary: 'Ran your script on %browser:app (now at https://app.test/).',
+      output: '{"items":3}',
+    });
+  });
+
+  it('should refuse it, for an agent and a person alike, with every way the owner can turn it on, while Page scripts is off', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+    world.policy.off.add('scripts');
+    const secret = 'document.cookie';
+
+    // Act
+    const byAgent = await refusal(
+      world.service.call(agent, { tool: 'browser.eval', name: 'app', function: `() => ${secret}` }),
+    );
+    const byPerson = await refusal(
+      world.service.call(person, { tool: 'browser.eval', name: 'app', function: `() => ${secret}` }),
+    );
+
+    // Assert
+    should(byAgent.code).equal('forbidden');
+    should(byAgent.message).equal(pageScriptsRefusal('fy'));
+    should(byAgent.message).containEql('fy machine set agent-control scripts on');
+    should(byAgent.message).containEql('Settings › this machine › What agents may control › Page scripts');
+    should(byAgent.message).containEql('sign-ins on the shared profile');
+    should(byPerson.message).equal(byAgent.message);
+    should(world.browser.scripts).deepEqual([]);
+    should(world.audit.entries.slice(-2).map(entry => entry.outcome)).deepEqual(['refused', 'refused']);
+    should(JSON.stringify(world.audit.entries)).not.containEql(secret);
+  });
+
+  it('should still need the Browsers switch, and say that one first', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+    world.policy.off.add('browser');
+
+    // Act
+    const refused = await refusal(
+      world.service.call(agent, { tool: 'browser.eval', name: 'app', function: '() => 1' }),
+    );
+
+    // Assert
+    should(refused.message).equal(controlRefusal('browser'));
+  });
+
+  it('should refuse a script queued when a person takes the page over, from inside the browser’s queue', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+    const original = world.browser.scriptOnPage.bind(world.browser);
+    world.browser.scriptOnPage = async (sessionId, key, script, guard) => {
+      await world.control.takeover('s1', { surface: 'browser', id: 'page-1' }, { by: 'local' });
+      return await original(sessionId, key, script, guard);
+    };
+
+    // Act
+    const raced = await refusal(world.service.call(agent, { tool: 'browser.eval', name: 'app', function: '() => 1' }));
+
+    // Assert
+    should(raced.code).equal('taken_over');
+    should(world.browser.scripts).deepEqual([]);
+  });
+
+  it('should mask every vault secret in what the script returned, and clip a long answer from its start', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+    world.redactor.values.set('sk_live_51Hx', 'STRIPE_KEY');
+    world.browser.scriptAnswer = '"key: sk_live_51Hx"';
+
+    // Act
+    const masked = await world.service.call(agent, { tool: 'browser.eval', name: 'app', function: '() => 1' });
+    world.browser.scriptAnswer = `"${'x'.repeat(AGENT_TOOL_MAX_OUTPUT_CHARS + 100)}"`;
+    const long = await world.service.call(agent, { tool: 'browser.eval', name: 'app', function: '() => 1' });
+
+    // Assert
+    should(masked.output).equal('"key: [redacted:STRIPE_KEY]"');
+    should(long.output?.length).equal(AGENT_TOOL_MAX_OUTPUT_CHARS);
+    should(long.output?.startsWith('"xxx')).be.true();
+    should(long.summary).containEql('It was clipped to fit');
+  });
+
+  it('should audit a script by its length, its target and the length of its answer — never the text of either', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+    world.browser.scriptAnswer = '"the-page-token-9f2c"';
+    const source = '() => localStorage.getItem("token")';
+
+    // Act
+    await world.service.call(agent, {
+      tool: 'browser.eval',
+      name: 'app',
+      function: source,
+      selector: '#app',
+      timeoutMs: 500,
+    });
+
+    // Assert
+    should(world.audit.entries.at(-1)?.detail).deepEqual({
+      tool: 'browser.eval',
+      by: 'agent',
+      surface: '%browser:app',
+      functionLength: source.length,
+      selector: '#app',
+      timeoutMs: 500,
+      resultLength: '"the-page-token-9f2c"'.length,
+    });
+    should(JSON.stringify(world.audit.entries)).not.containEql('localStorage');
+    should(JSON.stringify(world.audit.entries)).not.containEql('9f2c');
+  });
+
+  it('should say a dialog the script opened is waiting, as every act does', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+    world.browser.pendingDialog = { type: 'alert', message: 'Saved' };
+
+    // Act
+    const ran = await world.service.call(agent, {
+      tool: 'browser.eval',
+      name: 'app',
+      function: '() => alert("Saved")',
+    });
+
+    // Assert
+    should(ran.summary).containEql('A alert dialog is waiting on this page: "Saved"');
   });
 });
 

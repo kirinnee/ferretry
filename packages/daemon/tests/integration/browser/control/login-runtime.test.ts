@@ -1,11 +1,12 @@
 import { afterEach, describe, it } from 'bun:test';
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import should from 'should';
 import {
   type BrowserDisplayPort,
   type BrowserLoginChild,
+  type ListenerProverPort,
   NodeBrowserLoginRuntime,
   type XvfbChild,
   XvfbDisplay,
@@ -23,7 +24,8 @@ import { BrowserControlError } from '../../../../src/lib/index.ts';
  *
  * The two readiness probes that CANNOT be faked by a script are exercised against the real thing at a
  * loopback address the test owns: a free port is taken by binding one, and "is the VNC server up" is
- * answered by a listener this test opened and closed.
+ * answered by a listener this test opened and closed — proven, from this host's `/proc`, to be held by
+ * the process the runtime was told started it.
  */
 
 const roots: string[] = [];
@@ -37,6 +39,11 @@ async function workspace(): Promise<string> {
 afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
+
+/** A fresh, absent directory for a display's cookie file — the adapter must create it `0700` itself. */
+async function x11Directory(): Promise<string> {
+  return join(await workspace(), 'x11');
+}
 
 /** A script the adapter can spawn for real, with the mode the kernel needs to exec it. */
 async function script(root: string, name: string, body: string): Promise<string> {
@@ -105,7 +112,8 @@ describe('XvfbDisplay', () => {
     const root = await workspace();
     const record = join(root, 'argv.txt');
     const executable = await script(root, 'Xvfb', `printf '%s\\n' "$@" > '${record}'\nprintf '99\\n'\nsleep 5`);
-    const subject = new XvfbDisplay({ executable: () => executable, pollIntervalMs: 1 });
+    const authorityDirectory = join(root, 'x11');
+    const subject = new XvfbDisplay({ authorityDirectory, executable: () => executable, pollIntervalMs: 1 });
 
     try {
       // Act
@@ -116,7 +124,8 @@ describe('XvfbDisplay', () => {
       should(display).equal(':99');
       // Memoized: a second caller shares the one X server rather than starting a second.
       should(again).equal(':99');
-      should((await readFile(record, 'utf8')).trimEnd().split('\n')).deepEqual([
+      const argv = (await readFile(record, 'utf8')).trimEnd().split('\n');
+      should(argv.slice(0, -1)).deepEqual([
         '-displayfd',
         '1',
         '-screen',
@@ -127,10 +136,119 @@ describe('XvfbDisplay', () => {
         // Nothing off this machine may reach the screen: the VNC listener is the only published door.
         '-nolisten',
         'tcp',
+        // Nothing ELSE on this machine may reach it either: the server admits only a client with the cookie.
+        '-auth',
       ]);
+      should(argv.at(-1)).equal(subject.authority());
+      should(dirname(argv.at(-1) ?? '')).equal(authorityDirectory);
     } finally {
       await subject.close();
     }
+  });
+
+  it('should keep the cookie file private, encode it for the display it took, and remove it on close', async () => {
+    // The script copies the file the moment the server starts, which is the only view of what the
+    // SERVER was given: the placeholder entry must already hold the cookie the clients will present.
+    // Arrange
+    const root = await workspace();
+    const seen = join(root, 'seen.bin');
+    const executable = await script(
+      root,
+      'Xvfb',
+      `for last; do :; done\ncp "$last" '${seen}'\nprintf '99\\n'\nsleep 5`,
+    );
+    const authorityDirectory = join(root, 'x11');
+    const subject = new XvfbDisplay({ authorityDirectory, executable: () => executable, pollIntervalMs: 1 });
+    const display = await subject.display();
+    const file = subject.authority() ?? '';
+
+    try {
+      // Act
+      const entry = new Uint8Array(await readFile(file));
+      const given = new Uint8Array(await readFile(seen));
+
+      // Assert
+      should(display).equal(':99');
+      // The directory is the daemon's alone, and the file in it is readable by nobody else.
+      should((await stat(authorityDirectory)).mode & 0o777).equal(0o700);
+      should((await stat(file)).mode & 0o777).equal(0o600);
+      should(await readdir(authorityDirectory)).deepEqual([basename(file)]);
+      // family FamilyWild; empty address; number "99"; MIT-MAGIC-COOKIE-1; then 16 cookie bytes.
+      const cookie = entry.slice(-16);
+      should(Array.from(entry.slice(0, -16))).deepEqual([
+        0xff,
+        0xff,
+        0x00,
+        0x00,
+        0x00,
+        0x02,
+        0x39,
+        0x39,
+        0x00,
+        0x12,
+        ...new TextEncoder().encode('MIT-MAGIC-COOKIE-1'),
+        0x00,
+        0x10,
+      ]);
+      should(cookie.some(byte => byte !== 0)).be.true();
+      // The server started with the same cookie the finished file carries.
+      should(Array.from(given.slice(-16))).deepEqual(Array.from(cookie));
+
+      // Act
+      await subject.close();
+
+      // Assert
+      should(subject.authority()).be.undefined();
+      should(await readdir(authorityDirectory)).deepEqual([]);
+    } finally {
+      await subject.close();
+    }
+  });
+
+  it('should mint a different cookie for every display it takes', async () => {
+    // Arrange
+    const root = await workspace();
+    const executable = await script(root, 'Xvfb', `printf '5\\n'\nsleep 5`);
+    const first = new XvfbDisplay({
+      authorityDirectory: join(root, 'x11'),
+      executable: () => executable,
+      pollIntervalMs: 1,
+    });
+    const second = new XvfbDisplay({
+      authorityDirectory: join(root, 'x11'),
+      executable: () => executable,
+      pollIntervalMs: 1,
+    });
+
+    try {
+      // Act
+      await first.display();
+      await second.display();
+
+      // Assert
+      should(first.authority()).not.equal(second.authority());
+      should(
+        Buffer.compare(await readFile(first.authority() ?? ''), await readFile(second.authority() ?? '')),
+      ).not.equal(0);
+    } finally {
+      await first.close();
+      await second.close();
+    }
+  });
+
+  it('should leave no cookie file behind when the server never comes up', async () => {
+    // Arrange
+    const root = await workspace();
+    const executable = await script(root, 'Xvfb', 'exit 4');
+    const authorityDirectory = join(root, 'x11');
+    const subject = new XvfbDisplay({ authorityDirectory, executable: () => executable, pollIntervalMs: 1 });
+
+    // Act
+    await subject.display().catch(() => undefined);
+
+    // Assert
+    should(subject.authority()).be.undefined();
+    should(await readdir(authorityDirectory)).deepEqual([]);
   });
 
   it('should honour an explicit screen size', async () => {
@@ -139,6 +257,7 @@ describe('XvfbDisplay', () => {
     const record = join(root, 'argv.txt');
     const executable = await script(root, 'Xvfb', `printf '%s\\n' "$@" > '${record}'\nprintf '7\\n'\nsleep 5`);
     const subject = new XvfbDisplay({
+      authorityDirectory: await x11Directory(),
       executable: () => executable,
       screen: { width: 800, height: 600 },
       pollIntervalMs: 1,
@@ -158,7 +277,7 @@ describe('XvfbDisplay', () => {
 
   it('should refuse with a sentence naming what to install when the host has no Xvfb', async () => {
     // Arrange
-    const subject = new XvfbDisplay({ executable: () => undefined });
+    const subject = new XvfbDisplay({ authorityDirectory: await x11Directory(), executable: () => undefined });
 
     // Act
     const failure = await subject.display().catch((error: unknown) => error);
@@ -173,7 +292,11 @@ describe('XvfbDisplay', () => {
 
   it('should refuse in the words its owner gives it, when it serves something other than the login window', async () => {
     // Arrange
-    const subject = new XvfbDisplay({ executable: () => undefined, missing: () => 'install Xvfb for a real window' });
+    const subject = new XvfbDisplay({
+      authorityDirectory: await x11Directory(),
+      executable: () => undefined,
+      missing: () => 'install Xvfb for a real window',
+    });
 
     // Act
     const failure = await subject.display().catch((error: unknown) => error);
@@ -191,6 +314,7 @@ describe('XvfbDisplay', () => {
     const root = await workspace();
     const executable = await script(root, 'Xvfb', `printf '3\\n'\nsleep 5`);
     const subject = new XvfbDisplay({
+      authorityDirectory: await x11Directory(),
       executable: () => (present ? executable : undefined),
       pollIntervalMs: 1,
     });
@@ -211,7 +335,11 @@ describe('XvfbDisplay', () => {
     // Arrange
     const root = await workspace();
     const executable = await script(root, 'Xvfb', 'exit 4');
-    const subject = new XvfbDisplay({ executable: () => executable, pollIntervalMs: 1 });
+    const subject = new XvfbDisplay({
+      authorityDirectory: await x11Directory(),
+      executable: () => executable,
+      pollIntervalMs: 1,
+    });
 
     // Act
     const failure = await subject.display().catch((error: unknown) => error);
@@ -235,6 +363,7 @@ describe('XvfbDisplay', () => {
     const outcomes = await Promise.all(
       [closedWithoutNewline, notANumber, brokenPipe].map(async child => {
         const subject = new XvfbDisplay({
+          authorityDirectory: await x11Directory(),
           executable: () => '/usr/bin/Xvfb',
           spawn: () => child,
           readinessTimeoutMs: 5,
@@ -262,6 +391,7 @@ describe('XvfbDisplay', () => {
     const hung: XvfbChild = { ...child, stdout: new ReadableStream<Uint8Array>({ start: () => undefined }) };
     const signals: string[] = [];
     const subject = new XvfbDisplay({
+      authorityDirectory: await x11Directory(),
       executable: () => '/usr/bin/Xvfb',
       spawn: () => ({ ...hung, kill: signal => signals.push(signal) }),
       readinessTimeoutMs: 5,
@@ -283,6 +413,7 @@ describe('XvfbDisplay', () => {
     // Arrange
     const signals: string[] = [];
     const subject = new XvfbDisplay({
+      authorityDirectory: await x11Directory(),
       executable: () => '/usr/bin/Xvfb',
       spawn: () => ({ ...fakeXvfb(['5\n']), kill: signal => signals.push(signal) }),
       pollIntervalMs: 1,
@@ -305,12 +436,19 @@ function fakeDisplay(): BrowserDisplayPort & { closed: number } {
   const port = {
     closed: 0,
     display: async () => ':9',
+    authority: () => '/state/x11/xauthority',
     close: async () => {
       port.closed += 1;
     },
   };
   return port;
 }
+
+/** A host with no `/proc` to prove a listener from (macOS): the runtime falls back to a connection probe. */
+const UNPROVABLE: ListenerProverPort = {
+  prove: async () => ({ kind: 'unknown' }),
+  holder: async () => undefined,
+};
 
 describe('NodeBrowserLoginRuntime', () => {
   it('should describe this host from its own environment by default', async () => {
@@ -339,6 +477,7 @@ describe('NodeBrowserLoginRuntime', () => {
 
     // Assert
     should(resolved).equal(':9');
+    should(subject.authority()).equal('/state/x11/xauthority');
     should(display.closed).equal(1);
   });
 
@@ -571,14 +710,61 @@ describe('NodeBrowserLoginRuntime', () => {
     );
   });
 
-  it('should wait for the VNC server by connecting to the loopback port it claims', async () => {
-    // The one probe that cannot be faked by a script, so it runs against a real listener the test owns.
+  it.if(process.platform === 'linux')(
+    'should wait until the kernel shows the VNC port is held by the process it started',
+    async () => {
+      // The proof that cannot be faked by a script, so it runs against a real listener on this host's `/proc`:
+      // the test's own process holds the socket, so it stands in as the "x11vnc" the window started.
+      // Arrange
+      const root = await workspace();
+      const subject = new NodeBrowserLoginRuntime({
+        display: fakeDisplay(),
+        secretsDirectory: root,
+        pollIntervalMs: 1,
+      });
+      const server = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data: () => undefined } });
+      const vnc = { ...fakeChild(running()), pid: process.pid };
+
+      try {
+        // Act + Assert
+        await subject.waitForVnc(server.port, vnc);
+      } finally {
+        server.stop(true);
+      }
+    },
+  );
+
+  it.if(process.platform === 'linux')(
+    'should refuse, before the window announces anything, a VNC port another program holds',
+    async () => {
+      // Arrange: the port was taken before x11vnc (pid 4242, which holds nothing) could bind it.
+      const root = await workspace();
+      const subject = new NodeBrowserLoginRuntime({
+        display: fakeDisplay(),
+        secretsDirectory: root,
+        pollIntervalMs: 1,
+      });
+      const server = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data: () => undefined } });
+
+      try {
+        // Act + Assert
+        await should(subject.waitForVnc(server.port, fakeChild(running()))).be.rejectedWith(
+          `port ${String(server.port)} is held by another program (uid ${String(process.getuid?.())}), not this browser — someone may be squatting it; pick another port base or free it`,
+        );
+      } finally {
+        server.stop(true);
+      }
+    },
+  );
+
+  it('should fall back to connecting to the port on a host whose listeners cannot be proven', async () => {
     // Arrange
     const root = await workspace();
     const subject = new NodeBrowserLoginRuntime({
       display: fakeDisplay(),
       secretsDirectory: root,
       pollIntervalMs: 1,
+      listenerProver: UNPROVABLE,
     });
     const server = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data: () => undefined } });
 
@@ -596,6 +782,7 @@ describe('NodeBrowserLoginRuntime', () => {
     const subject = new NodeBrowserLoginRuntime({
       display: fakeDisplay(),
       secretsDirectory: root,
+      listenerProver: UNPROVABLE,
       readinessTimeoutMs: 3,
       pollIntervalMs: 1,
       now: tickingClock(2),

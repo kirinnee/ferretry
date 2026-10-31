@@ -793,7 +793,7 @@ describe('applying machine.settings that turns "what agents may control" back on
     ...MODEL(),
     machine: {
       ...MODEL().machine,
-      agentControl: { terminals: false, browsers: true, files: true, ferretrySettings: false },
+      agentControl: { terminals: false, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
     },
   });
 

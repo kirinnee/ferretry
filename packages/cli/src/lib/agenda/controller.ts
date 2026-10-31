@@ -9,7 +9,6 @@ import {
   type TaskRef,
 } from '@ferretry/protocol';
 import { type AnswerFlags, parseAnswer } from './answer.ts';
-import { type CardFlag, resolveCardFlag } from './card-flag.ts';
 import {
   type BriefFile,
   type BriefFlags,
@@ -18,6 +17,7 @@ import {
   type EditFlags,
   parseBriefFile,
 } from './brief.ts';
+import { type CardFlag, resolveCardFlag } from './card-flag.ts';
 import type { IAgendaBriefInput, IAgendaGateway, IAgendaOutput, IAgendaPrompt } from './ports.ts';
 import { agendaReference, parseAgendaReference } from './reference.ts';
 import {
@@ -30,7 +30,7 @@ import {
 import { parseNeededBy } from './when.ts';
 
 /**
- * Refuses a new item that does not say what is going on and why now: the owner reads it cold, so the premise
+ * Refuses a new item that does not say what is going on and the facts around it: the owner reads it cold, so the premise
  * and the context are required (the daemon refuses too). A confirmation's premise is the daemon's own — the
  * held change, in its words — so only its context is asked for.
  */
@@ -42,7 +42,7 @@ const requireBrief = (request: Extract<AgendaActionRequest, { action: 'add' }>):
   if (missing.length === 0) return;
   const flags = missing.map(problem => (problem.startsWith('premise') ? '--premise' : '--context')).join(' and ');
   throw new Error(
-    `agenda add needs ${flags}: ${missing.join('; ')}. The owner reads the card cold, so say --premise "<what is going on>" --context "<why it matters now>"`,
+    `agenda add needs ${flags}: ${missing.join('; ')}. The owner reads the card cold, so say --premise "<what is going on>" --context "<the facts around it>"`,
   );
 };
 

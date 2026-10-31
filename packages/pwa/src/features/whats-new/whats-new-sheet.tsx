@@ -18,6 +18,7 @@
 import { ExternalLink, Sparkles, X } from 'lucide-react';
 import { Fragment, useId, useRef, useState } from 'react';
 import { useDialogFocus } from '../../hooks/use-dialog-focus.ts';
+import { useScrimDismiss } from '../../hooks/use-scrim-dismiss.ts';
 import { type ChangelogChange, type ChangelogRelease, releaseDateLabel } from '../../lib/changelog.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { Badge } from '../../shell/primitives.tsx';
@@ -186,6 +187,7 @@ function WhatsNewDialog({ open, onClose, releases, fresh }: WhatsNewSheetProps) 
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const titleId = useId();
   const { onKeyDown } = useDialogFocus(open, dialogRef, onClose);
+  const scrim = useScrimDismiss(onClose);
   if (!open) return null;
   return (
     <div
@@ -197,7 +199,7 @@ function WhatsNewDialog({ open, onClose, releases, fresh }: WhatsNewSheetProps) 
         type="button"
         aria-label="Close what’s new"
         className="absolute inset-0 cursor-default"
-        onClick={onClose}
+        {...scrim}
         tabIndex={-1}
       />
       <div

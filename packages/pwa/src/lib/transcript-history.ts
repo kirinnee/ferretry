@@ -21,6 +21,8 @@ export interface LogPage {
   readonly log: string;
   readonly start: number;
   readonly file: string;
+  /** Where each line of `log` came from, one per event; absent from a daemon that predates search. */
+  readonly offsets?: readonly number[];
 }
 
 export interface TranscriptHistory {
@@ -32,9 +34,27 @@ export interface TranscriptHistory {
   readonly olderStart: number | null;
   /** Where the older history ends, which is where the tail it is joined to begins. */
   readonly anchor: number | null;
+  /** `older`'s line offsets, or `null` once a page came without them. */
+  readonly olderOffsets: readonly number[] | null;
 }
 
-export const EMPTY_HISTORY: TranscriptHistory = { tail: null, older: '', olderStart: null, anchor: null };
+export const EMPTY_HISTORY: TranscriptHistory = {
+  tail: null,
+  older: '',
+  olderStart: null,
+  anchor: null,
+  olderOffsets: [],
+};
+
+/** Two runs of offsets joined, or `null` when either is unknown. */
+const joinOffsets = (
+  older: readonly number[] | null | undefined,
+  newer: readonly number[] | null | undefined,
+): readonly number[] | null => (older == null || newer == null ? null : [...older, ...newer]);
+
+/** Where every line of the whole history came from, or nothing when some page did not say. */
+export const historyOffsets = (history: TranscriptHistory): readonly number[] | undefined =>
+  joinOffsets(history.olderOffsets, history.tail?.offsets ?? null) ?? undefined;
 
 /** What the reader can do at the top of the chat. */
 export type TranscriptHistoryStatus =
@@ -86,7 +106,13 @@ export const withTail = (history: TranscriptHistory, tail: LogPage): TailOutcome
 export const withGap = (history: TranscriptHistory, gap: LogPage, tail: LogPage): TranscriptHistory => {
   if (history.anchor === null || gap.start !== history.anchor || gap.file !== tail.file)
     return { ...EMPTY_HISTORY, tail };
-  return { ...history, older: joinLogs(history.older, gap.log), anchor: tail.start, tail };
+  return {
+    ...history,
+    older: joinLogs(history.older, gap.log),
+    olderOffsets: joinOffsets(history.olderOffsets, gap.offsets),
+    anchor: tail.start,
+    tail,
+  };
 };
 
 /**
@@ -104,6 +130,7 @@ export const withOlder = (history: TranscriptHistory, page: LogPage, before: num
   return {
     ...history,
     older: joinLogs(page.log, history.older),
+    olderOffsets: joinOffsets(page.offsets, history.olderOffsets),
     olderStart: page.start,
     anchor: history.anchor ?? before,
   };

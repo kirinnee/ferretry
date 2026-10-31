@@ -215,6 +215,11 @@ const checkNotGood = async (page: Page, scheme: string, label: string): Promise<
   await composer.locator('[aria-label="Attached files"] li').first().waitFor({ state: 'visible' });
   const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   if (wide > 0) fail(`the Not good composer scrolls sideways by ${wide}px`);
+  await composer
+    .locator('[aria-label="Attached files"] li', { hasText: 'ready' })
+    .first()
+    .waitFor({ state: 'visible' });
+  await page.waitForTimeout(600);
   await shot(page, `board-kanban-not-good-${scheme}-${label}`);
   await composer.locator('button', { hasText: 'Cancel' }).click();
 };

@@ -41,7 +41,7 @@ const MACHINE = {
   setUp: true,
   agentPermissions: 'auto',
   defaultRuntime: 'claude-default',
-  agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
+  agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
   tools: [{ harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/bin/claude' }],
   runtimeCount: 1,
   runningSessions: 0,
@@ -64,7 +64,7 @@ const VIEW = {
     kind: 'machine.settings',
     agentPermissions: 'skip',
     defaultRuntime: 'claude-default',
-    agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
+    agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
   },
   summary: 'Set agent permissions to Skip all permission checks',
   consequences: ['Applies to new sessions.'],
@@ -125,7 +125,7 @@ describe('the catalogue wire client', () => {
       kind: 'machine.settings',
       agentPermissions: 'skip',
       defaultRuntime: 'claude-default',
-      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
+      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
     });
 
     // Assert
@@ -137,7 +137,7 @@ describe('the catalogue wire client', () => {
         kind: 'machine.settings',
         agentPermissions: 'skip',
         defaultRuntime: 'claude-default',
-        agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
+        agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
       },
     });
   });

@@ -327,7 +327,7 @@ function AgendaRow({
       </div>
       {prose(item.subject, 'mt-xs text-row font-semibold leading-tight text-fg')}
       {visibleWhy(item) === null ? null : (
-        <Part part="why" icon={<CircleAlert size={11} />} label="Why now">
+        <Part part="why" icon={<CircleAlert size={11} />} label="Why">
           {prose(item.why, 'mt-0.5 text-cell leading-base text-muted')}
         </Part>
       )}

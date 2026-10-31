@@ -15,6 +15,7 @@ import {
   EMPTY_HISTORY,
   historyLog,
   historyMeetsTail,
+  historyOffsets,
   joinLogs,
   type LogPage,
   oldestStart,
@@ -31,6 +32,8 @@ const LOG_HEADER = /^(?:\[(\d{2}:\d{2}:\d{2})\] )?(user|assistant|developer|syst
 
 interface LogRecord {
   readonly clock?: string;
+  /** Where in the transcript the record came from, when the daemon said. */
+  readonly offset?: number;
   readonly role: 'user' | 'assistant' | 'developer' | 'system' | 'tool';
   readonly kind: string;
   readonly lines: readonly string[];
@@ -191,6 +194,8 @@ const recordInstants = (records: readonly LogRecord[], now: number): readonly (n
 };
 
 interface ToolRun {
+  /** Where the run's first record came from. */
+  offset?: number;
   readonly calls: {
     key: string;
     use: ToolUseData;
@@ -210,6 +215,7 @@ interface ToolRun {
 const toolEntry = (run: ToolRun): TranscriptEntry => ({
   // Named by the call that OPENED the run, so a run that grows is still the row the reader opened.
   id: `tools:${run.calls[0]?.key ?? ''}`,
+  ...(run.offset === undefined ? {} : { offset: run.offset }),
   kind: 'tool',
   text: run.calls.length === 1 ? 'ran a tool' : `ran ${run.calls.length} tools`,
   tools: run.calls,
@@ -276,11 +282,19 @@ const projectRecords = (records: readonly LogRecord[], now: number): readonly Tr
     if (run !== null) entries.push(toolEntry(run));
     run = null;
   };
+  // Every row a record opens carries where the record came from, so a search hit can find its row.
+  const push = (entry: TranscriptEntry, record: LogRecord): void => {
+    entries.push(record.offset === undefined ? entry : { ...entry, offset: record.offset });
+  };
+  const open = (record: LogRecord): ToolRun => ({
+    calls: [],
+    ...(record.offset === undefined ? {} : { offset: record.offset }),
+  });
   records.forEach((record, index) => {
     if (isHiddenRecord(record)) return;
     const text = record.lines.join('\n');
     if (isToolRecord(record)) {
-      run ??= { calls: [] };
+      run ??= open(record);
       const key = idFor(`${record.clock ?? ''}|${record.kind}|${text}`);
       if (record.kind === 'tool-call') {
         const at = instants[index];
@@ -296,7 +310,7 @@ const projectRecords = (records: readonly LogRecord[], now: number): readonly Tr
     if (showsImages(record)) {
       // Pictures read one after another are ONE `Read N images` call in the tool run, not a card each.
       if (run !== null || followedByImages(records, index)) {
-        run ??= { calls: [] };
+        run ??= open(record);
         addImageRead(
           run,
           attachmentImages(record),
@@ -305,8 +319,9 @@ const projectRecords = (records: readonly LogRecord[], now: number): readonly Tr
         return;
       }
       flush();
-      entries.push(
+      push(
         imageEntryFor(record, idFor(`${record.clock ?? ''}|${record.role}|${record.kind}|${text}`), instants[index]),
+        record,
       );
       return;
     }
@@ -317,7 +332,7 @@ const projectRecords = (records: readonly LogRecord[], now: number): readonly Tr
     flush();
     const id = idFor(`${record.clock ?? ''}|${record.role}|${record.kind}|${text}`);
     if (command?.kind === 'command') {
-      entries.push(commandEntry(id, command.command));
+      push(commandEntry(id, command.command), record);
       return;
     }
     if (command?.kind === 'output') {
@@ -328,11 +343,11 @@ const projectRecords = (records: readonly LogRecord[], now: number): readonly Tr
         entries[entries.length - 1] = commandEntry(last.id, withCommandOutput(last.command, command));
         return;
       }
-      entries.push(commandEntry(id, withCommandOutput({ name: '', tone: 'ok' }, command)));
+      push(commandEntry(id, withCommandOutput({ name: '', tone: 'ok' }, command)), record);
       return;
     }
     const at = instants[index];
-    entries.push(recordKind(record) === 'user' ? userEntryFor(record, id, at) : entryFor(record, id, at));
+    push(recordKind(record) === 'user' ? userEntryFor(record, id, at) : entryFor(record, id, at), record);
   });
   flush();
   return entries;
@@ -354,10 +369,13 @@ export const transcriptEntriesFromLog = (
   text: string,
   now: number = Date.now(),
   clientName = 'fy',
+  /** One byte offset per record header in `text`, in order (`SessionLogPage.offsets`). */
+  offsets?: readonly number[],
 ): readonly TranscriptEntry[] => {
   if (text.trim() === '') return [];
   const records: LogRecord[] = [];
-  let current: { clock?: string; role: LogRecord['role']; kind: string; lines: string[] } | null = null;
+  let current: { clock?: string; offset?: number; role: LogRecord['role']; kind: string; lines: string[] } | null =
+    null;
 
   const flush = (): void => {
     if (current === null) return;
@@ -369,8 +387,10 @@ export const transcriptEntriesFromLog = (
     const match = LOG_HEADER.exec(line);
     if (match !== null) {
       flush();
+      const offset = offsets?.[records.length];
       current = {
         ...(match[1] === undefined ? {} : { clock: match[1] }),
+        ...(offset === undefined ? {} : { offset }),
         role: match[2] as LogRecord['role'],
         kind: match[3] ?? 'message',
         lines: [match[4] ?? ''],
@@ -506,8 +526,19 @@ export interface SessionWorkspaceRefreshControl {
    * or on a daemon that cannot page.
    */
   readonly loadOlder: () => Promise<void>;
+  /**
+   * Load older pages until the chat reaches back to `offset` of the transcript file `file` (a search
+   * hit's place); `false` when it cannot (`chat-search.ts`).
+   */
+  readonly loadUntil: (offset: number, file: string) => Promise<boolean>;
+  /** The transcript file token the chat's pages came from, once one has been read. */
+  readonly file: () => string | undefined;
   readonly stop: () => void;
 }
+
+/** A jump to a search hit reads older pages this big, and at most this many of them. */
+const JUMP_PAGE_LIMIT = 2_000;
+const JUMP_PAGES = 100;
 
 /** How many events one gap read may hold, and how many reads may fill one gap before the history restarts. */
 const GAP_PAGE_LIMIT = 2_000;
@@ -569,11 +600,14 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
     file: string,
   ): Promise<LogPage | undefined> => {
     let log = '';
+    let offsets: readonly number[] | undefined = [];
     let end = before;
     for (let round = 0; round < GAP_ROUNDS; round += 1) {
       const page = await logPage(input.sessionId, { before: end, from, limit: GAP_PAGE_LIMIT, file });
       log = joinLogs(page.log, log);
-      if (page.start <= from) return { log, start: page.start, file: page.file };
+      offsets = page.offsets === undefined || offsets === undefined ? undefined : [...page.offsets, ...offsets];
+      if (page.start <= from)
+        return { log, start: page.start, file: page.file, ...(offsets === undefined ? {} : { offsets }) };
       end = page.start;
     }
     return undefined;
@@ -606,7 +640,11 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
     return { log, tail: log };
   };
 
-  const loadOlder = (): Promise<void> => {
+  /** The whole history as rows: its log, each line placed where the daemon said it came from. */
+  const historyEntries = (): readonly TranscriptEntry[] =>
+    transcriptEntriesFromLog(historyLog(history), undefined, undefined, historyOffsets(history));
+
+  const loadOlder = (limit?: number): Promise<void> => {
     const logPage = input.api.logPage;
     const before = oldestStart(history);
     const file = history.tail?.file;
@@ -615,14 +653,14 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
       return Promise.resolve();
     older = 'loading';
     sayHistory();
-    olderLoad = logPage(input.sessionId, { before, file })
+    olderLoad = logPage(input.sessionId, { before, file, ...(limit === undefined ? {} : { limit }) })
       .then(
         page => {
           if (stopped) return;
           history = withOlder(history, page, before);
           older = 'idle';
           // The tail moved while the page was in flight: the next read fills between them, then shows both.
-          if (historyMeetsTail(history)) input.onTranscript(transcriptEntriesFromLog(historyLog(history)));
+          if (historyMeetsTail(history)) input.onTranscript(historyEntries());
           else void refresh(true);
         },
         (reason: unknown) => {
@@ -640,6 +678,22 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
         if (!stopped) sayHistory();
       });
     return olderLoad;
+  };
+
+  /**
+   * Older pages, in large steps, until the history reaches back to `offset` of the file `file` — where a
+   * search hit is. `false` when it could not: another file, a failed page, a daemon that cannot page, or
+   * a hit further back than {@link JUMP_PAGES} pages of {@link JUMP_PAGE_LIMIT} events.
+   */
+  const loadUntil = async (offset: number, file: string): Promise<boolean> => {
+    for (let round = 0; ; round += 1) {
+      const oldest = oldestStart(history);
+      if (oldest === null || history.tail?.file !== file || !paging) return false;
+      if (oldest <= offset) return true;
+      if (round === JUMP_PAGES) return false;
+      await loadOlder(JUMP_PAGE_LIMIT);
+      if (older === 'error' || oldestStart(history) === oldest) return false;
+    }
   };
 
   const refresh = (afterCurrent = false): Promise<void> => {
@@ -665,7 +719,9 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
         let silenced = false;
         if (logs.status === 'fulfilled') {
           input.onLog?.(logs.value.tail);
-          input.onTranscript(transcriptEntriesFromLog(logs.value.log ?? historyLog(history)));
+          input.onTranscript(
+            logs.value.log === undefined ? historyEntries() : transcriptEntriesFromLog(logs.value.log),
+          );
           sayHistory();
         } else if (quiet(logs.reason)) silenced = true;
         else errors.push(`Transcript: ${errorMessage(logs.reason)}`);
@@ -728,7 +784,9 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
     refresh,
     nudge,
     acted,
-    loadOlder,
+    loadOlder: () => loadOlder(),
+    loadUntil,
+    file: () => history.tail?.file,
     stop: () => {
       if (stopped) return;
       stopped = true;

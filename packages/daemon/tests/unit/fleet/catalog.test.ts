@@ -411,7 +411,7 @@ describe('machineView', () => {
       setUp: true,
       agentPermissions: 'skip',
       defaultRuntime: null,
-      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
+      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
       browserMode: 'headless',
       browserProxy: null,
       autoResume: true,

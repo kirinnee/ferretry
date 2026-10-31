@@ -2901,7 +2901,7 @@ describe('SessionChatPage', () => {
         expect(page.root.findByType(Composer).props.placeholder).toBeUndefined();
         press(page.root);
         run(() => page.root.findByType(AgendaRow).props.onOpen());
-        expect(page.root.findByType(Composer).props.placeholder).toBe('Reply about !A3…');
+        expect(page.root.findByType(Composer).props.placeholder).toMatch(/^Reply to .+…$/u);
         await send('ship it');
         run(() => page.root.findByType(Composer).props.onSent());
         expect(page.root.findByType(Composer).props.placeholder).toBeUndefined();
@@ -3021,13 +3021,34 @@ describe('SessionChatPage', () => {
       test('showing an item while the board is expanded collapses the board, so the item is not hidden behind it', async () => {
         const expansions: boolean[] = [];
         const setExpanded = (next: boolean) => void expansions.push(next);
-        const { page, rerender } = mount(boardAndAgenda(true, setExpanded));
+        const { page } = mount(boardAndAgenda(true, setExpanded));
         try {
           await flush();
           expect(boardFull(page.root)).toHaveLength(1);
-          rerender(boardAndAgenda(true, setExpanded, { agendaTarget: 'A3', agendaTargetKey: 'entry-1' }));
+          run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onAgendaOpen('A3', null));
           await flush();
           expect(expansions).toEqual([false]);
+        } finally {
+          run(() => page.unmount());
+        }
+      });
+
+      test('expanding the board stays expanded when the address still names the item (#B86 flicker)', async () => {
+        // Expanding PUSHES a history entry, so the router hands the page a new entry key with the same `?attention=`.
+        // That is the board's own navigation, not a request to show the item: it must not collapse the board again.
+        const expansions: boolean[] = [];
+        const setExpanded = (next: boolean) => void expansions.push(next);
+        const { page, rerender } = mount(
+          boardAndAgenda(false, setExpanded, { agendaTarget: 'A3', agendaTargetKey: 'entry-1' }),
+        );
+        try {
+          await flush();
+          expect(page.root.findAllByType(AgendaItemView)).toHaveLength(1);
+          rerender(boardAndAgenda(true, setExpanded, { agendaTarget: 'A3', agendaTargetKey: 'entry-2' }));
+          await flush();
+          expect(expansions).toEqual([]);
+          expect(boardFull(page.root)).toHaveLength(1);
+          expect(page.root.findAllByType(AgendaItemView)).toHaveLength(0);
         } finally {
           run(() => page.unmount());
         }
@@ -3037,9 +3058,9 @@ describe('SessionChatPage', () => {
         const { page, rerender } = mount(boardAndAgenda(true, () => undefined));
         try {
           await flush();
-          rerender(boardAndAgenda(true, () => undefined, { agendaTarget: 'A3', agendaTargetKey: 'entry-1' }));
+          run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onAgendaOpen('A3', null));
           await flush();
-          rerender(boardAndAgenda(false, () => undefined, { agendaTarget: 'A3', agendaTargetKey: 'entry-1' }));
+          rerender(boardAndAgenda(false, () => undefined));
           await flush();
           expect(boardFull(page.root)).toHaveLength(0);
           expect(page.root.findAllByType(AgendaItemView)).toHaveLength(1);
@@ -4068,6 +4089,83 @@ describe('SessionChatPage Info and Actions', () => {
       expect(page.root.findByType(MigrateSheet).props.open).toBe(false);
     } finally {
       run(() => page.unmount());
+    }
+  });
+});
+
+describe('search within the conversation', () => {
+  const searchPort = {
+    search: async () => ({ v: 1 as const, sessionId: 'shared', query: 'x', file: 'f', matches: [], truncated: false }),
+    reach: async () => true,
+  };
+  const page = (withSearch: boolean, presentation: 'pane' | 'sheet' = 'pane') =>
+    renderSessionChatPage(
+      <SessionChatPage
+        client={client([], sessionView('shared'))}
+        connection={alpha}
+        {...(withSearch ? { conversationSearch: searchPort } : {})}
+        entries={[]}
+        onSessionChange={() => undefined}
+        presentation={presentation}
+        session={sessionView('shared')}
+      />,
+    );
+  const searchBars = (root: ReactTestInstance): number => root.findAll(node => node.type === 'search').length;
+  const controlF = (init: KeyboardEventInit = { ctrlKey: true }): void =>
+    run(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', cancelable: true, ...init }));
+    });
+
+  test('is a row of Actions — the phone’s way in — that opens the search bar, and closes again', () => {
+    const view = page(true, 'sheet');
+    try {
+      expect(actionLabels(view.root)).toContain('Search this conversation');
+      chooseAction(view.root, 'search');
+      expect(searchBars(view.root)).toBe(1);
+      run(() => view.root.findByProps({ 'aria-label': 'Close search' }).props.onClick());
+      expect(searchBars(view.root)).toBe(0);
+    } finally {
+      run(() => view.unmount());
+    }
+  });
+
+  test('opens on Ctrl-F and Cmd-F in the chat, and leaves other shortcuts to the browser', () => {
+    const view = page(true);
+    try {
+      controlF({ ctrlKey: true, shiftKey: true });
+      controlF({ altKey: true, metaKey: true });
+      expect(searchBars(view.root)).toBe(0);
+      controlF({ metaKey: true });
+      expect(searchBars(view.root)).toBe(1);
+      controlF({ ctrlKey: true });
+      expect(searchBars(view.root)).toBe(1);
+    } finally {
+      run(() => view.unmount());
+    }
+  });
+
+  test('leaves Ctrl-F to the browser when focus is in another pane', () => {
+    const view = page(true);
+    const elsewhere = document.createElement('input');
+    document.body.append(elsewhere);
+    elsewhere.focus();
+    try {
+      controlF();
+      expect(searchBars(view.root)).toBe(0);
+    } finally {
+      elsewhere.remove();
+      run(() => view.unmount());
+    }
+  });
+
+  test('offers no search where the host has none', () => {
+    const view = page(false);
+    try {
+      expect(actionLabels(view.root)).not.toContain('Search this conversation');
+      controlF();
+      expect(searchBars(view.root)).toBe(0);
+    } finally {
+      run(() => view.unmount());
     }
   });
 });

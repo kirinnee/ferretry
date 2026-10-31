@@ -467,6 +467,13 @@ interface PendingRecord {
    * the answer that owns it was bounded by `MAX_TUNNEL_BODY_BYTES` when it was cut into parts.
    */
   readonly part?: true;
+  /**
+   * The answer's last word, asked once more after the seal and before the socket: true while the
+   * plaintext that was sealed is still what the answer says. An answer that carries `ApiResponse.late`
+   * can change between the moment it was spelled and the moment it leaves, and the queue and the seal
+   * are both awaits.
+   */
+  readonly permit?: () => boolean;
 }
 
 /**
@@ -1301,11 +1308,23 @@ export class RelayLink {
   /** One answer, as one record or as its ordered parts. */
   #answer(session: LinkSession, id: number, response: ApiResponse): void {
     const messages = tunnelResponseMessages(id, response);
+    const permitOf = (index: number, sent: RelayTunnelDaemonMessage): (() => boolean) | undefined => {
+      if (response.late === undefined) return undefined;
+      const spelled = encodeTunnelMessage(sent);
+      return () => {
+        try {
+          const again = tunnelResponseMessages(id, response)[index];
+          return again !== undefined && sameBytes(encodeTunnelMessage(again), spelled);
+        } catch {
+          return false;
+        }
+      };
+    };
     if (messages.length === 1 && messages[0] !== undefined) {
-      this.#sendRecord(session, messages[0]);
+      this.#sendRecord(session, messages[0], permitOf(0, messages[0]));
       return;
     }
-    for (const message of messages) this.#queue(session, message);
+    for (const [index, message] of messages.entries()) this.#queue(session, message, false, permitOf(index, message));
   }
 
   // ─── one pairing exchange ───────────────────────────────────────────────────────────────────
@@ -1682,7 +1701,7 @@ export class RelayLink {
     });
   }
 
-  #sendRecord(session: LinkSession, message: RelayTunnelDaemonMessage): void {
+  #sendRecord(session: LinkSession, message: RelayTunnelDaemonMessage, permit?: () => boolean): void {
     const plaintext = encodeTunnelMessage(message);
     if (plaintext.byteLength > MAX_PLAINTEXT_BYTES || wholeRecords(session.waiting) >= CREDIT_WINDOW_FRAMES) {
       // Neither is reachable through a peer that honours the protocol — `tunnelResponseMessage`
@@ -1692,7 +1711,7 @@ export class RelayLink {
       this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'this session cannot carry its own answer');
       return;
     }
-    session.waiting.push({ plaintext, payload: false });
+    session.waiting.push({ plaintext, payload: false, ...(permit === undefined ? {} : { permit }) });
     this.#flush(session);
   }
 
@@ -1710,11 +1729,12 @@ export class RelayLink {
    * and ends the session in {@link RelayLink.flush} — one owner for that fact, in the layer that
    * knows it.
    */
-  #queue(session: LinkSession, message: RelayTunnelDaemonMessage, payload = false): void {
+  #queue(session: LinkSession, message: RelayTunnelDaemonMessage, payload = false, permit?: () => boolean): void {
     session.waiting.push({
       plaintext: encodeTunnelMessage(message),
       payload,
       ...(message.t === 'res-more' ? { part: true as const } : {}),
+      ...(permit === undefined ? {} : { permit }),
     });
     this.#flush(session);
   }
@@ -1809,6 +1829,14 @@ export class RelayLink {
         // does not spend a sequence number twice: this channel dies with its session, a reconnection
         // is a NEW session with new keys (§9), and nothing can seal under this nonce again.
         if (!this.#live(session)) return;
+        // THE ANSWER'S LAST WORD, after the last await and before the socket. A hold that began while
+        // this record queued or sealed has changed what the answer may say, and the ciphertext holds
+        // the old words. It is dropped unsent and its sequence number is never spent again: the
+        // session ends, its keys die with it, and the peer asks anew for an answer that is true now.
+        if (pending.permit?.() === false) {
+          this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'an answer changed before it left');
+          return;
+        }
         session.waiting.shift();
         // The mirror of the write-back in `#onRecord`, and for the same reason: a record arriving
         // while this seal was suspended has already advanced the receive counter, and assigning the
@@ -1907,3 +1935,6 @@ function instant(milliseconds: number): string {
 export function transcriptKey(transcript: Uint8Array | undefined): string {
   return transcript === undefined ? '' : [...transcript].map(byte => byte.toString(16).padStart(2, '0')).join('');
 }
+
+const sameBytes = (a: Uint8Array, b: Uint8Array): boolean =>
+  a.byteLength === b.byteLength && a.every((byte, index) => byte === b[index]);

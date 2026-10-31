@@ -53,6 +53,56 @@ function frame(overrides = {}) {
   };
 }
 
+/**
+ * The worker's end of Chrome's DevTools pipe, as the launcher hands it over: requests out on fd 3, replies in
+ * on fd 4, each JSON object followed by a NUL. `Bun.file` because the daemon's ends are non-blocking sockets.
+ */
+function chromePipe() {
+  const writer = Bun.file(3).writer();
+  const waiting = new Map();
+  let next = 1;
+  let closed = false;
+  void (async () => {
+    const decoder = new TextDecoder();
+    let pending = '';
+    for await (const chunk of Bun.file(4).stream()) {
+      pending += decoder.decode(chunk, { stream: true });
+      for (let end = pending.indexOf('\0'); end !== -1; end = pending.indexOf('\0')) {
+        const message = JSON.parse(pending.slice(0, end));
+        pending = pending.slice(end + 1);
+        waiting.get(message.id)?.resolve(message);
+        waiting.delete(message.id);
+      }
+    }
+    closed = true;
+    for (const call of waiting.values()) call.reject(new Error('Chrome closed its DevTools pipe'));
+    waiting.clear();
+  })();
+  return {
+    call(method) {
+      if (closed) return Promise.reject(new Error('Chrome closed its DevTools pipe'));
+      const id = next++;
+      return new Promise((resolve, reject) => {
+        waiting.set(id, { resolve, reject });
+        writer.write(`${JSON.stringify({ id, method })}\0`);
+        void writer.flush();
+      });
+    },
+  };
+}
+
+// `pipe` is what the agent-browser launcher passes: the handshake is one request Chrome answers over the
+// pipe, so this worker says "ready" only when the pipe it was handed really reaches a Chrome.
+const cdp = endpoint === 'pipe' ? chromePipe() : undefined;
+if (cdp !== undefined) {
+  try {
+    await cdp.call('Browser.getVersion');
+  } catch (error) {
+    emit({ type: 'fatal', error: error.message });
+    process.exit(1);
+  }
+}
+
 if (endpoint === 'exit-during-launch') process.exit(7);
 if (endpoint === 'fatal') {
   emit({ type: 'fatal', error: 'chromium is missing\nstack line' });
@@ -113,6 +163,14 @@ function handle({ id, method, params }) {
       return;
     case 'crashes':
       process.exit(3);
+      return;
+    case 'cdp-round-trip':
+      // One more request over the pipe AFTER launch: the daemon has closed its copies by now, so an answer
+      // proves the pipe runs from this worker to Chrome and through nobody else.
+      cdp.call('Browser.getVersion').then(
+        message => reply(id, true, snapshot(method, { chrome: message.result.product })),
+        error => reply(id, false, error.message),
+      );
       return;
     case 'startScreencast':
       // A real worker refuses a viewport it cannot capture.

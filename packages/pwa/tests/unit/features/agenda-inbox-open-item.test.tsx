@@ -80,6 +80,8 @@ const topView = (mounted: Mounted): HTMLElement =>
   must(mounted.container.querySelector<HTMLElement>('.fy-attn-deck__top [data-agenda-view]'), 'the open item');
 const head = (mounted: Mounted): HTMLElement =>
   must(mounted.container.querySelector<HTMLElement>('.fy-attn-deck__top [data-agenda-top]'), 'the item head');
+const cardTop = (mounted: Mounted): HTMLElement =>
+  must(mounted.container.querySelector<HTMLElement>('.fy-attn-deck__top [data-agenda-card-top]'), 'the card top bar');
 /** The deck's own handle on a phone: the who-and-what line (the view's head and row swipe on their own there). */
 const whoLine = (mounted: Mounted): HTMLElement =>
   must(mounted.container.querySelector<HTMLElement>('.fy-attn-deck__top [data-inbox-who]'), 'the who line');
@@ -119,58 +121,57 @@ describe('the open Inbox item', () => {
     await none.unmount();
   });
 
-  it('answers the recommended reply on a swipe up from its who-and-what line, into the undo window', async () => {
+  it('answers the middle reply — the second option — on a swipe up from its who-and-what line, into the undo window', async () => {
     const fake = fakeInbox();
     const mounted = await mount(page(fake, [shipIt, rebase], { initialOpen: rebase.key }));
     await swipeFrom(whoLine(mounted), 0, -200);
-    expect(pending(fake)).toEqual(['Rebase now']);
+    expect(pending(fake)).toEqual(['Wait']);
     expect(fake.commits).toEqual([]);
     await mounted.unmount();
   });
 
-  it('skips on a swipe down of the view’s own head — nothing is answered and the next item comes on top', async () => {
+  it('says Not needed on a swipe down of the item’s title head — into the undo window — and the next item comes on top', async () => {
     const fake = fakeInbox();
     const mounted = await mount(page(fake, [shipIt, rebase], { initialOpen: shipIt.key }));
     const first = topView(mounted).getAttribute('data-agenda-view');
     await swipeFrom(head(mounted), 0, 200);
-    expect(pending(fake)).toEqual([]);
+    expect(pending(fake)).toEqual(['Dismiss']);
+    expect(fake.commits).toEqual([]);
     expect(topView(mounted).getAttribute('data-agenda-view')).not.toBe(first);
     await mounted.unmount();
   });
 
-  it('stamps what a drag would do while it is held: ↑ the primary, ↓ Skip', async () => {
+  it('stamps what a drag would do while it is held: ← the first option, ↓ Not needed', async () => {
     const mounted = await mount(page(fakeInbox(), [shipIt], { initialOpen: shipIt.key }));
-    await swipeFrom(whoLine(mounted), 0, -200, false);
+    await swipeFrom(whoLine(mounted), -200, 0, false);
     const up = must(mounted.container.querySelector('.fy-attn-deck__top[data-swipe-direction]'), 'the card mid-drag');
-    expect(up.getAttribute('data-swipe-direction')).toBe('up');
+    expect(up.getAttribute('data-swipe-direction')).toBe('left');
     expect(up.getAttribute('data-swipe-answer')).toBe('Ship');
     await interact(() => whoLine(mounted).dispatchEvent(pointer('pointercancel', 100, 100)));
     await swipeFrom(whoLine(mounted), 0, 200, false);
     const down = must(mounted.container.querySelector('.fy-attn-deck__top[data-swipe-direction]'), 'the card mid-drag');
     expect(down.getAttribute('data-swipe-direction')).toBe('down');
-    expect(down.getAttribute('data-swipe-answer')).toBe('Skip');
+    expect(down.getAttribute('data-swipe-answer')).toBe('Not needed');
     expect(down.hasAttribute('data-swipe-committed')).toBe(true);
     await mounted.unmount();
   });
 
-  it('leaves a drag on a phone’s item head to the view: the deck neither stamps it nor moves the card', async () => {
+  it('leaves a drag on a phone’s card top bar to the view: the deck neither stamps it nor moves the card', async () => {
     const mounted = await mount(page(fakeInbox(), [shipIt], { initialOpen: shipIt.key }));
-    await swipeFrom(head(mounted), 0, -200, false);
+    await swipeFrom(cardTop(mounted), 0, -200, false);
     expect(mounted.container.querySelector('.fy-attn-deck__top[data-swipe-direction]')).toBeNull();
     expect(mounted.container.querySelector('.fy-attn-deck__top')?.hasAttribute('data-dragging')).toBe(false);
     await mounted.unmount();
   });
 
-  it('answers ↑ and skips ↓ from the keyboard, and Escape goes back to the list', async () => {
+  it('answers ↑, says Not needed on ↓ from the keyboard (into the undo window), and Escape goes back', async () => {
     const fake = fakeInbox();
     const mounted = await mount(page(fake, [shipIt, rebase], { initialOpen: shipIt.key, phone: false }));
-    const first = topView(mounted).getAttribute('data-agenda-view');
     await key(topView(mounted), 'ArrowDown');
-    expect(pending(fake)).toEqual([]);
-    const second = topView(mounted);
-    expect(second.getAttribute('data-agenda-view')).not.toBe(first);
-    await key(second, 'ArrowUp');
-    expect(pending(fake)).toHaveLength(1);
+    expect(pending(fake)).toEqual(['Dismiss']);
+    expect(fake.commits).toEqual([]);
+    await key(topView(mounted), 'ArrowUp');
+    expect(pending(fake)).toHaveLength(2);
     await mounted.unmount();
     const back = await mount(page(fakeInbox(), [shipIt], { initialOpen: shipIt.key }));
     await key(topView(back), 'Escape');
@@ -249,7 +250,7 @@ describe('the Inbox list says who and what', () => {
   });
 });
 
-describe('the deck that skips', () => {
+describe('the deck: ↓ is Not needed, Skip a tap', () => {
   const targets = swipeTargets(agendaItem('A1', { ask: choices('Yes', 'No') }));
 
   it('reads a mostly-downward drag as a skip only when the deck can skip', () => {
@@ -264,13 +265,14 @@ describe('the deck that skips', () => {
     expect(dragOffset(0, 80, targets)).toEqual({ dx: 0, dy: 0 });
   });
 
-  it('skips the focused card on ↓ and says so to a screen reader, and flies it down with motion on', async () => {
+  it('says Not needed on ↓ and flies the card down; Skip is a tap, never a swipe', async () => {
     const skipped: string[] = [];
+    const acted: string[] = [];
     const cards = [inboxCard(agendaItem('A1', { ask: choices('Ship', 'Hold') }))];
     const mounted = await mount(
       <AgendaSwipeDeck
         cards={cards}
-        onAct={() => undefined}
+        onAct={(_card, action) => acted.push(action.kind)}
         onSkip={card => skipped.push(card.item.id)}
         reducedMotion={false}
         renderCard={(card, _act, skip) => (
@@ -281,14 +283,14 @@ describe('the deck that skips', () => {
       />,
     );
     const frame = must(mounted.container.querySelector<HTMLElement>('[data-agenda-frame]'), 'the frame');
-    expect(frame.textContent).toContain('Arrow down: skip.');
-    // The card's own row: the recommended (here the first) option in the middle, on ↑.
-    expect(frame.textContent).toContain('Arrow up: Ship.');
+    expect(frame.textContent).toContain('Arrow down: not needed.');
+    // The card's own row, in the options list's order: the first option on ←.
+    expect(frame.textContent).toContain('Arrow left: Ship.');
     await key(frame, 'ArrowDown');
-    expect(skipped).toEqual(['A1']);
+    expect([acted, skipped]).toEqual([['dismiss'], []]);
     expect(mounted.container.querySelector('.fy-attn-deck__leaving')?.getAttribute('data-direction')).toBe('down');
     await interact(() => must(mounted.container.querySelector<HTMLButtonElement>('[data-skip-here]'), 'skip').click());
-    expect(skipped).toEqual(['A1', 'A1']);
+    expect(skipped).toEqual(['A1']);
     await mounted.unmount();
   });
 });
@@ -309,9 +311,10 @@ describe('the open Inbox item’s History', () => {
       }),
     );
     await interact(() => Promise.resolve());
-    const bubbles = [...mounted.container.querySelectorAll('.fy-item-history__chat')].map(node => node.textContent);
-    expect(bubbles.some(text => text?.includes('Hold until Monday'))).toBe(true);
-    expect(bubbles.some(text => text?.includes('Asking about'))).toBe(true);
+    const owner = [...mounted.container.querySelectorAll('[data-history="owner"]')].map(node => node.textContent);
+    const ferret = [...mounted.container.querySelectorAll('[data-history="ferret"]')].map(node => node.textContent);
+    expect(owner.some(text => text?.includes('Hold until Monday'))).toBe(true);
+    expect(ferret.some(text => text?.includes('Asking about'))).toBe(true);
     expect(asked).toEqual([shipIt.key]);
     await mounted.unmount();
   });

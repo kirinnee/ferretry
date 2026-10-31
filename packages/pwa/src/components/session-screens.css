@@ -1332,6 +1332,140 @@ button.fy-receipt {
   outline: var(--focus-width) solid var(--focus-color);
   outline-offset: var(--focus-offset);
 }
+/* SEARCH WITHIN A CONVERSATION: a bar above the chat — the box, "3 of 27", ↑ ↓ ✕ — and who and what to
+   search beneath it. Matches are painted as highlights over the text React drew; the current one stronger. */
+.fy-chat-search {
+  background: var(--chat-ground, var(--fy-surface));
+  border-bottom: var(--stroke-control) solid var(--fy-border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px var(--chat-gutter-x, 16px);
+}
+.fy-chat-search__row {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+  margin-inline: auto;
+  max-width: var(--chat-column, 760px);
+  min-width: 0;
+  width: 100%;
+}
+.fy-chat-search__icon {
+  color: var(--fy-muted);
+  flex: none;
+}
+.fy-chat-search__input {
+  background: transparent;
+  border: var(--stroke-control) solid var(--fy-border);
+  border-radius: var(--radius-control);
+  color: var(--fy-fg);
+  flex: 1 1 auto;
+  font-size: 16px;
+  min-width: 0;
+  padding: 6px 10px;
+}
+.fy-chat-search__input:focus-visible {
+  border-color: var(--fy-accent);
+  outline: none;
+}
+.fy-chat-search__count {
+  color: var(--fy-muted);
+  flex: none;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  min-width: 5.5em;
+  text-align: right;
+  white-space: nowrap;
+}
+.fy-chat-search__button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-control);
+  color: var(--fy-fg);
+  cursor: pointer;
+  display: inline-flex;
+  flex: none;
+  height: 36px;
+  justify-content: center;
+  width: 36px;
+}
+.fy-chat-search__button:disabled {
+  color: var(--fy-muted);
+  cursor: default;
+  opacity: 0.5;
+}
+.fy-chat-search__button:hover:not(:disabled),
+.fy-chat-search__button:focus-visible {
+  background: var(--fy-surface-2);
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: var(--focus-offset);
+}
+/* Who and what, in ONE row that scrolls sideways rather than wrapping, so the bar is two rows on a phone. */
+.fy-chat-search__filters {
+  align-items: center;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+  margin-inline: auto;
+  max-width: var(--chat-column, 760px);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  width: 100%;
+}
+.fy-chat-search__filters::-webkit-scrollbar {
+  display: none;
+}
+.fy-chat-search__who {
+  border: 0;
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+}
+.fy-chat-search__chip {
+  background: transparent;
+  border: var(--stroke-control) solid var(--fy-border);
+  border-radius: var(--radius-badge);
+  color: var(--fy-muted);
+  cursor: pointer;
+  flex: none;
+  font-size: 12px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+.fy-chat-search__chip[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--fy-accent) 14%, transparent);
+  border-color: var(--fy-accent);
+  color: var(--fy-fg);
+}
+.fy-chat-search__chip:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: var(--focus-offset);
+}
+.fy-chat-search__note {
+  color: var(--fy-muted);
+  font-size: 12px;
+  margin: 0 auto;
+  max-width: var(--chat-column, 760px);
+  width: 100%;
+}
+::highlight(fy-search) {
+  background-color: color-mix(in srgb, var(--warn) 35%, transparent);
+  color: inherit;
+}
+::highlight(fy-search-current) {
+  background-color: color-mix(in srgb, var(--warn) 75%, transparent);
+  color: var(--fy-fg);
+}
+[data-search-current] {
+  border-radius: var(--radius-control);
+  outline: 2px solid color-mix(in srgb, var(--fy-accent) 60%, transparent);
+  outline-offset: 4px;
+}
 /* THE COMPACT COMPOSER: one rounded row — ＋, the growing line, 🎙, send — and one small status line
  * under it. Focus is the row's border stepping up to the strong border, never a heavy accent ring. */
 .fy-composer {
@@ -3131,4 +3265,32 @@ button.fy-context-ring::after {
   .fy-context-ring[data-compacting] svg {
     animation: none;
   }
+}
+/* The board's nudge is a quiet one-line aside: meta-sized muted text, mark and sender first, the time at the
+   right edge of the FIRST line (never wrapped under the mark on a phone), the sentence wrapping in its own column. */
+.fy-message-system[data-board-nudge] {
+  align-items: flex-start;
+  flex-wrap: nowrap;
+  font-size: var(--chrome-font-size, 11px);
+}
+.fy-message-system[data-board-nudge] > .fy-system-icon {
+  align-self: flex-start;
+  margin-top: 0.15em;
+}
+.fy-message-system[data-board-nudge] .fy-system-label,
+.fy-message-system[data-board-nudge] .fy-system-text,
+.fy-message-system[data-board-nudge] .fy-system-text p {
+  font-size: inherit;
+  line-height: inherit;
+}
+.fy-message-system[data-board-nudge] .fy-system-label {
+  color: var(--fy-muted);
+}
+.fy-message-system[data-board-nudge] .fy-system-text {
+  color: var(--fy-muted);
+  flex: 1 1 0;
+}
+.fy-message-system[data-board-nudge] > .fy-receipt-line {
+  flex: 0 0 auto;
+  margin-left: auto;
 }

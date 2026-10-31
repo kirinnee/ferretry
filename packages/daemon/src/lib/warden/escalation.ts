@@ -457,7 +457,7 @@ type Reason =
   | { readonly kind: 'needs_human'; readonly verdict: WardenEscalationVerdict; readonly evidenceAt: string }
   | (WardenOwnerRoute['reason'] & { readonly evidenceAt?: string });
 
-/** Why now, as the context's lines, and the one-sentence `why`. */
+/** The context, as its lines, and the one-sentence `why`. */
 function whyNow(
   reason: Reason,
   remedy: WardenRemedyOutcome,
