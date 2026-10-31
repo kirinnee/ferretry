@@ -67,8 +67,8 @@ export interface CopyCaptured {
 interface Read {
   readonly value: string;
   readonly from: CopyOrigin;
-  /** How a command ended, and its stderr AS IT WAS: masked only once the value is held. */
-  readonly command?: {
+  /** How a command ended, and its stderr AS IT WAS: masked only once the value is held. Every source is a command until pages arrive (SC3). */
+  readonly command: {
     readonly outcome: CopyCommandReport['outcome'];
     readonly exitCode?: number;
     readonly stderr: string;
@@ -133,10 +133,7 @@ export class SecureCopyService implements InputSealedPort {
     // this point can carry the value, whether a program printed it with its newline or without.
     for (const spelling of spellings(read.value))
       this.ports.masking.holdUntil(sessionId, spelling, copyMask(request.name), expiresAt + AFTER_MASK_MS);
-    const command =
-      read.command === undefined
-        ? undefined
-        : await this.report(read.command, [read.command.stdout, read.value], request.name);
+    const command = await this.report(read.command, [read.command.stdout, read.value], request.name);
     const found: readonly ('found' | 'clean' | 'unknown')[] = await Promise.all(
       spellings(read.value).map(async spelling => await this.ports.exposure.transcriptHolds(sessionId, spelling)),
     ).catch(() => ['unknown']);
@@ -159,7 +156,7 @@ export class SecureCopyService implements InputSealedPort {
     const session = this.copies.get(sessionId) ?? new Map<CopyName, Entry>();
     session.set(request.name, entry);
     this.copies.set(sessionId, session);
-    return { copy: meta(entry), ...(command === undefined ? {} : { command }) };
+    return { copy: meta(entry), command };
   }
 
   /** Every copy of this session, live or recently ended, oldest first. */
