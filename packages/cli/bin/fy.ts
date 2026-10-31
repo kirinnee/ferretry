@@ -106,6 +106,7 @@ import { isLocalDaemonUrl, resolveDaemonUrl } from '../src/lib/daemon/address';
 import { type InstalledDaemonBinary, resolveDaemonBinaryPath } from '../src/lib/daemon/binary';
 import { registerDaemonCommands } from '../src/lib/daemon/commands';
 import { DaemonController } from '../src/lib/daemon/controller';
+import { ProtocolFirewallStatusReader } from '../src/lib/daemon/firewall-status';
 import { type DaemonLayout, resolveDaemonLayout, resolveDaemonStateHome } from '../src/lib/daemon/layout';
 import { legacyWireReport } from '../src/lib/daemon/legacy-wire';
 import type { IServiceDefinitionSupervisor } from '../src/lib/daemon/ports';
@@ -765,6 +766,7 @@ function buildDaemonController(world: CliWorld, client: SharedDaemonClient): Dae
     }),
     updateStatus: new DaemonUpdateStatusReader(hostInstallFacts(world), new ProtocolDaemonUpdateView(client)),
     tunnel: new ProtocolTunnelStatusReader(client),
+    firewall: new ProtocolFirewallStatusReader(client),
     nixShellOffer: buildProfileSwitch(world, processes),
     turns: { midTurn: async () => (await new ProtocolDaemonUpdateView(client).view())?.midTurn ?? 0 },
     restartMarker: new FileDaemonRestartMarker(restartMarkerPath(layout.stateHome)),

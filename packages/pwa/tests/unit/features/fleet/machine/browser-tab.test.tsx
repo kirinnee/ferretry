@@ -225,6 +225,33 @@ describe('BrowserTab › status line', () => {
       expect(q('[data-browser-state-refresh]')).toHaveProperty('disabled', true);
     });
   });
+
+  it('warns, with the remedy, when the loopback firewall is missing or stale', async () => {
+    for (const state of ['missing', 'stale'] as const) {
+      const detail = `the loopback firewall is ${state}: ask the host admin to add \`user 1001\` to /etc/ferretry/loopback-firewall.conf`;
+      await withTab(
+        { answers: { [BROWSER_STATE_PATH]: { state: 'stopped', firewall: { state, detail } } } },
+        async ({ q }) => {
+          const note = q('[data-setup-note="browser-firewall"]');
+          expect(note?.getAttribute('data-tone')).toBe('warn');
+          expect(note?.textContent).toContain(detail);
+        },
+      );
+    }
+  });
+
+  it('says nothing about the firewall when it is applied, not reported, or the machine is offline', async () => {
+    const applied = { state: 'applied', detail: 'the loopback firewall is applied' } as const;
+    await withTab({ answers: { [BROWSER_STATE_PATH]: { state: 'stopped', firewall: applied } } }, async ({ q }) => {
+      expect(q('[data-setup-note="browser-firewall"]')).toBeNull();
+    });
+    await withTab({}, async ({ q }) => {
+      expect(q('[data-setup-note="browser-firewall"]')).toBeNull();
+    });
+    await withTab({ online: false }, async ({ q }) => {
+      expect(q('[data-setup-note="browser-firewall"]')).toBeNull();
+    });
+  });
 });
 
 describe('BrowserTab › Browser mode', () => {

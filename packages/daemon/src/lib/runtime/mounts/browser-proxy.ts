@@ -1,4 +1,4 @@
-import { BrowserProxyTestRequestSchema, type BrowserStateView } from '@ferretry/protocol';
+import { BrowserProxyTestRequestSchema, type BrowserStateView, type LoopbackFirewallState } from '@ferretry/protocol';
 import { parseBody } from '../../api/body.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute } from '../../api/route.ts';
@@ -9,6 +9,8 @@ export interface BrowserProxySubsystem {
   readonly tester: BrowserProxyTester;
   /** Whether the machine's one agent browser runs and which proxy it started with. */
   readonly state: () => BrowserStateView;
+  /** Whether the loopback firewall fences this daemon's fixed browser ports; `undefined` while they are random. A reading, never a gate. */
+  readonly firewall?: () => Promise<LoopbackFirewallState | undefined>;
 }
 
 /**
@@ -29,7 +31,10 @@ export function browserProxyRoutes(subsystem: BrowserProxySubsystem): readonly A
       minimum: 'operator',
       capability: { capability: 'browser', axis: 'use' },
       noStore: true,
-      handle: async () => jsonResponse(subsystem.state()),
+      handle: async () => {
+        const firewall = await subsystem.firewall?.().catch(() => undefined);
+        return jsonResponse(firewall === undefined ? subsystem.state() : { ...subsystem.state(), firewall });
+      },
     },
     {
       method: 'POST',

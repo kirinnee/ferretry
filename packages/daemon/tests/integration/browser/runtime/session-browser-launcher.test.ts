@@ -524,6 +524,58 @@ describe('NodeSessionBrowserLauncher', () => {
       should(absent.started).match(/--remote-debugging-port=\d+\n/u);
     });
 
+    it('should tell the firewall warning about a start on fixed ports, and survive it failing', async () => {
+      const cdp = await spare();
+      let told = 0;
+      const fixed = async () => ({ kind: 'fixed' as const, ports: { cdp, relay: cdp + 1, vnc: cdp + 2 } });
+      const started = async (warnFirewall: () => Promise<void>) => {
+        const chrome = await fakeChrome();
+        const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
+        roots.push(root);
+        const worker = { unexpectedExit: new Promise<number>(() => undefined), close: async () => undefined };
+        const launcher = new NodeSessionBrowserLauncher(
+          new BrowserProfileStore(root),
+          INJECTED_WORKER,
+          process.execPath,
+          environment(chrome),
+          async () => worker as never,
+          { ...PORT, ports: fixed, warnFirewall },
+        );
+        opened.push(await launcher.launch({ width: 800, height: 600 }));
+      };
+      await started(async () => {
+        told += 1;
+      });
+      should(told).equal(1);
+      await started(async () => {
+        throw new Error('the marker is unreadable');
+      });
+    });
+
+    it('should not tell the firewall warning about a start on random ports', async () => {
+      let told = 0;
+      const chrome = await fakeChrome();
+      const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
+      roots.push(root);
+      const worker = { unexpectedExit: new Promise<number>(() => undefined), close: async () => undefined };
+      const launcher = new NodeSessionBrowserLauncher(
+        new BrowserProfileStore(root),
+        INJECTED_WORKER,
+        process.execPath,
+        environment(chrome),
+        async () => worker as never,
+        {
+          ...PORT,
+          ports: async () => ({ kind: 'random' }),
+          warnFirewall: async () => {
+            told += 1;
+          },
+        },
+      );
+      opened.push(await launcher.launch({ width: 800, height: 600 }));
+      should(told).equal(0);
+    });
+
     it('should refuse the launch with the reason, rather than quietly falling back to a random port', async () => {
       const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
       roots.push(root);

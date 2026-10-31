@@ -110,3 +110,4 @@ export * from './warden.ts';
 export * from './webrtc.ts';
 export * from './worktrees.ts';
 export * from './browser-proxy-test.ts';
+export * from './loopback-firewall.ts';

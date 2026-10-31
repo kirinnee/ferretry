@@ -2,7 +2,7 @@ import type { BrowserStateView } from '@ferretry/protocol';
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '../../../shell/primitives.tsx';
 import type { SetupAccess } from '../setup/setup-access.ts';
-import { SetupSection } from '../setup/setup-ui.tsx';
+import { SetupNote, SetupSection } from '../setup/setup-ui.tsx';
 import { readBrowserState } from './browser-proxy-api.ts';
 
 /** The one sentence the status line shows: whether the shared browser runs, and how its traffic leaves. */
@@ -75,6 +75,14 @@ export function BrowserStateLine({
           Refresh
         </Button>
       </div>
+      {online &&
+      reading.kind === 'shown' &&
+      reading.view.firewall !== undefined &&
+      reading.view.firewall.state !== 'applied' ? (
+        <SetupNote tone="warn" name="browser-firewall" title="Other users on this host can reach this browser’s ports">
+          <p className="m-0 min-w-0 break-words">{reading.view.firewall.detail}</p>
+        </SetupNote>
+      ) : null}
     </SetupSection>
   );
 }

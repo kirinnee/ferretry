@@ -213,6 +213,7 @@ import {
   type BrowserDisplayPort,
   BrowserLoginWindowService,
   BrowserProfileStore,
+  FileLoopbackMarkerReader,
   BrowserWorkerClient,
   BunApiServer,
   BunConnectorProcesses,
@@ -967,6 +968,7 @@ import {
   type RunOverrides,
   readDaemonRelayIdentity,
   readDoctorReport,
+  readLoopbackFirewall,
   readHarnessPreflight,
   readTranscriptPage,
   searchTranscriptRecords,
@@ -7287,6 +7289,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     return resolveBrowserPorts(setting, process.getuid?.() ?? 0, marker);
   };
   /**
+   * Whether the fixed browser ports are fenced off from other local users: read on demand, so the answer
+   * follows both the setting and the host's marker. A reading for warnings, never a gate.
+   */
+  const loopbackFirewall = async () =>
+    await readLoopbackFirewall(
+      async () => (await declaredAccountModel())?.machine.browserPorts ?? 'random',
+      process.getuid?.() ?? 0,
+      new FileLoopbackMarkerReader(),
+    );
+  /**
    * The same model as the last configuration load has it, without touching the directory: for the
    * readers that run on a timer — the credential catalogue, the usage feed and its cadence, auto-resume —
    * which each re-scanned the whole configuration tree on every pass. A change reaches them once the
@@ -8645,6 +8657,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // configuration launches headless rather than not at all.
         mode: async () => (await declaredAccountModel())?.machine.browserMode ?? 'headless',
         ports: browserPorts,
+        warnFirewall: async () => {
+          const firewall = await loopbackFirewall();
+          if (firewall !== undefined && firewall.state !== 'applied') bootNotices.state(firewall.detail);
+        },
         // Read at every launch too, but a proxy the owner asked for is never dropped quietly: a secret the vault
         // does not hold refuses the launch (resolveBrowserProxy) rather than sending traffic around the proxy.
         proxy: async () => {
@@ -10939,6 +10955,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               harnesses: await readHarnesses(accounts, executables, harnessDiscovery),
               directorySyscalls,
               tmuxRelease: await new TmuxReleaseReader(tmuxExecutable, tmux).read(),
+              loopbackFirewall: await loopbackFirewall(),
             });
           },
         },
@@ -11263,6 +11280,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             now: () => performance.now(),
           }),
           state: () => browserService.overview(),
+          firewall: loopbackFirewall,
         },
         agentTools: createAgentToolsSubsystem({
           storage,

@@ -356,3 +356,40 @@ describe('doctor tmux release row', () => {
     should(row(withTmux({ program: 'tmux 3.8' }))?.status).equal('present');
   });
 });
+
+describe('doctor loopback firewall row', () => {
+  const withFirewall = (loopbackFirewall: { state: 'applied' | 'missing' | 'stale'; detail: string } | undefined) =>
+    readDoctorReport({
+      platform: 'linux',
+      harnesses,
+      directorySyscalls: true,
+      executables: { resolve: name => `/bin/${name}` },
+      ...(loopbackFirewall === undefined ? {} : { loopbackFirewall }),
+    });
+  const row = (result: DoctorReport) => result.checks.find(check => check.name === 'loopback firewall');
+  const remedy = 'the loopback firewall is missing: ask the host admin to add `user 1001` to the conf';
+
+  it('should leave the row out while the browser ports are random', () => {
+    should(row(withFirewall(undefined))).be.undefined();
+  });
+
+  it('should pass an applied firewall', () => {
+    should(row(withFirewall({ state: 'applied', detail: 'applied' }))).containEql({ status: 'present' });
+  });
+
+  it('should warn with the remedy when the marker is missing, without making the host not ready', () => {
+    // Act
+    const result = withFirewall({ state: 'missing', detail: remedy });
+
+    // Assert
+    should(row(result)).containEql({ requirement: 'capability', status: 'missing', impact: remedy });
+    should(row(result)?.summary).match(/no usable marker at \/run\/ferretry\/loopback-firewall\.json/u);
+    should(result.ready).be.true();
+  });
+
+  it('should say the marker does not list this account when it is stale', () => {
+    should(row(withFirewall({ state: 'stale', detail: remedy }))?.summary).equal(
+      'the marker does not list this account’s ports',
+    );
+  });
+});
