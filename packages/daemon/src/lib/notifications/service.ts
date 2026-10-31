@@ -50,7 +50,17 @@ export interface NotificationServiceOptions {
  * nothing else (docs/notifications.md). Each is recorded under its own identity before it is sent, so a
  * repeat of the same stop, item or notice is no second push, across restarts too.
  */
+/**
+ * The most HIGH-priority pushes this daemon sends in any rolling hour, across every ferret. Past it a push still goes,
+ * once per card as always, at normal priority: a ferret raising card after card cannot keep the owner's phone loud.
+ */
+export const HIGH_PUSHES_PER_HOUR = 6;
+const HOUR_MS = 3_600_000;
+
 export class NotificationService implements AgendaRaisedObserver {
+  /** When each recent high push was sent, oldest first: the rolling window {@link HIGH_PUSHES_PER_HOUR} counts. */
+  private readonly highSent: number[] = [];
+
   constructor(private readonly options: NotificationServiceOptions) {}
 
   /** How many devices a push would reach now: every enrolled one, whatever it filters. */
@@ -122,8 +132,13 @@ export class NotificationService implements AgendaRaisedObserver {
    */
   private urgentOf(sessionId: string, shown: AgendaItem): AgendaItem | undefined {
     const subjectOf = this.options.subjectOf;
-    if (subjectOf === undefined) return undefined;
-    return pushUrgencyFor(subjectOf(sessionId, shown)) === 'high' ? shown : undefined;
+    if (subjectOf === undefined || pushUrgencyFor(subjectOf(sessionId, shown)) !== 'high') return undefined;
+    // The daemon-wide cap: counted and taken in one synchronous step, so two pushes cannot both take the last slot.
+    const now = Date.parse(this.options.clock.now());
+    while (this.highSent.length > 0 && (this.highSent[0] as number) <= now - HOUR_MS) this.highSent.shift();
+    if (this.highSent.length >= HIGH_PUSHES_PER_HOUR) return undefined;
+    this.highSent.push(now);
+    return shown;
   }
 
   private async announce(

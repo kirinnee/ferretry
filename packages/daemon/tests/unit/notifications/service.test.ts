@@ -98,6 +98,7 @@ function fixture(
     readonly callLog?: string[];
     readonly warnings?: string[];
     readonly subjectOf?: ConstructorParameters<typeof NotificationService>[0]['subjectOf'];
+    readonly now?: () => string;
   } = {},
 ) {
   const callLog = options.callLog ?? [];
@@ -114,7 +115,7 @@ function fixture(
       sessions,
       push,
       serial: new KeyedSerialExecutor(),
-      clock: { now: () => AT },
+      clock: { now: options.now ?? (() => AT) },
       ...(options.warnings === undefined ? {} : { diagnostics: { warn: message => options.warnings?.push(message) } }),
       ...(options.subjectOf === undefined ? {} : { subjectOf: options.subjectOf }),
     }),
@@ -562,6 +563,31 @@ describe('NotificationService high priority', () => {
     should(world.push.dispatches[0]?.urgency).be.undefined();
     should(world.push.dispatches[0]?.payload).not.have.property('urgency');
     should(world.push.dispatches[0]?.payload.tag).equal(`attention-${SESSION}`);
+  });
+
+  it('should send at most six high pushes a rolling hour, daemon-wide, and the rest at normal priority', async () => {
+    // Arrange — every item is a code card; the clock is moved by hand.
+    let now = Date.parse(AT);
+    const world = fixture({ subjectOf: () => 'one-time-code', now: () => new Date(now).toISOString() });
+    const card = (n: number) => AgendaItemSchema.parse({ ...due, id: `A${String(n)}` });
+
+    // Act — seven code cards in one hour, then one more an hour after the first.
+    for (let n = 1; n <= 7; n += 1) await world.service.deadline(SESSION, card(n), snapshot);
+    now += 3_600_000;
+    await world.service.deadline(SESSION, card(8), snapshot);
+
+    // Assert — still one push per card; only the urgency is capped.
+    should(world.push.dispatches.map(dispatch => dispatch.urgency ?? 'normal')).eql([
+      'high',
+      'high',
+      'high',
+      'high',
+      'high',
+      'high',
+      'normal',
+      'high',
+    ]);
+    should(world.push.dispatches[6]?.payload).not.have.property('urgency');
   });
 
   it('should push a code card past its deadline at high priority too', async () => {

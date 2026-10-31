@@ -484,7 +484,7 @@ describe('the next time: the card offers the saved login, and the owner taps Use
       'GITHUB',
       PutLoginEntryRequestSchema.parse({ label: 'GitHub', totp: { seed: SEED }, totpAcknowledged: true }),
     );
-    const { request, view } = await raised(h, { ...RAISE, sensitivity: 'code' });
+    const { request, view } = await raised(h, { ...RAISE, prompt: 'GitHub wants the 2FA code', sensitivity: 'code' });
     should(request.saved?.offers.map(offer => offer.fills)).deepEqual(['totp']);
 
     // Act
@@ -510,7 +510,7 @@ describe('the next time: the card offers the saved login, and the owner taps Use
   it('should leave a code the OWNER typed unmasked: it is not secret', async () => {
     // Arrange
     const h = harness({ facts: otpFacts() });
-    const { request } = await raised(h, { ...RAISE, sensitivity: 'code' });
+    const { request } = await raised(h, { ...RAISE, prompt: 'GitHub wants the 2FA code', sensitivity: 'code' });
 
     // Act
     await h.service.deliver(SESSION, request.id, typed(request.observedDigest as string, '481516'), HOST);

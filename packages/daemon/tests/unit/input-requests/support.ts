@@ -1,6 +1,6 @@
 import type { AgendaId, InputEvent, InputRaise, InputShot, InputTargetFacts } from '@ferretry/protocol';
 import { EphemeralValues } from '../../../src/lib/input-requests/ephemeral-values.ts';
-import type { InputLoginPort } from '../../../src/lib/input-requests/ports.ts';
+import type { InputAgendaPort, InputLoginPort } from '../../../src/lib/input-requests/ports.ts';
 import { QuarantineRegistry } from '../../../src/lib/input-requests/quarantine.ts';
 import { InputRequestService } from '../../../src/lib/input-requests/service.ts';
 
@@ -42,6 +42,8 @@ export function inputRequestService(
     readonly logins?: InputLoginPort;
     /** Whether the ferret steered a page (the login observer); absent: no observer, so every page counts as steered. */
     readonly steered?: (since: number) => boolean;
+    /** The agenda the cards are raised on; absent: a board that takes every card and says nothing. */
+    readonly agenda?: InputAgendaPort;
   } = {},
 ) {
   const live = options.session ?? SESSION;
@@ -74,7 +76,7 @@ export function inputRequestService(
         return 'typed';
       },
     },
-    agenda: {
+    agenda: options.agenda ?? {
       raise: async () => ({ ok: true, id: `A${card++}` as AgendaId }),
       close: async () => undefined,
       promptOf: async () => 'sudo wants your password',

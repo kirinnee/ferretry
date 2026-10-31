@@ -2272,7 +2272,7 @@ describe('a one-time code (`code`): visible, never locked, never masked when the
         recognisedConsumer: false,
       } as InputTargetFacts,
     ],
-    ['an OTP prompt with typing hidden', { ...OTP, echo: 'off' } as InputTargetFacts],
+    ['a PIN prompt with typing hidden', { ...OTP, echo: 'off', promptLine: 'Enter PIN:' } as InputTargetFacts],
   ] as const)
     it(`should handle a code aimed at ${what} as a secret, end to end`, async () => {
       // Arrange
@@ -2296,6 +2296,28 @@ describe('a one-time code (`code`): visible, never locked, never masked when the
       should(w.events.map(event => event.sensitivity)).not.containEql('code');
       should(w.audits.map(entry => entry.detail.sensitivity)).not.containEql('code');
     });
+
+  it('should treat a code as a secret when the ferret itself says password or PIN: its words may only raise', async () => {
+    // Act
+    const prompt = await raised({ facts: OTP }, { ...CODE, prompt: 'sudo needs your password' });
+    const label = await raised(
+      { facts: OTP },
+      { ...RAISE, prompt: 'the card wants it', fields: [{ id: 'value', label: 'Card PIN', sensitivity: 'code' }] },
+    );
+
+    // Assert
+    should(prompt.request.sensitivity).equal('secret');
+    should(label.request.sensitivity).equal('secret');
+  });
+
+  it('should keep a code at an OTP prompt with typing hidden: the pane asks for a code', async () => {
+    // Act
+    const { request } = await raised({ facts: { ...OTP, echo: 'off' } as InputTargetFacts }, CODE);
+
+    // Assert
+    should(request.sensitivity).equal('code');
+    should(request.lock).be.undefined();
+  });
 
   it('should check again when a restarted daemon finds the terminal now asking for a password, never back', async () => {
     // Arrange — raised at an OTP prompt; the daemon restarts and the pane now shows a sudo prompt.
@@ -2323,7 +2345,7 @@ describe('what a request push is about', () => {
       echo: 'on',
       promptLine: 'Verification code:',
     } as InputTargetFacts;
-    const code = await raised({ facts: otp }, { ...RAISE, sensitivity: 'code' });
+    const code = await raised({ facts: otp }, { ...RAISE, prompt: 'the 2FA code', sensitivity: 'code' });
     const secret = await raised({}, RAISE);
 
     // Act / Assert

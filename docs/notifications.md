@@ -112,6 +112,10 @@ What a high push does, and who honours it:
 | `renotify` with a tag per card, `silent: false`    | service worker | Chrome and Edge sound it again even when an earlier push for the ferret is showing                                                                                                               |
 | `vibrate`                                          | service worker | Chrome on Android; ignored elsewhere                                                                                                                                                             |
 
+**At most six high pushes an hour, daemon-wide** (`HIGH_PUSHES_PER_HOUR`, a rolling hour across every ferret). Past
+that a code card still pushes once, at normal priority, so a ferret raising card after card cannot keep the phone
+loud.
+
 **iOS has no "time-sensitive" option for a web app.** The interruption level (time-sensitive, which can break through
 a Focus mode) is an option for native apps only; Web Push on iOS and iPadOS exposes none, so Ferretry does not and
 cannot set it. A Focus mode can still hold a code push on an iPhone.

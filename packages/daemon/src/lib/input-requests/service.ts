@@ -208,6 +208,11 @@ const isFinal = (request: InputRequest): boolean => FINAL.has(request.state);
 
 export class InputRequestService {
   private readonly held = new Map<string, Held>();
+  /**
+   * What a card being raised is about, by request id, while `agenda.raise` runs: the card's push is made INSIDE that
+   * raise (the deadline push, buzz.ts), before the request is held, so `pushSubjectOf` must already know it.
+   */
+  private readonly raising = new Map<string, { readonly sessionId: string; readonly subject: PushSubject }>();
   private readonly raises = new Map<string, number[]>();
   private readonly lock = new SessionLock();
 
@@ -275,7 +280,7 @@ export class InputRequestService {
     const requestId = this.deps.ids.requestId();
     // A code aimed at a password is a secret (observedAs): what the card, the lock, the mask and the journal all use.
     const upgraded = new Set<string>();
-    const fields = observedAs(raised.map(cardField), seen.facts, upgraded);
+    const fields = observedAs(raised.map(cardField), seen.facts, upgraded, raise.prompt);
     const sensitivity = strongestSensitivity(fields);
     // A page is pictured now, before the owner is asked and long before anything is typed into it.
     const shot =
@@ -306,15 +311,18 @@ export class InputRequestService {
         : false;
     const lock = kept ? lockFor(seen.facts, fields, { ...context, probed }) : undefined;
     const step = raise.chain === undefined ? undefined : this.stepAfter(sessionId, raise.chain);
-    const card = await this.deps.agenda.raise(sessionId, {
-      requestId,
-      title: copy === undefined ? titleOf(fields) : PASTE_TITLE,
-      ask: copy === undefined ? askOf(shown, fields) : pasteAskOf(copy, shown),
-      prompt: raise.prompt,
-      blocking: raise.blocking ?? sensitivity === 'secret',
-      expiresAt,
-      ...(raise.chain === undefined ? {} : { chain: raise.chain }),
-    });
+    this.raising.set(requestId, { sessionId, subject: sensitivity === 'code' ? 'one-time-code' : 'other' });
+    const card = await this.deps.agenda
+      .raise(sessionId, {
+        requestId,
+        title: copy === undefined ? titleOf(fields) : PASTE_TITLE,
+        ask: copy === undefined ? askOf(shown, fields) : pasteAskOf(copy, shown),
+        prompt: raise.prompt,
+        blocking: raise.blocking ?? sensitivity === 'secret',
+        expiresAt,
+        ...(raise.chain === undefined ? {} : { chain: raise.chain }),
+      })
+      .finally(() => this.raising.delete(requestId));
     if (!card.ok) throw new InputRequestError('unavailable', card.message);
     const request: InputRequest = {
       id: requestId,
@@ -528,6 +536,8 @@ export class InputRequestService {
    * `one-time-code`, and is pushed at high priority; anything else, or a request this daemon does not hold, is `other`.
    */
   pushSubjectOf(sessionId: string, requestId: string): PushSubject {
+    const raising = this.raising.get(requestId);
+    if (raising !== undefined) return raising.sessionId === sessionId ? raising.subject : 'other';
     const held = this.held.get(requestId);
     if (held === undefined || held.request.sessionId !== sessionId || isFinal(held.request)) return 'other';
     return held.request.sensitivity === 'code' ? 'one-time-code' : 'other';
@@ -835,7 +845,7 @@ export class InputRequestService {
     held.binding = bindingOf(seen.facts);
     const matchKey = targetMatchKey(seen.facts, this.deps.hostName ?? '');
     if (matchKey !== undefined) held.matchKey = matchKey;
-    const fields = observedAs(request.fields, seen.facts, held.upgraded);
+    const fields = observedAs(request.fields, seen.facts, held.upgraded, request.prompt);
     held.request = {
       ...request,
       fields,
@@ -956,7 +966,7 @@ export class InputRequestService {
       if (seen.facts.kind === 'browser') held.navigation = seen.facts.navigationId;
       // Checked again at the write, AFTER any saved value was opened (so a saved login still fills the role the owner
       // chose): a code field now going into a password is held, masked and recorded as a secret. Never back.
-      const fields = observedAs(request.fields, seen.facts, held.upgraded);
+      const fields = observedAs(request.fields, seen.facts, held.upgraded, request.prompt);
       held.request = { ...held.request, fields, sensitivity: strongestSensitivity(fields) };
       // The secret store is no surface anybody reads, so there is nothing to hold from view. The lock is looked at
       // again from the facts just seen, and the longer of that and the card's is kept: a card never shortens.
@@ -1355,7 +1365,7 @@ export class InputRequestService {
     // A card redrawn onto another document than the one it was raised on says so, above any other flag but red.
     const moved =
       seen.facts.kind === 'browser' && held.raisedOn !== undefined && seen.facts.navigationId !== held.raisedOn;
-    const fields = observedAs(request.fields, seen.facts, held.upgraded).map(field =>
+    const fields = observedAs(request.fields, seen.facts, held.upgraded, request.prompt).map(field =>
       moved ? { ...field, risk: worstRisk([NEW_DOCUMENT_FLAG, field.risk]) as InputRisk } : field,
     );
     // The new picture is taken before the owner is asked again, exactly as at raise.
@@ -1648,6 +1658,8 @@ function pointerOf(field: { readonly id: string; readonly element?: InputRequest
 }
 
 const UPGRADED_FLAG = 'Treated as a secret: this is a password field.';
+/** The ferret's words that ask for a password, PIN or passphrase. */
+const PASSWORD_WORDS = /pass(?:word|phrase|wd)|(?:^|[^a-z])pin(?:[^a-z]|$)/iu;
 const AMBER_AT_LEAST: Readonly<Record<InputRisk['level'], InputRisk['level']>> = {
   green: 'amber',
   neutral: 'amber',
@@ -1665,9 +1677,12 @@ function observedAs(
   fields: readonly InputRequestField[],
   facts: InputTargetFacts,
   upgraded: Set<string>,
+  prompt: string,
 ): InputRequestField[] {
   return fields.map(field => {
-    if (field.sensitivity === 'code' && passwordTarget(facts, field.id)) upgraded.add(field.id);
+    // The ferret's own words (its prompt, the field's label or id) may only ever RAISE a code to a secret.
+    const said = PASSWORD_WORDS.test(prompt) || PASSWORD_WORDS.test(field.label) || PASSWORD_WORDS.test(field.id);
+    if (field.sensitivity === 'code' && (said || passwordTarget(facts, field.id))) upgraded.add(field.id);
     if (!upgraded.has(field.id)) return { ...field, risk: riskOf(field, facts) };
     const secret = { ...field, sensitivity: 'secret' as const };
     return { ...secret, risk: { level: AMBER_AT_LEAST[riskOf(secret, facts).level], reason: UPGRADED_FLAG } };

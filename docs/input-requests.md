@@ -144,12 +144,22 @@ one-time.
   the observed field of that sign-in. Its text is also masked from text reads for the redaction window, as defence in
   depth; that covers text only, so the ferret may still see it on screen (a screenshot, a scripted read). The owner
   allowed that: TOTP codes are fine to see (design §11.1).
-- **A `code` aimed at a password is a secret.** When the daemon sees a code field going into a password field
-  (`type=password`, or autocomplete `current-password` / `new-password`) or a password prompt (sudo, su, doas or
-  passwd, echo off, or a prompt line asking for a password or passphrase), it handles that field as `secret`: hidden
-  on the card, the full lock, masked, the ferret's typing blocked, and `secret` in the journal and audit. The card
-  says "Treated as a secret: this is a password field." This is decided at raise and checked again at the write
-  (never undone); a saved login still fills the role the owner picked.
+- **A `code` aimed at a password is a secret.** The daemon handles a code field as `secret` when any of these
+  holds (the ferret's words may only ever raise a code, never lower one):
+  - the page field is `type=password`, or its name, id or autocomplete says pass, pwd or PIN (any type);
+  - the terminal runs sudo, sudoedit, su, doas or passwd, or its prompt line asks for a password (password,
+    passphrase, passwd, Passwort, Kennwort, contraseña, mot de passe, credential, secret, "pw:", PIN), whatever else
+    the line says;
+  - the terminal reads with typing hidden, unless the prompt line the daemon read from the pane asks for a code
+    (verification code, one-time, OTP, 2FA, authenticator, "code:") and says none of password, passphrase, PIN, token
+    or secret;
+  - the ferret's own prompt, or the field's label or id, says password, passphrase or PIN.
+
+  Then the field is hidden on the card, fully locked, masked, blocks the ferret's typing, and is `secret` in the
+  journal and audit. The card says "Treated as a secret: this is a password field." This is decided at raise and
+  checked again at a redraw, a restart and the write (never undone); a saved login still fills the role the owner
+  picked.
+
 - **Never saved**: "Save as" keeps no code; the seed is added in Settings.
 - **Never probed**: a card with a code is not dummy-probed, as before.
 

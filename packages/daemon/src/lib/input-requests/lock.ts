@@ -90,25 +90,47 @@ export function provenByFacts(
  */
 const GETPASS_PROGRAMS: ReadonlySet<string> = new Set(['sudo', 'sudoedit', 'su', 'doas', 'passwd']);
 
+/** A prompt line asking for a one-time code, in the words the pane shows (never the ferret's). */
+const CODE_PROMPT = /\b(?:verification\s+code|one[\s-]?time|otp|2fa|authenticator)\b|\bcode\s*:/iu;
 /**
- * Whether the DAEMON saw a password where a field goes: a page field that is `type=password` or whose autocomplete
- * says `current-password` / `new-password`; a terminal running a getpass program (sudo, su, doas, passwd), reading
- * with echo off, or whose prompt line asks for a password or passphrase. A one-time `code` aimed at one is handled
- * as a `secret` (service.ts, `observedAs`): the ferret's word "code" never makes a password visible to it.
+ * A prompt line that asks for a password, in any of the ways a pane or a fake one says it: always a secret. Ferretry
+ * may over-read (a "secret" prompt): the ferret's word "code" may only ever be raised to a secret, never lowered.
+ */
+const PASSWORD_PROMPT =
+  /pass(?:word|phrase|wd|wort)|kennwort|contrase(?:ñ|n)a|mot de passe|credential|secret|\bpw\s*:|\bpin\b/iu;
+/** A page field whose name, id or autocomplete says password (or PIN), whatever its type. */
+const PASSWORD_FIELD = /pass|pwd|(?:^|[^a-z])pin(?:[^a-z]|$)/iu;
+/** Words that make a prompt line something other than a one-time code, whatever else it says. */
+const NOT_A_CODE = /\b(?:password|passphrase|pin|token|secret)\b/iu;
+
+/**
+ * Whether the DAEMON saw a password where a field goes. A one-time `code` aimed at one is handled as a `secret`
+ * (service.ts, `observedAs`): the ferret's word "code" never makes a password visible to it.
+ *
+ * - A page field that is `type=password`, or whose name, id or autocomplete says pass, pwd or PIN (any type).
+ * - A terminal running a getpass program (sudo, sudoedit, su, doas, passwd), or whose prompt line asks for a password
+ *   (password, passphrase, passwd, Passwort, Kennwort, contraseña, mot de passe, credential, secret, "pw:", PIN):
+ *   always, whatever else the line says.
+ * - A terminal reading with echo off, UNLESS the prompt line the daemon read from the pane asks for a code
+ *   ("Verification code:", one-time, OTP, 2FA, authenticator, "code:") and says none of password, passphrase, PIN,
+ *   token or secret. Whole words, any case. A bare ": " with echo off is a password.
  */
 export function passwordTarget(facts: InputTargetFacts, fieldId: string): boolean {
-  if (facts.kind === 'terminal')
-    return (
-      facts.echo === 'off' ||
-      GETPASS_PROGRAMS.has(facts.foreground.comm) ||
-      /pass(?:word|phrase)/iu.test(facts.promptLine)
-    );
+  // (The ferret's own words are checked in service.ts: they may only raise a code to a secret.)
+  if (facts.kind === 'terminal') {
+    const line = facts.promptLine;
+    if (GETPASS_PROGRAMS.has(facts.foreground.comm) || PASSWORD_PROMPT.test(line)) return true;
+    if (facts.echo !== 'off') return false;
+    return !(CODE_PROMPT.test(line) && !NOT_A_CODE.test(line));
+  }
   if (facts.kind !== 'browser') return false;
   const found = facts.fields.find(field => field.fieldId === fieldId);
   if (found === undefined) return false;
   return (
     found.field.type?.toLowerCase() === 'password' ||
-    /(?:^|\s)(?:current|new)-password(?:\s|$)/iu.test(found.field.autocomplete ?? '')
+    [found.field.name, found.field.id, found.field.autocomplete].some(
+      word => word !== undefined && PASSWORD_FIELD.test(word),
+    )
   );
 }
 

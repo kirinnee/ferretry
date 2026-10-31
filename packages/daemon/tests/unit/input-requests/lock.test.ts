@@ -239,9 +239,15 @@ describe('a password target (a `code` aimed at one is handled as a secret)', () 
       passwordTarget(page([pageField({}, { type: 'text', autocomplete: 'section-a new-password' })]), 'password'),
     ).be.true();
     should(
-      passwordTarget(page([pageField({}, { type: 'text', autocomplete: 'one-time-code' })]), 'password'),
+      passwordTarget(page([pageField({}, { type: 'text', name: 'otp', autocomplete: 'one-time-code' })]), 'password'),
     ).be.false();
     should(passwordTarget(page(), 'missing')).be.false();
+    // A text field named or id'd for a password or PIN is one, whatever its type.
+    for (const attributes of [{ name: 'password' }, { name: 'user_pwd' }, { id: 'passwd' }, { name: 'card-pin' }])
+      should(
+        passwordTarget(page([pageField({}, { type: 'text', name: undefined, ...attributes })]), 'password'),
+      ).be.true();
+    should(passwordTarget(page([pageField({}, { type: 'text', name: 'shipping', id: 'otp' })]), 'password')).be.false();
   });
 
   it('should see a password prompt by its program, hidden typing or wording, and not an echoing code prompt', () => {
@@ -251,7 +257,31 @@ describe('a password target (a `code` aimed at one is handled as a secret)', () 
     // Act / Assert
     should(passwordTarget(sudo(), 'value')).be.true();
     should(passwordTarget(sudo({ echo: 'on', promptLine: '[sudo] password for kirin:' }, 'bash'), 'value')).be.true();
-    should(passwordTarget(sudo({ echo: 'off', promptLine: 'Verification code:' }, 'ssh'), 'value')).be.true();
     should(passwordTarget(otp, 'value')).be.false();
+  });
+
+  it('should keep an echo-off prompt a code only when the pane asks for a code and names nothing secret', () => {
+    // Arrange — ssh's keyboard-interactive prompts, typing hidden.
+    const hidden = (promptLine: string, comm = 'ssh') =>
+      passwordTarget(sudo({ echo: 'off', promptLine }, comm), 'value');
+
+    // Act / Assert — a code prompt stays a code.
+    for (const line of ['Verification code:', 'Enter your one-time code:', 'Authenticator CODE:', '2FA: ', 'code:'])
+      should(hidden(line)).be.false();
+    // Anything else with typing hidden is a password.
+    for (const line of [
+      'Password:',
+      'Enter PIN:',
+      "Enter passphrase for key '/home/k/.ssh/id_ed25519':",
+      ': ',
+      'OTP token:',
+    ])
+      should(hidden(line)).be.true();
+    // A prompt that asks for a password in other words is one, typing shown or not.
+    for (const line of ['[sudo] passwd for kirin:', 'Passwort:', 'pw:', 'PIN:', 'Kennwort:', 'Enter credentials:'])
+      should(passwordTarget(sudo({ echo: 'on', promptLine: line }, 'bash'), 'value')).be.true();
+    // A getpass program is always a password, whatever its prompt says.
+    should(hidden('Verification code:', 'sudo')).be.true();
+    should(passwordTarget(sudo({ echo: 'on', promptLine: 'Verification code:' }, 'su'), 'value')).be.true();
   });
 });
