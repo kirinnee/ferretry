@@ -279,6 +279,16 @@ describe('the review and the install', () => {
       expect((button.textContent ?? '').length).toBeGreaterThan(before.length);
       expect(button.getAttribute('aria-expanded')).toBe('true');
     }
+    for (const button of buttons) {
+      const name = button.getAttribute('aria-label') ?? '';
+      expect(name).toContain(button.textContent ?? 'missing');
+      const hint = document.getElementById(button.getAttribute('aria-describedby') ?? 'missing');
+      expect(hint?.textContent).toBe('Showing in full. Tap to shorten.');
+      await click(button);
+      expect(document.getElementById(button.getAttribute('aria-describedby') ?? 'missing')?.textContent).toBe(
+        'Tap to show in full.',
+      );
+    }
     await view.unmount();
   });
 
@@ -483,8 +493,9 @@ describe('a preview that is overtaken', () => {
       q('[data-catalog-scope]'),
       q('[data-catalog-runtime]'),
       q('[data-catalog-pick-file]'),
+      q('[data-catalog-file-input]'),
     ];
-    expect(locked.length).toBe(5);
+    expect(locked.length).toBe(6);
     for (const control of locked) expect((control as HTMLInputElement).disabled).toBe(true);
     hold.release(agreeingPreview());
     await settle();
@@ -536,6 +547,16 @@ describe('a preview that is overtaken', () => {
     slowSecrets.release({ v: 1, health: 'ready', secrets: [{ name: 'ACME_TOKEN' }], references: [] });
     await settle();
     expect(q('[data-catalog-confirm]')).toBeNull();
+    await view.unmount();
+  });
+});
+
+describe('the item choices', () => {
+  it('draw the name in the app font, not a code font', async () => {
+    const { view } = await open({});
+    await giveText(fileText);
+    for (const label of document.querySelectorAll('[data-catalog-file-item] > span > span:first-child'))
+      expect(label.className).not.toContain('font-mono');
     await view.unmount();
   });
 });

@@ -69,6 +69,39 @@ export function isLargeFile(text: string): boolean {
   return text.split('⟨U+', LARGE_FILE_MARKERS + 2).length - 1 > LARGE_FILE_MARKERS;
 }
 
+/** What a collapsed file that a warning names still shows: this many lines, each cut at this many characters. */
+const HEAD_LINES = 40;
+const HEAD_LINE_CHARS = 400;
+
+/** The start of a file for a collapsed view, never cutting a marker in half. */
+export function fileHead(text: string): string {
+  return text
+    .split('\n', HEAD_LINES)
+    .map(line => {
+      if (line.length <= HEAD_LINE_CHARS) return line;
+      const open = line.lastIndexOf('⟨', HEAD_LINE_CHARS);
+      const close = open < 0 ? -1 : line.indexOf('⟩', open);
+      const end = close >= HEAD_LINE_CHARS ? close + 1 : HEAD_LINE_CHARS;
+      return `${line.slice(0, end)}…`;
+    })
+    .join('\n');
+}
+
+const WATCHED_WARNINGS: ReadonlySet<string> = new Set([
+  'carries-scripts',
+  'runs-on-its-own',
+  'possible-secret',
+  'hidden-characters',
+]);
+
+/** Whether a warning that says a file needs reading names this one by its path. */
+export function namedByWarning(
+  path: string,
+  warnings: readonly { readonly code: string; readonly text: string }[],
+): boolean {
+  return warnings.some(warning => WATCHED_WARNINGS.has(warning.code) && revealHidden(warning.text).includes(path));
+}
+
 export function holdsMarker(text: string): boolean {
   return new RegExp(MARKER.source, 'u').test(text);
 }

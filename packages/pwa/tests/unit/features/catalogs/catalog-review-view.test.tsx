@@ -167,3 +167,55 @@ describe('large files and long runs', () => {
     await view.unmount();
   });
 });
+
+describe('a large file that a warning names', () => {
+  const ZWSP = String.fromCodePoint(0x200b);
+  const big = (head: string) => `${head}\n${ZWSP.repeat(70 * 1024)}`;
+  const entries = [{ label: 'Skill file run.sh', text: big('echo start'), document: true }];
+
+  it('shows its first lines while closed, with the note under them', async () => {
+    const view = await mount(
+      <ReviewBody
+        entries={entries}
+        warnings={[{ code: 'carries-scripts', text: 'This skill carries a script a ferret may run: run.sh.' }]}
+      />,
+    );
+    const head = view.container.querySelector('[data-review-head]');
+    expect(head?.textContent?.startsWith('echo start')).toBe(true);
+    expect(view.container.querySelectorAll('[data-review-large]')).toHaveLength(1);
+    expect(view.container.querySelector('[data-review-large]')?.textContent).toBe(
+      'Large file: open to read it in full',
+    );
+    expect((head?.textContent ?? '').length).toBeLessThan(1000);
+    await view.unmount();
+  });
+
+  it('drops the first lines once it is opened', async () => {
+    const view = await mount(
+      <ReviewBody
+        entries={entries}
+        warnings={[{ code: 'carries-scripts', text: 'This skill carries a script a ferret may run: run.sh.' }]}
+      />,
+    );
+    const details = view.container.querySelector('details[data-review-file]') as HTMLDetailsElement;
+    await interact(() => {
+      details.open = true;
+      details.dispatchEvent(new Event('toggle'));
+    });
+    expect(view.container.querySelector('[data-review-head]')).toBeNull();
+    expect(view.container.querySelectorAll('pre')).toHaveLength(1);
+    await view.unmount();
+  });
+
+  it('shows no first lines when no warning names it', async () => {
+    const view = await mount(
+      <ReviewBody
+        entries={entries}
+        warnings={[{ code: 'carries-scripts', text: 'This skill carries a script a ferret may run: other.sh.' }]}
+      />,
+    );
+    expect(view.container.querySelector('[data-review-head]')).toBeNull();
+    expect(view.container.querySelectorAll('[data-review-large]')).toHaveLength(1);
+    await view.unmount();
+  });
+});

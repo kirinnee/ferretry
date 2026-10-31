@@ -15,6 +15,8 @@ import {
   shortDigest,
   splitMarkers,
   warningRows,
+  fileHead,
+  namedByWarning,
 } from '../../../../src/features/catalogs/catalog-review-model.ts';
 
 const marker = (code: string): string => `${String.fromCodePoint(0x27e8)}U+${code}${String.fromCodePoint(0x27e9)}`;
@@ -167,5 +169,47 @@ describe('numbers and names', () => {
     should(plural(1, 'item')).equal('1 item');
     should(plural(2, 'item')).equal('2 items');
     should(plural(2, 'person', 'people')).equal('2 people');
+  });
+});
+
+describe('fileHead', () => {
+  it('keeps a short file as it is', () => {
+    should(fileHead('a\nb')).equal('a\nb');
+  });
+
+  it('keeps only the first 40 lines', () => {
+    const lines = Array.from({ length: 100 }, (_, index) => `line ${index}`);
+    const head = fileHead(lines.join('\n')).split('\n');
+    should(head).have.length(40);
+    should(head[39]).equal('line 39');
+  });
+
+  it('cuts a very long line at 400 characters and says so', () => {
+    const head = fileHead('x'.repeat(5000));
+    should(head).equal(`${'x'.repeat(400)}…`);
+  });
+
+  it('never cuts a marker in half', () => {
+    const line = `${'x'.repeat(396)}${marker('202E')}tail`;
+    should(fileHead(line)).equal(`${'x'.repeat(396)}${marker('202E')}…`);
+  });
+
+  it('cuts after a whole marker that ends before the limit', () => {
+    const line = `${marker('202E')}${'y'.repeat(500)}`;
+    should(fileHead(line)).equal(`${line.slice(0, 400)}…`);
+  });
+});
+
+describe('namedByWarning', () => {
+  const warnings = [
+    { code: 'carries-scripts', text: 'This skill carries a script a ferret may run: run.sh. Read it.' },
+    { code: 'unpinned-package', text: 'npx fetches big.txt newest.' },
+  ];
+  it('is true for a file a reading warning names', () => {
+    should(namedByWarning('run.sh', warnings)).equal(true);
+  });
+  it('is false for a file no warning names, and for a warning that is not about reading', () => {
+    should(namedByWarning('notes.md', warnings)).equal(false);
+    should(namedByWarning('big.txt', warnings)).equal(false);
   });
 });

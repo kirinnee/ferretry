@@ -15,6 +15,8 @@ import {
   INSTALLER_FILLS_IN,
   type ReviewRow,
   type ReviewAudience,
+  fileHead,
+  namedByWarning,
   reviewHeading,
   reviewRows,
   splitMarkers,
@@ -61,7 +63,7 @@ export function MarkedText({ text }: { readonly text: string }) {
 
 const LARGE_FILE_NOTE = 'Large file: open to read it in full';
 
-function FileBlock({ row }: { readonly row: Extract<ReviewRow, { kind: 'file' }> }) {
+function FileBlock({ row, named }: { readonly row: Extract<ReviewRow, { kind: 'file' }>; readonly named: boolean }) {
   // A big file is not drawn until it is opened, so the page stays quick; opening it shows all of it.
   const [open, setOpen] = useState(!row.large);
   return (
@@ -79,12 +81,25 @@ function FileBlock({ row }: { readonly row: Extract<ReviewRow, { kind: 'file' }>
             Has hidden characters
           </span>
         ) : null}
-        {row.large ? (
+        {row.large && !named ? (
           <span className="w-full text-meta text-muted" data-review-large="">
             {LARGE_FILE_NOTE}
           </span>
         ) : null}
       </summary>
+      {!open && named ? (
+        <>
+          <pre
+            className="m-0 max-w-full overflow-x-auto whitespace-pre-wrap break-words border-t border-border-soft p-control-x font-mono text-cell leading-base text-fg"
+            data-review-head=""
+          >
+            <MarkedText text={fileHead(row.text)} />
+          </pre>
+          <p className="m-0 px-control-x pb-2 text-meta text-muted" data-review-large="">
+            {LARGE_FILE_NOTE}
+          </p>
+        </>
+      ) : null}
       {open ? (
         <pre className="m-0 max-w-full overflow-x-auto whitespace-pre-wrap break-words border-t border-border-soft p-control-x font-mono text-cell leading-base text-fg">
           <MarkedText text={row.text} />
@@ -125,10 +140,12 @@ function LineBlock({
  */
 export function ReviewBody({
   entries,
+  warnings = [],
   installerView = false,
   audience = 'publisher',
 }: {
   readonly entries: readonly CatalogReviewEntry[];
+  readonly warnings?: readonly CatalogInstallWarning[];
   readonly installerView?: boolean;
   readonly audience?: ReviewAudience;
 }) {
@@ -143,7 +160,7 @@ export function ReviewBody({
       </h4>
       {rows.map(({ row, key }) =>
         row.kind === 'file' ? (
-          <FileBlock key={key} row={row} />
+          <FileBlock key={key} row={row} named={row.large && namedByWarning(row.path, warnings)} />
         ) : (
           <LineBlock key={key} row={row} installerView={installerView} />
         ),

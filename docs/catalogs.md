@@ -88,9 +88,9 @@ nothing publishes one yet.
 **Labels** (a catalog's name, the publisher's name, a summary) refuse controls, line breaks and every
 invisible or text-direction character: the bidirectional overrides and marks, zero-width spaces and
 joiners, the soft hyphen, the line and paragraph separators, the Hangul fillers, variation selectors, tag
-characters and the byte-order mark (`HIDDEN_CHARACTER_SOURCE`). A description may also hold line breaks
+characters and the byte-order mark (`HIDDEN_CHARACTER_SOURCE`). **Any Unicode format character (`\p{Cf}`) is refused** the same way in names, summaries, arguments and values, and marked in file bodies, so a file that parsed under an older build can be refused now. A description may also hold line breaks
 and tabs. **Look-alike letters are not refused** (a Cyrillic `А` in "Аnthropic"): names in every
-language are allowed, so a reader always shows **its own label** for a publisher and the start of its
+language are allowed, so a reader always shows **its own label** for a publisher and the first 20 characters of its
 fingerprint beside the publisher's own name.
 
 ## Signed manifests

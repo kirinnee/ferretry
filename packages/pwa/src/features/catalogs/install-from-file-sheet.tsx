@@ -264,6 +264,7 @@ function InstallSheetBody({
           type="file"
           accept=".json,application/json"
           className="sr-only"
+          disabled={busy}
           onChange={event => void openFile(event.target.files?.[0])}
           data-catalog-file-input=""
         />
@@ -403,7 +404,7 @@ function OpenedFile({
               onChange={() => onItem(row.entry.itemId)}
             />
             <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-              <span className="break-words font-mono text-cell text-fg">
+              <span className="break-words text-cell text-fg">
                 {revealHidden(row.entry.name)} · {row.entry.kind === 'skill' ? 'Skill' : 'MCP server'} · version{' '}
                 {row.entry.version}
               </span>
@@ -581,16 +582,23 @@ function TapToExpand({
   readonly label: string;
 }) {
   const [open, setOpen] = useState(false);
+  const hint = useId();
   return (
-    <button
-      type="button"
-      className="min-h-[44px] max-w-full break-all bg-transparent p-0 text-left font-mono text-cell text-fg underline decoration-dotted"
-      aria-expanded={open}
-      aria-label={`${label}: ${open ? 'showing in full' : 'tap to show in full'}`}
-      onClick={() => setOpen(value => !value)}
-    >
-      {open ? full : short}
-    </button>
+    <>
+      <button
+        type="button"
+        className="min-h-[44px] max-w-full break-all bg-transparent p-0 text-left font-mono text-cell text-fg underline decoration-dotted"
+        aria-expanded={open}
+        aria-label={`${label}: ${full}`}
+        aria-describedby={hint}
+        onClick={() => setOpen(value => !value)}
+      >
+        {open ? full : short}
+      </button>
+      <span id={hint} className="sr-only">
+        {open ? 'Showing in full. Tap to shorten.' : 'Tap to show in full.'}
+      </span>
+    </>
   );
 }
 
@@ -647,7 +655,7 @@ function Confirm({
           <TapToExpand label="Digest" short={shortDigest(preview.provenance.digest)} full={preview.provenance.digest} />
         </Fact>
       </div>
-      <ReviewBody entries={preview.review} audience="installer" />
+      <ReviewBody entries={preview.review} warnings={preview.warnings} audience="installer" />
       {preview.secrets.length === 0 ? null : (
         <section className="flex min-w-0 flex-col gap-sm" aria-label="Secrets" data-catalog-secrets="">
           <h4 className="m-0 text-meta font-semibold uppercase text-muted">Secrets it asks for</h4>

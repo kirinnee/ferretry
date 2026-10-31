@@ -336,7 +336,7 @@ function PreviewBlock({ preview }: { readonly preview: CatalogItemPreview }) {
           </ul>
         </section>
       )}
-      <ReviewBody entries={preview.review} installerView />
+      <ReviewBody entries={preview.review} warnings={preview.warnings} installerView />
     </section>
   );
 }
