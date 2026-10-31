@@ -805,6 +805,17 @@ describe('how a saved login signs in, from the command line', () => {
     should(await fails(async () => await controller.hint('not a site', {}))).containEql('is not a site');
   });
 
+  it('should run `secret entry hint` from the command line', async () => {
+    const { controller, messages } = rig(world());
+    const root = new Command().name('fy').exitOverride();
+    root.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+    registerLoginEntryCommands(root.command('secret'), controller);
+
+    await root.parseAsync(['node', 'fy', 'secret', 'entry', 'hint', 'vercel.com', '--json']);
+
+    should(JSON.parse(messages[0] ?? '').hints[0].id).equal('VERCEL');
+  });
+
   it('should ask the hint route with the site in the query', async () => {
     const seen: string[] = [];
     const gateway = new ProtocolLoginEntryGateway({

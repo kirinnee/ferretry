@@ -8,7 +8,7 @@ import {
   type LoginEntrySummary,
   type LoginMethod,
   LoginMethodKindSchema,
-  LoginMethodSchema,
+  LoginMethodChangeSchema,
   LOGIN_METHODS,
   LoginMatchSchema,
   loginHintSite,
@@ -116,7 +116,7 @@ function method(
   if (!kind.success) throw new Error(`--method is one of ${LOGIN_METHODS.join(', ')}`);
   const via = options.via === false ? undefined : options.via === undefined ? current?.via : handle(options.via);
   const name = options.ssoName ?? (kind.data === 'sso' ? current?.name : undefined);
-  const parsed = LoginMethodSchema.safeParse({
+  const parsed = LoginMethodChangeSchema.safeParse({
     kind: kind.data,
     ...(name === undefined ? {} : { name: name.trim() }),
     ...(via === undefined || kind.data === 'password' ? {} : { via }),

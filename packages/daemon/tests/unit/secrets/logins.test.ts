@@ -301,6 +301,18 @@ describe('how a saved login signs in, at rest', () => {
     should(terminal.domains).deepEqual(['accounts.google.com', 'myaccount.google.com']);
   });
 
+  it('should refuse a circle of provider links', async () => {
+    const w = world();
+    await w.directory.put('GOOGLE', change({ label: 'Google' }));
+    await w.directory.put('SITE', change({ label: 'Site', method: { kind: 'google', via: 'GOOGLE' } }));
+    const error = await w.directory
+      .put('GOOGLE', change({ method: { kind: 'sso', name: 'Site SSO', via: 'SITE' } }))
+      .catch(caught => caught);
+    should(error).be.instanceOf(LoginEntryError);
+    should(error.refusal).equal('bad_via');
+    should(error.message).containEql('leads back');
+  });
+
   it('should refuse a provider that is not saved, or the entry itself', async () => {
     const w = world();
     for (const [id, via] of [

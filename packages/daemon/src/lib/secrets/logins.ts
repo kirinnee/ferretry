@@ -405,6 +405,16 @@ function checkVia(id: LoginEntryId, method: LoginMethod | undefined, index: Logi
       'bad_via',
       `there is no saved login ${via} to sign in via; save the provider's login first`,
     );
+  // Follow the provider's own links: one that leads back here would send the ferret round in a circle.
+  const seen = new Set<string>([id]);
+  for (let next: string | undefined = via; next !== undefined; next = index.entries[next]?.method?.via) {
+    if (seen.has(next))
+      throw new LoginEntryError(
+        'bad_via',
+        `${id} via ${via} leads back to ${next}; a provider cannot go via a site that uses it`,
+      );
+    seen.add(next);
+  }
 }
 
 /**

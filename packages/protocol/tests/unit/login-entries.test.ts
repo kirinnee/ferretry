@@ -10,6 +10,7 @@ import {
   loginHintsFor,
   loginHintSummary,
   loginMethodOf,
+  LoginMethodChangeSchema,
   LoginMethodSchema,
   loginMethodSentence,
   normalizedLoginDomain,
@@ -137,9 +138,27 @@ describe('how an entry signs in', () => {
   });
 
   it('should refuse an SSO named for a passkey or a hardware key, however it is spelt', () => {
-    for (const name of ['Passkey', 'pass-key', 'Pass Key login', 'WebAuthn', 'FIDO2', 'YubiKey', 'Security key', 'U2F'])
-      expect(LoginMethodSchema.safeParse({ kind: 'sso', name }).success).toBe(false);
-    expect(LoginMethodSchema.safeParse({ kind: 'sso', name: 'Okta' }).success).toBe(true);
+    for (const name of [
+      'Passkey',
+      'pass-key',
+      'Pass Key login',
+      'WebAuthn',
+      'FIDO2',
+      'YubiKey',
+      'Security key',
+      'U2F',
+    ]) {
+      expect(LoginMethodChangeSchema.safeParse({ kind: 'sso', name }).success).toBe(false);
+      expect(PutLoginEntryRequestSchema.safeParse({ method: { kind: 'sso', name } }).success).toBe(false);
+    }
+    expect(LoginMethodChangeSchema.safeParse({ kind: 'sso', name: 'Okta' }).success).toBe(true);
+  });
+
+  it('should judge only a change by the passkey words, so a stored name never makes a listing unreadable', () => {
+    expect(LoginMethodSchema.safeParse({ kind: 'sso', name: 'Passkey' }).success).toBe(true);
+    expect(LoginEntrySummarySchema.safeParse({ ...SUMMARY, method: { kind: 'sso', name: 'Passkey' } }).success).toBe(
+      true,
+    );
   });
 
   it('should need a name for other SSO only, and take a provider login only for a provider method', () => {

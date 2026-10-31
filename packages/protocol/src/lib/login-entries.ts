@@ -146,16 +146,16 @@ export const LOGIN_METHOD_LABELS: Readonly<Record<LoginMethodKind, string>> = {
 const PASSKEY_WORDS =
   /pass\s*-?\s*key|web\s*-?\s*authn|fido|u2f|security\s*-?\s*key|hardware\s*-?\s*key|yubi\s*-?\s*key/iu;
 
-/** Whether a sign-in method's name means a passkey: the store refuses it. */
+/** Whether a sign-in method's name means a passkey: a change that says one is refused. */
 export const namesPasskey = (text: string): boolean => PASSKEY_WORDS.test(text);
+
+const PASSKEYS_OFF = 'passkeys are off: a saved login signs in with a password or a provider';
 
 export const LoginMethodSchema = z
   .strictObject({
     kind: LoginMethodKindSchema,
     /** `sso` only: the provider's name as the site's button says it ("Okta", "Company SSO"). */
-    name: oneLine(LOGIN_SSO_NAME_MAX_LENGTH)
-      .refine(name => !namesPasskey(name), 'passkeys are off: a saved login signs in with a password or a provider')
-      .optional(),
+    name: oneLine(LOGIN_SSO_NAME_MAX_LENGTH).optional(),
     /** An identity-provider method only: the saved login of that provider, whose page it fills. */
     via: LoginEntryIdSchema.optional(),
   })
@@ -168,6 +168,15 @@ export const LoginMethodSchema = z
       context.addIssue({ code: 'custom', path: ['via'], message: 'a password sign-in is not via another login' });
   });
 export type LoginMethod = z.infer<typeof LoginMethodSchema>;
+
+/**
+ * A method as a CHANGE sends it: {@link LoginMethodSchema}, and an SSO name that says passkey is refused. Only a
+ * write is judged by the word list, so a list that grows later never makes an entry already stored unreadable.
+ */
+export const LoginMethodChangeSchema = LoginMethodSchema.refine(
+  method => method.name === undefined || !namesPasskey(method.name),
+  { path: ['name'], message: PASSKEYS_OFF },
+);
 
 /** The method an entry reads as: one saved before methods existed signs in with its password. */
 export const PASSWORD_METHOD: LoginMethod = { kind: 'password' };
@@ -231,7 +240,7 @@ export const PutLoginEntryRequestSchema = z
     label: oneLine(LOGIN_LABEL_MAX_LENGTH).optional(),
     match: z.array(LoginMatchSchema).max(LOGIN_MATCH_MAX).optional(),
     /** The whole method, replaced: `{ kind: 'password' }` goes back to a password sign-in. */
-    method: LoginMethodSchema.optional(),
+    method: LoginMethodChangeSchema.optional(),
     domains: z.array(LoginDomainSchema).max(LOGIN_MATCH_MAX).optional(),
     username: oneLine(LOGIN_USERNAME_MAX_LENGTH).nullable().optional(),
     password: z

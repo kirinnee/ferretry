@@ -121,6 +121,16 @@ export function signInFor(
   };
 }
 
+/**
+ * A site that signs in THROUGH a provider never has the provider's login typed into its own page: the provider's
+ * password belongs on the provider's domain, where it is matched. So its card leaves that entry out (unless the
+ * daemon matched it here too, which only an owner's own login domains can do).
+ */
+function withoutProvider(offers: readonly InputSavedOffer[], signIn: InputSignIn | undefined): InputSavedOffer[] {
+  const provider = signIn?.via?.id;
+  return offers.filter(offer => offer.id !== provider || offer.matched);
+}
+
 function holds(entry: LoginEntrySummary, role: LoginFieldRole): boolean {
   return role === 'username' ? entry.username !== undefined : entry.fields[role];
 }
@@ -166,7 +176,7 @@ export function savedFor(
     ...(matchKey === undefined ? {} : { match: matchKey }),
     ...(suggest === undefined || saves === undefined ? {} : { suggest }),
     ...(saves === undefined ? {} : { saves }),
-    offers,
+    offers: withoutProvider(offers, signIn),
     ...(signIn === undefined ? {} : { signIn }),
   };
 }
@@ -194,7 +204,8 @@ export function savedForFields(
     ...offered
   } = savedFor(strongestSensitivity(fields), matchKey, complete, hint);
   const signIn = signInFor(matchKey, entries);
-  const withSignIn = signIn === undefined ? offered : { ...offered, signIn };
+  const withSignIn =
+    signIn === undefined ? offered : { ...offered, offers: withoutProvider(offered.offers, signIn), signIn };
   const kept = savedRolesOf(fields);
   if (kept === undefined) return withSignIn;
   // The entry Save as would update is one this target already matches, not only one that can fill the card.

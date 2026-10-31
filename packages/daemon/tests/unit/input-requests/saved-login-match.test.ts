@@ -171,6 +171,7 @@ describe('a page card matches where an entry signs in', () => {
       via: { id: 'GOOGLE_KIRIN', label: 'Google (kirin@)' },
     });
     should(saved.offers.some(offer => offer.matched)).be.false();
+    should(saved.offers.map(offer => offer.id)).not.containEql('GOOGLE_KIRIN');
     should(signInFor('sudo@kirin-box', [google, vercel])).be.undefined();
   });
 
@@ -179,6 +180,24 @@ describe('a page card matches where an entry signs in', () => {
       { id: 'email', sensitivity: 'plain' as const },
       { id: 'password', sensitivity: 'secret' as const },
     ];
-    should(savedForFields(fields, 'vercel.com', [google, vercel], undefined).signIn?.via?.id).equal('GOOGLE_KIRIN');
+    const saved = savedForFields(fields, 'vercel.com', [google, vercel], undefined);
+    should(saved.signIn?.via?.id).equal('GOOGLE_KIRIN');
+    should(saved.offers.map(offer => offer.id)).not.containEql('GOOGLE_KIRIN');
+  });
+});
+
+describe('a provider login the owner also signs in with on the site', () => {
+  it('should still offer it where its own login domains make it matched', () => {
+    const google = entry('GOOGLE_KIRIN', ['accounts.google.com'], {
+      label: 'Google (kirin@)',
+      domains: ['accounts.google.com', 'vercel.com'],
+    });
+    const vercel = entry('VERCEL', ['vercel.com'], {
+      method: { kind: 'google', via: 'GOOGLE_KIRIN' },
+      domains: ['vercel.com'],
+      fields: { password: false, totp: false },
+    });
+    const saved = savedFor('secret', 'vercel.com', [google, vercel], undefined);
+    should(saved.offers.find(offer => offer.id === 'GOOGLE_KIRIN')?.matched).be.true();
   });
 });

@@ -87,6 +87,53 @@ describe('login.hint', () => {
     should(error.code).equal('unavailable');
   });
 
+  it('should refuse a site that is not one, and a page that is not on a site yet', async () => {
+    const world = agentToolWorld({ logins: listing() });
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+    // A page that has not navigated anywhere yet, as the real browser reports it.
+    const status = world.browser.status.bind(world.browser);
+    world.browser.status = async sessionId => {
+      const seen = await status(sessionId);
+      return { ...seen, pages: seen.pages.map(row => ({ ...row, url: 'about:blank' })) } as typeof seen;
+    };
+
+    const site = (await world.service
+      .call(agent, { tool: 'login.hint', site: 'not a site' })
+      .catch((caught: unknown) => caught)) as AgentToolError;
+    const page = (await world.service
+      .call(agent, { tool: 'login.hint', name: 'app' })
+      .catch((caught: unknown) => caught)) as AgentToolError;
+
+    should(site.code).equal('bad_request');
+    should(site.message).containEql('Name a site');
+    should(page.code).equal('bad_request');
+    should(page.message).containEql('not on a site yet');
+  });
+
+  it('should say the saved logins cannot be read, never that there are none', async () => {
+    const world = agentToolWorld({
+      logins: {
+        list: async () => {
+          throw new Error('the vault key is gone');
+        },
+      },
+    });
+
+    const error = (await world.service
+      .call(agent, { tool: 'login.hint', site: 'github.com' })
+      .catch((caught: unknown) => caught)) as AgentToolError;
+
+    should(error.code).equal('unavailable');
+    should(error.message).containEql('cannot be read');
+  });
+
+  it('should name the page in the audit when the hint was for a page', async () => {
+    const world = agentToolWorld({ logins: listing() });
+    await world.service.call(agent, { tool: 'browser.open', name: 'app', url: 'https://vercel.com/' });
+    await world.service.call(agent, { tool: 'login.hint', name: 'app' });
+    should(world.audit.entries.at(-1)?.detail).match({ tool: 'login.hint', from: 'page', surface: '%browser:app' });
+  });
+
   it('should be audited by how it was asked, never by what it answered', async () => {
     const world = agentToolWorld({ logins: listing() });
     await world.service.call(agent, { tool: 'login.hint', site: 'vercel.com' });

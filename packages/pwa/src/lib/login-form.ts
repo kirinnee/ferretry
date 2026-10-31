@@ -18,7 +18,7 @@ import {
   LoginMatchSchema,
   type LoginMethod,
   type LoginMethodKind,
-  LoginMethodSchema,
+  LoginMethodChangeSchema,
   loginDomainsOf,
   loginMethodOf,
   loginMethodSentence,
@@ -103,7 +103,7 @@ export const viaChoices = (
 /** Why the sign-in part of a form cannot go, in the schema's own words, or `undefined`. */
 export const signInProblem = (draft: SignInDraft): string | undefined => {
   if (draft.method === 'sso' && draft.ssoName.trim() === '') return 'Name the SSO provider, as its button says it.';
-  const parsed = LoginMethodSchema.safeParse(methodOfDraft(draft));
+  const parsed = LoginMethodChangeSchema.safeParse(methodOfDraft(draft));
   if (!parsed.success) return parsed.error.issues[0]?.message ?? 'That sign-in method is not valid.';
   const bad = domainParts(draft.domains).find(part => normalizedLoginDomain(part) === undefined);
   if (bad !== undefined) return `"${bad}" is not a web host, like app.vercel.com.`;

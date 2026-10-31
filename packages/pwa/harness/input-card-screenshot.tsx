@@ -105,7 +105,7 @@ const chain = fakeRequest({
   observed: page([browserField('code', { field: { tag: 'input', type: 'text', autocomplete: 'one-time-code' } })]),
 });
 // The ferret asked for a password on Vercel's own page, but Vercel signs in with Google: the card says so, and the
-// Google login is NOT the one tap here (it is matched only on accounts.google.com), just selectable by hand.
+// Google login is not offered here at all: it is typed only on accounts.google.com, where it is the one tap.
 const signin = fakeRequest({
   target: { kind: 'browser', key: 'app' },
   prompt: 'Sign in to Vercel',
@@ -124,7 +124,7 @@ const signin = fakeRequest({
   ),
   saved: savedSignIn({
     match: 'app.vercel.com',
-    offers: [offer({ id: 'GOOGLE_KIRIN', label: 'Google (kirin@…)', matched: false, username: 'kirin@example.test' })],
+    offers: [],
   }),
 });
 const request = { first, next, google, chain, signin }[view] ?? first;

@@ -290,3 +290,13 @@ describe('the login hint a ferret reads', () => {
     should(change.status).equal(403);
   });
 });
+
+describe('the login hint over a damaged store', () => {
+  it('should answer the damage as the server’s fault, never as no hint', async () => {
+    const subsystem = secretSubsystem({
+      loginIndex: new MemoryLoginIndex(new SecretStoreError('unreadable', 'bad json')),
+    });
+    const response = await dispatchAs(human, subsystem, 'GET', '/v1/secrets/logins/hint?site=github.com');
+    should(response.status).equal(500);
+  });
+});

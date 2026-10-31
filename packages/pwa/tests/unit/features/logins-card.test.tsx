@@ -391,6 +391,19 @@ describe('how a login signs in', () => {
     ]);
   });
 
+  it('forgets a half-made sign-in change on Cancel, so the next edit starts from what is saved', async () => {
+    const view = await show(signInLogins());
+    const vercel = row(view, 'VERCEL');
+
+    await click(inRow(vercel, '[aria-label="Edit Vercel"]'));
+    await choose(view.q('[data-login-edit-method]'), 'github');
+    await click(byText(vercel, 'button', 'Cancel'));
+    await click(inRow(vercel, '[aria-label="Edit Vercel"]'));
+
+    expect(must(view.q<HTMLSelectElement>('[data-login-edit-method]'), 'method').value).toBe('google');
+    expect(view.puts).toEqual([]);
+  });
+
   it('prefills an older entry with its web match hosts and sends nothing until something changes', async () => {
     const view = await show();
     const github = row(view, 'GITHUB_KIRINNEE');

@@ -233,6 +233,14 @@ describe('a person’s tool routes', () => {
     should(jsonBody(wrong)).match({ error: 'this route takes browser tools; terminal.list is not one' });
   });
 
+  it('should keep the login hint an agent’s tool: no person’s surface route takes it', async () => {
+    const { dispatch } = served();
+    const wrong = await dispatch.dispatch(
+      personCall('/v1/sessions/s1/surfaces/browser/tools', { tool: 'login.hint', site: 'vercel.com' }),
+    );
+    should(wrong.status).equal(400);
+  });
+
   it('should refuse a session id that cannot be one', async () => {
     const { dispatch } = served();
     const bad = await dispatch.dispatch(

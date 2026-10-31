@@ -1618,7 +1618,7 @@ export class AgentToolService {
   ): Promise<void> {
     const surface = facts.surface;
     const key = surface === undefined ? ('name' in call ? call.name : undefined) : (surface.name ?? surface.id);
-    const kind = kindOf(call);
+    const kind = surface?.surface ?? kindOf(call);
     const detail: AuditDetail = {
       tool: call.tool,
       by: caller.kind,
