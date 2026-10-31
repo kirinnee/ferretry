@@ -61,6 +61,7 @@ export * from './pack.ts';
 export * from './pack-cleanup.ts';
 export * from './pack-mentions.ts';
 export * from './pairing.ts';
+export * from './pairing-redirect.ts';
 export * from './performance.ts';
 export * from './performance-redaction.ts';
 export * from './performance-render.ts';

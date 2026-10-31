@@ -1,6 +1,11 @@
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+  PAIRING_REDIRECT_DIRECTORY_PREFIX,
+  PAIRING_REDIRECT_FILE_NAME,
+  PAIRING_REDIRECT_LIFETIME_MS,
+} from '@ferretry/protocol';
 import type { IBrowserOpener } from '../../lib/pair/ports.ts';
 import { renderPairingRedirectPage } from '../../lib/pair/redirect-page.ts';
 
@@ -41,14 +46,6 @@ import { renderPairingRedirectPage } from '../../lib/pair/redirect-page.ts';
  * WHAT IT DOES NOT CLAIM: that a browser actually rendered anything. A zero exit from `xdg-open` means
  * the handler was invoked, not that a window appeared, and this reports exactly that much.
  */
-
-/**
- * How long the page outlives the launcher.
- *
- * Long enough for a browser that is not running yet to start and read a local file, short enough that
- * the code is on disk for a fraction of its own two-minute life.
- */
-const REDIRECT_PAGE_LIFETIME_MS = 10_000;
 
 /** The launcher for a platform, or nothing when this host has no documented one. */
 const launcher = (platform: string): { readonly command: string; readonly leading: readonly string[] } | undefined => {
@@ -92,8 +89,8 @@ export class DesktopBrowserOpener implements IBrowserOpener {
     };
     try {
       const page = renderPairingRedirectPage(link);
-      directory = mkdtempSync(join(this.environment.stateHome, 'pair-open-'));
-      const file = join(directory, 'pairing.html');
+      directory = mkdtempSync(join(this.environment.stateHome, PAIRING_REDIRECT_DIRECTORY_PREFIX));
+      const file = join(directory, PAIRING_REDIRECT_FILE_NAME);
       writeFileSync(file, page, { flag: 'wx', mode: 0o600 });
       // Registered before the launcher starts, so there is no window in which the page exists unguarded.
       this.environment.onExit(discard);
@@ -156,7 +153,7 @@ export const desktopBrowserOpener = (stateHome: string): IBrowserOpener =>
     platform: process.platform,
     spawn,
     stateHome,
-    retentionMs: REDIRECT_PAGE_LIFETIME_MS,
+    retentionMs: PAIRING_REDIRECT_LIFETIME_MS,
     schedule: holdProcessOpen,
     onExit: onProcessExit.bind(undefined, process),
   });

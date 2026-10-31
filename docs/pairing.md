@@ -334,8 +334,16 @@ Whatever draws a QR of a pairing link is handling a credential for somebody's ma
   code touches disk, so the page lives seconds, not minutes: it is deleted 10 seconds after the launcher
   starts, at once if the launcher is missing, and when the process exits or is stopped. The timer holds
   `fy pair --no-wait` open for those seconds so the page is not removed before a cold browser reads it.
-  Declared GAP: a `SIGKILL` or a power loss inside that window leaves a page whose code has already
-  expired — dead, but still on disk under a `0700` directory only its owner can enter.
+  Declared GAP: a `SIGKILL` or a power loss inside that window leaves a page behind. **A code expires two
+  minutes after it is minted whether or not a leftover file survives** — the page can outlive its
+  usefulness but never extend the code's life, and a code older than that opens nothing. The file is still
+  a stale credential on disk, so it is swept rather than trusted to the expiry: the next `fy pair` and the
+  daemon's boot both remove any `<FY_HOME>/pair-open-XXXXXX/pairing.html` older than 30 seconds
+  (`sweepPairingRedirects` in `packages/protocol/src/adapters/pairing-redirect-sweep.ts`, the names and age
+  in `pairing-redirect.ts` so the two programs cannot disagree). The sweep matches the directory name
+  exactly, never follows a symbolic link, unlinks only a regular file, removes the directory with a plain
+  `rmdir`, and treats an absent state home as nothing to do. A page younger than 30 seconds is left to the
+  `fy pair` that may be showing it to a browser right now.
 - **Never screenshot a real one.** Committed captures use a fixed fake code (`HARNESS_INVITE`). A QR is a
   machine-readable label, not obfuscation, so a PNG of a real code in a repository is a leaked credential.
 

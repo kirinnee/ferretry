@@ -27,6 +27,7 @@ import {
   RELAY_LOCAL_ONLY_MINT,
   RELAY_PAIR_URL,
   RecordingBrowserOpener,
+  RecordingRedirectSweeper,
   RecordingProgress,
   redeemed,
   ScriptedPairGateway,
@@ -60,6 +61,7 @@ function harness(overrides: Partial<PairDeps> = {}, gateway = new ScriptedPairGa
     qr,
     terminal: new FixedTerminalSize(100),
     browser,
+    redirectSweeper: new RecordingRedirectSweeper(),
     binaryName: 'fy',
     ...overrides,
   };
@@ -317,6 +319,25 @@ describe('fy pair', () => {
     await should(h.subject.pair({})).be.rejectedWith('daemon URL must be an origin without a path');
     should(h.screen.writes).be.empty();
     should(h.qr.requests).be.empty();
+  });
+
+  it("should sweep a killed --open's leftover page before it mints, so a failed pairing still leaves the host clean", async () => {
+    // A page a SIGKILLed `fy pair --open` left behind holds a dead but real pairing code. Sweeping is the
+    // first thing a pairing does, ahead of the mint that can fail, so it happens however the pairing ends.
+    const order: string[] = [];
+    const sweeper = new RecordingRedirectSweeper(() => order.push('sweep'));
+    const gateway = new ScriptedPairGateway([pending], new Error('host-local access required'));
+    const mint = gateway.mint.bind(gateway);
+    gateway.mint = async grants => {
+      order.push('mint');
+      return await mint(grants);
+    };
+    const h = harness({ redirectSweeper: sweeper }, gateway);
+
+    await should(h.subject.pair({})).be.rejectedWith('host-local access required');
+
+    should(sweeper.sweeps).equal(1);
+    should(order).eql(['sweep', 'mint']);
   });
 
   it('should let a mint failure surface, so no screen claims a code that was never issued', async () => {

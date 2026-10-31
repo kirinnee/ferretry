@@ -14,6 +14,7 @@ import type {
   IPairExit,
   IPairGateway,
   IPairProgress,
+  IPairRedirectSweeper,
   IPairScreen,
   IQrEncoder,
   ITerminalSize,
@@ -75,6 +76,8 @@ export interface PairDeps {
   readonly terminal: ITerminalSize;
   /** Opens a URL on this host, for the same-machine case. */
   readonly browser: IBrowserOpener;
+  /** Removes the redirect pages a killed `--open` left behind, before a new code is minted. */
+  readonly redirectSweeper: IPairRedirectSweeper;
   /** What this binary is called, so every retry hint is a command the operator actually has. */
   readonly binaryName: string;
 }
@@ -99,6 +102,8 @@ export class PairController {
   constructor(private readonly deps: PairDeps) {}
 
   async pair(options: PairOptions): Promise<void> {
+    // First, before anything can fail: a pairing that cannot reach its daemon should still leave the host clean.
+    await this.deps.redirectSweeper.sweep();
     const requestedGrants = options.limited === true ? 'limited' : 'full';
     const mint = await this.deps.gateway.mint(requestedGrants);
     const remainingMs = this.#lifespan(mint);
