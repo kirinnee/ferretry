@@ -25,6 +25,8 @@ export interface TeardownOptions {
   readonly tmux: string | null;
   /** How long a daemon may take to exit on SIGTERM before it is killed. */
   readonly exitWithinMs?: number;
+  /** How long a daemon's control client may take to leave once the daemon has exited, before it is killed. */
+  readonly clientsWithinMs?: number;
   /** How long the servers' processes may take to leave once `kill-server` has answered. */
   readonly settleWithinMs?: number;
 }
@@ -39,6 +41,9 @@ const POLL_MS = 20;
  * in the integration coverage ledger, which counts adapters only.
  */
 const SWEEP = resolve(import.meta.dir, '../../../../../scripts/test/tmux-sweep.ts');
+
+/** A tmux process attached to a server as a client (a daemon's control-mode client is one), not the server itself. */
+const CLIENT = /\sattach(?:-session)?\s/u;
 
 /** Every tmux process — server or client — whose argv names one of `sockets`, as `ps` lists it. */
 function tmuxOn(sockets: readonly string[]): readonly string[] {
@@ -106,6 +111,14 @@ async function within(withinMs: number, done: () => boolean): Promise<boolean> {
  * each. CI run 40615810178 hit it as two "leaked servers" six pids apart on one socket. Waiting for
  * the exit first means no client of a dying daemon is ever on the server `kill-server` ends.
  *
+ * THE CLIENTS LEAVE FIRST, BY CONDITION. A daemon that has exited has not yet taken its control client with
+ * it: the client sees its stdin close and detaches a moment later, and on a loaded runner that moment is
+ * long enough for `kill-server` to arrive in the middle of it, which is the same deadlock. CI runs
+ * 41170241232 and 41220302930 (`restart-in-flight.test.ts`, two processes sharing four cores) each left one
+ * server and one `-C attach-session` client for the whole 30 s settle wait. So `kill-server` waits until
+ * no client of these sockets is left; a client that is still there after `clientsWithinMs` is stuck, is
+ * killed so the server can answer, and is reported by pid.
+ *
  * BY PROCESS AFTERWARDS. A tmux process still naming a socket once `kill-server` has run is found by
  * its argv, as the run's own sweep finds it, killed with everything in its panes by that sweep
  * (`scripts/test/tmux-sweep.ts`), and reported — so the test that left it fails by name instead of
@@ -120,7 +133,7 @@ async function within(withinMs: number, done: () => boolean): Promise<boolean> {
  */
 export async function tearDownSupervisedDaemons(
   fixture: SupervisedDaemonFixture,
-  { tmux, exitWithinMs = 30_000, settleWithinMs = 30_000 }: TeardownOptions,
+  { tmux, exitWithinMs = 30_000, clientsWithinMs = 10_000, settleWithinMs = 10_000 }: TeardownOptions,
 ): Promise<void> {
   const failures: string[] = [];
   const daemons = [...fixture.daemons];
@@ -135,6 +148,14 @@ export async function tearDownSupervisedDaemons(
 
   const sockets = disposable([...fixture.sockets], 'the fixture tmux socket', failures);
   fixture.sockets.clear();
+  const clientsOn = (): readonly string[] => tmuxOn(sockets).filter(line => CLIENT.test(line));
+  if (!(await within(clientsWithinMs, () => clientsOn().length === 0))) {
+    const stuck = clientsOn();
+    for (const line of stuck) signal(Number.parseInt(line, 10), 'SIGKILL');
+    failures.push(
+      `a tmux client was still attached ${String(clientsWithinMs)} ms after its daemon exited and was killed:\n${stuck.join('\n')}`,
+    );
+  }
   if (tmux !== null)
     for (const socket of sockets)
       await Bun.spawn([tmux, '-S', socket, 'kill-server'], { stdout: 'ignore', stderr: 'ignore' }).exited;
