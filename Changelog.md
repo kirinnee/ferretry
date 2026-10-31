@@ -1,3 +1,14 @@
+## [4.169.0](https://github.com/kirinnee/ferretry/compare/v4.168.2...v4.169.0) (2026-10-31)
+
+### Features
+
+* **fleet:** teach ferrets the input bridge for web logins (P4 instruction) ([#1148](https://github.com/kirinnee/ferretry/issues/1148)) ([26239ff](https://github.com/kirinnee/ferretry/commit/26239ff3f6707f88f751fb1c3486541520c4b1c0))
+* **input:** pages through the input bridge — browser fields, page holds, passkeys off (P4) ([#1147](https://github.com/kirinnee/ferretry/issues/1147)) ([49ecf9e](https://github.com/kirinnee/ferretry/commit/49ecf9ed6dd23cc94d5812e2b3b2b249f31bb688))
+
+### Fixes
+
+* **quota:** record a Codex turn that ended on its usage limit as rate limited ([#1164](https://github.com/kirinnee/ferretry/issues/1164)) ([e44f119](https://github.com/kirinnee/ferretry/commit/e44f119aedb7acd593d9f4697c253796fb3da0a0))
+
 ## [4.168.2](https://github.com/kirinnee/ferretry/compare/v4.168.1...v4.168.2) (2026-10-31)
 
 ### Fixes
