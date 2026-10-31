@@ -142,8 +142,11 @@ import {
 } from '../lib/session-restart.ts';
 import {
   type LogPageOptions,
+  type LogSearchOptions,
   type SessionLogPage,
   SessionLogPageSchema,
+  type SessionLogSearch,
+  SessionLogSearchSchema,
   type SessionTranscriptPage,
   SessionTranscriptPageSchema,
 } from '../lib/session-transcript.ts';
@@ -1144,6 +1147,19 @@ export class FyApiClient implements IFyApiClient {
     if (etag === null) this.#validatedLogs.forget(path);
     else this.#validatedLogs.remember(path, { etag, body: JSON.stringify(page) });
     return page;
+  }
+
+  /** Every place in a session's whole transcript that says `query`, oldest first. Never cached. */
+  logSearch(id: string, query: string, options: LogSearchOptions = {}): Promise<SessionLogSearch> {
+    const search = new URLSearchParams({ q: NonEmptyValueSchema.parse(query) });
+    if (options.who !== undefined) search.set('who', options.who);
+    if (options.tools === true) search.set('tools', '1');
+    if (options.limit !== undefined) search.set('limit', String(PositiveIntegerSchema.max(2_000).parse(options.limit)));
+    return this.request(
+      `/v1/sessions/${encodeURIComponent(NonEmptyValueSchema.parse(id))}/log-search?${search.toString()}`,
+      SessionLogSearchSchema,
+      options.signal === undefined ? {} : { signal: options.signal },
+    );
   }
 
   handoff(id: string, name: string): Promise<SessionHandoff> {

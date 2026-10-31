@@ -1,6 +1,6 @@
 import type { AgendaId, AgendaSnapshot, IFyApiClient, SessionView } from '@ferretry/protocol';
 import { WorktreeListResponseSchema } from '@ferretry/protocol';
-import { Pause, Play } from 'lucide-react';
+import { Pause, Play, Search } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { AgendaItemsProvider } from '../../components/agenda-message.tsx';
 import { AttachmentGalleryProvider } from '../../components/attachment-gallery.tsx';
@@ -32,6 +32,7 @@ import { SessionTopBar, sessionDisplayName } from '../../components/session-top-
 import type { SendDismiss, SendExpand } from '../../components/settled-send-note.tsx';
 import type { PaneSnapshotReader } from '../../components/terminal-snapshot.tsx';
 import { readPaneSnapshot } from '../../components/terminal-snapshot-model.ts';
+import { ChatSearch, type ChatSearchPort } from '../../components/chat-search.tsx';
 import { Transcript } from '../../components/transcript.tsx';
 import type { TranscriptHistoryControl } from '../../components/transcript-history-row.tsx';
 import { TranscriptUnboundNotice } from '../../components/transcript-unbound-notice.tsx';
@@ -203,6 +204,8 @@ export interface SessionChatPageProps {
   readonly readingPosition?: ChatScrollSlot;
   /** What the top of the transcript offers, and how to load older messages (`lib/transcript-history.ts`). */
   readonly history?: TranscriptHistoryControl;
+  /** Search within the conversation — the whole transcript — and jump to a match. Absent: no search. */
+  readonly conversationSearch?: ChatSearchPort;
   /**
    * The Tasks tab's place: expanded over the chat or in the panel, and whether agent tasks show. The app
    * keeps both in the address (`?tasks=full`, `?agents=1`) so Back collapses the board; absent, the page
@@ -440,6 +443,7 @@ export function SessionChatPage({
   catchingUp = false,
   readingPosition,
   history,
+  conversationSearch,
   tasksView,
   connectionState,
   chatWidth = 'readable',
@@ -897,6 +901,31 @@ export function SessionChatPage({
       ? undefined
       : session.state.harnessDialog;
   const compact = presentation === 'sheet';
+  // ---- SEARCH WITHIN THE CONVERSATION (`components/chat-search.tsx`) ----------------------------------
+  const [searchOpen, setSearchOpen] = useState(false);
+  /** Bumped to put the caret back in the search box. */
+  const [searchFocus, setSearchFocus] = useState(0);
+  const messagesRef = useRef<HTMLDivElement | null>(null);
+  const openSearch = useCallback(() => {
+    setSearchOpen(true);
+    setSearchFocus(count => count + 1);
+  }, []);
+  // Ctrl/Cmd-F in this chat searches the conversation instead of the page — which holds only what is
+  // loaded. Only while focus is in the chat or nowhere, so the browser's own find still serves other panes.
+  useEffect(() => {
+    if (conversationSearch === undefined) return;
+    const find = (event: KeyboardEvent): void => {
+      if (event.key.toLowerCase() !== 'f' || !(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey)
+        return;
+      const surface = messagesRef.current?.closest('.kt-chat-surface') ?? messagesRef.current?.parentElement;
+      const focus = document.activeElement;
+      if (focus !== null && focus !== document.body && surface?.contains(focus) !== true) return;
+      event.preventDefault();
+      openSearch();
+    };
+    window.addEventListener('keydown', find);
+    return () => window.removeEventListener('keydown', find);
+  }, [conversationSearch, openSearch]);
   const chatSurface = useRef<HTMLDivElement | null>(null);
   useChatScrollbarGutter(chatSurface, session.config.id);
   /**
@@ -1183,6 +1212,22 @@ export function SessionChatPage({
   // the name, one status dot, the theme icon, ⓘ and ▾. The theme picker is the bar's own icon, not a form in ▾.
   const interruptSpec = barActions.find(spec => spec.action === 'interrupt');
   const barOverflowActions: readonly SessionActionContribution<CoreActionContext>[] = [
+    // Search: Ctrl/Cmd-F on a keyboard, and this row — the phone's way in, the 🔍 of ▾.
+    ...(conversationSearch === undefined
+      ? []
+      : [
+          {
+            group: 'session',
+            order: 1,
+            build: () => ({
+              kind: 'run',
+              id: 'search',
+              label: 'Search this conversation',
+              icon: Search,
+              run: openSearch,
+            }),
+          } satisfies SessionActionContribution<CoreActionContext>,
+        ]),
     ...(compact
       ? [
           {
@@ -1494,11 +1539,25 @@ export function SessionChatPage({
           />
         </div>
       ) : null}
+      {conversationSearch !== undefined && searchOpen ? (
+        <ChatSearch
+          agentName={agentName}
+          focusSignal={searchFocus}
+          onClose={() => setSearchOpen(false)}
+          port={conversationSearch}
+          transcript={messagesRef}
+        />
+      ) : null}
       <div className="fy-chat-log">
         {/* An open item covers the message list only: the transcript stays mounted, but is hidden from sight and keys.
             The list is a real element in the log's ONE grid cell, like the view over it: a `contents` wrapper let the
             transcript fall into a second row, which squeezed an open item to 0px under an inert, untouchable list. */}
-        <div className="fy-chat-log__messages" data-chat-messages="" inert={agenda.covered || undefined}>
+        <div
+          className="fy-chat-log__messages"
+          data-chat-messages=""
+          inert={agenda.covered || undefined}
+          ref={messagesRef}
+        >
           {/* The agenda the conversation's answer and reply cards name their items from (`agenda-message.tsx`). */}
           <AgendaItemsProvider snapshot={agendaModel?.snapshot}>
             <Transcript

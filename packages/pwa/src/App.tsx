@@ -37,6 +37,7 @@ import {
 import { SessionsPage } from './components/sessions-page.tsx';
 import type { SendDismiss, SendExpand } from './components/settled-send-note.tsx';
 import type { TranscriptHistoryControl } from './components/transcript-history-row.tsx';
+import type { ChatSearchPort } from './components/chat-search.tsx';
 import { useAgendaSessionActions } from './features/agenda/agenda-session-actions.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { TERMINAL_STATUSES } from './shell/status-mark.tsx';
@@ -1171,6 +1172,17 @@ function SessionRoute({
   );
   /** The highest event sequence this browser has actually received. `0` means none yet. */
   const [liveCursor, setLiveCursor] = useState(0);
+  /** Search the whole conversation, and load the chat back to a match (`components/chat-search.tsx`). */
+  const conversationSearch = useMemo<ChatSearchPort | undefined>(
+    () =>
+      client === null
+        ? undefined
+        : {
+            search: async (query, options) => await client.logSearch(sessionId, query, options),
+            reach: async (offset, file) => (await refreshControl.current?.loadUntil(offset, file)) ?? false,
+          },
+    [client, sessionId],
+  );
   /**
    * The same number, held where a RESUBSCRIPTION can read it.
    *
@@ -1666,6 +1678,7 @@ function SessionRoute({
             daemonSessions={fleetSlice?.sessions ?? undefined}
             entries={placedEntries}
             history={history}
+            {...(conversationSearch === undefined ? {} : { conversationSearch })}
             onRetry={retrySend}
             onCancel={cancelSend}
             onSubmit={submitSend}

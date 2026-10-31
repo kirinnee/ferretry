@@ -41,7 +41,13 @@ import type {
 } from './session.ts';
 import type { ForkSessionOutcome, ForkSessionRequest } from './session-fork.ts';
 import type { SessionLiveActivity, SessionTranscriptMoved } from './session-live.ts';
-import type { LogPageOptions, SessionLogPage, SessionTranscriptPage } from './session-transcript.ts';
+import type {
+  LogPageOptions,
+  LogSearchOptions,
+  SessionLogPage,
+  SessionLogSearch,
+  SessionTranscriptPage,
+} from './session-transcript.ts';
 import type { TranscriptImageDownload } from './transcript-images.ts';
 import type { MachineSkillsInventory, SessionSkillsInventory, SkillFile } from './skills-inventory.ts';
 import type { SessionHandoff } from './turn-handoff.ts';
@@ -256,6 +262,13 @@ export interface IFyApiClient {
    * stitched on. An older daemon answers `unknown_route`.
    */
   logPage(id: string, options?: LogPageOptions): Promise<SessionLogPage>;
+  /**
+   * Every place in a session's WHOLE transcript that says `query` — not just what a chat has loaded —
+   * oldest first, each with the byte offset of its record (the coordinate `logPage` offsets carry) and
+   * a snippet cut from scrubbed text. `who` narrows to the owner's messages or the agent's; `tools`
+   * searches tool calls, results and thinking too. `truncated` says older matches were not looked for.
+   */
+  logSearch(id: string, query: string, options?: LogSearchOptions): Promise<SessionLogSearch>;
   /**
    * Read one session's durable conversation as rows a caller can fork through. This is NOT `logs`
    * with structure: the cursor and each row's binding are OPAQUE DAEMON-ISSUED BYTES, stored and sent

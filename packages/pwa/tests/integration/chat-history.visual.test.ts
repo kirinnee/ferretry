@@ -22,6 +22,7 @@ const shotsDir = process.env.FY_HISTORY_SHOTS_DIR ?? '';
 const SCENE_CSS = `
   html, body, #root { height: 100%; margin: 0; }
   .scene-chat { box-sizing: border-box; display: flex; flex-direction: column; inset: 0; position: fixed; }
+  .scene-messages { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; }
   .scene-chat .fy-transcript-shell { flex: 1 1 auto; margin: 0 auto; max-width: 760px; padding: 0 16px; width: 100%; box-sizing: border-box; min-height: 0; }
 `;
 
@@ -172,6 +173,58 @@ describe('scrolling a long chat back to its first message', () => {
             [...document.body.innerText.matchAll(/Question (\d+):/g)].map(match => Number(match[1])),
           );
           expect(questions).toEqual(Array.from({ length: 150 }, (_, index) => index * 10));
+        } finally {
+          await context.close();
+        }
+      }, 120_000);
+});
+
+describe('searching a long chat and jumping to a match', () => {
+  for (const { name, viewport, deviceScaleFactor } of VIEWPORTS)
+    for (const scheme of ['light', 'dark'] as const)
+      it(`finds an old message, loads back to it and marks it on a ${name} in ${scheme}`, async () => {
+        const context = await browser.newContext({ viewport, colorScheme: scheme, deviceScaleFactor });
+        try {
+          const origin = server?.url.origin ?? '';
+          await context.route('**/*', async route =>
+            new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+          );
+          const tab = await context.newPage();
+          await tab.goto(`${origin}/?theme=studio-${scheme}&search=1`);
+          await tab.waitForFunction(() => document.body.innerText.includes('Answer 1499.'));
+          const box = tab.locator('input[type="search"]');
+
+          // A message 1,080 records back — far past the tail — found, reached and marked.
+          await box.fill('question 420:');
+          await tab.waitForFunction(() => document.querySelector('.fy-chat-search__count')?.textContent === '1 of 1');
+          await tab.waitForSelector('[data-search-current]');
+          await framesSettled(tab);
+          const placed = await tab.evaluate(() => {
+            const row = document.querySelector('[data-search-current]') as HTMLElement;
+            const scroller = document.querySelector('.fy-transcript') as HTMLElement;
+            const r = row.getBoundingClientRect();
+            const s = scroller.getBoundingClientRect();
+            const registry = (CSS as unknown as { highlights?: Map<string, { size: number }> }).highlights;
+            return {
+              text: row.textContent ?? '',
+              inView: r.top >= s.top && r.bottom <= s.bottom,
+              painted: registry?.get('fy-search-current')?.size ?? 0,
+            };
+          });
+          expect(placed.text).toContain('Question 420:');
+          expect(placed.inView).toBe(true);
+          expect(placed.painted).toBe(1);
+          await shoot(tab, `${name}-${scheme}-search`);
+
+          // Many matches: the newest first, Enter walks back, and every step stays on its own row.
+          await box.fill('question 14');
+          await tab.waitForFunction(() => document.querySelector('.fy-chat-search__count')?.textContent === '11 of 11');
+          await box.press('Enter');
+          await tab.waitForFunction(() => document.querySelector('.fy-chat-search__count')?.textContent === '10 of 11');
+          await tab.waitForFunction(() =>
+            document.querySelector('[data-search-current]')?.textContent?.includes('Question 1480:'),
+          );
+          await shoot(tab, `${name}-${scheme}-search-many`);
         } finally {
           await context.close();
         }

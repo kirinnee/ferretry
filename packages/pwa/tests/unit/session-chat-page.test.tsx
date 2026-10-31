@@ -4071,3 +4071,80 @@ describe('SessionChatPage Info and Actions', () => {
     }
   });
 });
+
+describe('search within the conversation', () => {
+  const searchPort = {
+    search: async () => ({ v: 1 as const, sessionId: 'shared', query: 'x', file: 'f', matches: [], truncated: false }),
+    reach: async () => true,
+  };
+  const page = (withSearch: boolean, presentation: 'pane' | 'sheet' = 'pane') =>
+    renderSessionChatPage(
+      <SessionChatPage
+        client={client([], sessionView('shared'))}
+        connection={alpha}
+        {...(withSearch ? { conversationSearch: searchPort } : {})}
+        entries={[]}
+        onSessionChange={() => undefined}
+        presentation={presentation}
+        session={sessionView('shared')}
+      />,
+    );
+  const searchBars = (root: ReactTestInstance): number => root.findAll(node => node.type === 'search').length;
+  const controlF = (init: KeyboardEventInit = { ctrlKey: true }): void =>
+    run(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', cancelable: true, ...init }));
+    });
+
+  test('is a row of Actions — the phone’s way in — that opens the search bar, and closes again', () => {
+    const view = page(true, 'sheet');
+    try {
+      expect(actionLabels(view.root)).toContain('Search this conversation');
+      chooseAction(view.root, 'search');
+      expect(searchBars(view.root)).toBe(1);
+      run(() => view.root.findByProps({ 'aria-label': 'Close search' }).props.onClick());
+      expect(searchBars(view.root)).toBe(0);
+    } finally {
+      run(() => view.unmount());
+    }
+  });
+
+  test('opens on Ctrl-F and Cmd-F in the chat, and leaves other shortcuts to the browser', () => {
+    const view = page(true);
+    try {
+      controlF({ ctrlKey: true, shiftKey: true });
+      controlF({ altKey: true, metaKey: true });
+      expect(searchBars(view.root)).toBe(0);
+      controlF({ metaKey: true });
+      expect(searchBars(view.root)).toBe(1);
+      controlF({ ctrlKey: true });
+      expect(searchBars(view.root)).toBe(1);
+    } finally {
+      run(() => view.unmount());
+    }
+  });
+
+  test('leaves Ctrl-F to the browser when focus is in another pane', () => {
+    const view = page(true);
+    const elsewhere = document.createElement('input');
+    document.body.append(elsewhere);
+    elsewhere.focus();
+    try {
+      controlF();
+      expect(searchBars(view.root)).toBe(0);
+    } finally {
+      elsewhere.remove();
+      run(() => view.unmount());
+    }
+  });
+
+  test('offers no search where the host has none', () => {
+    const view = page(false);
+    try {
+      expect(actionLabels(view.root)).not.toContain('Search this conversation');
+      controlF();
+      expect(searchBars(view.root)).toBe(0);
+    } finally {
+      run(() => view.unmount());
+    }
+  });
+});

@@ -466,6 +466,8 @@ function transcriptRhythm(
     'data-transcript-after': priorDensity,
     'data-transcript-density': density,
     'data-transcript-turn': speakerChanged ? 'true' : undefined,
+    // Where in the transcript the row begins, so a search hit can be scrolled to (`chat-search.ts`).
+    'data-transcript-offset': entry.offset === undefined ? undefined : String(entry.offset),
   };
 }
 

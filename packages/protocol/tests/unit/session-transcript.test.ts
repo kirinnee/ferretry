@@ -42,7 +42,31 @@ const cases: SchemaCase[] = [
   {
     name: 'log page',
     schema: transcript.SessionLogPageSchema,
-    value: { v: 1, sessionId: 's1', log: '[09:08:07] user/message: hi', start: 4096, file: 'Zm9vYmFy' },
+    value: {
+      v: 1,
+      sessionId: 's1',
+      log: '[09:08:07] user/message: hi',
+      start: 4096,
+      file: 'Zm9vYmFy',
+      offsets: [4096],
+    },
+  },
+  {
+    name: 'log search match',
+    schema: transcript.SessionLogSearchMatchSchema,
+    value: { offset: 4096, role: 'user', kind: 'message', snippet: 'hi', at: '2026-10-20T12:00:00.000Z' },
+  },
+  {
+    name: 'log search',
+    schema: transcript.SessionLogSearchSchema,
+    value: {
+      v: 1,
+      sessionId: 's1',
+      query: 'hi',
+      file: 'Zm9vYmFy',
+      matches: [{ offset: 4096, role: 'user', kind: 'message', snippet: 'hi' }],
+      truncated: false,
+    },
   },
 ];
 

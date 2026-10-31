@@ -99,8 +99,50 @@ export const SessionLogPageSchema = z.strictObject({
   log: z.string(),
   start: z.number().int().nonnegative(),
   file: z.string().min(1),
+  /**
+   * Where each line of `log` came from — one byte offset per event, in order. Absent from a daemon
+   * that predates search; the chat then finds no row for a hit and says so.
+   */
+  offsets: z.array(z.number().int().nonnegative()).readonly().optional(),
 });
 export type SessionLogPage = z.infer<typeof SessionLogPageSchema>;
+
+/**
+ * One place a search found — `GET /v1/sessions/:id/log-search`. `offset` is the byte its event's record
+ * begins at, the coordinate the chat's pages carry (`SessionLogPage.offsets`), so the chat can load
+ * the history back to it and find the row. `snippet` is cut from the scrubbed text: never a secret.
+ */
+export const SessionLogSearchMatchSchema = z.strictObject({
+  offset: z.number().int().nonnegative(),
+  role: z.string().min(1),
+  kind: z.string().min(1),
+  snippet: z.string(),
+  at: z.string().optional(),
+});
+export type SessionLogSearchMatch = z.infer<typeof SessionLogSearchMatchSchema>;
+
+/**
+ * Every match of a query in a session's whole transcript, oldest first. `truncated` says the search
+ * stopped at its limit and older matches were not looked for; `file` is the page token, so a hit is
+ * never looked for in another file's pages.
+ */
+export const SessionLogSearchSchema = z.strictObject({
+  v: z.literal(1),
+  sessionId: z.string().min(1),
+  query: z.string().min(1),
+  file: z.string().min(1),
+  matches: z.array(SessionLogSearchMatchSchema).readonly(),
+  truncated: z.boolean(),
+});
+export type SessionLogSearch = z.infer<typeof SessionLogSearchSchema>;
+
+/** What a `logSearch` looks for: `who` said it, and whether tool calls, results and thinking count. */
+export interface LogSearchOptions {
+  readonly who?: 'all' | 'me' | 'agent';
+  readonly tools?: boolean;
+  readonly limit?: number;
+  readonly signal?: AbortSignal;
+}
 
 /** Which page `logPage` reads: the tail when `before` is absent. */
 export interface LogPageOptions {

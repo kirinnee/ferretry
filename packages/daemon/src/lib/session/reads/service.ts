@@ -39,14 +39,19 @@ import type {
   ConversationMessagePoint,
   FyEvent,
   SessionLogPage,
+  SessionLogSearch,
+  SessionLogSearchMatch,
   SessionTranscriptMessage,
   SessionTranscriptPage,
 } from '@ferretry/protocol';
 import { ExactConversationMessagePointSchema, formatTranscriptImageMarker } from '@ferretry/protocol';
 import { markerMediaType, numberRecordImages, type RecordImage } from '../../transcript/images.ts';
+import { isOwnerMessage } from '../../transcript/owner.ts';
+import { snippetAround } from '../../transcript/search.ts';
 import type { TranscriptEvent } from '../../transcript/types.ts';
 import type { LastSnapshotReader } from '../snapshot/index.ts';
 import { type PortableConversationRow, sameConversationMessagePoint } from '../transcript/digest.ts';
+import { prefilterNeedle } from '../transcript/log-search.ts';
 import {
   issueSessionTranscriptMessageToken,
   readSessionTranscriptMessageCursor,
@@ -230,6 +235,34 @@ export interface SessionTranscriptPages {
   page(sessionId: string, query: TranscriptPageQuery): Promise<TranscriptPageResult>;
 }
 
+/** What a transcript search asks the file for: a needle the raw records must hold, and the test for an event. */
+export interface TranscriptSearchQuery {
+  readonly needle: string | undefined;
+  readonly accept: (event: TranscriptEvent) => boolean;
+  readonly limit: number;
+}
+
+/** A search read that reports resolution separately from content, as {@link TranscriptPageResult} does. */
+export type TranscriptSearchReadResult =
+  | { readonly kind: 'unresolved' }
+  | { readonly kind: 'unreadable' }
+  | {
+      readonly kind: 'read';
+      readonly events: readonly TranscriptEvent[];
+      readonly truncated: boolean;
+      readonly file: string;
+    };
+
+/** The whole of one session's transcript, searched (`searchTranscriptRecords`). */
+export interface SessionTranscriptSearch {
+  search(sessionId: string, query: TranscriptSearchQuery): Promise<TranscriptSearchReadResult>;
+}
+
+/** The stand-in for a daemon that wired no search: an honest refusal, never "no matches". */
+const NO_SEARCH: SessionTranscriptSearch = {
+  search: async () => ({ kind: 'unreadable' }),
+};
+
 /** The stand-in for a daemon that wired no pages: an honest refusal, never an empty page. */
 const NO_PAGES: SessionTranscriptPages = {
   page: async () => ({ kind: 'unreadable' }),
@@ -313,6 +346,13 @@ export const DEFAULT_LOG_TAIL = 200;
 
 /** Largest transcript tail a single `logs` read will render. */
 export const MAX_LOG_TAIL = 2_000;
+
+/** Matches a `logSearch` answers when the caller names no limit, and the most it will. */
+export const DEFAULT_LOG_SEARCH = 500;
+export const MAX_LOG_SEARCH = 2_000;
+
+/** The longest query a search takes. */
+export const MAX_LOG_SEARCH_QUERY = 200;
 
 /**
  * The `source` every replayed event carries.
@@ -508,6 +548,7 @@ export class OperatorReadService {
     private readonly lastSnapshot: LastSnapshotReader = { read: async () => ({ kind: 'absent' }) },
     private readonly redactor: OperatorReadRedactor = UNREDACTED,
     private readonly pages: SessionTranscriptPages = NO_PAGES,
+    private readonly search: SessionTranscriptSearch = NO_SEARCH,
   ) {}
 
   /**
@@ -668,7 +709,82 @@ export class OperatorReadService {
         `session ${sessionId}'s transcript is no longer the file those pages came from`,
       );
     const log = await this.renderRedacted(result.events, { partialFirstRecord: false });
-    return { v: 1, sessionId, log, start: result.start, file: result.file };
+    // One per rendered event, in order: where in the file each line of `log` came from, so a search hit
+    // (`logSearch`) can be found among the rows the chat drew from these pages.
+    const offsets = result.events.map(event => event.byteOffset ?? result.start);
+    return { v: 1, sessionId, log, start: result.start, file: result.file, offsets };
+  }
+
+  /**
+   * Every place in the session's whole transcript that says `q`, newest first in the reading and
+   * answered oldest first — the chat's search, over what it has not loaded as much as what it has.
+   *
+   * WHAT IS SEARCHED is what the chat shows: a message's text, and with `tools` a reasoning block, a
+   * tool call (its name and input) and a tool's result. `who` narrows it to the owner's own messages
+   * (`me`, never text the harness wrote into the user channel) or to the agent's (`agent`).
+   *
+   * SECRETS STAY MASKED. An event is a match only if its SCRUBBED text holds the query, and its snippet
+   * is cut from that scrubbed text — so the search cannot be used to ask whether a secret value appears,
+   * and no snippet carries one. The raw text only chooses which records are worth scrubbing.
+   *
+   * `truncated` says older records were not read because `limit` matches were found first.
+   */
+  async logSearch(
+    sessionId: string,
+    query: { readonly q: string; readonly who?: string; readonly tools?: boolean; readonly limit?: number },
+  ): Promise<SessionLogSearch> {
+    const limit = boundedLimit(query.limit, DEFAULT_LOG_SEARCH, MAX_LOG_SEARCH, 'limit');
+    const text = query.q.trim();
+    if (text === '' || text.length > MAX_LOG_SEARCH_QUERY)
+      throw new OperatorReadError('invalid_query', `q must be 1 to ${MAX_LOG_SEARCH_QUERY} characters`);
+    const who = query.who ?? 'all';
+    if (who !== 'all' && who !== 'me' && who !== 'agent')
+      throw new OperatorReadError('invalid_query', 'who must be all, me or agent');
+    const needle = text.toLowerCase();
+    const shown = (event: TranscriptEvent): boolean =>
+      (who === 'me'
+        ? isOwnerMessage(event)
+        : who === 'agent'
+          ? event.role === 'assistant'
+          : event.role === 'user' || event.role === 'assistant' || event.role === 'tool') &&
+      (event.kind === 'message' ||
+        (query.tools === true &&
+          (event.kind === 'reasoning' || event.kind === 'tool-call' || event.kind === 'tool-result')));
+    const result = await this.search.search(sessionId, {
+      needle: prefilterNeedle(text),
+      accept: event => shown(event) && body(event).toLowerCase().includes(needle),
+      limit,
+    });
+    if (result.kind === 'unresolved')
+      throw new OperatorReadError(
+        'no_transcript',
+        `session ${sessionId} has no transcript this daemon can prove is its own`,
+      );
+    if (result.kind === 'unreadable')
+      throw new OperatorReadError(
+        'transcript_unreadable',
+        `session ${sessionId} has a proved transcript, but this daemon could not read it`,
+      );
+    const matches =
+      result.events.length === 0
+        ? []
+        : await this.redactor.batch(scrub =>
+            result.events.flatMap((event): SessionLogSearchMatch[] => {
+              const scrubbed = scrub.text(body(event));
+              const at = scrubbed.toLowerCase().indexOf(needle);
+              if (at < 0) return [];
+              return [
+                {
+                  offset: event.byteOffset ?? 0,
+                  role: event.role,
+                  kind: event.kind,
+                  snippet: snippetAround(scrubbed, at, needle.length),
+                  ...(event.timestamp === undefined ? {} : { at: event.timestamp }),
+                },
+              ];
+            }),
+          );
+    return { v: 1, sessionId, query: text, file: result.file, matches, truncated: result.truncated };
   }
 
   /**
