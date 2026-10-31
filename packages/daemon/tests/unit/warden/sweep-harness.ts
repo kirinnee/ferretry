@@ -20,6 +20,7 @@ import {
   type WardenEscalationBoardItem,
   type WardenEscalationRaise,
   type WardenEscalationVerdict,
+  type WardenExchangeReader,
   type WardenFleetSession,
   type WardenReviveService,
   type WardenRuntimeState,
@@ -179,6 +180,8 @@ export function harness(
     readonly revive?: WardenReviveService;
     /** The project boards, when a test is about cards. */
     readonly board?: WardenBoardPort;
+    /** The send ledgers, when a test is about who answered whom. */
+    readonly exchanges?: WardenExchangeReader;
     /** Force every card notice to one outcome. */
     readonly noticeWrite?: WardenAgendaWrite;
     /** Force every raise to one outcome, for the paths a real store reaches rarely. */
@@ -376,6 +379,7 @@ export function harness(
     journal: { record: (type, data) => void journal.push({ type, data: { ...data } }) },
     ...(options.revive === undefined ? {} : { revive: options.revive }),
     ...(options.board === undefined ? {} : { board: options.board }),
+    ...(options.exchanges === undefined ? {} : { exchanges: options.exchanges }),
     jevChecks: {
       append: async check => {
         if (options.jevChecksFail === 'append') throw new Error('disk full');

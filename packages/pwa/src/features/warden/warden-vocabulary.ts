@@ -34,6 +34,7 @@ export const ANOMALY_CHIPS: Readonly<Record<WardenAnomalyKind, WardenChip>> = {
   bootstrap_degraded: chip('setup broken', 'err'),
   owner_request: chip('you asked', 'accent'),
   orphaned_card: chip('card orphaned', 'err'),
+  report_overdue: chip('no reply', 'warn'),
 };
 
 /**

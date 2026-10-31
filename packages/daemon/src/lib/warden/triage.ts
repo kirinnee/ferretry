@@ -51,18 +51,20 @@
  */
 
 import type {
+  WardenCap,
   WardenCaps,
-  WardenJevBefore,
   WardenGuardFailureCode,
   WardenInvestigationOrigin,
+  WardenJevAct,
+  WardenJevActs,
+  WardenJevBefore,
+  WardenLayerStatus,
+  WardenLayers,
+  WardenMayActAlone,
   WardenSavings,
   WardenSpend,
-  WardenCap,
-  WardenLayers,
-  WardenLayerStatus,
   WardenTriageReason,
 } from '@ferretry/protocol';
-import type { WardenJevAct, WardenJevActs, WardenMayActAlone } from '@ferretry/protocol';
 import type { TriageActVerdict, TriageDecision, TriageSnapshot } from '../speedups/jev.ts';
 import { type WardenAnomaly, type WardenAnomalyKind, wardenAnomalySubject } from './detect.ts';
 import { instantMs } from './time.ts';
@@ -297,6 +299,7 @@ export const JEV_ACTS_BY_KIND: Readonly<Record<WardenAnomalyKind, readonly Triag
   provider_unavailable: ['failover'],
   owner_request: [],
   orphaned_card: [],
+  report_overdue: [],
 };
 
 /** The acts Jev is offered for one flag. A flag about several ferrets is no one ferret's to act on. */
