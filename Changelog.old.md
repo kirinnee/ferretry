@@ -1,3 +1,10 @@
+## [4.180.1](https://github.com/kirinnee/ferretry/compare/v4.180.0...v4.180.1) (2026-10-31)
+
+### Fixes
+
+* **input:** re-find a target that changed under the card instead of refusing it forever ([#1184](https://github.com/kirinnee/ferretry/issues/1184)) ([9b9e03e](https://github.com/kirinnee/ferretry/commit/9b9e03ed679db19d28c8070c40eb43e0b567731e))
+* **pwa:** task picker lists every open human card of the project ([#1185](https://github.com/kirinnee/ferretry/issues/1185)) ([5ce9f72](https://github.com/kirinnee/ferretry/commit/5ce9f72e69560f8895e21503bf7914011cee00c7))
+
 ## [4.180.0](https://github.com/kirinnee/ferretry/compare/v4.179.0...v4.180.0) (2026-10-31)
 
 ### Features

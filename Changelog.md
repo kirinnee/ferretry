@@ -1,3 +1,16 @@
+## [4.181.0](https://github.com/kirinnee/ferretry/compare/v4.180.1...v4.181.0) (2026-10-31)
+
+### Features
+
+* **catalogs:** mint shares and manage members (phase 2b-1) ([#1186](https://github.com/kirinnee/ferretry/issues/1186)) ([8bfd713](https://github.com/kirinnee/ferretry/commit/8bfd71382c1a317458c228847261c60f92bc242a))
+* **logins:** login recipes and daemon-observed sign-in facts ([#1183](https://github.com/kirinnee/ferretry/issues/1183)) ([33ba1ca](https://github.com/kirinnee/ferretry/commit/33ba1cad77f5e23f4ee536d0229f228932f1a1c3))
+* **warden:** flag and chase a sub-ferret that never answered its parent ([#1165](https://github.com/kirinnee/ferretry/issues/1165)) ([4903327](https://github.com/kirinnee/ferretry/commit/49033274b4fbc27bc451a178e1b7c7fdc170b5ab))
+
+### Fixes
+
+* **pwa:** a diagram never traps the page's scroll ([#1189](https://github.com/kirinnee/ferretry/issues/1189)) ([a98abd1](https://github.com/kirinnee/ferretry/commit/a98abd1b99f03a82dfb6b7653f204fcc998f2f3d))
+* **pwa:** draw one bullet for a point that carries its own list marker ([#1188](https://github.com/kirinnee/ferretry/issues/1188)) ([b5dbad7](https://github.com/kirinnee/ferretry/commit/b5dbad78526b0f4010a5a2a6fe91fc7378eb63a0))
+
 ## [4.180.1](https://github.com/kirinnee/ferretry/compare/v4.180.0...v4.180.1) (2026-10-31)
 
 ### Fixes
